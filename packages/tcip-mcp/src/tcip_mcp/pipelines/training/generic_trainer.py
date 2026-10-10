@@ -43,7 +43,6 @@ from tcip_mcp.pipelines.schemas import (
     PlateauSchedule,
     SchedulerSpec,
     StageSpec,
-    TilingSpec,
     TrainConfigSchema,
 )
 from tcip_mcp.pipelines.training.evaluation import (
@@ -223,30 +222,34 @@ def run_loaders(run: TrainRun, train_ds: Any, val_ds: Any
     return train_loader, val_loader
 
 
-def effective_data_geometry(data: DataSpec, train_ds: Any) -> DataSpec:
-    """The resolved data block ``data`` with the input geometry ``train_ds`` actually serves
-    recorded on it; ``data`` unchanged for a run whose loaders came from a bespoke
-    ``data.dataset_source`` builder, whose dataset exposes no tile attributes or sources to read.
+def effective_data_geometry(task: str, data: DataSpec, train_ds: Any) -> DataSpec:
+    """The resolved data block ``data`` of a ``task`` run with what ``train_ds`` serves recorded
+    on it.
 
-    A tiled train dataset (one carrying a ``tile_size``) records its effective
-    ``tile_size``/``overlap`` in the tiling block, filling in defaults the caller's config
-    omitted. An untiled one replaces the tiling block with ``{"enabled": False}`` outright, never
-    a merge, and records ``train_native_size``, ``[width, height]``, when its training frames all
-    share one size; mixed sizes record none. Probing is header-only for the common containers
-    (``image_dimensions``) and needs the dataset's source list.
+    A detector's train dataset records ``train_object_density`` over the ``regions`` it exposes,
+    a frame or a tile each (``derivations.derive_object_density``, whose refusals propagate),
+    whoever built it; one exposing no ``regions`` refuses (``ValueError``) naming that interface.
+    A run the platform resolved untiled (``data.tiling`` the disabled block) records
+    ``train_native_size``, ``[width, height]``, when its training frames all share one size;
+    mixed sizes record none, and so does a run whose tiling the platform did not resolve.
+    Probing is header-only for the common containers (``image_dimensions``) and needs the
+    dataset's source list.
     """
-    if data.dataset_source is not None:
-        return data
-    eff_tile = getattr(train_ds, "tile_size", None)
-    if eff_tile is not None:
-        geometry: dict[str, Any] = {"tile_size": int(eff_tile)}
-        eff_overlap = getattr(train_ds, "overlap", None)
-        if eff_overlap is not None:
-            geometry["overlap"] = float(eff_overlap)
-        stated = data.tiling or TilingSpec.model_validate({})
-        return data.model_copy(update={"tiling": stated.model_copy(update=geometry)})
-    native = _uniform_native_size(train_ds)
-    update: dict[str, Any] = {"tiling": TilingSpec.model_validate({"enabled": False})}
+    from tcip_mcp.pipelines.derivations import derive_object_density
+    from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
+
+    update: dict[str, Any] = {}
+    if task in DETECTION_TASKS:
+        regions = getattr(train_ds, "regions", None)
+        if regions is None:
+            raise ValueError(
+                f"this {task} run's train dataset exposes no regions: a detector's per-frame cap "
+                "scales by the object density of the regions it trains on, so a dataset_source "
+                "builder's dataset exposes regions, a list of derivations.Region, one per frame "
+                "or tile it serves.")
+        update["train_object_density"] = derive_object_density(regions)
+    untiled = data.tiling is not None and not data.tiling.enabled
+    native = _uniform_native_size(train_ds) if untiled else None
     if native is not None:
         update["train_native_size"] = list(native)
     return data.model_copy(update=update)
@@ -326,8 +329,7 @@ def _checkpoint_metrics(metrics: dict) -> dict:
 @dataclass(frozen=True)
 class _ResumeState:
     """The resume contract beside the training state the checkpoint carries at its top level
-    (:func:`capture_training_state`'s keys): each field a key :func:`_save_checkpoint` writes
-    and a resume reads back.
+    (:func:`capture_training_state`'s keys): each field one key of the checkpoint.
 
     ``best`` is the run's best epoch so far and ``stage_best`` the current stage's, each an
     :func:`_epoch_state` or ``None``; ``warmup_groups`` are the param groups (:data:`GROUPS_KEY`)
@@ -417,15 +419,16 @@ def _build_scheduler(optimizer, spec: SchedulerSpec, epochs: int):
 def _validate(
     model: TCIPModel, val_loader: DataLoader, device: torch.device, task: str, *,
     dims: Mapping[str, int], conf_threshold: float | None, iou_threshold: float,
-    score_weights: dict | None, trait: TraitEntry | None,
+    score_weights: dict | None, trait: TraitEntry | None, density: float | None,
 ) -> dict:
-    """``evaluation.evaluate`` of ``model`` over ``val_loader`` at the given thresholds and
-    ``trait`` (the confirmed entry whose criterion governs a count trait's detection metrics),
-    every key prefixed :data:`VAL_METRIC_PREFIX`."""
+    """``evaluation.evaluate`` of ``model`` over ``val_loader`` at the given thresholds, each
+    frame capped at the run's object ``density``, and ``trait`` (the confirmed entry whose
+    criterion governs a count trait's detection metrics), every key prefixed
+    :data:`VAL_METRIC_PREFIX`."""
     metrics = evaluate(
         model, val_loader, device, task, dims=dims,
         conf_threshold=conf_threshold, iou_threshold=iou_threshold,
-        score_weights=score_weights, trait=trait,
+        score_weights=score_weights, trait=trait, density=density,
     )
     return {f"{VAL_METRIC_PREFIX}{k}": v for k, v in metrics.items()}
 
@@ -903,7 +906,7 @@ def train(
                         conf_threshold=reads.conf_threshold,
                         iou_threshold=spec.evaluation.iou_threshold,
                         score_weights=spec.evaluation.score_weights,
-                        trait=trait,
+                        trait=trait, density=spec.data.train_object_density,
                     )
                 sel = _selection_value(task, val_metrics, avg_loss, selection_metric)
 

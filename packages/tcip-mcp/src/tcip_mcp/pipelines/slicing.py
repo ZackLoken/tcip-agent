@@ -5,7 +5,7 @@ path runs."""
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -18,8 +18,6 @@ from sahi.prediction import ObjectPrediction
 from sahi.slicing import get_slice_bboxes
 
 from tcip_annotation.mask_contours import mask_to_polygon_rings
-
-from tcip_mcp.pipelines.execution import DEFAULT_OVERLAP
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.execution import Execution
@@ -60,15 +58,13 @@ class TileGeometry:
 
     ``tile_size_source`` is ``"explicit"``, ``"derived"`` (the checkpoint's persisted training
     geometry), ``"native_ratio"`` (the square frame the checkpoint trained untiled at) or
-    ``"unavailable"`` (``tile_size`` ``None``); ``tile_size_derived_from`` says why a stated edge on
-    a tiled pass is trusted and is ``None`` otherwise. ``overlap_source`` is ``"explicit"``,
-    ``"derived"`` or ``"default"``.
+    ``"unavailable"`` (``tile_size`` ``None``). ``overlap_source`` is ``"explicit"``,
+    ``"derived"`` or ``"unavailable"`` (``overlap`` ``None``).
     """
 
     tile_size: int | None
     tile_size_source: str
-    tile_size_derived_from: str | None
-    overlap: float
+    overlap: float | None
     overlap_source: str
     tile_resize: tuple[int, int] | None
 
@@ -78,8 +74,7 @@ def resolve_tile_geometry(
 ) -> TileGeometry:
     """The tile geometry a pass of ``predictor`` runs at, each value by precedence: stated, then
     the checkpoint's persisted training geometry (``train_tile_size``/``train_overlap``), then for
-    the edge the square frame it trained untiled at (``train_native_size``), else the edge
-    ``None`` and the overlap ``DEFAULT_OVERLAP``.
+    the edge the square frame it trained untiled at (``train_native_size``), else ``None``.
 
     A stated edge on a tiled pass that differs from the checkpoint's recorded edge (persisted, else
     native) raises :class:`TileEdgeContradictionError` naming both. A tiled pass whose edge came
@@ -91,24 +86,15 @@ def resolve_tile_geometry(
     native = _native_ratio_tile_size(predictor.train_native_size)
     recorded = int(persisted) if persisted is not None else native
     edge: int | None = None
-    derived_from = None
     if tile_size is not None:
         edge, source = int(tile_size), "explicit"
-        if tiled and recorded is None:
-            derived_from = "stated on a checkpoint that records no tile geometry"
-        elif tiled:
+        if tiled and recorded is not None and recorded != edge:
             kind = ("persisted training tile geometry" if persisted is not None
                     else "recorded untiled training frame")
-            if recorded != edge:
-                raise TileEdgeContradictionError(
-                    f"stated tile_size {edge} contradicts this checkpoint's own {kind} of "
-                    f"{recorded}. Pass tile_size {recorded} to match the checkpoint, or leave "
-                    "tile_size unset to derive it from the checkpoint.")
-            derived_from = (
-                "equal to the checkpoint's persisted training tile geometry"
-                if persisted is not None else
-                "equal to the edge the checkpoint's recorded untiled training frame yields, run "
-                "without that frame's own recorded resize")
+            raise TileEdgeContradictionError(
+                f"stated tile_size {edge} contradicts this checkpoint's own {kind} of "
+                f"{recorded}. Pass tile_size {recorded} to match the checkpoint, or leave "
+                "tile_size unset to derive it from the checkpoint.")
     elif persisted is not None:
         edge, source = int(persisted), "derived"
     elif native is not None:
@@ -116,19 +102,20 @@ def resolve_tile_geometry(
     else:
         source = "unavailable"
 
+    resolved_overlap: float | None = None
     if overlap is not None:
         resolved_overlap, overlap_source = float(overlap), "explicit"
     elif predictor.train_overlap is not None:
         resolved_overlap, overlap_source = float(predictor.train_overlap), "derived"
     else:
-        resolved_overlap, overlap_source = DEFAULT_OVERLAP, "default"
+        overlap_source = "unavailable"
 
     tile_resize = None
     if tiled and source == "native_ratio":
         from tcip_mcp.pipelines.data.augmentations import recorded_resize
 
         tile_resize = recorded_resize(predictor.train_augmentation)
-    return TileGeometry(edge, source, derived_from, resolved_overlap, overlap_source, tile_resize)
+    return TileGeometry(edge, source, resolved_overlap, overlap_source, tile_resize)
 
 
 def packed_category(label: int, ids: Sequence[int], sizes: Sequence[int]) -> int:
@@ -161,6 +148,13 @@ def slice_lattice(
     return [(int(x0), int(y0), int(x1), int(y1)) for x0, y0, x1, y1 in get_slice_bboxes(
         image_height=height, image_width=width, slice_height=tile_size, slice_width=tile_size,
         auto_slice_resolution=False, overlap_height_ratio=overlap, overlap_width_ratio=overlap)]
+
+
+def overlap_ratio(tile_size: int, pixels: int) -> float:
+    """The ``overlap`` under which :func:`slice_lattice` lays neighboring ``tile_size`` slices
+    overlapping by at least ``pixels`` (a slice snapped back to the frame's far edge overlaps
+    more), SAHI truncating ``overlap x tile_size`` to whole pixels."""
+    return (pixels + 0.5) / tile_size
 
 
 def is_full_slice(box: tuple[int, int, int, int], tile_size: int) -> bool:
@@ -212,22 +206,26 @@ class TcipDetectionModel(DetectionModel):
     Each slice, an ``[H, W, C]`` array at whatever band count the source carries, reaches the model
     through the predictor's own tensor conversion; ``tile_resize`` stretches a slice PIL represents
     faithfully to that ``(width, height)`` and maps its boxes and masks back per axis, and a batch
-    holding a slice PIL does not represent logs that the resize was skipped for it. Detections
-    scoring at least ``conf`` (all of them for ``None``) become ``ObjectPrediction``s clipped to
-    the slice, each carrying its label and its ``attributes`` ids under the predictor's
-    ``attribute_sizes`` as one :func:`packed_category`, each mask cut at ``mask_binarize``'s value
-    into the rings
+    holding a slice PIL does not represent logs that the resize was skipped for it. Each slice runs
+    under the detection cap ``cap_of`` gives it, which ``caps`` keeps per slice of the last batch,
+    and the in-model score threshold ``conf``
+    (:func:`~tcip_mcp.pipelines.operating_point.governed_forward`). Its detections become
+    ``ObjectPrediction``s clipped to the slice, each carrying its label and its ``attributes`` ids
+    under the predictor's ``attribute_sizes`` as one :func:`packed_category`, each mask cut at
+    ``mask_binarize``'s value into the rings
     :func:`~tcip_annotation.mask_contours.mask_to_polygon_rings` extracts when ``collect_masks``.
     ``mask_binarize`` is the threshold's provenance, kept whole on the model it cut masks for.
     """
 
     def __init__(
         self, predictor: GenericPredictor, *, conf: float | None,
-        tile_resize: tuple[int, int] | None,
+        cap_of: Callable[[np.ndarray], int], tile_resize: tuple[int, int] | None,
         band_interpretations: tuple[str, ...] | None, collect_masks: bool, mask_binarize: dict,
     ) -> None:
         self._predictor = predictor
         self._conf = conf
+        self._cap_of = cap_of
+        self.caps: list[int] = []
         self._tile_resize = tile_resize
         self._band_interpretations = band_interpretations
         self.collect_masks = collect_masks
@@ -245,10 +243,11 @@ class TcipDetectionModel(DetectionModel):
         self.perform_batch_inference([image])
 
     def perform_batch_inference(self, images: list[np.ndarray]) -> None:
-        """One forward over every slice in ``images``."""
+        """``images`` predicted, one forward per distinct cap among them."""
         from PIL import Image
 
         from tcip_mcp.pipelines.image_utils import pil_to_tensor, to_pil_if_faithful
+        from tcip_mcp.pipelines.operating_point import governed_forward
 
         tensors, meta, unresized = [], [], False
         for arr in images:
@@ -271,7 +270,9 @@ class TcipDetectionModel(DetectionModel):
                 "tiled inference: the checkpoint's recorded train-time resize %s was not applied, "
                 "these tiles are in no PIL mode and the training loader's own transform chain "
                 "skipped such samples too.", self._tile_resize)
-        self._original_predictions = list(zip(self.model(tensors), meta))
+        self.caps = [self._cap_of(arr) for arr in images]
+        self._original_predictions = list(zip(
+            governed_forward(self.model, tensors, self.caps, conf=self._conf), meta))
 
     def _create_object_prediction_list_from_original_predictions(
         self, shift_amount_list: list[list[int | float]] | None = None,
@@ -283,20 +284,18 @@ class TcipDetectionModel(DetectionModel):
         per_image: list[list[ObjectPrediction]] = []
         for (out, ((sx, sy), h, w)), shift, full in zip(
                 self._original_predictions, shift_amount_list, full_shape_list):
-            keep = (out["scores"] >= self._conf if self._conf is not None
-                    else torch.ones_like(out["scores"], dtype=torch.bool))
-            boxes = out["boxes"][keep].cpu().numpy().astype(np.float64)
+            boxes = out["boxes"].cpu().numpy().astype(np.float64)
             boxes[:, [0, 2]] = np.clip(boxes[:, [0, 2]] / sx, 0, w)
             boxes[:, [1, 3]] = np.clip(boxes[:, [1, 3]] / sy, 0, h)
-            scores = out["scores"][keep].cpu().tolist()
+            scores = out["scores"].cpu().tolist()
             sizes = self._predictor.attribute_sizes
             categories = [packed_category(label, ids, sizes) for label, ids in zip(
-                out["labels"][keep].cpu().tolist(),
-                out["attributes"][keep].cpu().tolist() if sizes else [[]] * len(scores),
+                out["labels"].cpu().tolist(),
+                out["attributes"].cpu().tolist() if sizes else [[]] * len(scores),
                 strict=True)]
             segmentations: list = [None] * len(scores)
             if self.collect_masks:
-                masks = out["masks"][keep]
+                masks = out["masks"]
                 if masks.dim() == 4 and masks.shape[1] == 1:
                     masks = masks[:, 0]
                 if (sx, sy) != (1.0, 1.0) and len(masks):

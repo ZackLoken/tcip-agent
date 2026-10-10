@@ -444,16 +444,6 @@ def pick_f1_max(sweep: dict) -> float:
     return max(sweep["curve"], key=lambda c: c["f1"])["conf"]
 
 
-def image_record(width: float, height: float, gt: list[dict], dt: list[dict],
-                 image_id=None) -> dict:
-    """One per-image evaluation record: ``{"width", "height", "gt", "dt"}`` and ``image_id`` when
-    given. The one shape every per-image record is built in."""
-    rec = {"width": int(width), "height": int(height), "gt": list(gt), "dt": list(dt)}
-    if image_id is not None:
-        rec["image_id"] = image_id
-    return rec
-
-
 def _mask_rings(mask: Any, threshold: float | None) -> list:
     """A binary (``threshold`` ``None``) or soft mask's regions as rings
     (:func:`~tcip_annotation.mask_contours.mask_to_polygon_rings`), for a mask match."""
@@ -496,20 +486,34 @@ def _with_attributes(records: list[dict], values: Any) -> list[dict]:
     return records
 
 
-def prediction_record(result: Mapping[str, Any], gt: list[dict], *, image_id: str) -> dict:
-    """One per-image evaluation record from a detection result (its ``width``, ``height``,
-    corner ``boxes``, ``scores``, ``labels``, ``attributes`` and ``masks`` where it carries them,
-    each mask's polygons as its record's ``rings``, and ``cap_hit``) and the image's ground-truth
-    records ``gt``, named ``image_id``. Boxes, scores, labels and masks differing in length refuse
-    (``ValueError``)."""
+def result_record(result: Mapping[str, Any], gt: list[dict], *, image_id: Any = None,
+                  region: tuple[int, int, int, int] | None = None) -> dict:
+    """A detection result (its frame's ``width`` and ``height``, the ``cap`` and ``count`` of its
+    forward, corner ``boxes``, ``scores``, ``labels``, and ``attributes`` and ``masks`` where it
+    carries them) and its ground-truth records ``gt`` as the :func:`prediction_record` they make,
+    each mask's polygons as its detection's ``rings``. Boxes, scores, labels and masks differing
+    in length refuse (``ValueError``)."""
     dt = _with_attributes([detection_record(box, label, score) for box, score, label
                            in zip(result["boxes"], result["scores"], result["labels"],
                                   strict=True)], result.get("attributes"))
     for record, mask in zip(dt, result.get("masks", ()), strict="masks" in result):
         record["rings"] = [list(zip(p[0::2], p[1::2])) for p in mask["segmentation"]]
-    return {**image_record(int(result["width"]), int(result["height"]), gt, dt,
-                           image_id=image_id),
-            "cap_hit": result["cap_hit"]}
+    return prediction_record(dt, gt, width=result["width"], height=result["height"],
+                             cap=result["cap"], count=result["count"], image_id=image_id,
+                             region=region)
+
+
+def prediction_record(dt: list[dict], gt: list[dict], *, width: int, height: int,
+                      cap: int | None, count: int, image_id: Any = None,
+                      region: tuple[int, int, int, int] | None = None) -> dict:
+    """The one per-image evaluation record, ``{"width", "height", "gt", "dt", "cap", "count"}``,
+    ``image_id`` and ``region`` when given: the detection records ``dt`` and ground-truth records
+    ``gt`` of a ``width`` x ``height`` frame whose forward kept ``count`` detections under ``cap``
+    (``None`` where no forward capped it); ``region`` is the part of that frame,
+    ``(x0, y0, x1, y1)``, its detections and ground truth were kept to and are scored over."""
+    return {"width": int(width), "height": int(height), "gt": list(gt), "dt": list(dt),
+            "cap": cap, "count": count, **({} if image_id is None else {"image_id": image_id}),
+            **({} if region is None else {"region": list(region)})}
 
 
 def gt_records(target: Mapping[str, Any]) -> list[dict]:
@@ -535,26 +539,29 @@ def gt_records(target: Mapping[str, Any]) -> list[dict]:
     return records
 
 
-def records_from_detector(target: dict, output: dict, *, width: int, height: int,
+def records_from_detector(target: dict, output: dict, *, width: int, height: int, cap: int,
                           include_masks: bool = False) -> dict:
-    """A torchvision target and a detector's output as one per-image record. With
+    """A torchvision target and a detector's output, run on a ``width`` x ``height`` frame under
+    ``cap``, as the per-image record :func:`prediction_record` makes of them. With
     ``include_masks`` (instance segmentation) every ground-truth and detection record also
     carries its mask's ``rings``, the predicted masks cut at the platform's binarize threshold
     (:func:`~tcip_mcp.pipelines.measurement.mask_geometry.resolve_binarize_threshold`), for a mask
     match."""
     gt = gt_records(target)
-    dt = _with_attributes([detection_record(box, c, s) for box, c, s in zip(
-        output["boxes"].detach().cpu().tolist(), output["labels"].detach().cpu().tolist(),
-        output["scores"].detach().cpu().tolist(), strict=True)], output.get("attributes"))
+    record = result_record({
+        **{key: output[key].detach().cpu().tolist() for key in ("boxes", "scores", "labels")},
+        **({} if output.get("attributes") is None else {"attributes": output["attributes"]}),
+        "width": width, "height": height, "cap": cap, "count": len(output["boxes"])},
+        gt, image_id=target.get("image_id"))
     if include_masks:
         from tcip_mcp.pipelines.measurement.mask_geometry import resolve_binarize_threshold
 
         cut = resolve_binarize_threshold()["value"]
         for ann, mask in zip(gt, target["masks"], strict=True):
             ann["rings"] = _mask_rings(mask, None)
-        for res, mask in zip(dt, output["masks"], strict=True):
+        for res, mask in zip(record["dt"], output["masks"], strict=True):
             res["rings"] = _mask_rings(mask, cut)
-    return image_record(width, height, gt, dt, image_id=target.get("image_id"))
+    return record
 
 
 def subject_category_ids(annotations) -> dict[str, int]:
@@ -570,10 +577,12 @@ def subject_category_ids(annotations) -> dict[str, int]:
     return {n: i + 1 for i, n in enumerate(names)}
 
 
-def records_from_annotation(gt, preds, *, width: int, height: int,
+def records_from_annotation(gt, preds, *, width: int, height: int, cap: int | None,
                             name_id: dict[str, int] | None = None) -> dict:
     """Ground-truth and predicted :class:`Annotation` lists (a prediction carrying a ``score``)
-    as one per-image record, every record carrying its ``rings``
+    of a ``width`` x ``height`` frame whose predictions were kept to ``cap`` (``None`` where no
+    forward capped them), as the per-image record :func:`prediction_record` makes of them, its
+    ``count`` the detections predicted, every record carrying its ``rings``
     (:func:`~tcip_annotation.matching.match_record`) beside its box and the ``index`` of the
     annotation it was built from in its list. ``name_id`` maps each subject
     to the one category id it has in every image scored together
@@ -592,15 +601,17 @@ def records_from_annotation(gt, preds, *, width: int, height: int,
     dt_recs = [{**dt_record(m["bbox"], name_id[a.subject], prediction_score(a)),
                 "rings": m["rings"], "index": i}
                for i, a in enumerate(preds) if is_detection(a) for m in [match_record(a)]]
-    return image_record(width, height, gt_recs, dt_recs)
+    return prediction_record(dt_recs, gt_recs, width=width, height=height, cap=cap,
+                             count=len(dt_recs))
 
 
-def bucket_reads(images: Sequence[Any], bucket: Any) -> list[tuple[Any, list, list | None]]:
+def bucket_reads(images: Sequence[Any], bucket: Any) -> list[tuple[Any, list, Any]]:
     """The one read a scoring of ``bucket``'s documents for the logical ``images`` makes
     (:func:`~tcip_mcp.pipelines.image_utils.resolve_image_paths`' answers): each image's
     ``(source, ground truth, predictions)``, its label document's annotations and, where the
-    bucket's record names a document for it, that document's (``None`` where it names none), each
-    read once. An image with no label document refuses
+    bucket's record names a document for it, that prediction document
+    (:func:`~tcip_annotation.json_io.read_predictions`, ``None`` where it names none), each read
+    once. An image with no label document refuses
     (:class:`~tcip_annotation.json_io.UnreadableLabelDocumentError`)."""
     from pathlib import Path
 
@@ -645,14 +656,16 @@ def score_bucket(images: Sequence[Any], bucket: Any, *, iou_threshold: float,
 
     from tcip_mcp.pipelines.raster_source import SourceHeader
 
-    read = [(SourceHeader(src), gt, preds) for src, gt, preds in bucket_reads(images, bucket)]
+    read = [(SourceHeader(src), gt, None if document is None else document.annotations,
+             None if document is None else document.cap)
+            for src, gt, document in bucket_reads(images, bucket)]
     name_id = subject_category_ids(
-        [a for _h, gt, preds in read for a in (*gt, *(preds or ()))]
+        [a for _h, gt, preds, _cap in read for a in (*gt, *(preds or ()))]
     )
     records = [records_from_annotation(gt, preds or [], width=header.display_frame[0],
-                                       height=header.display_frame[1], name_id=name_id)
-               for header, gt, preds in read]
-    predicted = [k for k, (_h, _gt, preds) in enumerate(read) if preds is not None]
+                                       height=header.display_frame[1], cap=cap, name_id=name_id)
+               for header, gt, preds, cap in read]
+    predicted = [k for k, (_h, _gt, preds, _cap) in enumerate(read) if preds is not None]
     metrics = detection_metrics(
         [records[k] for k in predicted], trait=trait, conf_threshold=conf_threshold,
         iou_threshold=iou_threshold,
@@ -671,7 +684,7 @@ def score_bucket(images: Sequence[Any], bucket: Any, *, iou_threshold: float,
                         missed=[gi[g] for g in m.missed])
 
     return [ScoredImage(header, gt, preds, annotated(records[k], by_image[k]))
-            for k, (header, gt, preds) in enumerate(read)], metrics
+            for k, (header, gt, preds, _cap) in enumerate(read)], metrics
 
 
 def classification_metrics(
@@ -786,8 +799,7 @@ def concordance_correlation_coefficient(
 
 
 def ordinal_metrics(pred_ranks: torch.Tensor, gt_ranks: torch.Tensor, num_ranks: int) -> dict:
-    """Ordinal metrics over ``num_ranks``, the run's own rank count, which the scored half is
-    never asked for: it may not reach every rank."""
+    """Ordinal metrics over ``num_ranks``, the run's own rank count."""
     pred = pred_ranks.detach().cpu().float()
     gt = gt_ranks.detach().cpu().float()
     if gt.numel() == 0:
@@ -897,10 +909,14 @@ def evaluate(
     model, loader, device, task: str, *, dims: Mapping[str, Any],
     conf_threshold: float | None, iou_threshold: float = 0.5,
     score_weights: dict | None = None, trait: TraitEntry | None = None,
+    density: float | None = None,
 ) -> dict:
     """Compute per-task validation/test metrics. Returns bare metric keys. ``conf_threshold`` is
     the confidence a detector's boxes are counted at, read from the run's validated
     ``evaluation.conf_threshold`` or the pass's execution record; ``None`` for any other head.
+    A detector predicts each image under the cap ``density``, required for a detector and
+    ``None`` for any other head, gives its frame (``derivations.detection_cap``, through
+    ``operating_point.governed_forward``), its in-model score threshold as the caller left it.
 
     ``dims`` is what the model was built at (:func:`~tcip_mcp.pipelines.model_build.model_dims`);
     a class or rank count is read from it, never off the half being scored. A detector's metrics
@@ -911,7 +927,9 @@ def evaluate(
     the trait's confirmed entry whose criterion governs the count; absent, the IoU convention at
     ``iou_threshold`` governs.
     """
+    from tcip_mcp.pipelines.derivations import detection_cap
     from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
+    from tcip_mcp.pipelines.operating_point import governed_forward
 
     is_detection = task in DETECTION_TASKS
     is_instance_seg = task == "instance_seg"
@@ -961,11 +979,12 @@ def evaluate(
                 n_loss += 1
             # Prediction pass.
             model.eval()
-            outputs = model(images)
-            for img, t, out in zip(images, targets, outputs):
-                h, w = int(img.shape[-2]), int(img.shape[-1])
+            frames = [(int(img.shape[-1]), int(img.shape[-2])) for img in images]
+            caps = [detection_cap(cast(float, density), w * h) for w, h in frames]
+            outputs = governed_forward(model, images, caps, conf=None)
+            for (w, h), cap, t, out in zip(frames, caps, targets, outputs, strict=True):
                 per_image.append(records_from_detector(
-                    t, out, width=w, height=h, include_masks=is_instance_seg))
+                    t, out, width=w, height=h, cap=cap, include_masks=is_instance_seg))
         else:
             images, targets = batch
             images = images.to(device)

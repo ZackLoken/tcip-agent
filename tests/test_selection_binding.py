@@ -131,7 +131,15 @@ class _RecordingDataset(Dataset):
         return len(self.seen_samples)
 
     def __getitem__(self, idx: int):
-        return torch.zeros(3, 8, 8), {"boxes": torch.zeros(0, 4), "labels": torch.zeros(0)}
+        return torch.zeros(3, 8, 8), {"boxes": torch.tensor([[0.0, 0.0, 1.0, 1.0]]),
+                                      "labels": torch.tensor([1]), "iscrowd": torch.tensor([0])}
+
+    @property
+    def regions(self):
+        """Each 8 px frame's served object."""
+        from tests._producer_fixtures import served_regions
+
+        return served_regions(self)
 
 
 def build_recording_dataset(samples=None, scope=None, **kwargs) -> _RecordingDataset:

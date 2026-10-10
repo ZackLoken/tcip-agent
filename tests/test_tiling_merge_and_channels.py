@@ -111,7 +111,8 @@ def test_ctx_tiled_dataset_inherits_the_band_count(tmp_path):
     images_dir = _multiband_detection_fixture(tmp_path)
     base = dataset_over("detection", str(images_dir), subject="bud",
                         stated={"num_channels": 5})
-    assert TiledDetectionDataset(base, tile_size=16, sliver_frac=0.5).expected_channels == 5
+    assert TiledDetectionDataset(base, tile_size=16, overlap=0.0,
+                                 sliver_frac=0.5).expected_channels == 5
 
 
 def test_tiled_detection_handles_channel_first_rasters(tmp_path):

@@ -686,8 +686,11 @@ def test_train_emits_val_loss_with_autoval(tmp_path: Path):
         "auto_val": True,
         "split": {"val_ratio": 0.4, "seed": 1},
     }
+    from tcip_mcp.pipelines.training.generic_trainer import effective_data_geometry
+
     train_ds, val_ds, _, resolved = _train_val(tmp_path, "detection", data_cfg)
     assert val_ds is not None
+    resolved = effective_data_geometry("detection", resolved, train_ds)
 
     run = trainer_run(training_config(BLOB_BUILDER, resolved.record()), tmp_path / "out",
                       project=tmp_path, has_val_loader=True, id="auto-run-77")

@@ -106,10 +106,7 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     assert expected_sizes != (32, 64, 128, 256, 512)       # not torchvision's default sizes
 
     checkpoint = load_registered_checkpoint(str(ckpt), project=tmp_path)
-    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
-
-    p = prepare(checkpoint, Stated(tile=False, conf=0.0, max_dets=SAMPLE_MAX_DETS),
-                device="cpu").runnable()
+    p = prepare(checkpoint, Stated(tile=False, conf=0.0), device="cpu").runnable()
     predictor = p.predictor
     anchor_gen = predictor.model.detector.rpn.anchor_generator
     assert anchor_gen.aspect_ratios == (expected_ratios,)   # anchors are the GT-derived ratios

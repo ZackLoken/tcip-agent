@@ -209,24 +209,43 @@ def samples_over(
 def run_over(
     task: str, images_dir, ground_truth=None, *, subject: str | None = None,
     members: list[str] | None = None, stated: dict[str, Any] | None = None,
-    tiling: dict | None = None, **kwargs: Any,
+    tiling: dict | None = None, dataset_source: Any = None, transforms: Any = None,
 ):
     """A loader for ``task`` over one place holding ground truth and the data section a run over
     it records (its ``scope`` and sizes), both through the producer.
 
-    ``stated`` is what a config would state about the sizes (a band count, a class count), and
-    ``tiling`` its ``data.tiling`` block; the rest are resolved off the admitted samples the way a
-    run resolves them. The data section is in the form a run's record holds it."""
-    from tcip_mcp.pipelines.data.datasets import build_dataset, stated_sizes
-    from tcip_mcp.pipelines.data.split_construction import run_sizes
+    ``stated`` is what a config would state about the sizes (a band count, a class count),
+    ``tiling`` its ``data.tiling`` block and ``dataset_source`` its bespoke builder beside the
+    layout it imports from (``datasets.BespokeSource``, the layout ``model_build.staged_sources``
+    stages); the rest are resolved off the admitted samples the way a run resolves them, its
+    tiling block through ``split_construction._with_lattice``, the loader built from that block
+    at ``transforms`` as a run's training side is (``split_construction.recorded_datasets``), and
+    what it serves recorded on it (``generic_trainer.effective_data_geometry``). The data section
+    is in the form a run's record holds it."""
+    from tcip_mcp.pipelines.data.split_construction import (
+        _with_lattice, recorded_datasets, run_sizes,
+    )
     from tcip_mcp.pipelines.schemas import DataSpec
+    from tcip_mcp.pipelines.training.generic_trainer import effective_data_geometry
 
     admitted = admit_over(images_dir, ground_truth, subject=subject, members=members)
     samples = admitted.every_sample()
-    block = {**(stated or {}), **({} if tiling is None else {"tiling": tiling})}
-    data = run_sizes(task, DataSpec.model_validate(block), admitted.scope, samples)
-    return (build_dataset(task, samples=samples, scope=admitted.scope, sizes=stated_sizes(data),
-                          tiling=data.tiling, **kwargs), data.record())
+    block = {**(stated or {}), **({} if tiling is None else {"tiling": tiling}),
+             **({} if dataset_source is None else {"dataset_source": dataset_source[0]})}
+    data = _with_lattice(task, run_sizes(task, DataSpec.model_validate(block), admitted.scope,
+                                         samples), samples)
+    dataset, _val = recorded_datasets(task, data, samples, None, transforms,
+                                      dataset_source and dataset_source[1])
+    return dataset, effective_data_geometry(task, data, dataset).record()
+
+
+def served_regions(dataset: Any) -> list:
+    """Each item ``dataset`` serves, its target's objects over its image's pixels
+    (``datasets.object_region``): the regions a stand-in detection dataset exposes."""
+    from tcip_mcp.pipelines.data.datasets import object_region
+
+    return [object_region(target, image.shape[-2] * image.shape[-1])
+            for image, target in (dataset[i] for i in range(len(dataset)))]
 
 
 def staged_layout(project, data: Any):

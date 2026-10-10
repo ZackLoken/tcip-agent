@@ -729,12 +729,6 @@ class _FakeDataset:
         return i
 
 
-class _TiledFakeDataset(_FakeDataset):
-    """A stand-in dataset carrying tile geometry, for effective_data_geometry to record."""
-    tile_size = 224
-    overlap = 0.2
-
-
 def _detection_base(project: Path) -> dict:
     """A detection base config over :func:`_labeled`'s frames under ``project``, selecting on
     the loss."""
@@ -801,8 +795,8 @@ def _sweep_outcome(project: Path) -> dict:
 
 def _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=None):
     """Stub dataset building + training so a trial runs instantly, no Ray: the resolution builds
-    stand-in datasets and records no samples, and the child builds the same stand-ins from that
-    record."""
+    stand-in datasets, records no samples and stamps nothing they serve, and the child builds the
+    same stand-ins from that record."""
     from tcip_mcp.pipelines.data import samplers
     from tcip_mcp.pipelines.data import split_construction as sc
     from tcip_mcp.pipelines.training import generic_trainer as gt
@@ -818,6 +812,7 @@ def _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=None):
 
     monkeypatch.setattr(sc, "auto_train_val", fake_auto_train_val)
     monkeypatch.setattr(sc, "recorded_datasets", lambda *a, **k: (ds, ds))
+    monkeypatch.setattr(gt, "effective_data_geometry", lambda task, data, train_ds: data)
     monkeypatch.setattr(gt, "train", fake_train)
     monkeypatch.setattr(samplers, "build_sampler", lambda *a, **k: None)
 
@@ -967,16 +962,6 @@ def test_run_hpo_trial_dotted_seed_axis_reaches_the_data_cfg_handed_to_auto_trai
     assert captured["data"].split.seed == 7
 
 
-def _fake_auto_train_val_serving_tiles(project, task, data, transforms, plan, **_):
-    """A resolution of ``data`` that serves a tiled stand-in dataset on both sides and records
-    no samples, its data block resolved unchanged."""
-    from tcip_mcp.pipelines.data.split_construction import _partition_record
-
-    ds = _TiledFakeDataset()
-    return ds, ds, _partition_record([], seed=None, group_by="stem", selection=None,
-                                     spatial=None), data
-
-
 def test_run_hpo_trial_dotted_seed_axis_reaches_the_trials_own_records(monkeypatch, tmp_path):
     """data.split.seed, the split_draws grid axis, lands in the trial's launch record and in the
     data section it resolved, at the nested field auto_train_val reads it from, beside the
@@ -985,8 +970,6 @@ def test_run_hpo_trial_dotted_seed_axis_reaches_the_trials_own_records(monkeypat
     from tcip_mcp.experiments import RUN_FILE, read_record
 
     _patch_hpo_trial_machinery(monkeypatch, _completed_train)
-    from tcip_mcp.pipelines.data import split_construction as sc
-    monkeypatch.setattr(sc, "auto_train_val", _fake_auto_train_val_serving_tiles)
 
     trial_dir = _trial({"data.split.seed": 7}, [].append, _detection_base(tmp_path), tmp_path)
 
@@ -994,24 +977,6 @@ def test_run_hpo_trial_dotted_seed_axis_reaches_the_trials_own_records(monkeypat
     assert run["config"]["data"]["split"]["seed"] == 7
     assert run["trial_params"] == {"data.split.seed": 7}
     assert run["resolved"]["data"]["split"]["seed"] == 7
-
-
-def test_run_hpo_trial_geometry_stamp_from_a_tiled_dataset_reaches_the_resolved_record(
-    monkeypatch, tmp_path,
-):
-    """The tile geometry effective_data_geometry records off the tiled dataset a trial's
-    auto_train_val returns is in the trial's resolved data section, the record a caller reads
-    back to know what the trial actually trained on."""
-    pytest.importorskip("torch")
-    from tcip_mcp.experiments import RUN_FILE, read_record
-
-    _patch_hpo_trial_machinery(monkeypatch, _completed_train)
-    from tcip_mcp.pipelines.data import split_construction as sc
-    monkeypatch.setattr(sc, "auto_train_val", _fake_auto_train_val_serving_tiles)
-
-    trial_dir = _trial({"data.split.seed": 7}, [].append, _detection_base(tmp_path), tmp_path)
-
-    assert read_record(trial_dir / RUN_FILE)["resolved"]["data"]["tiling"]["tile_size"] == 224
 
 
 def test_run_hpo_trial_producer_fed_data_split_seed_over_the_single_source_spatial_path(
@@ -1125,7 +1090,8 @@ def test_get_worst_predictions_reads_canonical_confidence(tmp_path):
     bucket = published(tmp_path, "preds", [
         {"image": str(images / f"{stem}.png"), "width": 100, "height": 100,
          "boxes": [[10.0, 10.0, 40.0, 22.0]] * len(scores), "scores": scores,
-         "labels": [1] * len(scores)} for stem, scores in scored.items()],
+         "labels": [1] * len(scores), "cap": len(scores) + 1}
+        for stem, scores in scored.items()],
         scope={"subject": "bud"})
 
     out = get_worst_predictions(bucket, top_k=2)

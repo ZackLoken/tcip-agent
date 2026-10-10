@@ -224,8 +224,8 @@ class SpatialManifest(BaseModel):
     """The within-image split a run's resolution drew over its one source's tile lattice
     (``split_construction.spatial_single_source_split``), recorded in its resolved partition:
     each side's half-open pixel regions, the region identities its train and val tiles carry,
-    the lattice and buffer it was drawn at, what it requested and realized, and the raster it
-    was drawn over (``split_construction.raster_identity``)."""
+    the buffer it was drawn at (the lattice is the run's ``data.tiling``), what it requested and
+    realized, and the raster it was drawn over (``split_construction.raster_identity``)."""
 
     model_config = ConfigDict(extra="forbid")
     stem: str
@@ -241,8 +241,6 @@ class SpatialManifest(BaseModel):
     kept_calibration_tiles: int
     width: int
     height: int
-    tile_size: int
-    overlap: float
     axis: str
     buffer: int
     requested_fractions: dict[str, float]
@@ -255,8 +253,9 @@ class SpatialManifest(BaseModel):
 
 class TilingSpec(BaseModel):
     """``data.tiling``: whether a detection run tiles its loader, the
-    ``datasets.TiledDetectionDataset`` options it states (``None``, the tiler's own default), and
-    a within-image spatial split's ``buffer``. A key outside these fields refuses by name."""
+    ``datasets.TiledDetectionDataset`` options it states (an unstated edge and overlap derived,
+    every other unstated option the tiler's default), and a within-image spatial split's
+    ``buffer``. A key outside these fields refuses by name."""
 
     model_config = ConfigDict(extra="forbid")
     enabled: bool = True
@@ -270,7 +269,7 @@ class TilingSpec(BaseModel):
 
     def tiler_options(self, exclude: frozenset[str] = frozenset()) -> dict:
         """The ``TiledDetectionDataset`` keyword arguments this block states, but ``exclude``;
-        an option it leaves ``None`` is omitted so the tiler's own default applies."""
+        an option it leaves ``None`` is omitted."""
         return self.model_dump(exclude_none=True, exclude={"enabled", "buffer", *exclude})
 
 
@@ -285,8 +284,8 @@ class _Recorded(BaseModel):
 
 class DataSpec(_Recorded):
     """``data``: where a run's samples are and how they split, and what its resolution records
-    beside them (``scope``, the sizes, the stamped geometry). A key outside these fields refuses
-    by name."""
+    beside them (``scope``, the sizes, the stamped geometry and object density). A key outside
+    these fields refuses by name, and so does a ``tiling`` beside a ``dataset_source``."""
 
     model_config = ConfigDict(extra="forbid")
     images_dir: ResolvedPath | None = None
@@ -300,7 +299,16 @@ class DataSpec(_Recorded):
     num_classes: int | None = None
     num_ranks: int | None = None
     train_native_size: list[int] | None = None
+    train_object_density: float | None = None
     plant_csv_paths: list[ResolvedPath] | None = None
+
+    @model_validator(mode="after")
+    def _no_tiling_beside_a_builder(self) -> DataSpec:
+        if self.dataset_source is not None and self.tiling is not None:
+            raise ValueError("data.tiling is stated beside data.dataset_source: the platform tiles "
+                             "no dataset it does not build; a dataset_source builder's training "
+                             "body composes its own tiler (ctx.tiled_dataset). Drop data.tiling.")
+        return self
 
     @property
     def recorded_scope(self) -> ClassScope:

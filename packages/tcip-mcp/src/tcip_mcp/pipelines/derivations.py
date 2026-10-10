@@ -4,12 +4,14 @@ in hand.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    import numpy as np
+
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.raster_source import WindowSampling
 
@@ -114,29 +116,28 @@ def _validate_char_sizes(char_sizes: Sequence[float], *, fn_name: str) -> list[f
     return validated
 
 
-def _neighbor_max_ious(boxes: Sequence[Sequence[float]]) -> list[float]:
-    """Each box's max IoU with any other box in the same image (xywh px); fewer than 2 boxes ->
+def _neighbor_max_ious(boxes: np.ndarray) -> list[float]:
+    """Each box's max IoU with any other box in the same region (xyxy px); fewer than 2 boxes ->
     []."""
     import numpy as np
-    from tcip_annotation.matching import iou_matrix, xywh_corners
+    from tcip_annotation.matching import iou_matrix
 
     if len(boxes) < 2:
         return []
-    corners = xywh_corners(boxes)
-    overlap = iou_matrix(corners, corners, over="union")
+    overlap = iou_matrix(boxes, boxes, over="union")
     np.fill_diagonal(overlap, 0.0)  # exclude a box's overlap with itself (1.0)
     return overlap.max(axis=1).tolist()
 
 
-def _neighbor_min_center_distances(boxes: Sequence[Sequence[float]]) -> list[float]:
-    """Each box's distance to its nearest same-image neighbor's center (xywh px); fewer than 2
+def _neighbor_min_center_distances(boxes: np.ndarray) -> list[float]:
+    """Each box's distance to its nearest same-image neighbor's center (xyxy px); fewer than 2
     boxes -> []."""
     import numpy as np
-    from tcip_annotation.matching import box_centers, xywh_corners
+    from tcip_annotation.matching import box_centers
 
     if len(boxes) < 2:
         return []
-    centers = box_centers(xywh_corners(boxes))
+    centers = box_centers(boxes)
     dist = np.linalg.norm(centers[:, None, :] - centers[None, :, :], axis=-1)
     np.fill_diagonal(dist, np.inf)
     return dist.min(axis=1).tolist()
@@ -167,8 +168,9 @@ def derive_localization_tolerance_frac(
     dists: list[float] = []
     sizes: list[float] = []
     for boxes in gt_boxes_per_image:
-        dists.extend(_neighbor_min_center_distances(boxes))
-        sizes.extend(box_sizes(xywh_corners(boxes)).tolist())
+        corners = xywh_corners(boxes)
+        dists.extend(_neighbor_min_center_distances(corners))
+        sizes.extend(box_sizes(corners).tolist())
     if not dists or not sizes:
         return None
     avg_size = float(np.mean(sizes))
@@ -183,42 +185,96 @@ def derive_localization_tolerance_frac(
     return spacing * margin_frac / avg_size
 
 
-def char_sizes_from_boxes(gt_boxes_per_image: Sequence[Sequence[Sequence[float]]]) -> list[float]:
+@dataclass(frozen=True)
+class Region:
+    """One counted region of ground truth: the objects in it (crowd regions excluded), ``boxes``
+    in xyxy pixels beside their 1-indexed ``labels``, and its pixel ``area``."""
+
+    boxes: np.ndarray
+    labels: np.ndarray
+    area: float
+
+
+def char_sizes(boxes: Iterable[np.ndarray]) -> list[float]:
     """The positive characteristic sizes (:func:`~tcip_annotation.matching.box_sizes`) of every
-    GT box across every image; boxes are ``(x, y, w, h)``."""
-    from tcip_annotation.matching import box_sizes, xywh_corners
+    xyxy box of every array of ``boxes``."""
+    from tcip_annotation.matching import box_sizes
 
-    return [s for boxes in gt_boxes_per_image
-            for s in box_sizes(xywh_corners(boxes)).tolist() if s > 0]
-
-
-MAX_DETS_DERIVATION = ("ceil(1.5 x p99 of the reference's objects per pixel x the published "
-                       "frame's pixels)")
-"""The label an execution record names a cap :func:`derive_max_dets` derived by."""
+    return [s for arr in boxes for s in box_sizes(arr).tolist() if s > 0]
 
 
-def derive_max_dets(counted: list[tuple[int, float]], footprint: float) -> int:
-    """The detection cap ``ceil(1.5 * p99 * footprint)`` over the reference's ``counted`` regions
-    (each region's object count beside the pixel area it was counted over): the 99th percentile
-    of the regions' densities (objects per pixel), scaled to the ``footprint`` pixels one
-    published frame covers. The 99th percentile and the 1.5 multiplier are this method's own
-    chosen settings, not measured, and a frame denser than the percentile's can still exceed the
-    cap. Refuses (``ValueError``) an empty ``counted``, and one whose selected percentile over
-    this footprint comes to no positive cap, naming ``max_dets`` to state."""
+OBJECT_DENSITY_DERIVATION = ("p99 of the counted regions' objects per pixel; a frame keeps "
+                             "ceil(density x its pixels) detections")
+"""The label an execution record names a density :func:`derive_object_density` derived by."""
+
+
+def derive_object_density(regions: Sequence[Region]) -> float:
+    """The object density (objects per pixel) a frame's detection cap scales by
+    (:func:`detection_cap`): the 0.99 quantile of the ``regions``' densities, each its object
+    count over its area. The quantile is this method's own setting, not measured; a frame denser
+    than it can still exceed its cap. Refuses (``ValueError``) no regions, and a quantile of zero,
+    which no frame's cap could rest on."""
+    import numpy as np
+
+    if not regions:
+        raise ValueError("an object density is derived from counted regions, and none were "
+                         "counted.")
+    density = float(np.quantile([len(r.boxes) / r.area for r in regions], 0.99))
+    if density <= 0:
+        raise ValueError(f"the 0.99 quantile of the densities of the {len(regions)} counted "
+                         "regions is zero, so no frame's detection cap has a basis.")
+    return density
+
+
+def detection_cap(density: float, pixels: float) -> int:
+    """The most detections a frame of ``pixels`` keeps at ``density``: ``ceil(density x
+    pixels)``."""
+    import math
+
+    return math.ceil(density * pixels)
+
+
+TILE_EDGE_DERIVATION = "5 x the p99 of the objects' larger box side, rounded up to a pixel"
+"""The label an execution record names a tile edge :func:`derive_tile_geometry` derived by."""
+TILE_OVERLAP_DERIVATION = ("the p99 of the objects' larger box side, rounded up to a pixel, as "
+                           "the least overlap the lattice lays between neighboring tiles")
+"""The label an execution record names a tile overlap :func:`derive_tile_geometry` derived
+by."""
+
+
+def derive_tile_geometry(regions: Sequence[Region], *, tile_size: int | None,
+                         overlap: float | None) -> tuple[int, float]:
+    """A tile lattice's ``(edge, overlap)``: a stated value as given; else, with the extent the
+    99th percentile of the larger side of the ``regions``' boxes rounded up to a pixel, the edge
+    five times the extent (:data:`TILE_EDGE_DERIVATION`) and the overlap the ratio under which
+    :func:`~tcip_mcp.pipelines.slicing.slice_lattice` lays neighboring tiles overlapping by at
+    least the extent (:data:`TILE_OVERLAP_DERIVATION`, ``slicing.overlap_ratio``), so an object no
+    longer than the extent lies whole in some tile. The percentile and the five are this method's
+    own settings, not measured. Refuses (``ValueError``) a value to derive from regions holding no
+    object, and an extent at or past the edge, which no overlap fits."""
     import math
 
     import numpy as np
 
-    if not counted:
-        raise ValueError("a detection cap is derived from the reference's own object counts, and "
-                         "this reference holds none.")
-    scaled = float(np.quantile([count * (footprint / area) for count, area in counted], 0.99))
-    cap = int(math.ceil(1.5 * scaled))
-    if cap < 1:
-        raise ValueError(f"the 99th percentile of the reference's densities over a "
-                         f"{footprint:g}-pixel frame ({scaled:g} objects) yields no positive cap; "
-                         "state max_dets")
-    return cap
+    from tcip_mcp.pipelines.slicing import overlap_ratio
+
+    if tile_size is not None and overlap is not None:
+        return int(tile_size), float(overlap)
+    sides = [s for r in regions for s in np.maximum(r.boxes[:, 2] - r.boxes[:, 0],
+                                                    r.boxes[:, 3] - r.boxes[:, 1]).tolist()
+             if s > 0]
+    if not sides:
+        raise ValueError("the tile edge and overlap derive from the ground truth's object "
+                         "extents, and it holds no object; state tile_size and overlap.")
+    extent = math.ceil(float(np.percentile(sides, 99)))
+    edge = int(tile_size) if tile_size is not None else 5 * extent
+    if overlap is None:
+        if extent >= edge:
+            raise ValueError(f"the ground truth's p99 object side of {extent} px reaches the "
+                             f"{edge} px tile edge, so no overlap holds it whole in a tile; "
+                             "state a larger tile_size.")
+        overlap = overlap_ratio(edge, extent)
+    return edge, float(overlap)
 
 
 IOU_MATCH_DERIVATION = (
@@ -249,7 +305,9 @@ def derive_iou_match_threshold(
     """
     gt_boxes_per_image = _validate_gt_boxes_per_image(
         gt_boxes_per_image, fn_name="derive_iou_match_threshold")
-    sizes = char_sizes_from_boxes(gt_boxes_per_image)
+    from tcip_annotation.matching import xywh_corners
+
+    sizes = char_sizes(xywh_corners(boxes) for boxes in gt_boxes_per_image)
     if not sizes:
         return None
     import numpy as np
@@ -281,7 +339,7 @@ def derive_sliver_frac(
     Fewer than ``min_samples`` positive sizes -> ``None``.
 
     ``char_sizes`` is ``sqrt(w*h)`` per GT box (px), already filtered to the trait's own class; see
-    :func:`char_sizes_from_boxes`.
+    :func:`char_sizes`.
     """
     import numpy as np
     char_sizes = _validate_char_sizes(char_sizes, fn_name="derive_sliver_frac")
@@ -295,8 +353,8 @@ def derive_sliver_frac(
 
 
 def derive_block_scale_px(
-    *, tile_size: int, gt_boxes_per_image: Sequence[Sequence[Sequence[float]]],
-    plants: "list | None" = None, raster_path: "str | Path | None" = None,
+    *, tile_size: int, objects: Region, plants: "list | None" = None,
+    raster_path: "str | Path | None" = None,
 ) -> tuple[int, str]:
     """The pixel buffer/block scale for block-aware calibration's recursive sub-banding, floored at
     ``tile_size`` (:func:`~tcip_mcp.pipelines.data.splits.spatial_strip_split`'s own floor for a
@@ -315,10 +373,10 @@ def derive_block_scale_px(
       (truncated, corrupt, or otherwise unreadable), is refused by name. A ``plants`` list with
       fewer than two georeferenced plants (``grid_pitch_m`` returns ``0.0``) is refused by name.
     - GT-object-spacing-derived (``plants`` omitted, or the raster's pixel size unresolvable): the
-      median nearest-neighbor spacing of ``gt_boxes_per_image``'s own box centers.
+      median nearest-neighbor spacing of the centers of ``objects``' boxes.
 
     Raises ``ValueError`` naming exactly why when neither path can derive a scale (no ``plants``
-    and no image with two or more GT boxes to measure a spacing from).
+    and fewer than two objects to measure a spacing from).
     """
     import statistics
 
@@ -364,16 +422,12 @@ def derive_block_scale_px(
                     "floored at tile_size",
                 )
 
-    gt_boxes_per_image = _validate_gt_boxes_per_image(
-        gt_boxes_per_image, fn_name="derive_block_scale_px")
-    dists: list[float] = []
-    for boxes in gt_boxes_per_image:
-        dists.extend(_neighbor_min_center_distances(boxes))
+    dists = _neighbor_min_center_distances(objects.boxes)
     if not dists:
         raise ValueError(
             "derive_block_scale_px: no block scale is derivable (no plant registry supplied, or "
-            "its raster's georeferencing falls short, and the reserved region's own GT has no "
-            "image with two or more objects to measure a spacing from)"
+            "its raster's georeferencing falls short, and the reserved region's own GT holds "
+            "fewer than two objects to measure a spacing from)"
         )
     spacing_px = statistics.median(dists)
     return max(tile_size, round(spacing_px)), (
@@ -538,30 +592,27 @@ CROSS_TILE_NMS_DERIVATION = "GT neighbor-IoU distribution (p99 + margin)"
 comparing detections by IoS has no derivation: its threshold is the project's to state."""
 
 
-def derive_cross_tile_nms(gt_boxes_per_image: Sequence[Sequence[Sequence[float]]], *,
+def derive_cross_tile_nms(regions: Sequence[Region], *,
                           percentile: float = 99.0, margin: float = 0.05) -> float | None:
     """Cross-tile merge threshold for a merge comparing detections by IoU, from the GT
     neighbor-IoU distribution, or None if underivable.
 
     The merge joins two detections whose overlap exceeds this threshold, so it sits just above how
-    much real neighboring GT objects overlap: per image each GT box's max overlap with any other
-    box, the nonzero tail pooled across images, its ``percentile`` plus ``margin``. No two boxes
-    of one image overlapping returns None. Refuses (``ValueError``) a result at or above 1: the
-    ``margin`` added to the neighbors' own tail exhausts the IoU interval, so this method states
-    no threshold for this reference, though a smaller margin or a stated value could.
+    much real neighboring GT objects overlap: per region each object's max overlap with any other
+    object, the nonzero tail pooled across ``regions``, its ``percentile`` plus ``margin``. No two
+    objects of one region overlapping returns None. Refuses (``ValueError``) a result at or above
+    1: the ``margin`` added to the neighbors' own tail exhausts the IoU interval, so this method
+    states no threshold for this reference, though a smaller margin or a stated value could.
 
     ``percentile`` (99) takes the overlap nearly every real neighboring pair stays under, and
     ``margin`` (0.05) the step above it a seam duplicate must clear; both are this method's own
     chosen settings, not measured.
-
-    ``gt_boxes_per_image`` is one list of ``[x, y, w, h]`` boxes (COCO xywh, px) per image.
     """
     import numpy as np
-    gt_boxes_per_image = _validate_gt_boxes_per_image(
-        gt_boxes_per_image, fn_name="derive_cross_tile_nms")
+
     tail: list[float] = []
-    for boxes in gt_boxes_per_image:
-        tail.extend(v for v in _neighbor_max_ious(boxes) if v > 0.0)
+    for region in regions:
+        tail.extend(v for v in _neighbor_max_ious(region.boxes) if v > 0.0)
     if not tail:
         return None
     threshold = float(np.percentile(tail, percentile)) + margin
@@ -586,7 +637,9 @@ _STATIC_DERIVATION_IMPLEMENTATIONS: dict[str, object] = {
         "tcip_mcp.pipelines.derivations.derive_sliver_frac"
     ),
     IOU_MATCH_DERIVATION: "tcip_mcp.pipelines.derivations.derive_iou_match_threshold",
-    MAX_DETS_DERIVATION: "tcip_mcp.pipelines.derivations.derive_max_dets",
+    OBJECT_DENSITY_DERIVATION: "tcip_mcp.pipelines.derivations.derive_object_density",
+    TILE_EDGE_DERIVATION: "tcip_mcp.pipelines.derivations.derive_tile_geometry",
+    TILE_OVERLAP_DERIVATION: "tcip_mcp.pipelines.derivations.derive_tile_geometry",
 }
 """Each derivation label authored here, every one but the count-objective ones, mapped to the
 callable that computes it."""

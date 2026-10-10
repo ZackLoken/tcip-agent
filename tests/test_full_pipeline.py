@@ -23,7 +23,6 @@ from torchvision.utils import save_image
 from tests import REPO_ROOT, bespoke_models  # noqa: E402
 from tests._producer_fixtures import run_over  # noqa: E402
 from tests._training_values import adamw_optimizer, evaluation_block  # noqa: E402
-from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -213,8 +212,7 @@ class TestDetectionPipelineRealData:
 
         assert observation.checkpoint is not None
         checkpoint = load_registered_checkpoint(observation.checkpoint["path"], project=tmp_path)
-        detector = prepare(checkpoint, Stated(tile=False, conf=0.01, max_dets=SAMPLE_MAX_DETS),
-                           device="cpu").runnable()
+        detector = prepare(checkpoint, Stated(tile=False, conf=0.01), device="cpu").runnable()
 
         img_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
         test_images = sorted(p for p in images_dir.iterdir()
