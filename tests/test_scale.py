@@ -26,6 +26,8 @@ def test_predict_batch_detection_uses_one_forward_per_batch(tmp_path):
     calls = {"n": 0, "sizes": []}
 
     class FakeDet(torch.nn.Module):
+        score_thresh, detections_per_img = 0.0, 100  # no box, so within either knob
+
         def forward(self, images):
             calls["n"] += 1
             calls["sizes"].append(len(images))
@@ -36,13 +38,13 @@ def test_predict_batch_detection_uses_one_forward_per_batch(tmp_path):
 
     from types import SimpleNamespace
 
-    from tcip_mcp.pipelines.execution import Stated, execution_record
-    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
+    from tcip_mcp.pipelines.execution import Reference, Stated, execution_record
+    from tests._verified_checkpoint_fixtures import objects_over
 
     detector = SimpleNamespace(task="detection", path="detector.pt")
+    reference = Reference(regions=[objects_over([[2.0, 2.0, 6.0, 6.0]], 16 * 16)])
     results = pred.predict_batch(
-        paths, execution_record(detector, Stated(conf=0.0, max_dets=SAMPLE_MAX_DETS), None, None),
-        batch_size=2)
+        paths, execution_record(detector, Stated(conf=0.0), None, reference), batch_size=2)
     assert [r["count"] for r in results] == [0] * 5  # one result per image
     assert calls["n"] == 3              # ceil(5/2) forwards, not 5
     assert calls["sizes"] == [2, 2, 1]

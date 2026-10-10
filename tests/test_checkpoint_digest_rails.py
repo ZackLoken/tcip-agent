@@ -49,12 +49,12 @@ def _infer(tmp_path: Path, ckpt: str, bucket: str = "preds") -> dict:
     ``bucket`` under ``tmp_path``."""
     from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.inference_tools import run_inference
-    from tests._verified_checkpoint_fixtures import SAMPLE_CONF, SAMPLE_MAX_DETS
+    from tests._verified_checkpoint_fixtures import SAMPLE_CONF
 
     images_dir, _ = _images(tmp_path)
     return run_inference(tmp_path, ckpt, images_dir=str(images_dir), bucket=bucket,
                          device="cpu",
-                         stated=Stated(tile=False, conf=SAMPLE_CONF, max_dets=SAMPLE_MAX_DETS))
+                         stated=Stated(tile=False, conf=SAMPLE_CONF))
 
 
 def _published(tmp_path: Path, bucket: str) -> bool:
@@ -161,9 +161,7 @@ def test_triage_predictions_admits_a_checkpoint_registered_under_the_project_it_
 
     from tcip_mcp.tools.feedback_tools import triage_predictions
 
-    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
-
-    r = triage_predictions(registered_root, ckpt, str(images_dir), max_dets=SAMPLE_MAX_DETS)
+    r = triage_predictions(registered_root, ckpt, str(images_dir))
     assert "error" not in r, r
 
 

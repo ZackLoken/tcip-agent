@@ -55,10 +55,13 @@ class _StubDetector:
 
 
 class _StubModel:
-    """Composed-model stand-in exposing ``.detector`` and an empty-prediction forward."""
+    """Composed-model stand-in exposing ``.detector``, both operating-point knobs, which its
+    empty-prediction forward honors trivially."""
 
     def __init__(self, detector: _StubDetector) -> None:
         self.detector = detector
+        self.score_thresh = 0.0
+        self.detections_per_img = 100
 
     def eval(self) -> None:  # noqa: D401
         pass
@@ -87,7 +90,7 @@ def test_val_loss_forwards_all_negative_images():
     model = _StubModel(stub)
     loader = [_det_batch([1, 0]), _det_batch([0])]  # mixed batch, then all-negative batch
     evaluate(model, loader, torch.device("cpu"), "detection", dims=_DIMS,
-             conf_threshold=VALIDATION_CONF)
+             conf_threshold=VALIDATION_CONF, density=1.0)
     # Both batches forwarded through the detector (full batch incl. negatives), not just foreground.
     assert stub.calls == [(2, 4), (1, 0)]
 
@@ -97,7 +100,7 @@ def test_all_negative_only_loader_is_not_skipped():
     model = _StubModel(stub)
     loader = [_det_batch([0, 0])]  # nothing but negatives
     result = evaluate(model, loader, torch.device("cpu"), "detection", dims=_DIMS,
-                      conf_threshold=VALIDATION_CONF)
+                      conf_threshold=VALIDATION_CONF, density=1.0)
     assert stub.calls == [(2, 0)]  # forwarded, not skipped
     assert result["loss"] == pytest.approx(2.5)  # finite, non-zero: negatives contribute loss
 
@@ -175,7 +178,7 @@ def test_explicit_checkpoint_stays_untiled(tmp_path, monkeypatch):
     evaluate_model(tmp_path, ckpt, str(images_dir), stated=DETECTOR_PASS)
     assert isinstance(captured["ds"], DetectionDataset)
     assert not isinstance(captured["ds"], TiledDetectionDataset)
-    assert captured["tiling"] is None
+    assert captured["tiling"].enabled is False
 
 
 def test_evaluate_model_reads_its_loader_at_the_checkpoints_own_width(tmp_path, monkeypatch):
@@ -244,17 +247,21 @@ def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatc
 
     The door builds the checkpoint to read the width it measures at, and the runner scores through
     that same module governed by the execution record it reports: a separately built copy of the
-    same checkpoint, set to that record's conf and cap, answers with the same numbers over the
-    same loader. This checkpoint's builder declares a score floor above what it scores at, so a
-    run that scored at the builder's floor while reporting the record's would report numbers
-    this record does not produce, which the last assertion measures rather than assumes.
+    same checkpoint, set to that record's conf and the cap it gives each frame, answers with the
+    same numbers over the same loader. This checkpoint's builder declares a score floor above
+    what it scores at, so a run that scored at the builder's floor while reporting the record's
+    would report numbers this record does not produce, which the last assertion measures rather
+    than assumes.
     """
+    from typing import cast
+
     from PIL import Image
 
     import tcip_mcp.pipelines.inference.generic_predictor as generic_predictor
     import tcip_mcp.pipelines.model_build as model_build
     import tcip_mcp.pipelines.training.eval_runners as runners
     from tcip_mcp.model_registry import load_registered_checkpoint
+    from tcip_mcp.pipelines.execution import Execution
     from tcip_mcp.pipelines.model_build import STATE_DICT_KEY
     from tcip_mcp.pipelines.operating_point import set_detector_operating_point
     from tcip_mcp.tools.training_tools import evaluate_model
@@ -303,16 +310,18 @@ def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatc
     independent_model.load_state_dict(verified.payload[STATE_DICT_KEY])
     independent_model.to(recorded["device"])
     kw = recorded["kw"]
+    execution = Execution.of(measured["execution"])
 
-    def _independent() -> dict:
+    def _independent(score_thresh: float) -> dict:
+        """The evaluation of the independent copy at the in-model ``score_thresh``, each image
+        capped at the record's density."""
+        set_detector_operating_point(independent_model, score_thresh=score_thresh)
         return evaluate(
             independent_model, recorded["loader"], recorded["device"], recorded["task"],
-            dims=dims, conf_threshold=measured["execution"]["conf"],
-            iou_threshold=kw["iou_threshold"], trait=kw["trait"])
+            dims=dims, conf_threshold=execution.conf, iou_threshold=kw["iou_threshold"],
+            trait=kw["trait"], density=execution.density)
 
-    set_detector_operating_point(independent_model, score_thresh=measured["execution"]["conf"],
-                                 detections_per_img=measured["execution"]["max_dets"])
-    independent = _independent()
+    independent = _independent(cast(float, execution.conf))
     assert independent
     for key, value in independent.items():
         # Two forward passes over the same weights are equal to float noise, not bit for bit.
@@ -321,9 +330,8 @@ def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatc
 
     # What the builder's own floor reports instead, so the equality above is evidence about this
     # fixture rather than a comparison nothing could separate.
-    set_detector_operating_point(
-        independent_model, score_thresh=declares_its_point["builder_kwargs"]["box_score_thresh"])
-    assert _independent()["map50"] != measured["map50"]
+    floor = declares_its_point["builder_kwargs"]["box_score_thresh"]
+    assert _independent(floor)["map50"] != measured["map50"]
 
 
 def test_explicit_tiling_override_on_checkpoint(tmp_path, monkeypatch):
@@ -401,13 +409,14 @@ def test_full_frame_reads_each_ground_truth_box_on_the_stored_grid(tmp_path, mon
     from tcip_annotation.state import Annotation, BBox
 
     scored: list = []
-    real_record = evaluation.image_record
+    real_record = evaluation.prediction_record
 
-    def recording(w, h, gt, dt, **kw):
-        scored.append((gt, dt))
-        return real_record(w, h, gt, dt, **kw)
+    def recording(dt, gt, **kw):
+        record = real_record(dt, gt, **kw)
+        scored.append((record["gt"], record["dt"]))
+        return record
 
-    monkeypatch.setattr(evaluation, "image_record", recording)
+    monkeypatch.setattr(evaluation, "prediction_record", recording)
     bur = {"num_channels": 3, "scope": {"subject": "bur"}}
     _full_frame(tmp_path, monkeypatch, _sliced_stub([[10.1, 10.1, 40.3, 30.3]]),
                 [Annotation(subject="bur", geometry=BBox(10.1, 10.1, 40.3, 30.3))],
@@ -459,7 +468,8 @@ def test_a_tiled_pass_with_no_basis_for_its_edge_refuses_naming_it(tmp_path, mon
 
 
 def test_a_stated_edge_agreeing_with_the_checkpoint_is_recorded_as_stated(tmp_path, monkeypatch):
-    p, _results = _pass_over(tmp_path, monkeypatch, _geometry_stub(train_tile_size=224), tile=True,
+    p, _results = _pass_over(tmp_path, monkeypatch,
+                             _geometry_stub(train_tile_size=224, train_overlap=0.1), tile=True,
                              tile_size=224)
 
     assert (p.execution.tile_size, p.execution.sources["tile_size"]) == (224, "explicit")
@@ -476,13 +486,31 @@ def test_a_stated_edge_contradicting_the_checkpoint_refuses_naming_both(tmp_path
 
 # ── the delivery-grade evaluation resolves tile geometry the same way ──────
 
-def test_the_evaluation_refuses_an_unresolvable_tile_geometry(tmp_path, monkeypatch):
-    """A checkpoint with no persisted tiling and no stated edge refuses the delivery-grade
-    evaluation rather than silently scoring it at an ungrounded scale."""
-    from tcip_mcp.pipelines.execution import ExecutionRefusedError
+def test_the_evaluation_derives_an_unrecorded_tile_geometry_from_its_ground_truth(
+        tmp_path, monkeypatch):
+    """A checkpoint with no persisted tiling and no stated edge is scored at the lattice the
+    evaluated ground truth derives, recorded by the derivation's name, never at an ungrounded
+    scale, each value under the derivation that produced it: a stated edge keeps its own source
+    beside the overlap derived for it."""
+    from tcip_annotation.state import Annotation, BBox
 
-    with pytest.raises(ExecutionRefusedError, match="tile_size"):
-        _full_frame(tmp_path, monkeypatch, _sliced_stub([]), [])
+    from tcip_mcp.pipelines.derivations import TILE_EDGE_DERIVATION, TILE_OVERLAP_DERIVATION
+    from tcip_mcp.pipelines.slicing import overlap_ratio
+
+    one_object = [Annotation(subject="bud", geometry=BBox(10, 10, 30, 30))]
+    derived = _full_frame(tmp_path, monkeypatch, _sliced_stub([]), one_object)["execution"]
+    edge_stated = _full_frame(tmp_path / "stated", monkeypatch, _sliced_stub([]), one_object,
+                              tile_size=64)["execution"]
+
+    # One 20 px object: the edge five of it, the overlap the lattice lays 20 px apart at.
+    assert (derived["tile_size"], derived["overlap"]) == (
+        100, pytest.approx(overlap_ratio(100, 20)))
+    assert (derived["sources"]["tile_size"], derived["sources"]["overlap"]) == (
+        TILE_EDGE_DERIVATION, TILE_OVERLAP_DERIVATION)
+    assert (edge_stated["tile_size"], edge_stated["overlap"]) == (
+        64, pytest.approx(overlap_ratio(64, 20)))
+    assert (edge_stated["sources"]["tile_size"], edge_stated["sources"]["overlap"]) == (
+        "explicit", TILE_OVERLAP_DERIVATION)
 
 
 def test_the_evaluation_derives_tile_geometry_from_the_checkpoint(tmp_path, monkeypatch):
@@ -517,6 +545,7 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
 
     from tcip_mcp.experiments import run_resolution
     import tcip_mcp.pipelines.training.generic_trainer as gt
+    from tcip_mcp.pipelines.slicing import overlap_ratio
     from tcip_mcp.tools import training_tools
     from tests._chain_fixtures import BLOB_BUILDER
     from tests._producer_fixtures import small_detection_config
@@ -534,16 +563,18 @@ def test_launch_training_persists_effective_tile_geometry(tmp_path, monkeypatch)
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
 
     cfg = small_detection_config(images_dir, BLOB_BUILDER)
-    # no tile_size: the effective default must be persisted
+    # no tile_size: the lattice the ground truth derives must be persisted
     cfg["data"]["tiling"] = {"enabled": True, "sliver_frac": 0.5}
     res = training_tools.launch_training(tmp_path, cfg, actor=None)
     assert res["pid"] != os.getpid()  # a different OS process, not this one
     eid = res["experiment_id"]
 
-    tiling = run_resolution(eid, project=tmp_path).data.tiling
+    resolved = run_resolution(eid, project=tmp_path).data
+    tiling = resolved.tiling
     assert tiling is not None
-    assert tiling.tile_size == 224  # TiledDetectionDataset default
-    assert tiling.overlap == pytest.approx(0.2)
+    # Every 30 px box derives one extent: the edge five of them, the overlap that extent's.
+    assert (tiling.tile_size, tiling.overlap) == (150, pytest.approx(overlap_ratio(150, 30)))
+    assert resolved.train_object_density is not None
 
     # "completed", not any terminal state: a child run inside this process would hit _poison_train.
     assert run_to_end(tmp_path, eid)["state"] == "completed"

@@ -152,7 +152,10 @@ def test_the_trainer_and_the_validation_loss_hand_the_heads_objects_only(tmp_pat
                                                                          monkeypatch):
     """Both hand-offs to a model's training forward, the training step and the validation loss,
     withhold every crowd row the loader keeps."""
-    from tcip_mcp.pipelines.training.generic_trainer import run_loaders, train
+    from tcip_mcp.pipelines.schemas import DataSpec
+    from tcip_mcp.pipelines.training.generic_trainer import (
+        effective_data_geometry, run_loaders, train,
+    )
     from tests._chain_fixtures import training_config
     from tests.tiny_trainer_fixtures import capture_model, trainer_run
 
@@ -160,10 +163,11 @@ def test_the_trainer_and_the_validation_loss_hand_the_heads_objects_only(tmp_pat
     assert loader_ds[0][1]["iscrowd"].tolist() == [0, 1]  # the loader keeps every row
     built: list = []
     capture_model(monkeypatch, built)
+    data = effective_data_geometry("detection", DataSpec.model_validate(
+        {"num_channels": 3, "scope": {"subject": SUBJECT, "attributes": []}}), loader_ds)
     config = training_config(
         {"builder": f"{Path(__file__).stem}:build_recording_detector", "source_files": [__file__],
-         "task": "detection"},
-        {"num_channels": 3, "scope": {"subject": SUBJECT, "attributes": []}})
+         "task": "detection"}, data.record())
     run = trainer_run(config, tmp_path / "run", project=tmp_path, has_val_loader=True,
                       id="crowd-run")
     train_loader, val_loader = run_loaders(run, loader_ds, loader_ds)
@@ -211,29 +215,27 @@ def _records(tmp_path: Path, crowd: bool, n_crowd: int = 120) -> list[dict]:
             anns += [Annotation(subject=SUBJECT, geometry=BBox(40, 40, 99, 99), iscrowd=True)
                      for _ in range(n_crowd)]
         records.append(records_from_annotation(_read_back(tmp_path, f"r{i}_{crowd}", anns), [],
-                                               width=IMG, height=IMG))
+                                               width=IMG, height=IMG, cap=None))
     return records
 
 
-def test_the_density_cap_counts_objects_not_crowd_regions(tmp_path: Path):
-    """The cap derives from each reference document's foreground count, which a crowd region
-    beside the objects leaves unchanged."""
-    from tcip_mcp.pipelines.data.label_queries import registry_scope
-    from tcip_mcp.pipelines.data.splits import count_label_lines
-    from tcip_mcp.pipelines.derivations import derive_max_dets
+def test_the_object_density_counts_objects_not_crowd_regions(tmp_path: Path):
+    """The density derives from each frame's object count, which a crowd region beside the
+    objects leaves unchanged."""
+    from tcip_mcp.pipelines.derivations import derive_object_density
+    from tests._producer_fixtures import dataset_over, seed_labeled_images
 
-    counts = {}
+    regions = {}
     for crowd in (True, False):
-        key = label_key(tmp_path, UNDATED_BUCKET, f"cap_{crowd}")
         anns = [Annotation(subject=SUBJECT, geometry=OBJECT)] + (
             [Annotation(subject=SUBJECT, geometry=CROWD, iscrowd=True)] * 3 if crowd else [])
-        json_io.write_label_document(key, anns, IMG, IMG)
-        counts[crowd] = count_label_lines(json_io.read_label_document(key),
-                                          registry_scope(tmp_path / "images", SUBJECT))
-    assert counts[True] == counts[False] == 1
-    frame = float(IMG * IMG)
-    assert derive_max_dets([(counts[True], frame)], frame) == derive_max_dets(
-        [(counts[False], frame)], frame)
+        images_dir = seed_labeled_images(tmp_path / f"ds_{crowd}" / "images" / UNDATED_BUCKET,
+                                         anns, n=1, width=IMG, height=IMG)
+        regions[crowd] = dataset_over("detection", str(images_dir), subject=SUBJECT,
+                                      stated={"num_channels": 3}).regions
+    assert [(len(r.boxes), r.area) for c in (True, False) for r in regions[c]] == [
+        (1, float(IMG * IMG))] * 2
+    assert derive_object_density(regions[True]) == derive_object_density(regions[False])
 
 
 def test_the_object_size_and_spacing_ignore_crowd_regions(tmp_path: Path):
@@ -254,7 +256,7 @@ def test_a_crowd_prediction_is_no_detection_at_the_scoring_side(tmp_path: Path):
 
     preds = _read_back(tmp_path, "p", [
         Annotation(subject=SUBJECT, geometry=CROWD, score=0.9, iscrowd=True)])
-    record = records_from_annotation([], preds, width=IMG, height=IMG)
+    record = records_from_annotation([], preds, width=IMG, height=IMG, cap=None)
     assert record["dt"] == []
     m = detection_metrics([record], trait=None, conf_threshold=0.25, iou_threshold=0.5,
                           by_mask=False)
@@ -308,10 +310,11 @@ def _center_records(tmp_path: Path) -> list[dict]:
         preds = _read_back(tmp_path, f"p{i}",
                            [Annotation(subject=SUBJECT, geometry=BBox(60.0, 60.0, 80.0, 80.0),
                                        score=0.9)])
-        records.append(records_from_annotation(gt, preds, width=IMG, height=IMG,
+        records.append(records_from_annotation(gt, preds, width=IMG, height=IMG, cap=None,
                                                name_id=name_id))
     missed = _read_back(tmp_path, "missed", [Annotation(subject=SUBJECT, geometry=OBJECT)])
-    records.append(records_from_annotation(missed, [], width=IMG, height=IMG, name_id=name_id))
+    records.append(records_from_annotation(missed, [], width=IMG, height=IMG, cap=None,
+                                           name_id=name_id))
     return records
 
 
@@ -352,7 +355,7 @@ def test_the_worst_predictions_triage_counts_objects_not_crowd_regions(tmp_path:
     bucket = published(tmp_path, "preds", [
         {"image": str(images / "a.png"), "width": IMG, "height": IMG,
          "boxes": [[OBJECT.x1, OBJECT.y1, OBJECT.x2, OBJECT.y2]], "scores": [0.9],
-         "labels": [1]}], scope={"subject": SUBJECT})
+         "labels": [1], "count": 1, "cap": 2}], scope={"subject": SUBJECT})
     # Crowd regions beside the detection, as an edit in place would leave them.
     json_io.write_label_document(bucket.document_key("a"), [
         Annotation(subject=SUBJECT, geometry=OBJECT, score=0.9),
@@ -384,7 +387,7 @@ def test_the_derived_spacing_and_cross_tile_nms_ignore_crowd_regions(tmp_path: P
             if crowd:
                 anns += [Annotation(subject=SUBJECT, geometry=CROWD, iscrowd=True)] * 3
             out.append(records_from_annotation(_read_back(tmp_path, f"s{i}_{crowd}", anns), [],
-                                               width=IMG, height=IMG))
+                                               width=IMG, height=IMG, cap=None))
         return out
 
     boxes = {crowd: [[a["bbox"] for a in gt_objects(r)] for r in records(crowd)]
@@ -392,6 +395,10 @@ def test_the_derived_spacing_and_cross_tile_nms_ignore_crowd_regions(tmp_path: P
     with_crowd, without = (localization_frac(fx.COUNT_SPEC, boxes[c]) for c in (True, False))
     assert without[1] == "GT nearest-neighbor spacing (p10 + margin)", without
     assert with_crowd == without
-    merges = [derive_cross_tile_nms(boxes[c]) for c in (True, False)]
+    from tests._verified_checkpoint_fixtures import objects_over
+
+    merges = [derive_cross_tile_nms([
+        objects_over([[x, y, x + w, y + h] for x, y, w, h in image], IMG * IMG)
+        for image in boxes[c]]) for c in (True, False)]
     assert merges[1] is not None
     assert merges[0] == merges[1]

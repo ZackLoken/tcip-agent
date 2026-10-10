@@ -49,7 +49,7 @@ def _records(prefix: str, *, size: float, x0: float, det_offset: float) -> list[
             gt.append({"bbox": [x, y, size, size], "category_id": 1, "iscrowd": 0})
             dt.append({"bbox": [x + det_offset, y, size, size], "category_id": 1, "score": 0.9})
         recs.append({"image_id": f"{prefix}{i}", "width": 200000, "height": 2000,
-                     "gt": gt, "dt": dt, "cap_hit": False})
+                     "gt": gt, "dt": dt, "count": len(dt), "cap": len(dt) + 1})
     return recs
 
 

@@ -1,4 +1,4 @@
-"""``evaluate_model`` and the full-frame runner: ``max_dets`` honored verbatim in both regimes, a
+"""``evaluate_model`` and the full-frame runner: the density each regime caps its frames at, a
 saturated cap reported, the execution record each run records, and the gate's refusals."""
 
 from __future__ import annotations
@@ -13,51 +13,20 @@ pytest.importorskip("pycocotools")
 
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tests._predictor_fixtures import StubPredictor, install  # noqa: E402
-from tests._verified_checkpoint_fixtures import (  # noqa: E402
-    SAMPLE_CONF, SAMPLE_CROSS_TILE_NMS, SAMPLE_MAX_DETS,
-)
+from tests._verified_checkpoint_fixtures import SAMPLE_CONF, SAMPLE_CROSS_TILE_NMS  # noqa: E402
 
 CONF_AND_MERGE = {"conf": SAMPLE_CONF, "cross_tile_nms": SAMPLE_CROSS_TILE_NMS}
-"""The conf and merge threshold a tiled pass over these single-object references states, its cap
-stated beside them."""
+"""The conf and merge threshold a tiled pass over these single-object references states."""
 
 # seed_bud_trait_spec (conftest.py) confirms bud_opening in this test's project, so the
 # trait/subject="bud" call sites resolve.
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 
-# ══════════════════════════════════════════════════════════════════════════
-# max_dets honored verbatim
-# ══════════════════════════════════════════════════════════════════════════
-
-def test_gating_path_honors_explicit_max_dets_verbatim(tmp_path, monkeypatch):
-    """training_tools.evaluate_model's use_tiled_inference branch hands a stated max_dets on
-    verbatim, at any value: no floor and no substitute stands between the statement and the
-    evaluation."""
-    import tcip_mcp.pipelines.training.eval_runners as runners
-    from tcip_mcp.tools.training_tools import evaluate_model
-
-    captured: dict = {}
-
-    def _fake(ckpt, images_dir, **kw):
-        captured.update(kw)
-        return {"eval_regime": "full-frame-tiled-inference"}
-
-    monkeypatch.setattr(runners, "run_full_frame_evaluation", _fake)
-    images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET)
-    from tests._verified_checkpoint_fixtures import registered_checkpoint
-
-    ckpt = registered_checkpoint(tmp_path)
-
-    evaluate_model(tmp_path, str(ckpt), str(images_dir), use_tiled_inference=True,
-                   stated=Stated(max_dets=50))
-    assert captured["stated"].max_dets == 50
-
-
-def test_gating_path_refuses_an_unstated_max_dets(tmp_path, monkeypatch):
-    """The door's own pass-through: an unstated max_dets reaches run_full_frame_evaluation as
-    None, and the runner, which derives no cap from the evaluated reference, refuses naming it.
-    Proven on the runner's own answer rather than a fake's captured kwarg."""
+def test_gating_path_runs_at_the_density_the_evaluated_reference_derives(tmp_path):
+    """The door's own full-frame pass, run to the runner's own answer: its density is the one the
+    evaluated reference's frames derive, never one the caller states or the checkpoint's."""
+    from tcip_mcp.pipelines.derivations import OBJECT_DENSITY_DERIVATION
     from tcip_mcp.tools.training_tools import evaluate_model
 
     images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET)
@@ -67,7 +36,11 @@ def test_gating_path_refuses_an_unstated_max_dets(tmp_path, monkeypatch):
 
     r = evaluate_model(tmp_path, str(ckpt), str(images_dir), use_tiled_inference=True,
                        stated=Stated(tile_size=128, overlap=0.0, **CONF_AND_MERGE))
-    assert "max_dets" in r.get("error", ""), r
+    assert "error" not in r, r
+    # One bud in each 128 px reference frame; the checkpoint trained on one in each 64 x 48.
+    assert r["execution"]["sources"]["density"] == OBJECT_DENSITY_DERIVATION
+    assert r["execution"]["density"] == pytest.approx(1 / (128 * 128))
+    assert r["execution"]["density"] != pytest.approx(1 / (64 * 48))
 
 
 def _detector(monkeypatch, *, in_chans: int = 3, **answer) -> StubPredictor:
@@ -94,9 +67,10 @@ def _captured_execution(monkeypatch) -> dict:
     return captured
 
 
-def test_diagnostic_path_refuses_an_unset_cap_before_the_runner(tmp_path, monkeypatch):
-    """The diagnostic regime resolves no cap of its own: an unset one refuses naming it, and the
-    runner is never handed a pass."""
+def test_diagnostic_path_runs_at_the_checkpoints_own_density(tmp_path, monkeypatch):
+    """The diagnostic regime holds no reference pass: its record carries the density the
+    checkpoint recorded of its training frames."""
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.tools.training_tools import evaluate_model
 
     captured = _captured_execution(monkeypatch)
@@ -105,24 +79,10 @@ def test_diagnostic_path_refuses_an_unset_cap_before_the_runner(tmp_path, monkey
 
     ckpt = registered_checkpoint(tmp_path)
 
-    r = evaluate_model(tmp_path, str(ckpt), str(images_dir), stated=Stated(conf=SAMPLE_CONF))
-    assert "max_dets" in r.get("error", ""), r
-    assert "execution" not in captured
-
-
-def test_diagnostic_path_honors_explicit_max_dets(tmp_path, monkeypatch):
-    from tcip_mcp.tools.training_tools import evaluate_model
-
-    captured = _captured_execution(monkeypatch)
-    images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET)
-    from tests._verified_checkpoint_fixtures import registered_checkpoint
-
-    ckpt = registered_checkpoint(tmp_path)
-
-    evaluate_model(tmp_path, str(ckpt), str(images_dir),
-                   stated=Stated(conf=SAMPLE_CONF, max_dets=7))
-    assert captured["execution"].max_dets == 7
-    assert captured["execution"].sources["max_dets"] == "explicit"
+    evaluate_model(tmp_path, str(ckpt), str(images_dir), stated=Stated(conf=SAMPLE_CONF))
+    density = load_registered_checkpoint(ckpt, project=tmp_path).spec.data.train_object_density
+    assert (captured["execution"].density, captured["execution"].sources["density"]) == (
+        density, "derived")
 
 
 def test_bare_checkpoint_path_reuses_its_own_stamped_tiling_and_subject(tmp_path, monkeypatch):
@@ -154,7 +114,7 @@ def test_bare_checkpoint_path_reuses_its_own_stamped_tiling_and_subject(tmp_path
     from tcip_mcp.pipelines.execution import prepare
 
     record = prepare(captured["checkpoint"], Stated(
-        tile=True, max_dets=SAMPLE_MAX_DETS, **CONF_AND_MERGE)).runnable().execution
+        tile=True, **CONF_AND_MERGE)).runnable().execution
     assert (record.tile_size, record.overlap) == (384, 0.15)
 
 
@@ -218,10 +178,10 @@ def test_both_regimes_refuse_a_stray_labels_dir_by_name(tmp_path, use_tiled_infe
     assert "stray_labels" in r["error"] and "admits nothing to evaluate" in r["error"], r
 
 
-def test_cap_hit_stamped_when_explicit_max_dets_truncates(tmp_path, monkeypatch):
-    """Honoring an explicit low max_dets verbatim reopens a truncation hole unless it's at least
-    detectable. A caller-explicit cap that actually binds on real detections must be visible in
-    the result, not silently assumed safe."""
+def test_a_frame_that_hits_its_cap_is_reported_saturated(tmp_path, monkeypatch):
+    """A cap that actually binds on real detections must be visible in the result, not silently
+    assumed safe: a frame whose count reaches the cap the pass gave it counts toward the
+    saturated fraction."""
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
@@ -229,15 +189,14 @@ def test_cap_hit_stamped_when_explicit_max_dets_truncates(tmp_path, monkeypatch)
                                  box=(10, 10, 30, 30))
 
     checkpoint = verified_checkpoint(tmp_path)
-    # Five detections against a stated cap of two; cap_hit is what predict_sliced stamps.
-    _detector(monkeypatch, width=200, height=200, cap_hit=True,
+    # Five detections kept at a cap of five, as predict_sliced writes them.
+    _detector(monkeypatch, width=200, height=200, cap=5,
               boxes=((10, 10, 30, 30), (50, 50, 70, 70), (90, 90, 110, 110),
                      (130, 130, 150, 150), (170, 170, 190, 190)),
               scores=(0.9, 0.8, 0.7, 0.6, 0.5))
     r = run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir),
-                                  stated=Stated(max_dets=2, **CONF_AND_MERGE))
-    assert r["execution"]["max_dets"] == 2  # honored verbatim
-    assert r["max_dets_cap_saturated_frac"] == 1.0  # the one image hit the cap, now visible
+                                  stated=Stated(**CONF_AND_MERGE))
+    assert r["cap_saturated_frac"] == 1.0  # the one image hit the cap, now visible
 
 
 def test_the_gate_reads_its_references_at_the_predictors_own_width(tmp_path, monkeypatch):
@@ -261,16 +220,16 @@ def test_the_gate_reads_its_references_at_the_predictors_own_width(tmp_path, mon
     _detector(monkeypatch, in_chans=1, boxes=((10, 10, 40, 40),), scores=(0.9,))
     checkpoint = verified_checkpoint(tmp_path)
     r = run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir),
-                                  stated=Stated(max_dets=SAMPLE_MAX_DETS, **CONF_AND_MERGE))
+                                  stated=Stated(**CONF_AND_MERGE))
 
     assert r["scored_images"] == 4
     assert r["tp"] == 4
 
 
 def test_run_full_frame_evaluation_records_merge_and_execution(tmp_path, monkeypatch):
-    """The runner's record carries the execution record the pass ran under: its conf, cap and
-    merge threshold each the stated one, recorded ``explicit``, the merge threshold the one the
-    predictor merged at; a direct call stating max_dets=2 records 2."""
+    """The runner's record carries the execution record the pass ran under: its conf and merge
+    threshold each the stated one, recorded ``explicit``, the merge threshold the one the
+    predictor merged at."""
     from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
@@ -279,15 +238,15 @@ def test_run_full_frame_evaluation_records_merge_and_execution(tmp_path, monkeyp
     checkpoint = verified_checkpoint(tmp_path)
     detector = _detector(monkeypatch)
     r = run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir),
-                                  stated=Stated(max_dets=2, **CONF_AND_MERGE))
+                                  stated=Stated(**CONF_AND_MERGE))
 
     assert [execution.cross_tile_nms for execution in detector.executions] == [
         SAMPLE_CROSS_TILE_NMS]
     assert r["execution"]["postprocess"] == "nms"
-    assert (r["execution"]["conf"], r["execution"]["max_dets"],
-            r["execution"]["cross_tile_nms"]) == (SAMPLE_CONF, 2, SAMPLE_CROSS_TILE_NMS)
-    assert {r["execution"]["sources"][name]
-            for name in ("conf", "max_dets", "cross_tile_nms")} == {"explicit"}
+    assert (r["execution"]["conf"], r["execution"]["cross_tile_nms"]) == (
+        SAMPLE_CONF, SAMPLE_CROSS_TILE_NMS)
+    assert {r["execution"]["sources"][name] for name in ("conf", "cross_tile_nms")} == {
+        "explicit"}
 
 
 def test_the_gate_refuses_documents_whose_geometry_a_detector_cannot_read(tmp_path, monkeypatch):
@@ -312,7 +271,7 @@ def test_the_gate_refuses_documents_whose_geometry_a_detector_cannot_read(tmp_pa
     # Admits valid work: the same eight images, their documents carrying boxes, score.
     seed_bud_images(images_dir, n=8, size=128, box=(10, 10, 30, 30))
     scored = run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir),
-                                       stated=Stated(max_dets=SAMPLE_MAX_DETS, **CONF_AND_MERGE))
+                                       stated=Stated(**CONF_AND_MERGE))
     assert scored["scored_images"] == 8
 
 

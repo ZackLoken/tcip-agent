@@ -267,7 +267,8 @@ def _published_frames(root: Path) -> list[Path]:
     published(root, "published", [
         {"image": str(frame), "width": 64, "height": 48,
          "boxes": [[8, 8, 24, 24], [40, 30, 50, 40]],
-         "scores": [0.9, 0.7], "labels": [1, 1]} for frame in frames], scope={"subject": "leaf"})
+         "scores": [0.9, 0.7], "labels": [1, 1], "cap": 3} for frame in frames],
+        scope={"subject": "leaf"})
     return frames
 
 

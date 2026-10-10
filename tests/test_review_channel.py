@@ -56,7 +56,8 @@ def _publish(root: Path, date: str, preds: dict[str, list[float]]) -> str:
     return published(root.parent, f"baseline/{date}", [
         {"image": str(Path(image_dir(root, date)) / name), "width": 100, "height": 100,
          "boxes": [[10.0, 10.0, 20.0, 20.0]] * len(scores), "scores": scores,
-         "labels": [1] * len(scores)} for name, scores in preds.items()],
+         "labels": [1] * len(scores), "cap": len(scores) + 1}
+        for name, scores in preds.items()],
         scope={"subject": "bud"}).name
 
 

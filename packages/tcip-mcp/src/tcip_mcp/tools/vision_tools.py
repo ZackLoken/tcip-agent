@@ -6,7 +6,7 @@ from __future__ import annotations
 import random
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, NamedTuple, cast
+from typing import TYPE_CHECKING, Callable, NamedTuple
 
 import tcip_store as ts
 
@@ -333,7 +333,7 @@ def _viz_predictions(
         pred_key, scope = found.document_key(stem), found.scope
         if pred_key is None:
             return {"error": f"No predictions found for {stem} in bucket {bucket!r}"}
-        preds = read_predictions(pred_key)
+        preds = read_predictions(pred_key).annotations
     except (UnreadableLabelDocumentError, ValueError, FileNotFoundError) as exc:
         return {"error": str(exc)}
     preds = [a for a in preds if prediction_score(a) >= conf_threshold]
@@ -467,8 +467,8 @@ def _ranked(bucket: Bucket, top_k: int) -> tuple[dict, dict[str, tuple]]:
         image_dir(bucket.root, capture) / name for _stem, name in sorted(bucket.documents.items())),
         bucket)
     # Every image is one of the bucket's own documents, so each carries its predictions.
-    by_stem = {Path(source_path_of(src)).stem: (src, gt, cast(list, preds))
-               for src, gt, preds in read}
+    by_stem = {Path(source_path_of(src)).stem: (src, gt, document.annotations)
+               for src, gt, document in read}
     # Both sides counted as a count counts: objects with a box, a crowd region and a Point none.
     scores: list[tuple[str, float]] = []
     for stem, (_img, gt, predicted) in by_stem.items():

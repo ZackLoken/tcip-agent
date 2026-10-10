@@ -45,7 +45,8 @@ class WindowedRasterReader(Protocol):
 
 class GenericPredictor:
     """Load any bespoke ``model_source`` checkpoint and run inference under the execution record
-    each call is given, which alone decides the confidence threshold and the detection cap.
+    each call is given, which alone decides the confidence threshold and each frame's detection
+    cap.
 
     The checkpoint must carry its run config, whose ``model_source`` names the builder and the
     task, and the weights (``model_build``'s ``STATE_DICT_KEY``).
@@ -106,7 +107,8 @@ class GenericPredictor:
     ) -> list[dict]:
         """Run inference on multiple images under ``execution``, sliced when it is a tiled record.
 
-        Detection runs ``batch_size`` images per forward; other heads run one image per forward.
+        Detection takes ``batch_size`` images at a time, one forward per distinct frame cap among
+        them (:meth:`_predict_whole`); other heads run one image per forward.
 
         Each element of ``image_paths`` may be a plain path/string or a :class:`BandGroupRef` (see
         :meth:`predict`). Under a tiled ``execution`` every image runs through
@@ -122,64 +124,59 @@ class GenericPredictor:
         return [r for start in range(0, len(image_paths), step)
                 for r in self._predict_whole(image_paths[start:start + step], execution)]
 
-    def governed(self, execution: Execution) -> torch.nn.Module:
-        """This predictor's model with ``execution``'s conf and cap set as its in-model
-        thresholds, so they govern which boxes exist."""
-        from tcip_mcp.pipelines.operating_point import set_detector_operating_point
-
-        set_detector_operating_point(self.model, score_thresh=execution.conf,
-                                     detections_per_img=execution.max_dets)
-        return self.model
-
-    def _detection_model(self, execution: Execution, *, tile_resize: tuple[int, int] | None,
+    def _detection_model(self, execution: Execution, cap_of: Callable[[np.ndarray], int], *,
+                         tile_resize: tuple[int, int] | None,
                          band_interpretations: tuple[str, ...] | None,
                          collect_masks: bool) -> "TcipDetectionModel":
-        """This predictor wrapped as the SAHI detection model every detection pass runs through,
-        its in-model thresholds and its own score filter set from ``execution``, masks cut at the
+        """This predictor wrapped as the SAHI detection model a prediction runs through, each
+        input under the cap ``cap_of`` gives it and ``execution``'s conf, masks cut at the
         platform's binarize threshold."""
         from tcip_mcp.pipelines.measurement.mask_geometry import resolve_binarize_threshold
         from tcip_mcp.pipelines.slicing import TcipDetectionModel
 
-        self.governed(execution)
         return TcipDetectionModel(
-            self, conf=execution.conf, tile_resize=tile_resize,
+            self, conf=execution.conf, cap_of=cap_of, tile_resize=tile_resize,
             band_interpretations=band_interpretations, collect_masks=collect_masks,
             mask_binarize=resolve_binarize_threshold())
 
     def _predict_whole(self, sources: list[str | Path | BandGroupRef],
                        execution: Execution) -> list[dict]:
-        """One forward over ``sources`` under ``execution``, each decoded whole as one slice the
-        size of its frame at shift zero, each result built by :meth:`_detection_record`."""
-        model = self._detection_model(execution, tile_resize=None, band_interpretations=None,
-                                      collect_masks=self.task == "instance_seg")
+        """``sources`` under ``execution``, each decoded whole as one slice the size of its frame
+        at shift zero and run under its own frame's cap, each result built by
+        :meth:`_detection_record` under the cap its forward ran at."""
+        from tcip_mcp.pipelines.derivations import detection_cap
+
+        density = cast(float, execution.density)
+        model = self._detection_model(
+            execution, lambda a: detection_cap(density, a.shape[0] * a.shape[1]),
+            tile_resize=None, band_interpretations=None,
+            collect_masks=self.task == "instance_seg")
         arrays = [pixel_array(load_image(s, self.in_chans))[0] for s in sources]
         model.perform_batch_inference(arrays)
         model.convert_original_predictions(
             shift_amount=[[0, 0]] * len(arrays), full_shape=[list(a.shape[:2]) for a in arrays])
-        return [self._detection_record(preds, source_path_of(s), *frame_size(a),
-                                       model=model, max_dets=execution.max_dets)
-                for preds, s, a in zip(model.object_prediction_list_per_image, sources, arrays)]
+        return [self._detection_record(preds, source_path_of(s), *frame_size(a), model=model,
+                                       cap=cap)
+                for preds, s, a, cap in zip(model.object_prediction_list_per_image, sources,
+                                            arrays, model.caps, strict=True)]
 
     def _detection_record(self, predictions: "list[ObjectPrediction]", label: str, width: int,
-                          height: int, *, model: "TcipDetectionModel",
-                          max_dets: int | None) -> dict:
-        """The platform's detection record from ``ObjectPrediction``s in full-frame pixels, highest
-        score first under the full-frame ``max_dets`` cap: ``image``, ``width``, ``height``,
-        ``boxes`` (xyxy), ``scores``, ``labels`` (1-indexed), ``count`` and ``cap_hit``; where the
+                          height: int, *, model: "TcipDetectionModel", cap: int) -> dict:
+        """The platform's detection record from ``ObjectPrediction``s in full-frame pixels, as
+        the forward or the merge that capped them at ``cap`` left them, of the ``width`` x
+        ``height`` frame: ``image``, ``width``, ``height``, ``boxes`` (xyxy), ``scores``,
+        ``labels`` (1-indexed), ``count`` (their number) and ``cap``; where the
         checkpoint carries attributes, ``attributes``, one id per attribute per detection; where
         ``model`` collected masks, ``masks`` as one ``{"segmentation": [[x0, y0, x1, y1, ...],
         ...]}`` per detection, empty where the mask binarized to nothing, and ``mask_binarize``,
         the provenance of the threshold ``model`` cut them at."""
         from tcip_mcp.pipelines.slicing import prediction_rows
 
-        ranked = sorted(predictions, key=lambda p: -p.score.value)
-        cap_hit = bool(max_dets is not None and len(ranked) >= max_dets)
-        kept = prediction_rows(ranked[:max_dets] if max_dets is not None else ranked,
-                               self.attribute_sizes)
+        kept = prediction_rows(predictions, self.attribute_sizes)
         record = {
             "image": label, "width": int(width), "height": int(height),
             "boxes": [row["bbox"] for row in kept], "scores": [row["score"] for row in kept],
-            "labels": [row["category_id"] for row in kept], "count": len(kept), "cap_hit": cap_hit,
+            "labels": [row["category_id"] for row in kept], "count": len(kept), "cap": cap,
         }
         if self.attribute_sizes:
             record["attributes"] = [row["attributes"] for row in kept]
@@ -200,7 +197,8 @@ class GenericPredictor:
         :class:`~tcip_mcp.pipelines.slicing.TcipDetectionModel` ``tile_batch_size`` at a time with
         its shift and the frame's shape, then the record's one SAHI merge
         (:func:`~tcip_mcp.pipelines.slicing.cross_tile_merge`) over every slice's shifted
-        detections and a full-frame ``max_dets`` cap, highest score first.
+        detections and the cap the record gives the whole frame, highest score first, each slice
+        running under that same cap.
 
         A :class:`WindowedRasterReader` (has ``.read_window``) serves each slice from its own
         window and names the result by ``source_label``; any other source decodes whole once. Its
@@ -218,7 +216,7 @@ class GenericPredictor:
         (:func:`~tcip_mcp.pipelines.slicing.prediction_rows`) an interrupted pass recorded, and
         those slices are skipped; ``progress`` is called once per live batch with its first and
         last slice index and a mapping of that shape. Both refuse on a decoded source. Returns the
-        detection record with ``tiles`` (the lattice's slice count) and ``cap_hit``.
+        detection record (:meth:`_detection_record`) with ``tiles``, the lattice's slice count.
         """
         from tcip_mcp.pipelines.slicing import (
             cross_tile_merge, prediction_rows, predictions_from_rows, slice_lattice,
@@ -268,7 +266,12 @@ class GenericPredictor:
                            "it is handed (tiles will be rescaled).", min_size, model_edge)
         collect_masks = self.task == "instance_seg" and require_masks
         merge = cross_tile_merge(execution)
-        model = self._detection_model(execution, tile_resize=tile_resize,
+        from tcip_mcp.pipelines.derivations import detection_cap
+
+        # Every tile runs under the frame's cap: a tile denser than the density keeps its objects
+        # until the merged frame is capped.
+        frame_cap = detection_cap(cast(float, execution.density), width * height)
+        model = self._detection_model(execution, lambda _tile: frame_cap, tile_resize=tile_resize,
                                       band_interpretations=interpretations,
                                       collect_masks=collect_masks)
         slices = slice_lattice(height, width, tile_size, cast(float, execution.overlap))
@@ -291,10 +294,10 @@ class GenericPredictor:
                                                      "predictions": prediction_rows(
                                                          new, self.attribute_sizes)})
 
-        merged = merge(predictions) if predictions else []
-        # The in-model cap only caps per slice; the record's cap is the full frame's.
+        merged = sorted(merge(predictions) if predictions else [],
+                        key=lambda p: -p.score.value)[:frame_cap]
         return {**self._detection_record(merged, label, width, height, model=model,
-                                         max_dets=execution.max_dets),
+                                         cap=frame_cap),
                 "tiles": len(slices)}
 
     def _format_other(self, outputs: dict, image_path: str, w: int, h: int) -> dict:

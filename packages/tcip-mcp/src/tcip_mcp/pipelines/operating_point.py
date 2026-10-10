@@ -93,22 +93,36 @@ def detector_operating_point_holder(model: Any) -> tuple[Any, str | None]:
 
 
 def set_detector_operating_point(model: Any, *, score_thresh: float | None = None,
-                                 detections_per_img: int | None = None,
-                                 ) -> tuple[dict, str | None]:
-    """Set the in-model thresholds so the operating point governs which boxes exist.
-
-    Resolves where the knobs live through :func:`detector_operating_point_holder`. Returns
-    ``(applied, attribute_path)``: ``applied`` holds only the knobs actually set, and
-    ``attribute_path`` is the holder's own path, or ``None`` when nothing exposed any knob.
-    """
+                                 detections_per_img: int | None = None) -> None:
+    """Set each knob given on the holder :func:`detector_operating_point_holder` resolves, so the
+    operating point governs which boxes exist. A knob given that the model does not expose
+    refuses (``ValueError``) naming it and the holder."""
     target, path = detector_operating_point_holder(model)
-    applied: dict = {}
-    if target is not None:
-        for attr, val in zip(OPERATING_POINT_ATTRS, (score_thresh, detections_per_img)):
-            if val is not None and hasattr(target, attr):
-                setattr(target, attr, val)
-                applied[attr] = val
-    return applied, path
+    for attr, val in zip(OPERATING_POINT_ATTRS, (score_thresh, detections_per_img)):
+        if val is None:
+            continue
+        if not hasattr(target, attr):
+            raise ValueError(
+                f"this model exposes no {attr} "
+                f"({f'at its holder {path}' if path else 'and no holder of either knob'}): a "
+                f"detector's operating point is set in the model before its forward, so its "
+                f"holder exposes {attr} and honors it.")
+        setattr(target, attr, val)
+
+
+def governed_forward(model: Any, inputs: list, caps: list[int], *,
+                     conf: float | None) -> list:
+    """``model``'s output for each of ``inputs``, in input order, each produced under the
+    in-model score threshold ``conf`` (left as the model holds it for ``None``) and its own
+    detection cap of ``caps``, both set in the model (:func:`set_detector_operating_point`): one
+    forward per distinct cap, over the inputs it governs."""
+    outputs: list = [None] * len(inputs)
+    for cap in sorted(set(caps)):
+        at = [i for i, c in enumerate(caps) if c == cap]
+        set_detector_operating_point(model, score_thresh=conf, detections_per_img=cap)
+        for i, output in zip(at, model([inputs[i] for i in at]), strict=True):
+            outputs[i] = output
+    return outputs
 
 
 STAGED_CONF_FLOOR = 0.01
@@ -123,14 +137,14 @@ def _min_dt_score(records: list[dict]) -> float | None:
 
 
 def cap_saturated_frac(records: list[dict]) -> float:
-    """Fraction of ``records`` whose raw detection count hit the collection pass's per-image cap;
-    every record states ``cap_hit``."""
-    return sum(bool(r["cap_hit"]) for r in records) / len(records) if records else 0.0
+    """Fraction of ``records`` whose frame kept as many detections as the cap the collection pass
+    gave it; every record states its frame's ``count`` and ``cap``."""
+    return sum(r["count"] == r["cap"] for r in records) / len(records) if records else 0.0
 
 
 def count_criterion(
     cal_records: list[dict], hold_records: list[dict], entry: TraitEntry, *,
-    staged_conf_floor: float | None, staged_conf_floor_attribute_path: str | None,
+    staged_conf_floor: float, staged_conf_floor_attribute_path: str | None,
 ) -> tuple[float, dict, list[str]]:
     """The conf the trait's count objective picks on the calibration side, and the held-out count
     check at that conf: ``(conf, evidence, failures)``.
@@ -146,8 +160,7 @@ def count_criterion(
     side evidences at the conf is evidenced on the holdout; when the held-out precision and recall
     both clear ``holdout_match_quality_floor``; and when the held-out 90th-percentile per-image
     count error is within ``count_error_tolerance``. The entry carries every one of those fields.
-    A floor no module attribute took (``staged_conf_floor`` ``None``, beside the attribute path
-    it was applied on) fails as ``conf_floor_unstated``, a conf at or below a stated one as
+    A conf at or below the floor, applied on the attribute path beside it, fails as
     ``conf_censored``. An objective with no registered picker, or a calibration curve the
     objective picks no conf on, refuses (``ValueError``).
     """
@@ -186,9 +199,7 @@ def count_criterion(
     missing_classes = sorted(classes_with_evidence(cb) - classes_with_evidence(hb))
     floor = cast(float, entry.holdout_match_quality_floor)
     failures: list[str] = []
-    if staged_conf_floor is None:
-        failures.append("conf_floor_unstated")
-    elif conf <= staged_conf_floor:
+    if conf <= staged_conf_floor:
         failures.append("conf_censored")
     if not sum(len(gt_objects(r)) for r in cal_records):
         failures.append("insufficient_calibration_gt")
@@ -220,7 +231,7 @@ def count_criterion(
         "staged_conf_floor": staged_conf_floor,
         "staged_conf_floor_attribute_path": staged_conf_floor_attribute_path,
         "observed_min_score": observed_min,
-        "conf_floor_mismatch": (staged_conf_floor is not None and observed_min is not None
+        "conf_floor_mismatch": (observed_min is not None
                                 and observed_min > staged_conf_floor + 0.05),
         "calibration_cap_saturated_frac": cap_saturated_frac(cal_records),
         "holdout_cap_saturated_frac": cap_saturated_frac(hold_records),

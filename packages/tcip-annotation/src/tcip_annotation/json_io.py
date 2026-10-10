@@ -101,10 +101,7 @@ def iscrowd_of(raw) -> bool:
 
 
 def box_extent_ok(bbox: BBox) -> bool:
-    """Whether ``bbox`` has real extent: ``x2 > x1`` and ``y2 > y1``, on the raw corners;
-    :func:`check_box_extent` refuses by the same rule, and :func:`stored_box_extent_ok` checks the
-    stored grid.
-    """
+    """Whether ``bbox`` has real extent: ``x2 > x1`` and ``y2 > y1``, on the raw corners."""
     return bbox.x2 > bbox.x1 and bbox.y2 > bbox.y1
 
 
@@ -262,6 +259,9 @@ def _annotations_of(data: Any) -> list[Annotation]:
 COMPLETION_KEY = "complete"
 """The document key holding each subject's completion marks."""
 
+CAP_KEY = "cap"
+"""The prediction document key holding the detection cap its frame was predicted under."""
+
 SubjectState = Literal["complete", "negative", "partial", "unannotated"]
 """What one document says about one subject: finished with or without annotations of it
 (``complete``, ``negative``), or not finished with or without them (``partial``,
@@ -373,12 +373,15 @@ def covers(marks: Iterable[CompletionMark], rect: tuple[float, float, float, flo
 @dataclass(frozen=True)
 class LabelDocument:
     """One image's label document as read: its annotations, its ``width`` and ``height``
-    (``None`` for a document that states none), and each subject's live completion marks."""
+    (``None`` for a document that states none), each subject's live completion marks, and the
+    detection ``cap`` the pass that predicted a prediction document kept its frame to (``None``
+    for a document no pass predicted)."""
 
     annotations: list[Annotation]
     width: int | None
     height: int | None
     marks: dict[str, list[CompletionMark]]
+    cap: int | None
 
     def finished(self, subject: str) -> bool:
         """Whether this document's live marks for ``subject`` cover the whole image."""
@@ -403,10 +406,11 @@ def label_document(data: dict) -> LabelDocument:
     :func:`_annotations_of` and :func:`completion_marks` do."""
     annotations = _annotations_of(data)
     return LabelDocument(annotations=annotations, width=data.get("width"),
-                         height=data.get("height"), marks=completion_marks(data, annotations))
+                         height=data.get("height"), marks=completion_marks(data, annotations),
+                         cap=data.get(CAP_KEY))
 
 
-NO_DOCUMENT = LabelDocument(annotations=[], width=None, height=None, marks={})
+NO_DOCUMENT = LabelDocument(annotations=[], width=None, height=None, marks={}, cap=None)
 """What :func:`read_document_versioned` answers for a key holding no record."""
 
 
@@ -457,18 +461,18 @@ def read_label_document(key: Key, version: str | None = None) -> LabelDocument:
     return document_at(key, stored)
 
 
-def read_predictions(key: Key) -> list[Annotation]:
-    """A prediction document's records, each stating its ``score``: a record stating none raises
-    :class:`UnreadableLabelDocumentError` naming it
+def read_predictions(key: Key) -> LabelDocument:
+    """A prediction document, its records each stating its ``score``, beside the ``cap`` it was
+    kept to: a record stating none raises :class:`UnreadableLabelDocumentError` naming it
     (:func:`~tcip_annotation.state.prediction_score`).
     """
-    annotations = read_label_document(key).annotations
-    for i, a in enumerate(annotations):
+    document = read_label_document(key)
+    for i, a in enumerate(document.annotations):
         try:
             prediction_score(a)
         except ValueError as exc:
             raise UnreadableLabelDocumentError(f"record {i} {exc}") from exc
-    return annotations
+    return document
 
 
 def detection_annotations(annotations: Iterable[Annotation]) -> list[Annotation]:
@@ -700,11 +704,13 @@ def client_annotation(a: Annotation) -> dict:
 
 def document_payload(annotations, width: int, height: int, *,
                      keep_empty: bool = False,
-                     marks: Mapping[str, list[CompletionMark]] | None = None) -> dict | None:
-    """The record one image's per-image document holds: its frame, its annotations and, of
-    ``marks``, each subject's whose digest still names that subject's annotations here. Refuses
-    (``ValueError``) the first geometry the stored grid collapses. ``None`` when neither a record
-    nor a mark survives and ``keep_empty`` is not set.
+                     marks: Mapping[str, list[CompletionMark]] | None = None,
+                     cap: int | None = None) -> dict | None:
+    """The record one image's per-image document holds: its frame, its annotations, of
+    ``marks`` each subject's whose digest still names that subject's annotations here, and a
+    prediction document's detection ``cap`` when given. Refuses (``ValueError``) the first
+    geometry the stored grid collapses. ``None`` when neither a record nor a mark survives and
+    ``keep_empty`` is not set.
     """
     annotations = list(annotations)
     records = [{**stored_content(a), **_held_provenance(a)} for a in annotations]
@@ -712,6 +718,8 @@ def document_payload(annotations, width: int, height: int, *,
     if not records and not live and not keep_empty:
         return None
     payload: dict = {"width": int(width), "height": int(height), ANNOTATIONS_KEY: records}
+    if cap is not None:
+        payload[CAP_KEY] = int(cap)
     if live:
         payload[COMPLETION_KEY] = {
             subject: [{"rect": list(m.rect), "by": m.by, "at": m.at, "digest": m.digest,

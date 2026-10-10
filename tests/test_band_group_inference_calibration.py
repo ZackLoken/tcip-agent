@@ -21,7 +21,6 @@ import tifffile
 torch = pytest.importorskip("torch")
 
 from tests._chain_fixtures import BESPOKE_DETECTION  # noqa: E402
-from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS  # noqa: E402
 pytest.importorskip("torchvision")
 
 TILE = 32
@@ -91,7 +90,7 @@ def test_the_assessments_records_over_grouped_samples_decode_each_capture(tmp_pa
     images_dir = _grouped_dataset(tmp_path)
     checkpoint = load_registered_checkpoint(_detection_checkpoint(tmp_path), project=tmp_path)
     p = prepare(checkpoint,
-                Stated(tile=False, conf=0.0, max_dets=SAMPLE_MAX_DETS, postprocess="nms"),
+                Stated(tile=False, conf=0.0, postprocess="nms"),
                 device="cpu", tile_batch_size=8).runnable()
     samples = samples_over(images_dir, subject="bud")
 
@@ -136,8 +135,7 @@ def test_predict_batch_rejects_stringified_band_group_refs(tmp_path):
 
     images_dir = _grouped_dataset(tmp_path)
     checkpoint = load_registered_checkpoint(_detection_checkpoint(tmp_path), project=tmp_path)
-    p = prepare(checkpoint, Stated(tile=False, conf=0.0, max_dets=SAMPLE_MAX_DETS),
-                device="cpu").runnable()
+    p = prepare(checkpoint, Stated(tile=False, conf=0.0), device="cpu").runnable()
 
     logical = list_logical_images(images_dir)
     with pytest.raises(ValueError):

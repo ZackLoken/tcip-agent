@@ -31,7 +31,7 @@ def _fixture(tmp_path: Path) -> tuple[Path, str]:
     label_image(img, [Annotation(subject="bud", geometry=BBox(1, 1, 40, 30))], 100, 80)
     published(tmp_path, "baseline", [
         {"image": str(img), "width": 100, "height": 80, "boxes": [[1.0, 1.0, 40.0, 30.0]],
-         "scores": [0.9], "labels": [1]}],
+         "scores": [0.9], "labels": [1], "cap": 2}],
         scope={"subject": "bud"})
     return img, "baseline"
 

@@ -211,9 +211,9 @@ def _registered(project: Path) -> str:
 def _stated():
     """The execution values every pass here states."""
     from tcip_mcp.pipelines.execution import Stated
-    from tests._verified_checkpoint_fixtures import SAMPLE_CONF, SAMPLE_MAX_DETS
+    from tests._verified_checkpoint_fixtures import SAMPLE_CONF
 
-    return Stated(tile=False, conf=SAMPLE_CONF, max_dets=SAMPLE_MAX_DETS)
+    return Stated(tile=False, conf=SAMPLE_CONF)
 
 
 def _published(project: Path) -> None:
@@ -257,10 +257,7 @@ def _prioritize_review_queue(project: Path) -> list[str]:
 
 def _triage_predictions(project: Path) -> int:
     from tcip_mcp.tools.feedback_tools import triage_predictions
-    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
-
-    result = triage_predictions(project, _registered(project), f"images/{DATE}",
-                                max_dets=SAMPLE_MAX_DETS)
+    result = triage_predictions(project, _registered(project), f"images/{DATE}")
     assert "error" not in result, result
     return result["total_images"]
 
@@ -693,7 +690,7 @@ def test_a_run_missing_its_metrics_log_answers_its_own_error_at_the_checkpoint_d
     from tcip_mcp.experiments import METRICS_FILE
     from tcip_mcp.tools.feedback_tools import triage_predictions
     from tcip_mcp.tools.training_tools import evaluate_model
-    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS, registered_checkpoint
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     project = _dataset(tmp_path).root
     checkpoint = Path(registered_checkpoint(project, data={
@@ -703,7 +700,7 @@ def test_a_run_missing_its_metrics_log_answers_its_own_error_at_the_checkpoint_d
     spelling = _relative(checkpoint, project)
 
     evaluated = evaluate_model(project, spelling, f"images/{DATE}", stated=_stated())
-    triaged = triage_predictions(project, spelling, f"images/{DATE}", max_dets=SAMPLE_MAX_DETS)
+    triaged = triage_predictions(project, spelling, f"images/{DATE}")
 
     for answer in (evaluated, triaged):
         assert f"is missing {checkpoint.parent / METRICS_FILE}" in answer["error"], answer

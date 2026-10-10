@@ -9,7 +9,6 @@ from pathlib import Path
 
 from tcip_mcp.pipelines.data.selection import REFERENCE_SIDES
 from tcip_mcp.tools.feedback_tools import prioritize_review_queue
-from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
 
 DATE = "2026-03-04"
 
@@ -69,12 +68,12 @@ def test_triage_predictions_skips_only_the_images_marked_finished(tmp_path, monk
                                              for s in sources]))
 
     r = triage_predictions(tmp_path, checkpoint_path=str(ckpt), images_dir=str(images),
-                           subject="bud", max_dets=SAMPLE_MAX_DETS)
+                           subject="bud")
     assert r["reviewed_skipped"] == 1
     assert r["review_images"] == ["imgB.png"]
 
     other = triage_predictions(tmp_path, checkpoint_path=str(ckpt), images_dir=str(images),
-                               subject="leaf", max_dets=SAMPLE_MAX_DETS)
+                               subject="leaf")
     assert other["reviewed_skipped"] == 0
     assert other["review_images"] == ["imgA.png", "imgB.png"]
 
@@ -100,8 +99,7 @@ def test_triage_predictions_surfaces_unscoreable(tmp_path, monkeypatch):
         predmod, "GenericPredictor",
         lambda *a, **k: SimpleNamespace(predict_batch=lambda sources, **kw: predictions))
 
-    r = triage_predictions(
-        tmp_path, checkpoint_path=str(ckpt), images_dir=str(images), max_dets=SAMPLE_MAX_DETS)
+    r = triage_predictions(tmp_path, checkpoint_path=str(ckpt), images_dir=str(images))
     assert r["needs_review"] == 1
     assert r["review_images"] == ["a.jpg"]
     assert r["unscoreable_images"] == ["a.jpg"]
@@ -127,7 +125,7 @@ def _stubbed_triage_predictions(tmp_path, monkeypatch, predictions: list[dict], 
         lambda *a, **k: SimpleNamespace(predict_batch=lambda sources, **kw: predictions))
 
     return triage_predictions(tmp_path, checkpoint_path=str(ckpt), images_dir=str(images),
-                              **{"max_dets": SAMPLE_MAX_DETS, **kwargs})
+                              **kwargs)
 
 
 def _triage_over_one_image(tmp_path, monkeypatch) -> tuple[str, str, list]:
@@ -153,30 +151,18 @@ def _triage_over_one_image(tmp_path, monkeypatch) -> tuple[str, str, list]:
     return str(ckpt), str(images), ran_at
 
 
-def test_triage_refuses_a_detector_call_stating_no_cap(tmp_path, monkeypatch):
-    """No default stands behind a detector's cap: a triage call stating no ``max_dets`` refuses
-    naming it and predicts nothing."""
-    from tcip_mcp.tools.feedback_tools import triage_predictions
-
-    ckpt, images, ran_at = _triage_over_one_image(tmp_path, monkeypatch)
-
-    refused = triage_predictions(tmp_path, checkpoint_path=ckpt, images_dir=images, low=0.3)
-
-    assert "max_dets" in refused.get("error", ""), refused
-    assert ran_at == []
-
-
 def test_triage_predicts_a_detector_at_its_low_bound(tmp_path, monkeypatch):
     """Every box the band can hold exists: a detector predicts at ``low`` itself, never at a
-    default above it, under the cap the call states."""
+    default above it, each frame capped at the density its checkpoint recorded."""
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.tools.feedback_tools import triage_predictions
 
     ckpt, images, ran_at = _triage_over_one_image(tmp_path, monkeypatch)
 
-    triaged = triage_predictions(tmp_path, checkpoint_path=ckpt, images_dir=images, low=0.3,
-                                 max_dets=SAMPLE_MAX_DETS)
+    triaged = triage_predictions(tmp_path, checkpoint_path=ckpt, images_dir=images, low=0.3)
 
-    assert [(e.conf, e.max_dets) for e in ran_at] == [(0.3, SAMPLE_MAX_DETS)]
+    density = load_registered_checkpoint(ckpt, project=tmp_path).spec.data.train_object_density
+    assert [(e.conf, e.density) for e in ran_at] == [(0.3, density)]
     assert triaged["review_images"] == ["a.jpg"]
 
 
@@ -196,12 +182,8 @@ def test_triage_predictions_routes_the_band_and_the_unscoreable_and_accepts_noth
 
 
 def test_unresolvable_scorer_raises_valueerror_not_an_import_error():
-    """The refusal is a ValueError whatever the name looks like.
-
-    ``resolve_scorer``'s callers catch ``ValueError`` to turn a refusal into an error dict: a
-    dotted name that fails to import must raise ``ValueError`` too, never
-    ``ModuleNotFoundError`` straight out of the audited MCP tool.
-    """
+    """A scorer name that does not resolve refuses with ``ValueError`` whatever it looks like, a
+    dotted name that fails to import included."""
     import pytest
 
     from tcip_mcp.pipelines.active_learning.scorer import resolve_scorer

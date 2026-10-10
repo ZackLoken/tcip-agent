@@ -6,7 +6,6 @@ import pytest
 
 from tcip_mcp.pipelines.execution import Stated
 from tests._predictor_fixtures import BOX, StubPredictor, install
-from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
 
 BUCKET = "out/2026-01-01"
 
@@ -58,7 +57,7 @@ def test_encode_predictions_roundtrip_and_negative(tmp_path):
     encoded, _dropped = encode_predictions({
         "image": "img.jpg", "width": 100, "height": 100,
         "boxes": [[10.0, 10.0, 30.0, 30.0]], "scores": [0.9], "labels": [1], "count": 1,
-    }, "model:fixture", scope=scope)
+        "cap": 2}, "model:fixture", scope=scope)
     ann = encoded["annotations"][0]
     assert ann["subject"] == "bud"                       # the scope's one subject
     assert ann["bbox"] == [10.0, 10.0, 20.0, 20.0]
@@ -68,7 +67,8 @@ def test_encode_predictions_roundtrip_and_negative(tmp_path):
 
     # Negative invariant: a zero-detection image still yields an {"annotations": []} record.
     empty, _dropped = encode_predictions({"image": "empty.jpg", "width": 100, "height": 100,
-                                          "boxes": [], "scores": [], "labels": [], "count": 0},
+                                          "boxes": [], "scores": [], "labels": [], "count": 0,
+                                          "cap": 1},
                                          "model:fixture", scope=scope)
     assert empty["annotations"] == []
 
@@ -87,7 +87,7 @@ def test_web_worker_uses_generic_predictor_and_publishes_its_documents(tmp_path,
     predictor = install(monkeypatch, StubPredictor(train_tile_size=640))
 
     job = _job("t", tmp_path, ckpt, images_dir, Stated(
-        tile=True, conf=0.25, max_dets=SAMPLE_MAX_DETS, cross_tile_nms=0.7, overlap=0.2,
+        tile=True, conf=0.25, cross_tile_nms=0.7, overlap=0.2,
         postprocess="nmm"))
     _worker(job)
 
@@ -123,7 +123,7 @@ def test_web_worker_prefers_the_checkpoints_own_recorded_scope(tmp_path, monkeyp
     install(monkeypatch, StubPredictor(attributes=[[1]]))
 
     job = _job("t3", tmp_path, ckpt, images_dir, Stated(
-        tile=False, conf=0.25, max_dets=SAMPLE_MAX_DETS, cross_tile_nms=0.7, overlap=0.2,
+        tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2,
         postprocess="nms"))
     _worker(job)
 
@@ -149,7 +149,7 @@ def test_web_worker_runs_tiled_instance_seg_without_forcing_untiled(tmp_path, mo
     predictor = install(monkeypatch, StubPredictor(task="instance_seg", train_tile_size=640))
 
     job = _job("t3", tmp_path, ckpt, images_dir, Stated(
-        tile=True, conf=0.25, max_dets=SAMPLE_MAX_DETS, cross_tile_nms=0.7, overlap=0.2,
+        tile=True, conf=0.25, cross_tile_nms=0.7, overlap=0.2,
         postprocess="nms"))
     _worker(job)
 
@@ -178,7 +178,7 @@ def test_web_worker_runs_a_native_frame_tile_scale_and_forwards_its_recorded_res
         train_augmentation={"resize": [128, 128]}))
 
     job = _job("t4", tmp_path, ckpt, images_dir, Stated(
-        tile=True, conf=0.25, max_dets=SAMPLE_MAX_DETS, cross_tile_nms=0.7, overlap=0.2,
+        tile=True, conf=0.25, cross_tile_nms=0.7, overlap=0.2,
         postprocess="nms"))
     _worker(job)
 
@@ -194,9 +194,10 @@ def _sources(project: Path) -> dict:
     return read_bucket(project, BUCKET).execution.sources
 
 
-def test_web_worker_stamps_the_stated_conf_and_max_dets_as_explicit(tmp_path, monkeypatch):
-    """A caller-stated conf/max_dets is recorded 'explicit', the same distinction tile/tile_size
-    already carry."""
+def test_web_worker_stamps_the_stated_conf_explicit_and_the_checkpoints_density(
+        tmp_path, monkeypatch):
+    """A caller-stated conf is recorded 'explicit', the same distinction tile/tile_size already
+    carry, and the density no caller states is the checkpoint's own recorded one."""
     from tcip_web.routes.inference import _worker
 
     from tests._verified_checkpoint_fixtures import SAMPLE_CONF
@@ -206,14 +207,14 @@ def test_web_worker_stamps_the_stated_conf_and_max_dets_as_explicit(tmp_path, mo
     install(monkeypatch, StubPredictor())
 
     job = _job("conf-explicit", tmp_path, ckpt, images_dir, Stated(
-        tile=False, conf=SAMPLE_CONF, cross_tile_nms=0.7, max_dets=SAMPLE_MAX_DETS))
+        tile=False, conf=SAMPLE_CONF, cross_tile_nms=0.7))
     _worker(job)
 
     assert job.status == "completed", job.error
     # The pass ran at the stated values: the one image's one detection landed.
     assert len(_annotations(tmp_path)) == 1
     sources = _sources(tmp_path)
-    assert (sources["conf"], sources["max_dets"]) == ("explicit", "explicit")
+    assert (sources["conf"], sources["density"]) == ("explicit", "derived")
 
 
 def test_web_worker_fails_a_job_stating_no_conf_naming_it(tmp_path, monkeypatch):
@@ -226,7 +227,7 @@ def test_web_worker_fails_a_job_stating_no_conf_naming_it(tmp_path, monkeypatch)
     install(monkeypatch, StubPredictor())
 
     job = _job("conf-unstated", tmp_path, ckpt, images_dir,
-               Stated(tile=False, cross_tile_nms=0.7, max_dets=SAMPLE_MAX_DETS))
+               Stated(tile=False, cross_tile_nms=0.7))
     _worker(job)
 
     assert job.status == "failed"
@@ -249,7 +250,7 @@ def test_web_worker_dropped_boxes_agree_with_the_published_document_on_a_degener
                                        train_tile_size=640))
 
     job = _job("degenerate", tmp_path, ckpt, images_dir, Stated(
-        tile=True, conf=0.25, max_dets=SAMPLE_MAX_DETS, cross_tile_nms=0.7, overlap=0.2,
+        tile=True, conf=0.25, cross_tile_nms=0.7, overlap=0.2,
         postprocess="nmm"))
     _worker(job)
 
@@ -272,7 +273,7 @@ def test_web_worker_fails_the_job_on_a_stem_collision(tmp_path):
     ckpt = _checkpoint(tmp_path)
 
     job = _job("collision", tmp_path, ckpt, images_dir, Stated(
-        tile=False, conf=0.25, max_dets=SAMPLE_MAX_DETS, cross_tile_nms=0.7, overlap=0.2,
+        tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2,
         postprocess="nms"))
     _worker(job)
 

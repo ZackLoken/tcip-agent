@@ -214,9 +214,9 @@ def test_a_stated_tile_edge_other_than_the_splits_refuses_naming_both(tmp_path: 
 def test_every_band_runs_under_the_execution_record_the_assessment_records(
     tmp_path: Path, monkeypatch,
 ):
-    """The bands are predicted under the stated slicing and merge and at the merge threshold, cap
-    and floor the recorded execution states; the record the assessment keeps is the record the
-    bands ran."""
+    """The bands are predicted under the stated slicing and merge and at the merge threshold,
+    density and floor the recorded execution states; the record the assessment keeps is the
+    record the bands ran."""
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
 
     exp = _attested(tmp_path)
@@ -238,7 +238,7 @@ def test_every_band_runs_under_the_execution_record_the_assessment_records(
     assert {(p["execution"].overlap, p["execution"].postprocess,
              p["execution"].cross_tile_nms) for p in passes} == {
         (0.25, "greedynmm", execution["cross_tile_nms"])}
-    assert {p["execution"].max_dets for p in passes} == {execution["max_dets"]}
+    assert {p["execution"].density for p in passes} == {execution["density"]}
     assert {p["execution"].conf for p in passes} == {
         record["criterion"]["count"]["staged_conf_floor"]}
 
@@ -371,24 +371,24 @@ def test_the_band_scale_falls_back_to_object_spacing_with_no_plant_files(tmp_pat
 
 def test_a_saturated_band_cap_surfaces_as_cap_saturated_provenance(tmp_path: Path, monkeypatch):
     """A band whose raw detection count reaches the applied cap is recorded as saturated: the
-    derived cap is forced down to one, so every band with more than one raw detection is
-    truncated."""
+    derived density is forced so low that every band's cap is one, so every band with more than
+    one raw detection is truncated."""
     import tcip_mcp.pipelines.derivations as derivations_module
 
     exp = _attested(tmp_path)
-    monkeypatch.setattr(derivations_module, "derive_max_dets", lambda *a, **k: 1)
+    monkeypatch.setattr(derivations_module, "derive_object_density", lambda *a, **k: 1e-12)
 
     record = _assess(exp)
 
-    assert record["execution"]["max_dets"] == 1
+    assert record["execution"]["density"] == 1e-12
     assert record["criterion"]["count"]["calibration_cap_saturated_frac"] > 0.0
 
 
-def test_the_recorded_cap_is_derived_from_the_calibration_bands_alone(tmp_path: Path):
-    """The recorded cap is fitted on the calibration bands' densities only, scaled to the whole
-    mosaic the pass publishes: ground truth made dense inside the test region alone, which a
-    pooled derivation would follow, leaves it where the calibration side puts it."""
-    from tcip_mcp.pipelines.derivations import derive_max_dets
+def test_the_recorded_density_is_derived_from_the_calibration_bands_alone(tmp_path: Path):
+    """The recorded density is fitted on the calibration bands' densities only: ground truth made
+    dense inside the test region alone, which a pooled derivation would follow, leaves it where
+    the calibration side puts it."""
+    from tcip_mcp.pipelines.derivations import derive_object_density
 
     exp = _build_experiment(tmp_path)
     manifest = exp["spatial_manifest"]
@@ -408,31 +408,36 @@ def test_the_recorded_cap_is_derived_from_the_calibration_bands_alone(tmp_path: 
     rects = {s.member: s.rect for s in read_assessment(
         exp["project"], record["assessment_id"]).reference.samples}
 
-    def counted(side: str) -> list[tuple[int, float]]:
+    from tests._verified_checkpoint_fixtures import objects_over
+
+    def counted(side: str) -> list:
         out = []
         for name, n in counts[side].items():
             rect = rects[name]
             assert rect is not None, name
-            out.append((n, float((rect[2] - rect[0]) * (rect[3] - rect[1]))))
+            out.append(objects_over([[0.0, 0.0, 1.0, 1.0]] * n,
+                                    (rect[2] - rect[0]) * (rect[3] - rect[1])))
         return out
 
-    pooled = derive_max_dets(counted("calibration") + counted("holdout"), WIDTH * HEIGHT)
-    calibration_only = derive_max_dets(counted("calibration"), WIDTH * HEIGHT)
+    pooled = derive_object_density(counted("calibration") + counted("holdout"))
+    calibration_only = derive_object_density(counted("calibration"))
     assert pooled != calibration_only
-    assert record["execution"]["max_dets"] == calibration_only
+    assert record["execution"]["density"] == pytest.approx(calibration_only)
 
 
-def test_the_recorded_cap_covers_the_whole_mosaic_it_publishes(tmp_path: Path):
-    """The pass the assessment records publishes the whole mosaic as one frame: its cap scales
-    the calibration bands' density to the mosaic's area, so a mosaic holding more objects than
-    any one band is not truncated at publication."""
+def test_the_recorded_density_caps_the_whole_mosaic_at_its_own_pixels(tmp_path: Path):
+    """The pass the assessment records publishes the whole mosaic as one frame of the same rule:
+    its cap is the calibration bands' density times the mosaic's own pixels, so a mosaic holding
+    more objects than any one band is not truncated at publication."""
+    from tcip_mcp.pipelines.derivations import detection_cap
+
     exp = _attested(tmp_path)
     record = _assess(exp)
 
     in_mosaic = len(json_io.read_label_document(exp["label"]).annotations)
     densest_band = max(record["criterion"]["count"]["band_gt_counts"]["calibration"].values())
     assert in_mosaic > densest_band
-    assert record["execution"]["max_dets"] >= in_mosaic
+    assert detection_cap(record["execution"]["density"], WIDTH * HEIGHT) >= in_mosaic
 
 
 def test_an_unstated_merge_threshold_derives_from_the_calibration_bands(tmp_path: Path):
@@ -523,8 +528,8 @@ def test_band_records_carry_each_ground_truth_rows_crowd_flag(tmp_path: Path):
 
     class _OneDetection:
         def predict_sliced(self, view, **kwargs):
-            return {"boxes": [[10.1, 10.1, 40.3, 30.3]], "scores": [0.9], "labels": [1],
-                    "cap_hit": False}
+            return {"width": 200, "height": 200, "boxes": [[10.1, 10.1, 40.3, 30.3]],
+                    "scores": [0.9], "labels": [1], "count": 1, "cap": 5}
 
     label = image_label_key(tmp_path / "images" / UNDATED_BUCKET / "mosaic.tif")
     json_io.write_label_document(label, [
@@ -549,6 +554,42 @@ def test_band_records_carry_each_ground_truth_rows_crowd_flag(tmp_path: Path):
     assert records[0]["gt"][0]["bbox"] == [20.3, 20.7, 19.8, 40.2]
     assert [d["bbox"] for d in records[0]["dt"]] == [[10.1, 10.1, 30.2, 20.2]]
     assert records[0]["image_id"] == "band-digest"
+
+
+def test_a_band_record_states_the_frame_its_forward_ran_on_and_the_band_it_scores(
+        tmp_path: Path, monkeypatch):
+    """Through a real assessment, each band's record is the halo its tiled pass ran on: that
+    frame's width, height and the cap the pass's density gives it, a count within it, the band
+    inside it as the scored region, and only detections and ground truth centered in it."""
+    import tcip_mcp.assessment as assessment
+    from tcip_mcp.pipelines.derivations import detection_cap
+    from tcip_mcp.pipelines.slicing import slice_lattice
+
+    seen: list = []
+    real = assessment._band_records
+
+    def recording(reader, bands, p, execution, **kwargs):
+        records = real(reader, bands, p, execution, **kwargs)
+        seen.append(((reader.width, reader.height), bands, execution, records))
+        return records
+
+    monkeypatch.setattr(assessment, "_band_records", recording)
+    assert "error" not in _assess(_attested(tmp_path), conf=0.0)
+    assert seen
+
+    for (width, height), bands, execution, records in seen:
+        halo = TILE - slice_lattice(TILE, 2 * TILE, TILE, execution.overlap)[1][0]
+        for (ix0, iy0, ix1, iy1), record in zip(
+                (bands[name] for name in sorted(bands)), records, strict=True):
+            hx0, hy0 = max(0, ix0 - halo), max(0, iy0 - halo)
+            frame = (min(width, ix1 + halo) - hx0, min(height, iy1 + halo) - hy0)
+            region = [ix0 - hx0, iy0 - hy0, ix1 - hx0, iy1 - hy0]
+            assert (record["width"], record["height"]) == frame
+            assert record["cap"] == detection_cap(execution.density, frame[0] * frame[1])
+            assert record["count"] <= record["cap"] and record["region"] == region
+            for row in record["dt"] + record["gt"]:
+                x, y, w, h = row["bbox"]
+                assert region[0] <= x + w / 2 < region[2] and region[1] <= y + h / 2 < region[3]
 
 
 def test_band_rects_are_reported_in_full_mosaic_coordinates():

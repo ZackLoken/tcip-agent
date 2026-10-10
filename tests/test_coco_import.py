@@ -458,7 +458,7 @@ def test_a_pass_whose_document_fails_to_encode_publishes_nothing(tmp_path: Path,
     from tcip_mcp.pipelines.execution import Stated
     from tests._predictor_fixtures import StubPredictor, install
     from tests._verified_checkpoint_fixtures import (
-        SAMPLE_CONF, SAMPLE_MAX_DETS, registered_checkpoint,
+        SAMPLE_CONF, registered_checkpoint,
     )
 
     root = _dataset(tmp_path).root
@@ -477,7 +477,7 @@ def test_a_pass_whose_document_fails_to_encode_publishes_nothing(tmp_path: Path,
     with pytest.raises(OSError):
         itools.run_inference(tmp_path, ckpt, str(root / "images" / DATE),
                              bucket=f"detector/{DATE}",
-                             stated=Stated(tile=False, conf=SAMPLE_CONF, max_dets=SAMPLE_MAX_DETS))
+                             stated=Stated(tile=False, conf=SAMPLE_CONF))
 
     assert len(calls) == 2
     assert not ts.exists(bucket_key(root, f"detector/{DATE}"))
@@ -613,10 +613,10 @@ def test_a_crowd_region_imports_and_reaches_training_and_evaluation_as_one(tmp_p
     x, y, w, h = BOX
     assert heads["boxes"].tolist() == [[x, y, x + w, y + h]] and heads["iscrowd"].tolist() == [0]
 
-    from_annotations = records_from_annotation(gt, [], width=IMG, height=IMG)
+    from_annotations = records_from_annotation(gt, [], width=IMG, height=IMG, cap=None)
     no_detections = {"boxes": torch.zeros((0, 4)), "labels": torch.zeros((0,), dtype=torch.int64),
                      "scores": torch.zeros((0,))}
-    from_detector = records_from_detector(target, no_detections, width=IMG, height=IMG)
+    from_detector = records_from_detector(target, no_detections, width=IMG, height=IMG, cap=1)
     assert [g["iscrowd"] for g in from_annotations["gt"]] == [0, 1]
     assert [g["iscrowd"] for g in from_detector["gt"]] == [0, 1]
 

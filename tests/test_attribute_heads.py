@@ -27,11 +27,11 @@ from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 
 from tests._chain_fixtures import ATTRIBUTE, PLANTS, VALUES, attributed_series  # noqa: E402
 from tests._verified_checkpoint_fixtures import (  # noqa: E402
-    BUILT_DETECTOR, SAMPLE_MAX_DETS, SQUARE_64_DETECTOR,
+    BUILT_DETECTOR, SQUARE_64_DETECTOR,
 )
 
-UNFILTERED = Stated(tile=False, conf=0.0, max_dets=SAMPLE_MAX_DETS)
-"""An untiled pass keeping every box at the sample cap."""
+UNFILTERED = Stated(tile=False, conf=0.0)
+"""An untiled pass keeping every box up to the checkpoint's density."""
 SUBJECT = "object"
 COLOR = cr.Attribute("color", "categorical", ("red", "blue"))
 GRADE = cr.Attribute("grade", "ordinal", ("low", "mid", "high"))
@@ -303,7 +303,7 @@ def test_two_tiles_calling_one_object_differently_merge_into_the_higher_scoring_
 
     p = prepare(load_registered_checkpoint(ckpt, project=tmp_path),
                 Stated(tile=True, tile_size=128, overlap=0.25, postprocess=postprocess,
-                       cross_tile_nms=0.3, conf=0.0, max_dets=SAMPLE_MAX_DETS),
+                       cross_tile_nms=0.3, conf=0.0),
                 device="cpu", tile_batch_size=2).runnable()
     result = p.predictor.predict_sliced(str(source), execution=p.execution,
                                         tile_batch_size=p.tile_batch_size, require_masks=False)
@@ -317,11 +317,14 @@ def test_two_tiles_calling_one_object_differently_merge_into_the_higher_scoring_
 
 class _CallsEveryFrameOnce(torch.nn.Module):
     """One call per frame at the box :func:`~tests._verified_checkpoint_fixtures.
-    detection_images` draws, carrying ``ids`` as its attribute ids."""
+    detection_images` draws, carrying ``ids`` as its attribute ids, scored 0.9: one box, so
+    within any cap of the ``detections_per_img`` it exposes beside ``score_thresh``."""
 
     def __init__(self, ids: list[int]) -> None:
         super().__init__()
         self.ids = ids
+        self.score_thresh = 0.0
+        self.detections_per_img = 100
 
     def forward(self, images, targets=None):
         if self.training:
@@ -351,7 +354,7 @@ def test_evaluate_reports_each_attributes_agreement_over_the_pairs_it_assesses(t
     dims = model_dims(ClassScope.of(data), {"num_channels": 3})
 
     metrics = evaluate(_CallsEveryFrameOnce([1, 2]), [(list(images), list(targets))], "cpu",
-                       "detection", dims=dims, conf_threshold=0.0)
+                       "detection", dims=dims, conf_threshold=0.0, density=1.0)
 
     agreement = metrics["attribute_agreement"]
     assert set(agreement) == {"color", "grade"}

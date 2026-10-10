@@ -67,7 +67,7 @@ def test_a_buckets_record_is_not_counted_as_a_prediction(tmp_path: Path):
     root = _lopsided_dataset(tmp_path / "ds")
     published(tmp_path, f"run_a/{DATE}", [
         {"image": str(root / "images" / DATE / f"{stem}.jpg"), "width": 96, "height": 64,
-         "boxes": [[12.0, 8.0, 40.0, 52.0]], "scores": [0.8], "labels": [1]}
+         "boxes": [[12.0, 8.0, 40.0, 52.0]], "scores": [0.8], "labels": [1], "cap": 2}
         for stem in ("plotA_0_0", "plotB_0_0")], scope={"subject": SUBJECT})
     json_io.write_label_document(
         prediction_key(root, f"staged/{DATE}", "plotC_0_0"),

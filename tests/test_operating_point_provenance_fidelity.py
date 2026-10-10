@@ -33,7 +33,7 @@ def _records(prefix: str, offset: float, n_images: int = N_IMAGES) -> list[dict]
             gt.append({"bbox": box, "category_id": 1, "iscrowd": 0})
             dt.append({"bbox": box, "category_id": 1, "score": 0.9})
         recs.append({"image_id": f"{prefix}{i}", "width": 4000, "height": 1000, "gt": gt,
-                     "dt": dt, "cap_hit": False})
+                     "dt": dt, "count": len(dt), "cap": len(dt) + 1})
     return recs
 
 

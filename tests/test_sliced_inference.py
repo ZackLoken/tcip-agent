@@ -82,13 +82,12 @@ def _frame(bands: int = 3, *, value=255, blobs=BLOBS) -> np.ndarray:
 
 def _pass(checkpoint, reference=None, **stated):
     """The tiled pass ``checkpoint`` runs at the fixture's tile edge and overlap, merging by NMM
-    at 0.5 and keeping every score at the sample cap, with ``stated`` over those, made runnable
-    from ``reference`` when one is given."""
+    at 0.5 and keeping every score, with ``stated`` over those, made runnable from ``reference``
+    when one is given."""
     from tcip_mcp.pipelines.execution import prepare
-    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
 
     values = dict(tile=True, tile_size=TILE, overlap=OVERLAP, postprocess="nmm",
-                  cross_tile_nms=0.5, conf=0.0, max_dets=SAMPLE_MAX_DETS)
+                  cross_tile_nms=0.5, conf=0.0)
     values.update(stated)
     return prepare(checkpoint, Stated(**values), device="cpu",
                    tile_batch_size=2).runnable(reference)
@@ -101,11 +100,11 @@ def _sliced(p, source, *, require_masks: bool = True, **kwargs):
 
 
 def _whole(p, source) -> dict:
-    """The untiled record of ``source`` under the pass's own conf and cap."""
+    """The untiled record of ``source`` under the pass's own conf and the checkpoint's density."""
     from tcip_mcp.pipelines.execution import execution_record
 
     return p.predictor.predict(source, execution_record(
-        p.checkpoint, Stated(conf=p.execution.conf, max_dets=p.execution.max_dets), None, None))
+        p.checkpoint, Stated(conf=p.execution.conf), None, None))
 
 
 def _png(directory: Path, arr: np.ndarray, name: str = "frame.png") -> str:
@@ -210,7 +209,7 @@ def test_an_untiled_record_carries_the_polygons_the_sliced_record_does(tmp_path)
     assert whole["count"] == sliced["count"] == len(BLOBS)
     assert _mask_extents(whole) == _mask_extents(sliced)
     assert sorted(whole["boxes"]) == sorted(sliced["boxes"])
-    assert whole["cap_hit"] is sliced["cap_hit"] is False
+    assert whole["cap"] == sliced["cap"] > whole["count"]
     assert whole["mask_binarize"] == sliced["mask_binarize"]
 
 
@@ -361,10 +360,11 @@ def test_an_iou_merge_derives_its_threshold_and_an_ios_merge_states_one(tmp_path
     from tcip_mcp.pipelines.derivations import CROSS_TILE_NMS_DERIVATION
     from tcip_mcp.pipelines.execution import ExecutionRefusedError, Reference
     from tcip_mcp.pipelines.slicing import cross_tile_merge
+    from tests._verified_checkpoint_fixtures import objects_over
 
     _path, checkpoint = _checkpoint(tmp_path)
-    nested = Reference(boxes_per_image=[[[0.0, 0.0, 20.0, 20.0], [5.0, 5.0, 10.0, 10.0]]],
-                       counted=None, footprint=None)
+    nested = Reference(regions=[objects_over([[0.0, 0.0, 20.0, 20.0], [5.0, 5.0, 15.0, 15.0]],
+                                             FRAME * FRAME)])
     predictions = [ObjectPrediction(bbox=[0, 0, 20, 20], category_id=1, score=0.9),
                    ObjectPrediction(bbox=[5, 5, 15, 15], category_id=1, score=0.8)]
 
@@ -394,7 +394,6 @@ def test_a_preparation_runs_nothing_and_its_pass_merges_at_the_threshold_it_reso
     from tcip_mcp.pipelines.execution import (
         ExecutionRefusedError, Pass, Preparation, Reference, prepare,
     )
-    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
 
     _path, checkpoint = _checkpoint(tmp_path)
     received: list = []
@@ -411,16 +410,18 @@ def test_a_preparation_runs_nothing_and_its_pass_merges_at_the_threshold_it_reso
     def prepared(cross_tile_nms):
         prep = prepare(checkpoint, Stated(tile=True, tile_size=TILE, overlap=OVERLAP,
                                           postprocess="nms", cross_tile_nms=cross_tile_nms,
-                                          conf=0.0, max_dets=SAMPLE_MAX_DETS), device="cpu",
+                                          conf=0.0), device="cpu",
                        tile_batch_size=2)
         assert isinstance(prep, Preparation) and not hasattr(prep, "predict")
         assert not any(isinstance(v, Pass) for v in vars(prep).values())
         return prep
 
-    overlapping = Reference(boxes_per_image=[[[0.0, 0.0, 20.0, 20.0], [5.0, 5.0, 10.0, 10.0]]],
-                            counted=None, footprint=None)
-    apart = Reference(boxes_per_image=[[[0.0, 0.0, 20.0, 20.0], [100.0, 100.0, 20.0, 20.0]]],
-                      counted=None, footprint=None)
+    from tests._verified_checkpoint_fixtures import objects_over
+
+    overlapping = Reference(regions=[objects_over(
+        [[0.0, 0.0, 20.0, 20.0], [5.0, 5.0, 15.0, 15.0]], FRAME * FRAME)])
+    apart = Reference(regions=[objects_over(
+        [[0.0, 0.0, 20.0, 20.0], [100.0, 100.0, 120.0, 120.0]], FRAME * FRAME)])
     for cross_tile_nms, reference, source in ((0.5, None, "explicit"),
                                               (None, overlapping, CROSS_TILE_NMS_DERIVATION)):
         received.clear()
@@ -437,14 +438,13 @@ def test_a_preparation_runs_nothing_and_its_pass_merges_at_the_threshold_it_reso
 def test_the_dry_run_reports_the_record_the_bucket_keeps(tmp_path):
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.tools.inference_tools import run_inference
-    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
 
     ckpt, _checkpoint_record = _checkpoint(tmp_path)
     images = tmp_path / "images" / UNDATED_BUCKET
     images.mkdir(parents=True)
     _png(images, _frame())
     stated = Stated(tile=True, tile_size=TILE, overlap=OVERLAP, conf=0.2,
-                    cross_tile_nms=0.4, max_dets=SAMPLE_MAX_DETS, postprocess="greedynmm")
+                    cross_tile_nms=0.4, postprocess="greedynmm")
 
     dry = run_inference(tmp_path, ckpt, images_dir=str(images), bucket="sliced",
                         dry_run=True, stated=stated)
@@ -495,7 +495,6 @@ def test_an_assessed_tiled_pass_and_its_bucket_run_one_merge(tmp_path, monkeypat
     from tcip_mcp.tools.data_tools import draw_splits
     from tcip_mcp.tools.inference_tools import run_inference
     from tests import _trait_fixtures as fx
-    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
 
     fx.seed_confirmed_count(tmp_path, measured_subject="bud")
     images = _blob_capture(tmp_path)
@@ -518,7 +517,7 @@ def test_an_assessed_tiled_pass_and_its_bucket_run_one_merge(tmp_path, monkeypat
         tmp_path, checkpoint_path=ckpt, trait=fx.COUNT_TRAIT, delivery_kind="per_image_count",
         selection_dir=str(selection), device="cpu",
         stated=Stated(tile=True, tile_size=TILE, overlap=OVERLAP, postprocess="nmm",
-                      cross_tile_nms=0.8, max_dets=SAMPLE_MAX_DETS))
+                      cross_tile_nms=0.8))
     assert "error" not in assessment, assessment
     reference_passes = len(merged_at)
     published = run_inference(tmp_path, ckpt, images_dir=str(images), bucket="blob/2026-01-01",
@@ -545,17 +544,13 @@ def test_the_bucket_records_the_slice_geometry_the_checkpoint_derived(tmp_path):
     images.mkdir(parents=True)
     _png(images, _frame())
 
-    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
-
     for merge in ("nms", "nmm"):
         unstated = run_inference(tmp_path, ckpt, images_dir=str(images), bucket="sliced",
-                                 stated=Stated(conf=0.0, max_dets=SAMPLE_MAX_DETS,
-                                               postprocess=merge))
+                                 stated=Stated(conf=0.0, postprocess=merge))
         assert "cross_tile_nms" in unstated.get("error", ""), (merge, unstated)
 
     response = run_inference(tmp_path, ckpt, images_dir=str(images), bucket="sliced",
-                             stated=Stated(conf=0.0, max_dets=SAMPLE_MAX_DETS, postprocess="nmm",
-                                           cross_tile_nms=0.6))
+                             stated=Stated(conf=0.0, postprocess="nmm", cross_tile_nms=0.6))
 
     assert "error" not in response, response
     execution = read_bucket(response["dataset_root"], "sliced").execution

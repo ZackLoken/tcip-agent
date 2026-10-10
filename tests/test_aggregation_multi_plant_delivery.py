@@ -170,9 +170,7 @@ def _assessed(project, kind: str, experiment_id: str):
     """A bucket published under an assessment of ``kind``, the count trait confirmed first with both
     its per-image and its per-plant count operationalizations; the bucket as recorded."""
     from tcip_mcp.buckets import read_bucket
-    from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.calibration_tools import assess_checkpoint
-    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
     from tcip_mcp.tools.inference_tools import run_inference
     from tests._chain_fixtures import (
         DATE, SUBJECT, draw_reference_selection, synthetic_capture, train_on,
@@ -187,8 +185,7 @@ def _assessed(project, kind: str, experiment_id: str):
     draw_reference_selection(project, root, project / "selection")
     checkpoint = train_on(project / "selection", project, experiment_id)
     assessment = assess_checkpoint(project, checkpoint_path=checkpoint, trait=fx.COUNT_TRAIT,
-                                   delivery_kind=kind, selection_dir=str(project / "selection"),
-                                   stated=Stated(max_dets=SAMPLE_MAX_DETS))
+                                   delivery_kind=kind, selection_dir=str(project / "selection"))
     assert assessment.get("passed") is True, assessment
     bucket = f"{kind}/{DATE}"
     published = run_inference(project, checkpoint_path=checkpoint, images_dir=str(images_dir),

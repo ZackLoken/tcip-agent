@@ -26,7 +26,7 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     derive_operating_point_curve,
     gt_record,
 )
-from tcip_mcp.pipelines.training.evaluation import image_record  # noqa: E402
+from tcip_mcp.pipelines.training.evaluation import prediction_record  # noqa: E402
 
 CENTER_MATCH_TOLERANCE = 10.0
 
@@ -44,22 +44,19 @@ def _asymmetric_iou_records() -> list[dict]:
     wide_gt = gt_record([50, 60, 40, 20], 1, 0)
     tall_gt = gt_record([200, 100, 30, 60], 1, 0)
     flat_gt = gt_record([400, 250, 80, 25], 1, 0)
-    frame_one = image_record(
-        640, 400,
-        [wide_gt, tall_gt, flat_gt],
-        [
-            {"category_id": 1, "bbox": [50, 60, 40, 20], "score": 0.90},
-            {"category_id": 1, "bbox": [200, 100, 30, 60], "score": 0.80},
-            {"category_id": 1, "bbox": [500, 20, 15, 35], "score": 0.70},
-            {"category_id": 1, "bbox": [30, 300, 25, 15], "score": 0.60},
-            {"category_id": 1, "bbox": [600, 350, 20, 40], "score": 0.55},
-        ],
-    )
-    frame_two = image_record(
-        300, 500,
-        [gt_record([40, 40, 60, 15], 1, 0), gt_record([150, 300, 25, 90], 1, 0)],
-        [{"category_id": 1, "bbox": [40, 40, 60, 15], "score": 0.95}],
-    )
+    one_dt = [
+        {"category_id": 1, "bbox": [50, 60, 40, 20], "score": 0.90},
+        {"category_id": 1, "bbox": [200, 100, 30, 60], "score": 0.80},
+        {"category_id": 1, "bbox": [500, 20, 15, 35], "score": 0.70},
+        {"category_id": 1, "bbox": [30, 300, 25, 15], "score": 0.60},
+        {"category_id": 1, "bbox": [600, 350, 20, 40], "score": 0.55},
+    ]
+    two_dt = [{"category_id": 1, "bbox": [40, 40, 60, 15], "score": 0.95}]
+    frame_one = prediction_record(one_dt, [wide_gt, tall_gt, flat_gt], width=640, height=400,
+                                  cap=None, count=len(one_dt))
+    frame_two = prediction_record(
+        two_dt, [gt_record([40, 40, 60, 15], 1, 0), gt_record([150, 300, 25, 90], 1, 0)],
+        width=300, height=500, cap=None, count=len(two_dt))
     return [frame_one, frame_two]
 
 
@@ -103,21 +100,21 @@ def _clustered_center_match_records() -> list[dict]:
     objects, only one of them detected, so the reference also carries plain misses. Class id 7,
     a sparse id, so nothing rests on ids being dense or zero-based.
     """
-    frame_one = image_record(
-        500, 300,
+    one_dt = [{"category_id": 7, "bbox": [90, 94, 20, 12], "score": 0.90},
+              {"category_id": 7, "bbox": [97, 97, 16, 12], "score": 0.85},
+              {"category_id": 7, "bbox": [290, 190, 20, 20], "score": 0.50}]
+    two_dt = [{"category_id": 7, "bbox": [396, 296, 8, 8], "score": 0.70}]
+    frame_one = prediction_record(
+        one_dt,
         [{"category_id": 7, "bbox": [88, 92, 24, 16], "iscrowd": 0},
          {"category_id": 7, "bbox": [285, 185, 30, 30], "iscrowd": 0}],
-        [{"category_id": 7, "bbox": [90, 94, 20, 12], "score": 0.90},
-         {"category_id": 7, "bbox": [97, 97, 16, 12], "score": 0.85},
-         {"category_id": 7, "bbox": [290, 190, 20, 20], "score": 0.50}],
-    )
-    frame_two = image_record(
-        800, 600,
+        width=500, height=300, cap=None, count=len(one_dt))
+    frame_two = prediction_record(
+        two_dt,
         [{"category_id": 7, "bbox": [370, 290, 60, 20], "iscrowd": 0},
          {"category_id": 7, "bbox": [590, 80, 20, 40], "iscrowd": 0},
          {"category_id": 7, "bbox": [85, 490, 30, 20], "iscrowd": 0}],
-        [{"category_id": 7, "bbox": [396, 296, 8, 8], "score": 0.70}],
-    )
+        width=800, height=600, cap=None, count=len(two_dt))
     return [frame_one, frame_two]
 
 
@@ -159,15 +156,13 @@ def test_sweep_records_a_doubly_detected_object_as_one_hit_and_one_false_alarm()
 def test_uncontested_detections_all_match():
     """The tolerance still admits every detection that has its own object: one detection per object,
     each within tolerance, is all true positives with nothing left over."""
-    records = [
-        image_record(
-            500, 300,
-            [{"category_id": 7, "bbox": [88, 92, 24, 16], "iscrowd": 0},
-             {"category_id": 7, "bbox": [285, 185, 30, 30], "iscrowd": 0}],
-            [{"category_id": 7, "bbox": [90, 94, 20, 12], "score": 0.90},
-             {"category_id": 7, "bbox": [292, 192, 16, 16], "score": 0.50}],
-        ),
-    ]
+    dt = [{"category_id": 7, "bbox": [90, 94, 20, 12], "score": 0.90},
+          {"category_id": 7, "bbox": [292, 192, 16, 16], "score": 0.50}]
+    records = [prediction_record(
+        dt,
+        [{"category_id": 7, "bbox": [88, 92, 24, 16], "iscrowd": 0},
+         {"category_id": 7, "bbox": [285, 185, 30, 30], "iscrowd": 0}],
+        width=500, height=300, cap=None, count=len(dt))]
     counts = governing_counts(
         records, {"kind": "center_match", "tolerance": CENTER_MATCH_TOLERANCE},
         conf_threshold=0.25,

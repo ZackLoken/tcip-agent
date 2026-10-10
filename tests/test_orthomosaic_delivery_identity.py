@@ -33,7 +33,7 @@ def _produced_bucket(tmp_path: Path, raster_path: Path) -> str:
 
     result = run_inference(
         tmp_path, _bespoke_detection_checkpoint(tmp_path), bucket=BUCKET,
-        raster_path=str(raster_path), stated=RASTER_PASS.model_copy(update={"overlap": None}))
+        raster_path=str(raster_path), stated=RASTER_PASS)
     assert "error" not in result, result
     return result["bucket"]
 
@@ -81,7 +81,8 @@ def test_a_bucket_of_per_image_predictions_refuses_naming_what_it_is(tmp_path):
     _write_geo_raster(raster_path)
     bucket = published(tmp_path, "frames/2026-01-01",
                        [{"image": str(raster_path.parent / "img1.jpg"), "width": 64,
-                         "height": 64, "boxes": [], "scores": [], "labels": []}],
+                         "height": 64, "boxes": [], "scores": [], "labels": [],
+                         "cap": 1}],
                        scope=SCOPE).name
 
     refused = _delivered(tmp_path, bucket, raster_path)

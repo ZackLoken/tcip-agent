@@ -43,8 +43,7 @@ def test_triages_with_the_checkpoint_registered_in_the_named_project(
         predmod, "GenericPredictor",
         lambda *a, **k: SimpleNamespace(predict_batch=lambda sources, **kw: predictions))
 
-    rc = main(["--checkpoint", str(ckpt), "--images-dir", str(images), "--project", str(project),
-               "--max-dets", "300"])
+    rc = main(["--checkpoint", str(ckpt), "--images-dir", str(images), "--project", str(project)])
 
     assert rc == 0
     body = json.loads(capsys.readouterr().out)

@@ -401,7 +401,7 @@ class TestInferenceToolOutputSchema:
         res = run_inference(tmp_path, ckpt, images_dir=str(tmp_path / "images" / UNDATED_BUCKET),
                             bucket="out/2026-01-01",
                             dry_run=True, stated=Stated(
-                                tile=True, tile_size=512, overlap=0.35, conf=0.17, max_dets=37,
+                                tile=True, tile_size=512, overlap=0.35, conf=0.17,
                                 cross_tile_nms=0.55, postprocess="nmm"))
 
         assert "error" not in res, res
@@ -410,7 +410,6 @@ class TestInferenceToolOutputSchema:
         assert execution["conf"] == 0.17
         assert execution["tile_size"] == 512
         assert execution["overlap"] == 0.35
-        assert execution["max_dets"] == 37
         assert execution["cross_tile_nms"] == 0.55
         assert execution["postprocess"] == "nmm"
         assert execution["sources"]["cross_tile_nms"] == "explicit"
@@ -432,11 +431,12 @@ class TestInferenceToolOutputSchema:
         images = tmp_path / "dataset" / "images" / "2026-01-01"
         bucket = published(tmp_path, "baseline/2026-01-01", [
             {"image": str(images / f"{stem}.jpg"), "width": 800, "height": 600,
-             "boxes": _boxes(n), "scores": [0.9] * n, "labels": [1] * n}
+             "boxes": _boxes(n), "scores": [0.9] * n, "labels": [1] * n, "cap": n + 1}
             for stem, n in counts.items()], scope={"subject": "bud"})
 
         assert sorted(bucket.documents) == sorted(counts)
-        written = {stem: len(json_io.read_predictions(bucket.document_key(Path(source).stem)))
+        written = {stem: len(json_io.read_predictions(
+                       bucket.document_key(Path(source).stem)).annotations)
                    for stem, source in bucket.documents.items()}
         assert written == counts
 

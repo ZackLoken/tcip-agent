@@ -228,7 +228,7 @@ def _bucket(project: Path, date: str, *, attributes: tuple, images: list[Path] |
     registry = cr.SubjectRegistry(subjects=(cr.Subject(name="bud", attributes=attributes),))
     return published(project, f"run/{date}", [
         {"image": str(image), "width": 8, "height": 8, "boxes": [[1.0, 1.0, 3.0, 3.0]],
-         "scores": [0.9], "labels": [1],
+         "scores": [0.9], "labels": [1], "cap": 2,
          **({"attributes": [[len(a.values) - 1 for a in attributes]]} if attributes else {})}
         for image in images or [project / "ds" / "images" / date / "P1.png"]],
         scope={"subject": "bud"}, registry=registry)

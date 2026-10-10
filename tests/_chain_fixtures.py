@@ -20,10 +20,8 @@ if TYPE_CHECKING:
 
 def chain_pass() -> Stated:
     """The untiled pass the chain's detectors publish at without an assessment: the conf their
-    one bright square is found at, and the sample cap."""
-    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
-
-    return Stated(tile=False, conf=0.5, max_dets=SAMPLE_MAX_DETS)
+    one bright square is found at."""
+    return Stated(tile=False, conf=0.5)
 
 
 BESPOKE_MODELS = str(Path(__file__).with_name("bespoke_models.py"))
@@ -187,15 +185,13 @@ def confirm_count_trait(project_root: Path, **fields: Any):
 def assess(project: Path, checkpoint_path: str, selection_dir: Path, *,
            device: str | None = None, **stated: Any) -> dict:
     """``assess_checkpoint`` of the count trait's per-image count over ``selection_dir`` under the
-    ``stated`` execution values, the sample cap unless they name one."""
+    ``stated`` execution values."""
     from tcip_mcp.tools.calibration_tools import assess_checkpoint
     from tests import _trait_fixtures as fx
-    from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
 
     return assess_checkpoint(project, checkpoint_path=checkpoint_path, trait=fx.COUNT_TRAIT,
                              delivery_kind="per_image_count", selection_dir=str(selection_dir),
-                             stated=Stated(**{"max_dets": SAMPLE_MAX_DETS, **stated}),
-                             device=device)
+                             stated=Stated(**stated), device=device)
 
 
 @dataclass
@@ -275,10 +271,12 @@ def deliver_acknowledged(project: Path, results: list[dict], out: Path, delivere
 def predicted(image: Path, values: list[str], attributes: tuple = ()) -> dict:
     """One predictor result for the image at ``image``: a detection of the subject per entry of
     ``values``, each carrying that value's id under the first of ``attributes`` (the scope's
-    attribute records) and the first value of every other; no ``attributes`` row for none."""
+    attribute records) and the first value of every other; no ``attributes`` row for none. Its
+    frame's cap is one more than it kept."""
     result = {"image": str(image), "width": IMG, "height": IMG,
               "boxes": [[4.0 * k, 0.0, 4.0 * k + 3.0, 3.0] for k in range(len(values))],
-              "scores": [0.9] * len(values), "labels": [1] * len(values)}
+              "scores": [0.9] * len(values), "labels": [1] * len(values),
+              "count": len(values), "cap": len(values) + 1}
     if attributes:
         result["attributes"] = [[attributes[0].values.index(v)] + [0] * (len(attributes) - 1)
                                 for v in values]
@@ -296,9 +294,7 @@ def published(project: Path, name: str, results: list[dict], *, scope: dict,
     from tcip_mcp.pipelines.data.split_construction import raster_identity
     from tcip_mcp.pipelines.execution import prepare
     from tcip_mcp.pipelines.image_utils import resolve_image_path
-    from tests._verified_checkpoint_fixtures import (
-        SAMPLE_CONF, SAMPLE_MAX_DETS, project_checkpoint,
-    )
+    from tests._verified_checkpoint_fixtures import SAMPLE_CONF, project_checkpoint
 
     from tcip_store import decode_value, encode_record
 
@@ -307,8 +303,7 @@ def published(project: Path, name: str, results: list[dict], *, scope: dict,
         project=project)
     identity = (decode_value(encode_record(raster_identity(resolve_image_path(raster_path))))
                 if raster_path is not None else None)
-    p = prepare(checkpoint,
-                Stated(tile=False, conf=SAMPLE_CONF, max_dets=SAMPLE_MAX_DETS)).runnable()
+    p = prepare(checkpoint, Stated(tile=False, conf=SAMPLE_CONF)).runnable()
     root = source_root([raster_path] if raster_path is not None else [r["image"] for r in results])
     return publish(project, root, name, pass_documents(p, results), producer=checkpoint.producer,
                    scope=p.scope, execution=p.execution,
@@ -428,7 +423,9 @@ def attributed_series(
     The registry declares ``attributes`` on :data:`SUBJECT` (:func:`write_attributed_registry`),
     one of them :data:`ATTRIBUTE` over :data:`VALUES`; every labeled object carries a value of
     each, :data:`ATTRIBUTE`'s the band its blob is bright in. On each date every plant's frames
-    hold ``detections`` blobs of which ``fractions[i]`` are open."""
+    hold ``detections`` blobs of which ``fractions[i]`` are open; half the labeled frames hold as
+    many and the rest one or two, so the reference's densest frames are as dense as the frames it
+    answers for."""
     from datetime import datetime, timedelta
 
     from tcip_mcp.tools.data_tools import draw_splits
@@ -465,8 +462,9 @@ def attributed_series(
         labeled = {}
         for i in range(per_date):
             index = per_date * d + i
-            labeled[f"ref_{date}_{i:02d}"] = (index, [VALUES[index % 2]] + (
-                [VALUES[(index + 1) % 2]] if index % 3 else []))
+            held = detections if index % 2 == 0 else 2 if index % 3 else 1
+            labeled[f"ref_{date}_{i:02d}"] = (index, [VALUES[(index + k) % 2]
+                                                      for k in range(held)])
         for stem, (index, frame_values) in labeled.items():
             write_geo_image(capture / f"{stem}.jpg", *REFERENCE_SITE,
                             when + timedelta(hours=2, minutes=index),
@@ -497,12 +495,9 @@ def attributed_series(
 
     assessment = None
     if assessed:
-        from tests._verified_checkpoint_fixtures import SAMPLE_MAX_DETS
-
         assessment = assess_checkpoint(project, checkpoint_path=checkpoint_path,
                                        trait="bud_opening", delivery_kind="state_crossing_dates",
-                                       selection_dir=str(selection_dir),
-                                       stated=Stated(max_dets=SAMPLE_MAX_DETS))
+                                       selection_dir=str(selection_dir))
         assert "error" not in assessment, assessment
         assert assessment["passed"] is True, assessment["failures"]
 

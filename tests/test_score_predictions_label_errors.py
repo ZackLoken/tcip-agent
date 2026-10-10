@@ -27,7 +27,7 @@ def _published(project: Path, name: str, image: Path, registry=None):
 
     attributes = registry.subjects[0].attributes if registry is not None else ()
     result = {"image": str(image), "width": 100, "height": 80, "boxes": [[1.0, 1.0, 5.0, 5.0]],
-              "scores": [0.9], "labels": [1]}
+              "scores": [0.9], "labels": [1], "cap": 2}
     if attributes:
         result["attributes"] = [[len(a.values) - 1 for a in attributes]]
     return published(project, name, [result], scope={"subject": "bud"}, registry=registry)

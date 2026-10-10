@@ -19,11 +19,11 @@ def test_the_raster_door_records_the_execution_its_prepared_pass_states(tmp_path
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.execution import Stated, prepare
     from tcip_mcp.tools.inference_tools import run_inference
-    from tests._verified_checkpoint_fixtures import SAMPLE_CROSS_TILE_NMS, SAMPLE_MAX_DETS
+    from tests._verified_checkpoint_fixtures import SAMPLE_CROSS_TILE_NMS
     from tests.test_block_calibration import _build_experiment
 
     exp = _build_experiment(tmp_path)
-    stated = {"cross_tile_nms": SAMPLE_CROSS_TILE_NMS, "max_dets": SAMPLE_MAX_DETS}
+    stated = {"cross_tile_nms": SAMPLE_CROSS_TILE_NMS}
     result = run_inference(
         tmp_path, exp["checkpoint_path"], bucket="preds/2026-01-01",
         raster_path=str(exp["raster_path"]),
@@ -50,7 +50,7 @@ def test_a_raster_pass_records_the_frame_its_predictions_are_in(tmp_path):
     from tcip_mcp.dataset_layout import prediction_key
     from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.inference_tools import run_inference
-    from tests._verified_checkpoint_fixtures import SAMPLE_CROSS_TILE_NMS, SAMPLE_MAX_DETS
+    from tests._verified_checkpoint_fixtures import SAMPLE_CROSS_TILE_NMS
     from tests.test_block_calibration import _build_experiment
 
     exp = _build_experiment(tmp_path)
@@ -59,7 +59,7 @@ def test_a_raster_pass_records_the_frame_its_predictions_are_in(tmp_path):
     result = run_inference(
         tmp_path, exp["checkpoint_path"], bucket="odd/2026-01-01", raster_path=str(odd),
         stated=Stated(conf=0.0, tile_size=TILE, overlap=0.2,
-                      cross_tile_nms=SAMPLE_CROSS_TILE_NMS, max_dets=SAMPLE_MAX_DETS))
+                      cross_tile_nms=SAMPLE_CROSS_TILE_NMS))
     assert "error" not in result, result
 
     bucket = read_bucket(result["dataset_root"], result["bucket"])

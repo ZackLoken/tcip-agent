@@ -27,8 +27,8 @@ def _empty_bucket(project: Path, *images: Path) -> str:
     from tests._chain_fixtures import published
 
     return published(project, "m/2024-01-01", [
-        {"image": str(image), "width": 8, "height": 8, "boxes": [], "scores": [], "labels": []}
-        for image in images],
+        {"image": str(image), "width": 8, "height": 8, "boxes": [], "scores": [], "labels": [],
+         "cap": 1} for image in images],
         scope={"subject": "bud"}).name
 
 

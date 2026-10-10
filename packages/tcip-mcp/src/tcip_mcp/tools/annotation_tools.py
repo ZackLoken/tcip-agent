@@ -59,7 +59,7 @@ def read_annotations(image_path: str, bucket: str | None = None) -> dict:
             result["labels"] = _summary(labels.annotations)
         document = read_bucket(key.root, bucket).document_key(img.stem) if bucket else None
         if document is not None:
-            result["predictions"] = _summary(read_predictions(document))
+            result["predictions"] = _summary(read_predictions(document).annotations)
     except (UnreadableLabelDocumentError, ValueError) as exc:
         return {"error": str(exc)}
     return result

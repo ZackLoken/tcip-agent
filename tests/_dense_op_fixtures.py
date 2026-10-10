@@ -77,7 +77,7 @@ def dense_records(
             fx, fy = 50.0 + j * spacing, 50.0 + (far_row + i) * spacing
             dt.append({"category_id": 0, "bbox": _box(fx, fy), "score": fp_score})
         records.append({"width": width, "height": height, "image_id": f"{id_prefix}_{i}",
-                        "gt": gt, "dt": dt, "cap_hit": False})
+                        "gt": gt, "dt": dt, "count": len(dt), "cap": len(dt) + 1})
     return records
 
 
@@ -102,10 +102,10 @@ def toy_records(id_prefix: str = "c", *, shift: float = 0.0) -> list[dict]:
     center-match tolerance, leaving the detections in place."""
     a = {"width": 400, "height": 400, "image_id": f"{id_prefix}_a",
          "gt": [ann(100 + shift, 100)],
-         "dt": [ann(100, 100, score=0.9), ann(300, 300, score=0.6)], "cap_hit": False}
+         "dt": [ann(100, 100, score=0.9), ann(300, 300, score=0.6)], "count": 2, "cap": 3}
     b = {"width": 400, "height": 400, "image_id": f"{id_prefix}_b",
          "gt": [ann(100 + shift, 100), ann(200 + shift, 200)],
-         "dt": [ann(100, 100, score=0.9), ann(200, 200, score=0.3)], "cap_hit": False}
+         "dt": [ann(100, 100, score=0.9), ann(200, 200, score=0.3)], "count": 2, "cap": 3}
     return [a, b]
 
 

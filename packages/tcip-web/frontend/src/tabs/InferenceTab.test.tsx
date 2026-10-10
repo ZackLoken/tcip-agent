@@ -148,7 +148,7 @@ describe("InferenceTab date selection", () => {
     ]);
   });
 
-  it("states the conf, cap and cross-tile merge threshold the breeder enters", async () => {
+  it("states the conf and cross-tile merge threshold the breeder enters, and no cap", async () => {
     mockTree(["2026-01-01"]);
     vi.spyOn(resultsApi, "registeredModels").mockResolvedValue({
       models: [BASELINE_MODEL],
@@ -162,7 +162,7 @@ describe("InferenceTab date selection", () => {
 
     selectBaseline();
     fireEvent.change(screen.getByLabelText(/confidence threshold/i), { target: { value: "0.35" } });
-    fireEvent.change(screen.getByLabelText(/detection cap/i), { target: { value: "300" } });
+    expect(screen.queryByLabelText(/detection cap/i)).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(/cross-tile merge threshold/i), {
       target: { value: "0.45" },
     });
@@ -172,7 +172,6 @@ describe("InferenceTab date selection", () => {
     await waitFor(() => expect(launchSpy).toHaveBeenCalledTimes(1));
     expect(launchSpy.mock.calls[0][0].stated).toEqual({
       conf: 0.35,
-      max_dets: 300,
       cross_tile_nms: 0.45,
     });
   });

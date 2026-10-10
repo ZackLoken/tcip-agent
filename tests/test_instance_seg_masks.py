@@ -24,7 +24,7 @@ from tcip_mcp.pipelines.model_contract import check_model_contract  # noqa: E402
 from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor  # noqa: E402
 from tests import bespoke_models  # noqa: E402
 from tests._verified_checkpoint_fixtures import (  # noqa: E402
-    SAMPLE_CROSS_TILE_NMS, SAMPLE_DETECTOR_PASS, SAMPLE_MAX_DETS,
+    SAMPLE_CROSS_TILE_NMS, SAMPLE_DETECTOR_PASS, SAMPLE_OVERLAP,
 )
 
 # What the smokes below synthesize their batch at, the shape a run resolves for itself.
@@ -124,7 +124,7 @@ def test_predict_sliced_require_masks_false_reaches_real_slicing_path_for_instan
 # --------------------------------------------------------------------------
 
 TILE = 64
-TILED_PASS = Stated(tile=True, tile_size=TILE, conf=0.0, max_dets=SAMPLE_MAX_DETS,
+TILED_PASS = Stated(tile=True, tile_size=TILE, overlap=SAMPLE_OVERLAP, conf=0.0,
                     cross_tile_nms=SAMPLE_CROSS_TILE_NMS)
 """The execution values a tiled inference pass here states."""
 
@@ -187,7 +187,8 @@ def test_run_inference_instance_seg_explicit_tile_true_runs_tiled_with_masks(
 
     p, results = predicted_over(tmp_path, instance_seg_ckpt,
                                 str(Path(gray_frame(tmp_path / "images" / UNDATED_BUCKET)).parent),
-                                device="cpu", tile=True, tile_size=TILE, conf=0.0)
+                                device="cpu", tile=True, tile_size=TILE,
+                                overlap=SAMPLE_OVERLAP, conf=0.0)
     assert p.execution.tiled
     assert len(results) == 1
     result = results[0]
@@ -331,7 +332,7 @@ def test_export_single_component_mask_writes_polygon():
 
     mask = painted_array(32, 32, [((5, 5, 20, 20), 0.9)], background=0.0, mode="F")
     result = {
-        "image": "img.jpg", "width": 32, "height": 32,
+        "image": "img.jpg", "width": 32, "height": 32, "cap": 2,
         "boxes": [[5.0, 5.0, 19.0, 19.0]], "scores": [0.9], "labels": [1],
         "masks": [_mask_record(mask)],
     }
@@ -346,7 +347,7 @@ def test_export_does_not_pollute_annotation_attributes_with_binarize_threshold(t
     the binarize threshold never lands in ``Annotation.attributes``."""
     mask = painted_array(32, 32, [((5, 5, 20, 20), 0.9)], background=0.0, mode="F")
     result = {
-        "image": "img.jpg", "width": 32, "height": 32,
+        "image": "img.jpg", "width": 32, "height": 32, "cap": 2,
         "boxes": [[5.0, 5.0, 19.0, 19.0]], "scores": [0.9], "labels": [1],
         "masks": [_mask_record(mask)],
     }
@@ -363,7 +364,7 @@ def test_export_multi_component_mask_writes_multi_ring_polygon(tmp_path):
     mask = painted_array(64, 64, [((5, 5, 15, 15), 0.9), ((40, 40, 55, 55), 0.9)],
                          background=0.0, mode="F")
     result = {
-        "image": "img.jpg", "width": 64, "height": 64,
+        "image": "img.jpg", "width": 64, "height": 64, "cap": 2,
         "boxes": [[5.0, 5.0, 54.0, 54.0]], "scores": [0.9], "labels": [1],
         "masks": [_mask_record(mask)],
     }
@@ -378,7 +379,7 @@ def test_export_empty_mask_falls_back_to_bbox():
 
     mask = np.zeros((16, 16), dtype=np.float32)  # binarizes to nothing at the default threshold
     result = {
-        "image": "img.jpg", "width": 16, "height": 16,
+        "image": "img.jpg", "width": 16, "height": 16, "cap": 2,
         "boxes": [[1.0, 1.0, 5.0, 5.0]], "scores": [0.9], "labels": [1],
         "masks": [_mask_record(mask)],
     }
@@ -400,7 +401,7 @@ def test_export_drops_a_mask_that_binarizes_to_a_sliver(monkeypatch):
             rings=[[(5, 10), (8, 10), (12, 10)]]),
     )
     result = {
-        "image": "img.jpg", "width": 64, "height": 64,
+        "image": "img.jpg", "width": 64, "height": 64, "cap": 2,
         "boxes": [[5.0, 10.0, 12.0, 12.0]], "scores": [0.9], "labels": [1],
         "masks": [{"segmentation": []}],
     }
@@ -423,7 +424,7 @@ def test_export_drops_a_polygon_whose_vertices_all_round_to_one_point(monkeypatc
             rings=[[(0.996, 0.996), (1.004, 0.996), (1.004, 1.004)]]),
     )
     result = {
-        "image": "img.jpg", "width": 64, "height": 64,
+        "image": "img.jpg", "width": 64, "height": 64, "cap": 2,
         "boxes": [[1.0, 1.0, 2.0, 2.0]], "scores": [0.9], "labels": [1],
         "masks": [{"segmentation": []}],
     }
@@ -439,7 +440,7 @@ def test_export_no_masks_key_writes_bbox_as_before():
     from tcip_annotation.state import BBox
 
     result = {
-        "image": "img.jpg", "width": 32, "height": 32,
+        "image": "img.jpg", "width": 32, "height": 32, "cap": 2,
         "boxes": [[1.0, 1.0, 5.0, 5.0]], "scores": [0.9], "labels": [1],
     }
     anns, _dropped = _encoded(result)

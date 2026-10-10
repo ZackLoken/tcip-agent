@@ -51,11 +51,8 @@ def _default_anchor_sizes(num_levels: int, base: int = 32) -> tuple[tuple[int, .
 
 
 def _probe_in_chans(adapter: Any) -> int | None:
-    """A hint at the input band count, from the first ``Conv2d`` in registration order.
-
-    Consulted only when the caller passes no ``in_chans``, and never allowed to contradict one:
-    registration order says nothing about the forward graph. ``None`` when there is no conv at all.
-    """
+    """The ``in_channels`` of ``adapter``'s first ``Conv2d`` in registration order, or ``None``
+    when it holds no conv."""
     for module in adapter.modules():
         if isinstance(module, nn.Conv2d):
             return int(module.in_channels)
@@ -222,8 +219,8 @@ _BUILDER_SUPPLIED = frozenset({
 
 
 def _accepted_kwargs(name: str) -> set[str]:
-    """Every keyword ``build_detector(name, ...)`` accepts: the builder's own named parameters
-    plus its torchvision class's, less what the builder supplies itself."""
+    """Every keyword the detector ``name`` accepts: its builder's own named parameters plus its
+    torchvision class's, less what the builder supplies itself."""
     import torchvision.models.detection as detection
 
     from tcip_mcp.pipelines.model_build import keyword_parameters
@@ -328,12 +325,20 @@ def build_detector(name: str, adapter: Any, num_classes: int, *, attributes: Any
 
     Raises ``ValueError`` for an unknown name and ``TypeError`` for an unrecognized kwarg, naming
     the detectors that do take it. Accepted keys are the builder's own plus the torchvision
-    detector class's, which the builder forwards. An ``in_chans != 3`` build additionally
+    detector class's, which the builder forwards, but a detection cap
+    (``box_detections_per_img``, ``detections_per_img``), which refuses (``ValueError``): each
+    forward is capped at its frames' own cap. An ``in_chans != 3`` build additionally
     requires ``image_mean``/``image_std`` of that length (``_normalization``).
     """
     from tcip_mcp.pipelines.model_build import resolve_named
 
     fn, _cls_name = resolve_named(name, _DETECTORS, kind="detector")
+    stated_cap = sorted({"box_detections_per_img", "detections_per_img"} & set(kwargs))
+    if stated_cap:
+        raise ValueError(
+            f"build_detector('{name}', ...) was given {stated_cap}: a detector's cap is each "
+            "frame's, its object density times its pixels, set at every forward. Drop "
+            f"{stated_cap}.")
     accepted = _accepted_kwargs(name)
     unknown = sorted(set(kwargs) - accepted)
     if unknown:

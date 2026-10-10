@@ -94,7 +94,7 @@ def test_golden_pick_count_unbiased_and_f1_max():
 def test_golden_count_criterion_over_a_dense_distinct_reference():
     """The count criterion needs a dense, realistic reference: a sparse 2-image fixture's
     per-image variance trips the equivalence test, a correct refusal."""
-    from tcip_mcp.pipelines.derivations import derive_max_dets
+    from tcip_mcp.pipelines.derivations import derive_object_density
     from tcip_mcp.pipelines.operating_point import count_criterion
     from tcip_mcp.pipelines.training.evaluation import gt_objects
     from tests import _trait_fixtures as fx
@@ -107,10 +107,14 @@ def test_golden_count_criterion_over_a_dense_distinct_reference():
     assert conf == pytest.approx(0.9)
     assert evidence["conf_derived_from"] == "count-unbiased count curve"
     assert failures == []
-    # ~1.5x p99 over frames of one size, published at that size
+    # the p99 density over frames of one size, times that size, is the densest frame's count
+    from tests._verified_checkpoint_fixtures import objects_over
+
     frame = float(cal[0]["width"] * cal[0]["height"])
-    assert derive_max_dets([(len(gt_objects(r)), float(r["width"] * r["height"]))
-                            for r in cal + hold], frame) == 120
+    regions = [objects_over([[x, y, x + w, y + h] for x, y, w, h in (a["bbox"] for a in
+                                                                    gt_objects(r))],
+                            r["width"] * r["height"]) for r in cal + hold]
+    assert derive_object_density(regions) * frame == pytest.approx(80)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -195,19 +199,17 @@ def test_golden_per_plant_phenology_series_and_milestones(tmp_path: Path):
 
 def test_golden_execution_record_of_an_untiled_pass_runs_at_what_it_states(tmp_path):
     """Every value a pass runs under is recorded with where it came from: an untiled detector
-    pass runs at the conf and cap it states, each sourced ``explicit``, and stating neither
-    refuses."""
+    pass runs at the conf it states, sourced ``explicit``, and the density its checkpoint
+    recorded, sourced ``derived``, and stating no conf refuses."""
     from tcip_mcp.pipelines.execution import ExecutionRefusedError, Stated, prepare
-    from tests._verified_checkpoint_fixtures import (
-        SAMPLE_CONF, SAMPLE_MAX_DETS, verified_checkpoint,
-    )
+    from tests._verified_checkpoint_fixtures import SAMPLE_CONF, verified_checkpoint
 
     checkpoint = verified_checkpoint(tmp_path)
-    record = prepare(checkpoint, Stated(tile=False, conf=SAMPLE_CONF,
-                                        max_dets=SAMPLE_MAX_DETS)).runnable().execution.record()
+    record = prepare(checkpoint, Stated(tile=False, conf=SAMPLE_CONF)).runnable().execution.record()
 
-    assert (record["conf"], record["max_dets"]) == (SAMPLE_CONF, SAMPLE_MAX_DETS)
-    assert record["sources"] == {"conf": "explicit", "max_dets": "explicit"}
+    assert (record["conf"], record["density"]) == (
+        SAMPLE_CONF, checkpoint.spec.data.train_object_density)
+    assert record["sources"] == {"conf": "explicit", "density": "derived"}
     assert record["tile_size"] is None and record["cross_tile_nms"] is None
     with pytest.raises(ExecutionRefusedError, match="conf"):
         prepare(checkpoint, Stated(tile=False)).runnable()
@@ -220,6 +222,7 @@ def test_golden_no_operating_point_default_survives_and_each_door_takes_stated_v
     # a reference the caller holds, or refused, and every door hands its stated values on whole.
     from tcip_mcp.pipelines import execution as execution_mod
     from tcip_mcp.pipelines import operating_point as operating_point_mod
+    from tcip_mcp.pipelines.data import datasets as datasets_mod
     from tcip_mcp.pipelines.inference import generic_predictor as generic_predictor_mod
     from tcip_mcp.pipelines.training import eval_runners as runners
     from tcip_mcp.pipelines.training import evaluation as evaluation_mod
@@ -228,8 +231,9 @@ def test_golden_no_operating_point_default_survives_and_each_door_takes_stated_v
     # The operating point carries no shared fallback constant at all: a caller states each value
     # or derives it from a reference it holds.
     for name in ("DEFAULT_TILE_SIZE", "DEFAULT_TILED", "DEFAULT_NMS_IOU", "DEFAULT_CONF",
-                 "DEFAULT_MAX_DETS"):
+                 "DEFAULT_MAX_DETS", "DEFAULT_OVERLAP"):
         assert not hasattr(execution_mod, name), name
+    assert not hasattr(datasets_mod, "TILE_SIZE")
 
     for name in ("DEFAULT_CONF", "DEFAULT_MAX_DETS", "DEFAULT_NMS_IOU", "DEFAULT_OVERLAP",
                  "_DEFAULT_CROSS_TILE_NMS", "_DEFAULT_MAX_DETS", "DEFAULT_TILE_SIZE"):
@@ -254,55 +258,6 @@ def test_golden_no_operating_point_default_survives_and_each_door_takes_stated_v
     assert not {"conf_threshold", "cross_tile_nms", "max_dets", "tile_size", "overlap"} & set(
         ff_sig.parameters)
     assert evaluation_mod.DEFAULT_SCORE_WEIGHTS == {"loss": 0.45, "f1": 0.35, "map50": 0.2}
-
-
-def test_golden_evaluate_model_hands_the_diagnostic_its_stated_cap_and_refuses_none(
-        tmp_path, monkeypatch):
-    """A signature-shape golden alone cannot see what a caller's max_dets resolves to on the
-    tile-level/diagnostic regime: evaluate_model resolves none of its own and hands the runner
-    the pass the one execution resolver prepared, its cap the stated one; a call stating none
-    refuses naming it."""
-    from tcip_mcp.pipelines.execution import Stated
-    from tcip_mcp.pipelines.training import eval_runners as runners
-    from tcip_mcp.tools import training_tools as training_tools_mod
-    from tests._verified_checkpoint_fixtures import (
-        SAMPLE_CONF, SAMPLE_MAX_DETS, registered_checkpoint,
-    )
-
-    captured: dict = {}
-
-    def _fake_diagnostic(pass_, loader, device, **kw):
-        captured["diagnostic_max_dets"] = (pass_.execution.max_dets,
-                                           pass_.execution.sources["max_dets"])
-        return {"eval_regime": "tile-level"}
-
-    orig_diag = runners.run_test_evaluation
-    try:
-        runners.run_test_evaluation = _fake_diagnostic
-
-        from PIL import Image
-        from tcip_annotation.state import Annotation, BBox
-
-        from tests._producer_fixtures import label_image
-
-        tmp = tmp_path
-        images_dir = tmp / "images" / UNDATED_BUCKET
-        images_dir.mkdir(parents=True)
-        Image.new("RGB", (64, 64)).save(images_dir / "a.png")
-        label_image(images_dir / "a.png", [Annotation(subject="bud", geometry=BBox(5, 5, 20, 20))],
-                    64, 64)
-        ckpt = registered_checkpoint(tmp)
-
-        refused = training_tools_mod.evaluate_model(tmp, str(ckpt), str(images_dir),
-                                                    stated=Stated(conf=SAMPLE_CONF))
-        training_tools_mod.evaluate_model(
-            tmp, str(ckpt), str(images_dir),
-            stated=Stated(conf=SAMPLE_CONF, max_dets=SAMPLE_MAX_DETS))
-    finally:
-        runners.run_test_evaluation = orig_diag
-
-    assert "max_dets" in refused.get("error", ""), refused
-    assert captured["diagnostic_max_dets"] == (SAMPLE_MAX_DETS, "explicit")
 
 
 def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_none(
@@ -332,6 +287,8 @@ def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_n
     from PIL import Image
 
     class _DummyModel:
+        score_thresh, detections_per_img = 0.0, 100
+
         def to(self, device):
             return self
 
@@ -344,12 +301,9 @@ def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_n
         dims = {"in_chans": 3, "num_classes": 1}
         model = _DummyModel()
 
-        def governed(self, execution):
-            return self.model
-
         def predict_sliced(self, path, **kw):
             return {"width": 64, "height": 64, "boxes": [], "scores": [], "labels": [],
-                    "cap_hit": False}
+                    "count": 0, "cap": 1}
 
     # The checkpoint is built through the unpatched build_model before the stubs below go in.
     checkpoint = registered_checkpoint(tmp_path)

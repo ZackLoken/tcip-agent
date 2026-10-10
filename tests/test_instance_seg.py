@@ -42,7 +42,7 @@ def test_segm_metrics_score_mask_overlap():
               "labels": torch.tensor([1]), "scores": torch.tensor([0.99]),
               "masks": mask.unsqueeze(0).float()}  # [N, 1, H, W] soft masks
 
-    rec = records_from_detector(target, output, width=32, height=32, include_masks=True)
+    rec = records_from_detector(target, output, width=32, height=32, cap=2, include_masks=True)
     m = detection_metrics([rec], trait=None, conf_threshold=0.25, iou_threshold=0.5,
                           by_mask=True)
     assert m["governing_criterion"]["kind"] == "mask_iou_match"

@@ -41,11 +41,14 @@ def _predicted(tmp_path, images_dir: Path, *, in_chans, builder_kwargs=None, **s
 def test_a_source_with_no_coercion_is_refused_at_the_models_own_band_count(tmp_path):
     """A five-band raster under a three-channel checkpoint has no safe coercion, so the read
     refuses by name instead of truncating the bands the model trained on."""
+    from tests._verified_checkpoint_fixtures import SAMPLE_OVERLAP
+
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     _five_band_raster(images_dir)
     with pytest.raises(ValueError, match="refusing to silently truncate"):
-        _predicted(tmp_path, images_dir, in_chans=3, tile=True, tile_size=64)
+        _predicted(tmp_path, images_dir, in_chans=3, tile=True, tile_size=64,
+                   overlap=SAMPLE_OVERLAP)
 
 
 def test_a_photographic_source_the_model_reads_is_predicted(tmp_path):

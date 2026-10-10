@@ -265,6 +265,6 @@ def data_dir(tmp_path: Path) -> Path:
     published(tmp_path, DATA_DIR_BUCKET, [
         {"image": str(images_dir / f"{name}.jpg"), "width": 640, "height": 480,
          "boxes": [[288, 216, 352, 264], [496, 372, 528, 396]], "scores": [0.9, 0.7],
-         "labels": [1, 1]} for name in ("img_001", "img_002", "img_003")],
+         "labels": [1, 1], "cap": 3} for name in ("img_001", "img_002", "img_003")],
         scope={"subject": subject})
     return tmp_path

@@ -52,7 +52,7 @@ def _records(prefix: str, offset: float, *, spurious: bool) -> list[dict]:
                 dt.append({"bbox": [offset + 50.0 * k, 1500.0 + 10.0 * i, 20.0, 20.0],
                            "category_id": 2, "score": 0.9})
         recs.append({"image_id": f"{prefix}{i}", "width": 20000, "height": 3000, "gt": gt,
-                     "dt": dt, "cap_hit": False})
+                     "dt": dt, "count": len(dt), "cap": len(dt) + 1})
     return recs
 
 

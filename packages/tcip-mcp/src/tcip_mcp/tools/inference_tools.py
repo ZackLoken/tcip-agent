@@ -191,12 +191,15 @@ def run_inference(
     bucket.
 
     With ``assessment_id`` the pass runs exactly that assessment's execution record (its conf,
-    cap, tile edge, overlap, merge and threshold) and the bucket names the assessment, which is
-    what a delivery reads to call its numbers validated; a stated execution value it records
-    differently refuses by name. Without one, the bucket is unassessed and the pass runs at the
-    stated values: a detector's ``conf`` and ``max_dets`` and a tiled pass's ``cross_tile_nms`` are
-    required, no reference standing behind any of them; the tile edge and overlap are the stated
-    ones, else the checkpoint's own recorded geometry, else a documented default.
+    object density, tile edge, overlap, merge and threshold) and the bucket names the assessment,
+    which is what a delivery reads to call its numbers validated; a stated execution value it
+    records differently refuses by name. Without one, the bucket is unassessed and the pass runs
+    at the stated values: a detector's ``conf`` and a tiled pass's ``cross_tile_nms`` are
+    required, no reference standing behind either; the object density is the one the checkpoint
+    recorded of the regions it trained on (frames, or tiles for a tiled run), and each frame keeps
+    at most ``ceil(density x its pixels)`` detections, that cap written on its prediction
+    document; the tile edge and overlap are the stated ones, else the checkpoint's own recorded
+    geometry, and a tiled pass with neither refuses naming them.
 
     Args:
         checkpoint_path: A checkpoint registered in this project.
@@ -209,7 +212,7 @@ def run_inference(
         stated: The execution values to state rather than derive (``execution.Stated``):
             ``tile`` (tiled inference over ``images_dir``; unstated follows the checkpoint's own
             training regime), ``tile_size``, ``overlap``, ``postprocess`` (one of
-            ``execution.CROSS_TILE_MERGES``), ``cross_tile_nms``, ``conf`` and ``max_dets``.
+            ``execution.CROSS_TILE_MERGES``), ``cross_tile_nms`` and ``conf``.
         device: cuda / cpu (auto if omitted).
         tile_batch_size: Tiles per forward batch.
         dry_run: Resolve the execution record and the bucket and report them, with whether the

@@ -51,8 +51,9 @@ def encode_predictions(
     (:func:`~tcip_annotation.json_io.document_payload`), and the number of detections dropped.
 
     ``result`` carries its source ``image``, pixel-xyxy ``boxes``, 1-indexed ``labels``
-    (background=0), ``scores``, image ``width``/``height``, and, when ``scope`` declares
-    attributes, ``attributes``, one id row per detection; a result missing one of the first six,
+    (background=0), ``scores``, image ``width``/``height``, the frame's detection ``cap``, written
+    on the document, and, when ``scope`` declares attributes, ``attributes``, one id row per
+    detection; a result missing one of the first seven,
     or whose boxes, scores and labels differ in length, refuses (``ValueError``) naming it, and so
     does a ``scope`` naming no subject or attributes
     (:meth:`~tcip_mcp.pipelines.data.selection.ClassScope.admitted_for`). Every prediction's
@@ -74,12 +75,13 @@ def encode_predictions(
     from tcip_mcp.pipelines.data.datasets import PER_BOX_KEYS
 
     attributes = cast(tuple, scope.admitted_for(DOCUMENT, "this bucket's scope").attributes)
-    missing = [k for k in ("image", "width", "height", "boxes", "scores", "labels")
+    missing = [k for k in ("image", "width", "height", "boxes", "scores", "labels", "cap")
                if k not in result]
     if missing:
         raise ValueError(f"the result for {result.get('image')!r} carries no {missing}: a "
                          "prediction document holds a detection head's boxes, scores and "
-                         "labels for one source image, so nothing here is publishable.")
+                         "labels for one source image and the cap they were kept to, so nothing "
+                         "here is publishable.")
     p = Path(result["image"])
     boxes, scores, labels = result["boxes"], result["scores"], result["labels"]
     if not len(boxes) == len(scores) == len(labels):
@@ -102,7 +104,7 @@ def encode_predictions(
                                 attributes=json_io.attribute_values(ids, attributes),
                                 created_by=created_by, created_at=created_at))
         kept_indices.append(i)
-    data = json_io.document_payload(preds, int(w), int(h), keep_empty=True)
+    data = json_io.document_payload(preds, int(w), int(h), keep_empty=True, cap=result["cap"])
     assert data is not None, "keep_empty encodes every document"
     if dropped:
         kept = set(kept_indices)

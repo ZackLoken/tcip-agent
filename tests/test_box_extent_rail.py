@@ -37,7 +37,7 @@ def test_the_encoding_keeps_only_what_has_extent_on_the_stored_grid(tmp_path):
                 "scores": [0.9, 0.8, 0.7],
                 "boxes": [[5.0, 5.0, 30.0, 30.0], [5.0, 5.0, 30.0, 30.0],
                           [10.0, 5.0, 10.004, 30.0]],
-                "masks": [past_the_edge, blob], "count": 3}
+                "masks": [past_the_edge, blob], "count": 3, "cap": 4}
 
     written = result()
     data, _dropped = encode_predictions(written, "model:fixture",
@@ -203,7 +203,7 @@ def _seed_review_dataset(tmp_path: Path, *, pred_box=(10, 10, 20, 20), gt_box=No
     bucket = published(dataset_root, "m", [
         {"image": str(img), "width": 200, "height": 150,
          "boxes": [list(pred_box) if ordered else [10, 10, 20, 20]], "scores": [0.9],
-         "labels": [1]}], scope={"subject": "leaf"})
+         "labels": [1], "cap": 2}], scope={"subject": "leaf"})
     if not ordered:
         # A degenerate box can reach a document only by an edit in place after publication.
         ts.replace(bucket.document_key(img.stem), {
@@ -297,6 +297,7 @@ def test_encode_predictions_drops_a_degenerate_box_and_reports_the_count():
         "boxes": [[10, 10, 20, 20], [30, 30, 30, 40]],  # the second collapses to zero width
         "scores": [0.9, 0.8],
         "labels": [1, 1],
+        "cap": 3,
     }
 
     data, dropped = encode_predictions(result, "model:fixture", scope=LEAF)
@@ -316,6 +317,7 @@ def test_encode_predictions_drops_a_box_that_rounds_to_zero_extent():
         "boxes": [[10, 10, 20, 20], [30, 30, 30.003, 30.003]],
         "scores": [0.9, 0.8],
         "labels": [1, 1],
+        "cap": 3,
     }
 
     data, dropped = encode_predictions(result, "model:fixture", scope=LEAF)

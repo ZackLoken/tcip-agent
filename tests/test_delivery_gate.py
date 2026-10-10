@@ -129,7 +129,7 @@ def test_an_acknowledgment_binds_the_rows_and_refuses_once_a_document_changes(tm
                                 result_sha256=str(six.value.result_sha256))
     document = read_bucket(tmp_path / "ds", bucket).document_key(_image(tmp_path, "a").stem)
     assert document is not None
-    annotations = json_io.read_predictions(document)
+    annotations = json_io.read_predictions(document).annotations
     # Twelve where six were published, as an edit in place would leave it: no head re-emits one.
     json_io.write_label_document(document, annotations * 2, 64, 64)
 
@@ -210,7 +210,8 @@ def test_a_zero_extent_box_is_counted_by_neither_the_document_nor_the_delivery(t
     the bucket records the drop, and the delivered row counts and averages the one survivor."""
     bucket = _bucket(tmp_path, [{
         "image": str(_image(tmp_path, "a")), "width": 200, "height": 150,
-        "boxes": [[10, 10, 20, 20], [30, 30, 30, 40]], "scores": [0.9, 0.5], "labels": [1, 1]}])
+        "boxes": [[10, 10, 20, 20], [30, 30, 30, 40]], "scores": [0.9, 0.5], "labels": [1, 1],
+        "cap": 3}])
     from tcip_mcp.buckets import read_bucket
 
     assert read_bucket(tmp_path / "ds", bucket).dropped_boxes == 1
@@ -231,7 +232,7 @@ def test_a_non_finite_score_refuses_the_publication_so_no_average_ever_reads_it(
         _bucket(tmp_path, [{
             "image": str(_image(tmp_path, "a")), "width": 64, "height": 64,
             "boxes": [[1, 1, 5, 5], [10, 10, 15, 15]], "scores": [float("nan"), 0.5],
-            "labels": [1, 1]}])
+            "labels": [1, 1], "cap": 3}])
 
     assert not tcip_store.exists(bucket_key(tmp_path / "ds", "m/2026-01-01"))
 

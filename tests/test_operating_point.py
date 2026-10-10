@@ -83,13 +83,10 @@ def _one_stage():
 def test_set_detector_operating_point_two_stage():
     from tcip_mcp.pipelines.operating_point import set_detector_operating_point
     m = _two_stage()
-    applied, attribute_path = set_detector_operating_point(
-        m, score_thresh=0.4, detections_per_img=300)
+    set_detector_operating_point(m, score_thresh=0.4, detections_per_img=300)
     assert m.detector.roi_heads.score_thresh == 0.4
     assert m.detector.roi_heads.nms_thresh == 0.5  # the builder's own NMS, never set here
     assert m.detector.roi_heads.detections_per_img == 300
-    assert applied == {"score_thresh": 0.4, "detections_per_img": 300}
-    assert attribute_path == "detector.roi_heads"
 
 
 def test_set_detector_operating_point_one_stage():
@@ -99,19 +96,24 @@ def test_set_detector_operating_point_one_stage():
     assert m.detector.score_thresh == 0.4 and m.detector.nms_thresh == 0.6
 
 
-def test_the_detection_cap_is_its_formula_at_every_density_and_refuses_no_positive_cap():
-    """``ceil(1.5 * p99 density * footprint)``, a sparse scene included, with no floor over it;
-    a reference whose selected percentile is zero yields no positive cap and refuses naming
-    ``max_dets``, an all-empty one and a sparse one holding a single object alike."""
-    from tcip_mcp.pipelines.derivations import derive_max_dets
+def test_the_object_density_is_its_quantile_at_every_density_and_refuses_no_positive_one():
+    """The 0.99 quantile of the counted regions' objects per pixel, a sparse scene included, with
+    no floor and no multiplier over it; a reference whose selected quantile is zero yields no
+    positive density and refuses, an all-empty one and a sparse one holding a single object
+    alike."""
+    from tcip_mcp.pipelines.derivations import derive_object_density
+    from tests._verified_checkpoint_fixtures import objects_over
+
+    def counted(n: int, area: float) -> list:
+        return [objects_over([[0.0, 0.0, 1.0, 1.0]] * n, area)]
 
     frame = 100.0 * 100.0
-    assert derive_max_dets([(80, frame)] * 20, frame) == 120
-    assert derive_max_dets([(2, frame)] * 20, frame) == 3
-    assert derive_max_dets([(10, frame)] * 3, frame * 10) == 150
+    assert derive_object_density(counted(80, frame) * 20) == pytest.approx(80 / frame)
+    assert derive_object_density(counted(2, frame) * 20) == pytest.approx(2 / frame)
+    assert derive_object_density(counted(10, frame * 10) * 3) == pytest.approx(1 / frame)
     for sparse in ([0] * 5, [0] * 199 + [1]):
-        with pytest.raises(ValueError, match="no positive cap; state max_dets"):
-            derive_max_dets([(n, frame) for n in sparse], frame)
+        with pytest.raises(ValueError, match="quantile of the densities"):
+            derive_object_density([r for n in sparse for r in counted(n, frame)])
 
 
 # --- the cross-tile merge threshold ---
@@ -125,14 +127,18 @@ def _overlap_records(idp="d"):
             for i in range(2)]
 
 
-def _gt_boxes(records):
-    return [[a["bbox"] for a in rec["gt"]] for rec in records]
+def _regions(records):
+    """Each record's ground truth as the region of its objects over its frame."""
+    from tests._verified_checkpoint_fixtures import objects_over
+
+    return [objects_over([[x, y, x + w, y + h] for x, y, w, h in (a["bbox"] for a in rec["gt"])],
+                         rec["width"] * rec["height"]) for rec in records]
 
 
 def test_the_merge_threshold_derives_from_the_ground_truths_neighbor_overlap_tail():
     from tcip_mcp.pipelines.derivations import derive_cross_tile_nms
 
-    value = derive_cross_tile_nms(_gt_boxes(_overlap_records()))
+    value = derive_cross_tile_nms(_regions(_overlap_records()))
     # p99 of the GT neighbor-IoU tail + margin
     assert value == pytest.approx(0.4286 + 0.05, abs=1e-2)
 
@@ -141,22 +147,18 @@ def test_no_overlapping_ground_truth_derives_no_merge_threshold():
     from tcip_mcp.pipelines.derivations import derive_cross_tile_nms
 
     assert derive_cross_tile_nms([]) is None
-    assert derive_cross_tile_nms(_gt_boxes(_records("c"))) is None
+    assert derive_cross_tile_nms(_regions(_records("c"))) is None
 
 
 def _tiled_pass(tmp_path, records, **stated):
-    """The tiled pass of a verified checkpoint at the sample conf and cap, made runnable from
+    """The tiled pass of a verified checkpoint at the sample conf, made runnable from
     ``records``' ground truth."""
     from tcip_mcp.pipelines.execution import Reference, Stated, prepare
-    from tests._verified_checkpoint_fixtures import (
-        SAMPLE_CONF, SAMPLE_MAX_DETS, verified_checkpoint,
-    )
+    from tests._verified_checkpoint_fixtures import SAMPLE_CONF, verified_checkpoint
 
     prep = prepare(verified_checkpoint(tmp_path),
-                   Stated(tile=True, tile_size=64, conf=SAMPLE_CONF, max_dets=SAMPLE_MAX_DETS,
-                          **stated))
-    return prep.runnable(Reference(boxes_per_image=_gt_boxes(records), counted=None,
-                                   footprint=None))
+                   Stated(tile=True, tile_size=64, conf=SAMPLE_CONF, **stated))
+    return prep.runnable(Reference(regions=_regions(records)))
 
 
 def test_a_tiled_pass_records_its_derived_merge_threshold_by_the_derivations_name(tmp_path):
@@ -178,7 +180,7 @@ def test_a_stated_merge_threshold_is_never_relabeled_derived(tmp_path):
 def test_an_underivable_merge_threshold_refuses_naming_its_missing_basis(tmp_path):
     from tcip_mcp.pipelines.execution import ExecutionRefusedError
 
-    with pytest.raises(ExecutionRefusedError, match="no two of its boxes in one image overlap"):
+    with pytest.raises(ExecutionRefusedError, match="no two of its objects in one region overlap"):
         _tiled_pass(tmp_path, _records("c"))
 
 
