@@ -24,7 +24,7 @@ import os
 import threading
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import cached_property
@@ -69,24 +69,35 @@ never carries it, so it is the row's kind (:func:`partition_rows`)."""
 
 DATA_PATHS: PathFields = (
     ("images_dir",), ("labels_dir",), ("plant_csv_paths", "[]"), ("split", "selection_dir"))
-"""The fields of a run's data section that name a path."""
+"""The fields of a run's data section that name where its samples are."""
+
+_DATA_BLOCK_PATHS: PathFields = (*DATA_PATHS, ("dataset_source", "source_files", "[]"))
+"""Every field of a run's data section that names a path: :data:`DATA_PATHS` and the source files
+its dataset builder imports."""
+
+CONFIG_PATHS: PathFields = (("model_source", "source_files", "[]"),
+                            ("model_source", "image_stats_sampling", "windows", "[]", "0"),
+                            *within(("data",), _DATA_BLOCK_PATHS))
+"""Every field of a run's config that names a path, the one inventory each record's path fields
+derive from."""
 
 _PARAMETER_PATHS: PathFields = tuple(
-    (".".join(("data", *(step for step in field if step != "[]"))),
-     *(step for step in field if step == "[]"))
-    for field in DATA_PATHS)
-"""The same fields in a flat map of sweep parameters, each named by its dotted config path."""
+    (".".join(field[:depth]), *field[depth:])
+    for field in CONFIG_PATHS
+    for depth in range(1, (field.index("[]") if "[]" in field else len(field)) + 1))
+"""The same fields in a flat map of sweep parameters, whose keys are dotted config paths: each
+field under every key a parameter may name it by, the mapping holding it or the field itself."""
 
 _SPACE_PATHS: PathFields = tuple((name, "choices", "[]", *rest) for name, *rest in _PARAMETER_PATHS)
 
 RECORD_PATHS: dict[str, PathFields] = {
     RUN_FILE: (
-        *within(("config", "data"), DATA_PATHS), *within(("resolved", "data"), DATA_PATHS),
+        *within(("config",), CONFIG_PATHS), *within(("resolved", "data"), _DATA_BLOCK_PATHS),
         *within(("resolved", "partition", "samples", "[]"), SAMPLE_PATHS),
         ("resolved", "partition", "selection", "selection_dir"),
         ("resume_from",), *within(("trial_params",), _PARAMETER_PATHS)),
     SWEEP_FILE: (
-        *within(("input", "base_config", "data"), DATA_PATHS),
+        *within(("input", "base_config"), CONFIG_PATHS),
         *within(("input", "baseline_params"), _PARAMETER_PATHS),
         *within(("input", "param_space"), _SPACE_PATHS)),
     FINAL_STATUS_FILE: (("checkpoint", "path"),),
@@ -184,14 +195,18 @@ def create_run_directory(directory: Path) -> Path:
     return directory
 
 
-def open_run_directory(run_dir: Path, compose: Callable[[Path], dict]) -> None:
-    """Create the run directory ``run_dir`` (:func:`create_run_directory`) with its empty metrics
-    log, then write the record ``compose(run_dir)`` returns as its ``run.json`` once, so a
-    directory holding a launch record holds every file a reader of a live run reads. ``compose``
-    may write files of its own into the directory first."""
+def open_run_directory(run_dir: Path, record: dict, copies: Mapping[str, bytes]) -> None:
+    """Create the run directory ``run_dir`` (:func:`create_run_directory`) holding its source
+    snapshot's ``copies`` laid out (``model_build.lay_out``) and its empty metrics log, then write
+    ``record`` as its ``run.json`` once, so a directory holding a launch record holds every file a
+    reader of a live run reads. Everything that can refuse is composed before the directory
+    exists."""
+    from tcip_mcp.pipelines.model_build import lay_out
+
     create_run_directory(run_dir)
+    lay_out(run_dir, copies)
     (run_dir / METRICS_FILE).touch(exist_ok=False)
-    write_record(run_dir / RUN_FILE, compose(run_dir))
+    write_record(run_dir / RUN_FILE, record)
 
 
 def write_record(path: Path, value: Any) -> None:
@@ -428,9 +443,9 @@ def observe(directory: Path) -> RunObservation:
     """Read the sweep (holding its ``sweep.json``) or run at ``directory`` once. Its state is the
     one its final status names once one is written; before that ``running`` while its latest sign
     of life is within :data:`HEARTBEAT_STALE_SECONDS`, else ``interrupted``. A run holds its
-    metrics log from the moment it opened; one missing it refuses with ``FileNotFoundError``
-    naming it. A completed run's checkpoint is read, and refused when absent, by whatever loads
-    it: an archive may carry a run without its weights."""
+    metrics log from the moment it opened; one missing it refuses with
+    :class:`IncompleteRunError` naming it. A completed run's checkpoint is read, and refused when
+    absent, by whatever loads it: an archive may carry a run without its weights."""
     record_file = SWEEP_FILE if (directory / SWEEP_FILE).is_file() else RUN_FILE
     record = read_run_record(directory / record_file)
     final_path = directory / FINAL_STATUS_FILE
@@ -442,9 +457,13 @@ def observe(directory: Path) -> RunObservation:
         state = "running" if time.time() - alive <= HEARTBEAT_STALE_SECONDS else "interrupted"
     observation = RunObservation(directory, record, final, alive, state)
     if record_file == RUN_FILE and not observation.metrics_log.is_file():
-        raise FileNotFoundError(f"run {directory.name} ({state}) is missing "
-                                f"{observation.metrics_log}.")
+        raise IncompleteRunError(f"run {directory.name} ({state}) is missing "
+                                 f"{observation.metrics_log}.")
     return observation
+
+
+class IncompleteRunError(ValueError):
+    """A run directory missing a file every opened run holds."""
 
 
 def _holding(parent: Path, record_file: str) -> list[Path]:
@@ -841,7 +860,7 @@ def compare_experiments(experiment_ids: list[str], *, project: Path | str) -> di
         entry = run_entry(observation)
         summary["registry"] = [] if entry is None else [{
             "name": entry["name"], "registered_at": entry["registered_at"],
-            **entry_facts(entry),
+            **entry_facts(entry, project_of_run(observation.directory)),
         }]
         data = observation.resolved_data
         summary["split"] = _split_summary(observation)

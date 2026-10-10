@@ -16,7 +16,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from tests._chain_fixtures import BARE_NO_KNOB_DETECTOR, BARE_SCORE_THRESH_DETECTOR
+from tests._chain_fixtures import (
+    BARE_NO_KNOB_DETECTOR, BARE_SCORE_THRESH_DETECTOR, BESPOKE_MODELS,
+)
 
 torch = pytest.importorskip("torch")
 
@@ -25,6 +27,19 @@ pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 IMG = 32
 # The width and count a three-band, one-class detector run is built at.
 _DIMS = {"in_chans": 3, "num_classes": 1}
+
+
+def _built(model_source: dict):
+    """The model ``model_source`` builds at :data:`_DIMS`, imported from the staged sources of a
+    run config over no data with this repository as its project."""
+    from tcip_mcp.pipelines.model_build import build_from_model_source, staged_sources
+    from tcip_mcp.pipelines.schemas import train_config
+    from tests import REPO_ROOT
+    from tests._chain_fixtures import training_config
+
+    spec = train_config(training_config(model_source, {}))
+    return build_from_model_source(spec.model_source,
+                                   staged_sources(spec, REPO_ROOT).layout, _DIMS)
 
 
 def test_holder_resolves_to_the_module_itself_with_no_detector():
@@ -65,11 +80,9 @@ def test_holder_refuses_when_the_module_and_its_detectors_roi_heads_both_expose_
     """An ambiguous module, ambiguous in the same shape a real bespoke wrapper could build: a
     torchvision two-stage detector under ``.detector`` (whose ``roi_heads`` already exposes the
     knob) plus a knob restated on the wrapper itself. The platform must not silently pick one."""
-    from tcip_mcp.pipelines.model_build import build_from_model_source
-    from tcip_mcp.pipelines.schemas import ModelSourceSchema
     from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
-    model = build_from_model_source(ModelSourceSchema.model_validate(BUILT_DETECTOR), _DIMS)
+    model = _built(BUILT_DETECTOR)
     assert hasattr(model.detector, "roi_heads")
     assert hasattr(model.detector.roi_heads, "score_thresh")
     model.score_thresh = 0.5  # restated on the wrapper itself, ambiguous with .detector.roi_heads
@@ -99,11 +112,11 @@ def test_set_detector_operating_point_reports_no_path_when_nothing_matches():
 
 
 def _checkpoint(tmp_path, builder: str) -> str:
-    from tests._verified_checkpoint_fixtures import foreign_checkpoint
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    return foreign_checkpoint(
-        tmp_path, name=builder.rpartition(":")[2],
-        model_source={"builder": builder, "task": "detection"},
+    return registered_checkpoint(
+        tmp_path,
+        model_source={"builder": builder, "source_files": [BESPOKE_MODELS], "task": "detection"},
         data={"tiling": {"enabled": False}, "num_channels": 3,
               "scope": {"subject": "bud"}})
 
@@ -161,15 +174,11 @@ def test_a_module_exposing_no_knob_fails_unstated_not_censored(tmp_path):
 
 
 def test_model_contract_records_the_holders_own_knobs():
-    from tcip_mcp.pipelines.model_build import build_from_model_source
     from tcip_mcp.pipelines.model_contract import check_model_contract
-    from tcip_mcp.pipelines.schemas import ModelSourceSchema
 
-    def built(builder: str):
-        return build_from_model_source(
-            ModelSourceSchema.model_validate({"builder": builder, "task": "detection"}), _DIMS)
-
-    with_knob, without_knob = built(BARE_SCORE_THRESH_DETECTOR), built(BARE_NO_KNOB_DETECTOR)
+    with_knob, without_knob = (
+        _built({"builder": builder, "task": "detection", "source_files": [BESPOKE_MODELS]})
+        for builder in (BARE_SCORE_THRESH_DETECTOR, BARE_NO_KNOB_DETECTOR))
 
     dims = {"in_chans": 3, "num_classes": 1, "img_size": 64}
     assert check_model_contract(with_knob, "detection", dims=dims)["operating_point_knobs"] == [

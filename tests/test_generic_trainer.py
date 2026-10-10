@@ -7,6 +7,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
+from tcip_mcp.pipelines.model_build import staged_sources
 from tcip_mcp.pipelines.schemas import train_config
 from tcip_mcp.pipelines.training import generic_trainer as gt
 from tcip_mcp.pipelines.training.generic_trainer import train
@@ -79,8 +80,10 @@ def test_train_applies_the_drawn_seed(tmp_path, monkeypatch):
         captured["deterministic"] = deterministic
 
     monkeypatch.setattr(gt, "set_seed", fake_set_seed)
-    run = TrainRun(id="auto-run-seed-applied", spec=seeded(_spec()),
-                   objective=LOSS_OBJECTIVE, project=tmp_path, output_dir=str(tmp_path / "out"))
+    spec = seeded(_spec())
+    run = TrainRun(id="auto-run-seed-applied", spec=spec, objective=LOSS_OBJECTIVE,
+                   project=tmp_path, layout=staged_sources(spec, tmp_path).layout,
+                   output_dir=str(tmp_path / "out"))
     train(run, train_loader=None)  # fails at build, after seeding
 
     assert captured["seed"] == run.spec.seed
@@ -96,8 +99,9 @@ def test_train_with_unwritable_output_dir_marks_run_failed(tmp_path):
     blocker.write_text("I am a file, not a directory")
 
     # output_dir nests under an existing *file*, so out_dir.mkdir() raises.
-    run = TrainRun(id="auto-run-unwritable", spec=_spec(),
-                   objective=LOSS_OBJECTIVE, project=tmp_path, output_dir=str(blocker / "out"))
+    run = TrainRun(id="auto-run-unwritable", spec=_spec(), objective=LOSS_OBJECTIVE,
+                   project=tmp_path, layout=staged_sources(_spec(), tmp_path).layout,
+                   output_dir=str(blocker / "out"))
     run = train(run, train_loader=None)
 
     assert run.status == "failed"  # not stuck at "running"

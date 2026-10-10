@@ -24,11 +24,11 @@ GRADE = cr.Attribute("grade", "ordinal", ("low", "mid", "high"))
 
 
 def _checkpoint(tmp_path: Path, *attributes: cr.Attribute) -> str:
-    """A registered checkpoint whose completing run's dataset declares ``attributes`` on
-    :data:`SUBJECT`."""
-    from tests._verified_checkpoint_fixtures import foreign_checkpoint
+    """The checkpoint a run of ``tmp_path`` registered by completing, its dataset declaring
+    ``attributes`` on :data:`SUBJECT`."""
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    return foreign_checkpoint(
+    return registered_checkpoint(
         tmp_path, data={"num_channels": 3, "scope": {"subject": SUBJECT}},
         registry=cr.SubjectRegistry(subjects=(cr.Subject(name=SUBJECT, attributes=attributes),)))
 

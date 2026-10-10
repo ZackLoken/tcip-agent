@@ -36,10 +36,13 @@ def _start(tmp_path, body_name, *, deadline: float | None = None) -> tuple[Train
     launcher's own writer opened."""
     from tcip_mcp.experiments import observe
     from tcip_mcp.pipelines.training.run_registry import observed_run
-    from tests._verified_checkpoint_fixtures import detection_config, opened_run
+    from tests._verified_checkpoint_fixtures import (
+        detection_config, detector_declaring, opened_run,
+    )
 
     run_dir = opened_run(tmp_path, detection_config(
-        tmp_path / "data", training_source=f"{__name__}:{body_name}"))
+        tmp_path / "data", model_source=detector_declaring(__file__),
+        training_source=f"{Path(__file__).stem}:{body_name}"))
     run = observed_run(observe(run_dir))
     run.deadline = deadline
     ctx = TrainContext(run=run, train_loader=None, val_loader=None)

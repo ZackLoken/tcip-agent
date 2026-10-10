@@ -12,10 +12,12 @@ from fastapi.testclient import TestClient
 def _opened(project, experiment_id: str, *, data_dir=None, split: dict | None = None):
     """A detector run, over two frames of its own (or those under ``data_dir``) and stating
     ``split``, resolved and opened by the launcher's own producer and writer."""
-    from tests._verified_checkpoint_fixtures import detection_config, fixture_data_dir, opened_run
+    from tests._verified_checkpoint_fixtures import (
+        detection_config, fixture_data_dir, opened_run, unbuilt_source,
+    )
 
     config = detection_config(data_dir or fixture_data_dir(project, experiment_id),
-                              model_source={"builder": "m:f", "task": "detection"})
+                              model_source=unbuilt_source("detection"))
     if split is not None:
         config["data"]["split"] = split
     return opened_run(project, config, experiment_id=experiment_id)
@@ -25,14 +27,14 @@ def _bound(experiment_id: str, tmp_path, **split):
     """A run bound to a selection ``draw_splits`` drew at seed 7, its ``data.split`` beside the
     binding being ``split``."""
     from tests._chain_fixtures import training_config
-    from tests._verified_checkpoint_fixtures import opened_run
+    from tests._verified_checkpoint_fixtures import opened_run, unbuilt_source
     from tests.test_selection_binding import _draw, _two_subject_two_date_dataset
 
     selection_dir = tmp_path / "splits" / "2024-01-01"
     if not selection_dir.exists():
         _draw(tmp_path, _two_subject_two_date_dataset(tmp_path / "bound-ds"), selection_dir, seed=7)
     return opened_run(tmp_path, training_config(
-        {"builder": "m:f", "task": "detection"},
+        unbuilt_source("detection"),
         {"split": {"selection_dir": str(selection_dir), **split}}),
         experiment_id=experiment_id), selection_dir
 

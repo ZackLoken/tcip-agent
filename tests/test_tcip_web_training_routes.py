@@ -16,12 +16,16 @@ def test_the_run_list_refuses_while_no_project_is_open(client: TestClient) -> No
 
 
 def _opened(experiment_id: str, tmp_path: Path, builder: str = "my_models:chestnut_burr_det"):
-    """A detector run built by ``builder`` over two frames of its own under ``tmp_path``, opened
-    by the launcher's own producer and writer."""
+    """A detector run built by ``builder``, its module an empty file of its own, over two frames
+    of its own under ``tmp_path``, opened by the launcher's own producer and writer."""
     from tests._verified_checkpoint_fixtures import detection_config, opened_run
 
-    config = detection_config(tmp_path / f"{experiment_id}-data",
-                              model_source={"builder": builder, "task": "detection"})
+    module = Path(*builder.partition(":")[0].split("."))
+    code = (tmp_path / f"{experiment_id}-code" / module).with_suffix(".py")
+    code.parent.mkdir(parents=True, exist_ok=True)
+    code.write_text("", encoding="utf-8")
+    config = detection_config(tmp_path / f"{experiment_id}-data", model_source={
+        "builder": builder, "source_files": [str(code)], "task": "detection"})
     return opened_run(tmp_path, config, experiment_id=experiment_id)
 
 
@@ -351,10 +355,11 @@ def test_tensorboard_route_404s_with_no_logs_carrying_the_recorded_error(
     data load, say) and whose output directory holds no event file: the refusal must say both
     that it produced no logs (so the tab offers no Try again) and what the recorded error was,
     not the plain error text a run with real logs would still get."""
-    from tests._verified_checkpoint_fixtures import finished_run
+    from tests._verified_checkpoint_fixtures import detector_declaring, finished_run
 
     run_id = "exp-fails-at-data-load"
-    finished_run(tmp_path, experiment_id=run_id, training_source=f"{__name__}:_fails_at_data_load")
+    finished_run(tmp_path, experiment_id=run_id, model_source=detector_declaring(__file__),
+                 training_source=f"{Path(__file__).stem}:_fails_at_data_load")
 
     resp = opened_client.post(f"/api/training/runs/{run_id}/tensorboard", json={})
     assert resp.status_code == 404

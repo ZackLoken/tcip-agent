@@ -18,9 +18,9 @@ def test_a_registered_entry_ranks_through_best_model(tmp_path: Path) -> None:
 
     pytest.importorskip("torch")
     from tcip_mcp.model_registry import ModelRegistry, best_model
-    from tests._verified_checkpoint_fixtures import checkpoint_file
+    from tests._verified_checkpoint_fixtures import produced_checkpoint
 
-    ckpt = checkpoint_file(tmp_path / "m.pt", "weights")
+    ckpt = produced_checkpoint(tmp_path / "m.pt", "weights")
     registry = ModelRegistry(str(tmp_path))
     registry.register_model("m", str(ckpt), metrics={"val_map50": 0.7})
 

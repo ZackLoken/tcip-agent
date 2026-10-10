@@ -26,29 +26,40 @@ def chain_pass() -> Stated:
     return Stated(tile=False, conf=0.5, max_dets=SAMPLE_MAX_DETS)
 
 
+BESPOKE_MODELS = str(Path(__file__).with_name("bespoke_models.py"))
+"""The file of ``tests.bespoke_models``, which a config naming one of its builders or loops
+declares under ``model_source.source_files``; a run imports it as the top-level module
+``bespoke_models`` from the suite's own directory, so no package of this repository joins a
+run's plan."""
 IMG = 64
 SUBJECT = "bud"
 DATE = "2-11-26"
 STEMS = tuple(f"s{i:02d}" for i in range(40))
-BESPOKE_DETECTION = "tests.bespoke_models:build_bespoke_detection"
+BESPOKE_DETECTION = "bespoke_models:build_bespoke_detection"
 """The torchvision bespoke detector's builder, its sizes left to each caller."""
-BESPOKE_CLASSIFIER = "tests.bespoke_models:build_bespoke_classifier"
-BESPOKE_SEMANTIC_SEG = "tests.bespoke_models:build_bespoke_semantic_seg"
-BESPOKE_INSTANCE_SEG = "tests.bespoke_models:build_bespoke_instance_seg"
-BESPOKE_ORDINAL = "tests.bespoke_models:build_bespoke_ordinal"
-BESPOKE_REGRESSOR = "tests.bespoke_models:build_bespoke_regressor"
-GT_ANCHOR_DETECTOR = "tests.bespoke_models:build_bespoke_detector"
+BESPOKE_CLASSIFIER = "bespoke_models:build_bespoke_classifier"
+BESPOKE_SEMANTIC_SEG = "bespoke_models:build_bespoke_semantic_seg"
+BESPOKE_INSTANCE_SEG = "bespoke_models:build_bespoke_instance_seg"
+BESPOKE_ORDINAL = "bespoke_models:build_bespoke_ordinal"
+BESPOKE_REGRESSOR = "bespoke_models:build_bespoke_regressor"
+GT_ANCHOR_DETECTOR = "bespoke_models:build_bespoke_detector"
 """The GroupNorm detector whose anchors come from the ground truth's own box shapes."""
-BARE_SCORE_THRESH_DETECTOR = "tests.bespoke_models:build_bare_score_thresh_detector"
-BARE_NO_KNOB_DETECTOR = "tests.bespoke_models:build_bare_no_knob_detector"
-SAVE_BUILT_WEIGHTS = "tests.bespoke_models:save_built_weights"
+BARE_SCORE_THRESH_DETECTOR = "bespoke_models:build_bare_score_thresh_detector"
+BARE_NO_KNOB_DETECTOR = "bespoke_models:build_bare_no_knob_detector"
+SAVE_BUILT_WEIGHTS = "bespoke_models:save_built_weights"
 """A ``training_source`` that takes no step and saves the weights its model was built with."""
-TRAIN_BESPOKE = "tests.bespoke_models:train_bespoke"
+TRAIN_BESPOKE = "bespoke_models:train_bespoke"
 """A ``training_source`` training through the ``ctx`` sinks."""
-REGION_BUILDER = {"builder": "tests.bespoke_models:build_bright_region_detector",
-                  "builder_kwargs": {}, "task": "detection"}
-BLOB_BUILDER = {"builder": "tests.bespoke_models:build_bright_blob_detector",
-                "builder_kwargs": {}, "task": "detection"}
+DETECTION_SOURCE = {"builder": BESPOKE_DETECTION, "source_files": [BESPOKE_MODELS],
+                    "task": "detection"}
+"""A ``model_source`` of :data:`BESPOKE_DETECTION` at its builder's own sizes."""
+CLASSIFIER_SOURCE = {"builder": BESPOKE_CLASSIFIER, "source_files": [BESPOKE_MODELS],
+                     "task": "classification"}
+"""A ``model_source`` of :data:`BESPOKE_CLASSIFIER`."""
+REGION_BUILDER = {"builder": "bespoke_models:build_bright_region_detector",
+                  "builder_kwargs": {}, "source_files": [BESPOKE_MODELS], "task": "detection"}
+BLOB_BUILDER = {"builder": "bespoke_models:build_bright_blob_detector",
+                "builder_kwargs": {}, "source_files": [BESPOKE_MODELS], "task": "detection"}
 
 
 def object_at(index: int) -> tuple[int, int, int]:
@@ -131,13 +142,20 @@ def training_config(model_source: dict, data: dict, **overrides: Any) -> dict:
 
 
 def built_model(config: dict):
-    """The model a run over ``config`` builds: its validated ``model_source`` at the dims its data
-    block records (``model_build.recorded_model_dims``)."""
-    from tcip_mcp.pipelines.model_build import build_from_model_source, recorded_model_dims
+    """The model a run over ``config`` builds: its validated ``model_source``, imported from the
+    layout its admission stages with this repository as its project
+    (``model_build.staged_sources``), at the dims its data block records
+    (``model_build.recorded_model_dims``)."""
+    from tcip_mcp.pipelines.model_build import (
+        build_from_model_source, recorded_model_dims, staged_sources,
+    )
     from tcip_mcp.pipelines.schemas import train_config
 
+    from tests import REPO_ROOT
+
     spec = train_config(config)
-    return build_from_model_source(spec.model_source, recorded_model_dims(spec))
+    return build_from_model_source(spec.model_source, staged_sources(spec, REPO_ROOT).layout,
+                                   recorded_model_dims(spec))
 
 
 def train_on(selection_dir: Path, project_root: Path, experiment_id: str) -> str:

@@ -25,9 +25,16 @@ from tcip_mcp.pipelines.data.split_construction import (  # noqa: E402
 )
 from tcip_mcp.pipelines.schemas import DataSpec  # noqa: E402
 from tcip_mcp.tools.data_tools import draw_splits  # noqa: E402
-from tests._producer_fixtures import painted_frame  # noqa: E402
+from tests._producer_fixtures import painted_frame, staged_layout  # noqa: E402
 from tests._chain_fixtures import training_config  # noqa: E402
 from tests._verified_checkpoint_fixtures import partition_side, unbuilt_source  # noqa: E402
+
+
+def _train_val(project: Path, task: str, data: DataSpec):
+    """``split_construction.auto_train_val`` of a ``task`` run of ``project`` over ``data``, which
+    declares no dataset builder, untransformed: ``(train_ds, val_ds, partition, resolved)``."""
+    return auto_train_val(project, task, data, None, staged_layout(project, {}))
+
 
 STEMS = ("a", "b", "c", "d", "e", "f", "g", "h")
 
@@ -95,7 +102,7 @@ def test_a_bound_semantic_seg_run_trains_over_exactly_its_selections_samples(tmp
     drawn = _drawn(root, masks_dir, out)
 
     data = DataSpec.model_validate({"split": {"selection_dir": str(out)}})
-    train_ds, val_ds, partition, _data = auto_train_val(tmp_path, "semantic_seg", data, None)
+    train_ds, val_ds, partition, _data = _train_val(tmp_path, "semantic_seg", data)
 
     assert sorted(train_ds.stems) == sorted(s.location for s in drawn.on("train"))
     assert sorted(val_ds.stems) == sorted(s.location for s in drawn.on("val"))
@@ -112,7 +119,8 @@ def test_a_bound_classification_run_trains_over_exactly_its_selections_samples(t
     drawn = _drawn(root, csv_path, out)
 
     data = DataSpec.model_validate({"split": {"selection_dir": str(out)}})
-    train_ds, val_ds, partition, _data = auto_train_val(tmp_path, "classification", data, None)
+    train_ds, val_ds, partition, _data = _train_val(
+        tmp_path, "classification", data)
 
     assert sorted(train_ds.stems) == sorted(s.location for s in drawn.on("train"))
     assert sorted(val_ds.stems) == sorted(s.location for s in drawn.on("val"))
@@ -227,9 +235,9 @@ def test_a_mask_sample_reaches_its_own_mask(tmp_path: Path):
     out = tmp_path / "m"
     drawn = _drawn(root, masks_dir, out)
 
-    train_ds, _val_ds, _partition, _data = auto_train_val(
+    train_ds, _val_ds, _partition, _data = _train_val(
         tmp_path, "semantic_seg",
-        DataSpec.model_validate({"split": {"selection_dir": str(out)}}), None)
+        DataSpec.model_validate({"split": {"selection_dir": str(out)}}))
 
     by_identity = {s.location: s for s in drawn.samples}
     for index, key in enumerate(train_ds.stems):
@@ -249,9 +257,9 @@ def test_a_row_key_sample_reaches_the_row_it_names(tmp_path: Path):
     out = tmp_path / "m"
     drawn = _drawn(root, csv_path, out)
 
-    train_ds, _val_ds, _partition, _data = auto_train_val(
+    train_ds, _val_ds, _partition, _data = _train_val(
         tmp_path, "classification",
-        DataSpec.model_validate({"split": {"selection_dir": str(out)}}), None)
+        DataSpec.model_validate({"split": {"selection_dir": str(out)}}))
 
     by_identity = {s.location: s for s in drawn.samples}
     for index, key in enumerate(train_ds.stems):
@@ -273,7 +281,7 @@ def test_an_unbound_semantic_seg_run_reads_its_membership_off_its_own_samples(tm
     data = DataSpec.model_validate({"images_dir": str(images_dir), "labels_dir": str(masks_dir),
                                     "split": {"val_ratio": 0.25, "seed": 7}})
 
-    train_ds, val_ds, partition, _data = auto_train_val(tmp_path, "semantic_seg", data, None)
+    train_ds, val_ds, partition, _data = _train_val(tmp_path, "semantic_seg", data)
 
     assert val_ds is not None
     members = {ds: {ds.sample_of(key).member for key in ds.stems} for ds in (train_ds, val_ds)}
@@ -299,7 +307,7 @@ def test_an_unbound_regression_run_reads_its_membership_off_its_own_samples(tmp_
     data = DataSpec.model_validate({"images_dir": str(images_dir), "labels_dir": str(csv_path),
                                     "split": {"val_ratio": 0.25, "seed": 7}})
 
-    train_ds, val_ds, partition, _data = auto_train_val(tmp_path, "regression", data, None)
+    train_ds, val_ds, partition, _data = _train_val(tmp_path, "regression", data)
 
     assert val_ds is not None
     members = {ds: {ds.sample_of(key).member for key in ds.stems} for ds in (train_ds, val_ds)}
@@ -381,9 +389,9 @@ def test_a_mask_run_freezes_into_a_selection_its_bind_accepts(tmp_path: Path):
         assert Path(sample.ground_truth).parent == masks_dir
         assert Path(sample.ground_truth).is_file()
 
-    train_ds, val_ds, partition, _data = auto_train_val(
+    train_ds, val_ds, partition, _data = _train_val(
         tmp_path, "semantic_seg",
-        DataSpec.model_validate({"split": {"selection_dir": result["selection_dir"]}}), None)
+        DataSpec.model_validate({"split": {"selection_dir": result["selection_dir"]}}))
     assert sorted(train_ds.stems) == sorted(s.location for s in frozen.on("train"))
     assert val_ds is not None
     assert result["train"] == len(frozen.on("train"))
@@ -405,9 +413,9 @@ def test_a_table_run_freezes_into_a_selection_its_bind_accepts(tmp_path: Path):
     assert {s.ground_truth for s in frozen.samples} == {str(csv_path)}
     assert all(s.row_key is not None for s in frozen.samples)
 
-    train_ds, val_ds, _partition, _data = auto_train_val(
+    train_ds, val_ds, _partition, _data = _train_val(
         tmp_path, "classification",
-        DataSpec.model_validate({"split": {"selection_dir": result["selection_dir"]}}), None)
+        DataSpec.model_validate({"split": {"selection_dir": result["selection_dir"]}}))
     assert sorted(train_ds.stems) == sorted(s.location for s in frozen.on("train"))
     assert val_ds is not None
 
@@ -456,11 +464,11 @@ def test_a_stated_class_count_refuses_on_the_run_path_whatever_its_value(tmp_pat
 
     for stated in (2, 3, 9):
         with pytest.raises(ValueError, match=r"states \['num_classes'\]"):
-            auto_train_val(tmp_path, "semantic_seg",
-                           DataSpec.model_validate({**base, "num_classes": stated}), None)
+            _train_val(tmp_path, "semantic_seg",
+                           DataSpec.model_validate({**base, "num_classes": stated}))
 
-    _train_ds, val_ds, _partition, resolved = auto_train_val(
-        tmp_path, "semantic_seg", DataSpec.model_validate(base), None)
+    _train_ds, val_ds, _partition, resolved = _train_val(
+        tmp_path, "semantic_seg", DataSpec.model_validate(base))
     assert val_ds is not None
     assert resolved.num_classes == 3 and resolved.num_ranks is None
 
@@ -489,7 +497,8 @@ def test_a_runs_unstated_class_count_is_read_once_over_every_sample(tmp_path: Pa
     data = DataSpec.model_validate({"images_dir": str(images_dir), "labels_dir": str(masks_dir),
                                     "split": {"group_by": "stem", "val_ratio": 0.25, "seed": 3}})
 
-    train_ds, val_ds, partition, resolved = auto_train_val(tmp_path, "semantic_seg", data, None)
+    train_ds, val_ds, partition, resolved = _train_val(
+        tmp_path, "semantic_seg", data)
 
     # The one mask reaching class 2 is on the validation side, which is the disagreement a
     # per-loader count would produce here.
@@ -514,8 +523,8 @@ def test_a_runs_metrics_are_reported_over_the_class_space_it_trains_in(tmp_path:
     data = DataSpec.model_validate({"images_dir": str(images_dir), "labels_dir": str(masks_dir),
                                     "split": {"group_by": "stem", "val_ratio": 0.25, "seed": 3}})
 
-    train_ds, _val_ds, _partition, resolved = auto_train_val(
-        tmp_path, "semantic_seg", data, None)
+    train_ds, _val_ds, _partition, resolved = _train_val(
+        tmp_path, "semantic_seg", data)
     held = {int(np.array(Image.open(masks_dir / f"{stem}.png")).max())
             for stem in STEMS[1:4]}
     assert held == {1}, "the training half reaches only class 1, which is what this measures"
@@ -560,9 +569,9 @@ def test_a_mask_run_refuses_a_stated_class_space_and_admits_the_empty_one(tmp_pa
              "split": {"group_by": "stem", "val_ratio": 0.25, "seed": 5}})
 
     with pytest.raises(ValueError, match="carries its own classes"):
-        auto_train_val(tmp_path, "semantic_seg", data({"subject": "leaf"}), None)
+        _train_val(tmp_path, "semantic_seg", data({"subject": "leaf"}))
 
-    *_loaders, resolved = auto_train_val(tmp_path, "semantic_seg", data({}), None)
+    *_loaders, resolved = _train_val(tmp_path, "semantic_seg", data({}))
     assert resolved.scope == ClassScope()
 
 

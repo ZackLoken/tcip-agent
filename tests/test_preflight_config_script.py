@@ -16,12 +16,10 @@ def _fixture_config(root: Path) -> Path:
     --smoke is passed here) over two labeled frames of the subject its scope names
     (``_verified_checkpoint_fixtures.detection_images``)."""
     from tests._chain_fixtures import training_config
-    from tests._verified_checkpoint_fixtures import SCOPED_DATA, detection_images
+    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR, SCOPED_DATA, detection_images
 
     config = training_config(
-        {"builder": "tcip_mcp.pipelines.model_build:build_from_model_source",
-         "task": "detection"},
-        {**detection_images(root / "data", SCOPED_DATA["scope"]), **SCOPED_DATA})
+        BUILT_DETECTOR, {**detection_images(root / "data", SCOPED_DATA["scope"]), **SCOPED_DATA})
     config_path = root / "config.json"
     config_path.write_text(json.dumps(config), encoding="utf-8")
     return config_path

@@ -20,9 +20,10 @@ from tcip_mcp.experiments import (  # noqa: E402
 )
 from tcip_mcp.pipelines.data.selection import read_selection  # noqa: E402
 from tcip_mcp.pipelines.data.split_construction import partition_samples, resolve_run  # noqa: E402
+from tcip_mcp.pipelines.model_build import staged_sources  # noqa: E402
 from tcip_mcp.pipelines.schemas import train_config  # noqa: E402
 
-from tests._chain_fixtures import BESPOKE_DETECTION, run_config, training_config  # noqa: E402
+from tests._chain_fixtures import DETECTION_SOURCE, run_config, training_config  # noqa: E402
 from tests._training_values import evaluation_block  # noqa: E402
 from tests._verified_checkpoint_fixtures import (  # noqa: E402
     opened_run, resolved_run, unbuilt_source,
@@ -84,10 +85,10 @@ def test_freeze_selection_round_trips_through_a_real_bind(tmp_path: Path):
         assert ts.exists(sample.ground_truth)
 
     second = train_config(run_config(Path(selection_dir),
-                                     {"builder": BESPOKE_DETECTION, "task": "detection"}))
+                                     DETECTION_SOURCE))
     assert selection_compatibility(second.data, frozen, selection_dir) == []
 
-    resolution = resolve_run(second, project=tmp_path)
+    resolution = resolve_run(second, staged_sources(second, tmp_path).layout, project=tmp_path)
     assert len(resolution.train_ds) > 0 and len(resolution.val_ds) > 0
 
 

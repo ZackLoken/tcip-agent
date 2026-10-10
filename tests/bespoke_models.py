@@ -212,6 +212,20 @@ def save_built_weights(ctx) -> None:
     ctx.save_checkpoint(state, "model_final")
 
 
+SECOND_CHECKPOINT_TAG = "second"
+"""The tag :func:`save_built_weights_and_a_second_checkpoint` saves its second checkpoint under."""
+
+
+def save_built_weights_and_a_second_checkpoint(ctx) -> None:
+    """:func:`save_built_weights`, then the model its config builds saved again under
+    :data:`SECOND_CHECKPOINT_TAG`, beside the config's ``fixture_state`` when it states any: a
+    checkpoint the run wrote beside the deliverable its completion registers."""
+    save_built_weights(ctx)
+    ctx.save_checkpoint({STATE_DICT_KEY: ctx.build_model().state_dict(),
+                         **(ctx.spec.model_extra.get("fixture_state") or {})},
+                        SECOND_CHECKPOINT_TAG)
+
+
 # ---------------------------------------------------------------------------
 # Sibling builders: agent-authored modules that wire the kept nn.Module blocks
 # for the non-detector tasks. Same forward contract the trainer/eval expect:

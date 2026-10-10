@@ -221,8 +221,12 @@ def test_ray_init_propagates_this_process_s_import_search_path_to_trial_workers(
     tmp_path, monkeypatch
 ):
     """A trial worker Ray spawns starts from its own defaults, not this interpreter's
-    sys.path; a bespoke model_source/training_source/dataset_source importable here must stay
-    importable there, the same guarantee the launch subprocess gets."""
+    sys.path; every entry of it reaches the worker, the same guarantee the launch subprocess
+    gets, except a layout root an import put there, which no worker inherits: a worker imports
+    from the layout it binds itself."""
+    from tcip_mcp.pipelines.model_build import _LAYOUT_ROOTS
+    from tcip_store import canonical_path
+
     entered = [threading.Event()]
     release = [threading.Event()]
     release[0].set()
@@ -232,8 +236,9 @@ def test_ray_init_propagates_this_process_s_import_search_path_to_trial_workers(
 
     env_vars = ray.init_kwargs["runtime_env"]["env_vars"]
     pythonpath_entries = env_vars["PYTHONPATH"].split(os.pathsep)
-    for entry in (p for p in sys.path if p):
+    for entry in (p for p in sys.path if p and canonical_path(p) not in _LAYOUT_ROOTS):
         assert entry in pythonpath_entries
+    assert not [p for p in pythonpath_entries if canonical_path(p) in _LAYOUT_ROOTS]
 
 
 def test_a_concurrent_sweep_warns_when_the_running_cluster_s_import_path_has_gone_stale(

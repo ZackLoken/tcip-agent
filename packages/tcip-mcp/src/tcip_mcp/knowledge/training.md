@@ -106,7 +106,8 @@ config = {
         "builder": "my_module:build_net",
         "builder_kwargs": {"pretrained": False},  # the builder's own options; the platform hands
         "task": "detection",                      # it in_chans and the class count itself
-    },
+        "source_files": ["code/my_module.py"],    # the files the run imports, the builder's
+    },                                            # module (and a loop's) among them
     # "training_source": "my_module:train",  # optional custom train(ctx) loop, a bare
     #     dotted string ("module:function"), not a dict, see pipeline-design skill
     "data": {
@@ -167,7 +168,7 @@ naming why. Whole-frame training and whole-decode sources gain nothing from it; 
 | `list_experiments` | List every run of the project, and every sweep with its trial runs under it |
 | `cancel_training` | Request graceful cancellation of a running run, trial or sweep by its id; a run stops at the next batch/epoch boundary and still saves `model_final.pt`; a sweep's running trials stop the same way and new trials start nothing, Ray's hard stop being only the fallback after the heartbeat window |
 | `run_hyperparameter_search` | HPO on Ray Tune, you pick the search algorithm + trial scheduler |
-| `tcip render-failure-cases` (logged command) | Surface + render images ranked by count-mismatch (not IoU-matched, see evaluation skill) |
+| `tcip render-failure-cases` (command) | Surface + render images ranked by count-mismatch (not IoU-matched, see evaluation skill) |
 
 A run launched on its own is a run directory, `.tcip/experiments/<experiment_id>/`, beside the
 project's sweeps; a sweep's trial is one beneath its sweep (see HPO). Runs and sweeps share that one

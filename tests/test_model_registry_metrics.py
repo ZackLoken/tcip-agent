@@ -11,9 +11,9 @@ import pytest
 def _checkpoint(tmp_path, name: str) -> str:
     """A checkpoint file of its own under ``tmp_path`` for ``name``; its path."""
     pytest.importorskip("torch")
-    from tests._verified_checkpoint_fixtures import checkpoint_file
+    from tests._verified_checkpoint_fixtures import produced_checkpoint
 
-    return str(checkpoint_file(tmp_path / f"{name}.pt", name))
+    return str(produced_checkpoint(tmp_path / f"{name}.pt", name))
 
 
 def _registered(tmp_path, *entries: tuple[str, dict | None]):

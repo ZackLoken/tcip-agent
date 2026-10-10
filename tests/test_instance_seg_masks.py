@@ -5,7 +5,7 @@ predictor's detection record carries them as polygons, ``encode_predictions`` co
 from __future__ import annotations
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
-from tests._chain_fixtures import BESPOKE_INSTANCE_SEG
+from tests._chain_fixtures import BESPOKE_INSTANCE_SEG, BESPOKE_MODELS
 from tests._producer_fixtures import checkpoint_admission, gray_frame, painted_array
 
 from pathlib import Path
@@ -15,7 +15,6 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY  # noqa: E402
 pytest.importorskip("torchvision")
 cv2 = pytest.importorskip("cv2")
 
@@ -125,41 +124,31 @@ def test_predict_sliced_require_masks_false_reaches_real_slicing_path_for_instan
 # --------------------------------------------------------------------------
 
 TILE = 64
-TILED_PASS = Stated(tile_size=TILE, conf=0.0, max_dets=SAMPLE_MAX_DETS,
+TILED_PASS = Stated(tile=True, tile_size=TILE, conf=0.0, max_dets=SAMPLE_MAX_DETS,
                     cross_tile_nms=SAMPLE_CROSS_TILE_NMS)
 """The execution values a tiled inference pass here states."""
 
 
-@pytest.fixture(scope="module")
-def instance_seg_ckpt(tmp_path_factory) -> str:
-    """A real bespoke instance_seg (Mask R-CNN) checkpoint, built once and only read afterwards:
-    these tests exercise reachable tool/eval paths, so a stub predictor would assume the very
-    dispatch under test. Stamps its own persisted training tile geometry (``config["data"]
-    ["tiling"]``), matching a real tile-trained checkpoint, so the tests below that leave ``tile``
-    unset genuinely exercise the tiled default derived from *this* checkpoint's own geometry, not a
-    platform-wide fallback (an untrained-tiled checkpoint has no such basis and would derive
-    untiled instead, see ``resolve_tile_geometry``)."""
-    from tests._chain_fixtures import built_model, training_config
+@pytest.fixture
+def instance_seg_ckpt(tmp_path) -> str:
+    """A real bespoke instance_seg (Mask R-CNN) checkpoint a run completed in ``tmp_path`` over
+    square :data:`TILE` px polygon-labeled frames of its own, registered by completing: these
+    tests exercise reachable tool/eval paths, so a stub predictor would assume the very dispatch
+    under test. The run trains untiled, as every instance_seg run does, so its recorded frame is
+    the edge a tiled pass states."""
+    from tcip_annotation.state import Annotation, Polygon
 
-    model_source = {"builder": BESPOKE_INSTANCE_SEG,
-                    "builder_kwargs": {"min_size": TILE, "max_size": TILE * 2},
-                    "task": "instance_seg"}
-    config = training_config(model_source,
-                             {"tiling": {"tile_size": TILE, "overlap": 0.2}, "num_channels": 3,
-                              "scope": {"subject": "stem", "attributes": []}})
-    model = built_model(config)
-    ckpt = tmp_path_factory.mktemp("instance_seg_ckpt") / "model_best.pt"
-    torch.save({STATE_DICT_KEY: model.state_dict(), CONFIG_KEY: config}, str(ckpt))
-    return str(ckpt)
+    from tests._producer_fixtures import seed_labeled_images
+    from tests._verified_checkpoint_fixtures import fixture_data_dir, registered_checkpoint
 
-
-def _register_instance_seg_ckpt(ckpt_path: str, project_root: Path) -> None:
-    """Register the module-scoped checkpoint in one test's own project."""
-    from tcip_mcp.tools.model_tools import register_model
-
-    result = register_model(name="instance-seg-test-model", checkpoint_path=ckpt_path,
-                            project=project_root)
-    assert "error" not in result, result
+    stem = Annotation(subject="stem", geometry=Polygon([[(8, 8), (40, 8), (40, 40), (8, 40)]]))
+    images = seed_labeled_images(fixture_data_dir(tmp_path, "stems") / "images" / UNDATED_BUCKET,
+                                 [stem], n=2, width=TILE, height=TILE)
+    return registered_checkpoint(
+        tmp_path, model_source={"builder": BESPOKE_INSTANCE_SEG, "task": "instance_seg",
+                                "source_files": [BESPOKE_MODELS],
+                                "builder_kwargs": {"min_size": TILE, "max_size": TILE * 2}},
+        data={"images_dir": str(images), "num_channels": 3, "scope": {"subject": "stem"}})
 
 
 def test_predict_sliced_require_masks_false_returns_boxes_only(instance_seg_ckpt, tmp_path):
@@ -168,7 +157,6 @@ def test_predict_sliced_require_masks_false_returns_boxes_only(instance_seg_ckpt
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.execution import prepare
 
-    _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     checkpoint = load_registered_checkpoint(instance_seg_ckpt, project=tmp_path)
     tiled_pass = prepare(checkpoint, Stated(tile=True, tile_size=TILE, overlap=0.2,
                                             postprocess="nms", **SAMPLE_DETECTOR_PASS),
@@ -189,51 +177,23 @@ def test_predict_sliced_require_masks_false_returns_boxes_only(instance_seg_ckpt
     assert "masks" in untiled.predict([img])[0]
 
 
-def test_run_inference_instance_seg_unset_tile_runs_tiled_with_masks(instance_seg_ckpt, tmp_path):
-    """The fixture's own persisted training tile geometry derives an unset ``tile`` to True:
-    instance_seg behaves exactly as plain detection does (sliced inference merges masks across
-    seams), and each result's masks are the sliced (merged polygon) shape."""
+def test_run_inference_instance_seg_explicit_tile_true_runs_tiled_with_masks(
+    instance_seg_ckpt, tmp_path
+):
+    """An explicit tile=True is not refused for instance_seg: tiled inference threads masks
+    through the cross-tile reconstruction and merge, as plain detection does, and each result's
+    masks are the sliced (merged polygon) shape."""
     from tests._verified_checkpoint_fixtures import predicted_over
 
-    _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     p, results = predicted_over(tmp_path, instance_seg_ckpt,
                                 str(Path(gray_frame(tmp_path / "images" / UNDATED_BUCKET)).parent),
-                                device="cpu", tile_size=TILE, conf=0.0)
+                                device="cpu", tile=True, tile_size=TILE, conf=0.0)
     assert p.execution.tiled
     assert len(results) == 1
     result = results[0]
     assert "masks" in result
     if result["count"]:
         assert set(result["masks"][0]) == {"segmentation"}
-
-
-def test_run_inference_instance_seg_explicit_tile_true_runs_tiled_with_masks(
-    instance_seg_ckpt, tmp_path
-):
-    """An explicit tile=True is no longer refused for instance_seg: tiled inference threads masks
-    through the cross-tile reconstruction/merge now, so this checkpoint tiles like any other."""
-    from tests._verified_checkpoint_fixtures import predicted_over
-
-    _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
-    p, results = predicted_over(tmp_path, instance_seg_ckpt,
-                                str(Path(gray_frame(tmp_path / "images" / UNDATED_BUCKET)).parent),
-                                device="cpu", tile=True, tile_size=TILE, conf=0.0)
-    assert p.execution.tiled
-    assert len(results) == 1
-    assert "masks" in results[0]
-
-
-def test_run_inference_instance_seg_unset_tile_writes_tiled(instance_seg_ckpt, tmp_path):
-    from tcip_mcp.tools.inference_tools import run_inference
-
-    _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
-    gray_frame(images_dir)
-    r = run_inference(tmp_path, instance_seg_ckpt, str(images_dir), bucket="preds/2026-01-01",
-                      device="cpu", stated=TILED_PASS)
-    assert "error" not in r
-    assert r["execution"]["tile_size"] == TILE
-    assert _document(r, images_dir) is not None
 
 
 def _document(published: dict, images_dir: Path):
@@ -257,7 +217,6 @@ def test_a_masked_bucket_delivers_the_same_counts_on_every_read(instance_seg_ckp
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     gray_frame(images_dir)
-    _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     fx.seed_confirmed_count(tmp_path)
     bucket = "baseline/2026-01-01"
     ran = run_inference(tmp_path, instance_seg_ckpt, str(images_dir), bucket=bucket,
@@ -288,7 +247,6 @@ def test_run_inference_never_stamps_a_mask_threshold_into_annotation_attributes(
 
     from tcip_mcp.tools.inference_tools import run_inference
 
-    _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     gray_frame(images_dir)
     r = run_inference(tmp_path, instance_seg_ckpt, str(images_dir), bucket="preds/2026-01-01",
@@ -304,18 +262,19 @@ def test_run_inference_instance_seg_explicit_tile_true_writes_tiled(instance_seg
     the tiled path into the written prediction bucket."""
     from tcip_mcp.tools.inference_tools import run_inference
 
-    _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     gray_frame(images_dir)
     r = run_inference(tmp_path, instance_seg_ckpt, str(images_dir), bucket="preds/2026-01-01",
-                      device="cpu", stated=TILED_PASS.model_copy(update={"tile": True}))
+                      device="cpu", stated=TILED_PASS)
     assert "error" not in r
+    assert r["execution"]["tile_size"] == TILE
     assert _document(r, images_dir) is not None
 
 
 def test_run_full_frame_evaluation_tiled_instance_seg_scores_masks(instance_seg_ckpt, tmp_path):
-    """A tile-trained Mask R-CNN is gated full frame by its masks over the objects its own task
-    selects: a box beside a polygon is no instance reference on either route."""
+    """A Mask R-CNN tiled at its training frame's edge is gated full frame by its masks over the
+    objects its own task selects: a box beside a polygon is no instance reference on either
+    route."""
     from tcip_annotation.state import Annotation, BBox, Polygon
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.data.datasets import build_dataset, resolve_sizes
@@ -329,11 +288,10 @@ def test_run_full_frame_evaluation_tiled_instance_seg_scores_masks(instance_seg_
         Annotation(subject="stem", geometry=Polygon(rings=[[(54, 54), (74, 54), (74, 74)]]))],
         128, 128)
 
-    _register_instance_seg_ckpt(instance_seg_ckpt, tmp_path)
     checkpoint = load_registered_checkpoint(instance_seg_ckpt, project=tmp_path)
     admitted = checkpoint_admission(checkpoint, images_dir)
     r = run_full_frame_evaluation(checkpoint, admitted,
-                                  stated=Stated(tile_size=TILE, overlap=0.2,
+                                  stated=Stated(tile=True, tile_size=TILE, overlap=0.2,
                                                 **SAMPLE_DETECTOR_PASS))
     samples = admitted.every_sample()
     trained = build_dataset("instance_seg", scope=admitted.scope, samples=samples,

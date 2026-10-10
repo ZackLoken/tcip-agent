@@ -52,7 +52,7 @@ def prepare_run_context(
     partition = cast(dict, observation.resolution)["partition"]
     train_ds, val_ds = recorded_datasets(
         task, spec.data, partition_samples(partition), partition_spatial(partition),
-        run_transforms(spec))
+        run_transforms(spec), run_obj.layout)
     train_loader, val_loader = run_loaders(run_obj, train_ds, val_ds)
     if val_loader is None and task in DETECTION_TASKS:
         logger.warning(

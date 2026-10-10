@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests._chain_fixtures import BESPOKE_DETECTION, training_config
+from tests._chain_fixtures import DETECTION_SOURCE, training_config
 from tests._training_values import evaluation_block, sweep_space, tune_arguments
 from tests._verified_checkpoint_fixtures import opened_sweep
 
@@ -210,7 +210,7 @@ def test_run_hyperparameter_search_refuses_split_draws_when_a_bound_selection_wo
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran))
 
     _root, selection_dir = one_foreground_group_selection(tmp_path)
-    cfg = training_config({"builder": BESPOKE_DETECTION, "task": "detection"},
+    cfg = training_config(DETECTION_SOURCE,
                           {"split": {"selection_dir": str(selection_dir), "seed": 0}})
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=cfg, param_space=sweep_space(), n_trials=1,
@@ -557,7 +557,7 @@ def _bound_hpo_config(selection_dir, *, auto_val: bool | None = None) -> dict:
     data: dict = {"split": {"selection_dir": str(selection_dir), "seed": 42}}
     if auto_val is not None:
         data["auto_val"] = auto_val
-    return training_config({"builder": BESPOKE_DETECTION, "task": "detection"}, data)
+    return training_config(DETECTION_SOURCE, data)
 
 
 def test_run_hyperparameter_search_admits_split_draws_bound_to_a_selection_and_sets_the_redraw_flag(
@@ -1343,7 +1343,7 @@ def _one_source_tiled_cfg(images_dir) -> dict:
     into ``spatial_single_source_split`` when tiling is on and fewer than two stems are
     admitted, given a ``model_source`` block the way ``real_hpo_base_config`` gives its own."""
     return training_config(
-        {"builder": BESPOKE_DETECTION, "task": "detection"},
+        DETECTION_SOURCE,
         {"images_dir": str(images_dir), "scope": {"subject": "bud"},
          "auto_val": True, "split": {"val_ratio": 0.2, "seed": 1},
          # sliver_frac stated: a fixture this small derives no box-size spread.
@@ -1433,13 +1433,14 @@ def test_split_draws_over_one_bespoke_source_refuse_the_validation_they_cannot_d
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
     import tcip_mcp.tools.training_tools as tt
-    from tests.test_dataset_source_seam import BESPOKE_DS
+    from tests.test_dataset_source_seam import BESPOKE_DS, BESPOKE_DS_FILE
     from tests.test_training_autoval import _big_single_source
 
     images_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     cfg = _one_source_tiled_cfg(images_dir)
     untiled = {k: v for k, v in cfg["data"].items() if k != "tiling"}
-    cfg["data"] = {**untiled, "dataset_source": {"builder": BESPOKE_DS}}
+    cfg["data"] = {**untiled, "dataset_source": {"builder": BESPOKE_DS,
+                                                 "source_files": [BESPOKE_DS_FILE]}}
     # One source holds nothing out, so the run selects on its training loss.
     cfg["evaluation"] = evaluation_block(selection_metric="loss")
 

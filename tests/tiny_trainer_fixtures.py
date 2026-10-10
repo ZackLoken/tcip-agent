@@ -14,6 +14,8 @@ import torch.nn as nn
 from torch.nn import functional
 from torch.utils.data import Dataset
 
+from tests import REPO_ROOT
+
 
 class ConstantImageDataset(Dataset):
     """Non-square single-channel frames, one intensity per frame, each paired with a target under
@@ -232,9 +234,11 @@ def build_always_diverged_model(*, in_chans: int = 1, cancel_at_call: int | None
 
 def trainer_run(config: dict, output_dir, *, project, has_val_loader: bool, id: str = "run"):
     """A ``TrainRun`` of ``project`` over ``config`` writing into ``output_dir`` at the objective
-    the launcher's own producer resolves for it (``generic_trainer.resolve_objective``)."""
+    the launcher's own producer resolves for it (``generic_trainer.resolve_objective``),
+    importing from the layout its admission stages (``model_build.staged_sources``)."""
     from pathlib import Path
 
+    from tcip_mcp.pipelines.model_build import staged_sources
     from tcip_mcp.pipelines.schemas import train_config
     from tcip_mcp.pipelines.training.generic_trainer import resolve_objective
     from tcip_mcp.pipelines.training.run_registry import TrainRun
@@ -243,7 +247,8 @@ def trainer_run(config: dict, output_dir, *, project, has_val_loader: bool, id: 
     return TrainRun(id=id, spec=spec,
                     objective=resolve_objective(spec, project=Path(project),
                                                 has_val_loader=has_val_loader),
-                    project=Path(project), output_dir=str(output_dir))
+                    project=Path(project), layout=staged_sources(spec, Path(project)).layout,
+                    output_dir=str(output_dir))
 
 
 def count_validations(monkeypatch) -> list[str]:
@@ -264,12 +269,16 @@ def count_validations(monkeypatch) -> list[str]:
     return seen
 
 
-MEAN_INTENSITY_REGRESSOR = "tests.tiny_trainer_fixtures:build_mean_intensity_regressor"
-MEAN_INTENSITY_CLASSIFIER = "tests.tiny_trainer_fixtures:build_mean_intensity_classifier"
-ALWAYS_DIVERGED_MODEL = "tests.tiny_trainer_fixtures:build_always_diverged_model"
-NAN_EVAL_REGRESSOR = "tests.tiny_trainer_fixtures:build_nan_eval_regressor"
-TWO_RATE_REGRESSOR = "tests.tiny_trainer_fixtures:build_two_rate_regressor"
-COUNTING_REGRESSOR = "tests.tiny_trainer_fixtures:build_counting_regressor"
+MEAN_INTENSITY_REGRESSOR = "tiny_trainer_fixtures:build_mean_intensity_regressor"
+MEAN_INTENSITY_CLASSIFIER = "tiny_trainer_fixtures:build_mean_intensity_classifier"
+ALWAYS_DIVERGED_MODEL = "tiny_trainer_fixtures:build_always_diverged_model"
+NAN_EVAL_REGRESSOR = "tiny_trainer_fixtures:build_nan_eval_regressor"
+TWO_RATE_REGRESSOR = "tiny_trainer_fixtures:build_two_rate_regressor"
+COUNTING_REGRESSOR = "tiny_trainer_fixtures:build_counting_regressor"
+TINY_TRAINER_FILE = str(REPO_ROOT / "tests" / "tiny_trainer_fixtures.py")
+"""The file of ``tests.tiny_trainer_fixtures`` in this repository, which a config naming one of
+its builders declares under ``model_source.source_files``; never this module's own
+``__file__``, which names a run's snapshot copy once a run has bound the module there."""
 
 REGRESSOR_ADAMW = {"name": "adamw", "backbone_lr": 0.05, "head_lr": 0.05, "weight_decay": 0.0}
 """The AdamW section the one-weight regressors here train at."""
@@ -284,7 +293,7 @@ def regressor_config(epochs: int = 1, *, builder: str = MEAN_INTENSITY_REGRESSOR
     :data:`REGRESSOR_ADAMW`, no epoch checkpoints, with ``overrides`` in place of their keys."""
     from tests._chain_fixtures import training_config
 
-    source: dict = {"builder": builder, "task": "regression"}
+    source: dict = {"builder": builder, "source_files": [TINY_TRAINER_FILE], "task": "regression"}
     if builder_kwargs is not None:
         source["builder_kwargs"] = builder_kwargs
     return training_config(
@@ -302,7 +311,7 @@ def classifier_config(epochs: int, **overrides) -> dict:
 
     return training_config(
         {"builder": MEAN_INTENSITY_CLASSIFIER, "builder_kwargs": {"init_weight": -1.0},
-         "task": "classification"},
+         "source_files": [TINY_TRAINER_FILE], "task": "classification"},
         {"num_channels": 1, "num_classes": 2, "scope": {}},
         **{"batch_size": 3, "stages": [{"freeze_to": 0, "epochs": epochs}],
            "optimizer": {"name": "adamw", "backbone_lr": 0.2, "head_lr": 0.2,
@@ -342,8 +351,8 @@ def capture_model(monkeypatch, sink: list) -> None:
 
     real_build = gt.build_from_model_source
 
-    def build(source, dims):
-        model = real_build(source, dims)
+    def build(source, plan, dims):
+        model = real_build(source, plan, dims)
         sink.append(model)
         return model
 

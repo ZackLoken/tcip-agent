@@ -113,13 +113,13 @@ def test_a_coco_import_writes_every_document_or_none(tmp_path: Path, monkeypatch
                         lambda *a, **k: {**real_entry(*a, **k), "unencodable": float("nan")})
 
     with pytest.raises(ts.StoreError):
-        import_coco_document(document, root, date=DATE)
+        import_coco_document(document, root, date=DATE, project=root)
 
     assert [ts.exists(image_label_key(p)) for p in images] == [False] * len(images)
     assert "coco_document_imported" not in _audit_tools(root)
 
     monkeypatch.setattr(audit, "audit_entry", real_entry)
-    imported = import_coco_document(document, root, date=DATE)
+    imported = import_coco_document(document, root, date=DATE, project=root)
 
     assert imported["written"] == list(STEMS)
     assert [len(json_io.read_label_document(image_label_key(p)).annotations)
@@ -137,7 +137,7 @@ def test_an_import_refuses_over_a_present_record_whatever_it_holds(tmp_path: Pat
     ts.replace(image_label_key(images[-1]), None)
 
     with pytest.raises(ValueError, match=r"already holds a label document for \['c'\]"):
-        import_coco_document(_coco(tmp_path, images), root, date=DATE)
+        import_coco_document(_coco(tmp_path, images), root, date=DATE, project=root)
 
     assert ts.read(image_label_key(images[-1])) is None
 

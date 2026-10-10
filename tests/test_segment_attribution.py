@@ -23,7 +23,7 @@ from tcip_mcp.pipelines.postprocessing.segment_attribution import (
     tie_segments_to_plants,
 )
 
-from tests._geotiff_fixtures import write_canonical_dataset_raster
+from tests._geotiff_fixtures import geotransform_of_file, write_canonical_dataset_raster
 from tests._mapping_fixtures import POSITION_ERROR_M
 from tests._producer_fixtures import image_label_key, label_image
 
@@ -33,7 +33,7 @@ WIDTH = HEIGHT = 64
 def _setup(tmp_path: Path) -> tuple[Path, Path, OrthomosaicGeoreference, dict]:
     dataset_root = tmp_path / "ds"
     raster_path = write_canonical_dataset_raster(dataset_root, width=WIDTH, height=HEIGHT)
-    georef = OrthomosaicGeoreference.from_file(raster_path)
+    georef = OrthomosaicGeoreference(geotransform_of_file(raster_path))
     raster_identity = {"width": WIDTH, "height": HEIGHT}
     return dataset_root, raster_path, georef, raster_identity
 

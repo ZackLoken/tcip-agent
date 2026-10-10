@@ -9,8 +9,6 @@ from __future__ import annotations
 
 import pytest
 
-from tcip_mcp.pipelines.model_build import STATE_DICT_KEY
-
 
 # ── capture_env records code + library fingerprint ────────────────────────────
 
@@ -42,34 +40,34 @@ def test_the_producer_of_a_completed_runs_checkpoint_is_that_run(tmp_path):
 
 
 def test_the_producer_of_a_foreign_checkpoint_names_no_run(tmp_path):
-    """A registered checkpoint with no producing experiment (explicit-mode registration, no
-    stamp) names its digest and leaves ``experiment_id`` null rather than failing."""
-    torch = pytest.importorskip("torch")
-    from tcip_mcp.model_registry import ModelRegistry, load_registered_checkpoint
+    """A checkpoint a run of the project wrote beside its deliverable, whose digest no completion
+    names, registered in explicit mode, names its digest and leaves ``experiment_id`` null rather
+    than failing."""
+    pytest.importorskip("torch")
+    from tcip_mcp.model_registry import load_registered_checkpoint
+    from tests._verified_checkpoint_fixtures import foreign_checkpoint
 
-    ckpt = tmp_path / "foreign.pt"
-    torch.save({STATE_DICT_KEY: {}}, ckpt)
-    ModelRegistry(str(tmp_path)).register_model("foreign", str(ckpt))
-
-    producer = load_registered_checkpoint(ckpt, project=tmp_path).producer
-    assert producer["checkpoint_sha256"]       # the digest still recorded
-    assert producer["experiment_id"] is None   # no run -> honest null, not a failure
+    producer = load_registered_checkpoint(foreign_checkpoint(tmp_path), project=tmp_path).producer
+    assert producer["checkpoint_sha256"]
+    assert producer["experiment_id"] is None
 
 
 def test_a_payloads_own_experiment_id_names_no_producer(tmp_path):
     """A checkpoint payload that states an ``experiment_id`` of its own is a claim nothing
     answers for: the producer is only ever the run whose final status names the digest, so a
-    foreign checkpoint resolves none, whatever its payload says."""
-    torch = pytest.importorskip("torch")
-    from tcip_mcp.model_registry import ModelRegistry, load_registered_checkpoint
+    checkpoint a run saved through its own writer with that field beside its weights, whose
+    digest no completion names, resolves none, whatever its payload says."""
+    pytest.importorskip("torch")
+    from tcip_mcp.model_registry import load_registered_checkpoint
+    from tests._verified_checkpoint_fixtures import register_checkpoint, secondary_checkpoint
 
-    ckpt = tmp_path / "stamped.pt"
-    torch.save({STATE_DICT_KEY: {}, "experiment_id": "expStamped"}, ckpt)
-    ModelRegistry(str(tmp_path)).register_model("stamped", str(ckpt))
+    ckpt = secondary_checkpoint(tmp_path, fixture_state={"experiment_id": "expStamped"})
+    register_checkpoint(tmp_path, ckpt, name="stamped")
 
-    producer = load_registered_checkpoint(ckpt, project=tmp_path).producer
-    assert producer["experiment_id"] is None
-    assert producer["checkpoint_sha256"]
+    loaded = load_registered_checkpoint(ckpt, project=tmp_path)
+    assert loaded.payload["experiment_id"] == "expStamped"
+    assert loaded.producer["experiment_id"] is None
+    assert loaded.producer["checkpoint_sha256"]
 
 
 # ── draw_splits records each sample's digest and the seed ─────────────────────

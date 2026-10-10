@@ -112,7 +112,6 @@ def check_registry(root: Path, findings: list) -> None:
         findings.append(("error", "the model registry index will not decode or read, so this "
                         f"project's registered models could not be checked at all: {exc}"))
         return
-    root_resolved = Path(root).resolve()
     for m in entries:
         # Existence resolves first; the temp-tree marker scan runs over the resolved string.
         try:
@@ -122,7 +121,7 @@ def check_registry(root: Path, findings: list) -> None:
                             f"could not be resolved: {exc}"))
             continue
         ckpt = str(resolved)
-        stray = not resolved.is_relative_to(root_resolved) and any(
+        stray = not resolved.is_relative_to(root) and any(
             marker in ckpt for marker in TEMP_TREE_MARKERS)
         if stray:
             findings.append(("error", f"registry entry {m['name']!r} points at a test/temp "
@@ -131,10 +130,10 @@ def check_registry(root: Path, findings: list) -> None:
             findings.append(("error", f"registry entry {m['name']!r} checkpoint missing: {ckpt}"))
 
     registered_shas = {m["sha256"] for m in entries}
-    for key in tcip_store.keys(PREDICTION_BUCKETS, str(root_resolved)):
+    for key in tcip_store.keys(PREDICTION_BUCKETS, str(root)):
         name = key.parts[0]
         try:
-            sha = read_bucket(root_resolved, name).producer.get("checkpoint_sha256")
+            sha = read_bucket(root, name).producer.get("checkpoint_sha256")
         except ValueError as exc:
             findings.append(("error", f"bucket {name!r}: bucket record will not read: {exc}"))
             continue
@@ -148,8 +147,6 @@ def check_registry(root: Path, findings: list) -> None:
 def check_provenance(root: Path, findings: list, *, census: dict | None) -> None:
     from tcip_annotation.json_io import LabelDocument
 
-    from tcip_mcp.experiments import run_observations
-
     unstamped = 0
     for key, doc in (census["label_reads"] if census is not None else {}).items():
         for a in doc.annotations if isinstance(doc, LabelDocument) else []:
@@ -160,15 +157,6 @@ def check_provenance(root: Path, findings: list, *, census: dict | None) -> None
                 unstamped += 1
     if unstamped:
         findings.append(("info", f"{unstamped} GT annotations carry no created_by"))
-
-    # A bespoke run's source snapshot names what it failed to capture in its run.json.
-    for run in run_observations(root):
-        source = run.record["source"]
-        if source["missing"] or source["snapshot_errors"]:
-            findings.append(("warn",
-                            f"{run.directory.relative_to(root)}: source snapshot incomplete: "
-                            f"{len(source['missing'])} missing file(s), "
-                            f"{len(source['snapshot_errors'])} import error(s)"))
 
 
 def check_state(root: Path, findings: list) -> None:
@@ -184,17 +172,16 @@ def check_state(root: Path, findings: list) -> None:
 
     from tcip_mcp.buckets import read_bucket
 
-    resolved = Path(root).resolve()
-    for key in tcip_store.keys(REVIEW_FLAGS_STORE, str(resolved)):
+    for key in tcip_store.keys(REVIEW_FLAGS_STORE, str(root)):
         try:
             read_flags(key)
         except (ValueError, StoreError) as exc:
             findings.append(("warn", f"flags record {'/'.join(key.parts)} will not read: {exc}"))
-    for key in tcip_store.keys(REVIEW_VERDICTS_STORE, str(resolved)):
+    for key in tcip_store.keys(REVIEW_VERDICTS_STORE, str(root)):
         bucket, stem = key.parts
         try:
             read_verdicts(key)
-            known = stem in read_bucket(resolved, bucket).documents
+            known = stem in read_bucket(root, bucket).documents
         except (ValueError, StoreError) as exc:
             findings.append(("warn", f"verdict shard {bucket}/{stem} will not read: {exc}"))
             continue
@@ -237,7 +224,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0], prog=prog)
     ap.add_argument("project_root", help="project directory holding images/ and .tcip/")
     args = ap.parse_args(argv)
-    root = Path(args.project_root)
+    root = Path(args.project_root).resolve()
     if not root.is_dir():
         print(f"error: not a directory: {root}")
         return 2

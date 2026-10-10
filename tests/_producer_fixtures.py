@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from tcip_mcp.dataset_layout import label_key_of as image_label_key
@@ -228,13 +229,27 @@ def run_over(
                           tiling=data.tiling, **kwargs), data.record())
 
 
+def staged_layout(project, data: Any):
+    """The layout a run of ``project`` of the bespoke detector over the data block ``data`` (a
+    dict, or a ``DataSpec``) imports from at its admission (``model_build.staged_sources``)."""
+    from tcip_mcp.pipelines.model_build import staged_sources
+    from tcip_mcp.pipelines.schemas import train_config
+    from tests._chain_fixtures import DETECTION_SOURCE, training_config
+
+    block = data if isinstance(data, dict) else data.record()
+    return staged_sources(train_config(training_config(DETECTION_SOURCE, block)),
+                          Path(project)).layout
+
+
 def train_val(project, task: str, data_cfg: dict, transforms: Any = None):
     """``split_construction.auto_train_val`` for a ``task`` run of ``project`` over ``data_cfg``
-    validated as a run's data block: ``(train_ds, val_ds, partition, resolved)``."""
+    validated as a run's data block, a dataset builder it declares imported from
+    :func:`staged_layout`: ``(train_ds, val_ds, partition, resolved)``."""
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
     from tcip_mcp.pipelines.schemas import DataSpec
 
-    return auto_train_val(project, task, DataSpec.model_validate(data_cfg), transforms)
+    data = DataSpec.model_validate(data_cfg)
+    return auto_train_val(project, task, data, transforms, staged_layout(project, data_cfg))
 
 
 def dataset_over(task: str, images_dir, ground_truth=None, **kwargs: Any):

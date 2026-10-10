@@ -8,11 +8,15 @@ primitives so a hand-rolled ``train(ctx)`` self-proves.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 import pytest
 
-from tests._chain_fixtures import BESPOKE_CLASSIFIER, BESPOKE_SEMANTIC_SEG, training_config
+from tests._chain_fixtures import (
+    BESPOKE_CLASSIFIER, BESPOKE_MODELS, BESPOKE_SEMANTIC_SEG, training_config,
+)
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
@@ -101,7 +105,7 @@ def _admitted_tree(tmp_path):
     return imgs
 
 
-TASK_MODEL = f"{__name__}:_bespoke_task_model"
+TASK_MODEL = f"{Path(__file__).stem}:_bespoke_task_model"
 """The ``model_source`` builder of :func:`_bespoke_task_model`."""
 
 
@@ -192,7 +196,8 @@ def test_preflight_smoke_blocks_broken_builder(tmp_path, monkeypatch):
 
     imgs = _admitted_tree(tmp_path)
     cfg = training_config(
-        {"builder": f"{__name__}:_broken_builder", "task": "detection"},
+        {"builder": f"{Path(__file__).stem}:_broken_builder", "source_files": [__file__],
+         "task": "detection"},
         {"images_dir": str(imgs), "scope": {"subject": "leaf"},
          "split": {"seed": 0, "val_ratio": 0.15}},
         batch_size=1, stages=[{"freeze_to": 0, "epochs": 1}])
@@ -236,7 +241,8 @@ def test_preflight_builds_and_smokes_at_the_count_the_run_resolved(tmp_path, mon
 
     images_dir, masks_dir = _three_class_masks(tmp_path / "ds")
     cfg = training_config(
-        {"builder": BESPOKE_SEMANTIC_SEG, "task": "semantic_seg"},
+        {"builder": BESPOKE_SEMANTIC_SEG, "source_files": [BESPOKE_MODELS],
+         "task": "semantic_seg"},
         {"images_dir": str(images_dir), "labels_dir": str(masks_dir),
          "split": {"seed": 0, "val_ratio": 0.15}},
         batch_size=1, stages=[{"freeze_to": 0, "epochs": 1}])
@@ -266,7 +272,8 @@ def test_preflight_smokes_a_single_class_run_within_its_own_count(tmp_path, monk
             masks_dir / f"{stem}.png"
         )
     cfg = training_config(
-        {"builder": BESPOKE_SEMANTIC_SEG, "task": "semantic_seg"},
+        {"builder": BESPOKE_SEMANTIC_SEG, "source_files": [BESPOKE_MODELS],
+         "task": "semantic_seg"},
         {"images_dir": str(images_dir), "labels_dir": str(masks_dir),
          "split": {"seed": 0, "val_ratio": 0.15}},
         batch_size=1, stages=[{"freeze_to": 0, "epochs": 1}])
@@ -278,17 +285,19 @@ def test_preflight_smokes_a_single_class_run_within_its_own_count(tmp_path, monk
     assert synthetic["smoke"]["ok"] is True, synthetic["smoke"]["issues"]
     # The same model over the run's own batch reaches the same verdict.
     from tcip_mcp.pipelines.data.split_construction import resolve_run
-    from tcip_mcp.pipelines.model_build import build_from_model_source
+    from tcip_mcp.pipelines.model_build import build_from_model_source, staged_sources
     from tcip_mcp.pipelines.model_contract import check_model_contract
     from tcip_mcp.pipelines.schemas import train_config
     from tcip_mcp.tools.training_tools import _one_real_batch
 
     spec = train_config(cfg)
-    batch, why = _one_real_batch("semantic_seg", resolve_run(spec, project=tmp_path).train_ds)
+    layout = staged_sources(spec, tmp_path).layout
+    batch, why = _one_real_batch("semantic_seg",
+                                 resolve_run(spec, layout, project=tmp_path).train_ds)
     assert batch is not None, why
     smoked = synthetic["smoke"]["dims"]
     model = build_from_model_source(
-        spec.model_source,
+        spec.model_source, layout,
         {"in_chans": smoked["in_chans"], "num_classes": smoked["num_classes"]})
     assert check_model_contract(model, "semantic_seg", sample_batch=batch)["ok"]
 
@@ -301,10 +310,11 @@ def test_preflight_smokes_bespoke_task_on_a_real_batch(tmp_path, monkeypatch):
 
     imgs = _admitted_tree(tmp_path)
     cfg = training_config(
-        {"builder": TASK_MODEL, "task": "bunch_compactness"},
+        {"builder": TASK_MODEL, "source_files": [__file__], "task": "bunch_compactness"},
         {"images_dir": str(imgs), "scope": {"subject": "leaf"},
          "split": {"seed": 0, "val_ratio": 0.15},
-         "dataset_source": {"builder": f"{__name__}:_bespoke_task_dataset"}},
+         "dataset_source": {"builder": f"{Path(__file__).stem}:_bespoke_task_dataset",
+                            "source_files": [__file__]}},
         stages=[{"freeze_to": 0, "epochs": 1}])
     r = preflight_config(tmp_path, cfg, smoke=True, overfit=True)
     assert r["valid"] is True, r["issues"]
@@ -324,15 +334,19 @@ def test_preflight_smoke_batch_matches_what_the_run_will_build(tmp_path, monkeyp
     accepting only the producer's own four names builds fine."""
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.pipelines.data.split_construction import resolve_run
+    from tcip_mcp.pipelines.model_build import staged_sources
     from tcip_mcp.pipelines.schemas import train_config
     from tcip_mcp.tools.training_tools import _one_real_batch
 
     imgs = _admitted_tree(tmp_path)
     data = {"images_dir": str(imgs), "scope": {"subject": "leaf"},
             "split": {"seed": 0, "val_ratio": 0.15},
-            "dataset_source": {"builder": f"{__name__}:_strict_bespoke_dataset"}}
-    config = training_config({"builder": TASK_MODEL, "task": "bunch_compactness"}, data)
-    resolution = resolve_run(train_config(config), project=tmp_path)
+            "dataset_source": {"builder": f"{Path(__file__).stem}:_strict_bespoke_dataset",
+                               "source_files": [__file__]}}
+    config = training_config({"builder": TASK_MODEL, "source_files": [__file__],
+                              "task": "bunch_compactness"}, data)
+    spec = train_config(config)
+    resolution = resolve_run(spec, staged_sources(spec, tmp_path).layout, project=tmp_path)
 
     batch, why = _one_real_batch("bunch_compactness", resolution.train_ds)
     assert why is None, why
@@ -348,10 +362,11 @@ def test_preflight_blocks_when_no_batch_can_be_built(tmp_path, monkeypatch):
     imgs = _admitted_tree(tmp_path)
     # Structurally valid, but the dataset cannot produce an item.
     cfg = training_config(
-        {"builder": TASK_MODEL, "task": "bunch_compactness"},
+        {"builder": TASK_MODEL, "source_files": [__file__], "task": "bunch_compactness"},
         {"images_dir": str(imgs), "scope": {"subject": "leaf"},
          "split": {"seed": 0, "val_ratio": 0.15},
-         "dataset_source": {"builder": f"{__name__}:_unbuildable_dataset"}},
+         "dataset_source": {"builder": f"{Path(__file__).stem}:_unbuildable_dataset",
+                            "source_files": [__file__]}},
         stages=[{"freeze_to": 0, "epochs": 1}])
     r = preflight_config(tmp_path, cfg, smoke=True)
     assert r["valid"] is False
@@ -366,7 +381,8 @@ def test_preflight_blocks_when_no_batch_can_be_built(tmp_path, monkeypatch):
 def _ctx_for(project, task: str, builder: str, data: dict):
     """A context over a run of ``project`` whose table ground truth recorded the empty scope
     admission writes."""
-    config = training_config({"builder": builder, "task": task}, {"scope": {}, **data})
+    config = training_config({"builder": builder, "source_files": [__file__, BESPOKE_MODELS],
+                              "task": task}, {"scope": {}, **data})
     run = trainer_run(config, "out", project=project, has_val_loader=False, id="auto-run-6")
     return TrainContext(run=run, train_loader=None, val_loader=None)
 
@@ -392,6 +408,8 @@ def test_ctx_smokes_a_bespoke_dataset_run_at_the_count_its_data_states(tmp_path,
     from PIL import Image
 
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
+    from tcip_mcp.pipelines.model_build import staged_sources
+    from tcip_mcp.pipelines.schemas import train_config
     from tcip_mcp.pipelines.training.generic_trainer import run_loaders
 
     monkeypatch.chdir(tmp_path)
@@ -409,12 +427,16 @@ def test_ctx_smokes_a_bespoke_dataset_run_at_the_count_its_data_states(tmp_path,
 
     data = {"images_dir": str(imgs), "labels_dir": str(table), "num_classes": 3,
             "split": {"seed": 0, "val_ratio": 0.15},
-            "dataset_source": {"builder": f"{__name__}:_bespoke_classification_dataset"}}
+            "dataset_source": {"builder": f"{Path(__file__).stem}:_bespoke_classification_dataset",
+                               "source_files": [__file__]}}
+    config = training_config({"builder": BESPOKE_CLASSIFIER, "source_files": [BESPOKE_MODELS],
+                              "task": "classification"}, data)
+    layout = staged_sources(train_config(config), tmp_path).layout
     train_ds, _val_ds, _partition, resolved = auto_train_val(
-        tmp_path, "classification", DataSpec.model_validate(data), None)
+        tmp_path, "classification", DataSpec.model_validate(data), None, layout)
     assert (resolved.num_channels, resolved.num_classes) == (3, 3)
-    config = training_config({"builder": BESPOKE_CLASSIFIER, "task": "classification"},
-                             resolved.record())
+    config = training_config({"builder": BESPOKE_CLASSIFIER, "source_files": [BESPOKE_MODELS],
+                              "task": "classification"}, resolved.record())
     run = trainer_run(config, tmp_path / "out", project=tmp_path, has_val_loader=False,
                       id="auto-run-62")
     loader, _ = run_loaders(run, train_ds, None)

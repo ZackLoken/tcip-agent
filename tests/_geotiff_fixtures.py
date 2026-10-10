@@ -68,7 +68,7 @@ def write_geotiff(
         (34735, "H", len(keys), keys, False),
     ]
     if include_transformation_tag:
-        # Presence alone is what read_geotransform refuses on, regardless of the values it
+        # Presence alone is what the tag read refuses on, regardless of the values it
         # carries; a flat placeholder is exactly as effective as a computed affine here.
         extratags.append((34264, "d", 16, tuple(1.0 for _ in range(16)), False))
     kwargs: dict = {}
@@ -77,6 +77,15 @@ def write_geotiff(
     if rowsperstrip is not None:
         kwargs["rowsperstrip"] = rowsperstrip
     tifffile.imwrite(str(path), arr, photometric="rgb", extratags=extratags, **kwargs)
+
+
+def geotransform_of_file(path: Path):
+    """The geotransform ``path``'s header states, read through the platform's one header read;
+    raises the reason that read refused."""
+    from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import OrthomosaicGeoreference
+    from tcip_mcp.pipelines.raster_source import SourceHeader
+
+    return OrthomosaicGeoreference.of(SourceHeader(path).georeference).transform
 
 
 def write_canonical_dataset_raster(

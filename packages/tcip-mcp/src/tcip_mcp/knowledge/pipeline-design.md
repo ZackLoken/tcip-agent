@@ -106,9 +106,11 @@ Tailor the architecture to the data in hand, derived rather than pinned:
 
 Three seams support bespoke work; the platform guarantees integrity around it:
 
-- `pipelines.data.datasets.build_dataset(task, dataset_source, **kwargs)` builds from a
-  `dataset_source`: an *importable* builder you wrote (`{"builder": "my_module:build_ds",
-  "builder_kwargs": {...}, "source_files": [...]}`, mirroring `model_source`). It receives the
+- `pipelines.data.datasets.build_dataset(task, (dataset_source, layout), **kwargs)` builds from
+  a `dataset_source`: an *importable* builder you wrote (`{"builder": "my_module:build_ds",
+  "builder_kwargs": {...}, "source_files": [...]}`, mirroring `model_source`), imported from
+  the run's layout (`ctx.build_dataset(dataset_source=...)` pairs it with the run's own). It
+  receives the
   samples the platform's own producer named for the side being built and the class space they
   were admitted under (`samples` / `scope` / `transforms` / `task`), each sample carrying the
   logical image its pixels are read from as `image` (a `BandGroupRef` for a grouped capture),
@@ -127,11 +129,24 @@ Three seams support bespoke work; the platform guarantees integrity around it:
   built-in loader is not a task with no producer: the platform admits by the shape of the ground
   truth (the images' own label documents, or the masks or table `data.labels_dir` names), whatever
   the task, so your builder receives the same samples a built-in loader would. Registry-free, imported like any module, never `exec`'d.
-- `pipelines.model_build.build_from_model_source(spec.model_source, dims)` builds from a validated
-  config's `model_source`: an *importable* builder you wrote (`{"builder": "my_module:build_net",
-  "builder_kwargs": {...}, "source_files": [...], "task": "detection"}`, `builder` and `task`
-  required). It is imported, never `exec`'d. The platform
-  hands your builder the run's width as `in_chans` (`data.num_channels`, the band count its
+- `pipelines.model_build.build_from_model_source(spec.model_source, layout, dims)` builds from a
+  validated config's `model_source`: an *importable* builder you wrote (`{"builder":
+  "my_module:build_net", "builder_kwargs": {...}, "source_files": [...], "task": "detection"}`,
+  `builder` and `task` required), imported from `layout`, the run's declared files laid out under
+  one root (`model_build.SourceLayout`; `ctx.build_model` hands it the run's own). `source_files`
+  names the files your run imports, the builder's own module among them and a
+  `training_source` loop's module too; a builder whose module none of them is refuses, and so
+  does a module inside a package whose `__init__.py` is not declared beside it. Preflight
+  imports from the same layout the run will hold. A declared module's own imports resolve when
+  it is imported: once another run's sources are imported in the same process, an import a
+  function makes at call time binds that run's copy of the name, or refuses. Each run copies the
+  declared files into its own
+  directory, and the run and every checkpoint it writes import those copies. A checkpoint carries
+  the digest of the copies' contents its run recorded, so it loads only in a project holding
+  that run: its own, or another one the whole run was carried into (`archive_project`, then
+  `import_project`); copied alone beside another run of the same file names, it refuses. It is
+  imported, never `exec`'d.
+  The platform hands your builder the run's width as `in_chans` (`data.num_channels`, the band count its
   sources carry) and its head sizes: over label documents, `num_classes`, the subjects the scope
   isolates, and `attributes`, the scope's attribute records when it declares any, one
   per-instance head per record sized by its values (`build_detector` takes them and adds those
@@ -163,9 +178,10 @@ Three seams support bespoke work; the platform guarantees integrity around it:
   `ctx.default_train()` is one convenience, not a requirement: call it, extend it, or replace it
   entirely.
 
-  `state` reserves one top-level key, `config` (always this run's own launch config, the record
-  every publishing door reads a run's `data.scope` from). A `state` carrying it refuses; name a
-  bespoke loop's own field something else.
+  `state` reserves the keys the platform stamps every checkpoint with: `config` (this run's own
+  launch config, the record every publishing door reads a run's `data.scope` from) and
+  `source_snapshot` (the digest of the source snapshot this run took). A `state` carrying either
+  refuses; name a bespoke loop's own field something else.
 
   Registration needs one more fact your loop states explicitly. A checkpoint your loop saved via
   `ctx.save_checkpoint(state, "model_best")` or `"model_final"` is the deliverable once your loop

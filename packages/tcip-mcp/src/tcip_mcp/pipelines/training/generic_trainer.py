@@ -31,6 +31,7 @@ from tcip_mcp.pipelines.model_contract import DETECTION_TASKS, TCIPModel
 from tcip_mcp.pipelines.model_build import (
     CONFIG_KEY,
     METRICS_KEY,
+    SNAPSHOT_KEY,
     STATE_DICT_KEY,
     build_from_model_source,
     recorded_model_dims,
@@ -292,11 +293,15 @@ def write_checkpoint(payload: dict, path: Path) -> Path:
     return path
 
 
-def checkpoint_config(spec: TrainConfigSchema) -> dict:
-    """The config every checkpoint of a run under ``spec`` carries: ``spec`` as it records itself
+def checkpoint_stamp(run: TrainRun) -> dict:
+    """What every checkpoint of ``run`` carries beside its own state: under ``CONFIG_KEY`` its
+    spec (``TrainRun.spec``, its source files its own snapshot copies) as it records itself
     (``TrainConfigSchema.record``) without its data locations (``experiments.DATA_PATHS``), which
-    the run's own record keeps."""
-    from tcip_mcp.experiments import DATA_PATHS
+    the run's own record keeps, and every other path (``experiments.CONFIG_PATHS``) stored against
+    the run's project as its run record stores it; under ``SNAPSHOT_KEY`` the digest of the source
+    snapshot its run took (``SourceLayout.snapshot``)."""
+    from tcip_mcp.experiments import CONFIG_PATHS, DATA_PATHS
+    from tcip_mcp.registry_paths import recorded_paths
 
     paths: dict = {}
     for field in DATA_PATHS:
@@ -305,7 +310,9 @@ def checkpoint_config(spec: TrainConfigSchema) -> dict:
         for parent in parents:
             node = node.setdefault(parent, {})
         node[leaf] = True
-    return spec.record(exclude={"data": paths})
+    return {CONFIG_KEY: recorded_paths(run.spec.record(exclude={"data": paths}), CONFIG_PATHS,
+                                       run.project),
+            SNAPSHOT_KEY: run.layout.snapshot}
 
 
 def _checkpoint_metrics(metrics: dict) -> dict:
@@ -355,14 +362,15 @@ def _epoch_state(model, optimizer, *, selection: float, stage: int, epoch: int,
 
 
 def _save_checkpoint(
-    path: Path, *, model, optimizer, scheduler, scaler, loader_generator, config: dict,
+    path: Path, *, model, optimizer, scheduler, scaler, loader_generator, stamp: dict,
     stage_idx: int, stage_epoch: int, run: "TrainRun", best: dict | None,
     stage_best: dict | None, warmup_groups: list[dict] | None,
     es_best: float, es_counter: int, global_step: int, metrics: dict,
 ) -> None:
-    """Write a resumable periodic checkpoint carrying the run's config, its current training
-    state (:func:`capture_training_state`, the same representation a stage's best is held in)
-    and the resume state (:class:`_ResumeState`)."""
+    """Write a resumable periodic checkpoint carrying the run's ``stamp``
+    (:func:`checkpoint_stamp`), its current training state (:func:`capture_training_state`, the
+    same representation a stage's best is held in) and the resume state
+    (:class:`_ResumeState`)."""
     state = _ResumeState(
         scheduler_state_dict=scheduler.state_dict(),
         scaler_state_dict=scaler.state_dict() if scaler is not None else None,
@@ -372,7 +380,7 @@ def _save_checkpoint(
         global_step=global_step, **capture_rng_state(loader_generator),
     )
     write_checkpoint({
-        **capture_training_state(model, optimizer), **vars(state), CONFIG_KEY: config,
+        **capture_training_state(model, optimizer), **vars(state), **stamp,
         METRICS_KEY: _checkpoint_metrics(metrics),
     }, path)
 
@@ -600,7 +608,7 @@ def train(
     Every key below is read from ``run.spec``, the batch size, confidence and regime from what
     the run reads (``TrainRun.reads``; for a config naming its own loop, the regime its
     ``default_trainer_regime`` states, refusing naming whatever is unstated), and its checkpoints
-    carry that spec (:func:`checkpoint_config`):
+    carry that spec and the run's source snapshot (:func:`checkpoint_stamp`):
 
     - ``device`` (str, default cuda-if-available else cpu)
     - ``seed`` (int | None), ``deterministic`` (bool, default False), RNG seeding before model
@@ -640,7 +648,6 @@ def train(
     written once as ``model_best.pt`` beside ``model_final.pt``, the last epoch's weights; a
     diverged run writes neither. ``run.best_metric`` is the held best epoch's selection value.
     """
-    config = checkpoint_config(run.spec)
     run.status = "running"
     run.start_time = time.time()
     higher_is_better = run.objective["higher_is_better"]
@@ -658,6 +665,7 @@ def train(
         stages, optimizer_spec, scheduler_spec, ckpt_every = regime
         out_dir = Path(run.output_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
+        stamp = checkpoint_stamp(run)
 
         device = run_device(spec)
 
@@ -668,7 +676,7 @@ def train(
 
         task = spec.model_source.task
         dims = recorded_model_dims(spec)
-        model = build_from_model_source(spec.model_source, dims)
+        model = build_from_model_source(spec.model_source, run.layout, dims)
         model.to(device)
         _validate_input_channels(dims["in_chans"], train_loader)
 
@@ -959,7 +967,7 @@ def train(
                     _save_checkpoint(
                         checkpoint_path(out_dir, f"checkpoint_epoch_{run.current_epoch}"),
                         model=model, optimizer=optimizer, scheduler=scheduler, scaler=scaler,
-                        loader_generator=loader_generator, config=config, stage_idx=stage_idx,
+                        loader_generator=loader_generator, stamp=stamp, stage_idx=stage_idx,
                         stage_epoch=epoch + 1, run=run, best=best, stage_best=stage_best,
                         warmup_groups=warmup_groups, es_best=es_best, es_counter=es_counter,
                         global_step=global_step, metrics=epoch_metrics,
@@ -980,11 +988,11 @@ def train(
             if best is not None:
                 run.saved["model_best"] = write_checkpoint(
                     {**{key: best[key] for key in (STATE_DICT_KEY, METRICS_KEY, "stage", "epoch")},
-                     CONFIG_KEY: config}, checkpoint_path(out_dir, "model_best"))
+                     **stamp}, checkpoint_path(out_dir, "model_best"))
             last_epoch_metrics = run.metrics_history[-1] if run.metrics_history else {}
             run.saved["model_final"] = write_checkpoint({
                 STATE_DICT_KEY: model.state_dict(),
-                CONFIG_KEY: config,
+                **stamp,
                 METRICS_KEY: _checkpoint_metrics(last_epoch_metrics),
             }, checkpoint_path(out_dir, "model_final"))
 

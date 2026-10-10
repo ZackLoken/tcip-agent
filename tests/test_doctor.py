@@ -62,10 +62,10 @@ def test_doctor_help_prints_the_dispatchers_prog_argument(capsys):
 def _register_absent_checkpoint(root: Path, name: str, checkpoint_path: Path) -> None:
     """A registry entry, written by the registry's own producer, naming a checkpoint file that
     no longer exists: registered while it did, then deleted."""
-    from tests._verified_checkpoint_fixtures import checkpoint_file
+    from tests._verified_checkpoint_fixtures import produced_checkpoint
 
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
-    checkpoint_file(checkpoint_path, f"{name} weights")
+    produced_checkpoint(checkpoint_path, f"{name} weights")
     ModelRegistry(str(root)).register_model(name, str(checkpoint_path))
     checkpoint_path.unlink()
 
@@ -116,27 +116,6 @@ def test_doctor_flags_a_trait_record_that_will_not_read(tmp_path):
     assert res.returncode == 2  # errors present
     assert "'unicorn' will not read" in res.stdout
     assert "unicorn_match" in res.stdout
-
-
-def test_doctor_flags_incomplete_source_snapshot(tmp_path):
-    """A bespoke run's source snapshot that failed to capture a declared file is
-    self-describing (``missing``/``snapshot_errors``); ``tcip doctor`` surfaces it rather than
-    the manifest reading as complete."""
-    root = _clean_project(tmp_path)
-
-    from tests._verified_checkpoint_fixtures import (
-        BUILT_DETECTOR, detection_config, fixture_data_dir, opened_run,
-    )
-
-    opened_run(root, detection_config(
-        fixture_data_dir(root, "exp1"),
-        model_source={**BUILT_DETECTOR, "source_files": ["agent_helper.py"]}),
-        experiment_id="exp1")
-    new_project(root)
-
-    res = run_tcip("doctor", [str(root)])
-    assert res.returncode == 1  # warning only, no error
-    assert "source snapshot" in res.stdout and "1 missing file" in res.stdout
 
 
 def _clean_project(tmp_path: Path) -> Path:
@@ -212,13 +191,13 @@ def test_registry_findings_are_read_through_the_registrys_own_entry_shape(tmp_pa
     root = _layout_project(tmp_path, "2026-03-04")
     ckpt_dir = tmp_path / "checkpoints"
     ckpt_dir.mkdir()
-    from tests._verified_checkpoint_fixtures import checkpoint_file
+    from tests._verified_checkpoint_fixtures import produced_checkpoint
 
     registry = ModelRegistry(str(root))
     paths = {}
     for name, payload in (("currant_bud_detector_v1", "weights"),
                           ("chestnut_burr_counter_v3", "other weights")):
-        ckpt = checkpoint_file(ckpt_dir / f"{name}.pt", payload)
+        ckpt = produced_checkpoint(ckpt_dir / f"{name}.pt", payload)
         registry.register_model(name=name, checkpoint_path=str(ckpt), metrics={})
         paths[name] = ckpt
     for ckpt in paths.values():
@@ -258,11 +237,11 @@ def test_a_checkpoint_under_a_temp_rooted_project_is_not_pollution(tmp_path):
     resolving inside the project is never pollution merely because the project's own location
     carries a temp-tree marker: only a checkpoint the root does not contain is scanned."""
     root = _layout_project(tmp_path, "2026-03-04")
-    from tests._verified_checkpoint_fixtures import checkpoint_file
+    from tests._verified_checkpoint_fixtures import produced_checkpoint
 
     ckpt_dir = root / ".tcip" / "models"
     ckpt_dir.mkdir(parents=True)
-    checkpoint_file(ckpt_dir / "m.pt", "weights")
+    produced_checkpoint(ckpt_dir / "m.pt", "weights")
     ModelRegistry(str(root)).register_model(
         name="m", checkpoint_path=str(ckpt_dir / "m.pt"))
 

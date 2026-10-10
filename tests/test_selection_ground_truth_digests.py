@@ -136,7 +136,10 @@ def test_a_document_emptied_after_its_admission_never_trains_as_empty(
     data = DataSpec.model_validate({"images_dir": str(images_dir), "scope": {"subject": SUBJECT},
                                     "split": {"seed": 0, "val_ratio": 0.15}})
 
-    train, val, _partition, _resolved = auto_train_val(tmp_path, "detection", data, None)
+    from tests._producer_fixtures import staged_layout
+
+    train, val, _partition, _resolved = auto_train_val(tmp_path, "detection", data, None,
+                                                       staged_layout(tmp_path, {}))
 
     (key,) = [k for ds in (train, val) for k in ds.stems if Path(k).stem == "a"]
     held = next(ds for ds in (train, val) if key in ds.stems)

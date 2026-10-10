@@ -208,20 +208,23 @@ def test_evaluate_model_reads_its_loader_at_the_checkpoints_own_width(tmp_path, 
     assert "no band count" in r["error"], r
 
 
-def _detections_as_ground_truth(payload, images_dir, *, subject: str, limit: int = 20):
+def _detections_as_ground_truth(checkpoint, images_dir, *, subject: str, limit: int = 20):
     """Write each image's own strongest detections back as its ground truth, so a metric over this
-    fixture is sensitive to which detections the model is allowed to emit. The checkpoint's model
-    is read with its score floor removed so that it returns detections to write back.
+    fixture is sensitive to which detections the model is allowed to emit. The registered
+    ``checkpoint``'s model, built from its own spec, is read with its score floor removed so that
+    it returns detections to write back.
     """
     from tcip_annotation.state import Annotation, BBox
 
     from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
-    from tcip_mcp.pipelines.model_build import STATE_DICT_KEY
+    from tcip_mcp.pipelines.model_build import (
+        STATE_DICT_KEY, build_from_model_source, recorded_model_dims,
+    )
     from tcip_mcp.pipelines.operating_point import set_detector_operating_point
-    from tests._chain_fixtures import built_model
 
-    model = built_model(payload[CONFIG_KEY])
-    model.load_state_dict(payload[STATE_DICT_KEY])
+    model = build_from_model_source(checkpoint.spec.model_source, checkpoint.layout,
+                                    recorded_model_dims(checkpoint.spec))
+    model.load_state_dict(checkpoint.payload[STATE_DICT_KEY])
     model.eval()
     set_detector_operating_point(model, score_thresh=0.0)
     for image in sorted(Path(images_dir).glob("*.png")):
@@ -266,14 +269,14 @@ def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatc
     # detection and a substituted floor of 0.5 or 0.0 would not.
     ckpt = registered_checkpoint(tmp_path, model_source=declares_its_point, seed=0)
     verified = load_registered_checkpoint(ckpt, project=tmp_path)
-    _detections_as_ground_truth(verified.payload, images_dir, subject="bud")
+    _detections_as_ground_truth(verified, images_dir, subject="bud")
 
     build = model_build.build_from_model_source
     builds = []
 
-    def _spy(source, dims):
+    def _spy(source, layout, dims):
         builds.append(source)
-        return build(source, dims)
+        return build(source, layout, dims)
 
     monkeypatch.setattr(model_build, "build_from_model_source", _spy)
     monkeypatch.setattr(generic_predictor, "build_from_model_source", _spy)
@@ -296,7 +299,7 @@ def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatc
 
     torch.manual_seed(777)
     dims = model_build.recorded_model_dims(verified.spec)
-    independent_model = build(verified.spec.model_source, dims)
+    independent_model = build(verified.spec.model_source, verified.layout, dims)
     independent_model.load_state_dict(verified.payload[STATE_DICT_KEY])
     independent_model.to(recorded["device"])
     kw = recorded["kw"]

@@ -98,8 +98,7 @@ def test_auto_train_val_detection_splits(tmp_path: Path):
 
 
 def test_auto_train_val_malformed_group_by_raises(tmp_path: Path):
-    """An unrecognized split.group_by is a caller-config error and must propagate,
-    not degrade silently to (full_train_ds, None)."""
+    """An unrecognized split.group_by is a caller-config error and propagates."""
     images_dir, _all_stems = _detection_dataset(tmp_path / "ds")
     data_cfg = {
         "images_dir": str(images_dir),
@@ -436,17 +435,22 @@ def test_a_runs_band_count_is_read_over_every_source_and_a_disagreement_refuses(
 
 
 def _probe_spy(monkeypatch) -> list[str]:
-    """Every source the band-count probe is asked about, in call order."""
-    from tcip_mcp.pipelines import derivations
+    """Every source whose header's own band count is read, once per header read, in call
+    order."""
+    from functools import cached_property
+
+    from tcip_mcp.pipelines import raster_source
 
     probed: list[str] = []
-    real_probe = derivations.probe_channels
+    real_channels = raster_source.SourceHeader.channels.func
 
-    def _record(source):
-        probed.append(str(source))
-        return real_probe(source)
+    def _record(header):
+        probed.append(str(header.source))
+        return real_channels(header)
 
-    monkeypatch.setattr(derivations, "probe_channels", _record)
+    recorded = cached_property(_record)
+    recorded.__set_name__(raster_source.SourceHeader, "channels")
+    monkeypatch.setattr(raster_source.SourceHeader, "channels", recorded)
     return probed
 
 

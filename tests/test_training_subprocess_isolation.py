@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 import pytest
@@ -15,11 +17,14 @@ from tests._training_values import tune_arguments
 
 
 def _config(**keys) -> dict:
-    """A :func:`~tests._chain_fixtures.training_config` of a detection model no body builds, over
-    no data, with ``keys`` in place of theirs."""
+    """A :func:`~tests._chain_fixtures.training_config` of a detection model no body builds,
+    declaring this module for a loop of its own, over no data, with ``keys`` in place of
+    theirs."""
     from tests._verified_checkpoint_fixtures import unbuilt_source
 
-    return training_config(unbuilt_source("detection"), {}, **keys)
+    source = unbuilt_source("detection")
+    return training_config({**source, "source_files": [*source["source_files"], __file__]}, {},
+                           **keys)
 
 
 # ── persist the training run's class space ───────────────────────────
@@ -186,11 +191,14 @@ def test_ctx_should_cancel_and_dispatch_classification_honor_the_cancellation(tm
     classifies the resulting run as 'canceled', not 'completed'."""
     from tcip_mcp.experiments import request_cancel
     from tcip_mcp.pipelines.training.envelope import TrainContext, dispatch_train_body
+    from tcip_mcp.pipelines.model_build import staged_sources
     from tcip_mcp.pipelines.training.run_registry import TrainRun
 
-    run = TrainRun(id="run_ctx_cancel", spec=train_config(_config(training_source=BESPOKE_LOOP)),
+    spec = train_config(_config(training_source=BESPOKE_LOOP))
+    run = TrainRun(id="run_ctx_cancel", spec=spec,
                    objective={"selection_metric": "loss", "higher_is_better": False},
-                   project=tmp_path, output_dir=str(tmp_path))
+                   project=tmp_path, layout=staged_sources(spec, tmp_path).layout,
+                   output_dir=str(tmp_path))
     request_cancel(tmp_path)
 
     ctx = TrainContext(run=run, train_loader=None)
@@ -208,7 +216,7 @@ def _bespoke_loop(ctx) -> None:
     raise AssertionError("should_cancel() did not see the requested cancellation")
 
 
-BESPOKE_LOOP = f"{__name__}:_bespoke_loop"
+BESPOKE_LOOP = f"{Path(__file__).stem}:_bespoke_loop"
 """The ``training_source`` of :func:`_bespoke_loop`."""
 
 
@@ -263,10 +271,10 @@ def test_run_summary_surfaces_the_wall_clock_failure_the_child_wrote(tmp_path):
     """A run past its deadline stops at its next cancel poll and its own final status names the
     wall clock; no second writer is involved."""
     from tcip_mcp.experiments import observe, run_summary
-    from tests._verified_checkpoint_fixtures import finished_run
+    from tests._verified_checkpoint_fixtures import detector_declaring, finished_run
 
     run_dir = finished_run(
-        tmp_path, training_source=BESPOKE_LOOP,
+        tmp_path, model_source=detector_declaring(__file__), training_source=BESPOKE_LOOP,
         wall_clock_passed=True)
 
     result = run_summary(observe(run_dir), [], None).model_dump()
@@ -278,10 +286,10 @@ def test_a_canceled_run_reads_canceled_whatever_its_heartbeat(tmp_path, monkeypa
     """A final status is the answer once written: a canceled run never reads running or
     interrupted, however stale its heartbeat."""
     from tcip_mcp import experiments
-    from tests._verified_checkpoint_fixtures import finished_run
+    from tests._verified_checkpoint_fixtures import detector_declaring, finished_run
 
     canceled = finished_run(
-        tmp_path, training_source=BESPOKE_LOOP,
+        tmp_path, model_source=detector_declaring(__file__), training_source=BESPOKE_LOOP,
         cancel_requested=True)
 
     assert experiments.observe(canceled).state == "canceled"
@@ -311,9 +319,12 @@ def test_launched_runs_view_lists_a_run_read_from_its_directory(tmp_path):
     from tcip_mcp.tools.experiment_tools import list_experiments
     from tests._verified_checkpoint_fixtures import detection_config, log_epoch, opened_run
 
+    models = tmp_path / "code" / "my_models.py"
+    models.parent.mkdir()
+    models.write_text("", encoding="utf-8")
     run_dir = opened_run(tmp_path, detection_config(
         tmp_path / "data", model_source={"builder": "my_models:chestnut_burr_det",
-                                         "task": "detection"}),
+                                         "source_files": [str(models)], "task": "detection"}),
         experiment_id="exp-no-stamp")
     log_epoch(run_dir, 9, {"loss": 0.1})
 

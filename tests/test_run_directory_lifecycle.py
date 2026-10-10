@@ -403,7 +403,8 @@ def test_the_live_run_conflict_reads_the_projects_one_listing(tmp_path, monkeypa
 def _trial(tmp_path, point: dict | None = None, **extra) -> tuple[Path, list[float]]:
     """One HPO trial of a sweep over a tiny regression dataset at ``point`` (by default a
     learning rate), run through the sweep's own trial body under the sweep's objective
-    (``loss``, lower better); its run directory and every value it reported."""
+    (``loss``, lower better), its model source declaring this module beside the regressor's for
+    a loop of its own; its run directory and every value it reported."""
     from tcip_mcp.experiments import run_dirs
     from tcip_mcp.tools.training_tools import _run_hpo_trial
     from tests._verified_checkpoint_fixtures import opened_sweep
@@ -415,6 +416,7 @@ def _trial(tmp_path, point: dict | None = None, **extra) -> tuple[Path, list[flo
     base_config = regressor_config(2, data={
         "images_dir": str(images_dir), "labels_dir": str(csv_path),
         "split": {"val_ratio": 0.34, "seed": 3}}, **extra)
+    base_config["model_source"]["source_files"].append(__file__)
     sweep = opened_sweep(tmp_path, base_config)
     reported: list[float] = []
     _run_hpo_trial(point or {"optimizer.head_lr": 0.01}, reported.append, sweep, "a")
@@ -475,7 +477,7 @@ def test_a_report_only_trial_projects_the_value_it_reported(tmp_path):
     result, the same value the sweep's scheduler saw."""
     from tcip_mcp.experiments import observe
 
-    trial_dir, reported = _trial(tmp_path, training_source=f"{__name__}:_reports_only")
+    trial_dir, reported = _trial(tmp_path, training_source=f"{Path(__file__).stem}:_reports_only")
 
     assert observe(trial_dir).state == "completed"
     assert reported == [0.25]

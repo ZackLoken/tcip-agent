@@ -148,18 +148,21 @@ def test_a_crop_keeps_each_rows_crowd_flag_with_its_box(tmp_path: Path):
     assert cropped["iscrowd"].tolist() == [1] and cropped["labels"].tolist() == [1]
 
 
-def test_the_trainer_and_the_validation_loss_hand_the_heads_objects_only(tmp_path: Path):
+def test_the_trainer_and_the_validation_loss_hand_the_heads_objects_only(tmp_path: Path,
+                                                                         monkeypatch):
     """Both hand-offs to a model's training forward, the training step and the validation loss,
     withhold every crowd row the loader keeps."""
     from tcip_mcp.pipelines.training.generic_trainer import run_loaders, train
     from tests._chain_fixtures import training_config
-    from tests.tiny_trainer_fixtures import trainer_run
+    from tests.tiny_trainer_fixtures import capture_model, trainer_run
 
     loader_ds = _detection_loader(tmp_path / "ds")
     assert loader_ds[0][1]["iscrowd"].tolist() == [0, 1]  # the loader keeps every row
-    RecordingDetector.handed.clear()
+    built: list = []
+    capture_model(monkeypatch, built)
     config = training_config(
-        {"builder": f"{__name__}:build_recording_detector", "task": "detection"},
+        {"builder": f"{Path(__file__).stem}:build_recording_detector", "source_files": [__file__],
+         "task": "detection"},
         {"num_channels": 3, "scope": {"subject": SUBJECT, "attributes": []}})
     run = trainer_run(config, tmp_path / "run", project=tmp_path, has_val_loader=True,
                       id="crowd-run")
@@ -167,8 +170,10 @@ def test_the_trainer_and_the_validation_loss_hand_the_heads_objects_only(tmp_pat
     completed = train(run, train_loader, val_loader=val_loader)
 
     assert completed.status == "completed", completed.status
-    assert len(RecordingDetector.handed) >= 2  # one training step and one validation-loss pass
-    assert all(flags == [0, 0] for flags in RecordingDetector.handed), RecordingDetector.handed
+    (model,) = built
+    handed = type(model).handed  # the run's own copy of the class records what it was handed
+    assert len(handed) >= 2  # one training step and one validation-loss pass
+    assert all(flags == [0, 0] for flags in handed), handed
 
 
 def test_the_overfit_probe_drives_the_model_with_objects_only(tmp_path: Path):

@@ -72,28 +72,21 @@ def _capture(root: Path) -> tuple[Path, Path]:
     return images, masks
 
 
-def _train_and_register(data_cfg: dict, out_dir: Path, project_root: Path) -> dict:
-    """Train a detector over ``data_cfg`` through the producer's own resolution and register its
-    checkpoint under ``project_root``: ``{"checkpoint", "data"}``, the data block the run
-    resolved in the form its record holds it."""
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
-    from tcip_mcp.pipelines.schemas import DataSpec
-    from tcip_mcp.pipelines.training.generic_trainer import run_loaders, train
-    from tcip_mcp.tools.model_tools import register_model
+def _train_and_register(data_cfg: dict, project_root: Path) -> dict:
+    """Train a detector over ``data_cfg`` in a run of ``project_root`` the launcher's own
+    producer opened and the child's own entry ran, which registers its checkpoint by completing:
+    ``{"checkpoint", "data"}``, the data block the run resolved in the form its record holds
+    it."""
+    from tcip_mcp.experiments import observe
     from tests._chain_fixtures import REGION_BUILDER, training_config
-    from tests.tiny_trainer_fixtures import trainer_run
+    from tests._training_values import evaluation_block
+    from tests._verified_checkpoint_fixtures import worker_run
 
-    train_ds, _val, _partition, resolved = auto_train_val(
-        project_root, "detection", DataSpec.model_validate(data_cfg), None)
-    config = training_config(REGION_BUILDER, resolved.record())
-    run = trainer_run(config, out_dir, project=project_root, has_val_loader=True, id=out_dir.name)
-    train_loader, val_loader = run_loaders(run, train_ds, train_ds)
-    completed = train(run, train_loader, val_loader=val_loader)
-    assert completed.status == "completed", completed.status
-    checkpoint = out_dir / "model_best.pt"
-    registered = register_model(project_root, name=out_dir.name, checkpoint_path=str(checkpoint))
-    assert "error" not in registered, registered
-    return {"checkpoint": str(checkpoint), "data": resolved.record()}
+    observation = observe(worker_run(project_root, training_config(
+        REGION_BUILDER, data_cfg, evaluation=evaluation_block(selection_metric="loss"))))
+    assert observation.checkpoint is not None, observation.final
+    return {"checkpoint": observation.checkpoint["path"],
+            "data": observation.record["resolved"]["data"]}
 
 
 def test_a_run_that_recorded_no_subject_is_refused_assessment_by_name(tmp_path: Path):
@@ -101,8 +94,9 @@ def test_a_run_that_recorded_no_subject_is_refused_assessment_by_name(tmp_path: 
 
     images, masks = _capture(tmp_path / "masks")
     data_cfg = {"images_dir": str(images), "labels_dir": str(masks), "auto_val": False,
-                "dataset_source": {"builder": f"{__name__}:build_mask_box_ds"}}
-    trained = _train_and_register(data_cfg, tmp_path / "unscoped", tmp_path)
+                "dataset_source": {"builder": f"{Path(__file__).stem}:build_mask_box_ds",
+                                   "source_files": [__file__]}}
+    trained = _train_and_register(data_cfg, tmp_path)
     checkpoint = trained["checkpoint"]
     # The producer admitted by shape and recorded an empty scope.
     assert trained["data"]["scope"] == {"subject": None, "attributes": None}
