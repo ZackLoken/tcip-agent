@@ -28,7 +28,7 @@ bound, a level small enough to read whole in one native pass, chosen and not mea
 _BUILD_POLL_SECONDS = 0.2
 
 # The build's one acquisition of the raster: its header and the one GDAL open plan the levels and
-# write them, first stating on stdout either the plan's predicted size or why there is none.
+# write them, first stating on stdout either the plan's levels or why there are none.
 _BUILD_CHILD = """
 import json
 import sys
@@ -66,11 +66,8 @@ def plan_overview_build(ds) -> dict:
     """The build of the pyramid of the raster the open GDAL dataset ``ds`` is (``ds.name``),
     planned over ``ds`` and the raster's TIFF header: ``{"refusal": why}`` when the raster already
     carries internal overviews or has no
-    level to build, else its ``levels`` (:func:`overview_levels`), whether it is a ``palette``
-    raster (whose indices are resampled by nearest, never averaged), and the ``predicted``
-    uncompressed size of the pyramid's stored pixels, the denominator progress is reported
-    against (a compressed sidecar lands under it, so the reported fraction is a floor on real
-    progress)."""
+    level to build, else its ``levels`` (:func:`overview_levels`) and whether it is a ``palette``
+    raster (whose indices are resampled by nearest, never averaged)."""
     path = ds.name
     if ds.overviews(1):
         return {"refusal": f"{path} already carries internal overviews; nothing to build"}
@@ -78,10 +75,7 @@ def plan_overview_build(ds) -> dict:
     if not levels:
         return {"refusal": f"{path}'s longest edge is within {PYRAMID_FLOOR_EDGE} pixels; there "
                            "is no overview level to build"}
-    header = SourceHeader(path).tiff
-    per_level = sum(-(-int(ds.width) // lvl) * -(-int(ds.height) // lvl) for lvl in levels)
-    return {"levels": levels, "palette": header.palette_lut is not None,
-            "predicted": max(per_level * int(ds.count) * header.dtype.itemsize, 1)}
+    return {"levels": levels, "palette": SourceHeader(path).tiff.palette_lut is not None}
 
 
 def sidecar_valid(path: str | Path) -> bool:
@@ -119,7 +113,7 @@ def overview_levels(width: int, height: int) -> list[int]:
 
 
 def build_overviews(path: str | Path,
-                    *, progress_cb: "Callable[[float], object] | None" = None) -> Path:
+                    *, progress_cb: "Callable[[int], object] | None" = None) -> Path:
     """Build ``path``'s external ``.ovr`` pyramid as :func:`plan_overview_build` plans it and
     return the sidecar's path. The raster is read once, in the child process the build runs in:
     its header and one GDAL open plan and write the levels.
@@ -131,8 +125,9 @@ def build_overviews(path: str | Path,
     interrupted build otherwise leaves a valid-looking file whose unwritten tiles read back as
     silent zeros.
 
-    ``progress_cb``, when given, receives the build's completion fraction in ``[0, 1]``; returning
-    ``False`` cancels the build. It is consulted once before the child starts, so a caller that
+    ``progress_cb``, when given, receives the sidecar's size in bytes at each poll, ``0`` before
+    the child starts, and the finished sidecar's size once the build succeeds; returning ``False``
+    while the build runs cancels it. It is consulted once before the child starts, so a caller that
     cancels immediately is honored whatever the raster's size. The child process is what makes a
     running build cancelable: rasterio's ``build_overviews`` takes no progress or cancel
     callback, so progress is the sidecar's growth and a cancel terminates the child.
@@ -147,15 +142,15 @@ def build_overviews(path: str | Path,
                 f"{sidecar} already holds a valid overview pyramid; refusing to rebuild over it")
         sidecar.unlink()
 
-    def canceled(fraction: float) -> bool:
-        return progress_cb is not None and progress_cb(fraction) is False
+    def canceled(written: int) -> bool:
+        return progress_cb is not None and progress_cb(written) is False
 
     def abandon(reason: str) -> NoReturn:
         if sidecar.exists():
             sidecar.unlink()
         raise RuntimeError(reason)
 
-    if canceled(0.0):
+    if canceled(0):
         abandon(f"overview build for {path} canceled before it started")
 
     child = subprocess.Popen(
@@ -171,16 +166,14 @@ def build_overviews(path: str | Path,
     if "refusal" in plan:
         child.wait()
         raise ValueError(plan["refusal"])
-    predicted = plan["predicted"]
     while child.poll() is None:
         time.sleep(_BUILD_POLL_SECONDS)
-        grown = sidecar.stat().st_size if sidecar.exists() else 0
-        if canceled(min(grown / predicted, 0.99)):
+        if canceled(sidecar.stat().st_size if sidecar.exists() else 0):
             child.terminate()
             child.wait(timeout=30)
             abandon(f"overview build for {path} canceled")
     if child.returncode != 0:
         abandon(f"overview build for {path} failed: {(child.stderr.read() or '').strip()}")
     if progress_cb is not None:
-        progress_cb(1.0)
+        progress_cb(sidecar.stat().st_size)
     return sidecar

@@ -784,7 +784,7 @@ class OverviewJob:
     job_id: str
     path: str
     status: str = "pending"  # pending | running | completed | failed
-    progress: float = 0.0
+    bytes_written: int = 0
     error: "str | None" = None
 
 
@@ -798,11 +798,11 @@ class OverviewBuildPayload(BaseModel):
 
 def _overview_summary(job: OverviewJob) -> dict:
     return {"job_id": job.job_id, "path": job.path, "status": job.status,
-            "progress": job.progress, "error": job.error}
+            "bytes_written": job.bytes_written, "error": job.error}
 
 
 def _overview_worker(job: OverviewJob) -> None:
-    """Build the pyramid, recording progress and whatever stopped it.
+    """Build the pyramid, recording the sidecar bytes it reports and whatever stopped it.
 
     A refusal to rebuild over a pyramid that already exists is a completed outcome; anything else
     that stops the build is a failure. A raster GDAL cannot open at all answers that there is no
@@ -810,8 +810,8 @@ def _overview_worker(job: OverviewJob) -> None:
     """
     from tcip_mcp.pipelines.overviews import build_overviews, overview_dims
 
-    def record(fraction: float) -> None:
-        job.progress = float(fraction)
+    def record(written: int) -> None:
+        job.bytes_written = written
 
     job.status = "running"
     try:
@@ -826,7 +826,6 @@ def _overview_worker(job: OverviewJob) -> None:
             job.error = str(exc)
             return
     job.status = "completed"
-    job.progress = 1.0
 
 
 @router.post("/overviews")
@@ -849,7 +848,8 @@ def build_image_overviews(payload: OverviewBuildPayload) -> dict:
 
 @router.get("/overviews/status")
 def get_overview_job(job_id: str = Query(...)) -> dict:
-    """An overview build's status and completion fraction."""
+    """An overview build's status and the bytes its sidecar holds as last reported: 0 until the
+    build reports, and a build refused over an existing pyramid reports none."""
     job = _overview_registry.get(job_id)
     if job is None:
         raise HTTPException(404, f"job not found: {job_id}")

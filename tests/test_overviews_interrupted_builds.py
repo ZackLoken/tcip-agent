@@ -1,5 +1,5 @@
 """Overview pyramids that were never finished: sidecars whose tiles are only partly written,
-the progress fraction a watcher reads while a build runs, and the cleanup a canceled build owes.
+the sidecar bytes a watcher reads while a build runs, and the cleanup a canceled build owes.
 
 A pyramid is structurally complete long before its pixels are, so these cover the states a build
 that stopped early leaves behind, where a wrong answer is a silent one: a reduced-resolution read
@@ -20,7 +20,6 @@ from tcip_mcp.pipelines.overviews import (
     overview_dims,
     overview_levels,
     overview_sidecar,
-    plan_overview_build,
     sidecar_valid,
 )
 
@@ -36,8 +35,7 @@ def _deep_pyramid_raster(tmp_path: Path, *, width: int = 32768, height: int = 8)
 
 def _growing_raster(tmp_path: Path) -> Path:
     """A raster whose pyramid takes long enough to build that the parent polls the sidecar's size
-    many times while it grows, and whose every level tiles exactly so the finished sidecar matches
-    the predicted uncompressed size."""
+    many times while it grows."""
     path = tmp_path / "growing.tif"
     arr = (np.arange(1024 * 32768, dtype=np.int64) % 251).astype(np.uint8)
     tifffile.imwrite(str(path), arr.reshape(1024, 32768), rowsperstrip=8)
@@ -113,47 +111,28 @@ def test_a_sidecar_is_invalid_when_a_deeper_pyramid_level_is_unwritten(tmp_path:
     assert sidecar_valid(path) is False
 
 
-def test_the_progress_denominator_scales_with_the_pyramid_area(tmp_path: Path) -> None:
-    """Progress is reported against the pyramid's pixel count, so quadrupling a raster's pixels
-    quadruples the denominator. A denominator that grew with the raster's edges instead would be
-    passed by the sidecar's first few kilobytes and report a fresh build as nearly finished."""
-    import rasterio
-
-    def predicted(name: str, arr: np.ndarray) -> int:
-        path = tmp_path / name
-        tifffile.imwrite(str(path), arr)
-        with rasterio.open(str(path)) as ds:
-            plan = plan_overview_build(ds)
-        assert plan["levels"] == [2, 4]
-        return plan["predicted"]
-
-    short = predicted("short.tif", np.zeros((8, 4096), dtype=np.uint8))
-    assert predicted("tall.tif", np.zeros((32, 4096), dtype=np.uint8)) == 4 * short
-    assert predicted("deep.tif", np.zeros((8, 4096, 3), dtype=np.uint16)) == 6 * short
-
-
-def test_reported_progress_never_overstates_how_much_of_the_sidecar_is_written(
+def test_reported_progress_is_the_sidecar_bytes_on_disk_and_ends_at_the_finished_file(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The fraction handed to a watcher is a floor on real progress. Every fraction reported while
-    the build runs stays at or under the share of the finished sidecar that was on disk at the
-    moment it was reported, so a watcher never sees a build it must wait minutes for as done."""
+    """A watcher is handed what the build knows, the sidecar's bytes on disk, and nothing it
+    estimates. Every value reported while the build runs is at most the sidecar's size when the
+    watcher reads it, and the last is the finished sidecar's size."""
     monkeypatch.setattr(overviews_module, "_BUILD_POLL_SECONDS", 0.01)
     path = _growing_raster(tmp_path)
     sidecar = overview_sidecar(path)
-    samples: list[tuple[float, int]] = []
+    samples: list[tuple[int, int]] = []
 
-    def watch(fraction: float) -> None:
-        samples.append((fraction, sidecar.stat().st_size if sidecar.exists() else 0))
+    def watch(written: int) -> None:
+        samples.append((written, sidecar.stat().st_size if sidecar.exists() else 0))
 
     build_overviews(path, progress_cb=watch)
     finished = sidecar.stat().st_size
 
-    part_way = [(fraction, size) for fraction, size in samples if 30_000 < size < 0.9 * finished]
+    part_way = [(written, size) for written, size in samples if 30_000 < size < 0.9 * finished]
     assert part_way, "the build finished without ever being sampled part way through"
 
-    for fraction, size in samples:
-        assert fraction <= size / finished + 0.02, (
-            f"reported {fraction} with {size} of {finished} sidecar bytes written")
+    for written, size in samples:
+        assert written <= size, f"reported {written} with {size} sidecar bytes on disk"
+    assert samples[-1][0] == finished
 
 
 def test_canceling_a_build_that_has_started_writing_deletes_the_sidecar(
@@ -166,7 +145,7 @@ def test_canceling_a_build_that_has_started_writing_deletes_the_sidecar(
     sidecar = overview_sidecar(path)
     canceled_at: list[int] = []
 
-    def cancel_once_started(_fraction: float) -> bool:
+    def cancel_once_started(_written: int) -> bool:
         size = sidecar.stat().st_size if sidecar.exists() else 0
         if size < 1_000_000:
             return True

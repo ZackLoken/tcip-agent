@@ -1250,10 +1250,10 @@ def test_the_overview_job_makes_that_same_request_servable(
     assert started.status_code == 200
     job = _await_job(client, started.json()["job_id"])
     assert job["status"] == "completed", job
-    assert job["progress"] == 1.0
 
-    from tcip_mcp.pipelines.overviews import sidecar_valid
+    from tcip_mcp.pipelines.overviews import overview_sidecar, sidecar_valid
 
+    assert job["bytes_written"] == overview_sidecar(path).stat().st_size
     assert sidecar_valid(path)
     served = _served(client.get("/api/images", params=view))
     assert served.shape[0] * served.shape[1] <= SMALL_DISPLAY
