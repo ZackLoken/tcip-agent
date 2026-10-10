@@ -1,8 +1,9 @@
 """The ``dataset_source`` bespoke seam, mirroring ``model_source``.
 
 An agent-supplied importable builder produces a torch ``Dataset`` for a task the built-in loaders
-do not cover, ``build_dataset`` routes to it over the producer's own samples, the known loaders
-stay the default, and the builder source is snapshotted for provenance.
+do not cover, built over the producer's own samples (``build_from_dataset_source``, which a run's
+loaders and ``ctx.build_dataset`` route to), the known loaders stay the factory's, and the builder
+source is snapshotted for provenance.
 """
 
 from __future__ import annotations
@@ -23,8 +24,9 @@ from torch.utils.data import Dataset  # noqa: E402
 
 class _CountingDataset(Dataset):
     """A trivially-bespoke dataset: one item per sample the producer named, echoing the context it
-    was built with. ``rows`` is the builder's own configuration, which a direct construction with
-    no producer behind it stands on instead."""
+    was built with, each an 8 px frame holding one object named by its stem. ``rows`` is the
+    builder's own configuration, which a direct construction with no producer behind it stands on
+    instead."""
 
     def __init__(self, *, samples=None, scope=None, rows=None, marker: str = "", **_ignored):
         self.samples = list(samples or [])
@@ -37,7 +39,16 @@ class _CountingDataset(Dataset):
 
     def __getitem__(self, idx):
         named = self.samples or self.rows
-        return torch.zeros(3, 8, 8), {"stem": str(named[idx])}
+        return torch.zeros(3, 8, 8), {"stem": str(named[idx]),
+                                      "boxes": torch.tensor([[0.0, 0.0, 1.0, 1.0]]),
+                                      "labels": torch.tensor([1]), "iscrowd": torch.tensor([0])}
+
+    @property
+    def regions(self):
+        """Each frame's served object."""
+        from tests._producer_fixtures import served_regions
+
+        return served_regions(self)
 
 
 def build_bespoke_ds(**kwargs) -> _CountingDataset:
@@ -135,54 +146,82 @@ def _scope():
     return registry_scope(Path(__file__).parent, "leaf")
 
 
-def test_build_dataset_routes_to_dataset_source(tmp_path: Path):
-    """The factory routes a task no built-in loader covers to the agent's own builder, handing it
-    the run's samples and nothing else; the builder's own configuration rides in
-    ``builder_kwargs``."""
-    from tcip_mcp.pipelines.data.datasets import build_dataset
+def _ctx(root: Path, task: str, data: dict):
+    """A training body's context over a run of ``root`` of ``task`` whose data block states
+    ``data`` beside the place :func:`_admitted_samples` admits there and the class space it
+    admits under, and those samples."""
+    from dataclasses import asdict
 
-    samples = _admitted_samples(tmp_path / "ds")
-    ds = build_dataset("grape_bunch_count", dataset_source=_bespoke(DATASET_SOURCE),
-                       samples=samples, sizes={}, scope=_scope(), transforms=None)
+    from tcip_mcp.pipelines.training.envelope import TrainContext
+    from tests._chain_fixtures import training_config
+    from tests._training_values import evaluation_block
+    from tests.tiny_trainer_fixtures import trainer_run
+
+    samples = _admitted_samples(root / "ds")
+    config = training_config(
+        {"builder": GT_ANCHOR_DETECTOR, "builder_kwargs": {"gt_boxes_wh": [(10, 10)]},
+         "source_files": [BESPOKE_MODELS], "task": task},
+        {**data, "scope": asdict(_scope()),
+         "images_dir": str(root / "ds" / "images" / UNDATED_BUCKET)},
+        evaluation=evaluation_block(selection_metric="loss"))
+    run = trainer_run(config, root / "out", project=root, has_val_loader=False)
+    return TrainContext(run=run, train_loader=None, val_loader=None), samples
+
+
+def _bespoke_ctx(root: Path):
+    """:func:`_ctx` over a run whose loaders :data:`DATASET_SOURCE` builds."""
+    return _ctx(root, "grape_bunch_count", {"dataset_source": DATASET_SOURCE})
+
+
+def test_a_bodys_platform_loader_reads_at_the_runs_sizes_and_lattice(tmp_path: Path):
+    """On a run whose data block names no ``dataset_source``, a training body's
+    ``ctx.build_dataset`` builds the platform's loader over the subset of samples it was handed,
+    at the band count and the lattice the run's data block records."""
+    lattice = {"enabled": True, "tile_size": 8, "overlap": 0.25, "sliver_frac": 0.5}
+    ctx, samples = _ctx(tmp_path, "detection", {"num_channels": 3, "tiling": lattice})
+
+    tiler = ctx.build_dataset(samples=samples[:1])
+
+    assert (tiler.tile_size, tiler.overlap) == (8, 0.25)
+    assert tiler.expected_channels == 3
+    assert {tiler.sample_of(k).member for k in tiler.stems} == {samples[0].member}
+
+
+def test_a_bodys_loader_on_a_bespoke_run_builds_through_its_builder_over_the_subset(
+        tmp_path: Path):
+    """On a run whose data block names a ``dataset_source``, a training body's
+    ``ctx.build_dataset`` imports that builder from the run's layout and hands it the subset of
+    samples it was given and the run's recorded class space; the builder's own configuration
+    rides in ``builder_kwargs``."""
+    ctx, samples = _bespoke_ctx(tmp_path)
+    ds = ctx.build_dataset(samples=samples[:1])
 
     assert type(ds).__qualname__ == "_CountingDataset"
-    assert ds.samples == list(samples)       # the producer's own membership, unchanged
-    assert ds.scope == _scope()              # the class space they were admitted under, whole
+    assert ds.samples == list(samples[:1])   # the subset handed through the door, unchanged
+    assert ds.scope == ctx.spec.data.recorded_scope  # the class space they were admitted under
     assert ds.rows == ["s0", "s1"]           # the builder's own configuration, from its own kwargs
     assert ds.marker == "bespoke"            # builder_kwargs applied
     # The platform states nothing about a dataset it did not build, and reads nothing off it.
     assert not hasattr(ds, "expected_channels")
 
 
-def test_a_bespoke_builder_is_handed_only_what_the_producer_named(tmp_path: Path):
-    """The one factory boundary hands a bespoke builder the producer's four names and refuses
-    every other kwarg it was given, so the promise holds on every route into it, an agent's own
-    ``ctx.build_dataset`` call included: a builder given anything else could answer for a
-    membership, a class space or a format this run's own record does not state. The check runs
-    before anything is read off those kwargs, so a name the factory itself owns is refused too."""
-    from tcip_mcp.pipelines.data.datasets import build_dataset
+def test_a_bodys_door_takes_the_samples_and_the_augmentation_and_nothing_else(tmp_path: Path):
+    """``ctx.build_dataset`` takes the samples and the augmentation and refuses every other
+    keyword by name, a builder, a class space, a tiling and sizes included: the run's own block
+    states each, and a loader given another could answer for a membership, a class space, a
+    format or a lattice this run's record does not state."""
     from tcip_mcp.pipelines.schemas import TilingSpec
 
-    samples = _admitted_samples(tmp_path / "ds")
-    bespoke = _bespoke(DATASET_SOURCE)
-    for unowned in ({"labels_dir": "X:/elsewhere"}, {"images_dir": "X:/elsewhere"},
-                    {"csv_path": "X:/elsewhere/table.csv"}, {"stems": ["s0"]},
-                    {"val_images_dir": "X:/elsewhere/val"},
-                    {"label_format": "coco"}, {"coco_path": "X:/elsewhere/instances.json"},
-                    {"subject": "leaf"}):
-        with pytest.raises(ValueError, match="was given"):
-            build_dataset("grape_bunch_count", dataset_source=bespoke, samples=samples,
-                          sizes={}, scope=_scope(), **unowned)
+    ctx, samples = _bespoke_ctx(tmp_path)
+    for unowned in ({"dataset_source": ctx.spec.data.dataset_source}, {"scope": _scope()},
+                    {"tiling": TilingSpec.model_validate({"enabled": True})},
+                    {"sizes": {"num_channels": 3}}, {"labels_dir": "X:/elsewhere"},
+                    {"stems": ["s0"]}, {"label_format": "coco"}, {"subject": "leaf"}):
+        with pytest.raises(TypeError) as refused:
+            ctx.build_dataset(samples=samples, **unowned)
+        assert all(name in str(refused.value) for name in unowned)
 
-    # A tiling is refused beside a builder that composes its own.
-    with pytest.raises(ValueError, match="beside a dataset_source"):
-        build_dataset("grape_bunch_count", dataset_source=bespoke, samples=samples,
-                      sizes={"num_channels": 3}, scope=_scope(),
-                      tiling=TilingSpec.model_validate({"enabled": True}))
-
-    # Admits valid work: the producer's own samples and class space reach the builder unchanged.
-    built = build_dataset("grape_bunch_count", dataset_source=bespoke, samples=samples,
-                          sizes={}, scope=_scope(), transforms=None)
+    built = ctx.build_dataset(samples=samples, transforms=None)
     assert type(built).__qualname__ == "_CountingDataset"
     assert built.samples == list(samples) and built.scope == _scope()
 

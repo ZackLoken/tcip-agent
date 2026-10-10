@@ -380,7 +380,6 @@ def launch_training(
         "dims": smoke_report.get("dims"),
         "issues": smoke_report.get("issues", []),
         "gradient_magnitudes": smoke_report.get("gradient_magnitudes"),
-        "operating_point_knobs": smoke_report.get("operating_point_knobs"),
         "overfit_check": rendered_overfit_report,
     }
 
@@ -1400,15 +1399,13 @@ def evaluate_model(
 
     Three detection eval regimes:
       * Untiled default (no ``tiling``, checkpoint trained without tiling) -> single full-res
-      forward pass, ``eval_regime="full-frame-single-pass"``: the delivery gate for a checkpoint
-      never tile-trained. ``use_tiled_inference`` for such a checkpoint refuses (see below).
+      forward pass, ``eval_regime="full-frame-single-pass"``.
       * ``tiling`` set (or a run id whose training was tiled, reused automatically) -> tile-level
-      diagnostic that matches the training-run val mAP; not the delivery metric.
-      * ``use_tiled_inference=True`` -> the delivery-grade full-frame metric for a tile-trained
-      checkpoint (tiled inference reconstructed to full frame, matched to full-frame GT). Tile
-      geometry is resolved from the checkpoint's own persisted or native-frame training geometry,
-      or the stated one; a checkpoint with none of those refuses (see
-      ``run_full_frame_evaluation``).
+      diagnostic over per-tile ground truth; not the delivery metric.
+      * ``use_tiled_inference=True`` -> the delivery-grade full-frame metric (tiled inference
+      reconstructed to full frame, matched to full-frame GT). Tile
+      geometry is the stated one, else the checkpoint's own persisted or native-frame training
+      geometry, else derived from the evaluated ground truth (see ``run_full_frame_evaluation``).
 
     Args:
         experiment_id_or_ckpt: The id of a run of this project (uses the checkpoint its final
@@ -1423,8 +1420,8 @@ def evaluate_model(
             with ``images_dir`` (``label_queries.admit``) before any regime runs, a refusal naming
             both. The task is the checkpoint's own.
         stated: The execution values to state rather than derive (``execution.Stated``): the
-            operating ``conf`` and detection cap ``max_dets`` P/R/F1 are reported at, both
-            required of a detector, and on the delivery-grade path the ``tile_size``,
+            operating ``conf`` P/R/F1 are reported at, required of a detector, and on the
+            delivery-grade path the ``tile_size``,
             ``overlap``, ``postprocess`` and ``cross_tile_nms`` (derived from the evaluated
             ground truth when unstated). The resolved record, each value's source with it, is
             returned under ``execution``.
@@ -1446,6 +1443,7 @@ def evaluate_model(
         run_full_frame_evaluation, run_test_evaluation,
     )
     from tcip_mcp.pipelines.data.datasets import build_dataset, resolve_sizes
+    from tcip_mcp.pipelines.data.split_construction import resolved_tiling
     from tcip_mcp.pipelines.execution import prepare
 
     from tcip_mcp.operationalization import OperationalizationRefusedError, latest_confirmed
@@ -1502,8 +1500,6 @@ def evaluate_model(
     # Tile-level diagnostic (or untiled). Only detection tiles; a run id reuses its training tiling.
     if tiling is None and by_run:
         tiling = run_tiling
-    if task != "detection":
-        tiling = None
 
     # The checkpoint's own untiled pass: the width its predictor reads images at sizes the loader,
     # and its execution record governs the model that scores them.
@@ -1517,9 +1513,10 @@ def evaluate_model(
         measured_samples = admitted.every_sample()
         # Read at the width the predictor reads at: the model scores these tensors, so a loader
         # sized off the references instead would hand it images of another shape.
-        dataset = build_dataset(
-            task, samples=measured_samples, tiling=tiling, scope=scope,
-            sizes=resolve_sizes(task, {"num_channels": predictor.in_chans}, measured_samples))
+        sizes = resolve_sizes(task, {"num_channels": predictor.in_chans}, measured_samples)
+        tiling = resolved_tiling(task, tiling, measured_samples, scope, sizes)
+        dataset = build_dataset(task, samples=measured_samples, tiling=tiling, scope=scope,
+                                sizes=sizes)
     except Exception as exc:  # noqa: BLE001
         return {"error": f"Failed to build dataset: {exc}"}
 

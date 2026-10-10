@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from collections import Counter
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -27,7 +27,7 @@ from tcip_annotation.json_io import LabelDocument
 from tcip_annotation.state import box_derivable, object_rows, polygonal
 
 from tcip_mcp.pipelines.data.label_queries import acquired, json_det_targets, resolved
-from tcip_mcp.pipelines.derivations import num_classes_from_distribution
+from tcip_mcp.pipelines.derivations import Region, num_classes_from_distribution
 from tcip_mcp.pipelines.data.selection import (
     DOCUMENT, MASK, SHAPE_DESCRIPTIONS, TABLE, ClassScope, Sample, refuse_unreadable_samples,
 )
@@ -35,7 +35,6 @@ from tcip_mcp.pipelines.image_utils import (
     frame_size, load_image, pil_to_tensor, pixel_array,
     to_pil_if_faithful,
 )
-from tcip_mcp.pipelines.execution import DEFAULT_OVERLAP
 from tcip_mcp.pipelines.schemas import DatasetSourceSchema, DataSpec, TilingSpec
 
 if TYPE_CHECKING:
@@ -240,6 +239,20 @@ def crowd_of(target: Mapping[str, Any]) -> Any:
     return target["iscrowd"]
 
 
+def object_region(target: Mapping[str, Any], area: float) -> Region:
+    """The objects of a detection ``target`` (its rows but the crowd regions, :func:`object_rows`),
+    their xyxy boxes and labels, over a region of ``area`` pixels."""
+    keep = object_rows(crowd_of(target))
+    return Region(boxes=np.asarray(target["boxes"], dtype=np.float32).reshape(-1, 4)[keep],
+                  labels=np.asarray(target["labels"], dtype=np.int64).reshape(-1)[keep],
+                  area=float(area))
+
+
+def class_counts(regions: Iterable[Region]) -> dict[int, int]:
+    """Objects per 0-indexed class id over ``regions``."""
+    return dict(Counter(int(label) - 1 for r in regions for label in r.labels.tolist()))
+
+
 def instance_targets(targets: list[dict]) -> list[dict]:
     """``targets`` as the built-in torchvision heads take them: every crowd row
     (:func:`object_rows`) dropped from each per-box key, every other key as it was; the input
@@ -276,6 +289,20 @@ class DocumentDataset(BaseImageDataset):
         return json_det_targets(document.annotations, self.scope,
                                 reads=cast("Callable[[Any], bool]", self.reads_geometry))
 
+    def region(self, stem: str) -> Region:
+        """One sample's objects over the frame its label document records
+        (:func:`object_region`)."""
+        from tcip_mcp.pipelines.data.splits import label_document_extent
+
+        document = self.document(stem)
+        width, height = label_document_extent(document, f"{stem}'s label document")
+        return object_region(self.det_targets(document), width * height)
+
+    @property
+    def regions(self) -> list[Region]:
+        """Each sample's :meth:`region`, in index order."""
+        return [self.region(stem) for stem in self.stems]
+
 
 class DetectionDataset(DocumentDataset):
     """Object detection over a recorded sample list: each sample reads its own source and the label
@@ -288,12 +315,7 @@ class DetectionDataset(DocumentDataset):
 
     @property
     def class_distribution(self) -> dict[int, int]:
-        counts: Counter[int] = Counter()
-        for stem in self.stems:
-            target = self.det_targets(self.document(stem))
-            for lab in np.asarray(target["labels"])[object_rows(crowd_of(target))].tolist():
-                counts[lab - 1] += 1  # back to 0-indexed cid
-        return dict(counts)
+        return class_counts(self.regions)
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
         stem = self.stems[idx]
@@ -305,9 +327,6 @@ class DetectionDataset(DocumentDataset):
 # ====================================================================
 # Tiled Detection (SAHI's slice lattice)
 # ====================================================================
-
-TILE_SIZE = 224
-"""Tile edge in pixels a tiled detection run uses when its config states none."""
 
 _EMPTY_BOXES = np.zeros((0, 4), dtype=np.float32)
 _EMPTY_LABELS = np.zeros((0,), dtype=np.int64)
@@ -449,7 +468,8 @@ class TiledDetectionDataset(BaseImageDataset):
     source whose backend reads windows without a decode (a GDAL-served raster, a memory-mapped
     ``.npy``); layout refusals surface here, and a refusal of the pixels themselves surfaces at
     first read. ``__getitem__`` reads a windowed stem one slice window at a time through the
-    pool, and a whole-decode stem by decoding once and indexing the slice; both emit the same
+    pool, and a whole-decode stem by decoding the whole source for each slice and indexing the
+    slice out of it; both emit the same
     target dict shape as ``DetectionDataset``. The dataset itself never holds an open source
     object, so it pickles into spawned DataLoader workers.
 
@@ -460,7 +480,8 @@ class TiledDetectionDataset(BaseImageDataset):
     slices no rect contains count in ``tiles_dropped_outside_regions``. Without ``keep_regions``
     both counts stay 0 and every slice is kept.
 
-    A clipped box whose visible part falls under ``sliver_frac`` of the class's average size is a
+    ``tile_size`` and ``overlap`` are the lattice's, both required. A clipped box whose visible
+    part falls under ``sliver_frac`` of the class's average size is a
     tile-seam sliver and dropped; unstated, the fraction derives from the ground truth's own
     size spread (``derivations.derive_sliver_frac``), and ground truth too sparse to derive it
     refuses (``ValueError``) naming ``tiling.sliver_frac``.
@@ -471,24 +492,20 @@ class TiledDetectionDataset(BaseImageDataset):
     def __init__(
         self,
         base: "DetectionDataset",
-        tile_size: int = TILE_SIZE,
-        overlap: float = DEFAULT_OVERLAP,
+        tile_size: int,
+        overlap: float,
         sliver_frac: float | None = None,
         dedup_iou: float = 0.8,
         skip_empty: bool = False,
         transforms: Any = None,
         keep_regions: Sequence[tuple[int, int, int, int]] | None = None,
     ) -> None:
-        from tcip_annotation.matching import box_sizes
-
-        from tcip_mcp.pipelines.derivations import derive_sliver_frac
+        from tcip_mcp.pipelines.derivations import char_sizes, derive_sliver_frac
         from tcip_mcp.pipelines.raster_source import rect_contains_rect
         from tcip_mcp.pipelines.slicing import is_full_slice, slice_lattice
 
         self._samples = base._samples
         self.expected_channels = base.expected_channels
-        self.tile_size = tile_size
-        self.overlap = overlap
         self.transforms = transforms
         self._index: list[dict] = []
         # Plain values only, so the dataset pickles into spawned workers; asserted at decode time.
@@ -497,9 +514,9 @@ class TiledDetectionDataset(BaseImageDataset):
         self.tiles_dropped_past_extent = 0
         self.tiles_dropped_outside_regions = 0
 
-        # Pass 1: every image's dims and boxes, and the GT box sizes the sliver cutoff derives from.
+        # Pass 1: every image's dims and boxes, and the objects of each whole frame.
         stems_data: list[tuple[str, np.ndarray, dict[str, np.ndarray], int, int]] = []
-        object_sizes: list[float] = []
+        frames: list[Region] = []
         for stem in base.stems:
             # Acquired now, so an unreadable layout refuses here rather than mid-epoch.
             header = raster_source.SourceHeader(base.image_of(stem))
@@ -530,18 +547,18 @@ class TiledDetectionDataset(BaseImageDataset):
             fb = np.asarray(full["boxes"], dtype=np.float32).reshape(-1, 4)
             rows_of: dict[str, np.ndarray] = {k: np.asarray(full[k], dtype=np.int64)
                                               for k in PER_BOX_KEYS if k != "boxes" and k in full}
-            # A crowd region is not one object, so its extent says nothing about object size.
-            object_sizes.extend(box_sizes(fb[object_rows(crowd_of(rows_of))]).tolist())
             stems_data.append((stem, fb, rows_of, w, h))
+            frames.append(object_region(full, w * h))
 
-        char_sizes = [s for s in object_sizes if s > 0]
-        class_avg_size = float(np.mean(char_sizes)) if char_sizes else 0.0
+        self.tile_size, self.overlap = tile_size, overlap
+        sizes = char_sizes(r.boxes for r in frames)
+        class_avg_size = float(np.mean(sizes)) if sizes else 0.0
         if sliver_frac is None:
-            sliver_frac = derive_sliver_frac(char_sizes)
+            sliver_frac = derive_sliver_frac(sizes)
         if sliver_frac is None:
             raise ValueError(
                 f"the tile-seam sliver cutoff derives from the ground truth's own box-size spread, "
-                f"and this dataset holds {len(char_sizes)} box(es), too few to measure one; state "
+                f"and this dataset holds {len(sizes)} box(es), too few to measure one; state "
                 "tiling.sliver_frac for this run.")
         min_box_size = sliver_frac * class_avg_size
 
@@ -586,12 +603,15 @@ class TiledDetectionDataset(BaseImageDataset):
         return {stem: dict(info) for stem, info in self._source_frames.items()}
 
     @property
+    def regions(self) -> list[Region]:
+        """Each indexed tile's objects over its own pixel area (:func:`object_region`), in index
+        order."""
+        return [object_region(e, (x1 - x0) * (y1 - y0))
+                for e in self._index for x0, y0, x1, y1 in [e["slice"]]]
+
+    @property
     def class_distribution(self) -> dict[int, int]:
-        counts: Counter[int] = Counter()
-        for e in self._index:
-            for lab in e["labels"][object_rows(crowd_of(e))].tolist():
-                counts[int(lab) - 1] += 1  # 0-indexed cid, matching DetectionDataset
-        return dict(counts)
+        return class_counts(self.regions)
 
     def _read_windowed_tile(self, stem: str, info: dict, s: tuple[int, int, int, int]):
         """One slice through the pooled windowed source: its ``[H, W, C]`` array and the source's
@@ -935,26 +955,23 @@ def run_tiling(task: str, tiling: TilingSpec | None) -> TilingSpec | None:
 
 
 def build_dataset(
-    task: str, dataset_source: BespokeSource | None = None, *,
-    samples: Sequence[Sample], sizes: "Mapping[str, int]", scope: ClassScope,
+    task: str, *, samples: Sequence[Sample], sizes: "Mapping[str, int]", scope: ClassScope,
     transforms: Any = None, tiling: TilingSpec | None = None, **unowned: Any,
 ) -> Dataset:
-    """Factory: build a dataset by task type, or via a bespoke builder ``dataset_source`` names
-    with the layout it imports from (:data:`BespokeSource`).
+    """Factory: build the platform's dataset for ``task``.
 
-    ``samples`` is the producer's own sample list, required on every route: each sample reads its
-    own source and the ground truth that answers for it, its own label document, its own mask
-    raster or the row its ``row_key`` names. ``scope`` is the class space those samples were
-    admitted under (:class:`~tcip_mcp.pipelines.data.selection.ClassScope`), handed to a loader
-    over label documents and to a bespoke builder.
+    ``samples`` is the producer's own sample list: each sample reads its own source and the
+    ground truth that answers for it, its own label document, its own mask raster or the row its
+    ``row_key`` names. ``scope`` is the class space those samples were admitted under
+    (:class:`~tcip_mcp.pipelines.data.selection.ClassScope`), handed to a loader over label
+    documents.
 
     ``sizes`` is what the caller resolved for this run (:func:`resolve_sizes`); a loader reads its
-    sources at its band count. Anything given that no recipient could take refuses by name.
+    sources at its band count. Anything else given refuses (``ValueError``) by name.
 
-    An enabled ``tiling`` wraps the detection dataset in a :class:`TiledDetectionDataset` at the
-    options it states (``TilingSpec.tiler_options``); a
-    bespoke builder composes its own tiling, and a ``tiling`` beside it refuses. An unknown task
-    with no builder raises ``Unknown task``.
+    An enabled ``tiling`` wraps a detection dataset in a :class:`TiledDetectionDataset` at the
+    options it states (``TilingSpec.tiler_options``), and one missing its ``tile_size`` or
+    ``overlap`` refuses (``ValueError``). An unknown task raises ``Unknown task``.
     """
     if unowned:
         raise ValueError(
@@ -962,19 +979,8 @@ def build_dataset(
             f"platform's own producer named, the class space they were admitted under and the "
             f"augmentation this run resolved, and nothing else, so anything further could answer "
             f"for a membership, a class space or a format this run's own record does not state. "
-            f"Drop {sorted(unowned)}; a bespoke builder's own configuration goes in "
-            "dataset_source.builder_kwargs."
-        )
-    if dataset_source is not None:
-        if tiling is not None:
-            raise ValueError(
-                "build_dataset was given ['tiling'] beside a dataset_source: a bespoke builder "
-                "composes its own tiling over the samples it was handed, so the platform states "
-                "none for a dataset it does not build. Drop ['tiling'], or put it in "
-                "dataset_source.builder_kwargs."
-            )
-        return build_from_dataset_source(dataset_source, task=task, samples=samples,
-                                         scope=scope, transforms=transforms)
+            f"Drop {sorted(unowned)}; a dataset_source builds through build_from_dataset_source "
+            "(ctx.build_dataset from a training body), configured by its builder_kwargs.")
 
     from tcip_mcp.pipelines.model_build import resolve_named
 
@@ -984,6 +990,11 @@ def build_dataset(
 
     tiler = run_tiling(task, tiling)
     if tiler is not None:
+        if tiler.tile_size is None or tiler.overlap is None:
+            raise ValueError(
+                f"build_dataset was given an enabled tiling with tile_size {tiler.tile_size!r} "
+                f"and overlap {tiler.overlap!r}: a tiler runs on one whole lattice; state both, "
+                "or resolve them with split_construction.resolved_tiling.")
         base = construct(samples=samples, **declared)
         assert isinstance(base, DetectionDataset), "_DATASET_MAP's detection entry is this class"
         # Stamped before the tiler indexes every image at the base's band count.

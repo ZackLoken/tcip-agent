@@ -343,16 +343,24 @@ def build_bespoke_detection(*, num_classes: int = 1, in_chans: int = 3,
 
 
 class _OneConvDetector(nn.Module):
-    """A detector whose one parameter is a 1x1 convolution, carrying ``score_thresh`` on itself;
-    :meth:`zero_loss` is its training forward's answer."""
+    """A detector whose one parameter is a 1x1 convolution, carrying ``score_thresh`` and
+    ``detections_per_img`` on itself; :meth:`zero_loss` is its training forward's answer and
+    :meth:`governed` its eval forward's output kept to both knobs."""
 
     def __init__(self, in_chans: int = 3) -> None:
         super().__init__()
         self.conv = nn.Conv2d(in_chans, 1, 1)
         self.score_thresh = 0.0
+        self.detections_per_img = 100
 
     def zero_loss(self, images) -> dict:
         return {"loss": sum(self.conv(im.unsqueeze(0)).sum() for im in images) * 0.0}
+
+    def governed(self, out: dict) -> dict:
+        """``out``'s rows scoring at least ``score_thresh``, the ``detections_per_img`` highest."""
+        order = torch.argsort(out["scores"], descending=True)
+        keep = order[out["scores"][order] >= self.score_thresh][: self.detections_per_img]
+        return {key: value[keep] for key, value in out.items()}
 
 
 class FixedMaskSegmenter(_OneConvDetector):
@@ -370,9 +378,9 @@ class FixedMaskSegmenter(_OneConvDetector):
             y0, y1, x0, x1 = h // 4, 3 * h // 4, w // 4, 3 * w // 4
             mask = torch.as_tensor(painted_array(w, h, [((x0, y0, x1, y1), 1.0)],
                                                  background=0.0, mode="F"))[None, None]
-            results.append({"boxes": torch.tensor([[x0, y0, x1, y1]], dtype=torch.float32),
-                            "scores": torch.tensor([0.9]), "labels": torch.tensor([1]),
-                            "masks": mask})
+            results.append(self.governed({
+                "boxes": torch.tensor([[x0, y0, x1, y1]], dtype=torch.float32),
+                "scores": torch.tensor([0.9]), "labels": torch.tensor([1]), "masks": mask}))
         return results
 
 
@@ -382,11 +390,8 @@ def build_fixed_mask_instance_seg(*, num_classes: int = 1, in_chans: int = 3):
 
 # A non-torchvision detector, no .detector to route through.
 class BareScoreThreshDetector(_OneConvDetector):
-    """A hand-rolled detector with no ``.detector``: exposes ``score_thresh`` on itself, and
-    honors it in its own eval-mode forward, one fixed box per image kept only when it clears the
-    threshold. The proof that the operating-point holder resolves to the module itself when it is
-    the only thing exposing a knob.
-    """
+    """A hand-rolled detector with no ``.detector``: exposes both knobs on itself and honors them
+    in its own eval-mode forward over one fixed box per image."""
 
     def forward(self, images):
         if self.training:
@@ -395,10 +400,8 @@ class BareScoreThreshDetector(_OneConvDetector):
         for im in images:
             h, w = int(im.shape[-2]), int(im.shape[-1])
             boxes = torch.tensor([[w * 0.25, h * 0.25, w * 0.75, h * 0.75]], dtype=torch.float32)
-            scores = torch.tensor([0.9])
-            labels = torch.tensor([1])
-            keep = scores >= self.score_thresh
-            results.append({"boxes": boxes[keep], "scores": scores[keep], "labels": labels[keep]})
+            results.append(self.governed({"boxes": boxes, "scores": torch.tensor([0.9]),
+                                          "labels": torch.tensor([1])}))
         return results
 
 
@@ -537,9 +540,10 @@ class BrightBlobDetector(nn.Module):
     exceeds 0.5; with ``attributes`` (the count of attributes it is built at) it is bright where
     one band exceeds 0.5, and carries that band's index as its first attribute's id and 0 for
     every other. A training step's loss is the squared distance of the confidence from each
-    frame's label presence (one when it holds a labeled object, zero when not). Every inference
-    forward records each input's channel count in ``seen_channels`` and its per-band peak value
-    in ``seen_band_peaks``."""
+    frame's label presence (one when it holds a labeled object, zero when not). An inference
+    forward keeps each frame's blobs scoring at least ``score_thresh``, the ``detections_per_img``
+    highest, and records each input's channel count in ``seen_channels`` and its per-band peak
+    value in ``seen_band_peaks``."""
 
     def __init__(self, in_chans: int = 3, with_masks: bool = False, attributes: int = 0) -> None:
         super().__init__()
@@ -547,6 +551,7 @@ class BrightBlobDetector(nn.Module):
         self.with_masks = with_masks
         self.attributes = attributes
         self.score_thresh = 0.0
+        self.detections_per_img = 100
         self.nms_thresh = 0.45  # never applied here; a sentinel a pass must leave unchanged
         self.seen_channels: list[int] = []
         self.seen_band_peaks: list[list[float]] = []
@@ -587,7 +592,9 @@ class BrightBlobDetector(nn.Module):
             if self.with_masks:
                 out["masks"] = (torch.stack(masks) if masks
                                 else torch.zeros((0, 1, h, w), dtype=torch.float32))
-            results.append(out)
+            order = torch.argsort(out["scores"], descending=True)
+            keep = order[out["scores"][order] >= self.score_thresh][: self.detections_per_img]
+            results.append({key: value[keep] for key, value in out.items()})
         return results
 
 

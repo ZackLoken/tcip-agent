@@ -377,39 +377,48 @@ SAMPLE_CROSS_TILE_NMS = 0.45
 """A sample IoU cross-tile merge threshold a test's tiled pass states."""
 SAMPLE_CONF = 0.4
 """A sample confidence a test's detector pass states."""
-SAMPLE_MAX_DETS = 300
-"""A sample detection cap a test's detector pass states."""
-SAMPLE_DETECTOR_PASS = {"conf": SAMPLE_CONF, "max_dets": SAMPLE_MAX_DETS,
-                        "cross_tile_nms": SAMPLE_CROSS_TILE_NMS}
+SAMPLE_OVERLAP = 0.25
+"""A sample tile overlap a test's tiled pass states."""
+SAMPLE_DETECTOR_PASS = {"conf": SAMPLE_CONF, "cross_tile_nms": SAMPLE_CROSS_TILE_NMS}
 """The execution values a test's detector pass states, by ``execution.Stated`` field."""
+
+
+def objects_over(boxes: list[list[float]], area: float):
+    """The region ``datasets.object_region`` makes of one-class objects at the xyxy ``boxes``, none
+    a crowd region, over ``area`` pixels."""
+    from tcip_mcp.pipelines.data.datasets import object_region
+
+    return object_region({"boxes": boxes, "labels": [1] * len(boxes),
+                          "iscrowd": [0] * len(boxes)}, area)
 
 
 def tiled_record(*, tile_size: int, overlap: float, conf: float,
                  tile_resize: tuple[int, int] | None = None,
                  cross_tile_nms: float = SAMPLE_CROSS_TILE_NMS):
     """A detector's tiled execution record at ``tile_size``, ``overlap`` and ``tile_resize``
-    (each stated), at ``conf`` and the sample cap, merging by NMS at the stated
-    ``cross_tile_nms``, built by the producer a pass builds its own with
-    (``execution.execution_record``)."""
+    (each stated), at ``conf``, merging by NMS at the stated ``cross_tile_nms``, its density
+    derived from a reference counting a hundred objects in one tile, built by the producer a pass
+    builds its own with (``execution.execution_record``)."""
     from types import SimpleNamespace
 
-    from tcip_mcp.pipelines.execution import Stated, execution_record
+    from tcip_mcp.pipelines.execution import Reference, Stated, execution_record
     from tcip_mcp.pipelines.slicing import TileGeometry
 
     detector = SimpleNamespace(task="detection", path="detector.pt")
-    geometry = TileGeometry(tile_size=tile_size, tile_size_source="explicit",
-                            tile_size_derived_from=None, overlap=overlap,
+    geometry = TileGeometry(tile_size=tile_size, tile_size_source="explicit", overlap=overlap,
                             overlap_source="explicit", tile_resize=tile_resize)
-    stated = Stated(conf=conf, max_dets=SAMPLE_MAX_DETS, postprocess="nms",
-                    cross_tile_nms=cross_tile_nms)
-    return execution_record(cast(Any, detector), stated, geometry, None)
+    stated = Stated(conf=conf, postprocess="nms", cross_tile_nms=cross_tile_nms)
+    reference = Reference(regions=[objects_over([[0.0, 0.0, 1.0, 1.0]] * 100,
+                                                tile_size * tile_size)])
+    return execution_record(cast(Any, detector), stated, geometry, reference)
 
 
 def predicted_over(project: Path, checkpoint_path: str, images_dir: str, *,
                    device: str | None = None, **stated: Any):
     """The pass ``run_inference`` prepares for the detector registered at ``checkpoint_path``
     over ``images_dir`` (``execution.prepare`` under the ``stated`` execution values over
-    :data:`SAMPLE_DETECTOR_PASS`), run without publishing: ``(pass, results)``."""
+    :data:`SAMPLE_DETECTOR_PASS`, its density the checkpoint's own), run without publishing:
+    ``(pass, results)``."""
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.execution import Stated, prepare
 

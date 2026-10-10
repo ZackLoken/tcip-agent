@@ -58,6 +58,9 @@ class _MiddleHalfDetector(torch.nn.Module):
 
         self.transform = GeneralizedRCNNTransform(
             min_size, max_size, [0.0] * channels, [1.0] * channels)
+        # One box scored 0.9 per input: within any cap and above any threshold a test states.
+        self.score_thresh = 0.0
+        self.detections_per_img = 100
 
     def forward(self, images):
         original_sizes = [(int(im.shape[-2]), int(im.shape[-1])) for im in images]
@@ -368,13 +371,14 @@ def _native_frame_checkpoint(tmp_path: Path, augmentation: dict | None = None) -
 def test_a_tiled_pass_over_a_native_frame_checkpoint_says_what_it_rests_on(tmp_path):
     """The rail admits the work: a caller who asks to tile a checkpoint whose only geometry is its
     untiled training frame gets a real pass at that frame's edge, its record naming that basis and
-    the recorded resize each tile runs through."""
-    from tests._verified_checkpoint_fixtures import predicted_over
+    the recorded resize each tile runs through; an untiled frame records no overlap, so the caller
+    states one."""
+    from tests._verified_checkpoint_fixtures import SAMPLE_OVERLAP, predicted_over
 
     ckpt = _native_frame_checkpoint(tmp_path, {"resize": [32, 32]})
 
     p, results = predicted_over(tmp_path, ckpt, str(Path(gray_frame(tmp_path, IMAGE)).parent),
-                                device="cpu", tile=True, conf=0.0)
+                                device="cpu", tile=True, overlap=SAMPLE_OVERLAP, conf=0.0)
 
     assert len(results) == 1
     assert (p.execution.tile_size, p.execution.sources["tile_size"]) == (TILE, "native_ratio")
@@ -559,7 +563,7 @@ def test_an_untiled_call_with_a_contradicting_stated_edge_is_inert():
 
     g = resolve_tile_geometry(stub, tiled=False, tile_size=64, overlap=None)
 
-    assert (g.tile_size, g.tile_size_source, g.tile_size_derived_from) == (64, "explicit", None)
+    assert (g.tile_size, g.tile_size_source) == (64, "explicit")
 
 
 def test_an_explicit_edge_equal_to_persisted_geometry_clears():
@@ -570,7 +574,6 @@ def test_an_explicit_edge_equal_to_persisted_geometry_clears():
     g = resolve_tile_geometry(stub, tiled=True, tile_size=128, overlap=None)
 
     assert (g.tile_size, g.tile_size_source) == (128, "explicit")
-    assert g.tile_size_derived_from == "equal to the checkpoint's persisted training tile geometry"
 
 
 def test_an_explicit_edge_equal_to_the_native_frame_clears():
@@ -581,7 +584,6 @@ def test_an_explicit_edge_equal_to_the_native_frame_clears():
     g = resolve_tile_geometry(stub, tiled=True, tile_size=512, overlap=None)
 
     assert (g.tile_size, g.tile_size_source) == (512, "explicit")
-    assert "recorded untiled training frame" in g.tile_size_derived_from
 
 
 def test_an_explicit_edge_on_a_checkpoint_recording_no_geometry_clears():
@@ -593,7 +595,6 @@ def test_an_explicit_edge_on_a_checkpoint_recording_no_geometry_clears():
     g = resolve_tile_geometry(stub, tiled=True, tile_size=64, overlap=None)
 
     assert (g.tile_size, g.tile_size_source) == (64, "explicit")
-    assert g.tile_size_derived_from == "stated on a checkpoint that records no tile geometry"
 
 
 def _tiled_checkpoint(tmp_path: Path, tile_size: int) -> str:

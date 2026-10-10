@@ -52,6 +52,13 @@ class _MaskBoxDataset(Dataset):
             "boxes": torch.tensor([box]), "labels": torch.tensor([1]),
             "iscrowd": torch.tensor([0]), "image_id": idx}
 
+    @property
+    def regions(self):
+        """Each frame's served objects over its pixel area."""
+        from tests._producer_fixtures import served_regions
+
+        return served_regions(self)
+
 
 def build_mask_box_ds(**kwargs) -> _MaskBoxDataset:
     return _MaskBoxDataset(**kwargs)

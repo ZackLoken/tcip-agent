@@ -44,13 +44,21 @@ def test_gt_aspect_ratios_covers_open():
     assert max(ratios) >= 3.0
 
 
+def _regions(boxes_per_image):
+    """One region per image of the xywh ``boxes_per_image``, over a 200 px square frame."""
+    from tests._verified_checkpoint_fixtures import objects_over
+
+    return [objects_over([[x, y, x + w, y + h] for x, y, w, h in boxes], 200 * 200)
+            for boxes in boxes_per_image]
+
+
 def test_derive_cross_tile_nms_dense_cluster_exceeds_sparse():
     # Dense boxes (20px, offset 4px -> neighbor IoU ~0.667) push the threshold up so genuinely-
     # overlapping dense objects aren't merged; sparse boxes (offset 16px -> IoU ~0.111) sit lower.
     dense = [[(0, 0, 20, 20), (4, 0, 20, 20), (8, 0, 20, 20), (12, 0, 20, 20)]]
     sparse = [[(0, 0, 20, 20), (16, 0, 20, 20), (32, 0, 20, 20)]]
-    t_dense = derive_cross_tile_nms(dense)
-    t_sparse = derive_cross_tile_nms(sparse)
+    t_dense = derive_cross_tile_nms(_regions(dense))
+    t_sparse = derive_cross_tile_nms(_regions(sparse))
     assert t_dense is not None and t_sparse is not None
     assert t_dense > t_sparse
     # p99 of the neighbor-IoU tail + margin, at either density.
@@ -61,7 +69,7 @@ def test_derive_cross_tile_nms_dense_cluster_exceeds_sparse():
 def test_derive_cross_tile_nms_no_overlap_returns_none():
     # No genuine neighbor overlap anywhere -> underivable -> the caller states a threshold.
     boxes = [[(0, 0, 20, 20), (100, 100, 20, 20)], [(0, 0, 20, 20)]]
-    assert derive_cross_tile_nms(boxes) is None
+    assert derive_cross_tile_nms(_regions(boxes)) is None
     assert derive_cross_tile_nms([]) is None
 
 
@@ -69,9 +77,9 @@ def test_derive_cross_tile_nms_answers_near_duplicates_unbounded_and_refuses_ful
     # Near-duplicate neighbors (IoU 19/21) answer their own tail plus the margin; neighbors that
     # overlap fully leave the margin nowhere below 1 to land.
     near = [[(0, 0, 20, 20), (1, 0, 20, 20)]]
-    assert derive_cross_tile_nms(near) == pytest.approx(19 / 21 + 0.05)
+    assert derive_cross_tile_nms(_regions(near)) == pytest.approx(19 / 21 + 0.05)
     with pytest.raises(ValueError, match="cross_tile_nms"):
-        derive_cross_tile_nms([[(0, 0, 20, 20), (0, 0, 20, 20)]])
+        derive_cross_tile_nms(_regions([[(0, 0, 20, 20), (0, 0, 20, 20)]]))
 
 
 def test_derive_cross_tile_nms_refuses_where_the_margin_exhausts_the_interval():
@@ -79,14 +87,14 @@ def test_derive_cross_tile_nms_refuses_where_the_margin_exhausts_the_interval():
     # past 1 and refuses naming the margin, while a 0.01 margin answers below it.
     boxes = [[(0, 0, 100, 100), (2, 0, 100, 100)]]
     with pytest.raises(ValueError, match="margin 0.05"):
-        derive_cross_tile_nms(boxes)
-    assert derive_cross_tile_nms(boxes, margin=0.01) == pytest.approx(98 / 102 + 0.01)
+        derive_cross_tile_nms(_regions(boxes))
+    assert derive_cross_tile_nms(_regions(boxes), margin=0.01) == pytest.approx(98 / 102 + 0.01)
 
 
 def test_derive_cross_tile_nms_reads_the_neighbor_iou_tail():
     # A box nested in another: IoU 0.25, so the threshold sits a margin above it.
     nested = [[(0, 0, 20, 20), (5, 5, 10, 10)]]
-    assert derive_cross_tile_nms(nested) == pytest.approx(0.25 + 0.05)
+    assert derive_cross_tile_nms(_regions(nested)) == pytest.approx(0.25 + 0.05)
 
 
 def test_derive_localization_tolerance_frac_tight_spacing_stays_tighter_than_loose():
@@ -205,7 +213,7 @@ def test_derive_iou_match_threshold_no_boxes_returns_none():
 
 @pytest.mark.parametrize("fn", [
     derive_localization_tolerance_frac,
-    functools.partial(derive_iou_match_threshold, **JITTER), derive_cross_tile_nms,
+    functools.partial(derive_iou_match_threshold, **JITTER),
 ])
 def test_derive_box_functions_raise_valueerror_on_malformed_gt_boxes(fn):
     # A bare Python operation on malformed input raises whatever exception type it happens to hit
@@ -233,21 +241,21 @@ def test_derive_block_scale_px_gt_object_spacing_floored_at_tile_size():
     # Objects 200px apart, tile_size 50: the derived scale (median NN spacing) is 200, well above
     # the floor, so the floor never engages.
     boxes = [(x, 0, 20, 20) for x in range(0, 1000, 200)]
-    px, source = derive_block_scale_px(tile_size=50, gt_boxes_per_image=[boxes])
+    px, source = derive_block_scale_px(tile_size=50, objects=_regions([boxes])[0])
     assert px == 200
     assert "GT object-spacing" in source
 
 
 def test_derive_block_scale_px_floors_at_tile_size_when_spacing_is_smaller():
     boxes = [(x, 0, 5, 5) for x in range(0, 100, 10)]  # 10px spacing
-    px, source = derive_block_scale_px(tile_size=64, gt_boxes_per_image=[boxes])
+    px, source = derive_block_scale_px(tile_size=64, objects=_regions([boxes])[0])
     assert px == 64  # the tile_size floor wins over the smaller measured spacing
     assert "floored at tile_size" in source
 
 
 def test_derive_block_scale_px_no_data_refuses_named():
     with pytest.raises(ValueError, match="no block scale is derivable"):
-        derive_block_scale_px(tile_size=64, gt_boxes_per_image=[[]])
+        derive_block_scale_px(tile_size=64, objects=_regions([[]])[0])
 
 
 def test_derive_block_scale_px_insufficient_plant_registry_refuses_named():
@@ -257,7 +265,7 @@ def test_derive_block_scale_px_insufficient_plant_registry_refuses_named():
     boxes = [(x, 0, 20, 20) for x in range(0, 1000, 200)]
     with pytest.raises(ValueError, match="plant grid pitch is underivable"):
         derive_block_scale_px(
-            tile_size=50, gt_boxes_per_image=[boxes], plants=one_plant, raster_path=None)
+            tile_size=50, objects=_regions([boxes])[0], plants=one_plant, raster_path=None)
 
 
 def test_derive_block_scale_px_plant_pitch_via_projected_geotransform(tmp_path):
@@ -274,7 +282,7 @@ def test_derive_block_scale_px_plant_pitch_via_projected_geotransform(tmp_path):
     write_geotiff(raster_path)
     boxes = [(x, 0, 20, 20) for x in range(0, 40, 20)]  # sparse GT: the plant path must win
     px, source = derive_block_scale_px(
-        tile_size=16, gt_boxes_per_image=[boxes], plants=plants,
+        tile_size=16, objects=_regions([boxes])[0], plants=plants,
         raster_path=str(raster_path))
     assert "plant grid pitch" in source
     assert "EPSG:32615" in source
@@ -303,7 +311,7 @@ def test_derive_block_scale_px_reads_the_rasters_header_once(tmp_path, monkeypat
 
     monkeypatch.setattr(raster_source, "tiff_header", counting)
     _px, source = derive_block_scale_px(
-        tile_size=16, gt_boxes_per_image=[[(0, 0, 20, 20)]], plants=plants,
+        tile_size=16, objects=_regions([[(0, 0, 20, 20)]])[0], plants=plants,
         raster_path=str(raster_path))
     assert "plant grid pitch" in source
     assert len(reads) == 1
@@ -323,7 +331,7 @@ def test_derive_block_scale_px_converts_a_foot_unit_raster_through_its_crs(tmp_p
     write_geotiff(raster_path, pixel_scale=(1.0, 1.0, 0.0), projected_epsg=2264)
     boxes = [(x, 0, 20, 20) for x in range(0, 40, 20)]  # sparse GT: the plant path must win
     px, source = derive_block_scale_px(
-        tile_size=16, gt_boxes_per_image=[boxes], plants=plants,
+        tile_size=16, objects=_regions([boxes])[0], plants=plants,
         raster_path=str(raster_path))
     assert "plant grid pitch" in source
     assert "EPSG:2264" in source
@@ -346,7 +354,7 @@ def test_derive_block_scale_px_photographic_raster_path_refuses_named(tmp_path):
     boxes = [(x, 0, 20, 20) for x in range(0, 40, 20)]
     with pytest.raises(ValueError) as exc_info:
         derive_block_scale_px(
-            tile_size=16, gt_boxes_per_image=[boxes], plants=plants,
+            tile_size=16, objects=_regions([boxes])[0], plants=plants,
             raster_path=str(photo_path))
     assert str(photo_path) in str(exc_info.value)
 
@@ -366,7 +374,7 @@ def test_derive_block_scale_px_anisotropic_raster_falls_back_to_gt_spacing(tmp_p
     write_geotiff(raster_path, pixel_scale=(0.5, 0.6, 0.0))
     boxes = [(x, 0, 20, 20) for x in range(0, 1000, 200)]
     px, source = derive_block_scale_px(
-        tile_size=50, gt_boxes_per_image=[boxes], plants=plants,
+        tile_size=50, objects=_regions([boxes])[0], plants=plants,
         raster_path=str(raster_path))
     assert "GT object-spacing" in source  # fell back, not a refusal
     assert px == 200
@@ -392,7 +400,7 @@ def test_derive_block_scale_px_unprojected_raster_falls_back_to_gt_spacing(monke
     write_geotiff(raster_path)
     boxes = [(x, 0, 20, 20) for x in range(0, 1000, 200)]
     px, source = derive_block_scale_px(
-        tile_size=50, gt_boxes_per_image=[boxes], plants=plants,
+        tile_size=50, objects=_regions([boxes])[0], plants=plants,
         raster_path=str(raster_path))
     assert "GT object-spacing" in source  # fell back, not a refusal
     assert px == 200
@@ -412,7 +420,7 @@ def test_derive_block_scale_px_truncated_raster_refuses_named(tmp_path):
     boxes = [(x, 0, 20, 20) for x in range(0, 1000, 200)]
     with pytest.raises(ValueError, match="could not be opened as a raster"):
         derive_block_scale_px(
-            tile_size=50, gt_boxes_per_image=[boxes], plants=plants,
+            tile_size=50, objects=_regions([boxes])[0], plants=plants,
             raster_path=str(raster_path))
 
 
@@ -431,7 +439,7 @@ def test_derive_block_scale_px_npy_raster_refuses_named_for_no_georeference(tmp_
     boxes = [(x, 0, 20, 20) for x in range(0, 1000, 200)]
     with pytest.raises(ValueError, match="carries no georeferencing tags"):
         derive_block_scale_px(
-            tile_size=50, gt_boxes_per_image=[boxes], plants=plants,
+            tile_size=50, objects=_regions([boxes])[0], plants=plants,
             raster_path=str(raster_path))
 
 

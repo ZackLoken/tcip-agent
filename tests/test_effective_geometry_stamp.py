@@ -1,6 +1,6 @@
-"""The effective input-geometry stamp: what a run actually trained on (tile geometry or
-native frame) lands in the persisted config, and a requested-but-unrealized tiling record
-never survives an untiled run."""
+"""What a run's train dataset serves (its object density, its native frame) lands in the
+persisted config, and a run's tiling block is the one its resolution wrote, so a
+requested-but-unrealized tiling record never survives an untiled run."""
 
 from __future__ import annotations
 
@@ -17,58 +17,51 @@ torch = pytest.importorskip("torch")
 
 
 class _TiledStub:
-    tile_size = 224
-    overlap = 0.2
+    """A tiler serving 96 px tiles, one of them holding two objects."""
+
+    tile_size = 96
+
+    @property
+    def regions(self):
+        from tests._verified_checkpoint_fixtures import objects_over
+
+        return [objects_over([[0, 0, 4, 4], [10, 10, 14, 14]], 96 * 96)]
 
 
 class _OpaqueStub:
-    """No tile geometry and no source list: nothing can be probed, nothing is stamped."""
+    """No regions and no source list: nothing can be counted or probed."""
 
 
-def _geometry(data_cfg: dict, train_ds):
-    """``data_cfg`` validated as a run's data block with the geometry ``train_ds`` serves
+def _geometry(data_cfg: dict, train_ds, task: str = "detection"):
+    """``data_cfg`` validated as a ``task`` run's data block with what ``train_ds`` serves
     recorded on it (``generic_trainer.effective_data_geometry``)."""
     from tcip_mcp.pipelines.schemas import DataSpec
     from tcip_mcp.pipelines.training.generic_trainer import effective_data_geometry
 
-    return effective_data_geometry(DataSpec.model_validate(data_cfg), train_ds)
+    return effective_data_geometry(task, DataSpec.model_validate(data_cfg), train_ds)
 
 
-def test_stamp_tiled_run_fills_effective_geometry_into_tiling():
-    # No tile_size: the dataset's default is the truth.
-    stamped = _geometry({"tiling": {"enabled": True}}, _TiledStub())
+def test_stamp_tiled_run_records_its_tiles_density_and_leaves_the_lattice_it_was_given():
+    """The lattice a tiled run serves is the one its resolution wrote into ``data.tiling``; the
+    stamp adds the density over the tiles and nothing else."""
+    tiling = {"enabled": True, "tile_size": 96, "overlap": 0.25}
+    stamped = _geometry({"tiling": tiling}, _TiledStub())
 
-    assert stamped.record()["tiling"] == {
-        "enabled": True, "tile_size": 224, "overlap": pytest.approx(0.2)}
+    assert stamped.record()["tiling"] == tiling
+    assert stamped.train_object_density == pytest.approx(2 / (96 * 96))
     assert stamped.train_native_size is None
 
 
-def test_a_bespoke_run_records_no_geometry_at_all():
-    """The stamp reads a dataset's own tile attributes and probes its sources, so a dataset the
-    platform did not build is one it cannot measure, not one serving untiled frames. Recording
-    ``{"enabled": False}`` there would put a geometry nobody measured onto the checkpoint every
-    predictor and tiled-eval default reads back, so a bespoke run records nothing."""
-    data_cfg = {"dataset_source": {"builder": "my_module:build_ds"},
-                "tiling": {"enabled": True, "tile_size": 640}}
+def test_a_detector_dataset_records_its_density_whoever_built_it():
+    """A bespoke builder's detector dataset exposing regions records their density as a
+    platform-built one does; a detector dataset exposing none refuses naming the interface, and
+    another head's records none."""
+    bespoke = {"dataset_source": {"builder": "my_module:build_ds"}}
 
-    stamped = _geometry(data_cfg, _OpaqueStub())
-    # untouched, not replaced
-    assert stamped.record()["tiling"] == {"enabled": True, "tile_size": 640}
-    assert stamped.train_native_size is None
-
-    # A platform-built dataset in the same shape still stamps: absence is the bespoke fact alone.
-    platform = _geometry({"tiling": {"enabled": True, "tile_size": 640}}, _OpaqueStub())
-    assert platform.record()["tiling"] == {"enabled": False}
-
-
-def test_stamp_untiled_run_replaces_tiling_record_wholesale():
-    """An untiled run must never carry a requested tile_size into its persisted config: a
-    reader would take it for the frame the model trained on."""
-    stamped = _geometry({"tiling": {"enabled": True, "tile_size": 640, "overlap": 0.3}},
-                        _OpaqueStub())
-
-    assert stamped.record()["tiling"] == {"enabled": False}
-    assert stamped.train_native_size is None
+    assert _geometry(bespoke, _TiledStub()).train_object_density == pytest.approx(2 / (96 * 96))
+    with pytest.raises(ValueError, match="regions"):
+        _geometry(bespoke, _OpaqueStub())
+    assert _geometry(bespoke, _OpaqueStub(), "classification").train_object_density is None
 
 
 def _detection_dataset(tmp_path, sizes):
@@ -90,20 +83,21 @@ def _detection_dataset(tmp_path, sizes):
 
 
 def test_stamp_untiled_uniform_frames_record_train_native_size(tmp_path):
-    """With no tiling dict at all, the untiled stamp still runs: the tiling record states the
-    untiled truth and the shared native frame is recorded as [width, height]."""
-    stamped = _geometry({}, _detection_dataset(tmp_path, [(64, 48), (64, 48)]))
+    """An untiled run records the shared native frame as [width, height], and the object
+    density counted over those frames."""
+    stamped = _geometry({"tiling": {"enabled": False}},
+                        _detection_dataset(tmp_path, [(64, 48), (64, 48)]))
 
-    assert stamped.record()["tiling"] == {"enabled": False}
     assert stamped.train_native_size == [64, 48]
+    assert stamped.train_object_density == pytest.approx(1 / (64 * 48))
 
 
 def test_stamp_untiled_mixed_frames_record_nothing(tmp_path):
     """Mixed source sizes have no single native frame; stamping any one of them would be a
     guess, so no train_native_size is written."""
-    stamped = _geometry({}, _detection_dataset(tmp_path, [(64, 48), (32, 32)]))
+    stamped = _geometry({"tiling": {"enabled": False}},
+                        _detection_dataset(tmp_path, [(64, 48), (32, 32)]))
 
-    assert stamped.record()["tiling"] == {"enabled": False}
     assert stamped.train_native_size is None
 
 
@@ -170,8 +164,8 @@ def test_an_hpo_trials_resolved_record_replaces_unrealized_tiling(tmp_path):
 
 
 def test_an_hpo_trials_resolved_record_carries_the_effective_tile_geometry(tmp_path):
-    """A tiled trial records the tile edge its train dataset served and the overlap that
-    dataset filled in where the config stated none."""
+    """A tiled trial records the tile edge its config stated and the overlap its resolution
+    derived where the config stated none."""
     trial_dir = _trial(tmp_path, _base_config(
         {"enabled": True, "tile_size": 32, "sliver_frac": 0.5}, tmp_path))
 

@@ -10,8 +10,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from tcip_annotation.matching import xywh_corners
+
 from tcip_mcp.pipelines.derivations import (
-    char_sizes_from_boxes,
+    char_sizes,
     derive_block_scale_px,
     derive_localization_tolerance_frac,
     gt_aspect_ratios,
@@ -46,7 +48,7 @@ def test_anchor_ratios_keep_square_coverage_on_a_uniformly_open_dataset(boxes, l
 
 def test_localization_tolerance_normalizes_by_the_characteristic_size_its_siblings_share():
     """The center-match tolerance is a fraction of ``sqrt(w*h)``, the same characteristic size
-    ``char_sizes_from_boxes`` (and through it the localization kind and the IoU threshold) measures.
+    ``char_sizes`` (and through it the localization kind and the IoU threshold) measures.
     Two datasets with the same characteristic size and the same neighbor spacing must therefore
     derive the same tolerance, however differently their boxes are shaped: a size measure that
     reads the sides instead splits them apart and the tolerance stops being comparable to the
@@ -54,8 +56,8 @@ def test_localization_tolerance_normalizes_by_the_characteristic_size_its_siblin
     square = [[(0, 0, 30, 30), (40, 0, 30, 30), (80, 0, 30, 30)]]
     open = [[(0, 0, 10, 90), (40, 0, 10, 90), (80, 0, 10, 90)]]
 
-    assert float(np.mean(char_sizes_from_boxes(square))) == pytest.approx(30.0)
-    assert float(np.mean(char_sizes_from_boxes(open))) == pytest.approx(30.0)
+    assert float(np.mean(char_sizes(xywh_corners(b) for b in square))) == pytest.approx(30.0)
+    assert float(np.mean(char_sizes(xywh_corners(b) for b in open))) == pytest.approx(30.0)
 
     tol_square = derive_localization_tolerance_frac(square)
     tol_open = derive_localization_tolerance_frac(open)
@@ -70,10 +72,12 @@ def test_block_scale_takes_the_typical_spacing_not_one_dragged_up_by_isolated_ob
     objects real GT always carries cannot widen them past what the data supports. On a skewed
     spacing distribution (a dense row plus a far-apart pair) the mean sits well above every
     spacing the dense majority actually has."""
-    dense = [(x, 0, 10, 10) for x in range(0, 600, 100)]      # 6 boxes, 100px apart
-    isolated = [(5000, 0, 10, 10), (5900, 0, 10, 10)]         # 900px apart, far from the row
+    from tests._verified_checkpoint_fixtures import objects_over
+
+    dense = [[x, 0, x + 10, 10] for x in range(0, 600, 100)]  # 6 boxes, 100px apart
+    isolated = [[5000, 0, 5010, 10], [5900, 0, 5910, 10]]     # 900px apart, far from the row
     px, source = derive_block_scale_px(
-        tile_size=50, gt_boxes_per_image=[dense + isolated])
+        tile_size=50, objects=objects_over(dense + isolated, 6000 * 100))
     assert "GT object-spacing" in source
     assert px == 100
     assert px > 50  # above the tile_size floor, so the floor is not what produced this number

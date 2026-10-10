@@ -15,7 +15,6 @@ from __future__ import annotations
 import logging
 import shutil
 import time
-from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -135,29 +134,25 @@ class TrainContext:
                      resume_from=self.resume_from)
 
     # ---- craft library passthroughs (compose, don't reinvent) ----
-    def build_dataset(self, *, samples: Any, sizes: "Mapping[str, int] | None" = None,
-                      **kwargs: Any) -> Any:
-        """The factory for this run's task, over the samples you were handed. ``sizes`` and
-        ``scope`` unstated are the ones this run's data block records, so a loader you build here
-        reads at its width and count whichever subset of samples it holds, and a
-        ``dataset_source`` you name imports from this run's layout."""
-        from tcip_mcp.pipelines.data.datasets import build_dataset, stated_sizes
+    def build_dataset(self, *, samples: Any, transforms: Any = None) -> Any:
+        """This run's loader over ``samples``, whole, at ``transforms``
+        (``split_construction.run_loader``): by the builder its data block's dataset source
+        names, or else by the platform's factory at the block's sizes and tiling, under the
+        block's class space. A within-image split's region views are this run's own
+        ``train_loader`` and ``val_loader``; this builds no view of them."""
+        from tcip_mcp.pipelines.data.split_construction import run_loader
 
-        data = self.spec.data
-        if sizes is None:
-            sizes = stated_sizes(data)
-        kwargs.setdefault("scope", data.recorded_scope)
-        if kwargs.get("dataset_source") is not None:
-            kwargs["dataset_source"] = (kwargs["dataset_source"], self.run.layout)
-        return build_dataset(self.task, samples=samples, sizes=sizes, **kwargs)
+        return run_loader(self.task, self.spec.data, self.run.layout)(samples=samples,
+                                                                      transforms=transforms)
 
-    def tiled_dataset(self, base: Any, **kwargs: Any) -> Any:
-        """Wrap a detection dataset in the native-resolution tiler (same derived sliver cutoff
-        the default path uses); ``kwargs``: tile_size / overlap / sliver_frac / dedup_iou /
-        skip_empty."""
+    def tiled_dataset(self, base: Any, *, tile_size: int, overlap: float, **kwargs: Any) -> Any:
+        """Wrap a detection dataset in the native-resolution tiler
+        (``datasets.TiledDetectionDataset``) at the lattice you compose it at, ``tile_size`` and
+        ``overlap``, both required. ``kwargs``: sliver_frac / dedup_iou / skip_empty /
+        keep_regions / transforms."""
         from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
 
-        return TiledDetectionDataset(base, **kwargs)
+        return TiledDetectionDataset(base, tile_size=tile_size, overlap=overlap, **kwargs)
 
     def task_collate(self) -> Any:
         from tcip_mcp.pipelines.training.collation import task_collate
@@ -230,15 +225,16 @@ class TrainContext:
     def evaluate(self, model: Any, loader: Any = None, **kwargs: Any) -> Any:
         """``evaluation.evaluate`` of ``model`` over ``loader`` (the run's validation loader when
         omitted), a detector's boxes counted at the run's stated confidence
-        (``TrainRun.reads``);
-        ``kwargs`` are ``evaluate``'s other keywords, and one naming ``conf_threshold`` is refused
-        by the call (``TypeError``)."""
+        (``TrainRun.reads``) and each frame capped at the run's recorded object density;
+        ``kwargs`` are ``evaluate``'s other keywords, and one naming ``conf_threshold`` or
+        ``density`` is refused by the call (``TypeError``)."""
         from tcip_mcp.pipelines.model_build import recorded_model_dims
         from tcip_mcp.pipelines.training.evaluation import evaluate
 
         return evaluate(model, self.val_loader if loader is None else loader,
                         self.device, self.task, dims=recorded_model_dims(self.spec),
-                        conf_threshold=self.run.reads.conf_threshold, **kwargs)
+                        conf_threshold=self.run.reads.conf_threshold,
+                        density=self.spec.data.train_object_density, **kwargs)
 
     # ---- measurement primitives (compose for dimensional traits) ----
     def mask_geometry(self, *args: Any, **kwargs: Any) -> Any:
