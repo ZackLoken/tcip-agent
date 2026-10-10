@@ -533,9 +533,13 @@ def test_an_assessed_tiled_pass_and_its_bucket_run_one_merge(tmp_path, monkeypat
 
 
 def test_the_bucket_records_the_slice_geometry_the_checkpoint_derived(tmp_path):
+    """A tiled record read back from its published bucket states its lattice and the merge it
+    names, and that name builds SAHI's postprocess of that type over that type's metric."""
     import sahi
+    from sahi.predict import POSTPROCESS_NAME_TO_CLASS
 
     from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.pipelines.slicing import cross_tile_merge
     from tcip_mcp.tools.inference_tools import run_inference
 
     ckpt, _checkpoint_record = _checkpoint(  # sliver_frac stated: three boxes derive no spread
@@ -555,6 +559,8 @@ def test_the_bucket_records_the_slice_geometry_the_checkpoint_derived(tmp_path):
     assert "error" not in response, response
     execution = read_bucket(response["dataset_root"], "sliced").execution
     assert (execution.tile_size, execution.overlap) == (TILE, OVERLAP)
-    assert (execution.postprocess, execution.merge_type, execution.match_metric) == (
-        "nmm", "NMM", "IOS")
+    assert execution.postprocess == "nmm"
     assert execution.sahi_version == sahi.__version__
+    merge = cross_tile_merge(execution)
+    assert type(merge) is POSTPROCESS_NAME_TO_CLASS["NMM"]
+    assert (merge.match_metric, merge.match_threshold) == ("IOS", 0.6)

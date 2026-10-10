@@ -2,9 +2,9 @@
 
 One record states everything that decides which predictions a pass produces: the confidence
 threshold and the object density each frame's detection cap scales by, and for a tiled pass the
-tile edge, overlap, per-tile resize, the cross-tile merge (its SAHI type and match metric,
-resolved once) and the threshold it merges at. The record a pass executes is the record a bucket
-or an assessment stamps.
+tile edge, overlap, per-tile resize, the cross-tile merge by name (its SAHI type and match
+metric resolved from the name where they are read) and the threshold it merges at. The record a
+pass executes is the record a bucket or an assessment stamps.
 """
 
 from __future__ import annotations
@@ -37,6 +37,15 @@ CROSS_TILE_MERGES: dict[str, tuple[str, str]] = {
 metric that type compares over (intersection over union, or over the smaller box)."""
 
 
+def cross_tile_merge_of(name: str) -> tuple[str, str]:
+    """The SAHI postprocess type and match metric the cross-tile merge ``name`` runs
+    (:data:`CROSS_TILE_MERGES`); a name it does not hold refuses (``ValueError``) naming the
+    ones it does."""
+    from tcip_mcp.pipelines.model_build import resolve_named
+
+    return resolve_named(name, CROSS_TILE_MERGES, kind="cross-tile merge")
+
+
 class ExecutionRefusedError(ValueError):
     """A pass that cannot run as stated: a tile edge the checkpoint contradicts, a pass with no
     basis for its scale or its density, or a stated value that differs from the record being
@@ -63,8 +72,6 @@ class Execution:
     overlap: float | None
     tile_resize: tuple[int, int] | None
     postprocess: str | None
-    merge_type: str | None
-    match_metric: str | None
     cross_tile_nms: float | None
     sahi_version: str | None
     sources: dict[str, str] = field(default_factory=dict)
@@ -254,7 +261,6 @@ def execution_record(checkpoint: VerifiedCheckpoint, stated: Stated,
         TILE_OVERLAP_DERIVATION, derive_cross_tile_nms, derive_object_density,
         derive_tile_geometry,
     )
-    from tcip_mcp.pipelines.model_build import resolve_named
     from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
 
     values: dict[str, Any] = {}
@@ -283,8 +289,7 @@ def execution_record(checkpoint: VerifiedCheckpoint, stated: Stated,
     if geometry is None:
         return Execution(conf=values.get("conf"), density=values.get("density"),
                          tile_size=None, overlap=None, tile_resize=None, postprocess=None,
-                         merge_type=None, match_metric=None, cross_tile_nms=None,
-                         sahi_version=None, sources=sources)
+                         cross_tile_nms=None, sahi_version=None, sources=sources)
 
     edge, overlap = geometry.tile_size, geometry.overlap
     if edge is None or overlap is None:
@@ -301,7 +306,7 @@ def execution_record(checkpoint: VerifiedCheckpoint, stated: Stated,
                           else TILE_OVERLAP_DERIVATION)
 
     merge = DEFAULT_POSTPROCESS if stated.postprocess is None else stated.postprocess
-    merge_type, match_metric = resolve_named(merge, CROSS_TILE_MERGES, kind="cross-tile merge")
+    match_metric = cross_tile_merge_of(merge)[1]
     threshold = stated.cross_tile_nms
     if threshold is not None:
         sources["cross_tile_nms"] = "explicit"
@@ -322,6 +327,6 @@ def execution_record(checkpoint: VerifiedCheckpoint, stated: Stated,
         sources["cross_tile_nms"] = CROSS_TILE_NMS_DERIVATION
     return Execution(
         conf=values.get("conf"), density=values.get("density"), tile_size=edge, overlap=overlap,
-        tile_resize=geometry.tile_resize, postprocess=merge, merge_type=merge_type,
-        match_metric=match_metric, cross_tile_nms=float(threshold), sahi_version=sahi.__version__,
+        tile_resize=geometry.tile_resize, postprocess=merge, cross_tile_nms=float(threshold),
+        sahi_version=sahi.__version__,
         sources={**sources, "postprocess": "explicit" if stated.postprocess else "default"})
