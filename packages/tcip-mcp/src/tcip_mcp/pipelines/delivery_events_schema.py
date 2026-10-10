@@ -178,6 +178,10 @@ class Acknowledgment(BaseModel):
     recorded_at: str
 
 
+PlantMapping = Union[PlantMappingDisclosure, PlantRegistryDisclosure, CanopySegmentDisclosure]
+"""The one of three disclosures a delivery's ``plant_mapping`` is."""
+
+
 class DeliveryEventRecord(BaseModel):
     """The stored per-delivery record: what shipped, under which trait revision and kind, from
     which producer, what the gate found per bucket, and the acknowledgment it shipped under."""
@@ -199,7 +203,5 @@ class DeliveryEventRecord(BaseModel):
     acknowledgment: Optional[Acknowledgment]
     population: list[str]
     require_all_dates_complete: Optional[bool]
-    plant_mapping: Optional[
-        Union[PlantMappingDisclosure, PlantRegistryDisclosure, CanopySegmentDisclosure]
-    ]
+    plant_mapping: Optional[PlantMapping]
     produced_at: str

@@ -206,7 +206,7 @@ def test_plant_mapping_union_resolves_each_shape_and_refuses_a_hybrid(tmp_path: 
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.pipelines.delivery_events_schema import (
         CanopySegmentDisclosure,
-        DeliveryEventRecord,
+        PlantMapping,
         PlantMappingDisclosure,
         PlantRegistryDisclosure,
     )
@@ -244,7 +244,7 @@ def test_plant_mapping_union_resolves_each_shape_and_refuses_a_hybrid(tmp_path: 
         segmented, bucket, reg, ["plot0"], canopy_subject="canopy",
         position_error_m=POSITION_ERROR_M))
 
-    union = TypeAdapter(DeliveryEventRecord.model_fields["plant_mapping"].annotation)
+    union = TypeAdapter(PlantMapping | None)
 
     def _resolved(pm: dict) -> object:
         return union.validate_python(pm)
