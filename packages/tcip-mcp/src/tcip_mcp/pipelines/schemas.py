@@ -52,13 +52,12 @@ class EarlyStoppingSpec(BaseModel):
 
 
 class OptimizerSpec(BaseModel):
-    """The optimizer every stage builds (``optimizer_factory.build_optimizer``): its tuned
-    settings required (both rates, the weight decay, and ``momentum`` for ``sgd`` and for no other
-    optimizer), its identity defaulting to the platform's own."""
+    """The optimizer every stage builds (``optimizer_factory.build_optimizer``): its family and
+    its tuned settings required (both rates, the weight decay, and ``momentum`` for ``sgd`` and
+    for no other optimizer)."""
 
     model_config = ConfigDict(extra="forbid")
-    name: str = "adamw"
-    """The platform's optimizer when a config names none."""
+    name: str
     backbone_lr: float = Field(gt=0)
     head_lr: float = Field(gt=0)
     weight_decay: float = Field(ge=0)
@@ -360,7 +359,9 @@ class TrainConfigSchema(_Recorded):
     trainer."""
     batch_size: int | None = Field(None, ge=1)
     num_workers: int = Field(0, ge=0)
-    sampler: str = "random"
+    sampler: dict | None = None
+    """The train loader's sampler (``samplers.build_sampler``), its ``name`` beside its own
+    values; ``None`` draws every sample once an epoch in shuffled order."""
     augmentation: dict | None = None
     device: str | None = None
     """``None``: cuda when available, else cpu."""
@@ -400,10 +401,17 @@ class TrainConfigSchema(_Recorded):
         """What training under this config reads, each stated: the loaders' ``batch_size``, a
         detector's ``evaluation.conf_threshold``, and, when the config names no
         ``training_source``, the default trainer's regime (:meth:`default_trainer_regime`).
-        Refuses (``ValueError``) naming every one of them the config leaves unstated."""
+        Refuses (``ValueError``) naming every one of them the config leaves unstated, and a
+        ``sampler`` block its sampler refuses (``samplers.sampler_settings``)."""
+        from tcip_mcp.pipelines.data.samplers import sampler_settings
         from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
 
         unstated = []
+        if self.sampler is not None:
+            try:
+                sampler_settings(self.sampler)
+            except ValueError as exc:
+                unstated.append(str(exc))
         if self.batch_size is None:
             unstated.append("batch_size unstated: a run's loaders draw batches of the size its "
                             "config states, under any trainer")

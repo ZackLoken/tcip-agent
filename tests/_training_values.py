@@ -50,11 +50,28 @@ def sweep_space() -> dict:
     return {"optimizer.head_lr": {"type": "loguniform", "low": 1e-4, "high": 1e-2}}
 
 
+def fifo_scheduler() -> dict:
+    """A trial ``scheduler`` block that runs every trial to completion."""
+    return {"name": "fifo"}
+
+
+def fifo_search() -> dict:
+    """A sweep's sample ``search_alg`` and ``scheduler``: random sampling, every trial run to
+    completion."""
+    return {"search_alg": "random", "scheduler": fifo_scheduler()}
+
+
+def asha_scheduler(**stated) -> dict:
+    """A sample ``asha`` trial ``scheduler`` block stating every setting its Ray class takes,
+    with ``stated`` over them."""
+    return {"name": "asha", "time_attr": "training_iteration", "max_t": 3, "grace_period": 1,
+            "reduction_factor": 2, "brackets": 1, "stop_last_trials": True, **stated}
+
+
 def tune_arguments(**stated) -> dict:
     """``hpo.tune_search``'s arguments for a sample one-trial random search scheduling nothing
     and seeking the lowest ``objective``, with ``stated`` over them; ``objective_fn``,
     ``param_space`` and ``sweep_dir`` are the caller's own."""
     return {"metric": "objective", "mode": "min", "num_samples": 1, "search_alg": "random",
-            "scheduler": None, "grace_period": 1, "reduction_factor": 2, "seed": 0,
-            "max_concurrent": 1, "baseline_params": None, "resources_per_trial": None,
-            "split_draws": 1, **stated}
+            "scheduler": fifo_scheduler(), "seed": 0, "max_concurrent": 1,
+            "baseline_params": None, "resources_per_trial": None, "split_draws": 1, **stated}

@@ -20,7 +20,7 @@ import pytest
 pytest.importorskip("torch")
 
 from tcip_mcp.pipelines.model_build import STATE_DICT_KEY  # noqa: E402
-from tests._training_values import sweep_space  # noqa: E402
+from tests._training_values import fifo_search, sweep_space  # noqa: E402
 
 
 @pytest.fixture
@@ -502,7 +502,7 @@ def test_the_sweep_the_live_summary_and_a_trial_read_one_recorded_objective(
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", one_trial)
     result = tt.run_hyperparameter_search(tmp_path, base_config=real_hpo_base_config,
                                           param_space=sweep_space(), n_trials=1, search_seed=0,
-                                          auto_tensorboard=False)
+                                          **fifo_search(), auto_tensorboard=False)
     sweep = observe(find_sweep(result["sweep"]["sweep_id"], project=tmp_path))
     (trial_dir,) = run_dirs(tmp_path)
     trial = observe(trial_dir)

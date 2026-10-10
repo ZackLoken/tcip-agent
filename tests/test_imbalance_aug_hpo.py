@@ -1,4 +1,4 @@
-"""Imbalance losses + augmentation presets + HPO upgrades."""
+"""Imbalance losses, the augmentation chain a config states, and the HPO search."""
 
 from __future__ import annotations
 
@@ -15,9 +15,9 @@ from tcip_mcp.pipelines.components.losses import (  # noqa: E402
     FocalLoss, build_loss, compute_class_weights,
 )
 from tcip_mcp.pipelines.data.augmentations import (  # noqa: E402
-    RandomRotation, ToTensor, build_augmentation, get_augmentation_preset,
+    RandomRotation, ToTensor, build_augmentation,
 )
-from tests._training_values import tune_arguments  # noqa: E402
+from tests._training_values import asha_scheduler, tune_arguments  # noqa: E402
 
 
 # --------------------------------------------------------------------------
@@ -164,23 +164,45 @@ def test_semantic_seg_head_advertises_no_loss_choice():
 # Augmentation
 # --------------------------------------------------------------------------
 
-def test_nadir_preset_omits_mosaic_copypaste():
-    p = get_augmentation_preset("nadir_rotation")
-    assert {"rotation", "horizontal_flip", "vertical_flip"} <= set(p)
-    assert "mosaic" not in p and "copy_paste" not in p and "mixup" not in p
+EVERY_TRANSFORM: dict[str, dict] = {
+    "rotation": {"degrees": 180, "p": 1.0},
+    "horizontal_flip": {"p": 0.5},
+    "vertical_flip": {"p": 0.5},
+    "color_jitter": {"brightness": 0.2, "contrast": 0.2, "saturation": 0.2},
+    "random_crop": {"size": [64, 64], "min_scale": 0.5, "max_scale": 1.0},
+    "gaussian_blur": {"p": 0.1, "radius": 2.0},
+    "resize": {"size": [64, 64]},
+}
+"""A sample augmentation config naming every registered transform, each entry stating every
+value its transform takes."""
 
 
-def test_build_augmentation_from_preset_string():
-    aug = build_augmentation("nadir_rotation")
-    assert isinstance(aug.transforms[-1], ToTensor)
-    assert any(isinstance(t, RandomRotation) for t in aug.transforms)
+def test_build_augmentation_builds_each_transform_at_the_values_its_entry_states():
+    """guard. Every entry of the dict form builds its transform, in the config's order, holding
+    exactly the values the entry states, the chain ending in ToTensor."""
+    chain = build_augmentation(EVERY_TRANSFORM).transforms
+
+    assert [vars(t) for t in chain[:-1]] == list(EVERY_TRANSFORM.values())
+    assert isinstance(chain[-1], ToTensor)
 
 
-def test_build_augmentation_refuses_unknown_key():
-    """An unrecognized key must not be silently skipped: that would leave the persisted
-    experiment config claiming an augmentation that never ran."""
-    with pytest.raises(ValueError, match="mosaic"):
-        build_augmentation({"horizontal_flip": 0.5, "mosaic": True})
+@pytest.mark.parametrize("config, named", [
+    ({"horizontal_flip": True}, "'horizontal_flip'"),
+    ({"horizontal_flip": 0.5}, "'horizontal_flip'"),
+    ({"resize": [640, 640]}, "'resize'"),
+    ("nadir_rotation", "'nadir_rotation'"),
+    ({"color_jitter": {"hue": 0.1}}, "'color_jitter'"),
+    ({"color_jitter": {**EVERY_TRANSFORM["color_jitter"], "hue": 0.1}}, "'hue'"),
+    ({"rotation": {"degrees": 90}}, "'rotation'"),
+    ({"horizontal_flip": {"p": 0.5}, "mosaic": {}}, "mosaic"),
+], ids=["true", "a-number", "a-list", "a-preset-name", "hue-alone", "hue-beside-the-rest",
+        "a-value-unstated", "an-unknown-transform"])
+def test_build_augmentation_refuses_an_entry_not_stating_its_values_by_name(config, named):
+    """guard. A shorthand (True, a number, a list), a preset name, a value the transform does not
+    take (hue) and a value it takes left unstated each refuse naming the entry, and an unknown
+    transform refuses by its name: nothing in the chain is a value the config did not state."""
+    with pytest.raises(ValueError, match=named):
+        build_augmentation(config)
 
 
 def test_random_rotation_detection_keeps_boxes_valid():
@@ -359,21 +381,63 @@ def test_tune_search_normalizes_search_alg_case_before_deciding_grid(tmp_path, m
     assert captured["grid"] is True
 
 
-def test_build_scheduler_aliases():
+PBT_SCHEDULER = {
+    "name": "pbt", "time_attr": "training_iteration", "perturbation_interval": 2,
+    "burn_in_period": 0, "quantile_fraction": 0.25, "resample_probability": 0.25,
+    "perturbation_factors": [1.2, 0.8], "custom_explore_fn": None, "log_config": True,
+    "require_attrs": True, "synch": False,
+}
+MEDIAN_SCHEDULER = {"name": "median", "time_attr": "training_iteration", "grace_period": 2,
+                    "min_samples_required": 3, "min_time_slice": 0, "hard_stop": True}
+HYPERBAND_SCHEDULER = {"name": "hyperband", "time_attr": "training_iteration", "max_t": 9,
+                       "reduction_factor": 3, "stop_last_trials": True}
+"""Sample trial scheduler blocks, each stating every setting its Ray class takes."""
+
+
+def test_build_scheduler_builds_each_scheduler_at_the_settings_its_block_states():
+    """guard. Each scheduler is Ray's own class built at its block's settings, max_t among them
+    (never Ray's default cap), pbt mutating over the space it is handed, fifo pruning nothing."""
     pytest.importorskip("ray")
-    from ray.tune.schedulers import (
-        AsyncHyperBandScheduler, MedianStoppingRule, PopulationBasedTraining,
-    )
     from ray import tune
-    from tcip_mcp.pipelines.training.hpo import build_scheduler
-    assert isinstance(build_scheduler("asha"), AsyncHyperBandScheduler)
-    assert isinstance(build_scheduler("median"), MedianStoppingRule)
-    # PBT mutates hyperparameters mid-training, so it needs the search space as mutations.
-    assert isinstance(
-        build_scheduler("pbt", hyperparam_mutations={"lr": tune.loguniform(1e-5, 1e-2)}),
+    from ray.tune.schedulers import (
+        AsyncHyperBandScheduler, FIFOScheduler, HyperBandScheduler, MedianStoppingRule,
         PopulationBasedTraining,
     )
-    assert build_scheduler("none") is None
+    from tcip_mcp.pipelines.training.hpo import build_scheduler
+
+    space = {"lr": tune.loguniform(1e-5, 1e-2)}
+    asha = build_scheduler(asha_scheduler(max_t=7), hyperparam_mutations=space)
+    assert isinstance(asha, AsyncHyperBandScheduler) and asha._max_t == 7
+    hyperband = build_scheduler(HYPERBAND_SCHEDULER, hyperparam_mutations=space)
+    assert isinstance(hyperband, HyperBandScheduler) and hyperband._max_t_attr == 9
+    assert isinstance(build_scheduler(MEDIAN_SCHEDULER, hyperparam_mutations=space),
+                      MedianStoppingRule)
+    pbt = build_scheduler(PBT_SCHEDULER, hyperparam_mutations=space)
+    assert isinstance(pbt, PopulationBasedTraining) and pbt._hyperparam_mutations == space
+    assert type(build_scheduler({"name": "fifo"}, hyperparam_mutations=space)) is FIFOScheduler
+
+
+@pytest.mark.parametrize("scheduler, named", [
+    ({k: v for k, v in asha_scheduler().items() if k != "max_t"}, "unstated ['max_t']"),
+    ({k: v for k, v in asha_scheduler().items() if k != "grace_period"},
+     "unstated ['grace_period']"),
+    ({**HYPERBAND_SCHEDULER, "grace_period": 2}, "not taken ['grace_period']"),
+    ({"name": "fifo", "max_t": 5}, "not taken ['max_t']"),
+    ({"name": "none"}, "Unknown scheduler 'none'"),
+    ({"max_t": 5}, "Unknown scheduler ''"),
+], ids=["asha-without-max_t", "asha-without-grace_period", "hyperband-with-grace_period",
+        "fifo-with-max_t", "an-unknown-name", "no-name"])
+def test_scheduler_settings_refuses_a_setting_unstated_or_not_taken_by_name(scheduler, named):
+    """guard. A setting its scheduler's Ray class takes and the block leaves unstated (so Ray
+    would supply it), and one the class does not take (so Ray would drop it), each refuse by
+    name, as does a name no scheduler carries."""
+    pytest.importorskip("ray")
+    import re
+
+    from tcip_mcp.pipelines.training.hpo import scheduler_settings
+
+    with pytest.raises(ValueError, match=re.escape(named)):
+        scheduler_settings(scheduler)
 
 
 def _first_sampled_lr(searcher, storage_path) -> float:
@@ -482,7 +546,7 @@ def test_tune_search_evaluates_its_baseline_and_optimizes(tmp_path):
         obj,
         param_space={"x": {"type": "uniform", "low": -5.0, "high": 5.0}},
         sweep_dir=tmp_path / "hpo" / "sweep",
-        **tune_arguments(num_samples=6, scheduler="none", baseline_params={"x": 2.0}),
+        **tune_arguments(num_samples=6, baseline_params={"x": 2.0}),
     )
     points = [json.loads(p.read_text(encoding="utf-8")) for p in seen.iterdir()]
     assert len(points) == 6
@@ -490,8 +554,9 @@ def test_tune_search_evaluates_its_baseline_and_optimizes(tmp_path):
 
 
 def test_run_hyperparameter_search_exposes_agent_search_choices_not_pinned():
-    """run_hyperparameter_search lets the agent choose search_alg and scheduler; it takes no
-    ``pruner`` or ``direction`` parameter, and the search space is the caller's to state, no
+    """guard. run_hyperparameter_search takes the trial count, the search algorithm and the
+    scheduler block as required arguments with no default; it takes no ``pruner``,
+    ``direction`` or separate halving setting, and the search space is the caller's to state, no
     default space or default baseline shipping beside it."""
     import inspect
 
@@ -504,5 +569,7 @@ def test_run_hyperparameter_search_exposes_agent_search_choices_not_pinned():
     assert "warm_start" not in params
     assert not hasattr(hpo, "get_default_space")
     assert not hasattr(hpo, "get_default_baseline_params")
-    assert params["search_alg"].default == "random"
-    assert params["scheduler"].default == "asha"
+    for name in ("n_trials", "search_alg", "scheduler", "search_seed"):
+        assert params[name].default is inspect.Parameter.empty, name
+        assert params[name].kind is inspect.Parameter.KEYWORD_ONLY, name
+    assert not {"grace_period", "reduction_factor", "max_t"} & set(params)

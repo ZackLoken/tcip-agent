@@ -343,7 +343,7 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
         kw["objective_fn"]({"optimizer.head_lr": 0.1}, lambda value: None)
 
     from tests._chain_fixtures import BESPOKE_MODELS, training_config
-    from tests._training_values import sweep_space
+    from tests._training_values import fifo_search, sweep_space
 
     monkeypatch.setattr(tt, "_run_hpo_trial", fake_trial)
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
@@ -353,7 +353,7 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
             {"builder": BESPOKE_DETECTION, "source_files": [BESPOKE_MODELS], "task": "detection"},
             {"images_dir": str(root / "images" / "2026-03-04"),
              "scope": {"subject": "bud"}, "split": {"seed": 0, "val_ratio": 0.15}}),
-        param_space=sweep_space(), n_trials=1, search_seed=0
+        param_space=sweep_space(), n_trials=1, **fifo_search(), search_seed=0
     )
     sweep_id = hpo_result["sweep"]["sweep_id"]
 

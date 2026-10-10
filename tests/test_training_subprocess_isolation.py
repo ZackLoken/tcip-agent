@@ -536,7 +536,7 @@ def test_tune_search_accepts_explicit_resources_per_trial(tmp_path):
         obj,
         param_space={"x": {"type": "uniform", "low": -5.0, "high": 5.0}},
         sweep_dir=tmp_path / "explicit",
-        **tune_arguments(num_samples=4, scheduler="none",
+        **tune_arguments(num_samples=4,
                          resources_per_trial={"cpu": 1.0, "gpu": 0.0}))
     assert (tmp_path / "explicit").is_dir()
 
@@ -563,7 +563,7 @@ def test_tune_search_runs_despite_deprecated_ray_result_dir_variables(tmp_path, 
         obj,
         param_space={"x": {"type": "uniform", "low": -5.0, "high": 5.0}},
         sweep_dir=tmp_path / "sweep_store" / "redirected",
-        **tune_arguments(num_samples=2, scheduler="none",
+        **tune_arguments(num_samples=2,
                          resources_per_trial={"cpu": 1.0, "gpu": 0.0}))
 
     assert (tmp_path / "sweep_store" / "redirected").is_dir()

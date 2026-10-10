@@ -85,7 +85,7 @@ _SUBPROCESS_SCRIPT = textwrap.dedent(
             objective_fn=objective_fn,
             param_space={"optimizer.head_lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2}},
             metric="objective", mode="min", num_samples=1, search_alg="random",
-            scheduler=None, grace_period=1, reduction_factor=2, max_concurrent=1,
+            scheduler={"name": "fifo"}, max_concurrent=1,
             baseline_params=None, resources_per_trial={"cpu": 1}, split_draws=1,
             sweep_dir=Path(sys.argv[1]), seed=0
         )

@@ -54,8 +54,8 @@ class GenericPredictor:
     The input geometry the run trained at travels on the checkpoint's embedded config and is
     exposed as-recorded: ``train_tile_size``/``train_overlap`` (a tiled run's tile lattice),
     ``train_native_size`` (the one frame size an untiled run's frames all shared, ``[width,
-    height]``), and ``train_augmentation`` (the augmentation config that run declared, a dict or a
-    preset name). ``dims`` are the dimensions the model was built at
+    height]``), and ``train_augmentation`` (the augmentation config that run declared). ``dims``
+    are the dimensions the model was built at
     (:func:`~tcip_mcp.pipelines.model_build.recorded_model_dims`).
     """
 

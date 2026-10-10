@@ -155,38 +155,31 @@ def test_a_config_with_no_resize_records_no_resize():
 
     assert recorded_resize(None) is None
     assert recorded_resize({}) is None
-    assert recorded_resize({"horizontal_flip": 0.5}) is None
+    assert recorded_resize({"horizontal_flip": {"p": 0.5}}) is None
 
 
-def test_a_recorded_resize_is_read_through_the_builders_own_conventions():
+def test_a_recorded_resize_is_read_through_the_builders_own_chain():
+    """The size the last resize of the chain the config builds states, the dict form's own."""
     from tcip_mcp.pipelines.data.augmentations import recorded_resize
 
-    assert recorded_resize({"resize": [800, 600]}) == (800, 600)
     assert recorded_resize({"resize": {"size": [320, 240]}}) == (320, 240)
-    assert recorded_resize({"resize": True}) == (640, 640)
+    assert recorded_resize({"resize": {"size": [800, 600]},
+                            "horizontal_flip": {"p": 0.5}}) == (800, 600)
 
 
-def test_a_preset_name_resolves_through_the_same_preset_the_run_built():
-    """A preset string is not a ``[w, h]`` pair; it resolves through
-    ``get_augmentation_preset``, at the same default size every production caller builds it with.
-
-    That default is pinned here rather than read back off the preset, so the size a preset name
-    reproduces is a stated fact and not whatever the two sides happen to agree on today. A caller
-    that names its own size gets that one instead.
-    """
-    from tcip_mcp.pipelines.data.augmentations import get_augmentation_preset, recorded_resize
-
-    assert recorded_resize("nadir_rotation") == (640, 640)
-    assert recorded_resize("nadir_rotation") == tuple(
-        get_augmentation_preset("nadir_rotation")["resize"])
-    assert tuple(get_augmentation_preset("nadir_rotation", (512, 384))["resize"]) == (512, 384)
-
-
-def test_an_unbuildable_recorded_config_raises_rather_than_reading_as_no_resize():
+@pytest.mark.parametrize("config, refusal", [
+    ({"not_a_transform": {"p": 0.5}}, "Unknown augmentation"),
+    ({"resize": [640, 640]}, "'resize'"),
+    ({"resize": True}, "'resize'"),
+    ("nadir_rotation", "'nadir_rotation'"),
+])
+def test_an_unbuildable_recorded_config_raises_rather_than_reading_as_no_resize(config, refusal):
+    """A config the builder refuses (an unknown transform, a shorthand, a preset name) raises its
+    refusal here too, never read as a run that pinned no size."""
     from tcip_mcp.pipelines.data.augmentations import recorded_resize
 
-    with pytest.raises(ValueError, match="Unknown augmentation"):
-        recorded_resize({"not_a_transform": 0.5})
+    with pytest.raises(ValueError, match=refusal):
+        recorded_resize(config)
 
 
 def test_the_recorded_resize_travels_only_with_a_native_frame_tile_edge():
@@ -194,7 +187,7 @@ def test_the_recorded_resize_travels_only_with_a_native_frame_tile_edge():
     count already produced at those tiers was measured at."""
     from tcip_mcp.pipelines.slicing import resolve_tile_geometry
 
-    augmentation = {"resize": [640, 640]}
+    augmentation = {"resize": {"size": [640, 640]}}
     native = _GeometryStub(train_native_size=[512, 512], train_augmentation=augmentation)
     persisted = _GeometryStub(train_tile_size=512, train_augmentation=augmentation)
 
@@ -213,13 +206,13 @@ def test_a_checkpoint_carries_its_untiled_training_geometry_to_the_predictor(tmp
     from tcip_mcp.model_registry import load_registered_checkpoint
 
     checkpoint = load_registered_checkpoint(
-        _native_frame_checkpoint(tmp_path, {"resize": [32, 32]}), project=tmp_path)
+        _native_frame_checkpoint(tmp_path, {"resize": {"size": [32, 32]}}), project=tmp_path)
 
     pred = GenericPredictor(checkpoint, device="cpu")
 
     assert pred.train_tile_size is None
     assert pred.train_native_size == [TILE, TILE]
-    assert pred.train_augmentation == {"resize": [32, 32]}
+    assert pred.train_augmentation == {"resize": {"size": [32, 32]}}
 
 
 # --- the tile pass itself -----------------------------------------------
@@ -375,7 +368,7 @@ def test_a_tiled_pass_over_a_native_frame_checkpoint_says_what_it_rests_on(tmp_p
     states one."""
     from tests._verified_checkpoint_fixtures import SAMPLE_OVERLAP, predicted_over
 
-    ckpt = _native_frame_checkpoint(tmp_path, {"resize": [32, 32]})
+    ckpt = _native_frame_checkpoint(tmp_path, {"resize": {"size": [32, 32]}})
 
     p, results = predicted_over(tmp_path, ckpt, str(Path(gray_frame(tmp_path, IMAGE)).parent),
                                 device="cpu", tile=True, overlap=SAMPLE_OVERLAP, conf=0.0)
@@ -431,7 +424,7 @@ def _native_frame_regime_predictor():
     p = _stub_predictor(_MiddleHalfDetector(min_size=800, max_size=1333))
     p.train_tile_size, p.train_overlap = None, 0.0
     p.train_native_size = [TILE, TILE]
-    p.train_augmentation = {"resize": [TILE * 2, TILE * 2]}
+    p.train_augmentation = {"resize": {"size": [TILE * 2, TILE * 2]}}
     return p
 
 

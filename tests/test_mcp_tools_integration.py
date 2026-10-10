@@ -188,10 +188,10 @@ class TestAugmentations:
         from tcip_mcp.pipelines.data.augmentations import build_augmentation
 
         config = {
-            "horizontal_flip": 0.5,
-            "vertical_flip": 0.3,
-            "color_jitter": {"brightness": 0.3, "contrast": 0.3},
-            "gaussian_blur": 0.1,
+            "horizontal_flip": {"p": 0.5},
+            "vertical_flip": {"p": 0.3},
+            "color_jitter": {"brightness": 0.3, "contrast": 0.3, "saturation": 0.0},
+            "gaussian_blur": {"p": 0.1, "radius": 2.0},
         }
         transforms = build_augmentation(config)
         # 4 augmentations + ToTensor
@@ -201,7 +201,7 @@ class TestAugmentations:
         import torch
         from tcip_mcp.pipelines.data.augmentations import build_augmentation
 
-        config = {"horizontal_flip": 1.0}  # always flip
+        config = {"horizontal_flip": {"p": 1.0}}  # always flip
         transforms = build_augmentation(config)
 
         img = Image.new("RGB", (100, 100), color=(128, 128, 128))
@@ -220,7 +220,7 @@ class TestAugmentations:
         import torch
         from tcip_mcp.pipelines.data.augmentations import build_augmentation
 
-        config = {"color_jitter": {"brightness": 0.1}}
+        config = {"color_jitter": {"brightness": 0.1, "contrast": 0.0, "saturation": 0.0}}
         transforms = build_augmentation(config)
 
         img = Image.new("RGB", (64, 64), color=(128, 128, 128))

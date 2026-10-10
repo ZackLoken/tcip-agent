@@ -69,7 +69,7 @@ def _keep_rows(target: dict, valid: torch.Tensor) -> None:
 class RandomHorizontalFlip:
     """Flip image, boxes, and masks horizontally with probability p."""
 
-    def __init__(self, p: float = 0.5) -> None:
+    def __init__(self, *, p: float) -> None:
         self.p = p
 
     def __call__(self, img: Image.Image, target: dict) -> tuple[Image.Image, dict]:
@@ -93,7 +93,7 @@ class RandomHorizontalFlip:
 class RandomVerticalFlip:
     """Flip image, boxes, and masks vertically with probability p."""
 
-    def __init__(self, p: float = 0.5) -> None:
+    def __init__(self, *, p: float) -> None:
         self.p = p
 
     def __call__(self, img: Image.Image, target: dict) -> tuple[Image.Image, dict]:
@@ -113,19 +113,13 @@ class RandomVerticalFlip:
 
 
 class ColorJitter:
-    """Random brightness, contrast, saturation, hue perturbations."""
+    """Random brightness, contrast and saturation perturbations, each a factor drawn uniformly
+    from ``[1 - value, 1 + value]``; a value of 0 leaves that property unchanged."""
 
-    def __init__(
-        self,
-        brightness: float = 0.2,
-        contrast: float = 0.2,
-        saturation: float = 0.2,
-        hue: float = 0.05,
-    ) -> None:
+    def __init__(self, *, brightness: float, contrast: float, saturation: float) -> None:
         self.brightness = brightness
         self.contrast = contrast
         self.saturation = saturation
-        self.hue = hue
 
     def __call__(self, img: Image.Image, target: dict) -> tuple[Image.Image, dict]:
         if self.brightness > 0:
@@ -137,19 +131,13 @@ class ColorJitter:
         if self.saturation > 0:
             factor = 1.0 + random.uniform(-self.saturation, self.saturation)
             img = ImageEnhance.Color(img).enhance(factor)
-        # Hue shift via HSV conversion
-        if self.hue > 0:
-            # Simple hue shift isn't trivial with PIL alone; skip (no-op for now).
-            pass
         return img, target
 
 
 class RandomResizedCrop:
     """Crop a random region and resize to target size. Adjusts boxes and masks accordingly."""
 
-    def __init__(
-        self, size: tuple[int, int] = (640, 640), min_scale: float = 0.5, max_scale: float = 1.0
-    ) -> None:
+    def __init__(self, *, size: tuple[int, int], min_scale: float, max_scale: float) -> None:
         self.size = size
         self.min_scale = min_scale
         self.max_scale = max_scale
@@ -196,7 +184,7 @@ class RandomResizedCrop:
 class GaussianBlur:
     """Apply Gaussian blur with probability p."""
 
-    def __init__(self, p: float = 0.1, radius: float = 2.0) -> None:
+    def __init__(self, *, p: float, radius: float) -> None:
         self.p = p
         self.radius = radius
 
@@ -209,7 +197,7 @@ class GaussianBlur:
 class Resize:
     """Resize image to fixed size. Adjusts boxes and masks accordingly."""
 
-    def __init__(self, size: tuple[int, int] = (640, 640)) -> None:
+    def __init__(self, *, size: tuple[int, int]) -> None:
         self.size = size
 
     def __call__(self, img: Image.Image, target: dict) -> tuple[Image.Image, dict]:
@@ -233,15 +221,14 @@ class RandomRotation:
     """Rotate image (and detection boxes/masks) by a uniform angle in
     ``[-degrees, degrees]`` with probability ``p``.
 
-    Nadir/aerial imagery has no canonical "up", so free rotation is a valid
-    augmentation. Boxes are rotated as 4 corners about the image center and taken
+    Boxes are rotated as 4 corners about the image center and taken
     as their axis-aligned envelope, then clamped + degenerate-filtered exactly like
     ``RandomResizedCrop`` (filtering ``labels``/``masks`` in lockstep). Semantic
     ``[H, W]`` masks are rotated with nearest resampling. Non-detection targets
     (classification/ordinal/regression) pass through untouched.
     """
 
-    def __init__(self, degrees: float = 180.0, p: float = 1.0) -> None:
+    def __init__(self, *, degrees: float, p: float) -> None:
         self.degrees = degrees
         self.p = p
 
@@ -309,32 +296,7 @@ _AUGMENTATION_REGISTRY: dict[str, type] = {
 }
 
 
-def get_augmentation_preset(name: str, image_size: tuple[int, int] = (640, 640)) -> dict:
-    """Return a ``build_augmentation``-ready config dict for a named preset.
-
-    ``nadir_rotation``: free rotation, h/v flips, mild jitter; no mosaic/copy-paste/mixup.
-    """
-    from tcip_mcp.pipelines.model_build import resolve_named
-
-    presets: dict[str, dict] = {
-        "nadir_rotation": {
-            "rotation": {"degrees": 180, "p": 1.0},
-            "horizontal_flip": 0.5,
-            "vertical_flip": 0.5,
-            "color_jitter": {"brightness": 0.2, "contrast": 0.2, "saturation": 0.2, "hue": 0.0},
-            "resize": list(image_size),
-        },
-        "default": {
-            "horizontal_flip": 0.5,
-            "color_jitter": {"brightness": 0.2, "contrast": 0.2},
-            "resize": list(image_size),
-        },
-        "none": {"resize": list(image_size)},
-    }
-    return resolve_named(name, presets, kind="augmentation preset")
-
-
-def recorded_resize(config: dict | str | None) -> tuple[int, int] | None:
+def recorded_resize(config: dict | None) -> tuple[int, int] | None:
     """The fixed ``(width, height)`` an augmentation config resizes every sample to, or ``None``
     when it pins no size.
 
@@ -351,50 +313,25 @@ def recorded_resize(config: dict | str | None) -> tuple[int, int] | None:
     return int(width), int(height)
 
 
-def build_augmentation(config: dict | str) -> Compose:
-    """Build an augmentation pipeline from a config dict or a preset name.
+def build_augmentation(config: dict) -> Compose:
+    """The augmentation chain ``config`` states, in its order, ending in :class:`ToTensor`.
 
-    ``config`` may be a dict (as below) or a preset-name string
-    (e.g. ``"nadir_rotation"``) resolved via :func:`get_augmentation_preset`.
+    ``config`` maps each transform's name (:data:`_AUGMENTATION_REGISTRY`) to a dict stating
+    every value that transform's constructor takes, e.g. ``{"horizontal_flip": {"p": 0.5},
+    "resize": {"size": [512, 512]}}``. Refuses (``ValueError``) a ``config`` that is no dict, an
+    unknown transform, and by name an entry that is not a dict stating exactly its transform's
+    values."""
+    from tcip_mcp.pipelines.model_build import keyword_parameters, resolve_named
 
-    Config format:
-        {
-            "rotation": {"degrees": 180, "p": 1.0},
-            "horizontal_flip": 0.5,       # probability
-            "vertical_flip": 0.3,
-            "color_jitter": {"brightness": 0.3, "contrast": 0.3},
-            "random_crop": {"min_scale": 0.5, "size": [640, 640]},
-            "gaussian_blur": 0.1,
-            "resize": [640, 640],
-        }
-
-    Values can be:
-      - float: interpreted as probability (p=value)
-      - list/tuple: interpreted as size
-      - dict: passed as kwargs to the transform constructor
-      - bool: True → use defaults
-
-    Returns a Compose([..., ToTensor()]) pipeline.
-    """
-    from tcip_mcp.pipelines.model_build import resolve_named
-
-    if isinstance(config, str):
-        config = get_augmentation_preset(config)
-
-    transforms = []
-
+    if not isinstance(config, dict):
+        raise ValueError(f"augmentation {config!r} is no dict of transform entries")
+    transforms: list = []
     for name, params in config.items():
         cls = resolve_named(name, _AUGMENTATION_REGISTRY, kind="augmentation")
-
-        if isinstance(params, bool) and params:
-            transforms.append(cls())
-        elif isinstance(params, (int, float)):
-            transforms.append(cls(p=params))
-        elif isinstance(params, (list, tuple)):
-            transforms.append(cls(size=tuple(params)))
-        elif isinstance(params, dict):
-            transforms.append(cls(**params))
-
-    # Always end with ToTensor
+        values = keyword_parameters(cls)[0]
+        if not isinstance(params, dict) or set(params) != values:
+            raise ValueError(f"augmentation {name!r} states {params!r}; it takes a dict stating "
+                             f"each of {sorted(values)}")
+        transforms.append(cls(**params))
     transforms.append(ToTensor())
     return Compose(transforms)

@@ -159,11 +159,11 @@ class TrainContext:
 
         return task_collate(self.task)
 
-    def build_sampler(self, name: str, dataset: Any, *, num_workers: int | None = None,
+    def build_sampler(self, block: dict, dataset: Any, *, num_workers: int | None = None,
                       batch_size: int | None = None) -> Any:
         from tcip_mcp.pipelines.data.samplers import build_sampler
 
-        return build_sampler(name, dataset, num_workers=num_workers, batch_size=batch_size)
+        return build_sampler(block, dataset, num_workers=num_workers, batch_size=batch_size)
 
     def build_augmentation(self, cfg: dict) -> Any:
         from tcip_mcp.pipelines.data.augmentations import build_augmentation

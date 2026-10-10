@@ -141,7 +141,7 @@ def opened_run(root: str | Path, config: dict, *, experiment_id: str | None = No
 
 SWEEP_ARGUMENTS: dict[str, Any] = {
     "param_space": sweep_space(), "n_trials": 1,
-    "search_alg": "random", "scheduler": "none", "grace_period": 1, "reduction_factor": 2,
+    "search_alg": "random", "scheduler": {"name": "fifo"},
     "baseline_params": None, "max_concurrent": 1,
     "resources_per_trial": None, "split_draws": 1, "split_draw_seeds": None, "search_seed": 0,
     "trial_budget": None, "relaunched_from": None,

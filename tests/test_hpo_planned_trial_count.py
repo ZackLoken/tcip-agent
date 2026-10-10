@@ -224,7 +224,7 @@ def test_planned_trial_count_leaves_nothing_under_home_or_the_project_root(tmp_p
 
 
 def _trials_ray_yields(
-    param_space: dict, num_samples: int, search_alg: str | None, draws: int,
+    param_space: dict, num_samples: int, search_alg: str, draws: int,
     baseline_params: dict | None, storage_path,
 ) -> tuple[int, int]:
     """Build the searcher tune_search launches for this sweep and drain it, returning the number

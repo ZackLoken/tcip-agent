@@ -7,7 +7,9 @@ from __future__ import annotations
 import pytest
 
 from tests._chain_fixtures import DETECTION_SOURCE, training_config
-from tests._training_values import evaluation_block, sweep_space, tune_arguments
+from tests._training_values import (
+    asha_scheduler, evaluation_block, fifo_scheduler, fifo_search, sweep_space, tune_arguments,
+)
 from tests._verified_checkpoint_fixtures import opened_sweep
 
 
@@ -63,7 +65,7 @@ def test_run_hyperparameter_search_refuses_split_draws_below_one(
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space=sweep_space(), n_trials=1,
-        scheduler="none", split_draws=value, search_seed=0
+        **fifo_search(), split_draws=value, search_seed=0
     )
 
     assert "error" in result and "pairs no partition" in result["error"]
@@ -82,7 +84,7 @@ def test_run_hyperparameter_search_refuses_a_non_integer_split_draws_by_direct_c
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space=sweep_space(), n_trials=1,
-        scheduler="none", split_draws=2.5, search_seed=0
+        **fifo_search(), split_draws=2.5, search_seed=0
     )
 
     assert "error" in result and "is not a draw count" in result["error"]
@@ -103,7 +105,7 @@ def test_run_hyperparameter_search_refuses_a_split_draws_of_another_type_by_dire
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space=sweep_space(), n_trials=1,
-        scheduler="none", split_draws=value, search_seed=0
+        **fifo_search(), split_draws=value, search_seed=0
     )
 
     assert "error" in result and "is not a draw count" in result["error"]
@@ -126,7 +128,7 @@ def test_run_hyperparameter_search_refuses_n_trials_not_a_count_when_a_bound_is_
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space=sweep_space(), n_trials=value,
-        scheduler="none", split_draws=2, search_seed=0
+        **fifo_search(), split_draws=2, search_seed=0
     )
 
     assert "error" in result and "is not a count of trials" in result["error"]
@@ -146,7 +148,7 @@ def test_run_hyperparameter_search_admits_n_trials_not_a_count_at_one_draw_with_
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space=sweep_space(), n_trials=value,
-        search_seed=0
+        **fifo_search(), search_seed=0
     )
 
     assert "error" not in result, result
@@ -166,7 +168,7 @@ def test_run_hyperparameter_search_refuses_split_draws_above_one_with_no_trial_b
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space=sweep_space(), n_trials=1,
-        scheduler="none", split_draws=2, search_seed=0
+        **fifo_search(), split_draws=2, search_seed=0
     )
 
     assert "error" in result and "trial_budget=2" in result["error"]
@@ -187,7 +189,7 @@ def test_run_hyperparameter_search_refuses_a_trial_budget_not_a_count(
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space=sweep_space(), n_trials=1,
-        scheduler="none", trial_budget=value, search_seed=0
+        **fifo_search(), trial_budget=value, search_seed=0
     )
 
     assert "error" in result and "is not a count of trials" in result["error"]
@@ -214,7 +216,7 @@ def test_run_hyperparameter_search_refuses_split_draws_when_a_bound_selection_wo
                           {"split": {"selection_dir": str(selection_dir), "seed": 0}})
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=cfg, param_space=sweep_space(), n_trials=1,
-                        scheduler="none", split_draws=2, search_seed=0)
+                        **fifo_search(), split_draws=2, search_seed=0)
 
     assert any("fewer than the 2 the requested sides need" in issue
                for issue in result["issues"]), result
@@ -233,7 +235,7 @@ def test_run_hyperparameter_search_refuses_split_draws_when_auto_val_is_off(
     cfg["data"] = {**cfg["data"], "auto_val": False}
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=cfg, param_space=sweep_space(), n_trials=1,
-                        scheduler="none", split_draws=2, search_seed=0)
+                        **fifo_search(), split_draws=2, search_seed=0)
 
     assert "error" in result and "auto_val" in result["error"]
     assert not ran
@@ -249,7 +251,8 @@ def test_run_hyperparameter_search_refuses_split_draws_with_a_non_native_search_
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space=sweep_space(), n_trials=1,
-                        search_alg="bayesopt", scheduler="none", split_draws=2, search_seed=0)
+                        search_alg="bayesopt", scheduler=fifo_scheduler(), split_draws=2,
+                        search_seed=0)
 
     assert "error" in result and "search_alg" in result["error"]
     assert not ran
@@ -265,7 +268,8 @@ def test_run_hyperparameter_search_refuses_split_draws_with_a_pruning_scheduler(
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space=sweep_space(), n_trials=1,
-                        scheduler="asha", split_draws=2, search_seed=0)
+                        search_alg="random", scheduler=asha_scheduler(), split_draws=2,
+                        search_seed=0)
 
     assert "error" in result and "scheduler" in result["error"]
     assert not ran
@@ -281,7 +285,7 @@ def test_run_hyperparameter_search_refuses_split_draw_seeds_of_the_wrong_length(
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space=sweep_space(), n_trials=1,
-                        scheduler="none", split_draws=3, split_draw_seeds=[1, 2], search_seed=0)
+                        **fifo_search(), split_draws=3, split_draw_seeds=[1, 2], search_seed=0)
 
     assert "error" in result and "split_draw_seeds" in result["error"]
     assert not ran
@@ -298,7 +302,7 @@ def test_run_hyperparameter_search_refuses_split_draws_when_param_space_already_
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config,
         param_space={"data.split.seed": {"type": "categorical", "choices": [1, 2]}},
-        n_trials=1, scheduler="none", split_draws=2, search_seed=0
+        n_trials=1, **fifo_search(), split_draws=2, search_seed=0
     )
 
     assert "error" in result and "data.split.seed" in result["error"]
@@ -315,7 +319,7 @@ def test_run_hyperparameter_search_refuses_split_draws_when_the_baseline_names_t
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space=sweep_space(), n_trials=1,
-        scheduler="none", split_draws=2,
+        **fifo_search(), split_draws=2,
         baseline_params={"optimizer.head_lr": 0.01, "data.split.seed": 7}, search_seed=0
     )
 
@@ -334,7 +338,7 @@ def test_run_hyperparameter_search_refuses_split_draws_when_param_space_sweeps_a
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config,
         param_space={"data.split.val_ratio": {"type": "uniform", "low": 0.1, "high": 0.3}},
-        n_trials=1, scheduler="none", split_draws=2, search_seed=0
+        n_trials=1, **fifo_search(), split_draws=2, search_seed=0
     )
 
     assert "error" in result and "data.split.val_ratio" in result["error"]
@@ -387,7 +391,7 @@ def test_run_hyperparameter_search_refuses_a_caller_split_seed_axis_at_one_draw(
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, n_trials=1,
-        scheduler="none", search_seed=0, **case,
+        scheduler=fifo_scheduler(), search_seed=0, **{"search_alg": "random", **case},
     )
 
     assert "error" in result and "cannot be replayed as recorded" in result["error"]
@@ -408,7 +412,7 @@ def test_run_hyperparameter_search_refuses_split_draws_zero_before_the_seed_axis
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, n_trials=1,
-        scheduler="none", split_draws=0,
+        **fifo_search(), split_draws=0,
         param_space={"data.split.seed": {"type": "categorical", "choices": [1, 2]}}, search_seed=0
     )
 
@@ -442,7 +446,7 @@ def test_run_hyperparameter_search_refuses_repeated_split_draw_seeds(
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space=sweep_space(), n_trials=1,
-        scheduler="none", split_draws=2, split_draw_seeds=[7, 7], search_seed=0
+        **fifo_search(), split_draws=2, split_draw_seeds=[7, 7], search_seed=0
     )
 
     assert "error" in result and "[7]" in result["error"]
@@ -460,7 +464,7 @@ def test_run_hyperparameter_search_admits_distinct_split_draw_seeds_beside_the_r
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space=sweep_space(), n_trials=1,
-        scheduler="none", split_draws=2, split_draw_seeds=[7, 8], trial_budget=2, search_seed=0
+        **fifo_search(), split_draws=2, split_draw_seeds=[7, 8], trial_budget=2, search_seed=0
     )
 
     assert "error" not in result, result
@@ -478,7 +482,7 @@ def test_run_hyperparameter_search_admits_the_paired_path_with_a_param_space_bes
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space=sweep_space(),
         n_trials=1,
-        scheduler="none", split_draws=2, split_draw_seeds=[7, 8], trial_budget=2, search_seed=0
+        **fifo_search(), split_draws=2, split_draw_seeds=[7, 8], trial_budget=2, search_seed=0
     )
 
     assert "error" not in result, result
@@ -497,7 +501,7 @@ def test_run_hyperparameter_search_admits_a_space_naming_no_seed_axis_at_one_dra
     space = sweep_space()
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space=space,
-        n_trials=1, search_seed=0
+        n_trials=1, **fifo_search(), search_seed=0
     )
 
     assert "error" not in result, result
@@ -521,7 +525,7 @@ def test_run_hyperparameter_search_reports_the_seed_axis_refusal_over_a_prefligh
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=cfg,
         param_space={"data.split.seed": {"type": "categorical", "choices": [1, 2]}},
-        n_trials=1, scheduler="none", search_seed=0
+        n_trials=1, **fifo_search(), search_seed=0
     )
 
     assert "error" in result and "cannot be replayed as recorded" in result["error"]
@@ -543,7 +547,7 @@ def test_the_seed_axis_refusal_answers_before_a_later_points_schema_error(
         tmp_path, base_config=real_hpo_base_config,
         param_space={"data.split.seed": {"type": "categorical", "choices": [1, 2]},
                      "batch_size": {"type": "categorical", "choices": [2, 0]}},
-        n_trials=1, scheduler="none", search_seed=0
+        n_trials=1, **fifo_search(), search_seed=0
     )
 
     assert "error" in result and "cannot be replayed as recorded" in result["error"], result
@@ -583,7 +587,7 @@ def test_run_hyperparameter_search_admits_split_draws_bound_to_a_selection_and_s
     cfg = _bound_hpo_config(selection_dir)
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=cfg, param_space=sweep_space(), n_trials=1,
-                        scheduler="none", split_draws=2, trial_budget=2, search_seed=0)
+                        **fifo_search(), split_draws=2, trial_budget=2, search_seed=0)
 
     assert "error" not in result, result
     assert captured["param_space"]["data.split.seed"] == {
@@ -628,7 +632,7 @@ def test_a_bound_sweep_reads_and_redraws_its_selection_once_on_opening(tmp_path,
     monkeypatch.setattr(split_mod, "redrawn_selection", redraw)
     opened = tt.open_sweep(
         tmp_path, _bound_hpo_config(selection_dir), sweep_space(),
-        n_trials=1, search_alg="random", scheduler="none", grace_period=1, reduction_factor=2,
+        n_trials=1, **fifo_search(),
         baseline_params=None, max_concurrent=1, resources_per_trial=None,
         split_draws=2, split_draw_seeds=None, search_seed=0, trial_budget=2,
         relaunched_from=None, actor=None)
@@ -657,7 +661,7 @@ def test_run_hyperparameter_search_admits_split_draws_bound_with_auto_val_false(
     cfg = _bound_hpo_config(selection_dir, auto_val=False)
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=cfg, param_space=sweep_space(), n_trials=1,
-                        scheduler="none", split_draws=2, trial_budget=2, search_seed=0)
+                        **fifo_search(), split_draws=2, trial_budget=2, search_seed=0)
 
     assert "error" not in result, result
 
@@ -674,7 +678,7 @@ def test_run_hyperparameter_search_admits_split_draws_and_derives_seeds_from_the
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space=sweep_space(), n_trials=2,
-                        scheduler="none", split_draws=3, trial_budget=6, search_seed=0)
+                        **fifo_search(), split_draws=3, trial_budget=6, search_seed=0)
 
     assert "error" not in result, result
     assert captured["split_draws"] == 3
@@ -696,7 +700,7 @@ def test_run_hyperparameter_search_admits_split_draws_with_explicit_seeds(
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space=sweep_space(), n_trials=1,
-                        scheduler="none", split_draws=2, split_draw_seeds=[7, 99],
+                        **fifo_search(), split_draws=2, split_draw_seeds=[7, 99],
                         trial_budget=2, search_seed=0)
 
     assert "error" not in result, result
@@ -717,7 +721,7 @@ def test_run_hyperparameter_search_admits_split_draws_with_a_native_search_alg(
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space=sweep_space(), n_trials=1,
-                        search_alg=search_alg, scheduler="none", split_draws=2,
+                        search_alg=search_alg, scheduler=fifo_scheduler(), split_draws=2,
                         trial_budget=budget, search_seed=0)
 
     assert "error" not in result, result
@@ -740,7 +744,7 @@ def test_run_hyperparameter_search_admits_split_draws_for_instance_seg(
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=cfg, param_space=sweep_space(), n_trials=1,
-                        scheduler="none", split_draws=2, trial_budget=2, search_seed=0)
+                        **fifo_search(), split_draws=2, trial_budget=2, search_seed=0)
 
     assert "error" not in result, result
 
@@ -759,7 +763,7 @@ def test_run_hyperparameter_search_admits_split_draws_with_explicit_auto_val_tru
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=cfg, param_space=sweep_space(), n_trials=1,
-                        scheduler="none", split_draws=2, trial_budget=2, search_seed=0)
+                        **fifo_search(), split_draws=2, trial_budget=2, search_seed=0)
 
     assert "error" not in result, result
 
@@ -775,7 +779,7 @@ def test_run_hyperparameter_search_admits_split_draws_with_a_baseline_not_naming
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space=sweep_space(), n_trials=1,
-        scheduler="none", split_draws=2, baseline_params={"optimizer.head_lr": 0.01},
+        **fifo_search(), split_draws=2, baseline_params={"optimizer.head_lr": 0.01},
         trial_budget=2, search_seed=0
     )
 
@@ -795,7 +799,7 @@ def test_run_hyperparameter_search_admits_a_bare_seed_axis_beside_split_draws(
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config,
         param_space={"seed": {"type": "int", "low": 1, "high": 3}},
-        n_trials=1, scheduler="none", split_draws=2, trial_budget=2, search_seed=0
+        n_trials=1, **fifo_search(), split_draws=2, trial_budget=2, search_seed=0
     )
 
     assert "error" not in result, result
@@ -820,7 +824,7 @@ def test_run_hyperparameter_search_refuses_a_budget_that_admits_fewer_than_every
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space=sweep_space(), n_trials=4,
-        scheduler="none", search_alg="random", split_draws=3, trial_budget=10, search_seed=0
+        **fifo_search(), split_draws=3, trial_budget=10, search_seed=0
     )
 
     assert "error" in result
@@ -842,7 +846,7 @@ def test_run_hyperparameter_search_refuses_a_budget_at_the_quotient_boundary(
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space=THREE_CHOICE_SPACE, n_trials=2,
-        scheduler="none", search_alg="grid", split_draws=3, trial_budget=6, search_seed=0
+        scheduler=fifo_scheduler(), search_alg="grid", split_draws=3, trial_budget=6, search_seed=0
     )
 
     assert "error" in result
@@ -865,7 +869,7 @@ def test_run_hyperparameter_search_refuses_a_budget_a_single_draw_already_exceed
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space=THREE_CHOICE_SPACE, n_trials=2,
-        scheduler="none", search_alg="grid", split_draws=2, trial_budget=5, search_seed=0
+        scheduler=fifo_scheduler(), search_alg="grid", split_draws=2, trial_budget=5, search_seed=0
     )
 
     assert "error" in result
@@ -885,7 +889,7 @@ def test_run_hyperparameter_search_admits_a_budget_the_count_fits_and_records_it
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space=sweep_space(), n_trials=2,
-        scheduler="none", search_alg="random", split_draws=3, trial_budget=6, search_seed=0
+        **fifo_search(), split_draws=3, trial_budget=6, search_seed=0
     )
 
     assert "error" not in result, result
@@ -907,7 +911,7 @@ def test_run_hyperparameter_search_refuses_a_one_draw_launch_a_stated_budget_exc
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space=sweep_space(), n_trials=5,
-        scheduler="none", trial_budget=3, search_seed=0
+        **fifo_search(), trial_budget=3, search_seed=0
     )
 
     assert "error" in result
@@ -927,7 +931,7 @@ def test_run_hyperparameter_search_admits_a_one_draw_launch_with_no_stated_budge
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space=sweep_space(), n_trials=1,
-        scheduler="none", search_seed=0
+        **fifo_search(), search_seed=0
     )
 
     assert "error" not in result, result
@@ -949,7 +953,7 @@ def test_run_hyperparameter_search_relaunch_with_no_budget_replays_as_recorded(
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space=sweep_space(), n_trials=1,
-        scheduler="none", split_draws=2, relaunched_from=source, search_seed=0
+        **fifo_search(), split_draws=2, relaunched_from=source, search_seed=0
     )
 
     assert "error" not in result, result
@@ -969,7 +973,7 @@ def test_run_hyperparameter_search_relaunch_with_a_budget_is_still_checked(
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space=sweep_space(), n_trials=1,
-        scheduler="none", split_draws=2, relaunched_from=source, trial_budget=1, search_seed=0
+        **fifo_search(), split_draws=2, relaunched_from=source, trial_budget=1, search_seed=0
     )
 
     assert "error" in result and "2" in result["error"]
@@ -989,7 +993,7 @@ def test_run_hyperparameter_search_refuses_a_categorical_with_no_choices_before_
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space={"x": {"type": "categorical"}},
-        n_trials=1, scheduler="none", split_draws=split_draws, trial_budget=trial_budget,
+        n_trials=1, **fifo_search(), split_draws=split_draws, trial_budget=trial_budget,
         search_seed=0
     )
 
@@ -1011,7 +1015,7 @@ def test_run_hyperparameter_search_refuses_an_inverted_int_bound_before_minting(
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config,
         param_space={"batch_size": {"type": "int", "low": 8, "high": 2}},
-        n_trials=1, scheduler="none", search_alg=search_alg,
+        n_trials=1, scheduler=fifo_scheduler(), search_alg=search_alg,
         split_draws=2, trial_budget=5, search_seed=0
     )
 
@@ -1056,7 +1060,7 @@ def test_run_hyperparameter_search_refuses_a_sampled_int_axis_the_sampler_cannot
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config,
         param_space={"x": {"type": "int", "low": 0, "high": 10**30}},
-        n_trials=1, scheduler="none", split_draws=2, trial_budget=5, search_seed=0,
+        n_trials=1, **fifo_search(), split_draws=2, trial_budget=5, search_seed=0,
     )
 
     assert "'x'" in result.get("error", "") and "int64" in result["error"], result
@@ -1078,7 +1082,7 @@ def test_run_hyperparameter_search_refuses_a_grid_axis_past_its_bound_by_name(
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config,
         param_space={"x": {"type": "int", "low": 0, "high": 10**6 - 1}},
-        n_trials=1, scheduler="none", search_alg="grid", split_draws=split_draws,
+        n_trials=1, scheduler=fifo_scheduler(), search_alg="grid", split_draws=split_draws,
         trial_budget=trial_budget, search_seed=0,
     )
 
@@ -1100,7 +1104,7 @@ def test_run_hyperparameter_search_counts_an_empty_param_space_at_one_draw_as_it
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space={}, n_trials=2,
-        scheduler="none", search_alg="grid", trial_budget=1, search_seed=0
+        scheduler=fifo_scheduler(), search_alg="grid", trial_budget=1, search_seed=0
     )
 
     assert "error" in result and "2 trials" in result["error"]
@@ -1121,7 +1125,7 @@ def test_run_hyperparameter_search_an_empty_param_space_above_one_draw_counts_th
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space={}, n_trials=1,
-        scheduler="none", search_alg="grid", split_draws=2, trial_budget=1, search_seed=0
+        scheduler=fifo_scheduler(), search_alg="grid", split_draws=2, trial_budget=1, search_seed=0
     )
 
     assert "error" in result and "2" in result["error"] and "1 per draw" in result["error"]
@@ -1131,7 +1135,7 @@ def test_run_hyperparameter_search_an_empty_param_space_above_one_draw_counts_th
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=real_hpo_base_config, param_space={}, n_trials=1,
-        scheduler="none", search_alg="grid", split_draws=2, trial_budget=2, search_seed=0
+        scheduler=fifo_scheduler(), search_alg="grid", split_draws=2, trial_budget=2, search_seed=0
     )
 
     assert "error" not in result, result
@@ -1371,7 +1375,7 @@ def test_run_hyperparameter_search_refuses_split_draws_over_a_single_source_spat
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=cfg, param_space=sweep_space(), n_trials=1,
-                        scheduler="none", split_draws=2, search_seed=0)
+                        **fifo_search(), split_draws=2, search_seed=0)
 
     assert "one admitted source" in result["error"]
     assert "over its own pixels" in result["error"]
@@ -1397,7 +1401,7 @@ def test_run_hyperparameter_search_admits_a_single_source_spatial_config_at_one_
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=cfg, param_space=sweep_space(), n_trials=1,
-                        scheduler="none", split_draws=1, search_seed=0)
+                        **fifo_search(), split_draws=1, search_seed=0)
 
     assert "error" not in result, result
 
@@ -1419,7 +1423,7 @@ def test_run_hyperparameter_search_admits_split_draws_over_a_two_source_tiled_co
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=cfg, param_space=sweep_space(), n_trials=1,
-                        scheduler="none", split_draws=2, trial_budget=2, search_seed=0)
+                        **fifo_search(), split_draws=2, trial_budget=2, search_seed=0)
 
     assert "error" not in result, result
 
@@ -1448,7 +1452,7 @@ def test_split_draws_over_one_bespoke_source_refuse_the_validation_they_cannot_d
 
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=cfg, param_space=sweep_space(), n_trials=1,
-                        scheduler="none", split_draws=2, trial_budget=2, search_seed=0)
+                        **fifo_search(), split_draws=2, trial_budget=2, search_seed=0)
 
     assert any("auto_val=False" in issue for issue in result["issues"]), result
 
@@ -1469,7 +1473,7 @@ def test_run_hyperparameter_search_reads_an_earlier_legs_reason_before_this_one(
                    "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2}}
     result = tt.run_hyperparameter_search(
         tmp_path, base_config=cfg, param_space=sweep_space(), n_trials=1,
-                        scheduler="none", split_draws=2, search_seed=0)
+                        **fifo_search(), split_draws=2, search_seed=0)
 
     assert "error" in result and "auto_val" in result["error"]
     assert "over its own pixels" not in result["error"]

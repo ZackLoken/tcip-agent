@@ -242,8 +242,8 @@ The detection training pipeline mirrors a production drone-phenotyping workflow:
 - Splits: group-aware, annotation-stratified train/val/calibration splitting
   (no source-image leakage) with automatic validation loaders; the calibration side is
   held out from both training and checkpoint selection.
-- Imbalance & augmentation: class-weighted / focal losses and a nadir-imagery
-  augmentation preset (free rotation + flips; mosaic/copy-paste off).
+- Imbalance & augmentation: class-weighted / focal losses and an augmentation chain each
+  config states transform by transform (rotation, flips, jitter, crop, blur, resize).
 - HPO: Ray Tune search over the composite, with a pluggable searcher/scheduler
   (ASHA-style pruning and known-good warm start available, not mandatory).
 - Reproducibility: global seeding, checkpoint resume (model + optimizer +

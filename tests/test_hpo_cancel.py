@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests._training_values import sweep_space
+from tests._training_values import fifo_search, sweep_space
 from tests._verified_checkpoint_fixtures import opened_sweep
 
 
@@ -76,7 +76,8 @@ def test_a_cancel_landing_mid_search_ends_the_sweep_canceled(
     _stub_search(monkeypatch, before=experiments.request_cancel, raises=raises)
 
     result = run_hyperparameter_search(project, base_config=real_hpo_base_config,
-                                       param_space=sweep_space(), n_trials=1, search_seed=0)
+                                       param_space=sweep_space(), n_trials=1, **fifo_search(),
+                                       search_seed=0)
 
     assert (result["sweep"]["state"], result["sweep"]["status_error"]) == (
         "canceled", _CANCEL_DURING_RUN_REASON)
@@ -97,7 +98,7 @@ def test_a_cancel_after_the_sweep_ended_refuses_and_leaves_its_final_status_as_w
     _stub_search(monkeypatch)
     sweep_id = run_hyperparameter_search(project, base_config=real_hpo_base_config,
                                          param_space=sweep_space(), n_trials=1,
-                                         search_seed=0)["sweep"]["sweep_id"]
+                                         **fifo_search(), search_seed=0)["sweep"]["sweep_id"]
 
     result = cancel_training(project, sweep_id, actor=None)
 
@@ -221,10 +222,11 @@ def test_run_hyperparameter_search_refuses_a_relaunched_from_naming_no_sweep_und
     _stub_search(monkeypatch)
     result = run_hyperparameter_search(
         project, base_config=real_hpo_base_config, param_space=sweep_space(), n_trials=1,
-        relaunched_from="hpo_does_not_exist", search_seed=0)
+        **fifo_search(), relaunched_from="hpo_does_not_exist", search_seed=0)
     assert "hpo_does_not_exist" in result["error"]
     assert sweep_dirs(project) == []
 
     admitted = run_hyperparameter_search(project, base_config=real_hpo_base_config,
-                                         param_space=sweep_space(), n_trials=1, search_seed=0)
+                                         param_space=sweep_space(), n_trials=1, **fifo_search(),
+                                         search_seed=0)
     assert "error" not in admitted, admitted

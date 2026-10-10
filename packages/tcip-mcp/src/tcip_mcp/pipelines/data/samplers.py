@@ -1,8 +1,8 @@
 """Task-aware data samplers: class-imbalance handling plus read-locality ordering.
 
-The imbalance samplers wrap torch samplers but auto-compute weights from
-dataset.class_distribution, so the agent just picks a strategy name. The locality
-sampler orders a tiled dataset's reads to stay inside GDAL's block cache.
+The imbalance samplers wrap torch samplers but compute weights from
+dataset.class_distribution; a config's ``sampler`` block names one beside its own values. The
+locality sampler orders a tiled dataset's reads to stay inside GDAL's block cache.
 """
 
 from __future__ import annotations
@@ -87,9 +87,7 @@ class ClassBalancedSampler(Sampler):
 class OverSampler(Sampler):
     """Duplicate minority-class samples so all classes have >= min_count."""
 
-    def __init__(
-        self, dataset: BaseDataset, min_count: int = 50, class_key: str | None = None
-    ) -> None:
+    def __init__(self, dataset: BaseDataset, min_count: int, class_key: str | None = None) -> None:
         dist = dataset.class_distribution
         self._indices: list[int] = list(range(len(dataset)))
         if not dist:
@@ -185,8 +183,8 @@ class TileLocalitySampler(Sampler):
         if tile_entries is None or source_frames is None:
             raise ValueError(
                 "tile_locality requires a tiled dataset exposing tile_entries and "
-                "source_frames; build the dataset with tiling enabled, or pick another "
-                "sampler (e.g. 'random')."
+                "source_frames; build the dataset with tiling enabled, or state another "
+                "sampler or none."
             )
         if num_workers is None:
             raise ValueError(
@@ -205,8 +203,8 @@ class TileLocalitySampler(Sampler):
         if not windowed:
             raise ValueError(
                 "tile_locality orders reads for windowed raster sources; every source in "
-                "this dataset decodes whole, so read order cannot reduce decodes. Use the "
-                "'random' sampler."
+                "this dataset decodes whole, so read order cannot reduce decodes. State no "
+                "sampler."
             )
         row_costs = {}
         for stem, frame in windowed.items():
@@ -292,8 +290,7 @@ class TileLocalitySampler(Sampler):
 # Factory
 # ====================================================================
 
-_SAMPLER_MAP = {
-    "random": None,  # use default DataLoader shuffle
+_SAMPLER_MAP: dict[str, type] = {
     "class_balanced": ClassBalancedSampler,
     "oversample": OverSampler,
     "weighted_random": WeightedRandomSampler,
@@ -301,22 +298,47 @@ _SAMPLER_MAP = {
 }
 
 
-def build_sampler(name: str, dataset: BaseDataset, *, num_workers: int | None = None,
-                  batch_size: int | None = None, **kwargs) -> Sampler | None:
-    """Build a sampler by name. Returns None for 'random' (use shuffle=True).
+LOADER_CONTEXT = ("num_workers", "batch_size")
+"""The settings the train loader supplies to a sampler whose constructor takes them, never a
+sampler block."""
 
-    ``num_workers``/``batch_size`` are the loader context, forwarded only to samplers whose
-    constructor accepts them; a sampler that needs one and was built without it refuses,
-    naming what to pass. A sampler whose constructor takes neither is built without them.
+
+def sampler_settings(block: dict) -> tuple[type, dict]:
+    """The sampler class ``block["name"]`` names and the rest of ``block`` as its own values.
+    Refuses (``ValueError``) an unknown name, and by name a value its constructor requires that
+    ``block`` leaves unstated, one it states that the constructor does not take, or one of
+    :data:`LOADER_CONTEXT`, which the loader supplies."""
+    import inspect
+
+    from tcip_mcp.pipelines.model_build import resolve_named
+
+    cls = resolve_named(block.get("name", ""), _SAMPLER_MAP, kind="sampler")
+    settings = {k: v for k, v in block.items() if k != "name"}
+    supplied = sorted(set(settings) & set(LOADER_CONTEXT))
+    if supplied:
+        raise ValueError(f"sampler {block['name']!r} states {supplied}, which the train loader "
+                         "supplies; drop them from the block")
+    try:
+        inspect.signature(cls).bind(None, **settings)
+    except TypeError as exc:
+        raise ValueError(f"sampler {block['name']!r}: {exc}") from exc
+    return cls, settings
+
+
+def build_sampler(block: dict, dataset: BaseDataset, *, num_workers: int | None = None,
+                  batch_size: int | None = None) -> Sampler:
+    """The sampler ``block`` states (:func:`sampler_settings`) over ``dataset``.
+
+    ``num_workers``/``batch_size`` are the loader context (:data:`LOADER_CONTEXT`), handed to a
+    sampler whose constructor takes them; a sampler that needs one and was built without it
+    refuses, naming what to pass. A sampler whose constructor takes neither is built without
+    them.
     """
-    from tcip_mcp.pipelines.model_build import keyword_parameters, resolve_named
+    from tcip_mcp.pipelines.model_build import keyword_parameters
 
-    cls = resolve_named(name, _SAMPLER_MAP, kind="sampler")
-    if cls is None:
-        return None
+    cls, kwargs = sampler_settings(block)
     params, _open = keyword_parameters(cls)
-    if "num_workers" in params:
-        kwargs.setdefault("num_workers", num_workers)
-    if "batch_size" in params:
-        kwargs.setdefault("batch_size", batch_size)
+    for name, value in zip(LOADER_CONTEXT, (num_workers, batch_size), strict=True):
+        if name in params:
+            kwargs[name] = value
     return cls(dataset, **kwargs)

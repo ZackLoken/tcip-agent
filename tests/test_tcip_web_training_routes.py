@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from tests._training_values import sweep_space
+from tests._training_values import fifo_search, sweep_space
 
 
 def test_the_run_list_refuses_while_no_project_is_open(client: TestClient) -> None:
@@ -559,7 +559,7 @@ def test_a_sweep_and_its_trial_each_have_one_board_whichever_door_launches_it(
     monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", one_trial_search)
     sweep_id = tt.run_hyperparameter_search(
         opened_project, base_config=real_hpo_base_config, param_space=sweep_space(), n_trials=1,
-        search_seed=0)["sweep"]["sweep_id"]
+        **fifo_search(), search_seed=0)["sweep"]["sweep_id"]
     for name in (sweep_id, trials[0].name):
         resp = opened_client.post(f"/api/training/runs/{name}/tensorboard", json={})
         assert resp.status_code == 200, resp.text
