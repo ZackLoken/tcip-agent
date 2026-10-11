@@ -169,7 +169,7 @@ def _preflight(project: Path, spec: TrainConfigSchema | None, sources: StagedSou
             issues.append(
                 f"data.split {reserved} have no effect: this run over {len(known)} admitted "
                 "sources did not resolve to the single-source spatial-strip split a reserved "
-                "region is cut from (a detection task with tiling enabled over one admitted "
+                "region is cut from (a run with tiling enabled over one admitted "
                 "source); draw a selection with draw_splits for a reference.")
         if sampling_record is not None:
             bad = sorted({label for label, _ in sampling_record.windows if label not in known})
@@ -830,7 +830,7 @@ def run_hyperparameter_search(
         own point is admitted when its trial opens); a
         ``param_space`` axis naming ``data.split.seed`` while ``split_draws`` draws at
         most one partition (:func:`caller_split_seed_refusal`); ``split_draws`` above 1 on an
-        unbound, built-in detection config with tiling on that admits exactly one trainable source
+        unbound, built-in config with tiling on that admits exactly one trainable source
         (:func:`_split_draws_refusal`); a ``split_draws`` that is not an integer, or below 1
         (:func:`_split_draws_argument_refusal`, checked first); and, on a launch above one draw or
         any call naming a ``trial_budget``, the bound refusals of :func:`_trial_budget_refusal`. A
@@ -1316,7 +1316,7 @@ _SEED_AXIS_REMEDY = (
     "prunes nothing (fifo); split_draw_seeds is one per draw and distinct; no "
     "baseline_params names no seed; no other data.* axis is in param_space; "
     "a trial_budget is stated on a launch that is not a relaunch, and Ray's variant count over "
-    "the sweep fits under it; and, for a built-in detection config with tiling on, more than one "
+    "the sweep fits under it; and, for a built-in config with tiling on, more than one "
     "trainable source is admitted under data.images_dir (a single admitted source's own "
     "single-source spatial-strip path pairs no distinct partition with any draw). A single fixed "
     "seed belongs in "
@@ -1397,7 +1397,7 @@ def evaluate_model(
     nothing: the training run's directory is never touched. The reference is read under the class
     space the checkpoint records, its map included.
 
-    Three detection eval regimes:
+    Three detection and instance_seg eval regimes:
       * Untiled default (no ``tiling``, checkpoint trained without tiling) -> single full-res
       forward pass, ``eval_regime="full-frame-single-pass"``.
       * ``tiling`` set (or a run id whose training was tiled, reused automatically) -> tile-level
@@ -1426,8 +1426,9 @@ def evaluate_model(
             ground truth when unstated). The resolved record, each value's source with it, is
             returned under ``execution``.
         iou_threshold: The IoU a match must reach under the IoU convention.
-        tiling: Optional detection tiling (``schemas.TilingSpec``: enabled, tile_size, overlap,
-            ...) for a tile-level eval. None + a run id reuses the run's training tiling;
+        tiling: Optional tiling (``schemas.TilingSpec``: enabled, tile_size, overlap, ...) for a
+            tile-level eval, refused enabled for a task that does not tile
+            (``schemas.run_tiling``). None + a run id reuses the run's training tiling;
             None + a checkpoint path stays untiled.
         use_tiled_inference: Score the delivery regime (full-frame via tiled inference).
         trait: When set, the derived localization criterion of the trait's latest confirmed
@@ -1475,7 +1476,6 @@ def evaluate_model(
         scope = checkpoint.spec.data.recorded_scope
     except (CheckpointNotFoundError, UnregisteredCheckpointError, ValueError) as exc:
         return {"error": str(exc)}
-    run_tiling = checkpoint.spec.data.tiling
     stated = stated or Stated()
 
     from tcip_annotation.json_io import UnreadableLabelDocumentError
@@ -1488,7 +1488,9 @@ def evaluate_model(
         return {"error": f"the ground truth of images_dir={images_dir!r} with "
                          f"labels_dir={labels_dir!r} admits nothing to evaluate: {exc}"}
 
-    if use_tiled_inference and task == "detection":
+    from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
+
+    if use_tiled_inference and task in DETECTION_TASKS:
         try:
             return run_full_frame_evaluation(
                 checkpoint, admitted, stated=stated, iou_threshold=iou_threshold,
@@ -1496,9 +1498,9 @@ def evaluate_model(
         except (ValueError, UnreadableLabelDocumentError) as exc:
             return {"error": str(exc)}
 
-    # Tile-level diagnostic (or untiled). Only detection tiles; a run id reuses its training tiling.
+    # Tile-level diagnostic (or untiled); a run id reuses its training tiling.
     if tiling is None and by_run:
-        tiling = run_tiling
+        tiling = checkpoint.spec.data.tiling
 
     # The checkpoint's own untiled pass: the width its predictor reads images at sizes the loader,
     # and its execution record governs the model that scores them.

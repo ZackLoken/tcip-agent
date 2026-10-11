@@ -190,22 +190,18 @@ def test_ctx_should_cancel_and_dispatch_classification_honor_the_cancellation(tm
     cancellation requested through the run directory's own record, and dispatch_train_body
     classifies the resulting run as 'canceled', not 'completed'."""
     from tcip_mcp.experiments import request_cancel
-    from tcip_mcp.pipelines.training.envelope import TrainContext, dispatch_train_body
-    from tcip_mcp.pipelines.model_build import staged_sources
-    from tcip_mcp.pipelines.training.run_registry import TrainRun
+    from tcip_mcp.pipelines.training.envelope import dispatch_train_body
+    from tests._verified_checkpoint_fixtures import SCOPED_DATA, detection_images
+    from tests.tiny_trainer_fixtures import run_context
 
-    spec = train_config(_config(training_source=BESPOKE_LOOP))
-    run = TrainRun(id="run_ctx_cancel", spec=spec,
-                   objective={"selection_metric": "loss", "higher_is_better": False},
-                   project=tmp_path, layout=staged_sources(spec, tmp_path).layout,
-                   output_dir=str(tmp_path))
-    request_cancel(tmp_path)
+    data = {**detection_images(tmp_path / "ds", SCOPED_DATA["scope"]), **SCOPED_DATA}
+    ctx = run_context(tmp_path, {**_config(training_source=BESPOKE_LOOP), "data": data})
+    request_cancel(ctx.run_dir)
 
-    ctx = TrainContext(run=run, train_loader=None)
     assert ctx.should_cancel() is True
 
     dispatch_train_body(ctx)
-    assert run.status == "canceled"
+    assert ctx.run.status == "canceled"
 
 
 def _bespoke_loop(ctx) -> None:

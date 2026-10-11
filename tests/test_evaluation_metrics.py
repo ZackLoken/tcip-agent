@@ -714,7 +714,9 @@ def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts(tmp_pa
         # detection.
         trait = fx.latest("bud_opening", tmp_path) if task == "detection" else None
         dims = {"ordinal": {"num_ranks": 3}, "regression": {}}.get(task, {"num_classes": 2})
-        detector = task in ("detection", "instance_seg")
+        from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
+
+        detector = task in DETECTION_TASKS
         result = evaluate(model, loader, device, task, dims={"in_chans": 3, **dims}, trait=trait,
                           conf_threshold=VALIDATION_CONF if detector else None,
                           iou_threshold=IOU_THRESHOLD,
@@ -860,10 +862,8 @@ def test_evaluation_result_refuses_a_key_extra_shares_with_common():
 
 torchvision = pytest.importorskip("torchvision")
 
-from tcip_mcp.pipelines.training.generic_trainer import run_loaders, train  # noqa: E402
-from tests._producer_fixtures import run_over  # noqa: E402
+from tcip_mcp.pipelines.training.generic_trainer import train  # noqa: E402
 from tests._training_values import adamw_optimizer  # noqa: E402
-from tests.tiny_trainer_fixtures import trainer_run  # noqa: E402
 
 IMG = 64
 
@@ -898,27 +898,25 @@ def _stored(tmp_path, annotations, size: int = 100):
     return json_io.read_label_document(key)
 
 
-def _cfg(model_source, data: dict, **overrides) -> dict:
+def _context(tmp_path, model_source, data: dict, **overrides):
+    """The context of a run of ``model_source`` over the data block ``data`` drawing a quarter of
+    its frames onto its validation side, opened by the launcher's own producer."""
     from tests._chain_fixtures import training_config
+    from tests.tiny_trainer_fixtures import run_context
 
-    return training_config(model_source, data, optimizer=adamw_optimizer(), **overrides)
-
-
-def _loaders(run, ds):
-    """``run``'s train and validation loaders, both over ``ds``
-    (``generic_trainer.run_loaders``)."""
-    return run_loaders(run, ds, ds)
+    return run_context(tmp_path, training_config(
+        model_source, {**data, "split": {"seed": 0, "val_ratio": 0.25}},
+        optimizer=adamw_optimizer(), **overrides))
 
 
 def test_validate_detection_returns_metrics_and_objective(tmp_path):
-    ds, data = run_over("detection", str(_four_bud_images(tmp_path)), subject="bud")
-
     from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
-    run = trainer_run(_cfg(BUILT_DETECTOR, data), tmp_path / "out", project=tmp_path,
-                      has_val_loader=True, id="auto-run-23")
-    loader, val_loader = _loaders(run, ds)
-    run = train(run, loader, val_loader=val_loader)  # no AttributeError on model.heads
+    ctx = _context(tmp_path, BUILT_DETECTOR, {"images_dir": str(_four_bud_images(tmp_path)),
+                                              "scope": {"subject": "bud"}})
+    out_dir = ctx.run_dir
+    # No AttributeError on model.heads.
+    run = train(ctx.run, ctx.train_loader, val_loader=ctx.val_loader)
 
     last = run.metrics_history[-1]
     for k in ("val_loss", "val_precision", "val_recall", "val_f1", "val_map50", "val_map",
@@ -930,8 +928,8 @@ def test_validate_detection_returns_metrics_and_objective(tmp_path):
     assert math.isnan(last["selection"])
     assert run.status == "failed"
     assert "stage 0 produced no selectable epoch" in run.status_error
-    assert not (tmp_path / "out" / "model_best.pt").is_file()
-    assert not (tmp_path / "out" / "model_final.pt").is_file()
+    assert not (out_dir / "model_best.pt").is_file()
+    assert not (out_dir / "model_final.pt").is_file()
     assert run.best_metric == math.inf
 
 
@@ -941,21 +939,11 @@ def test_train_center_match_trait_records_governing_criterion(tmp_path):
     val_map50_role (a str) in val_metrics; the TensorBoard scalar loop must skip these
     non-numeric values rather than crash `add_scalar` on them. An untrained BespokeDetection never
     scores here, so the run then fails as having no selectable epoch, after the row is logged."""
-    from tcip_mcp.experiments import METRICS_FILE
-    from tcip_mcp.pipelines.training.envelope import TrainContext
-
-    ds, data = run_over("detection", str(_four_bud_images(tmp_path)), subject="bud")
-
     from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
-    cfg = _cfg(BUILT_DETECTOR, data)
-    cfg["evaluation"] = evaluation_block(trait="bud_opening")
-    out_dir = tmp_path / "out"
-    out_dir.mkdir()
-    (out_dir / METRICS_FILE).touch()
-    run = trainer_run(cfg, out_dir, project=tmp_path, has_val_loader=True, id="auto-run-24")
-    loader, val_loader = _loaders(run, ds)
-    ctx = TrainContext(run=run, train_loader=loader, val_loader=val_loader)
+    ctx = _context(tmp_path, BUILT_DETECTOR, {"images_dir": str(_four_bud_images(tmp_path)),
+                                              "scope": {"subject": "bud"}},
+                   evaluation=evaluation_block(trait="bud_opening"))
     run = ctx.default_train()
     ctx.tb.close()
 
@@ -978,16 +966,14 @@ def test_validate_classification_metrics(tmp_path):
         w = csv.writer(f)
         w.writerow(("stem", "label"))
         w.writerows(rows)
-    ds, data = run_over("classification", str(images_dir), str(csv_path))
 
     from tests._chain_fixtures import BESPOKE_MODELS
 
     model_source = {"builder": BESPOKE_CLASSIFIER, "source_files": [BESPOKE_MODELS],
                     "task": "classification"}
-    run = trainer_run(_cfg(model_source, data, batch_size=3), tmp_path / "out", project=tmp_path,
-                      has_val_loader=True, id="auto-run-25")
-    loader, val_loader = _loaders(run, ds)
-    run = train(run, loader, val_loader=val_loader)
+    ctx = _context(tmp_path, model_source,
+                   {"images_dir": str(images_dir), "labels_dir": str(csv_path)}, batch_size=3)
+    run = train(ctx.run, ctx.train_loader, val_loader=ctx.val_loader)
 
     assert run.status == "completed", run.status_error
     last = run.metrics_history[-1]

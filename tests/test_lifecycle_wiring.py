@@ -4,36 +4,24 @@ metrics its own checkpoint recorded and never fabricating any."""
 from pathlib import Path
 
 from tcip_mcp.pipelines.model_build import METRICS_KEY
-from tests._verified_checkpoint_fixtures import opened_run
 
 
 def _stock_run(root: Path, builder: str, horizon: int, experiment_id: str,
                builder_kwargs: dict | None = None) -> Path:
     """A run of the regression ``builder`` at ``builder_kwargs``, its stage ending at its
-    schedule's ``horizon``, under ``root`` over a
-    regression dataset of its own on disk, opened by the launcher's own writer and run in-process
-    through the envelope's stock trainer over tiny in-memory regression datasets, its loaders
-    built by the platform's own loader builder. Returns the run directory."""
-    from tcip_mcp.experiments import observe
-    from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope
-    from tcip_mcp.pipelines.training.generic_trainer import run_loaders
-    from tcip_mcp.pipelines.training.run_registry import observed_run
-    from tests.tiny_trainer_fixtures import (
-        ConstantImageDataset, regressor_config, write_regression_dataset,
-    )
+    schedule's ``horizon``, under ``root`` over a regression dataset of its own on disk (four
+    training and two validation frames, each valued twice its intensity), opened by the
+    launcher's own writer and run in-process through the envelope's stock trainer over its own
+    loaders. Returns the run directory."""
+    from tcip_mcp.pipelines.training.envelope import run_training_envelope
+    from tests.tiny_trainer_fixtures import drawn_data, regressor_config, run_context
 
-    train_ds = ConstantImageDataset([0.1, 0.3, 0.5, 0.7], [0.2, 0.6, 1.0, 1.4])
-    val_ds = ConstantImageDataset([0.2, 0.6], [0.4, 1.2])
-    images_dir, csv_path = write_regression_dataset(
-        root / f"{experiment_id}-data", [0.1, 0.3, 0.5, 0.7], [0.2, 0.6, 1.0, 1.4])
-    config = regressor_config(horizon, builder=builder, builder_kwargs=builder_kwargs, data={
-        "images_dir": str(images_dir), "labels_dir": str(csv_path), "num_channels": 1,
-        "split": {"seed": 0, "val_ratio": 0.15}})
-    run_dir = opened_run(root, config, experiment_id=experiment_id)
-    run = observed_run(observe(run_dir))
-    train_loader, val_loader = run_loaders(run, train_ds, val_ds)
-    run_training_envelope(TrainContext(run=run, train_loader=train_loader, val_loader=val_loader))
-    return run_dir
+    data = drawn_data(root / f"{experiment_id}-data", ([0.1, 0.3, 0.5, 0.7], [0.2, 0.6, 1.0, 1.4]),
+                      ([0.2, 0.6], [0.4, 1.2]))
+    config = regressor_config(horizon, builder=builder, builder_kwargs=builder_kwargs, data=data)
+    ctx = run_context(root, config, experiment_id=experiment_id)
+    run_training_envelope(ctx)
+    return ctx.run_dir
 
 
 def _entry(root: Path, name: str) -> dict | None:

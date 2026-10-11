@@ -1,8 +1,8 @@
-"""clip_boxes_to_tile and clipped_boxes_per_slice semantics.
+"""slice_candidates and clip_rows_to_tile over box rows.
 
-The per-box reference below restates the clip/sliver rules one box at a time, independent of
-the shipped vectorized code, so the equivalence tests catch a vectorization that drifts from
-the semantics and the property test states those semantics on their own terms.
+The per-box reference below restates the clip and sliver rules one box at a time, independent of
+the shipped code, so the equivalence tests catch a clip that drifts from the semantics and the
+property test states those semantics on their own terms.
 """
 
 from __future__ import annotations
@@ -11,17 +11,18 @@ import time
 
 import numpy as np
 
-from tcip_mcp.pipelines.data.datasets import clip_boxes_to_tile, clipped_boxes_per_slice
+from tcip_annotation.matching import box_ring, shapely_geometry
+from tcip_annotation.state import BBox
+from tcip_mcp.pipelines.data.datasets import clip_rows_to_tile, slice_candidates
 from tcip_mcp.pipelines.slicing import slice_lattice
 
 
-def _clip_reference(boxes, labels, tile_x, tile_y, tile_size, min_box_size):
-    """One box at a time: intersect, drop empty, drop clipped slivers, emit tile-local xyxy."""
-    if len(boxes) == 0:
-        return np.zeros((0, 4), dtype=np.float32), np.zeros((0,), dtype=np.int64)
-    tx2, ty2 = tile_x + tile_size, tile_y + tile_size
-    out_boxes, out_labels = [], []
-    for (bx1, by1, bx2, by2), lab in zip(boxes, labels):
+def _clip_reference(boxes, tile_x, tile_y, tile_w, tile_h, min_box_size):
+    """One box at a time: intersect, drop empty, drop clipped slivers; the rows kept and their
+    tile-local xyxy."""
+    tx2, ty2 = tile_x + tile_w, tile_y + tile_h
+    rows, out = [], []
+    for i, (bx1, by1, bx2, by2) in enumerate(np.asarray(boxes, dtype=np.float64).tolist()):
         ix1, iy1 = max(bx1, tile_x), max(by1, tile_y)
         ix2, iy2 = min(bx2, tx2), min(by2, ty2)
         iw, ih = ix2 - ix1, iy2 - iy1
@@ -30,19 +31,25 @@ def _clip_reference(boxes, labels, tile_x, tile_y, tile_size, min_box_size):
         clipped = bx1 < tile_x or by1 < tile_y or bx2 > tx2 or by2 > ty2
         if clipped and (iw * ih) ** 0.5 < min_box_size:
             continue
-        out_boxes.append([ix1 - tile_x, iy1 - tile_y, ix2 - tile_x, iy2 - tile_y])
-        out_labels.append(int(lab))
-    if not out_boxes:
-        return np.zeros((0, 4), dtype=np.float32), np.zeros((0,), dtype=np.int64)
-    return np.asarray(out_boxes, dtype=np.float32), np.asarray(out_labels, dtype=np.int64)
+        rows.append(i)
+        out.append([ix1 - tile_x, iy1 - tile_y, ix2 - tile_x, iy2 - tile_y])
+    return np.asarray(out, dtype=np.float32).reshape(-1, 4), np.asarray(rows, dtype=np.int64)
+
+
+def _clip(boxes, tile, min_box_size, rows=None):
+    """``boxes`` as box rows clipped to ``tile`` (:func:`clip_rows_to_tile`): kept boxes, rows."""
+    boxes = np.asarray(boxes, dtype=np.float64).reshape(-1, 4)
+    shapes = [shapely_geometry([box_ring(BBox(*b))]) for b in boxes.tolist()]
+    rows = np.arange(len(boxes)) if rows is None else rows
+    kept, kept_rows, _regions = clip_rows_to_tile(shapes, boxes, rows, tile, min_box_size)
+    return kept, kept_rows
 
 
 def _assert_identical(got, want):
-    gb, gl = got
-    wb, wl = want
-    assert gb.dtype == wb.dtype and gl.dtype == wl.dtype
+    (gb, gr), (wb, wr) = got, want
+    assert gb.dtype == wb.dtype
     assert np.array_equal(gb, wb), f"boxes differ: {gb} vs {wb}"
-    assert np.array_equal(gl, wl), f"labels differ: {gl} vs {wl}"
+    assert np.array_equal(gr, wr), f"rows differ: {gr} vs {wr}"
 
 
 # Tile at (200, 200), size 64, so edges sit at 200 and 264.
@@ -73,12 +80,8 @@ _ADVERSARIAL = [
 
 def test_clip_matches_the_per_box_reference_on_adversarial_geometries():
     for boxes in _ADVERSARIAL:
-        for dtype in (np.float32, np.float64):
-            b = boxes.astype(dtype)
-            labels = np.arange(1, len(b) + 1, dtype=np.int64)
-            got = clip_boxes_to_tile(b, labels, 200, 200, 64, 64, 3.0)
-            want = _clip_reference(b, labels, 200, 200, 64, 3.0)
-            _assert_identical(got, want)
+        _assert_identical(_clip(boxes, (200, 200, 264, 264), 3.0),
+                          _clip_reference(boxes, 200, 200, 64, 64, 3.0))
 
 
 def test_clip_matches_the_per_box_reference_on_random_geometries():
@@ -86,110 +89,56 @@ def test_clip_matches_the_per_box_reference_on_random_geometries():
     for _ in range(40):
         n = int(rng.integers(0, 200))
         xy = rng.uniform(-40, 460, size=(n, 2))
-        wh = rng.uniform(0, 80, size=(n, 2))
+        wh = rng.uniform(0.5, 80, size=(n, 2))
         boxes = np.concatenate([xy, xy + wh], axis=1)
-        labels = rng.integers(1, 4, size=n).astype(np.int64)
         tile_x, tile_y = int(rng.integers(0, 300)), int(rng.integers(0, 300))
         min_box_size = float(rng.uniform(0, 20))
-        for dtype in (np.float32, np.float64):
-            got = clip_boxes_to_tile(boxes.astype(dtype), labels, tile_x, tile_y, 128, 128,
-                                            min_box_size)
-            want = _clip_reference(boxes.astype(dtype), labels, tile_x, tile_y, 128,
-                                   min_box_size)
-            _assert_identical(got, want)
+        _assert_identical(_clip(boxes, (tile_x, tile_y, tile_x + 128, tile_y + 128),
+                                min_box_size),
+                          _clip_reference(boxes, tile_x, tile_y, 128, 128, min_box_size))
 
 
-def test_clip_semantics_stated_as_properties():
-    """The rules themselves, restated in plain python floats over the float64 inputs the
-    arithmetic then matches exactly: a visible intersection is kept unless the box was clipped
-    and its visible part's characteristic size falls below the cutoff; outputs are tile-local,
-    in input order."""
-    rng = np.random.default_rng(23)
-    tile_size = 100
-    for _ in range(25):
-        n = int(rng.integers(1, 120))
-        xy = rng.uniform(-60, 400, size=(n, 2))
-        wh = rng.uniform(0, 90, size=(n, 2))
-        boxes = np.concatenate([xy, xy + wh], axis=1)
-        labels = np.arange(1, n + 1, dtype=np.int64)
-        tx, ty = int(rng.integers(0, 250)), int(rng.integers(0, 250))
-        cutoff = float(rng.uniform(0, 25))
-        out_boxes, out_labels = clip_boxes_to_tile(boxes, labels, tx, ty, tile_size,
-                                                          tile_size, cutoff)
-        expected = []
-        for i, (bx1, by1, bx2, by2) in enumerate(boxes.tolist()):
-            iw = min(bx2, tx + tile_size) - max(bx1, tx)
-            ih = min(by2, ty + tile_size) - max(by1, ty)
-            if iw <= 0 or ih <= 0:
-                continue
-            clipped = bx1 < tx or by1 < ty or bx2 > tx + tile_size or by2 > ty + tile_size
-            if clipped and (iw * ih) ** 0.5 < cutoff:
-                continue
-            expected.append((i, (max(bx1, tx) - tx, max(by1, ty) - ty,
-                                 min(bx2, tx + tile_size) - tx, min(by2, ty + tile_size) - ty)))
-        assert [int(lab) for lab in out_labels] == [labels[i] for i, _ in expected]
-        assert np.allclose(out_boxes, np.array([r for _, r in expected]).reshape(-1, 4),
-                           atol=1e-4)
-        if len(out_boxes):
-            assert out_boxes.min() >= 0 and out_boxes.max() <= tile_size
-
-
-def test_clip_boxes_to_tile_square_call_is_byte_identical_to_the_square_only_reference():
-    """clip_boxes_to_tile(..., tile_w, tile_h, ...) at tile_w == tile_h == tile_size must match
-    the square-only reference this function generalized from exactly: the byte-identical
-    guarantee every square slice of a lattice depends on."""
-    tile_size = 64
-    boxes = np.concatenate([b for b in _ADVERSARIAL if b.size], axis=0)
-    labels = np.arange(1, len(boxes) + 1, dtype=np.int64)
-    got = clip_boxes_to_tile(boxes, labels, 200, 200, tile_size, tile_size, 3.0)
-    want = _clip_reference(boxes, labels, 200, 200, tile_size, 3.0)
-    _assert_identical(got, want)
-
-
-def test_clip_boxes_to_tile_rectangular_is_a_genuine_generalization():
-    """tile_w != tile_h clips against a real rectangle, not a silent square-only pass-through: a
-    box's visible slice is a 54x40 sliver clipped against a 64-wide square tile (dropped at
-    min_box_size=100), but the same box sits entirely inside a 300-wide rectangle at the same
-    tile_x/tile_y, unclipped and always kept regardless of size."""
+def test_a_rectangular_tile_clips_against_its_own_extent():
+    """A box's visible part is a 54x40 sliver against a 64-wide square tile (dropped at
+    min_box_size=100), but the same box sits entirely inside a 300-wide tile at the same origin,
+    unclipped and kept regardless of size."""
     boxes = np.array([[210.0, 210.0, 350.0, 250.0]])
-    labels = np.array([1])
-    square = clip_boxes_to_tile(boxes, labels, 200, 200, 64, 64, 100.0)
-    rect = clip_boxes_to_tile(boxes, labels, 200, 200, 300, 64, 100.0)
+    square = _clip(boxes, (200, 200, 264, 264), 100.0)
+    rect = _clip(boxes, (200, 200, 500, 264), 100.0)
     assert len(square[0]) == 0
     assert len(rect[0]) == 1
     assert np.allclose(rect[0][0], [10.0, 10.0, 150.0, 50.0])
 
 
-def test_bulk_clip_equals_the_per_slice_calls_over_a_lattice():
+def test_the_candidates_clipped_equal_every_row_clipped_over_a_lattice():
     rng = np.random.default_rng(31)
     height, width, tile_size = 500, 700, 128
     slices = slice_lattice(height, width, tile_size, 0.2)
     for _ in range(5):
         n = int(rng.integers(0, 150))
         xy = rng.uniform(-40, 700, size=(n, 2))
-        wh = rng.uniform(0, 100, size=(n, 2))
+        wh = rng.uniform(0.5, 100, size=(n, 2))
         boxes = np.concatenate([xy, xy + wh], axis=1).astype(np.float32)
-        labels = rng.integers(1, 3, size=n).astype(np.int64)
-        results = clipped_boxes_per_slice(boxes, labels, slices, 6.0)
-        assert len(results) == len(slices)
-        for (tx, ty, _x1, _y1), got in zip(slices, results):
-            _assert_identical(got, _clip_reference(boxes, labels, tx, ty, tile_size, 6.0))
+        candidates = slice_candidates(boxes, slices)
+        assert len(candidates) == len(slices)
+        for (tx, ty, x1, y1), rows in zip(slices, candidates):
+            _assert_identical(_clip(boxes, (tx, ty, x1, y1), 6.0, rows),
+                              _clip_reference(boxes, tx, ty, x1 - tx, y1 - ty, 6.0))
 
 
-def test_bulk_clip_returns_fresh_arrays_per_slice():
-    """Empty slices must not share one mutable array: a caller mutating one slice's boxes must
-    never see the change in another's."""
+def test_each_slice_gets_its_own_candidate_array():
+    """Empty slices must not share one mutable array: a caller mutating one slice's candidates
+    must never see the change in another's."""
     slices = [(0, 0, 64, 64), (100, 0, 164, 64), (0, 100, 64, 164)]
-    results = clipped_boxes_per_slice(
-        np.array([[10.0, 10.0, 20.0, 20.0]]), np.array([1]), slices, 2.0)
-    empties = [b for b, _lab in results if len(b) == 0]
+    candidates = slice_candidates(np.array([[10.0, 10.0, 20.0, 20.0]]), slices)
+    empties = [rows for rows in candidates if len(rows) == 0]
     assert len(empties) == 2
     assert empties[0] is not empties[1]
-    empties[0].resize((1, 4), refcheck=False)
-    assert empties[1].shape == (0, 4)
+    empties[0].resize((1,), refcheck=False)
+    assert empties[1].shape == (0,)
 
 
-def test_bulk_clip_cost_scales_with_incidences_not_positions_times_boxes():
+def test_candidate_cost_scales_with_incidences_not_positions_times_boxes():
     """A generous wall-clock rail on a large geometry: the cost must follow the box-slice
     incidences, so a dense lattice over many small boxes finishes in seconds."""
     rng = np.random.default_rng(5)
@@ -201,10 +150,9 @@ def test_bulk_clip_cost_scales_with_incidences_not_positions_times_boxes():
     xy = rng.uniform(0, width - 60, size=(n, 2))
     wh = rng.uniform(8, 48, size=(n, 2))
     boxes = np.concatenate([xy, xy + wh], axis=1).astype(np.float32)
-    labels = rng.integers(1, 3, size=n).astype(np.int64)
     start = time.perf_counter()
-    results = clipped_boxes_per_slice(boxes, labels, positions, 6.0)
+    candidates = slice_candidates(boxes, positions)
     elapsed = time.perf_counter() - start
-    assert len(results) == len(positions)
-    assert sum(len(lab) for _b, lab in results) >= n  # every box lands in at least one tile
+    assert len(candidates) == len(positions)
+    assert sum(len(rows) for rows in candidates) >= n  # every box lands in at least one tile
     assert elapsed < 60.0

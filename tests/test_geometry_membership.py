@@ -30,15 +30,13 @@ from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
 from tcip_mcp.pipelines.data.split_construction import (  # noqa: E402
     partition_samples, partition_spatial,
 )
+from tcip_mcp.pipelines.model_contract import DETECTION_TASKS  # noqa: E402
 from tests._producer_fixtures import label_image, train_val, write_image  # noqa: E402
 from tests._training_values import evaluation_block  # noqa: E402
 from tests._verified_checkpoint_fixtures import partition_side as recorded_side  # noqa: E402
 
 IMG = 64
 SUBJECT = "bud"
-GEOMETRY_TASKS = ("detection", "instance_seg")
-"""The tasks the known geometry loaders cover, which is the set the producer names membership for.
-Every route below that either can take is parametrized over both."""
 
 
 def _target_geometry(task: str):
@@ -73,16 +71,20 @@ def _one_target(ds, task: str) -> None:
         assert int(target["masks"].sum()) > 0
 
 
-def _big_source(root: Path, stem: str, width: int, height: int) -> Path:
-    """One source large enough to hold a within-image spatial split, with GT across its extent;
-    the image directory."""
+def _big_source(root: Path, stem: str, width: int, height: int, *,
+                task: str = "detection") -> Path:
+    """One source large enough to hold a within-image spatial split, with GT across its extent in
+    the geometry ``task``'s own loader reads; the image directory."""
     from PIL import Image
 
     images_dir = root / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (width, height), color=(70, 90, 60)).save(images_dir / f"{stem}.png")
-    boxes = [Annotation(subject=SUBJECT, geometry=BBox(x, y, x + 20, y + 20))
-             for x in range(20, width - 20, 200) for y in range(20, height - 20, 200)]
+    squares = [(x, y, x + 20, y + 20)
+               for x in range(20, width - 20, 200) for y in range(20, height - 20, 200)]
+    boxes = [Annotation(subject=SUBJECT, geometry=Polygon(
+        rings=[[(x0, y0), (x1, y0), (x1, y1), (x0, y1)]]) if task == "instance_seg"
+        else BBox(x0, y0, x1, y1)) for x0, y0, x1, y1 in squares]
     label_image(images_dir / f"{stem}.png", boxes, width, height)
     return images_dir
 
@@ -115,7 +117,7 @@ def _recorded(project: Path, task: str, data_cfg: dict, **config) -> dict:
     return run_resolution(run_dir.name, project=project).partition
 
 
-@pytest.mark.parametrize("task", GEOMETRY_TASKS)
+@pytest.mark.parametrize("task", sorted(DETECTION_TASKS))
 def test_the_drawn_route_loaders_name_their_own_samples(tmp_path: Path, task: str):
     stems = [f"src{i}_0_0" for i in range(4)]
     images_dir = _labeled(tmp_path / "ds", stems, task=task)
@@ -131,7 +133,7 @@ def test_the_drawn_route_loaders_name_their_own_samples(tmp_path: Path, task: st
     _one_target(train_ds, task)
 
 
-@pytest.mark.parametrize("task", GEOMETRY_TASKS)
+@pytest.mark.parametrize("task", sorted(DETECTION_TASKS))
 def test_auto_val_off_trains_on_every_admitted_sample_and_records_them(tmp_path: Path, task: str):
     stems = ["a_0_0", "b_0_0", "c_0_0"]
     images_dir = _labeled(tmp_path / "ds", stems, task=task)
@@ -149,7 +151,7 @@ def test_auto_val_off_trains_on_every_admitted_sample_and_records_them(tmp_path:
     assert recorded_side(record, "train") == sorted(stems)
 
 
-@pytest.mark.parametrize("task", GEOMETRY_TASKS)
+@pytest.mark.parametrize("task", sorted(DETECTION_TASKS))
 def test_a_starved_draw_refuses_by_the_draws_own_floor(tmp_path: Path, task: str):
     """A group policy that collapses every sample into one group leaves no side to hold out, so
     the run refuses naming the floor rather than training without validation."""
@@ -164,22 +166,21 @@ def test_a_starved_draw_refuses_by_the_draws_own_floor(tmp_path: Path, task: str
         train_val(tmp_path, task, data_cfg)
 
 
-def test_one_tiled_source_still_splits_spatially_over_its_own_samples(tmp_path: Path):
+@pytest.mark.parametrize("task", sorted(DETECTION_TASKS))
+def test_one_tiled_source_still_splits_spatially_over_its_own_samples(tmp_path: Path, task: str):
     """The within-image route wraps the producer's own sample, records that one sample as its
     partition, and its region identities still name the bare stem every consumer of the manifest
-    joins on.
-
-    Detection alone: tiling wraps the detection loader, and no other task reaches this route.
+    joins on, for every task that tiles.
     """
     stem = "mosaic"
-    images_dir = _big_source(tmp_path / "ds", stem, 4000, 3000)
+    images_dir = _big_source(tmp_path / "ds", stem, 4000, 3000, task=task)
     data_cfg = {
         "images_dir": str(images_dir), "scope": {"subject": SUBJECT},
         "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.25, "holdout_ratio": 0.1, "calibration_ratio": 0, "seed": 1},
     }
 
-    train_ds, val_ds, partition, _resolved = train_val(tmp_path, "detection", data_cfg)
+    train_ds, val_ds, partition, _resolved = train_val(tmp_path, task, data_cfg)
 
     assert val_ds is not None
     assert [s.member for s in partition_samples(partition)] == [stem]

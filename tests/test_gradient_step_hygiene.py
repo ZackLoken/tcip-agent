@@ -14,13 +14,13 @@ pytest.importorskip("torch")
 import torch  # noqa: E402
 
 from tcip_mcp.pipelines.training import generic_trainer as gt
-from tcip_mcp.pipelines.training.generic_trainer import run_loaders, train
+from tcip_mcp.pipelines.training.generic_trainer import train
 from tests.tiny_trainer_fixtures import (
-    ConstantImageDataset,
     build_data_scaled_gradient_model,
     capture_model,
+    frames_data,
     regressor_config,
-    trainer_run,
+    run_context,
 )
 
 BUILDER = "tiny_trainer_fixtures:build_data_scaled_gradient_model"
@@ -31,18 +31,18 @@ SKEWED_VALUES = [1.0, 10.0, 100.0]
 SKEWED_INTENSITIES = [0.2, 0.5, 0.9]
 
 
-def _loader(run, values, intensities):
-    """``run``'s training loader over frames at ``intensities`` valued ``values``, built by the
-    platform's own loader builder (``generic_trainer.run_loaders``): a loader built twice for
-    one run serves its first epoch in one order, seeded from the run's config."""
-    dataset = ConstantImageDataset(intensities, values, height=7, width=11)
-    return run_loaders(run, dataset, None)[0]
-
-
-def _config(*, accumulation: int = 1) -> dict:
-    return regressor_config(
-        1, builder=BUILDER, gradient_accumulation_steps=accumulation, batch_size=1, seed=0,
+def _trained(tmp_path, values=SKEWED_VALUES, intensities=SKEWED_INTENSITIES, *,
+             accumulation: int = 1):
+    """A run over training frames at ``intensities`` valued ``values`` and no validation side,
+    one frame a batch at ``accumulation`` batches a step, opened by the launcher's own producer
+    and trained over its own loader, which serves its first epoch in an order seeded from the
+    run's config."""
+    config = regressor_config(
+        1, data=frames_data(tmp_path / "ds", intensities, values), builder=BUILDER,
+        gradient_accumulation_steps=accumulation, batch_size=1, seed=0,
         optimizer={"name": "adamw", "backbone_lr": 0.01, "head_lr": 0.01, "weight_decay": 0.0})
+    ctx = run_context(tmp_path, config)
+    return train(ctx.run, ctx.train_loader)
 
 
 def _batch_gradient(images, targets) -> torch.Tensor:
@@ -105,12 +105,9 @@ def _window_sizes(steps: list) -> list[int]:
 
 def test_each_optimizer_step_sees_only_its_own_batch_gradient(tmp_path, monkeypatch):
     """One step per batch at accumulation 1, each carrying that batch's gradient alone."""
-    run = trainer_run(
-        _config(), tmp_path / "out", project=tmp_path, has_val_loader=False, id="auto-run-34"
-    )
     steps: list = []
     _record_steps(monkeypatch, steps)
-    run = train(run, _loader(run, SKEWED_VALUES, SKEWED_INTENSITIES))
+    run = _trained(tmp_path)
 
     assert run.status == "completed", run.status_error
     assert _window_sizes(steps) == [1, 1, 1]
@@ -122,10 +119,7 @@ def test_no_accumulated_gradient_survives_the_run(tmp_path, monkeypatch):
     models: list = []
     capture_model(monkeypatch, models)
 
-    run = trainer_run(
-        _config(), tmp_path / "out", project=tmp_path, has_val_loader=False, id="auto-run-35"
-    )
-    run = train(run, _loader(run, SKEWED_VALUES, SKEWED_INTENSITIES))
+    run = _trained(tmp_path)
 
     assert run.status == "completed", run.status_error
     assert len(models) == 1
@@ -138,12 +132,9 @@ def test_no_accumulated_gradient_survives_the_run(tmp_path, monkeypatch):
 def test_gradient_accumulation_combines_only_its_own_window(tmp_path, monkeypatch):
     """Accumulation still holds: with two batches per step, a step carries the mean of exactly
     those two batches' gradients, and the window does not carry over into the next step."""
-    values, intensities = [1.0, 10.0, 100.0, 1000.0], [0.2, 0.5, 0.9, 0.35]
-    run = trainer_run(_config(accumulation=2), tmp_path / "out", project=tmp_path,
-                      has_val_loader=False, id="auto-run-36")
     steps: list = []
     _record_steps(monkeypatch, steps)
-    run = train(run, _loader(run, values, intensities))
+    run = _trained(tmp_path, [1.0, 10.0, 100.0, 1000.0], [0.2, 0.5, 0.9, 0.35], accumulation=2)
 
     assert run.status == "completed", run.status_error
     assert _window_sizes(steps) == [2, 2]
@@ -152,11 +143,9 @@ def test_gradient_accumulation_combines_only_its_own_window(tmp_path, monkeypatc
 def test_an_epoch_last_shorter_window_averages_over_the_batches_it_holds(tmp_path, monkeypatch):
     """Three batches at accumulation two: the second window holds one batch, and its step carries
     that batch's own gradient, not half of it."""
-    run = trainer_run(_config(accumulation=2), tmp_path / "out", project=tmp_path,
-                      has_val_loader=False, id="auto-run-37")
     steps: list = []
     _record_steps(monkeypatch, steps)
-    run = train(run, _loader(run, SKEWED_VALUES, SKEWED_INTENSITIES))
+    run = _trained(tmp_path, accumulation=2)
 
     assert run.status == "completed", run.status_error
     assert _window_sizes(steps) == [2, 1]

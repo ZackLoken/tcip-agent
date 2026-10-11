@@ -315,17 +315,17 @@ def raster_identity(image: "Path | BandGroupRef") -> dict:
 
 
 def spatial_single_source_split(
-    sample: "Sample", data: "DataSpec", shares: "Mapping[str, float]",
+    task: str, sample: "Sample", data: "DataSpec", shares: "Mapping[str, float]",
 ) -> SpatialManifest:
     """Derive the run's requested ``shares`` (:func:`run_shares`: ``train``, ``val``, ``holdout``
-    and, when stated, ``calibration``) over one detection source's own tile lattice,
+    and, when stated, ``calibration``) over one source's own tile lattice,
     by disjoint pixel strips (:func:`~tcip_mcp.pipelines.data.splits.spatial_strip_split`), and
     return it as the :class:`~tcip_mcp.pipelines.schemas.SpatialManifest` a run's partition
     records; the reserved regions record only their geometry and kept-tile count. It is drawn at
     the lattice and buffer of the resolved block ``data``'s tiling (:func:`_with_lattice`).
 
-    ``sample`` is the run's own single admitted sample, which every side's view here is built
-    over (:func:`_block_loader`) at ``data``'s class space and sizes (:func:`run_sizes`).
+    ``sample`` is the ``task`` run's own single admitted sample, which every side's view here is
+    built over (:func:`_block_loader`) at ``data``'s class space and sizes (:func:`run_sizes`).
 
     Raises ``ValueError`` naming which reason fired when the strip layout is infeasible or a side
     keeps no tile after filtering. The label document's frame is read through
@@ -358,7 +358,7 @@ def spatial_single_source_split(
 
     # A tile lattice occupying a reserved region (spatial_strip_split's own check) is not proof it
     # carries GT: an all-background region still passes that but skip_empty filters it to 0.
-    views = {side: _block_loader("detection", data, samples=[sample], transforms=None,
+    views = {side: _block_loader(task, data, samples=[sample], transforms=None,
                                  region=spatial.regions[side]) for side in split_names}
     train_ds, val_ds = views["train"], views["val"]
     if any(view.num_samples == 0 for view in views.values()):
@@ -420,15 +420,15 @@ def resolved_tiling(task: str, tiling: TilingSpec | None, samples: "Sequence[Sam
     at: ``{"enabled": False}`` when it does not tile, else ``tiling`` with its edge and overlap,
     the stated ones or the ones ``samples``' objects derive (``derivations.derive_tile_geometry``,
     whose refusals propagate)."""
-    from tcip_mcp.pipelines.data.datasets import build_dataset, run_tiling
+    from tcip_mcp.pipelines.data.datasets import build_dataset
     from tcip_mcp.pipelines.derivations import derive_tile_geometry
-    from tcip_mcp.pipelines.schemas import TilingSpec
+    from tcip_mcp.pipelines.schemas import TilingSpec, run_tiling
 
     tiler = run_tiling(task, tiling)
     if tiler is None:
         return TilingSpec.model_validate({"enabled": False})
     regions = ([] if tiler.tile_size is not None and tiler.overlap is not None else cast(
-        Any, build_dataset("detection", samples=samples, scope=scope, sizes=sizes)).regions)
+        Any, build_dataset(task, samples=samples, scope=scope, sizes=sizes)).regions)
     tile_size, overlap = derive_tile_geometry(regions, tile_size=tiler.tile_size,
                                               overlap=tiler.overlap)
     return tiler.model_copy(update={"tile_size": tile_size, "overlap": overlap})
@@ -556,7 +556,7 @@ def _drawn_split(task: str, data: "DataSpec", layout: "SourceLayout", *, transfo
     """``(train_ds, val_ds, partition, resolved)`` for a run that draws its own split over
     ``data``'s ground truth: its one place's membership (:func:`admitted_membership`, its tallies
     copied into ``tallies_out``), then, with ``auto_val`` on, train and val drawn through
-    :func:`draw_sides`, or a single tiled detection source split over its own tile lattice
+    :func:`draw_sides`, or a single tiled source split over its own tile lattice
     (:func:`spatial_single_source_split`). ``auto_val`` off trains on every member with no
     validation. ``resolved`` is ``data`` with its class space and sizes recorded, and a
     within-image split is the partition's. Raises when the validation requested cannot be drawn
@@ -574,17 +574,17 @@ def _drawn_split(task: str, data: "DataSpec", layout: "SourceLayout", *, transfo
         return _sample_loaders(task, _with_lattice(task, resolved, samples), samples, transforms,
                                layout, seed=None, group_by=membership.group_by)
     if len(samples) < 2:
-        from tcip_mcp.pipelines.data.datasets import run_tiling
+        from tcip_mcp.pipelines.schemas import run_tiling
 
         if run_tiling(task, data.tiling) is None:
             raise ValueError(
                 f"{len(samples)} admitted source(s) leave nothing to hold a validation side out "
                 f"of for this {task} run; set data.auto_val=False to train without validation, "
                 "or admit more sources.")
-        # A tiled detection source the platform builds itself holds out disjoint pixel blocks,
-        # drawn at the lattice its own objects derive.
+        # A tiled source the platform builds itself holds out disjoint pixel blocks, drawn at the
+        # lattice its own objects derive.
         resolved = _with_lattice(task, resolved, samples)
-        manifest = spatial_single_source_split(samples[0], resolved,
+        manifest = spatial_single_source_split(task, samples[0], resolved,
                                                run_shares(split, spatial=True))
         return _sample_loaders(task, resolved, samples, transforms, layout, seed=None,
                                group_by="stem", spatial=manifest)

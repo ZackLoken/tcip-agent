@@ -7,7 +7,7 @@ torch = pytest.importorskip("torch")
 from PIL import Image  # noqa: E402
 from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
 from tests._chain_fixtures import CLASSIFIER_SOURCE  # noqa: E402
-from tests._producer_fixtures import dataset_over, run_over  # noqa: E402
+from tests._producer_fixtures import dataset_over  # noqa: E402
 
 
 def test_pil_to_tensor_grayscale_and_multiband():
@@ -43,24 +43,22 @@ def test_build_dataset_grayscale_yields_one_channel(tmp_path):
 
 def test_grayscale_classification_end_to_end(tmp_path):
     pytest.importorskip("torchvision")
-    from tcip_mcp.pipelines.training.generic_trainer import run_loaders, train
-    from tests.tiny_trainer_fixtures import trainer_run
+    from tcip_mcp.pipelines.training.generic_trainer import train
+    from tests._chain_fixtures import training_config
+    from tests.tiny_trainer_fixtures import run_context
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = tmp_path / "ds" / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True)
     rows = ["stem,label"]
     for i in range(4):
         Image.new("RGB", (32, 32), (30 * i, 40, 50)).save(images_dir / f"img{i}.png")
         rows.append(f"img{i},{i % 2}")
-    (tmp_path / "labels.csv").write_text("\n".join(rows) + "\n")
+    labels = tmp_path / "ds" / "labels.csv"
+    labels.write_text("\n".join(rows) + "\n")
 
-    ds, data = run_over("classification", str(images_dir), str(tmp_path / "labels.csv"),
-                        stated={"num_channels": 1})
-    from tests._chain_fixtures import training_config
-
-    cfg = training_config(CLASSIFIER_SOURCE, data)
-    run = trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=False,
-                      id="auto-run-39")
-    loader, _ = run_loaders(run, ds, None)
-    run = train(run, loader)
+    ctx = run_context(tmp_path, training_config(
+        CLASSIFIER_SOURCE, {"images_dir": str(images_dir), "labels_dir": str(labels),
+                            "num_channels": 1, "auto_val": False}))
+    assert ctx.train_loader.dataset[0][0].shape[0] == 1
+    run = train(ctx.run, ctx.train_loader)
     assert run.status == "completed"  # 1-channel data + 1-channel model trains end to end

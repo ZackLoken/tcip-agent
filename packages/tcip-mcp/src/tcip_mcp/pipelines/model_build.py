@@ -358,7 +358,7 @@ def resolve_contract_dims(spec: "TrainConfigSchema", dims: "Mapping[str, Any]") 
     untiled training source shares (``train_native_size``). A run that resolved neither carries
     no ``img_size``.
     """
-    from tcip_mcp.pipelines.data.datasets import run_tiling
+    from tcip_mcp.pipelines.schemas import run_tiling
 
     count = dims.get("num_classes", dims.get("num_ranks"))
     tiler = run_tiling(spec.model_source.task, spec.data.tiling)

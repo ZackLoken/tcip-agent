@@ -15,8 +15,8 @@ from tcip_mcp.experiments import TENSORBOARD_DIR
 from tcip_mcp.pipelines.training.generic_trainer import train
 from tests.tiny_trainer_fixtures import (
     classifier_config,
-    separable_classifier_loaders,
-    trainer_run,
+    run_context,
+    separable_classifier_data,
 )
 
 
@@ -29,21 +29,12 @@ def _scalar_steps(log_dir: Path, tag: str) -> list[int]:
 
 
 def test_classification_training_writes_train_and_val_scalars_every_epoch(tmp_path):
-    config = classifier_config(3)
-    from tcip_mcp.experiments import METRICS_FILE
-    from tcip_mcp.pipelines.training.envelope import TrainContext
-
-    out_dir = tmp_path / "out"
-    out_dir.mkdir()
-    (out_dir / METRICS_FILE).touch()
-    run = trainer_run(config, out_dir, project=tmp_path, has_val_loader=True, id="auto-run-42")
-    train_loader, val_loader = separable_classifier_loaders(run)
-    ctx = TrainContext(run=run, train_loader=train_loader, val_loader=val_loader)
+    ctx = run_context(tmp_path, classifier_config(3, separable_classifier_data(tmp_path / "ds")))
     run = ctx.default_train()
     ctx.tb.close()
     assert run.status == "completed", run.status_error
 
-    tb_dir = out_dir / TENSORBOARD_DIR
+    tb_dir = ctx.run_dir / TENSORBOARD_DIR
     assert _scalar_steps(tb_dir, "train_loss") == [1, 2, 3]
     assert _scalar_steps(tb_dir, "val_loss") == [1, 2, 3]
     assert _scalar_steps(tb_dir, "val_accuracy") == [1, 2, 3]
@@ -84,11 +75,9 @@ def test_the_epoch_console_line_carries_validation_metrics_beyond_loss(tmp_path,
     not only the loss a plain reader would take for the whole story."""
     import logging
 
-    run = trainer_run(classifier_config(2), tmp_path / "out", project=tmp_path, has_val_loader=True,
-                      id="auto-run-43")
-    train_loader, val_loader = separable_classifier_loaders(run)
+    ctx = run_context(tmp_path, classifier_config(2, separable_classifier_data(tmp_path / "ds")))
     with caplog.at_level(logging.INFO, logger="tcip_mcp.pipelines.training.generic_trainer"):
-        run = train(run, train_loader, val_loader=val_loader)
+        run = train(ctx.run, ctx.train_loader, val_loader=ctx.val_loader)
     assert run.status == "completed", run.status_error
 
     epoch_lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Epoch")]

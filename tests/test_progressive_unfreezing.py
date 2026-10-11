@@ -24,8 +24,7 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 from torch import nn  # noqa: E402
 
-from tcip_mcp.pipelines.training.generic_trainer import run_loaders, train  # noqa: E402
-from tests.tiny_trainer_fixtures import trainer_run  # noqa: E402
+from tcip_mcp.pipelines.training.generic_trainer import train  # noqa: E402
 from tcip_mcp.pipelines.training.optimizer_factory import (  # noqa: E402
     GROUPS_KEY, OPTIMIZER_STATE_KEY, capture_training_state, captured_sources, compute_lr_scale,
     restore_training_state,
@@ -33,7 +32,6 @@ from tcip_mcp.pipelines.training.optimizer_factory import (  # noqa: E402
 from tcip_mcp.pipelines.training.generic_trainer import _warmup_starts  # noqa: E402
 from tcip_mcp.pipelines.model_build import STATE_DICT_KEY  # noqa: E402
 from tests._image_fixtures import write_noise_image  # noqa: E402
-from tests._producer_fixtures import dataset_over  # noqa: E402
 
 IMG = 64
 BASE_BB_LR = 1e-3
@@ -279,41 +277,33 @@ def test_freeze_to_is_per_stage_for_a_wrapped_bespoke_backbone():
 _save_png = partial(write_noise_image, size=IMG)
 
 
-def _classification_loader(tmp_path: Path, run, n: int = 6):
-    """``run``'s training loader over ``n`` two-label frames under ``tmp_path``, built by the
-    platform's own loader builder (``generic_trainer.run_loaders``) at the run's batch size."""
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+def _trained(tmp_path: Path, stages, n: int = 6, **extra):
+    """A classification run of the resnet18 classifier (the freeze and warmup logic here is
+    backbone-agnostic) over ``stages``, ``extra`` its other config keys, training on ``n``
+    two-label frames under ``tmp_path`` with no validation side, opened by the launcher's own
+    producer and trained over its own loader at its batch size: the run and its directory."""
+    from tests._chain_fixtures import training_config
+    from tests.tiny_trainer_fixtures import run_context
+
+    images_dir = tmp_path / "ds" / "images" / UNDATED_BUCKET
     rows = []
     for i in range(n):
         _save_png(images_dir / f"img{i}.png", bright=(i % 2 == 0))
         rows.append((f"img{i}", i % 2))
-    csv_path = tmp_path / "labels.csv"
+    csv_path = tmp_path / "ds" / "labels.csv"
     with open(csv_path, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(("stem", "label"))
         w.writerows(rows)
-    ds = dataset_over("classification", str(images_dir), str(csv_path))
-    return run_loaders(run, ds, None)[0]
-
-
-def _model_source() -> dict:
-    # resnet18 (not tv_resnet50): these integration tests exercise backbone-agnostic
-    # LR-schedule / freeze / warmup logic. The smaller backbone routes through the identical
-    # BackboneWrapper.freeze_to path and cuts per-test model-construction cost. The tv_* freeze
-    # branch stays covered by test_freeze_to_is_per_stage_for_tv_backbones (kept on resnet50).
-    return dict(CLASSIFIER_SOURCE)
-
-
-def _cfg(stages, **extra) -> dict:
-    from tests._chain_fixtures import training_config
-
-    # The sizes _classification_loader's RGB, two-label table resolves.
-    return training_config(
-        _model_source(), {"num_channels": 3, "num_classes": 2, "scope": {}},
+    config = training_config(
+        dict(CLASSIFIER_SOURCE),
+        {"images_dir": str(images_dir), "labels_dir": str(csv_path), "auto_val": False},
         **{"stages": stages,
            "optimizer": {"name": "adamw", "backbone_lr": BASE_BB_LR, "head_lr": 1e-3,
                          "weight_decay": 0},
            **extra})
+    ctx = run_context(tmp_path, config)
+    return train(ctx.run, ctx.train_loader, val_loader=None), ctx.run_dir
 
 
 # --------------------------------------------------------------------------
@@ -322,10 +312,7 @@ def _cfg(stages, **extra) -> dict:
 
 def test_monotonic_unfreeze_guard_fails(tmp_path: Path):
     # Stage 0 fully unfreezes; stage 1 re-freezes the backbone -> guard must fire.
-    cfg = _cfg([{"freeze_to": 0}, {"freeze_to": -1}])
-    run = trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=False,
-                      id="auto-run-46")
-    run = train(run, _classification_loader(tmp_path, run), val_loader=None)
+    run, _ = _trained(tmp_path, [{"freeze_to": 0}, {"freeze_to": -1}])
     assert run.status == "failed"
     assert "Non-decreasing unfreeze" in run.status_error
 
@@ -333,10 +320,7 @@ def test_monotonic_unfreeze_guard_fails(tmp_path: Path):
 def test_warmup_lr_ramps_at_stage_boundary(tmp_path: Path):
     """The second stage warms up for two epochs with its schedule suppressed, then runs its
     schedule's one-epoch horizon."""
-    cfg = _cfg([{"freeze_to": -1}, {"freeze_to": 0}], stage_warmup_epochs=2)
-    run = trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=False,
-                      id="auto-run-47")
-    run = train(run, _classification_loader(tmp_path, run), val_loader=None)
+    run, _ = _trained(tmp_path, [{"freeze_to": -1}, {"freeze_to": 0}], stage_warmup_epochs=2)
     assert run.status == "completed", run.status_error
 
     stage1 = [m for m in run.metrics_history if m["stage"] == 1]
@@ -352,10 +336,7 @@ def test_lr_scaling_is_relative_to_the_first_stage_effective_batch(tmp_path: Pat
     the multiplier is (8/2)^0.5 == 2.0. Six samples make three batches, so the second stage's one
     window holds three of the four batches it targets: one optimizer step against three."""
     stages = [{"freeze_to": -1}, {"freeze_to": 0, "gradient_accumulation_steps": 4}]
-    cfg = _cfg(stages, lr_scaling={"scale_power": 0.5}, batch_size=2)
-    run = trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=False,
-                      id="auto-run-48")
-    run = train(run, _classification_loader(tmp_path, run))
+    run, _ = _trained(tmp_path, stages, lr_scaling={"scale_power": 0.5}, batch_size=2)
     assert run.status == "completed", run.status_error
     assert [m["target_eff_batch"] for m in run.metrics_history] == [2, 8]
     assert [m["optimizer_steps"] for m in run.metrics_history] == [3, 1]
@@ -364,12 +345,9 @@ def test_lr_scaling_is_relative_to_the_first_stage_effective_batch(tmp_path: Pat
 
 
 def test_two_stage_handoff_smoke(tmp_path: Path):
-    cfg = _cfg([{"freeze_to": -1}, {"freeze_to": 0}])
-    run = trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=False,
-                      id="auto-run-50")
-    run = train(run, _classification_loader(tmp_path, run), val_loader=None)
+    run, run_dir = _trained(tmp_path, [{"freeze_to": -1}, {"freeze_to": 0}])
     assert run.status == "completed", run.status_error
     assert all(math.isfinite(m["train_loss"]) for m in run.metrics_history)
     tps = [m["trainable_params"] for m in run.metrics_history]
     assert all(b >= a for a, b in zip(tps, tps[1:]))  # non-decreasing across stages
-    assert (tmp_path / "out" / "model_best.pt").is_file()
+    assert (run_dir / "model_best.pt").is_file()

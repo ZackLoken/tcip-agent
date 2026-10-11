@@ -7,15 +7,11 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from tcip_mcp.pipelines.model_build import staged_sources
 from tcip_mcp.pipelines.schemas import train_config
 from tcip_mcp.pipelines.training import generic_trainer as gt
 from tcip_mcp.pipelines.training.generic_trainer import train
-from tcip_mcp.pipelines.training.run_registry import TrainRun, seeded
+from tcip_mcp.pipelines.training.run_registry import seeded
 from tests._chain_fixtures import training_config
-
-LOSS_OBJECTIVE = {"selection_metric": "loss", "higher_is_better": False}
-"""A run's objective when it selects on its training loss."""
 
 
 # mint_experiment_id: id uniqueness (same-second and cross-thread)
@@ -72,7 +68,16 @@ def test_seeded_drawn_seeds_are_independent():
     assert len(seeds) == 8  # OS entropy per run, not one fixed default
 
 
-def test_train_applies_the_drawn_seed(tmp_path, monkeypatch):
+def _context(tmp_path, **stated):
+    """The context of a one-epoch regression run over two frames and no validation side, with
+    ``stated``'s config keys, opened by the launcher's own producer."""
+    from tests.tiny_trainer_fixtures import frames_data, regressor_config, run_context
+
+    data = frames_data(tmp_path / "ds", [0.1, 0.5], [0.2, 1.0])
+    return run_context(tmp_path, regressor_config(data=data, **stated))
+
+
+def test_train_applies_the_runs_seed(tmp_path, monkeypatch):
     captured = {}
 
     def fake_set_seed(seed, deterministic=False):
@@ -80,13 +85,11 @@ def test_train_applies_the_drawn_seed(tmp_path, monkeypatch):
         captured["deterministic"] = deterministic
 
     monkeypatch.setattr(gt, "set_seed", fake_set_seed)
-    spec = seeded(_spec())
-    run = TrainRun(id="auto-run-seed-applied", spec=spec, objective=LOSS_OBJECTIVE,
-                   project=tmp_path, layout=staged_sources(spec, tmp_path).layout,
-                   output_dir=str(tmp_path / "out"))
-    train(run, train_loader=None)  # fails at build, after seeding
+    ctx = _context(tmp_path, seed=seeded(_spec()).seed)
+    run = train(ctx.run, ctx.train_loader)
 
-    assert captured["seed"] == run.spec.seed
+    assert run.status == "completed", run.status_error
+    assert captured["seed"] == run.spec.seed is not None
     assert captured["deterministic"] is False
 
 
@@ -95,14 +98,13 @@ def test_train_applies_the_drawn_seed(tmp_path, monkeypatch):
 # ====================================================================
 
 def test_train_with_unwritable_output_dir_marks_run_failed(tmp_path):
-    blocker = tmp_path / "not_a_dir"
-    blocker.write_text("I am a file, not a directory")
+    import shutil
 
-    # output_dir nests under an existing *file*, so out_dir.mkdir() raises.
-    run = TrainRun(id="auto-run-unwritable", spec=_spec(), objective=LOSS_OBJECTIVE,
-                   project=tmp_path, layout=staged_sources(_spec(), tmp_path).layout,
-                   output_dir=str(blocker / "out"))
-    run = train(run, train_loader=None)
+    ctx = _context(tmp_path)
+    # The run's directory replaced by a file, so out_dir.mkdir() raises.
+    shutil.rmtree(ctx.run_dir)
+    ctx.run_dir.write_text("I am a file, not a directory")
+    run = train(ctx.run, ctx.train_loader)
 
     assert run.status == "failed"  # not stuck at "running"
     assert run.status_error

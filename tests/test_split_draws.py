@@ -1354,19 +1354,23 @@ def _one_source_tiled_cfg(images_dir) -> dict:
          "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2, "sliver_frac": 0.5}})
 
 
+@pytest.mark.parametrize("task", ["detection", "instance_seg"])
 def test_run_hyperparameter_search_refuses_split_draws_over_a_single_source_spatial_split(
-    tmp_path, monkeypatch,
+    tmp_path, monkeypatch, task,
 ):
-    """One admitted source under a built-in detection config with tiling on resolves to a split
-    over its own pixels, whose partition no draw of data.split.seed varies: split_draws above 1
-    refuses, naming the one admitted source and its split, and never reaches the search."""
+    """One admitted source under a built-in config of a task that tiles, with tiling on, resolves
+    to a split over its own pixels, whose partition no draw of data.split.seed varies:
+    split_draws above 1 refuses, naming the one admitted source and its split, and never reaches
+    the search."""
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
     import tcip_mcp.tools.training_tools as tt
     from tests.test_training_autoval import _big_single_source
 
-    images_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    images_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000,
+                                           polygons=task == "instance_seg")
     cfg = _one_source_tiled_cfg(images_dir)
+    cfg["model_source"] = {**cfg["model_source"], "task": task}
     # The default holdout strip is narrower than this mosaic's tile lattice admits.
     cfg["data"]["split"]["holdout_ratio"] = 0.1
 

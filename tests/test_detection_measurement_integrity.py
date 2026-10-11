@@ -344,6 +344,7 @@ def test_the_three_evaluation_loaders_over_one_truth_and_one_predictor_agree(
     from tcip_annotation.state import Annotation, BBox
 
     import tcip_mcp.pipelines.data.datasets as datasets
+    from tcip_mcp.pipelines.schemas import run_tiling
     from tcip_mcp.tools.data_tools import draw_splits
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._chain_fixtures import assess, confirm_count_trait
@@ -368,7 +369,7 @@ def test_the_three_evaluation_loaders_over_one_truth_and_one_predictor_agree(
     real = datasets.build_dataset
 
     def recording(task, **kwargs):
-        built.append((task, dict(kwargs["sizes"]), datasets.stated_tiling(kwargs.get("tiling"))))
+        built.append((task, dict(kwargs["sizes"]), run_tiling(task, kwargs.get("tiling"))))
         return real(task, **kwargs)
 
     monkeypatch.setattr(datasets, "build_dataset", recording)

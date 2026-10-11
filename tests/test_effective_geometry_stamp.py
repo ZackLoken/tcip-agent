@@ -1,6 +1,6 @@
 """What a run's train dataset serves (its object density, its native frame) lands in the
-persisted config, and a run's tiling block is the one its resolution wrote, so a
-requested-but-unrealized tiling record never survives an untiled run."""
+persisted config, a run's tiling block is the one its resolution wrote, and a tiling stated on a
+task that trains whole frames is refused at the door rather than recorded unrealized."""
 
 from __future__ import annotations
 
@@ -9,7 +9,9 @@ from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from pathlib import Path
 
 import pytest
-from tests._chain_fixtures import BESPOKE_DETECTION, training_config  # noqa: E402
+from tests._chain_fixtures import (  # noqa: E402
+    BESPOKE_CLASSIFIER, BESPOKE_DETECTION, BESPOKE_SEMANTIC_SEG, training_config,
+)
 from tests._producer_fixtures import dataset_over, registry_over  # noqa: E402
 from tests._training_values import evaluation_block  # noqa: E402
 
@@ -131,18 +133,36 @@ def _resolved_data(run_dir) -> dict:
     return observe(run_dir).record["resolved"]["data"]
 
 
-def test_an_untiled_runs_resolved_record_drops_the_requested_geometry(tmp_path):
-    """The resolved data section is recorded whole, so an untiled run's record keeps no stale
-    requested tile_size from the config it was launched with: a classification run, which no
-    tiler serves, launched stating a tile geometry."""
+@pytest.mark.parametrize("task, builder", [("classification", BESPOKE_CLASSIFIER),
+                                           ("semantic_seg", BESPOKE_SEMANTIC_SEG)])
+def test_a_tiling_stated_on_a_task_that_trains_whole_frames_refuses_at_the_door(task, builder):
+    """A run whose task trains whole frames stating an enabled ``data.tiling`` is refused when
+    its config is validated, naming the task and ``data.tiling``, never trained untiled with the
+    statement ignored."""
+    from tcip_mcp.pipelines.schemas import train_config
+    from tests._chain_fixtures import BESPOKE_MODELS
+
+    config = training_config({"builder": builder, "source_files": [BESPOKE_MODELS], "task": task},
+                             {"num_channels": 3, "tiling": {"enabled": True, "tile_size": 64}})
+    with pytest.raises(ValueError, match=rf"data\.tiling is enabled for a run of task '{task}'"):
+        train_config(config)
+
+
+def test_an_untiled_runs_resolved_record_carries_the_disabled_block(tmp_path):
+    """A classification run stating no tiling opens through the launcher's own producer, and the
+    record it resolved, validated again as every reader validates it, carries the disabled
+    block."""
+    from tcip_mcp.experiments import observe
+    from tcip_mcp.pipelines.training.run_registry import observed_run
     from tests._verified_checkpoint_fixtures import opened_run
 
-    config = _base_config({"enabled": True, "tile_size": 640}, tmp_path, task="classification")
+    config = _base_config(None, tmp_path, task="classification")
     run_dir = opened_run(tmp_path, config)
 
     data = _resolved_data(run_dir)
     assert data["tiling"] == {"enabled": False}
     assert data["images_dir"] == config["data"]["images_dir"]
+    assert observed_run(observe(run_dir)).spec.data.tiling.enabled is False
 
 
 def _trial(tmp_path, base_config):
@@ -154,12 +174,24 @@ def _trial(tmp_path, base_config):
     return open_trial(opened_sweep(tmp_path, base_config), "0", {"optimizer.head_lr": 3e-4})
 
 
-def test_an_hpo_trials_resolved_record_replaces_unrealized_tiling(tmp_path):
-    """A trial that trained untiled must not leave the base config's requested tile_size in its
-    resolved record, the record a later reader takes for the trial's geometry."""
-    trial_dir = _trial(tmp_path, _base_config({"enabled": True, "tile_size": 999}, tmp_path,
-                                              task="classification"))
+def test_a_sweep_over_a_tiling_its_task_never_reads_opens_nothing(tmp_path):
+    """A sweep whose classification base config states an enabled tiling is refused by name before
+    any directory opens; the same base config stating none opens a trial whose resolved record
+    carries the disabled block."""
+    from tcip_mcp import experiments
+    from tcip_mcp.tools.training_tools import open_sweep
+    from tests._verified_checkpoint_fixtures import SWEEP_ARGUMENTS
 
+    arguments = dict(SWEEP_ARGUMENTS)
+    space = arguments.pop("param_space")
+    refused = open_sweep(tmp_path, _base_config({"enabled": True, "tile_size": 999}, tmp_path,
+                                                task="classification"),
+                         space, actor=None, **arguments)
+
+    assert isinstance(refused, dict)
+    assert "data.tiling is enabled for a run of task 'classification'" in str(refused), refused
+    assert experiments.sweep_dirs(tmp_path) == []
+    trial_dir = _trial(tmp_path, _base_config(None, tmp_path, task="classification"))
     assert _resolved_data(trial_dir)["tiling"] == {"enabled": False}
 
 

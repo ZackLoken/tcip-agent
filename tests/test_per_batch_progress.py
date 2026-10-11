@@ -12,12 +12,11 @@ from tcip_mcp.experiments import (  # noqa: E402
     read_rows, run_summary,
 )
 from tcip_mcp.pipelines.training.envelope import TrainContext  # noqa: E402
-from tcip_mcp.pipelines.training.run_registry import observed_run  # noqa: E402
-from tests._verified_checkpoint_fixtures import opened_run  # noqa: E402
 from tests.tiny_trainer_fixtures import (  # noqa: E402
-    opposed_regression_loaders,
+    frames_data,
+    opposed_regression_data,
     regressor_config,
-    write_regression_dataset,
+    run_context,
 )
 
 
@@ -30,19 +29,18 @@ TRAIN_INTENSITIES = [0.10, 0.25, 0.40, 0.55, 0.70, 0.85]
 VAL_INTENSITIES = [0.15, 0.35, 0.60, 0.90]
 
 
-def _context(tmp_path, hook_calls: list, intensities=TRAIN_INTENSITIES, **extra) -> TrainContext:
-    """A context over a regression run of training frames at ``intensities`` opened by the
-    launcher's own producer, its loaders built for that run (by default three training batches
-    an epoch), recording every epoch hook call into ``hook_calls``; ``extra`` are config keys."""
-    images_dir, csv_path = write_regression_dataset(
-        tmp_path / "ds", intensities, [2.0 * c for c in intensities])
-    config = regressor_config(2, data={
-        "num_channels": 1, "scope": {}, "images_dir": str(images_dir),
-        "labels_dir": str(csv_path), "split": {"seed": 1, "val_ratio": 0.15}}, **extra)
-    run = observed_run(observe(opened_run(tmp_path, config)))
-    train_loader, val_loader = opposed_regression_loaders(run, intensities, VAL_INTENSITIES)
-    return TrainContext(run=run, train_loader=train_loader, val_loader=val_loader,
-                        epoch_hook=lambda epoch, metrics: hook_calls.append(epoch))
+def _context(tmp_path, hook_calls: list, intensities=TRAIN_INTENSITIES, *,
+             validated: bool = True, **extra) -> TrainContext:
+    """The context of a regression run over opposed frames (``validated``, else over its
+    training frames alone with no validation side), its training frames at ``intensities`` (by
+    default three training batches an epoch), opened by the launcher's own producer, recording
+    every epoch hook call into ``hook_calls``; ``extra`` are config keys."""
+    root = tmp_path / "ds"
+    data = (opposed_regression_data(root, intensities, VAL_INTENSITIES) if validated
+            else frames_data(root, intensities, [2.0 * c for c in intensities]))
+    config = regressor_config(2, data=data, **extra)
+    return run_context(tmp_path, config,
+                       epoch_hook=lambda epoch, metrics: hook_calls.append(epoch))
 
 
 def test_a_run_admits_what_its_training_reads_once(tmp_path, monkeypatch):
@@ -143,7 +141,7 @@ def test_a_config_stating_no_cadence_logs_ten_batch_rows_every_epoch(tmp_path, n
     spaced evenly over the epoch, the gaps between them never differing by more than one batch,
     the last at the epoch's own final batch."""
     intensities = [0.1 + 0.6 * i / n_batches for i in range(n_batches)]
-    ctx = _context(tmp_path, [], intensities, batch_size=1)
+    ctx = _context(tmp_path, [], intensities, validated=False, batch_size=1)
     assert ctx.default_train().status == "completed"
     batches = batch_rows(read_rows(ctx.run_dir / METRICS_FILE)[0])
     for epoch in (1, 2):

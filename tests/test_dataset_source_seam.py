@@ -24,9 +24,9 @@ from torch.utils.data import Dataset  # noqa: E402
 
 class _CountingDataset(Dataset):
     """A trivially-bespoke dataset: one item per sample the producer named, echoing the context it
-    was built with, each an 8 px frame holding one object named by its stem. ``rows`` is the
-    builder's own configuration, which a direct construction with no producer behind it stands on
-    instead."""
+    was built with, each a black 8 px frame holding one object named by its stem and valued zero,
+    a target a detector and a regressor both read. ``rows`` is the builder's own configuration,
+    which a direct construction with no producer behind it stands on instead."""
 
     def __init__(self, *, samples=None, scope=None, rows=None, marker: str = "", **_ignored):
         self.samples = list(samples or [])
@@ -41,7 +41,8 @@ class _CountingDataset(Dataset):
         named = self.samples or self.rows
         return torch.zeros(3, 8, 8), {"stem": str(named[idx]),
                                       "boxes": torch.tensor([[0.0, 0.0, 1.0, 1.0]]),
-                                      "labels": torch.tensor([1]), "iscrowd": torch.tensor([0])}
+                                      "labels": torch.tensor([1]), "iscrowd": torch.tensor([0]),
+                                      "values": torch.tensor(0.0)}
 
     @property
     def regions(self):
@@ -147,25 +148,23 @@ def _scope():
 
 
 def _ctx(root: Path, task: str, data: dict):
-    """A training body's context over a run of ``root`` of ``task`` whose data block states
-    ``data`` beside the place :func:`_admitted_samples` admits there and the class space it
-    admits under, and those samples."""
+    """A training body's context over a run of ``root`` of ``task``, opened by the launcher's own
+    producer, whose data block states ``data`` beside the place :func:`_admitted_samples` admits
+    there and the class space it admits under, training on every sample; and those samples."""
     from dataclasses import asdict
 
-    from tcip_mcp.pipelines.training.envelope import TrainContext
     from tests._chain_fixtures import training_config
     from tests._training_values import evaluation_block
-    from tests.tiny_trainer_fixtures import trainer_run
+    from tests.tiny_trainer_fixtures import run_context
 
     samples = _admitted_samples(root / "ds")
     config = training_config(
         {"builder": GT_ANCHOR_DETECTOR, "builder_kwargs": {"gt_boxes_wh": [(10, 10)]},
          "source_files": [BESPOKE_MODELS], "task": task},
-        {**data, "scope": asdict(_scope()),
+        {**data, "scope": asdict(_scope()), "auto_val": False,
          "images_dir": str(root / "ds" / "images" / UNDATED_BUCKET)},
         evaluation=evaluation_block(selection_metric="loss"))
-    run = trainer_run(config, root / "out", project=root, has_val_loader=False)
-    return TrainContext(run=run, train_loader=None, val_loader=None), samples
+    return run_context(root, config), samples
 
 
 def _bespoke_ctx(root: Path):
