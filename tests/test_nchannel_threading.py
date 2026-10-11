@@ -154,10 +154,10 @@ def test_torchvision_constructor_kwargs_forward_but_typos_raise():
     adapter = _nchan_adapter(3)
     names = list(adapter(torch.zeros(1, 3, 64, 64)).keys())
     common = {"featmap_names": names, "num_levels": len(names)}
-    det = build_detector("faster_rcnn", adapter, num_classes=1, **common, box_score_thresh=0.42)
-    assert det.roi_heads.score_thresh == 0.42
-    with pytest.raises(TypeError, match="box_score_thresholdd"):
-        build_detector("faster_rcnn", adapter, num_classes=1, **common, box_score_thresholdd=0.42)
+    det = build_detector("faster_rcnn", adapter, num_classes=1, **common, box_nms_thresh=0.42)
+    assert det.roi_heads.nms_thresh == 0.42
+    with pytest.raises(TypeError, match="box_nms_threshh"):
+        build_detector("faster_rcnn", adapter, num_classes=1, **common, box_nms_threshh=0.42)
 
 
 @pytest.mark.parametrize("dtype,scale", [
@@ -334,7 +334,7 @@ def test_a_checkpoint_reads_images_at_the_width_its_run_recorded(tmp_path):
     dims = recorded_model_dims(checkpoint.spec)
     assert dims == {"in_chans": 1, "num_classes": 2}
     assert resolve_contract_dims(checkpoint.spec, dims) == {
-        "in_chans": 1, "num_classes": 2, "img_size": 224}
+        "in_chans": 1, "num_classes": 2, "img_size": (32, 32)}  # the frame its sources share
 
     p = prepare(checkpoint, Stated(tile=False), device="cpu").runnable()
 

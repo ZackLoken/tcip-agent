@@ -15,7 +15,7 @@ import torch  # noqa: E402
 from tcip_mcp.pipelines.model_contract import overfit_check  # noqa: E402
 
 # What the checks below synthesize their batch at, the shape a run resolves for itself.
-CLS_DIMS = {"in_chans": 3, "num_classes": 2, "img_size": 64}
+CLS_DIMS = {"in_chans": 3, "num_classes": 2, "img_size": (64, 64)}
 
 
 class _DisconnectedParameter(torch.nn.Module):

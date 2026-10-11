@@ -149,7 +149,7 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
 
     overfit = overfit_check(built_model(config), "detection",
                             steps=30, lr=5e-3,
-                            dims={"in_chans": 3, "num_classes": 1, "img_size": 64})
+                            dims={"in_chans": 3, "num_classes": 1, "img_size": (64, 64)})
     assert overfit["passed"], overfit["issue"]
 
     (pred,) = p.predict([str(images_dir / "img0.png")])

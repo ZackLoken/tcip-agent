@@ -92,15 +92,13 @@ def detector_operating_point_holder(model: Any) -> tuple[Any, str | None]:
     return matches[0] if matches else (None, None)
 
 
-def set_detector_operating_point(model: Any, *, score_thresh: float | None = None,
-                                 detections_per_img: int | None = None) -> None:
-    """Set each knob given on the holder :func:`detector_operating_point_holder` resolves, so the
-    operating point governs which boxes exist. A knob given that the model does not expose
-    refuses (``ValueError``) naming it and the holder."""
+def set_detector_operating_point(model: Any, *, score_thresh: float,
+                                 detections_per_img: int) -> None:
+    """Set both knobs on the holder :func:`detector_operating_point_holder` resolves, so the
+    operating point governs which boxes exist. A knob the model does not expose refuses
+    (``ValueError``) naming it and the holder."""
     target, path = detector_operating_point_holder(model)
-    for attr, val in zip(OPERATING_POINT_ATTRS, (score_thresh, detections_per_img)):
-        if val is None:
-            continue
+    for attr, val in zip(OPERATING_POINT_ATTRS, (score_thresh, detections_per_img), strict=True):
         if not hasattr(target, attr):
             raise ValueError(
                 f"this model exposes no {attr} "
@@ -110,12 +108,11 @@ def set_detector_operating_point(model: Any, *, score_thresh: float | None = Non
         setattr(target, attr, val)
 
 
-def governed_forward(model: Any, inputs: list, caps: list[int], *,
-                     conf: float | None) -> list:
+def governed_forward(model: Any, inputs: list, caps: list[int], *, conf: float) -> list:
     """``model``'s output for each of ``inputs``, in input order, each produced under the
-    in-model score threshold ``conf`` (left as the model holds it for ``None``) and its own
-    detection cap of ``caps``, both set in the model (:func:`set_detector_operating_point`): one
-    forward per distinct cap, over the inputs it governs."""
+    in-model score threshold ``conf`` and its own detection cap of ``caps``, both set in the
+    model (:func:`set_detector_operating_point`): one forward per distinct cap, over the inputs it
+    governs."""
     outputs: list = [None] * len(inputs)
     for cap in sorted(set(caps)):
         at = [i for i, c in enumerate(caps) if c == cap]

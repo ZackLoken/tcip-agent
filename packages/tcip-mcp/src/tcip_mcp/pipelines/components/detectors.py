@@ -325,20 +325,23 @@ def build_detector(name: str, adapter: Any, num_classes: int, *, attributes: Any
 
     Raises ``ValueError`` for an unknown name and ``TypeError`` for an unrecognized kwarg, naming
     the detectors that do take it. Accepted keys are the builder's own plus the torchvision
-    detector class's, which the builder forwards, but a detection cap
-    (``box_detections_per_img``, ``detections_per_img``), which refuses (``ValueError``): each
-    forward is capped at its frames' own cap. An ``in_chans != 3`` build additionally
-    requires ``image_mean``/``image_std`` of that length (``_normalization``).
+    detector class's, which the builder forwards, but an operating-point knob (a detection cap,
+    ``box_detections_per_img`` or ``detections_per_img``, or a score threshold,
+    ``box_score_thresh`` or ``score_thresh``), which refuses (``ValueError``): both are set at
+    every forward. An ``in_chans != 3`` build additionally requires ``image_mean``/``image_std``
+    of that length (``_normalization``).
     """
     from tcip_mcp.pipelines.model_build import resolve_named
 
     fn, _cls_name = resolve_named(name, _DETECTORS, kind="detector")
-    stated_cap = sorted({"box_detections_per_img", "detections_per_img"} & set(kwargs))
-    if stated_cap:
+    stated_point = sorted({"box_detections_per_img", "detections_per_img", "box_score_thresh",
+                           "score_thresh"} & set(kwargs))
+    if stated_point:
         raise ValueError(
-            f"build_detector('{name}', ...) was given {stated_cap}: a detector's cap is each "
-            "frame's, its object density times its pixels, set at every forward. Drop "
-            f"{stated_cap}.")
+            f"build_detector('{name}', ...) was given {stated_point}: a detector's operating "
+            "point is set at every forward, its cap each frame's object density times its "
+            "pixels and its score threshold the pass's conf, or none at validation. Drop "
+            f"{stated_point}.")
     accepted = _accepted_kwargs(name)
     unknown = sorted(set(kwargs) - accepted)
     if unknown:

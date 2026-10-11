@@ -304,8 +304,8 @@ def test_a_tiled_pass_with_nothing_stated_recorded_or_referenced_refuses_naming_
 def test_validation_runs_every_frame_under_the_cap_its_density_gives_it(tmp_path: Path,
                                                                         monkeypatch):
     """The trainer's validation predicts each frame under the cap the run's density gives it, so
-    a frame whose cap is one keeps one detection though the built detector's own cap would keep
-    a hundred."""
+    a frame whose cap is one keeps one detection though the same detector under a cap of two
+    keeps more than one."""
     import tcip_mcp.pipelines.training.evaluation as evaluation
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
@@ -320,10 +320,10 @@ def test_validation_runs_every_frame_under_the_cap_its_density_gives_it(tmp_path
     images, targets = zip(*(dataset[i] for i in range(len(dataset))))
     model = GenericPredictor(verified_checkpoint(tmp_path), device="cpu").model
     model.eval()
-    set_detector_operating_point(model, score_thresh=0.0)
+    set_detector_operating_point(model, score_thresh=0.0, detections_per_img=2)
     with torch.no_grad():
         raw = model([images[0]])[0]
-    assert len(raw["boxes"]) > 1, "the built detector must keep more than one box ungoverned"
+    assert len(raw["boxes"]) > 1, "the built detector must keep more than one box under two"
 
     kept: list[int] = []
     real = evaluation.records_from_detector
@@ -338,6 +338,51 @@ def test_validation_runs_every_frame_under_the_cap_its_density_gives_it(tmp_path
               iou_threshold=0.5, score_weights=None, trait=None, density=1 / (128 * 128))
 
     assert len(kept) == 2 and max(kept) <= 1
+
+
+def test_validation_keeps_every_box_the_cap_admits_whatever_the_builders_own_floor(
+        tmp_path: Path, monkeypatch):
+    """The trainer's validation predicts at no score floor: a built detector holding a score
+    threshold above every score it gives, as a builder's own threshold would, still reports in
+    each frame's row every box the frame's cap admits."""
+    import tcip_mcp.pipelines.training.evaluation as evaluation
+    from tcip_mcp.pipelines.data.selection import ClassScope
+    from tcip_mcp.pipelines.derivations import detection_cap
+    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+    from tcip_mcp.pipelines.model_build import model_dims
+    from tcip_mcp.pipelines.operating_point import set_detector_operating_point
+    from tcip_mcp.pipelines.training.generic_trainer import _validate
+    from tests._producer_fixtures import run_over, seed_bud_images
+    from tests._verified_checkpoint_fixtures import verified_checkpoint
+
+    images_dir = seed_bud_images(tmp_path / "val" / "images" / UNDATED_BUCKET, n=2, size=128)
+    dataset, data = run_over("detection", images_dir, subject="bud", stated={"num_channels": 3})
+    images, targets = zip(*(dataset[i] for i in range(len(dataset))))
+    model = GenericPredictor(verified_checkpoint(tmp_path), device="cpu").model
+    model.eval()
+    density = 300 / (128 * 128)
+    cap = detection_cap(density, 128 * 128)
+    set_detector_operating_point(model, score_thresh=0.0, detections_per_img=cap)
+    with torch.no_grad():
+        unfloored = [model([image])[0] for image in images]
+    scores = [float(s) for out in unfloored for s in out["scores"]]
+    assert scores, "the fixture must give boxes for a floor to drop"
+    set_detector_operating_point(model, score_thresh=min(1.0, max(scores) + 1e-3),
+                                 detections_per_img=cap)
+
+    rows: list[dict] = []
+    real = evaluation.records_from_detector
+
+    def recording(target, output, **kwargs):
+        rows.append(real(target, output, **kwargs))
+        return rows[-1]
+
+    monkeypatch.setattr(evaluation, "records_from_detector", recording)
+    _validate(model, [(list(images), list(targets))], torch.device("cpu"), "detection",
+              dims=model_dims(ClassScope.of(data), {"num_channels": 3}), conf_threshold=0.5,
+              iou_threshold=0.5, score_weights=None, trait=None, density=density)
+
+    assert [row["count"] for row in rows] == [len(out["boxes"]) for out in unfloored]
 
 
 def _frames_config(project: Path, name: str, **data) -> dict:
@@ -531,14 +576,16 @@ def test_a_bespoke_detector_under_cap_one_keeps_one_through_validation_and_a_pas
     assert kept == [1, 1]
 
 
-def test_a_detection_cap_stated_to_the_builder_refuses_by_name():
-    """The cap is each frame's: a detector builder handed one refuses naming it, and builds
-    beside it at its other keywords."""
+@pytest.mark.parametrize(
+    "knob", ["box_detections_per_img", "detections_per_img", "box_score_thresh", "score_thresh"])
+def test_an_operating_point_knob_stated_to_the_builder_refuses_by_name(knob: str):
+    """The cap and the score threshold are set at every forward: a detector builder handed
+    either refuses naming it, and the same call without it builds at its other keywords."""
     from tests.bespoke_models import build_bespoke_detection
 
-    with pytest.raises(ValueError, match="box_detections_per_img"):
-        build_bespoke_detection(min_size=64, max_size=128, box_detections_per_img=7)
-    assert build_bespoke_detection(min_size=64, max_size=128, box_score_thresh=0.3) is not None
+    with pytest.raises(ValueError, match=knob):
+        build_bespoke_detection(min_size=64, max_size=128, box_nms_thresh=0.4, **{knob: 7})
+    assert build_bespoke_detection(min_size=64, max_size=128, box_nms_thresh=0.4) is not None
 
 
 def test_a_restored_record_missing_its_overlap_or_density_refuses_and_a_complete_one_predicts(

@@ -220,7 +220,7 @@ class TcipDetectionModel(DetectionModel):
     """
 
     def __init__(
-        self, predictor: GenericPredictor, *, conf: float | None,
+        self, predictor: GenericPredictor, *, conf: float,
         cap_of: Callable[[np.ndarray], int], tile_resize: tuple[int, int] | None,
         band_interpretations: tuple[str, ...] | None, collect_masks: bool, mask_binarize: dict,
     ) -> None:

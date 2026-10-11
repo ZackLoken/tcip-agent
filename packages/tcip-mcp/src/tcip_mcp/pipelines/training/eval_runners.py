@@ -39,28 +39,27 @@ def evaluation_result(common: dict, extra: dict) -> dict:
 
 def run_test_evaluation(
     pass_: Pass, loader, device, *, iou_threshold: float = 0.5,
-    score_weights: dict | None = None, tiling: TilingSpec | None = None,
-    trait: TraitEntry | None = None,
+    tiling: TilingSpec | None = None, trait: TraitEntry | None = None,
 ) -> dict:
-    """Score ``loader`` against the untiled ``pass_``'s model, its in-model score threshold the
-    pass's conf and each image capped at the pass's density (``evaluation.evaluate``), and return
-    the result (:func:`evaluation_result`) with that record under ``execution``; ``trait`` is the
-    confirmed entry whose criterion governs the count, as ``evaluate`` reads it.
+    """Score ``loader`` against the untiled ``pass_``'s model, its boxes counted at the pass's
+    conf, each image capped at the pass's density and the objective weighted by the checkpoint's
+    recorded ``evaluation.score_weights`` (``evaluation.evaluate``), and return the result
+    (:func:`evaluation_result`) with that record under ``execution``; ``trait`` is the confirmed
+    entry whose criterion governs the count, as ``evaluate`` reads it.
 
     ``tiling`` describes the loader's regime for provenance only: a tile-level run scores
     per-tile predictions against per-tile ground truth, a diagnostic, not the delivery regime.
     """
     from tcip_mcp.pipelines.data.datasets import run_tiling
-    from tcip_mcp.pipelines.operating_point import set_detector_operating_point
     from tcip_mcp.pipelines.training.evaluation import evaluate
 
     checkpoint, execution, predictor = pass_.checkpoint, pass_.execution, pass_.predictor
     task = checkpoint.task
 
-    set_detector_operating_point(predictor.model, score_thresh=execution.conf)
     metrics = evaluate(predictor.model.to(device), loader, device, task, dims=predictor.dims,
                        conf_threshold=execution.conf, iou_threshold=iou_threshold,
-                       score_weights=score_weights, trait=trait, density=execution.density)
+                       score_weights=checkpoint.spec.evaluation.score_weights, trait=trait,
+                       density=execution.density)
     tiled = run_tiling(task, tiling) is not None
     common = {
         "model_path": checkpoint.path, "task": task, **checkpoint.producer,
@@ -95,18 +94,15 @@ def run_full_frame_evaluation(
     predictor = prep.predictor
     by_mask = predictor.task == "instance_seg"
 
-    # The loader a run over this same ground truth builds, over the samples the producer admits.
-    from tcip_mcp.pipelines.data.datasets import DocumentDataset, build_dataset, resolve_sizes
+    from tcip_mcp.pipelines.data.datasets import DocumentDataset
     from tcip_mcp.pipelines.data.label_queries import require_admitted
+    from tcip_mcp.pipelines.data.split_construction import predictor_dataset
 
     require_admitted(admitted)
-    # The task's own loader, at the width the predictor reads at: its targets are the objects the
-    # task's geometry selects, and the predictor reads each source itself.
-    measured_samples = admitted.every_sample()
-    measured = build_dataset(
-        predictor.task, scope=admitted.scope, samples=measured_samples,
-        sizes=resolve_sizes(predictor.task, {"num_channels": predictor.in_chans},
-                            measured_samples))
+    # The task's own loader: its targets are the objects the task's geometry selects, and the
+    # predictor reads each source itself.
+    measured = predictor_dataset(predictor.task, admitted.every_sample(), admitted.scope,
+                                 predictor, None)
     assert isinstance(measured, DocumentDataset), "a detector's build over samples is one of these"
     gt_by_key = {key: gt_records(measured.det_targets(measured.document(key)))
                  for key in measured.stems}

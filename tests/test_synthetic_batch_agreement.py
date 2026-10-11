@@ -23,8 +23,8 @@ from tcip_mcp.pipelines.training.collation import task_collate  # noqa: E402
 from tests._producer_fixtures import dataset_over, registry_over  # noqa: E402
 
 # What the smokes below synthesize their batch at, the shape a run resolves for itself.
-DET_DIMS = {"in_chans": 3, "num_classes": 1, "img_size": 64}
-ORD_DIMS = {"in_chans": 3, "num_classes": 4, "img_size": 64}
+DET_DIMS = {"in_chans": 3, "num_classes": 1, "img_size": (64, 64)}
+ORD_DIMS = {"in_chans": 3, "num_classes": 4, "img_size": (64, 64)}
 
 
 class _DetectionTargetRecorder(torch.nn.Module):
@@ -127,18 +127,19 @@ def test_synthetic_detection_target_labels_a_foreground_object(tmp_path):
 
 
 def test_synthetic_detection_box_covers_a_positive_area_inside_the_frame():
-    """A degenerate or out-of-frame box is not an object a detector can be asked to learn."""
-    img_size = 64
+    """A degenerate or out-of-frame box is not an object a detector can be asked to learn, on a
+    frame of either orientation."""
+    width, height = 96, 48
     recorder = _DetectionTargetRecorder()
-    check_model_contract(recorder, "detection", dims={**DET_DIMS, "img_size": img_size})
+    check_model_contract(recorder, "detection", dims={**DET_DIMS, "img_size": (width, height)})
     boxes = recorder.seen[0][0]["boxes"]
 
     assert boxes.shape == (1, 4)
     x1, y1, x2, y2 = (float(v) for v in boxes[0])
     assert x2 > x1
     assert y2 > y1
-    assert 0.0 <= x1 and x2 <= img_size
-    assert 0.0 <= y1 and y2 <= img_size
+    assert 0.0 <= x1 and x2 <= width
+    assert 0.0 <= y1 and y2 <= height
 
 
 def test_synthetic_detection_target_carries_only_keys_the_real_loader_carries(tmp_path):

@@ -141,10 +141,11 @@ def _frozen_detection_builder(**kwargs):
 
 def _detection_smoke_cfg(builder: str, tmp_path: Path) -> dict:
     """A smoke config over the bespoke detector at a small resize target: the detector's own
-    transform resizes the 224 px contract input to ``min_size``, so 64 keeps two smoke builds
-    plus twenty overfit steps to seconds where the 800 px default took minutes. ``fcos`` builds
-    in a fraction of ``faster_rcnn``'s time over the same resnet18 backbone (single-stage, no
-    region-proposal network), and nothing either smoke test asserts is faster-rcnn-specific.
+    transform resizes whatever frame the smoke reads off the run to ``min_size``, so 64 keeps
+    two smoke builds plus twenty overfit steps to seconds where the 800 px default took minutes.
+    ``fcos`` builds in a fraction of ``faster_rcnn``'s time over the same resnet18 backbone
+    (single-stage, no region-proposal network), and nothing either smoke test asserts is
+    faster-rcnn-specific.
     """
     return training_config(
         {"builder": builder,

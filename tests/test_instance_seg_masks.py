@@ -28,7 +28,7 @@ from tests._verified_checkpoint_fixtures import (  # noqa: E402
 )
 
 # What the smokes below synthesize their batch at, the shape a run resolves for itself.
-_SMOKE_DIMS = {"in_chans": 3, "num_classes": 1, "img_size": 64}
+_SMOKE_DIMS = {"in_chans": 3, "num_classes": 1, "img_size": (64, 64)}
 LEAF = registry_scope(Path(__file__).parent, "leaf")
 
 

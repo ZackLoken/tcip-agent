@@ -40,9 +40,18 @@ VALIDATION_CONF = 0.35
 """A sample confidence a detector run's validation counts boxes at."""
 
 
+IOU_THRESHOLD = 0.5
+"""A sample IoU a match must reach under the IoU convention, handed to ``evaluate`` directly."""
+
+
+SCORE_WEIGHTS = {"loss": 0.5, "f1": 0.3, "map50": 0.2}
+"""Sample weights a run selecting on the composite objective states for its three terms."""
+
+
 def evaluation_block(**stated) -> dict:
-    """An ``evaluation`` block at :data:`VALIDATION_CONF`, with ``stated`` over it."""
-    return {"conf_threshold": VALIDATION_CONF, **stated}
+    """An ``evaluation`` block at :data:`VALIDATION_CONF` weighting its objective by
+    :data:`SCORE_WEIGHTS`, with ``stated`` over it."""
+    return {"conf_threshold": VALIDATION_CONF, "score_weights": dict(SCORE_WEIGHTS), **stated}
 
 
 def sweep_space() -> dict:

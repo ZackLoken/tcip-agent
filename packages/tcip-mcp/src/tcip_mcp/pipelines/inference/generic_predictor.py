@@ -135,7 +135,7 @@ class GenericPredictor:
         from tcip_mcp.pipelines.slicing import TcipDetectionModel
 
         return TcipDetectionModel(
-            self, conf=execution.conf, cap_of=cap_of, tile_resize=tile_resize,
+            self, conf=cast(float, execution.conf), cap_of=cap_of, tile_resize=tile_resize,
             band_interpretations=band_interpretations, collect_masks=collect_masks,
             mask_binarize=resolve_binarize_threshold())
 

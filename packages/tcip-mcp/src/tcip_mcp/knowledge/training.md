@@ -71,8 +71,10 @@ predecessor's rates with the schedule held, whatever the schedule.
 
 The stop rule and `model_best.pt` share the same selection criterion; there is no separate
 `metric`/`mode` key on `early_stopping`. Both are driven by `evaluation.selection_metric`
-(defaults to the composite objective for detection/instance_seg, `loss` otherwise), and both
-compare in whichever direction `evaluation.HIGHER_IS_BETTER_BY_METRIC` declares for that metric,
+(defaults to the composite objective for detection/instance_seg, `loss` otherwise; the objective
+blends its terms by the `evaluation.score_weights` block the run states, `schemas.ScoreWeights`,
+one non-negative weight per term, and a run selecting on it without them is refused by name),
+and both compare in whichever direction `evaluation.HIGHER_IS_BETTER_BY_METRIC` declares for that metric,
 not always "lower wins": selecting on `f1` keeps the highest-F1 checkpoint, selecting on `loss`
 keeps the lowest-loss one. A `selection_metric` with no declared direction is refused. For a
 count trait with a center-match criterion, an explicit `selection_metric` must be one of the

@@ -15,6 +15,7 @@ torch = pytest.importorskip("torch")
 from tcip_mcp.pipelines.model_build import METRICS_KEY
 from tcip_mcp.pipelines.training.evaluation import evaluate
 from tcip_mcp.pipelines.training.generic_trainer import train
+from tests._training_values import IOU_THRESHOLD
 from tests.tiny_trainer_fixtures import (
     capture_model,
     opposed_regression_loaders,
@@ -63,9 +64,9 @@ def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(tmp_path
 
     device = torch.device("cpu")
     on_holdout = evaluate(model, val_loader, device, "regression", dims={"in_chans": 1},
-                          conf_threshold=None)
+                          conf_threshold=None, iou_threshold=IOU_THRESHOLD, score_weights=None)
     on_training = evaluate(model, train_loader, device, "regression", dims={"in_chans": 1},
-                           conf_threshold=None)
+                           conf_threshold=None, iou_threshold=IOU_THRESHOLD, score_weights=None)
     # The two loaders must be distinguishable at all, or nothing below can discriminate.
     assert on_holdout["loss"] > 3.0 * on_training["loss"] > 0.0
     assert on_holdout["mae"] != pytest.approx(on_training["mae"], rel=0.1)

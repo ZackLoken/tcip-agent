@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 from tcip_store import stored_number
 
 if TYPE_CHECKING:
-    from tcip_mcp.pipelines.schemas import TrainConfigSchema
+    from tcip_mcp.pipelines.schemas import SpatialManifest, TrainConfigSchema
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,7 @@ class TrainContext:
     run: Any                      # TrainRun
     train_loader: Any
     val_loader: Any | None = None
+    spatial: SpatialManifest | None = None   # the within-image split the run's partition records
     resume_from: str = ""
     epoch_hook: Any = None        # (epoch, metrics) -> None, fired for every epoch row
     _epoch: int = 0
@@ -135,15 +136,16 @@ class TrainContext:
 
     # ---- craft library passthroughs (compose, don't reinvent) ----
     def build_dataset(self, *, samples: Any, transforms: Any = None) -> Any:
-        """This run's loader over ``samples``, whole, at ``transforms``
+        """This run's loader over ``samples`` at ``transforms``
         (``split_construction.run_loader``): by the builder its data block's dataset source
         names, or else by the platform's factory at the block's sizes and tiling, under the
-        block's class space. A within-image split's region views are this run's own
-        ``train_loader`` and ``val_loader``; this builds no view of them."""
+        block's class space. On a within-image split run (:attr:`spatial`) it is the run's one
+        sample's train view, its tiles inside the recorded train region, and any other sample
+        list refuses naming that sample."""
         from tcip_mcp.pipelines.data.split_construction import run_loader
 
-        return run_loader(self.task, self.spec.data, self.run.layout)(samples=samples,
-                                                                      transforms=transforms)
+        return run_loader(self.task, self.spec.data, self.run.layout, self.spatial)(
+            samples=samples, transforms=transforms)
 
     def tiled_dataset(self, base: Any, *, tile_size: int, overlap: float, **kwargs: Any) -> Any:
         """Wrap a detection dataset in the native-resolution tiler
@@ -225,17 +227,13 @@ class TrainContext:
 
     def evaluate(self, model: Any, loader: Any = None, **kwargs: Any) -> Any:
         """``evaluation.evaluate`` of ``model`` over ``loader`` (the run's validation loader when
-        omitted), a detector's boxes counted at the run's stated confidence
-        (``TrainRun.reads``) and each frame capped at the run's recorded object density;
-        ``kwargs`` are ``evaluate``'s other keywords, and one naming ``conf_threshold`` or
-        ``density`` is refused by the call (``TypeError``)."""
-        from tcip_mcp.pipelines.model_build import recorded_model_dims
+        omitted) at the keywords the run resolved once (``TrainRun.evaluation_arguments``);
+        ``kwargs`` are ``evaluate``'s other keywords, and one naming a keyword the run supplies
+        is refused by the call (``TypeError``)."""
         from tcip_mcp.pipelines.training.evaluation import evaluate
 
-        return evaluate(model, self.val_loader if loader is None else loader,
-                        self.device, self.task, dims=recorded_model_dims(self.spec),
-                        conf_threshold=self.run.reads.conf_threshold,
-                        density=self.spec.data.train_object_density, **kwargs)
+        return evaluate(model, self.val_loader if loader is None else loader, self.device,
+                        self.task, **self.run.evaluation_arguments, **kwargs)
 
     # ---- measurement primitives (compose for dimensional traits) ----
     def mask_geometry(self, *args: Any, **kwargs: Any) -> Any:
