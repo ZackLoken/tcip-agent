@@ -644,7 +644,11 @@ def test_a_restored_record_runs_as_recorded_and_a_changed_overlap_or_merge_refus
     tmp_path,
 ):
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.execution import ExecutionRefusedError, prepare
+    from tcip_mcp.pipelines.execution import (
+        DEFAULT_POSTPROCESS,
+        ExecutionRefusedError,
+        prepare,
+    )
 
     _images, _drawn, _sel, checkpoint_path = _trained(tmp_path, "exp-restore")
     checkpoint = load_registered_checkpoint(checkpoint_path, project=tmp_path)
@@ -656,6 +660,27 @@ def test_a_restored_record_runs_as_recorded_and_a_changed_overlap_or_merge_refus
         .execution
     )
     assert recorded.tiled, recorded
+    assert (recorded.postprocess, recorded.sources["postprocess"]) == (
+        DEFAULT_POSTPROCESS,
+        "default",
+    )
+    stated_merge = (
+        prepare(
+            checkpoint,
+            Stated(
+                tile=True,
+                overlap=0.2,
+                postprocess="nmm",
+                **SAMPLE_DETECTOR_PASS,
+            ),
+        )
+        .runnable()
+        .execution
+    )
+    assert (stated_merge.postprocess, stated_merge.sources["postprocess"]) == (
+        "nmm",
+        "explicit",
+    )
 
     assert (
         prepare(checkpoint, Stated(overlap=0.2), restored=recorded)
