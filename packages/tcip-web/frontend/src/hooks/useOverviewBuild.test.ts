@@ -52,6 +52,18 @@ describe("useOverviewBuild", () => {
     expect(result.current.error).toBeNull();
   });
 
+  it("reaches one completed state whether the build request or the poll answers completed", async () => {
+    const done = { building: false, bytesWritten: 9_000_000, error: null, reloadToken: 1 };
+    vi.spyOn(client.api.images, "buildOverviews").mockResolvedValue(job("completed", 9_000_000));
+    const fromRequest = renderHook(() => useOverviewBuild(URL, PATH, OVERVIEWS_REQUIRED));
+    await waitFor(() => expect(fromRequest.result.current).toEqual(done));
+
+    vi.spyOn(client.api.images, "buildOverviews").mockResolvedValue(job("running"));
+    vi.spyOn(client.api.images, "overviewJob").mockResolvedValue(job("completed", 9_000_000));
+    const fromPoll = renderHook(() => useOverviewBuild(URL, PATH, OVERVIEWS_REQUIRED));
+    await waitFor(() => expect(fromPoll.result.current).toEqual(done));
+  });
+
   it("reports a failed build instead of leaving the viewer waiting", async () => {
     vi.spyOn(client.api.images, "buildOverviews").mockResolvedValue(job("running"));
     vi.spyOn(client.api.images, "overviewJob").mockResolvedValue(
