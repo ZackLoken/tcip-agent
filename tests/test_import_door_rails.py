@@ -289,7 +289,7 @@ def _annotated_dataset(root: Path, n: int) -> None:
     from PIL import Image
 
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.subject_registry import SubjectRegistry, Subject
+    from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tests._producer_fixtures import label_image, registry_over
 
     images_dir = root / "images" / "2026-03-04"
@@ -358,7 +358,6 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(
     import tcip_mcp.tools.training_tools as tt
     from tcip_mcp import experiments
     from tcip_mcp.pipelines.data.selection import selection_key
-    from tcip_mcp.traits import read_trait
     from tcip_mcp.tools.data_tools import draw_splits
     from tcip_mcp.tools.project_tools import (
         dataset_entry_path,
@@ -366,7 +365,7 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(
         read_datasets,
         register_dataset,
     )
-
+    from tcip_mcp.traits import read_trait
     from tests._trait_fixtures import COUNT_TRAIT, seed_confirmed_count
 
     root = tmp_path / "source"

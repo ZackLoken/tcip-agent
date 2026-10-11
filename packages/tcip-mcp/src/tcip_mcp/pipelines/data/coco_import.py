@@ -78,7 +78,6 @@ def import_coco_document(
     import tcip_store
     from tcip_annotation.format_io import is_coco_id, parse_coco_annotations
     from tcip_annotation.json_io import document_payload
-
     from tcip_mcp import dataset_layout
     from tcip_mcp.audit import audit_entry, audit_log_key
     from tcip_mcp.pipelines.image_utils import (

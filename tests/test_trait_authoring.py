@@ -8,8 +8,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from tcip_mcp import subject_registry as cr
-from tcip_mcp import traits
+from tcip_mcp import subject_registry as cr, traits
 from tcip_mcp.operationalization import latest_confirmed
 from tcip_mcp.pipelines.postprocessing import phenology
 from tcip_mcp.traits import TraitEntry, TraitUnknownError, trait_names

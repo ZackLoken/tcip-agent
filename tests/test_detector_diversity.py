@@ -5,12 +5,12 @@ Uses ``resnet18`` (FPN normalizes the channel difference); CPU, tiny inputs, 1 e
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 import math
 from pathlib import Path
 
 import pytest
+
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
@@ -106,12 +106,13 @@ def test_detection_anchor_count_with_p2():
 
 def test_detection_anchor_free_e2e(tmp_path: Path):
     from torchvision.utils import save_image
+
+    from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.training.generic_trainer import train
     from tests._chain_fixtures import training_config
     from tests._producer_fixtures import label_image
     from tests._verified_checkpoint_fixtures import built_detector
     from tests.tiny_trainer_fixtures import run_context
-    from tcip_annotation.state import Annotation, BBox
 
     images_dir = tmp_path / "ds" / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True, exist_ok=True)

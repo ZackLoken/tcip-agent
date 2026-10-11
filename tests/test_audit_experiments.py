@@ -7,14 +7,12 @@ from pathlib import Path
 import pytest
 
 import tcip_store as ts
-
 from tests._verified_checkpoint_fixtures import (
     BUILT_DETECTOR,
     detection_config,
     log_epoch,
     opened_run,
 )
-
 
 # ── Audit logging ──
 

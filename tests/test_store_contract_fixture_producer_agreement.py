@@ -112,7 +112,6 @@ def test_a_selection_record_carries_each_sample_s_own_source_label_group_and_sid
     documents, is its sample list: each entry names its own source and label rather than a
     shared root, with no per-date members block or bare id list."""
     import tcip_store as ts
-
     from tcip_mcp.pipelines.data import selection
     from tcip_mcp.tools.data_tools import draw_splits
     from tests.test_training_autoval import _detection_dataset
@@ -200,7 +199,6 @@ def test_the_traits_golden_carries_every_field_the_proposing_and_confirming_prod
     field added to the schema is caught here."""
     import tcip_store as ts
     from tcip_mcp import traits
-
     from tests import _trait_fixtures as fx
 
     fx.seed_confirmed_count(tmp_path)

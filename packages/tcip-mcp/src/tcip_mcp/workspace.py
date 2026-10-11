@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable, Iterable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Iterable, NamedTuple, Optional
+from typing import NamedTuple
 
 import tcip_store
 from tcip_store import Key
@@ -77,7 +78,7 @@ def last_opened_key(workspace: Path) -> Key:
     return Key(LAST_OPENED_STORE, str(workspace), _POINTER_PARTS)
 
 
-def read_last_opened(workspace: Path) -> Optional[str]:
+def read_last_opened(workspace: Path) -> str | None:
     """The id the last-opened pointer holds, as stored, or ``None`` when the backend has opened
     nothing in this workspace yet. A pointer the store cannot read raises the store's own error."""
     return tcip_store.read(last_opened_key(workspace), default=None)
@@ -154,11 +155,10 @@ def remove_project(
     :data:`RENAME_BUDGET_S` removes the archive just written and raises the ``OSError``, leaving the
     project where it was. Returns ``{"archive_path", "moved_to"}``.
     """
-    from tcip_store.file_backend import retry_while_denied
-
     from tcip_mcp.audit import record_event_or_raise
     from tcip_mcp.experiments import live_run_conflict
     from tcip_mcp.tools.project_tools import write_archive
+    from tcip_store.file_backend import retry_while_denied
 
     conflict = live_run_conflict(project)
     if conflict is not None:

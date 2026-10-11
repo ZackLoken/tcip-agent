@@ -5,12 +5,14 @@ and after its directory exists.
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 import pytest
 
-from tests._producer_fixtures import fake_popen as _fake_popen
-from tests._producer_fixtures import seed_bud_images, small_detection_config
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tests._producer_fixtures import (
+    fake_popen as _fake_popen,
+    seed_bud_images,
+    small_detection_config,
+)
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
@@ -97,11 +99,10 @@ def test_launch_refuses_when_the_launch_record_cannot_be_written(
 ):
     """A launch record that cannot be written refuses the launch by name before the subprocess,
     and leaves no directory that reads as a run."""
-    from tcip_store import StoreError
-
     from tcip_mcp import experiments as experiments_mod
     from tcip_mcp.experiments import run_dirs
     from tcip_mcp.tools import training_tools
+    from tcip_store import StoreError
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     seed_bud_images(images_dir, n=2, size=32, box=(1, 1, 9, 9))

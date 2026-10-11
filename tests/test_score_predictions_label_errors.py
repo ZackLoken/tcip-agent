@@ -4,13 +4,12 @@ document, never a raise through the MCP tool boundary, on both the single-image 
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 from pathlib import Path
 
 import pytest
 
 from tcip_annotation.state import Annotation, BBox
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tcip_mcp.tools.annotation_tools import score_predictions
 from tests._producer_fixtures import image_label_key, label_image, write_image
 

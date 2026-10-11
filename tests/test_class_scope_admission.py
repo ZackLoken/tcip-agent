@@ -13,7 +13,6 @@ import pytest
 from tcip_mcp.pipelines.data.selection import ClassScope, read_selection
 from tcip_mcp.subject_registry import Attribute
 from tcip_mcp.tools.data_tools import draw_splits
-
 from tests.test_selection_binding import (
     DATES,
     SUBJECT,

@@ -56,7 +56,6 @@ def _annotations(
 ) -> list[dict]:
     """The records of ``stem``'s published prediction document under ``bucket``."""
     import tcip_store
-
     from tcip_mcp.dataset_layout import prediction_key
 
     return tcip_store.read(prediction_key(project, bucket, stem))[
@@ -310,7 +309,6 @@ def test_web_worker_stamps_the_stated_conf_explicit_and_the_checkpoints_density(
     """A caller-stated conf is recorded 'explicit', the same distinction tile/tile_size already
     carry, and the density no caller states is the checkpoint's own recorded one."""
     from tcip_web.routes.inference import _worker
-
     from tests._verified_checkpoint_fixtures import SAMPLE_CONF
 
     images_dir = _one_image(tmp_path)

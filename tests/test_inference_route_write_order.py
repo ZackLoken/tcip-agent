@@ -64,7 +64,6 @@ def _launch_through_the_route(client, dataset, bucket, ckpt, *, tile: bool):
 def _documents(root: Path, bucket: str) -> list[str]:
     """The stems of the prediction documents stored under ``bucket``."""
     import tcip_store
-
     from tcip_mcp.dataset_layout import PREDICTION_DOCUMENTS
 
     return [
@@ -75,7 +74,6 @@ def _documents(root: Path, bucket: str) -> list[str]:
 
 def _published(root: Path, bucket: str) -> bool:
     import tcip_store
-
     from tcip_mcp.dataset_layout import bucket_key
 
     return tcip_store.exists(bucket_key(root, bucket))
@@ -253,9 +251,8 @@ def test_a_full_gui_pass_publishes_every_document_and_the_record(
     """Every prediction document and the record that states who produced them are published, the
     images predicted in the order the pass walked them, and the job reports its summary."""
     pytest.importorskip("fastapi")
-    from tcip_annotation import json_io
-
     import tcip_mcp.pipelines.postprocessing.export as export
+    from tcip_annotation import json_io
     from tcip_mcp.buckets import read_bucket
     from tcip_web.routes.inference import _summary, _worker
     from tests._verified_checkpoint_fixtures import registered_checkpoint

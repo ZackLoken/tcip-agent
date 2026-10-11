@@ -75,7 +75,6 @@ def orthomosaic_plant_counts(
         read_label_document,
     )
     from tcip_annotation.state import bbox_of
-
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
         DetectionAssignment,
@@ -278,7 +277,6 @@ def _segment_counts(
         document_at,
         read_stored,
     )
-
     from tcip_mcp.dataset_layout import label_key_of
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         UNATTRIBUTED_SEGMENT_SOURCES,

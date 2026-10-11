@@ -13,8 +13,8 @@ acknowledgment the breeder's own recording door records.
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import pytest
 
@@ -143,7 +143,6 @@ def _ingest_images(project: Path) -> Path:
 
 def _save_annotations(project: Path) -> Path:
     import tcip_store as ts
-
     from tcip_mcp.dataset_layout import label_key
     from tcip_mcp.project_record import read_record
     from tcip_mcp.tools.annotation_tools import save_annotations
@@ -598,9 +597,9 @@ def test_a_copied_projects_run_and_sweep_trial_read_the_copys_source_files(
     import tcip_store as ts
     from tcip_mcp.experiments import observe
     from tcip_mcp.tools.training_tools import open_trial
+    from tests._chain_fixtures import BESPOKE_MODELS
     from tests._training_values import sweep_space
     from tests._verified_checkpoint_fixtures import opened_run, opened_sweep
-    from tests._chain_fixtures import BESPOKE_MODELS
     from tests.test_dataset_source_seam import BESPOKE_DS, BESPOKE_DS_FILE
     from tests.test_launch_artifact_anchoring_and_lineage import (
         _canonical_dataset,

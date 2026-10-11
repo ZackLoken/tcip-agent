@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 import csv
 import random
 from pathlib import Path
 
 import pytest
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._chain_fixtures import CLASSIFIER_SOURCE
 
 torch = pytest.importorskip("torch")
@@ -47,9 +46,9 @@ def test_set_seed_sets_cudnn_flags():
 pytest.importorskip("torchvision")
 
 import tcip_mcp.pipelines.components.backbones  # noqa: F401,E402
-import tcip_mcp.pipelines.components.necks  # noqa: F401,E402
 import tcip_mcp.pipelines.components.heads  # noqa: F401,E402
 import tcip_mcp.pipelines.components.losses  # noqa: F401,E402
+import tcip_mcp.pipelines.components.necks  # noqa: F401,E402
 from tcip_mcp.pipelines.training.generic_trainer import run_loaders, train  # noqa: E402
 from tests._producer_fixtures import dataset_over  # noqa: E402
 from tests._training_values import adamw_optimizer, schedule  # noqa: E402

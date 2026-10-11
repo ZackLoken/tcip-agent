@@ -7,7 +7,7 @@ against at most one.
 
 from __future__ import annotations
 
-from typing import Literal, Optional, Union
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -148,7 +148,7 @@ class Producer(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     checkpoint_sha256: str
-    experiment_id: Optional[str]
+    experiment_id: str | None
 
 
 class BucketFinding(BaseModel):
@@ -159,10 +159,10 @@ class BucketFinding(BaseModel):
 
     dataset_root: str
     bucket: str
-    date: Optional[str]
-    assessment_id: Optional[str]
+    date: str | None
+    assessment_id: str | None
     validated: bool
-    reason: Optional[str]
+    reason: str | None
 
 
 class Acknowledgment(BaseModel):
@@ -179,9 +179,9 @@ class Acknowledgment(BaseModel):
     recorded_at: str
 
 
-PlantMapping = Union[
-    PlantMappingDisclosure, PlantRegistryDisclosure, CanopySegmentDisclosure
-]
+PlantMapping = (
+    PlantMappingDisclosure | PlantRegistryDisclosure | CanopySegmentDisclosure
+)
 """The one of three disclosures a delivery's ``plant_mapping`` is."""
 
 
@@ -201,10 +201,10 @@ class DeliveryEventRecord(BaseModel):
     output_sha256: str
     producer: Producer
     buckets: list[BucketFinding]
-    scale_assessment_id: Optional[str]
+    scale_assessment_id: str | None
     validated: bool
-    acknowledgment: Optional[Acknowledgment]
+    acknowledgment: Acknowledgment | None
     population: list[str]
-    require_all_dates_complete: Optional[bool]
-    plant_mapping: Optional[PlantMapping]
+    require_all_dates_complete: bool | None
+    plant_mapping: PlantMapping | None
     produced_at: str

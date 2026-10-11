@@ -5,13 +5,13 @@ its own config's model source, and the dimensions a builder is handed are the ru
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 import importlib
 from dataclasses import asdict
 from pathlib import Path
 
 import pytest
+
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 torch = pytest.importorskip("torch")
 
@@ -120,8 +120,8 @@ def test_contract_dims_take_the_admitted_attributes_without_the_loader_backgroun
     has since gained a third, and a re-resolution would smoke a head one value wider than the head
     that trains."""
     from PIL import Image
-    from tcip_annotation.state import Annotation, BBox
 
+    from tcip_annotation.state import Annotation, BBox
     from tests._producer_fixtures import admit_over, label_image
 
     dataset_root = tmp_path / "currant_2026"
@@ -394,8 +394,8 @@ def test_a_run_builds_at_the_width_and_heads_its_admitted_data_records(
     three-value attribute all differ from ``build_probe_net``'s defaults, so a build that dropped
     any of them would come out at the default shape."""
     from PIL import Image
-    from tcip_annotation.state import Annotation, BBox
 
+    from tcip_annotation.state import Annotation, BBox
     from tests._producer_fixtures import label_image, run_over
 
     dataset_root = tmp_path / "hazel_2026"

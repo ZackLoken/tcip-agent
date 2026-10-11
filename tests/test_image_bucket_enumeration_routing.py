@@ -64,7 +64,6 @@ def _label(bucket: Path, *stems: str) -> None:
     """One label document per stem's image in ``bucket``, so the producer admits this bucket: a
     preflight reads the run's own admitted membership, never a directory listing of its own."""
     from tcip_annotation.state import Annotation, BBox
-
     from tests._producer_fixtures import label_image
 
     for stem in stems:

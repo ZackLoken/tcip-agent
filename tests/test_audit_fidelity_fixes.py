@@ -8,10 +8,9 @@ import pytest
 
 import tcip_store as ts
 from tcip_annotation import json_io
-
 from tests._producer_fixtures import (
-    box_annotation,
     blank_image,
+    box_annotation,
     image_label_key,
     label_image,
 )
@@ -81,7 +80,6 @@ def test_draw_splits_counts_json_objects_not_lines(tmp_path):
     """A pretty-printed negative ({annotations: []}) is several text lines; the stratifier
     sees 0."""
     from tcip_mcp.tools.data_tools import draw_splits
-
     from tests._producer_fixtures import mark_complete
 
     images = [blank_image(tmp_path, name=f"img_{i}.JPG") for i in range(4)]

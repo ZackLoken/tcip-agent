@@ -7,11 +7,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
-
-from tcip_mcp.subject_registry import SubjectRegistry, RegistryError, Subject
-from tests._producer_fixtures import registry_over
 from tcip_mcp.dataset_layout import (
     capture_subjects,
     label_key,
@@ -20,6 +18,8 @@ from tcip_mcp.dataset_layout import (
     prediction_key,
     subjects_path,
 )
+from tcip_mcp.subject_registry import RegistryError, Subject, SubjectRegistry
+from tests._producer_fixtures import registry_over
 
 
 def test_only_published_buckets_are_listed_under_the_date_their_record_states(

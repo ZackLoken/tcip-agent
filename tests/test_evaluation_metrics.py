@@ -25,10 +25,15 @@ from tcip_mcp.pipelines.data.label_queries import registry_scope  # noqa: E402
 from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tcip_mcp.pipelines.schemas import ScoreWeights  # noqa: E402
+from tcip_mcp.pipelines.training.eval_runners import (  # noqa: E402
+    evaluation_result,
+    run_test_evaluation,
+)
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     classification_metrics,
     compute_composite_objective,
     concordance_correlation_coefficient,
+    derive_operating_point_curve,
     detection_metrics,
     gt_class_avg_size,
     ordinal_metrics,
@@ -39,20 +44,15 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     r_squared,
     regression_metrics,
     resolve_match_criterion,
-    derive_operating_point_curve,
-)
-from tcip_mcp.pipelines.training.eval_runners import (  # noqa: E402
-    evaluation_result,
-    run_test_evaluation,
 )
 from tcip_mcp.pipelines.training.generic_trainer import (  # noqa: E402
     _selection_value,
     resolve_selection_metric,
 )
+from tests import _trait_fixtures as fx  # noqa: E402
+from tests._dense_op_fixtures import gt_only  # noqa: E402
 from tests._image_fixtures import write_noise_image  # noqa: E402
 from tests._producer_fixtures import checkpoint_admission  # noqa: E402
-from tests._dense_op_fixtures import gt_only  # noqa: E402
-from tests import _trait_fixtures as fx  # noqa: E402
 from tests._training_values import (  # noqa: E402
     IOU_THRESHOLD,
     SCORE_WEIGHTS,
@@ -990,14 +990,13 @@ def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts(
     that neither ever produces, nothing either produces that the declaration leaves unaccounted
     for (declared, or named in the not-a-ranking list below, or a ``_state`` companion)."""
     pytest.importorskip("torchvision")
-    from tcip_store.values import NOT_FINITE_SUFFIX
-
     from tcip_mcp.pipelines.model_contract import _SYNTHESIZABLE_TASKS
     from tcip_mcp.pipelines.training.evaluation import (
         HIGHER_IS_BETTER_BY_METRIC,
         evaluate,
         governing_counts,
     )
+    from tcip_store.values import NOT_FINITE_SUFFIX
     from tests import bespoke_models
     from tests._producer_fixtures import painted_array
 
@@ -1140,8 +1139,8 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(
     from PIL import Image
 
     import tcip_mcp.pipelines.training.evaluation as evaluation
-    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.training.eval_runners import (
         run_full_frame_evaluation,
     )
@@ -1338,7 +1337,6 @@ def _four_bud_images(tmp_path):
     """Four noise images in ``tmp_path``'s undated capture, each labeled with one centered
     ``bud`` box."""
     from tcip_annotation.state import Annotation, BBox
-
     from tests._producer_fixtures import label_image
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
@@ -1357,7 +1355,6 @@ def _stored(tmp_path, annotations, size: int = 100):
     """``annotations`` written as the label document of a ``size``-pixel image ``a`` under
     ``tmp_path`` and read back."""
     from tcip_annotation import json_io
-
     from tcip_mcp.dataset_layout import label_key
 
     key = label_key(tmp_path, UNDATED_BUCKET, "a")

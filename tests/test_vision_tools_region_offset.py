@@ -9,13 +9,13 @@ that sits where no object is, under a bbox that looks right.
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 from pathlib import Path
 
 import numpy as np
 import pytest
 from PIL import Image
+
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 #: The frame, deliberately not square so a swapped or unshifted axis cannot look plausible.
 FRAME_W, FRAME_H = 300, 160

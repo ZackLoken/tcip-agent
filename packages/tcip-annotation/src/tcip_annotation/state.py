@@ -16,7 +16,7 @@ class BBox:
     y2: float
 
     @classmethod
-    def from_normalized_center(cls, box, img_w: float, img_h: float) -> "BBox":
+    def from_normalized_center(cls, box, img_w: float, img_h: float) -> BBox:
         """A normalized center-form ``[cx, cy, w, h]`` scaled to an ``img_w`` x ``img_h`` image."""
         cx, cy, w, h = (float(v) for v in box)
         return cls(
@@ -114,7 +114,7 @@ def instances(
 
 
 def box_derivable(
-    geometry: "BBox | Polygon | Point | None",
+    geometry: BBox | Polygon | Point | None,
 ) -> TypeGuard[BBox | Polygon]:
     """Whether a geometry yields a box: a rect or a polygon, never a point and never nothing."""
     return geometry is not None and not isinstance(geometry, Point)
@@ -135,7 +135,7 @@ def prediction_score(a: Annotation) -> float:
     return a.score
 
 
-def polygonal(geometry: "BBox | Polygon | Point | None") -> TypeGuard[Polygon]:
+def polygonal(geometry: BBox | Polygon | Point | None) -> TypeGuard[Polygon]:
     """Whether a geometry is a polygon, the one shape an instance mask is rasterized from."""
     return isinstance(geometry, Polygon)
 

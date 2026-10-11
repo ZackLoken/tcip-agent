@@ -25,8 +25,8 @@ from tcip_mcp.traits import (
     STATE_CROSSING_DATES,
     PositiveState,
 )
-from tests._producer_fixtures import registry_over
 from tests import _trait_fixtures as fx
+from tests._producer_fixtures import registry_over
 
 _CROSSING = fx.with_operationalization(
     fx.CROSSING_SPEC,

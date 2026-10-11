@@ -669,7 +669,6 @@ def test_a_registry_load_answers_content_and_version_from_one_read(
     new version: the load's version is the one its content was read at, so posting it back
     refuses as stale."""
     import tcip_store
-
     from tcip_mcp.tools.annotation_tools import write_subject_registry
 
     assert "error" not in write_subject_registry(

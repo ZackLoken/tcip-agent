@@ -260,7 +260,6 @@ def _write_dataset_stem(
     dataset_root: Path, date: str, stem: str, tiepoint: tuple[float, float]
 ) -> None:
     from tcip_annotation.state import Annotation, BBox
-
     from tests._producer_fixtures import label_image
 
     images_dir = dataset_root / "images" / date

@@ -10,9 +10,11 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-from shapely.geometry import MultiPolygon as ShapelyMultiPolygon
-from shapely.geometry import Point as ShapelyPoint
-from shapely.geometry import Polygon as ShapelyPolygon
+from shapely.geometry import (
+    MultiPolygon as ShapelyMultiPolygon,
+    Point as ShapelyPoint,
+    Polygon as ShapelyPolygon,
+)
 from shapely.validation import make_valid
 
 from tcip_annotation.state import (
@@ -275,8 +277,8 @@ def match_record(a: Annotation) -> dict:
     return {
         "bbox": xywh(b.x1, b.y1, b.x2, b.y2),
         "iscrowd": a.iscrowd,
-        "rings": geometry_rings(a.geometry),
-    }  # type: ignore[arg-type]
+        "rings": geometry_rings(a.geometry),  # type: ignore[arg-type]
+    }
 
 
 def geometry_rings(geometry: BBox | Polygon) -> Rings:

@@ -89,6 +89,7 @@ def listings(workspace: Path) -> dict[str, dict]:
     workspace the web backend is started with here, serving the listing at each stage,
     :func:`normalized`."""
     from fastapi.testclient import TestClient
+
     from tcip_mcp import traits
     from tcip_mcp.tools.project_tools import initialize_project
     from tcip_web.app import app

@@ -17,7 +17,6 @@ from tests._training_values import (
 )
 from tests._verified_checkpoint_fixtures import opened_sweep
 
-
 THREE_CHOICE_SPACE = {
     **sweep_space(),
     "batch_size": {"type": "categorical", "choices": [2, 4, 8]},
@@ -286,7 +285,6 @@ def test_run_hyperparameter_search_refuses_split_draws_when_a_bound_selection_wo
     """A selection whose train-plus-val members hold one foreground group refuses the sweep
     before minting, through the first point's own resolution."""
     import tcip_mcp.tools.training_tools as tt
-
     from tests.test_selection_binding import one_foreground_group_selection
 
     ran = []
@@ -857,7 +855,6 @@ def test_run_hyperparameter_search_admits_split_draws_bound_to_a_selection_and_s
     sweep manifest's own base_config carries the claim."""
     import tcip_mcp.tools.training_tools as tt
     from tcip_mcp.tools.data_tools import draw_splits
-
     from tests.test_selection_binding import (
         SUBJECT,
         _two_subject_two_date_dataset,
@@ -916,7 +913,6 @@ def test_a_bound_sweep_reads_and_redraws_its_selection_once_on_opening(
     import tcip_mcp.pipelines.data.split_construction as split_mod
     import tcip_mcp.tools.training_tools as tt
     from tcip_mcp.tools.data_tools import draw_splits
-
     from tests.test_selection_binding import (
         SUBJECT,
         _two_subject_two_date_dataset,
@@ -978,7 +974,6 @@ def test_run_hyperparameter_search_admits_split_draws_bound_with_auto_val_false(
     auto_val=False no longer refuses it the way it refuses a drawn config."""
     import tcip_mcp.tools.training_tools as tt
     from tcip_mcp.tools.data_tools import draw_splits
-
     from tests.test_selection_binding import (
         SUBJECT,
         _two_subject_two_date_dataset,

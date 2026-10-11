@@ -4,6 +4,12 @@ predictor's detection record carries them as polygons, ``encode_predictions`` co
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import cast
+
+import numpy as np
+import pytest
+
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._chain_fixtures import BESPOKE_INSTANCE_SEG, BESPOKE_MODELS
 from tests._producer_fixtures import (
@@ -12,12 +18,6 @@ from tests._producer_fixtures import (
     painted_array,
 )
 
-from pathlib import Path
-from typing import cast
-
-import numpy as np
-import pytest
-
 torch = pytest.importorskip("torch")
 
 pytest.importorskip("torchvision")
@@ -25,8 +25,8 @@ cv2 = pytest.importorskip("cv2")
 
 from tcip_mcp.pipelines.data.label_queries import registry_scope  # noqa: E402
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
-from tcip_mcp.pipelines.model_contract import check_model_contract  # noqa: E402
 from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor  # noqa: E402
+from tcip_mcp.pipelines.model_contract import check_model_contract  # noqa: E402
 from tests import bespoke_models  # noqa: E402
 from tests._verified_checkpoint_fixtures import (  # noqa: E402
     SAMPLE_CROSS_TILE_NMS,
@@ -175,11 +175,10 @@ def _stem_run(tmp_path) -> Path:
     own, each two :data:`TILE` px tiles wide holding one :data:`STRADDLING` polygon, stating
     :data:`TRAINED_LATTICE`; its directory."""
     from tcip_annotation.state import Annotation, Polygon
-
     from tests._producer_fixtures import seed_labeled_images
     from tests._verified_checkpoint_fixtures import (
-        fixture_data_dir,
         finished_run,
+        fixture_data_dir,
     )
 
     stem = Annotation(subject="stem", geometry=Polygon([STRADDLING]))
@@ -445,7 +444,6 @@ def test_run_inference_never_stamps_a_mask_threshold_into_annotation_attributes(
     """Annotation.attributes is the domain trait namespace, so no pass value lands there.
     Exercised on the tiled path, so the sliced (merged polygon) mask shape reaches export too."""
     import tcip_store
-
     from tcip_mcp.tools.inference_tools import run_inference
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
@@ -579,7 +577,6 @@ def _mask_record(mask: np.ndarray) -> dict:
     """``mask`` as the predictor's record carries it: the shared extractor's rings of the mask
     binarized at the platform's threshold, each flattened to SAHI's ``[x0, y0, x1, y1, ...]``."""
     from tcip_annotation.mask_contours import mask_to_polygon_rings
-
     from tcip_mcp.pipelines.measurement.mask_geometry import (
         resolve_binarize_threshold,
     )
@@ -691,8 +688,8 @@ def test_export_drops_a_mask_that_binarizes_to_a_sliver(monkeypatch):
     """A mask whose contour is real but collinear carries no real extent either: the encoder drops
     it and reports the count, the same as a degenerate box, rather than storing a zero-area
     shape."""
-    from tcip_mcp.pipelines.postprocessing import export
     from tcip_annotation.state import Polygon
+    from tcip_mcp.pipelines.postprocessing import export
 
     monkeypatch.setattr(
         export,
@@ -723,8 +720,8 @@ def test_export_drops_a_polygon_whose_vertices_all_round_to_one_point(
     """A polygon with real raw extent that collapses to one point at the document's stored
     2-decimal grid must be dropped here, the same as an already-collinear contour: the writer
     would otherwise refuse it and abort the whole batch."""
-    from tcip_mcp.pipelines.postprocessing import export
     from tcip_annotation.state import Polygon
+    from tcip_mcp.pipelines.postprocessing import export
 
     monkeypatch.setattr(
         export,

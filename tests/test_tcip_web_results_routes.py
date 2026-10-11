@@ -14,7 +14,6 @@ from fastapi.testclient import TestClient
 
 import tcip_store
 from tcip_mcp.audit import audit_log_key
-
 from tests import _trait_fixtures as fx
 from tests._audit_fixtures import refuse_audit_appends
 from tests._web_fixtures import BROWSER, acknowledged_post, open_new_project

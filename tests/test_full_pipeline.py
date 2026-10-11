@@ -6,13 +6,12 @@ Uses synthetic data for classification and real sample data for detection.
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 import os
 from pathlib import Path
 
 import pytest
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._chain_fixtures import BESPOKE_CLASSIFIER
 
 torch = pytest.importorskip("torch")
@@ -25,7 +24,6 @@ from torchvision.utils import save_image
 from tests import REPO_ROOT, bespoke_models  # noqa: E402
 from tests._producer_fixtures import run_over  # noqa: E402
 from tests._training_values import adamw_optimizer, evaluation_block, schedule  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

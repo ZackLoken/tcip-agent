@@ -18,9 +18,8 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser.add_argument("folder_path", help="Dataset root directory to scan.")
     args = parser.parse_args(argv)
 
-    from tcip_store import bind
-
     from tcip_mcp.tools.data_tools import scan_dataset
+    from tcip_store import bind
 
     bind()
 

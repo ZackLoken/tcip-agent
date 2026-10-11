@@ -179,7 +179,7 @@ def _populate_project(src: Path) -> tuple[Path, Path]:
     from PIL import Image
 
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.subject_registry import SubjectRegistry, Subject
+    from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tests._producer_fixtures import label_image, registry_over
 
     date = "2026-03-04"

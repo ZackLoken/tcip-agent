@@ -8,8 +8,9 @@ it, absolute exactly when external.
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import Any, Callable
+from typing import Any
 
 
 def is_external_form(stored: str) -> bool:

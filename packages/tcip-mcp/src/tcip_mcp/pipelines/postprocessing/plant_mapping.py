@@ -12,6 +12,7 @@ import logging
 import math
 import re
 import statistics
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
@@ -19,21 +20,18 @@ from typing import (
     TYPE_CHECKING,
     Any,
     ClassVar,
-    Iterable,
     Literal,
     NamedTuple,
-    Optional,
-    Sequence,
     get_args,
 )
 
-import tcip_store
 from PIL import ExifTags, Image
 from pydantic import ConfigDict, TypeAdapter
-from tcip_store import Key, encode_record
 
+import tcip_store
 from tcip_mcp.audit import now_iso
 from tcip_mcp.project_paths import project_state_dir
+from tcip_store import Key, encode_record
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -67,12 +65,12 @@ class ImageStamp:
     date_folder: str
     kind: str
     name: str
-    timestamp: Optional[datetime]
-    lat: Optional[float]
-    lon: Optional[float]
-    h_pos_err: Optional[float]
-    readable: Optional[bool]
-    manifest_sha256: Optional[str] = None
+    timestamp: datetime | None
+    lat: float | None
+    lon: float | None
+    h_pos_err: float | None
+    readable: bool | None
+    manifest_sha256: str | None = None
     members: tuple[str, ...] = ()
 
     @property
@@ -91,9 +89,9 @@ class PlantRecord:
 
     plot_name: str
     accession_name: str
-    plot_number: Optional[float]
-    row_number: Optional[float]
-    col_number: Optional[float]
+    plot_number: float | None
+    row_number: float | None
+    col_number: float | None
     lat: float
     lon: float
 
@@ -138,19 +136,19 @@ class Assignment:
     image: str
     stem: str
     date_folder: str
-    plot_name: Optional[str]
-    accession_name: Optional[str]
+    plot_name: str | None
+    accession_name: str | None
     source: GpsSource
-    distance_m: Optional[float]
+    distance_m: float | None
 
     @classmethod
     def of(
         cls,
-        stamp: "ImageStamp",
-        plant: "PlantRecord | None",
+        stamp: ImageStamp,
+        plant: PlantRecord | None,
         source: GpsSource,
         distance_m: float | None,
-    ) -> "Assignment":
+    ) -> Assignment:
         """``stamp`` assigned to ``plant`` (``None`` for no plant) from ``source``."""
         return cls(
             image=stamp.name,
@@ -207,7 +205,7 @@ class MappingBuild:
     dataset_root: str
     dataset_id: str
     built_at: str
-    dates_requested: Optional[list[str]]
+    dates_requested: list[str] | None
     dates: list[str]
     nn_tolerance_m: dict
     plant_registry: dict
@@ -216,7 +214,7 @@ class MappingBuild:
     capture_digests: dict[str, dict[str, str]]
     unreadable: dict[str, list[str]]
     assignments: dict[str, list[Assignment]]
-    supersedes: Optional[str] = None
+    supersedes: str | None = None
     """The archived digest this record replaced, when a same-name rebuild was told to
     ``supersede`` a record a delivery event still cited; ``None`` otherwise."""
     record_sha256: str = ""
@@ -235,7 +233,7 @@ class MappingBuild:
     @classmethod
     def from_record(
         cls, raw: object, project: Path | str, name: str
-    ) -> "MappingBuild":
+    ) -> MappingBuild:
         """The build the stored record ``raw`` under ``name`` holds, carrying the record's own
         digest (:func:`record_digest`). A document that does not decode as this record raises
         ``ValueError`` naming the project and the name."""
@@ -261,7 +259,7 @@ class MappingBuild:
             for date, assignments in self.assignments.items()
         }
 
-    def unattributed(self, dates: Optional[Iterable[str]] = None) -> int:
+    def unattributed(self, dates: Iterable[str] | None = None) -> int:
         """The number of assignments over ``dates`` (every date this mapping holds, when ``None``)
         for which :func:`assignment_is_attributed` is false.
         """
@@ -359,7 +357,7 @@ _GPS_IFD_TAG = 0x8825
 
 def _exif_dms_to_decimal(
     dms, ref, *, axis: str, negative: str, positive: str, path: Path
-) -> Optional[float]:
+) -> float | None:
     """Degrees, minutes and seconds with their hemisphere reference as signed decimal degrees, or
     ``None`` when ``dms`` is absent. Raises ``ValueError`` naming ``path`` for a value that is not
     three numbers or a reference that is not ``negative`` or ``positive``."""
@@ -451,7 +449,7 @@ def read_image_stamp(path: Path, date_folder: str) -> ImageStamp:
 
 
 def _read_date_stamps(
-    logical: dict[str, "Path | BandGroupRef"], date_folder: str
+    logical: dict[str, Path | BandGroupRef], date_folder: str
 ) -> list[ImageStamp]:
     """A date's stamps for every logical capture ``list_logical_images`` enumerated, by its
     header's ``kind``: EXIF for a photograph, the manifest's own digest and member names for a
@@ -630,7 +628,7 @@ shapefile through :func:`read_plant_shapefile`'s own ``field_map``: an ESRI Shap
 field names at 10 characters, so a source rarely matches these exactly."""
 
 
-def _shapefile_field_value(properties: dict, field_name: Optional[str]) -> str:
+def _shapefile_field_value(properties: dict, field_name: str | None) -> str:
     if field_name is None:
         return ""
     value = properties.get(field_name)
@@ -640,7 +638,7 @@ def _shapefile_field_value(properties: dict, field_name: Optional[str]) -> str:
 def read_plant_shapefile(
     path: Path | str,
     *,
-    field_map: Optional[dict[str, str]] = None,
+    field_map: dict[str, str] | None = None,
 ) -> ShapefileRows:
     """Read a plant-locations shapefile's own features into :data:`PLANT_CSV_COLUMNS`-shaped rows,
     reprojecting every feature's own coordinate to WGS84 with ``always_xy=True`` (GDAL 3's
@@ -692,7 +690,7 @@ def read_plant_shapefile(
         )
 
         available = set(layer.schema["properties"])
-        resolved_fields: dict[str, Optional[str]] = {}
+        resolved_fields: dict[str, str | None] = {}
         for csv_col, shp_field in fields.items():
             if shp_field in available:
                 resolved_fields[csv_col] = shp_field
@@ -755,7 +753,7 @@ def read_plant_shapefile(
     )
 
 
-def _maybe_float(x: Optional[str]) -> Optional[float]:
+def _maybe_float(x: str | None) -> float | None:
     if x is None or x == "":
         return None
     try:
@@ -871,9 +869,9 @@ def registry_csv_entries(record: dict, project: Path | str) -> list[dict]:
 
 
 def registry_entries_or_refusal(
-    build: "MappingBuild",
+    build: MappingBuild,
     project: Path | str,
-) -> tuple[list[dict], Optional[str]]:
+) -> tuple[list[dict], str | None]:
     """The CSV entries ``build.plant_registry`` names, or the refusal naming the registry, the
     mapping and ``project`` when they cannot be trusted: the named registry no longer loads,
     or its own ``digest`` no longer matches ``build.plant_registry["digest"]``.
@@ -897,7 +895,7 @@ def registry_entries_or_refusal(
 
 def verify_registry_csv_bytes(
     registry_entries: list[dict],
-) -> tuple[list[str], Optional[str], dict[str, bytes]]:
+) -> tuple[list[str], str | None, dict[str, bytes]]:
     """Check each of ``registry_entries``'s (:func:`registry_csv_entries`'s own ``{path, sha256,
     n_plants}`` shape) recorded bytes against what is on disk now, reading each present file's
     bytes exactly once.
@@ -908,7 +906,7 @@ def verify_registry_csv_bytes(
     bytes facts only; the caller composes its own remedy.
     """
     missing: list[str] = []
-    rewritten: Optional[str] = None
+    rewritten: str | None = None
     bytes_by_path: dict[str, bytes] = {}
     for entry in registry_entries:
         p = Path(entry["path"])
@@ -1035,7 +1033,7 @@ def attr(row: object, name: str) -> Any:
 
 
 def stems_delivery_reads(
-    rows: "Iterable[Assignment | dict]", bucket: "Bucket"
+    rows: Iterable[Assignment | dict], bucket: Bucket
 ) -> set[str]:
     """Stems of ``rows`` (one date's assignment rows) :func:`assignment_is_attributed` calls
     attributed, whose stem also carries a prediction document in ``bucket``'s record: which
@@ -1055,8 +1053,8 @@ def nearest_plant(
     plants: list[PlantRecord],
     *,
     within_m: float,
-    skip: "set[int] | frozenset[int]" = frozenset(),
-) -> tuple[Optional[int], Optional[float]]:
+    skip: set[int] | frozenset[int] = frozenset(),
+) -> tuple[int | None, float | None]:
     """The index in ``plants`` (those in ``skip`` passed over) of the plant nearest the ``(lat,
     lon)`` ``position``, and its distance in meters; the index is ``None`` when that plant lies
     farther than ``within_m`` and both are ``None`` when no plant is left to measure."""
@@ -1079,7 +1077,7 @@ def nearest_plant(
 _ROW_BREAK_MODIFIED_Z = 3.5
 
 
-def _derive_row_break_threshold(gaps: list[float]) -> Optional[float]:
+def _derive_row_break_threshold(gaps: list[float]) -> float | None:
     """Find the natural break in a date's own consecutive-image gap distances, if one exists.
 
     A walker's path produces small, roughly-uniform steps within a row and one or more much
@@ -1130,7 +1128,7 @@ def _segment_runs(stamps: list[ImageStamp]) -> list[list[ImageStamp]]:
     date's own walking gaps (see ``_derive_row_break_threshold``)."""
     if not stamps:
         return []
-    pairs: list[tuple[ImageStamp, Optional[float]]] = []
+    pairs: list[tuple[ImageStamp, float | None]] = []
     for prev, cur in zip(stamps, stamps[1:]):
         d = None
         if prev.position is not None and cur.position is not None:
@@ -1272,8 +1270,8 @@ def build_mapping(
     dataset_id: str,
     project: Path | str,
     plant_registry: dict,
-    dates: Optional[list[str]] = None,
-    nn_tolerance_m: Optional[float] = None,
+    dates: list[str] | None = None,
+    nn_tolerance_m: float | None = None,
 ) -> MappingBuild:
     """Build one project's named plant mapping: per-date assignments plus the provenance that binds
     the record to the inputs it was built from.
@@ -1472,7 +1470,7 @@ def persist_mapping(
     existing_raw = tcip_store.read(
         plant_mapping_key(project, name), default=None
     )
-    archived_digest: Optional[str] = None
+    archived_digest: str | None = None
     if existing_raw is not None:
         existing_digest = record_digest(existing_raw)
         citing = _citing_delivery_event_ids(project, name, existing_digest)
@@ -1516,8 +1514,8 @@ def build_plant_mapping(
     images_root: Path,
     plant_registry: str,
     *,
-    dates: Optional[list[str]] = None,
-    nn_tolerance_m: Optional[float] = None,
+    dates: list[str] | None = None,
+    nn_tolerance_m: float | None = None,
     supersede: bool = False,
     actor: str | None,
 ) -> MappingBuild:
@@ -1575,7 +1573,7 @@ _receipt_cursor: dict[str, str] = {}
 _receipt_seen: dict[str, dict[str, set[str]]] = {}
 
 
-def _scan_receipts(project: Path | str, *, after: Optional[str]) -> None:
+def _scan_receipts(project: Path | str, *, after: str | None) -> None:
     from tcip_mcp.audit import acts_of
 
     root_key = tcip_store.canonical_path(project)
@@ -1607,7 +1605,7 @@ def _require_receipt(
         )
 
 
-def load_mapping(project: Path | str, name: str) -> Optional[MappingBuild]:
+def load_mapping(project: Path | str, name: str) -> MappingBuild | None:
     """One project's named, persisted plant-mapping build, or ``None`` when nothing is stored
     under that name.
 
@@ -1637,7 +1635,7 @@ def resolved_mapping_key_for_citation(
     project: Path | str,
     name: str,
     record_sha256: str,
-) -> Optional[str]:
+) -> str | None:
     """The name a reader loads to see exactly the record a delivery event's own
     ``plant_mapping.record_sha256`` cites: ``name`` itself when the record currently stored under
     it still hashes to ``record_sha256``, the archive name a superseding rebuild moved it to
@@ -1670,7 +1668,7 @@ def _describe_capture(stamps_by_stem: dict[str, ImageStamp], stem: str) -> str:
 def verify_mapping_inputs(
     build: MappingBuild,
     dataset_root: Path | str,
-    buckets: "Mapping[str, Bucket]",
+    buckets: Mapping[str, Bucket],
     *,
     project: Path | str,
 ) -> dict:
@@ -1822,9 +1820,9 @@ def verify_mapping_inputs(
                 if s.position is None:
                     return {
                         "refusal": (
-                            f"{s.name} (date {date}) recorded a plant position when this mapping was "
-                            "built and now carries no GPS position: rebuild, since its assignment "
-                            "would differ"
+                            f"{s.name} (date {date}) recorded a plant position when this "
+                            "mapping was built and now carries no GPS position: rebuild, "
+                            "since its assignment would differ"
                         )
                     }
                 distances = [
@@ -1840,9 +1838,9 @@ def verify_mapping_inputs(
                 if not any(abs(d - row.distance_m) <= 1e-6 for d in distances):
                     return {
                         "refusal": (
-                            f"{s.name} (date {date}) has moved since this mapping was built: no "
-                            f"plant named {row.plot_name!r} is {row.distance_m} m away now; rebuild, "
-                            "since its assignment would differ"
+                            f"{s.name} (date {date}) has moved since this mapping was built: "
+                            f"no plant named {row.plot_name!r} is {row.distance_m} m away now; "
+                            "rebuild, since its assignment would differ"
                         )
                     }
 
@@ -1882,7 +1880,10 @@ def ungeoreferenced_capture_message(
     """
     prefix = ""
     if unreadable:
-        prefix = f"{', '.join(unreadable)} could not be opened, so their position could not be read; "
+        prefix = (
+            f"{', '.join(unreadable)} could not be opened, so their position could not be "
+            "read; "
+        )
     return (
         f"{prefix}no capture under {walked} on the requested dates carries a position this door "
         "reads (a photograph with no GPS position, or a raster or band-group capture, which never "
@@ -1917,7 +1918,7 @@ class MappingDeliveryError(_StatusError):
 def resolve_delivery_mapping(
     project: Path | str,
     name: str,
-    buckets: "Mapping[str, Bucket]",
+    buckets: Mapping[str, Bucket],
 ) -> tuple[MappingBuild, dict]:
     """Load the named mapping, refuse a delivered bucket's recorded date it does not cover
     (``buckets`` keyed by those dates), resolve the delivered buckets' one dataset root and require
@@ -1933,10 +1934,9 @@ def resolve_delivery_mapping(
     :class:`MappingDeliveryError`, naming the remedy, for every case a delivery must not proceed
     from, a ``StoreError`` reading the mapping store included.
     """
-    from tcip_store import StoreError
-
     from tcip_mcp.buckets import shared_root
     from tcip_mcp.dataset_layout import require_dataset_identity
+    from tcip_store import StoreError
 
     try:
         mapping_build = load_mapping(project, name)
@@ -2035,7 +2035,7 @@ def resolve_delivery_mapping(
 def plant_mapping_disclosure(
     project: Path | str,
     name: str,
-    buckets: "Mapping[str, Bucket]",
+    buckets: Mapping[str, Bucket],
     plants: list[str],
 ) -> dict:
     """The ``plant_mapping`` disclosure a per-plant delivery of the population ``plants`` carries

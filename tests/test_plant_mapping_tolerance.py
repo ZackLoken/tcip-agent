@@ -16,7 +16,6 @@ from tcip_mcp.pipelines.postprocessing.plant_mapping import (
     grid_pitch_m,
     read_plant_csvs,
 )
-
 from tests._image_fixtures import write_geo_image as _write_geo_image
 from tests._mapping_fixtures import write_plant_csv
 

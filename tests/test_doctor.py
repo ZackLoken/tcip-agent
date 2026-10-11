@@ -10,17 +10,17 @@ from PIL import Image
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp import traits
-from tcip_mcp.subject_registry import SubjectRegistry, Subject
+from tcip_mcp.dataset_layout import image_dir
+from tcip_mcp.model_registry import ModelRegistry
+from tcip_mcp.subject_registry import Subject, SubjectRegistry
+from tests import _trait_fixtures as fx
+from tests._cli_fixtures import run_tcip
 from tests._producer_fixtures import (
     image_label_key,
     label_image,
     mark_complete,
     registry_over,
 )
-from tcip_mcp.dataset_layout import image_dir
-from tcip_mcp.model_registry import ModelRegistry
-from tests import _trait_fixtures as fx
-from tests._cli_fixtures import run_tcip
 from tests._web_fixtures import new_project
 
 

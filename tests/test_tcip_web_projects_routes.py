@@ -43,7 +43,7 @@ def _make_project(
         ddir.mkdir(parents=True)
         Image.new("RGB", (8, 8), (0, 0, 0)).save(ddir / "img.png")
     if subjects:
-        from tcip_mcp.subject_registry import SubjectRegistry, Subject
+        from tcip_mcp.subject_registry import Subject, SubjectRegistry
         from tests._producer_fixtures import registry_over
 
         registry_over(
@@ -253,9 +253,8 @@ def test_list_reports_record_fields_across_four_project_states(
     record's fields or the ``record_problem`` naming why they are absent. The recordless one gets
     no database published under it by the listing, the store's own guarantee at this surface."""
     import tcip_store
-    from tcip_store.file_backend import database_file
-
     from tcip_mcp.project_record import project_record_key
+    from tcip_store.file_backend import database_file
     from tests._record_damage_fixtures import damage_record
 
     recorded = _make_project(workspace_dir, "currant_bud_recorded").root

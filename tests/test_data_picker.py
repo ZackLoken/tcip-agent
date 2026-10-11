@@ -17,7 +17,6 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
 import tcip_store as ts
-
 from tests._chain_fixtures import training_config
 from tests._verified_checkpoint_fixtures import opened_run
 from tests.test_selection_binding import (
@@ -372,7 +371,6 @@ def test_list_split_choices_offers_a_frozen_manifest(tmp_path: Path):
     offered the identical checked-then-compatibility way as any other candidate."""
     from tcip_mcp.tools.data_tools import freeze_selection
     from tcip_mcp.tools.training_tools import list_split_choices
-
     from tests.test_freeze_selection import _real_drawn_experiment
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
@@ -397,7 +395,6 @@ def test_list_split_choices_offers_two_frozen_manifests_under_one_splits_directo
     under the dataset's one splits/ directory; list_split_choices offers both."""
     from tcip_mcp.tools.data_tools import freeze_selection
     from tcip_mcp.tools.training_tools import list_split_choices
-
     from tests.test_freeze_selection import _real_drawn_experiment
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")

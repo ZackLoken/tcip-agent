@@ -20,13 +20,13 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, Optional, Union
+from typing import TYPE_CHECKING, Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
-from tcip_mcp.pipelines.postprocessing import phenology, plant_mapping
 
+from tcip_mcp.pipelines.postprocessing import phenology, plant_mapping
 from tcip_web.paths import resolved_path, within
 from tcip_web.state import store
 
@@ -45,9 +45,8 @@ def _evidence_roots(root: Path) -> list[Path]:
     """The open project's own tree plus every dataset root registered to it; a registry that will
     not decode answers 400.
     """
-    from tcip_store import DecodeError
-
     from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets
+    from tcip_store import DecodeError
 
     try:
         entries = read_datasets(root)
@@ -82,8 +81,8 @@ class BuildMappingPayload(BaseModel):
     name: str
     images_root: str = Field(min_length=1)
     plant_registry: str
-    dates: Optional[list[str]] = None
-    nn_tolerance_m: Optional[float] = None
+    dates: list[str] | None = None
+    nn_tolerance_m: float | None = None
     supersede: bool = False
     user: str
 
@@ -190,7 +189,7 @@ class PhenologyPayload(PhenologyInputs):
     show_unvalidated: bool = False
 
 
-def _measure(root: Path, payload: PhenologyInputs) -> "PhenologyMeasurement":
+def _measure(root: Path, payload: PhenologyInputs) -> PhenologyMeasurement:
     """:func:`~tcip_mcp.pipelines.postprocessing.phenology.measure_phenology` over the buckets this
     route confines to the project ``root``; each of its refusals answers 400."""
     from tcip_mcp.operationalization import OperationalizationRefusedError
@@ -295,7 +294,7 @@ class AcknowledgmentPayload(BaseModel):
 
 def _recorded_acknowledgment(
     root: Path, payload, person: str, request: Request
-) -> Optional[str]:
+) -> str | None:
     """Record the acknowledgment ``payload`` carries (:func:`~tcip_mcp.delivery.
     record_acknowledgment`) in the project ``root`` by ``person``, and return its id; ``None``
     when it carries none. A
@@ -340,11 +339,11 @@ class ExportCsvPayload(PhenologyInputs):
     # Which server computation to export: a choice of producer, never a claim about what the rows
     # mean or whether they are valid. Picking the "wrong" one yields a correctly-gated CSV.
     payload: Literal["curves", "milestones"]
-    filename: Optional[str] = None
+    filename: str | None = None
     user: str
     # The breeder's own act of shipping this delivery unvalidated, or None for an ordinary
     # validated export.
-    acknowledgment: Optional[AcknowledgmentPayload] = None
+    acknowledgment: AcknowledgmentPayload | None = None
 
 
 @router.post("/export_csv")
@@ -436,12 +435,12 @@ class ExportCountCsvPayload(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    delivery: Union[PerImageCountDelivery, OrthomosaicPlantCountsDelivery] = (
-        Field(discriminator="kind")
+    delivery: PerImageCountDelivery | OrthomosaicPlantCountsDelivery = Field(
+        discriminator="kind"
     )
     filename: str = Field(min_length=1)
     user: str
-    acknowledgment: Optional[AcknowledgmentPayload] = None
+    acknowledgment: AcknowledgmentPayload | None = None
 
 
 @router.post("/export_count_csv")
@@ -558,6 +557,7 @@ def list_delivery_events() -> dict:
     carries no ``plant_mapping_resolved_key`` at all.
     """
     from pydantic import ValidationError
+
     from tcip_mcp.delivery import read_delivery_events
     from tcip_mcp.pipelines.delivery_events_schema import (
         PlantMappingDisclosure,
@@ -565,7 +565,6 @@ def list_delivery_events() -> dict:
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         resolved_mapping_key_for_citation,
     )
-
     from tcip_store import StoreError
 
     root = store.held().root
@@ -621,6 +620,7 @@ def list_traits() -> dict:
     ``unreadable`` names each trait whose stored record its schema refuses, and why.
     """
     from pydantic import ValidationError
+
     from tcip_mcp.traits import crops_definitions, read_trait, trait_names
 
     root = store.held().root
@@ -684,7 +684,7 @@ def confirm_trait_revision(payload: ConfirmRevisionPayload) -> dict:
 
     person = actor(payload.user)
     root = store.held().root
-    audit_warning: Optional[str] = None
+    audit_warning: str | None = None
     try:
         revision = confirm_revision(
             root,
@@ -727,7 +727,7 @@ class RegisteredModels(BaseModel):
 
 
 @router.get("/models/registered")
-def registered_models(tag: Optional[str] = None) -> RegisteredModels:
+def registered_models(tag: str | None = None) -> RegisteredModels:
     """The open project's registered models under ``tag``
     (:func:`~tcip_mcp.tools.model_tools.registered_listing`), each as the browser lists it."""
     from tcip_mcp.tools.model_tools import registered_listing

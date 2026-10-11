@@ -44,7 +44,6 @@ def _distinctive(
 
 def _write_labels(image: Path, size_wh: tuple[int, int]) -> None:
     from tcip_annotation.state import Annotation, BBox
-
     from tests._producer_fixtures import label_image
 
     w, h = size_wh

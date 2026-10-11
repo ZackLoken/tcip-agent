@@ -3,13 +3,12 @@ and the output shapes of the tools that push."""
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tcip_mcp.web_client import VALID_PANELS
 
 
@@ -575,7 +574,6 @@ class TestInferenceToolOutputSchema:
         holding its own detections, an image with none included, and its record names each."""
         pytest.importorskip("torch")
         from tcip_annotation import json_io
-
         from tests._chain_fixtures import published
 
         def _boxes(n: int) -> list[list[float]]:
@@ -643,10 +641,8 @@ def test_post_panel_event_suppressed_under_pytest(bound, monkeypatch):
 
 
 def test_post_panel_event_opt_in_bypasses_suppression(bound, monkeypatch):
-    from tcip_mcp.web_client import post_panel_event
-
     import tcip_store as ts
-    from tcip_mcp.web_client import backend_port_key
+    from tcip_mcp.web_client import backend_port_key, post_panel_event
 
     monkeypatch.setenv("TCIP_ALLOW_PANEL_EVENTS", "1")
     ts.replace(

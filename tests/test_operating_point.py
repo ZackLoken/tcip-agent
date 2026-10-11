@@ -9,14 +9,17 @@ torch = pytest.importorskip(
     "torch"
 )  # evaluation.py imports torch at module load
 
-from tests._dense_op_fixtures import _box, dense_records  # noqa: E402
-from tests._dense_op_fixtures import ann as _ann  # noqa: E402
-from tests._dense_op_fixtures import toy_records as _records  # noqa: E402
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
+    derive_operating_point_curve,
     gt_class_avg_size,
     pick_count_unbiased,
     pick_f1_max,
-    derive_operating_point_curve,
+)
+from tests._dense_op_fixtures import (  # noqa: E402
+    _box,
+    ann as _ann,  # noqa: E402
+    dense_records,
+    toy_records as _records,  # noqa: E402
 )
 
 

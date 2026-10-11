@@ -130,9 +130,8 @@ def test_an_undecodable_bucket_record_refuses_by_name_rather_than_reading_as_unc
     pytest.importorskip("torch")
     import sqlite3
 
-    from tcip_store.file_backend import database_file
-
     from tcip_mcp.buckets import NotABucketError, read_bucket
+    from tcip_store.file_backend import database_file
     from tests._chain_fixtures import predicted, published
 
     image = tmp_path / "ds" / "images" / "2026-05-02" / "s1.png"

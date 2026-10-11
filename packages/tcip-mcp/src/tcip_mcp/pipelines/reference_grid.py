@@ -9,7 +9,6 @@ import math
 from dataclasses import dataclass
 
 from tcip_annotation.grid import column_label
-
 from tcip_mcp.pipelines.display_bounds import VIZ_ARTIFACT_MAX_EDGE, within_cap
 
 POINTING_LEGIBLE_EDGE = 46

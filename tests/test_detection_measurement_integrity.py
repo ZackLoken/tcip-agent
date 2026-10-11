@@ -7,32 +7,32 @@ tests here are pure-Python or monkeypatched (no GPU) so they stay xdist-safe.
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-from tests._producer_fixtures import checkpoint_admission
-
 from pathlib import Path
 
 import pytest
+
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tests._producer_fixtures import checkpoint_admission
 
 torch = pytest.importorskip("torch")
 
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tcip_mcp.pipelines.model_build import CONFIG_KEY  # noqa: E402
+from tcip_mcp.pipelines.schemas import ScoreWeights  # noqa: E402
+from tcip_mcp.pipelines.training.evaluation import evaluate  # noqa: E402
 from tests._predictor_fixtures import StubPredictor, install  # noqa: E402
 from tests._producer_fixtures import label_image, seed_bud_images  # noqa: E402
+from tests._training_values import (
+    IOU_THRESHOLD,
+    SCORE_WEIGHTS,
+    VALIDATION_CONF,
+)  # noqa: E402
 from tests._verified_checkpoint_fixtures import (  # noqa: E402
     SAMPLE_DETECTOR_PASS,
     SCOPED_DATA,
     project_checkpoint,
     verified_checkpoint,
 )
-from tcip_mcp.pipelines.training.evaluation import evaluate  # noqa: E402
-from tcip_mcp.pipelines.schemas import ScoreWeights  # noqa: E402
-from tests._training_values import (
-    IOU_THRESHOLD,
-    SCORE_WEIGHTS,
-    VALIDATION_CONF,
-)  # noqa: E402
 
 WEIGHTS = ScoreWeights.model_validate(SCORE_WEIGHTS)
 _DIMS = {"in_chans": 3, "num_classes": 1}
@@ -301,7 +301,6 @@ def _detections_as_ground_truth(
     it returns detections to write back.
     """
     from tcip_annotation.state import Annotation, BBox
-
     from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
     from tcip_mcp.pipelines.model_build import (
         STATE_DICT_KEY,
@@ -455,9 +454,9 @@ def test_the_three_evaluation_loaders_over_one_truth_and_one_predictor_agree(
     are compared with each other. The predictor reads one band of three-band sources, so a door
     sizing its loader off the sources would disagree."""
     from PIL import Image
-    from tcip_annotation.state import Annotation, BBox
 
     import tcip_mcp.pipelines.data.datasets as datasets
+    from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.schemas import run_tiling
     from tcip_mcp.tools.data_tools import draw_splits
     from tcip_mcp.tools.training_tools import evaluate_model
@@ -798,7 +797,6 @@ def test_the_evaluation_derives_an_unrecorded_tile_geometry_from_its_ground_trut
     scale, each value under the derivation that produced it: a stated edge keeps its own source
     beside the overlap derived for it."""
     from tcip_annotation.state import Annotation, BBox
-
     from tcip_mcp.pipelines.derivations import (
         TILE_EDGE_DERIVATION,
         TILE_OVERLAP_DERIVATION,
@@ -878,8 +876,8 @@ def test_launch_training_persists_effective_tile_geometry(
     monkeypatch.chdir(tmp_path)
     import os
 
-    from tcip_mcp.experiments import run_resolution
     import tcip_mcp.pipelines.training.generic_trainer as gt
+    from tcip_mcp.experiments import run_resolution
     from tcip_mcp.pipelines.slicing import overlap_ratio
     from tcip_mcp.tools import training_tools
     from tests._chain_fixtures import BLOB_BUILDER

@@ -281,10 +281,9 @@ def test_worst_predictions_does_not_count_a_point_as_a_detection(
 
 
 def test_phenology_detection_counts_exclude_a_point(tmp_path: Path) -> None:
+    from tcip_mcp.dataset_layout import prediction_key
     from tcip_mcp.pipelines.postprocessing.phenology import count_by_class
     from tcip_mcp.traits import PositiveState
-
-    from tcip_mcp.dataset_layout import prediction_key
 
     path = prediction_key(tmp_path, "m/2026-01-01", "IMG_0001")
     json_io.write_label_document(

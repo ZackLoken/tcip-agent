@@ -14,7 +14,6 @@ import pytest
 import tcip_store as ts
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
-
 from tcip_mcp.dataset_layout import LABEL_DOCUMENTS, label_key
 from tcip_mcp.tools.data_tools import scan_dataset
 from tests._producer_fixtures import write_image

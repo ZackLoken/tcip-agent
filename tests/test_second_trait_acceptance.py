@@ -40,7 +40,7 @@ def _seed_currant_bloom_trait(tmp_path: Path) -> None:
             milestone_fractions=(0.05, 0.50, 0.95),
             milestone_on="positive_fraction",
             # No majority alias: crops.yml names no single "most blooms open" date for currant,
-            # unlike bud_opening's bud_majority_date. Left empty rather than copied from bud_opening.
+            # unlike the first trait's majority date; left empty rather than copied from it.
             phenology_prefix="bloom",
             count_bias_tolerance_frac=0.01,
             notes="Test-only, provisional: proves the delivery mechanism generalizes to a second "

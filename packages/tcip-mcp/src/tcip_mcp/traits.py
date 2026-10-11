@@ -13,9 +13,8 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 import tcip_store as ts
-from tcip_store import Key
-
 from tcip_mcp.audit import now_iso
+from tcip_store import Key
 
 if TYPE_CHECKING:
     from tcip_mcp.subject_registry import SubjectRegistry

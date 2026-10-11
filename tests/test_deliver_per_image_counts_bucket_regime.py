@@ -11,8 +11,8 @@ import sys
 from pathlib import Path
 
 import pytest
-from tcip_store.file_backend import is_bookkeeping
 
+from tcip_store.file_backend import is_bookkeeping
 from tests import _trait_fixtures as fx, csv_rows
 
 pytest.importorskip("torch")

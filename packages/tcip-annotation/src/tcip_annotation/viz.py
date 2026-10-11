@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
 from PIL import Image, ImageDraw, ImageFont
+
 from tcip_annotation.utils import auto_orient_image
 
 if TYPE_CHECKING:
@@ -44,7 +45,7 @@ COLOR_PALETTE: list[tuple[int, int, int]] = [
 ]
 
 
-def _rgb_frame(image: "Image.Image | np.ndarray") -> Image.Image:
+def _rgb_frame(image: Image.Image | np.ndarray) -> Image.Image:
     """The caller's display pixels as an RGB frame this module can draw on.
 
     A ``uint8 [H, W, 3]`` array or any PIL image; the returned frame is always a new one. An array
@@ -104,15 +105,15 @@ def _try_font(size: int = 12) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     """Try to load a TTF font, fall back to default bitmap font."""
     try:
         return ImageFont.truetype("arial.ttf", size)
-    except (OSError, IOError):
+    except OSError:
         try:
             return ImageFont.truetype("DejaVuSans.ttf", size)
-        except (OSError, IOError):
+        except OSError:
             return ImageFont.load_default()
 
 
 def render_detections(
-    image: "Image.Image | np.ndarray",
+    image: Image.Image | np.ndarray,
     boxes: list[dict],
     *,
     native_size: tuple[int, int],
@@ -158,7 +159,7 @@ def render_detections(
 
 
 def render_segmentations(
-    image: "Image.Image | np.ndarray",
+    image: Image.Image | np.ndarray,
     polygons: list[dict],
     *,
     native_size: tuple[int, int],
@@ -206,7 +207,7 @@ def render_segmentations(
 
 
 def render_comparison(
-    image: "Image.Image | np.ndarray",
+    image: Image.Image | np.ndarray,
     gt_boxes: list[dict],
     pred_boxes: list[dict],
     *,
@@ -344,7 +345,7 @@ def render_grid(
 
 
 def render_candidates(
-    image: "Image.Image | np.ndarray",
+    image: Image.Image | np.ndarray,
     candidates: list[dict],
     *,
     native_size: tuple[int, int],
@@ -421,7 +422,7 @@ def render_candidates(
 
 
 def render_grid_overlay(
-    image: "Image.Image | np.ndarray",
+    image: Image.Image | np.ndarray,
     cells: list,
     *,
     native_size: tuple[int, int],
@@ -592,7 +593,7 @@ def _draw_path(
 
 
 def render_canvas_state(
-    image: "Image.Image | np.ndarray",
+    image: Image.Image | np.ndarray,
     shapes: list[dict],
     *,
     region: tuple[int, int, int, int],

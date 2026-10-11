@@ -3,6 +3,7 @@ guard, and dataset channel metadata. Multi-channel *readers* are separate; here 
 carries channel counts and validates them."""
 
 import pytest
+
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._chain_fixtures import CLASSIFIER_SOURCE, training_config
 from tests._producer_fixtures import dataset_over  # noqa: E402
@@ -363,7 +364,6 @@ def test_build_dataset_sets_expected_channels(tmp_path):
     from PIL import Image
 
     from tcip_annotation.state import Annotation, BBox
-
     from tests._producer_fixtures import label_image
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
@@ -495,11 +495,9 @@ def test_a_source_whose_band_count_cannot_be_read_refuses_rather_than_defaulting
     """A run's input channels are derived from its own sources, so a probe that fails refuses by
     name: a confidently-wrong count sizes the model wrong for every image the run reads."""
     import pytest
-
     from PIL import Image
 
     from tcip_annotation.state import Annotation, BBox
-
     from tests._producer_fixtures import label_image
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET

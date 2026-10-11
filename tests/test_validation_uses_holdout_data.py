@@ -8,7 +8,6 @@ that scored the training data would report visibly different numbers and pick a 
 
 from __future__ import annotations
 
-
 import pytest
 
 torch = pytest.importorskip("torch")

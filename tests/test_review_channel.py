@@ -774,8 +774,8 @@ def test_a_two_ring_proposal_round_trips_through_propose_and_accept(
     from tcip_mcp.pipelines import proposal
     from tcip_mcp.tools.annotation_tools import read_annotations
     from tcip_mcp.tools.proposal_tools import (
-        stage_proposals,
         propose_annotations,
+        stage_proposals,
     )
 
     monkeypatch.setitem(

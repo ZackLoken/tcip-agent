@@ -35,8 +35,8 @@ def test_main_publishes_the_port_and_configures_the_backend_on_one_workspace(
     monkeypatch,
 ):
     """The port the backend binds is the port a tool process resolves under the same workspace."""
-    import tcip_web.__main__ as entry
     import tcip_store
+    import tcip_web.__main__ as entry
     from tcip_mcp.web_client import resolve_web_port
 
     elsewhere = tmp_path_factory.mktemp("elsewhere")

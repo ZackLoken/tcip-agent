@@ -22,7 +22,6 @@ def _labels_term(
     :func:`~tcip_mcp.pipelines.data.selection.ground_truth_digest`. ``None`` when the dataset
     holds no label document."""
     import tcip_store
-
     from tcip_mcp.dataset_layout import LABEL_DOCUMENTS
     from tcip_mcp.pipelines.data.selection import ground_truth_digest
 
@@ -42,9 +41,8 @@ def _images_term(images_root: Path) -> str | None:
     ``.bandgroup`` manifest digests as its own bytes. ``None`` when there are no images."""
     if not images_root.is_dir():
         return None
-    from tcip_store import read_blob_versioned
-
     from tcip_mcp.pipelines.image_utils import IMAGE_EXTS
+    from tcip_store import read_blob_versioned
 
     files = sorted(
         p
@@ -66,7 +64,6 @@ def _registry_term(dataset_root: Path) -> str | None:
     """Digest over the canonical registry serialization (``registry_to_dict``) in declared order;
     ``None`` when the dataset has no registry, and a registry ``read_registry`` refuses raises."""
     from tcip_annotation.json_io import canonical_digest
-
     from tcip_mcp.subject_registry import read_registry, registry_to_dict
 
     try:
@@ -85,7 +82,6 @@ def dataset_fingerprint(
     samples, enters at the version its admission read rather than being read again. ``None`` for
     a dataset with no images or no labels."""
     from tcip_annotation.json_io import canonical_digest
-
     from tcip_mcp.dataset_layout import image_root
 
     root = Path(dataset_root)

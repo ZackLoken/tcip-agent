@@ -8,7 +8,6 @@ selection objective, so a record carrying the training loss under that key is vi
 
 from __future__ import annotations
 
-
 import pytest
 
 torch = pytest.importorskip("torch")

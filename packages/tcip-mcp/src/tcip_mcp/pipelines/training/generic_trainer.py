@@ -24,13 +24,10 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from tcip_store import scalar_number, stored_numbers
-
 from tcip_mcp.pipelines.data.datasets import (
     indexed_sample_keys,
     instance_targets,
 )
-from tcip_mcp.pipelines.model_contract import DETECTION_TASKS, TCIPModel
 from tcip_mcp.pipelines.model_build import (
     CONFIG_KEY,
     METRICS_KEY,
@@ -38,6 +35,7 @@ from tcip_mcp.pipelines.model_build import (
     STATE_DICT_KEY,
     build_from_model_source,
 )
+from tcip_mcp.pipelines.model_contract import DETECTION_TASKS, TCIPModel
 from tcip_mcp.pipelines.schemas import (
     CosineSchedule,
     DataSpec,
@@ -65,6 +63,7 @@ from tcip_mcp.pipelines.training.optimizer_factory import (
     restore_training_state,
 )
 from tcip_mcp.pipelines.training.run_registry import TrainRun
+from tcip_store import scalar_number, stored_numbers
 
 if TYPE_CHECKING:
     from tcip_mcp.traits import TraitEntry
@@ -443,7 +442,7 @@ def _save_checkpoint(
     stamp: dict,
     stage_idx: int,
     stage_epoch: int,
-    run: "TrainRun",
+    run: TrainRun,
     best: dict | None,
     stage_best: dict | None,
     warmup_groups: list[dict] | None,

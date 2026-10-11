@@ -24,7 +24,6 @@ from tcip_mcp.tools.phenology_tools import (
     build_plant_mapping,
     deliver_phenology_milestones,
 )
-
 from tests._image_fixtures import write_geo_image as _write_geo_image
 from tests._mapping_fixtures import (
     register_plant_registry_for,

@@ -17,8 +17,8 @@ import tcip_store
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox, Polygon
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
-from tcip_mcp.subject_registry import SubjectRegistry, Subject
 from tcip_mcp.pipelines.data.label_queries import registry_scope
+from tcip_mcp.subject_registry import Subject, SubjectRegistry
 from tests._producer_fixtures import (  # noqa: E402
     dataset_over,
     image_label_key,
@@ -399,9 +399,8 @@ def test_geometryless_only_image_is_refused_by_the_loader_that_reads_no_target_f
 # (i) eval accumulates every per-image record into one score, so a subject must carry the same
 # category id across images: records_from_annotation must honor a passed global name_id.
 def test_records_from_annotation_honors_a_global_name_id():
+    from tcip_annotation.state import Annotation as Ann, BBox as B
     from tcip_mcp.pipelines.training.evaluation import records_from_annotation
-    from tcip_annotation.state import Annotation as Ann
-    from tcip_annotation.state import BBox as B
 
     name_id = {"bush": 1, "bud": 2}  # one global map
     # An image whose only subject is bud: a per-image-local map would give bud id 1; the global

@@ -87,7 +87,7 @@ def test_the_tree_and_the_project_summary_agree_on_dates_over_a_hidden_directory
     """The tree route and the project-picker summary both derive dates from the layout's one
     grammar, so a hidden directory under ``images/`` is invisible to both alike."""
     from tcip_mcp.project_record import record_fields
-    from tcip_mcp.subject_registry import SubjectRegistry, Subject
+    from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tcip_web.routes.projects import _summarize
     from tests._producer_fixtures import registry_over
 

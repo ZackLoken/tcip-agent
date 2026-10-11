@@ -21,11 +21,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional, cast
-
-from tcip_store import Key
+from typing import TYPE_CHECKING, Any, cast
 
 from tcip_mcp.dataset_layout import prediction_key
+from tcip_store import Key
 
 if TYPE_CHECKING:
     from tcip_mcp.buckets import Bucket
@@ -176,7 +175,7 @@ class Crossing:
 
 def crossing_date(
     series: list[tuple[str, float]], target: float
-) -> Optional[Crossing]:
+) -> Crossing | None:
     """Earliest date the fraction curve reaches ``>= target``, with its evidentiary bound.
 
     Linear interpolation between neighboring observed dates when the crossing falls between two
@@ -206,7 +205,7 @@ def crossing_date(
     return Crossing(iso(points[-1][0]), "right_censored")
 
 
-def positive_onset_date(series: list[tuple[str, float]]) -> Optional[str]:
+def positive_onset_date(series: list[tuple[str, float]]) -> str | None:
     """First date any positive-state observation appears (fraction > 0), chronologically.
     ``None`` if never."""
     for d, r in _real_points(series):

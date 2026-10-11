@@ -105,7 +105,6 @@ def test_ranking_a_review_queue_leaves_no_line(
     """Ranking candidates for review reads a checkpoint and a manifest and writes nothing, so a
     successful ranking through a registered run leaves the project's log as it found it."""
     from tcip_mcp.tools.feedback_tools import prioritize_review_queue
-
     from tests.test_feedback_tools import _bound_checkpoint, _stub_scorer
     from tests.test_selection_ground_truth_digests import (
         DATES,

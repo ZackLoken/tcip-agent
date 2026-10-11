@@ -121,8 +121,8 @@ def test_a_detector_over_that_backbone_builds_from_its_datasets_own_band_statist
     states the width builds on torchvision's own three-band default."""
     import numpy as np
     import tifffile
-    from tcip_annotation.state import Annotation, BBox
 
+    from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.components.detectors import build_detector
     from tcip_mcp.pipelines.derivations import band_normalization_stats
     from tests._producer_fixtures import label_image, samples_over

@@ -49,10 +49,9 @@ def _attributed_predictor() -> StubPredictor:
 def _published(tmp_path: Path, checkpoint: str, images_dir: Path):
     """``run_inference`` over ``images_dir`` into the bucket ``out/2026-01-01``; the bucket and
     the records of its one document."""
+    import tcip_store
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.tools.inference_tools import run_inference
-
-    import tcip_store
 
     result = run_inference(
         tmp_path,

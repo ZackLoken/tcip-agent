@@ -7,12 +7,11 @@ through the platform's own creation door under this test's workspace (``tmp_path
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 import os
 from pathlib import Path
 
 import tcip_store as ts
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests import REFUSED_NAMES
 from tests._audit_fixtures import audit_rows
 from tests._web_fixtures import named_project
@@ -158,6 +157,7 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
     at their new location, and no run record names the directory it left."""
     import json
 
+    from tcip_mcp.buckets import read_bucket
     from tcip_mcp.experiments import (
         RUN_FILE,
         SWEEP_FILE,
@@ -169,9 +169,8 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
         write_record,
     )
     from tcip_mcp.model_registry import ModelRegistry
-    from tcip_mcp.buckets import read_bucket
-    from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.pipelines.data.split_construction import partition_samples
+    from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.pipelines.training.subprocess_worker import (
         prepare_run_context,
     )

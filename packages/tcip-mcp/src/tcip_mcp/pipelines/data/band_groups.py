@@ -239,10 +239,10 @@ def detect_embedded_metadata_groups(
                             "group_id": gid,
                             "band": None,
                             "files": [str(p) for p in sorted(paths)],
-                            "reason": f"files sharing group id {gid!r} disagree on {disagreeing_tag!r} "
-                            "beyond its tolerance, a shared group id alone is not proof of "
-                            "one physical capture, refusing rather than splicing unrelated "
-                            "captures together",
+                            "reason": f"files sharing group id {gid!r} disagree on "
+                            f"{disagreeing_tag!r} beyond its tolerance, a shared group id "
+                            "alone is not proof of one physical capture, refusing rather "
+                            "than splicing unrelated captures together",
                         }
                     )
                     continue
@@ -252,10 +252,10 @@ def detect_embedded_metadata_groups(
                             "group_id": gid,
                             "band": None,
                             "files": [str(p) for p in sorted(paths)],
-                            "reason": f"files sharing group id {gid!r} carry none of this strategy's "
-                            "independent identity signals (every declared check's tag is "
-                            "missing from at least one file), a shared group id alone is not "
-                            "proof of one physical capture, and there is no secondary signal "
+                            "reason": f"files sharing group id {gid!r} carry none of this "
+                            "strategy's independent identity signals (every declared check's "
+                            "tag is missing from at least one file), a shared group id alone is "
+                            "not proof of one physical capture, and there is no secondary signal "
                             "left to confirm it, so refusing rather than guessing",
                         }
                     )
@@ -273,7 +273,8 @@ def detect_embedded_metadata_groups(
                             "group_id": gid,
                             "band": band_name,
                             "files": [str(bands[band_name]), str(p)],
-                            "reason": f"two files both claim band {band_name!r} for capture {gid!r}",
+                            "reason": f"two files both claim band {band_name!r} for capture "
+                            f"{gid!r}",
                         }
                     )
                     duplicate = True

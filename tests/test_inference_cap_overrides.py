@@ -237,7 +237,6 @@ def test_the_dry_run_reports_the_stated_values_and_refuses_an_unstated_conf(
     )
 
     import tcip_store
-
     from tcip_mcp.dataset_layout import bucket_key
 
     for result in (over_images, over_raster):

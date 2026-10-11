@@ -4,8 +4,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -34,10 +32,10 @@ class DatasetTree(BaseModel):
     buckets_by_date: dict[str, list[str]]
     # The first date whose labels would not read, naming the documents; every other document's
     # subjects are still listed.
-    label_problem: Optional[str] = None
+    label_problem: str | None = None
 
 
-def _label_problem(capture: str, unreadable: list[str]) -> Optional[str]:
+def _label_problem(capture: str, unreadable: list[str]) -> str | None:
     """The line naming ``capture``'s label documents that will not read, if any."""
     if not unreadable:
         return None
@@ -46,11 +44,11 @@ def _label_problem(capture: str, unreadable: list[str]) -> Optional[str]:
 
 def _subjects_by_date(
     root, dates: list[str]
-) -> tuple[dict[str, list[str]], Optional[str]]:
+) -> tuple[dict[str, list[str]], str | None]:
     """:func:`~tcip_mcp.dataset_layout.capture_subjects` per date, and the first date's
     :func:`_label_problem`."""
     by_date: dict[str, list[str]] = {}
-    problem: Optional[str] = None
+    problem: str | None = None
     for d in dates:
         by_date[d], unreadable = capture_subjects(root, d)
         problem = problem or _label_problem(d, unreadable)
@@ -77,11 +75,11 @@ def get_dataset_tree(dataset_root: str) -> DatasetTree:
 
 class SelectionRequest(BaseModel):
     dataset_root: str
-    subject: Optional[str] = None
+    subject: str | None = None
     # The capture: a date folder, a literal bucket or ``UNDATED_BUCKET``.
     date: str
     # The name of the bucket to review, published under dataset_root.
-    bucket: Optional[str] = None
+    bucket: str | None = None
 
 
 @router.post("/select")

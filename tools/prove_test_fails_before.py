@@ -268,9 +268,9 @@ def _resolve_baseline(
             None,
             f"merge-base against {integration}",
             (
-                f"the working tree carries no uncommitted source change and HEAD is already contained "
-                f"in {integration}, so no tree here precedes a change. Name the pre-change revision "
-                f"with --baseline."
+                "the working tree carries no uncommitted source change and HEAD is already "
+                f"contained in {integration}, so no tree here precedes a change. Name the "
+                "pre-change revision with --baseline."
             ),
         )
     return base, f"merge-base of HEAD and {integration}", ""
@@ -740,7 +740,8 @@ def _classify(
             if baseline_precedes
             else (
                 " No source file differs between the baseline and the tree this test comes from, "
-                "so this is a fact about the baseline rather than proof that a change here is guarded."
+                "so this is a fact about the baseline rather than proof that a change here is "
+                "guarded."
             )
         )
         return GUARDS, (
@@ -953,11 +954,13 @@ def main() -> int:
                 record.update(
                     verdict=INDETERMINATE,
                     why=(
-                        f"{timed_out_nodeid} was running when the process ended without reporting an "
-                        f"outcome, under --per-test-timeout ({args.per_test_timeout}s). The marker "
-                        "names which test did not finish, not why: a hang killed outright (the thread "
-                        "method pytest-timeout uses where SIGALRM is unavailable) and a crash read the "
-                        "same here, and either is a different fact from a slow pass or a real failure."
+                        f"{timed_out_nodeid} was running when the process ended without "
+                        f"reporting an outcome, under --per-test-timeout "
+                        f"({args.per_test_timeout}s). The marker names which test did not "
+                        "finish, not why: a hang killed outright (the thread method "
+                        "pytest-timeout uses where SIGALRM is unavailable) and a crash read "
+                        "the same here, and either is a different fact from a slow pass or a "
+                        "real failure."
                     ),
                 )
                 return _report(record, args.json_out)

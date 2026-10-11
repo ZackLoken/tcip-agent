@@ -98,7 +98,7 @@ def run_test_evaluation(
 
 def run_full_frame_evaluation(
     checkpoint,
-    admitted: "Admission",
+    admitted: Admission,
     *,
     stated: Stated,
     iou_threshold: float = 0.5,

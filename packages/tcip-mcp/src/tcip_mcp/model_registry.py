@@ -19,8 +19,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import tcip_store
-from tcip_store import Key, finite_number
-
 from tcip_mcp.audit import now_iso
 from tcip_mcp.registry_paths import (
     RegistryPathEmptyError,
@@ -31,6 +29,7 @@ from tcip_mcp.registry_paths import (
     resolved_registry_path,
     runtime_paths,
 )
+from tcip_store import Key, finite_number
 
 if TYPE_CHECKING:
     from tcip_mcp.experiments import RunObservation
@@ -114,7 +113,7 @@ def registry_checkpoint_disclosures(root: Path) -> dict[str, list]:
     }
 
 
-def run_entry(observation: "RunObservation") -> dict | None:
+def run_entry(observation: RunObservation) -> dict | None:
     """The registry entry a completed training run's final status stands for, named by the run's
     id and carrying it as ``experiment_id``, or ``None`` for a run that has not completed."""
     checkpoint = observation.checkpoint
@@ -192,7 +191,7 @@ def _sha256_of_bytes(data: bytes) -> str:
 
 def _unregistered_checkpoint_error(
     checkpoint_path: Path, digest: str, root: str
-) -> "UnregisteredCheckpointError":
+) -> UnregisteredCheckpointError:
     return UnregisteredCheckpointError(
         f"{checkpoint_path} (sha256 {digest}) is not named by any completed run's final status or "
         f"entry in the registry at {root!r}: a completed run registers its own final weights, and "

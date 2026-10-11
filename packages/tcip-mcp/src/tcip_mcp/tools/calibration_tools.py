@@ -18,7 +18,6 @@ if TYPE_CHECKING:
 def _refusals() -> tuple[type[Exception], ...]:
     """What an assessment door answers ``{"error": ...}`` for rather than raising."""
     from tcip_annotation.json_io import UnreadableLabelDocumentError
-
     from tcip_mcp.model_registry import UnregisteredCheckpointError
     from tcip_mcp.traits import TraitUnknownError
 

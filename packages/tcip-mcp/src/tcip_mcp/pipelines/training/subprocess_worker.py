@@ -26,11 +26,11 @@ def _parse_args() -> argparse.Namespace:
 
 
 def prepare_run_context(
-    observation: "RunObservation",
+    observation: RunObservation,
     *,
     origin: str = "training",
     epoch_hook: Any = None,
-) -> "TrainContext":
+) -> TrainContext:
     """Build the ``TrainContext`` of the observed run from what its launch record resolved,
     resolving nothing again: its config with the resolved data section, its objective, its
     within-image split if its partition records one, and its datasets and loaders
@@ -92,7 +92,7 @@ def run_directory(
     *,
     origin: str = "training",
     epoch_hook: Any = None,
-) -> "TrainRun":
+) -> TrainRun:
     """Run the run whose directory is ``run_dir`` to its final status and return it: refuse one
     that has ended before anything is written (``experiments.require_open``), observe it once,
     keep its heartbeat, build its context from that observation (:func:`prepare_run_context`,

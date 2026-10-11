@@ -12,14 +12,17 @@ torch = pytest.importorskip(
     "torch"
 )  # evaluation.py imports torch at module load
 
-from tests import _trait_fixtures as fx  # noqa: E402
-from tests._dense_op_fixtures import _box, dense_records  # noqa: E402
-from tests._dense_op_fixtures import toy_records as _records  # noqa: E402
 from tcip_mcp.pipelines.operating_point import (
     cap_saturated_frac,
     count_criterion,
 )  # noqa: E402
 from tcip_mcp.traits import DETECTION_F1, PRESENCE  # noqa: E402
+from tests import _trait_fixtures as fx  # noqa: E402
+from tests._dense_op_fixtures import (  # noqa: E402
+    _box,
+    dense_records,
+    toy_records as _records,  # noqa: E402
+)
 
 ENTRY = fx.with_fields(
     fx.BUD_OPENING, count_bias_tolerance_frac=0.01, count_error_tolerance=100.0

@@ -18,9 +18,10 @@ import tempfile
 import threading
 import uuid
 from collections import OrderedDict
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, TypeVar
+from typing import TypeVar
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
@@ -75,7 +76,7 @@ class _Encoding:
 
     pil_format: str
     options: dict
-    max_edge: "int | None"
+    max_edge: int | None
 
     @property
     def suffix(self) -> str:
@@ -125,7 +126,7 @@ _CACHE_BUDGET_DIVISOR = 20
 """The rendered-variant cache's byte budget is the cache volume's free space divided by this: a
 documented headroom choice, not a measured optimum."""
 
-_cache_budget_bytes: "int | None" = None
+_cache_budget_bytes: int | None = None
 
 
 def _cache_byte_budget(cache_dir: Path) -> int:
@@ -191,10 +192,10 @@ class _RasterStats:
     num_channels: int
     ranges: list
     clip_bounds: list
-    seed: "int | None" = None
-    pixel_fraction: "float | None" = None
-    overview_size: "tuple[int, int] | None" = None
-    interpretations: "tuple | None" = None
+    seed: int | None = None
+    pixel_fraction: float | None = None
+    overview_size: tuple[int, int] | None = None
+    interpretations: tuple | None = None
 
     @property
     def sampled(self) -> bool:
@@ -203,10 +204,10 @@ class _RasterStats:
 
 
 _V = TypeVar("_V")
-_stats_cache: "OrderedDict[tuple, _RasterStats]" = OrderedDict()
+_stats_cache: OrderedDict[tuple, _RasterStats] = OrderedDict()
 """Each raster's display statistics, under its :func:`_source_identity` and the band count it
 is read at."""
-_count_cache: "OrderedDict[tuple, int]" = OrderedDict()
+_count_cache: OrderedDict[tuple, int] = OrderedDict()
 """Each source's own band count, under its version on disk
 (:func:`~tcip_mcp.pipelines.raster_source.source_version`)."""
 _stats_lock = threading.Lock()
@@ -398,7 +399,7 @@ def _parse_band_tokens(raw: str) -> list[str]:
 
 
 def _band_index(
-    token: str, declared_names: "list[str] | None", total_bands: int
+    token: str, declared_names: list[str] | None, total_bands: int
 ) -> int:
     if declared_names and token in declared_names:
         return declared_names.index(token)
@@ -474,8 +475,8 @@ def _source_identity(header) -> tuple:
 
 
 def _memo(
-    cache: "OrderedDict[tuple, _V]", key: tuple, compute: "Callable[[], _V]"
-) -> "_V":
+    cache: OrderedDict[tuple, _V], key: tuple, compute: Callable[[], _V]
+) -> _V:
     """What ``cache`` holds under ``key``; on a miss, ``compute()``'s answer, stored there with
     the :data:`_STATS_CACHE_MAX` most recently used kept. A concurrent miss on the same key
     computes twice and stores the same value."""
@@ -547,8 +548,8 @@ def _stats_of(raster) -> _RasterStats:
 
 
 def _sampled_bounds(
-    stats: _RasterStats, idxs: "list[int]", stretch: str
-) -> "list[tuple[float, float]]":
+    stats: _RasterStats, idxs: list[int], stretch: str
+) -> list[tuple[float, float]]:
     """The ``(low, high)`` pair per selected band a region render stretches between, in the same
     order as ``idxs``: the clip cut points for ``percent_clip``, the sampled range otherwise
     (``none`` reads both ends, as the sampled minimum and maximum a float raster's divisor comes
@@ -558,7 +559,7 @@ def _sampled_bounds(
     return [(stats.ranges[i].minimum, stats.ranges[i].maximum) for i in idxs]
 
 
-def _plain_rgb(pixels, dtype, bounds: "tuple[float, float] | None"):
+def _plain_rgb(pixels, dtype, bounds: tuple[float, float] | None):
     """A 1/3/4-band array as the plain ``uint8`` RGB the file's own pixels read as: a single band
     replicated, a fourth band dropped, and no data-range stretch applied.
 
@@ -987,7 +988,7 @@ class OverviewJob:
     path: str
     status: str = "pending"  # pending | running | completed | failed
     bytes_written: int = 0
-    error: "str | None" = None
+    error: str | None = None
 
 
 _overview_registry = jobstore.JobRegistry()

@@ -290,8 +290,10 @@ def test_plant_mapping_union_resolves_each_shape_and_refuses_a_hybrid(
         plant_mapping_disclosure,
     )
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
-    from tests import test_orthomosaic_tools as ortho
-    from tests import test_plant_mapping_binding as binding
+    from tests import (
+        test_orthomosaic_tools as ortho,
+        test_plant_mapping_binding as binding,
+    )
     from tests._mapping_fixtures import register_plant_registry_for
 
     mapped = tmp_path / "mapped"

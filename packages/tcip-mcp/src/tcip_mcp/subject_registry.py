@@ -28,9 +28,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, TypeVar, cast
 
 if TYPE_CHECKING:
-    from tcip_store import Version
-
     from tcip_mcp.traits import PositiveState
+    from tcip_store import Version
 
 #: The attribute kinds a subject may carry. Numeric is deliberately absent, see the module
 #: docstring.
@@ -211,7 +210,7 @@ def _checked_registry_document(data: bytes, *, path: str | Path) -> dict:
 
 def read_versioned_registry(
     dataset_root: str | Path,
-) -> tuple[SubjectRegistry, "Version"]:
+) -> tuple[SubjectRegistry, Version]:
     """Read ``dataset_root``'s subject registry into a :class:`SubjectRegistry`, beside the
     version of the bytes it decoded, both from one read.
 
@@ -219,7 +218,6 @@ def read_versioned_registry(
     decode raises :class:`RegistryError`, the same refusal a structurally invalid registry raises.
     """
     import tcip_store
-
     from tcip_mcp.dataset_layout import subjects_path
 
     path = subjects_path(dataset_root)
@@ -264,7 +262,7 @@ def replace_registry(
     dataset_root: str | Path,
     registry: SubjectRegistry,
     *,
-    expect: "Version | None",
+    expect: Version | None,
     allow_removals: bool = False,
     allow_type_changes: bool = False,
     actor: str | None,
@@ -293,7 +291,6 @@ def replace_registry(
     line records it: ``{"subjects_path", "n_subjects", "version"}`` (the new token).
     """
     import tcip_store
-
     from tcip_mcp.audit import record_event_or_raise
     from tcip_mcp.dataset_layout import subjects_path
 
@@ -364,7 +361,6 @@ def copy_registry(source: str | Path, destination: str | Path) -> None:
     when the destination already holds a registry.
     """
     import tcip_store
-
     from tcip_mcp.dataset_layout import subjects_path
 
     try:
@@ -381,7 +377,7 @@ def copy_registry(source: str | Path, destination: str | Path) -> None:
 
 
 def positive_state_problem(
-    registry: SubjectRegistry, subject_name: str, state: "PositiveState"
+    registry: SubjectRegistry, subject_name: str, state: PositiveState
 ) -> str | None:
     """Why ``state`` cannot be ``subject_name``'s positive state in ``registry``, or ``None`` when
     that subject declares ``state``'s attribute and the attribute lists ``state``'s value."""

@@ -57,8 +57,6 @@ from dataclasses import dataclass, replace
 from typing import Any, Literal, Protocol, cast
 
 import tcip_store
-from tcip_store import Key, Version, scalar_number
-
 from tcip_annotation.state import (
     Annotation,
     BBox,
@@ -69,6 +67,7 @@ from tcip_annotation.state import (
     polygonal,
     prediction_score,
 )
+from tcip_store import Key, Version, scalar_number
 
 ANNOTATIONS_KEY = "annotations"  # the one top-level list key
 _PROV_KEYS = ("created_by", "created_at", "accepted_by", "accepted_at")

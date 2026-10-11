@@ -50,9 +50,8 @@ class ProjectSummary(BaseModel):
 def _summarize(project_dir: Path, record: dict) -> ProjectSummary:
     """``project_dir`` listed with ``record``, its record's fields
     (:func:`tcip_mcp.workspace.project_records`)."""
-    from tcip_web.routes.dataset import _subjects_by_date
-
     from tcip_mcp.pipelines.image_utils import logical_image_count
+    from tcip_web.routes.dataset import _subjects_by_date
 
     st = project_dir.stat()
     image_count = logical_image_count(project_dir)

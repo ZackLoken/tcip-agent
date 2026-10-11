@@ -32,7 +32,6 @@ from tcip_annotation.state import (
     box_derivable,
     polygonal,
 )
-
 from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
     OrthomosaicGeoreference,
     detection_location,

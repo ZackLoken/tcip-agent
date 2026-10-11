@@ -14,8 +14,9 @@ from __future__ import annotations
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, NoReturn
+from typing import NoReturn
 
 from tcip_mcp.pipelines.raster_source import SourceHeader
 
@@ -120,7 +121,7 @@ def overview_levels(width: int, height: int) -> list[int]:
 
 
 def build_overviews(
-    path: str | Path, *, progress_cb: "Callable[[int], object] | None" = None
+    path: str | Path, *, progress_cb: Callable[[int], object] | None = None
 ) -> Path:
     """Build ``path``'s external ``.ovr`` pyramid as :func:`plan_overview_build` plans it and
     return the sidecar's path. The raster is read once, in the child process the build runs in:

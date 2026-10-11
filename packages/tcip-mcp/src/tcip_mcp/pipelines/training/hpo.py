@@ -17,11 +17,11 @@ import os
 import subprocess
 import sys
 import threading
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from importlib.util import find_spec
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.schemas import SplitSpec

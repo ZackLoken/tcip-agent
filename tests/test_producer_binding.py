@@ -33,7 +33,6 @@ def _edit_record(root: Path, bucket: str, edit) -> None:
     """Rewrite ``bucket``'s record through ``edit`` past the publication, the way a hand edit
     after publication reaches it."""
     import tcip_store
-
     from tcip_mcp.dataset_layout import bucket_key
 
     key = bucket_key(root, bucket)

@@ -8,8 +8,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import defaultdict, deque
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, NamedTuple, Optional, TypeVar
+from typing import Any, NamedTuple, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
@@ -55,7 +56,7 @@ class OpenProject(NamedTuple):
 class Held(NamedTuple):
     """The open project (``None`` when none is) and its live GUI state, published as one value."""
 
-    project: Optional[OpenProject]
+    project: OpenProject | None
     state: GuiState
 
 
@@ -70,7 +71,7 @@ class StateStore:
         self._version = 0
         self._lock = asyncio.Lock()
         self._subscribers: list = []  # list[Callable[[dict], Awaitable[None]]]
-        self._workspace: Optional[Path] = None
+        self._workspace: Path | None = None
         self._image_roots: tuple[Path, ...] = ()
         self._retained: dict[str, deque[dict[str, Any]]] = defaultdict(
             lambda: deque(maxlen=RETAINED_EVENTS_PER_PANEL)
@@ -100,7 +101,7 @@ class StateStore:
         return self._image_roots
 
     @property
-    def opened(self) -> Optional[OpenProject]:
+    def opened(self) -> OpenProject | None:
         """The open project, its directory and id together, or ``None`` when none is open: one
         value, so a reader that wants both reads them in one step."""
         return self._now.project
@@ -147,9 +148,9 @@ class StateStore:
 
     async def _switch(
         self,
-        following: Optional[OpenProject],
+        following: OpenProject | None,
         state: GuiState,
-        closing: Optional[str] = None,
+        closing: str | None = None,
     ) -> None:
         """Under the lock: when ``closing`` is given and does not name the open project, nothing.
         Otherwise, when ``following`` replaces another project, end every unended session of the
@@ -197,7 +198,7 @@ class StateStore:
         return list(self._retained.get(panel, ()))
 
     async def _hold(
-        self, project: Optional[OpenProject], state: GuiState
+        self, project: OpenProject | None, state: GuiState
     ) -> None:
         """Hold ``project`` with ``state`` as the next version, the retained events cleared when
         the project changes, and notify every subscriber of it; called under the lock."""
@@ -242,7 +243,7 @@ class StateStore:
         return self._now.state.model_dump(mode="json")
 
     async def mutate(
-        self, mutation: dict[str, Any], *, project: Optional[OpenProject]
+        self, mutation: dict[str, Any], *, project: OpenProject | None
     ) -> None:
         """Apply a partial mutation, validated, persist it to the open project, and hold it.
 

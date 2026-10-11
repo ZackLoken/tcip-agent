@@ -13,14 +13,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import tcip_store as ts
 from pydantic import BaseModel, ConfigDict
 
+import tcip_store as ts
 from tcip_annotation import Annotation, BBox, Polygon, bbox_of
 from tcip_annotation.grid import grid_to_rect
 from tcip_annotation.json_io import stored_box_extent_ok
 from tcip_annotation.viz import render_candidates, render_detections
-
 from tcip_mcp.audit import now_iso, record_event_or_raise
 from tcip_mcp.pipelines.image_utils import (
     BandGroupIncompleteError,
@@ -64,7 +63,7 @@ def _staging_key_for(image_path: str) -> ts.Key:
     return proposal_staging_key(*parse_image_path(image_path))
 
 
-def _region_rect_from_cells(cells: list, names: list[str]) -> "Rect":
+def _region_rect_from_cells(cells: list, names: list[str]) -> Rect:
     """The bounding rect, in the grid's native-pixel frame, of the named reference-grid cells.
 
     Each name resolves through ``grid.grid_to_rect``, so a malformed or out-of-grid name is
@@ -81,7 +80,7 @@ def _region_rect_from_cells(cells: list, names: list[str]) -> "Rect":
     )
 
 
-def _write_region_crop(pixels: "np.ndarray") -> Path:
+def _write_region_crop(pixels: np.ndarray) -> Path:
     """Save an RGB region crop to a fresh temp PNG file; the caller deletes it once the engine has
     read it.
 
@@ -487,7 +486,6 @@ def _stage_document(
     return the bucket's name; no annotations publishes nothing and returns ``None``. A bucket of
     that name already published refuses (:class:`~tcip_mcp.buckets.BucketExistsError`)."""
     from tcip_annotation import json_io
-
     from tcip_mcp.buckets import Document, publish
     from tcip_mcp.pipelines.data.selection import ClassScope
 
@@ -523,7 +521,6 @@ def _stage_explicit_regime(
     """Stage explicit boxes and polygons, each carrying a ``subject``, as one staged proposal of
     ``model_name`` for the image (:func:`_stage_document`)."""
     from tcip_annotation.json_io import ring_vertex
-
     from tcip_mcp.workspace import is_valid_name
 
     if not is_valid_name(model_name):

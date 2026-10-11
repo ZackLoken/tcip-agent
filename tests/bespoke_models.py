@@ -16,7 +16,6 @@ from torch.nn import functional
 from tcip_mcp.pipelines.derivations import gt_aspect_ratios
 from tcip_mcp.pipelines.model_build import METRICS_KEY, STATE_DICT_KEY
 
-
 # ---------------------------------------------------------------------------
 # (a) architecture with modified internals: GroupNorm backbone/FPN + GT anchors
 # ---------------------------------------------------------------------------

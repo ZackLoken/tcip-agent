@@ -13,7 +13,6 @@ import numpy as np
 
 if TYPE_CHECKING:
     from tcip_annotation.json_io import LabelDocument
-
     from tcip_mcp.pipelines.schemas import SpatialManifest
 
 logger = logging.getLogger(__name__)
@@ -109,7 +108,7 @@ def select_gt_for_band(
 
 
 def check_completeness(
-    document: "LabelDocument",
+    document: LabelDocument,
     where: str,
     subject: str,
     rects: dict[str, tuple[int, int, int, int]],
@@ -119,7 +118,6 @@ def check_completeness(
     ``subject`` cover every half-open rect in ``rects``.
     """
     from tcip_annotation.json_io import covers
-
     from tcip_mcp.assessment import AssessmentRefusedError
 
     marks = document.marks.get(subject, [])

@@ -9,14 +9,14 @@ import functools
 import inspect
 import logging
 import time
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Mapping, TypeVar, overload
-
-from tcip_store import Key, append
+from typing import Any, TypeVar, overload
 
 from tcip_mcp import agent_identity
 from tcip_mcp.registry_paths import located
+from tcip_store import Key, append
 
 logger = logging.getLogger(__name__)
 

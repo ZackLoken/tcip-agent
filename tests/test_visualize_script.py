@@ -6,14 +6,13 @@ the door writes an artifact and carries an audit line, both under that project.
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 import json
 from pathlib import Path
 
 from PIL import Image
 
 from tcip_annotation.state import Annotation, BBox
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._cli_fixtures import run_tcip
 from tests._producer_fixtures import label_image
 

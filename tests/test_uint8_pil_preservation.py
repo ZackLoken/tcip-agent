@@ -11,14 +11,13 @@ rather than guess.
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 from pathlib import Path
 
 import numpy as np
 import pytest
 from PIL import Image
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
 from tests._producer_fixtures import dataset_over  # noqa: E402
 
@@ -220,8 +219,8 @@ def _detection_project(
 ):
     """One TIFF holding ``arr`` and its label document; its images directory."""
     import tifffile
-    from tcip_annotation.state import Annotation, BBox
 
+    from tcip_annotation.state import Annotation, BBox
     from tests._producer_fixtures import label_image
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
@@ -263,6 +262,7 @@ def test_a_uint8_tiff_trains_augmented_through_detection(tmp_path: Path):
 def test_a_uint8_windowed_tile_trains_augmented_through_tiling(tmp_path: Path):
     pytest.importorskip("torch")
     import torch
+
     from tcip_mcp.pipelines import raster_source
 
     raster_source.close_source_pool()
@@ -293,6 +293,7 @@ def test_a_declared_alpha_windowed_tile_trains_augmented(tmp_path: Path):
     chain, byte-identical to the whole-decode case above."""
     pytest.importorskip("torch")
     import torch
+
     from tcip_mcp.pipelines import raster_source
 
     raster_source.close_source_pool()
@@ -328,6 +329,7 @@ def test_a_declared_spectral_fourth_band_windowed_tile_trains_unaugmented(
     the tile's own raw, unflipped pixels."""
     pytest.importorskip("torch")
     import torch
+
     from tcip_mcp.pipelines import raster_source
 
     raster_source.close_source_pool()

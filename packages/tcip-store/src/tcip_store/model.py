@@ -79,7 +79,7 @@ class Version:
 
     token: str
 
-    ABSENT: ClassVar["Version"]
+    ABSENT: ClassVar[Version]
 
 
 Version.ABSENT = Version("")

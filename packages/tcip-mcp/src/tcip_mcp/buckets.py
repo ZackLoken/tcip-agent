@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 import tcip_store
-
 from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.execution import Execution
 

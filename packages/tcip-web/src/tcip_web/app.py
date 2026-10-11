@@ -14,16 +14,15 @@ from typing import Any
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-
-from tcip_store import bind
 
 from tcip_mcp.audit import now_iso
 from tcip_mcp.buckets import NotABucketError
 from tcip_mcp.identity import NoActorError
 from tcip_mcp.web_client import PANEL_EVENT_ANNOTATE_FOCUS, VALID_PANELS
+from tcip_store import bind
 from tcip_web.trust_boundary import TrustBoundaryMiddleware
 
 logger = logging.getLogger(__name__)

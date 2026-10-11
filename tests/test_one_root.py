@@ -112,8 +112,9 @@ def test_the_server_refuses_to_start_for_a_directory_holding_no_project(
 def test_a_server_started_for_no_project_needs_no_workspace_and_serves_knowledge(
     monkeypatch,
 ):
-    import tcip_mcp.server as server_module
     from mcp.server import MCPServer
+
+    import tcip_mcp.server as server_module
 
     served: list[MCPServer] = []
     monkeypatch.setattr(
@@ -131,8 +132,9 @@ def test_a_server_started_for_no_project_needs_no_workspace_and_serves_knowledge
 def test_a_server_started_for_a_project_refuses_with_no_workspace_by_name(
     tmp_path, monkeypatch
 ):
-    import tcip_mcp.server as server_module
     from mcp.server import MCPServer
+
+    import tcip_mcp.server as server_module
 
     project = named_project(tmp_path.parent / "valley_block", "Valley block")
     served: list[MCPServer] = []

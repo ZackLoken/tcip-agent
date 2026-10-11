@@ -14,18 +14,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from tcip_store import Key
-
 from tcip_annotation.state import Annotation, BBox, Polygon, box_derivable
-
 from tcip_mcp.pipelines.image_utils import list_logical_images
+from tcip_store import Key
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.data.selection import ClassScope, Sample
 
 
-def registry_scope(images_dir, subject: str | None) -> "ClassScope":
+def registry_scope(images_dir, subject: str | None) -> ClassScope:
     """The class space ``subject`` is read under over the images ``images_dir`` holds: the subject
     with every attribute their dataset's ``subjects.json`` declares for it, none for a dataset
     holding no registry; no subject is the empty class space, reading no registry. A registry not
@@ -49,7 +47,7 @@ def registry_scope(images_dir, subject: str | None) -> "ClassScope":
 
 def json_det_targets(
     annotations: Sequence[Annotation],
-    scope: "ClassScope",
+    scope: ClassScope,
     reads: Callable[[Any], bool] = box_derivable,
 ) -> dict[str, Any]:
     """One image's detection target from its label document's ``annotations``, read under
@@ -65,6 +63,7 @@ def json_det_targets(
     declare refuses.
     """
     import numpy as np
+
     from tcip_annotation import json_io
     from tcip_annotation.state import bbox_of
 
@@ -142,7 +141,7 @@ class Candidate:
     holds none for it) and its row key when one table answers for many."""
 
     member: str
-    source: "Path | BandGroupRef | None"
+    source: Path | BandGroupRef | None
     ground_truth: Key | str | None
     row_key: str | None = None
 
@@ -222,7 +221,7 @@ def _candidates(
 
 def _acquire(
     shape: str,
-    ground_truth: "Key | str",
+    ground_truth: Key | str,
     row_key: str | None,
     tables: _Tables,
     *,
@@ -236,7 +235,6 @@ def _acquire(
     :class:`~tcip_annotation.json_io.UnreadableLabelDocumentError` and anything else as
     ``ValueError``."""
     import tcip_store
-
     from tcip_annotation.json_io import (
         UnreadableLabelDocumentError,
         document_at,
@@ -280,7 +278,7 @@ def _acquire(
 
 
 def _tally(
-    shape: str, candidate: Candidate, scope: "ClassScope", tables: _Tables
+    shape: str, candidate: Candidate, scope: ClassScope, tables: _Tables
 ) -> tuple[str, Any, Any]:
     """What one candidate's ground truth reads as, with its one read (:func:`_acquire`): its
     label document's state for ``scope``'s subject, ``complete`` for a mask or a row that is
@@ -305,8 +303,8 @@ def _tally(
 
 def _admission(
     shape: str,
-    candidates: "Sequence[Candidate]",
-    scope: "ClassScope",
+    candidates: Sequence[Candidate],
+    scope: ClassScope,
     tables: _Tables,
 ) -> tuple[list[Admitted], dict[str, int]]:
     """The candidates :func:`admits` admits by their :func:`_tally`, each with its source resolved
@@ -352,7 +350,7 @@ class Admitted:
     """
 
     member: str
-    image: "Path | BandGroupRef"
+    image: Path | BandGroupRef
     ground_truth: Key | str
     ground_truth_digest: str
     read: Any
@@ -369,10 +367,10 @@ class Admitted:
 
 
 def samples_over(
-    records: "Sequence[Admitted]",
+    records: Sequence[Admitted],
     assignment: dict[str, str],
-    group_of: "Callable[[str], str]",
-) -> list["Sample"]:
+    group_of: Callable[[str], str],
+) -> list[Sample]:
     """Admitted records as explicit samples, one per record: ``assignment`` maps each member to
     the side it landed on and ``group_of`` gives its group key. Each sample carries the source,
     the ground truth and its digest the admission resolved for that member.
@@ -398,8 +396,8 @@ def samples_over(
 
 
 def foreground_counts(
-    members: "Mapping[str, Sample | Admitted]",
-    scope: "ClassScope",
+    members: Mapping[str, Sample | Admitted],
+    scope: ClassScope,
 ) -> dict[str, int]:
     """Each admitted member's own foreground count, under the key its caller already holds it by.
 
@@ -467,7 +465,7 @@ def _refused(tallies: Mapping[str, int]) -> str:
     )
 
 
-def acquired(samples: "Sequence[Sample]") -> list["Sample"]:
+def acquired(samples: Sequence[Sample]) -> list[Sample]:
     """``samples``, each carrying its ``read`` and ``stored``: the read this act's admission
     already made, else one read of its ground truth at the version it records
     (:func:`_acquire` at ``ground_truth_digest``, whose refusals propagate), each table read
@@ -476,7 +474,7 @@ def acquired(samples: "Sequence[Sample]") -> list["Sample"]:
 
     tables: _Tables = {}
 
-    def read(s: "Sample") -> "Sample":
+    def read(s: Sample) -> Sample:
         if s.stored is not None:
             return s
         stored, decoded = _acquire(
@@ -492,8 +490,8 @@ def acquired(samples: "Sequence[Sample]") -> list["Sample"]:
 
 
 def readmitted_samples(
-    samples: "Sequence[Sample]", scope: "ClassScope"
-) -> list["Sample"]:
+    samples: Sequence[Sample], scope: ClassScope
+) -> list[Sample]:
     """``samples`` re-admitted, each as a :class:`Candidate` through the same evaluation
     :func:`admit` runs under ``scope`` held to its shape (``ClassScope.admitted_for``, so a
     document read under a scope naming no subject refuses by name), each carrying the version
@@ -554,7 +552,7 @@ def readmitted_samples(
     ]
 
 
-def resolved(samples: "Sequence[Sample]") -> list["Sample"]:
+def resolved(samples: Sequence[Sample]) -> list[Sample]:
     """``samples``, each carrying its ``image``: the logical image this act's admission already
     resolved, else one resolution of its recorded ``source``
     (:func:`~tcip_mcp.pipelines.image_utils.resolve_image_paths`, each directory scanned once,
@@ -571,7 +569,7 @@ def resolved(samples: "Sequence[Sample]") -> list["Sample"]:
     ]
 
 
-def require_admitted(admitted: "Admission") -> None:
+def require_admitted(admitted: Admission) -> None:
     """Refuse an empty admission, naming the tallies that refused every candidate and what would
     fix it for its ground-truth shape."""
     if admitted.records:
@@ -619,16 +617,16 @@ class Admission:
     tallies: dict[str, int]
     """How many places the admission tallied each way (:func:`admits`); never a foreground
     count."""
-    scope: "ClassScope"
+    scope: ClassScope
     date: str
 
     def samples(
-        self, assignment: dict[str, str], group_of: "Callable[[str], str]"
-    ) -> list["Sample"]:
+        self, assignment: dict[str, str], group_of: Callable[[str], str]
+    ) -> list[Sample]:
         """The admitted records this assignment names, as samples on the sides it gives them."""
         return samples_over(self.records, assignment, group_of)
 
-    def every_sample(self) -> list["Sample"]:
+    def every_sample(self) -> list[Sample]:
         """Every admitted record as a sample, all on the training side, each member grouped by the
         ``stem`` policy's key (:func:`~tcip_mcp.pipelines.data.splits.recorded_group_key_fn`).
         """
@@ -644,7 +642,7 @@ def admit(
     images_dir,
     ground_truth=None,
     *,
-    scope: "ClassScope | None" = None,
+    scope: ClassScope | None = None,
     members: list[str] | None = None,
 ) -> Admission:
     """The membership the images of ``images_dir`` and their ground truth admit, through the

@@ -8,11 +8,11 @@ run surfaces the metric alongside ``loss``.
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 from pathlib import Path
 
 import pytest
+
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 torch = pytest.importorskip(
     "torch"
@@ -24,7 +24,6 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
 )
 from tests._producer_fixtures import dataset_over  # noqa: E402
 from tests._training_values import IOU_THRESHOLD  # noqa: E402
-
 
 # --------------------------------------------------------------------------
 # semantic_seg_metrics: exact values on tiny synthetic maps
@@ -105,8 +104,8 @@ def test_batched_shapes_flatten():
 
 def test_evaluate_semantic_seg_surfaces_miou(tmp_path: Path):
     pytest.importorskip("torchvision")
-    from PIL import Image
     import numpy as np
+    from PIL import Image
     from torch.utils.data import DataLoader
 
     from tcip_mcp.pipelines.training.collation import task_collate

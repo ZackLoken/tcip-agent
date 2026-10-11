@@ -29,7 +29,6 @@ def _display(image_path: str) -> tuple[np.ndarray, tuple[int, int]]:
 def viz_dataset(tmp_path: Path) -> Path:
     """Create a dataset with images and their label documents (name-based layout)."""
     from tcip_annotation.state import Annotation, BBox
-
     from tests._producer_fixtures import label_image
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
@@ -583,7 +582,6 @@ def test_scoring_and_the_comparison_render_state_one_count_for_one_image(
     which it overlaps by little of its own area, is ignored by all three."""
     pytest.importorskip("torch")
     from tcip_annotation.state import Annotation, BBox
-
     from tcip_mcp.tools.annotation_tools import score_predictions
     from tcip_mcp.tools.vision_tools import visualize
     from tests._chain_fixtures import published
@@ -656,7 +654,6 @@ class TestVisualizeComparison:
         self, viz_bucket: Path
     ):
         from tcip_annotation.state import Annotation, BBox
-
         from tcip_mcp.tools.vision_tools import visualize
         from tests._producer_fixtures import label_image
 
@@ -897,10 +894,8 @@ class TestVisualizeDatasetSample:
     ):
         """A present, unreadable label document must surface as an error, not be silently
         rendered as though the image carried no labels."""
-        from tcip_mcp.tools.vision_tools import visualize
-
         from tcip_annotation.state import Annotation, BBox
-
+        from tcip_mcp.tools.vision_tools import visualize
         from tests._producer_fixtures import label_image
 
         bad = viz_dataset / "images" / UNDATED_BUCKET / "img_bad.jpg"
@@ -1351,8 +1346,8 @@ class TestAcceptProposalsTool:
     ):
         from tcip_mcp.pipelines import proposal
         from tcip_mcp.tools.proposal_tools import (
-            stage_proposals,
             propose_annotations,
+            stage_proposals,
         )
 
         # The candidates propose_annotations stages, in the neutral engine schema.
@@ -1492,7 +1487,6 @@ def _staged(
     decodes them and its records as the store holds them."""
     import tcip_store
     from tcip_annotation.json_io import read_label_document
-
     from tcip_mcp.buckets import read_bucket
 
     key = read_bucket(project, staged["bucket"]).document_key(image.stem)

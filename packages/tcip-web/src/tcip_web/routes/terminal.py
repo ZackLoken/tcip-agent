@@ -13,7 +13,7 @@ import logging
 import os
 import threading
 from dataclasses import dataclass, field
-from typing import Literal, Optional
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, ValidationError
@@ -70,9 +70,9 @@ class LaunchedProgram(BaseModel):
 
     provider: str
     argv: list[str]
-    version: Optional[str]
-    confinement: Optional[str]
-    delivery_unverified: Optional[str]
+    version: str | None
+    confinement: str | None
+    delivery_unverified: str | None
     prepared: list[str]
 
 
@@ -91,7 +91,7 @@ class ProviderStatus(BaseModel):
 
     id: str
     name: str
-    unavailable_reason: Optional[str]
+    unavailable_reason: str | None
 
 
 class TerminalStatus(BaseModel):
@@ -103,7 +103,7 @@ class TerminalStatus(BaseModel):
 def _record_start(
     session_id: str,
     launched: LaunchedProgram,
-    project: Optional[OpenProject],
+    project: OpenProject | None,
     actor: str,
 ) -> None:
     """One audit line by ``actor`` in ``project``'s log per launch for it, naming the session id
@@ -131,10 +131,10 @@ class _Launch:
     continues from."""
 
     gen: int
-    ritual: Optional[str] = None
+    ritual: str | None = None
     ritual_sent: bool = False
     ready: bool = False
-    composer_ready: Optional[str] = None
+    composer_ready: str | None = None
     composer_live: bool = False
     queued: list[str] = field(default_factory=list)
     tail: str = ""
@@ -166,7 +166,7 @@ class TerminalSession:
 
     def start(
         self, rows: int, cols: int, provider: pty_host.Provider, actor: str
-    ) -> Optional[str]:
+    ) -> str | None:
         """Spawn ``provider``'s harness in a PTY for the open project as the current launch by
         ``actor``, or a new one when the current launch already spawned, its ritual built before
         the spawn from the project's record as it reads now. Returns an error reason (a record
@@ -246,7 +246,7 @@ class TerminalSession:
 
     def restart(
         self, rows: int, cols: int, provider: pty_host.Provider, actor: str
-    ) -> Optional[str]:
+    ) -> str | None:
         """Open the next launch, holding the current launch's undelivered requests and every
         request submitted from here on behind its ritual, end the current process and start
         ``provider`` as that launch by ``actor``. Returns an error reason, or None on success."""
@@ -346,7 +346,7 @@ class TerminalSession:
         while launch.queued and self.write(pty_host.paste(launch.queued[0])):
             launch.queued.pop(0)
 
-    def _on_output(self, data: str, gen: Optional[int] = None) -> None:
+    def _on_output(self, data: str, gen: int | None = None) -> None:
         with self._lock:
             launch = self._launch
             if gen is not None and gen != launch.gen:
@@ -380,7 +380,7 @@ class TerminalSession:
             for sub_id in dead:
                 self._subs.pop(sub_id, None)
 
-    def _on_exit(self, gen: Optional[int] = None) -> None:
+    def _on_exit(self, gen: int | None = None) -> None:
         # Visible in the terminal itself: the surface must never just go quiet.
         self._on_output(_EXIT_NOTE, gen)
 
@@ -582,7 +582,7 @@ async def terminal_ws(websocket: WebSocket, session_id: str) -> None:
     await websocket.accept()
 
     sub_id, queue, replay = session.attach()
-    pump_task: Optional[asyncio.Task] = None
+    pump_task: asyncio.Task | None = None
     try:
         if replay:
             await websocket.send_text(replay)

@@ -13,7 +13,7 @@ import threading
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -26,11 +26,11 @@ from tcip_annotation.json_io import (
     read_document_versioned,
 )
 from tcip_annotation.state import Annotation
-from tcip_store import Key, Version, VersionConflictError
 from tcip_mcp.pipelines.active_learning import (
     DEFAULT_REVIEW_BUDGET,
     DEFAULT_SCORER,
 )
+from tcip_store import Key, Version, VersionConflictError
 from tcip_web import jobstore
 from tcip_web.paths import allowed_image, allowed_path
 from tcip_web.state import store
@@ -64,9 +64,9 @@ class FlagPayload(BaseModel):
     (:class:`~tcip_annotation.flags.FlagRequest`)."""
 
     text: str
-    point: Optional[tuple[float, float]] = None
-    subject: Optional[str] = None
-    proposal: Optional[tuple[str, int]] = None
+    point: tuple[float, float] | None = None
+    subject: str | None = None
+    proposal: tuple[str, int] | None = None
 
 
 class SavePayload(BaseModel):
@@ -77,15 +77,15 @@ class SavePayload(BaseModel):
     annotations: list[AnnotationPayload] = []
     # The label document's version token as the client loaded it: with one, the save is a
     # compare-and-set and a 409 says it changed underneath. Omit to skip the comparison.
-    base_mtime: Optional[str] = None
+    base_mtime: str | None = None
     user: str
-    bucket: Optional[str] = None
+    bucket: str | None = None
     accept: list[int] = []
     reject: list[int] = []
     # Each annotation the person signs off as their own call, by its position in ``annotations``.
     confirm: list[int] = []
     complete: dict[str, bool] = {}
-    rect: Optional[tuple[float, float, float, float]] = None
+    rect: tuple[float, float, float, float] | None = None
     proposals_hidden: bool = False
     flag: list[FlagPayload] = []
     # Each open flag resolved, by id, with the reply given.
@@ -190,7 +190,6 @@ def save_labels(payload: SavePayload) -> dict:
     400, nothing written.
     """
     from tcip_annotation.flags import FlagRequest
-
     from tcip_mcp.dataset_layout import Gestures, save_label_document
     from tcip_mcp.identity import actor
 
@@ -256,13 +255,12 @@ def load_proposals(image_path: str, bucket: str) -> dict:
     names no document for the image, or one that will not read, answers 400; no project open
     answers 409."""
     from tcip_annotation.verdicts import read_verdicts
-
-    from tcip_mcp.delivery import admitted_conf
     from tcip_mcp.dataset_layout import (
         image_proposals,
         proposal_pairs,
         verdict_key_of,
     )
+    from tcip_mcp.delivery import admitted_conf
 
     root = store.held().root
     key, _w, _h = _admitted(image_path)
@@ -299,11 +297,11 @@ class PriorityQueueJob:
     project: str
     checkpoint_path: str
     images_dir: str
-    subject: Optional[str]
+    subject: str | None
     method: str
     budget: int
     status: str = "pending"  # one of jobstore.JOB_STATES
-    error: Optional[str] = None
+    error: str | None = None
     # [{image, score, reference_member?}], highest first.
     queue: list[dict] = field(default_factory=list)
     total_candidates: int = 0
@@ -342,7 +340,7 @@ def _pq_worker(job: PriorityQueueJob) -> None:
 class LaunchPriorityQueuePayload(BaseModel):
     checkpoint_path: str
     images_dir: str
-    subject: Optional[str] = None
+    subject: str | None = None
     method: str = DEFAULT_SCORER
     budget: int = DEFAULT_REVIEW_BUDGET
 

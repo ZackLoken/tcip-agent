@@ -5,10 +5,10 @@ from __future__ import annotations
 from dataclasses import asdict
 from pathlib import Path
 
-from tcip_mcp.server import tool
 from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.data.splits import DEFAULT_GROUP_BY, DEFAULT_SHARES
 from tcip_mcp.registry_paths import located
+from tcip_mcp.server import tool
 
 
 @tool()
@@ -41,17 +41,16 @@ def freeze_selection(
             sources through ``dataset_root_of``; refused when that does not resolve (a source
             outside the canonical ``<dataset_root>/images/...`` layout).
     """
+    from tcip_annotation.json_io import UnreadableLabelDocumentError
     from tcip_mcp.dataset_layout import dataset_root_of
     from tcip_mcp.experiments import run_resolution
     from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
+    from tcip_mcp.pipelines.data.label_queries import acquired
     from tcip_mcp.pipelines.data.selection import (
         Selection,
         read_selection_checked,
         write_selection,
     )
-    from tcip_annotation.json_io import UnreadableLabelDocumentError
-
-    from tcip_mcp.pipelines.data.label_queries import acquired
     from tcip_mcp.pipelines.data.split_construction import partition_samples
 
     try:
@@ -143,7 +142,6 @@ def _scan_dataset(root: str) -> dict:
     capture raises :class:`~tcip_mcp.pipelines.image_utils.AmbiguousImageStemError`.
     """
     import tcip_store
-
     from tcip_mcp.buckets import buckets_under
     from tcip_mcp.dataset_layout import (
         LABEL_DOCUMENTS,
@@ -321,7 +319,6 @@ def draw_splits_at(
         return {"error": f"Directory not found: {folder_path}"}
 
     import tcip_store
-
     from tcip_annotation.json_io import UnreadableLabelDocumentError
     from tcip_mcp.dataset_layout import LABEL_DOCUMENTS, image_dir, list_dates
     from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint

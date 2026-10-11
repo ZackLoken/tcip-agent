@@ -25,7 +25,6 @@ from tcip_mcp.pipelines.data.split_construction import (
 )  # noqa: E402
 from tcip_mcp.pipelines.model_build import staged_sources  # noqa: E402
 from tcip_mcp.pipelines.schemas import train_config  # noqa: E402
-
 from tests._chain_fixtures import DETECTION_SOURCE, run_config, training_config  # noqa: E402
 from tests._training_values import evaluation_block  # noqa: E402
 from tests._verified_checkpoint_fixtures import (  # noqa: E402
@@ -132,9 +131,9 @@ def test_freeze_selection_names_the_sources_the_run_read_not_the_launch_input(
     changes nothing: freezing a partition against pixels the run never saw would bind a later run
     to a different dataset."""
     from PIL import Image
-    from tcip_store import encode_record
 
     from tcip_mcp.tools.data_tools import freeze_selection
+    from tcip_store import encode_record
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     data_cfg = _real_drawn_experiment(tmp_path, root, "exp-elsewhere")

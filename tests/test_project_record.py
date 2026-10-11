@@ -10,7 +10,6 @@ import pytest
 
 import tcip_store as ts
 
-
 # ── text validation ─────────────────────────────────────────────────────────────
 
 
@@ -174,9 +173,8 @@ def test_read_record_raises_missing_and_publishes_no_database_for_a_root_with_no
     tmp_path: Path,
 ):
     """Names the creating door; a read of an absent record never publishes a database."""
-    from tcip_store.file_backend import database_file
-
     from tcip_mcp.project_record import ProjectRecordMissingError, read_record
+    from tcip_store.file_backend import database_file
 
     with pytest.raises(ProjectRecordMissingError, match="initialize_project"):
         read_record(tmp_path)

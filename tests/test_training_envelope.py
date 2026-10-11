@@ -7,13 +7,12 @@ stamped, and completion writes the final status whose checkpoint the registry re
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 from pathlib import Path
 
 import pytest
 
 import tcip_store as ts
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 torch = pytest.importorskip("torch")
 

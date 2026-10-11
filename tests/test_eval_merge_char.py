@@ -91,7 +91,6 @@ GOLDEN_DATASET = {
 
 def test_evaluate_single_image_golden(data_dir: Path):
     from tcip_mcp.tools.annotation_tools import score_predictions
-
     from tests.conftest import DATA_DIR_BUCKET
 
     img = data_dir / "images" / "2-11-26" / "img_001.jpg"
@@ -117,7 +116,6 @@ def test_evaluate_single_image_golden(data_dir: Path):
 
 def test_evaluate_folder_golden(data_dir: Path):
     from tcip_mcp.tools.annotation_tools import score_predictions
-
     from tests.conftest import DATA_DIR_BUCKET
 
     images_dir = str(data_dir / "images" / "2-11-26")

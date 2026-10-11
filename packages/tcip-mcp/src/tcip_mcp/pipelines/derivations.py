@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.raster_source import WindowSampling
 
 
-def probe_channels(image_path: "str | Path | BandGroupRef") -> int:
+def probe_channels(image_path: str | Path | BandGroupRef) -> int:
     """Band count of a raster read from disk, as its own header states it
     (:attr:`~tcip_mcp.pipelines.raster_source.SourceHeader.channels`): a grouped capture's
     one band per member."""
@@ -76,7 +76,7 @@ def gt_aspect_ratios(
 
 
 def _validate_gt_boxes_per_image(
-    gt_boxes_per_image: "Sequence[Sequence[Sequence[float]]]",
+    gt_boxes_per_image: Sequence[Sequence[Sequence[float]]],
     *,
     fn_name: str,
 ) -> list[list[tuple[float, float, float, float]]]:
@@ -146,6 +146,7 @@ def _neighbor_max_ious(boxes: np.ndarray) -> list[float]:
     """Each box's max IoU with any other box in the same region (xyxy px); fewer than 2 boxes ->
     []."""
     import numpy as np
+
     from tcip_annotation.matching import iou_matrix
 
     if len(boxes) < 2:
@@ -159,6 +160,7 @@ def _neighbor_min_center_distances(boxes: np.ndarray) -> list[float]:
     """Each box's distance to its nearest same-image neighbor's center (xyxy px); fewer than 2
     boxes -> []."""
     import numpy as np
+
     from tcip_annotation.matching import box_centers
 
     if len(boxes) < 2:
@@ -196,6 +198,7 @@ def derive_localization_tolerance_frac(
     filtered to the trait's own class.
     """
     import numpy as np
+
     from tcip_annotation.matching import box_sizes, xywh_corners
 
     gt_boxes_per_image = _validate_gt_boxes_per_image(
@@ -420,8 +423,8 @@ def derive_block_scale_px(
     *,
     tile_size: int,
     objects: Region,
-    plants: "list | None" = None,
-    raster_path: "str | Path | None" = None,
+    plants: list | None = None,
+    raster_path: str | Path | None = None,
 ) -> tuple[int, str]:
     """The pixel buffer/block scale for block-aware calibration's recursive sub-banding, floored at
     ``tile_size`` (:func:`~tcip_mcp.pipelines.data.splits.spatial_strip_split`'s own floor for a
@@ -507,7 +510,7 @@ def derive_block_scale_px(
 
 
 def band_normalization_stats(
-    image_paths: "Sequence[str | Path | BandGroupRef]",
+    image_paths: Sequence[str | Path | BandGroupRef],
     num_channels: int,
     *,
     max_images: int = 50,
@@ -591,7 +594,7 @@ class SampledNormalizationStats:
 
 
 def band_normalization_stats_sampled(
-    image_paths: "Sequence[str | Path | BandGroupRef]",
+    image_paths: Sequence[str | Path | BandGroupRef],
     num_channels: int,
     *,
     seed: int,
@@ -652,7 +655,8 @@ def band_normalization_stats_sampled(
 
 
 def image_stats_provenance(
-    result: "tuple[list[float], list[float], list[str]] | SampledNormalizationStats",
+    result: tuple[list[float], list[float], list[str]]
+    | SampledNormalizationStats,
     *,
     window_size: int | None = None,
     max_windows_per_image: int | None = None,

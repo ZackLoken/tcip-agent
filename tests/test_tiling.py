@@ -6,8 +6,6 @@ The clip tests need no torch. The wrapper tests skip if torch is absent (they go
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +13,7 @@ import pytest
 
 from tcip_annotation.matching import geometry_rings, shapely_geometry
 from tcip_annotation.state import BBox, Polygon
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tcip_mcp.pipelines.data.datasets import clip_rows_to_tile
 from tests._producer_fixtures import dataset_over  # noqa: E402
 
@@ -165,8 +164,8 @@ def test_detection_and_instance_seg_tiles_of_one_frame_agree(tmp_path):
     torch = pytest.importorskip("torch")
     from PIL import Image
     from shapely.geometry import Point as ShapelyPoint
-    from tcip_annotation.state import Annotation
 
+    from tcip_annotation.state import Annotation
     from tests._producer_fixtures import label_image
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
@@ -253,8 +252,8 @@ def test_detection_and_instance_seg_tiles_of_one_frame_agree(tmp_path):
 def test_tiled_dataset_keeps_empty_tiles(tmp_path):
     pytest.importorskip("torch")
     from PIL import Image
-    from tcip_annotation.state import Annotation, BBox
 
+    from tcip_annotation.state import Annotation, BBox
     from tests._producer_fixtures import label_image
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
@@ -288,6 +287,7 @@ def test_tiled_dataset_collate_roundtrip(tmp_path):
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
     from torch.utils.data import DataLoader
+
     from tcip_mcp.pipelines.training.collation import task_collate
 
     images_dir = _det_dataset(tmp_path)
@@ -313,7 +313,9 @@ def test_tiled_dataset_collate_roundtrip(tmp_path):
 def test_build_dataset_no_tiling_unchanged(tmp_path):
     pytest.importorskip("torch")
     import csv
+
     from PIL import Image
+
     from tcip_mcp.pipelines.data.datasets import DetectionDataset
 
     images_dir = _det_dataset(tmp_path, n=3, size=64)

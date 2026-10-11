@@ -9,13 +9,12 @@ here drives both tools for real, through a stub engine installed at
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 from pathlib import Path
 
 import numpy as np
 import pytest
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._producer_fixtures import write_image
 
 
@@ -74,8 +73,8 @@ def test_two_dated_buckets_with_the_same_stem_stage_and_read_back_independently(
     """Two images sharing a stem in different capture-date buckets have their own record: the
     second run's candidates must never answer for the first."""
     from tcip_mcp.tools.proposal_tools import (
-        stage_proposals,
         propose_annotations,
+        stage_proposals,
     )
 
     first = tmp_path / "images" / "2026-01-01" / "leaf.jpg"
@@ -138,7 +137,6 @@ def test_an_assignment_naming_no_subject_is_refused_never_skipped(
         ],
     )
     import tcip_store
-
     from tcip_mcp.dataset_layout import bucket_key
 
     assert staged["error"].startswith("assignment 1: ")
@@ -154,8 +152,8 @@ def test_accept_refuses_when_the_images_content_has_changed_since_the_proposal_r
     pixel of the changed image is read for display."""
     from tcip_mcp.tools import vision_tools
     from tcip_mcp.tools.proposal_tools import (
-        stage_proposals,
         propose_annotations,
+        stage_proposals,
     )
 
     img_path = tmp_path / "images" / UNDATED_BUCKET / "changed.jpg"
@@ -251,8 +249,8 @@ def test_propose_then_accept_stages_a_prediction_at_the_expected_location(
 ) -> None:
     """An undated and a dated capture both propose, stage, and accept the same way."""
     from tcip_mcp.tools.proposal_tools import (
-        stage_proposals,
         propose_annotations,
+        stage_proposals,
     )
 
     img_path = tmp_path / "images" / capture / "sample.jpg"
@@ -285,10 +283,11 @@ def test_propose_then_accept_through_a_band_groups_manifest_path(
     """A band-grouped capture is addressed by its manifest path on both sides, and resolves to
     the same BandGroupRef for the proposal run and for the accepted image dimensions."""
     import tifffile
+
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
     from tcip_mcp.tools.proposal_tools import (
-        stage_proposals,
         propose_annotations,
+        stage_proposals,
     )
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
@@ -327,6 +326,7 @@ def test_propose_on_a_band_groups_member_path_refuses_naming_the_manifest(
     """A band of a grouped capture is no logical image of its own: proposing on its path refuses
     naming the manifest, stages nothing, and the manifest's own path admits the proposal."""
     import tifffile
+
     import tcip_store as ts
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
     from tcip_mcp.tools.proposal_tools import (
@@ -364,10 +364,9 @@ def test_a_second_accept_of_the_same_staged_run_refuses_and_keeps_the_first(
     """The first accept's document is written once, so a second accept for the same image refuses
     naming it and the first document is unchanged."""
     import tcip_store
-
     from tcip_mcp.tools.proposal_tools import (
-        stage_proposals,
         propose_annotations,
+        stage_proposals,
     )
 
     img_path = tmp_path / "images" / UNDATED_BUCKET / "twice.jpg"
@@ -403,8 +402,8 @@ def test_a_second_proposal_run_replaces_the_first_and_accept_reads_the_newest(
 ) -> None:
     """last_writer_wins: a re-run overwrites the previous record rather than merging into it."""
     from tcip_mcp.tools.proposal_tools import (
-        stage_proposals,
         propose_annotations,
+        stage_proposals,
     )
 
     img_path = tmp_path / "images" / UNDATED_BUCKET / "rerun.jpg"
@@ -441,8 +440,8 @@ def test_a_re_run_finding_nothing_clears_the_previous_runs_record(
     """A run that proposes zero candidates must not leave a prior run's record readable: a later
     accept would otherwise stage that stale run's candidates as if this run had proposed them."""
     from tcip_mcp.tools.proposal_tools import (
-        stage_proposals,
         propose_annotations,
+        stage_proposals,
     )
 
     img_path = tmp_path / "images" / UNDATED_BUCKET / "goes_empty.jpg"
@@ -508,8 +507,8 @@ def test_accept_reports_an_unsampleable_image_as_an_error_dict(
     an uncaught exception out of the tool."""
     from tcip_mcp.pipelines import raster_source
     from tcip_mcp.tools.proposal_tools import (
-        stage_proposals,
         propose_annotations,
+        stage_proposals,
     )
 
     img_path = tmp_path / "images" / UNDATED_BUCKET / "unsampleable.jpg"
@@ -595,8 +594,8 @@ def test_a_staging_is_one_publication_with_one_audit_line(
     from tcip_mcp.audit import audit_log_key
     from tcip_mcp.buckets import Document, publish
     from tcip_mcp.tools.proposal_tools import (
-        stage_proposals,
         propose_annotations,
+        stage_proposals,
     )
 
     assert Document._fields == ("source", "data", "dropped")

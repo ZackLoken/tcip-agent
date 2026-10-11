@@ -249,7 +249,7 @@ class RasterSource(Protocol):
 
     def close(self) -> None: ...
 
-    def __enter__(self) -> "RasterSource": ...
+    def __enter__(self) -> RasterSource: ...
 
     def __exit__(self, *exc_info: object) -> None: ...
 
@@ -278,7 +278,7 @@ class _ClosableSource:
 
     def read_region(
         self, rect: Rect, *, target_size: tuple[int, int] | None = None
-    ) -> tuple[np.ndarray, "ReadSpec"]:
+    ) -> tuple[np.ndarray, ReadSpec]:
         """Return ``([H, W, C] pixels, ReadSpec)`` for ``rect``; every subclass provides its own."""
         raise NotImplementedError
 
@@ -451,7 +451,7 @@ class _TiffHeader:
     shape: tuple[int, ...]
     axes: str
     dtype: np.dtype
-    palette_lut: "np.ndarray | None"
+    palette_lut: np.ndarray | None
     georeference: GeoTransform | GeoreferencingError
 
 
@@ -467,7 +467,7 @@ def _palette_lut(colormap: np.ndarray) -> np.ndarray:
     return (raw.astype(np.uint16) >> 8).astype(np.uint8).T
 
 
-def tiff_header(tif: "TiffFile") -> _TiffHeader:
+def tiff_header(tif: TiffFile) -> _TiffHeader:
     """The first-series header of the open TIFF ``tif``, at the path its file handle names, read
     without a pixel decode. Raises ``ValueError`` naming the file when tifffile cannot read it,
     and for a palette image this module cannot expand: one that is not uint8, carries no
@@ -654,7 +654,7 @@ class PhotographicSource(_ClosableSource):
     ``tcip_annotation.utils.oriented_size`` measures: labels are authored in the upright frame.
     """
 
-    def __init__(self, opened: "PILImage", num_channels: int):
+    def __init__(self, opened: PILImage, num_channels: int):
         """``opened`` is the photograph as ``PIL.Image.open`` answered it, its pixels not yet
         decoded; it is decoded here and closed."""
         from tcip_annotation.utils import auto_orient_image
@@ -700,7 +700,7 @@ class TiffWholeSource(_ArraySource):
 
     _backend = "tiff_whole"
 
-    def __init__(self, source: "SourceHeader", layout: _Layout):
+    def __init__(self, source: SourceHeader, layout: _Layout):
         """Decodes the TIFF ``source`` already holds open, a palette image expanded through its
         table, laid out in the frame ``layout`` describes."""
         header = source.tiff
@@ -735,7 +735,7 @@ class BandGroupSource(_ClosableSource):
     band's; a member covering a different extent is refused at open.
     """
 
-    def __init__(self, group: "SourceHeader"):
+    def __init__(self, group: SourceHeader):
         ref = group.group
         self._members = [member.open(1) for member in group.members]
         first = self._members[0]
@@ -864,8 +864,8 @@ class GdalSource(_ClosableSource):
         return pixels, ReadSpec(self._backend)
 
     def _read_window(
-        self, ds, window: Rect, out: "tuple[int, int] | None"
-    ) -> tuple[np.ndarray, "str | None"]:
+        self, ds, window: Rect, out: tuple[int, int] | None
+    ) -> tuple[np.ndarray, str | None]:
         """``window`` of dataset ``ds`` as ``[H, W, C]``, area-averaged to ``out`` when given (a
         palette raster's indices expanded first, never averaged), and the resampling used."""
         from rasterio.enums import Resampling
@@ -956,7 +956,7 @@ class SourceHeader:
     ``"photo"`` (any other extension outside :data:`ARRAY_CONTAINER_EXTS`, decoded whole through
     PIL), or an array container's extension cut to ``"tif"``, ``"npy"`` or ``"npz"``."""
 
-    def __init__(self, source: "str | Path | BandGroupRef"):
+    def __init__(self, source: str | Path | BandGroupRef):
         self.source = (
             source if isinstance(source, BandGroupRef) else Path(source)
         )
@@ -979,7 +979,7 @@ class SourceHeader:
         return Path(source_path_of(self.source))
 
     @cached_property
-    def tiff_file(self) -> "TiffFile":
+    def tiff_file(self) -> TiffFile:
         """The TIFF opened through tifffile, held until this record is collected. Raises
         ``ValueError`` naming the file when tifffile cannot open it."""
         import tifffile
@@ -1008,7 +1008,7 @@ class SourceHeader:
             return npz[npz.files[0]]
 
     @cached_property
-    def _photo_image(self) -> "PILImage":
+    def _photo_image(self) -> PILImage:
         """The photograph as ``PIL.Image.open`` answers it, its pixels not decoded; closed by the
         reader that decodes it, or when this header is collected, whichever comes first."""
         from PIL import Image
@@ -1036,7 +1036,7 @@ class SourceHeader:
         return read_band_group_manifest(self.path)
 
     @cached_property
-    def members(self) -> "list[SourceHeader]":
+    def members(self) -> list[SourceHeader]:
         """A band group's members' headers, in the manifest's declared band order: each one band
         laid out as it is opened, at one band (:meth:`_layout_at`), what a member of a band group
         is. Raises ``ValueError`` naming a member that holds another count read that way."""
@@ -1072,7 +1072,7 @@ class SourceHeader:
         return self.frame_at(self.route_channels)
 
     @property
-    def georeference(self) -> "GeoTransform | GeoreferencingError | None":
+    def georeference(self) -> GeoTransform | GeoreferencingError | None:
         """A TIFF's georeference read outcome (:class:`_TiffHeader`); ``None`` for a source that
         carries no TIFF tags."""
         return self.tiff.georeference if self.kind == "tif" else None
@@ -1110,7 +1110,7 @@ class SourceHeader:
                 "Use .npy/.npz or a multi-band GeoTIFF (.tif/.tiff)."
             )
 
-    def windowed(self, num_channels: int) -> "RasterSource | None":
+    def windowed(self, num_channels: int) -> RasterSource | None:
         """The one dispatch: the reader that serves the source at ``num_channels`` without
         decoding pixels, for the caller to close, or ``None`` for one the whole decode serves.
 
@@ -1138,7 +1138,7 @@ class SourceHeader:
             return None
         return source
 
-    def gdal(self) -> "GdalSource":
+    def gdal(self) -> GdalSource:
         """The TIFF opened through GDAL as it sits on disk, whatever count it is served at: the
         reader of its physical overview pyramid, whether or not a read at some count would
         decode it whole. Raises ``ValueError`` where GDAL cannot open it."""
@@ -1173,7 +1173,7 @@ class SourceHeader:
 
 
 def open_raster(
-    source: "str | Path | BandGroupRef", num_channels: int
+    source: str | Path | BandGroupRef, num_channels: int
 ) -> RasterSource:
     """:meth:`SourceHeader.open` of ``source`` at ``num_channels``: a 5-band GeoTIFF opened at 3
     still reads as 5 bands."""
@@ -1182,7 +1182,7 @@ def open_raster(
 
 # ── Process-local pool of open sources ───────────────────────────────────
 
-_POOL: "OrderedDict[tuple, RasterSource]" = OrderedDict()
+_POOL: OrderedDict[tuple, RasterSource] = OrderedDict()
 _POOL_PID: int | None = None
 _POOL_BYTES = 0
 
@@ -1194,7 +1194,7 @@ def file_version(path: Path) -> tuple[str, int, int]:
     return str(path), int(st.st_mtime_ns), int(st.st_size)
 
 
-def source_version(header: "SourceHeader") -> tuple:
+def source_version(header: SourceHeader) -> tuple:
     """The version on disk of the source ``header`` describes (:func:`file_version`): its
     file's; a band group's manifest's beside each band's name and its member file's, since the
     manifest can be rewritten to name another file and a member can be rewritten under an
@@ -1209,7 +1209,7 @@ def source_version(header: "SourceHeader") -> tuple:
 
 def pooled_source(
     header: SourceHeader, num_channels: int
-) -> "RasterSource | None":
+) -> RasterSource | None:
     """The windowed reader for ``header``'s source from this process's pool, opening one through
     :meth:`SourceHeader.windowed` if it holds none; ``None`` for a source that decodes whole,
     and nothing is pooled.
@@ -1363,7 +1363,7 @@ def raster_content_identity(
 
 def open_as_recorded(
     recorded: dict,
-    source: "str | Path | BandGroupRef",
+    source: str | Path | BandGroupRef,
 ) -> tuple[RasterSource, RasterIdentity | None]:
     """``source`` opened at the count a previously recorded :func:`raster_content_identity`
     result (its ``dataclasses.asdict`` form) was taken at, for the caller to close, beside its

@@ -4,19 +4,20 @@
 from __future__ import annotations
 
 import random
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 import tcip_store as ts
-
 from tcip_annotation import Annotation, Point, bbox_of
-from tcip_annotation.state import box_derivable, polygonal, prediction_score
 from tcip_annotation.json_io import (
     UnreadableLabelDocumentError,
     read_document_versioned,
     read_predictions,
 )
+from tcip_annotation.matching import REVIEW_CONF_FLOOR
+from tcip_annotation.state import box_derivable, polygonal, prediction_score
 from tcip_annotation.viz import (
     render_canvas_state,
     render_comparison,
@@ -25,9 +26,7 @@ from tcip_annotation.viz import (
     render_grid_overlay,
     render_segmentations,
 )
-
 from tcip_mcp.pipelines.display_bounds import VIZ_ARTIFACT_MAX_EDGE
-from tcip_annotation.matching import REVIEW_CONF_FLOOR
 from tcip_mcp.pipelines.raster_source import SourceHeader
 from tcip_mcp.project_paths import viz_output_path
 from tcip_mcp.registry_paths import located
@@ -77,7 +76,7 @@ def _clamped_rect(
 
 
 def _read_for_display(
-    raster: "RasterSource",
+    raster: RasterSource,
     *,
     max_edge: int = VIZ_ARTIFACT_MAX_EDGE,
     region: tuple[float, float, float, float] | None = None,
@@ -122,7 +121,7 @@ def _read_for_display(
 
 
 def _display_of(
-    header: "SourceHeader",
+    header: SourceHeader,
     *,
     max_edge: int = VIZ_ARTIFACT_MAX_EDGE,
     region: tuple[float, float, float, float] | None = None,
@@ -598,7 +597,6 @@ def _ranked(bucket: Bucket, top_k: int) -> tuple[dict, dict[str, tuple]]:
     capture's labeled stems the bucket holds no document for), beside the read the ranking was
     made over: each stem's source, ground truth and predictions."""
     from tcip_annotation.json_io import detection_annotations
-
     from tcip_mcp.dataset_layout import capture_label_keys, image_dir
     from tcip_mcp.pipelines.image_utils import (
         resolve_image_paths,

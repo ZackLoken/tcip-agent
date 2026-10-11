@@ -8,8 +8,8 @@ import pytest
 
 pytest.importorskip("torch")
 import torch  # noqa: E402
-from torch.nn import functional  # noqa: E402
 from PIL import Image  # noqa: E402
+from torch.nn import functional  # noqa: E402
 
 from tcip_mcp.pipelines.components.losses import (  # noqa: E402
     FocalLoss,
@@ -22,7 +22,6 @@ from tcip_mcp.pipelines.data.augmentations import (  # noqa: E402
     build_augmentation,
 )
 from tests._training_values import asha_scheduler, tune_arguments  # noqa: E402
-
 
 # --------------------------------------------------------------------------
 # Losses
@@ -181,6 +180,7 @@ def test_semantic_seg_head_advertises_no_loss_choice():
     forward, since the registry's DiceLoss is binary while this head emits multi-class logits.
     """
     import pytest as _pytest
+
     from tcip_mcp.pipelines.components.heads import SemanticSegHead
 
     with _pytest.raises(TypeError, match="'loss'"):
@@ -293,7 +293,7 @@ def _instance_target(
     }
 
 
-def _mask_bbox(mask: "torch.Tensor") -> list[float]:
+def _mask_bbox(mask: torch.Tensor) -> list[float]:
     ys, xs = torch.nonzero(mask, as_tuple=True)
     return [
         float(xs.min()),
@@ -367,6 +367,7 @@ def test_random_resized_crop_keeps_masks_aligned():
 
 def test_random_resized_crop_random_scale_masks_track_boxes():
     import random as _random
+
     from tcip_mcp.pipelines.data.augmentations import RandomResizedCrop
 
     _random.seed(0)
@@ -423,6 +424,7 @@ def test_random_rotation_rotates_semantic_mask():
 def test_to_tune_space_maps_every_param_type():
     pytest.importorskip("ray")
     from ray import tune
+
     from tcip_mcp.pipelines.training.hpo import _to_tune_space
 
     space = _to_tune_space(
@@ -524,6 +526,7 @@ def test_build_scheduler_builds_each_scheduler_at_the_settings_its_block_states(
         MedianStoppingRule,
         PopulationBasedTraining,
     )
+
     from tcip_mcp.pipelines.training.hpo import build_scheduler
 
     space = {"lr": tune.loguniform(1e-5, 1e-2)}

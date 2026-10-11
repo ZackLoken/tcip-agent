@@ -15,10 +15,10 @@ round trip between, which halved the suite's throughput when measured here.
 
 from __future__ import annotations
 
-from collections.abc import Generator
 import os
-from pathlib import Path
 import tempfile
+from collections.abc import Generator
+from pathlib import Path
 
 import pytest
 

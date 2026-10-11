@@ -298,7 +298,6 @@ def test_run_inference_over_a_raster_publishes_one_document_and_the_raster_it_ra
 
 def _published(project: Path, bucket: str) -> bool:
     import tcip_store
-
     from tcip_mcp.dataset_layout import bucket_key
 
     return tcip_store.exists(bucket_key(project / "ds", bucket))
@@ -308,7 +307,6 @@ def test_a_second_raster_export_into_a_published_bucket_refuses_and_leaves_it_wh
     tmp_path,
 ):
     import tcip_store
-
     from tcip_mcp.dataset_layout import prediction_key
     from tcip_mcp.tools.inference_tools import run_inference
 
@@ -758,7 +756,6 @@ def _write_canopy_document(
     """A hand-traced canopy boundary document, ``raster_path``'s own label document, one
     rectangle per ``boxes`` entry, under a person's identity."""
     from tcip_annotation.state import Annotation, Polygon
-
     from tests._producer_fixtures import label_image
 
     anns = [

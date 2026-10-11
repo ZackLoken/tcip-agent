@@ -16,14 +16,16 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
-from tests._producer_fixtures import train_val as _train_val
-from tests._verified_checkpoint_fixtures import partition_side as recorded_side  # noqa: E402
-from tcip_mcp.pipelines.training.generic_trainer import train  # noqa: E402
 from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
-from tests._image_fixtures import write_noise_image  # noqa: E402
-from tests._producer_fixtures import label_image  # noqa: E402
+from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
+from tcip_mcp.pipelines.training.generic_trainer import train  # noqa: E402
 from tests._chain_fixtures import BLOB_BUILDER, training_config  # noqa: E402
+from tests._image_fixtures import write_noise_image  # noqa: E402
+from tests._producer_fixtures import (
+    label_image,  # noqa: E402
+    train_val as _train_val,
+)
+from tests._verified_checkpoint_fixtures import partition_side as recorded_side  # noqa: E402
 
 IMG = 64
 
@@ -917,7 +919,6 @@ def test_single_tiled_source_raises_on_an_unreadable_label(
     can read."""
     import tcip_store
     from tcip_annotation.json_io import UnreadableLabelDocumentError
-
     from tests._producer_fixtures import image_label_key
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET

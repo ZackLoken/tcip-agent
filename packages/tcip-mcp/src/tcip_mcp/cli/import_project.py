@@ -35,9 +35,8 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    from tcip_store import bind
-
     from tcip_mcp.tools.project_tools import import_project
+    from tcip_store import bind
 
     bind()
 

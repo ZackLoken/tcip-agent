@@ -22,7 +22,7 @@ def encode_record(value: Any) -> bytes:
     text = json.dumps(
         value, indent=2, ensure_ascii=False, allow_nan=False, sort_keys=False
     )
-    return f"{text}\n".encode("utf-8")
+    return f"{text}\n".encode()
 
 
 def encode_log_line(value: Any) -> bytes:

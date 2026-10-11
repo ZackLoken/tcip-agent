@@ -15,12 +15,12 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
 from tcip_mcp.pipelines.model_build import build_from_model_source  # noqa: E402
-from tcip_mcp.pipelines.schemas import checked_train_config  # noqa: E402
 from tcip_mcp.pipelines.model_contract import (  # noqa: E402
     TCIPModel,
     check_model_contract,
     overfit_check,
 )
+from tcip_mcp.pipelines.schemas import checked_train_config  # noqa: E402
 from tcip_store import check_json_value  # noqa: E402
 from tests import bespoke_models  # noqa: E402
 

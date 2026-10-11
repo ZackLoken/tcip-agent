@@ -5,13 +5,12 @@ parsing in get_worst_predictions."""
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 import json
 from pathlib import Path
 
 import pytest
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._chain_fixtures import (
     BESPOKE_CLASSIFIER,
     BESPOKE_DETECTION,
@@ -43,8 +42,8 @@ def _bud_image(image: Path, *, labeled: bool = True) -> None:
     """A 20x20 frame at ``image`` and, unless ``labeled`` is false, its label document holding
     one ``bud`` box."""
     from PIL import Image
-    from tcip_annotation.state import Annotation, BBox
 
+    from tcip_annotation.state import Annotation, BBox
     from tests._producer_fixtures import label_image
 
     image.parent.mkdir(parents=True, exist_ok=True)
@@ -385,9 +384,9 @@ def test_preflight_admits_the_run_once(tmp_path):
     question of what this run trains on."""
     pytest.importorskip("torch")
     from PIL import Image
-    from tcip_annotation.state import Annotation, BBox
 
     import tcip_mcp.pipelines.data.label_queries as label_queries
+    from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.tools.training_tools import preflight_config
     from tests._producer_fixtures import label_image
 
@@ -450,9 +449,8 @@ def test_preflight_config_blocks_a_document_only_the_admission_reader_refuses(
     preflight reads through the same call so it blocks here too, rather than passing a document
     the launch then aborts on."""
     pytest.importorskip("torch")
-    from tcip_store import encode_record
-
     from tcip_mcp.tools.training_tools import preflight_config
+    from tcip_store import encode_record
 
     imgs = tmp_path / "images" / UNDATED_BUCKET
     _bud_image(imgs / "ann.jpg")
@@ -1047,8 +1045,7 @@ def _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=None):
     """Stub dataset building + training so a trial runs instantly, no Ray: the resolution builds
     stand-in datasets, records no samples and stamps nothing they serve, and the child builds the
     same stand-ins from that record."""
-    from tcip_mcp.pipelines.data import samplers
-    from tcip_mcp.pipelines.data import split_construction as sc
+    from tcip_mcp.pipelines.data import samplers, split_construction as sc
     from tcip_mcp.pipelines.training import generic_trainer as gt
 
     ds = _FakeDataset()
@@ -1449,12 +1446,12 @@ def test_get_worst_predictions_reads_canonical_confidence(tmp_path):
     box geometry. Reading a normalized box height as confidence instead would make the
     (1 - avg_conf) ranking term ~1.0 for every image with small boxes (e.g. buds)."""
     pytest.importorskip("torch")
+    from PIL import Image
+
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.tools.vision_tools import get_worst_predictions
     from tests._chain_fixtures import published
     from tests._producer_fixtures import label_image
-
-    from PIL import Image
 
     images = tmp_path / "images" / UNDATED_BUCKET
     images.mkdir(parents=True)

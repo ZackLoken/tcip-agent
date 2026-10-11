@@ -3,10 +3,9 @@ mark finished."""
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 from pathlib import Path
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tcip_mcp.pipelines.data.selection import REFERENCE_SIDES
 from tcip_mcp.tools.feedback_tools import prioritize_review_queue
 
@@ -489,8 +488,8 @@ _FLAT_STEMS = ("a", "b", "c", "d", "e", "f")
 def _labeled_flat_image(path: Path) -> None:
     """A gray image at ``path`` whose label document holds one ``leaf`` box."""
     from PIL import Image
-    from tcip_annotation.state import Annotation, BBox
 
+    from tcip_annotation.state import Annotation, BBox
     from tests._producer_fixtures import label_image
 
     path.parent.mkdir(parents=True, exist_ok=True)

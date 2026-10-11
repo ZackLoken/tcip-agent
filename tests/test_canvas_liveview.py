@@ -257,7 +257,6 @@ def test_a_push_waits_for_a_holder_of_the_records_lock_and_then_lands(
     import threading
 
     import tcip_store as ts
-
     from tcip_web.routes.canvas import CanvasStatePayload, push_canvas_state
     from tests._audit_fixtures import held_by_another_writer
 

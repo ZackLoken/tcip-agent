@@ -162,13 +162,11 @@ def test_an_acknowledgment_binds_the_rows_and_refuses_once_a_document_changes(
 ):
     """An act recorded for six detections never ships twelve: the bucket, its producer and the
     gate's finding are the same after the document changes, and the rows it would write are not."""
+    import tcip_store
     from tcip_annotation import json_io
-
     from tcip_mcp.audit import audit_log_key
     from tcip_mcp.buckets import read_bucket
     from tests._chain_fixtures import predicted
-
-    import tcip_store
 
     bucket = _bucket(
         tmp_path, [predicted(_image(tmp_path, "a"), [fx.COUNT_SUBJECT] * 6)]
@@ -331,7 +329,6 @@ def test_a_non_finite_score_refuses_the_publication_so_no_average_ever_reads_it(
     """No stored number stands in for a score the model did not give: the publication refuses
     naming it, and no bucket a delivery could average over is ever recorded."""
     import tcip_store
-
     from tcip_mcp.dataset_layout import bucket_key
 
     with pytest.raises(ValueError, match="nan"):

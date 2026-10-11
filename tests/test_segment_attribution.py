@@ -13,7 +13,6 @@ import pytest
 
 from tcip_annotation.json_io import LabelDocument, read_label_document
 from tcip_annotation.state import Annotation, BBox, Point, Polygon
-
 from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
     OrthomosaicGeoreference,
 )
@@ -24,7 +23,6 @@ from tcip_mcp.pipelines.postprocessing.segment_attribution import (
     load_canopy_segments,
     tie_segments_to_plants,
 )
-
 from tests._geotiff_fixtures import (
     geotransform_of_file,
     write_canonical_dataset_raster,

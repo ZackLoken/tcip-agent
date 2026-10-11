@@ -13,11 +13,12 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
 from torch.utils.data import Dataset  # noqa: E402
+
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.pipelines.data.selection import ClassScope, read_selection
 from tcip_mcp.pipelines.data.split_construction import partition_samples
-from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject
+from tcip_mcp.subject_registry import Attribute, Subject, SubjectRegistry
 from tcip_mcp.tools.data_tools import draw_splits
 from tests._chain_fixtures import (
     BLOB_BUILDER,
@@ -25,8 +26,12 @@ from tests._chain_fixtures import (
     run_config,
     training_config,
 )
-from tests._producer_fixtures import label_image, labeled_frame, registry_over
-from tests._producer_fixtures import train_val as _train_val
+from tests._producer_fixtures import (
+    label_image,
+    labeled_frame,
+    registry_over,
+    train_val as _train_val,
+)
 from tests._verified_checkpoint_fixtures import partition_side
 
 SUBJECT = "leaf"
@@ -879,7 +884,6 @@ def test_auto_train_val_refuses_a_selection_with_an_empty_side(tmp_path: Path):
 def _strip_the_recorded_subject(out: Path) -> None:
     """Rewrite a drawn selection's record with no subject, past the writer."""
     import tcip_store as ts
-
     from tcip_mcp.pipelines.data.selection import selection_key
 
     document = ts.read(selection_key(out))

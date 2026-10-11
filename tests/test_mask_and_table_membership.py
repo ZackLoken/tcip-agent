@@ -26,9 +26,9 @@ from tcip_mcp.pipelines.data.split_construction import (  # noqa: E402
 )
 from tcip_mcp.pipelines.schemas import DataSpec  # noqa: E402
 from tcip_mcp.tools.data_tools import draw_splits  # noqa: E402
+from tests._chain_fixtures import training_config  # noqa: E402
 from tests._producer_fixtures import painted_frame, staged_layout  # noqa: E402
 from tests._training_values import IOU_THRESHOLD  # noqa: E402
-from tests._chain_fixtures import training_config  # noqa: E402
 from tests._verified_checkpoint_fixtures import partition_side, unbuilt_source  # noqa: E402
 
 
@@ -177,7 +177,6 @@ def _document_dataset(root: Path) -> tuple[Path, None]:
     """A dataset whose ground truth is one label document per image, each holding one ``bud``;
     its images directory, and no ground-truth place, since the images' own keys address it."""
     from tcip_annotation.state import Annotation, BBox
-
     from tests._producer_fixtures import label_image
 
     images_dir = root / "images" / UNDATED_BUCKET
@@ -201,7 +200,6 @@ def _drop_ground_truth_of_a(
     """Remove member ``a``'s ground truth: its label document, its row from a table, its mask
     from a directory."""
     import tcip_store
-
     from tests._producer_fixtures import image_label_key
 
     if ground_truth is None:
@@ -855,7 +853,7 @@ def test_a_document_run_and_a_mask_run_record_the_same_images_the_same_way(
     different image for one shape than for the other.
     """
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.subject_registry import SubjectRegistry, Subject
+    from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tests._producer_fixtures import (
         image_label_key,
         label_image,

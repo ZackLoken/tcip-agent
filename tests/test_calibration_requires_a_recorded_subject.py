@@ -10,11 +10,11 @@ which records the subject it was trained on.
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 from pathlib import Path
 
 import pytest
+
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("pycocotools")

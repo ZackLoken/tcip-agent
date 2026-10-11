@@ -19,7 +19,6 @@ from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
 from tcip_mcp.pipelines.data.label_queries import registry_scope
 from tests._producer_fixtures import image_label_key, write_image
 
-
 # ── the shared constructor ──────────────────────────────────────────────────
 
 
@@ -251,7 +250,7 @@ def _seed_review_dataset(
 ):
     """The label document of one image and the bucket ``m`` proposing ``pred_box`` on it; the
     label document's key."""
-    from tcip_mcp.subject_registry import SubjectRegistry, Subject
+    from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tests._producer_fixtures import label_image, registry_over
     from tests._web_fixtures import open_new_project
 

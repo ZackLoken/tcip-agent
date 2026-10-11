@@ -25,7 +25,6 @@ def test_the_subprocess_resolves_the_authored_criterion_and_leaves_the_trait_ent
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.tools import training_tools
     from tcip_mcp.traits import CENTER_MATCH, read_trait
-
     from tests._trait_fixtures import entry, propose_and_confirm
 
     monkeypatch.setattr(
@@ -33,7 +32,6 @@ def test_the_subprocess_resolves_the_authored_criterion_and_leaves_the_trait_ent
         lambda *a, **k: {},
     )
     from tcip_annotation.state import Annotation, BBox
-
     from tests._chain_fixtures import BLOB_BUILDER, training_config
     from tests._producer_fixtures import seed_labeled_images
     from tests._training_values import evaluation_block

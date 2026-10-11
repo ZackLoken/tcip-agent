@@ -84,7 +84,6 @@ def detection_images(
     ``values`` as its attribute values, and ``registry`` as the dataset's subject registry when
     one is given. Returns the ``images_dir`` a data section names it by."""
     from tcip_annotation.state import Annotation, BBox, Polygon
-
     from tests._producer_fixtures import registry_over, seed_labeled_images
 
     if registry is not None:

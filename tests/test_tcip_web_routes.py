@@ -6,13 +6,15 @@ import io
 from pathlib import Path
 
 import pytest
-import tcip_store
 from fastapi.testclient import TestClient
 from PIL import Image
 
+import tcip_store
 from tcip_annotation.json_io import read_label_document
 from tcip_annotation.state import Annotation, BBox, Polygon
-from tcip_mcp.subject_registry import SubjectRegistry, Subject
+from tcip_mcp.subject_registry import Subject, SubjectRegistry
+from tcip_web import jobstore
+from tcip_web.paths import safe_join
 from tests import REFUSED_NAMES
 from tests._audit_fixtures import audit_rows
 from tests._producer_fixtures import (
@@ -21,9 +23,6 @@ from tests._producer_fixtures import (
     registry_over,
 )
 from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS
-from tcip_web import jobstore
-from tcip_web.paths import safe_join
-
 
 # ── per-image JSON label fixtures (canonical on-disk format) ─────────────────
 
@@ -1157,7 +1156,6 @@ def test_a_launch_into_a_bucket_that_exists_fails_its_job_and_writes_nothing(
     """The publication refuses a bucket that exists, as it refuses every door's: the job ends
     failed naming the rule, the bucket keeps exactly the record it held, and no line is logged."""
     import tcip_store
-
     from tcip_mcp.dataset_layout import bucket_key
     from tcip_web.routes import inference
     from tests._verified_checkpoint_fixtures import registered_checkpoint
@@ -1210,7 +1208,6 @@ def test_inference_launch_leaves_the_bucket_for_its_publication_to_create(
     monkeypatch,
 ) -> None:
     import tcip_store
-
     from tcip_mcp.dataset_layout import bucket_key
 
     ckpt, dataset_root, date, _inference_routes = _launch_setup(

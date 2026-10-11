@@ -13,7 +13,6 @@ from PIL import Image
 from tcip_annotation.state import Annotation, BBox
 from tests._producer_fixtures import image_label_key, label_image
 
-
 # 4 source prefixes (srcA..srcD) x 3 tiles x 1 GT box each: 4 leakage groups, uniform density,
 # exactly meeting the draw's floor (one group each for train/val, two for the reference).
 GOLDEN_DRAW_SPLITS = {
@@ -95,10 +94,9 @@ def test_draw_splits_stats_golden(tmp_path: Path):
 def test_draw_splits_selection_document_golden(tmp_path: Path):
     """The selection is the draw's one record, in the database under its directory. Every
     sample names its own source and label; the draw copies nothing."""
-    from tcip_store.file_backend import is_bookkeeping
-
     from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.tools.data_tools import draw_splits
+    from tcip_store.file_backend import is_bookkeeping
 
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "s"

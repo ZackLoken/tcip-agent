@@ -13,9 +13,9 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
-from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from torch.utils.data import Dataset  # noqa: E402
 
+from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
 from tcip_mcp.pipelines.execution import ExecutionRefusedError, Stated  # noqa: E402
 from tests import REPO_ROOT  # noqa: E402

@@ -22,10 +22,10 @@ from mcp.shared.memory import create_client_server_memory_streams
 
 import tcip_store as ts
 from tcip_mcp import traits
+from tcip_mcp.agent_identity import RECORD_FIELDS as IDENTITY_FIELDS
 from tcip_mcp.server import build_server
 from tcip_mcp.workspace import BoundProject, workspace_from_environment
 from tests import _trait_fixtures as fx
-from tcip_mcp.agent_identity import RECORD_FIELDS as IDENTITY_FIELDS
 from tests._audit_fixtures import audit_rows
 
 DECLARED = mcp_types.Implementation(name="reviewing-harness", version="1.2.3")
@@ -204,7 +204,7 @@ def test_a_trait_proposed_through_a_handshake_is_named_by_its_audit_line(
 class _CapturingResponse:
     status = 200
 
-    def __enter__(self) -> "_CapturingResponse":
+    def __enter__(self) -> _CapturingResponse:
         return self
 
     def __exit__(self, *exc: object) -> None:

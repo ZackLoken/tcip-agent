@@ -7,19 +7,19 @@ reference is re-sided only through the admission's own sample producer, never ha
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 import shutil
 from pathlib import Path
 
 import pytest
+
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("pycocotools")
 
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, Polygon  # noqa: E402
-
+from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tests import _trait_fixtures as fx  # noqa: E402
 from tests._chain_fixtures import (  # noqa: E402
     DATE,
@@ -34,7 +34,6 @@ from tests._chain_fixtures import (  # noqa: E402
     train_on,
 )
 from tests._dense_op_fixtures import dense_records, good_cal_holdout  # noqa: E402
-from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS  # noqa: E402
 
 
@@ -599,9 +598,7 @@ def test_a_polygon_that_fails_to_rasterize_refuses_rather_than_training_an_empty
 ):
     from PIL import ImageDraw
 
-    from tests._producer_fixtures import dataset_over
-
-    from tests._producer_fixtures import label_image, write_image
+    from tests._producer_fixtures import dataset_over, label_image, write_image
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     write_image(images_dir / "a.png", (IMG, IMG))

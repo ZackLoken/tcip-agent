@@ -49,7 +49,7 @@ def encode_predictions(
     result: dict,
     created_by: str,
     *,
-    scope: "ClassScope",
+    scope: ClassScope,
 ) -> tuple[dict, int]:
     """A detection result encoded as its name-based per-image prediction document
     (:func:`~tcip_annotation.json_io.document_payload`), and the number of detections dropped.
@@ -75,8 +75,8 @@ def encode_predictions(
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation
     from tcip_mcp.audit import now_iso
-    from tcip_mcp.pipelines.data.selection import DOCUMENT
     from tcip_mcp.pipelines.data.datasets import PER_BOX_KEYS
+    from tcip_mcp.pipelines.data.selection import DOCUMENT
 
     attributes = cast(
         tuple, scope.admitted_for(DOCUMENT, "this bucket's scope").attributes

@@ -259,11 +259,10 @@ def test_inference_worker_predicts_on_the_correctly_decoded_grouped_capture(
     channel-aware loader, never as a stringified BandGroupRef."""
     pytest.importorskip("torch")
 
-    from tests._verified_checkpoint_fixtures import registered_checkpoint
-
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.execution import Stated
     from tcip_web.routes.inference import InferenceJob, _worker
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     images_dir = tmp_path / "images" / "2026-01-01"
     images_dir.mkdir(parents=True)

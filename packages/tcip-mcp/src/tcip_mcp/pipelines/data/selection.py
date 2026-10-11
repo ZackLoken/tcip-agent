@@ -8,14 +8,14 @@ one location (the source path, and the rect when a sample is a region of a large
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterable, Mapping, Sequence, cast
+from typing import TYPE_CHECKING, Any, cast
+
+from pydantic import ConfigDict, TypeAdapter
 
 import tcip_store
-from pydantic import ConfigDict, TypeAdapter
-from tcip_store import Key, encode_record
-
 from tcip_mcp.registry_paths import (
     PathFields,
     recorded_paths,
@@ -23,6 +23,7 @@ from tcip_mcp.registry_paths import (
     within,
 )
 from tcip_mcp.subject_registry import Attribute, named
+from tcip_store import Key, encode_record
 
 if TYPE_CHECKING:
     from tcip_mcp.traits import PositiveState
@@ -143,7 +144,7 @@ class ClassScope:
         object.__setattr__(self, "subject", self.subject or None)
 
     @classmethod
-    def of(cls, record: "Mapping[str, Any]") -> "ClassScope":
+    def of(cls, record: Mapping[str, Any]) -> ClassScope:
         """The class space ``record`` carries under ``scope``, a selection document or a
         prediction bucket's stamp, validated as a run's data block validates its own
         (``schemas.DataSpec.scope``) and read through :meth:`recorded`. A scope naming a key
@@ -157,7 +158,7 @@ class ClassScope:
         )
 
     @staticmethod
-    def recorded(scope: "ClassScope | None") -> "ClassScope":
+    def recorded(scope: ClassScope | None) -> ClassScope:
         """``scope``, the class space a record carries; a record carrying none refuses
         (``ValueError``) by name."""
         if scope is None:
@@ -168,9 +169,7 @@ class ClassScope:
             )
         return scope
 
-    def state_ids(
-        self, state: "PositiveState | None"
-    ) -> tuple[int, int] | None:
+    def state_ids(self, state: PositiveState | None) -> tuple[int, int] | None:
         """``(column, value id)`` of ``state`` under this class space: its attribute's position
         among the declared attributes and its value's among that attribute's values. ``None`` for
         no state, a space naming no subject, or one whose attributes do not list ``state``; a
@@ -186,7 +185,7 @@ class ClassScope:
             return None
         return attributes.index(found), found.values.index(state.value)
 
-    def admitted_for(self, shape: str, source: str) -> "ClassScope":
+    def admitted_for(self, shape: str, source: str) -> ClassScope:
         """This class space, refused by ``source`` when ground truth of ``shape`` cannot be read
         under it: per-image label documents are read for a named subject under the attributes the
         registry declares for it, and a mask raster or a table row, carrying its own classes, only

@@ -40,7 +40,6 @@ def test_write_project_site_refuses_a_directory_holding_no_project_record(
 
 def test_write_project_site_refuses_a_record_that_does_not_read(project: Path):
     import tcip_store
-
     from tcip_mcp.project_record import project_record_key
 
     key = project_record_key(str(project))

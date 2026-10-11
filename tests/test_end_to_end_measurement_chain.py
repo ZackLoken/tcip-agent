@@ -21,7 +21,6 @@ pytest.importorskip("pycocotools")
 
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
-
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tests._chain_fixtures import (  # noqa: E402
     IMG,
@@ -236,15 +235,12 @@ def test_the_chain_delivers_a_csv_whose_validated_column_reads_true(
     is edited and nothing is republished, so the delivery stands; the same predictions published
     under no assessment refuse.
     """
-    from tests import csv_rows
-
-    from tests import _trait_fixtures as fx
-
     from tcip_mcp.delivery import read_delivery_events
     from tcip_mcp.tools.inference_tools import (
         deliver_per_image_counts,
         run_inference,
     )
+    from tests import _trait_fixtures as fx, csv_rows
 
     chain = run_the_chain(tmp_path, experiment_id="exp-chain-delivers")
 
@@ -299,11 +295,9 @@ def test_editing_the_reference_labels_after_the_assessment_refuses_the_delivery(
     document and writes no CSV.
     """
     import tcip_store
-
-    from tests import _trait_fixtures as fx
-
     from tcip_mcp.assessment import assessment_dir, read_assessment
     from tcip_mcp.tools.inference_tools import deliver_per_image_counts
+    from tests import _trait_fixtures as fx
 
     chain = run_the_chain(tmp_path, experiment_id="exp-chain-edited")
     reference = read_assessment(
@@ -356,7 +350,6 @@ def test_publishing_the_same_bucket_twice_refuses_the_second_publish(
     exactly what the first publication left.
     """
     import tcip_store
-
     from tcip_mcp.buckets import (
         BucketExistsError,
         Document,
