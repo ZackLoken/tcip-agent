@@ -1,8 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { subjectsApi } from "@/api/subjects";
 import { StructuredRefusalError } from "@/api/http";
+import { subjectsApi } from "@/api/subjects";
 import { ATTR_TYPES } from "@/api/types.generated";
 import { AttributePanel } from "@/components/annotate/AttributePanel";
 import { useStore } from "@/store";

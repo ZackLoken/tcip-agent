@@ -2,9 +2,9 @@
  * The Annotate canvas's Konva Stage wrapper, its pan + zoom state managed in the store.
  */
 
+import Konva from "konva";
 import { useEffect, useRef, useState } from "react";
 import { Image as KonvaImage, Layer, Stage } from "react-konva";
-import Konva from "konva";
 
 import { MAX_SCALE, MIN_SCALE } from "@/components/Canvas/zoom";
 import { useOverviewBuild, writtenLabel } from "@/hooks/useOverviewBuild";

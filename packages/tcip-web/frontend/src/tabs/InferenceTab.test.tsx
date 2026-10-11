@@ -1,6 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { StructuredRefusalError } from "@/api/http";
 import {
   inferenceApi,
   openInferenceStream,
@@ -8,7 +9,6 @@ import {
   type BucketExistsRefusal,
   type InferenceJob,
 } from "@/api/inference";
-import { StructuredRefusalError } from "@/api/http";
 import type { RegisteredModel } from "@/api/types.generated";
 import { useStore } from "@/store";
 import { InferenceTab } from "@/tabs/InferenceTab";

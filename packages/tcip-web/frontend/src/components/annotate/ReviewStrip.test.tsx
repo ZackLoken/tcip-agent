@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ReviewStrip } from "@/components/annotate/ReviewStrip";
 import { itemName, type ReviewItem } from "@/lib/reviewItems";

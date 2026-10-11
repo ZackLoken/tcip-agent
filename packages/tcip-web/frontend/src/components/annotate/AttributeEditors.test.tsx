@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
 import { AttributeEditors } from "@/components/annotate/AttributeEditors";
 
@@ -13,7 +13,7 @@ describe("AttributeEditors unset option naming", () => {
       <AttributeEditors subject="bud" attributes={{}} registry={REGISTRY} onChange={vi.fn()} />,
     );
 
-    const select = screen.getByRole("combobox") as HTMLSelectElement;
+    const select = screen.getByRole("combobox");
     expect(within(select).getByRole("option", { name: "no opening value" })).toBeInTheDocument();
   });
 });

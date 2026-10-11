@@ -1,6 +1,6 @@
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { GUI_STATE_DEFAULTS } from "@/api/types.generated";
 import { ProjectPicker } from "@/components/ProjectPicker";

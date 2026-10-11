@@ -6,14 +6,14 @@ import {
   PANEL_EVENT_CANVAS_STATE_REQUEST,
   TAB_NAMES,
 } from "@/api/types.generated";
-import { ProjectPicker } from "@/components/ProjectPicker";
-import { TerminalRail } from "@/components/TerminalRail";
+import { stateSocket } from "@/api/ws";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { HelpOverlay } from "@/components/HelpOverlay";
+import { ProjectPicker } from "@/components/ProjectPicker";
 import { StatusBar } from "@/components/StatusBar";
 import { TabBanner } from "@/components/TabBanner";
+import { TerminalRail } from "@/components/TerminalRail";
 import { TopBar, tabButtonId, tabPanelId } from "@/components/TopBar";
-import { stateSocket } from "@/api/ws";
 import { useActiveTabSync } from "@/hooks/useActiveTabSync";
 import { applyAnnotateFocus, type AnnotateFocusData } from "@/lib/annotateFocus";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";

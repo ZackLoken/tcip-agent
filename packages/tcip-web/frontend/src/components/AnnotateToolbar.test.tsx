@@ -1,11 +1,11 @@
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Auto-cleanup needs vitest globals (not enabled here), so clean up explicitly.
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import type { ImageBandsResponse } from "@/api/client";
 import { api } from "@/api/client";
-import { subjectsApi } from "@/api/subjects";
 import { StructuredRefusalError } from "@/api/http";
+import { subjectsApi } from "@/api/subjects";
 import { AnnotateToolbar } from "@/components/AnnotateToolbar";
 import { defaultBandSelection, type BandSelection } from "@/lib/bandSelection";
 import { useStore } from "@/store";

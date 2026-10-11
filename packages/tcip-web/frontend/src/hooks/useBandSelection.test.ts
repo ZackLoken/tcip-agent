@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it } from "vitest";
 import { act, renderHook } from "@testing-library/react";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import type { ImageBandInfo, ImageBandsResponse } from "@/api/client";
 import { useBandSelection } from "@/hooks/useBandSelection";

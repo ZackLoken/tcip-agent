@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/api/client";
 import type { ServingCell } from "@/api/types.generated";
@@ -41,7 +41,7 @@ beforeEach(() => {
     x: 0,
     y: 0,
     toJSON: () => "",
-  } as DOMRect);
+  });
 });
 
 afterEach(() => {

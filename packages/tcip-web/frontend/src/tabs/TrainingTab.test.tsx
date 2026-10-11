@@ -1,13 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { StructuredRefusalError } from "@/api/http";
-import {
-  openTrainingStream,
-  trainingApi,
-  type SplitChoices,
-  type TrainingStreamMsg,
-} from "@/api/training";
+import { openTrainingStream, trainingApi, type SplitChoices } from "@/api/training";
 import {
   NOT_FINITE_SUFFIX,
   type RunRow,
@@ -17,8 +12,8 @@ import {
 } from "@/api/types.generated";
 import { UNSET_GLYPH } from "@/lib/glyphs";
 import { useStore } from "@/store";
-import { TrainingTab, dataPickerFor } from "@/tabs/TrainingTab";
 import { RUN_REFRESH_MS } from "@/tabs/trainingMetrics";
+import { TrainingTab, dataPickerFor } from "@/tabs/TrainingTab";
 import { openTestProject } from "@/test/store";
 
 // The live metrics stream owns a real WebSocket; only the run list and its controls are under
@@ -84,9 +79,7 @@ type Frame = Omit<TrainingRowFrame, "experiment_id"> | Omit<TrainingStatusFrame,
 /** Every stream the tab opens delivers ``frames`` at once, each under the id it was opened for. */
 function streamFrames(...frames: Frame[]) {
   vi.mocked(openTrainingStream).mockImplementation((experimentId, onMessage) => {
-    frames.forEach((frame) =>
-      onMessage({ ...frame, experiment_id: experimentId } as TrainingStreamMsg),
-    );
+    frames.forEach((frame) => onMessage({ ...frame, experiment_id: experimentId }));
     return () => {};
   });
 }

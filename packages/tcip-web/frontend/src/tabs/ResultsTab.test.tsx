@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/api/client";
 import { StructuredRefusalError } from "@/api/http";
@@ -536,7 +536,7 @@ describe("ResultsTab meaning refusals", () => {
             message: "stated but not confirmed by the breeder",
           },
         }),
-      } as Response),
+      }),
     );
 
     render(<ResultsTab />);

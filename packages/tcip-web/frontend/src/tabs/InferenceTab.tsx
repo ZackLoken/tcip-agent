@@ -221,14 +221,14 @@ export function InferenceTab() {
         };
         setActiveJob((prev) =>
           prev && prev.job_id === activeJobId
-            ? ({
+            ? {
                 ...prev,
                 done: asNum(msg.done, prev.done),
                 total: asNum(msg.total, prev.total),
                 status: (msg.status as InferenceJob["status"]) ?? prev.status,
                 // A frame's presence of the key decides, including error: null.
                 error: "error" in msg ? (msg.error as string | null) : prev.error,
-              } as InferenceJob)
+              }
             : prev,
         );
       }
@@ -320,18 +320,17 @@ export function InferenceTab() {
   function onWatchRefusedJob(refusal: BucketExistsRefusal) {
     const row = jobs.find((j) => j.job_id === refusal.job_id);
     setActiveJob(
-      row ??
-        ({
-          job_id: refusal.job_id,
-          status: "running",
-          done: 0,
-          total: 0,
-          // Nothing the refusal carries names the images dir; left empty rather than fabricated.
-          images_dir: "",
-          dataset_root: datasetRoot ?? "",
-          bucket: refusal.requested_bucket ?? "",
-          error: null,
-        } as InferenceJob),
+      row ?? {
+        job_id: refusal.job_id,
+        status: "running",
+        done: 0,
+        total: 0,
+        // Nothing the refusal carries names the images dir; left empty rather than fabricated.
+        images_dir: "",
+        dataset_root: datasetRoot ?? "",
+        bucket: refusal.requested_bucket ?? "",
+        error: null,
+      },
     );
     setActiveJobListed(row !== undefined);
   }

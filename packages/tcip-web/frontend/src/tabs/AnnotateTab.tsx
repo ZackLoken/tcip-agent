@@ -1,15 +1,14 @@
+import Konva from "konva";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Rect } from "react-konva";
-import Konva from "konva";
 
-import { api, type SaveLabelsBody } from "@/api/client";
+import { api, type SaveLabelsBody, SaveResult } from "@/api/client";
 import { subjectColor } from "@/api/subjects";
 import { AnnotateLegend } from "@/components/annotate/AnnotateLegend";
 import { AnnotationShapes } from "@/components/annotate/AnnotationShapes";
 import { AttributePanel } from "@/components/annotate/AttributePanel";
 import { FlagMarks } from "@/components/annotate/FlagMarks";
 import { InProgressPolygon } from "@/components/annotate/InProgressPolygon";
-import { boxBounds, boxDraft, draftStrokes } from "@/lib/draftStrokes";
 import { ProposalShapes } from "@/components/annotate/ProposalShapes";
 import { ReviewStrip } from "@/components/annotate/ReviewStrip";
 import { SnapIndicator } from "@/components/annotate/SnapIndicator";
@@ -23,11 +22,31 @@ import { useImageNav } from "@/hooks/useImageNav";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { usePrefetchAdjacentImages } from "@/hooks/usePrefetchAdjacentImages";
 import { useRegionServes } from "@/hooks/useRegionServes";
-import { compositeParams } from "@/lib/bandSelection";
 import { ANNOTATE_KEYS } from "@/lib/annotateKeys";
-import { postHeldContributions } from "@/lib/sessionLifecycle";
+import { compositeParams } from "@/lib/bandSelection";
+import {
+  buildAnnotateShapes,
+  computeViewport,
+  createCanvasPusher,
+  measureCanvasHost,
+  onCanvasStateRequest,
+  type CanvasStateBody,
+} from "@/lib/canvasSync";
+import { boxBounds, boxDraft, draftStrokes } from "@/lib/draftStrokes";
+import { applyEditDrag, hitTestEdit, type EditDrag } from "@/lib/editGeometry";
 import type { LoadedImage } from "@/lib/imageLoader";
+import { serializeCanvas } from "@/lib/labelSerde";
 import { currentImage } from "@/lib/paths";
+import {
+  computePolygonBboxes,
+  cutRing,
+  findHitPoint,
+  belowMinSide,
+  pointInRings,
+  pointToSegmentDist,
+  polygonAt,
+  withRing,
+} from "@/lib/polygonGeometry";
 import {
   decisionTarget,
   flagPlaces,
@@ -47,33 +66,13 @@ import {
   type ReviewItem,
   type StepScope,
 } from "@/lib/reviewItems";
-import { dashAt, DRAFT_DASH, POINT_HIT_CANVAS, strokeWidths } from "@/lib/symbology";
-import { fitView, zoomToRect } from "@/lib/viewGeometry";
-import {
-  buildAnnotateShapes,
-  computeViewport,
-  createCanvasPusher,
-  measureCanvasHost,
-  onCanvasStateRequest,
-  type CanvasStateBody,
-} from "@/lib/canvasSync";
-import type { SaveResult } from "@/api/client";
-import { holdsCanvas } from "@/store/slices/canvas";
-import { serializeCanvas } from "@/lib/labelSerde";
-import {
-  computePolygonBboxes,
-  cutRing,
-  findHitPoint,
-  belowMinSide,
-  pointInRings,
-  pointToSegmentDist,
-  polygonAt,
-  withRing,
-} from "@/lib/polygonGeometry";
-import { applyEditDrag, hitTestEdit, type EditDrag } from "@/lib/editGeometry";
+import { postHeldContributions } from "@/lib/sessionLifecycle";
 import { useSubjectColors } from "@/lib/subjectColors";
+import { dashAt, DRAFT_DASH, POINT_HIT_CANVAS, strokeWidths } from "@/lib/symbology";
 import { nextMode } from "@/lib/toolMode";
+import { fitView, zoomToRect } from "@/lib/viewGeometry";
 import { useStore } from "@/store";
+import { holdsCanvas } from "@/store/slices/canvas";
 import {
   isFinished,
   NO_CONTENT,

@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { subjectsApi, derivedSubjectColor, setSubjectColorRegistry } from "@/api/subjects";
-import { SUBJECT_COLORS, subjectColor } from "@/api/subjects";
+import {
+  subjectsApi,
+  derivedSubjectColor,
+  setSubjectColorRegistry,
+  SUBJECT_COLORS,
+  subjectColor,
+} from "@/api/subjects";
 
 function stubFetch(body: unknown = { status: "ok" }) {
   vi.stubGlobal(
@@ -11,7 +16,7 @@ function stubFetch(body: unknown = { status: "ok" }) {
       status: 200,
       json: async () => body,
       text: async () => JSON.stringify(body),
-    } as Response),
+    }),
   );
 }
 

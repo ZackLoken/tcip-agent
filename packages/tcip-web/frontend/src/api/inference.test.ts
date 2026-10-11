@@ -10,7 +10,7 @@ function stubFetch(status: number, body: unknown) {
       ok: status >= 200 && status < 300,
       status,
       json: async () => body,
-    } as Response),
+    }),
   );
 }
 
@@ -82,7 +82,7 @@ describe("inferenceApi.cancel", () => {
       ok: true,
       status: 200,
       json: async () => ({ job_id: "j1", status: "running", cancel_requested: true }),
-    } as Response);
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const res = await inferenceApi.cancel("j1", "jordan");

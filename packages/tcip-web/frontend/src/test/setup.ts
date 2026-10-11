@@ -35,7 +35,7 @@ function memoryStorage(): Storage {
     setItem: (k: string, v: string) => {
       store.set(k, String(v));
     },
-  } as Storage;
+  };
 }
 if (!globalThis.localStorage) {
   Object.defineProperty(globalThis, "localStorage", {
