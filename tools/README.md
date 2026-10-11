@@ -1,73 +1,70 @@
 # tools/
 
 Not a Python package (no `__init__.py`); each file is a standalone entry point run with
-`python tools/<name>.py`. Read a script's own module docstring and `--help` for exact usage;
-this index only says what each does. CI and development tooling only; the operator commands a
-breeder or an operator runs against a project are documented in `README.md` and
-`CONTRIBUTING.md` instead.
+`python tools/<name>.py`. Read a script's own module docstring and `--help` for exact usage; this
+index only says what each does. CI and development tooling only; the operator commands a breeder or
+an operator runs against a project are documented in `README.md` and `CONTRIBUTING.md` instead.
 
 - `gate_baseline.py` - runs the quality gate CI actually declares, parsed from
   `.github/workflows/ci.yml` rather than restated by hand, so a local pass predicts a CI pass.
 - `prove_test_fails_before.py` - extracts a baseline revision with `git archive`, overlays the
-  current test tree so conftest and helpers travel with the test, proves the baseline's own
-  source is what gets imported, and reads pytest's per-test outcome to say whether a test
-  actually fails without its fix. Four verdicts on four exit codes: `GUARDS` (0), `VACUOUS` (1),
-  `INDETERMINATE` (2) when the baseline is not shown to precede the change, and `REFUSED` (3)
-  when nothing was selected, everything was skipped, collection failed, or every failure was a
-  missing import. Only `GUARDS` is evidence. The default baseline is `HEAD` for uncommitted work
-  and the merge-base against the integration branch otherwise; the previous commit is not a
-  baseline in a one-file-per-commit history, so pass `--baseline` when neither default applies.
-  `--test-rev` checks a guard claim already in the history.
-- `cross_family_ask.py` - poses one identical question to several agent harnesses (claude,
-  codex, antigravity) and records comparable answers: the exact prompt, argv, stdout/stderr, the
-  extracted response, and run metadata describing what the harness was and how long it took.
-- `list_tools.py` - prints the live MCP tool registry (count + names); the single source of
-  truth for "how many domain tools exist," since the count drifts as tools are added/renamed.
-- `line_delta.py` - sums a change's insertions and deletions by area (`packages/`, `tests/`,
-  other) for a commit, a `rev1..rev2` range or `--cached`; the one measurement a contraction
-  change reports before landing (CLAUDE.md, "Working a change"), so package growth beside a
-  replacement is seen rather than assumed away.
-- `worktree_gate.py` - runs ruff, mypy and a pytest file list inside a worktree, its own
-  `tcip_mcp` resolution proved first (the editable installs point at the main checkout, so a
-  worktree needs its own `PYTHONPATH`) and refused before any gate runs if `tcip_mcp` resolves
-  outside it; each requested gate runs in the foreground, stopping at the first failure with its
-  exit code.
-- `generate_frontend_routes.py` - generates the browser's route-path module and the dev
-  server's proxy config from the backend's registered FastAPI routes, so the frontend
-  references a path by name instead of restating the string a second time.
+  current test tree so conftest and helpers travel with the test, proves the baseline's own source
+  is what gets imported, and reads pytest's per-test outcome to say whether a test actually fails
+  without its fix. Four verdicts on four exit codes: `GUARDS` (0), `VACUOUS` (1), `INDETERMINATE`
+  (2) when the baseline is not shown to precede the change, and `REFUSED` (3) when nothing was
+  selected, everything was skipped, collection failed, or every failure was a missing import. Only
+  `GUARDS` is evidence. The default baseline is `HEAD` for uncommitted work and the merge-base
+  against the integration branch otherwise; the previous commit is not a baseline in a
+  one-file-per-commit history, so pass `--baseline` when neither default applies. `--test-rev`
+  checks a guard claim already in the history.
+- `cross_family_ask.py` - poses one identical question to several agent harnesses (claude, codex,
+  antigravity) and records comparable answers: the exact prompt, argv, stdout/stderr, the extracted
+  response, and run metadata describing what the harness was and how long it took.
+- `list_tools.py` - prints the live MCP tool registry (count + names); the single source of truth
+  for "how many domain tools exist," since the count drifts as tools are added/renamed.
+- `line_delta.py` - sums a change's insertions and deletions by area (`packages/`, `tests/`, other)
+  for a commit, a `rev1..rev2` range or `--cached`; the one measurement a contraction change reports
+  before landing (CLAUDE.md, "Working a change"), so package growth beside a replacement is seen
+  rather than assumed away.
+- `worktree_gate.py` - runs ruff, mypy and a pytest file list inside a worktree, its own `tcip_mcp`
+  resolution proved first (the editable installs point at the main checkout, so a worktree needs its
+  own `PYTHONPATH`) and refused before any gate runs if `tcip_mcp` resolves outside it; each
+  requested gate runs in the foreground, stopping at the first failure with its exit code.
+- `generate_frontend_routes.py` - generates the browser's route-path module and the dev server's
+  proxy config from the backend's registered FastAPI routes, so the frontend references a path by
+  name instead of restating the string a second time.
 - `generate_frontend_types.py` - renders `frontend/src/api/types.generated.ts` from the pydantic
   models that declare the backend's response shapes and the GUI's tab/mode vocabulary
-  (`tcip_web.state.GuiVocabulary`), so the browser's types are a projection of the backend's
-  rather than hand-transcribed. Run after changing a declared model;
+  (`tcip_web.state.GuiVocabulary`), so the browser's types are a projection of the backend's rather
+  than hand-transcribed. Run after changing a declared model;
   `tests/test_generated_frontend_types.py` fails when the checked-in module is stale.
-- `generate_trait_fixture.py` - writes `frontend/src/test/traitListings.json`, the trait
-  listings the frontend tests read, by proposing and confirming traits in a scratch project and
-  serving them through the traits route. Run after changing the trait record's shape.
+- `generate_trait_fixture.py` - writes `frontend/src/test/traitListings.json`, the trait listings
+  the frontend tests read, by proposing and confirming traits in a scratch project and serving them
+  through the traits route. Run after changing the trait record's shape.
 - `generate_delivery_fixture.py` - writes `frontend/src/test/deliveryEvents.json`, the delivery
   events the frontend tests read, by making real deliveries in scratch projects and serving them
-  through the delivery-events route; `tests/test_generated_frontend_fixtures.py` holds the file
-  to what a regeneration serves. Run after changing a delivery's record or that route.
+  through the delivery-events route; `tests/test_generated_frontend_fixtures.py` holds the file to
+  what a regeneration serves. Run after changing a delivery's record or that route.
 - `generate_harness_discovery.py` - renders the thin `.claude/skills/<name>/SKILL.md` and
   `.agents/skills/<name>/SKILL.md` files, plus the generated block in `AGENTS.md`, from the
-  canonical knowledge documents under `packages/tcip-mcp/src/tcip_mcp/knowledge/`. Run after
-  adding, renaming, or re-describing a document; `tests/test_harness_discovery_generated.py`
-  fails when a checked-in generated file is stale.
-- `verify_skill_tools.py` - guardrail holding every tool name in agent-facing prose to the MCP
-  tool registry: a fabrication check over every table whose header's first column is "Tool", and
-  an orphan check for a registered tool no surface names anywhere.
-- `verify_skill_traits.py` - flags any trait-like token in a crop/domain `SKILL.md` that
-  isn't a real name in `crops.yml`, to catch fabricated trait names in skill prose.
-- `serve_capture_app.py` - starts and stops `python -m tcip_web` under a scratch environment for
-  a GUI capture harness: `start` sets `TCIP_WORKSPACE` beneath a caller-named
-  harness root (refusing one under the repository; refusing one that aliases the caller's own
-  active `TCIP_WORKSPACE` in either direction; refusing, when no `TCIP_WORKSPACE` is bound, a
-  root that already looks like a workspace itself), waits for the projects route to answer, and
-  records pid and port; `stop` kills the recorded process tree, Windows-only (`taskkill /T`),
-  refusing outright on any other host. Carries no project fixture, seed, or crop name; seeding a
-  project is the capture script's own job.
+  canonical knowledge documents under `packages/tcip-mcp/src/tcip_mcp/knowledge/`. Run after adding,
+  renaming, or re-describing a document; `tests/test_harness_discovery_generated.py` fails when a
+  checked-in generated file is stale.
+- `verify_skill_tools.py` - guardrail holding every tool name in agent-facing prose to the MCP tool
+  registry: a fabrication check over every table whose header's first column is "Tool", and an
+  orphan check for a registered tool no surface names anywhere.
+- `verify_skill_traits.py` - flags any trait-like token in a crop/domain `SKILL.md` that isn't a
+  real name in `crops.yml`, to catch fabricated trait names in skill prose.
+- `serve_capture_app.py` - starts and stops `python -m tcip_web` under a scratch environment for a
+  GUI capture harness: `start` sets `TCIP_WORKSPACE` beneath a caller-named harness root (refusing
+  one under the repository; refusing one that aliases the caller's own active `TCIP_WORKSPACE` in
+  either direction; refusing, when no `TCIP_WORKSPACE` is bound, a root that already looks like a
+  workspace itself), waits for the projects route to answer, and records pid and port; `stop` kills
+  the recorded process tree, Windows-only (`taskkill /T`), refusing outright on any other host.
+  Carries no project fixture, seed, or crop name; seeding a project is the capture script's own job.
 - `generate_favicon.ps1` - renders the browser-tab favicon from the source logo: crops its
   transparent margins, resizes the result to 512x512, and writes it plus a 32x32 copy to the
   frontend's public assets.
 - `smoke_terminal_e2e.py` - live smoke exercising the in-app agent terminal against one provider
-  row's real harness end to end (spawn, websocket attach, prompt, response), named by its id.
-  Costs one model turn.
+  row's real harness end to end (spawn, websocket attach, prompt, response), named by its id. Costs
+  one model turn.

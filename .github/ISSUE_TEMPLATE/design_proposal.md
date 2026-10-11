@@ -24,9 +24,9 @@ migration shim.
 
 ## Refusal or gate impact
 
-If this adds or changes a refusal: what it refuses, and the legitimate call that must still
-succeed afterward (a rail change ships with a test proving valid work still passes, constructed
-through the platform's own producer).
+If this adds or changes a refusal: what it refuses, and the legitimate call that must still succeed
+afterward (a rail change ships with a test proving valid work still passes, constructed through the
+platform's own producer).
 
 ## Alternatives considered
 

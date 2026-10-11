@@ -23,5 +23,5 @@ supports:
 What this work establishes, in a few sentences.
 
 What it does not establish. Its dataset, scale, or domain, and where that differs from tree-crop
-phenotyping, so a later reader can judge how far the result carries. A citation that omits its
-own limits invites over-reading.
+phenotyping, so a later reader can judge how far the result carries. A citation that omits its own
+limits invites over-reading.

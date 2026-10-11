@@ -18,8 +18,8 @@ everything you have; leave the rest blank rather than guessing.
 
 ## The delivery's own provenance tail
 
-Copy the values from the delivered CSV's own columns; a blank cell is itself informative, so
-report it as blank rather than omitting the row.
+Copy the values from the delivered CSV's own columns; a blank cell is itself informative, so report
+it as blank rather than omitting the row.
 
 - `producer_model_sha256`:
 - `producing_experiment_id`:
@@ -35,11 +35,11 @@ report it as blank rather than omitting the row.
 
 ## What is wrong
 
-Describe the specific value(s) that are wrong or that overclaim confidence, and against what
-ground truth or breeder judgment you are checking them.
+Describe the specific value(s) that are wrong or that overclaim confidence, and against what ground
+truth or breeder judgment you are checking them.
 
 ## What the breeder expected
 
-What the breeder told you the delivered number should mean, and how what you got differs from
-that. Name the trait revision the delivery event records, whether the breeder had confirmed it,
-and quote its operationalization statement for this delivery kind if you have it.
+What the breeder told you the delivered number should mean, and how what you got differs from that.
+Name the trait revision the delivery event records, whether the breeder had confirmed it, and quote
+its operationalization statement for this delivery kind if you have it.
