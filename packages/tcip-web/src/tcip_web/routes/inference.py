@@ -50,7 +50,7 @@ class InferenceJob:
     assessment_id: str | None = None
     total: int = 0
     done: int = 0
-    status: str = "pending"  # one of jobstore.JOB_STATES
+    status: jobstore.JobStatus = "pending"
     error: str | None = None
     # Detections dropped for a zero-extent box, as the published bucket's record counts them;
     # None until a bucket is published.
@@ -97,7 +97,7 @@ def _get(job_id: str) -> InferenceJob | None:
 def _worker(job: InferenceJob) -> None:
     # Held through try/except, assigned to job.status only in finally, after the publication is
     # attempted. "running" (never a terminal read) until a branch below names the real outcome.
-    terminal_status = "running"
+    terminal_status: jobstore.JobStatus = "running"
     try:
         job.status = "running"
 

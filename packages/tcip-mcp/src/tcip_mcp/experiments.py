@@ -29,12 +29,21 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import cached_property
 from pathlib import Path, PureWindowsPath
-from typing import TYPE_CHECKING, Any, BinaryIO, NamedTuple, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    BinaryIO,
+    Literal,
+    NamedTuple,
+    cast,
+    get_args,
+)
 
 from pydantic import BaseModel
 
 from tcip_mcp.audit import now_iso
 from tcip_mcp.pipelines.data.selection import SAMPLE_PATHS
+from tcip_mcp.pipelines.schemas import Objective
 from tcip_mcp.registry_paths import (
     PathFields,
     recorded_paths,
@@ -136,8 +145,9 @@ RECORD_PATHS: dict[str, PathFields] = {
 """The fields of each record of a run or sweep directory that name a path, each stored against
 the project the directory lies under (:func:`project_of_run`)."""
 
-FINAL_STATES = ("completed", "failed", "canceled")
+FinalState = Literal["completed", "failed", "canceled"]
 """The states a final status names."""
+FINAL_STATES: tuple[FinalState, ...] = get_args(FinalState)
 TERMINAL_STATES = frozenset({*FINAL_STATES, "interrupted"})
 """Every state a run or sweep ends in: a final status's, and ``interrupted``, the state a directory
 with no final status reads as once its heartbeat is stale."""
@@ -471,8 +481,8 @@ def cancel_requested(directory: Path) -> bool:
 @dataclass(frozen=True)
 class RunObservation:
     """One run or sweep directory read once: its launch record, its final status (``None`` while
-    it has not ended), its latest sign of life as a POSIX time (:func:`last_alive`), and the state
-    those derive.
+    it has not ended), its latest sign of life as a POSIX time (:func:`last_alive`), the state
+    those derive, and the record file it holds (``RUN_FILE`` or ``SWEEP_FILE``).
     """
 
     directory: Path
@@ -480,6 +490,7 @@ class RunObservation:
     final: dict | None
     alive: float
     state: str
+    record_file: str
 
     @property
     def metrics_log(self) -> Path:
@@ -536,6 +547,21 @@ class RunObservation:
             else DataSpec.model_validate(resolved["data"])
         )
 
+    @cached_property
+    def objective(self) -> Objective:
+        """The objective the record carries, validated once: a sweep's own, else what a run's
+        launch resolved (:attr:`resolution`'s). Refuses (``ValueError``) naming the run when it
+        resolved to nothing.
+        """
+        if self.record_file == SWEEP_FILE:
+            return Objective.model_validate(self.record["objective"])
+        resolved = self.resolution
+        if resolved is None:
+            raise ValueError(
+                f"run {self.directory.name} resolved to nothing and carries no objective"
+            )
+        return Objective.model_validate(resolved["objective"])
+
     @property
     def sweep(self) -> str | None:
         """The sweep a trial run belongs to, ``None`` for a run launched on its own."""
@@ -566,7 +592,9 @@ def observe(directory: Path) -> RunObservation:
             if time.time() - alive <= HEARTBEAT_STALE_SECONDS
             else "interrupted"
         )
-    observation = RunObservation(directory, record, final, alive, state)
+    observation = RunObservation(
+        directory, record, final, alive, state, record_file
+    )
     if record_file == RUN_FILE and not observation.metrics_log.is_file():
         raise IncompleteRunError(
             f"run {directory.name} ({state}) is missing "
@@ -705,11 +733,11 @@ def epoch_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def best_selection(
-    rows: list[dict[str, Any]], objective: dict
+    rows: list[dict[str, Any]], objective: Objective
 ) -> float | None:
     """The best finite ``selection`` among a run's metrics-log epoch rows
-    (:func:`partition_rows`) in the direction of ``objective``, the run's recorded
-    ``{"selection_metric", "higher_is_better"}``; ``None`` when no row carries one.
+    (:func:`partition_rows`) in the direction of ``objective``, the run's recorded one; ``None``
+    when no row carries one.
     """
     values = [
         float(row["selection"])
@@ -718,7 +746,7 @@ def best_selection(
     ]
     if not values:
         return None
-    return max(values) if objective["higher_is_better"] else min(values)
+    return max(values) if objective.higher_is_better else min(values)
 
 
 class RunRow(BaseModel):
@@ -755,12 +783,10 @@ def run_summary(
     resolved (:func:`best_selection`) with that objective's metric name, both ``None`` for a run
     that resolved to nothing.
     """
-    record, resolution, spec = (
-        observation.record,
-        observation.resolution,
-        observation.spec,
+    record, spec = observation.record, observation.spec
+    objective = (
+        observation.objective if observation.resolution is not None else None
     )
-    objective = resolution["objective"] if resolution is not None else None
     rows = epoch_rows(rows)
     return RunRow(
         experiment_id=observation.directory.name,
@@ -776,7 +802,7 @@ def run_summary(
         best_metric=best_selection(rows, objective)
         if objective is not None
         else None,
-        best_metric_name=objective["selection_metric"]
+        best_metric_name=objective.selection_metric
         if objective is not None
         else None,
         output_dir=str(observation.directory),
@@ -866,16 +892,18 @@ def group_split_draws(
     return out
 
 
-def sweep_outcome(trials: list[RunRow], sweep: dict) -> dict[str, Any]:
-    """What a sweep's trial rows amount to under the objective its record ``sweep`` states:
+def sweep_outcome(
+    trials: list[RunRow], given: dict[str, Any], objective: Objective
+) -> dict[str, Any]:
+    """What a sweep's trial rows amount to under its recorded input ``given`` and ``objective``:
     ``best_params`` and ``best_value`` over its completed trials in the objective's direction;
     above one draw, the best point by mean over its draws (:func:`group_split_draws`), with
     ``best_value_spread`` and every point's ``split_sensitivity``. ``best_params`` is ``None``
     when no trial or point qualifies.
     """
-    choose = max if sweep["objective"]["higher_is_better"] else min
-    if sweep["input"]["split_draws"] > 1:
-        groups = group_split_draws(trials, sweep["input"]["split_draw_seeds"])
+    choose = max if objective.higher_is_better else min
+    if given["split_draws"] > 1:
+        groups = group_split_draws(trials, given["split_draw_seeds"])
         eligible = [g for g in groups if g["eligible"]]
         best_group = (
             choose(eligible, key=lambda g: g["block"]["mean"])
@@ -914,7 +942,7 @@ class SweepGroup(BaseModel):
     state: str
     status_error: str | None
     input: dict[str, Any]
-    objective: dict[str, Any]
+    objective: Objective
     cancel_requested: bool
     heartbeat: str
     trials: list[RunRow]
@@ -932,11 +960,11 @@ def read_sweep(directory: Path, rows: list[RunRow]) -> SweepGroup:
         state=sweep.state,
         status_error=sweep.status_error,
         input=sweep.record["input"],
-        objective=sweep.record["objective"],
+        objective=sweep.objective,
         cancel_requested=cancel_requested(directory),
         heartbeat=sweep.heartbeat,
         trials=trials,
-        outcome=sweep_outcome(trials, sweep.record),
+        outcome=sweep_outcome(trials, sweep.record["input"], sweep.objective),
     )
 
 

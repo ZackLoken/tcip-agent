@@ -940,9 +940,12 @@ def test_a_detector_run_selecting_on_the_objective_refuses_unweighted_and_resolv
             evaluation=evaluation_block(score_weights=weights),
         )
     )
-    assert resolve_objective(spec, project=tmp_path, has_val_loader=True)[
-        "selection_metric"
-    ] == ("objective")
+    assert (
+        resolve_objective(
+            spec, project=tmp_path, has_val_loader=True
+        ).selection_metric
+        == "objective"
+    )
     assert (
         compute_composite_objective(
             2.0, 0.5, 0.4, spec.evaluation.score_weights

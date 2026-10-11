@@ -300,26 +300,24 @@ def read_audit_log(
         limit: Maximum entries to return (default 200), newest first.
 
     """
-    from tcip_mcp.audit import audit_entries, audit_log_key, dataset_scope_of
+    from tcip_mcp.audit import audit_entries, dataset_scope_of
     from tcip_mcp.registry_paths import located
 
-    if scope is None:
-        key = audit_log_key(project)
-    else:
-        resolved_scope = dataset_scope_of(located(scope, project))
-        if resolved_scope is None:
-            return {
-                "error": (
-                    f"scope '{scope}' names no dataset root, project root, or path under "
-                    "either: omit scope for the project's own log, or pass a dataset root, a "
-                    "project root, or a path under one; a project root must carry its own "
-                    ".tcip directory or subjects.json for this to resolve it"
-                ),
-            }
-        key = audit_log_key(resolved_scope)
+    root = (
+        project if scope is None else dataset_scope_of(located(scope, project))
+    )
+    if root is None:
+        return {
+            "error": (
+                f"scope '{scope}' names no dataset root, project root, or path under "
+                "either: omit scope for the project's own log, or pass a dataset root, a "
+                "project root, or a path under one; a project root must carry its own "
+                ".tcip directory or subjects.json for this to resolve it"
+            ),
+        }
 
     try:
-        records, _cursor = audit_entries(key.root)
+        records, _cursor = audit_entries(root)
         since_dt = (
             _parse_audit_bound("since", since) if since is not None else None
         )
@@ -333,7 +331,7 @@ def read_audit_log(
             for entry in records
         ]
     except ValueError as exc:
-        return {"error": str(exc), "scope_resolved": key.root}
+        return {"error": str(exc), "scope_resolved": str(root)}
 
     def _matches(at: datetime, entry: Mapping[str, Any]) -> bool:
         return (
@@ -358,7 +356,7 @@ def read_audit_log(
         "entries": entries,
         "count": len(entries),
         "skipped": skipped,
-        "scope_resolved": key.root,
+        "scope_resolved": str(root),
     }
 
 

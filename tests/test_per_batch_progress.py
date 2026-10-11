@@ -208,8 +208,11 @@ def test_the_best_selection_reads_epoch_rows_and_never_a_batch_row_s_selection(
     ctx.log_metrics(2, {"selection": 0.7})
 
     rows = read_rows(ctx.run_dir / METRICS_FILE)[0]
-    assert best_selection(rows, {"higher_is_better": False}) == 0.5
-    assert best_selection(rows, {"higher_is_better": True}) == 0.7
+    for higher_is_better, best in ((False, 0.5), (True, 0.7)):
+        objective = ctx.run.objective.model_copy(
+            update={"higher_is_better": higher_is_better}
+        )
+        assert best_selection(rows, objective) == best
 
 
 def test_a_bespoke_loop_logs_a_batch_row_and_neither_sink_takes_the_other_s_stamp(

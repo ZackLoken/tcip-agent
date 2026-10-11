@@ -538,12 +538,12 @@ script-invoked doors demoted from them) except a door whose libraries record eac
 `propose_trait`, `save_annotations`, `write_subject_registry`, `run_hyperparameter_search`, and the
 three assessment doors `assess_checkpoint`, `assess_reserved_regions` and
 `calibrate_physical_scale`, whose assessment leaves its library's line): bare, the project's own
-log; `@audited(scope_arg=...)` names the argument carrying a dataset or project location, resolved
-via `dataset_scope_of` (`audit.py`) (through the tool's own canonicalizer when the declaration
-passes one as `scope_via`). Four doors declare one: three dataset-scoped (`register_dataset`,
-`tools/project_tools.py`; `propose_annotations`, `tools/proposal_tools.py`; `stage_proposals`,
-`tools/proposal_tools.py`). A resolution that answers "no dataset" leaves the entry in the project's
-own log; a resolver that raises refuses the call rather than filing it there.
+log; `@audited(scope_arg=...)`, the decorator's one keyword, names the argument carrying a dataset
+or project location, located against the project (`registry_paths.located`) and resolved to its
+root by `dataset_scope_of` (`audit.py`). One door declares one: `register_dataset`
+(`tools/project_tools.py`, `scope_arg="dataset_root"`). A resolution that answers "no dataset"
+leaves the entry in the project's own log; a resolver that raises refuses the call rather than
+filing it there.
 
 `record_event_or_raise` covers code that is neither an MCP tool nor a demoted door. Project-scoped:
 the training envelope's open/close events (`pipelines/training/envelope.py`), the model registry's
@@ -1400,8 +1400,9 @@ Must agree: the browser recognizes the terminal frame and the status vocabulary 
 Side A: `packages/tcip-web/src/tcip_web/routes/inference.py`
 (`@router.websocket("/jobs/{job_id}/stream")`). Side B:
 `packages/tcip-mcp/src/tcip_mcp/experiments.py`
-(`TERMINAL_STATES = frozenset({*FINAL_STATES, "interrupted"})`, the one declaration the job registry
-and the generated frontend vocabulary both read).
+(`FinalState`, the final states the job registry's `jobstore.JobStatus` composes over and
+`TERMINAL_STATES = frozenset({*FINAL_STATES, "interrupted"})` extends, both read by the generated
+frontend vocabulary).
 
 ## S51. Training run stream WebSocket
 

@@ -104,12 +104,32 @@ def test_every_configured_root_is_honored_not_only_the_first(
         "TCIP_IMAGE_ROOTS", os.pathsep.join([str(root_a), "  ", str(second)])
     )
     roots = image_roots_from_environment()
-    assert roots == (root_a.resolve(), second.resolve())
+    assert roots == (root_a, second)
     store.configure(store.workspace, roots)
     assert assert_path_allowed(str(img_a)) == img_a.resolve()
     assert assert_path_allowed(str(img_b)) == img_b.resolve()
     with pytest.raises(ValueError, match="outside the allowed roots"):
         assert_path_allowed(str(leak))
+
+
+def test_a_relative_image_root_refuses_at_start_and_an_absolute_one_is_read(
+    tmp_path, monkeypatch
+) -> None:
+    """A relative ``TCIP_IMAGE_ROOTS`` entry names no directory until a working directory is
+    chosen, so reading the list refuses naming it; the same list stated absolutely is read.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(
+        "TCIP_IMAGE_ROOTS", os.pathsep.join([str(tmp_path), "archive"])
+    )
+    with pytest.raises(ValueError, match=r"relative entries \['archive'\]"):
+        image_roots_from_environment()
+
+    monkeypatch.setenv(
+        "TCIP_IMAGE_ROOTS",
+        os.pathsep.join([str(tmp_path), str(tmp_path / "archive")]),
+    )
+    assert image_roots_from_environment() == (tmp_path, tmp_path / "archive")
 
 
 def test_derived_default_canonicalises_the_path_it_admits(

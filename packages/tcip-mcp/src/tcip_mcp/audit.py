@@ -69,7 +69,7 @@ def audit_log_key(scope: str | Path) -> Key:
     hangs off (a dataset root when the event changed a record that travels with the data, the
     project root otherwise).
     """
-    return Key(AUDIT_LOG_STORE, str(Path(scope).resolve()), _AUDIT_PARTS)
+    return Key(AUDIT_LOG_STORE, str(scope), _AUDIT_PARTS)
 
 
 def audit_entries(
@@ -192,8 +192,7 @@ def dataset_scope_of(value: Any) -> Path | None:
         ):
             return None
         root = candidate
-    # Resolved, so the scope an entry names is the same root its key was built from.
-    return root.resolve()
+    return root
 
 
 _Door = TypeVar("_Door", bound=Callable[..., Any])

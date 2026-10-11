@@ -58,6 +58,16 @@ class EarlyStoppingSpec(BaseModel):
     min_delta: float = Field(ge=0)
 
 
+class Objective(BaseModel):
+    """A run's objective, resolved once at launch: the metric its epochs are selected by and that
+    metric's declared direction.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    selection_metric: str
+    higher_is_better: bool
+
+
 class OptimizerSpec(BaseModel):
     """The optimizer every stage builds (``optimizer_factory.build_optimizer``): its family and
     its tuned settings required (both rates, the weight decay, and ``momentum`` for ``sgd`` and

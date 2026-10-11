@@ -93,6 +93,7 @@ def declared_models() -> list[type[BaseModel]]:
         SegmentTieDisclosure,
     )
     from tcip_mcp.pipelines.execution import Stated
+    from tcip_mcp.pipelines.schemas import Objective
     from tcip_mcp.traits import (
         Operationalization,
         PositiveState,
@@ -151,6 +152,7 @@ def declared_models() -> list[type[BaseModel]]:
         ServingCell,
         ViewReads,
         RunRow,
+        Objective,
         SweepGroup,
         TrainingDetail,
         TrainingListing,
@@ -264,10 +266,10 @@ def literal_aliases() -> dict[str, tuple[str, ...]]:
     from tcip_annotation.json_io import SubjectState
     from tcip_annotation.verdicts import VerdictAction
     from tcip_mcp.pipelines.band_stats import StretchMode
-    from tcip_web.jobstore import JOB_STATES
+    from tcip_web.jobstore import JobStatus
 
     return {
-        "JobStatus": JOB_STATES,
+        "JobStatus": get_args(JobStatus),
         "StretchMode": get_args(StretchMode),
         "SubjectState": get_args(SubjectState),
         "VerdictAction": get_args(VerdictAction),

@@ -965,10 +965,10 @@ def open_trial(sweep: Path, trial_id: str, point: dict) -> Path:
     refuses, or whose sources cannot be staged, raises ``ValueError`` naming every issue before
     any directory is opened.
     """
-    record = experiments.observe(sweep).record
+    observed = experiments.observe(sweep)
     project = experiments.project_of_run(sweep)
     spec, sources, issues = _admitted(
-        record["input"]["base_config"], point, project
+        observed.record["input"]["base_config"], point, project
     )
     if spec is None or sources is None:
         raise ValueError(
@@ -982,7 +982,7 @@ def open_trial(sweep: Path, trial_id: str, point: dict) -> Path:
                 spec,
                 sources.layout,
                 project=project,
-                objective=record["objective"],
+                objective=observed.objective,
             ).record
         except Exception as exc:  # noqa: BLE001, whatever stops the resolution fails the trial
             status_error = str(exc)
@@ -1326,7 +1326,7 @@ def open_sweep(
         return {"error": str(exc), "issues": []}
     record = {
         "created": now_iso(),
-        "objective": objective,
+        "objective": objective.model_dump(),
         "input": {
             "n_trials": n_trials,
             "search_alg": search_alg,
@@ -1384,8 +1384,8 @@ def run_sweep(directory: Path) -> SweepGroup:
     )
 
     project = experiments.project_of_run(directory)
-    record = experiments.observe(directory).record
-    given = record["input"]
+    observed = experiments.observe(directory)
+    given = observed.record["input"]
 
     def end(state: str, status_error: str | None) -> SweepGroup:
         experiments.write_final_status(directory, state, status_error)
@@ -1412,7 +1412,7 @@ def run_sweep(directory: Path) -> SweepGroup:
             objective_fn=objective_fn,
             param_space=search_param_space,
             metric="objective",
-            mode="max" if record["objective"]["higher_is_better"] else "min",
+            mode="max" if observed.objective.higher_is_better else "min",
             num_samples=given["n_trials"],
             search_alg=given["search_alg"],
             scheduler=given["scheduler"],

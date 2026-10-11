@@ -1319,7 +1319,7 @@ def test_a_bound_detection_run_stating_no_metric_selects_by_the_composite_object
     )
 
     assert observation.state == "completed", observation.status_error
-    assert observation.resolution["objective"] == {
+    assert observation.objective.model_dump() == {
         "selection_metric": "objective",
         "higher_is_better": False,
     }

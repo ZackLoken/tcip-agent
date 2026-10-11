@@ -81,8 +81,8 @@ class StateStore:
     def configure(
         self, workspace: Path, image_roots: tuple[Path, ...]
     ) -> None:
-        """Set the workspace this backend serves and the additive image roots it admits, each
-        resolved once where the backend starts.
+        """Set the workspace this backend serves and the additive image roots it admits, both
+        read once where the backend starts.
         """
         self._workspace, self._image_roots = workspace, image_roots
 

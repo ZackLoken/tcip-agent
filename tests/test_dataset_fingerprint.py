@@ -175,6 +175,36 @@ def test_registry_value_order_matters_but_whitespace_does_not(tmp_path):
     assert dataset_fingerprint(tmp_path) == fp_a
 
 
+def test_an_admitted_sample_enters_at_its_admitted_version_under_the_root_as_spelled(
+    tmp_path, monkeypatch
+):
+    """A dataset root spelled through a ``..`` segment: each admitted sample's label document
+    enters the labels term at the version its admission read, never digested again, since the
+    term lists the documents under the root as the caller spelled it, the spelling the samples'
+    own keys carry.
+    """
+    from tcip_mcp.pipelines.data.selection import ClassScope
+    from tcip_mcp.pipelines.data.split_construction import admitted_membership
+
+    (tmp_path / "elsewhere").mkdir()
+    root = tmp_path / "elsewhere" / ".." / "ds"
+    _make_dataset(root)
+    samples = admitted_membership(
+        [("2026-02-11", root / "images" / "2026-02-11", None)],
+        scope=ClassScope(subject="bud"),
+        group_by="tile_prefix",
+        group_key_map=None,
+    ).samples.values()
+    admitted = dataset_fingerprint(root, samples)
+    assert admitted is not None
+
+    def digested_again(key):
+        raise AssertionError(f"{key} was digested again")
+
+    monkeypatch.setattr(selection, "ground_truth_digest", digested_again)
+    assert dataset_fingerprint(root, samples) == admitted
+
+
 def test_fingerprint_is_content_addressed_move_preserves_it(tmp_path):
     src = tmp_path / "a"
     _make_dataset(src)

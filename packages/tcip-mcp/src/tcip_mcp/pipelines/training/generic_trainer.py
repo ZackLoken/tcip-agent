@@ -40,6 +40,7 @@ from tcip_mcp.pipelines.schemas import (
     CosineSchedule,
     DataSpec,
     HorizonSchedule,
+    Objective,
     OneCycleSchedule,
     PlateauSchedule,
     SchedulerSpec,
@@ -628,11 +629,11 @@ def resolve_selection_metric(
 
 def resolve_objective(
     spec: TrainConfigSchema, *, project: Path, has_val_loader: bool
-) -> dict:
-    """A run's objective: ``selection_metric``, :func:`resolve_selection_metric` over its
-    validated config's (``schemas.train_config``) task, ``evaluation`` trait (:func:`config_trait`
-    in ``project``) and ``selection_metric``, and ``higher_is_better``, that metric's declared
-    direction.
+) -> Objective:
+    """A run's :class:`~tcip_mcp.pipelines.schemas.Objective`: ``selection_metric``,
+    :func:`resolve_selection_metric` over its validated config's (``schemas.train_config``) task,
+    ``evaluation`` trait (:func:`config_trait` in ``project``) and ``selection_metric``, and
+    ``higher_is_better``, that metric's declared direction.
     """
     metric = resolve_selection_metric(
         spec.model_source.task,
@@ -641,10 +642,10 @@ def resolve_objective(
         score_weights=spec.evaluation.score_weights,
         has_val_loader=has_val_loader,
     )
-    return {
-        "selection_metric": metric,
-        "higher_is_better": HIGHER_IS_BETTER_BY_METRIC[metric],
-    }
+    return Objective(
+        selection_metric=metric,
+        higher_is_better=HIGHER_IS_BETTER_BY_METRIC[metric],
+    )
 
 
 def _selection_value(
@@ -818,7 +819,7 @@ def train(
     """
     run.status = "running"
     run.start_time = time.time()
-    higher_is_better = run.objective["higher_is_better"]
+    higher_is_better = run.objective.higher_is_better
     # The losing-side sentinel for this run's own direction: any real value beats it.
     losing_side = float("-inf") if higher_is_better else float("inf")
     best: dict | None = None  # the run's best epoch (_epoch_state)
@@ -875,7 +876,7 @@ def train(
         first_eff_batch = physical_batch * accumulation(stages[0])
         prev_trainable = None  # trainable param count of the previous stage
         trait = evaluated["trait"]
-        selection_metric = run.objective["selection_metric"]
+        selection_metric = run.objective.selection_metric
         loader_generator = getattr(train_loader, "generator", None)
 
         global_step = 0

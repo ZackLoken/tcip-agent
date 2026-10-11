@@ -330,7 +330,7 @@ def test_report_objective_records_a_selection_row_that_reaches_the_epoch_hook(
     ctx.log_metrics(2, {"train_loss": 0.5})
     ctx.report_objective(3.14)
 
-    metric = ctx.run.objective["selection_metric"]
+    metric = ctx.run.objective.selection_metric
     assert seen[-1] == (2, {"selection": 3.14, "selection_metric": metric})
     last = read_rows(run_dir / METRICS_FILE)[0][-1]
     assert (last["epoch"], last["selection"], last["selection_metric"]) == (

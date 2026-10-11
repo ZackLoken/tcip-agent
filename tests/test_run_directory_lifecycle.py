@@ -257,7 +257,7 @@ def test_progress_logged_after_the_final_status_never_reopens_the_run(
     assert summary["state"] == "completed"
     assert summary["best_metric"] is not None
     assert summary["best_metric"] == best_selection(
-        rows, observation.record["resolved"]["objective"]
+        rows, observation.objective
     )
 
 
@@ -610,6 +610,8 @@ def test_a_trial_whose_resolution_fails_is_a_directory_whose_final_status_names_
         row["best_metric"],
         row["best_metric_name"],
     ) == ("failed", final["status_error"], None, None)
+    with pytest.raises(ValueError, match="resolved to nothing"):
+        observe(trial_dir).objective
 
 
 def _reports_only(ctx):
@@ -673,11 +675,11 @@ def test_the_sweep_the_live_summary_and_a_trial_read_one_recorded_objective(
     (trial_dir,) = run_dirs(tmp_path)
     trial = observe(trial_dir)
 
-    assert sweep.record["objective"]["selection_metric"] != "loss"
-    assert trial.resolution["objective"] == sweep.record["objective"]
+    assert sweep.objective.selection_metric != "loss"
+    assert trial.objective == sweep.objective
     assert (
         run_summary(trial, [], None).best_metric_name
-        == sweep.record["objective"]["selection_metric"]
+        == sweep.objective.selection_metric
     )
 
 

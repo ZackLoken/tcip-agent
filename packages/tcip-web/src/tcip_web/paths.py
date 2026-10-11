@@ -9,6 +9,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from tcip_mcp.registry_paths import located, nearest_containing_ancestor
+from tcip_store import canonical_path
 
 __all__ = [
     "allowed_optional",
@@ -23,14 +24,22 @@ __all__ = [
 
 
 def image_roots_from_environment() -> tuple[Path, ...]:
-    """The additive ``TCIP_IMAGE_ROOTS`` entries (os.pathsep list), resolved; empty when unset.
-    Read once, at the backend's start.
+    """The additive ``TCIP_IMAGE_ROOTS`` entries (os.pathsep list); empty when unset. Read once,
+    at the backend's start. A relative entry refuses (``ValueError``) naming it, since it names
+    no directory until a working directory is chosen.
 
     These are added on top of the derived allow-set (:func:`allowed_roots`), the recovery path for
     a legitimate root the platform does not manage. Setting it never narrows anything.
     """
     raw = os.environ.get("TCIP_IMAGE_ROOTS", "").strip()
-    return tuple(Path(r).resolve() for r in raw.split(os.pathsep) if r.strip())
+    roots = tuple(Path(r) for r in raw.split(os.pathsep) if r.strip())
+    relative = [str(root) for root in roots if not root.is_absolute()]
+    if relative:
+        raise ValueError(
+            f"TCIP_IMAGE_ROOTS names relative entries {relative}: state each image root as an "
+            "absolute path"
+        )
+    return roots
 
 
 def allowed_roots() -> list[Path]:
@@ -46,9 +55,7 @@ def allowed_roots() -> list[Path]:
 
     roots: list[Path] = [store.workspace]
     for project in project_dirs(store.workspace):
-        # A project reached through a junction or symlink resolves outside the workspace and is
-        # admitted as itself, not only through the workspace it is listed from.
-        roots.append(project.resolve())
+        roots.append(project)
         try:
             entries = read_datasets(project)
         except DecodeError as exc:
@@ -58,14 +65,7 @@ def allowed_roots() -> list[Path]:
             ) from exc
         roots.extend(dataset_entry_path(project, e) for e in entries)
     roots.extend(store.image_roots)
-    seen: set[str] = set()
-    unique: list[Path] = []
-    for root in roots:
-        key = str(root)
-        if key not in seen:
-            seen.add(key)
-            unique.append(root)
-    return unique
+    return list({canonical_path(root): root for root in roots}.values())
 
 
 def _existing_anchor(resolved: Path) -> Path | None:
