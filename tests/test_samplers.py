@@ -1,6 +1,6 @@
-"""build_sampler call shape and the tile-locality sampler: banded read order, runtime band
-derivation, per-worker lanes under multi-worker loading, and the refusals that keep it
-honest.
+"""build_sampler call shape, the imbalance samplers over a run's own loaders, and the
+tile-locality sampler: banded read order, runtime band derivation, per-worker lanes under
+multi-worker loading, and the refusals that keep it honest.
 """
 
 from __future__ import annotations
@@ -328,16 +328,24 @@ def test_tile_locality_refuses_windowed_source_without_dtype_size(monkeypatch):
 # ── build_sampler call shape: the loader context must not disturb the existing names ──
 
 
-class _TinyClassDataset:
-    def __len__(self):
-        return 4
+def _table_run(tmp_path, values: list[int], block: dict, task: str):
+    """The context of a ``task`` run over one frame per value of ``values`` (each its label),
+    whose train loader draws through the sampler ``block``, built as the child's own entry builds
+    it (:func:`~tests.tiny_trainer_fixtures.run_context`).
+    """
+    from tests.tiny_trainer_fixtures import (
+        classifier_config,
+        distinct_intensities,
+        frames_data,
+        run_context,
+    )
 
-    def __getitem__(self, i):
-        return "x", {"label": i % 2}
-
-    @property
-    def class_distribution(self):
-        return {0: 2, 1: 2}
+    data = frames_data(
+        tmp_path / "ds", distinct_intensities(len(values)), values
+    )
+    config = classifier_config(1, data, sampler=block)
+    config["model_source"]["task"] = task
+    return run_context(tmp_path, config)
 
 
 def test_build_sampler_builds_tile_locality_through_the_factory(monkeypatch):
@@ -356,13 +364,17 @@ def test_build_sampler_builds_tile_locality_through_the_factory(monkeypatch):
     assert isinstance(sampler, TileLocalitySampler)
 
 
-def test_build_sampler_imbalance_samplers_build_with_or_without_the_loader_context():
+def test_build_sampler_imbalance_samplers_build_with_or_without_the_loader_context(
+    tmp_path,
+):
     """The imbalance samplers neither require nor receive the loader context: each block builds
     with the context absent and with it present but ignored.
     """
     from tcip_mcp.pipelines.data import samplers
 
-    ds = _TinyClassDataset()
+    ds = _table_run(
+        tmp_path, [0, 1, 0, 1], {"name": "class_balanced"}, "classification"
+    ).train_loader.dataset
     for block in (
         {"name": "class_balanced"},
         {"name": "oversample", "min_count": 3},
@@ -409,24 +421,106 @@ def test_a_stated_oversampler_count_is_the_count_the_train_loader_draws_at(
 ):
     """Guard. The train loader built for a run (``generic_trainer.run_loaders``) draws through the
     oversampler at the count its config states: four samples of two classes, two each,
-    duplicated up to five per class, read 4 + 2 * 3 * 2 indices an epoch. The run is the
-    launcher's own; the samples are a dataset naming each class under the key the sampler
-    reads.
+    duplicated up to five per class, read 4 + 2 * 3 * 2 indices an epoch.
     """
-    from tcip_mcp.pipelines.training.generic_trainer import run_loaders
-    from tests.tiny_trainer_fixtures import (
-        classifier_config,
-        frames_data,
-        run_context,
-    )
-
-    data = frames_data(tmp_path / "ds", [0.1, 0.2, 0.8, 0.9], [0, 0, 1, 1])
-    ctx = run_context(
+    ctx = _table_run(
         tmp_path,
-        classifier_config(
-            1, data, sampler={"name": "oversample", "min_count": 5}
-        ),
+        [0, 0, 1, 1],
+        {"name": "oversample", "min_count": 5},
+        "classification",
     )
-    train_loader, _ = run_loaders(ctx.run, _TinyClassDataset(), None)
 
-    assert len(list(iter(train_loader.sampler))) == 4 + 2 * 3 * 2
+    assert len(list(iter(ctx.train_loader.sampler))) == 4 + 2 * 3 * 2
+
+
+@pytest.mark.parametrize("task", ["classification", "ordinal"])
+def test_each_imbalance_sampler_weighs_the_classes_its_loaders_distribution_counts(
+    tmp_path, task
+):
+    """Guard. Over a run's own loader of three frames of class 0 and one of class 1, the
+    oversampler duplicates each class up to its count (4 + 3 * 2 + 1 * 5 indices), and the
+    class-balanced and weighted samplers weigh each frame by its own class's balanced weight.
+    """
+    from tcip_mcp.pipelines.components.losses import compute_class_weights
+    from tcip_mcp.pipelines.data.samplers import build_sampler
+
+    ctx = _table_run(
+        tmp_path, [0, 0, 0, 1], {"name": "oversample", "min_count": 5}, task
+    )
+    ds = ctx.train_loader.dataset
+    assert ds.class_distribution == {0: 3, 1: 1}
+    weight = compute_class_weights(ds.class_distribution, normalize=False)
+    expected = [weight[label].item() for label in (0, 0, 0, 1)]
+    balanced = build_sampler({"name": "class_balanced"}, ds)
+    weighted = build_sampler({"name": "weighted_random"}, ds)
+    assert weighted._sampler.weights.tolist() == pytest.approx(expected)
+    assert balanced._weights.tolist() == pytest.approx(expected)
+    assert len(list(iter(ctx.train_loader.sampler))) == 4 + 3 * 2 + 1 * 5
+
+
+def test_a_detection_loaders_example_classes_are_its_distributions_keys(
+    tmp_path,
+):
+    """A detection loader's 1-indexed labels reach a sampler as the 0-indexed classes its
+    class distribution counts.
+    """
+    from tests._producer_fixtures import dataset_over
+    from tests._verified_checkpoint_fixtures import detection_images
+
+    images = detection_images(tmp_path, {"subject": "bud"})["images_dir"]
+    ds = dataset_over("detection", images, subject="bud")
+
+    assert ds.class_distribution == {0: 2}
+    assert ds.sample_classes() == [0, 0]
+
+
+def test_an_imbalance_sampler_over_a_loader_stating_no_classes_refuses_naming_both(
+    tmp_path,
+):
+    """Guard. A regression loader states no class distribution, so a run stating a class-balanced
+    sampler refuses when its train loader is built, naming the sampler and the task, rather than
+    drawing a plain shuffle the config did not ask for.
+    """
+    with pytest.raises(
+        ValueError, match=r"ClassBalancedSampler.*'regression'"
+    ):
+        _table_run(
+            tmp_path, [0, 1, 0, 1], {"name": "class_balanced"}, "regression"
+        )
+
+
+def test_the_oversampler_over_an_instance_segmentation_loader_draws_at_its_distribution(
+    tmp_path,
+):
+    """Guard. An instance-segmentation loader states the class distribution its regions count, so
+    the oversampler duplicates its two frames of class 0 up to five: 2 + 2 * 3 indices.
+    """
+    from tcip_mcp.pipelines.data.samplers import build_sampler
+    from tests._producer_fixtures import dataset_over
+    from tests._verified_checkpoint_fixtures import detection_images
+
+    images = detection_images(tmp_path, {"subject": "bud"}, polygons=True)
+    ds = dataset_over("instance_seg", images["images_dir"], subject="bud")
+
+    assert ds.class_distribution == {0: 2}
+    sampler = build_sampler({"name": "oversample", "min_count": 5}, ds)
+    assert len(list(iter(sampler))) == 2 + 2 * 3
+
+
+def test_the_oversampler_reshuffles_per_epoch_under_the_global_seed(tmp_path):
+    from tcip_mcp.pipelines.data.samplers import OverSampler
+
+    ds = _table_run(
+        tmp_path,
+        [0] * 8 + [1],
+        {"name": "oversample", "min_count": 4},
+        "classification",
+    ).train_loader.dataset
+    s = OverSampler(ds, min_count=4)
+    assert len(s) > len(ds)
+    torch.manual_seed(0)
+    epoch1, epoch2 = list(s), list(s)
+    assert sorted(epoch1) == sorted(epoch2)
+    assert epoch1 != epoch2
+    torch.manual_seed(0)
+    assert list(s) == epoch1

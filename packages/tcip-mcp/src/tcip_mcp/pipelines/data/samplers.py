@@ -1,8 +1,9 @@
 """Task-aware data samplers: class-imbalance handling plus read-locality ordering.
 
-The imbalance samplers wrap torch samplers but compute weights from
-dataset.class_distribution; a config's ``sampler`` block names one beside its own values. The
-locality sampler orders a tiled dataset's reads to stay inside GDAL's block cache.
+The imbalance samplers wrap torch samplers but compute weights from dataset.class_distribution
+over each example's class (dataset.sample_classes); a config's ``sampler`` block names one beside
+its own values. The locality sampler orders a tiled dataset's reads to stay inside GDAL's block
+cache.
 """
 
 from __future__ import annotations
@@ -23,73 +24,48 @@ from tcip_mcp.pipelines.data.datasets import BaseDataset
 logger = logging.getLogger(__name__)
 
 
-def _target_class_id(target: dict, class_key: str | None = None) -> int | None:
-    """A sample's class id: its target's ``class_key`` value, raw, when one is named, else its
-    ``label``, its ``ranks``, or its first detection ``labels`` row shifted from 1-indexed to the
-    0-indexed id ``class_distribution`` keys; ``None`` when none is found.
+def _classes(
+    sampler: Sampler, dataset: BaseDataset
+) -> tuple[dict[int, int], list[int | None]]:
+    """``dataset``'s class distribution and each example's class (``dataset.sample_classes``).
+    Refuses (``ValueError``) naming ``sampler`` and the dataset's task when the dataset states no
+    class distribution.
     """
-    if class_key is not None:
-        val = target.get(class_key)
-    elif "label" in target:
-        val = target["label"]
-    elif "ranks" in target:
-        val = target["ranks"]
-    elif torch.is_tensor(target.get("labels")) and len(target["labels"]) > 0:
-        # 1-indexed detection label -> 0-indexed class_distribution key.
-        return int(target["labels"].reshape(-1)[0].item()) - 1
-    else:
-        return None
-    if val is None:
-        return None
-    if torch.is_tensor(val):
-        return int(val.reshape(-1)[0].item()) if val.numel() else None
-    return int(val)
+    dist = dataset.class_distribution
+    if not dist:
+        raise ValueError(
+            f"{type(sampler).__name__} weighs each example by its class, and this "
+            f"{dataset.task_type!r} loader ({type(dataset).__name__}) states no class "
+            "distribution: state no sampler block for a shuffled draw of every sample, or "
+            "train over a loader that states a class per example."
+        )
+    return dist, dataset.sample_classes()
+
+
+def _class_weights(sampler: Sampler, dataset: BaseDataset) -> torch.Tensor:
+    """Each example's draw weight: its class's balanced weight
+    (:func:`~tcip_mcp.pipelines.components.losses.compute_class_weights`) over the dataset's
+    distribution (:func:`_classes`, whose refusal propagates), 1.0 for an example with no class
+    or one outside it.
+    """
+    from tcip_mcp.pipelines.components.losses import compute_class_weights
+
+    dist, classes = _classes(sampler, dataset)
+    class_weight = compute_class_weights(dist, normalize=False).tolist()
+    weights = [class_weight[cid] if cid in dist else 1.0 for cid in classes]
+    return torch.tensor(weights, dtype=torch.double)
 
 
 class ClassBalancedSampler(Sampler):
     """Over-/under-samples so each class appears equally often per epoch."""
 
-    def __init__(
-        self, dataset: BaseDataset, class_key: str | None = None
-    ) -> None:
-        self.class_key = class_key
-        dist = dataset.class_distribution
-        if not dist:
-            self._indices = list(range(len(dataset)))
-            self._length = len(dataset)
-            return
-
-        # Build per-sample weight: inverse class frequency
-        self._weights = self._compute_weights(dataset, dist, class_key)
+    def __init__(self, dataset: BaseDataset) -> None:
+        self._weights = _class_weights(self, dataset)
         self._length = len(dataset)
 
-    @staticmethod
-    def _compute_weights(
-        dataset: BaseDataset,
-        dist: dict[int, int],
-        class_key: str | None = None,
-    ) -> torch.Tensor:
-        """Each sample's draw weight: its class's balanced weight
-        (:func:`~tcip_mcp.pipelines.components.losses.compute_class_weights`), 1.0 for a sample
-        with no class or one outside ``dist``.
-        """
-        from tcip_mcp.pipelines.components.losses import compute_class_weights
-
-        class_weight = compute_class_weights(dist, normalize=False).tolist()
-        weights = []
-        for i in range(len(dataset)):
-            _, target = dataset[i]
-            cid = _target_class_id(target, class_key)
-            weights.append(class_weight[cid] if cid in dist else 1.0)
-        return torch.tensor(weights, dtype=torch.double)
-
     def __iter__(self):
-        if hasattr(self, "_weights"):
-            idx = torch.multinomial(
-                self._weights, self._length, replacement=True
-            )
-            return iter(idx.tolist())
-        return iter(self._indices)
+        idx = torch.multinomial(self._weights, self._length, replacement=True)
+        return iter(idx.tolist())
 
     def __len__(self) -> int:
         return self._length
@@ -98,23 +74,14 @@ class ClassBalancedSampler(Sampler):
 class OverSampler(Sampler):
     """Duplicate minority-class samples so all classes have >= min_count."""
 
-    def __init__(
-        self,
-        dataset: BaseDataset,
-        min_count: int,
-        class_key: str | None = None,
-    ) -> None:
-        dist = dataset.class_distribution
+    def __init__(self, dataset: BaseDataset, min_count: int) -> None:
+        dist, classes = _classes(self, dataset)
         self._indices: list[int] = list(range(len(dataset)))
-        if not dist:
-            return
 
         # Gather per-class indices
         class_indices: dict[int, list[int]] = {cid: [] for cid in dist}
-        for i in range(len(dataset)):
-            _, target = dataset[i]
-            cid = _target_class_id(target, class_key)
-            if cid is not None and cid in class_indices:
+        for i, cid in enumerate(classes):
+            if cid in class_indices:
                 class_indices[cid].append(i)
 
         # Duplicate minority classes
@@ -137,26 +104,12 @@ class OverSampler(Sampler):
 class WeightedRandomSampler(Sampler):
     """Thin wrapper around torch's WeightedRandomSampler with auto-weights."""
 
-    def __init__(
-        self, dataset: BaseDataset, class_key: str | None = None
-    ) -> None:
-        dist = dataset.class_distribution
-        n = len(dataset)
-        if not dist:
-            # torch's own stub types weights as Sequence[float]; a Tensor is what the
-            # constructor actually accepts and converts internally.
-            self._sampler = _TorchWeightedRandom(
-                cast(Sequence[float], torch.ones(n)),
-                num_samples=n,
-                replacement=True,
-            )
-            return
-
-        weights = ClassBalancedSampler._compute_weights(
-            dataset, dist, class_key
-        )
+    def __init__(self, dataset: BaseDataset) -> None:
+        # torch's own stub types weights as Sequence[float]; a Tensor is what it accepts.
         self._sampler = _TorchWeightedRandom(
-            cast(Sequence[float], weights), num_samples=n, replacement=True
+            cast(Sequence[float], _class_weights(self, dataset)),
+            num_samples=len(dataset),
+            replacement=True,
         )
 
     def __iter__(self):
