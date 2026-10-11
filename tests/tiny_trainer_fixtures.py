@@ -32,11 +32,39 @@ class MeanIntensityRegressor(nn.Module):
 
     One parameter, so which data a pass is run over is the only thing that can move its loss. A
     subclass changes only which training calls it answers with that loss.
+
+    With ``cancel_at_call`` and ``cancel_output_dir`` given, the training forward with that
+    one-based call count requests the run's own cancellation (``experiments.request_cancel``)
+    at that output directory, so a test can place a cancel at an exact point in the batch
+    stream; both are record values, so the builder's kwargs stay a config.
     """
 
-    def __init__(self, init_weight: float = 0.0) -> None:
+    def __init__(
+        self,
+        init_weight: float = 0.0,
+        cancel_at_call: int | None = None,
+        cancel_output_dir: str | None = None,
+    ) -> None:
         super().__init__()
         self.weight = nn.Parameter(torch.tensor([float(init_weight)]))
+        self.cancel_at_call = cancel_at_call
+        self.cancel_output_dir = cancel_output_dir
+        self._forwards = 0
+
+    def _count_training_forward(self) -> None:
+        """Count one training forward, requesting the run's cancellation at ``cancel_at_call``."""
+        self._forwards += 1
+        if (
+            self._forwards == self.cancel_at_call
+            and self.cancel_output_dir is not None
+        ):
+            from pathlib import Path
+
+            from tcip_mcp.experiments import request_cancel
+
+            path = Path(self.cancel_output_dir)
+            path.mkdir(parents=True, exist_ok=True)
+            request_cancel(path)
 
     def predict(self, images):
         return self.weight * images.mean(dim=(1, 2, 3))
@@ -50,6 +78,7 @@ class MeanIntensityRegressor(nn.Module):
 
     def forward(self, images, targets=None):
         if self.training and targets is not None:
+            self._count_training_forward()
             return self.fit_loss(images, targets)
         return {"head0_values": self.predict(images)}
 
@@ -58,9 +87,15 @@ def build_mean_intensity_regressor(
     *,
     in_chans: int = 1,
     init_weight: float = 0.0,
+    cancel_at_call: int | None = None,
+    cancel_output_dir: str | None = None,
 ) -> MeanIntensityRegressor:
     """``model_source`` builder for :class:`MeanIntensityRegressor`."""
-    return MeanIntensityRegressor(init_weight=init_weight)
+    return MeanIntensityRegressor(
+        init_weight=init_weight,
+        cancel_at_call=cancel_at_call,
+        cancel_output_dir=cancel_output_dir,
+    )
 
 
 class CountingRegressor(MeanIntensityRegressor):
@@ -199,38 +234,9 @@ def build_data_scaled_gradient_model(
 
 
 class AlwaysDivergedModel(MeanIntensityRegressor):
-    """Reports a non-finite loss unconditionally, for exercising a diverged run end to end.
-
-    With ``cancel_at_call`` and ``cancel_output_dir`` given, the training forward with that
-    one-based call count requests the run's own cancellation (``experiments.request_cancel``)
-    at that output directory, so a test can place a
-    cancel at an exact point in the batch stream; both are record values, so the builder's
-    kwargs stay a config.
-    """
-
-    def __init__(
-        self,
-        cancel_at_call: int | None = None,
-        cancel_output_dir: str | None = None,
-    ) -> None:
-        super().__init__()
-        self.cancel_at_call = cancel_at_call
-        self.cancel_output_dir = cancel_output_dir
-        self._calls = 0
+    """Reports a non-finite loss unconditionally, for exercising a diverged run end to end."""
 
     def fit_loss(self, images, targets) -> dict:
-        self._calls += 1
-        if (
-            self._calls == self.cancel_at_call
-            and self.cancel_output_dir is not None
-        ):
-            from pathlib import Path
-
-            from tcip_mcp.experiments import request_cancel
-
-            path = Path(self.cancel_output_dir)
-            path.mkdir(parents=True, exist_ok=True)
-            request_cancel(path)
         return {"nan_loss": self.weight * float("nan")}
 
 
@@ -472,16 +478,11 @@ class _CallScheduledModel(MeanIntensityRegressor):
     training-forward calls ``finite(call)`` admits and a non-finite loss on every other.
     """
 
-    def __init__(self, init_weight: float = 0.0) -> None:
-        super().__init__(init_weight)
-        self._calls = 0
-
     def finite(self, call: int) -> bool:
         raise NotImplementedError
 
     def fit_loss(self, images, targets) -> dict:
-        self._calls += 1
-        if self.finite(self._calls):
+        if self.finite(self._forwards):
             return super().fit_loss(images, targets)
         return {"nan_loss": _phantom_nan()}
 
