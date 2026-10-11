@@ -1,20 +1,30 @@
-# The lint gate: CI runs `ruff check .`, a developer `ruff check packages tests tools`.
-# The code follows PEP 8 strictly and this gate enforces it.
+# The lint and format gate: CI runs `ruff check .` and `ruff format --check .`, a developer the
+# same over `packages tests tools`. The code follows PEP 8 strictly and this gate enforces it.
 
 # Selected explicitly, never ruff's implicit default, which moves between releases; the preview
 # rules move too, so .github/workflows/ci.yml pins the ruff version this file was written against.
 
-# 100 columns: where the tree sat when the gate was written and the length the reformatting was
-# first measured at. Provisional until the owner rules on 79, 88 or 100.
-line-length = 100
+# 79 columns for code, PEP 8's limit, which the formatter holds.
+line-length = 79
+
+[format]
+docstring-code-format = true
 
 [lint]
 # pycodestyle's whitespace, blank-line and warning rules (E1, E2, E3, W) are preview rules in ruff.
 preview = true
 
-# E, W: pycodestyle, PEP 8's layout rules, line length included. N: pep8-naming, PEP 8's naming.
-# F: pyflakes. B033: a duplicate set value. D, I, UP, SIM, C4 and the formatter are later gates.
-select = ["E", "W", "N", "F", "B033"]
+# E, W: pycodestyle. N: pep8-naming. F: pyflakes. B033: a duplicate set value. I: import order.
+# UP: the modern syntax for the Python this runs on. D and ANN are the owner's next gates.
+select = ["E", "W", "N", "F", "B033", "I", "UP"]
+
+[lint.pycodestyle]
+# Prose the formatter does not wrap (docstrings, comments) holds the 100 columns the tree's
+# documents sit at; code the formatter wraps at 79.
+max-line-length = 100
+
+[lint.isort]
+known-first-party = ["tcip_store", "tcip_annotation", "tcip_mcp", "tcip_web", "tests", "tools"]
 
 [lint.per-file-ignores]
 # `name = pytest.importorskip("dep")` legitimately precedes imports in dependency-gated test
