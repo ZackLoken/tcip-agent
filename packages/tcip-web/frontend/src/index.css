@@ -1,6 +1,62 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+/* "Field station" identity: warm bark, soil and field-notebook neutrals around SI green and persimmon.
+   tcip-bg and tcip-accent are held fixed: the focus-ring test in index.css.test.ts pins them. */
+@theme {
+  --color-tcip-bg: #1e1e1e; /* held fixed (focus-ring offset test) */
+  --color-tcip-canvas: #26271f; /* warm-neutral canvas host, annotation colors read true */
+  --color-tcip-fg: #e7e5dc; /* field-notebook paper (warm off-white) */
+  --color-tcip-muted: #8c9082; /* sage gray */
+  --color-tcip-border: #33352c; /* bark border */
+  --color-tcip-panel: #20211b; /* bark panel surface */
+  --color-tcip-hover: #282922; /* warm raised hover surface (secondary controls) */
+  --color-tcip-border-hover: #454a3b;
+  --color-tcip-accent: #507754; /* SI_GREEN, held fixed (focus-ring color test) */
+  --color-tcip-accent-hover: #46694a; /* darker on hover: white 12px text stays AA (6.2:1) */
+  --color-tcip-warn: #e6976b; /* SI_PERSIMMON, the warm / autumn signal */
+  /* Phenology season scale (dormant, bud, canopy, late-summer, fruit) used by SeasonRail. */
+  --color-tcip-season-0: #5b6b6a;
+  --color-tcip-season-1: #7fa96a;
+  --color-tcip-season-2: #507754;
+  --color-tcip-season-3: #c9a24b;
+  --color-tcip-season-4: #e6976b;
+  /* Detection tags: kept vivid and distinct (CV correctness). */
+  --color-tcip-tp: #4caf50;
+  --color-tcip-fp: #ef5350;
+  --color-tcip-fn: #ffd54a; /* gold, the "missed" (false-negative) signal, matches the review legend */
+  --color-tcip-pred: #00bfff;
+  --color-tcip-focus: #ffd700;
+
+  --font-sans: Archivo, "Segoe UI", "Helvetica Neue", Helvetica, Arial, "DejaVu Sans", sans-serif;
+  --font-mono: Consolas, Menlo, monospace;
+
+  --spacing-topbar: 44px;
+  --spacing-statusbar: 28px;
+
+  --animate-tcip-rise: tcip-rise 0.32s ease-out both;
+  @keyframes tcip-rise {
+    0% {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
+
+/* Preflight leaves buttons on the default cursor and placeholders at half the text color. */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--color-gray-400);
+  }
+}
 
 /* ── Archivo (Savanna Institute brand font) ──────────────────────────── */
 @font-face {
@@ -80,75 +136,73 @@ body,
   }
 }
 
-@layer components {
-  /* Secondary buttons hover to a neutral raised surface; only .tcip-btn-primary
-     hovers SI green, so action hierarchy survives the hover state. */
-  .tcip-btn {
-    @apply inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded border border-tcip-border bg-tcip-panel text-tcip-fg text-[12px]
-           hover:bg-tcip-hover hover:border-tcip-border-hover transition-colors disabled:opacity-40 disabled:hover:bg-tcip-panel
-           disabled:hover:border-tcip-border disabled:cursor-not-allowed
-           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tcip-accent/70 focus-visible:ring-offset-1 focus-visible:ring-offset-tcip-bg;
-  }
+/* Secondary buttons hover to a neutral raised surface; only tcip-btn-primary
+   hovers SI green, so action hierarchy survives the hover state. */
+@utility tcip-btn {
+  @apply inline-flex items-center justify-center gap-1.5 h-8 px-3 rounded border border-tcip-border bg-tcip-panel text-tcip-fg text-[12px]
+         hover:bg-tcip-hover hover:border-tcip-border-hover transition-colors disabled:opacity-40 disabled:hover:bg-tcip-panel
+         disabled:hover:border-tcip-border disabled:cursor-not-allowed
+         focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-tcip-accent/70 focus-visible:ring-offset-1 focus-visible:ring-offset-tcip-bg;
+}
 
-  .tcip-btn-primary {
-    @apply tcip-btn bg-tcip-accent border-tcip-accent text-white
-           hover:bg-tcip-accent-hover hover:border-tcip-accent-hover;
-  }
+@utility tcip-btn-primary {
+  @apply tcip-btn bg-tcip-accent border-tcip-accent text-white
+         hover:bg-tcip-accent-hover hover:border-tcip-accent-hover;
+}
 
-  .tcip-btn-danger {
-    /* Hover signal rides the border only: a lighter fill under 12px warn text fails AA. */
-    @apply tcip-btn bg-tcip-warn/20 border-tcip-warn/40 text-tcip-warn
-           hover:bg-tcip-warn/20 hover:border-tcip-warn;
-  }
+@utility tcip-btn-danger {
+  /* Hover signal rides the border only: a lighter fill under 12px warn text fails AA. */
+  @apply tcip-btn bg-tcip-warn/20 border-tcip-warn/40 text-tcip-warn
+         hover:bg-tcip-warn/20 hover:border-tcip-warn;
+}
 
-  .tcip-input {
-    @apply h-8 px-2 rounded bg-tcip-panel border border-tcip-border text-tcip-fg text-[12px]
-           placeholder:text-tcip-muted placeholder:italic
-           focus:outline-none focus:border-tcip-accent
-           focus-visible:ring-2 focus-visible:ring-tcip-accent/70 focus-visible:ring-offset-1 focus-visible:ring-offset-tcip-bg;
-  }
+@utility tcip-input {
+  @apply h-8 px-2 rounded bg-tcip-panel border border-tcip-border text-tcip-fg text-[12px]
+         placeholder:text-tcip-muted placeholder:italic
+         focus:outline-hidden focus:border-tcip-accent
+         focus-visible:ring-2 focus-visible:ring-tcip-accent/70 focus-visible:ring-offset-1 focus-visible:ring-offset-tcip-bg;
+}
 
-  .tcip-select {
-    @apply tcip-input pr-7 appearance-none cursor-pointer bg-no-repeat;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238A8A8A' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-    background-position: right 0.5rem center;
-  }
+@utility tcip-select {
+  @apply tcip-input pr-7 appearance-none cursor-pointer bg-no-repeat;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238A8A8A' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-position: right 0.5rem center;
+}
 
-  .tcip-panel {
-    @apply bg-tcip-panel border border-tcip-border rounded;
-  }
+@utility tcip-panel {
+  @apply bg-tcip-panel border border-tcip-border rounded;
+}
 
-  .tcip-badge {
-    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium;
-  }
+@utility tcip-badge {
+  @apply inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium;
+}
 
-  /* Section header: the small uppercase "instrument label" used on every panel
-     and sidebar section, so all tabs share one typographic hierarchy. */
-  .tcip-heading {
-    @apply text-[11px] font-semibold uppercase tracking-wider text-tcip-muted;
-  }
+/* Section header: the small uppercase "instrument label" used on every panel
+   and sidebar section, so all tabs share one typographic hierarchy. */
+@utility tcip-heading {
+  @apply text-[11px] font-semibold uppercase tracking-wider text-tcip-muted;
+}
 
-  /* Hero "specimen tag" eyebrow, the identity motif: an uppercase instrument label
-     led by a small green→persimmon rule (canopy to fruit), echoing a botanical
-     specimen tag. Used sparingly, on the front door and section heroes. */
-  .tcip-eyebrow {
-    @apply inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-tcip-muted;
-  }
-  .tcip-eyebrow::before {
+/* Hero "specimen tag" eyebrow: an uppercase instrument label led by a small green to persimmon
+   rule (canopy to fruit). Used sparingly, on the front door and section heroes. */
+@utility tcip-eyebrow {
+  @apply inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-tcip-muted;
+
+  &::before {
     content: "";
     width: 16px;
     height: 2px;
     border-radius: 2px;
     background: linear-gradient(90deg, #507754, #e6976b);
   }
+}
 
-  /* Form-field label. */
-  .tcip-label {
-    @apply block text-[11px] font-medium text-tcip-muted;
-  }
+/* Form-field label. */
+@utility tcip-label {
+  @apply block text-[11px] font-medium text-tcip-muted;
+}
 
-  /* Table column header: matches .tcip-heading at table scale. */
-  .tcip-th {
-    @apply py-1.5 pr-3 text-left text-[10px] font-semibold uppercase tracking-wider text-tcip-muted;
-  }
+/* Table column header: matches tcip-heading at table scale. */
+@utility tcip-th {
+  @apply py-1.5 pr-3 text-left text-[10px] font-semibold uppercase tracking-wider text-tcip-muted;
 }

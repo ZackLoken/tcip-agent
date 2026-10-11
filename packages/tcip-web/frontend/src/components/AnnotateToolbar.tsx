@@ -235,7 +235,7 @@ export function AnnotateToolbar({
             className="flex h-[30px] items-center gap-2 rounded border border-tcip-border bg-tcip-bg px-2.5 text-[12px] text-tcip-fg hover:border-tcip-border-hover"
           >
             <span
-              className="h-2.5 w-2.5 rounded-sm"
+              className="h-2.5 w-2.5 rounded-xs"
               style={{ background: activeSubject ? subjectColor(activeSubject) : "#666" }}
               aria-hidden
             />
@@ -263,7 +263,7 @@ export function AnnotateToolbar({
                 {subjectNames.map((name) => (
                   <div key={name} className="flex items-center gap-2 px-2 hover:bg-tcip-hover">
                     <span
-                      className="h-3.5 w-3.5 shrink-0 rounded-sm border border-tcip-border"
+                      className="h-3.5 w-3.5 shrink-0 rounded-xs border border-tcip-border"
                       style={{ background: subjectColor(name) }}
                       aria-hidden
                     />

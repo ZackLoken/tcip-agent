@@ -256,10 +256,10 @@ jobs:
         working-directory: packages/tcip-web/frontend
         run: npm ci --no-fund --no-audit
 
-      # The shipped bundle's dependencies; the dev tooling's advisories are the owner's upgrade.
-      - name: Dependency audit (npm audit over the production set)
+      # The shipped bundle's dependencies and the dev tooling that builds and tests it.
+      - name: Dependency audit (npm audit over the full set)
         working-directory: packages/tcip-web/frontend
-        run: npm audit --omit=dev --audit-level=high
+        run: npm audit --audit-level=high
 
       - name: Format check
         working-directory: packages/tcip-web/frontend

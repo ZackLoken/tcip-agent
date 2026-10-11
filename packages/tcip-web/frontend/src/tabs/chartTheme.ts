@@ -1,7 +1,7 @@
 /**
  * Recharts takes literal color strings (not Tailwind classes), so the field-station tokens
  * are mirrored here as hex. Shared by the Training + Results charts so they read as one
- * instrument rather than two ad-hoc palettes. Keep in sync with tailwind.config.ts.
+ * instrument rather than two ad-hoc palettes. Keep in sync with the @theme block in index.css.
  */
 export const CHART = {
   grid: "#33352C", // tcip-border

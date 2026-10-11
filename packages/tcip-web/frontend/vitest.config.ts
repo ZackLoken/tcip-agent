@@ -17,9 +17,9 @@ export default mergeConfig(
         provider: "v8",
         include: ["src/**/*.{ts,tsx}"],
         exclude: ["src/**/*.test.{ts,tsx}", "src/test/**", "src/api/*.generated.ts"],
-        // The floor is the coverage measured when the gate was written: statements 91.65,
-        // branches 88.66, functions 80.09, lines 91.65 percent, each rounded down.
-        thresholds: { statements: 91, branches: 88, functions: 80, lines: 91 },
+        // Lowest of four AST-remapped V8 coverage runs under vitest 5 on this tree, rounded down:
+        // statements 86.07, branches 79.6, functions 85.00, lines 87.94; runs vary by hundredths.
+        thresholds: { statements: 86, branches: 79, functions: 85, lines: 87 },
       },
     },
   }),

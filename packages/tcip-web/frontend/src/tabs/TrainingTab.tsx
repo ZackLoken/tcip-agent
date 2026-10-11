@@ -230,7 +230,7 @@ function RunItem({
             type="button"
             aria-pressed={marked}
             aria-label={`Compare ${id}`}
-            className={`px-2 py-1 text-[10px] transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70 ${
+            className={`px-2 py-1 text-[10px] transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70 ${
               marked ? "bg-tcip-accent text-white" : "hover:bg-tcip-hover"
             }`}
             onClick={onToggleMarked}
@@ -272,7 +272,7 @@ function CancelButton({
       aria-label={`Cancel ${id}`}
       aria-describedby={cancelError ? `cancel-error-${id}` : undefined}
       disabled={canceling}
-      className="px-2 py-1 text-[10px] border-l border-tcip-border first:border-l-0 hover:bg-tcip-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70"
+      className="px-2 py-1 text-[10px] border-l border-tcip-border first:border-l-0 hover:bg-tcip-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70"
       onClick={onCancel}
     >
       {canceling ? "Canceling…" : "Cancel"}

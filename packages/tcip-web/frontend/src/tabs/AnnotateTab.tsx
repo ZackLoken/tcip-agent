@@ -1641,7 +1641,7 @@ export function AnnotateTab() {
           type="button"
           onClick={overview}
           title="Overview: fit the whole image to the canvas"
-          className="absolute top-3 left-3 z-20 rounded-full border border-tcip-border bg-tcip-panel/90 px-2.5 py-1 text-[11px] text-tcip-muted backdrop-blur hover:border-tcip-border-hover hover:text-tcip-fg"
+          className="absolute top-3 left-3 z-20 rounded-full border border-tcip-border bg-tcip-panel/90 px-2.5 py-1 text-[11px] text-tcip-muted backdrop-blur-sm hover:border-tcip-border-hover hover:text-tcip-fg"
         >
           Overview
         </button>

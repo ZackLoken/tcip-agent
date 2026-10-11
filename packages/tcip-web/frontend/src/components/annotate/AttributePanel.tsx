@@ -140,7 +140,7 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
       <button
         type="button"
         onClick={() => setDismissed(false)}
-        className="absolute top-3 right-3 z-20 flex items-center gap-1.5 rounded-full border border-tcip-border bg-tcip-panel/90 px-2.5 py-1 text-[11px] text-tcip-muted backdrop-blur hover:border-tcip-border-hover hover:text-tcip-fg"
+        className="absolute top-3 right-3 z-20 flex items-center gap-1.5 rounded-full border border-tcip-border bg-tcip-panel/90 px-2.5 py-1 text-[11px] text-tcip-muted backdrop-blur-sm hover:border-tcip-border-hover hover:text-tcip-fg"
       >
         Attributes
       </button>
@@ -148,7 +148,7 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
   }
 
   return (
-    <div className="absolute top-3 right-3 z-20 w-60 rounded-md border border-tcip-border bg-tcip-panel/95 p-3 text-[11px] shadow-lg backdrop-blur">
+    <div className="absolute top-3 right-3 z-20 w-60 rounded-md border border-tcip-border bg-tcip-panel/95 p-3 text-[11px] shadow-lg backdrop-blur-sm">
       <div className="mb-1 flex items-center justify-between">
         <h4 className="text-[11px] font-semibold tracking-wide text-tcip-fg">Attributes</h4>
         <button
