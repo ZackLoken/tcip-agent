@@ -53,6 +53,25 @@ function clampWidth(px: number): number {
   return Math.max(MIN_WIDTH, Math.min(Math.round(px), max));
 }
 
+function persistWidth(px: number) {
+  try {
+    localStorage.setItem(WIDTH_KEY, String(px));
+  } catch {
+    /* width just won't persist */
+  }
+}
+
+/**
+ * The width in CSS pixels of one terminal column, measured off the screen xterm has painted
+ * into `host` at `cols` columns; null while nothing is painted, when no step is known.
+ */
+function columnWidth(host: HTMLElement | null, cols: number): number | null {
+  const screen = host?.querySelector(".xterm-screen");
+  if (!screen || cols <= 0) return null;
+  const px = screen.getBoundingClientRect().width / cols;
+  return px > 0 ? px : null;
+}
+
 /**
  * Field-station terminal theme. A terminal UI draws with the 16 ANSI slots, so mapping
  * them to the app palette re-skins the real TUI: green → SI-green (the app accent), yellow
@@ -157,14 +176,21 @@ export function TerminalRail() {
       document.body.style.userSelect = "";
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
-      try {
-        localStorage.setItem(WIDTH_KEY, String(widthRef.current));
-      } catch {
-        /* width just won't persist */
-      }
+      persistWidth(widthRef.current);
     };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
+  }
+
+  /** Arrow keys on the handle resize by one terminal column; left widens, since the rail is docked right. */
+  function resizeByKey(e: React.KeyboardEvent) {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    const step = columnWidth(hostRef.current, termRef.current?.cols ?? 0);
+    if (step === null) return;
+    e.preventDefault();
+    const next = clampWidth(widthRef.current + (e.key === "ArrowLeft" ? step : -step));
+    setWidth(next);
+    persistWidth(next);
   }
 
   useEffect(() => {
@@ -410,19 +436,26 @@ export function TerminalRail() {
       className="relative shrink-0 flex flex-col border-l border-tcip-border bg-tcip-panel"
       aria-label="Agent terminal"
     >
-      {/* Drag the left edge to resize; width persists. */}
+      {/* Drag the left edge or press the arrow keys on it to resize; width persists. */}
       <div
         onMouseDown={startResize}
         role="presentation"
         className="absolute left-0 top-0 bottom-0 -ml-1 w-1.5 z-10 cursor-col-resize hover:bg-tcip-accent/40"
       >
+        {/* A focusable separator is ARIA's window splitter; jsx-a11y reads the role as static. */}
+        {/* eslint-disable jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/no-noninteractive-tabindex */}
         <div
           role="separator"
+          tabIndex={0}
           aria-orientation="vertical"
           aria-label="Resize agent terminal"
-          title="Drag to resize"
-          className="h-full w-full"
+          aria-valuenow={width}
+          aria-valuemin={MIN_WIDTH}
+          title="Drag, or press the arrow keys, to resize by one terminal column"
+          onKeyDown={resizeByKey}
+          className="h-full w-full focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-tcip-accent/70"
         />
+        {/* eslint-enable jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/no-noninteractive-tabindex */}
       </div>
       <div className="h-9 shrink-0 flex items-center justify-between px-3 border-b border-tcip-border bg-tcip-panel">
         <div className="flex items-center gap-2">

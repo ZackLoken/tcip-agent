@@ -3,13 +3,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // jsdom lacks xterm's canvas and measurement APIs, so the emulator and its addons are mocked;
 // vi.hoisted makes the class exist when the hoisted vi.mock factories run.
-const { termInstances, MockTerminal } = vi.hoisted(() => {
+const { termInstances, MockTerminal, painted } = vi.hoisted(() => {
+  // The pixel width the mock paints its screen at: 8 px per column, or 0 for an unpainted one.
+  const painted = { columnPx: 8 };
   class MockTerminal {
     static instances: MockTerminal[] = [];
     rows = 30;
     cols = 100;
     unicode = { activeVersion: "6" };
-    open = vi.fn();
+    open = vi.fn((host: HTMLElement) => {
+      const screen = document.createElement("div");
+      screen.className = "xterm-screen";
+      screen.getBoundingClientRect = () =>
+        ({ width: painted.columnPx * this.cols, height: 0 }) as DOMRect;
+      host.appendChild(screen);
+    });
     loadAddon = vi.fn();
     write = vi.fn();
     reset = vi.fn();
@@ -26,7 +34,7 @@ const { termInstances, MockTerminal } = vi.hoisted(() => {
       MockTerminal.instances.push(this);
     }
   }
-  return { termInstances: MockTerminal.instances, MockTerminal };
+  return { termInstances: MockTerminal.instances, MockTerminal, painted };
 });
 vi.mock("@xterm/xterm", () => ({ Terminal: MockTerminal }));
 vi.mock("@xterm/addon-fit", () => ({
@@ -243,6 +251,33 @@ describe("TerminalRail", () => {
     render(<TerminalRail />);
     await screen.findByTestId("terminal-host");
     expect(screen.getByLabelText("Resize agent terminal")).toBeInTheDocument();
+  });
+
+  it("resizes by one painted terminal column per arrow key and persists the width", async () => {
+    painted.columnPx = 8;
+    render(<TerminalRail />);
+    await screen.findByTestId("terminal-host");
+    await waitFor(() => expect(termInstances[0].open).toHaveBeenCalled());
+    const handle = screen.getByLabelText("Resize agent terminal");
+    const rail = screen.getByLabelText("Agent terminal");
+    expect(rail.style.width).toBe("480px");
+    fireEvent.keyDown(handle, { key: "ArrowLeft" });
+    expect(rail.style.width).toBe("488px");
+    expect(localStorage.getItem("tcip.terminal_width")).toBe("488");
+    fireEvent.keyDown(handle, { key: "ArrowRight" });
+    fireEvent.keyDown(handle, { key: "ArrowRight" });
+    expect(rail.style.width).toBe("472px");
+    expect(localStorage.getItem("tcip.terminal_width")).toBe("472");
+  });
+
+  it("leaves the width alone when no column has been painted to measure", async () => {
+    painted.columnPx = 0;
+    render(<TerminalRail />);
+    await screen.findByTestId("terminal-host");
+    await waitFor(() => expect(termInstances[0].open).toHaveBeenCalled());
+    fireEvent.keyDown(screen.getByLabelText("Resize agent terminal"), { key: "ArrowLeft" });
+    expect(screen.getByLabelText("Agent terminal").style.width).toBe("480px");
+    expect(localStorage.getItem("tcip.terminal_width")).toBeNull();
   });
 
   describe("the harness picker", () => {
