@@ -17,45 +17,39 @@ from tcip_mcp.pipelines.model_build import METRICS_KEY
 from tcip_mcp.pipelines.training.generic_trainer import train
 from tests.tiny_trainer_fixtures import (
     classifier_config,
-    opposed_regression_loaders,
+    frames_data,
+    opposed_regression_data,
     regressor_config,
-    separable_classifier_loaders,
-    trainer_run,
-    write_regression_dataset,
+    run_context,
+    separable_classifier_data,
 )
 
 TRAIN_INTENSITIES = [0.10, 0.25, 0.40, 0.55, 0.70, 0.85]
 VAL_INTENSITIES = [0.15, 0.35, 0.60, 0.90]
 
 
-def _config(evaluation: dict | None = None) -> dict:
+def _config(tmp_path, evaluation: dict | None = None, *, validated: bool = True) -> dict:
+    """A regression config over opposed frames under ``tmp_path`` (``validated``), or over the
+    training frames alone with no validation side."""
+    data = (opposed_regression_data(tmp_path / "ds", TRAIN_INTENSITIES, VAL_INTENSITIES)
+            if validated else frames_data(tmp_path / "ds", TRAIN_INTENSITIES,
+                                          [2.0 * c for c in TRAIN_INTENSITIES]))
     return regressor_config(
-        3, builder_kwargs={"init_weight": 0.0},
-        data={"num_channels": 1, "scope": {}, "split": {"seed": 1, "val_ratio": 0.15}},
+        3, data=data, builder_kwargs={"init_weight": 0.0},
         **({"evaluation": evaluation} if evaluation is not None else {}))
 
 
 def test_epoch_record_reports_the_value_the_best_checkpoint_was_chosen_by(tmp_path):
     """The chosen epoch's recorded ``selection``, the copy embedded in ``model_best.pt``, the
     ``metrics.jsonl`` line and the callback payload all carry ``run.best_metric``."""
-    from tcip_mcp.experiments import METRICS_FILE, observe, partition_rows, read_rows
-    from tcip_mcp.pipelines.training.envelope import TrainContext
-    from tcip_mcp.pipelines.training.run_registry import observed_run
-    from tests._verified_checkpoint_fixtures import opened_run
+    from tcip_mcp.experiments import METRICS_FILE, partition_rows, read_rows
 
     callbacks: list[dict] = []
-    images_dir, csv_path = write_regression_dataset(
-        tmp_path / "ds", TRAIN_INTENSITIES, [2.0 * c for c in TRAIN_INTENSITIES])
-    config = _config()
-    config["data"] = {**config["data"], "images_dir": str(images_dir),
-                      "labels_dir": str(csv_path)}
-    out_dir = opened_run(tmp_path, config)
-    run = observed_run(observe(out_dir))
-    train_loader, val_loader = opposed_regression_loaders(run, TRAIN_INTENSITIES, VAL_INTENSITIES)
     # The production wiring: the trainer hands each row to the envelope's sink, which logs it
     # to the run's own metrics log and fires the hook a trial prunes on.
-    ctx = TrainContext(run=run, train_loader=train_loader, val_loader=val_loader,
-                       epoch_hook=lambda epoch, metrics: callbacks.append(dict(metrics)))
+    ctx = run_context(tmp_path, _config(tmp_path),
+                      epoch_hook=lambda epoch, metrics: callbacks.append(dict(metrics)))
+    out_dir = ctx.run_dir
     run = ctx.default_train()
 
     assert run.status == "completed", run.status_error
@@ -99,11 +93,10 @@ def test_the_plateau_scheduler_steps_on_the_validation_loss_under_its_declared_k
     from tests._training_values import schedule, stop_rule
 
     # The holdout loss worsens from the first epoch on, so the plateau ends the stage at three.
-    config = {**_config(), "scheduler": schedule("plateau"), "early_stopping": stop_rule(2)}
-    run = trainer_run(config, tmp_path / "out", project=tmp_path, has_val_loader=True,
-                      id="auto-run-plateau")
-    train_loader, val_loader = opposed_regression_loaders(run, TRAIN_INTENSITIES, VAL_INTENSITIES)
-    run = train(run, train_loader, val_loader=val_loader)
+    config = {**_config(tmp_path), "scheduler": schedule("plateau"),
+              "early_stopping": stop_rule(2)}
+    ctx = run_context(tmp_path, config)
+    run = train(ctx.run, ctx.train_loader, val_loader=ctx.val_loader)
 
     assert run.status == "completed", run.status_error
     assert stepped == pytest.approx([r["heldout_loss"] for r in run.metrics_history])
@@ -112,11 +105,9 @@ def test_the_plateau_scheduler_steps_on_the_validation_loss_under_its_declared_k
 def test_epoch_record_follows_a_configured_selection_metric(tmp_path):
     """An explicit ``evaluation.selection_metric`` drives both the checkpoint objective and the
     reported ``selection``, so the two still name the same number."""
-    config = _config({"selection_metric": "mae"})
-    out_dir = tmp_path / "out"
-    run = trainer_run(config, out_dir, project=tmp_path, has_val_loader=True, id="auto-run-64")
-    train_loader, val_loader = opposed_regression_loaders(run, TRAIN_INTENSITIES, VAL_INTENSITIES)
-    run = train(run, train_loader, val_loader=val_loader)
+    ctx = run_context(tmp_path, _config(tmp_path, {"selection_metric": "mae"}))
+    out_dir = ctx.run_dir
+    run = train(ctx.run, ctx.train_loader, val_loader=ctx.val_loader)
 
     assert run.status == "completed", run.status_error
     history = run.metrics_history
@@ -134,11 +125,9 @@ def test_epoch_record_follows_a_configured_selection_metric(tmp_path):
 def test_a_run_selecting_on_f1_keeps_its_highest_f1_checkpoint(tmp_path):
     """``f1`` is higher-is-better; model_best.pt must hold the epoch with the highest val f1,
     not the lowest."""
-    config = classifier_config(5, evaluation={"selection_metric": "f1"})
-    run = trainer_run(config, tmp_path / "out", project=tmp_path, has_val_loader=True,
-                      id="auto-run-65")
-    train_loader, val_loader = separable_classifier_loaders(run)
-    run = train(run, train_loader, val_loader=val_loader)
+    ctx = run_context(tmp_path, classifier_config(5, separable_classifier_data(tmp_path / "ds"),
+                                                  evaluation={"selection_metric": "f1"}))
+    run = train(ctx.run, ctx.train_loader, val_loader=ctx.val_loader)
 
     assert run.status == "completed", run.status_error
     history = run.metrics_history
@@ -147,7 +136,7 @@ def test_a_run_selecting_on_f1_keeps_its_highest_f1_checkpoint(tmp_path):
     worst_epoch = min(f1_by_epoch, key=lambda e: f1_by_epoch[e])
     assert f1_by_epoch[best_epoch] > f1_by_epoch[worst_epoch]  # the run must actually vary
 
-    best = torch.load(tmp_path / "out" / "model_best.pt", weights_only=False)
+    best = torch.load(ctx.run_dir / "model_best.pt", weights_only=False)
     assert best["epoch"] == best_epoch
     assert best[METRICS_KEY]["val_f1"] == pytest.approx(f1_by_epoch[best_epoch], abs=1e-6)
     assert run.best_metric == pytest.approx(f1_by_epoch[best_epoch], abs=1e-6)
@@ -157,11 +146,8 @@ def test_a_run_selecting_on_a_metric_its_task_does_not_produce_fails_naming_both
     """``f1`` is declared (a detection/classification metric) but regression's own ``evaluate()``
     never produces it; the run must fail naming the requested metric and the keys validation did
     produce, not silently fall back to the training loss under a name nobody chose."""
-    config = _config({"selection_metric": "f1"})
-    run = trainer_run(config, tmp_path / "out", project=tmp_path, has_val_loader=True,
-                      id="auto-run-66")
-    train_loader, val_loader = opposed_regression_loaders(run, TRAIN_INTENSITIES, VAL_INTENSITIES)
-    run = train(run, train_loader, val_loader=val_loader)
+    ctx = run_context(tmp_path, _config(tmp_path, {"selection_metric": "f1"}))
+    run = train(ctx.run, ctx.train_loader, val_loader=ctx.val_loader)
 
     assert run.status == "failed"
     assert "'f1'" in run.status_error
@@ -174,10 +160,9 @@ def test_a_loss_selected_run_with_no_validation_loader_still_completes_and_selec
 ):
     """No validation loader means no metric but the training loss exists; a run selecting on the
     default (loss) metric must still complete and choose the lowest-loss epoch."""
-    run = trainer_run(_config(), tmp_path / "out", project=tmp_path, has_val_loader=False,
-                      id="auto-run-67")
-    train_loader, _ = opposed_regression_loaders(run, TRAIN_INTENSITIES, VAL_INTENSITIES)
-    run = train(run, train_loader, val_loader=None)
+    ctx = run_context(tmp_path, _config(tmp_path, validated=False))
+    assert ctx.val_loader is None
+    run = train(ctx.run, ctx.train_loader, val_loader=None)
 
     assert run.status == "completed", run.status_error
     history = run.metrics_history
@@ -187,5 +172,5 @@ def test_a_loss_selected_run_with_no_validation_loader_still_completes_and_selec
         assert "val_loss" not in record
     assert run.best_metric == pytest.approx(min(r["selection"] for r in history), abs=1e-6)
 
-    best = torch.load(tmp_path / "out" / "model_best.pt", weights_only=False)
+    best = torch.load(ctx.run_dir / "model_best.pt", weights_only=False)
     assert best[METRICS_KEY]["selection"] == pytest.approx(run.best_metric, abs=1e-6)

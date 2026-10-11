@@ -1,7 +1,7 @@
-"""TiledDetectionDataset: SAHI's lattice over each image, labels clipped to each slice.
+"""TiledDetectionDataset: SAHI's lattice over each image, each row clipped once to each slice.
 
-The label tests are pure numpy (no torch). The wrapper tests skip if torch is absent (they go
-through ``build_dataset``).
+The clip tests need no torch. The wrapper tests skip if torch is absent (they go through
+``build_dataset``).
 """
 
 from __future__ import annotations
@@ -13,42 +13,45 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from tcip_mcp.pipelines.data.datasets import clip_boxes_to_tile, dedup_boxes
+from tcip_annotation.matching import geometry_rings, shapely_geometry
+from tcip_annotation.state import BBox, Polygon
+from tcip_mcp.pipelines.data.datasets import clip_rows_to_tile
 from tests._producer_fixtures import dataset_over  # noqa: E402
 
 SLIVER = 0.5
 """The sliver cutoff the wrapper tests state: their one-box fixtures derive no size spread."""
+TRIANGLE = Polygon(rings=[[(4.0, 4.0), (124.0, 60.0), (4.0, 60.0)]])
+"""A region no box stands in for, crossing the seam of a frame two 64 px tiles wide: within the
+second tile its diagonal edge starts at y=32, where its bounding box starts at y=4."""
 
 
-def test_clip_boxes_to_tile_sliver_drop_and_remap():
-    # min_box_size=12: a clipped box counts unless its visible part is a sliver (< 12px char-size).
-    # Fully-inside box -> always kept, remapped to tile-local (minus origin 200,200).
-    tb, tl = clip_boxes_to_tile(
-        np.array([[210., 210., 230., 230.]]), np.array([1]), 200, 200, 64, 64, 12.0)
-    assert tb.shape == (1, 4)
-    assert np.allclose(tb[0], [10, 10, 30, 30])
-    # Straddling box whose visible part is substantial (clipped to 14x14, char 14 >= 12) -> kept.
-    tb2, _ = clip_boxes_to_tile(
-        np.array([[250., 250., 290., 290.]]), np.array([1]), 200, 200, 64, 64, 12.0)
-    assert len(tb2) == 1
-    # Straddling box whose visible part is a sliver (clipped to 9x9, char 9 < 12) -> dropped.
-    tb3, _ = clip_boxes_to_tile(
-        np.array([[255., 255., 265., 265.]]), np.array([1]), 200, 200, 64, 64, 12.0)
-    assert len(tb3) == 0
-    # Non-overlapping box -> no output.
-    tb4, _ = clip_boxes_to_tile(
-        np.array([[0., 0., 10., 10.]]), np.array([1]), 200, 200, 64, 64, 12.0)
-    assert len(tb4) == 0
+def _clipped(geometries, tile, min_box_size):
+    """``geometries`` (each a box or a polygon) clipped to ``tile`` (:func:`clip_rows_to_tile`)."""
+    boxes = np.asarray([[g.x1, g.y1, g.x2, g.y2] if isinstance(g, BBox) else [
+        min(x for r in g.rings for x, _ in r), min(y for r in g.rings for _, y in r),
+        max(x for r in g.rings for x, _ in r), max(y for r in g.rings for _, y in r)]
+        for g in geometries])
+    return clip_rows_to_tile([shapely_geometry(geometry_rings(g)) for g in geometries], boxes,
+                             np.arange(len(geometries)), tile, min_box_size)
 
 
-def test_dedup_boxes_class_aware():
-    boxes = np.array([[0., 0., 20., 20.], [1., 1., 19., 19.]])  # IoU 0.81, same label
-    assert dedup_boxes(boxes, np.array([1, 1]), 0.8) == [0]  # larger kept
-    distinct = np.array([[0., 0., 10., 10.], [50., 50., 60., 60.]])
-    assert dedup_boxes(distinct, np.array([1, 1]), 0.8) == [0, 1]  # both survive
-    # same geometry, different labels -> both survive
-    assert dedup_boxes(boxes, np.array([1, 2]), 0.8) == [0, 1]
-    assert dedup_boxes(boxes, np.array([1, 1]), 1.0) == [0, 1]  # iou_thresh >= 1.0: no-op
+def test_a_row_is_clipped_once_and_carries_the_bounds_of_what_the_tile_shows():
+    """min_box_size 12 on the tile (200, 200, 264, 264): a row inside the tile is kept, remapped
+    to tile-local; one crossing the edge with a 14 px visible part is kept and one with a 9 px
+    sliver is dropped; one not meeting the tile is gone. A polygon's box is the bounds of its
+    clipped region, never its bounding box cut at the tile, and its geometry is that region,
+    tile-local."""
+    tile = (200, 200, 264, 264)
+    boxes, rows, regions = _clipped([BBox(210, 210, 230, 230), BBox(250, 250, 290, 290),
+                                     BBox(255, 255, 265, 265), BBox(0, 0, 10, 10)], tile, 12.0)
+    assert rows.tolist() == [0, 1]
+    assert np.allclose(boxes, [[10, 10, 30, 30], [50, 50, 64, 64]])
+    assert sorted(regions[1].rings[0]) == [(50.0, 50.0), (50.0, 64.0), (64.0, 50.0), (64.0, 64.0)]
+
+    boxes, rows, regions = _clipped([TRIANGLE], (64, 0, 128, 64), 0.0)
+    assert rows.tolist() == [0]
+    assert np.allclose(boxes, [[0.0, 32.0, 60.0, 60.0]])
+    assert sorted(regions[0].rings[0]) == [(0.0, 32.0), (0.0, 60.0), (60.0, 60.0)]
 
 
 # --------------------------------------------------------------------------
@@ -92,6 +95,56 @@ def test_tiled_detection_dataset_wrapper(tmp_path):
     assert target["boxes"].shape[1] == 4
     assert (target["boxes"] >= 0).all() and (target["boxes"] <= 64).all()
     assert target["labels"].dtype == torch.int64
+
+
+def test_detection_and_instance_seg_tiles_of_one_frame_agree(tmp_path):
+    """One frame of polygons, several crossing a seam and one of them a triangle no box stands in
+    for, tiled at one lattice by the detection loader and the instance-segmentation loader: the
+    two agree on every tile's rect, boxes and labels, every instance mask is the untiled
+    instance-segmentation loader's frame mask over its tile's rect up to the rasterizer's
+    rounding at the region's edge, and every box is the bounds of its mask's pixels, so a box
+    cut from the unclipped region, or a mask cut at another offset than its box, disagrees."""
+    torch = pytest.importorskip("torch")
+    from PIL import Image
+    from shapely.geometry import Point as ShapelyPoint
+    from tcip_annotation.state import Annotation
+
+    from tests._producer_fixtures import label_image
+
+    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir.mkdir(parents=True)
+    Image.new("RGB", (200, 200), (120, 120, 120)).save(images_dir / "a.png")
+    regions = [Polygon(rings=[[(x0, y0), (x1, y0), (x1, y1), (x0, y1)]])
+               for x0, y0, x1, y1 in [(40, 40, 80, 80), (100, 30, 150, 70), (20, 120, 60, 170)]]
+    regions.append(Polygon(rings=[[(100.0, 100.0), (196.0, 190.0), (100.0, 190.0)]]))
+    label_image(images_dir / "a.png",
+                [Annotation(subject="bud", geometry=region) for region in regions], 200, 200)
+    edges = [shapely_geometry(region.rings).boundary for region in regions]
+    # A tenth of the objects' size keeps the triangle's corner pieces, whose boxes are the point.
+    tiling = {"enabled": True, "tile_size": 64, "overlap": 0.25, "sliver_frac": 0.1}
+    detection = dataset_over("detection", str(images_dir), subject="bud", tiling=tiling)
+    instances = dataset_over("instance_seg", str(images_dir), subject="bud", tiling=tiling)
+    frame = dataset_over("instance_seg", str(images_dir), subject="bud")[0][1]["masks"]
+
+    assert detection.tile_entries == instances.tile_entries
+    straddled = 0
+    for index, (_stem, (x0, y0, x1, y1)) in enumerate(instances.tile_entries):
+        boxes, masked = detection[index][1], instances[index][1]
+        assert torch.equal(boxes["boxes"], masked["boxes"])
+        assert torch.equal(boxes["labels"], masked["labels"])
+        assert masked["masks"].shape == (len(masked["boxes"]), y1 - y0, x1 - x0)
+        cropped = frame[:, y0:y1, x0:x1]
+        for mask, box in zip(masked["masks"], masked["boxes"].tolist()):
+            # The frame's raster of the same region: the two differ only where the rasterizer
+            # rounds the region's edge, never a pixel farther from it.
+            which = max(range(len(cropped)), key=lambda i: int((mask & cropped[i]).sum()))
+            assert all(edges[which].distance(ShapelyPoint(x0 + x + 0.5, y0 + y + 0.5)) <= 1.0
+                       for y, x in torch.nonzero(mask != cropped[which]).tolist())
+            ys, xs = torch.nonzero(mask, as_tuple=True)
+            pixels = [int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1]
+            assert all(abs(p - b) <= 1 for p, b in zip(pixels, box)), (box, pixels)
+        straddled += int(any(0 < int(c.sum()) < int(f.sum()) for c, f in zip(cropped, frame)))
+    assert straddled > 0
 
 
 def test_tiled_dataset_keeps_empty_tiles(tmp_path):
@@ -145,7 +198,8 @@ def test_build_dataset_no_tiling_unchanged(tmp_path):
     assert isinstance(ds, DetectionDataset)
     assert len(ds) == 3  # no tiling -> one sample per image
 
-    # tiling passed to a non-detection task is ignored (no raise).
+    # An enabled tiling handed to a task that trains whole frames refuses by name; untiled, the
+    # same samples build the plain classification dataset.
     cls_dir = tmp_path / "cls" / "images" / UNDATED_BUCKET
     cls_dir.mkdir(parents=True, exist_ok=True)
     rows = []
@@ -157,7 +211,9 @@ def test_build_dataset_no_tiling_unchanged(tmp_path):
         w = csv.writer(f)
         w.writerow(("stem", "label"))
         w.writerows(rows)
-    ds2 = dataset_over("classification", str(cls_dir), str(csv_path), tiling={"enabled": True})
+    with pytest.raises(ValueError, match="data.tiling is enabled for a run of task 'classific"):
+        dataset_over("classification", str(cls_dir), str(csv_path), tiling={"enabled": True})
+    ds2 = dataset_over("classification", str(cls_dir), str(csv_path))
     assert ds2.num_samples == 2  # plain classification dataset
 
 

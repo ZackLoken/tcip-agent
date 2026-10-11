@@ -16,7 +16,6 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
 from tcip_mcp.pipelines.components.necks import FPN, PAN  # noqa: E402
-from tests._producer_fixtures import run_over  # noqa: E402
 from tests._training_values import adamw_optimizer, evaluation_block  # noqa: E402
 
 
@@ -84,31 +83,28 @@ def test_detection_anchor_count_with_p2():
 
 def test_detection_anchor_free_e2e(tmp_path: Path):
     from torchvision.utils import save_image
-    from tcip_mcp.pipelines.training.generic_trainer import run_loaders, train
+    from tcip_mcp.pipelines.training.generic_trainer import train
+    from tests._chain_fixtures import training_config
     from tests._producer_fixtures import label_image
-    from tests.tiny_trainer_fixtures import trainer_run
+    from tests._verified_checkpoint_fixtures import built_detector
+    from tests.tiny_trainer_fixtures import run_context
     from tcip_annotation.state import Annotation, BBox
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = tmp_path / "ds" / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True, exist_ok=True)
     for i in range(4):
         save_image(torch.rand(3, 64, 64), str(images_dir / f"img{i}.png"))
         label_image(images_dir / f"img{i}.png",
                     [Annotation(subject="bud", geometry=BBox(19.2, 19.2, 44.8, 44.8))], 64, 64)
 
-    ds, data = run_over("detection", str(images_dir), subject="bud")
-
-    from tests._chain_fixtures import training_config
-    from tests._verified_checkpoint_fixtures import built_detector
-
-    # No val_loader below: loss is the only metric coherent to select on without one.
-    cfg = training_config(built_detector(detector="fcos"), data, optimizer=adamw_optimizer(),
+    # No validation side: loss is the only metric coherent to select on without one.
+    cfg = training_config(built_detector(detector="fcos"),
+                          {"images_dir": str(images_dir), "scope": {"subject": "bud"},
+                           "auto_val": False},
+                          optimizer=adamw_optimizer(),
                           evaluation=evaluation_block(selection_metric="loss"))
-    run = trainer_run(
-        cfg, tmp_path / "out", has_val_loader=False, id="auto-run-8", project=tmp_path
-    )
-    loader, _ = run_loaders(run, ds, None)
-    run = train(run, loader, val_loader=None)
+    ctx = run_context(tmp_path, cfg)
+    run = train(ctx.run, ctx.train_loader, val_loader=None)
     assert run.status == "completed", run.status_error
     assert math.isfinite(run.metrics_history[-1]["train_loss"])
-    assert (tmp_path / "out" / "model_best.pt").is_file()
+    assert (ctx.run_dir / "model_best.pt").is_file()

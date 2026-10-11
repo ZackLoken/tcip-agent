@@ -322,18 +322,21 @@ def test_a_sampler_block_its_sampler_refuses_is_refused_at_preflight_by_name(blo
     from tests.tiny_trainer_fixtures import classifier_config
 
     with pytest.raises(ValueError, match=named):
-        train_config(classifier_config(1, sampler=block)).trainer_reads()
+        train_config(classifier_config(1, {}, sampler=block)).trainer_reads()
 
 
 def test_a_stated_oversampler_count_is_the_count_the_train_loader_draws_at(tmp_path):
-    """guard. The train loader a run builds (``generic_trainer.run_loaders``) draws through the
+    """guard. The train loader built for a run (``generic_trainer.run_loaders``) draws through the
     oversampler at the count its config states: four samples of two classes, two each,
-    duplicated up to five per class, read 4 + 2 * 3 * 2 indices an epoch."""
+    duplicated up to five per class, read 4 + 2 * 3 * 2 indices an epoch. The run is the
+    launcher's own; the samples are a dataset naming each class under the key the sampler
+    reads."""
     from tcip_mcp.pipelines.training.generic_trainer import run_loaders
-    from tests.tiny_trainer_fixtures import classifier_config, trainer_run
+    from tests.tiny_trainer_fixtures import classifier_config, frames_data, run_context
 
-    run = trainer_run(classifier_config(1, sampler={"name": "oversample", "min_count": 5}),
-                      tmp_path / "out", project=tmp_path, has_val_loader=False)
-    train_loader, _ = run_loaders(run, _TinyClassDataset(), None)
+    data = frames_data(tmp_path / "ds", [0.1, 0.2, 0.8, 0.9], [0, 0, 1, 1])
+    ctx = run_context(tmp_path, classifier_config(
+        1, data, sampler={"name": "oversample", "min_count": 5}))
+    train_loader, _ = run_loaders(ctx.run, _TinyClassDataset(), None)
 
     assert len(list(iter(train_loader.sampler))) == 4 + 2 * 3 * 2

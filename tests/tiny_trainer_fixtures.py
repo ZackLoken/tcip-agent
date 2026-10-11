@@ -1,10 +1,13 @@
-"""Tiny deterministic models, their ``model_source`` builders, and datasets.
+"""Tiny deterministic models, their ``model_source`` builders, the frames they train on, and the
+runs those frames are trained in.
 
 Every model here holds parameters initialized from constants (one, except
 :class:`TwoRateRegressor`), so a run's trajectory is decided by the data it is fed and never by
 random init. Each builder accepts the width
 (``in_chans``) and, for the classifier, the class count a builder is handed; a model reads a
-frame's mean intensity whatever its width.
+frame's mean intensity whatever its width. A frame is filled with one intensity
+(:func:`write_regression_dataset`), so the loss landscape a run presents is fixed by its frames'
+(intensity, value) pairs alone.
 """
 
 from __future__ import annotations
@@ -12,38 +15,9 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 from torch.nn import functional
-from torch.utils.data import Dataset
 
 from tests import REPO_ROOT
 from tests._training_values import schedule
-
-
-class ConstantImageDataset(Dataset):
-    """Non-square single-channel frames, one intensity per frame, each paired with a target under
-    ``key`` (``"values"``, a regression value, by default; ``"labels"`` with ``cast=int`` for a
-    class label).
-
-    A frame is filled with a single value, so a sample's mean intensity is exactly its
-    ``intensity`` and the loss landscape a loader presents is fixed by its (intensity, target)
-    pairs alone.
-    """
-
-    def __init__(self, intensities, targets, height: int = 6, width: int = 10, *,
-                 key: str = "values", cast=float) -> None:
-        if len(intensities) != len(targets):
-            raise ValueError("intensities and targets must be the same length")
-        self.intensities = [float(i) for i in intensities]
-        self.targets = [cast(v) for v in targets]
-        self.key = key
-        self.height = int(height)
-        self.width = int(width)
-
-    def __len__(self) -> int:
-        return len(self.targets)
-
-    def __getitem__(self, idx: int):
-        image = torch.full((1, self.height, self.width), self.intensities[idx])
-        return image, {self.key: self.targets[idx]}
 
 
 def _phantom_nan() -> torch.Tensor:
@@ -152,7 +126,8 @@ def build_nan_eval_regressor(*, in_chans: int = 1, init_weight: float = 0.0) -> 
 
 
 class MeanIntensityClassifier(nn.Module):
-    """Two-class logit ``[0, weight * mean(image)]``, cross-entropy loss in train mode.
+    """Two-class logit ``[0, weight * (mean(image) - 0.5)]``, cross-entropy loss in train mode:
+    frames darker and brighter than mid-gray fall either side of its boundary.
 
     One parameter, so a run's trajectory is decided by the data it is fed alone.
     """
@@ -165,7 +140,7 @@ class MeanIntensityClassifier(nn.Module):
         self.heads = [self]  # evaluate() reads num_classes off model.heads[0]
 
     def forward(self, images, targets=None):
-        logit1 = self.weight * images.mean(dim=(1, 2, 3))
+        logit1 = self.weight * (images.mean(dim=(1, 2, 3)) - 0.5)
         logits = torch.stack([torch.zeros_like(logit1), logit1], dim=1)
         if self.training and targets is not None:
             return {"ce": functional.cross_entropy(logits, targets["labels"])}
@@ -233,23 +208,72 @@ def build_always_diverged_model(*, in_chans: int = 1, cancel_at_call: int | None
                                cancel_output_dir=cancel_output_dir)
 
 
-def trainer_run(config: dict, output_dir, *, project, has_val_loader: bool, id: str = "run"):
-    """A ``TrainRun`` of ``project`` over ``config`` writing into ``output_dir`` at the objective
-    the launcher's own producer resolves for it (``generic_trainer.resolve_objective``),
-    importing from the layout its admission stages (``model_build.staged_sources``)."""
-    from pathlib import Path
+def run_context(root, config: dict, *, epoch_hook=None, experiment_id: str | None = None):
+    """The context the child's own entry builds (``subprocess_worker.prepare_run_context``) for
+    the run :func:`~tests._verified_checkpoint_fixtures.opened_run` opens under the project
+    ``root`` over ``config``: ``run_registry.observed_run``'s run over that directory and the
+    loaders its recorded partition builds, ``epoch_hook`` the context's own."""
+    from tcip_mcp.experiments import observe
+    from tcip_mcp.pipelines.training.subprocess_worker import prepare_run_context
+    from tests._verified_checkpoint_fixtures import opened_run
 
-    from tcip_mcp.pipelines.model_build import staged_sources
-    from tcip_mcp.pipelines.schemas import train_config
-    from tcip_mcp.pipelines.training.generic_trainer import resolve_objective
-    from tcip_mcp.pipelines.training.run_registry import TrainRun
+    return prepare_run_context(observe(opened_run(root, config, experiment_id=experiment_id)),
+                               epoch_hook=epoch_hook)
 
-    spec = train_config(config)
-    return TrainRun(id=id, spec=spec,
-                    objective=resolve_objective(spec, project=Path(project),
-                                                has_val_loader=has_val_loader),
-                    project=Path(project), layout=staged_sources(spec, Path(project)).layout,
-                    output_dir=str(output_dir))
+
+def frames_data(root, intensities, values) -> dict:
+    """The data block of a run training on every frame :func:`write_regression_dataset` writes
+    under ``root``, at ``intensities`` and valued ``values``, with no validation side."""
+    images_dir, csv_path = write_regression_dataset(root, intensities, values)
+    return {"images_dir": str(images_dir), "labels_dir": str(csv_path), "auto_val": False}
+
+
+def drawn_data(root, train: tuple[list, list], val: tuple[list, list]) -> dict:
+    """The data block of a run drawing its own split over the frames
+    :func:`write_regression_dataset` writes under ``root``: ``train``'s and then ``val``'s, each
+    ``(intensities, values)``. The frames are grouped so the draw keeps ``val``'s whole on the
+    validation side and ``train``'s on the training side: ``train``'s first frame one group, its
+    others a second, ``val``'s a third, ``val``'s share its own; the draw meets each side's one
+    group smallest first, so ``val`` holds more than one frame and fewer than ``train`` less one.
+    """
+    from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
+    n_train, n_val = len(train[0]), len(val[0])
+    if not 1 < n_val < n_train - 1:
+        raise ValueError(f"{n_val} validation frames beside {n_train} training frames: the draw "
+                         "places these groups only for more than one and fewer than "
+                         f"{n_train - 1}")
+    images_dir, csv_path = write_regression_dataset(root, [*train[0], *val[0]],
+                                                    [*train[1], *val[1]])
+    groups = ["train-first"] + ["train"] * (n_train - 1) + ["val"] * n_val
+    return {"images_dir": str(images_dir), "labels_dir": str(csv_path),
+            "split": {"seed": 0, "val_ratio": n_val / (n_train + n_val),
+                      "group_key_map": {f"{UNDATED_BUCKET}/img{i}": group
+                                        for i, group in enumerate(groups)}}}
+
+
+FIT, HOLDOUT_FIT = 2.0, -5.0
+"""The weights the frames of :func:`opposed_regression_data` are fit by: training frames valued
+at ``FIT`` times their intensity, validation frames at ``HOLDOUT_FIT``."""
+
+
+def opposed_regression_data(root, train_intensities, val_intensities) -> dict:
+    """:func:`drawn_data` of training frames at ``train_intensities`` valued by :data:`FIT` and
+    validation frames at ``val_intensities`` valued by :data:`HOLDOUT_FIT`: the two sides are fit
+    by opposite-signed weights, so training progress on one is a regression on the other."""
+    return drawn_data(root, (train_intensities, [FIT * c for c in train_intensities]),
+                      (val_intensities, [HOLDOUT_FIT * c for c in val_intensities]))
+
+
+SEPARABLE_TRAIN = ([0.10, 0.20, 0.30, 0.70, 0.80, 0.90], [0, 0, 0, 1, 1, 1])
+SEPARABLE_VAL = ([0.15, 0.40, 0.60, 0.85], [0, 0, 1, 1])
+"""Classification frames labeled 0 below mid-gray and 1 above it, as ``(intensities, labels)``:
+six training and four validation frames, which :class:`MeanIntensityClassifier` separates."""
+
+
+def separable_classifier_data(root) -> dict:
+    """:func:`drawn_data` of :data:`SEPARABLE_TRAIN` and :data:`SEPARABLE_VAL`."""
+    return drawn_data(root, SEPARABLE_TRAIN, SEPARABLE_VAL)
 
 
 def count_validations(monkeypatch) -> list[str]:
@@ -285,29 +309,27 @@ REGRESSOR_ADAMW = {"name": "adamw", "backbone_lr": 0.05, "head_lr": 0.05, "weigh
 """The AdamW section the one-weight regressors here train at."""
 
 
-def regressor_config(horizon: int = 1, *, builder: str = MEAN_INTENSITY_REGRESSOR,
-                     builder_kwargs: dict | None = None, data: dict | None = None,
-                     **overrides) -> dict:
+def regressor_config(horizon: int = 1, *, data: dict, builder: str = MEAN_INTENSITY_REGRESSOR,
+                     builder_kwargs: dict | None = None, **overrides) -> dict:
     """A :func:`~tests._chain_fixtures.training_config` of the regression ``builder`` (by
-    default the mean-intensity regressor) at ``builder_kwargs`` over ``data`` (by default
-    one-band frames with no scope): one unfrozen stage at :data:`REGRESSOR_ADAMW` under a cosine
-    schedule of ``horizon`` epochs, no epoch checkpoints, with ``overrides`` in place of their
-    keys."""
+    default the mean-intensity regressor) at ``builder_kwargs`` over the data block ``data``:
+    one unfrozen stage at :data:`REGRESSOR_ADAMW` under a cosine schedule of ``horizon`` epochs,
+    no epoch checkpoints, with ``overrides`` in place of their keys."""
     from tests._chain_fixtures import training_config
 
     source: dict = {"builder": builder, "source_files": [TINY_TRAINER_FILE], "task": "regression"}
     if builder_kwargs is not None:
         source["builder_kwargs"] = builder_kwargs
     return training_config(
-        source, data if data is not None else {"num_channels": 1, "scope": {}},
+        source, data,
         **{"stages": [{"freeze_to": 0}], "optimizer": REGRESSOR_ADAMW,
            "scheduler": schedule("cosine", horizon_epochs=horizon),
            "checkpoint_every_n_epochs": 0, **overrides})
 
 
-def classifier_config(horizon: int, **overrides) -> dict:
+def classifier_config(horizon: int, data: dict, **overrides) -> dict:
     """A :func:`~tests._chain_fixtures.training_config` of the mean-intensity classifier
-    (weight -1) over one-band, two-class frames: one unfrozen stage in batches of three under a
+    (weight -1) over the data block ``data``: one unfrozen stage in batches of three under a
     cosine schedule of ``horizon`` epochs, AdamW at 0.2, no epoch checkpoints, with
     ``overrides`` in place of their keys."""
     from tests._chain_fixtures import training_config
@@ -315,37 +337,12 @@ def classifier_config(horizon: int, **overrides) -> dict:
     return training_config(
         {"builder": MEAN_INTENSITY_CLASSIFIER, "builder_kwargs": {"init_weight": -1.0},
          "source_files": [TINY_TRAINER_FILE], "task": "classification"},
-        {"num_channels": 1, "num_classes": 2, "scope": {}},
+        data,
         **{"batch_size": 3, "stages": [{"freeze_to": 0}],
            "scheduler": schedule("cosine", horizon_epochs=horizon),
            "optimizer": {"name": "adamw", "backbone_lr": 0.2, "head_lr": 0.2,
                          "weight_decay": 0.0},
            "checkpoint_every_n_epochs": 0, **overrides})
-
-
-def separable_classifier_loaders(run):
-    """A classification training loader of six frames (three of negative intensity, three of
-    positive) and a validation loader of four (two each), labeled 0 for negative intensity and 1
-    for positive, built by the platform's own loader builder (``generic_trainer.run_loaders``)
-    for ``run``."""
-    from tcip_mcp.pipelines.training.generic_trainer import run_loaders
-
-    train_ds = ConstantImageDataset(
-        [-2.0, -1.5, -1.0, 1.0, 1.5, 2.0], [0, 0, 0, 1, 1, 1], key="labels", cast=int)
-    val_ds = ConstantImageDataset([-1.8, -0.4, 0.4, 1.8], [0, 0, 1, 1], key="labels", cast=int)
-    return run_loaders(run, train_ds, val_ds)
-
-
-def opposed_regression_loaders(run, train_intensities, val_intensities):
-    """A regression training loader over ``train_intensities`` fit by weight +2 and a holdout
-    loader over ``val_intensities`` fit by weight -5, built by the platform's own loader builder
-    (``generic_trainer.run_loaders``) for ``run``."""
-    from tcip_mcp.pipelines.training.generic_trainer import run_loaders
-
-    train_ds = ConstantImageDataset(train_intensities, [2.0 * c for c in train_intensities])
-    val_ds = ConstantImageDataset(
-        val_intensities, [-5.0 * c for c in val_intensities], height=8, width=12)
-    return run_loaders(run, train_ds, val_ds)
 
 
 def capture_model(monkeypatch, sink: list) -> None:
@@ -457,8 +454,8 @@ def build_pixel_sum_divide_model(*, in_chans: int = 1) -> PixelSumDivideModel:
 
 
 def write_regression_dataset(root, intensities, values, *, height: int = 6, width: int = 10):
-    """Write a small on-disk regression dataset (uint8 RGB PNGs + a CSV of ``stem,value`` rows),
-    the real-file counterpart to :class:`ConstantImageDataset`.
+    """Write a small on-disk table-labeled dataset (uint8 RGB PNGs ``img<i>.png`` + a CSV of
+    ``stem,value`` rows), a regression's values or a classification's labels.
 
     Every frame is filled with one uint8 intensity (``round(255 * fraction)``), so
     ``intensities=[0.0, ...]`` decodes to exactly zero-valued pixels (``pil_to_tensor`` scales a

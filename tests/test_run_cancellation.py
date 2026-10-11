@@ -3,7 +3,6 @@
 import pytest
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._chain_fixtures import CLASSIFIER_SOURCE
-from tests._producer_fixtures import run_over  # noqa: E402
 from tests._training_values import schedule
 
 torch = pytest.importorskip("torch")
@@ -32,30 +31,29 @@ def test_cancel_before_training_yields_canceled(tmp_path):
     pytest.importorskip("torchvision")
     from PIL import Image
 
-    from tcip_mcp.pipelines.training.generic_trainer import run_loaders, train
+    from tcip_mcp.pipelines.training.generic_trainer import train
     from tcip_mcp.experiments import request_cancel
-    from tests.tiny_trainer_fixtures import trainer_run
+    from tests._chain_fixtures import training_config
+    from tests.tiny_trainer_fixtures import run_context
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
+    images_dir = tmp_path / "ds" / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True)
     rows = ["stem,label"]
     for i in range(4):
         Image.new("RGB", (32, 32), (20 * i, 30, 40)).save(images_dir / f"img{i}.png")
         rows.append(f"img{i},{i % 2}")
-    (tmp_path / "labels.csv").write_text("\n".join(rows) + "\n")
+    labels = tmp_path / "ds" / "labels.csv"
+    labels.write_text("\n".join(rows) + "\n")
 
-    ds, data = run_over("classification", str(images_dir), str(tmp_path / "labels.csv"))
-    from tests._chain_fixtures import training_config
-
-    cfg = training_config(CLASSIFIER_SOURCE, data,
+    cfg = training_config(CLASSIFIER_SOURCE,
+                          {"images_dir": str(images_dir), "labels_dir": str(labels),
+                           "auto_val": False},
                           stages=[{"freeze_to": -1}],
                           scheduler=schedule("cosine", horizon_epochs=3))
-    run = trainer_run(cfg, tmp_path / "out", project=tmp_path, has_val_loader=False,
-                      id="cancel-run-2")
-    (tmp_path / "out").mkdir()
-    request_cancel(tmp_path / "out")  # request cancellation before any epoch runs
-    run = train(run, run_loaders(run, ds, None)[0])
+    ctx = run_context(tmp_path, cfg)
+    request_cancel(ctx.run_dir)  # request cancellation before any epoch runs
+    run = train(ctx.run, ctx.train_loader)
 
     assert run.status == "canceled"
     assert run.current_epoch == 0                                  # stopped before training
-    assert (tmp_path / "out" / "model_final.pt").is_file()         # partial progress still saved
+    assert (ctx.run_dir / "model_final.pt").is_file()              # partial progress still saved

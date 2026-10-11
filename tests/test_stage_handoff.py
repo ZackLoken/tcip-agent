@@ -1,61 +1,68 @@
 """What a training stage starts from, when it and the run end, and that a resumed run trains as
 an uninterrupted one across a stage boundary.
 
-The multi-epoch handoff runs of ``MeanIntensityRegressor`` train over
-``opposed_regression_loaders``, whose holdout loss worsens as the training loss improves, so
+The multi-epoch handoff runs of ``MeanIntensityRegressor`` train over opposed frames
+(``opposed_regression_data``), whose holdout loss worsens as the training loss improves, so
 each of their stages has its best epoch first and not last: a stage that started from its
 predecessor's last epoch instead of its best one is visible, and no stage improves on the one
-before it. ``_consistent_loaders`` fit both sides by one weight, so every epoch improves.
+before it. ``_consistent`` frames fit both sides by one weight, so every epoch improves.
 """
 
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 
 import pytest
 
 torch = pytest.importorskip("torch")
 
+from tcip_mcp.experiments import experiment_dir  # noqa: E402
 from tcip_mcp.pipelines.model_build import STATE_DICT_KEY  # noqa: E402
 from tcip_mcp.pipelines.schemas import SCHEDULER_TYPES  # noqa: E402
 from tcip_mcp.pipelines.training import generic_trainer as gt  # noqa: E402
-from tcip_mcp.pipelines.training.generic_trainer import run_loaders, train  # noqa: E402
+from tcip_mcp.pipelines.training.generic_trainer import train  # noqa: E402
 from tests._training_values import schedule, stop_rule  # noqa: E402
 from tests.tiny_trainer_fixtures import (  # noqa: E402
     COUNTING_REGRESSOR,
     NAN_EVAL_REGRESSOR,
     TWO_RATE_REGRESSOR,
-    ConstantImageDataset,
     capture_model,
-    opposed_regression_loaders,
+    drawn_data,
+    frames_data,
+    opposed_regression_data,
     regressor_config,
-    trainer_run,
+    run_context,
 )
 
 TRAIN_INTENSITIES = [0.10, 0.25, 0.40, 0.55, 0.70, 0.85]
 VAL_INTENSITIES = [0.15, 0.35, 0.60, 0.90]
 
 
-def _config(stages: list[dict], **extra) -> dict:
-    return regressor_config(**{"seed": 3, "stages": stages, **extra})
+def _config(stages: list[dict], data: dict | None = None, **extra) -> dict:
+    """A regression config at seed 3 over ``stages``; ``data`` is filled in by :func:`_train`,
+    and a config never trained states its one band alone."""
+    return regressor_config(data=data or {"num_channels": 1},
+                            **{"seed": 3, "stages": stages, **extra})
 
 
-def _opposed_loaders(run):
-    return opposed_regression_loaders(run, TRAIN_INTENSITIES, VAL_INTENSITIES)
+def _opposed(root: Path) -> dict:
+    return opposed_regression_data(root, TRAIN_INTENSITIES, VAL_INTENSITIES)
 
 
-def _consistent_loaders(run):
-    """A training and a holdout loader both fit by weight +2 (``generic_trainer.run_loaders``),
-    so the holdout loss improves as the training loss does."""
-    return run_loaders(
-        run, ConstantImageDataset(TRAIN_INTENSITIES, [2.0 * c for c in TRAIN_INTENSITIES]),
-        ConstantImageDataset(VAL_INTENSITIES, [2.0 * c for c in VAL_INTENSITIES]))
+def _consistent(root: Path) -> dict:
+    """Training and holdout frames both fit by weight +2, so the holdout loss improves as the
+    training loss does."""
+    return drawn_data(root, (TRAIN_INTENSITIES, [2.0 * c for c in TRAIN_INTENSITIES]),
+                      (VAL_INTENSITIES, [2.0 * c for c in VAL_INTENSITIES]))
 
 
-def _train(tmp_path, config: dict, name: str, loaders=_opposed_loaders, **kwargs):
-    run = trainer_run(config, tmp_path / name, project=tmp_path, has_val_loader=True, id=name)
-    train_loader, val_loader = loaders(run)
-    return train(run, train_loader, val_loader=val_loader, **kwargs)
+def _train(tmp_path, config: dict, name: str, frames=_opposed, **kwargs):
+    """The run ``name`` under ``tmp_path`` over ``config`` with ``frames``' data block, opened by
+    the launcher's own producer and trained over its own loaders with ``kwargs``."""
+    ctx = run_context(tmp_path, {**config, "data": frames(tmp_path / frames.__name__)},
+                      experiment_id=name)
+    return train(ctx.run, ctx.train_loader, val_loader=ctx.val_loader, **kwargs)
 
 
 def _tensors(value):
@@ -149,19 +156,18 @@ def test_a_resume_puts_back_the_buffer_and_the_tensor_setting_its_capture_holds(
     freshly built pair: the model's registered buffer, and a tensor-valued group setting moved
     in place since the pair was built, the way a scheduler fills a tensor setting. The capture
     stays as it was taken once the restored pair moves on."""
-    from tcip_mcp.pipelines.schemas import train_config
     from tcip_mcp.pipelines.training.optimizer_factory import (
         GROUPS_KEY, build_optimizer, capture_training_state, restore_training_state,
     )
-    from tests._chain_fixtures import built_model
 
-    config = _config([{"freeze_to": 0}], builder=COUNTING_REGRESSOR)
-    regime = train_config(config).trainer_reads().regime
+    ctx = run_context(tmp_path, _config([{"freeze_to": 0}], _opposed(tmp_path / "ds"),
+                                        builder=COUNTING_REGRESSOR))
+    regime = ctx.run.spec.trainer_reads().regime
     assert regime is not None
     stated = regime.optimizer
 
     def built_pair():
-        model = built_model(config)
+        model = ctx.build_model()
         return model, build_optimizer(stated, model, backbone_lr=stated.backbone_lr,
                                       head_lr=stated.head_lr)
 
@@ -195,23 +201,23 @@ def test_a_stage_ends_on_its_own_plateau_and_the_next_stage_runs(tmp_path):
     assert [m["stage"] for m in run.metrics_history] == [0, 0, 1, 1]
 
 
-@pytest.mark.parametrize(("loaders", "min_delta", "stages_run"), [
-    (_consistent_loaders, 0.0, [0, 0, 1, 1, 2, 2]),
-    (_opposed_loaders, 0.0, [0, 0, 1, 1]),
-    (_consistent_loaders, 10.0, [0, 0, 1, 1]),
+@pytest.mark.parametrize(("frames", "min_delta", "stages_run"), [
+    (_consistent, 0.0, [0, 0, 1, 1, 2, 2]),
+    (_opposed, 0.0, [0, 0, 1, 1]),
+    (_consistent, 10.0, [0, 0, 1, 1]),
 ], ids=["every-stage-improves", "a-stage-worsens", "a-stage-improves-by-less-than-min-delta"])
 def test_the_run_ends_with_the_first_stage_that_does_not_improve_on_the_one_before(
-        tmp_path, loaders, min_delta, stages_run):
+        tmp_path, frames, min_delta, stages_run):
     """A run runs every stage while each stage's best improves by ``min_delta`` on its
     predecessor's best; the first that does not ends the run completed, the stages after it
     never running, and the run's last epoch row names the stage that ended it."""
     run = _train(tmp_path, _config([{"freeze_to": 0}] * 3, horizon=2,
                                    early_stopping=stop_rule(min_delta=min_delta)),
-                 "run-stop", loaders=loaders)
+                 "run-stop", frames=frames)
 
     assert run.status == "completed", run.status_error
     assert [m["stage"] for m in run.metrics_history] == stages_run
-    assert (tmp_path / "run-stop" / "model_best.pt").is_file()
+    assert (experiment_dir("run-stop", project=tmp_path) / "model_best.pt").is_file()
 
 
 def test_a_stage_under_a_schedule_with_no_horizon_runs_until_its_plateau(tmp_path):
@@ -222,7 +228,7 @@ def test_a_stage_under_a_schedule_with_no_horizon_runs_until_its_plateau(tmp_pat
                      optimizer={"name": "adamw", "backbone_lr": 2e-3, "head_lr": 2e-3,
                                 "weight_decay": 0.0},
                      early_stopping=stop_rule(3, 1e-6))
-    run = _train(tmp_path, config, "unbounded", loaders=_consistent_loaders)
+    run = _train(tmp_path, config, "unbounded", frames=_consistent)
 
     assert run.status == "completed", run.status_error
     history = run.metrics_history
@@ -246,7 +252,7 @@ def test_a_horizon_bound_schedule_is_built_over_its_horizon_and_ends_the_stage_t
 
     monkeypatch.setattr(gt, "_build_scheduler", recording_build_scheduler)
     reached = _train(tmp_path, _config([{"freeze_to": 0}], scheduler=schedule(kind)),
-                     "horizon", loaders=_consistent_loaders)
+                     "horizon", frames=_consistent)
     assert reached.status == "completed", reached.status_error
     horizon = schedule(kind)["horizon_epochs"]
     assert len(reached.metrics_history) == horizon
@@ -262,12 +268,12 @@ def test_a_horizon_bound_schedule_is_built_over_its_horizon_and_ends_the_stage_t
 def test_a_run_with_no_validation_loader_ends_its_stage_on_the_training_loss_plateau(tmp_path):
     """Selecting on ``loss`` with no validation loader, the training loss is the selection value
     the stop rule reads: a loss that cannot improve ends the stage one epoch after its first."""
-    config = _config([{"freeze_to": 0}], scheduler=schedule("step"),
-                     early_stopping=stop_rule(1))
-    run = trainer_run(config, tmp_path / "flat", project=tmp_path, has_val_loader=False)
     # Zero-intensity frames: the prediction is zero whatever the weight, so the loss is fixed.
-    train_loader, _ = run_loaders(run, ConstantImageDataset([0.0] * 6, [1.0] * 6), None)
-    run = train(run, train_loader, val_loader=None)
+    config = _config([{"freeze_to": 0}], frames_data(tmp_path / "flat", [0.0] * 6, [1.0] * 6),
+                     scheduler=schedule("step"), early_stopping=stop_rule(1))
+    ctx = run_context(tmp_path, config)
+    assert ctx.val_loader is None
+    run = train(ctx.run, ctx.train_loader, val_loader=None)
 
     assert run.status == "completed", run.status_error
     assert [m["selection"] for m in run.metrics_history] == [1.0, 1.0]
@@ -297,7 +303,9 @@ def test_a_run_resumed_across_a_stage_boundary_trains_as_the_uninterrupted_run(
     assert straight.status == "completed", straight.status_error
     assert len(straight.metrics_history) > resume_epoch
 
-    checkpoint = tmp_path / "straight" / f"checkpoint_epoch_{resume_epoch}.pt"
+    straight_dir, resumed_dir = (experiment_dir(name, project=tmp_path)
+                                 for name in ("straight", "resumed"))
+    checkpoint = straight_dir / f"checkpoint_epoch_{resume_epoch}.pt"
     resumed = _train(tmp_path, config, "resumed", resume_from=str(checkpoint))
     assert resumed.status == "completed", resumed.status_error
 
@@ -305,11 +313,11 @@ def test_a_run_resumed_across_a_stage_boundary_trains_as_the_uninterrupted_run(
     expected = [{k: m[k] for k in keys} for m in straight.metrics_history[resume_epoch:]]
     assert [{k: m[k] for k in keys} for m in resumed.metrics_history] == expected
     for name in ("model_best", "model_final"):
-        a = torch.load(tmp_path / "straight" / f"{name}.pt", weights_only=False)
-        b = torch.load(tmp_path / "resumed" / f"{name}.pt", weights_only=False)
+        a = torch.load(straight_dir / f"{name}.pt", weights_only=False)
+        b = torch.load(resumed_dir / f"{name}.pt", weights_only=False)
         assert torch.equal(a[STATE_DICT_KEY]["weight"], b[STATE_DICT_KEY]["weight"]), name
-    assert (torch.load(tmp_path / "resumed" / "model_best.pt", weights_only=False)["epoch"]
-            == torch.load(tmp_path / "straight" / "model_best.pt", weights_only=False)["epoch"])
+    assert (torch.load(resumed_dir / "model_best.pt", weights_only=False)["epoch"]
+            == torch.load(straight_dir / "model_best.pt", weights_only=False)["epoch"])
 
 
 def test_a_resume_whose_optimizer_orders_its_groups_differently_warms_up_as_the_straight_run(
@@ -331,15 +339,17 @@ def test_a_resume_whose_optimizer_orders_its_groups_differently_warms_up_as_the_
     assert straight.status == "completed", straight.status_error
 
     reversed_config = two_rate_config(reverse_groups=True)
-    checkpoint = tmp_path / "straight" / "checkpoint_epoch_3.pt"
+    straight_dir, resumed_dir = (experiment_dir(name, project=tmp_path)
+                                 for name in ("straight", "resumed"))
+    checkpoint = straight_dir / "checkpoint_epoch_3.pt"
     resumed = _train(tmp_path, reversed_config, "resumed", resume_from=str(checkpoint))
     assert resumed.status == "completed", resumed.status_error
 
     keys = ("stage", "train_loss", "val_loss")
     assert ([{k: m[k] for k in keys} for m in resumed.metrics_history]
             == [{k: m[k] for k in keys} for m in straight.metrics_history[3:]])
-    a = torch.load(tmp_path / "straight" / "model_final.pt", weights_only=False)[STATE_DICT_KEY]
-    b = torch.load(tmp_path / "resumed" / "model_final.pt", weights_only=False)[STATE_DICT_KEY]
+    a = torch.load(straight_dir / "model_final.pt", weights_only=False)[STATE_DICT_KEY]
+    b = torch.load(resumed_dir / "model_final.pt", weights_only=False)[STATE_DICT_KEY]
     assert all(torch.equal(a[name], b[name]) for name in ("weight", "bias"))
 
 
@@ -372,14 +382,9 @@ def test_a_worker_run_validates_its_config_once(tmp_path, monkeypatch):
     from tcip_mcp.experiments import observe
     from tcip_mcp.pipelines.training.subprocess_worker import prepare_run_context
     from tests._verified_checkpoint_fixtures import opened_run
-    from tests.tiny_trainer_fixtures import count_validations, write_regression_dataset
+    from tests.tiny_trainer_fixtures import count_validations
 
-    images_dir, csv_path = write_regression_dataset(
-        tmp_path / "ds", TRAIN_INTENSITIES, [2.0 * c for c in TRAIN_INTENSITIES])
-    config = _config([{"freeze_to": 0}])
-    config["data"] = {**config["data"], "images_dir": str(images_dir),
-                      "labels_dir": str(csv_path), "split": {"seed": 1, "val_ratio": 0.15}}
-    run_dir = opened_run(tmp_path, config)
+    run_dir = opened_run(tmp_path, _config([{"freeze_to": 0}], _opposed(tmp_path / "ds")))
 
     validations = count_validations(monkeypatch)
     ctx = prepare_run_context(observe(run_dir))
@@ -394,7 +399,7 @@ def test_a_stage_stating_an_epoch_count_is_refused_and_one_stating_none_is_admit
     refused = _config([{"freeze_to": 0, "epochs": 3}])
     assert any("stages.0.epochs" in issue for issue in checked_train_config(refused)[1])
     with pytest.raises(ValueError, match="stages.0.epochs"):
-        trainer_run(refused, tmp_path / "counted", project=tmp_path, has_val_loader=True)
+        _train(tmp_path, refused, "counted")
 
     admitted = _train(tmp_path, _config([{"freeze_to": 0}]), "one")
     assert admitted.status == "completed", admitted.status_error
@@ -402,8 +407,8 @@ def test_a_stage_stating_an_epoch_count_is_refused_and_one_stating_none_is_admit
 
 def test_an_unknown_scheduler_is_refused_and_a_named_one_is_admitted(tmp_path):
     with pytest.raises(ValueError, match="scheduler.*cosine_warm"):
-        trainer_run(_config([{"freeze_to": 0}], scheduler={"type": "cosine_warm"}),
-                    tmp_path / "unknown", project=tmp_path, has_val_loader=True)
+        _train(tmp_path, _config([{"freeze_to": 0}], scheduler={"type": "cosine_warm"}),
+               "unknown")
 
     admitted = _train(tmp_path, _config([{"freeze_to": 0}], scheduler=schedule("step"),
                                         early_stopping=stop_rule(1)), "step")

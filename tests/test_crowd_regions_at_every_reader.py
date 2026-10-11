@@ -152,32 +152,28 @@ def test_the_trainer_and_the_validation_loss_hand_the_heads_objects_only(tmp_pat
                                                                          monkeypatch):
     """Both hand-offs to a model's training forward, the training step and the validation loss,
     withhold every crowd row the loader keeps."""
-    from tcip_mcp.pipelines.schemas import DataSpec
-    from tcip_mcp.pipelines.training.generic_trainer import (
-        effective_data_geometry, run_loaders, train,
-    )
+    from tcip_mcp.pipelines.training.generic_trainer import train
     from tests._chain_fixtures import training_config
-    from tests.tiny_trainer_fixtures import capture_model, trainer_run
+    from tests.tiny_trainer_fixtures import capture_model, run_context
 
-    loader_ds = _detection_loader(tmp_path / "ds")
-    assert loader_ds[0][1]["iscrowd"].tolist() == [0, 1]  # the loader keeps every row
     built: list = []
     capture_model(monkeypatch, built)
-    data = effective_data_geometry("detection", DataSpec.model_validate(
-        {"num_channels": 3, "scope": {"subject": SUBJECT, "attributes": []}}), loader_ds)
     config = training_config(
         {"builder": f"{Path(__file__).stem}:build_recording_detector", "source_files": [__file__],
-         "task": "detection"}, data.record())
-    run = trainer_run(config, tmp_path / "run", project=tmp_path, has_val_loader=True,
-                      id="crowd-run")
-    train_loader, val_loader = run_loaders(run, loader_ds, loader_ds)
-    completed = train(run, train_loader, val_loader=val_loader)
+         "task": "detection"},
+        {"images_dir": str(_labeled(tmp_path / "ds")),
+         "scope": {"subject": SUBJECT, "attributes": []},
+         "split": {"seed": 0, "val_ratio": 0.5}})
+    ctx = run_context(tmp_path, config)
+    for loader in (ctx.train_loader, ctx.val_loader):
+        assert loader.dataset[0][1]["iscrowd"].tolist() == [0, 1]  # the loader keeps every row
+    completed = train(ctx.run, ctx.train_loader, val_loader=ctx.val_loader)
 
     assert completed.status == "completed", completed.status
     (model,) = built
     handed = type(model).handed  # the run's own copy of the class records what it was handed
     assert len(handed) >= 2  # one training step and one validation-loss pass
-    assert all(flags == [0, 0] for flags in handed), handed
+    assert all(flags and set(flags) == {0} for flags in handed), handed
 
 
 def test_the_overfit_probe_drives_the_model_with_objects_only(tmp_path: Path):

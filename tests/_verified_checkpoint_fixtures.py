@@ -211,12 +211,13 @@ def finished_run(
     drawing its own split draws it at ``data.split.seed`` 0 unless ``data`` states one, and
     ``config``'s keys take the place of its config's own. Returns the run directory."""
     from tcip_mcp import experiments
+    from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
     from tcip_mcp.pipelines.training.subprocess_worker import run_directory
 
     run_id = experiment_id or experiments.mint_experiment_id()
     model_source = model_source or dict(BUILT_DETECTOR)
     task = model_source.get("task")
-    geometric = task in ("detection", "instance_seg")
+    geometric = task in DETECTION_TASKS
     stated = data or (dict(SCOPED_DATA) if geometric else {"num_channels": 3})
     if "images_dir" not in stated:
         where = fixture_data_dir(root, run_id)

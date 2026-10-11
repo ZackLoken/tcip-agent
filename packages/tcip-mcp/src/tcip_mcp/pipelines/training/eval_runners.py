@@ -50,7 +50,7 @@ def run_test_evaluation(
     ``tiling`` describes the loader's regime for provenance only: a tile-level run scores
     per-tile predictions against per-tile ground truth, a diagnostic, not the delivery regime.
     """
-    from tcip_mcp.pipelines.data.datasets import run_tiling
+    from tcip_mcp.pipelines.schemas import run_tiling
     from tcip_mcp.pipelines.training.evaluation import evaluate
 
     checkpoint, execution, predictor = pass_.checkpoint, pass_.execution, pass_.predictor

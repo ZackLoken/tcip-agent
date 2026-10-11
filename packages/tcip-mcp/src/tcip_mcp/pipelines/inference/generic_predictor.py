@@ -60,7 +60,7 @@ class GenericPredictor:
     """
 
     def __init__(self, checkpoint: "VerifiedCheckpoint", device: str | None = None) -> None:
-        from tcip_mcp.pipelines.data.datasets import stated_tiling
+        from tcip_mcp.pipelines.schemas import run_tiling
 
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         self.checkpoint_path = checkpoint.path
@@ -69,7 +69,7 @@ class GenericPredictor:
         self.model_source = spec.model_source
         self.task = spec.model_source.task
 
-        tiling = stated_tiling(spec.data.tiling)
+        tiling = run_tiling(self.task, spec.data.tiling)
         self.train_tile_size = tiling.tile_size if tiling is not None else None
         self.train_overlap = tiling.overlap if tiling is not None else None
         self.train_native_size = spec.data.train_native_size

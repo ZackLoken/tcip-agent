@@ -19,9 +19,8 @@ pytest.importorskip("torchvision")
 from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
 from tests._producer_fixtures import train_val as _train_val
 from tests._verified_checkpoint_fixtures import partition_side as recorded_side  # noqa: E402
-from tcip_mcp.pipelines.training.generic_trainer import run_loaders, train  # noqa: E402
-from tests.tiny_trainer_fixtures import trainer_run  # noqa: E402
-from tcip_annotation.state import Annotation, BBox  # noqa: E402
+from tcip_mcp.pipelines.training.generic_trainer import train  # noqa: E402
+from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
 from tests._image_fixtures import write_noise_image  # noqa: E402
 from tests._producer_fixtures import label_image  # noqa: E402
 from tests._chain_fixtures import BLOB_BUILDER, training_config  # noqa: E402
@@ -173,17 +172,20 @@ def test_auto_train_val_single_untiled_source_refuses_validation_and_trains_with
     assert val_ds is None and train_ds.num_samples == 1
 
 
-def _big_single_source(root: Path, width: int, height: int) -> tuple[Path, str]:
-    """One large detection source with a scatter of small boxes, real width/height in its label
-    document: a single-image dataset large enough to hold a spatial train/val split; its image
-    tree and stem."""
+def _big_single_source(root: Path, width: int, height: int, *,
+                       polygons: bool = False) -> tuple[Path, str]:
+    """One large source with a scatter of small boxes (``polygons``: squares), real width/height
+    in its label document: a single-image dataset large enough to hold a spatial train/val split;
+    its image tree and stem."""
     images_dir = root / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True, exist_ok=True)
     stem = "mosaic"
     from torchvision.utils import save_image
     save_image(torch.rand(3, height, width) * 0.3, str(images_dir / f"{stem}.png"))
     boxes = [
-        Annotation(subject="bud", geometry=BBox(x, y, x + 20, y + 20))
+        Annotation(subject="bud", geometry=Polygon(
+            rings=[[(x, y), (x + 20, y), (x + 20, y + 20), (x, y + 20)]]) if polygons
+            else BBox(x, y, x + 20, y + 20))
         for x in range(20, width - 20, 200) for y in range(20, height - 20, 200)
     ]
     label_image(images_dir / f"{stem}.png", boxes, width, height)
@@ -638,7 +640,8 @@ def test_a_spatial_split_raises_on_unresolvable_extent(tmp_path: Path):
             {"tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2}})
         block = _with_lattice("detection", run_sizes("detection", stated, admitted.scope,
                                                      samples), samples)
-        return spatial_single_source_split(samples[0], block, run_shares(split, spatial=True))
+        return spatial_single_source_split("detection", samples[0], block,
+                                           run_shares(split, spatial=True))
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     _save_png(images_dir / "mosaic.png")
@@ -743,16 +746,11 @@ def test_train_emits_val_loss_with_autoval(tmp_path: Path):
         "auto_val": True,
         "split": {"val_ratio": 0.4, "seed": 1},
     }
-    from tcip_mcp.pipelines.training.generic_trainer import effective_data_geometry
+    from tests.tiny_trainer_fixtures import run_context
 
-    train_ds, val_ds, _, resolved = _train_val(tmp_path, "detection", data_cfg)
-    assert val_ds is not None
-    resolved = effective_data_geometry("detection", resolved, train_ds)
-
-    run = trainer_run(training_config(BLOB_BUILDER, resolved.record()), tmp_path / "out",
-                      project=tmp_path, has_val_loader=True, id="auto-run-77")
-    train_loader, val_loader = run_loaders(run, train_ds, val_ds)
-    run = train(run, train_loader, val_loader=val_loader)
+    ctx = run_context(tmp_path, training_config(BLOB_BUILDER, data_cfg))
+    assert ctx.val_loader is not None
+    run = train(ctx.run, ctx.train_loader, val_loader=ctx.val_loader)
 
     assert run.status == "completed", run.status_error
     assert "val_loss" in run.metrics_history[-1]

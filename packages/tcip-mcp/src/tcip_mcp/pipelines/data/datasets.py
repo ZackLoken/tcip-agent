@@ -24,7 +24,7 @@ from torch.utils.data import Dataset
 from tcip_mcp.pipelines import raster_source
 from tcip_mcp.pipelines.data.band_groups import BandGroupRef
 from tcip_annotation.json_io import LabelDocument
-from tcip_annotation.state import box_derivable, object_rows, polygonal
+from tcip_annotation.state import Polygon, box_derivable, object_rows, polygonal
 
 from tcip_mcp.pipelines.data.label_queries import acquired, json_det_targets, resolved
 from tcip_mcp.pipelines.derivations import Region, num_classes_from_distribution
@@ -35,7 +35,7 @@ from tcip_mcp.pipelines.image_utils import (
     frame_size, load_image, pil_to_tensor, pixel_array,
     to_pil_if_faithful,
 )
-from tcip_mcp.pipelines.schemas import DatasetSourceSchema, DataSpec, TilingSpec
+from tcip_mcp.pipelines.schemas import DatasetSourceSchema, DataSpec, TilingSpec, run_tiling
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.model_build import SourceLayout
@@ -303,6 +303,18 @@ class DocumentDataset(BaseImageDataset):
         """Each sample's :meth:`region`, in index order."""
         return [self.region(stem) for stem in self.stems]
 
+    @staticmethod
+    def tensors(target: Mapping[str, Any]) -> dict[str, torch.Tensor]:
+        """The tensors this task's loader emits for ``target``'s rows, each in the coordinates of
+        the image it is served with: :func:`target_tensors`."""
+        return target_tensors(target)
+
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
+        stem = self.stems[idx]
+        img = self._open_image(stem)
+        target = self.tensors({**self.det_targets(self.document(stem)), "size": frame_size(img)})
+        return self._finalize(img, {**target, "image_id": idx})
+
 
 class DetectionDataset(DocumentDataset):
     """Object detection over a recorded sample list: each sample reads its own source and the label
@@ -317,119 +329,71 @@ class DetectionDataset(DocumentDataset):
     def class_distribution(self) -> dict[int, int]:
         return class_counts(self.regions)
 
-    def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
-        stem = self.stems[idx]
-        img = self._open_image(stem)
-        return self._finalize(
-            img, {**target_tensors(self.det_targets(self.document(stem))), "image_id": idx})
-
 
 # ====================================================================
 # Tiled Detection (SAHI's slice lattice)
 # ====================================================================
 
-_EMPTY_BOXES = np.zeros((0, 4), dtype=np.float32)
-_EMPTY_LABELS = np.zeros((0,), dtype=np.int64)
+def slice_candidates(boxes: np.ndarray,
+                     slices: list[tuple[int, int, int, int]]) -> list[np.ndarray]:
+    """Each slice's candidate rows of a frame whose full-image xyxy ``boxes`` are given: the
+    ascending indices of every row whose box can meet the slice's half-open ``(x0, y0, x1, y1)``
+    extent, a superset :func:`clip_rows_to_tile` decides on. Found from the slice origins each
+    box's extent spans, so the cost follows the box-slice incidences; slice origins are distinct,
+    as a lattice's are. Each slice gets its own fresh array."""
+    found: list[list[int]] = [[] for _ in slices]
+    boxes = np.asarray(boxes, dtype=np.float64).reshape(-1, 4)
+    if slices and len(boxes):
+        xs = np.unique(np.asarray([s[0] for s in slices], dtype=np.int64))
+        ys = np.unique(np.asarray([s[1] for s in slices], dtype=np.int64))
+        span_x = max(x1 - x0 for x0, _y0, x1, _y1 in slices)
+        span_y = max(y1 - y0 for _x0, y0, _x1, y1 in slices)
+        col_lo = np.searchsorted(xs, boxes[:, 0] - span_x, side="right")
+        col_hi = np.searchsorted(xs, boxes[:, 2], side="left")
+        row_lo = np.searchsorted(ys, boxes[:, 1] - span_y, side="right")
+        row_hi = np.searchsorted(ys, boxes[:, 3], side="left")
+        index_of = {(x0, y0): m for m, (x0, y0, _x1, _y1) in enumerate(slices)}
+        for i in range(len(boxes)):
+            for k in range(row_lo[i], row_hi[i]):
+                for j in range(col_lo[i], col_hi[i]):
+                    m = index_of.get((int(xs[j]), int(ys[k])))
+                    if m is not None:
+                        found[m].append(i)
+    return [np.asarray(rows, dtype=np.int64) for rows in found]
 
 
-def clip_boxes_to_tile(
-    boxes: np.ndarray, labels: np.ndarray, tile_x: int, tile_y: int,
-    tile_w: int, tile_h: int, min_box_size: float,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Intersect full-image-px boxes with a ``tile_w`` x ``tile_h`` tile; drop seam slivers; emit
-    tile-local xyxy.
+def clip_rows_to_tile(
+    shapes: Sequence[Any], boxes: np.ndarray, rows: np.ndarray,
+    tile: tuple[int, int, int, int], min_box_size: float,
+) -> tuple[np.ndarray, np.ndarray, list[Polygon]]:
+    """The ``rows`` of a frame clipped once to the half-open pixel ``tile`` ``(x0, y0, x1, y1)``:
+    each row's region (``shapes``, its Shapely geometry,
+    :func:`~tcip_annotation.matching.shapely_geometry`) intersected with the tile.
 
-    A box clipped by the tile edge is dropped only when the visible (clipped) part is a sliver: its
-    characteristic size ``sqrt(iw*ih) < min_box_size``. Boxes fully inside the tile are always
-    kept. ``tile_w``/``tile_h`` need not be equal.
+    A row whose clipped region has no area leaves the tile. A row whose full-image xyxy box
+    (``boxes``) crosses the tile edge also leaves it when its clipped region is a seam sliver: the
+    characteristic size of the region's bounds under ``min_box_size``. Returns the surviving
+    rows' tile-local boxes (the bounds of their clipped regions, float32 xyxy), their indices, and
+    each one's clipped region as a tile-local ``Polygon``, one ring per piece the tile cut.
     """
+    import shapely
     from tcip_annotation.matching import box_sizes
 
-    boxes = np.asarray(boxes)
-    labels = np.asarray(labels)
-    if len(boxes) == 0:
-        return _EMPTY_BOXES.copy(), _EMPTY_LABELS.copy()
-    tx2, ty2 = tile_x + tile_w, tile_y + tile_h
-    ix1 = np.maximum(boxes[:, 0], tile_x)
-    iy1 = np.maximum(boxes[:, 1], tile_y)
-    ix2 = np.minimum(boxes[:, 2], tx2)
-    iy2 = np.minimum(boxes[:, 3], ty2)
-    iw, ih = ix2 - ix1, iy2 - iy1
-    visible = (iw > 0) & (ih > 0)
-    was_clipped = ((boxes[:, 0] < tile_x) | (boxes[:, 1] < tile_y)
-                   | (boxes[:, 2] > tx2) | (boxes[:, 3] > ty2))
-    char_size = box_sizes(np.stack([ix1, iy1, ix2, iy2], axis=1))
-    keep = visible & ~(was_clipped & (char_size < min_box_size))
-    if not keep.any():
-        return _EMPTY_BOXES.copy(), _EMPTY_LABELS.copy()
-    out = np.stack([ix1[keep] - tile_x, iy1[keep] - tile_y,
-                    ix2[keep] - tile_x, iy2[keep] - tile_y], axis=1)
-    return out.astype(np.float32), labels[keep].astype(np.int64)
-
-
-def clipped_boxes_per_slice(
-    boxes: np.ndarray, labels: np.ndarray, slices: list[tuple[int, int, int, int]],
-    min_box_size: float,
-) -> list[tuple[np.ndarray, np.ndarray]]:
-    """:func:`clip_boxes_to_tile` for every slice of a lattice at once, each clipped to its own
-    ``(x0, y0, x1, y1)`` extent: result ``i`` equals ``clip_boxes_to_tile(boxes, labels, x0, y0,
-    x1 - x0, y1 - y0, ...)`` for ``slices[i]``. Slice origins are distinct, as a lattice's are.
-    """
-    n = len(slices)
-    boxes = np.asarray(boxes)
-    labels = np.asarray(labels)
-    if n == 0 or len(boxes) == 0:
-        return [(_EMPTY_BOXES.copy(), _EMPTY_LABELS.copy()) for _ in range(n)]
-    xs = np.unique(np.asarray([s[0] for s in slices], dtype=np.int64))
-    ys = np.unique(np.asarray([s[1] for s in slices], dtype=np.int64))
-    # float64 holds every float32/float64 coordinate and every origin exactly, so these strict
-    # bounds agree with the clip's own visibility arithmetic instead of re-rounding it.
-    bx1 = boxes[:, 0].astype(np.float64)
-    by1 = boxes[:, 1].astype(np.float64)
-    bx2 = boxes[:, 2].astype(np.float64)
-    by2 = boxes[:, 3].astype(np.float64)
-    span_x = max(x1 - x0 for x0, _y0, x1, _y1 in slices)
-    span_y = max(y1 - y0 for _x0, y0, _x1, y1 in slices)
-    col_lo = np.searchsorted(xs, bx1 - span_x, side="right")
-    col_hi = np.searchsorted(xs, bx2, side="left")
-    row_lo = np.searchsorted(ys, by1 - span_y, side="right")
-    row_hi = np.searchsorted(ys, by2, side="left")
-    candidates: dict[tuple[int, int], list[int]] = {}
-    for i in range(len(boxes)):
-        for k in range(row_lo[i], row_hi[i]):
-            ty = int(ys[k])
-            for j in range(col_lo[i], col_hi[i]):
-                candidates.setdefault((int(xs[j]), ty), []).append(i)
-    results: list[tuple[np.ndarray, np.ndarray] | None] = [None] * n
-    index_of = {(x0, y0): m for m, (x0, y0, _x1, _y1) in enumerate(slices)}
-    for (x0, y0), idxs in candidates.items():
-        m = index_of.get((x0, y0))
-        if m is None:
-            continue  # an origin pair the lattice never laid down
-        _x0, _y0, x1, y1 = slices[m]
-        results[m] = clip_boxes_to_tile(
-            boxes[idxs], labels[idxs], x0, y0, x1 - x0, y1 - y0, min_box_size)
-    return [(_EMPTY_BOXES.copy(), _EMPTY_LABELS.copy()) if r is None else r for r in results]
-
-
-def dedup_boxes(boxes: np.ndarray, labels: np.ndarray, iou_thresh: float) -> list[int]:
-    """Greedy largest-first, class-aware dedup: the sorted indices of the boxes kept, dropping a
-    box that overlaps a kept box of its own class by >= iou_thresh. Indices, so a caller keeps
-    every per-box array (a crowd flag beside the labels) in step by indexing each one the same
-    way."""
-    from tcip_annotation.matching import box_areas, iou_matrix
-
-    n = len(boxes)
-    if not iou_thresh or iou_thresh >= 1.0 or n < 2:
-        return list(range(n))
-    areas = box_areas(boxes)
-    ious = iou_matrix(boxes, boxes)
-    kept: list[int] = []
-    for i in sorted(range(n), key=lambda i: -areas[i]):  # largest first
-        if not any(labels[i] == labels[k] and 0 < ious[i, k] and ious[i, k] >= iou_thresh
-                   for k in kept):
-            kept.append(i)
-    return sorted(kept)
+    x0, y0, x1, y1 = tile
+    rows = np.asarray(rows, dtype=np.int64)
+    clipped = shapely.intersection(np.asarray(shapes, dtype=object)[rows],
+                                   shapely.box(x0, y0, x1, y1))
+    bounds = np.nan_to_num(shapely.bounds(clipped)).reshape(-1, 4)
+    frame = np.asarray(boxes, dtype=np.float64).reshape(-1, 4)[rows]
+    crosses = ((frame[:, 0] < x0) | (frame[:, 1] < y0) | (frame[:, 2] > x1)
+               | (frame[:, 3] > y1))
+    keep = (shapely.area(clipped) > 0) & ~(crosses & (box_sizes(bounds) < min_box_size))
+    pieces = [[p for p in shapely.get_parts(region) if isinstance(p, shapely.Polygon) and p.area]
+              for region in clipped[keep]]
+    regions = [Polygon(rings=[[(x - x0, y - y0) for x, y in p.exterior.coords[:-1]]
+                              for p in parts]) for parts in pieces]
+    local = (bounds[keep] - [x0, y0, x0, y0]).astype(np.float32)
+    return local, rows[keep], regions
 
 
 def _validated_keep_regions(
@@ -457,9 +421,13 @@ def _validated_keep_regions(
 
 
 class TiledDetectionDataset(BaseImageDataset):
-    """Wrap a ``DetectionDataset`` and expand each source image into native-resolution
-    slices of SAHI's lattice (:func:`~tcip_mcp.pipelines.slicing.slice_lattice`) with labels
-    clipped/remapped to slice space.
+    """Wrap a :class:`DocumentDataset` (a detection or an instance-segmentation one) and expand
+    each source image into native-resolution slices of SAHI's lattice
+    (:func:`~tcip_mcp.pipelines.slicing.slice_lattice`), each row's region clipped once to the
+    slice (:func:`clip_rows_to_tile`): a row whose clipped region has no area or is a seam sliver
+    leaves the slice, and one that stays carries the bounds of its clipped region as its box and
+    that region, tile-local, as its geometry. Each slice emits the base task's target
+    (``DocumentDataset.tensors``), an instance mask the clipped region rasterized.
 
     Slice membership is computed at ``__init__``. Each source's frame comes from its
     :class:`~tcip_mcp.pipelines.raster_source.SourceHeader` (a TIFF's or a photograph's header,
@@ -469,9 +437,8 @@ class TiledDetectionDataset(BaseImageDataset):
     ``.npy``); layout refusals surface here, and a refusal of the pixels themselves surfaces at
     first read. ``__getitem__`` reads a windowed stem one slice window at a time through the
     pool, and a whole-decode stem by decoding the whole source for each slice and indexing the
-    slice out of it; both emit the same
-    target dict shape as ``DetectionDataset``. The dataset itself never holds an open source
-    object, so it pickles into spawned DataLoader workers.
+    slice out of it; both emit the base's target dict shape. The dataset itself never holds an
+    open source object, so it pickles into spawned DataLoader workers.
 
     ``keep_regions``, when given, is a sequence of half-open pixel rects ``(x0, y0, x1, y1)``
     in each image's own full-resolution frame: only slices lying fully inside one of them are
@@ -480,22 +447,19 @@ class TiledDetectionDataset(BaseImageDataset):
     slices no rect contains count in ``tiles_dropped_outside_regions``. Without ``keep_regions``
     both counts stay 0 and every slice is kept.
 
-    ``tile_size`` and ``overlap`` are the lattice's, both required. A clipped box whose visible
-    part falls under ``sliver_frac`` of the class's average size is a
+    ``tile_size`` and ``overlap`` are the lattice's, both required. A row crossing the slice edge
+    whose clipped region's bounds fall under ``sliver_frac`` of the class's average size is a
     tile-seam sliver and dropped; unstated, the fraction derives from the ground truth's own
     size spread (``derivations.derive_sliver_frac``), and ground truth too sparse to derive it
     refuses (``ValueError``) naming ``tiling.sliver_frac``.
     """
 
-    task_type = "detection"
-
     def __init__(
         self,
-        base: "DetectionDataset",
+        base: DocumentDataset,
         tile_size: int,
         overlap: float,
         sliver_frac: float | None = None,
-        dedup_iou: float = 0.8,
         skip_empty: bool = False,
         transforms: Any = None,
         keep_regions: Sequence[tuple[int, int, int, int]] | None = None,
@@ -504,8 +468,11 @@ class TiledDetectionDataset(BaseImageDataset):
         from tcip_mcp.pipelines.raster_source import rect_contains_rect
         from tcip_mcp.pipelines.slicing import is_full_slice, slice_lattice
 
+        from tcip_annotation.matching import geometry_rings, shapely_geometry
+
         self._samples = base._samples
         self.expected_channels = base.expected_channels
+        self._tensors = type(base).tensors
         self.transforms = transforms
         self._index: list[dict] = []
         # Plain values only, so the dataset pickles into spawned workers; asserted at decode time.
@@ -514,8 +481,8 @@ class TiledDetectionDataset(BaseImageDataset):
         self.tiles_dropped_past_extent = 0
         self.tiles_dropped_outside_regions = 0
 
-        # Pass 1: every image's dims and boxes, and the objects of each whole frame.
-        stems_data: list[tuple[str, np.ndarray, dict[str, np.ndarray], int, int]] = []
+        # Pass 1: every image's dims and rows, and the objects of each whole frame.
+        stems_data: list[tuple[str, np.ndarray, dict[str, np.ndarray], list, int, int]] = []
         frames: list[Region] = []
         for stem in base.stems:
             # Acquired now, so an unreadable layout refuses here rather than mid-epoch.
@@ -547,7 +514,7 @@ class TiledDetectionDataset(BaseImageDataset):
             fb = np.asarray(full["boxes"], dtype=np.float32).reshape(-1, 4)
             rows_of: dict[str, np.ndarray] = {k: np.asarray(full[k], dtype=np.int64)
                                               for k in PER_BOX_KEYS if k != "boxes" and k in full}
-            stems_data.append((stem, fb, rows_of, w, h))
+            stems_data.append((stem, fb, rows_of, full["geometry"], w, h))
             frames.append(object_region(full, w * h))
 
         self.tile_size, self.overlap = tile_size, overlap
@@ -562,7 +529,7 @@ class TiledDetectionDataset(BaseImageDataset):
                 "tiling.sliver_frac for this run.")
         min_box_size = sliver_frac * class_avg_size
 
-        for stem, fb, rows_of, w, h in stems_data:
+        for stem, fb, rows_of, geometries, w, h in stems_data:
             slices = slice_lattice(h, w, tile_size, overlap)
             if regions is not None:
                 kept: list[tuple[int, int, int, int]] = []
@@ -574,14 +541,12 @@ class TiledDetectionDataset(BaseImageDataset):
                     else:
                         self.tiles_dropped_outside_regions += 1
                 slices = kept
-            per_slice = clipped_boxes_per_slice(fb, np.arange(len(fb)), slices, min_box_size)
-            for s, (tb, rows) in zip(slices, per_slice):
-                if len(tb) > 1:
-                    keep = dedup_boxes(tb, rows_of["labels"][rows], dedup_iou)
-                    tb, rows = tb[keep], rows[keep]
+            shapes = [shapely_geometry(geometry_rings(g)) for g in geometries]
+            for s, candidates in zip(slices, slice_candidates(fb, slices)):
+                tb, rows, clipped = clip_rows_to_tile(shapes, fb, candidates, s, min_box_size)
                 if skip_empty and len(tb) == 0:
                     continue
-                self._index.append({"stem": stem, "slice": s, "boxes": tb,
+                self._index.append({"stem": stem, "slice": s, "boxes": tb, "geometry": clipped,
                                     **{k: v[rows] for k, v in rows_of.items()}})
 
     @property
@@ -646,6 +611,7 @@ class TiledDetectionDataset(BaseImageDataset):
         source names its 4th band alpha (:func:`to_pil_if_faithful`)."""
         e = self._index[idx]
         stem = e["stem"]
+        x0, y0, x1, y1 = e["slice"]
         info = self._source_frames[stem]
         interpretations = None
         if info["windowed"]:
@@ -660,10 +626,10 @@ class TiledDetectionDataset(BaseImageDataset):
                     f"{self.expected_channels} channels. Cropping here would displace every box."
                 )
             arr, interpretations = pixel_array(img)
-            x0, y0, x1, y1 = e["slice"]
             region = arr[y0:y1, x0:x1]
         tile = to_pil_if_faithful(region, band_interpretations=interpretations)
-        return self._finalize(tile, {**target_tensors(e), "image_id": idx})
+        return self._finalize(tile, {**self._tensors({**e, "size": (x1 - x0, y1 - y0)}),
+                                     "image_id": idx})
 
 
 # ====================================================================
@@ -678,31 +644,29 @@ class InstanceSegDataset(DocumentDataset):
     reads_geometry = staticmethod(polygonal)
     reads_description = "a polygon of its subject"
 
-    def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
-        stem = self.stems[idx]
-        img = self._open_image(stem)
-        w, h = frame_size(img)
+    @staticmethod
+    def tensors(target: Mapping[str, Any]) -> dict[str, torch.Tensor]:
+        """:func:`target_tensors` beside ``masks``, each row's polygon rasterized on the
+        ``size`` ``(width, height)`` of the image it is served with (:func:`instance_masks`)."""
+        return {**target_tensors(target),
+                "masks": instance_masks(target["geometry"], target["size"])}
 
-        target = self.det_targets(self.document(stem))
-        from PIL import ImageDraw
 
-        masks = []
-        for polygon in target["geometry"]:
-            # Every ring fills one instance mask: a multi-ring instance is one occlusion-split
-            # object.
-            poly_img = Image.new("L", (w, h), 0)
-            draw = ImageDraw.Draw(poly_img)
-            for ring in polygon.rings:
-                draw.polygon([(p[0], p[1]) for p in ring], fill=1)
-            masks.append(np.array(poly_img))
+def instance_masks(polygons: Sequence[Any], size: tuple[int, int]) -> torch.Tensor:
+    """Each polygon of ``polygons`` filled on its own ``size`` ``(width, height)`` canvas, as a
+    ``[N, height, width]`` uint8 tensor. Every ring of a polygon fills its one mask: a multi-ring
+    instance is one occlusion-split object."""
+    from PIL import ImageDraw
 
-        return self._finalize(img, {
-            **target_tensors(target),
-            "masks": torch.tensor(
-                np.stack(masks) if masks else np.zeros((0, h, w)), dtype=torch.uint8
-            ),
-            "image_id": idx,
-        })
+    w, h = size
+    masks = np.zeros((len(polygons), h, w), dtype=np.uint8)
+    for mask, polygon in zip(masks, polygons):
+        canvas = Image.new("L", (w, h), 0)
+        draw = ImageDraw.Draw(canvas)
+        for ring in polygon.rings:
+            draw.polygon([(x, y) for x, y in ring], fill=1)
+        mask[:] = np.asarray(canvas)
+    return torch.from_numpy(masks)
 
 
 # ====================================================================
@@ -943,17 +907,6 @@ def resolve_sizes(
     return resolved
 
 
-def stated_tiling(tiling: TilingSpec | None) -> TilingSpec | None:
-    """``tiling`` when it is stated and enabled; ``None`` otherwise."""
-    return tiling if tiling is not None and tiling.enabled else None
-
-
-def run_tiling(task: str, tiling: TilingSpec | None) -> TilingSpec | None:
-    """:func:`stated_tiling` for a run of ``task`` that tiles its training loader: a detection
-    run; ``None`` for a run that does not."""
-    return stated_tiling(tiling) if task == "detection" else None
-
-
 def build_dataset(
     task: str, *, samples: Sequence[Sample], sizes: "Mapping[str, int]", scope: ClassScope,
     transforms: Any = None, tiling: TilingSpec | None = None, **unowned: Any,
@@ -969,9 +922,10 @@ def build_dataset(
     ``sizes`` is what the caller resolved for this run (:func:`resolve_sizes`); a loader reads its
     sources at its band count. Anything else given refuses (``ValueError``) by name.
 
-    An enabled ``tiling`` wraps a detection dataset in a :class:`TiledDetectionDataset` at the
-    options it states (``TilingSpec.tiler_options``), and one missing its ``tile_size`` or
-    ``overlap`` refuses (``ValueError``). An unknown task raises ``Unknown task``.
+    The tiling ``task`` builds at (``schemas.run_tiling``, whose refusal propagates) wraps the
+    task's dataset in a :class:`TiledDetectionDataset` at the options it states
+    (``TilingSpec.tiler_options``), and one missing its ``tile_size`` or ``overlap`` refuses
+    (``ValueError``). An unknown task raises ``Unknown task``.
     """
     if unowned:
         raise ValueError(
@@ -996,16 +950,12 @@ def build_dataset(
                 f"and overlap {tiler.overlap!r}: a tiler runs on one whole lattice; state both, "
                 "or resolve them with split_construction.resolved_tiling.")
         base = construct(samples=samples, **declared)
-        assert isinstance(base, DetectionDataset), "_DATASET_MAP's detection entry is this class"
+        assert isinstance(base, DocumentDataset), "a task that tiles reads label documents"
         # Stamped before the tiler indexes every image at the base's band count.
         base.expected_channels = sizes["num_channels"]
         ds: BaseDataset = TiledDetectionDataset(base, transforms=transforms,
                                                 **tiler.tiler_options())
     else:
-        if stated_tiling(tiling) is not None:
-            logger.warning(
-                "tiling is only supported for task='detection'; ignoring for task=%r", task
-            )
         ds = construct(samples=samples, transforms=transforms, **declared)
 
     ds.expected_channels = sizes["num_channels"]

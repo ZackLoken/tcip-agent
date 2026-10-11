@@ -148,9 +148,9 @@ class TrainContext:
             samples=samples, transforms=transforms)
 
     def tiled_dataset(self, base: Any, *, tile_size: int, overlap: float, **kwargs: Any) -> Any:
-        """Wrap a detection dataset in the native-resolution tiler
+        """Wrap a detection or instance-segmentation dataset in the native-resolution tiler
         (``datasets.TiledDetectionDataset``) at the lattice you compose it at, ``tile_size`` and
-        ``overlap``, both required. ``kwargs``: sliver_frac / dedup_iou / skip_empty /
+        ``overlap``, both required. ``kwargs``: sliver_frac / skip_empty /
         keep_regions / transforms."""
         from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
 

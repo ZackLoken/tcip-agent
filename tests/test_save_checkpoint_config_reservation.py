@@ -17,14 +17,13 @@ from tcip_mcp.pipelines.training.envelope import TrainContext  # noqa: E402
 
 
 def _ctx(tmp_path) -> tuple[TrainContext, dict]:
-    """A context over a run the launcher's own writer opened under ``tmp_path``, and the config
+    """The context of a run the launcher's own writer opened under ``tmp_path``, and the config
     its run trains under as its spec records it."""
-    from tcip_mcp.experiments import observe
-    from tcip_mcp.pipelines.training.run_registry import observed_run
-    from tests._verified_checkpoint_fixtures import detection_config, opened_run
+    from tests._verified_checkpoint_fixtures import detection_config
+    from tests.tiny_trainer_fixtures import run_context
 
-    run = observed_run(observe(opened_run(tmp_path, detection_config(tmp_path / "data"))))
-    return TrainContext(run=run, train_loader=None, val_loader=None), run.spec.record()
+    ctx = run_context(tmp_path, detection_config(tmp_path / "data"))
+    return ctx, ctx.run.spec.record()
 
 
 def test_save_checkpoint_refuses_a_state_carrying_its_own_config_key(tmp_path) -> None:
@@ -62,30 +61,19 @@ def test_the_default_trainer_and_a_bespoke_loop_stamp_one_checkpoint_config(tmp_
     ``SNAPSHOT_KEY``, the run's own snapshot digest."""
     from tcip_mcp.experiments import DATA_PATHS, observe
     from tcip_mcp.pipelines.training.generic_trainer import train
-    from tcip_mcp.pipelines.training.run_registry import observed_run
     from tcip_mcp.registry_paths import _each_path, stored_path
-    from tests._verified_checkpoint_fixtures import opened_run
     from tests.test_dataset_source_seam import BESPOKE_DS, BESPOKE_DS_FILE
-    from tests.tiny_trainer_fixtures import (
-        opposed_regression_loaders,
-        regressor_config,
-        write_regression_dataset,
-    )
+    from tests.tiny_trainer_fixtures import opposed_regression_data, regressor_config, run_context
 
-    intensities = [0.1, 0.25, 0.4, 0.55, 0.7, 0.85]
-    images_dir, csv_path = write_regression_dataset(
-        tmp_path / "ds", intensities, [2.0 * c for c in intensities])
     config = regressor_config(seed=3, data={
-        "num_channels": 1, "scope": {}, "images_dir": str(images_dir),
-        "labels_dir": str(csv_path), "split": {"seed": 1, "val_ratio": 0.15},
+        **opposed_regression_data(tmp_path / "ds", [0.1, 0.25, 0.4, 0.55, 0.7, 0.85],
+                                  [0.2, 0.6, 0.9]),
         "dataset_source": {"builder": BESPOKE_DS, "source_files": [BESPOKE_DS_FILE]}})
-    observation = observe(opened_run(tmp_path, config))
-    run = observed_run(observation)
-    train_loader, val_loader = opposed_regression_loaders(run, [0.1, 0.4, 0.7], [0.2, 0.6])
-    trained = train(run, train_loader, val_loader=val_loader)
+    ctx = run_context(tmp_path, config)
+    observation = observe(ctx.run_dir)
+    trained = train(ctx.run, ctx.train_loader, val_loader=ctx.val_loader)
     assert trained.status == "completed", trained.status_error
-    path = TrainContext(run=run, train_loader=None).save_checkpoint(
-        {STATE_DICT_KEY: {}}, "model_bespoke")
+    path = ctx.save_checkpoint({STATE_DICT_KEY: {}}, "model_bespoke")
 
     stamped = {CONFIG_KEY, SNAPSHOT_KEY}
     by_trainer, by_loop = ({key: value for key, value in torch.load(

@@ -188,10 +188,12 @@ def test_the_trainer_reads_the_flat_config_as_given(tmp_path, monkeypatch):
     second placement to reconcile against."""
     monkeypatch.chdir(tmp_path)
     from tests._chain_fixtures import DETECTION_SOURCE
-    from tests.tiny_trainer_fixtures import trainer_run
+    from tests._verified_checkpoint_fixtures import SCOPED_DATA, detection_images
+    from tests.tiny_trainer_fixtures import run_context
 
-    run = trainer_run({**FLAT_CONFIG, "model_source": DETECTION_SOURCE}, tmp_path,
-                      project=tmp_path, has_val_loader=True, id="auto-run-5")
+    data = {**detection_images(tmp_path / "ds", SCOPED_DATA["scope"]), **SCOPED_DATA}
+    run = run_context(tmp_path, {**FLAT_CONFIG, "model_source": DETECTION_SOURCE,
+                                 "data": data}).run
     assert run.spec.record()["stages"] == FLAT_CONFIG["stages"]
     assert "training" not in run.spec.record()
 
@@ -238,14 +240,12 @@ def test_the_loaders_read_the_batch_size_the_schema_validated(tmp_path):
     """The batch size the schema admits is the one the loaders are built at, coerced the same
     way, and one it refuses builds no loader."""
     pytest.importorskip("torch")
-    from tcip_mcp.pipelines.training.generic_trainer import run_loaders
-    from tests.tiny_trainer_fixtures import ConstantImageDataset, regressor_config, trainer_run
+    from tests.tiny_trainer_fixtures import frames_data, regressor_config, run_context
 
-    dataset = ConstantImageDataset([0.1, 0.2, 0.3], [0.2, 0.4, 0.6])
     assert _issues_of({**FLAT_CONFIG, "batch_size": "3"}) == []
-    run = trainer_run(regressor_config(batch_size="3", num_workers="0"), tmp_path / "out",
-                      project=tmp_path, has_val_loader=True)
-    train_loader, _ = run_loaders(run, dataset, None)
+    data = frames_data(tmp_path / "ds", [0.1, 0.2, 0.3], [0.2, 0.4, 0.6])
+    train_loader = run_context(tmp_path, regressor_config(
+        data=data, batch_size="3", num_workers="0")).train_loader
     assert (train_loader.batch_size, train_loader.num_workers) == (3, 0)
     with pytest.raises(ValueError, match="batch_size"):
         train_config({**FLAT_CONFIG, "batch_size": 0})
@@ -312,10 +312,10 @@ def test_a_stated_tiling_block_reaches_the_tiler_as_stated():
     from tcip_mcp.pipelines.schemas import train_config
 
     stated = {"enabled": True, "tile_size": 64, "overlap": 0.25, "sliver_frac": 0.5,
-              "dedup_iou": 0.7, "skip_empty": True, "keep_regions": [[0, 0, 64, 64]]}
+              "skip_empty": True, "keep_regions": [[0, 0, 64, 64]]}
     tiling = train_config({**FLAT_CONFIG, "data": {"tiling": stated}}).data.tiling
     assert tiling is not None
     assert tiling.tiler_options() == {**{k: v for k, v in stated.items() if k != "enabled"},
                                       "keep_regions": [(0, 0, 64, 64)]}
-    assert tiling.tiler_options(frozenset({"keep_regions", "dedup_iou"})) == {
+    assert tiling.tiler_options(frozenset({"keep_regions"})) == {
         "tile_size": 64, "overlap": 0.25, "sliver_frac": 0.5, "skip_empty": True}

@@ -150,6 +150,12 @@ masks or a `.csv` table of one row per image. A detection or instance run names 
 image's own label document is its ground truth, and neither does a run bound to a selection, whose
 samples each name their own.
 
+A detection or instance_seg run may state `data.tiling` to train over tiles of each frame, each
+object's region clipped to the tile once, its box the bounds of what the tile shows and its
+instance mask that region, and its checkpoint then predicts at that lattice
+when a pass states none. A run of any other task trains whole frames, and an enabled `data.tiling`
+on one is refused by name.
+
 ## Samplers
 
 The top-level `sampler` config key is a block naming the train loader's sampler beside that

@@ -2,7 +2,7 @@
 
 Every ``val_`` metric, the selection value, the best-checkpoint choice and early stopping are
 only defensible if they were measured on data the epoch did not just train on. These runs give
-the train and val loaders loss landscapes that pull in opposite directions, so a validation pass
+the train and val sides loss landscapes that pull in opposite directions, so a validation pass
 that scored the training data would report visibly different numbers and pick a different epoch.
 """
 
@@ -18,20 +18,44 @@ from tcip_mcp.pipelines.training.generic_trainer import train
 from tests._training_values import IOU_THRESHOLD
 from tests.tiny_trainer_fixtures import (
     capture_model,
-    opposed_regression_loaders,
+    opposed_regression_data,
     regressor_config,
-    trainer_run,
-    write_regression_dataset,
+    run_context,
 )
 
-# Train values sit at 2x the frame intensity, holdout values at -5x: the two loaders are fit by
-# opposite-signed weights, so training progress on one is a regression on the other.
 TRAIN_INTENSITIES = [0.10, 0.25, 0.40, 0.55, 0.70, 0.85]
 VAL_INTENSITIES = [0.15, 0.35, 0.60, 0.90]
 
 
-def _config(horizon: int, **overrides) -> dict:
-    return regressor_config(horizon, builder_kwargs={"init_weight": 0.0}, **overrides)
+def _context(tmp_path, horizon: int, **overrides):
+    """The context of a regression run over opposed frames under ``tmp_path``, opened by the
+    launcher's own producer."""
+    data = opposed_regression_data(tmp_path / "ds", TRAIN_INTENSITIES, VAL_INTENSITIES)
+    return run_context(tmp_path, regressor_config(
+        horizon, data=data, builder_kwargs={"init_weight": 0.0}, **overrides))
+
+
+def test_the_run_a_test_trains_is_the_one_its_directory_records(tmp_path):
+    """The context a training test trains holds the run ``observed_run`` reads back from the
+    directory the launcher's own producer opened, and loaders over that run's recorded partition,
+    whose validation side holds the validation frames its fixture wrote and no other."""
+    from tcip_mcp.experiments import observe
+    from tcip_mcp.pipelines.training.run_registry import observed_run
+    from tests._verified_checkpoint_fixtures import partition_side
+
+    ctx = _context(tmp_path, 1)
+    observation = observe(ctx.run_dir)
+    recorded = observed_run(observation)
+    partition = observation.record["resolved"]["partition"]
+
+    assert (ctx.run.id, ctx.run.spec.record(), ctx.run.objective) == (
+        recorded.id, recorded.spec.record(), recorded.objective)
+    for side, loader in (("train", ctx.train_loader), ("val", ctx.val_loader)):
+        dataset = loader.dataset
+        assert sorted(dataset.sample_of(key).member for key in dataset.stems) == partition_side(
+            partition, side)
+    assert partition_side(partition, "val") == sorted(
+        f"img{len(TRAIN_INTENSITIES) + i}" for i in range(len(VAL_INTENSITIES)))
 
 
 def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(tmp_path, monkeypatch):
@@ -40,22 +64,11 @@ def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(tmp_path
     models: list = []
     capture_model(monkeypatch, models)
 
-    from tcip_mcp.experiments import METRICS_FILE, observe, partition_rows, read_rows
-    from tcip_mcp.pipelines.training.envelope import TrainContext
-    from tcip_mcp.pipelines.training.run_registry import observed_run
-    from tests._verified_checkpoint_fixtures import opened_run
+    from tcip_mcp.experiments import METRICS_FILE, partition_rows, read_rows
 
-    images_dir, csv_path = write_regression_dataset(
-        tmp_path / "ds", TRAIN_INTENSITIES, [2.0 * c for c in TRAIN_INTENSITIES])
-    config = _config(1)
-    config["data"] = {**config["data"], "images_dir": str(images_dir),
-                      "labels_dir": str(csv_path), "split": {"seed": 1, "val_ratio": 0.15}}
-    out_dir = opened_run(tmp_path, config)
-    run = observed_run(observe(out_dir))
-    train_loader, val_loader = opposed_regression_loaders(run, TRAIN_INTENSITIES, VAL_INTENSITIES)
+    ctx = _context(tmp_path, 1)
     # The production wiring: the trainer hands each row to the envelope's sink, which logs it
     # to the run's own metrics log.
-    ctx = TrainContext(run=run, train_loader=train_loader, val_loader=val_loader)
     run = ctx.default_train()
 
     assert run.status == "completed", run.status_error
@@ -63,9 +76,9 @@ def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(tmp_path
     model = models[0]
 
     device = torch.device("cpu")
-    on_holdout = evaluate(model, val_loader, device, "regression", dims={"in_chans": 1},
+    on_holdout = evaluate(model, ctx.val_loader, device, "regression", dims={"in_chans": 3},
                           conf_threshold=None, iou_threshold=IOU_THRESHOLD, score_weights=None)
-    on_training = evaluate(model, train_loader, device, "regression", dims={"in_chans": 1},
+    on_training = evaluate(model, ctx.train_loader, device, "regression", dims={"in_chans": 3},
                            conf_threshold=None, iou_threshold=IOU_THRESHOLD, score_weights=None)
     # The two loaders must be distinguishable at all, or nothing below can discriminate.
     assert on_holdout["loss"] > 3.0 * on_training["loss"] > 0.0
@@ -78,7 +91,7 @@ def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(tmp_path
     # A regression run selects by val_loss, so the checkpoint objective is the holdout number too.
     assert run.best_metric == pytest.approx(on_holdout["loss"], abs=1e-6)
 
-    persisted = partition_rows(read_rows(out_dir / METRICS_FILE)[0])[0]
+    persisted = partition_rows(read_rows(ctx.run_dir / METRICS_FILE)[0])[0]
     assert len(persisted) == 1
     assert persisted[0]["val_loss"] == pytest.approx(on_holdout["loss"], abs=1e-6)
 
@@ -89,11 +102,8 @@ def test_best_checkpoint_and_early_stopping_follow_the_holdout_loader(tmp_path, 
     models: list = []
     capture_model(monkeypatch, models)
 
-    out_dir = tmp_path / "out"
-    config = _config(4, early_stopping={"patience": 1, "min_delta": 1e-4})
-    run = trainer_run(config, out_dir, project=tmp_path, has_val_loader=True, id="auto-run-76")
-    train_loader, val_loader = opposed_regression_loaders(run, TRAIN_INTENSITIES, VAL_INTENSITIES)
-    run = train(run, train_loader, val_loader=val_loader)
+    ctx = _context(tmp_path, 4, early_stopping={"patience": 1, "min_delta": 1e-4})
+    run = train(ctx.run, ctx.train_loader, val_loader=ctx.val_loader)
 
     assert run.status == "completed", run.status_error
     history = run.metrics_history
@@ -103,6 +113,6 @@ def test_best_checkpoint_and_early_stopping_follow_the_holdout_loader(tmp_path, 
     assert history[1]["val_loss"] > history[0]["val_loss"]
 
     assert run.best_metric == pytest.approx(history[0]["val_loss"], abs=1e-6)
-    best = torch.load(out_dir / "model_best.pt", weights_only=False)
+    best = torch.load(ctx.run_dir / "model_best.pt", weights_only=False)
     assert best["epoch"] == 1
     assert best[METRICS_KEY]["val_loss"] == pytest.approx(history[0]["val_loss"], abs=1e-6)

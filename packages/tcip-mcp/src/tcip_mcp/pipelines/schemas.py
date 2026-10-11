@@ -264,7 +264,7 @@ class SpatialManifest(BaseModel):
 
 
 class TilingSpec(BaseModel):
-    """``data.tiling``: whether a detection run tiles its loader, the
+    """``data.tiling``: whether a run tiles its loader (:func:`run_tiling`), the
     ``datasets.TiledDetectionDataset`` options it states (an unstated edge and overlap derived,
     every other unstated option the tiler's default), and a within-image spatial split's
     ``buffer``. A key outside these fields refuses by name."""
@@ -274,7 +274,6 @@ class TilingSpec(BaseModel):
     tile_size: int | None = None
     overlap: float | None = None
     sliver_frac: float | None = None
-    dedup_iou: float | None = None
     skip_empty: bool | None = None
     keep_regions: list[Rect] | None = None
     buffer: int | None = None
@@ -283,6 +282,23 @@ class TilingSpec(BaseModel):
         """The ``TiledDetectionDataset`` keyword arguments this block states, but ``exclude``;
         an option it leaves ``None`` is omitted."""
         return self.model_dump(exclude_none=True, exclude={"enabled", "buffer", *exclude})
+
+
+def run_tiling(task: str, tiling: TilingSpec | None) -> TilingSpec | None:
+    """The tiling a run of ``task`` builds its loaders at: ``tiling`` when it is stated and
+    enabled, ``None`` otherwise. A task outside ``model_contract.DETECTION_TASKS`` trains whole
+    frames, so an enabled ``tiling`` for one refuses (``ValueError``) naming the task and
+    ``data.tiling``."""
+    from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
+
+    if tiling is None or not tiling.enabled:
+        return None
+    if task not in DETECTION_TASKS:
+        raise ValueError(
+            f"data.tiling is enabled for a run of task {task!r}: only a "
+            f"{sorted(DETECTION_TASKS)} run trains and predicts over tiles, its targets clipped "
+            "to each one, so this run would never read the tiling it states. Drop data.tiling.")
+    return tiling
 
 
 class _Recorded(BaseModel):
@@ -399,6 +415,11 @@ class TrainConfigSchema(_Recorded):
         if isinstance(values, dict) and "training" in values:
             raise ValueError(NESTED_TRAINING_SECTION_REFUSAL)
         return values
+
+    @model_validator(mode="after")
+    def _tiling_on_a_task_that_tiles(self) -> TrainConfigSchema:
+        run_tiling(self.model_source.task, self.data.tiling)
+        return self
 
     def default_trainer_regime(self) -> DefaultTrainerRegime:
         """The regime the default trainer runs at. Refuses (``ValueError``) naming every block of

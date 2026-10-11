@@ -9,6 +9,7 @@ from tests._chain_fixtures import BESPOKE_INSTANCE_SEG, BESPOKE_MODELS
 from tests._producer_fixtures import checkpoint_admission, gray_frame, painted_array
 
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import pytest
@@ -127,28 +128,89 @@ TILE = 64
 TILED_PASS = Stated(tile=True, tile_size=TILE, overlap=SAMPLE_OVERLAP, conf=0.0,
                     cross_tile_nms=SAMPLE_CROSS_TILE_NMS)
 """The execution values a tiled inference pass here states."""
+UNSTATED_LATTICE_PASS = Stated(conf=0.0, cross_tile_nms=SAMPLE_CROSS_TILE_NMS)
+"""A pass stating neither whether it tiles nor at what lattice."""
+STRADDLING = [(4.0, 4.0), (124.0, 60.0), (4.0, 60.0)]
+"""A stem's triangle, in a frame two :data:`TILE` px tiles wide, crossing the seam at x=64:
+within the second tile its diagonal edge starts at y=32, where its bounding box starts at y=4."""
+TRAINED_LATTICE = {"tile_size": TILE, "overlap": 0.0, "sliver_frac": 0.25}
+"""The lattice the fixture run states: two tiles per frame; two objects derive no sliver
+spread, and a quarter of the triangle's size keeps both of its pieces."""
+
+
+def _stem_run(tmp_path) -> Path:
+    """A bespoke instance_seg (Mask R-CNN) run completed in ``tmp_path`` over two frames of its
+    own, each two :data:`TILE` px tiles wide holding one :data:`STRADDLING` polygon, stating
+    :data:`TRAINED_LATTICE`; its directory."""
+    from tcip_annotation.state import Annotation, Polygon
+
+    from tests._producer_fixtures import seed_labeled_images
+    from tests._verified_checkpoint_fixtures import fixture_data_dir, finished_run
+
+    stem = Annotation(subject="stem", geometry=Polygon([STRADDLING]))
+    images = seed_labeled_images(fixture_data_dir(tmp_path, "stems") / "images" / UNDATED_BUCKET,
+                                 [stem], n=2, width=2 * TILE, height=TILE)
+    return finished_run(
+        tmp_path, model_source={"builder": BESPOKE_INSTANCE_SEG, "task": "instance_seg",
+                                "source_files": [BESPOKE_MODELS],
+                                "builder_kwargs": {"min_size": TILE, "max_size": TILE * 2}},
+        data={"images_dir": str(images), "num_channels": 3, "scope": {"subject": "stem"},
+              "tiling": TRAINED_LATTICE})
 
 
 @pytest.fixture
 def instance_seg_ckpt(tmp_path) -> str:
-    """A real bespoke instance_seg (Mask R-CNN) checkpoint a run completed in ``tmp_path`` over
-    square :data:`TILE` px polygon-labeled frames of its own, registered by completing: these
-    tests exercise reachable tool/eval paths, so a stub predictor would assume the very dispatch
-    under test. The run trains untiled, as every instance_seg run does, so its recorded frame is
-    the edge a tiled pass states."""
-    from tcip_annotation.state import Annotation, Polygon
+    """The checkpoint :func:`_stem_run` registered by completing: these tests exercise reachable
+    tool/eval paths, so a stub predictor would assume the very dispatch under test."""
+    from tests._verified_checkpoint_fixtures import completed_checkpoint
 
-    from tests._producer_fixtures import seed_labeled_images
-    from tests._verified_checkpoint_fixtures import fixture_data_dir, registered_checkpoint
+    completed = completed_checkpoint(_stem_run(tmp_path))
+    assert completed is not None
+    return completed["path"]
 
-    stem = Annotation(subject="stem", geometry=Polygon([[(8, 8), (40, 8), (40, 40), (8, 40)]]))
-    images = seed_labeled_images(fixture_data_dir(tmp_path, "stems") / "images" / UNDATED_BUCKET,
-                                 [stem], n=2, width=TILE, height=TILE)
-    return registered_checkpoint(
-        tmp_path, model_source={"builder": BESPOKE_INSTANCE_SEG, "task": "instance_seg",
-                                "source_files": [BESPOKE_MODELS],
-                                "builder_kwargs": {"min_size": TILE, "max_size": TILE * 2}},
-        data={"images_dir": str(images), "num_channels": 3, "scope": {"subject": "stem"}})
+
+def test_an_instance_seg_run_trains_over_its_instances_clipped_to_each_tile(tmp_path):
+    """A run stating a lattice serves tiles whose masks are its instances cut at each tile's edge:
+    a triangle straddling the seam appears in both of its frame's tiles, each tile's mask the
+    run's own untiled loader's frame mask over that tile's rect and each tile's box the bounds of
+    that mask's pixels; its checkpoint records the lattice."""
+    from tcip_mcp.experiments import observe
+    from tcip_mcp.model_registry import load_registered_checkpoint
+    from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset, build_dataset, stated_sizes
+    from tcip_mcp.pipelines.data.split_construction import partition_samples
+    from tcip_mcp.pipelines.training.subprocess_worker import prepare_run_context
+    from tests._verified_checkpoint_fixtures import completed_checkpoint
+
+    run_dir = _stem_run(tmp_path)
+    observation = observe(run_dir)
+    ctx = prepare_run_context(observation)
+    data = ctx.run.spec.data
+    frames = build_dataset("instance_seg", scope=data.recorded_scope, sizes=stated_sizes(data),
+                           samples=partition_samples(cast(dict, observation.resolution)[
+                               "partition"]))
+    frame_masks = {stem: frames[i][1]["masks"] for i, stem in enumerate(frames.stems)}
+    tiled = [loader.dataset for loader in (ctx.train_loader, ctx.val_loader)
+             if loader is not None]
+
+    seams: list[str] = []
+    for ds in tiled:
+        assert isinstance(ds, TiledDetectionDataset)
+        for index, (stem, (x0, y0, x1, y1)) in enumerate(ds.tile_entries):
+            target = ds[index][1]
+            masks = target["masks"]
+            assert masks.shape == (1, y1 - y0, x1 - x0)
+            assert torch.equal(masks, frame_masks[stem][:, y0:y1, x0:x1])
+            ys, xs = torch.nonzero(masks[0], as_tuple=True)
+            pixels = [int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1]
+            (box,) = target["boxes"].tolist()
+            assert all(abs(p - b) <= 1 for p, b in zip(pixels, box)), (box, pixels)
+            seams.append(stem)
+    assert sorted(seams) == sorted(list(frame_masks) * 2)
+    completed = completed_checkpoint(run_dir)
+    assert completed is not None
+    recorded = load_registered_checkpoint(completed["path"], project=tmp_path).spec.data.tiling
+    assert recorded is not None
+    assert recorded.model_dump(exclude_none=True) == {"enabled": True, **TRAINED_LATTICE}
 
 
 def test_predict_sliced_require_masks_false_returns_boxes_only(instance_seg_ckpt, tmp_path):
@@ -260,7 +322,8 @@ def test_run_inference_never_stamps_a_mask_threshold_into_annotation_attributes(
 
 def test_run_inference_instance_seg_explicit_tile_true_writes_tiled(instance_seg_ckpt, tmp_path):
     """An explicit tile=True is no longer refused for instance_seg export: masks travel through
-    the tiled path into the written prediction bucket."""
+    the tiled path into the written prediction bucket. A pass stating no lattice predicts the
+    tile-trained checkpoint sliced at the lattice it recorded."""
     from tcip_mcp.tools.inference_tools import run_inference
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
@@ -271,11 +334,18 @@ def test_run_inference_instance_seg_explicit_tile_true_writes_tiled(instance_seg
     assert r["execution"]["tile_size"] == TILE
     assert _document(r, images_dir) is not None
 
+    implicit = run_inference(tmp_path, instance_seg_ckpt, str(images_dir),
+                             bucket="preds/2026-01-02", device="cpu",
+                             stated=UNSTATED_LATTICE_PASS)
+    assert "error" not in implicit, implicit
+    assert (implicit["execution"]["tile_size"], implicit["execution"]["overlap"]) == (
+        TILE, TRAINED_LATTICE["overlap"])
+
 
 def test_run_full_frame_evaluation_tiled_instance_seg_scores_masks(instance_seg_ckpt, tmp_path):
-    """A Mask R-CNN tiled at its training frame's edge is gated full frame by its masks over the
-    objects its own task selects: a box beside a polygon is no instance reference on either
-    route."""
+    """A tile-trained Mask R-CNN is gated full frame by its masks over the objects its own task
+    selects: a box beside a polygon is no instance reference on either route. A pass stating no
+    lattice runs at the one the checkpoint recorded."""
     from tcip_annotation.state import Annotation, BBox, Polygon
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.data.datasets import build_dataset, resolve_sizes
@@ -302,6 +372,11 @@ def test_run_full_frame_evaluation_tiled_instance_seg_scores_masks(instance_seg_
     assert r["n_gt"] == len(trained[0][1]["boxes"]) == 1
     assert r["task"] == "instance_seg"
     assert r["governing_criterion"]["kind"] == "mask_iou_match"
+
+    implicit = run_full_frame_evaluation(checkpoint, admitted, stated=Stated(
+        **SAMPLE_DETECTOR_PASS))
+    assert (implicit["execution"]["tile_size"], implicit["execution"]["overlap"]) == (
+        TILE, TRAINED_LATTICE["overlap"])
 
 
 # export.py encode_predictions: masks become a real (possibly multi-ring) Polygon.

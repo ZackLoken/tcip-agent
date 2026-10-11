@@ -532,9 +532,12 @@ def test_an_assessed_tiled_pass_and_its_bucket_run_one_merge(tmp_path, monkeypat
         execution)
 
 
-def test_the_bucket_records_the_slice_geometry_the_checkpoint_derived(tmp_path):
+@pytest.mark.parametrize("with_masks", [False, True], ids=["detection", "instance_seg"])
+def test_the_bucket_records_the_slice_geometry_the_checkpoint_derived(tmp_path, with_masks):
     """A tiled record read back from its published bucket states its lattice and the merge it
-    names, and that name builds SAHI's postprocess of that type over that type's metric."""
+    names, and that name builds SAHI's postprocess of that type over that type's metric: a
+    tile-trained checkpoint of either task that tiles predicts at its recorded lattice when a pass
+    states none."""
     import sahi
     from sahi.predict import POSTPROCESS_NAME_TO_CLASS
 
@@ -543,7 +546,8 @@ def test_the_bucket_records_the_slice_geometry_the_checkpoint_derived(tmp_path):
     from tcip_mcp.tools.inference_tools import run_inference
 
     ckpt, _checkpoint_record = _checkpoint(  # sliver_frac stated: three boxes derive no spread
-        tmp_path, tiling={"tile_size": TILE, "overlap": OVERLAP, "sliver_frac": 0.5})
+        tmp_path, with_masks=with_masks,
+        tiling={"tile_size": TILE, "overlap": OVERLAP, "sliver_frac": 0.5})
     images = tmp_path / "images" / UNDATED_BUCKET
     images.mkdir(parents=True)
     _png(images, _frame())

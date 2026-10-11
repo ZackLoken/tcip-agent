@@ -22,8 +22,6 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
 from tcip_mcp.pipelines.model_build import resolve_contract_dims  # noqa: E402
-from tcip_mcp.pipelines.training.envelope import TrainContext  # noqa: E402
-from tests.tiny_trainer_fixtures import trainer_run  # noqa: E402
 from torch.utils.data import Dataset  # noqa: E402
 
 
@@ -436,21 +434,48 @@ def test_preflight_blocks_when_no_batch_can_be_built(tmp_path, monkeypatch):
 # ctx surface: a custom loop self-proves + reuses the craft primitives
 # --------------------------------------------------------------------------
 
-def _ctx_for(project, task: str, builder: str, data: dict):
-    """A context over a run of ``project`` whose table ground truth recorded the empty scope
-    admission writes."""
-    config = training_config({"builder": builder, "source_files": [__file__, BESPOKE_MODELS],
-                              "task": task}, {"scope": {}, **data})
-    run = trainer_run(config, "out", project=project, has_val_loader=False, id="auto-run-6")
-    return TrainContext(run=run, train_loader=None, val_loader=None)
+def _table_tree(tmp_path) -> tuple[Path, Path]:
+    """Four 32 px frames and a table labeling them in three classes, under ``tmp_path``: their
+    images directory and the table."""
+    import csv
+
+    from PIL import Image
+
+    imgs, table = tmp_path / "ds" / "images" / UNDATED_BUCKET, tmp_path / "ds" / "labels.csv"
+    imgs.mkdir(parents=True)
+    rows = []
+    for index in range(4):
+        Image.new("RGB", (32, 32), (40 * index, 90, 120)).save(imgs / f"img{index}.png")
+        rows.append((f"img{index}", index % 3))
+    with open(table, "w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(("stem", "label"))
+        writer.writerows(rows)
+    return imgs, table
+
+
+def _bespoke_classification_data(imgs: Path, table: Path, **sizes) -> dict:
+    """The data block of a run over ``imgs`` labeled by ``table`` whose loaders
+    :func:`_bespoke_classification_dataset` builds, stating ``sizes``, drawing its own split."""
+    return {"images_dir": str(imgs), "labels_dir": str(table), **sizes,
+            "split": {"seed": 0, "val_ratio": 0.15},
+            "dataset_source": {"builder": f"{Path(__file__).stem}:_bespoke_classification_dataset",
+                               "source_files": [__file__]}}
 
 
 def test_ctx_check_contract_and_overfit_check(tmp_path):
     """The model is built and smoked at what the run recorded: its own width and class count, the
     sizes its loaders were built at, and the frame its untiled sources share."""
-    ctx = _ctx_for(tmp_path, "classification", BESPOKE_CLASSIFIER,
-                   data={"num_channels": 3, "num_classes": 2, "tiling": {"enabled": False},
-                         "train_native_size": [32, 32]})
+    from tests.tiny_trainer_fixtures import run_context
+
+    imgs, table = _table_tree(tmp_path)
+    ctx = run_context(tmp_path, training_config(
+        {"builder": BESPOKE_CLASSIFIER, "source_files": [BESPOKE_MODELS],
+         "task": "classification"},
+        {"images_dir": str(imgs), "labels_dir": str(table), "auto_val": False}))
+    recorded = ctx.run.spec.data
+    assert (recorded.num_channels, recorded.num_classes, recorded.train_native_size) == (
+        3, 3, [32, 32])
     report = ctx.check_contract()
     assert report["ok"], report["issues"]
     # overfit is voluntary + non-gating; steps flow through as an override kwarg.
@@ -462,44 +487,16 @@ def test_ctx_smokes_a_bespoke_dataset_run_at_the_count_its_data_states(tmp_path,
     """A bespoke dataset owns its class space, so its run states the count on its data section;
     the platform records the band count its sources carry beside it and builds the model at both,
     and both proofs run at those dimensions."""
-    import csv
-
-    from PIL import Image
-
-    from tcip_mcp.pipelines.data.split_construction import auto_train_val
-    from tcip_mcp.pipelines.model_build import staged_sources
-    from tcip_mcp.pipelines.schemas import train_config
-    from tcip_mcp.pipelines.training.generic_trainer import run_loaders
+    from tests.tiny_trainer_fixtures import run_context
 
     monkeypatch.chdir(tmp_path)
-    imgs, table = tmp_path / "images" / UNDATED_BUCKET, tmp_path / "labels.csv"
-    imgs.mkdir(parents=True)
-    rows = []
-    for index in range(4):
-        Image.new("RGB", (32, 32), (40 * index, 90, 120)).save(imgs / f"img{index}.png")
-        rows.append((f"img{index}", index % 3))
-    with open(table, "w", newline="") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(("stem", "label"))
-        writer.writerows(rows)
-    from tcip_mcp.pipelines.schemas import DataSpec
-
-    data = {"images_dir": str(imgs), "labels_dir": str(table), "num_classes": 3,
-            "split": {"seed": 0, "val_ratio": 0.15},
-            "dataset_source": {"builder": f"{Path(__file__).stem}:_bespoke_classification_dataset",
-                               "source_files": [__file__]}}
-    config = training_config({"builder": BESPOKE_CLASSIFIER, "source_files": [BESPOKE_MODELS],
-                              "task": "classification"}, data)
-    layout = staged_sources(train_config(config), tmp_path).layout
-    train_ds, _val_ds, _partition, resolved = auto_train_val(
-        tmp_path, "classification", DataSpec.model_validate(data), None, layout)
+    imgs, table = _table_tree(tmp_path)
+    ctx = run_context(tmp_path, training_config(
+        {"builder": BESPOKE_CLASSIFIER, "source_files": [BESPOKE_MODELS],
+         "task": "classification"},
+        _bespoke_classification_data(imgs, table, num_classes=3)))
+    resolved = ctx.run.spec.data
     assert (resolved.num_channels, resolved.num_classes) == (3, 3)
-    config = training_config({"builder": BESPOKE_CLASSIFIER, "source_files": [BESPOKE_MODELS],
-                              "task": "classification"}, resolved.record())
-    run = trainer_run(config, tmp_path / "out", project=tmp_path, has_val_loader=False,
-                      id="auto-run-62")
-    loader, _ = run_loaders(run, train_ds, None)
-    ctx = TrainContext(run=run, train_loader=loader, val_loader=None)
 
     report = ctx.check_contract()
     over = ctx.overfit_check(steps=3)
@@ -510,28 +507,27 @@ def test_ctx_smokes_a_bespoke_dataset_run_at_the_count_its_data_states(tmp_path,
     assert over["issue"] is None, over
 
 
-def test_ctx_refuses_a_classification_run_recording_no_class_count(tmp_path):
-    """A classification run recording no class count is refused by name by both proofs: a batch
-    shaped at a count nobody resolved would prove the model against a class space the run does
-    not train in."""
-    ctx = _ctx_for(tmp_path, "classification", TASK_MODEL,
-                   data={"num_channels": 3})
+def test_a_classification_record_stating_no_class_count_builds_no_model():
+    """A classification record with no class count, the shape only a config the platform did not
+    resolve takes, is refused by name before any model is built for either proof
+    (``recorded_model_dims``, which ``ctx.check_contract`` and ``ctx.overfit_check`` build
+    through): a batch shaped at a count nobody resolved would prove the model against a class
+    space the run does not train in. A run the producer resolved records its count
+    (:func:`test_ctx_check_contract_and_overfit_check`)."""
+    from tcip_mcp.pipelines.model_build import recorded_model_dims
 
     with pytest.raises(ValueError, match="records no num_classes"):
-        ctx.check_contract()
-    with pytest.raises(ValueError, match="records no num_classes"):
-        ctx.overfit_check(steps=2)
+        recorded_model_dims(_spec("classification", {"num_channels": 3, "scope": {}}))
 
 
 def test_ctx_apply_stage_freeze_matches_trainer_guard(tmp_path):
     from tcip_mcp.pipelines.training.generic_trainer import apply_stage_freeze
+    from tests._verified_checkpoint_fixtures import unbuilt_source
+    from tests.tiny_trainer_fixtures import frames_data, run_context
 
     model = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.Linear(4, 2))
-    from tests._verified_checkpoint_fixtures import unbuilt_source
-
-    ctx = TrainContext(run=trainer_run(training_config(unbuilt_source("regression"), {}), "out",
-                                       project=tmp_path, has_val_loader=False, id="auto-run-7"),
-                       train_loader=None)
+    ctx = run_context(tmp_path, training_config(
+        unbuilt_source("regression"), frames_data(tmp_path / "ds", [0.1, 0.5], [0.2, 1.0])))
     full = ctx.apply_stage_freeze(model, 0)
     assert full == sum(p.numel() for p in model.parameters())
     # A shrink relative to the previous stage violates the monotonic guard.
