@@ -637,6 +637,65 @@ def test_a_polygon_that_fails_to_rasterize_refuses_rather_than_training_an_empty
         dataset[0]
 
 
+def test_an_instance_segmentation_assessment_reads_its_reference_through_polygons(
+    tmp_path,
+):
+    """Guard. An instance-segmentation checkpoint's count fit reads its reference through its own
+    task's loader: a reference holding the subject as polygons is fitted, and one holding it
+    only as boxes refuses by name, where a box detector's loader would have read the boxes.
+    """
+    from tcip_mcp import assessment
+    from tcip_mcp.model_registry import load_registered_checkpoint
+    from tcip_mcp.pipelines.data.selection import source_digests
+    from tcip_mcp.pipelines.execution import prepare
+    from tcip_mcp.pipelines.operating_point import STAGED_CONF_FLOOR
+    from tests._chain_fixtures import BESPOKE_INSTANCE_SEG, BESPOKE_MODELS
+    from tests._producer_fixtures import samples_over
+    from tests._verified_checkpoint_fixtures import (
+        detection_images,
+        registered_checkpoint,
+    )
+
+    checkpoint = load_registered_checkpoint(
+        registered_checkpoint(
+            tmp_path,
+            model_source={
+                "builder": BESPOKE_INSTANCE_SEG,
+                "builder_kwargs": {"min_size": 64, "max_size": 128},
+                "source_files": [BESPOKE_MODELS],
+                "task": "instance_seg",
+            },
+        ),
+        project=tmp_path,
+    )
+
+    def fit(polygons: bool):
+        reference = detection_images(
+            tmp_path.parent / f"reference-{polygons}",
+            {"subject": SUBJECT},
+            n=4,
+            polygons=polygons,
+        )
+        samples = samples_over(reference["images_dir"], subject=SUBJECT)
+        return assessment._detection(
+            prepare(
+                checkpoint,
+                Stated(tile=False, conf=STAGED_CONF_FLOOR),
+                device="cpu",
+            ),
+            samples[:2],
+            samples[2:],
+            fx.COUNT_SPEC,
+            "per_image_count",
+            source_digests(samples),
+        )
+
+    _pass, measured, _failures = fit(polygons=True)
+    assert "count" in measured
+    with pytest.raises(ValueError, match="instance_seg loader does not read"):
+        fit(polygons=False)
+
+
 # -- a restored execution record runs exactly as recorded ---------------------------------
 
 
