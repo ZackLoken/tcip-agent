@@ -5,8 +5,7 @@ FROM node:22 AS frontend-builder
 WORKDIR /app
 COPY packages/tcip-web/frontend/ packages/tcip-web/frontend/
 WORKDIR /app/packages/tcip-web/frontend
-RUN npm ci --no-fund --no-audit
-RUN npm run build
+RUN npm ci --no-fund --no-audit && npm run build
 
 FROM python:3.13-slim
 WORKDIR /app
