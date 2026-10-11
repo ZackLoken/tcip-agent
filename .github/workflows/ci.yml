@@ -23,7 +23,9 @@ jobs:
 
       - name: Install the system libraries the opencv-python wheel links (libGL, GLib)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgl1 libglib2.0-0
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgl1 libglib2.0-0
 
       - uses: conda-incubator/setup-miniconda@v3
         with:
@@ -34,8 +36,11 @@ jobs:
       - name: Report what resolved
         run: |
           python --version
-          python -c "import rasterio, fiona, pyproj; print('rasterio', rasterio.__version__, 'gdal', rasterio.__gdal_version__); print('fiona', fiona.__version__)"
-          python -c "import cv2, sahi; print('cv2', cv2.__version__, cv2.__file__); print('sahi', sahi.__version__)"
+          python -c "import rasterio as r; print('rasterio', r.__version__)"
+          python -c "import rasterio as r; print('gdal', r.__gdal_version__)"
+          python -c "import fiona, pyproj; print('fiona', fiona.__version__)"
+          python -c "import cv2; print('cv2', cv2.__version__, cv2.__file__)"
+          python -c "import sahi; print('sahi', sahi.__version__)"
 
       - name: The raster stack works in the documented environment
         run: pytest tests/test_raster_source.py tests/test_overviews.py tests/test_band_stats.py -q
@@ -104,7 +109,9 @@ jobs:
         run: pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 
       - name: Install the system libraries the opencv-python wheel links (libGL, GLib)
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgl1 libglib2.0-0
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgl1 libglib2.0-0
 
       - name: Install packages
         run: |
@@ -115,7 +122,8 @@ jobs:
           pip install -e packages/tcip-annotation
           pip install -e "packages/tcip-mcp[dev,hpo]"
           pip install -e "packages/tcip-web[dev]"
-          python -c "import cv2, sahi; print('cv2', cv2.__version__, cv2.__file__); print('sahi', sahi.__version__)"
+          python -c "import cv2; print('cv2', cv2.__version__, cv2.__file__)"
+          python -c "import sahi; print('sahi', sahi.__version__)"
 
       - name: Lint (ruff)
         run: ruff check .
@@ -150,7 +158,8 @@ jobs:
       - name: The detached Ray exit path leaves no daemon behind
         run: |
           set -o pipefail
-          pytest tests/test_hpo_ray_detached_exit.py -q --timeout=600 | tee ray-exit-windows-output.txt
+          pytest tests/test_hpo_ray_detached_exit.py -q --timeout=600 \
+            | tee ray-exit-windows-output.txt
 
       - name: Prove the file's one Windows-only test actually ran and passed, not skipped away
         run: |
@@ -179,17 +188,19 @@ jobs:
       - name: The removal's move of a project whose database was open
         run: |
           set -o pipefail
-          pytest tests/test_project_removal.py::test_removal_archives_moves_and_records_one_line \
-                 tests/test_store_contract.py::test_release_root_releases_that_root_so_it_can_be_renamed_and_keeps_every_other \
-                 -v --timeout=300 | tee project-removal-windows-output.txt
+          removal=tests/test_project_removal.py::test_removal_archives_moves_and_records_one_line
+          seam=tests/test_store_contract.py::test_release_root_releases_that_root_so_it_can_be_renamed_and_keeps_every_other
+          pytest "$removal" "$seam" -v --timeout=300 | tee project-removal-windows-output.txt
 
       - name: Prove both selected tests passed by node id, not a bare count
         run: |
-          grep -qE "^tests/test_project_removal\.py::test_removal_archives_moves_and_records_one_line PASSED" project-removal-windows-output.txt || {
+          removal=tests/test_project_removal.py::test_removal_archives_moves_and_records_one_line
+          seam=tests/test_store_contract.py::test_release_root_releases_that_root_so_it_can_be_renamed_and_keeps_every_other
+          grep -qF "$removal PASSED" project-removal-windows-output.txt || {
             echo "the removal test did not pass (skipped or none selected)"
             exit 1
           }
-          grep -qE "^tests/test_store_contract\.py::test_release_root_releases_that_root_so_it_can_be_renamed_and_keeps_every_other PASSED" project-removal-windows-output.txt || {
+          grep -qF "$seam PASSED" project-removal-windows-output.txt || {
             echo "the seam contract test did not pass (skipped or none selected)"
             exit 1
           }
@@ -209,7 +220,8 @@ jobs:
 
       - name: Run and poll for the GUI
         run: |
-          docker run --network host -d --name tcip-web-ci -e TCIP_WORKSPACE=/tmp/tcip-workspace tcip-web:ci
+          docker run --network host -d --name tcip-web-ci \
+            -e TCIP_WORKSPACE=/tmp/tcip-workspace tcip-web:ci
           for _ in $(seq 1 60); do
             code=$(curl -s -o response.txt -w "%{http_code}" http://127.0.0.1:8765/ || true)
             [ "$code" = "200" ] && break

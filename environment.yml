@@ -7,10 +7,12 @@
 # dependencies and the four local packages (editable) via pip. Run it from the
 # repository root so the editable paths resolve.
 #
-# GPU note: defaults to the CUDA build (cu130) via --extra-index-url below; it runs fine without a GPU too, since every device placement here branches on torch.cuda.is_available(). CI installs its own separate CPU wheel (.github/workflows/ci.yml), unaffected by this.
+# GPU note: the CUDA build (cu130) via --extra-index-url below; it runs without a GPU too, since
+# every device placement branches on torch.cuda.is_available(). CI installs its own CPU wheel.
 #
 # environment.win.lock.yml is a frozen export from one Windows machine, taken before this
-# file's Node and OpenCV corrections; it is kept only for the mypy pin its CI comment cites, never as a path to create an environment. environment.linux.lock.yml is the same kind of
+# file's Node and OpenCV corrections; it is kept only for the mypy pin its CI comment cites,
+# never as a path to create an environment. environment.linux.lock.yml is the same kind of
 # export from a fresh Linux container, a record of what resolved there.
 name: tcip-agent
 channels:
@@ -19,7 +21,9 @@ dependencies:
   # One version by choice, for a reproducible environment; the packages themselves take >=3.12.
   # Not 3.14 yet: fiona publishes no stable 3.14 wheel.
   - python=3.13.*
-  - nodejs>=22.9,<23  # npm 11 supports node ^20.17.0 || >=22.9.0; unpinned, conda-forge resolved a v26 alpha build it refuses
+  # npm 11 supports node ^20.17.0 || >=22.9.0; unpinned, conda-forge resolved a v26 alpha build
+  # it refuses.
+  - nodejs>=22.9,<23
   - pip
   - pip:
       - --extra-index-url https://download.pytorch.org/whl/cu130
@@ -28,10 +32,14 @@ dependencies:
       - numpy
       - pillow>=9.0
       - tifffile>=2023.1
-      - imagecodecs>=2023.1  # LZW/JPEG decode for compressed multi-band GeoTIFF (e.g. a drone orthomosaic)
-      # rasterio bundles its own GDAL and ships wheels for every platform this runs on, so no separate osgeo binding, no system libgdal, and no pinned third-party wheel.
+      # LZW/JPEG decode for compressed multi-band GeoTIFF (e.g. a drone orthomosaic).
+      - imagecodecs>=2023.1
+      # rasterio bundles its own GDAL and ships wheels for every platform this runs on, so no
+      # separate osgeo binding, no system libgdal, and no pinned third-party wheel.
       - rasterio>=1.4
-      - fiona>=1.9  # vector side of the same stack, for plant_mapping.read_plant_shapefile and tcip shp-to-plant-csv
+      # Vector side of the same stack, for plant_mapping.read_plant_shapefile and
+      # tcip shp-to-plant-csv.
+      - fiona>=1.9
       - pyproj>=3.5
       - shapely>=2.0
       - pyyaml>=6.0
