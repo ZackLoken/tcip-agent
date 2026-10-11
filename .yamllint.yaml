@@ -1,0 +1,21 @@
+# The YAML gate: CI runs `yamllint .` and pre-commit runs it on the staged files.
+extends: default
+ignore: |
+  # Frozen environment exports, records of what resolved on one machine, never edited by hand.
+  environment.linux.lock.yml
+  environment.win.lock.yml
+  node_modules/
+rules:
+  # 100 columns, where the tree's prose and ruff.toml's gate sit.
+  line-length:
+    max: 100
+    allow-non-breakable-words: true
+    allow-non-breakable-inline-mappings: true
+  # No tracked file opens with a document marker.
+  document-start: disable
+  # The workflow's `on:` key.
+  truthy:
+    check-keys: false
+  # Both sequence styles are in the tree: the workflow indents its lists, crops.yml does not.
+  indentation:
+    indent-sequences: whatever
