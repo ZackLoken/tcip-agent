@@ -149,6 +149,8 @@ def test_the_record_a_prediction_is_handed_governs_the_model_it_runs(tmp_path):
     prediction sets them for it.
     """
     from tcip_mcp.pipelines.operating_point import (
+        DETECTIONS_PER_IMG,
+        SCORE_THRESH,
         detector_operating_point_holder,
     )
     from tests._verified_checkpoint_fixtures import SAMPLE_CONF
@@ -156,8 +158,8 @@ def test_the_record_a_prediction_is_handed_governs_the_model_it_runs(tmp_path):
     p = _pass(tmp_path, tile=False, conf=SAMPLE_CONF)
 
     assert _in_model_point(p, tmp_path) == {
-        "score_thresh": SAMPLE_CONF,
-        "detections_per_img": math.ceil(p.execution.density * 64 * 64),
+        SCORE_THRESH: SAMPLE_CONF,
+        DETECTIONS_PER_IMG: math.ceil(p.execution.density * 64 * 64),
     }
     assert p.execution.cross_tile_nms is None
 

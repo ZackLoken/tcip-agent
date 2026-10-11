@@ -81,7 +81,11 @@ def _bias_equivalence(
     ) <= tolerance, tolerance
 
 
-OPERATING_POINT_ATTRS = ("score_thresh", "detections_per_img")
+SCORE_THRESH = "score_thresh"
+"""The knob holding the least score a detection keeps in the model's own output."""
+DETECTIONS_PER_IMG = "detections_per_img"
+"""The knob holding the most detections the model keeps for one frame."""
+OPERATING_POINT_ATTRS = (SCORE_THRESH, DETECTIONS_PER_IMG)
 """The two knobs the detection operating point governs, wherever a module holds them."""
 
 
@@ -123,17 +127,22 @@ def set_detector_operating_point(
     (``ValueError``) naming it and the holder.
     """
     target, path = detector_operating_point_holder(model)
-    for attr, val in zip(
-        OPERATING_POINT_ATTRS, (score_thresh, detections_per_img), strict=True
-    ):
-        if not hasattr(target, attr):
-            raise ValueError(
-                f"this model exposes no {attr} "
-                f"({f'at its holder {path}' if path else 'and no holder of either knob'}): a "
-                f"detector's operating point is set in the model before its forward, so its "
-                f"holder exposes {attr} and honors it."
-            )
-        setattr(target, attr, val)
+    _set_knob(target, path, SCORE_THRESH, score_thresh)
+    _set_knob(target, path, DETECTIONS_PER_IMG, detections_per_img)
+
+
+def _set_knob(target: Any, path: str | None, attr: str, value: float) -> None:
+    """Set the operating-point knob ``attr`` to ``value`` on ``target``, the holder at ``path``,
+    refusing (``ValueError``) naming the knob and the holder when ``target`` does not expose it.
+    """
+    if not hasattr(target, attr):
+        raise ValueError(
+            f"this model exposes no {attr} "
+            f"({f'at its holder {path}' if path else 'and no holder of either knob'}): a "
+            f"detector's operating point is set in the model before its forward, so its "
+            f"holder exposes {attr} and honors it."
+        )
+    setattr(target, attr, value)
 
 
 def governed_forward(

@@ -13,6 +13,8 @@ from typing import Any, cast
 import torch
 import torch.nn as nn
 
+from tcip_mcp.pipelines.operating_point import DETECTIONS_PER_IMG, SCORE_THRESH
+
 ROI_OUTPUT_SIZE = 7
 """The edge, in feature cells, every box's pooled features are resampled to: torchvision's own
 box-head pool edge, the value these builders' RoI pools already used."""
@@ -351,8 +353,8 @@ class AttributeDetector(nn.Module):
     """
 
     roi_heads = _held("roi_heads")
-    score_thresh = _held("score_thresh")
-    detections_per_img = _held("detections_per_img")
+    score_thresh = _held(SCORE_THRESH)
+    detections_per_img = _held(DETECTIONS_PER_IMG)
 
     def __init__(
         self,
@@ -479,9 +481,9 @@ def build_detector(
     stated_point = sorted(
         {
             "box_detections_per_img",
-            "detections_per_img",
+            DETECTIONS_PER_IMG,
             "box_score_thresh",
-            "score_thresh",
+            SCORE_THRESH,
         }
         & set(kwargs)
     )
