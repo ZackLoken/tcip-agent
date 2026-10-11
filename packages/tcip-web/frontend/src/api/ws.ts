@@ -33,7 +33,7 @@ export class StateSocket {
       onMessage: (data) => {
         let msg: IncomingMessage;
         try {
-          msg = JSON.parse(data);
+          msg = JSON.parse(data) as IncomingMessage;
         } catch {
           return;
         }
@@ -92,7 +92,7 @@ export class StateSocket {
       url: wsUrl(ROUTES.socketWsPanelByPanel(panel)),
       onMessage: (data) => {
         try {
-          handler(JSON.parse(data));
+          handler(JSON.parse(data) as Parameters<typeof handler>[0]);
         } catch {
           /* ignore */
         }

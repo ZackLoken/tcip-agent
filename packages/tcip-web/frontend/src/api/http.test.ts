@@ -15,7 +15,7 @@ function res(status: number, body: unknown): Response {
     ok: status >= 200 && status < 300,
     status,
     statusText: "",
-    json: async () => body,
+    json: () => Promise.resolve(body),
   } as Response;
 }
 

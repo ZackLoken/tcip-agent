@@ -73,15 +73,17 @@ export function ColorPickerModal({ title, initialColor, onSubmit, onCancel, onRe
 
   return (
     <div
+      role="presentation"
       className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center"
-      onClick={onCancel}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onCancel();
+      }}
     >
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
         className="tcip-panel rounded-lg p-5 w-[400px]"
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-3">
           <div id={titleId} className="text-[13px] font-semibold">

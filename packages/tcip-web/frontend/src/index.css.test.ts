@@ -28,9 +28,11 @@ describe("index.css component layer", () => {
     // empty strings. @types/node isn't installed in this package, so import
     // node:fs dynamically: vitest runs in Node, so it resolves at runtime.
     // @ts-expect-error TS2307: no @types/node in the frontend tsconfig
-    const { readFileSync } = await import("node:fs");
+    const { readFileSync } = (await import("node:fs")) as {
+      readFileSync: (path: string, encoding: "utf8") => string;
+    };
     // Vitest runs with cwd = frontend root (vitest.config.ts lives there).
-    const rawCss: string = readFileSync("src/index.css", "utf8");
+    const rawCss = readFileSync("src/index.css", "utf8");
 
     // Raw content stub instead of file globs so the test emits the component
     // classes without scanning the source tree.

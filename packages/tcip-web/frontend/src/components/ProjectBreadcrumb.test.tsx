@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { api, type ProjectSummary } from "@/api/client";
 import { GUI_STATE_DEFAULTS } from "@/api/types.generated";
 import { ProjectBreadcrumb } from "@/components/ProjectBreadcrumb";
 import { openWithDefaults } from "@/lib/openProject";
@@ -19,9 +20,6 @@ vi.mock("@/api/client", () => {
     },
   };
 });
-
-import { api } from "@/api/client";
-import type { ProjectSummary } from "@/api/client";
 
 // The current-project row marker (the breadcrumb's active-row glyph, U+25CF).
 const MARKER = String.fromCharCode(0x25cf);
@@ -146,9 +144,9 @@ describe("recent-projects menu through the one opening transition", () => {
   it("opens a recent project from the listing it already holds, without listing again", async () => {
     localStorage.setItem("tcip.recent_projects", JSON.stringify(["a1", "b2"]));
     let listingsBeforeOpen = -1;
-    vi.mocked(api.projects.open).mockImplementation(async () => {
+    vi.mocked(api.projects.open).mockImplementation(() => {
       listingsBeforeOpen = vi.mocked(api.projects.list).mock.calls.length;
-      return { id: "b2", display_name: "Beta block", path: "/w/b2" };
+      return Promise.resolve({ id: "b2", display_name: "Beta block", path: "/w/b2" });
     });
     vi.mocked(api.dataset.select).mockResolvedValue(selection("/w/b2"));
     render(<ProjectBreadcrumb />);
@@ -169,12 +167,8 @@ describe("recent-projects menu through the one opening transition", () => {
     fireEvent.click(screen.getByTitle("Recent projects"));
     fireEvent.click(await screen.findByText("Beta block"));
 
-    await waitFor(() =>
-      expect(useStore.getState().openError).toEqual({
-        projectId: "b2",
-        message: expect.stringContaining("beta refused"),
-      }),
-    );
+    await waitFor(() => expect(useStore.getState().openError?.message).toContain("beta refused"));
+    expect(useStore.getState().openError?.projectId).toBe("b2");
     expect(useStore.getState().toasts.map((t) => t.message)).toContainEqual(
       expect.stringContaining("beta refused"),
     );
@@ -201,7 +195,7 @@ describe("recent-projects menu through the one opening transition", () => {
       useStore.getState().mergeSnapshot(GUI_STATE_DEFAULTS, 1, { id: "b2", path: "/w/b2" }, "e1"),
     );
 
-    await act(async () => answer());
+    await act(() => Promise.resolve(answer()));
 
     expect(api.dataset.select).not.toHaveBeenCalled();
     expect(useStore.getState().openProject).toEqual({ id: "b2", path: "/w/b2" });

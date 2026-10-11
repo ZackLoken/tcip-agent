@@ -83,7 +83,8 @@ function runRowLabel(run: RunRow): string {
 
 /** What a sweep's trials amount to so far, under the objective its record states. */
 function sweepOutcomeLine(sweep: SweepGroup): string {
-  const metric = String(sweep.objective.selection_metric ?? "objective");
+  const selected = sweep.objective.selection_metric;
+  const metric = typeof selected === "string" ? selected : "objective";
   return sweep.outcome.best_params == null
     ? "no completed trial yet"
     : `best ${metric} ${String(sweep.outcome.best_value)}`;
@@ -741,7 +742,7 @@ export function TrainingTab() {
           </div>
         )}
         {empty && !runsError && (
-          <RunMonitorEmpty>No runs yet. Use "Start a run" above.</RunMonitorEmpty>
+          <RunMonitorEmpty>No runs yet. Use &quot;Start a run&quot; above.</RunMonitorEmpty>
         )}
         {!empty && (
           <div className="text-[10px] text-tcip-muted mb-1">

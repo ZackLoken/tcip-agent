@@ -118,7 +118,7 @@ function RemovalDialog({
           <button
             className="tcip-btn-primary flex-1"
             disabled={confirmText !== name || submitting}
-            onClick={confirmRemoval}
+            onClick={() => void confirmRemoval()}
           >
             {submitting ? "Removing…" : "Remove"}
           </button>
@@ -191,7 +191,7 @@ function RenameDialog({
           <button
             className="tcip-btn-primary flex-1"
             disabled={!canConfirm}
-            onClick={confirmRename}
+            onClick={() => void confirmRename()}
           >
             {submitting ? "Renaming…" : "Rename"}
           </button>

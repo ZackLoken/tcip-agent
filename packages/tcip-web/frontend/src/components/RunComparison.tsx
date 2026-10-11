@@ -25,7 +25,7 @@ const NO_MARKED_CHECKPOINT = "none of the marked experiments registered a checkp
 const NOT_RANKED_NO_CHECKPOINT = `not ranked: ${NO_REGISTERED_CHECKPOINT}`;
 const RANK_REASON_ID = "rank-disabled-reason";
 
-function cellText(value: unknown): string {
+function cellText(value: number | string | null | undefined): string {
   if (value === null || value === undefined) return UNRECORDED;
   if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(3);
   return String(value);

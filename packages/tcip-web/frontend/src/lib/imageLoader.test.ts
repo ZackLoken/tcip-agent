@@ -9,7 +9,7 @@ function stubFetch(status: number, headers: Record<string, string>) {
       ok: status >= 200 && status < 300,
       status,
       headers: new Headers(headers),
-      blob: async () => new Blob([]),
+      blob: () => Promise.resolve(new Blob([])),
     }),
   );
 }

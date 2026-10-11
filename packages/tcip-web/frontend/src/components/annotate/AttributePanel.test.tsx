@@ -59,9 +59,7 @@ describe("AttributePanel registry-growing on a lost audit line", () => {
 
     render(<AttributePanel focused={null} />);
     fillAttributeDraft("opening", "closed\nopen");
-    await act(async () => {
-      fireEvent.click(screen.getByText("Add"));
-    });
+    await act(() => Promise.resolve(fireEvent.click(screen.getByText("Add"))));
 
     // The committed registry is adopted as though the save had answered 200, and the gap
     // itself is surfaced as a toast rather than swallowed.
@@ -80,9 +78,7 @@ describe("AttributePanel registry-growing on a lost audit line", () => {
 
     render(<AttributePanel focused={null} />);
     fillAttributeDraft("opening", "closed\nopen");
-    await act(async () => {
-      fireEvent.click(screen.getByText("Add"));
-    });
+    await act(() => Promise.resolve(fireEvent.click(screen.getByText("Add"))));
 
     expect(useStore.getState().registry.subjects).toEqual({ bud: {} });
     expect(useStore.getState().registry.version).toBe("v3");

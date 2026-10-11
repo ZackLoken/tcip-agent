@@ -880,7 +880,7 @@ export function AnnotateTab() {
     { keys: K.previousItem.keys, action: () => stepItem(-1), when: () => order.length > 0 },
     {
       keys: K.complete.keys,
-      action: () => markComplete(!subjectFinished),
+      action: () => void markComplete(!subjectFinished),
       when: () => !!dataset.subject && subjectState !== null,
     },
     { keys: K.hideProposals.keys, action: () => setHideProposals((h) => !h), when: () => !!bucket },
@@ -1478,7 +1478,7 @@ export function AnnotateTab() {
           saveDisabled={saveDisabled}
           dirty={canvas.dirty}
           subjectState={null}
-          onComplete={markComplete}
+          onComplete={(next) => void markComplete(next)}
         />
         <div className="flex-1 flex items-center justify-center bg-tcip-canvas px-4">
           <div className="max-w-lg rounded-lg border border-tcip-border bg-tcip-panel px-5 py-4 text-center">
@@ -1511,8 +1511,10 @@ export function AnnotateTab() {
         bandSelection={bandSelection}
         onBandSelectionChange={setBandSelection}
         subjectState={subjectState}
-        onComplete={markComplete}
-        onCompleteView={viewIsRegion && viewRect ? () => markComplete(true, viewRect) : undefined}
+        onComplete={(next) => void markComplete(next)}
+        onCompleteView={
+          viewIsRegion && viewRect ? () => void markComplete(true, viewRect) : undefined
+        }
       />
       <ReviewStrip
         bucket={bucket ?? null}

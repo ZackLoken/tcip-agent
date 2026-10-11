@@ -14,14 +14,14 @@ function stubFetch(body: unknown = { status: "ok" }) {
     vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => body,
-      text: async () => JSON.stringify(body),
+      json: () => Promise.resolve(body),
+      text: () => Promise.resolve(JSON.stringify(body)),
     }),
   );
 }
 
 function sentBody(): Record<string, unknown> {
-  return JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body));
+  return JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string) as Record<string, unknown>;
 }
 
 describe("subjectColor collision-free registry slots", () => {

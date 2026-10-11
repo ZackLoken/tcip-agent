@@ -12,7 +12,7 @@ const SUBJECT_COLORS_EVENT = "tcip:subject-colors";
 export function loadSubjectColorOverrides(): SubjectColorOverrides {
   try {
     const raw = localStorage.getItem(SUBJECT_COLORS_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) return JSON.parse(raw) as SubjectColorOverrides;
   } catch {
     /* storage disabled, fall back to no overrides */
   }

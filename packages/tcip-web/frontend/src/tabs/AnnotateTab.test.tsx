@@ -71,6 +71,7 @@ vi.mock("@/components/Canvas/CanvasStage", () => {
       return (
         <div
           data-testid="canvas-stage"
+          role="presentation"
           data-canvas-host
           data-image-url={props.imageUrl ?? ""}
           onMouseDown={(e) =>
@@ -358,9 +359,7 @@ describe("AnnotateTab save/load race", () => {
 
     // Edit img2 while the img1 save is still in flight, then let it resolve late.
     act(addBox);
-    await act(async () => {
-      resolveFlushSave(saved("150"));
-    });
+    await act(() => Promise.resolve(resolveFlushSave(saved("150"))));
 
     // The stale result must not markClean() the img2 edits...
     expect(useStore.getState().canvas.dirty).toBe(true);
@@ -394,12 +393,12 @@ describe("AnnotateTab save/load race", () => {
     expect(pending).toHaveLength(2);
     expect(useStore.getState().canvas.saving?.image).toBe("C:/data/images/2026-01-01/img2.jpg");
 
-    await act(async () => pending[0](saved("150")));
+    await act(() => Promise.resolve(pending[0](saved("150"))));
     expect(useStore.getState().canvas.saving?.image).toBe("C:/data/images/2026-01-01/img2.jpg");
     act(addBox);
     expect(useStore.getState().canvas.boxes).toHaveLength(1);
 
-    await act(async () => pending[1](saved("9", { boxes: [] })));
+    await act(() => Promise.resolve(pending[1](saved("9", { boxes: [] }))));
     expect(useStore.getState().canvas.saving).toBeNull();
     expect(useStore.getState().canvas.boxes).toHaveLength(0);
   });
@@ -437,7 +436,7 @@ describe("AnnotateTab save/load race", () => {
     it("lands without adopting anything into the canvas the new editor is loading", async () => {
       const { answer } = await departing();
       const held = useStore.getState().canvas.boxes;
-      await act(async () => answer(saved("150", { boxes: [] })));
+      await act(() => Promise.resolve(answer(saved("150", { boxes: [] }))));
       expect(useStore.getState().canvas.boxes).toBe(held);
       expect(useStore.getState().canvas.saving).toBeNull();
     });
@@ -459,7 +458,7 @@ describe("AnnotateTab save/load race", () => {
     });
     await waitFor(() => expect(loadSpy).toHaveBeenCalledTimes(2));
     await flush();
-    await act(async () => reject(new DOMException("aborted", "AbortError")));
+    await act(() => Promise.resolve(reject(new DOMException("aborted", "AbortError"))));
     expect(screen.queryByText(/Save canceled/)).not.toBeInTheDocument();
   });
 
@@ -484,7 +483,7 @@ describe("AnnotateTab save/load race", () => {
     it("does not overwrite what the remounted editor has since changed", async () => {
       const pending = await remountedWithEdit();
       const edited = useStore.getState().canvas.boxes;
-      await act(async () => pending[0](saved("150", { boxes: [] })));
+      await act(() => Promise.resolve(pending[0](saved("150", { boxes: [] }))));
       expect(useStore.getState().canvas.boxes).toBe(edited);
       expect(useStore.getState().canvas.dirty).toBe(true);
     });
@@ -494,7 +493,7 @@ describe("AnnotateTab save/load race", () => {
       pressSave();
       await flush();
       expect(pending).toHaveLength(2);
-      await act(async () => pending[0](saved("150")));
+      await act(() => Promise.resolve(pending[0](saved("150"))));
       expect(useStore.getState().canvas.saving).not.toBeNull();
       act(addBox);
       expect(useStore.getState().canvas.boxes).toHaveLength(1);
@@ -521,7 +520,7 @@ describe("AnnotateTab save/load race", () => {
     expect(useStore.getState().canvas.saving).toBeNull();
     act(addBox);
     expect(useStore.getState().canvas.boxes).toHaveLength(2);
-    await act(async () => late(saved("150", { boxes: [] })));
+    await act(() => Promise.resolve(late(saved("150", { boxes: [] }))));
     expect(useStore.getState().canvas.boxes).toHaveLength(2);
     expect(useStore.getState().canvas.dirty).toBe(true);
   });
@@ -558,8 +557,9 @@ describe("AnnotateTab save/load race", () => {
     await flush();
 
     // Both the interactive save and the navigation flush save 409 late.
-    await act(async () => {
+    await act(() => {
       for (const res of pending) res({ status: "conflict" });
+      return Promise.resolve();
     });
     expect(screen.queryByText("Reload")).not.toBeInTheDocument();
     expect(screen.queryByText(/changed elsewhere/)).not.toBeInTheDocument();
@@ -900,9 +900,11 @@ describe("AnnotateTab point tool", () => {
     saveSpy.mockImplementationOnce(() => new Promise<SaveResult>((res) => (answer = res)));
     pressSave();
     await flush();
-    await act(async () =>
-      answer(
-        saved("5", { points: [{ x: 200, y: 200, subject: "tip", attributes: {}, index: 0 }] }),
+    await act(() =>
+      Promise.resolve(
+        answer(
+          saved("5", { points: [{ x: 200, y: 200, subject: "tip", attributes: {}, index: 0 }] }),
+        ),
       ),
     );
 
@@ -1131,9 +1133,7 @@ describe("AnnotateTab AttributePanel authoring", () => {
     fireEvent.change(screen.getByPlaceholderText(/one value per line/), {
       target: { value: "small\nlarge" },
     });
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Add" }));
-    });
+    await act(() => Promise.resolve(fireEvent.click(screen.getByRole("button", { name: "Add" }))));
   }
 
   it("posts the grown registry through subjectsApi.save with the loaded version and installs it", async () => {
@@ -1211,9 +1211,7 @@ describe("AnnotateTab AttributePanel authoring", () => {
     fireEvent.change(screen.getByPlaceholderText(/one value per line/), {
       target: { value: "large" },
     });
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Add" }));
-    });
+    await act(() => Promise.resolve(fireEvent.click(screen.getByRole("button", { name: "Add" }))));
 
     expect(
       screen.getByText("size is already declared; add values to it with + value."),
@@ -1626,12 +1624,16 @@ describe("Cut tool arming", () => {
     vi.useFakeTimers();
     try {
       act(() => useStore.getState().setCut(true));
-      act(() => vi.advanceTimersByTime(1600));
+      act(() => {
+        vi.advanceTimersByTime(1600);
+      });
       expect(pushSpy.mock.calls.at(-1)?.[0].cut_armed).toBe(true);
 
       pushSpy.mockClear();
       act(() => useStore.getState().setCut(false));
-      act(() => vi.advanceTimersByTime(1600));
+      act(() => {
+        vi.advanceTimersByTime(1600);
+      });
       expect(pushSpy.mock.calls.at(-1)?.[0].cut_armed).toBe(false);
     } finally {
       vi.useRealTimers();
@@ -2682,7 +2684,7 @@ describe("AnnotateTab review symbology", () => {
       s.patchGui({ dataset: { ...s.gui.dataset, current_image_index: 1 } });
     });
     await flush();
-    await act(async () => answer(saved("9", { boxes: boxes() })));
+    await act(() => Promise.resolve(answer(saved("9", { boxes: boxes() }))));
 
     expect(useStore.getState().canvas.focus).toBeNull();
   });
@@ -2720,8 +2722,8 @@ describe("AnnotateTab review symbology", () => {
         boxes: [{ ...boxes()[0], subject: "other", index: 0 }],
       }),
     );
-    await act(async () =>
-      answer(saved("8", { boxes: boxes(), polygons: [polygon()] }, { "1": 0 })),
+    await act(() =>
+      Promise.resolve(answer(saved("8", { boxes: boxes(), polygons: [polygon()] }, { "1": 0 }))),
     );
     stop();
     await waitFor(() => expect(useStore.getState().canvas.boxes[0]?.subject).toBe("other"));
@@ -2736,8 +2738,8 @@ describe("AnnotateTab review symbology", () => {
     fireEvent.keyDown(window, { key: "e" });
     await flush();
     act(() => useStore.getState().setMode("polygon"));
-    await act(async () =>
-      answer(saved("8", { boxes: boxes(), polygons: [polygon()] }, { "1": 0 })),
+    await act(() =>
+      Promise.resolve(answer(saved("8", { boxes: boxes(), polygons: [polygon()] }, { "1": 0 }))),
     );
     expect(useStore.getState().gui.mode).toBe("box");
     expect(useStore.getState().canvas.focus).toEqual({ kind: "box", index: 0 });
@@ -2820,7 +2822,7 @@ describe("AnnotateTab review symbology", () => {
       expect(useStore.getState().canvas.boxes).toHaveLength(3);
       expect(useStore.getState().canvas.focus).toBeNull();
 
-      await act(async () => answer(saved("7", { boxes: personBoxes() })));
+      await act(() => Promise.resolve(answer(saved("7", { boxes: personBoxes() }))));
       const { canvas } = useStore.getState();
       expect(canvas.saving).toBeNull();
       expect(canvas.boxes[2].authorship).toBe("person");
@@ -2937,7 +2939,7 @@ describe("AnnotateTab flags", () => {
     fireEvent.keyDown(comment(), { key: "Enter" });
     await flush();
     fireEvent.change(comment(), { target: { value: "second, not submitted" } });
-    await act(async () => answer(saved("5")));
+    await act(() => Promise.resolve(answer(saved("5"))));
     expect(comment()).toHaveValue("second, not submitted");
   });
 

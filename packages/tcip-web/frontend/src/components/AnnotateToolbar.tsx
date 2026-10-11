@@ -254,7 +254,11 @@ export function AnnotateToolbar({
           </button>
           {subjectMenuOpen && (
             <>
-              <div className="fixed inset-0 z-10" onClick={() => setSubjectMenuOpen(false)} />
+              <div
+                role="presentation"
+                className="fixed inset-0 z-10"
+                onClick={() => setSubjectMenuOpen(false)}
+              />
               <div className="absolute left-0 top-full z-20 mt-1 w-56 rounded-md border border-tcip-border bg-tcip-panel py-1 text-[12px] shadow-lg">
                 {subjectNames.map((name) => (
                   <div key={name} className="flex items-center gap-2 px-2 hover:bg-tcip-hover">

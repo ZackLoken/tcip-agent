@@ -11,7 +11,8 @@ describe("trainingApi.cancel", () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ experiment_id: "r1", status: "running", cancel_requested: true }),
+      json: () =>
+        Promise.resolve({ experiment_id: "r1", status: "running", cancel_requested: true }),
     });
     vi.stubGlobal("fetch", fetchMock);
 

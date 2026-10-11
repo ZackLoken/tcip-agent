@@ -126,7 +126,7 @@ describe("useRegionServes", () => {
     });
     rerender({ ...args, view: { scale: 2, offset_x: 0, offset_y: 0 } });
     await waitFor(() => expect(result.current.map((r) => r.key)).toEqual(["0:NEW"]));
-    await act(async () => releaseFirst({ reads: [native("OLD", 0, 0, 1000, 600)] }));
+    await act(() => Promise.resolve(releaseFirst({ reads: [native("OLD", 0, 0, 1000, 600)] })));
     expect(result.current.map((r) => r.key)).toEqual(["0:NEW"]);
     expect(reads).toHaveBeenCalledTimes(2);
   });
