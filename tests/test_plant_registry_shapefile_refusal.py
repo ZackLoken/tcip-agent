@@ -21,44 +21,75 @@ def _point_shapefile(tmp_path: Path) -> Path:
     import fiona
 
     path = tmp_path / "plants.shp"
-    schema = {"geometry": "Point", "properties": {"plot_name": "str", "accession_name": "str"}}
-    with fiona.open(str(path), "w", driver="ESRI Shapefile", crs=f"EPSG:{UTM_15N_EPSG}",
-                    schema=schema) as dst:
-        dst.write({"geometry": {"type": "Point", "coordinates": POINT_NATIVE},
-                   "properties": {"plot_name": "P1", "accession_name": "acc-A"}})
-        dst.write({"geometry": {"type": "Point",
-                                "coordinates": (POINT_NATIVE[0] + 5, POINT_NATIVE[1])},
-                   "properties": {"plot_name": "P2", "accession_name": "acc-B"}})
+    schema = {
+        "geometry": "Point",
+        "properties": {"plot_name": "str", "accession_name": "str"},
+    }
+    with fiona.open(
+        str(path),
+        "w",
+        driver="ESRI Shapefile",
+        crs=f"EPSG:{UTM_15N_EPSG}",
+        schema=schema,
+    ) as dst:
+        dst.write(
+            {
+                "geometry": {"type": "Point", "coordinates": POINT_NATIVE},
+                "properties": {"plot_name": "P1", "accession_name": "acc-A"},
+            }
+        )
+        dst.write(
+            {
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": (POINT_NATIVE[0] + 5, POINT_NATIVE[1]),
+                },
+                "properties": {"plot_name": "P2", "accession_name": "acc-B"},
+            }
+        )
     return path
 
 
 def test_register_plant_registry_refuses_a_shp_naming_the_command(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     shp = _point_shapefile(tmp_path)
 
     res = register_plant_registry(
-        tmp_path, name="reg", csv_paths=[str(shp)], crop="black locust", site="block")
+        tmp_path,
+        name="reg",
+        csv_paths=[str(shp)],
+        crop="black locust",
+        site="block",
+    )
 
     assert "error" in res
     assert "tcip shp-to-plant-csv" in res["error"]
 
 
 def test_register_plant_registry_refuses_a_binary_csv_as_not_utf8(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     binary_path = tmp_path / "plants.csv"
     binary_path.write_bytes(bytes(range(256)))
 
     res = register_plant_registry(
-        tmp_path, name="reg", csv_paths=[str(binary_path)], crop="black locust", site="block")
+        tmp_path,
+        name="reg",
+        csv_paths=[str(binary_path)],
+        crop="black locust",
+        site="block",
+    )
 
     assert "error" in res
     assert "not UTF-8 text" in res["error"]
 
 
 def test_register_plant_registry_admits_a_shapefile_converted_first(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A shapefile is never registered directly; converted through the platform's own command
     first, the resulting CSV registers exactly as a hand-authored one would."""
@@ -69,7 +100,12 @@ def test_register_plant_registry_admits_a_shapefile_converted_first(
     converted = convert_shp_to_plant_csv(shp, csv_path)
 
     res = register_plant_registry(
-        tmp_path, name="reg", csv_paths=[str(csv_path)], crop="black locust", site="block")
+        tmp_path,
+        name="reg",
+        csv_paths=[str(csv_path)],
+        crop="black locust",
+        site="block",
+    )
 
     assert "error" not in res, res
     assert res["n_plants"] == converted["n_features"] == 2

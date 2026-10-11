@@ -7,9 +7,17 @@ from __future__ import annotations
 import pytest
 
 from tests._chain_fixtures import (
-    BARE_SCORE_THRESH_DETECTOR, BESPOKE_DETECTION, BESPOKE_MODELS, training_config,
+    BARE_SCORE_THRESH_DETECTOR,
+    BESPOKE_DETECTION,
+    BESPOKE_MODELS,
+    training_config,
 )
-from tests._training_values import asha_scheduler, evaluation_block, fifo_search, sweep_space
+from tests._training_values import (
+    asha_scheduler,
+    evaluation_block,
+    fifo_search,
+    sweep_space,
+)
 
 
 def _stub_search(monkeypatch, *, during=None) -> dict:
@@ -22,19 +30,28 @@ def _stub_search(monkeypatch, *, during=None) -> dict:
         if during is not None:
             during(**kw)
 
-    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.training.hpo.tune_search", fake_search
+    )
     return captured
 
 
 def test_run_hyperparameter_search_threads_the_sweeps_directory_and_records_its_result(
-    tmp_path, real_hpo_base_config, monkeypatch,
+    tmp_path,
+    real_hpo_base_config,
+    monkeypatch,
 ):
     import tcip_mcp.tools.training_tools as tt
 
     captured = _stub_search(monkeypatch)
     tt.run_hyperparameter_search(
-        tmp_path, base_config=real_hpo_base_config, param_space=sweep_space(), n_trials=1,
-        **fifo_search(), search_seed=0)
+        tmp_path,
+        base_config=real_hpo_base_config,
+        param_space=sweep_space(),
+        n_trials=1,
+        **fifo_search(),
+        search_seed=0,
+    )
 
     assert captured["sweep_dir"].name.startswith("hpo_")
     assert captured["sweep_dir"].parent == tmp_path / ".tcip" / "experiments"
@@ -53,17 +70,33 @@ def test_run_hyperparameter_search_resolves_direction_from_the_top_level_evaluat
     import tcip_mcp.tools.training_tools as tt
 
     cfg = dict(real_hpo_base_config)
-    cfg["evaluation"] = evaluation_block(selection_metric="f1")  # higher-is-better -> "max"
+    cfg["evaluation"] = evaluation_block(
+        selection_metric="f1"
+    )  # higher-is-better -> "max"
 
     nested = {**cfg, "training": {"evaluation": {"selection_metric": "loss"}}}
-    refused = tt.run_hyperparameter_search(tmp_path, base_config=nested,
-                                           param_space=sweep_space(), n_trials=1,
-                                           **fifo_search(), search_seed=0)
-    assert any("'training' is not a config section" in issue for issue in refused["issues"])
+    refused = tt.run_hyperparameter_search(
+        tmp_path,
+        base_config=nested,
+        param_space=sweep_space(),
+        n_trials=1,
+        **fifo_search(),
+        search_seed=0,
+    )
+    assert any(
+        "'training' is not a config section" in issue
+        for issue in refused["issues"]
+    )
 
     captured = _stub_search(monkeypatch)
-    tt.run_hyperparameter_search(tmp_path, base_config=cfg, param_space=sweep_space(),
-                                 n_trials=1, **fifo_search(), search_seed=0)
+    tt.run_hyperparameter_search(
+        tmp_path,
+        base_config=cfg,
+        param_space=sweep_space(),
+        n_trials=1,
+        **fifo_search(),
+        search_seed=0,
+    )
 
     assert captured["metric"] == "objective"
     assert captured["mode"] == "max"
@@ -83,26 +116,37 @@ def test_a_sweep_is_on_disk_while_it_runs_and_its_trials_are_its_own_run_directo
         report(0.25)
 
     def during(**kw):
-        observed["while_running"] = tt.monitor_training(tmp_path, kw["sweep_dir"].name)["sweep"]
+        observed["while_running"] = tt.monitor_training(
+            tmp_path, kw["sweep_dir"].name
+        )["sweep"]
         kw["objective_fn"]({"optimizer.head_lr": 0.1}, lambda value: None)
 
     monkeypatch.setattr(tt, "_run_hpo_trial", fake_trial)
     _stub_search(monkeypatch, during=during)
 
-    result = tt.run_hyperparameter_search(tmp_path, base_config=real_hpo_base_config,
-                                          param_space=sweep_space(), n_trials=1,
-                                          **fifo_search(), search_seed=0)
+    result = tt.run_hyperparameter_search(
+        tmp_path,
+        base_config=real_hpo_base_config,
+        param_space=sweep_space(),
+        n_trials=1,
+        **fifo_search(),
+        search_seed=0,
+    )
     sweep_id = result["sweep"]["sweep_id"]
 
     running = observed["while_running"]
     assert running["state"] == "running"
     assert running["input"]["n_trials"] == 1
     assert running["input"]["param_space"]  # the space the sweep is searching
-    assert observed["trial"].parent == tt.experiments.experiment_dir(sweep_id, project=tmp_path)
+    assert observed["trial"].parent == tt.experiments.experiment_dir(
+        sweep_id, project=tmp_path
+    )
 
     sweep = tt.monitor_training(tmp_path, sweep_id)["sweep"]
     assert sweep["state"] == "completed"
-    assert [t["experiment_id"] for t in sweep["trials"]] == [observed["trial"].name]
+    assert [t["experiment_id"] for t in sweep["trials"]] == [
+        observed["trial"].name
+    ]
 
 
 def test_a_sweep_whose_search_raises_ends_failed_naming_the_error(
@@ -116,12 +160,19 @@ def test_a_sweep_whose_search_raises_ends_failed_naming_the_error(
         captured["sweep_id"] = kw["sweep_dir"].name
         raise RuntimeError("no ray here")
 
-    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", exploding_search)
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.training.hpo.tune_search", exploding_search
+    )
 
     with pytest.raises(RuntimeError):
-        tt.run_hyperparameter_search(tmp_path, base_config=real_hpo_base_config,
-                                     param_space=sweep_space(), n_trials=1, **fifo_search(),
-                                     search_seed=0)
+        tt.run_hyperparameter_search(
+            tmp_path,
+            base_config=real_hpo_base_config,
+            param_space=sweep_space(),
+            n_trials=1,
+            **fifo_search(),
+            search_seed=0,
+        )
 
     sweep = tt.monitor_training(tmp_path, captured["sweep_id"])["sweep"]
     assert sweep["state"] == "failed"
@@ -139,8 +190,13 @@ def test_run_hyperparameter_search_refuses_before_minting_when_the_base_config_f
     result = tt.run_hyperparameter_search(
         tmp_path,
         base_config=training_config(
-            {"builder": "not.a:real_builder", "task": "detection"}, {}),
-        param_space=sweep_space(), n_trials=1, **fifo_search(), search_seed=0)
+            {"builder": "not.a:real_builder", "task": "detection"}, {}
+        ),
+        param_space=sweep_space(),
+        n_trials=1,
+        **fifo_search(),
+        search_seed=0,
+    )
 
     assert "error" in result
     assert any("not.a" in issue for issue in result["issues"]), result
@@ -157,20 +213,34 @@ def test_run_hyperparameter_search_checks_a_swept_placeholder_axis_at_its_resolv
 
     _stub_search(monkeypatch)
     result = tt.run_hyperparameter_search(
-        tmp_path, base_config={**real_hpo_base_config,
-                               "model_source": {"builder": "PLACEHOLDER:PLACEHOLDER",
-                                                "source_files": [BESPOKE_MODELS],
-                                                "task": "detection"}},
-        param_space={"model_source.builder": {
-            "type": "categorical", "choices": [BESPOKE_DETECTION]}},
-        n_trials=1, **fifo_search(), search_seed=0)
+        tmp_path,
+        base_config={
+            **real_hpo_base_config,
+            "model_source": {
+                "builder": "PLACEHOLDER:PLACEHOLDER",
+                "source_files": [BESPOKE_MODELS],
+                "task": "detection",
+            },
+        },
+        param_space={
+            "model_source.builder": {
+                "type": "categorical",
+                "choices": [BESPOKE_DETECTION],
+            }
+        },
+        n_trials=1,
+        **fifo_search(),
+        search_seed=0,
+    )
 
     assert "error" not in result, result
 
 
-@pytest.mark.parametrize("choices", [["still:bad"],
-                                     [BESPOKE_DETECTION, "still:bad"]],
-                         ids=["every-choice-fails", "a-later-choice-fails"])
+@pytest.mark.parametrize(
+    "choices",
+    [["still:bad"], [BESPOKE_DETECTION, "still:bad"]],
+    ids=["every-choice-fails", "a-later-choice-fails"],
+)
 def test_run_hyperparameter_search_refuses_a_swept_axis_any_of_whose_choices_fails(
     tmp_path, real_hpo_base_config, monkeypatch, choices
 ):
@@ -179,12 +249,22 @@ def test_run_hyperparameter_search_refuses_a_swept_axis_any_of_whose_choices_fai
 
     captured = _stub_search(monkeypatch)
     result = tt.run_hyperparameter_search(
-        tmp_path, base_config={**real_hpo_base_config,
-                               "model_source": {"builder": "PLACEHOLDER:PLACEHOLDER",
-                                                "source_files": [BESPOKE_MODELS],
-                                                "task": "detection"}},
-        param_space={"model_source.builder": {"type": "categorical", "choices": choices}},
-        n_trials=1, **fifo_search(), search_seed=0)
+        tmp_path,
+        base_config={
+            **real_hpo_base_config,
+            "model_source": {
+                "builder": "PLACEHOLDER:PLACEHOLDER",
+                "source_files": [BESPOKE_MODELS],
+                "task": "detection",
+            },
+        },
+        param_space={
+            "model_source.builder": {"type": "categorical", "choices": choices}
+        },
+        n_trials=1,
+        **fifo_search(),
+        search_seed=0,
+    )
 
     assert "'still'" in " ".join([result["error"], *result["issues"]])
     assert not captured
@@ -198,15 +278,25 @@ def test_run_hyperparameter_search_admits_a_swept_axis_whose_every_choice_resolv
 
     _stub_search(monkeypatch)
     result = tt.run_hyperparameter_search(
-        tmp_path, base_config={**real_hpo_base_config,
-                               "model_source": {"builder": "PLACEHOLDER:PLACEHOLDER",
-                                                "source_files": [BESPOKE_MODELS],
-                                                "task": "detection"}},
-        param_space={"model_source.builder": {
-            "type": "categorical",
-            "choices": [BESPOKE_DETECTION,
-                        BARE_SCORE_THRESH_DETECTOR]}},
-        n_trials=1, **fifo_search(), search_seed=0)
+        tmp_path,
+        base_config={
+            **real_hpo_base_config,
+            "model_source": {
+                "builder": "PLACEHOLDER:PLACEHOLDER",
+                "source_files": [BESPOKE_MODELS],
+                "task": "detection",
+            },
+        },
+        param_space={
+            "model_source.builder": {
+                "type": "categorical",
+                "choices": [BESPOKE_DETECTION, BARE_SCORE_THRESH_DETECTOR],
+            }
+        },
+        n_trials=1,
+        **fifo_search(),
+        search_seed=0,
+    )
 
     assert "error" not in result, result
 
@@ -218,17 +308,31 @@ def test_run_hyperparameter_search_passes_agent_search_and_scheduler_choices(
     import tcip_mcp.tools.training_tools as tt
 
     captured = _stub_search(monkeypatch)
-    tt.run_hyperparameter_search(tmp_path, base_config=real_hpo_base_config,
-                                 param_space=sweep_space(), n_trials=3, search_alg="bayesopt",
-                                 scheduler=asha_scheduler(), max_concurrent=2, search_seed=0)
+    tt.run_hyperparameter_search(
+        tmp_path,
+        base_config=real_hpo_base_config,
+        param_space=sweep_space(),
+        n_trials=3,
+        search_alg="bayesopt",
+        scheduler=asha_scheduler(),
+        max_concurrent=2,
+        search_seed=0,
+    )
 
-    assert (captured["search_alg"], captured["scheduler"], captured["max_concurrent"],
-            captured["num_samples"]) == ("bayesopt", asha_scheduler(), 2, 3)
+    assert (
+        captured["search_alg"],
+        captured["scheduler"],
+        captured["max_concurrent"],
+        captured["num_samples"],
+    ) == ("bayesopt", asha_scheduler(), 2, 3)
 
 
 @pytest.mark.parametrize("unstated", ["n_trials", "search_alg", "scheduler"])
 def test_run_hyperparameter_search_refuses_an_unstated_search_setting_by_name(
-    tmp_path, real_hpo_base_config, monkeypatch, unstated,
+    tmp_path,
+    real_hpo_base_config,
+    monkeypatch,
+    unstated,
 ):
     """guard. The trial count, the search algorithm and the scheduler block have no default:
     a call leaving one unstated refuses naming it, and no search runs."""
@@ -238,18 +342,38 @@ def test_run_hyperparameter_search_refuses_an_unstated_search_setting_by_name(
     stated = {"n_trials": 1, **fifo_search()}
     del stated[unstated]
     with pytest.raises(TypeError, match=f"'{unstated}'"):
-        tt.run_hyperparameter_search(tmp_path, base_config=real_hpo_base_config,
-                                     param_space=sweep_space(), search_seed=0, **stated)
+        tt.run_hyperparameter_search(
+            tmp_path,
+            base_config=real_hpo_base_config,
+            param_space=sweep_space(),
+            search_seed=0,
+            **stated,
+        )
     assert not captured
 
 
-@pytest.mark.parametrize("scheduler, named", [
-    ({k: v for k, v in asha_scheduler().items() if k != "max_t"}, "unstated ['max_t']"),
-    ({**asha_scheduler(), "hard_stop": True}, "not taken ['hard_stop']"),
-    ({"name": "fifo", "max_t": 5}, "not taken ['max_t']"),
-], ids=["asha-without-max_t", "asha-with-a-setting-it-does-not-take", "fifo-with-max_t"])
+@pytest.mark.parametrize(
+    "scheduler, named",
+    [
+        (
+            {k: v for k, v in asha_scheduler().items() if k != "max_t"},
+            "unstated ['max_t']",
+        ),
+        ({**asha_scheduler(), "hard_stop": True}, "not taken ['hard_stop']"),
+        ({"name": "fifo", "max_t": 5}, "not taken ['max_t']"),
+    ],
+    ids=[
+        "asha-without-max_t",
+        "asha-with-a-setting-it-does-not-take",
+        "fifo-with-max_t",
+    ],
+)
 def test_run_hyperparameter_search_refuses_a_scheduler_setting_unstated_or_not_taken(
-    tmp_path, real_hpo_base_config, monkeypatch, scheduler, named,
+    tmp_path,
+    real_hpo_base_config,
+    monkeypatch,
+    scheduler,
+    named,
 ):
     """guard. A scheduler block leaving a setting of its Ray class unstated, or stating one the
     class does not take, refuses at the door naming it, before anything is minted."""
@@ -257,8 +381,14 @@ def test_run_hyperparameter_search_refuses_a_scheduler_setting_unstated_or_not_t
 
     captured = _stub_search(monkeypatch)
     result = tt.run_hyperparameter_search(
-        tmp_path, base_config=real_hpo_base_config, param_space=sweep_space(), n_trials=1,
-        search_alg="random", scheduler=scheduler, search_seed=0)
+        tmp_path,
+        base_config=real_hpo_base_config,
+        param_space=sweep_space(),
+        n_trials=1,
+        search_alg="random",
+        scheduler=scheduler,
+        search_seed=0,
+    )
 
     assert named in result["error"], result
     assert not captured
@@ -266,7 +396,9 @@ def test_run_hyperparameter_search_refuses_a_scheduler_setting_unstated_or_not_t
 
 
 def test_a_sweeps_recorded_scheduler_is_the_one_ray_tunes_under(
-    tmp_path, real_hpo_base_config, monkeypatch,
+    tmp_path,
+    real_hpo_base_config,
+    monkeypatch,
 ):
     """guard. The scheduler block a sweep states is recorded whole on its input, and Ray's own
     TuneConfig receives the scheduler built from that record: an ASHA scheduler capped at the
@@ -290,11 +422,19 @@ def test_a_sweeps_recorded_scheduler_is_the_one_ray_tunes_under(
             return None
 
     monkeypatch.setattr(tune, "Tuner", _RecordingTuner)
-    monkeypatch.setattr(hpo, "_ray_session", lambda ray, num_cpus: contextlib.nullcontext())
+    monkeypatch.setattr(
+        hpo, "_ray_session", lambda ray, num_cpus: contextlib.nullcontext()
+    )
     scheduler = asha_scheduler(max_t=4)
     result = tt.run_hyperparameter_search(
-        tmp_path, base_config=real_hpo_base_config, param_space=sweep_space(), n_trials=1,
-        search_alg="random", scheduler=scheduler, search_seed=0)
+        tmp_path,
+        base_config=real_hpo_base_config,
+        param_space=sweep_space(),
+        n_trials=1,
+        search_alg="random",
+        scheduler=scheduler,
+        search_seed=0,
+    )
 
     sweep = tt.monitor_training(tmp_path, result["sweep"]["sweep_id"])["sweep"]
     assert sweep["input"]["scheduler"] == scheduler

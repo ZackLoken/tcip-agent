@@ -34,22 +34,42 @@ BOX_INSIDE_AT_SERVED_SCALE = (30, 32)
 BOX_INSIDE_AT_NATIVE_SCALE = (60, 70)
 
 SHAPES = [
-    {"kind": "point", "points": [list(POINT_NATIVE)], "color": "#FF0000", "tag": "gt"},
-    {"kind": "box", "xyxy": BOX_NATIVE, "color": "#00FF00", "fill": True, "tag": "gt"},
+    {
+        "kind": "point",
+        "points": [list(POINT_NATIVE)],
+        "color": "#FF0000",
+        "tag": "gt",
+    },
+    {
+        "kind": "box",
+        "xyxy": BOX_NATIVE,
+        "color": "#00FF00",
+        "fill": True,
+        "tag": "gt",
+    },
 ]
 
 
 def _canvas_image(tmp_path: Path) -> str:
-    return str(write_image(tmp_path / "canvas.png", (FRAME_W, FRAME_H), BACKGROUND))
+    return str(
+        write_image(tmp_path / "canvas.png", (FRAME_W, FRAME_H), BACKGROUND)
+    )
 
 
 def _ago(seconds: float) -> str:
     """The instant ``seconds`` before now, in the spelling the push route stamps."""
-    return (datetime.now(timezone.utc) - timedelta(seconds=seconds)).isoformat()
+    return (
+        datetime.now(timezone.utc) - timedelta(seconds=seconds)
+    ).isoformat()
 
 
-def _push_state(tmp_path: Path, image: str, *, received_at: str,
-                shapes: list[dict] | None = None) -> None:
+def _push_state(
+    tmp_path: Path,
+    image: str,
+    *,
+    received_at: str,
+    shapes: list[dict] | None = None,
+) -> None:
     """Write the two documents the GUI pushes for the project ``tmp_path``: the meta heartbeat
     and the geometry blob, the image named relative to the project as the push route stores it."""
     import tcip_store
@@ -58,17 +78,28 @@ def _push_state(tmp_path: Path, image: str, *, received_at: str,
 
     root = str(tmp_path)
     image_path = stored_path(image, tmp_path)
-    tcip_store.replace(canvas_geometry_key(root), {
-        "image_path": image_path, "tab": "annotate", "received_at": received_at,
-        "shapes": SHAPES if shapes is None else shapes,
-    })
-    tcip_store.replace(canvas_meta_key(root), {
-        "received_at": received_at, "tab": "annotate",
-        "image": Path(image).name, "image_path": image_path,
-        "viewport": {"x": 0, "y": 0, "w": FRAME_W, "h": FRAME_H},
-        "user": "breeder", "mode": "polygon",
-        "classes": [{"id": 0, "name": "bud", "color": "#FF0000"}],
-    })
+    tcip_store.replace(
+        canvas_geometry_key(root),
+        {
+            "image_path": image_path,
+            "tab": "annotate",
+            "received_at": received_at,
+            "shapes": SHAPES if shapes is None else shapes,
+        },
+    )
+    tcip_store.replace(
+        canvas_meta_key(root),
+        {
+            "received_at": received_at,
+            "tab": "annotate",
+            "image": Path(image).name,
+            "image_path": image_path,
+            "viewport": {"x": 0, "y": 0, "w": FRAME_W, "h": FRAME_H},
+            "user": "breeder",
+            "mode": "polygon",
+            "classes": [{"id": 0, "name": "bud", "color": "#FF0000"}],
+        },
+    )
 
 
 def _dominance(px: Image.Image, xy: tuple[int, int], channel: int) -> int:
@@ -79,7 +110,8 @@ def _dominance(px: Image.Image, xy: tuple[int, int], channel: int) -> int:
 
 
 def test_canvas_shapes_are_drawn_at_the_resolution_the_pixels_were_served_at(
-    tmp_path: Path, bound,
+    tmp_path: Path,
+    bound,
 ) -> None:
     """A frame read down to ``max_edge`` carries its shapes down with it.
 
@@ -92,8 +124,9 @@ def test_canvas_shapes_are_drawn_at_the_resolution_the_pixels_were_served_at(
     image = _canvas_image(tmp_path)
     _push_state(tmp_path, image, received_at=_ago(0))
 
-    result = capture_live_canvas(bound, refresh=False,
-                                 crop_to_viewport=False, max_edge=SERVED_MAX_EDGE)
+    result = capture_live_canvas(
+        bound, refresh=False, crop_to_viewport=False, max_edge=SERVED_MAX_EDGE
+    )
     assert "error" not in result, result
     assert result["shapes_missing"] is False
 
@@ -107,7 +140,9 @@ def test_canvas_shapes_are_drawn_at_the_resolution_the_pixels_were_served_at(
 
 
 def test_a_capture_no_gui_answered_reports_the_state_as_last_known(
-    tmp_path: Path, bound, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    bound,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A ping that reaches the hub but produces no new push leaves the capture unrefreshed.
 
@@ -123,15 +158,19 @@ def test_a_capture_no_gui_answered_reports_the_state_as_last_known(
 
     pings: list[tuple[str, str]] = []
 
-    def silent_hub(target: BoundProject, panel: str, event_type: str, data: dict,
-                   **kwargs: object) -> dict:
+    def silent_hub(
+        target: BoundProject,
+        panel: str,
+        event_type: str,
+        data: dict,
+        **kwargs: object,
+    ) -> dict:
         pings.append((target, panel, event_type))
         return {"status": "ok", "delivered": True}
 
     monkeypatch.setattr(web_client, "post_panel_event", silent_hub)
 
-    result = capture_live_canvas(bound, refresh=True,
-                                 crop_to_viewport=False)
+    result = capture_live_canvas(bound, refresh=True, crop_to_viewport=False)
     assert "error" not in result, result
     assert pings == [(bound, "app", "canvas_state_request")]
     assert result["refresh_ping_delivered"] is True
@@ -141,7 +180,9 @@ def test_a_capture_no_gui_answered_reports_the_state_as_last_known(
 
 
 def test_a_capture_the_gui_answered_reports_the_state_as_live(
-    tmp_path: Path, bound, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    bound,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A GUI that pushes fresh state in response to the ping is reported as live: the refresh
     round trip has to admit the answered case, not only flag the unanswered one."""
@@ -151,15 +192,19 @@ def test_a_capture_the_gui_answered_reports_the_state_as_live(
     image = _canvas_image(tmp_path)
     _push_state(tmp_path, image, received_at=_ago(600))
 
-    def answering_hub(target: BoundProject, panel: str, event_type: str, data: dict,
-                      **kwargs: object) -> dict:
+    def answering_hub(
+        target: BoundProject,
+        panel: str,
+        event_type: str,
+        data: dict,
+        **kwargs: object,
+    ) -> dict:
         _push_state(tmp_path, image, received_at=_ago(0))
         return {"status": "ok", "delivered": True}
 
     monkeypatch.setattr(web_client, "post_panel_event", answering_hub)
 
-    result = capture_live_canvas(bound, refresh=True,
-                                 crop_to_viewport=False)
+    result = capture_live_canvas(bound, refresh=True, crop_to_viewport=False)
     assert "error" not in result, result
     assert result["refreshed"] is True
     assert "last known" not in result["summary"]
@@ -167,7 +212,8 @@ def test_a_capture_the_gui_answered_reports_the_state_as_live(
 
 
 def test_a_canvas_record_without_its_arrival_instant_is_refused_by_name(
-    tmp_path: Path, bound,
+    tmp_path: Path,
+    bound,
 ) -> None:
     """No producer writes a canvas record without ``received_at``, so its age is unknown, never
     zero: the capture refuses rather than describing it as live."""

@@ -16,10 +16,19 @@ def _fixture_config(root: Path) -> Path:
     --smoke is passed here) over two labeled frames of the subject its scope names
     (``_verified_checkpoint_fixtures.detection_images``)."""
     from tests._chain_fixtures import training_config
-    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR, SCOPED_DATA, detection_images
+    from tests._verified_checkpoint_fixtures import (
+        BUILT_DETECTOR,
+        SCOPED_DATA,
+        detection_images,
+    )
 
     config = training_config(
-        BUILT_DETECTOR, {**detection_images(root / "data", SCOPED_DATA["scope"]), **SCOPED_DATA})
+        BUILT_DETECTOR,
+        {
+            **detection_images(root / "data", SCOPED_DATA["scope"]),
+            **SCOPED_DATA,
+        },
+    )
     config_path = root / "config.json"
     config_path.write_text(json.dumps(config), encoding="utf-8")
     return config_path
@@ -30,7 +39,9 @@ def test_refuses_a_run_naming_no_project(tmp_path):
     cwd = tmp_path / "operator_cwd"
     cwd.mkdir()
 
-    result = run_tcip("preflight-config", ["--config", str(config_path)], cwd=cwd)
+    result = run_tcip(
+        "preflight-config", ["--config", str(config_path)], cwd=cwd
+    )
 
     assert result.returncode != 0, result.stdout
     assert "--project" in result.stderr
@@ -42,8 +53,11 @@ def test_validates_a_fixture_config_for_the_named_project(project, tmp_path):
     cwd = tmp_path.parent / "operator_cwd"
     cwd.mkdir()
 
-    result = run_tcip("preflight-config",
-                      ["--config", str(config_path), "--project", str(project)], cwd=cwd)
+    result = run_tcip(
+        "preflight-config",
+        ["--config", str(config_path), "--project", str(project)],
+        cwd=cwd,
+    )
 
     assert result.returncode == 0, result.stdout
     body = json.loads(result.stdout)

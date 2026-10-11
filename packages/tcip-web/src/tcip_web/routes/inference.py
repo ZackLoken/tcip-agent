@@ -57,15 +57,23 @@ class InferenceJob:
     # None until a bucket is published.
     dropped_boxes: Optional[int] = None
     thread: Optional[threading.Thread] = field(default=None, repr=False)
-    cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
+    cancel_event: threading.Event = field(
+        default_factory=threading.Event, repr=False
+    )
 
 
 def _summary(job: InferenceJob) -> dict:
     """The job as every listing and stream frame serves it."""
     return {
-        "job_id": job.job_id, "status": job.status, "done": job.done, "total": job.total,
-        "images_dir": job.images_dir, "dataset_root": job.dataset_root, "bucket": job.bucket,
-        "error": job.error, "dropped_boxes": job.dropped_boxes,
+        "job_id": job.job_id,
+        "status": job.status,
+        "done": job.done,
+        "total": job.total,
+        "images_dir": job.images_dir,
+        "dataset_root": job.dataset_root,
+        "bucket": job.bucket,
+        "error": job.error,
+        "dropped_boxes": job.dropped_boxes,
     }
 
 
@@ -100,18 +108,33 @@ def _worker(job: InferenceJob) -> None:
             job.done, job.total = done, total
 
         result = infer(
-            Path(job.project), checkpoint_path=Path(job.checkpoint_path),
+            Path(job.project),
+            checkpoint_path=Path(job.checkpoint_path),
             images_dir=job.images_dir,
-            raster_path=None, bucket=job.bucket, assessment_id=job.assessment_id,
-            stated=job.stated, device=None, tile_batch_size=DEFAULT_TILE_BATCH_SIZE,
-            dry_run=False, require_masks=True, resume=False, progress=progress,
-            canceled=job.cancel_event.is_set, actor=job.actor)
+            raster_path=None,
+            bucket=job.bucket,
+            assessment_id=job.assessment_id,
+            stated=job.stated,
+            device=None,
+            tile_batch_size=DEFAULT_TILE_BATCH_SIZE,
+            dry_run=False,
+            require_masks=True,
+            resume=False,
+            progress=progress,
+            canceled=job.cancel_event.is_set,
+            actor=job.actor,
+        )
         # The publication's own result names the error a failed pass met, and a published
         # bucket's dropped_boxes.
         job.error = result.get("error")
         job.dropped_boxes = result.get("dropped_boxes")
-        terminal_status = ("failed" if job.error is not None
-                           else "canceled" if job.cancel_event.is_set() else "completed")
+        terminal_status = (
+            "failed"
+            if job.error is not None
+            else "canceled"
+            if job.cancel_event.is_set()
+            else "completed"
+        )
     except Exception as exc:
         logger.exception("inference job %s failed", job.job_id)
         terminal_status = "failed"
@@ -161,36 +184,60 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
     if not images_dir.is_dir():
         raise HTTPException(404, f"images_dir not found: {images_dir}")
 
-    live_job = next((j for j in _registry.list(str(project)) if jobstore.live(j)
-                     and j.bucket == payload.bucket
-                     and canonical_path(j.dataset_root) == canonical_path(dataset_root)), None)
+    live_job = next(
+        (
+            j
+            for j in _registry.list(str(project))
+            if jobstore.live(j)
+            and j.bucket == payload.bucket
+            and canonical_path(j.dataset_root) == canonical_path(dataset_root)
+        ),
+        None,
+    )
     if live_job is not None:
-        raise HTTPException(409, {
-            "kind": "bucket_exists",
-            "message": f"bucket {payload.bucket!r} under {dataset_root} is the bucket job "
-                       f"{live_job.job_id} is still writing.",
-            "date": payload.date, "requested_bucket": payload.bucket,
-            "job_id": live_job.job_id,
-        })
+        raise HTTPException(
+            409,
+            {
+                "kind": "bucket_exists",
+                "message": f"bucket {payload.bucket!r} under {dataset_root} is the bucket job "
+                f"{live_job.job_id} is still writing.",
+                "date": payload.date,
+                "requested_bucket": payload.bucket,
+                "job_id": live_job.job_id,
+            },
+        )
 
     job = InferenceJob(
-        job_id=f"inf-{uuid.uuid4().hex[:8]}", project=str(project),
-        checkpoint_path=str(checkpoint_path), dataset_root=str(dataset_root),
-        images_dir=str(images_dir), bucket=payload.bucket, actor=person, stated=payload.stated,
-        assessment_id=payload.assessment_id)
+        job_id=f"inf-{uuid.uuid4().hex[:8]}",
+        project=str(project),
+        checkpoint_path=str(checkpoint_path),
+        dataset_root=str(dataset_root),
+        images_dir=str(images_dir),
+        bucket=payload.bucket,
+        actor=person,
+        stated=payload.stated,
+        assessment_id=payload.assessment_id,
+    )
     _register(job)
 
     t = threading.Thread(target=_worker, args=(job,), daemon=True)
     job.thread = t
     t.start()
 
-    return {"status": "launched", "job_id": job.job_id, "images_dir": str(images_dir),
-            "dataset_root": str(dataset_root), "bucket": payload.bucket}
+    return {
+        "status": "launched",
+        "job_id": job.job_id,
+        "images_dir": str(images_dir),
+        "dataset_root": str(dataset_root),
+        "bucket": payload.bucket,
+    }
 
 
 @router.get("/jobs")
 def list_jobs() -> dict:
-    return {"jobs": [_summary(j) for j in _registry.list(str(store.held().root))]}
+    return {
+        "jobs": [_summary(j) for j in _registry.list(str(store.held().root))]
+    }
 
 
 @router.post("/jobs/{job_id}/cancel")
@@ -208,9 +255,16 @@ def cancel_job(job_id: str, payload: PersonPayload) -> dict:
     j.cancel_event.set()
     answer = {"job_id": job_id, "status": j.status, "cancel_requested": True}
     try:
-        record_event_or_raise("inference_canceled",
-                              {"job_id": job_id, "dataset_root": j.dataset_root,
-                               "bucket": j.bucket}, actor=person, scope=j.project)
+        record_event_or_raise(
+            "inference_canceled",
+            {
+                "job_id": job_id,
+                "dataset_root": j.dataset_root,
+                "bucket": j.bucket,
+            },
+            actor=person,
+            scope=j.project,
+        )
     except AuditEntryNotWrittenError as exc:
         raise audit_gap_409(exc, answer) from exc
     return answer
@@ -231,7 +285,9 @@ async def stream_job(websocket: WebSocket, job_id: str) -> None:
         while True:
             if job.done != last_done:
                 last_done = job.done
-                await websocket.send_json({"type": "progress", **_summary(job)})
+                await websocket.send_json(
+                    {"type": "progress", **_summary(job)}
+                )
             if not jobstore.live(job):
                 await websocket.send_json({"type": "final", **_summary(job)})
                 break

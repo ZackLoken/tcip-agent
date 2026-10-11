@@ -36,8 +36,12 @@ def _dataset(root: Path, stems=_STEMS) -> Path:
         images_dir = root / "images" / date
         for stem in stems:
             _save_png(images_dir / f"{stem}.jpg")
-            label_image(images_dir / f"{stem}.jpg",
-                        [Annotation(subject=SUBJECT, geometry=BBox(2, 2, 10, 10))], IMG, IMG)
+            label_image(
+                images_dir / f"{stem}.jpg",
+                [Annotation(subject=SUBJECT, geometry=BBox(2, 2, 10, 10))],
+                IMG,
+                IMG,
+            )
     return root
 
 
@@ -45,8 +49,16 @@ def _draw(project: Path, root: Path, out: Path, *, seed: int = 2):
     from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.tools.data_tools import draw_splits
 
-    result = draw_splits(project, str(root), output_path=str(out), subject=SUBJECT, seed=seed,
-                         val_ratio=0.3, calibration_ratio=0.15, holdout_ratio=0.15)
+    result = draw_splits(
+        project,
+        str(root),
+        output_path=str(out),
+        subject=SUBJECT,
+        seed=seed,
+        val_ratio=0.3,
+        calibration_ratio=0.15,
+        holdout_ratio=0.15,
+    )
     assert "error" not in result, result
     return read_selection(out, project=project)
 
@@ -57,7 +69,10 @@ def _bind_run(project: Path, out: Path, experiment_id: str) -> Path:
     from tests._verified_checkpoint_fixtures import resolved_run
 
     return resolved_run(
-        project, {"split": {"selection_dir": str(out)}}, experiment_id=experiment_id)
+        project,
+        {"split": {"selection_dir": str(out)}},
+        experiment_id=experiment_id,
+    )
 
 
 def _manifest_sha256(out: Path) -> str:
@@ -66,11 +81,14 @@ def _manifest_sha256(out: Path) -> str:
 
     from tcip_mcp.pipelines.data.selection import selection_key
 
-    return hashlib.sha256(encode_record(tcip_store.read(selection_key(out)))).hexdigest()
+    return hashlib.sha256(
+        encode_record(tcip_store.read(selection_key(out)))
+    ).hexdigest()
 
 
 def test_every_drawn_sample_carries_its_own_documents_version_as_its_digest(
-        tmp_path: Path) -> None:
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.dataset_layout import label_key
 
     root = _dataset(tmp_path / "ds")
@@ -78,12 +96,18 @@ def test_every_drawn_sample_carries_its_own_documents_version_as_its_digest(
 
     assert len(drawn.samples) == len(DATES) * len(_STEMS)
     for sample in drawn.samples:
-        assert sample.ground_truth in {label_key(root, date, sample.member) for date in DATES}
-        assert sample.ground_truth_digest == tcip_store.read_versioned(
-            sample.ground_truth).version.token
+        assert sample.ground_truth in {
+            label_key(root, date, sample.member) for date in DATES
+        }
+        assert (
+            sample.ground_truth_digest
+            == tcip_store.read_versioned(sample.ground_truth).version.token
+        )
 
 
-def test_a_withdrawn_ground_truth_refuses_its_digest_by_name(tmp_path: Path) -> None:
+def test_a_withdrawn_ground_truth_refuses_its_digest_by_name(
+    tmp_path: Path,
+) -> None:
     """A document that is gone has no digest: the read refuses naming it rather than answering
     a stand-in value a comparison could mistake for a recorded one."""
     from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
@@ -102,22 +126,32 @@ def test_the_run_binding_records_the_selection_digest_once_never_on_a_sample(
     document as the store holds it, and the run's resolved partition carries that value once in
     its binding block, never on a sample."""
     from tcip_mcp.experiments import run_resolution
-    from tcip_mcp.pipelines.data.selection import read_selection, selection_digest
+    from tcip_mcp.pipelines.data.selection import (
+        read_selection,
+        selection_digest,
+    )
 
     root = _dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(tmp_path, root, out)
-    resolved = run_resolution(_bind_run(tmp_path, out, "exp_selection_digest").name,
-                              project=tmp_path)
+    resolved = run_resolution(
+        _bind_run(tmp_path, out, "exp_selection_digest").name, project=tmp_path
+    )
 
     selection = read_selection(out, project=tmp_path)
     assert selection_digest(selection, tmp_path) == _manifest_sha256(out)
-    assert resolved.partition["selection"]["selection_sha256"] == _manifest_sha256(out)
-    assert not any("selection_sha256" in sample for sample in resolved.partition["samples"])
+    assert resolved.partition["selection"][
+        "selection_sha256"
+    ] == _manifest_sha256(out)
+    assert not any(
+        "selection_sha256" in sample
+        for sample in resolved.partition["samples"]
+    )
 
 
 def test_a_document_emptied_after_its_admission_never_trains_as_empty(
-        tmp_path: Path, monkeypatch) -> None:
+    tmp_path: Path, monkeypatch
+) -> None:
     """The loaders train the document the admission read, at the version its sample records: one
     emptied between that read and the loaders is never trained as an image with nothing on it."""
     from tcip_mcp.pipelines.data import label_queries
@@ -133,22 +167,33 @@ def test_a_document_emptied_after_its_admission_never_trains_as_empty(
         return real_samples(self, assignment, group_of)
 
     monkeypatch.setattr(label_queries.Admission, "samples", emptied_first)
-    data = DataSpec.model_validate({"images_dir": str(images_dir), "scope": {"subject": SUBJECT},
-                                    "split": {"seed": 0, "val_ratio": 0.15}})
+    data = DataSpec.model_validate(
+        {
+            "images_dir": str(images_dir),
+            "scope": {"subject": SUBJECT},
+            "split": {"seed": 0, "val_ratio": 0.15},
+        }
+    )
 
     from tests._producer_fixtures import staged_layout
 
-    train, val, _partition, _resolved = auto_train_val(tmp_path, "detection", data, None,
-                                                       staged_layout(tmp_path, {}))
+    train, val, _partition, _resolved = auto_train_val(
+        tmp_path, "detection", data, None, staged_layout(tmp_path, {})
+    )
 
-    (key,) = [k for ds in (train, val) for k in ds.stems if Path(k).stem == "a"]
+    (key,) = [
+        k for ds in (train, val) for k in ds.stems if Path(k).stem == "a"
+    ]
     held = next(ds for ds in (train, val) if key in ds.stems)
     assert held.document(key).annotations
     assert held.sample_of(key).ground_truth_digest != ground_truth_digest(
-        held.sample_of(key).ground_truth)
+        held.sample_of(key).ground_truth
+    )
 
 
-def test_the_partition_alone_carries_the_per_sample_digests(tmp_path: Path) -> None:
+def test_the_partition_alone_carries_the_per_sample_digests(
+    tmp_path: Path,
+) -> None:
     """The per-sample digests and groups ride only in the run's resolved partition: the data
     section recorded beside it (the one every checkpoint embeds) never gains them."""
     from tcip_mcp.experiments import run_resolution
@@ -157,10 +202,18 @@ def test_the_partition_alone_carries_the_per_sample_digests(tmp_path: Path) -> N
     out = tmp_path / "m"
     _draw(tmp_path, root, out)
 
-    resolved = run_resolution(_bind_run(tmp_path, out, "exp_split_config_readback").name,
-                              project=tmp_path)
+    resolved = run_resolution(
+        _bind_run(tmp_path, out, "exp_split_config_readback").name,
+        project=tmp_path,
+    )
 
     assert resolved.partition["samples"]
-    assert all(sample["ground_truth_digest"] for sample in resolved.partition["samples"])
-    for block in (resolved.data.record()["split"], resolved.partition["selection"]):
+    assert all(
+        sample["ground_truth_digest"]
+        for sample in resolved.partition["samples"]
+    )
+    for block in (
+        resolved.data.record()["split"],
+        resolved.partition["selection"],
+    ):
         assert "samples" not in block

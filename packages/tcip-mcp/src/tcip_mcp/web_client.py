@@ -82,7 +82,9 @@ def annotation_stats_key(project: str) -> Key:
     return Key(ANNOTATION_STATS_STORE, project, _ANNOTATION_STATS_PARTS)
 
 
-ActiveTab = Literal["setup", "annotate", "training", "inference", "results", "meta"]
+ActiveTab = Literal[
+    "setup", "annotate", "training", "inference", "results", "meta"
+]
 """The GUI's tabs: the vocabulary ``GuiState.active_tab`` holds and ``POST /api/state/tab`` and
 the canvas push validate against."""
 
@@ -93,7 +95,9 @@ AnnotateMode = Literal["box", "polygon", "point"]
 
 ANNOTATE_MODES = get_args(AnnotateMode)
 
-_TRANSPORT = ConfigDict(extra="forbid", json_schema_serialization_defaults_required=True)
+_TRANSPORT = ConfigDict(
+    extra="forbid", json_schema_serialization_defaults_required=True
+)
 """The GUI state models' config: no field beyond the declared ones, and every field present in
 what they serialize to."""
 
@@ -176,8 +180,13 @@ def require_whole(model: BaseModel, where: str) -> None:
             require_whole(value, f"{where}.{name}")
 
 
-def selection_for(dataset_root: Path, subject: Optional[str], date: str,
-                  bucket: Optional[str], current_image_index: int) -> DatasetSelection:
+def selection_for(
+    dataset_root: Path,
+    subject: Optional[str],
+    date: str,
+    bucket: Optional[str],
+    current_image_index: int,
+) -> DatasetSelection:
     """The selection a choice names: the image list of capture ``date`` and the name of the
     bucket under ``dataset_root`` whose proposals the canvas shows. ``current_image_index`` is
     clamped to the list. Raises ``AmbiguousImageStemError`` for a capture holding two images of one
@@ -187,7 +196,11 @@ def selection_for(dataset_root: Path, subject: Optional[str], date: str,
 
     images_dir = image_dir(dataset_root, date)
     image_list = list(logical_images_by_name(images_dir))
-    index = max(0, min(current_image_index, len(image_list) - 1)) if image_list else 0
+    index = (
+        max(0, min(current_image_index, len(image_list) - 1))
+        if image_list
+        else 0
+    )
     return DatasetSelection(
         dataset_root=str(dataset_root),
         subject=subject,
@@ -204,7 +217,10 @@ def current_image(selection: DatasetSelection) -> Optional[str]:
     names none."""
     if selection.images_dir is None or not selection.image_list:
         return None
-    return str(Path(selection.images_dir) / selection.image_list[selection.current_image_index])
+    return str(
+        Path(selection.images_dir)
+        / selection.image_list[selection.current_image_index]
+    )
 
 
 def write_gui_snapshot(project: Path, state: GuiState) -> None:
@@ -212,12 +228,23 @@ def write_gui_snapshot(project: Path, state: GuiState) -> None:
     from tcip_mcp.registry_paths import stored_path
 
     dataset = state.dataset
-    choice = None if dataset.dataset_root is None or dataset.date is None else _DatasetChoice(
-        dataset_root=stored_path(dataset.dataset_root, project), subject=dataset.subject,
-        date=dataset.date, current_image_index=dataset.current_image_index,
-        bucket=dataset.bucket)
-    document = _PersistedGuiState(**{**state.model_dump(exclude={"dataset"}), "dataset": choice})
-    tcip_store.replace(gui_snapshot_key(project), document.model_dump(mode="json"))
+    choice = (
+        None
+        if dataset.dataset_root is None or dataset.date is None
+        else _DatasetChoice(
+            dataset_root=stored_path(dataset.dataset_root, project),
+            subject=dataset.subject,
+            date=dataset.date,
+            current_image_index=dataset.current_image_index,
+            bucket=dataset.bucket,
+        )
+    )
+    document = _PersistedGuiState(
+        **{**state.model_dump(exclude={"dataset"}), "dataset": choice}
+    )
+    tcip_store.replace(
+        gui_snapshot_key(project), document.model_dump(mode="json")
+    )
 
 
 def read_gui_snapshot(project: Path) -> Optional[GuiState]:
@@ -233,10 +260,20 @@ def read_gui_snapshot(project: Path) -> Optional[GuiState]:
     persisted = _PersistedGuiState.model_validate(raw)
     require_whole(persisted, "the GUI snapshot")
     choice = persisted.dataset
-    dataset = DatasetSelection() if choice is None else selection_for(
-        resolved_registry_path(project, choice.dataset_root), choice.subject, choice.date,
-        choice.bucket, choice.current_image_index)
-    return GuiState(**{**persisted.model_dump(exclude={"dataset"}), "dataset": dataset})
+    dataset = (
+        DatasetSelection()
+        if choice is None
+        else selection_for(
+            resolved_registry_path(project, choice.dataset_root),
+            choice.subject,
+            choice.date,
+            choice.bucket,
+            choice.current_image_index,
+        )
+    )
+    return GuiState(
+        **{**persisted.model_dump(exclude={"dataset"}), "dataset": dataset}
+    )
 
 
 # One panel per GUI tab, plus "app" for steering the GUI itself (open a project, focus a tab).
@@ -266,13 +303,17 @@ def resolve_web_port(workspace: Path) -> int:
     that is not an integer."""
     recorded = tcip_store.read(backend_port_key(workspace), default=None)
     if recorded is None:
-        raise NoBackendPortError(f"no backend has recorded a port under {workspace}; "
-                            "`python -m tcip_web` serving it records one")
+        raise NoBackendPortError(
+            f"no backend has recorded a port under {workspace}; "
+            "`python -m tcip_web` serving it records one"
+        )
     try:
         return int(recorded)
     except ValueError as exc:
-        raise ValueError(f"the backend's port under {workspace} does not read as a port: "
-                         f"{exc}") from exc
+        raise ValueError(
+            f"the backend's port under {workspace} does not read as a port: "
+            f"{exc}"
+        ) from exc
 
 
 def backend_url(workspace: Path, path: str) -> str:
@@ -304,23 +345,43 @@ def post_panel_event(
     # Hermetic under pytest: focus/web tests must never steer a live GUI session to ephemeral
     # fixture paths (the browser then 404s on deleted tmp dirs). Tests that exercise real
     # delivery opt back in with TCIP_ALLOW_PANEL_EVENTS=1.
-    if os.environ.get("PYTEST_CURRENT_TEST") and not os.environ.get("TCIP_ALLOW_PANEL_EVENTS"):
-        return {"status": "suppressed_under_pytest", "delivered": False, "url": ""}
+    if os.environ.get("PYTEST_CURRENT_TEST") and not os.environ.get(
+        "TCIP_ALLOW_PANEL_EVENTS"
+    ):
+        return {
+            "status": "suppressed_under_pytest",
+            "delivered": False,
+            "url": "",
+        }
 
     from tcip_mcp import agent_identity
 
     try:
         url = backend_url(bound.workspace, f"/api/events/{panel}")
     except NoBackendPortError as exc:
-        return {"status": "no_subscribers", "delivered": False, "url": "", "error": str(exc)}
-    payload = json.dumps({"panel": panel, "event_type": event_type, "data": data,
-                          "project_id": bound.id}).encode("utf-8")
+        return {
+            "status": "no_subscribers",
+            "delivered": False,
+            "url": "",
+            "error": str(exc),
+        }
+    payload = json.dumps(
+        {
+            "panel": panel,
+            "event_type": event_type,
+            "data": data,
+            "project_id": bound.id,
+        }
+    ).encode("utf-8")
 
     # The pushing harness and session, as headers, so the backend can say who steered the GUI.
     req = urllib.request.Request(
         url,
         data=payload,
-        headers={"Content-Type": "application/json", **agent_identity.http_headers()},
+        headers={
+            "Content-Type": "application/json",
+            **agent_identity.http_headers(),
+        },
         method="POST",
     )
     try:
@@ -332,8 +393,17 @@ def post_panel_event(
                     parsed = json.loads(body)
                 except (json.JSONDecodeError, UnicodeDecodeError):
                     parsed = None
-                return {"status": "ok", "delivered": True, "url": url, "response": parsed}
-            return {"error": f"backend returned HTTP {code}", "delivered": False, "url": url}
+                return {
+                    "status": "ok",
+                    "delivered": True,
+                    "url": url,
+                    "response": parsed,
+                }
+            return {
+                "error": f"backend returned HTTP {code}",
+                "delivered": False,
+                "url": url,
+            }
     except urllib.error.HTTPError as exc:
         # The backend's own answer, e.g. the project it has open when that is not this one.
         try:
@@ -342,15 +412,28 @@ def post_panel_event(
             detail = None
         if isinstance(detail, dict):
             fields = {k: v for k, v in detail.items() if k != "message"}
-            return {**fields, "error": detail.get("message"), "delivered": False, "url": url}
-        error = detail if isinstance(detail, str) else f"backend returned HTTP {exc.code}"
+            return {
+                **fields,
+                "error": detail.get("message"),
+                "delivered": False,
+                "url": url,
+            }
+        error = (
+            detail
+            if isinstance(detail, str)
+            else f"backend returned HTTP {exc.code}"
+        )
         return {"error": error, "delivered": False, "url": url}
     except urllib.error.URLError as exc:
         # ConnectionRefusedError or similar -> backend not running
         reason = getattr(exc, "reason", exc)
         if isinstance(reason, (ConnectionRefusedError, OSError)):
             return {"status": "no_subscribers", "delivered": False, "url": url}
-        return {"error": f"URL error: {reason}", "delivered": False, "url": url}
+        return {
+            "error": f"URL error: {reason}",
+            "delivered": False,
+            "url": url,
+        }
     except Exception as exc:  # pragma: no cover
         logger.exception("post_panel_event failed")
         return {"error": str(exc), "delivered": False, "url": url}

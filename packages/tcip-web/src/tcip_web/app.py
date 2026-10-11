@@ -79,16 +79,23 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # ── Tab routes ──
 from tcip_web.routes import register_all as _register_routes  # noqa: E402  (needs `app`)
+
 _register_routes(app)
 
 # ── State snapshot + WS ──
 from tcip_web.state import (  # noqa: E402  (needs `app`)
-    GuiMutationInvalidError, NoProjectOpenError, ProjectNotOpenError, store as _gui_store,
+    GuiMutationInvalidError,
+    NoProjectOpenError,
+    ProjectNotOpenError,
+    store as _gui_store,
 )
+
 _state_watchers: set[WebSocket] = set()
 
 
-async def _bad_request_handler(_request: Request, exc: Exception) -> JSONResponse:
+async def _bad_request_handler(
+    _request: Request, exc: Exception
+) -> JSONResponse:
     """An invalid GUI mutation, a directory read as a bucket it is not, or an act naming no
     person: 400 with the reason."""
     return JSONResponse(status_code=400, content={"detail": str(exc)})
@@ -100,17 +107,28 @@ app.add_exception_handler(NoActorError, _bad_request_handler)
 
 
 @app.exception_handler(NoProjectOpenError)
-async def _no_project_open_handler(_request: Request, exc: NoProjectOpenError) -> JSONResponse:
+async def _no_project_open_handler(
+    _request: Request, exc: NoProjectOpenError
+) -> JSONResponse:
     """Every route that acts on the open project answers 409 while none is open."""
     return JSONResponse(status_code=409, content={"detail": str(exc)})
 
 
 @app.exception_handler(ProjectNotOpenError)
-async def _project_not_open_handler(_request: Request, exc: ProjectNotOpenError) -> JSONResponse:
+async def _project_not_open_handler(
+    _request: Request, exc: ProjectNotOpenError
+) -> JSONResponse:
     """A request built for a project the backend does not have open answers 409 naming the one it
     has open."""
-    return JSONResponse(status_code=409, content={"detail": {
-        "message": str(exc), "open_project_id": exc.open_project_id}})
+    return JSONResponse(
+        status_code=409,
+        content={
+            "detail": {
+                "message": str(exc),
+                "open_project_id": exc.open_project_id,
+            }
+        },
+    )
 
 
 # This process's launch identity, minted once at import: rides every snapshot envelope so a
@@ -118,7 +136,9 @@ async def _project_not_open_handler(_request: Request, exc: ProjectNotOpenError)
 SERVER_EPOCH = uuid.uuid4().hex
 
 
-def state_snapshot_message(state: dict[str, Any], version: int) -> dict[str, Any]:
+def state_snapshot_message(
+    state: dict[str, Any], version: int
+) -> dict[str, Any]:
     """The state-snapshot envelope: state, version, the open project (``{id, path}``, or null
     when none is open) and this process's epoch."""
     opened = _gui_store.opened
@@ -126,7 +146,9 @@ def state_snapshot_message(state: dict[str, Any], version: int) -> dict[str, Any
         "type": "state_snapshot",
         "state": state,
         "version": version,
-        "project": None if opened is None else {"id": opened.id, "path": str(opened.root)},
+        "project": None
+        if opened is None
+        else {"id": opened.id, "path": str(opened.root)},
         "epoch": SERVER_EPOCH,
     }
 
@@ -161,7 +183,9 @@ async def set_active_tab(payload: ActiveTabPayload) -> dict:
     """Record which tab the browser is actually showing, so the GUI snapshot tracks what the
     human sees.
     """
-    await _gui_store.mutate({"active_tab": payload.active_tab}, project=_gui_store.opened)
+    await _gui_store.mutate(
+        {"active_tab": payload.active_tab}, project=_gui_store.opened
+    )
     return {"status": "ok", "active_tab": payload.active_tab}
 
 
@@ -244,7 +268,9 @@ if STATIC_DIR.exists():
     # mount that subdirectory at /assets; /static stays for ad-hoc static resources.
     assets_dir = STATIC_DIR / "assets"
     if assets_dir.exists():
-        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+        app.mount(
+            "/assets", StaticFiles(directory=str(assets_dir)), name="assets"
+        )
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
@@ -302,7 +328,10 @@ async def post_panel_event(panel: str, event: PanelEvent, request: Request):
     from tcip_mcp import agent_identity
 
     if panel not in VALID_PANELS:
-        return {"error": f"unknown panel: {panel}", "valid": sorted(VALID_PANELS)}
+        return {
+            "error": f"unknown panel: {panel}",
+            "valid": sorted(VALID_PANELS),
+        }
     project = _gui_store.admit(event.project_id)
     payload = {
         "panel": panel,

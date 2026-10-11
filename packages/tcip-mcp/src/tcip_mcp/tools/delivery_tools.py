@@ -54,7 +54,9 @@ def deliver_per_plant_csv(
     """
     from tcip_mcp.buckets import by_recorded_date, read_bucket
     from tcip_mcp.pipelines.postprocessing import plant_mapping as mapping
-    from tcip_mcp.pipelines.postprocessing.aggregation import deliver_per_plant_aggregate
+    from tcip_mcp.pipelines.postprocessing.aggregation import (
+        deliver_per_plant_aggregate,
+    )
     from tcip_mcp.pipelines.postprocessing.phenology import population
     from tcip_mcp.registry_paths import located
     from tcip_mcp.traits import TraitUnknownError
@@ -63,15 +65,32 @@ def deliver_per_plant_csv(
         root = located(dataset_root, project)
         delivered = [read_bucket(root, b) for b in buckets]
         wanted = population(plants)
-        disclosure = (mapping.plant_mapping_disclosure(
-            project, plant_mapping, by_recorded_date(delivered), wanted)
-            if plant_mapping else None)
+        disclosure = (
+            mapping.plant_mapping_disclosure(
+                project, plant_mapping, by_recorded_date(delivered), wanted
+            )
+            if plant_mapping
+            else None
+        )
         return deliver_per_plant_aggregate(
-            project, results, str(located(output_path, project)),
-            delivered_phenotype=delivered_phenotype, delivery_kind=delivery_kind,
-            buckets=delivered, plants=wanted, crop=crop,
-            pipeline_version=pipeline_version, door="deliver_per_plant_csv",
-            plant_mapping=disclosure, scale_assessment_id=scale_assessment_id,
-            acknowledgment_id=acknowledgment_id, actor=None)
-    except (TraitUnknownError, mapping.MappingDeliveryError, ValueError) as exc:
+            project,
+            results,
+            str(located(output_path, project)),
+            delivered_phenotype=delivered_phenotype,
+            delivery_kind=delivery_kind,
+            buckets=delivered,
+            plants=wanted,
+            crop=crop,
+            pipeline_version=pipeline_version,
+            door="deliver_per_plant_csv",
+            plant_mapping=disclosure,
+            scale_assessment_id=scale_assessment_id,
+            acknowledgment_id=acknowledgment_id,
+            actor=None,
+        )
+    except (
+        TraitUnknownError,
+        mapping.MappingDeliveryError,
+        ValueError,
+    ) as exc:
         return {"error": str(exc)}

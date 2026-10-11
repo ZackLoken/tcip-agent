@@ -13,5 +13,9 @@ def test_deregistered_wrappers_absent_from_registry():
     from tcip_mcp.server import list_registered_tools
 
     registered = set(list_registered_tools())
-    for name in ("log_metrics", "record_artifact", "get_training_metrics_path"):
+    for name in (
+        "log_metrics",
+        "record_artifact",
+        "get_training_metrics_path",
+    ):
         assert name not in registered, f"{name} should be de-registered"

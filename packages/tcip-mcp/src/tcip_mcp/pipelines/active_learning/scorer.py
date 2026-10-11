@@ -38,8 +38,9 @@ class BaseScorer(ABC):
     """Rank images by how valuable they'd be to label next."""
 
     @abstractmethod
-    def score(self, image_paths: list[str],
-              predictor: GenericPredictor) -> list[tuple[str, float]]:
+    def score(
+        self, image_paths: list[str], predictor: GenericPredictor
+    ) -> list[tuple[str, float]]:
         """Return (path, score) pairs sorted descending (highest = most valuable), reading each
         candidate through the loaded checkpoint ``predictor``: its model, its device and its
         ``in_chans`` travel together."""
@@ -57,8 +58,9 @@ class UncertaintyScorer(BaseScorer):
         self.task = task
 
     @torch.no_grad()
-    def score(self, image_paths: list[str],
-              predictor: GenericPredictor) -> list[tuple[str, float]]:
+    def score(
+        self, image_paths: list[str], predictor: GenericPredictor
+    ) -> list[tuple[str, float]]:
         model = predictor.model
         model.eval()
         scored: list[tuple[str, float]] = []
@@ -72,16 +74,27 @@ class UncertaintyScorer(BaseScorer):
                     outputs = outputs[0]
                 scores = outputs["scores"]
                 # A frame with no detections holds no ambiguous decision, so it ranks lowest.
-                uncertainty = 1.0 - scores.mean().item() if len(scores) else 0.0
+                uncertainty = (
+                    1.0 - scores.mean().item() if len(scores) else 0.0
+                )
             else:
                 outputs = model(tensor)
-                heads = outputs.values() if isinstance(outputs, dict) else [outputs]
+                heads = (
+                    outputs.values()
+                    if isinstance(outputs, dict)
+                    else [outputs]
+                )
                 # Multi-head: average classification-style entropy across all heads.
-                entropies = [_entropy(v) for v in heads
-                             if isinstance(v, torch.Tensor) and v.dim() >= 2]
+                entropies = [
+                    _entropy(v)
+                    for v in heads
+                    if isinstance(v, torch.Tensor) and v.dim() >= 2
+                ]
                 if not entropies:
-                    raise ValueError(f"the uncertainty scorer cannot score a {self.task} model: "
-                                     "its output carries no class logits to take an entropy of.")
+                    raise ValueError(
+                        f"the uncertainty scorer cannot score a {self.task} model: "
+                        "its output carries no class logits to take an entropy of."
+                    )
                 uncertainty = sum(entropies) / len(entropies)
 
             scored.append((path, uncertainty))
@@ -104,8 +117,9 @@ class DiversityScorer(BaseScorer):
         self._labeled = embeddings
 
     @torch.no_grad()
-    def score(self, image_paths: list[str],
-              predictor: GenericPredictor) -> list[tuple[str, float]]:
+    def score(
+        self, image_paths: list[str], predictor: GenericPredictor
+    ) -> list[tuple[str, float]]:
         model = predictor.model
         if not hasattr(model, "backbone"):
             # No silent random-noise embeddings: diversity needs real backbone features.
@@ -121,8 +135,15 @@ class DiversityScorer(BaseScorer):
         for path in image_paths:
             tensor = predictor.model_input(path)[0].unsqueeze(0)
             feats = cast(Any, model).backbone(tensor)
-            feat = list(feats.values())[-1] if isinstance(feats, dict) else feats
-            emb = functional.adaptive_avg_pool2d(feat, 1).flatten(1).cpu().numpy()
+            feat = (
+                list(feats.values())[-1] if isinstance(feats, dict) else feats
+            )
+            emb = (
+                functional.adaptive_avg_pool2d(feat, 1)
+                .flatten(1)
+                .cpu()
+                .numpy()
+            )
             embeddings.append(emb[0])
 
         embeddings_arr = np.stack(embeddings)
@@ -138,10 +159,13 @@ class DiversityScorer(BaseScorer):
 
         # Cosine distance to nearest labeled sample
         from numpy.linalg import norm
+
         scored = []
         for i, emb in enumerate(embeddings_arr):
             emb_norm = emb / (norm(emb) + 1e-8)
-            labeled_norm = self._labeled / (norm(self._labeled, axis=1, keepdims=True) + 1e-8)
+            labeled_norm = self._labeled / (
+                norm(self._labeled, axis=1, keepdims=True) + 1e-8
+            )
             similarities = emb_norm @ labeled_norm.T
             min_dist = 1.0 - similarities.max()
             scored.append((image_paths[i], float(min_dist)))
@@ -165,8 +189,9 @@ class CombinedScorer(BaseScorer):
         self.uw = uncertainty_weight
         self.dw = diversity_weight
 
-    def score(self, image_paths: list[str],
-              predictor: GenericPredictor) -> list[tuple[str, float]]:
+    def score(
+        self, image_paths: list[str], predictor: GenericPredictor
+    ) -> list[tuple[str, float]]:
         unc_scores = dict(self.unc.score(image_paths, predictor))
         div_scores = dict(self.div.score(image_paths, predictor))
 
@@ -208,5 +233,7 @@ def resolve_scorer(method: str, task: str) -> BaseScorer:
     refusals propagate)."""
     from tcip_mcp.pipelines.model_build import resolve_named
 
-    target = resolve_named(method, SCORER_REGISTRY, kind="scorer", register="register_scorer")
+    target = resolve_named(
+        method, SCORER_REGISTRY, kind="scorer", register="register_scorer"
+    )
     return target(task) if callable(target) else target

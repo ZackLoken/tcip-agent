@@ -52,7 +52,9 @@ def read_registry_index(project_path: str | Path) -> list[dict]:
     """Every foreign checkpoint the project has registered, in registration order. A project that
     has registered nothing reads as an empty list; an index that does not decode raises
     ``DecodeError``."""
-    return tcip_store.read(registry_index_key(project_path), default={"entries": []})["entries"]
+    return tcip_store.read(
+        registry_index_key(project_path), default={"entries": []}
+    )["entries"]
 
 
 def _checkpoint_entry_file(project_path: Path, raw: str) -> Path | None:
@@ -63,7 +65,11 @@ def _checkpoint_entry_file(project_path: Path, raw: str) -> Path | None:
         resolved = resolved_registry_path(project_path, raw).resolve()
     except (RegistryPathEmptyError, RegistryPathTraversalError):
         return None
-    return resolved if resolved.is_file() and resolved.is_relative_to(project_path) else None
+    return (
+        resolved
+        if resolved.is_file() and resolved.is_relative_to(project_path)
+        else None
+    )
 
 
 def checkpoint_files(root: Path) -> frozenset[Path]:
@@ -74,8 +80,14 @@ def checkpoint_files(root: Path) -> frozenset[Path]:
     from tcip_mcp.experiments import run_dirs
 
     found = {p for p in (root / ".tcip" / "models").glob("*") if p.is_file()}
-    found |= {path for path in (_checkpoint_entry_file(root, e["checkpoint_path"])
-                                for e in read_registry_index(root)) if path is not None}
+    found |= {
+        path
+        for path in (
+            _checkpoint_entry_file(root, e["checkpoint_path"])
+            for e in read_registry_index(root)
+        )
+        if path is not None
+    }
     found |= {p for run_dir in run_dirs(root) for p in run_dir.glob("*.pt")}
     return frozenset(found)
 
@@ -89,11 +101,16 @@ def registry_checkpoint_disclosures(root: Path) -> dict[str, list]:
     stored = sorted(e["checkpoint_path"] for e in read_registry_index(root))
     return {
         "checkpoint_paths_unresolved": [
-            raw for raw in stored
-            if not is_external_form(raw) and _checkpoint_entry_file(root, raw) is None],
+            raw
+            for raw in stored
+            if not is_external_form(raw)
+            and _checkpoint_entry_file(root, raw) is None
+        ],
         "external_checkpoints": [
             {"checkpoint_path": raw, "exists": Path(raw).is_file()}
-            for raw in stored if is_external_form(raw)],
+            for raw in stored
+            if is_external_form(raw)
+        ],
     }
 
 
@@ -103,10 +120,14 @@ def run_entry(observation: "RunObservation") -> dict | None:
     checkpoint = observation.checkpoint
     if checkpoint is None:
         return None
-    assert observation.final is not None, "a completed checkpoint is named by a final status"
+    assert observation.final is not None, (
+        "a completed checkpoint is named by a final status"
+    )
     return {
-        "name": observation.directory.name, "checkpoint_path": checkpoint["path"],
-        "sha256": checkpoint["sha256"], "registered_at": observation.final["ended"],
+        "name": observation.directory.name,
+        "checkpoint_path": checkpoint["path"],
+        "sha256": checkpoint["sha256"],
+        "registered_at": observation.final["ended"],
         "tags": [],
         "experiment_id": observation.directory.name,
     }
@@ -119,11 +140,23 @@ def registered_entries(project_path: str | Path) -> list[dict]:
     first, in completion order."""
     from tcip_mcp.experiments import run_observations
 
-    runs = sorted((entry for entry in map(run_entry, run_observations(project_path))
-                   if entry is not None), key=lambda entry: entry["registered_at"])
+    runs = sorted(
+        (
+            entry
+            for entry in map(run_entry, run_observations(project_path))
+            if entry is not None
+        ),
+        key=lambda entry: entry["registered_at"],
+    )
     owned = {entry["sha256"] for entry in runs}
-    return [*runs, *({**e, "experiment_id": None} for e in read_registry_index(project_path)
-                     if e["sha256"] not in owned)]
+    return [
+        *runs,
+        *(
+            {**e, "experiment_id": None}
+            for e in read_registry_index(project_path)
+            if e["sha256"] not in owned
+        ),
+    ]
 
 
 def entry_facts(entry: dict, project: Path) -> dict:
@@ -137,13 +170,18 @@ def entry_facts(entry: dict, project: Path) -> dict:
     from tcip_mcp.pipelines.model_build import METRICS_KEY
 
     checkpoint = VerifiedCheckpoint(
-        path=entry["checkpoint_path"], entry=entry, project=project,
-        payload=checkpoint_payload(entry["checkpoint_path"], entry["sha256"]))
+        path=entry["checkpoint_path"],
+        entry=entry,
+        project=project,
+        payload=checkpoint_payload(entry["checkpoint_path"], entry["sha256"]),
+    )
     if entry["experiment_id"] is None:
         metrics, source = entry["metrics"], "caller"
     else:
         metrics = checkpoint.payload.get(METRICS_KEY) or {}
-        source = "training_source" if checkpoint.spec.training_source else "trainer"
+        source = (
+            "training_source" if checkpoint.spec.training_source else "trainer"
+        )
     return {"metrics": metrics, "metrics_source": source if metrics else None}
 
 
@@ -194,7 +232,10 @@ class VerifiedCheckpoint:
     def producer(self) -> dict[str, str | None]:
         """The producer every record of this checkpoint's output names: its sha256 and the run
         behind it."""
-        return {"checkpoint_sha256": self.sha256, "experiment_id": self.experiment_id}
+        return {
+            "checkpoint_sha256": self.sha256,
+            "experiment_id": self.experiment_id,
+        }
 
     @cached_property
     def spec(self) -> TrainConfigSchema:
@@ -209,16 +250,24 @@ class VerifiedCheckpoint:
         from tcip_mcp.pipelines.model_build import CONFIG_KEY, source_seams
         from tcip_mcp.pipelines.schemas import train_config
 
-        spec = train_config(runtime_paths(self.payload.get(CONFIG_KEY, {}), CONFIG_PATHS,
-                                          self.project))
-        absent = [file for _field, _dotted, files in source_seams(spec) for file in files or []
-                  if not Path(file).is_file()]
+        spec = train_config(
+            runtime_paths(
+                self.payload.get(CONFIG_KEY, {}), CONFIG_PATHS, self.project
+            )
+        )
+        absent = [
+            file
+            for _field, _dotted, files in source_seams(spec)
+            for file in files or []
+            if not Path(file).is_file()
+        ]
         if absent:
             raise ValueError(
                 f"{self.path} binds its source to {absent}, which {self.project} does not hold: a "
                 "checkpoint carries its run's source snapshot and loads only beside that run. "
                 "Load it in the project holding the run directory those paths name, or carry that "
-                "run whole into this project (archive_project, then import_project).")
+                "run whole into this project (archive_project, then import_project)."
+            )
         return spec
 
     @cached_property
@@ -227,9 +276,14 @@ class VerifiedCheckpoint:
         ``SNAPSHOT_KEY`` digest names, as the record of the run of :attr:`project` that took it
         states it (``model_build.owning_run_layout``, which refuses a config declaring no file, or
         a snapshot and files no run of :attr:`project` took)."""
-        from tcip_mcp.pipelines.model_build import SNAPSHOT_KEY, owning_run_layout
+        from tcip_mcp.pipelines.model_build import (
+            SNAPSHOT_KEY,
+            owning_run_layout,
+        )
 
-        return owning_run_layout(self.spec, self.payload.get(SNAPSHOT_KEY), self.project)
+        return owning_run_layout(
+            self.spec, self.payload.get(SNAPSHOT_KEY), self.project
+        )
 
     @property
     def task(self) -> str:
@@ -260,7 +314,9 @@ def _load_verified_payload(data: bytes, *, source: str) -> dict:
     from tcip_mcp.pipelines.model_build import STATE_DICT_KEY
 
     try:
-        payload = torch.load(io.BytesIO(data), map_location="cpu", weights_only=True)
+        payload = torch.load(
+            io.BytesIO(data), map_location="cpu", weights_only=True
+        )
     except Exception as exc:
         raise UnregisteredCheckpointError(
             f"{source} could not be loaded with weights_only=True ({exc}): this payload carries "
@@ -269,12 +325,16 @@ def _load_verified_payload(data: bytes, *, source: str) -> dict:
             "loop's own arbitrary state is outside the contract)."
         ) from exc
     if not isinstance(payload, dict):
-        raise ValueError(f"{source} did not unpickle to a dict (got {type(payload).__name__}), so "
-                         "it carries none of the config and weights this platform's checkpoints "
-                         "do.")
+        raise ValueError(
+            f"{source} did not unpickle to a dict (got {type(payload).__name__}), so "
+            "it carries none of the config and weights this platform's checkpoints "
+            "do."
+        )
     if STATE_DICT_KEY not in payload:
-        raise ValueError(f"{source} carries no {STATE_DICT_KEY!r}: a checkpoint is admitted for "
-                         "the weights it loads, and this one holds none.")
+        raise ValueError(
+            f"{source} carries no {STATE_DICT_KEY!r}: a checkpoint is admitted for "
+            "the weights it loads, and this one holds none."
+        )
     return payload
 
 
@@ -297,11 +357,16 @@ def checkpoint_payload(checkpoint_path: str | Path, sha256: str) -> dict:
     if digest != sha256:
         raise UnregisteredCheckpointError(
             f"{checkpoint_path} now hashes to {digest}, not the {sha256} its record names: the "
-            "file was replaced after it was recorded.")
-    return _load_verified_payload(data, source=f"{checkpoint_path} (sha256 {digest})")
+            "file was replaced after it was recorded."
+        )
+    return _load_verified_payload(
+        data, source=f"{checkpoint_path} (sha256 {digest})"
+    )
 
 
-def load_registered_checkpoint(checkpoint_path: Path, *, project: Path) -> VerifiedCheckpoint:
+def load_registered_checkpoint(
+    checkpoint_path: Path, *, project: Path
+) -> VerifiedCheckpoint:
     """The checkpoint at the established location ``checkpoint_path`` (its caller's arrival
     located it, ``registry_paths.located``), read once and unpickled from the same bytes its
     digest is taken over, when ``project``'s :func:`registered_entries` name that digest.
@@ -316,15 +381,20 @@ def load_registered_checkpoint(checkpoint_path: Path, *, project: Path) -> Verif
     except FileNotFoundError as exc:
         raise CheckpointNotFoundError(f"Checkpoint not found: {ckpt}") from exc
     digest = _sha256_of_bytes(data)
-    entry = next((e for e in registered_entries(root) if e["sha256"] == digest), None)
+    entry = next(
+        (e for e in registered_entries(root) if e["sha256"] == digest), None
+    )
     if entry is None:
         raise _unregistered_checkpoint_error(ckpt, digest, root)
     payload = _load_verified_payload(data, source=f"{ckpt} (sha256 {digest})")
-    return VerifiedCheckpoint(path=str(ckpt), payload=payload, entry=entry, project=Path(project))
+    return VerifiedCheckpoint(
+        path=str(ckpt), payload=payload, entry=entry, project=Path(project)
+    )
 
 
-def _write_registry_entry(txn: tcip_store.Txn, key: Key,
-                          entry: dict) -> tuple[dict | None, dict]:
+def _write_registry_entry(
+    txn: tcip_store.Txn, key: Key, entry: dict
+) -> tuple[dict | None, dict]:
     """Write ``entry`` as the one foreign entry of its sha256 inside ``txn``'s already-open
     transaction over the index key.
 
@@ -334,10 +404,13 @@ def _write_registry_entry(txn: tcip_store.Txn, key: Key,
     which is no change and so no write.
     """
     index = txn.read(key, default={"entries": []})["entries"]
-    superseded = next((e for e in index if e["sha256"] == entry["sha256"]), None)
+    superseded = next(
+        (e for e in index if e["sha256"] == entry["sha256"]), None
+    )
     if superseded is not None:
-        if ({k: v for k, v in superseded.items() if k != "registered_at"}
-                == {k: v for k, v in entry.items() if k != "registered_at"}):
+        if {k: v for k, v in superseded.items() if k != "registered_at"} == {
+            k: v for k, v in entry.items() if k != "registered_at"
+        }:
             return superseded, superseded
     index = [e for e in index if e["sha256"] != entry["sha256"]]
     index.append(entry)
@@ -345,17 +418,27 @@ def _write_registry_entry(txn: tcip_store.Txn, key: Key,
     return superseded, entry
 
 
-def _audit_entry_write(project_path: str, superseded: dict | None, entry: dict) -> None:
+def _audit_entry_write(
+    project_path: str, superseded: dict | None, entry: dict
+) -> None:
     """Emit ``model_registered`` in the project's log for a written ``entry``, naming the entry of
     the same sha256 it superseded. A failed append raises ``AuditEntryNotWrittenError``."""
     from tcip_mcp.audit import record_event_or_raise
 
-    replaced = {} if superseded is None else {
-        "superseded_name": superseded["name"], "superseded_tags": superseded["tags"],
-    }
-    record_event_or_raise("model_registered",
-                          {"name": entry["name"], "new_sha256": entry["sha256"], **replaced},
-                          actor=None, scope=project_path)
+    replaced = (
+        {}
+        if superseded is None
+        else {
+            "superseded_name": superseded["name"],
+            "superseded_tags": superseded["tags"],
+        }
+    )
+    record_event_or_raise(
+        "model_registered",
+        {"name": entry["name"], "new_sha256": entry["sha256"], **replaced},
+        actor=None,
+        scope=project_path,
+    )
 
 
 def _resolve_entry_checkpoint(project_path: str, entry: dict) -> dict:
@@ -367,7 +450,9 @@ def _resolve_entry_checkpoint(project_path: str, entry: dict) -> dict:
     copy = dict(entry)
     stored = entry["checkpoint_path"]
     try:
-        copy["checkpoint_path"] = str(resolved_registry_path(project_path, stored))
+        copy["checkpoint_path"] = str(
+            resolved_registry_path(project_path, stored)
+        )
     except (RegistryPathEmptyError, RegistryPathTraversalError) as exc:
         copy["checkpoint_path_error"] = str(exc)
     return copy
@@ -415,10 +500,13 @@ class ModelRegistry:
         if not ckpt.is_file():
             raise FileNotFoundError(
                 f"register_model: checkpoint_path {checkpoint_path!r} does not exist, refusing to "
-                "register a phantom registry entry.")
+                "register a phantom registry entry."
+            )
         entry = {
             "name": name,
-            "checkpoint_path": checkpoint_registry_path_for(ckpt, self._project_path),
+            "checkpoint_path": checkpoint_registry_path_for(
+                ckpt, self._project_path
+            ),
             "sha256": admitted_digest(ckpt),
             "registered_at": now_iso(),
             "metrics": metrics or {},
@@ -429,8 +517,11 @@ class ModelRegistry:
             superseded, stored = _write_registry_entry(txn, key, entry)
         if stored is entry:
             _audit_entry_write(self._project_path, superseded, entry)
-        owner = next(e for e in registered_entries(self._project_path)
-                     if e["sha256"] == entry["sha256"])
+        owner = next(
+            e
+            for e in registered_entries(self._project_path)
+            if e["sha256"] == entry["sha256"]
+        )
         return _resolve_entry_checkpoint(self._project_path, owner)
 
     def list_models(self, tag: str | None = None) -> list[dict]:
@@ -438,12 +529,18 @@ class ModelRegistry:
         a copy carrying the resolved absolute ``checkpoint_path``
         (:func:`_resolve_entry_checkpoint`) and what its payload says of it (:func:`entry_facts`).
         """
-        resolved = [_resolve_entry_checkpoint(self._project_path, m)
-                    for m in registered_entries(self._project_path)
-                    if tag is None or tag in m["tags"]]
+        resolved = [
+            _resolve_entry_checkpoint(self._project_path, m)
+            for m in registered_entries(self._project_path)
+            if tag is None or tag in m["tags"]
+        ]
         # A path the resolution above refused names no file to read facts from; its error says so.
-        return [m if "checkpoint_path_error" in m
-                else {**m, **entry_facts(m, Path(self._project_path))} for m in resolved]
+        return [
+            m
+            if "checkpoint_path_error" in m
+            else {**m, **entry_facts(m, Path(self._project_path))}
+            for m in resolved
+        ]
 
 
 def verified(entry: dict) -> bool:
@@ -452,7 +549,10 @@ def verified(entry: dict) -> bool:
 
 
 def best_model(
-    models: list[dict], metric_key: str, *, higher_is_better: bool,
+    models: list[dict],
+    metric_key: str,
+    *,
+    higher_is_better: bool,
     include_unverified: bool = False,
 ) -> dict | None:
     """The one of ``models`` (:meth:`ModelRegistry.list_models`'s entries) with the best finite
@@ -466,7 +566,9 @@ def best_model(
         val = m["metrics"].get(metric_key)
         if not finite_number(val):
             continue
-        if best_val is None or (val > best_val if higher_is_better else val < best_val):
+        if best_val is None or (
+            val > best_val if higher_is_better else val < best_val
+        ):
             best_val = float(val)
             best = m
     return best

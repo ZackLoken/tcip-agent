@@ -31,10 +31,14 @@ def _empty_source_pool():
     raster_source.close_source_pool()
 
 
-def _distinctive(height: int, width: int, channels: int = 3, dtype=np.uint8) -> np.ndarray:
+def _distinctive(
+    height: int, width: int, channels: int = 3, dtype=np.uint8
+) -> np.ndarray:
     arr = np.zeros((height, width, channels), dtype=dtype)
     for c in range(channels):
-        arr[:, :, c] = (np.add.outer(np.arange(height) * (c + 1), np.arange(width))) % 251
+        arr[:, :, c] = (
+            np.add.outer(np.arange(height) * (c + 1), np.arange(width))
+        ) % 251
     return arr
 
 
@@ -45,7 +49,9 @@ def _write_labels(image: Path, size_wh: tuple[int, int]) -> None:
 
     w, h = size_wh
     box = BBox(0.3 * w, 0.3 * h, 0.5 * w, 0.5 * h)
-    label_image(image, [Annotation(subject="bud", geometry=box)], w, h, keep_empty=True)
+    label_image(
+        image, [Annotation(subject="bud", geometry=box)], w, h, keep_empty=True
+    )
 
 
 def _jpeg_project(tmp_path: Path, size: int = 200) -> Path:
@@ -58,21 +64,27 @@ def _jpeg_project(tmp_path: Path, size: int = 200) -> Path:
     return images_dir
 
 
-def _tiff_project(tmp_path: Path, height: int = 200, width: int = 200, dtype=np.uint8):
+def _tiff_project(
+    tmp_path: Path, height: int = 200, width: int = 200, dtype=np.uint8
+):
     import tifffile
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True)
     arr = _distinctive(height, width, dtype=dtype)
-    tifffile.imwrite(str(images_dir / "img0.tif"), arr, photometric="rgb", rowsperstrip=16)
+    tifffile.imwrite(
+        str(images_dir / "img0.tif"), arr, photometric="rgb", rowsperstrip=16
+    )
     _write_labels(images_dir / "img0.tif", (width, height))
     return images_dir, arr
 
 
 def _tiled(images_dir, **kwargs) -> TiledDetectionDataset:
-    base = dataset_over('detection', str(images_dir), subject="bud")
+    base = dataset_over("detection", str(images_dir), subject="bud")
     # sliver_frac stated: one labeled box derives no size spread.
-    return TiledDetectionDataset(base, tile_size=64, overlap=0.2, sliver_frac=0.5, **kwargs)
+    return TiledDetectionDataset(
+        base, tile_size=64, overlap=0.2, sliver_frac=0.5, **kwargs
+    )
 
 
 def _only_source(ds) -> str:
@@ -94,7 +106,12 @@ def test_keep_regions_keeps_only_fully_contained_tiles(tmp_path):
 
     ds = _tiled(images_dir, keep_regions=[(0, 0, 116, 116)])
     # Contained: origins 0/52 per axis (52 + 64 = 116, half-open).
-    assert [box[:2] for _s, box in ds.tile_entries] == [(0, 0), (52, 0), (0, 52), (52, 52)]
+    assert [box[:2] for _s, box in ds.tile_entries] == [
+        (0, 0),
+        (52, 0),
+        (0, 52),
+        (52, 52),
+    ]
     assert ds.tiles_dropped_past_extent == 0
     assert ds.tiles_dropped_outside_regions == 12
     assert len(ds) == 4
@@ -109,7 +126,9 @@ def test_keep_regions_keeps_only_fully_contained_tiles(tmp_path):
 
 def test_keep_regions_union_across_disjoint_rects(tmp_path):
     images_dir = _jpeg_project(tmp_path)
-    ds = _tiled(images_dir, keep_regions=[(0, 0, 64, 64), (104, 104, 168, 168)])
+    ds = _tiled(
+        images_dir, keep_regions=[(0, 0, 64, 64), (104, 104, 168, 168)]
+    )
     assert [box[:2] for _s, box in ds.tile_entries] == [(0, 0), (104, 104)]
     assert ds.tiles_dropped_past_extent == 0
     assert ds.tiles_dropped_outside_regions == 14
@@ -123,7 +142,9 @@ def test_an_empty_keep_regions_sequence_keeps_nothing(tmp_path):
     assert ds.tiles_dropped_outside_regions == 16
 
 
-def test_a_frame_shorter_than_the_tile_counts_its_short_slice_past_the_extent(tmp_path):
+def test_a_frame_shorter_than_the_tile_counts_its_short_slice_past_the_extent(
+    tmp_path,
+):
     images_dir = _jpeg_project(tmp_path, size=50)
     assert len(_tiled(images_dir)) == 1  # one 50x50 slice, kept unfiltered
     ds = _tiled(images_dir, keep_regions=[(0, 0, 200, 200)])
@@ -148,8 +169,10 @@ def test_tile_entries_matches_index_order_and_getitem(tmp_path):
     ds = _tiled(images_dir)
     entries = ds.tile_entries
     assert len(entries) == len(ds)
-    assert all(isinstance(s, str) and all(isinstance(v, int) for v in box)
-               for s, box in entries)
+    assert all(
+        isinstance(s, str) and all(isinstance(v, int) for v in box)
+        for s, box in entries
+    )
     assert entries[0] == (_only_source(ds), (0, 0, 64, 64))
     assert ds.sample_of(entries[0][0]).member == "img0"
     assert entries == [(e["stem"], e["slice"]) for e in ds._index]
@@ -159,8 +182,13 @@ def test_source_frames_for_a_photographic_source(tmp_path):
     images_dir = _jpeg_project(tmp_path)
     ds = _tiled(images_dir)
     assert ds.source_frames == {
-        _only_source(ds): {"width": 200, "height": 200, "channels": None, "dtype_itemsize": None,
-                           "windowed": False},
+        _only_source(ds): {
+            "width": 200,
+            "height": 200,
+            "channels": None,
+            "dtype_itemsize": None,
+            "windowed": False,
+        },
     }
 
 
@@ -168,25 +196,36 @@ def test_source_frames_for_a_windowed_raster(tmp_path):
     images_dir, _arr = _tiff_project(tmp_path)
     ds = _tiled(images_dir)
     assert ds.source_frames == {
-        _only_source(ds): {"width": 200, "height": 200, "channels": 3, "dtype_itemsize": 1,
-                           "windowed": True},
+        _only_source(ds): {
+            "width": 200,
+            "height": 200,
+            "channels": 3,
+            "dtype_itemsize": 1,
+            "windowed": True,
+        },
     }
 
 
 # -- Eager opens, backend-conditioned -------------------------------------
 
 
-def test_photographic_construction_opens_no_raster_backend(tmp_path, monkeypatch):
+def test_photographic_construction_opens_no_raster_backend(
+    tmp_path, monkeypatch
+):
     """A directory of JPEGs must index from header probes alone: opening each one through the
     raster layer would decode every frame at construction."""
     images_dir = _jpeg_project(tmp_path)
-    base = dataset_over('detection', str(images_dir), subject="bud")
+    base = dataset_over("detection", str(images_dir), subject="bud")
 
     def _refuse(*_a, **_k):
-        raise AssertionError("construction must not open a raster backend for photographic sources")
+        raise AssertionError(
+            "construction must not open a raster backend for photographic sources"
+        )
 
     monkeypatch.setattr(raster_source.SourceHeader, "open", _refuse)
-    ds = TiledDetectionDataset(base, tile_size=64, overlap=0.2, sliver_frac=0.5)
+    ds = TiledDetectionDataset(
+        base, tile_size=64, overlap=0.2, sliver_frac=0.5
+    )
     assert len(ds) == 16
 
 
@@ -194,12 +233,15 @@ def test_windowed_construction_registers_the_source_in_the_pool(tmp_path):
     images_dir, _arr = _tiff_project(tmp_path)
     ds = _tiled(images_dir)
     tiff = str(images_dir / "img0.tif")
-    assert any(version[0] == tiff for version, _channels in raster_source._POOL)
+    assert any(
+        version[0] == tiff for version, _channels in raster_source._POOL
+    )
     assert ds.source_frames[_only_source(ds)]["windowed"] is True
 
 
 def test_the_index_opens_a_windowed_source_once_and_reads_through_that_reader(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     """Building the index opens the raster once, and that pooled reader is the one a tile is
     read through: no probe reader is opened beside it, and a read opens nothing new."""
@@ -248,7 +290,9 @@ def test_windowed_tiles_match_the_whole_decode_crop(tmp_path):
     images_dir, _arr = _tiff_project(tmp_path)
     ds = _tiled(images_dir)
     whole = np.asarray(load_image(images_dir / "img0.tif", 3))
-    assert len(ds.tile_entries) == 16, "the 200x200 frame slices into 16 windows"
+    assert len(ds.tile_entries) == 16, (
+        "the 200x200 frame slices into 16 windows"
+    )
     for i, (_stem, (tx, ty, x1, y1)) in enumerate(ds.tile_entries):
         expected = pil_to_tensor(whole[ty:y1, tx:x1])
         got, target = ds[i]
@@ -263,7 +307,9 @@ def test_windowed_getitem_never_whole_decodes(tmp_path, monkeypatch):
     ds = _tiled(images_dir)
 
     def _refuse(*_a, **_k):
-        raise AssertionError("windowed __getitem__ must not decode the source whole")
+        raise AssertionError(
+            "windowed __getitem__ must not decode the source whole"
+        )
 
     monkeypatch.setattr(datasets_module, "load_image", _refuse)
     img_tensor, _target = ds[0]
@@ -277,8 +323,12 @@ def test_a_replaced_windowed_source_refuses_at_read(tmp_path):
 
     images_dir, _arr = _tiff_project(tmp_path)
     ds = _tiled(images_dir)
-    tifffile.imwrite(str(images_dir / "img0.tif"), _distinctive(150, 180), photometric="rgb",
-                     rowsperstrip=16)
+    tifffile.imwrite(
+        str(images_dir / "img0.tif"),
+        _distinctive(150, 180),
+        photometric="rgb",
+        rowsperstrip=16,
+    )
     with pytest.raises(ValueError, match="frame changed"):
         ds[0]
 
@@ -297,13 +347,16 @@ def test_a_decoder_disagreeing_with_its_header_refuses(tmp_path, monkeypatch):
         ds[0]
 
 
-def test_a_uint16_windowed_tile_stays_ndarray_and_scales_by_its_dtype(tmp_path):
+def test_a_uint16_windowed_tile_stays_ndarray_and_scales_by_its_dtype(
+    tmp_path,
+):
     images_dir, arr = _tiff_project(tmp_path, dtype=np.uint16)
     ds = _tiled(images_dir)
     assert ds.source_frames[_only_source(ds)]["dtype_itemsize"] == 2
     img_tensor, _target = ds[0]
     expected = torch.from_numpy(
-        arr[0:64, 0:64].astype(np.float32) / 65535.0).permute(2, 0, 1)
+        arr[0:64, 0:64].astype(np.float32) / 65535.0
+    ).permute(2, 0, 1)
     assert torch.allclose(img_tensor, expected)
 
 

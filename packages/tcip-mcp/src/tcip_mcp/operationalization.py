@@ -61,12 +61,22 @@ def confirmed_revision(
     (:class:`OperationalizationRefusedError`) when no trait or several qualify, when the revision
     states no operationalization for ``delivery_kind``, and when :func:`bind` refuses.
     """
-    revision = (latest_confirmed(trait, project) if trait is not None
-                else _revision_delivering(str(delivered_phenotype), project))
+    revision = (
+        latest_confirmed(trait, project)
+        if trait is not None
+        else _revision_delivering(str(delivered_phenotype), project)
+    )
     if delivery_kind not in revision.entry.operationalizations:
-        raise OperationalizationRefusedError(_unstated_text(revision, delivery_kind))
-    bind(revision, delivery_kind, delivered_phenotype=delivered_phenotype, value_keys=value_keys,
-         registry=registry)
+        raise OperationalizationRefusedError(
+            _unstated_text(revision, delivery_kind)
+        )
+    bind(
+        revision,
+        delivery_kind,
+        delivered_phenotype=delivered_phenotype,
+        value_keys=value_keys,
+        registry=registry,
+    )
     return revision
 
 
@@ -96,31 +106,50 @@ def bind(
         )
 
     if delivery_kind == STATE_CROSSING_DATES and registry is not None:
-        problem = positive_state_problem(registry, stated.measured_subject,
-                                         cast(PositiveState, entry.positive_state))
+        problem = positive_state_problem(
+            registry,
+            stated.measured_subject,
+            cast(PositiveState, entry.positive_state),
+        )
         if problem is not None:
             raise refuse(
                 f"names positive state {entry.positive_state} for {stated.measured_subject!r}, "
-                f"which the delivered dataset's registry no longer declares: {problem}")
-    if (delivered_phenotype is not None and delivery_kind in PHENOTYPE_NAMING_KINDS
-            and delivered_phenotype not in stated.delivered_phenotypes):
-        raise refuse(f"covers {list(stated.delivered_phenotypes)}, not {delivered_phenotype!r}")
+                f"which the delivered dataset's registry no longer declares: {problem}"
+            )
+    if (
+        delivered_phenotype is not None
+        and delivery_kind in PHENOTYPE_NAMING_KINDS
+        and delivered_phenotype not in stated.delivered_phenotypes
+    ):
+        raise refuse(
+            f"covers {list(stated.delivered_phenotypes)}, not {delivered_phenotype!r}"
+        )
     if value_keys is not None and delivery_kind in VALUE_KEY_KINDS:
         missing = sum(1 for key in value_keys if not key)
         if missing:
-            raise refuse(f"covers value keys {list(stated.delivered_value_keys)}, and {missing} "
-                         "row(s) carry no value key at all")
-        offending = sorted({str(key) for key in value_keys} - set(stated.delivered_value_keys))
+            raise refuse(
+                f"covers value keys {list(stated.delivered_value_keys)}, and {missing} "
+                "row(s) carry no value key at all"
+            )
+        offending = sorted(
+            {str(key) for key in value_keys} - set(stated.delivered_value_keys)
+        )
         if offending:
-            raise refuse(f"covers value keys {list(stated.delivered_value_keys)}, and these "
-                         f"rows carry {offending}")
+            raise refuse(
+                f"covers value keys {list(stated.delivered_value_keys)}, and these "
+                f"rows carry {offending}"
+            )
     for bucket, subject in (buckets or {}).items():
         if stated.measured_subject != subject:
-            raise refuse(f"measures {stated.measured_subject!r}, and bucket {bucket} counted "
-                         f"{subject!r}")
+            raise refuse(
+                f"measures {stated.measured_subject!r}, and bucket {bucket} counted "
+                f"{subject!r}"
+            )
 
 
-def _revision_delivering(delivered_phenotype: str, project: str | Path) -> TraitRevision:
+def _revision_delivering(
+    delivered_phenotype: str, project: str | Path
+) -> TraitRevision:
     """The latest confirmed revision of the one trait whose latest confirmed revision delivers
     ``delivered_phenotype``; refuses (:class:`OperationalizationRefusedError`) naming the phenotype,
     the confirmed traits delivering it and the traits proposing it when not exactly one does."""
@@ -129,7 +158,8 @@ def _revision_delivering(delivered_phenotype: str, project: str | Path) -> Trait
     for name in trait_names(project):
         record = read_trait(name, project)
         if record.latest_confirmed is not None and (
-                delivered_phenotype in record.latest_confirmed.entry.delivers):
+            delivered_phenotype in record.latest_confirmed.entry.delivers
+        ):
             confirmed.append(record.latest_confirmed)
         elif delivered_phenotype in record.latest.entry.delivers:
             proposed.append(name)
@@ -148,8 +178,12 @@ def _revision_delivering(delivered_phenotype: str, project: str | Path) -> Trait
 def _unstated_text(revision: TraitRevision, delivery_kind: str) -> str:
     entry = revision.entry
     definitions = crops_definitions()
-    quoted = "; ".join(f"{n}: {definitions[n]}" for n in entry.delivers if n in definitions)
-    vocabulary = f", defined in the crop vocabulary as {quoted}" if quoted else ""
+    quoted = "; ".join(
+        f"{n}: {definitions[n]}" for n in entry.delivers if n in definitions
+    )
+    vocabulary = (
+        f", defined in the crop vocabulary as {quoted}" if quoted else ""
+    )
     return (
         f"Delivery refused for trait {entry.name!r}: its confirmed revision {revision.number} "
         f"states no operationalization for a {delivery_kind} delivery. This trait delivers "

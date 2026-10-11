@@ -12,15 +12,19 @@ class StubProposer:
     """Hands back one fixed candidate box, in the neutral proposal schema."""
 
     def propose(self, image_path: str, **params: object) -> list[dict]:
-        return [{
-            "candidate_id": 0,
-            "bbox": [5.0, 10.0, 25.0, 30.0],
-            "area": 400,
-            "score": 0.9,
-            "engine": "stub",
-            "engine_meta": {},
-            "rings": [[(5.0, 10.0), (25.0, 10.0), (25.0, 30.0), (5.0, 30.0)]],
-        }]
+        return [
+            {
+                "candidate_id": 0,
+                "bbox": [5.0, 10.0, 25.0, 30.0],
+                "area": 400,
+                "score": 0.9,
+                "engine": "stub",
+                "engine_meta": {},
+                "rings": [
+                    [(5.0, 10.0), (25.0, 10.0), (25.0, 30.0), (5.0, 30.0)]
+                ],
+            }
+        ]
 
 
 def factory() -> StubProposer:

@@ -47,10 +47,18 @@ class _MaskBoxDataset(Dataset):
         sample = self.samples[idx]
         mask = np.array(Image.open(sample.ground_truth)) > 0
         ys, xs = np.nonzero(mask)
-        box = [float(xs.min()), float(ys.min()), float(xs.max() + 1), float(ys.max() + 1)]
+        box = [
+            float(xs.min()),
+            float(ys.min()),
+            float(xs.max() + 1),
+            float(ys.max() + 1),
+        ]
         return pil_to_tensor(load_image(sample.image, 3)), {
-            "boxes": torch.tensor([box]), "labels": torch.tensor([1]),
-            "iscrowd": torch.tensor([0]), "image_id": idx}
+            "boxes": torch.tensor([box]),
+            "labels": torch.tensor([1]),
+            "iscrowd": torch.tensor([0]),
+            "image_id": idx,
+        }
 
     @property
     def regions(self):
@@ -74,8 +82,11 @@ def _capture(root: Path) -> tuple[Path, Path]:
     for index, stem in enumerate(STEMS):
         shade = 30 + index
         painted_frame(IMG, IMG, (shade, shade, shade), [(BOX, BRIGHT)]).save(
-            images / f"{stem}.png")
-        painted_frame(IMG, IMG, 0, [(BOX, 1)], mode="L").save(masks / f"{stem}.png")
+            images / f"{stem}.png"
+        )
+        painted_frame(IMG, IMG, 0, [(BOX, 1)], mode="L").save(
+            masks / f"{stem}.png"
+        )
     return images, masks
 
 
@@ -89,29 +100,51 @@ def _train_and_register(data_cfg: dict, project_root: Path) -> dict:
     from tests._training_values import evaluation_block
     from tests._verified_checkpoint_fixtures import worker_run
 
-    observation = observe(worker_run(project_root, training_config(
-        REGION_BUILDER, data_cfg, evaluation=evaluation_block(selection_metric="loss"))))
+    observation = observe(
+        worker_run(
+            project_root,
+            training_config(
+                REGION_BUILDER,
+                data_cfg,
+                evaluation=evaluation_block(selection_metric="loss"),
+            ),
+        )
+    )
     assert observation.checkpoint is not None, observation.final
-    return {"checkpoint": observation.checkpoint["path"],
-            "data": observation.record["resolved"]["data"]}
+    return {
+        "checkpoint": observation.checkpoint["path"],
+        "data": observation.record["resolved"]["data"],
+    }
 
 
-def test_a_run_that_recorded_no_subject_is_refused_assessment_by_name(tmp_path: Path):
+def test_a_run_that_recorded_no_subject_is_refused_assessment_by_name(
+    tmp_path: Path,
+):
     from tests import _chain_fixtures as chain
 
     images, masks = _capture(tmp_path / "masks")
-    data_cfg = {"images_dir": str(images), "labels_dir": str(masks), "auto_val": False,
-                "dataset_source": {"builder": f"{Path(__file__).stem}:build_mask_box_ds",
-                                   "source_files": [__file__]}}
+    data_cfg = {
+        "images_dir": str(images),
+        "labels_dir": str(masks),
+        "auto_val": False,
+        "dataset_source": {
+            "builder": f"{Path(__file__).stem}:build_mask_box_ds",
+            "source_files": [__file__],
+        },
+    }
     trained = _train_and_register(data_cfg, tmp_path)
     checkpoint = trained["checkpoint"]
     # The producer admitted by shape and recorded an empty scope.
     assert trained["data"]["scope"] == {"subject": None, "attributes": None}
     chain.synthetic_capture(tmp_path / "ds")
-    chain.draw_reference_selection(tmp_path, tmp_path / "ds", tmp_path / "selection")
+    chain.draw_reference_selection(
+        tmp_path, tmp_path / "ds", tmp_path / "selection"
+    )
     chain.confirm_count_trait(tmp_path)
 
-    result = chain.assess(tmp_path, checkpoint, tmp_path / "selection", device="cpu")
+    result = chain.assess(
+        tmp_path, checkpoint, tmp_path / "selection", device="cpu"
+    )
 
     assert "records no subject" in result.get("error", ""), result
     assert not (tmp_path / ASSESSMENTS_DIR).exists()

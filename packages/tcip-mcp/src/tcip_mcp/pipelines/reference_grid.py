@@ -56,7 +56,9 @@ def reference_cells(
     if tile_size < 1:
         raise ValueError(f"tile_size must be at least 1, got {tile_size}")
     if not 0.0 <= overlap < 1.0:
-        raise ValueError(f"overlap is a fraction of tile_size in [0, 1), got {overlap}")
+        raise ValueError(
+            f"overlap is a fraction of tile_size in [0, 1), got {overlap}"
+        )
 
     stride = max(1, int(tile_size * (1.0 - overlap)))
     cells = []
@@ -65,13 +67,23 @@ def reference_cells(
             x1, y1 = tx + tile_size, ty + tile_size
             if clamp:
                 x1, y1 = min(x1, width), min(y1, height)
-            cells.append(Cell(name=f"{column_label(col)}{row + 1}", col=col, row=row,
-                              x0=tx, y0=ty, x1=x1, y1=y1))
+            cells.append(
+                Cell(
+                    name=f"{column_label(col)}{row + 1}",
+                    col=col,
+                    row=row,
+                    x0=tx,
+                    y0=ty,
+                    x1=x1,
+                    y1=y1,
+                )
+            )
     return cells
 
 
-def derive_serving_tile_size(width: int, height: int, max_pixels: int,
-                             max_edge: int | None = None) -> int:
+def derive_serving_tile_size(
+    width: int, height: int, max_pixels: int, max_edge: int | None = None
+) -> int:
     """Cell edge for region serving: a near-uniform square grid whose every cell, served at its
     grid's own resolution and clipped to the extent (``reference_cells(..., clamp=True)``), is at
     most ``max_pixels`` pixels and, when ``max_edge`` is given (the edge limit of the encoding the
@@ -85,7 +97,11 @@ def derive_serving_tile_size(width: int, height: int, max_pixels: int,
     within the cap. An image within both bounds is one cell spanning it.
     """
     long_edge = max(width, height)
-    bound = long_edge if within_cap(width, height, max_pixels) else math.isqrt(max_pixels)
+    bound = (
+        long_edge
+        if within_cap(width, height, max_pixels)
+        else math.isqrt(max_pixels)
+    )
     if max_edge is not None:
         bound = min(bound, max_edge)
     n = math.ceil(long_edge / bound)
@@ -109,7 +125,9 @@ def derive_pointing_tile_size(width: int, height: int) -> int:
     return math.ceil(long_native / n)
 
 
-def grid_geometry(width: int, height: int, tile_size: int, overlap: float = 0.0) -> dict:
+def grid_geometry(
+    width: int, height: int, tile_size: int, overlap: float = 0.0
+) -> dict:
     """The serializable parameter tuple every consumer echoes: ``{width, height, tile_size,
     overlap, cols, rows}``.
 

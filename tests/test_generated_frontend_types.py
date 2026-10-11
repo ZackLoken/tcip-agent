@@ -26,9 +26,12 @@ GENERATOR = REPO_ROOT / "tools" / "generate_frontend_types.py"
 
 _TS_BLOCK_RE = re.compile(r"(?:interface|type)\s+\w+\s*=?\s*\{(.*?)\n\}", re.S)
 _TS_FIELD_RE = re.compile(r"^\s+(\w+)(\??):", re.M)
-_FIELD_UNION_RE = re.compile(r'\w+\??:\s*((?:"[^"]+"\s*\|\s*)+"[^"]+")(?:\s*\|\s*null)?[;,]')
+_FIELD_UNION_RE = re.compile(
+    r'\w+\??:\s*((?:"[^"]+"\s*\|\s*)+"[^"]+")(?:\s*\|\s*null)?[;,]'
+)
 _TYPE_ALIAS_UNION_RE = re.compile(
-    r'^\s*(?:export\s+)?type\s+(\w+)\s*=\s*((?:"[^"]+"\s*\|\s*)+"[^"]+")\s*;', re.M
+    r'^\s*(?:export\s+)?type\s+(\w+)\s*=\s*((?:"[^"]+"\s*\|\s*)+"[^"]+")\s*;',
+    re.M,
 )
 _QUOTED_RE = re.compile(r'"([^"]+)"')
 
@@ -36,14 +39,18 @@ _QUOTED_RE = re.compile(r'"([^"]+)"')
 def _generator():
     """The type-module generator loaded as a module, so the test regenerates the same way CI
     does."""
-    spec = importlib.util.spec_from_file_location("tcip_frontend_type_generator", GENERATOR)
+    spec = importlib.util.spec_from_file_location(
+        "tcip_frontend_type_generator", GENERATOR
+    )
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-def test_the_generated_types_module_is_what_the_declared_models_produce() -> None:
+def test_the_generated_types_module_is_what_the_declared_models_produce() -> (
+    None
+):
     """The checked-in module is a projection of the declared models' JSON schema, not a
     hand-edited copy: a field renamed, added or retyped on a model that never reached the module
     would leave the browser reading a shape the backend no longer sends."""
@@ -80,14 +87,23 @@ def test_a_one_member_literal_renders_its_own_value_as_the_type() -> None:
     narrows a discriminated union on, so it renders rather than dropping the literal."""
     generator = _generator()
     schema = _OneMemberLiteral.model_json_schema()
-    assert generator._ts_type(schema["properties"]["kind"], "_OneMemberLiteral.kind") == '"only"'
+    assert (
+        generator._ts_type(
+            schema["properties"]["kind"], "_OneMemberLiteral.kind"
+        )
+        == '"only"'
+    )
 
 
 def test_a_union_used_as_an_array_item_is_parenthesized() -> None:
     generator = _generator()
     schema = _NullableStringList.model_json_schema()
-    assert (generator._ts_type(schema["properties"]["values"], "_NullableStringList.values")
-            == "(string | null)[]")
+    assert (
+        generator._ts_type(
+            schema["properties"]["values"], "_NullableStringList.values"
+        )
+        == "(string | null)[]"
+    )
 
 
 def test_a_free_form_object_renders_as_a_record_of_unknown() -> None:
@@ -95,11 +111,17 @@ def test_a_free_form_object_renders_as_a_record_of_unknown() -> None:
     unknown>`` rather than refusing or dropping to an untyped ``object``."""
     generator = _generator()
     schema = _FreeFormObject.model_json_schema()
-    assert (generator._ts_type(schema["properties"]["payload"], "_FreeFormObject.payload")
-            == "Record<string, unknown>")
+    assert (
+        generator._ts_type(
+            schema["properties"]["payload"], "_FreeFormObject.payload"
+        )
+        == "Record<string, unknown>"
+    )
 
 
-def test_reordering_platform_panel_events_does_not_change_a_named_constants_value() -> None:
+def test_reordering_platform_panel_events_does_not_change_a_named_constants_value() -> (
+    None
+):
     """Each named ``PANEL_EVENT_*`` constant is read off its own module attribute, never off
     ``PLATFORM_PANEL_EVENTS``'s position, so a consumer importing one by name is unaffected by
     how that tuple is ordered."""
@@ -128,11 +150,14 @@ def test_an_object_with_its_own_fixed_property_set_still_refuses() -> None:
 def _generated_field_sets() -> list[set[str]]:
     text = GENERATED.read_text(encoding="utf-8")
     return [
-        {name for name, _ in _TS_FIELD_RE.findall(block)} for block in _TS_BLOCK_RE.findall(text)
+        {name for name, _ in _TS_FIELD_RE.findall(block)}
+        for block in _TS_BLOCK_RE.findall(text)
     ]
 
 
-def test_no_other_frontend_module_declares_an_interface_with_a_generated_field_set() -> None:
+def test_no_other_frontend_module_declares_an_interface_with_a_generated_field_set() -> (
+    None
+):
     """One declaration per generated shape, so the backend has one browser-side counterpart to
     stay equal to. A second interface naming the same fields is what drifts: the module that was
     updated keeps working and the one that was not reads a key the models no longer emit."""
@@ -140,8 +165,14 @@ def test_no_other_frontend_module_declares_an_interface_with_a_generated_field_s
     assert generated_sets, "no interfaces parsed out of the generated module"
 
     sources = [
-        p for p in sorted(list(FRONTEND_SRC.rglob("*.ts")) + list(FRONTEND_SRC.rglob("*.tsx")))
-        if ".test." not in p.name and "test" not in p.parent.name and p != GENERATED
+        p
+        for p in sorted(
+            list(FRONTEND_SRC.rglob("*.ts"))
+            + list(FRONTEND_SRC.rglob("*.tsx"))
+        )
+        if ".test." not in p.name
+        and "test" not in p.parent.name
+        and p != GENERATED
     ]
     assert sources, "no frontend sources found, so nothing was checked"
     offenders = []
@@ -162,9 +193,14 @@ def _generated_vocabularies() -> list[set[str]]:
     constant, and each literal alias."""
     text = GENERATED.read_text(encoding="utf-8")
     generator = _generator()
-    return ([set(_QUOTED_RE.findall(m.group(1))) for m in _FIELD_UNION_RE.finditer(text)]
-            + [set(v) for v in generator.tuple_constants().values()]
-            + [set(v) for v in generator.literal_aliases().values()])
+    return (
+        [
+            set(_QUOTED_RE.findall(m.group(1)))
+            for m in _FIELD_UNION_RE.finditer(text)
+        ]
+        + [set(v) for v in generator.tuple_constants().values()]
+        + [set(v) for v in generator.literal_aliases().values()]
+    )
 
 
 def test_no_frontend_module_hand_declares_a_generated_vocabulary() -> None:
@@ -175,15 +211,23 @@ def test_no_frontend_module_hand_declares_a_generated_vocabulary() -> None:
     assert generated_sets, "no vocabularies read from the generator"
 
     sources = [
-        p for p in sorted(list(FRONTEND_SRC.rglob("*.ts")) + list(FRONTEND_SRC.rglob("*.tsx")))
-        if ".test." not in p.name and "test" not in p.parent.name and p != GENERATED
+        p
+        for p in sorted(
+            list(FRONTEND_SRC.rglob("*.ts"))
+            + list(FRONTEND_SRC.rglob("*.tsx"))
+        )
+        if ".test." not in p.name
+        and "test" not in p.parent.name
+        and p != GENERATED
     ]
     offenders = []
     for source in sources:
         text = source.read_text(encoding="utf-8")
         for m in _TYPE_ALIAS_UNION_RE.finditer(text):
             if set(_QUOTED_RE.findall(m.group(2))) in generated_sets:
-                offenders.append(f"{source.relative_to(REPO_ROOT).as_posix()}: {m.group(1)}")
+                offenders.append(
+                    f"{source.relative_to(REPO_ROOT).as_posix()}: {m.group(1)}"
+                )
     assert not offenders, (
         "these declare a union alias matching a generated vocabulary by hand:\n"
         + "\n".join(offenders)

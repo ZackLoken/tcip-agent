@@ -41,7 +41,11 @@ class MeanIntensityRegressor(nn.Module):
         return self.weight * images.mean(dim=(1, 2, 3))
 
     def fit_loss(self, images, targets) -> dict:
-        return {"mse": ((self.predict(images) - targets["values"].float()) ** 2).mean()}
+        return {
+            "mse": (
+                (self.predict(images) - targets["values"].float()) ** 2
+            ).mean()
+        }
 
     def forward(self, images, targets=None):
         if self.training and targets is not None:
@@ -50,7 +54,9 @@ class MeanIntensityRegressor(nn.Module):
 
 
 def build_mean_intensity_regressor(
-    *, in_chans: int = 1, init_weight: float = 0.0,
+    *,
+    in_chans: int = 1,
+    init_weight: float = 0.0,
 ) -> MeanIntensityRegressor:
     """``model_source`` builder for :class:`MeanIntensityRegressor`."""
     return MeanIntensityRegressor(init_weight=init_weight)
@@ -71,12 +77,18 @@ class CountingRegressor(MeanIntensityRegressor):
         return super().fit_loss(images, targets)
 
     def get_param_groups(self, backbone_lr, head_lr):
-        return [{"params": [self.weight], "lr": head_lr,
-                 "rates": torch.tensor([backbone_lr, head_lr])}]
+        return [
+            {
+                "params": [self.weight],
+                "lr": head_lr,
+                "rates": torch.tensor([backbone_lr, head_lr]),
+            }
+        ]
 
 
-def build_counting_regressor(*, in_chans: int = 1, init_weight: float = 0.0
-                             ) -> CountingRegressor:
+def build_counting_regressor(
+    *, in_chans: int = 1, init_weight: float = 0.0
+) -> CountingRegressor:
     """``model_source`` builder for :class:`CountingRegressor`."""
     return CountingRegressor(init_weight=init_weight)
 
@@ -95,13 +107,16 @@ class TwoRateRegressor(MeanIntensityRegressor):
         return self.weight * images.mean(dim=(1, 2, 3)) + self.bias
 
     def get_param_groups(self, backbone_lr, head_lr):
-        groups = [{"params": [self.weight], "lr": backbone_lr},
-                  {"params": [self.bias], "lr": head_lr}]
+        groups = [
+            {"params": [self.weight], "lr": backbone_lr},
+            {"params": [self.bias], "lr": head_lr},
+        ]
         return groups[::-1] if self.reverse_groups else groups
 
 
-def build_two_rate_regressor(*, in_chans: int = 1, reverse_groups: bool = False
-                             ) -> TwoRateRegressor:
+def build_two_rate_regressor(
+    *, in_chans: int = 1, reverse_groups: bool = False
+) -> TwoRateRegressor:
     """``model_source`` builder for :class:`TwoRateRegressor`."""
     return TwoRateRegressor(reverse_groups=reverse_groups)
 
@@ -120,7 +135,9 @@ class NanEvalRegressor(MeanIntensityRegressor):
         return {"head0_values": self.predict(images) + float("nan")}
 
 
-def build_nan_eval_regressor(*, in_chans: int = 1, init_weight: float = 0.0) -> NanEvalRegressor:
+def build_nan_eval_regressor(
+    *, in_chans: int = 1, init_weight: float = 0.0
+) -> NanEvalRegressor:
     """``model_source`` builder for :class:`NanEvalRegressor`."""
     return NanEvalRegressor(init_weight=init_weight)
 
@@ -148,7 +165,10 @@ class MeanIntensityClassifier(nn.Module):
 
 
 def build_mean_intensity_classifier(
-    *, in_chans: int = 1, num_classes: int = 2, init_weight: float = 0.0,
+    *,
+    in_chans: int = 1,
+    num_classes: int = 2,
+    init_weight: float = 0.0,
 ) -> MeanIntensityClassifier:
     """``model_source`` builder for :class:`MeanIntensityClassifier`."""
     return MeanIntensityClassifier(init_weight=init_weight)
@@ -163,10 +183,14 @@ class DataScaledGradientModel(MeanIntensityRegressor):
     """
 
     def fit_loss(self, images, targets) -> dict:
-        return {"linear": (self.weight * targets["values"].float().sum()).squeeze()}
+        return {
+            "linear": (self.weight * targets["values"].float().sum()).squeeze()
+        }
 
 
-def build_data_scaled_gradient_model(*, in_chans: int = 1) -> DataScaledGradientModel:
+def build_data_scaled_gradient_model(
+    *, in_chans: int = 1
+) -> DataScaledGradientModel:
     """``model_source`` builder for :class:`DataScaledGradientModel`."""
     return DataScaledGradientModel()
 
@@ -181,8 +205,11 @@ class AlwaysDivergedModel(MeanIntensityRegressor):
     kwargs stay a config.
     """
 
-    def __init__(self, cancel_at_call: int | None = None,
-                 cancel_output_dir: str | None = None) -> None:
+    def __init__(
+        self,
+        cancel_at_call: int | None = None,
+        cancel_output_dir: str | None = None,
+    ) -> None:
         super().__init__()
         self.cancel_at_call = cancel_at_call
         self.cancel_output_dir = cancel_output_dir
@@ -190,7 +217,10 @@ class AlwaysDivergedModel(MeanIntensityRegressor):
 
     def fit_loss(self, images, targets) -> dict:
         self._calls += 1
-        if self._calls == self.cancel_at_call and self.cancel_output_dir is not None:
+        if (
+            self._calls == self.cancel_at_call
+            and self.cancel_output_dir is not None
+        ):
             from pathlib import Path
 
             from tcip_mcp.experiments import request_cancel
@@ -201,31 +231,46 @@ class AlwaysDivergedModel(MeanIntensityRegressor):
         return {"nan_loss": self.weight * float("nan")}
 
 
-def build_always_diverged_model(*, in_chans: int = 1, cancel_at_call: int | None = None,
-                                cancel_output_dir: str | None = None) -> AlwaysDivergedModel:
+def build_always_diverged_model(
+    *,
+    in_chans: int = 1,
+    cancel_at_call: int | None = None,
+    cancel_output_dir: str | None = None,
+) -> AlwaysDivergedModel:
     """``model_source`` builder for :class:`AlwaysDivergedModel`."""
-    return AlwaysDivergedModel(cancel_at_call=cancel_at_call,
-                               cancel_output_dir=cancel_output_dir)
+    return AlwaysDivergedModel(
+        cancel_at_call=cancel_at_call, cancel_output_dir=cancel_output_dir
+    )
 
 
-def run_context(root, config: dict, *, epoch_hook=None, experiment_id: str | None = None):
+def run_context(
+    root, config: dict, *, epoch_hook=None, experiment_id: str | None = None
+):
     """The context the child's own entry builds (``subprocess_worker.prepare_run_context``) for
     the run :func:`~tests._verified_checkpoint_fixtures.opened_run` opens under the project
     ``root`` over ``config``: ``run_registry.observed_run``'s run over that directory and the
     loaders its recorded partition builds, ``epoch_hook`` the context's own."""
     from tcip_mcp.experiments import observe
-    from tcip_mcp.pipelines.training.subprocess_worker import prepare_run_context
+    from tcip_mcp.pipelines.training.subprocess_worker import (
+        prepare_run_context,
+    )
     from tests._verified_checkpoint_fixtures import opened_run
 
-    return prepare_run_context(observe(opened_run(root, config, experiment_id=experiment_id)),
-                               epoch_hook=epoch_hook)
+    return prepare_run_context(
+        observe(opened_run(root, config, experiment_id=experiment_id)),
+        epoch_hook=epoch_hook,
+    )
 
 
 def frames_data(root, intensities, values) -> dict:
     """The data block of a run training on every frame :func:`write_regression_dataset` writes
     under ``root``, at ``intensities`` and valued ``values``, with no validation side."""
     images_dir, csv_path = write_regression_dataset(root, intensities, values)
-    return {"images_dir": str(images_dir), "labels_dir": str(csv_path), "auto_val": False}
+    return {
+        "images_dir": str(images_dir),
+        "labels_dir": str(csv_path),
+        "auto_val": False,
+    }
 
 
 def drawn_data(root, train: tuple[list, list], val: tuple[list, list]) -> dict:
@@ -240,16 +285,27 @@ def drawn_data(root, train: tuple[list, list], val: tuple[list, list]) -> dict:
 
     n_train, n_val = len(train[0]), len(val[0])
     if not 1 < n_val < n_train - 1:
-        raise ValueError(f"{n_val} validation frames beside {n_train} training frames: the draw "
-                         "places these groups only for more than one and fewer than "
-                         f"{n_train - 1}")
-    images_dir, csv_path = write_regression_dataset(root, [*train[0], *val[0]],
-                                                    [*train[1], *val[1]])
+        raise ValueError(
+            f"{n_val} validation frames beside {n_train} training frames: the draw "
+            "places these groups only for more than one and fewer than "
+            f"{n_train - 1}"
+        )
+    images_dir, csv_path = write_regression_dataset(
+        root, [*train[0], *val[0]], [*train[1], *val[1]]
+    )
     groups = ["train-first"] + ["train"] * (n_train - 1) + ["val"] * n_val
-    return {"images_dir": str(images_dir), "labels_dir": str(csv_path),
-            "split": {"seed": 0, "val_ratio": n_val / (n_train + n_val),
-                      "group_key_map": {f"{UNDATED_BUCKET}/img{i}": group
-                                        for i, group in enumerate(groups)}}}
+    return {
+        "images_dir": str(images_dir),
+        "labels_dir": str(csv_path),
+        "split": {
+            "seed": 0,
+            "val_ratio": n_val / (n_train + n_val),
+            "group_key_map": {
+                f"{UNDATED_BUCKET}/img{i}": group
+                for i, group in enumerate(groups)
+            },
+        },
+    }
 
 
 FIT, HOLDOUT_FIT = 2.0, -5.0
@@ -261,8 +317,11 @@ def opposed_regression_data(root, train_intensities, val_intensities) -> dict:
     """:func:`drawn_data` of training frames at ``train_intensities`` valued by :data:`FIT` and
     validation frames at ``val_intensities`` valued by :data:`HOLDOUT_FIT`: the two sides are fit
     by opposite-signed weights, so training progress on one is a regression on the other."""
-    return drawn_data(root, (train_intensities, [FIT * c for c in train_intensities]),
-                      (val_intensities, [HOLDOUT_FIT * c for c in val_intensities]))
+    return drawn_data(
+        root,
+        (train_intensities, [FIT * c for c in train_intensities]),
+        (val_intensities, [HOLDOUT_FIT * c for c in val_intensities]),
+    )
 
 
 SEPARABLE_TRAIN = ([0.10, 0.20, 0.30, 0.70, 0.80, 0.90], [0, 0, 0, 1, 1, 1])
@@ -294,8 +353,12 @@ def count_validations(monkeypatch) -> list[str]:
     return seen
 
 
-MEAN_INTENSITY_REGRESSOR = "tiny_trainer_fixtures:build_mean_intensity_regressor"
-MEAN_INTENSITY_CLASSIFIER = "tiny_trainer_fixtures:build_mean_intensity_classifier"
+MEAN_INTENSITY_REGRESSOR = (
+    "tiny_trainer_fixtures:build_mean_intensity_regressor"
+)
+MEAN_INTENSITY_CLASSIFIER = (
+    "tiny_trainer_fixtures:build_mean_intensity_classifier"
+)
 ALWAYS_DIVERGED_MODEL = "tiny_trainer_fixtures:build_always_diverged_model"
 NAN_EVAL_REGRESSOR = "tiny_trainer_fixtures:build_nan_eval_regressor"
 TWO_RATE_REGRESSOR = "tiny_trainer_fixtures:build_two_rate_regressor"
@@ -305,26 +368,47 @@ TINY_TRAINER_FILE = str(REPO_ROOT / "tests" / "tiny_trainer_fixtures.py")
 its builders declares under ``model_source.source_files``; never this module's own
 ``__file__``, which names a run's snapshot copy once a run has bound the module there."""
 
-REGRESSOR_ADAMW = {"name": "adamw", "backbone_lr": 0.05, "head_lr": 0.05, "weight_decay": 0.0}
+REGRESSOR_ADAMW = {
+    "name": "adamw",
+    "backbone_lr": 0.05,
+    "head_lr": 0.05,
+    "weight_decay": 0.0,
+}
 """The AdamW section the one-weight regressors here train at."""
 
 
-def regressor_config(horizon: int = 1, *, data: dict, builder: str = MEAN_INTENSITY_REGRESSOR,
-                     builder_kwargs: dict | None = None, **overrides) -> dict:
+def regressor_config(
+    horizon: int = 1,
+    *,
+    data: dict,
+    builder: str = MEAN_INTENSITY_REGRESSOR,
+    builder_kwargs: dict | None = None,
+    **overrides,
+) -> dict:
     """A :func:`~tests._chain_fixtures.training_config` of the regression ``builder`` (by
     default the mean-intensity regressor) at ``builder_kwargs`` over the data block ``data``:
     one unfrozen stage at :data:`REGRESSOR_ADAMW` under a cosine schedule of ``horizon`` epochs,
     no epoch checkpoints, with ``overrides`` in place of their keys."""
     from tests._chain_fixtures import training_config
 
-    source: dict = {"builder": builder, "source_files": [TINY_TRAINER_FILE], "task": "regression"}
+    source: dict = {
+        "builder": builder,
+        "source_files": [TINY_TRAINER_FILE],
+        "task": "regression",
+    }
     if builder_kwargs is not None:
         source["builder_kwargs"] = builder_kwargs
     return training_config(
-        source, data,
-        **{"stages": [{"freeze_to": 0}], "optimizer": REGRESSOR_ADAMW,
-           "scheduler": schedule("cosine", horizon_epochs=horizon),
-           "checkpoint_every_n_epochs": 0, **overrides})
+        source,
+        data,
+        **{
+            "stages": [{"freeze_to": 0}],
+            "optimizer": REGRESSOR_ADAMW,
+            "scheduler": schedule("cosine", horizon_epochs=horizon),
+            "checkpoint_every_n_epochs": 0,
+            **overrides,
+        },
+    )
 
 
 def classifier_config(horizon: int, data: dict, **overrides) -> dict:
@@ -335,14 +419,27 @@ def classifier_config(horizon: int, data: dict, **overrides) -> dict:
     from tests._chain_fixtures import training_config
 
     return training_config(
-        {"builder": MEAN_INTENSITY_CLASSIFIER, "builder_kwargs": {"init_weight": -1.0},
-         "source_files": [TINY_TRAINER_FILE], "task": "classification"},
+        {
+            "builder": MEAN_INTENSITY_CLASSIFIER,
+            "builder_kwargs": {"init_weight": -1.0},
+            "source_files": [TINY_TRAINER_FILE],
+            "task": "classification",
+        },
         data,
-        **{"batch_size": 3, "stages": [{"freeze_to": 0}],
-           "scheduler": schedule("cosine", horizon_epochs=horizon),
-           "optimizer": {"name": "adamw", "backbone_lr": 0.2, "head_lr": 0.2,
-                         "weight_decay": 0.0},
-           "checkpoint_every_n_epochs": 0, **overrides})
+        **{
+            "batch_size": 3,
+            "stages": [{"freeze_to": 0}],
+            "scheduler": schedule("cosine", horizon_epochs=horizon),
+            "optimizer": {
+                "name": "adamw",
+                "backbone_lr": 0.2,
+                "head_lr": 0.2,
+                "weight_decay": 0.0,
+            },
+            "checkpoint_every_n_epochs": 0,
+            **overrides,
+        },
+    )
 
 
 def capture_model(monkeypatch, sink: list) -> None:
@@ -392,10 +489,15 @@ class TransientlyDivergedModel(_CallScheduledModel):
 
 
 def build_transiently_diverged_model(
-    *, in_chans: int = 1, bad_batches: int = 2, init_weight: float = 0.0,
+    *,
+    in_chans: int = 1,
+    bad_batches: int = 2,
+    init_weight: float = 0.0,
 ) -> TransientlyDivergedModel:
     """``model_source`` builder for :class:`TransientlyDivergedModel`."""
-    return TransientlyDivergedModel(bad_batches=bad_batches, init_weight=init_weight)
+    return TransientlyDivergedModel(
+        bad_batches=bad_batches, init_weight=init_weight
+    )
 
 
 class StepCountedDivergenceModel(_CallScheduledModel):
@@ -412,10 +514,15 @@ class StepCountedDivergenceModel(_CallScheduledModel):
 
 
 def build_step_counted_divergence_model(
-    *, in_chans: int = 1, finite_at=(), init_weight: float = 0.0,
+    *,
+    in_chans: int = 1,
+    finite_at=(),
+    init_weight: float = 0.0,
 ) -> StepCountedDivergenceModel:
     """``model_source`` builder for :class:`StepCountedDivergenceModel`."""
-    return StepCountedDivergenceModel(finite_at=finite_at, init_weight=init_weight)
+    return StepCountedDivergenceModel(
+        finite_at=finite_at, init_weight=init_weight
+    )
 
 
 class DivergesAfterModel(_CallScheduledModel):
@@ -433,7 +540,10 @@ class DivergesAfterModel(_CallScheduledModel):
 
 
 def build_diverges_after_model(
-    *, good_calls: int, in_chans: int = 1, init_weight: float = 0.0,
+    *,
+    good_calls: int,
+    in_chans: int = 1,
+    init_weight: float = 0.0,
 ) -> DivergesAfterModel:
     """``model_source`` builder for :class:`DivergesAfterModel`."""
     return DivergesAfterModel(good_calls=good_calls, init_weight=init_weight)
@@ -445,7 +555,9 @@ class PixelSumDivideModel(MeanIntensityRegressor):
     smoke batch (never exactly zero) passes the measurement-boundary contract cleanly."""
 
     def predict(self, images):
-        return (self.weight + images.mean(dim=(1, 2, 3))) / images.sum(dim=(1, 2, 3))
+        return (self.weight + images.mean(dim=(1, 2, 3))) / images.sum(
+            dim=(1, 2, 3)
+        )
 
 
 def build_pixel_sum_divide_model(*, in_chans: int = 1) -> PixelSumDivideModel:
@@ -453,7 +565,9 @@ def build_pixel_sum_divide_model(*, in_chans: int = 1) -> PixelSumDivideModel:
     return PixelSumDivideModel()
 
 
-def write_regression_dataset(root, intensities, values, *, height: int = 6, width: int = 10):
+def write_regression_dataset(
+    root, intensities, values, *, height: int = 6, width: int = 10
+):
     """Write a small on-disk table-labeled dataset (uint8 RGB PNGs ``img<i>.png`` + a CSV of
     ``stem,value`` rows), a regression's values or a classification's labels.
 
@@ -476,7 +590,9 @@ def write_regression_dataset(root, intensities, values, *, height: int = 6, widt
     for i, (frac, value) in enumerate(zip(intensities, values)):
         stem = f"img{i}"
         px = round(255 * float(frac))
-        Image.new("RGB", (width, height), (px, px, px)).save(images_dir / f"{stem}.png")
+        Image.new("RGB", (width, height), (px, px, px)).save(
+            images_dir / f"{stem}.png"
+        )
         rows.append(f"{stem},{value}")
     csv_path.write_text("\n".join(rows) + "\n", encoding="utf-8", newline="\n")
     return images_dir, csv_path

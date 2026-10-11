@@ -4,11 +4,15 @@ calling it.
 
 ``model_source`` schema::
 
-    {"builder": "my_module:build_net",     # required, 'module:function' (or 'module.function')
-     "builder_kwargs": {...},              # optional, passed to the builder
-     "source_files": [...],                # the files the run imports, its builder's module among
-                                           # them; a run binds its own snapshot copies
-     "task": "detection"}                  # required, the run's task
+    {
+        "builder": "my_module:build_net",  # required, 'module:function' (or 'module.function')
+        "builder_kwargs": {...},  # optional, passed to the builder
+        "source_files": [
+            ...
+        ],  # the files the run imports, its builder's module among
+        # them; a run binds its own snapshot copies
+        "task": "detection",
+    }  # required, the run's task
 
 The builder is also handed the run's width, count and attributes (:func:`model_dims`), never
 stated here.
@@ -55,10 +59,14 @@ def _import_dotted(target: object) -> Any:
     a non-string or empty ``builder`` refuses.
     """
     if not isinstance(target, str) or not target:
-        raise ValueError(f"builder must be a non-empty 'module:function' string, got {target!r}")
+        raise ValueError(
+            f"builder must be a non-empty 'module:function' string, got {target!r}"
+        )
     mod_name, attr = _split_dotted(target)
     if not mod_name or not attr:
-        raise ValueError(f"Invalid dotted builder {target!r}; expected 'module:function'.")
+        raise ValueError(
+            f"Invalid dotted builder {target!r}; expected 'module:function'."
+        )
 
     import importlib
 
@@ -66,11 +74,18 @@ def _import_dotted(target: object) -> Any:
     try:
         return getattr(module, attr)
     except AttributeError as exc:
-        raise ValueError(f"Builder {attr!r} not found in module {mod_name!r}.") from exc
+        raise ValueError(
+            f"Builder {attr!r} not found in module {mod_name!r}."
+        ) from exc
 
 
-def resolve_named(name: str, registry: "Mapping[str, Any]", *, kind: str,
-                  register: str | None = None) -> Any:
+def resolve_named(
+    name: str,
+    registry: "Mapping[str, Any]",
+    *,
+    kind: str,
+    register: str | None = None,
+) -> Any:
     """The entry ``registry`` holds under ``name``. Where ``register`` names the call that adds
     an entry to ``registry``, a dotted ``module:factory`` ``name`` imports its target instead.
     Refuses (``ValueError``) a name that is neither, naming the ``kind``, the registered names
@@ -78,12 +93,16 @@ def resolve_named(name: str, registry: "Mapping[str, Any]", *, kind: str,
     if name in registry:
         return registry[name]
     if register is None:
-        raise ValueError(f"Unknown {kind} {name!r}. Name one of {sorted(registry)}.")
+        raise ValueError(
+            f"Unknown {kind} {name!r}. Name one of {sorted(registry)}."
+        )
     if ":" in name or "." in name:
         try:
             return _import_dotted(name)
         except Exception as exc:  # noqa: BLE001 (any import failure is an unresolvable name)
-            raise ValueError(f"Could not import {kind} {name!r}: {exc}") from exc
+            raise ValueError(
+                f"Could not import {kind} {name!r}: {exc}"
+            ) from exc
     raise ValueError(
         f"Unknown {kind} {name!r}. Name a registered one ({sorted(registry)}), register one with "
         f"{register}, or pass a dotted 'module:factory' you wrote."
@@ -96,8 +115,11 @@ def keyword_parameters(fn: Any) -> tuple[set[str], bool]:
     import inspect
 
     params = inspect.signature(fn).parameters.values()
-    named = {p.name for p in params
-             if p.kind not in (p.VAR_POSITIONAL, p.VAR_KEYWORD) and p.name != "self"}
+    named = {
+        p.name
+        for p in params
+        if p.kind not in (p.VAR_POSITIONAL, p.VAR_KEYWORD) and p.name != "self"
+    }
     return named, any(p.kind is p.VAR_KEYWORD for p in params)
 
 
@@ -110,8 +132,10 @@ def _import_root(file: Path, module: str) -> Path | None:
     matched against the file's own path so an unrelated file of the same stem is never taken for it.
     """
     parts = tuple(module.split("."))
-    module_path = file.parent if file.name == "__init__.py" else file.with_suffix("")
-    if file.suffix != ".py" or module_path.parts[-len(parts):] != parts:
+    module_path = (
+        file.parent if file.name == "__init__.py" else file.with_suffix("")
+    )
+    if file.suffix != ".py" or module_path.parts[-len(parts) :] != parts:
         return None
     return module_path.parents[len(parts) - 1]
 
@@ -142,7 +166,8 @@ def module_root(dotted: str, source_files: list[str] | None) -> Path:
     raise ValueError(
         f"{dotted!r} imports the module {module!r}, and none of the source_files "
         f"{list(source_files or [])} is that module's own file: name the file it is defined in "
-        "under source_files, so the run snapshots it and every checkpoint binds that copy")
+        "under source_files, so the run snapshots it and every checkpoint binds that copy"
+    )
 
 
 def lay_out(directory: Path, copies: Mapping[str, bytes]) -> None:
@@ -173,8 +198,13 @@ def staged_sources(spec: "TrainConfigSchema", project: Path) -> StagedSources:
     record, copies = snapshot_model_source(spec, project)
     held = tempfile.TemporaryDirectory(prefix="tcip-source-")
     lay_out(Path(held.name), copies)
-    return StagedSources(record, copies, dataclasses.replace(
-        run_layout(Path(held.name), record), directory=held))
+    return StagedSources(
+        record,
+        copies,
+        dataclasses.replace(
+            run_layout(Path(held.name), record), directory=held
+        ),
+    )
 
 
 def run_layout(run_dir: Path, source: dict) -> SourceLayout:
@@ -185,15 +215,22 @@ def run_layout(run_dir: Path, source: dict) -> SourceLayout:
     import hashlib
     import json
 
-    copies = sorted((entry["file"], entry["sha256"]) for entry in source["files"].values())
+    copies = sorted(
+        (entry["file"], entry["sha256"]) for entry in source["files"].values()
+    )
     return SourceLayout(
-        run_dir / SNAPSHOT_DIR, tuple(PurePosixPath(file).relative_to(SNAPSHOT_DIR)
-                                      for file, _sha256 in copies),
-        hashlib.sha256(json.dumps(copies).encode()).hexdigest())
+        run_dir / SNAPSHOT_DIR,
+        tuple(
+            PurePosixPath(file).relative_to(SNAPSHOT_DIR)
+            for file, _sha256 in copies
+        ),
+        hashlib.sha256(json.dumps(copies).encode()).hexdigest(),
+    )
 
 
-def owning_run_layout(spec: "TrainConfigSchema", snapshot: str | None,
-                      project: Path) -> SourceLayout:
+def owning_run_layout(
+    spec: "TrainConfigSchema", snapshot: str | None, project: Path
+) -> SourceLayout:
     """The layout (:func:`run_layout`) of the run of ``project`` (``experiments.run_dirs``) that
     took the source snapshot whose digest is ``snapshot`` (:attr:`SourceLayout.snapshot`, a
     checkpoint's :data:`SNAPSHOT_KEY`) and whose layout holds every file ``spec`` declares.
@@ -201,18 +238,27 @@ def owning_run_layout(spec: "TrainConfigSchema", snapshot: str | None,
     ``project`` took, naming how a checkpoint comes to have a run."""
     from tcip_mcp.experiments import RUN_FILE, read_run_record, run_dirs
 
-    declared = {Path(file) for _field, _dotted, files in source_seams(spec)
-                for file in files or []}
+    declared = {
+        Path(file)
+        for _field, _dotted, files in source_seams(spec)
+        for file in files or []
+    }
     for run_dir in run_dirs(project):
-        layout = run_layout(run_dir, read_run_record(run_dir / RUN_FILE)["source"])
-        if declared and layout.snapshot == snapshot and declared <= {
-                layout.root / place for place in layout.places}:
+        layout = run_layout(
+            run_dir, read_run_record(run_dir / RUN_FILE)["source"]
+        )
+        if (
+            declared
+            and layout.snapshot == snapshot
+            and declared <= {layout.root / place for place in layout.places}
+        ):
             return layout
     raise ValueError(
         f"No run of {project} took {sorted(map(str, declared))} as its source snapshot, so "
         "nothing states the layout a model built from them imports: a checkpoint builds from the "
         "snapshot its run took. Train it through a run of this project (launch_training), or "
-        "carry the run that produced it whole (archive_project, then import_project).")
+        "carry the run that produced it whole (archive_project, then import_project)."
+    )
 
 
 _LAYOUT_ROOTS: set[str] = set()
@@ -238,18 +284,43 @@ def import_source_builder(dotted: str, layout: SourceLayout) -> Any:
     import sys
 
     root = canonical_path(layout.root)
-    left = {gone for gone in map(canonical_path, sys.path) if gone in _LAYOUT_ROOTS - {root}}
-    names = {".".join(place.parent.parts if place.name == "__init__.py"
-                      else place.with_suffix("").parts) for place in layout.places}
+    left = {
+        gone
+        for gone in map(canonical_path, sys.path)
+        if gone in _LAYOUT_ROOTS - {root}
+    }
+    names = {
+        ".".join(
+            place.parent.parts
+            if place.name == "__init__.py"
+            else place.with_suffix("").parts
+        )
+        for place in layout.places
+    }
     for loaded, module in list(sys.modules.items()):
         own = getattr(module, "__dict__", {})
-        if any(loaded == name or loaded.startswith(f"{name}.") for name in names) or left and any(
-                Path(canonical_path(where)).is_relative_to(gone) for gone in left
-                for where in (own.get("__file__"), *(own.get("__path__") or ())) if where):
+        if (
+            any(
+                loaded == name or loaded.startswith(f"{name}.")
+                for name in names
+            )
+            or left
+            and any(
+                Path(canonical_path(where)).is_relative_to(gone)
+                for gone in left
+                for where in (
+                    own.get("__file__"),
+                    *(own.get("__path__") or ()),
+                )
+                if where
+            )
+        ):
             del sys.modules[loaded]
     _LAYOUT_ROOTS.add(root)
-    sys.path[:] = [str(layout.root),
-                   *(p for p in sys.path if canonical_path(p) not in _LAYOUT_ROOTS)]
+    sys.path[:] = [
+        str(layout.root),
+        *(p for p in sys.path if canonical_path(p) not in _LAYOUT_ROOTS),
+    ]
     importlib.invalidate_caches()
     return _import_dotted(dotted)
 
@@ -270,10 +341,14 @@ def child_pythonpath() -> str:
     import sys
 
     entries = [*sys.path, *os.environ.get("PYTHONPATH", "").split(os.pathsep)]
-    return os.pathsep.join(p for p in entries if p and canonical_path(p) not in _LAYOUT_ROOTS)
+    return os.pathsep.join(
+        p for p in entries if p and canonical_path(p) not in _LAYOUT_ROOTS
+    )
 
 
-def model_dims(scope: "ClassScope", sizes: "Mapping[str, int]") -> dict[str, Any]:
+def model_dims(
+    scope: "ClassScope", sizes: "Mapping[str, int]"
+) -> dict[str, Any]:
     """The dimensions a run's model is built at, each handed to its builder under its own name.
 
     ``in_chans`` is the band count the run's sources are read at, ``sizes["num_channels"]``
@@ -295,8 +370,11 @@ def model_dims(scope: "ClassScope", sizes: "Mapping[str, int]") -> dict[str, Any
             "is unknown, and building at a guess would feed it something other than what it "
             "trained on. Build from a run this platform trained, or state data.num_channels."
         )
-    counts = {name: int(sizes[name]) for name in GROUND_TRUTH_COUNTS
-              if sizes.get(name) is not None}
+    counts = {
+        name: int(sizes[name])
+        for name in GROUND_TRUTH_COUNTS
+        if sizes.get(name) is not None
+    }
     if scope.subject is None:
         return {"in_chans": int(sizes["num_channels"]), **counts}
     if counts:
@@ -305,9 +383,14 @@ def model_dims(scope: "ClassScope", sizes: "Mapping[str, int]") -> dict[str, Any
             "subject its scope isolates and the attributes the registry declares for it, so a "
             f"stated count would be a second one. Drop {sorted(counts)} from data."
         )
-    attributes = scope.admitted_for(DOCUMENT, "this run's data.scope").attributes
-    return {"in_chans": int(sizes["num_channels"]), "num_classes": 1,
-            **({"attributes": attributes} if attributes else {})}
+    attributes = scope.admitted_for(
+        DOCUMENT, "this run's data.scope"
+    ).attributes
+    return {
+        "in_chans": int(sizes["num_channels"]),
+        "num_classes": 1,
+        **({"attributes": attributes} if attributes else {}),
+    }
 
 
 def recorded_model_dims(spec: "TrainConfigSchema") -> dict[str, Any]:
@@ -329,8 +412,11 @@ def recorded_model_dims(spec: "TrainConfigSchema") -> dict[str, Any]:
     return dims
 
 
-def build_from_model_source(source: "ModelSourceSchema", layout: SourceLayout,
-                            dims: "Mapping[str, Any]") -> Any:
+def build_from_model_source(
+    source: "ModelSourceSchema",
+    layout: SourceLayout,
+    dims: "Mapping[str, Any]",
+) -> Any:
     """Import the builder a validated ``model_source`` (``schemas.TrainConfigSchema``'s) names
     from its run's ``layout`` (:func:`import_source_builder`) and call it with its
     ``builder_kwargs`` and ``dims`` (:func:`model_dims`). Refuses (``ValueError``) by name a
@@ -350,7 +436,9 @@ def build_from_model_source(source: "ModelSourceSchema", layout: SourceLayout,
     return fn(**kwargs, **dims)
 
 
-def resolve_contract_dims(spec: "TrainConfigSchema", dims: "Mapping[str, Any]") -> dict:
+def resolve_contract_dims(
+    spec: "TrainConfigSchema", dims: "Mapping[str, Any]"
+) -> dict:
     """The dimensions a synthetic smoke batch of a validated run config is shaped at: the width,
     count and attributes the model is built at (``dims``, :func:`model_dims`, a rank count
     carried as ``num_classes``) and the ``img_size``, ``(width, height)``, of the frame its
@@ -362,10 +450,17 @@ def resolve_contract_dims(spec: "TrainConfigSchema", dims: "Mapping[str, Any]") 
 
     count = dims.get("num_classes", dims.get("num_ranks"))
     tiler = run_tiling(spec.model_source.task, spec.data.tiling)
-    frame = (tiler.tile_size, tiler.tile_size) if tiler is not None else spec.data.train_native_size
-    return {"in_chans": dims["in_chans"], **({} if frame is None else {"img_size": tuple(frame)}),
-            **({} if count is None else {"num_classes": count}),
-            **({"attributes": dims["attributes"]} if "attributes" in dims else {})}
+    frame = (
+        (tiler.tile_size, tiler.tile_size)
+        if tiler is not None
+        else spec.data.train_native_size
+    )
+    return {
+        "in_chans": dims["in_chans"],
+        **({} if frame is None else {"img_size": tuple(frame)}),
+        **({} if count is None else {"num_classes": count}),
+        **({"attributes": dims["attributes"]} if "attributes" in dims else {}),
+    }
 
 
 # The checkout's commit can't change within a process, resolve it once (a subprocess per training
@@ -385,9 +480,13 @@ def _tcip_git_commit() -> str | None:
         repo = Path(__file__).resolve().parents[4]
         out = subprocess.run(
             ["git", "-C", str(repo), "rev-parse", "--short", "HEAD"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
-        _GIT_COMMIT = (out.stdout.strip() or None) if out.returncode == 0 else None
+        _GIT_COMMIT = (
+            (out.stdout.strip() or None) if out.returncode == 0 else None
+        )
     except Exception:
         _GIT_COMMIT = None
     return _GIT_COMMIT
@@ -398,7 +497,10 @@ def capture_env() -> dict:
     process runs, each ``None`` when it cannot be resolved."""
     import sys
 
-    env: dict[str, Any] = {"python": sys.version.split()[0], "tcip_git_commit": _tcip_git_commit()}
+    env: dict[str, Any] = {
+        "python": sys.version.split()[0],
+        "tcip_git_commit": _tcip_git_commit(),
+    }
     for name in ("torch", "torchvision", "timm", "numpy"):
         try:
             env[name] = getattr(__import__(name), "__version__", "unknown")
@@ -418,19 +520,39 @@ SNAPSHOT_DIR = "model_src"
 """The run-directory subdirectory a bespoke run's copied source files land in."""
 
 
-def source_seams(spec: "TrainConfigSchema") -> list[tuple[str, str, list[str] | None]]:
+def source_seams(
+    spec: "TrainConfigSchema",
+) -> list[tuple[str, str, list[str] | None]]:
     """Each module a run of ``spec`` imports from its declared files: the config field naming
     it, its dotted name, and the files declared for it (a ``training_source`` is one of the
     ``model_source``'s)."""
     dataset_source = spec.data.dataset_source
-    return [(field, dotted, files) for field, dotted, files in (
-        ("model_source.builder", spec.model_source.builder, spec.model_source.source_files),
-        ("training_source", spec.training_source, spec.model_source.source_files),
-        ("data.dataset_source.builder", dataset_source and dataset_source.builder,
-         dataset_source.source_files if dataset_source else None)) if dotted]
+    return [
+        (field, dotted, files)
+        for field, dotted, files in (
+            (
+                "model_source.builder",
+                spec.model_source.builder,
+                spec.model_source.source_files,
+            ),
+            (
+                "training_source",
+                spec.training_source,
+                spec.model_source.source_files,
+            ),
+            (
+                "data.dataset_source.builder",
+                dataset_source and dataset_source.builder,
+                dataset_source.source_files if dataset_source else None,
+            ),
+        )
+        if dotted
+    ]
 
 
-def module_plan(spec: "TrainConfigSchema", project: Path) -> dict[Path, PurePosixPath]:
+def module_plan(
+    spec: "TrainConfigSchema", project: Path
+) -> dict[Path, PurePosixPath]:
     """Where each file a run of ``project`` declares (its :func:`source_seams`' files, once)
     lies under the run's one snapshot import root (:data:`SNAPSHOT_DIR`), which is also the
     module path it imports as there: its path under the import root (:func:`module_root`) of the
@@ -448,33 +570,49 @@ def module_plan(spec: "TrainConfigSchema", project: Path) -> dict[Path, PurePosi
     seams = source_seams(spec)
     roots = [module_root(dotted, files) for _field, dotted, files in seams]
     plan: dict[Path, PurePosixPath] = {}
-    for p in dict.fromkeys(Path(file) for _field, _dotted, files in seams for file in files or []):
-        base = next((root for root in (*roots, project) if p.is_relative_to(root)), None)
+    for p in dict.fromkeys(
+        Path(file) for _field, _dotted, files in seams for file in files or []
+    ):
+        base = next(
+            (root for root in (*roots, project) if p.is_relative_to(root)),
+            None,
+        )
         if base is None:
             raise ValueError(
                 f"{p} lies outside {project} and under none of the declared modules' import "
                 f"roots ({', '.join(map(str, dict.fromkeys(roots)))}), so a run's snapshot has "
                 "no place for it: declare it inside the project or beside the module that "
-                "imports it")
+                "imports it"
+            )
         plan[p] = PurePosixPath(p.relative_to(base).as_posix())
-        if (top := plan[p].parts[0].removesuffix(".py")) in sys.stdlib_module_names:
-            raise ValueError(f"{p} would import as the standard-library module {top}")
+        if (
+            top := plan[p].parts[0].removesuffix(".py")
+        ) in sys.stdlib_module_names:
+            raise ValueError(
+                f"{p} would import as the standard-library module {top}"
+            )
         if list(plan.values()).count(plan[p]) > 1:
-            raise ValueError(f"{p} and another declared file would both lie at {plan[p]}: a "
-                             "run's snapshot holds one file at each path")
+            raise ValueError(
+                f"{p} and another declared file would both lie at {plan[p]}: a "
+                "run's snapshot holds one file at each path"
+            )
     for p, place in plan.items():
         for depth in range(1, len(place.parts)):
-            init = p.parents[len(place.parts) - 1].joinpath(*place.parts[:depth], "__init__.py")
+            init = p.parents[len(place.parts) - 1].joinpath(
+                *place.parts[:depth], "__init__.py"
+            )
             if init.is_file() and init not in plan:
                 raise ValueError(
                     f"{p} imports as a module of the package {'.'.join(place.parts[:depth])}, "
                     f"whose initializer {init} is not declared: declare it in source_files, so "
-                    "the run binds the package its module belongs to")
+                    "the run binds the package its module belongs to"
+                )
     return plan
 
 
-def snapshot_model_source(spec: "TrainConfigSchema",
-                          project: Path) -> tuple[dict, dict[str, bytes]]:
+def snapshot_model_source(
+    spec: "TrainConfigSchema", project: Path
+) -> tuple[dict, dict[str, bytes]]:
     """The snapshot of the files a run of ``project`` declares, placed by its
     :func:`module_plan` (which refuses as it does): its record, ``{"files": {...}}``, one entry
     per declared file keyed by its stored path (``registry_paths.stored_path`` against
@@ -491,11 +629,16 @@ def snapshot_model_source(spec: "TrainConfigSchema",
         copy = f"{SNAPSHOT_DIR}/{place}"
         copies[copy] = data = p.read_bytes()
         entries[stored_path(p, project)] = {
-            "file": copy, "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)}
+            "file": copy,
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "bytes": len(data),
+        }
     return {"files": entries}, copies
 
 
-def snapshot_bound(spec: "TrainConfigSchema", source: dict, run_dir: Path) -> "TrainConfigSchema":
+def snapshot_bound(
+    spec: "TrainConfigSchema", source: dict, run_dir: Path
+) -> "TrainConfigSchema":
     """``spec``, a run's config, with each file it declares (:func:`source_seams`) replaced by
     its copy in ``run_dir``'s snapshot (``source``, :func:`snapshot_model_source`'s record of that
     run, which names each copy by the declared file's stored path), so the run, and every
@@ -504,13 +647,29 @@ def snapshot_bound(spec: "TrainConfigSchema", source: dict, run_dir: Path) -> "T
     from tcip_mcp.registry_paths import stored_path
 
     def bound(files: list[str] | None) -> list[str]:
-        return [str(run_dir / source["files"][stored_path(file, project_of_run(run_dir))]["file"])
-                for file in files or []]
+        return [
+            str(
+                run_dir
+                / source["files"][stored_path(file, project_of_run(run_dir))][
+                    "file"
+                ]
+            )
+            for file in files or []
+        ]
 
     model_source = spec.model_source.model_copy(
-        update={"source_files": bound(spec.model_source.source_files)})
+        update={"source_files": bound(spec.model_source.source_files)}
+    )
     dataset_source = spec.data.dataset_source
-    data = spec.data if dataset_source is None else spec.data.model_copy(update={
-        "dataset_source": dataset_source.model_copy(
-            update={"source_files": bound(dataset_source.source_files)})})
+    data = (
+        spec.data
+        if dataset_source is None
+        else spec.data.model_copy(
+            update={
+                "dataset_source": dataset_source.model_copy(
+                    update={"source_files": bound(dataset_source.source_files)}
+                )
+            }
+        )
+    )
     return spec.model_copy(update={"model_source": model_source, "data": data})

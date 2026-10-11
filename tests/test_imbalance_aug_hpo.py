@@ -12,10 +12,14 @@ from torch.nn import functional  # noqa: E402
 from PIL import Image  # noqa: E402
 
 from tcip_mcp.pipelines.components.losses import (  # noqa: E402
-    FocalLoss, build_loss, compute_class_weights,
+    FocalLoss,
+    build_loss,
+    compute_class_weights,
 )
 from tcip_mcp.pipelines.data.augmentations import (  # noqa: E402
-    RandomRotation, ToTensor, build_augmentation,
+    RandomRotation,
+    ToTensor,
+    build_augmentation,
 )
 from tests._training_values import asha_scheduler, tune_arguments  # noqa: E402
 
@@ -24,14 +28,19 @@ from tests._training_values import asha_scheduler, tune_arguments  # noqa: E402
 # Losses
 # --------------------------------------------------------------------------
 
+
 def test_compute_class_weights_balanced():
     w = compute_class_weights({0: 90, 1: 10})
     assert len(w) == 2
     assert w[1] > w[0]  # rarer class up-weighted
-    assert float(w.mean()) == pytest.approx(1.0, abs=1e-5)  # normalized over present
+    assert float(w.mean()) == pytest.approx(
+        1.0, abs=1e-5
+    )  # normalized over present
 
 
-def test_class_weights_are_sized_by_the_one_class_count_derivation(monkeypatch):
+def test_class_weights_are_sized_by_the_one_class_count_derivation(
+    monkeypatch,
+):
     """A weight vector and a run's loaders are sized by one rule: the weigher asks the platform's
     own derivation for the count a distribution implies, so a distribution whose top id is above
     its own length weights every class the ground truth reaches rather than only those present."""
@@ -48,9 +57,13 @@ def test_class_weights_are_sized_by_the_one_class_count_derivation(monkeypatch):
 
     w = compute_class_weights({0: 40, 4: 10})
 
-    assert asked == [{0: 40, 4: 10}]  # the count came from the shared derivation
+    assert asked == [
+        {0: 40, 4: 10}
+    ]  # the count came from the shared derivation
     assert len(w) == 5  # ids 0 and 4 present, 1 to 3 counted but unseen
-    assert float(w[1]) == float(w[2]) == float(w[3]) > 0  # an unseen class is weighted, not dropped
+    assert (
+        float(w[1]) == float(w[2]) == float(w[3]) > 0
+    )  # an unseen class is weighted, not dropped
 
 
 def test_focal_loss_scalar_alpha_unchanged():
@@ -76,7 +89,9 @@ def test_focal_loss_class_weights():
 
 
 def test_weighted_ce_built():
-    loss = build_loss("weighted_ce", class_distribution={0: 90, 1: 10}, num_classes=2)
+    loss = build_loss(
+        "weighted_ce", class_distribution={0: 90, 1: 10}, num_classes=2
+    )
     assert loss.ce.weight is not None  # class weight injected
 
 
@@ -95,9 +110,13 @@ def test_combined_loss_routes_each_kwarg_to_the_terms_that_accept_it():
 
 
 def test_combined_loss_weights_only_the_weightable_term():
-    loss = build_loss("cross_entropy+dice", class_distribution={0: 90, 1: 10}, num_classes=2)
+    loss = build_loss(
+        "cross_entropy+dice", class_distribution={0: 90, 1: 10}, num_classes=2
+    )
     ce, _dice = loss.losses
-    assert ce.ce.weight is not None  # dice never sees class_distribution, so it builds fine
+    assert (
+        ce.ce.weight is not None
+    )  # dice never sees class_distribution, so it builds fine
 
 
 def test_combined_loss_refuses_a_kwarg_no_term_accepts():
@@ -107,6 +126,7 @@ def test_combined_loss_refuses_a_kwarg_no_term_accepts():
 
 def test_classification_head_loss_optional():
     from tcip_mcp.pipelines.components.heads import ClassificationHead
+
     feats = torch.randn(4, 512)
     targets = {"labels": torch.randint(0, 5, (4,))}
 
@@ -124,6 +144,7 @@ def test_classification_head_loss_optional():
 
 def test_regression_head_loss_optional():
     from tcip_mcp.pipelines.components.heads import RegressionHead
+
     feats = torch.randn(4, 256)
     targets = {"values": torch.tensor([1.0, 2.5, 0.3, -1.2])}
 
@@ -141,11 +162,16 @@ def test_regression_head_loss_optional():
 
 def test_semantic_seg_head_weighted_ce():
     from tcip_mcp.pipelines.components.heads import SemanticSegHead
-    h = SemanticSegHead(in_channels=64, num_classes=3, class_weights=[1.0, 2.0, 3.0])
+
+    h = SemanticSegHead(
+        in_channels=64, num_classes=3, class_weights=[1.0, 2.0, 3.0]
+    )
     out = h(torch.randn(2, 64, 16, 16))
     losses = h.compute_loss(out, {"masks": torch.randint(0, 3, (2, 16, 16))})
     assert "ce_loss" in losses and "dice_loss" in losses
-    assert losses["ce_loss"].requires_grad and losses["dice_loss"].requires_grad
+    assert (
+        losses["ce_loss"].requires_grad and losses["dice_loss"].requires_grad
+    )
 
 
 def test_semantic_seg_head_advertises_no_loss_choice():
@@ -156,6 +182,7 @@ def test_semantic_seg_head_advertises_no_loss_choice():
     """
     import pytest as _pytest
     from tcip_mcp.pipelines.components.heads import SemanticSegHead
+
     with _pytest.raises(TypeError, match="'loss'"):
         SemanticSegHead(in_channels=64, num_classes=3, loss="weighted_ce")  # type: ignore[call-arg]  # the refused kwarg is the subject; the raises pins it to loss
 
@@ -186,18 +213,35 @@ def test_build_augmentation_builds_each_transform_at_the_values_its_entry_states
     assert isinstance(chain[-1], ToTensor)
 
 
-@pytest.mark.parametrize("config, named", [
-    ({"horizontal_flip": True}, "'horizontal_flip'"),
-    ({"horizontal_flip": 0.5}, "'horizontal_flip'"),
-    ({"resize": [640, 640]}, "'resize'"),
-    ("nadir_rotation", "'nadir_rotation'"),
-    ({"color_jitter": {"hue": 0.1}}, "'color_jitter'"),
-    ({"color_jitter": {**EVERY_TRANSFORM["color_jitter"], "hue": 0.1}}, "'hue'"),
-    ({"rotation": {"degrees": 90}}, "'rotation'"),
-    ({"horizontal_flip": {"p": 0.5}, "mosaic": {}}, "mosaic"),
-], ids=["true", "a-number", "a-list", "a-preset-name", "hue-alone", "hue-beside-the-rest",
-        "a-value-unstated", "an-unknown-transform"])
-def test_build_augmentation_refuses_an_entry_not_stating_its_values_by_name(config, named):
+@pytest.mark.parametrize(
+    "config, named",
+    [
+        ({"horizontal_flip": True}, "'horizontal_flip'"),
+        ({"horizontal_flip": 0.5}, "'horizontal_flip'"),
+        ({"resize": [640, 640]}, "'resize'"),
+        ("nadir_rotation", "'nadir_rotation'"),
+        ({"color_jitter": {"hue": 0.1}}, "'color_jitter'"),
+        (
+            {"color_jitter": {**EVERY_TRANSFORM["color_jitter"], "hue": 0.1}},
+            "'hue'",
+        ),
+        ({"rotation": {"degrees": 90}}, "'rotation'"),
+        ({"horizontal_flip": {"p": 0.5}, "mosaic": {}}, "mosaic"),
+    ],
+    ids=[
+        "true",
+        "a-number",
+        "a-list",
+        "a-preset-name",
+        "hue-alone",
+        "hue-beside-the-rest",
+        "a-value-unstated",
+        "an-unknown-transform",
+    ],
+)
+def test_build_augmentation_refuses_an_entry_not_stating_its_values_by_name(
+    config, named
+):
     """guard. A shorthand (True, a number, a list), a preset name, a value the transform does not
     take (hue) and a value it takes left unstated each refuse naming the entry, and an unknown
     transform refuses by its name: nothing in the chain is a value the config did not state."""
@@ -208,12 +252,17 @@ def test_build_augmentation_refuses_an_entry_not_stating_its_values_by_name(conf
 def test_random_rotation_detection_keeps_boxes_valid():
     torch.manual_seed(0)
     img = Image.new("RGB", (64, 64), (120, 120, 120))
-    target = {"boxes": torch.tensor([[10.0, 10.0, 40.0, 40.0]]), "labels": torch.tensor([1])}
+    target = {
+        "boxes": torch.tensor([[10.0, 10.0, 40.0, 40.0]]),
+        "labels": torch.tensor([1]),
+    }
     out, t = RandomRotation(degrees=90, p=1.0)(img, target)
     assert out.size == (64, 64)
     boxes = t["boxes"]
     if len(boxes):
-        assert (boxes[:, 2] > boxes[:, 0]).all() and (boxes[:, 3] > boxes[:, 1]).all()
+        assert (boxes[:, 2] > boxes[:, 0]).all() and (
+            boxes[:, 3] > boxes[:, 1]
+        ).all()
         assert (boxes >= 0).all() and (boxes <= 64).all()
     assert len(t["labels"]) == len(boxes)
 
@@ -227,11 +276,16 @@ def test_random_rotation_classification_passthrough():
 
 # --- Geometric transforms must keep masks aligned with image + boxes ------
 
-def _instance_target(x1: int, y1: int, x2: int, y2: int, size: int = 64) -> dict:
+
+def _instance_target(
+    x1: int, y1: int, x2: int, y2: int, size: int = 64
+) -> dict:
     """One box with an exactly-matching [1, H, W] instance mask."""
     from tests._producer_fixtures import painted_array
 
-    mask = torch.as_tensor(painted_array(size, size, [((x1, y1, x2, y2), 1)]))[None]
+    mask = torch.as_tensor(painted_array(size, size, [((x1, y1, x2, y2), 1)]))[
+        None
+    ]
     return {
         "boxes": torch.tensor([[float(x1), float(y1), float(x2), float(y2)]]),
         "labels": torch.tensor([1]),
@@ -241,22 +295,35 @@ def _instance_target(x1: int, y1: int, x2: int, y2: int, size: int = 64) -> dict
 
 def _mask_bbox(mask: "torch.Tensor") -> list[float]:
     ys, xs = torch.nonzero(mask, as_tuple=True)
-    return [float(xs.min()), float(ys.min()), float(xs.max()) + 1, float(ys.max()) + 1]
+    return [
+        float(xs.min()),
+        float(ys.min()),
+        float(xs.max()) + 1,
+        float(ys.max()) + 1,
+    ]
 
 
 def test_horizontal_flip_flips_instance_masks_with_boxes():
     from tcip_mcp.pipelines.data.augmentations import RandomHorizontalFlip
+
     img = Image.new("RGB", (64, 64))
     out, t = RandomHorizontalFlip(p=1.0)(img, _instance_target(10, 10, 40, 40))
     assert t["masks"].shape == (1, 64, 64)
-    assert _mask_bbox(t["masks"][0]) == t["boxes"][0].tolist() == [24.0, 10.0, 54.0, 40.0]
+    assert (
+        _mask_bbox(t["masks"][0])
+        == t["boxes"][0].tolist()
+        == [24.0, 10.0, 54.0, 40.0]
+    )
 
 
 def test_vertical_flip_flips_semantic_mask():
     from tcip_mcp.pipelines.data.augmentations import RandomVerticalFlip
     from tests._producer_fixtures import painted_array
+
     img = Image.new("RGB", (64, 64))
-    sem = torch.as_tensor(painted_array(64, 64, [((0, 0, 64, 10), 2)])).long()  # top stripe
+    sem = torch.as_tensor(
+        painted_array(64, 64, [((0, 0, 64, 10), 2)])
+    ).long()  # top stripe
     out, t = RandomVerticalFlip(p=1.0)(img, {"masks": sem.clone()})
     assert torch.equal(t["masks"], torch.flip(sem, dims=[-2]))
     assert (t["masks"][-10:, :] == 2).all()
@@ -264,11 +331,16 @@ def test_vertical_flip_flips_semantic_mask():
 
 def test_resize_scales_masks_with_image_and_boxes():
     from tcip_mcp.pipelines.data.augmentations import Resize
+
     img = Image.new("RGB", (64, 64))
     out, t = Resize(size=(128, 128))(img, _instance_target(10, 10, 40, 40))
     assert out.size == (128, 128)
     assert t["masks"].shape == (1, 128, 128)
-    assert _mask_bbox(t["masks"][0]) == t["boxes"][0].tolist() == [20.0, 20.0, 80.0, 80.0]
+    assert (
+        _mask_bbox(t["masks"][0])
+        == t["boxes"][0].tolist()
+        == [20.0, 20.0, 80.0, 80.0]
+    )
 
     # Semantic [H, W] mask resizes too (nearest keeps class indices intact)
     sem = torch.full((64, 64), 3, dtype=torch.long)
@@ -279,22 +351,30 @@ def test_resize_scales_masks_with_image_and_boxes():
 
 def test_random_resized_crop_keeps_masks_aligned():
     from tcip_mcp.pipelines.data.augmentations import RandomResizedCrop
+
     # Full-scale crop is deterministic: pure 2x upscale
     img = Image.new("RGB", (64, 64))
     crop = RandomResizedCrop(size=(128, 128), min_scale=1.0, max_scale=1.0)
     out, t = crop(img, _instance_target(10, 10, 40, 40))
     assert out.size == (128, 128)
     assert t["masks"].shape == (1, 128, 128)
-    assert _mask_bbox(t["masks"][0]) == t["boxes"][0].tolist() == [20.0, 20.0, 80.0, 80.0]
+    assert (
+        _mask_bbox(t["masks"][0])
+        == t["boxes"][0].tolist()
+        == [20.0, 20.0, 80.0, 80.0]
+    )
 
 
 def test_random_resized_crop_random_scale_masks_track_boxes():
     import random as _random
     from tcip_mcp.pipelines.data.augmentations import RandomResizedCrop
+
     _random.seed(0)
     crop = RandomResizedCrop(size=(64, 64), min_scale=0.5, max_scale=0.5)
     for _ in range(10):
-        _, t = crop(Image.new("RGB", (64, 64)), _instance_target(10, 10, 40, 40))
+        _, t = crop(
+            Image.new("RGB", (64, 64)), _instance_target(10, 10, 40, 40)
+        )
         assert t["masks"].shape[0] == len(t["boxes"]) == len(t["labels"])
         assert t["masks"].shape[1:] == (64, 64)
         for box, mask in zip(t["boxes"], t["masks"]):
@@ -306,6 +386,7 @@ def test_random_resized_crop_random_scale_masks_track_boxes():
 
 def test_random_resized_crop_semantic_mask_follows_image():
     from tcip_mcp.pipelines.data.augmentations import RandomResizedCrop
+
     sem = torch.full((64, 64), 5, dtype=torch.long)
     crop = RandomResizedCrop(size=(32, 48), min_scale=0.5, max_scale=1.0)
     _, t = crop(Image.new("RGB", (64, 64)), {"masks": sem})
@@ -317,12 +398,20 @@ def test_random_rotation_rotates_semantic_mask():
     import random as _random
 
     from tests._producer_fixtures import painted_array
+
     _random.seed(1)
-    sem = torch.as_tensor(painted_array(64, 64, [((0, 0, 64, 16), 1)])).long()  # asymmetric
-    out, t = RandomRotation(degrees=180, p=1.0)(Image.new("RGB", (64, 64)), {"masks": sem.clone()})
+    sem = torch.as_tensor(
+        painted_array(64, 64, [((0, 0, 64, 16), 1)])
+    ).long()  # asymmetric
+    out, t = RandomRotation(degrees=180, p=1.0)(
+        Image.new("RGB", (64, 64)), {"masks": sem.clone()}
+    )
     assert t["masks"].shape == (64, 64)
     assert t["masks"].dtype == sem.dtype
-    assert set(t["masks"].unique().tolist()) <= {0, 1}  # nearest preserves class ids
+    assert set(t["masks"].unique().tolist()) <= {
+        0,
+        1,
+    }  # nearest preserves class ids
     assert not torch.equal(t["masks"], sem)  # actually rotated
 
 
@@ -330,16 +419,20 @@ def test_random_rotation_rotates_semantic_mask():
 # HPO: Ray Tune search algorithms + schedulers are agent-selectable
 # --------------------------------------------------------------------------
 
+
 def test_to_tune_space_maps_every_param_type():
     pytest.importorskip("ray")
     from ray import tune
     from tcip_mcp.pipelines.training.hpo import _to_tune_space
-    space = _to_tune_space({
-        "lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2},
-        "wd": {"type": "uniform", "low": 0.0, "high": 0.1},
-        "bs": {"type": "categorical", "choices": [2, 4]},
-        "k": {"type": "int", "low": 1, "high": 3},
-    })
+
+    space = _to_tune_space(
+        {
+            "lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2},
+            "wd": {"type": "uniform", "low": 0.0, "high": 0.1},
+            "bs": {"type": "categorical", "choices": [2, 4]},
+            "k": {"type": "int", "low": 1, "high": 3},
+        }
+    )
     assert isinstance(space["lr"], tune.search.sample.Float)
     assert isinstance(space["bs"], tune.search.sample.Categorical)
     assert isinstance(space["k"], tune.search.sample.Integer)
@@ -348,12 +441,17 @@ def test_to_tune_space_maps_every_param_type():
 def test_grid_mode_enumerates_discrete_axes():
     pytest.importorskip("ray")
     from tcip_mcp.pipelines.training.hpo import _to_tune_space
-    space = _to_tune_space({"bs": {"type": "categorical", "choices": [2, 4, 8]}}, grid=True)
+
+    space = _to_tune_space(
+        {"bs": {"type": "categorical", "choices": [2, 4, 8]}}, grid=True
+    )
     # grid_search wraps a plain dict with a "grid_search" key, not a sampler.
     assert space["bs"] == {"grid_search": [2, 4, 8]}
 
 
-def test_tune_search_normalizes_search_alg_case_before_deciding_grid(tmp_path, monkeypatch):
+def test_tune_search_normalizes_search_alg_case_before_deciding_grid(
+    tmp_path, monkeypatch
+):
     """tune_search reads a normalized local, not the caller's own casing, at the point it
     decides whether _to_tune_space builds a grid space: search_alg="Grid" (the agent's own
     casing, not this module's lower-cased spelling) still reaches the grid branch. Stopped
@@ -376,21 +474,41 @@ def test_tune_search_normalizes_search_alg_case_before_deciding_grid(tmp_path, m
         hpo.tune_search(
             objective_fn=lambda config, report: None,
             param_space={"bs": {"type": "categorical", "choices": [2, 4]}},
-            sweep_dir=tmp_path / "sweep", **tune_arguments(search_alg="Grid"))
+            sweep_dir=tmp_path / "sweep",
+            **tune_arguments(search_alg="Grid"),
+        )
 
     assert captured["grid"] is True
 
 
 PBT_SCHEDULER = {
-    "name": "pbt", "time_attr": "training_iteration", "perturbation_interval": 2,
-    "burn_in_period": 0, "quantile_fraction": 0.25, "resample_probability": 0.25,
-    "perturbation_factors": [1.2, 0.8], "custom_explore_fn": None, "log_config": True,
-    "require_attrs": True, "synch": False,
+    "name": "pbt",
+    "time_attr": "training_iteration",
+    "perturbation_interval": 2,
+    "burn_in_period": 0,
+    "quantile_fraction": 0.25,
+    "resample_probability": 0.25,
+    "perturbation_factors": [1.2, 0.8],
+    "custom_explore_fn": None,
+    "log_config": True,
+    "require_attrs": True,
+    "synch": False,
 }
-MEDIAN_SCHEDULER = {"name": "median", "time_attr": "training_iteration", "grace_period": 2,
-                    "min_samples_required": 3, "min_time_slice": 0, "hard_stop": True}
-HYPERBAND_SCHEDULER = {"name": "hyperband", "time_attr": "training_iteration", "max_t": 9,
-                       "reduction_factor": 3, "stop_last_trials": True}
+MEDIAN_SCHEDULER = {
+    "name": "median",
+    "time_attr": "training_iteration",
+    "grace_period": 2,
+    "min_samples_required": 3,
+    "min_time_slice": 0,
+    "hard_stop": True,
+}
+HYPERBAND_SCHEDULER = {
+    "name": "hyperband",
+    "time_attr": "training_iteration",
+    "max_t": 9,
+    "reduction_factor": 3,
+    "stop_last_trials": True,
+}
 """Sample trial scheduler blocks, each stating every setting its Ray class takes."""
 
 
@@ -400,7 +518,10 @@ def test_build_scheduler_builds_each_scheduler_at_the_settings_its_block_states(
     pytest.importorskip("ray")
     from ray import tune
     from ray.tune.schedulers import (
-        AsyncHyperBandScheduler, FIFOScheduler, HyperBandScheduler, MedianStoppingRule,
+        AsyncHyperBandScheduler,
+        FIFOScheduler,
+        HyperBandScheduler,
+        MedianStoppingRule,
         PopulationBasedTraining,
     )
     from tcip_mcp.pipelines.training.hpo import build_scheduler
@@ -408,26 +529,59 @@ def test_build_scheduler_builds_each_scheduler_at_the_settings_its_block_states(
     space = {"lr": tune.loguniform(1e-5, 1e-2)}
     asha = build_scheduler(asha_scheduler(max_t=7), hyperparam_mutations=space)
     assert isinstance(asha, AsyncHyperBandScheduler) and asha._max_t == 7
-    hyperband = build_scheduler(HYPERBAND_SCHEDULER, hyperparam_mutations=space)
-    assert isinstance(hyperband, HyperBandScheduler) and hyperband._max_t_attr == 9
-    assert isinstance(build_scheduler(MEDIAN_SCHEDULER, hyperparam_mutations=space),
-                      MedianStoppingRule)
+    hyperband = build_scheduler(
+        HYPERBAND_SCHEDULER, hyperparam_mutations=space
+    )
+    assert (
+        isinstance(hyperband, HyperBandScheduler)
+        and hyperband._max_t_attr == 9
+    )
+    assert isinstance(
+        build_scheduler(MEDIAN_SCHEDULER, hyperparam_mutations=space),
+        MedianStoppingRule,
+    )
     pbt = build_scheduler(PBT_SCHEDULER, hyperparam_mutations=space)
-    assert isinstance(pbt, PopulationBasedTraining) and pbt._hyperparam_mutations == space
-    assert type(build_scheduler({"name": "fifo"}, hyperparam_mutations=space)) is FIFOScheduler
+    assert (
+        isinstance(pbt, PopulationBasedTraining)
+        and pbt._hyperparam_mutations == space
+    )
+    assert (
+        type(build_scheduler({"name": "fifo"}, hyperparam_mutations=space))
+        is FIFOScheduler
+    )
 
 
-@pytest.mark.parametrize("scheduler, named", [
-    ({k: v for k, v in asha_scheduler().items() if k != "max_t"}, "unstated ['max_t']"),
-    ({k: v for k, v in asha_scheduler().items() if k != "grace_period"},
-     "unstated ['grace_period']"),
-    ({**HYPERBAND_SCHEDULER, "grace_period": 2}, "not taken ['grace_period']"),
-    ({"name": "fifo", "max_t": 5}, "not taken ['max_t']"),
-    ({"name": "none"}, "Unknown scheduler 'none'"),
-    ({"max_t": 5}, "Unknown scheduler ''"),
-], ids=["asha-without-max_t", "asha-without-grace_period", "hyperband-with-grace_period",
-        "fifo-with-max_t", "an-unknown-name", "no-name"])
-def test_scheduler_settings_refuses_a_setting_unstated_or_not_taken_by_name(scheduler, named):
+@pytest.mark.parametrize(
+    "scheduler, named",
+    [
+        (
+            {k: v for k, v in asha_scheduler().items() if k != "max_t"},
+            "unstated ['max_t']",
+        ),
+        (
+            {k: v for k, v in asha_scheduler().items() if k != "grace_period"},
+            "unstated ['grace_period']",
+        ),
+        (
+            {**HYPERBAND_SCHEDULER, "grace_period": 2},
+            "not taken ['grace_period']",
+        ),
+        ({"name": "fifo", "max_t": 5}, "not taken ['max_t']"),
+        ({"name": "none"}, "Unknown scheduler 'none'"),
+        ({"max_t": 5}, "Unknown scheduler ''"),
+    ],
+    ids=[
+        "asha-without-max_t",
+        "asha-without-grace_period",
+        "hyperband-with-grace_period",
+        "fifo-with-max_t",
+        "an-unknown-name",
+        "no-name",
+    ],
+)
+def test_scheduler_settings_refuses_a_setting_unstated_or_not_taken_by_name(
+    scheduler, named
+):
     """guard. A setting its scheduler's Ray class takes and the block leaves unstated (so Ray
     would supply it), and one the class does not take (so Ray would drop it), each refuse by
     name, as does a name no scheduler carries."""
@@ -445,9 +599,15 @@ def _first_sampled_lr(searcher, storage_path) -> float:
     from ray import tune
     from ray.tune.experiment import Experiment
 
-    searcher.add_configurations(Experiment(
-        name="seed_probe", run=lambda config: None,
-        config={"lr": tune.loguniform(1e-5, 1e-2)}, num_samples=1, storage_path=str(storage_path)))
+    searcher.add_configurations(
+        Experiment(
+            name="seed_probe",
+            run=lambda config: None,
+            config={"lr": tune.loguniform(1e-5, 1e-2)},
+            num_samples=1,
+            storage_path=str(storage_path),
+        )
+    )
     return searcher.next_trial().config["lr"]
 
 
@@ -455,8 +615,12 @@ def test_the_native_sampler_draws_the_sweep_seed_s_points(tmp_path):
     pytest.importorskip("ray")
     from tcip_mcp.pipelines.training.hpo import build_search_alg
 
-    first = _first_sampled_lr(build_search_alg("random", seed=7), tmp_path / "a")
-    again = _first_sampled_lr(build_search_alg("random", seed=7), tmp_path / "b")
+    first = _first_sampled_lr(
+        build_search_alg("random", seed=7), tmp_path / "a"
+    )
+    again = _first_sampled_lr(
+        build_search_alg("random", seed=7), tmp_path / "b"
+    )
     other = _first_sampled_lr(build_search_alg("grid", seed=8), tmp_path / "c")
     assert first == again
     assert first != other
@@ -473,11 +637,17 @@ def test_every_backend_searcher_retains_the_sweep_seed():
 
     points = [{"lr": 1e-3}]
     optuna = build_search_alg("optuna", seed=713, points_to_evaluate=points)
-    hyperopt = build_search_alg("hyperopt", seed=713, points_to_evaluate=points)
-    bayesopt = build_search_alg("bayesopt", seed=713, points_to_evaluate=points)
+    hyperopt = build_search_alg(
+        "hyperopt", seed=713, points_to_evaluate=points
+    )
+    bayesopt = build_search_alg(
+        "bayesopt", seed=713, points_to_evaluate=points
+    )
 
     assert optuna._seed == 713
-    assert hyperopt.rstate.randint(2**31 - 1) == np.random.RandomState(713).randint(2**31 - 1)
+    assert hyperopt.rstate.randint(2**31 - 1) == np.random.RandomState(
+        713
+    ).randint(2**31 - 1)
     assert bayesopt._random_state == 713
 
 
@@ -504,7 +674,9 @@ def test_build_search_alg_native_and_backend():
 
     from tcip_mcp.pipelines.training.hpo import build_search_alg
 
-    assert isinstance(build_search_alg("random", seed=0), BasicVariantGenerator)
+    assert isinstance(
+        build_search_alg("random", seed=0), BasicVariantGenerator
+    )
     assert isinstance(build_search_alg("grid", seed=0), BasicVariantGenerator)
     # A backend the agent picks that isn't installed raises clearly (never silently swapped).
     # Absence is simulated rather than relying on a package that happens to be missing: every
@@ -519,6 +691,7 @@ def test_build_search_alg_native_and_backend():
 def test_available_search_algs_lists_natives_and_installed_backends():
     pytest.importorskip("ray")
     from tcip_mcp.pipelines.training.hpo import available_search_algs
+
     algs = available_search_algs()
     assert "random" in algs and "grid" in algs
     pytest.importorskip("optuna")
@@ -538,17 +711,22 @@ def test_tune_search_evaluates_its_baseline_and_optimizes(tmp_path):
     seen.mkdir()
 
     def obj(config, report):
-        (seen / f"{uuid.uuid4().hex}.json").write_text(json.dumps(config["x"]), encoding="utf-8")
+        (seen / f"{uuid.uuid4().hex}.json").write_text(
+            json.dumps(config["x"]), encoding="utf-8"
+        )
         report((config["x"] - 2.0) ** 2)
 
     from tcip_mcp.pipelines.training.hpo import tune_search
+
     tune_search(
         obj,
         param_space={"x": {"type": "uniform", "low": -5.0, "high": 5.0}},
         sweep_dir=tmp_path / "hpo" / "sweep",
         **tune_arguments(num_samples=6, baseline_params={"x": 2.0}),
     )
-    points = [json.loads(p.read_text(encoding="utf-8")) for p in seen.iterdir()]
+    points = [
+        json.loads(p.read_text(encoding="utf-8")) for p in seen.iterdir()
+    ]
     assert len(points) == 6
     assert 2.0 in points  # the baseline point, the exact minimum, was trained
 
@@ -562,6 +740,7 @@ def test_run_hyperparameter_search_exposes_agent_search_choices_not_pinned():
 
     from tcip_mcp.pipelines.training import hpo
     from tcip_mcp.tools.training_tools import run_hyperparameter_search
+
     params = inspect.signature(run_hyperparameter_search).parameters
     assert "search_alg" in params and "scheduler" in params
     assert "pruner" not in params and "direction" not in params

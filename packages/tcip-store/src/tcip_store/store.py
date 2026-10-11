@@ -9,7 +9,13 @@ from typing import Any
 
 from tcip_store.errors import StoreNotBoundError, TransactionMisuseError
 from tcip_store.model import (
-    REQUIRED, Key, LogPage, Version, Versioned, canonical_path, held_transaction,
+    REQUIRED,
+    Key,
+    LogPage,
+    Version,
+    Versioned,
+    canonical_path,
+    held_transaction,
     refuse_inside_transaction,
 )
 from tcip_store.sqlite_backend import SqliteBackend, Txn
@@ -101,7 +107,9 @@ def transaction(*keys: Key, timeout_s: float | None = None) -> Generator[Txn]:
     naming the first key when the write lock is not acquired in time.
     """
     if not keys:
-        raise TransactionMisuseError("transaction() must name at least one key")
+        raise TransactionMisuseError(
+            "transaction() must name at least one key"
+        )
     roots = sorted({canonical_path(key.root) for key in keys})
     if len(roots) > 1:
         raise TransactionMisuseError(
@@ -109,7 +117,10 @@ def transaction(*keys: Key, timeout_s: float | None = None) -> Generator[Txn]:
             f"{', '.join(roots)}. Take one root's keys in one transaction and the other's in "
             "another"
         )
-    with held_transaction(), _backend().transaction(keys, timeout_s=timeout_s) as txn:
+    with (
+        held_transaction(),
+        _backend().transaction(keys, timeout_s=timeout_s) as txn,
+    ):
         yield txn
 
 

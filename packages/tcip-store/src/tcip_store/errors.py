@@ -40,8 +40,14 @@ class TransactionMisuseError(StoreError):
 class VersionConflictError(StoreError):
     """The stored version is not the one the caller expected, so nothing was written."""
 
-    def __init__(self, entry: Key | str, expected: Version, actual: Version) -> None:
-        named = entry if isinstance(entry, str) else f"{entry.store}{list(entry.parts)}"
+    def __init__(
+        self, entry: Key | str, expected: Version, actual: Version
+    ) -> None:
+        named = (
+            entry
+            if isinstance(entry, str)
+            else f"{entry.store}{list(entry.parts)}"
+        )
         super().__init__(
             f"{named} changed since it was read: expected version "
             f"{expected.token or '(absent)'}, found {actual.token or '(absent)'}. "
@@ -57,8 +63,13 @@ class StoreBusyError(StoreError):
     the first key or file the refused call named."""
 
     def __init__(self, blocked_on: Key | str, waited_s: float) -> None:
-        named = (blocked_on if isinstance(blocked_on, str)
-                 else f"{blocked_on.store}{list(blocked_on.parts)}")
-        super().__init__(f"waited {waited_s:.1f}s for {named} and gave up; nothing was written.")
+        named = (
+            blocked_on
+            if isinstance(blocked_on, str)
+            else f"{blocked_on.store}{list(blocked_on.parts)}"
+        )
+        super().__init__(
+            f"waited {waited_s:.1f}s for {named} and gave up; nothing was written."
+        )
         self.blocked_on = blocked_on
         self.waited_s = waited_s

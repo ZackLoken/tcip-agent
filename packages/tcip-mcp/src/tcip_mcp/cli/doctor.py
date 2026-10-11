@@ -26,7 +26,10 @@ def _census(root: Path, findings: list) -> dict | None:
     """The dataset census (``data_tools._scan_dataset``) with ``label_reads``, each label key's
     document or the ``UnreadableLabelDocumentError`` it raised; ``None`` with an error finding for
     an ``images/`` stem collision or an unreadable ``.bandgroup`` manifest."""
-    from tcip_annotation.json_io import UnreadableLabelDocumentError, read_label_document
+    from tcip_annotation.json_io import (
+        UnreadableLabelDocumentError,
+        read_label_document,
+    )
     from tcip_mcp.pipelines.image_utils import AmbiguousImageStemError
     from tcip_mcp.tools.data_tools import _scan_dataset
 
@@ -44,7 +47,9 @@ def _census(root: Path, findings: list) -> dict | None:
     return {**scan, "label_reads": label_reads}
 
 
-def check_data_quality(root: Path, findings: list, *, census: dict | None) -> None:
+def check_data_quality(
+    root: Path, findings: list, *, census: dict | None
+) -> None:
     """Per-document annotation quality, each document read on its own so one bad document never
     hides the findings about the rest, each named by its capture and stem: a label with no
     matching image, a label the one per-image reader refuses (undecodable, an unrecognized shape,
@@ -66,20 +71,38 @@ def check_data_quality(root: Path, findings: list, *, census: dict | None) -> No
             findings.append(("error", f"{named}: no matching image"))
         doc = scan["label_reads"][key]
         if not isinstance(doc, LabelDocument):
-            findings.append(("error", f"{named}: label document will not read: {doc}"))
-        elif not doc.annotations and not any(admits(doc.state(s)) for s in doc.marks):
-            findings.append(("error", f"{named}: empty label document, not marked complete for "
-                            "any subject; excluded from training"))
+            findings.append(
+                ("error", f"{named}: label document will not read: {doc}")
+            )
+        elif not doc.annotations and not any(
+            admits(doc.state(s)) for s in doc.marks
+        ):
+            findings.append(
+                (
+                    "error",
+                    f"{named}: empty label document, not marked complete for "
+                    "any subject; excluded from training",
+                )
+            )
 
     # Images with no label record at all: excluded from training, so a breeder who labeled 30 of
     # 400 trains on 30. Reported as one line, not one per image (the dominant case at small scale).
     labeled = set(scan["labels"])
-    unannotated = sorted(_named(key) for key in scan["images"].values() if key not in labeled)
+    unannotated = sorted(
+        _named(key) for key in scan["images"].values() if key not in labeled
+    )
     if unannotated:
-        shown = ", ".join(unannotated[:5]) + ("…" if len(unannotated) > 5 else "")
-        findings.append(("info", f"{len(unannotated)} of {len(scan['images'])} image(s) have no "
-                        f"label record and are excluded from training ({shown}). Annotate them, "
-                        "or mark the genuinely-empty ones Complete to train them as negatives."))
+        shown = ", ".join(unannotated[:5]) + (
+            "…" if len(unannotated) > 5 else ""
+        )
+        findings.append(
+            (
+                "info",
+                f"{len(unannotated)} of {len(scan['images'])} image(s) have no "
+                f"label record and are excluded from training ({shown}). Annotate them, "
+                "or mark the genuinely-empty ones Complete to train them as negatives.",
+            )
+        )
 
 
 TEMP_TREE_MARKERS = ("pytest-of-", "\\Temp\\", "/Temp/")
@@ -103,31 +126,54 @@ def check_registry(root: Path, findings: list) -> None:
     from tcip_mcp.dataset_layout import PREDICTION_BUCKETS
     from tcip_mcp.model_registry import registered_entries
     from tcip_mcp.registry_paths import (
-        RegistryPathEmptyError, RegistryPathTraversalError, resolved_registry_path,
+        RegistryPathEmptyError,
+        RegistryPathTraversalError,
+        resolved_registry_path,
     )
 
     try:
         entries = registered_entries(root)
     except StoreError as exc:
-        findings.append(("error", "the model registry index will not decode or read, so this "
-                        f"project's registered models could not be checked at all: {exc}"))
+        findings.append(
+            (
+                "error",
+                "the model registry index will not decode or read, so this "
+                f"project's registered models could not be checked at all: {exc}",
+            )
+        )
         return
     for m in entries:
         # Existence resolves first; the temp-tree marker scan runs over the resolved string.
         try:
             resolved = resolved_registry_path(root, m["checkpoint_path"])
         except (RegistryPathEmptyError, RegistryPathTraversalError) as exc:
-            findings.append(("error", f"registry entry {m['name']!r} checkpoint_path "
-                            f"could not be resolved: {exc}"))
+            findings.append(
+                (
+                    "error",
+                    f"registry entry {m['name']!r} checkpoint_path "
+                    f"could not be resolved: {exc}",
+                )
+            )
             continue
         ckpt = str(resolved)
         stray = not resolved.is_relative_to(root) and any(
-            marker in ckpt for marker in TEMP_TREE_MARKERS)
+            marker in ckpt for marker in TEMP_TREE_MARKERS
+        )
         if stray:
-            findings.append(("error", f"registry entry {m['name']!r} points at a test/temp "
-                            f"checkpoint: {ckpt}"))
+            findings.append(
+                (
+                    "error",
+                    f"registry entry {m['name']!r} points at a test/temp "
+                    f"checkpoint: {ckpt}",
+                )
+            )
         elif not Path(ckpt).is_file():
-            findings.append(("error", f"registry entry {m['name']!r} checkpoint missing: {ckpt}"))
+            findings.append(
+                (
+                    "error",
+                    f"registry entry {m['name']!r} checkpoint missing: {ckpt}",
+                )
+            )
 
     registered_shas = {m["sha256"] for m in entries}
     for key in tcip_store.keys(PREDICTION_BUCKETS, str(root)):
@@ -135,28 +181,49 @@ def check_registry(root: Path, findings: list) -> None:
         try:
             sha = read_bucket(root, name).producer.get("checkpoint_sha256")
         except ValueError as exc:
-            findings.append(("error", f"bucket {name!r}: bucket record will not read: {exc}"))
+            findings.append(
+                (
+                    "error",
+                    f"bucket {name!r}: bucket record will not read: {exc}",
+                )
+            )
             continue
         if sha is not None and sha not in registered_shas:
-            findings.append(("warn", f"bucket {name!r}: prediction bucket's record names "
-                            f"checkpoint {sha}, which no registry entry names; register the "
-                            "checkpoint to make this bucket's provenance verifiable going "
-                            "forward."))
+            findings.append(
+                (
+                    "warn",
+                    f"bucket {name!r}: prediction bucket's record names "
+                    f"checkpoint {sha}, which no registry entry names; register the "
+                    "checkpoint to make this bucket's provenance verifiable going "
+                    "forward.",
+                )
+            )
 
 
-def check_provenance(root: Path, findings: list, *, census: dict | None) -> None:
+def check_provenance(
+    root: Path, findings: list, *, census: dict | None
+) -> None:
     from tcip_annotation.json_io import LabelDocument
 
     unstamped = 0
-    for key, doc in (census["label_reads"] if census is not None else {}).items():
+    for key, doc in (
+        census["label_reads"] if census is not None else {}
+    ).items():
         for a in doc.annotations if isinstance(doc, LabelDocument) else []:
             if a.accepted_by and not a.created_by:
-                findings.append(("warn", f"{_named(key)}: annotation has accepted_by without "
-                                "created_by (acceptance without origin)"))
+                findings.append(
+                    (
+                        "warn",
+                        f"{_named(key)}: annotation has accepted_by without "
+                        "created_by (acceptance without origin)",
+                    )
+                )
             if not a.created_by:
                 unstamped += 1
     if unstamped:
-        findings.append(("info", f"{unstamped} GT annotations carry no created_by"))
+        findings.append(
+            ("info", f"{unstamped} GT annotations carry no created_by")
+        )
 
 
 def check_state(root: Path, findings: list) -> None:
@@ -176,18 +243,30 @@ def check_state(root: Path, findings: list) -> None:
         try:
             read_flags(key)
         except (ValueError, StoreError) as exc:
-            findings.append(("warn", f"flags record {'/'.join(key.parts)} will not read: {exc}"))
+            findings.append(
+                (
+                    "warn",
+                    f"flags record {'/'.join(key.parts)} will not read: {exc}",
+                )
+            )
     for key in tcip_store.keys(REVIEW_VERDICTS_STORE, str(root)):
         bucket, stem = key.parts
         try:
             read_verdicts(key)
             known = stem in read_bucket(root, bucket).documents
         except (ValueError, StoreError) as exc:
-            findings.append(("warn", f"verdict shard {bucket}/{stem} will not read: {exc}"))
+            findings.append(
+                ("warn", f"verdict shard {bucket}/{stem} will not read: {exc}")
+            )
             continue
         if not known:
-            findings.append(("warn", f"verdict shard {bucket}/{stem} names image {stem!r}, "
-                            "which its bucket's record names no document for"))
+            findings.append(
+                (
+                    "warn",
+                    f"verdict shard {bucket}/{stem} names image {stem!r}, "
+                    "which its bucket's record names no document for",
+                )
+            )
 
 
 def check_traits(root: Path, findings: list) -> None:
@@ -205,9 +284,14 @@ def check_traits(root: Path, findings: list) -> None:
             findings.append(("error", f"trait {name!r} will not read: {exc}"))
             continue
         if not record.latest.confirmed:
-            findings.append(("warn", f"the latest revision ({record.latest.number}) of trait "
-                            f"{name!r} is not confirmed; ask the breeder to confirm it in the "
-                            "Setup tab"))
+            findings.append(
+                (
+                    "warn",
+                    f"the latest revision ({record.latest.number}) of trait "
+                    f"{name!r} is not confirmed; ask the breeder to confirm it in the "
+                    "Setup tab",
+                )
+            )
 
 
 def check_project_record(root: Path, findings: list) -> None:
@@ -221,8 +305,12 @@ def check_project_record(root: Path, findings: list) -> None:
 
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0], prog=prog)
-    ap.add_argument("project_root", help="project directory holding images/ and .tcip/")
+    ap = argparse.ArgumentParser(
+        description=__doc__.splitlines()[0], prog=prog
+    )
+    ap.add_argument(
+        "project_root", help="project directory holding images/ and .tcip/"
+    )
     args = ap.parse_args(argv)
     root = Path(args.project_root).resolve()
     if not root.is_dir():
@@ -236,8 +324,14 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     findings: list[tuple[str, str]] = []
     census = _census(root, findings)
     checks_taking_census = (check_data_quality, check_provenance)
-    for check in (check_data_quality, check_registry, check_provenance, check_state,
-                  check_traits, check_project_record):
+    for check in (
+        check_data_quality,
+        check_registry,
+        check_provenance,
+        check_state,
+        check_traits,
+        check_project_record,
+    ):
         run: Callable[..., None] = check
         if check in checks_taking_census:
             run(root, findings, census=census)
@@ -250,8 +344,10 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
         print(f"[{level.upper():5}] {msg}")
     errors = sum(1 for level, _ in findings if level == "error")
     warns = sum(1 for level, _ in findings if level == "warn")
-    print(f"\ndoctor: {errors} error(s), {warns} warning(s), "
-          f"{len(findings) - errors - warns} info")
+    print(
+        f"\ndoctor: {errors} error(s), {warns} warning(s), "
+        f"{len(findings) - errors - warns} info"
+    )
     return 2 if errors else (1 if warns else 0)
 
 

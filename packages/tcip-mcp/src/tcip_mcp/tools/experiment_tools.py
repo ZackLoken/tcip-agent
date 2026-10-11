@@ -9,8 +9,11 @@ from tcip_mcp.server import tool
 
 @tool()
 def get_experiment(
-    project: Path, experiment_id: str, view: str = "full",
-    metrics_limit: int | None = None, metrics_offset: int = 0,
+    project: Path,
+    experiment_id: str,
+    view: str = "full",
+    metrics_limit: int | None = None,
+    metrics_offset: int = 0,
 ) -> dict:
     """Read one run's directory.
 
@@ -34,13 +37,21 @@ def get_experiment(
 
     if view == "lineage":
         if metrics_limit is not None or metrics_offset != 0:
-            return {"error": "metrics_limit/metrics_offset apply only to view='full'; "
-                             "view='lineage' has no metrics rows to page."}
+            return {
+                "error": "metrics_limit/metrics_offset apply only to view='full'; "
+                "view='lineage' has no metrics rows to page."
+            }
         return _lineage(experiment_id, project=project)
     if view != "full":
-        return {"error": f"Invalid view: {view!r} (expected 'full' or 'lineage')"}
-    return _get(experiment_id, project=project, metrics_limit=metrics_limit,
-                metrics_offset=metrics_offset)
+        return {
+            "error": f"Invalid view: {view!r} (expected 'full' or 'lineage')"
+        }
+    return _get(
+        experiment_id,
+        project=project,
+        metrics_limit=metrics_limit,
+        metrics_offset=metrics_offset,
+    )
 
 
 @tool()

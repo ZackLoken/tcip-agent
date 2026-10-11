@@ -13,7 +13,12 @@ from typing import Any, Callable, NamedTuple, Optional, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from tcip_mcp.web_client import GuiState, read_gui_snapshot, require_whole, write_gui_snapshot
+from tcip_mcp.web_client import (
+    GuiState,
+    read_gui_snapshot,
+    require_whole,
+    write_gui_snapshot,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -68,9 +73,12 @@ class StateStore:
         self._workspace: Optional[Path] = None
         self._image_roots: tuple[Path, ...] = ()
         self._retained: dict[str, deque[dict[str, Any]]] = defaultdict(
-            lambda: deque(maxlen=RETAINED_EVENTS_PER_PANEL))
+            lambda: deque(maxlen=RETAINED_EVENTS_PER_PANEL)
+        )
 
-    def configure(self, workspace: Path, image_roots: tuple[Path, ...]) -> None:
+    def configure(
+        self, workspace: Path, image_roots: tuple[Path, ...]
+    ) -> None:
         """Set the workspace this backend serves and the additive image roots it admits, each
         resolved once where the backend starts."""
         self._workspace, self._image_roots = workspace, image_roots
@@ -80,8 +88,10 @@ class StateStore:
         """The workspace this backend serves; raises ``RuntimeError`` when it started without
         one."""
         if self._workspace is None:
-            raise RuntimeError("the backend was started without a workspace; start it through "
-                               "python -m tcip_web")
+            raise RuntimeError(
+                "the backend was started without a workspace; start it through "
+                "python -m tcip_web"
+            )
         return self._workspace
 
     @property
@@ -105,7 +115,9 @@ class StateStore:
         :class:`NoProjectOpenError` when none is open."""
         now = self._now
         if now.project is None:
-            raise NoProjectOpenError("no project is open; open one from the project list first")
+            raise NoProjectOpenError(
+                "no project is open; open one from the project list first"
+            )
         return now.project, now.state
 
     def admit(self, project_id: str) -> OpenProject:
@@ -121,7 +133,10 @@ class StateStore:
         """Make ``project`` the open project (:meth:`_switch`), holding its persisted state (a
         fresh state when it has none). Raises what :func:`tcip_mcp.web_client.read_gui_snapshot`
         raises, leaving the open project unchanged."""
-        state = await asyncio.to_thread(read_gui_snapshot, project.root) or GuiState()
+        state = (
+            await asyncio.to_thread(read_gui_snapshot, project.root)
+            or GuiState()
+        )
         await self._switch(project, state)
 
     async def close_project(self, project_id: str) -> None:
@@ -130,8 +145,12 @@ class StateStore:
         does not, or none is open."""
         await self._switch(None, GuiState(), closing=project_id)
 
-    async def _switch(self, following: Optional[OpenProject], state: GuiState,
-                      closing: Optional[str] = None) -> None:
+    async def _switch(
+        self,
+        following: Optional[OpenProject],
+        state: GuiState,
+        closing: Optional[str] = None,
+    ) -> None:
         """Under the lock: when ``closing`` is given and does not name the open project, nothing.
         Otherwise, when ``following`` replaces another project, end every unended session of the
         departed one (:func:`tcip_web.routes.sessions.end_sessions`), then, once that commit has
@@ -149,8 +168,12 @@ class StateStore:
                     return
             departed = self._now.project
             ended: list[dict] = []
-            if departed is not None and (following is None or following.id != departed.id):
-                ended = await asyncio.to_thread(end_sessions, departed.root, None)
+            if departed is not None and (
+                following is None or following.id != departed.id
+            ):
+                ended = await asyncio.to_thread(
+                    end_sessions, departed.root, None
+                )
             await self._hold(following, state)
         if departed is not None and ended:
             await asyncio.to_thread(record_ended, departed.root, ended)
@@ -173,7 +196,9 @@ class StateStore:
         """The open project's latest events on ``panel``, oldest first."""
         return list(self._retained.get(panel, ()))
 
-    async def _hold(self, project: Optional[OpenProject], state: GuiState) -> None:
+    async def _hold(
+        self, project: Optional[OpenProject], state: GuiState
+    ) -> None:
         """Hold ``project`` with ``state`` as the next version, the retained events cleared when
         the project changes, and notify every subscriber of it; called under the lock."""
         if project != self._now.project:
@@ -216,7 +241,9 @@ class StateStore:
         """Return a JSON-safe snapshot of the current state."""
         return self._now.state.model_dump(mode="json")
 
-    async def mutate(self, mutation: dict[str, Any], *, project: Optional[OpenProject]) -> None:
+    async def mutate(
+        self, mutation: dict[str, Any], *, project: Optional[OpenProject]
+    ) -> None:
         """Apply a partial mutation, validated, persist it to the open project, and hold it.
 
         ``project`` is the project the mutation was made for, admitted under the lock
@@ -243,7 +270,9 @@ class StateStore:
             except (ValidationError, ValueError) as exc:
                 raise GuiMutationInvalidError(str(exc)) from exc
             if opened is not None:
-                await asyncio.to_thread(write_gui_snapshot, opened.root, new_state)
+                await asyncio.to_thread(
+                    write_gui_snapshot, opened.root, new_state
+                )
             await self._hold(self._now.project, new_state)
 
 

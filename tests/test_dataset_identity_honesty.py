@@ -25,12 +25,24 @@ def _dataset(root: Path) -> None:
     """Two dated images of different sizes, each with its own label, the nested layout ingest
     writes."""
     (root / "images" / _DATE).mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (48, 32), color=(120, 90, 40)).save(root / "images" / _DATE / "IMG_1.png")
-    Image.new("RGB", (64, 40), color=(20, 160, 70)).save(root / "images" / _DATE / "IMG_2.png")
-    label_image(root / "images" / _DATE / "IMG_1.png",
-                [Annotation(subject="bud", geometry=BBox(4, 6, 22, 31))], 48, 32)
-    label_image(root / "images" / _DATE / "IMG_2.png",
-                [Annotation(subject="bud", geometry=BBox(9, 3, 60, 28))], 64, 40)
+    Image.new("RGB", (48, 32), color=(120, 90, 40)).save(
+        root / "images" / _DATE / "IMG_1.png"
+    )
+    Image.new("RGB", (64, 40), color=(20, 160, 70)).save(
+        root / "images" / _DATE / "IMG_2.png"
+    )
+    label_image(
+        root / "images" / _DATE / "IMG_1.png",
+        [Annotation(subject="bud", geometry=BBox(4, 6, 22, 31))],
+        48,
+        32,
+    )
+    label_image(
+        root / "images" / _DATE / "IMG_2.png",
+        [Annotation(subject="bud", geometry=BBox(9, 3, 60, 28))],
+        64,
+        40,
+    )
 
 
 def test_a_dataset_whose_images_were_all_removed_reports_no_identity(tmp_path):

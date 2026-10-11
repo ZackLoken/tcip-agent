@@ -15,21 +15,31 @@ from tcip_mcp.pipelines.derivations import num_classes_from_distribution
 
 class BaseLoss(nn.Module):
     """Abstract base for registered losses."""
+
     name: str = ""
 
-    def forward(self, predictions: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, predictions: torch.Tensor, targets: torch.Tensor
+    ) -> torch.Tensor:
         raise NotImplementedError
 
 
-def dice_loss(probs: torch.Tensor, targets: torch.Tensor, smooth: float = 1e-6) -> torch.Tensor:
+def dice_loss(
+    probs: torch.Tensor, targets: torch.Tensor, smooth: float = 1e-6
+) -> torch.Tensor:
     """One minus the Dice coefficient of ``probs`` against ``targets`` of the same shape, each
     summed over its last axis and the result averaged over every other axis."""
     intersection = (probs * targets).sum(-1)
-    return (1.0 - (2.0 * intersection + smooth)
-            / (probs.sum(-1) + targets.sum(-1) + smooth)).mean()
+    return (
+        1.0
+        - (2.0 * intersection + smooth)
+        / (probs.sum(-1) + targets.sum(-1) + smooth)
+    ).mean()
 
 
-def corn_loss(logits: torch.Tensor, ranks: torch.Tensor, num_ranks: int) -> torch.Tensor:
+def corn_loss(
+    logits: torch.Tensor, ranks: torch.Tensor, num_ranks: int
+) -> torch.Tensor:
     """The CORN loss of ``[B, num_ranks - 1]`` conditional ``logits`` against ``[B]`` 0-indexed
     ``ranks``: for each rank ``k``, binary cross-entropy of classifier ``k`` on the samples with
     a rank of at least ``k`` predicting a rank above ``k``, averaged over the classifiers that saw
@@ -41,7 +51,8 @@ def corn_loss(logits: torch.Tensor, ranks: torch.Tensor, num_ranks: int) -> torc
         if mask.sum() == 0:
             continue
         loss = loss + functional.binary_cross_entropy_with_logits(
-            logits[mask, k], (ranks[mask] > k).float())
+            logits[mask, k], (ranks[mask] > k).float()
+        )
         n_tasks += 1
     return loss / max(n_tasks, 1)
 
@@ -49,9 +60,13 @@ def corn_loss(logits: torch.Tensor, ranks: torch.Tensor, num_ranks: int) -> torc
 class CrossEntropyLoss(BaseLoss):
     name = "cross_entropy"
 
-    def __init__(self, weight: torch.Tensor | None = None, label_smoothing: float = 0.0):
+    def __init__(
+        self, weight: torch.Tensor | None = None, label_smoothing: float = 0.0
+    ):
         super().__init__()
-        self.ce = nn.CrossEntropyLoss(weight=weight, label_smoothing=label_smoothing)
+        self.ce = nn.CrossEntropyLoss(
+            weight=weight, label_smoothing=label_smoothing
+        )
 
     def forward(self, predictions, targets):
         return self.ce(predictions, targets)
@@ -60,8 +75,13 @@ class CrossEntropyLoss(BaseLoss):
 class FocalLoss(BaseLoss):
     name = "focal"
 
-    def __init__(self, alpha: float = 0.25, gamma: float = 2.0,
-                 weight: torch.Tensor | list | None = None, reduction: str = "mean"):
+    def __init__(
+        self,
+        alpha: float = 0.25,
+        gamma: float = 2.0,
+        weight: torch.Tensor | list | None = None,
+        reduction: str = "mean",
+    ):
         super().__init__()
         self.alpha = alpha
         self.gamma = gamma
@@ -77,11 +97,14 @@ class FocalLoss(BaseLoss):
         if self.weight is not None:
             # Per-class weight subsumes the scalar alpha: no double balance.
             ce = functional.cross_entropy(
-                predictions, targets, weight=self.weight, reduction="none")
+                predictions, targets, weight=self.weight, reduction="none"
+            )
             p_t = torch.exp(-ce)
             loss = (1 - p_t) ** self.gamma * ce
         else:
-            ce = functional.cross_entropy(predictions, targets, reduction="none")
+            ce = functional.cross_entropy(
+                predictions, targets, reduction="none"
+            )
             p_t = torch.exp(-ce)
             loss = self.alpha * (1 - p_t) ** self.gamma * ce
         if self.reduction == "mean":
@@ -134,8 +157,11 @@ class DiceLoss(BaseLoss):
         self.smooth = smooth
 
     def forward(self, predictions, targets):
-        return dice_loss(torch.sigmoid(predictions).flatten(1), targets.float().flatten(1),
-                         self.smooth)
+        return dice_loss(
+            torch.sigmoid(predictions).flatten(1),
+            targets.float().flatten(1),
+            self.smooth,
+        )
 
 
 class GIoULoss(BaseLoss):
@@ -161,6 +187,7 @@ class CORNLoss(BaseLoss):
 class CORALLoss(BaseLoss):
     """Consistent rank logits loss: binary cross-entropy of ``[B, K-1]`` cumulative logits against
     each sample's rank levels."""
+
     name = "coral"
 
     def __init__(self, num_ranks: int):
@@ -170,29 +197,37 @@ class CORALLoss(BaseLoss):
     def forward(self, predictions, targets):
         levels = torch.zeros_like(predictions)
         for i in range(predictions.size(0)):
-            levels[i, :targets[i]] = 1.0
+            levels[i, : targets[i]] = 1.0
         return functional.binary_cross_entropy_with_logits(predictions, levels)
 
 
 class CombinedLoss(BaseLoss):
     """Weighted combination of multiple losses."""
+
     name = "combined"
 
-    def __init__(self, losses: list[BaseLoss], weights: list[float] | None = None):
+    def __init__(
+        self, losses: list[BaseLoss], weights: list[float] | None = None
+    ):
         super().__init__()
         self.losses = nn.ModuleList(losses)
         self.weights = weights or [1.0] * len(losses)
 
     def forward(self, predictions, targets):
         total = torch.tensor(
-            0.0, device=predictions.device if torch.is_tensor(predictions) else "cpu"
+            0.0,
+            device=predictions.device
+            if torch.is_tensor(predictions)
+            else "cpu",
         )
         for loss_fn, w in zip(self.losses, self.weights):
             total = total + w * loss_fn(predictions, targets)
         return total
 
 
-def _generalized_box_iou_loss(pred_boxes: torch.Tensor, gt_boxes: torch.Tensor) -> torch.Tensor:
+def _generalized_box_iou_loss(
+    pred_boxes: torch.Tensor, gt_boxes: torch.Tensor
+) -> torch.Tensor:
     """GIoU loss for bounding box regression. Boxes in xyxy format."""
     from tcip_annotation.matching import box_areas
 
@@ -245,7 +280,7 @@ def compute_class_weights(
         elif scheme == "inverse":
             weights.append(1.0 / cnt)
         elif scheme == "effective":
-            eff = 1.0 - beta ** cnt
+            eff = 1.0 - beta**cnt
             weights.append((1.0 - beta) / eff if eff > 0 else 1.0)
         else:  # balanced
             weights.append(total / (n_present * cnt) if n_present > 0 else 1.0)
@@ -275,8 +310,12 @@ _LOSS_CLASSES: dict[str, type[BaseLoss]] = {
 
 
 def build_loss(
-    name: str, *, class_distribution: dict[int, int] | None = None,
-    num_classes: int | None = None, weight_scheme: str = "balanced", **kwargs,
+    name: str,
+    *,
+    class_distribution: dict[int, int] | None = None,
+    num_classes: int | None = None,
+    weight_scheme: str = "balanced",
+    **kwargs,
 ) -> BaseLoss:
     """Build a loss by name, or a :class:`CombinedLoss` from terms joined like ``'bce+dice'``.
 
@@ -288,11 +327,16 @@ def build_loss(
     with no weightable term refuses. An unknown name refuses (``ValueError``) naming the
     registered ones.
     """
-    from tcip_mcp.pipelines.model_build import keyword_parameters, resolve_named
+    from tcip_mcp.pipelines.model_build import (
+        keyword_parameters,
+        resolve_named,
+    )
 
     parts = [p.strip() for p in name.split("+")]
-    accepted = {p: keyword_parameters(resolve_named(p, _LOSS_CLASSES, kind="loss"))
-                for p in parts}
+    accepted = {
+        p: keyword_parameters(resolve_named(p, _LOSS_CLASSES, kind="loss"))
+        for p in parts
+    }
 
     def takes(p: str, k: str) -> bool:
         named, open_ended = accepted[p]
@@ -303,15 +347,27 @@ def build_loss(
             raise ValueError(
                 f"class_distribution was supplied for '{name}', which is not weightable (no term "
                 "takes a weight); the weighting would have no effect. Compose a weightable term, "
-                "or drop class_distribution.")
-        kwargs.setdefault("weight", compute_class_weights(
-            class_distribution, num_classes=num_classes, scheme=weight_scheme))
+                "or drop class_distribution."
+            )
+        kwargs.setdefault(
+            "weight",
+            compute_class_weights(
+                class_distribution,
+                num_classes=num_classes,
+                scheme=weight_scheme,
+            ),
+        )
     unusable = sorted(k for k in kwargs if not any(takes(p, k) for p in parts))
     if unusable:
         raise ValueError(
             f"{unusable} not accepted by any term of '{name}'. Each term accepts: "
-            + "; ".join(f"{p}: {'any' if accepted[p][1] else sorted(accepted[p][0])}"
-                        for p in parts))
-    terms = [_LOSS_CLASSES[p](**{k: v for k, v in kwargs.items() if takes(p, k)})
-             for p in parts]
+            + "; ".join(
+                f"{p}: {'any' if accepted[p][1] else sorted(accepted[p][0])}"
+                for p in parts
+            )
+        )
+    terms = [
+        _LOSS_CLASSES[p](**{k: v for k, v in kwargs.items() if takes(p, k)})
+        for p in parts
+    ]
     return terms[0] if len(terms) == 1 else CombinedLoss(terms)

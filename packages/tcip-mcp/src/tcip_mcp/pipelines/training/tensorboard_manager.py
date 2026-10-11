@@ -102,10 +102,16 @@ if sys.platform == "win32":
             dll.CreateJobObjectW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p]
             dll.SetInformationJobObject.restype = ctypes.c_int
             dll.SetInformationJobObject.argtypes = [
-                ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32,
+                ctypes.c_void_p,
+                ctypes.c_int,
+                ctypes.c_void_p,
+                ctypes.c_uint32,
             ]
             dll.AssignProcessToJobObject.restype = ctypes.c_int
-            dll.AssignProcessToJobObject.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+            dll.AssignProcessToJobObject.argtypes = [
+                ctypes.c_void_p,
+                ctypes.c_void_p,
+            ]
             dll.CloseHandle.restype = ctypes.c_int
             dll.CloseHandle.argtypes = [ctypes.c_void_p]
             _win_kernel32 = dll
@@ -127,9 +133,14 @@ if sys.platform == "win32":
             logger.warning(reason)
             return None, reason
         info = _JobObjectExtendedLimitInformation()
-        info.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        info.BasicLimitInformation.LimitFlags = (
+            _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        )
         if not kernel32.SetInformationJobObject(
-            handle, _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION, ctypes.byref(info), ctypes.sizeof(info)
+            handle,
+            _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+            ctypes.byref(info),
+            ctypes.sizeof(info),
         ):
             reason = f"SetInformationJobObject failed: {ctypes.WinError(ctypes.get_last_error())}"
             logger.warning(reason)
@@ -169,7 +180,8 @@ def _stop_all_tracked() -> None:
         if result.get("status") == "kill_unconfirmed":
             logger.warning(
                 "Exit sweep left TensorBoard key %s (pid=%s) running: its kill went unconfirmed",
-                key, result.get("pid"),
+                key,
+                result.get("pid"),
             )
 
 
@@ -188,17 +200,32 @@ def _tensorboard_argv(logdir: str, port: int) -> list[str]:
 
     # tensorboard has no __main__.py; tensorboard.main runs under its own __main__ guard.
     return [
-        sys.executable, "-m", "tensorboard.main", "--logdir", logdir,
-        "--port", str(port), "--host", LOOPBACK_HOST, "--reload_interval", "5",
+        sys.executable,
+        "-m",
+        "tensorboard.main",
+        "--logdir",
+        logdir,
+        "--port",
+        str(port),
+        "--host",
+        LOOPBACK_HOST,
+        "--reload_interval",
+        "5",
     ]
 
 
 def _guardian_argv(argv: list[str]) -> list[str]:
     """``argv`` run under the POSIX lifetime guardian."""
     return [
-        sys.executable, "-m", "tcip_mcp.pipelines.training.tensorboard_guardian",
-        "--parent", str(os.getpid()), "--term-grace", str(_GUARDIAN_TERM_GRACE_SECONDS),
-        "--", *argv,
+        sys.executable,
+        "-m",
+        "tcip_mcp.pipelines.training.tensorboard_guardian",
+        "--parent",
+        str(os.getpid()),
+        "--term-grace",
+        str(_GUARDIAN_TERM_GRACE_SECONDS),
+        "--",
+        *argv,
     ]
 
 
@@ -239,8 +266,13 @@ def launch_tensorboard(logdir: str) -> dict:
 
     entry = _running(key)
     if entry is not None:
-        return {"url": entry.url, "port": entry.port, "pid": entry.proc.pid, "logdir": logdir,
-                "lifetime_tie": entry.lifetime_tie}
+        return {
+            "url": entry.url,
+            "port": entry.port,
+            "pid": entry.proc.pid,
+            "logdir": logdir,
+            "lifetime_tie": entry.lifetime_tie,
+        }
 
     port = free_port(6006)
     _register_atexit_once()
@@ -253,7 +285,9 @@ def launch_tensorboard(logdir: str) -> dict:
 
     proc: subprocess.Popen | None = None
     try:
-        proc = subprocess.Popen(launch_argv, stdout=output, stderr=subprocess.STDOUT)
+        proc = subprocess.Popen(
+            launch_argv, stdout=output, stderr=subprocess.STDOUT
+        )
         if sys.platform == "win32":
             failure = _assign_to_win_job(proc)
             lifetime_tie = "job" if failure is None else f"none: {failure}"
@@ -274,7 +308,11 @@ def launch_tensorboard(logdir: str) -> dict:
     time.sleep(_STARTUP_GRACE_SECONDS)
     if proc.poll() is not None:
         detail = _collect_output(output)
-        logger.warning("TensorBoard exited during startup (code=%s): %s", proc.returncode, detail)
+        logger.warning(
+            "TensorBoard exited during startup (code=%s): %s",
+            proc.returncode,
+            detail,
+        )
         return {
             "error": f"tensorboard exited during startup with code {proc.returncode}",
             "output": detail,
@@ -282,11 +320,19 @@ def launch_tensorboard(logdir: str) -> dict:
         }
 
     url = f"http://{LOOPBACK_HOST}:{port}"
-    _TB_PROCESSES[key] = _Launched(proc=proc, port=port, url=url, output=output,
-                                   lifetime_tie=lifetime_tie)
-    logger.info("TensorBoard started: %s (pid=%d, logdir=%s)", url, proc.pid, logdir)
-    return {"url": url, "port": port, "pid": proc.pid, "logdir": logdir,
-            "lifetime_tie": lifetime_tie}
+    _TB_PROCESSES[key] = _Launched(
+        proc=proc, port=port, url=url, output=output, lifetime_tie=lifetime_tie
+    )
+    logger.info(
+        "TensorBoard started: %s (pid=%d, logdir=%s)", url, proc.pid, logdir
+    )
+    return {
+        "url": url,
+        "port": port,
+        "pid": proc.pid,
+        "logdir": logdir,
+        "lifetime_tie": lifetime_tie,
+    }
 
 
 def _running(key: str) -> _Launched | None:
@@ -331,7 +377,9 @@ def stop_tensorboard(logdir: str) -> dict:
                 entry.proc.wait(timeout=_STOP_WAIT_SECONDS)
             except subprocess.TimeoutExpired:
                 logger.warning(
-                    "TensorBoard key %s (pid=%d) has a kill unconfirmed", key, entry.proc.pid
+                    "TensorBoard key %s (pid=%d) has a kill unconfirmed",
+                    key,
+                    entry.proc.pid,
                 )
                 _release_output(entry)
                 return {"status": "kill_unconfirmed", "pid": entry.proc.pid}

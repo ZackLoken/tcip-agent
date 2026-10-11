@@ -22,7 +22,9 @@ DATE = "2-11-26"
 
 def _check(root: Path) -> list[tuple[str, str]]:
     findings: list[tuple[str, str]] = []
-    doctor.check_data_quality(root, findings, census=doctor._census(root, findings))
+    doctor.check_data_quality(
+        root, findings, census=doctor._census(root, findings)
+    )
     return findings
 
 
@@ -30,9 +32,17 @@ def _errors(findings: list[tuple[str, str]]) -> list[str]:
     return [msg for level, msg in findings if level == "error"]
 
 
-def _label(root: Path, stem: str, annotations, width: int = 96, height: int = 64,
-           **kwargs) -> None:
-    json_io.write_label_document(label_key(root, DATE, stem), annotations, width, height, **kwargs)
+def _label(
+    root: Path,
+    stem: str,
+    annotations,
+    width: int = 96,
+    height: int = 64,
+    **kwargs,
+) -> None:
+    json_io.write_label_document(
+        label_key(root, DATE, stem), annotations, width, height, **kwargs
+    )
 
 
 def test_an_unreadable_label_record_is_an_error_per_document(tmp_path: Path):
@@ -42,13 +52,17 @@ def test_an_unreadable_label_record_is_an_error_per_document(tmp_path: Path):
     root = tmp_path / "unreadable"
     for stem in ("plotA_0_0", "plotA_0_1"):
         write_image(root / "images" / DATE / f"{stem}.jpg", (96, 64))
-        ts.replace(label_key(root, DATE, stem),
-                   {"shapes": [{"label": "bud", "points": [[3, 5], [40, 52]]}]})
+        ts.replace(
+            label_key(root, DATE, stem),
+            {"shapes": [{"label": "bud", "points": [[3, 5], [40, 52]]}]},
+        )
 
     findings = _check(root)
     assert len(findings) == 2
-    assert all(level == "error" and "label document will not read" in msg
-               for level, msg in findings)
+    assert all(
+        level == "error" and "label document will not read" in msg
+        for level, msg in findings
+    )
 
     bare = tmp_path / "unlabeled"
     for stem in ("plotA_0_0", "plotA_0_1"):
@@ -65,7 +79,11 @@ def test_a_label_with_no_matching_image_is_an_error(tmp_path: Path):
     for stem in ("plotA_0_0", "plotB_0_0"):
         write_image(root / "images" / DATE / f"{stem}.jpg", (96, 64))
     for stem in ("plotA_0_0", "plotB_0_0", "plotZ_9_9"):
-        _label(root, stem, [Annotation(subject="bud", geometry=BBox(11, 7, 39, 51))])
+        _label(
+            root,
+            stem,
+            [Annotation(subject="bud", geometry=BBox(11, 7, 39, 51))],
+        )
 
     errors = _errors(_check(root))
 
@@ -79,7 +97,11 @@ def test_an_unreadable_first_label_hides_no_later_finding(tmp_path: Path):
     root = tmp_path / "ds"
     write_image(root / "images" / DATE / "0_bad.jpg", (96, 64))
     ts.replace(label_key(root, DATE, "0_bad"), ["not", "a", "document"])
-    _label(root, "zzz_orphan", [Annotation(subject="bud", geometry=BBox(1, 1, 8, 8))])
+    _label(
+        root,
+        "zzz_orphan",
+        [Annotation(subject="bud", geometry=BBox(1, 1, 8, 8))],
+    )
 
     errors = _errors(_check(root))
 
@@ -114,14 +136,20 @@ def test_a_confirmed_negative_empty_label_stays_clean(tmp_path: Path):
     assert _check(root) == []
 
 
-def test_an_unreadable_label_is_a_finding_beside_a_readable_one(tmp_path: Path):
+def test_an_unreadable_label_is_a_finding_beside_a_readable_one(
+    tmp_path: Path,
+):
     """Coverage, not a guard: the refusal surfaces as a per-document finding beside a readable
     document of the same capture, never propagating out of the walk."""
     root = tmp_path / "ds"
     write_image(root / "images" / DATE / "plotA_0_0.jpg", (96, 64))
     write_image(root / "images" / DATE / "plotB_0_0.jpg", (96, 64))
 
-    _label(root, "plotA_0_0", [Annotation(subject="bud", geometry=BBox(11, 7, 39, 51))])
+    _label(
+        root,
+        "plotA_0_0",
+        [Annotation(subject="bud", geometry=BBox(11, 7, 39, 51))],
+    )
     ts.replace(label_key(root, DATE, "plotB_0_0"), ["not", "a", "document"])
 
     findings = _check(root)

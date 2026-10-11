@@ -69,11 +69,14 @@ class TrainRun:
         from tcip_mcp.pipelines.training.generic_trainer import config_trait
 
         spec = self.spec
-        return {"dims": recorded_model_dims(spec), "conf_threshold": self.reads.conf_threshold,
-                "iou_threshold": spec.evaluation.iou_threshold,
-                "score_weights": spec.evaluation.score_weights,
-                "trait": config_trait(spec, self.project),
-                "density": spec.data.train_object_density}
+        return {
+            "dims": recorded_model_dims(spec),
+            "conf_threshold": self.reads.conf_threshold,
+            "iou_threshold": spec.evaluation.iou_threshold,
+            "score_weights": spec.evaluation.score_weights,
+            "trait": config_trait(spec, self.project),
+            "density": spec.data.train_object_density,
+        }
 
     @property
     def wall_clock_exceeded(self) -> bool:
@@ -92,11 +95,17 @@ class TrainRun:
         if not self.output_dir:
             return False
         run_dir = Path(self.output_dir)
-        directories = (run_dir, run_dir.parent) if self.origin == "hpo_trial" else (run_dir,)
+        directories = (
+            (run_dir, run_dir.parent)
+            if self.origin == "hpo_trial"
+            else (run_dir,)
+        )
         return any(cancel_requested(d) for d in directories)
 
 
-def observed_run(observation: RunObservation, *, origin: str = "training") -> TrainRun:
+def observed_run(
+    observation: RunObservation, *, origin: str = "training"
+) -> TrainRun:
     """The :class:`TrainRun` of an observed run, of ``origin``: named for its directory, training
     under its validated launch config (``RunObservation.spec``) with the data block its launch
     resolved (``RunObservation.resolved_data``) laid over it and its source files bound to the
@@ -108,13 +117,22 @@ def observed_run(observation: RunObservation, *, origin: str = "training") -> Tr
 
     resolved, data = observation.resolution, observation.resolved_data
     assert resolved is not None and data is not None, (
-        "a run whose input resolved to nothing ended at its opening")
-    spec = snapshot_bound(observation.spec.model_copy(update={"data": data}),
-                          observation.record["source"], observation.directory)
-    return TrainRun(id=observation.directory.name, spec=spec, objective=resolved["objective"],
-                    project=project_of_run(observation.directory),
-                    layout=run_layout(observation.directory, observation.record["source"]),
-                    output_dir=str(observation.directory), origin=origin)
+        "a run whose input resolved to nothing ended at its opening"
+    )
+    spec = snapshot_bound(
+        observation.spec.model_copy(update={"data": data}),
+        observation.record["source"],
+        observation.directory,
+    )
+    return TrainRun(
+        id=observation.directory.name,
+        spec=spec,
+        objective=resolved["objective"],
+        project=project_of_run(observation.directory),
+        layout=run_layout(observation.directory, observation.record["source"]),
+        output_dir=str(observation.directory),
+        origin=origin,
+    )
 
 
 def seeded(spec: TrainConfigSchema) -> TrainConfigSchema:

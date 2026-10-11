@@ -31,7 +31,9 @@ DEFAULT_IMAGE_BATCH_SIZE = 16
 DEFAULT_POSTPROCESS = "nms"
 """The cross-tile merge when a caller names none: suppress overlaps rather than union them."""
 CROSS_TILE_MERGES: dict[str, tuple[str, str]] = {
-    "nms": ("NMS", "IOU"), "nmm": ("NMM", "IOS"), "greedynmm": ("GREEDYNMM", "IOS"),
+    "nms": ("NMS", "IOU"),
+    "nmm": ("NMM", "IOS"),
+    "greedynmm": ("GREEDYNMM", "IOS"),
 }
 """Every cross-tile merge a caller may name, as the SAHI postprocess type it runs and the match
 metric that type compares over (intersection over union, or over the smaller box)."""
@@ -77,14 +79,22 @@ class Execution:
     sources: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        for first, second, whole in (("tile_size", "overlap", "a tiled pass runs on one lattice"),
-                                     ("conf", "density", "a detector's pass keeps each frame's "
-                                      "detections by both")):
-            if (getattr(self, first) is None) != (getattr(self, second) is None):
+        for first, second, whole in (
+            ("tile_size", "overlap", "a tiled pass runs on one lattice"),
+            (
+                "conf",
+                "density",
+                "a detector's pass keeps each frame's detections by both",
+            ),
+        ):
+            if (getattr(self, first) is None) != (
+                getattr(self, second) is None
+            ):
                 raise ValueError(
                     f"the execution record states {first} {getattr(self, first)!r} and {second} "
                     f"{getattr(self, second)!r}: {whole}, so no pass runs from a record stating "
-                    "one alone.")
+                    "one alone."
+                )
 
     @property
     def tiled(self) -> bool:
@@ -93,7 +103,9 @@ class Execution:
     def record(self) -> dict[str, Any]:
         """The record as JSON values."""
         out = asdict(self)
-        out["tile_resize"] = list(self.tile_resize) if self.tile_resize is not None else None
+        out["tile_resize"] = (
+            list(self.tile_resize) if self.tile_resize is not None else None
+        )
         return out
 
     @classmethod
@@ -101,16 +113,24 @@ class Execution:
         """The execution a :meth:`record` states. A record missing a field refuses naming it."""
         missing = sorted(set(cls.__dataclass_fields__) - set(record))
         if missing:
-            raise ValueError(f"the execution record carries no {missing}: it states only part of "
-                             "a pass, so no pass can be restored from it.")
+            raise ValueError(
+                f"the execution record carries no {missing}: it states only part of "
+                "a pass, so no pass can be restored from it."
+            )
         resize = record["tile_resize"]
-        return cls(**{**{k: record[k] for k in cls.__dataclass_fields__},
-                      "tile_resize": tuple(resize) if resize is not None else None,
-                      "sources": dict(record["sources"])})
+        return cls(
+            **{
+                **{k: record[k] for k in cls.__dataclass_fields__},
+                "tile_resize": tuple(resize) if resize is not None else None,
+                "sources": dict(record["sources"]),
+            }
+        )
 
     def with_value(self, name: str, value: Any, source: str) -> Execution:
         """This record with ``name`` set to ``value`` from ``source``."""
-        return replace(self, **{name: value}, sources={**self.sources, name: source})
+        return replace(
+            self, **{name: value}, sources={**self.sources, name: source}
+        )
 
 
 class Stated(BaseModel):
@@ -129,12 +149,17 @@ class Stated(BaseModel):
 
     def differences(self, restored: Execution) -> list[str]:
         """Each stated value, the tiled flag included, that ``restored`` states differently."""
-        differing = ([f"tile stated {self.tile!r}, recorded {restored.tiled!r}"]
-                     if self.tile is not None and self.tile != restored.tiled else [])
+        differing = (
+            [f"tile stated {self.tile!r}, recorded {restored.tiled!r}"]
+            if self.tile is not None and self.tile != restored.tiled
+            else []
+        )
         for name in Stated.model_fields.keys() - {"tile"}:
             value = getattr(self, name)
             if value is not None and value != getattr(restored, name):
-                differing.append(f"{name} stated {value!r}, recorded {getattr(restored, name)!r}")
+                differing.append(
+                    f"{name} stated {value!r}, recorded {getattr(restored, name)!r}"
+                )
         return sorted(differing)
 
 
@@ -160,12 +185,16 @@ class Pass:
     tile_batch_size: int
     paths: list[Any] = field(default_factory=list)
 
-    def predict(self, sources: list[Any],
-                execution: Execution | None = None) -> list[dict]:
+    def predict(
+        self, sources: list[Any], execution: Execution | None = None
+    ) -> list[dict]:
         """One result per source under the pass's own execution record, or under ``execution``
         where one is given."""
         return self.predictor.predict_batch(
-            sources, execution=execution or self.execution, tile_batch_size=self.tile_batch_size)
+            sources,
+            execution=execution or self.execution,
+            tile_batch_size=self.tile_batch_size,
+        )
 
 
 @dataclass
@@ -188,15 +217,30 @@ class Preparation:
     def runnable(self, reference: Reference | None = None) -> Pass:
         """The pass under the restored record, or under the record :func:`execution_record`
         resolves from what was stated and ``reference``."""
-        execution = (self.restored if self.restored is not None else
-                     execution_record(self.checkpoint, self.stated, self.geometry, reference))
-        return Pass(checkpoint=self.checkpoint, predictor=self.predictor, scope=self.scope,
-                    execution=execution, tile_batch_size=self.tile_batch_size, paths=self.paths)
+        execution = (
+            self.restored
+            if self.restored is not None
+            else execution_record(
+                self.checkpoint, self.stated, self.geometry, reference
+            )
+        )
+        return Pass(
+            checkpoint=self.checkpoint,
+            predictor=self.predictor,
+            scope=self.scope,
+            execution=execution,
+            tile_batch_size=self.tile_batch_size,
+            paths=self.paths,
+        )
 
 
 def prepare(
-    checkpoint: VerifiedCheckpoint, stated: Stated = Stated(), *, images_dir: str | None = None,
-    device: str | None = None, tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE,
+    checkpoint: VerifiedCheckpoint,
+    stated: Stated = Stated(),
+    *,
+    images_dir: str | None = None,
+    device: str | None = None,
+    tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE,
     restored: Execution | None = None,
 ) -> Preparation:
     """``checkpoint`` readied for a pass over ``images_dir``'s logical images (none for a raster
@@ -210,7 +254,10 @@ def prepare(
 
     from tcip_mcp.pipelines.image_utils import list_logical_images
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
-    from tcip_mcp.pipelines.slicing import TileEdgeContradictionError, resolve_tile_geometry
+    from tcip_mcp.pipelines.slicing import (
+        TileEdgeContradictionError,
+        resolve_tile_geometry,
+    )
 
     logical = list_logical_images(images_dir) if images_dir is not None else {}
     paths = [logical[stem] for stem in sorted(logical)]
@@ -218,30 +265,50 @@ def prepare(
     if restored is not None:
         differing = stated.differences(restored)
         if restored.tiled and restored.sahi_version != sahi.__version__:
-            differing.append(f"sahi {sahi.__version__} installed, {restored.sahi_version} recorded")
+            differing.append(
+                f"sahi {sahi.__version__} installed, {restored.sahi_version} recorded"
+            )
         if differing:
             raise ExecutionRefusedError(
                 f"the recorded execution differs from this call: {'; '.join(differing)}. A pass "
                 "restored from a record runs exactly that record; drop the differing argument "
-                "or start a new pass.")
+                "or start a new pass."
+            )
 
     predictor = GenericPredictor(checkpoint, device=device)
     geometry = None
-    if restored is None and (predictor.train_tile_size is not None
-                             if stated.tile is None else stated.tile):
+    if restored is None and (
+        predictor.train_tile_size is not None
+        if stated.tile is None
+        else stated.tile
+    ):
         try:
-            geometry = resolve_tile_geometry(predictor, tiled=True, tile_size=stated.tile_size,
-                                             overlap=stated.overlap)
+            geometry = resolve_tile_geometry(
+                predictor,
+                tiled=True,
+                tile_size=stated.tile_size,
+                overlap=stated.overlap,
+            )
         except TileEdgeContradictionError as exc:
             raise ExecutionRefusedError(str(exc)) from exc
-    return Preparation(checkpoint=checkpoint, predictor=predictor,
-                       scope=checkpoint.spec.data.recorded_scope, geometry=geometry,
-                       stated=stated, restored=restored, tile_batch_size=tile_batch_size,
-                       paths=paths)
+    return Preparation(
+        checkpoint=checkpoint,
+        predictor=predictor,
+        scope=checkpoint.spec.data.recorded_scope,
+        geometry=geometry,
+        stated=stated,
+        restored=restored,
+        tile_batch_size=tile_batch_size,
+        paths=paths,
+    )
 
 
-def execution_record(checkpoint: VerifiedCheckpoint, stated: Stated,
-                     geometry: TileGeometry | None, reference: Reference | None) -> Execution:
+def execution_record(
+    checkpoint: VerifiedCheckpoint,
+    stated: Stated,
+    geometry: TileGeometry | None,
+    reference: Reference | None,
+) -> Execution:
     """The one complete execution record a fresh pass of ``checkpoint`` runs under, each value's
     source recorded. A detector's ``conf`` is the stated one; its ``density`` the one
     ``reference``'s regions derive (``derivations.derive_object_density``), else the one
@@ -257,8 +324,12 @@ def execution_record(checkpoint: VerifiedCheckpoint, stated: Stated,
     import sahi
 
     from tcip_mcp.pipelines.derivations import (
-        CROSS_TILE_NMS_DERIVATION, OBJECT_DENSITY_DERIVATION, TILE_EDGE_DERIVATION,
-        TILE_OVERLAP_DERIVATION, derive_cross_tile_nms, derive_object_density,
+        CROSS_TILE_NMS_DERIVATION,
+        OBJECT_DENSITY_DERIVATION,
+        TILE_EDGE_DERIVATION,
+        TILE_OVERLAP_DERIVATION,
+        derive_cross_tile_nms,
+        derive_object_density,
         derive_tile_geometry,
     )
     from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
@@ -269,7 +340,8 @@ def execution_record(checkpoint: VerifiedCheckpoint, stated: Stated,
         if stated.conf is None:
             raise ExecutionRefusedError(
                 f"{checkpoint.path} is a detector and this pass states no conf: state the "
-                "confidence its boxes are kept at, or run under an assessment's record")
+                "confidence its boxes are kept at, or run under an assessment's record"
+            )
         values["conf"], sources["conf"] = float(stated.conf), "explicit"
         if reference is not None:
             values["density"] = derive_object_density(reference.regions)
@@ -281,15 +353,25 @@ def execution_record(checkpoint: VerifiedCheckpoint, stated: Stated,
             raise ExecutionRefusedError(
                 f"{checkpoint.path} records no object density of its training frames, so no "
                 "frame's detection cap has a basis: train it with launch_training over label "
-                "documents, or run under an assessment's record")
+                "documents, or run under an assessment's record"
+            )
     elif stated.conf is not None:
         raise ExecutionRefusedError(
             f"{checkpoint.path} is a {checkpoint.task!r} checkpoint: a confidence threshold "
-            "governs a detector's boxes and nothing this head produces.")
+            "governs a detector's boxes and nothing this head produces."
+        )
     if geometry is None:
-        return Execution(conf=values.get("conf"), density=values.get("density"),
-                         tile_size=None, overlap=None, tile_resize=None, postprocess=None,
-                         cross_tile_nms=None, sahi_version=None, sources=sources)
+        return Execution(
+            conf=values.get("conf"),
+            density=values.get("density"),
+            tile_size=None,
+            overlap=None,
+            tile_resize=None,
+            postprocess=None,
+            cross_tile_nms=None,
+            sahi_version=None,
+            sources=sources,
+        )
 
     edge, overlap = geometry.tile_size, geometry.overlap
     if edge is None or overlap is None:
@@ -298,14 +380,27 @@ def execution_record(checkpoint: VerifiedCheckpoint, stated: Stated,
                 f"a tiled pass of {checkpoint.path} has no "
                 f"{'tile_size' if edge is None else 'overlap'}: state it, train the checkpoint "
                 "tiled so it records its lattice, or run under an assessment's reference whose "
-                "ground truth derives it")
-        edge, overlap = derive_tile_geometry(reference.regions, tile_size=edge, overlap=overlap)
-    sources["tile_size"] = (geometry.tile_size_source if geometry.tile_size is not None
-                            else TILE_EDGE_DERIVATION)
-    sources["overlap"] = (geometry.overlap_source if geometry.overlap is not None
-                          else TILE_OVERLAP_DERIVATION)
+                "ground truth derives it"
+            )
+        edge, overlap = derive_tile_geometry(
+            reference.regions, tile_size=edge, overlap=overlap
+        )
+    sources["tile_size"] = (
+        geometry.tile_size_source
+        if geometry.tile_size is not None
+        else TILE_EDGE_DERIVATION
+    )
+    sources["overlap"] = (
+        geometry.overlap_source
+        if geometry.overlap is not None
+        else TILE_OVERLAP_DERIVATION
+    )
 
-    merge = DEFAULT_POSTPROCESS if stated.postprocess is None else stated.postprocess
+    merge = (
+        DEFAULT_POSTPROCESS
+        if stated.postprocess is None
+        else stated.postprocess
+    )
     match_metric = cross_tile_merge_of(merge)[1]
     threshold = stated.cross_tile_nms
     if threshold is not None:
@@ -313,20 +408,32 @@ def execution_record(checkpoint: VerifiedCheckpoint, stated: Stated,
     elif match_metric != "IOU":
         raise ExecutionRefusedError(
             f"a tiled pass merging by {merge!r} compares by {match_metric} and has no "
-            "cross_tile_nms: state it, since no derivation stands behind an IoS threshold")
+            "cross_tile_nms: state it, since no derivation stands behind an IoS threshold"
+        )
     elif reference is None:
         raise ExecutionRefusedError(
             f"a tiled pass merging by {merge!r} has no cross_tile_nms: state it, since this pass "
-            "holds no reference ground truth to derive it from")
+            "holds no reference ground truth to derive it from"
+        )
     else:
         threshold = derive_cross_tile_nms(reference.regions)
         if threshold is None:
             raise ExecutionRefusedError(
                 "the reference's ground truth derives no cross-tile merge threshold, since no two "
-                "of its objects in one region overlap; state cross_tile_nms")
+                "of its objects in one region overlap; state cross_tile_nms"
+            )
         sources["cross_tile_nms"] = CROSS_TILE_NMS_DERIVATION
     return Execution(
-        conf=values.get("conf"), density=values.get("density"), tile_size=edge, overlap=overlap,
-        tile_resize=geometry.tile_resize, postprocess=merge, cross_tile_nms=float(threshold),
+        conf=values.get("conf"),
+        density=values.get("density"),
+        tile_size=edge,
+        overlap=overlap,
+        tile_resize=geometry.tile_resize,
+        postprocess=merge,
+        cross_tile_nms=float(threshold),
         sahi_version=sahi.__version__,
-        sources={**sources, "postprocess": "explicit" if stated.postprocess else "default"})
+        sources={
+            **sources,
+            "postprocess": "explicit" if stated.postprocess else "default",
+        },
+    )

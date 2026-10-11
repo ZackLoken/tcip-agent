@@ -20,7 +20,11 @@ from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
 )
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tcip_mcp.pipelines.raster_source import open_raster
-from tests._chain_fixtures import BESPOKE_DETECTION, BESPOKE_INSTANCE_SEG, BESPOKE_MODELS
+from tests._chain_fixtures import (
+    BESPOKE_DETECTION,
+    BESPOKE_INSTANCE_SEG,
+    BESPOKE_MODELS,
+)
 
 from tests._geotiff_fixtures import (
     PIXEL_SCALE,
@@ -102,7 +106,13 @@ def test_missing_geokey_directory_refuses(tmp_path: Path) -> None:
         extrasamples=["unassalpha"],
         extratags=[
             (33550, "d", 3, (PIXEL_SCALE, PIXEL_SCALE, 0.0), False),
-            (33922, "d", 6, (0.0, 0.0, 0.0, TIEPOINT_NATIVE_X, TIEPOINT_NATIVE_Y, 0.0), False),
+            (
+                33922,
+                "d",
+                6,
+                (0.0, 0.0, 0.0, TIEPOINT_NATIVE_X, TIEPOINT_NATIVE_Y, 0.0),
+                False,
+            ),
         ],
     )
     with pytest.raises(GeoreferencingError):
@@ -122,7 +132,9 @@ def test_model_transformation_tag_refuses(tmp_path: Path) -> None:
 # ── UTM -> WGS84 reprojection ───────────────────────────────────────────
 
 
-def test_pixel_to_wgs84_matches_independent_pyproj_transform(tmp_path: Path) -> None:
+def test_pixel_to_wgs84_matches_independent_pyproj_transform(
+    tmp_path: Path,
+) -> None:
     import pyproj
 
     path = tmp_path / "mosaic.tif"
@@ -133,7 +145,9 @@ def test_pixel_to_wgs84_matches_independent_pyproj_transform(tmp_path: Path) -> 
     # A second, independently-constructed Transformer: exercises whether OrthomosaicGeoreference
     # wired the EPSG code, argument order, and lat/lon swap correctly, not whether pyproj itself
     # is correct.
-    reference = pyproj.Transformer.from_crs(f"EPSG:{UTM_15N_EPSG}", "EPSG:4326", always_xy=True)
+    reference = pyproj.Transformer.from_crs(
+        f"EPSG:{UTM_15N_EPSG}", "EPSG:4326", always_xy=True
+    )
     native_x, native_y = pixel_to_native(read_geotransform(path), 30.0, 40.0)
     expected_lon, expected_lat = reference.transform(native_x, native_y)
 
@@ -141,14 +155,18 @@ def test_pixel_to_wgs84_matches_independent_pyproj_transform(tmp_path: Path) -> 
     assert lon == pytest.approx(expected_lon)
 
 
-def test_pixel_to_wgs84_central_meridian_known_reference(tmp_path: Path) -> None:
+def test_pixel_to_wgs84_central_meridian_known_reference(
+    tmp_path: Path,
+) -> None:
     """UTM zone 15N's central meridian is exactly -93 degrees longitude; a pixel resolving to
     native easting 500000 (the zone's false easting) must land on that meridian regardless of
     northing, a hand-verifiable check independent of trusting pyproj's own round-trip."""
     path = tmp_path / "mosaic.tif"
     _write_geotiff(path)
     georef = OrthomosaicGeoreference(read_geotransform(path))
-    _lat, lon = georef.pixel_to_wgs84(0.0, 0.0)  # tiepoint pixel -> native (500000, 4800000)
+    _lat, lon = georef.pixel_to_wgs84(
+        0.0, 0.0
+    )  # tiepoint pixel -> native (500000, 4800000)
     assert lon == pytest.approx(-93.0, abs=1e-6)
 
 
@@ -156,7 +174,8 @@ def test_pixel_to_wgs84_central_meridian_known_reference(tmp_path: Path) -> None
 
 
 def test_wgs84_to_pixel_matches_independent_pyproj_inverse_at_asymmetric_pixel(
-        tmp_path: Path) -> None:
+    tmp_path: Path,
+) -> None:
     """An asymmetric pixel (distinct nonzero x and y, off the tiepoint): the round-trip and an
     independently-built pyproj inverse transform must both land back on it."""
     import pyproj
@@ -167,10 +186,14 @@ def test_wgs84_to_pixel_matches_independent_pyproj_inverse_at_asymmetric_pixel(
     px, py = 30.0, 47.0
     lat, lon = georef.pixel_to_wgs84(px, py)
 
-    reference = pyproj.Transformer.from_crs("EPSG:4326", f"EPSG:{UTM_15N_EPSG}", always_xy=True)
+    reference = pyproj.Transformer.from_crs(
+        "EPSG:4326", f"EPSG:{UTM_15N_EPSG}", always_xy=True
+    )
     expected_native_x, expected_native_y = reference.transform(lon, lat)
     transform = read_geotransform(path)
-    expected_px, expected_py = native_to_pixel(transform, expected_native_x, expected_native_y)
+    expected_px, expected_py = native_to_pixel(
+        transform, expected_native_x, expected_native_y
+    )
 
     result_px, result_py = georef.wgs84_to_pixel(lat, lon)
     assert result_px == pytest.approx(expected_px, abs=1e-6)
@@ -180,7 +203,8 @@ def test_wgs84_to_pixel_matches_independent_pyproj_inverse_at_asymmetric_pixel(
 
 
 def test_native_to_pixel_round_trips_with_pixel_to_native_at_asymmetric_pixel(
-        tmp_path: Path) -> None:
+    tmp_path: Path,
+) -> None:
     path = tmp_path / "mosaic.tif"
     _write_geotiff(path)
     transform = read_geotransform(path)
@@ -191,7 +215,9 @@ def test_native_to_pixel_round_trips_with_pixel_to_native_at_asymmetric_pixel(
     assert round_py == pytest.approx(py)
 
 
-def test_native_to_pixel_zero_pixel_scale_x_refuses_naming_the_scale(tmp_path: Path) -> None:
+def test_native_to_pixel_zero_pixel_scale_x_refuses_naming_the_scale(
+    tmp_path: Path,
+) -> None:
     path = tmp_path / "mosaic.tif"
     _write_geotiff(path)
     transform = read_geotransform(path)
@@ -200,7 +226,9 @@ def test_native_to_pixel_zero_pixel_scale_x_refuses_naming_the_scale(tmp_path: P
         native_to_pixel(degenerate, 500_000.0, 4_800_000.0)
 
 
-def test_native_to_pixel_zero_pixel_scale_y_refuses_naming_the_scale(tmp_path: Path) -> None:
+def test_native_to_pixel_zero_pixel_scale_y_refuses_naming_the_scale(
+    tmp_path: Path,
+) -> None:
     path = tmp_path / "mosaic.tif"
     _write_geotiff(path)
     transform = read_geotransform(path)
@@ -212,7 +240,9 @@ def test_native_to_pixel_zero_pixel_scale_y_refuses_naming_the_scale(tmp_path: P
 # ── plants_in_frame: the one in-frame partition both attribution regimes share ──
 
 
-def test_plants_in_frame_partitions_by_the_rasters_own_recorded_dimensions(tmp_path: Path) -> None:
+def test_plants_in_frame_partitions_by_the_rasters_own_recorded_dimensions(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
 
     path = tmp_path / "mosaic.tif"
@@ -220,12 +250,28 @@ def test_plants_in_frame_partitions_by_the_rasters_own_recorded_dimensions(tmp_p
     georef = OrthomosaicGeoreference(read_geotransform(path))
 
     inside_lat, inside_lon = georef.pixel_to_wgs84(10.0, 10.0)
-    outside_lat, outside_lon = georef.pixel_to_wgs84(-5.0, 10.0)  # negative column: outside
+    outside_lat, outside_lon = georef.pixel_to_wgs84(
+        -5.0, 10.0
+    )  # negative column: outside
     plants = [
-        PlantRecord(plot_name="in", accession_name="a", plot_number=0, row_number=0,
-                   col_number=0, lat=inside_lat, lon=inside_lon),
-        PlantRecord(plot_name="out", accession_name="b", plot_number=1, row_number=0,
-                   col_number=1, lat=outside_lat, lon=outside_lon),
+        PlantRecord(
+            plot_name="in",
+            accession_name="a",
+            plot_number=0,
+            row_number=0,
+            col_number=0,
+            lat=inside_lat,
+            lon=inside_lon,
+        ),
+        PlantRecord(
+            plot_name="out",
+            accession_name="b",
+            plot_number=1,
+            row_number=0,
+            col_number=1,
+            lat=outside_lat,
+            lon=outside_lon,
+        ),
     ]
 
     in_frame, outside = plants_in_frame(plants, georef, width=64, height=64)
@@ -233,7 +279,9 @@ def test_plants_in_frame_partitions_by_the_rasters_own_recorded_dimensions(tmp_p
     assert [p.plot_name for p in outside] == ["out"]
 
 
-def test_plants_in_frame_edge_pixel_at_width_or_height_is_outside(tmp_path: Path) -> None:
+def test_plants_in_frame_edge_pixel_at_width_or_height_is_outside(
+    tmp_path: Path,
+) -> None:
     """The half-open test: a plant projecting to exactly the raster's own width or height row or
     column is outside, since a valid pixel index runs only 0..width-1 / 0..height-1, on both
     axes."""
@@ -245,10 +293,24 @@ def test_plants_in_frame_edge_pixel_at_width_or_height_is_outside(tmp_path: Path
     width_edge_lat, width_edge_lon = georef.pixel_to_wgs84(64.0, 10.0)
     height_edge_lat, height_edge_lon = georef.pixel_to_wgs84(10.0, 64.0)
     plants = [
-        PlantRecord(plot_name="width_edge", accession_name="a", plot_number=0, row_number=0,
-                    col_number=0, lat=width_edge_lat, lon=width_edge_lon),
-        PlantRecord(plot_name="height_edge", accession_name="b", plot_number=1, row_number=0,
-                    col_number=1, lat=height_edge_lat, lon=height_edge_lon),
+        PlantRecord(
+            plot_name="width_edge",
+            accession_name="a",
+            plot_number=0,
+            row_number=0,
+            col_number=0,
+            lat=width_edge_lat,
+            lon=width_edge_lon,
+        ),
+        PlantRecord(
+            plot_name="height_edge",
+            accession_name="b",
+            plot_number=1,
+            row_number=0,
+            col_number=1,
+            lat=height_edge_lat,
+            lon=height_edge_lon,
+        ),
     ]
 
     in_frame, outside = plants_in_frame(plants, georef, width=64, height=64)
@@ -282,8 +344,17 @@ def _pass(tmp_path: Path, ckpt: str):
 
     return prepare(
         load_registered_checkpoint(ckpt, project=tmp_path),
-        Stated(tile=True, tile_size=TILE, overlap=0.2, postprocess="nms", cross_tile_nms=0.3,
-               conf=0.0), device="cpu", tile_batch_size=8).runnable()
+        Stated(
+            tile=True,
+            tile_size=TILE,
+            overlap=0.2,
+            postprocess="nms",
+            cross_tile_nms=0.3,
+            conf=0.0,
+        ),
+        device="cpu",
+        tile_batch_size=8,
+    ).runnable()
 
 
 def _bare_execution():
@@ -297,13 +368,21 @@ def _bare_execution():
 def _sliced(predictor, execution, source, **kwargs) -> dict:
     """``predict_sliced`` under ``execution``, eight tiles a batch, masks collected unless
     ``kwargs`` says otherwise."""
-    call: dict = dict(execution=execution, tile_batch_size=8, require_masks=True)
+    call: dict = dict(
+        execution=execution, tile_batch_size=8, require_masks=True
+    )
     call.update(kwargs)
     return predictor.predict_sliced(source, **call)
 
 
-def _windowed_multiband_tiff(path: Path, *, height: int = 96, width: int = 96,
-                              channels: int = 4, rowsperstrip: int = 12) -> np.ndarray:
+def _windowed_multiband_tiff(
+    path: Path,
+    *,
+    height: int = 96,
+    width: int = 96,
+    channels: int = 4,
+    rowsperstrip: int = 12,
+) -> np.ndarray:
     """A small multi-band raster with real pixel content (not all-zero, so a from-scratch
     detector's convolutions see something), decodable by both ``load_image`` (the full-array
     path) and the windowed raster layer (``open_raster``): strip-based, contiguous samples, no
@@ -315,8 +394,9 @@ def _windowed_multiband_tiff(path: Path, *, height: int = 96, width: int = 96,
     return arr
 
 
-def _bespoke_detection_checkpoint(tmp_path: Path, raster_path: Path, *, in_chans: int,
-                                  tile_size: int = TILE) -> str:
+def _bespoke_detection_checkpoint(
+    tmp_path: Path, raster_path: Path, *, in_chans: int, tile_size: int = TILE
+) -> str:
     """A real bespoke detector checkpoint for a raster with ``in_chans`` bands.
 
     At ``in_chans != 3``, ``build_detector`` refuses without per-band ``image_mean``/``image_std``
@@ -334,13 +414,22 @@ def _bespoke_detection_checkpoint(tmp_path: Path, raster_path: Path, *, in_chans
         builder_kwargs["image_mean"] = mean
         builder_kwargs["image_std"] = std
 
-    return _raster_checkpoint(tmp_path, {"builder": BESPOKE_DETECTION,
-                                         "builder_kwargs": builder_kwargs,
-                                         "source_files": [BESPOKE_MODELS], "task": "detection"},
-                              in_chans, tiling={"enabled": False})
+    return _raster_checkpoint(
+        tmp_path,
+        {
+            "builder": BESPOKE_DETECTION,
+            "builder_kwargs": builder_kwargs,
+            "source_files": [BESPOKE_MODELS],
+            "task": "detection",
+        },
+        in_chans,
+        tiling={"enabled": False},
+    )
 
 
-def _raster_checkpoint(tmp_path: Path, model_source: dict, channels: int, **data) -> str:
+def _raster_checkpoint(
+    tmp_path: Path, model_source: dict, channels: int, **data
+) -> str:
     """The checkpoint a run under ``tmp_path`` of ``model_source`` completed over two labeled
     ``channels``-band rasters of its own, ``data``'s keys laid over its data section; registered
     by completing. The frames are not square, so the run records no frame edge a stated tile
@@ -348,23 +437,44 @@ def _raster_checkpoint(tmp_path: Path, model_source: dict, channels: int, **data
     from tcip_annotation.state import Annotation, BBox, Polygon
 
     from tests._producer_fixtures import label_image
-    from tests._verified_checkpoint_fixtures import fixture_data_dir, registered_checkpoint
+    from tests._verified_checkpoint_fixtures import (
+        fixture_data_dir,
+        registered_checkpoint,
+    )
 
-    geometry = (Polygon([[(8, 8), (24, 8), (24, 24), (8, 24)]])
-                if model_source["task"] == "instance_seg" else BBox(8, 8, 24, 24))
+    geometry = (
+        Polygon([[(8, 8), (24, 8), (24, 24), (8, 24)]])
+        if model_source["task"] == "instance_seg"
+        else BBox(8, 8, 24, 24)
+    )
     images = fixture_data_dir(tmp_path, "rasters") / "images" / UNDATED_BUCKET
     images.mkdir(parents=True)
     for index in range(2):
         frame = images / f"frame{index}.tif"
-        arr = _windowed_multiband_tiff(frame, height=48, width=64, channels=channels)
-        label_image(frame, [Annotation(subject="bud", geometry=geometry)],
-                    arr.shape[1], arr.shape[0])
-    return registered_checkpoint(tmp_path, model_source=model_source, data={
-        "images_dir": str(images), "num_channels": channels, "scope": {"subject": "bud"},
-        **data})
+        arr = _windowed_multiband_tiff(
+            frame, height=48, width=64, channels=channels
+        )
+        label_image(
+            frame,
+            [Annotation(subject="bud", geometry=geometry)],
+            arr.shape[1],
+            arr.shape[0],
+        )
+    return registered_checkpoint(
+        tmp_path,
+        model_source=model_source,
+        data={
+            "images_dir": str(images),
+            "num_channels": channels,
+            "scope": {"subject": "bud"},
+            **data,
+        },
+    )
 
 
-def test_predict_sliced_windowed_source_matches_full_array_predict_sliced(tmp_path: Path) -> None:
+def test_predict_sliced_windowed_source_matches_full_array_predict_sliced(
+    tmp_path: Path,
+) -> None:
     """The load-bearing correctness check: the windowed-read slicing path and the full-array
     ``predict_sliced`` path must produce bit-identical full-mosaic-pixel-space
     detections for the same checkpoint and the same raster, not merely both run without error.
@@ -373,36 +483,60 @@ def test_predict_sliced_windowed_source_matches_full_array_predict_sliced(tmp_pa
     pytest.importorskip("torchvision")
     path = tmp_path / "mosaic.tif"
     arr = _windowed_multiband_tiff(path)
-    ckpt = _bespoke_detection_checkpoint(tmp_path, path, in_chans=arr.shape[-1])
+    ckpt = _bespoke_detection_checkpoint(
+        tmp_path, path, in_chans=arr.shape[-1]
+    )
 
     full = _pass(tmp_path, ckpt)
     full_result = _sliced(full.predictor, full.execution, str(path))
 
     windowed = _pass(tmp_path, ckpt)
     with open_raster(path, arr.shape[-1]) as reader:
-        win_result = _sliced(windowed.predictor, windowed.execution, reader,
-                             source_label=str(path))
+        win_result = _sliced(
+            windowed.predictor,
+            windowed.execution,
+            reader,
+            source_label=str(path),
+        )
 
     assert win_result["width"] == full_result["width"] == arr.shape[1]
     assert win_result["height"] == full_result["height"] == arr.shape[0]
-    assert win_result["tiles"] == full_result["tiles"] > 1  # really tiled, not one pass
+    assert (
+        win_result["tiles"] == full_result["tiles"] > 1
+    )  # really tiled, not one pass
     assert win_result["image"] == str(path)
-    np.testing.assert_allclose(win_result["boxes"], full_result["boxes"], rtol=1e-5, atol=1e-4)
-    np.testing.assert_allclose(win_result["scores"], full_result["scores"], rtol=1e-5, atol=1e-6)
+    np.testing.assert_allclose(
+        win_result["boxes"], full_result["boxes"], rtol=1e-5, atol=1e-4
+    )
+    np.testing.assert_allclose(
+        win_result["scores"], full_result["scores"], rtol=1e-5, atol=1e-6
+    )
     assert win_result["labels"] == full_result["labels"]
 
 
 def _bespoke_instance_seg_checkpoint(
-        tmp_path: Path, *, in_chans: int = 3, tile_size: int = TILE) -> str:
+    tmp_path: Path, *, in_chans: int = 3, tile_size: int = TILE
+) -> str:
     """A real bespoke Mask R-CNN checkpoint (RGB only, no multispectral norm derivation needed
     for this end-to-end mask-shape test)."""
-    return _raster_checkpoint(tmp_path, {
-        "builder": BESPOKE_INSTANCE_SEG, "task": "instance_seg", "source_files": [BESPOKE_MODELS],
-        "builder_kwargs": {"min_size": tile_size, "max_size": tile_size * 2}}, in_chans)
+    return _raster_checkpoint(
+        tmp_path,
+        {
+            "builder": BESPOKE_INSTANCE_SEG,
+            "task": "instance_seg",
+            "source_files": [BESPOKE_MODELS],
+            "builder_kwargs": {
+                "min_size": tile_size,
+                "max_size": tile_size * 2,
+            },
+        },
+        in_chans,
+    )
 
 
 def test_predict_sliced_windowed_and_full_array_sources_produce_matching_masks(
-        tmp_path: Path) -> None:
+    tmp_path: Path,
+) -> None:
     """Both source kinds carry masks for a multi-slice instance_seg case, in the merged-polygon
     shape documented on ``predict_sliced``, and the windowed path agrees with the full-array path
     detection-for-detection, masks included."""
@@ -418,22 +552,32 @@ def test_predict_sliced_windowed_and_full_array_sources_produce_matching_masks(
 
     windowed = _pass(tmp_path, ckpt)
     with open_raster(path, 3) as reader:
-        win_result = _sliced(windowed.predictor, windowed.execution, reader,
-                             source_label=str(path))
+        win_result = _sliced(
+            windowed.predictor,
+            windowed.execution,
+            reader,
+            source_label=str(path),
+        )
 
     assert "masks" in full_result and "masks" in win_result
-    assert len(full_result["masks"]) == len(win_result["masks"]) == full_result["count"]
+    assert (
+        len(full_result["masks"])
+        == len(win_result["masks"])
+        == full_result["count"]
+    )
     for m in full_result["masks"] + win_result["masks"]:
         assert set(m) == {"segmentation"}
         for flat in m["segmentation"]:
             assert all(0 <= x <= win_result["width"] for x in flat[0::2])
             assert all(0 <= y <= win_result["height"] for y in flat[1::2])
     assert [m["segmentation"] for m in full_result["masks"]] == [
-        m["segmentation"] for m in win_result["masks"]]
+        m["segmentation"] for m in win_result["masks"]
+    ]
 
 
 def test_predict_sliced_windowed_source_require_masks_false_carries_no_masks_key(
-        tmp_path: Path) -> None:
+    tmp_path: Path,
+) -> None:
     """The boxes-only opt-out still works on the windowed path: no ``masks`` key at all, not an
     empty one, mirroring ``predict_sliced``'s own opt-out contract."""
     pytest.importorskip("torch")
@@ -450,7 +594,9 @@ def test_predict_sliced_windowed_source_require_masks_false_carries_no_masks_key
     assert {"boxes", "scores", "labels", "count", "tiles"} <= set(result)
 
 
-def test_predict_sliced_windowed_source_mask_polygon_exports_where_it_sits(tmp_path: Path) -> None:
+def test_predict_sliced_windowed_source_mask_polygon_exports_where_it_sits(
+    tmp_path: Path,
+) -> None:
     """A sliced instance_seg detection's merged polygon round-trips through
     ``encode_predictions`` to a polygon at the same full-mosaic pixels."""
     pytest.importorskip("torch")
@@ -466,15 +612,22 @@ def test_predict_sliced_windowed_source_mask_polygon_exports_where_it_sits(tmp_p
 
     p = _pass(tmp_path, ckpt)
     with open_raster(path, 3) as reader:
-        result = _sliced(p.predictor, p.execution, reader, source_label=str(path))
-    assert result["count"] > 0, "fixture assumes at least one surviving detection"
+        result = _sliced(
+            p.predictor, p.execution, reader, source_label=str(path)
+        )
+    assert result["count"] > 0, (
+        "fixture assumes at least one surviving detection"
+    )
 
     # A clean polygon past the first slice replaces whatever the untrained model predicted: the
     # point is where export places it, not the from-scratch-weights mask content.
-    result["masks"][0] = {"segmentation": [[40.0, 44.0, 46.0, 44.0, 46.0, 50.0, 40.0, 50.0]]}
+    result["masks"][0] = {
+        "segmentation": [[40.0, 44.0, 46.0, 44.0, 46.0, 50.0, 40.0, 50.0]]
+    }
 
-    data, _dropped = encode_predictions(result, "model:fixture",
-                                        scope=registry_scope(tmp_path, "leaf"))
+    data, _dropped = encode_predictions(
+        result, "model:fixture", scope=registry_scope(tmp_path, "leaf")
+    )
     anns = json_io.label_document(data).annotations
     assert isinstance(anns[0].geometry, Polygon)
     xs = [x for ring in anns[0].geometry.rings for x, _ in ring]
@@ -493,7 +646,9 @@ def test_predict_sliced_windowed_source_channel_mismatch_refuses() -> None:
         height, width, num_channels = 64, 64, 5
 
         def read_window(self, y0, y1, x0, x1):
-            raise AssertionError("a channel mismatch must refuse before any tile is read")
+            raise AssertionError(
+                "a channel mismatch must refuse before any tile is read"
+            )
 
     p = GenericPredictor.__new__(GenericPredictor)
     p.task = "detection"
@@ -503,8 +658,9 @@ def test_predict_sliced_windowed_source_channel_mismatch_refuses() -> None:
         _sliced(p, _bare_execution(), _FakeReader())
 
 
-def test_windowed_predict_sliced_reaches_real_slicing_for_instance_seg_with_and_without_masks(
-) -> None:
+def test_windowed_predict_sliced_reaches_real_slicing_for_instance_seg_with_and_without_masks() -> (
+    None
+):
     """instance_seg masks thread through the windowed-read path the same as the full-array
     ``predict_sliced`` path: neither ``require_masks=True`` (masks collected) nor
     ``require_masks=False`` (the boxes-only opt-out) refuses outright, both reach the real slice
@@ -524,7 +680,9 @@ def test_windowed_predict_sliced_reaches_real_slicing_for_instance_seg_with_and_
     p.task = "instance_seg"
     p.in_chans = 3
     p.attribute_sizes = []
-    p.model_source = ModelSourceSchema.model_validate({"builder": "m:f", "task": p.task})
+    p.model_source = ModelSourceSchema.model_validate(
+        {"builder": "m:f", "task": p.task}
+    )
     p.model = torch.nn.Identity()
     p.device = torch.device("cpu")
 
@@ -546,7 +704,9 @@ def test_predict_sliced_windowed_source_refuses_non_detection_task() -> None:
         height, width, num_channels = 64, 64, 3
 
         def read_window(self, y0, y1, x0, x1):
-            raise AssertionError("a non-detection task must refuse before any tile is read")
+            raise AssertionError(
+                "a non-detection task must refuse before any tile is read"
+            )
 
     p = GenericPredictor.__new__(GenericPredictor)
     p.task = "classification"
@@ -559,15 +719,27 @@ def test_predict_sliced_windowed_source_refuses_non_detection_task() -> None:
 # ── Per-detection plant assignment ───────────────────────────────────────
 
 
-def _plant_grid_csv(tmp_path: Path, georef: OrthomosaicGeoreference,
-                    plant_pixels: list[tuple[float, float]]) -> Path:
+def _plant_grid_csv(
+    tmp_path: Path,
+    georef: OrthomosaicGeoreference,
+    plant_pixels: list[tuple[float, float]],
+) -> Path:
     from tests._mapping_fixtures import GRID_COLUMNS, write_plant_csv
 
     rows = []
     for i, (px, py) in enumerate(plant_pixels):
         lat, lon = georef.pixel_to_wgs84(px, py)
-        rows.append({"plot": f"plot{i}", "accession": f"acc{i}", "lat": lat, "lon": lon,
-                     "plot_number": i, "row_number": i // 2, "col_number": i % 2})
+        rows.append(
+            {
+                "plot": f"plot{i}",
+                "accession": f"acc{i}",
+                "lat": lat,
+                "lon": lon,
+                "plot_number": i,
+                "row_number": i // 2,
+                "col_number": i % 2,
+            }
+        )
     return write_plant_csv(tmp_path / "plants.csv", rows, extra=GRID_COLUMNS)
 
 
@@ -577,8 +749,12 @@ def _plant_grid_csv(tmp_path: Path, georef: OrthomosaicGeoreference,
 _PLANT_PIXELS = [(10.0, 10.0), (10.0, 50.0), (50.0, 10.0), (50.0, 50.0)]
 
 
-def test_assign_detections_to_plants_maps_near_and_leaves_far_unmapped(tmp_path: Path) -> None:
-    from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import assign_detections_to_plants
+def test_assign_detections_to_plants_maps_near_and_leaves_far_unmapped(
+    tmp_path: Path,
+) -> None:
+    from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
+        assign_detections_to_plants,
+    )
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         read_plant_csvs,
         resolve_nn_tolerance_m,
@@ -587,15 +763,21 @@ def test_assign_detections_to_plants_maps_near_and_leaves_far_unmapped(tmp_path:
     path = tmp_path / "mosaic.tif"
     _write_geotiff(path)
     georef = OrthomosaicGeoreference(read_geotransform(path))
-    plants = read_plant_csvs([_plant_grid_csv(tmp_path, georef, _PLANT_PIXELS)])
+    plants = read_plant_csvs(
+        [_plant_grid_csv(tmp_path, georef, _PLANT_PIXELS)]
+    )
     assert len(plants) == 4
 
     boxes = [
-        [8.0, 8.0, 12.0, 12.0],              # centroid (10, 10): sits on plant 0
-        [3990.0, 3990.0, 4010.0, 4010.0],    # ~2 km away: no plant anywhere near
+        [8.0, 8.0, 12.0, 12.0],  # centroid (10, 10): sits on plant 0
+        [3990.0, 3990.0, 4010.0, 4010.0],  # ~2 km away: no plant anywhere near
     ]
     assignments = assign_detections_to_plants(
-        boxes, georef, plants, nn_tolerance_m=resolve_nn_tolerance_m(plants)["value"])
+        boxes,
+        georef,
+        plants,
+        nn_tolerance_m=resolve_nn_tolerance_m(plants)["value"],
+    )
     assert len(assignments) == 2
 
     near, far = assignments
@@ -609,19 +791,28 @@ def test_assign_detections_to_plants_maps_near_and_leaves_far_unmapped(tmp_path:
     assert far.source == "unmapped"
     assert far.plot_name is None
     assert far.accession_name is None
-    assert far.distance_m is not None  # honest distance even when unmapped, never fabricated
+    assert (
+        far.distance_m is not None
+    )  # honest distance even when unmapped, never fabricated
 
 
 def test_assign_detections_to_plants_matches_within_the_tolerance_it_is_given(
     tmp_path: Path,
 ) -> None:
-    from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import assign_detections_to_plants
-    from tcip_mcp.pipelines.postprocessing.plant_mapping import haversine_m, read_plant_csvs
+    from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
+        assign_detections_to_plants,
+    )
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        haversine_m,
+        read_plant_csvs,
+    )
 
     path = tmp_path / "mosaic.tif"
     _write_geotiff(path)
     georef = OrthomosaicGeoreference(read_geotransform(path))
-    plants = read_plant_csvs([_plant_grid_csv(tmp_path, georef, _PLANT_PIXELS)])
+    plants = read_plant_csvs(
+        [_plant_grid_csv(tmp_path, georef, _PLANT_PIXELS)]
+    )
 
     det_px = (20.0, 10.0)
     lat, lon = georef.pixel_to_wgs84(*det_px)
@@ -629,20 +820,33 @@ def test_assign_detections_to_plants_matches_within_the_tolerance_it_is_given(
     dist = haversine_m(lat, lon, plant0_lat, plant0_lon)
     detections = [[det_px[0] - 1, det_px[1] - 1, det_px[0] + 1, det_px[1] + 1]]
 
-    tight = assign_detections_to_plants(detections, georef, plants, nn_tolerance_m=dist / 2)
+    tight = assign_detections_to_plants(
+        detections, georef, plants, nn_tolerance_m=dist / 2
+    )
     assert tight[0].source == "unmapped"
-    loose = assign_detections_to_plants(detections, georef, plants, nn_tolerance_m=dist * 2)
+    loose = assign_detections_to_plants(
+        detections, georef, plants, nn_tolerance_m=dist * 2
+    )
     assert loose[0].source == "nearest_neighbor"
     assert loose[0].plot_name == "plot0"
 
 
-def test_assign_detections_to_plants_no_boxes_returns_empty(tmp_path: Path) -> None:
-    from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import assign_detections_to_plants
+def test_assign_detections_to_plants_no_boxes_returns_empty(
+    tmp_path: Path,
+) -> None:
+    from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
+        assign_detections_to_plants,
+    )
     from tcip_mcp.pipelines.postprocessing.plant_mapping import read_plant_csvs
 
     path = tmp_path / "mosaic.tif"
     _write_geotiff(path)
     georef = OrthomosaicGeoreference(read_geotransform(path))
-    plants = read_plant_csvs([_plant_grid_csv(tmp_path, georef, _PLANT_PIXELS)])
+    plants = read_plant_csvs(
+        [_plant_grid_csv(tmp_path, georef, _PLANT_PIXELS)]
+    )
 
-    assert assign_detections_to_plants([], georef, plants, nn_tolerance_m=1.0) == []
+    assert (
+        assign_detections_to_plants([], georef, plants, nn_tolerance_m=1.0)
+        == []
+    )

@@ -29,14 +29,21 @@ def _checkpoint(tmp_path: Path, *attributes: cr.Attribute) -> str:
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     return registered_checkpoint(
-        tmp_path, data={"num_channels": 3, "scope": {"subject": SUBJECT}},
-        registry=cr.SubjectRegistry(subjects=(cr.Subject(name=SUBJECT, attributes=attributes),)))
+        tmp_path,
+        data={"num_channels": 3, "scope": {"subject": SUBJECT}},
+        registry=cr.SubjectRegistry(
+            subjects=(cr.Subject(name=SUBJECT, attributes=attributes),)
+        ),
+    )
 
 
 def _attributed_predictor() -> StubPredictor:
     """A predictor over :data:`COLOR` and :data:`GRADE`: two detections, different values."""
-    return StubPredictor(boxes=(BOX, (40.0, 40.0, 60.0, 60.0)), scores=(0.9, 0.8),
-                         attributes=[[0, 2], [1, 0]])
+    return StubPredictor(
+        boxes=(BOX, (40.0, 40.0, 60.0, 60.0)),
+        scores=(0.9, 0.8),
+        attributes=[[0, 2], [1, 0]],
+    )
 
 
 def _published(tmp_path: Path, checkpoint: str, images_dir: Path):
@@ -47,8 +54,13 @@ def _published(tmp_path: Path, checkpoint: str, images_dir: Path):
 
     import tcip_store
 
-    result = run_inference(tmp_path, checkpoint, str(images_dir), bucket="out/2026-01-01",
-                           stated=Stated(tile=False, **SAMPLE_DETECTOR_PASS))
+    result = run_inference(
+        tmp_path,
+        checkpoint,
+        str(images_dir),
+        bucket="out/2026-01-01",
+        stated=Stated(tile=False, **SAMPLE_DETECTOR_PASS),
+    )
     assert "error" not in result, result
     bucket = read_bucket(result["dataset_root"], result["bucket"])
     key = bucket.document_key("img")
@@ -57,7 +69,8 @@ def _published(tmp_path: Path, checkpoint: str, images_dir: Path):
 
 
 def test_an_attributed_run_writes_every_attribute_value_and_stamps_its_scope(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     images_dir = tmp_path / "images" / "2026-01-01"
     write_image(images_dir / "img.png", (100, 100))
@@ -66,15 +79,18 @@ def test_an_attributed_run_writes_every_attribute_value_and_stamps_its_scope(
 
     bucket, anns = _published(tmp_path, checkpoint, images_dir)
 
-    assert [a["attributes"] for a in anns] == [{"color": "red", "grade": "high"},
-                                               {"color": "blue", "grade": "low"}]
+    assert [a["attributes"] for a in anns] == [
+        {"color": "red", "grade": "high"},
+        {"color": "blue", "grade": "low"},
+    ]
     assert all(a["subject"] == SUBJECT for a in anns)
 
     assert bucket.scope.attributes == (COLOR, GRADE)
 
 
 def test_a_detector_run_declaring_no_attribute_writes_the_ordinary_shape_and_stamps_its_scope(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
+    monkeypatch,
 ) -> None:
     images_dir = tmp_path / "images" / "2026-01-01"
     write_image(images_dir / "img.png", (100, 100))

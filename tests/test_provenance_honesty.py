@@ -17,4 +17,6 @@ def test_registered_implementations_exist_and_are_callable():
             continue
         module, _, attr = str(target).rpartition(".")
         fn = getattr(importlib.import_module(module), attr, None)
-        assert callable(fn), f"{label!r} points at {target} which is not an importable callable"
+        assert callable(fn), (
+            f"{label!r} points at {target} which is not an importable callable"
+        )

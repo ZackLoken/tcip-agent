@@ -12,7 +12,11 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from tests._producer_fixtures import box_annotation, image_label_key, label_image
+from tests._producer_fixtures import (
+    box_annotation,
+    image_label_key,
+    label_image,
+)
 
 DATE = "2026-03-02"
 
@@ -45,8 +49,9 @@ def test_subject_names_differing_only_by_case_stay_distinct(
     assert set(subjects) == {"bud", "Bud", "bush"}
     assert subjects["bud"]["description"] == "the first spelling a human typed"
     assert subjects["Bud"]["description"] == "a second spelling a human typed"
-    assert set(json.loads((tmp_path / "subjects.json").read_text(encoding="utf-8"))) == {
-        "bud", "Bud", "bush"}
+    assert set(
+        json.loads((tmp_path / "subjects.json").read_text(encoding="utf-8"))
+    ) == {"bud", "Bud", "bush"}
 
 
 def test_registry_derived_from_labels_keeps_each_name_exactly_as_labeled(
@@ -61,7 +66,8 @@ def test_registry_derived_from_labels_keeps_each_name_exactly_as_labeled(
             box_annotation(300, 44, 372, 70, subject="Bud"),
             box_annotation(5, 9, 640, 480, subject="bush"),
         ],
-        900, 500,
+        900,
+        500,
     )
 
     body = client.get(
@@ -84,12 +90,24 @@ def test_registry_derivation_reports_a_document_it_cannot_read(
     from tests._record_damage_fixtures import damage_record
 
     images = tmp_path / "images" / DATE
-    label_image(images / "IMG_A.jpg", [box_annotation(12, 30, 48, 140)], 900, 500)
-    label_image(images / "IMG_B.jpg", [box_annotation(700, 100, 760, 220)], 900, 500)
+    label_image(
+        images / "IMG_A.jpg", [box_annotation(12, 30, 48, 140)], 900, 500
+    )
+    label_image(
+        images / "IMG_B.jpg", [box_annotation(700, 100, 760, 220)], 900, 500
+    )
     # No platform producer can make a record without a subject; a damaged record can carry one.
-    damage_record(image_label_key(images / "IMG_B.jpg"), encode_record({
-        "image": "IMG_B", "width": 900, "height": 500,
-        "annotations": [{"subject": "", "bbox": [700, 100, 60, 120]}]}))
+    damage_record(
+        image_label_key(images / "IMG_B.jpg"),
+        encode_record(
+            {
+                "image": "IMG_B",
+                "width": 900,
+                "height": 500,
+                "annotations": [{"subject": "", "bbox": [700, 100, 60, 120]}],
+            }
+        ),
+    )
 
     body = client.get(
         "/api/subjects/load",
@@ -106,18 +124,26 @@ def test_a_new_subject_is_addable_alongside_the_saved_ones(
     in place, leaving one entry per name rather than a duplicate."""
     first = client.post(
         "/api/subjects/save",
-        json={"dataset_root": str(tmp_path),
-              "subjects": {"bud": {"description": "first pass"}}, "version": None,
-              "user": "breeder"},
+        json={
+            "dataset_root": str(tmp_path),
+            "subjects": {"bud": {"description": "first pass"}},
+            "version": None,
+            "user": "breeder",
+        },
     )
     assert first.status_code == 200, first.text
 
     second = client.post(
         "/api/subjects/save",
-        json={"dataset_root": str(tmp_path),
-              "subjects": {"bud": {"description": "corrected"},
-                           "hazel_leaf": {"description": "one leaf blade"}},
-              "version": first.json()["version"], "user": "breeder"},
+        json={
+            "dataset_root": str(tmp_path),
+            "subjects": {
+                "bud": {"description": "corrected"},
+                "hazel_leaf": {"description": "one leaf blade"},
+            },
+            "version": first.json()["version"],
+            "user": "breeder",
+        },
     )
     assert second.status_code == 200, second.text
     assert second.json()["n_subjects"] == 2
@@ -128,4 +154,11 @@ def test_a_new_subject_is_addable_alongside_the_saved_ones(
     ).json()["subjects"]
     assert set(subjects) == {"bud", "hazel_leaf"}
     assert subjects["bud"]["description"] == "corrected"
-    assert len(json.loads((tmp_path / "subjects.json").read_text(encoding="utf-8"))) == 2
+    assert (
+        len(
+            json.loads(
+                (tmp_path / "subjects.json").read_text(encoding="utf-8")
+            )
+        )
+        == 2
+    )

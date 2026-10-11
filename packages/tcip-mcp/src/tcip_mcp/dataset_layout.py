@@ -64,7 +64,8 @@ def parse_capture_dir(images_dir: str | Path) -> tuple[Path, str]:
     if directory.parent.name != "images":
         raise ValueError(
             f"{str(directory)!r} is not a capture: a capture's images sit at "
-            f"<root>/images/<capture>/<stem>, a dateless capture's under {UNDATED_BUCKET!r}.")
+            f"<root>/images/<capture>/<stem>, a dateless capture's under {UNDATED_BUCKET!r}."
+        )
     return directory.parent.parent, directory.name
 
 
@@ -99,7 +100,8 @@ def image_dir(dataset_root: str | Path, capture: str) -> Path:
 
     if not is_valid_name(capture):
         raise ValueError(
-            f"a capture must be a single safe path segment (no separators/'..'), got {capture!r}")
+            f"a capture must be a single safe path segment (no separators/'..'), got {capture!r}"
+        )
     return image_root(dataset_root) / capture
 
 
@@ -108,7 +110,9 @@ def image_filename(stem: str, ext: str) -> str:
     return f"{stem}{ext}"
 
 
-def image_path(dataset_root: str | Path, capture: str, stem: str, ext: str) -> Path:
+def image_path(
+    dataset_root: str | Path, capture: str, stem: str, ext: str
+) -> Path:
     """Canonical write path for an image (``ext`` includes the leading dot)."""
     return image_dir(dataset_root, capture) / image_filename(stem, ext)
 
@@ -119,7 +123,9 @@ def list_dates(dataset_root: str | Path) -> list[str]:
     imgs = image_root(dataset_root)
     if not imgs.is_dir():
         return []
-    return sorted(p.name for p in imgs.iterdir() if p.is_dir() and is_bucket_name(p.name))
+    return sorted(
+        p.name for p in imgs.iterdir() if p.is_dir() and is_bucket_name(p.name)
+    )
 
 
 def dataset_root_of(path: str | Path) -> Optional[Path]:
@@ -154,7 +160,9 @@ def dataset_identity_path(dataset_root: str | Path) -> Path:
     return Path(dataset_root, "dataset.json")
 
 
-def decode_dataset_identity_document(data: bytes, *, dataset_root: str | Path) -> dict:
+def decode_dataset_identity_document(
+    data: bytes, *, dataset_root: str | Path
+) -> dict:
     """A dataset identity document's bytes, decoded and shape-checked.
 
     Raises ``ValueError`` for bytes that do not decode, or that decode to something other than a
@@ -165,12 +173,18 @@ def decode_dataset_identity_document(data: bytes, *, dataset_root: str | Path) -
     except ValueError as exc:
         raise ValueError(
             f"{dataset_identity_path(dataset_root)} exists but does not decode as a dataset "
-            f"identity ({exc}); re-register with register_dataset") from exc
+            f"identity ({exc}); re-register with register_dataset"
+        ) from exc
     if not isinstance(identity, dict):
         raise ValueError(
             f"{dataset_identity_path(dataset_root)} exists but does not decode as a dataset "
-            "identity; re-register with register_dataset")
-    _id, _crop, _fingerprint = identity["id"], identity["crop"], identity["fingerprint"]
+            "identity; re-register with register_dataset"
+        )
+    _id, _crop, _fingerprint = (
+        identity["id"],
+        identity["crop"],
+        identity["fingerprint"],
+    )
     return identity
 
 
@@ -178,10 +192,14 @@ def read_dataset_identity(dataset_root: str | Path) -> dict | None:
     """The dataset's identity record (``{crop, id, fingerprint}``) decoded through
     :func:`decode_dataset_identity_document`, or ``None`` for a dataset never registered. A record
     that does not decode raises ``ValueError``."""
-    stored = tcip_store.read_blob_versioned(dataset_identity_path(dataset_root), default=None)
+    stored = tcip_store.read_blob_versioned(
+        dataset_identity_path(dataset_root), default=None
+    )
     if stored.value is None:
         return None
-    return decode_dataset_identity_document(stored.value, dataset_root=dataset_root)
+    return decode_dataset_identity_document(
+        stored.value, dataset_root=dataset_root
+    )
 
 
 def require_dataset_identity(dataset_root: str | Path) -> dict:
@@ -192,7 +210,8 @@ def require_dataset_identity(dataset_root: str | Path) -> dict:
         raise ValueError(
             f"{dataset_root} carries no dataset identity record "
             f"({dataset_identity_path(dataset_root)} absent); register it first with "
-            "register_dataset")
+            "register_dataset"
+        )
     return identity
 
 
@@ -236,7 +255,9 @@ def image_proposals(bucket: str, key: Key) -> tuple["Bucket", list]:
     found = read_bucket(key.root, bucket)
     document = found.document_key(key.parts[-1])
     if document is None:
-        raise ValueError(f"bucket {bucket!r} holds no proposals for {key.parts[-1]}")
+        raise ValueError(
+            f"bucket {bucket!r} holds no proposals for {key.parts[-1]}"
+        )
     return found, read_predictions(document).annotations
 
 
@@ -248,8 +269,12 @@ def verdict_key_of(key: Key, bucket: str) -> Key:
     return verdict_key(key.root, bucket, key.parts[-1])
 
 
-def proposal_pairs(project: str | Path | None, bucket: "Bucket", annotations: list,
-                   proposals: list) -> dict[int, int]:
+def proposal_pairs(
+    project: str | Path | None,
+    bucket: "Bucket",
+    annotations: list,
+    proposals: list,
+) -> dict[int, int]:
     """Which annotation each of ``bucket``'s proposals pairs with, proposal index to annotation
     index, by the one matcher (:func:`~tcip_annotation.matching.pair_proposals`) under the
     localization criterion the assessment ``bucket`` was published under measured its count by;
@@ -264,11 +289,17 @@ def proposal_pairs(project: str | Path | None, bucket: "Bucket", annotations: li
     criterion = None
     if bucket.assessment_id is not None:
         if project is None:
-            raise ValueError(f"bucket {bucket.name!r} was published under assessment "
-                             f"{bucket.assessment_id}, which only its project holds; open it")
-        count = read_assessment(project, bucket.assessment_id).criterion.get("count")
+            raise ValueError(
+                f"bucket {bucket.name!r} was published under assessment "
+                f"{bucket.assessment_id}, which only its project holds; open it"
+            )
+        count = read_assessment(project, bucket.assessment_id).criterion.get(
+            "count"
+        )
         criterion = count["localization"] if count else None
-    m = pair_proposals(annotations, proposals, criterion or resolve_match_criterion(None, []))
+    m = pair_proposals(
+        annotations, proposals, criterion or resolve_match_criterion(None, [])
+    )
     return {p: g for g, p in m.pairs}
 
 
@@ -279,9 +310,16 @@ def signed_off(annotation: "Annotation", by: str, at: str) -> "Annotation":
 
 
 def save_label_document(
-    project: str | Path | None, key: Key, payloads: Iterable[dict], *,
-    width: int, height: int, author: str, actor: Optional[str],
-    expect: Optional[tcip_store.Version] = None, gestures: Gestures = Gestures(),
+    project: str | Path | None,
+    key: Key,
+    payloads: Iterable[dict],
+    *,
+    width: int,
+    height: int,
+    author: str,
+    actor: Optional[str],
+    expect: Optional[tcip_store.Version] = None,
+    gestures: Gestures = Gestures(),
 ) -> "tuple[tcip_store.Version, LabelDocument, dict[int, int]]":
     """Write the label document ``key`` names (:func:`label_key_of` an image), the verdicts its
     ``gestures`` decide and the save's one audit line by ``actor``, in one commit under the
@@ -314,13 +352,26 @@ def save_label_document(
     ``VersionConflictError`` when ``expect`` is not the version the commit reads.
     """
     from tcip_annotation.flags import (
-        flag_key, flags_of, flags_record, raised, resolved_by_removal,
+        flag_key,
+        flags_of,
+        flags_record,
+        raised,
+        resolved_by_removal,
     )
     from tcip_annotation.json_io import (
-        CompletionMark, annotation_from_payload, document_at, document_payload, label_document,
-        stamped, subject_digest,
+        CompletionMark,
+        annotation_from_payload,
+        document_at,
+        document_payload,
+        label_document,
+        stamped,
+        subject_digest,
     )
-    from tcip_annotation.verdicts import Verdict, VerdictAction, record_verdicts
+    from tcip_annotation.verdicts import (
+        Verdict,
+        VerdictAction,
+        record_verdicts,
+    )
 
     from tcip_mcp.audit import audit_entry, audit_log_key, now_iso
 
@@ -336,81 +387,142 @@ def save_label_document(
     decides = bool(gestures.accept or gestures.reject)
     if decides:
         if gestures.bucket is None:
-            raise ValueError("accepting or rejecting a proposal names the bucket it came from")
+            raise ValueError(
+                "accepting or rejecting a proposal names the bucket it came from"
+            )
         both = gestures.accept & gestures.reject
         if both:
-            raise ValueError(f"proposal(s) {sorted(both)} are both accepted and rejected; decide "
-                             "each once")
+            raise ValueError(
+                f"proposal(s) {sorted(both)} are both accepted and rejected; decide "
+                "each once"
+            )
         bucket, proposals = image_proposals(gestures.bucket, key)
         verdict = verdict_key_of(key, gestures.bucket)
-    new_flags = [raised(request, by=author, at=now) for request in gestures.flag]
+    new_flags = [
+        raised(request, by=author, at=now) for request in gestures.flag
+    ]
     for flag in new_flags:
         if flag.proposal is not None:
             named, index = flag.proposal
             held = len(image_proposals(named, key)[1])
             if index >= held:
-                raise ValueError(f"bucket {named!r} holds {held} proposals for {stem}, not one "
-                                 f"at index {index} to flag")
+                raise ValueError(
+                    f"bucket {named!r} holds {held} proposals for {stem}, not one "
+                    f"at index {index} to flag"
+                )
     flags_key = flag_key(key)
-    with tcip_store.transaction(key, audit, flags_key, *([verdict] if decides else [])) as txn:
+    with tcip_store.transaction(
+        key, audit, flags_key, *([verdict] if decides else [])
+    ) as txn:
         read = txn.read_versioned(key, default=None)
         stored = document_at(key, read)
         if expect is not None and expect != read.version:
             raise tcip_store.VersionConflictError(key, expect, read.version)
-        annotations = stamped(contents, stored.annotations, author=author, now=now)
+        annotations = stamped(
+            contents, stored.annotations, author=author, now=now
+        )
         for i in sorted(gestures.confirm):
             if not 0 <= i < len(annotations):
-                raise ValueError(f"the save writes {len(annotations)} annotations for {stem}, "
-                                 f"none at position {i} to confirm")
+                raise ValueError(
+                    f"the save writes {len(annotations)} annotations for {stem}, "
+                    f"none at position {i} to confirm"
+                )
             annotations[i] = signed_off(annotations[i], author, now)
         held_flags = flags_of(txn.read(flags_key, default=None))
         open_ids = {flag.id for flag in held_flags if flag.open}
         unknown = sorted(set(gestures.resolve) - open_ids)
         if unknown:
-            raise ValueError(f"flag(s) {unknown} are not open on {stem}; resolve an open flag")
-        flags = [flag.resolved(by=author, at=now, reply=gestures.resolve[flag.id])
-                 if flag.id in gestures.resolve else flag for flag in held_flags] + new_flags
+            raise ValueError(
+                f"flag(s) {unknown} are not open on {stem}; resolve an open flag"
+            )
+        flags = [
+            flag.resolved(by=author, at=now, reply=gestures.resolve[flag.id])
+            if flag.id in gestures.resolve
+            else flag
+            for flag in held_flags
+        ] + new_flags
         verdicts: list[Verdict] = []
         accepted: dict[int, int] = {}
         if decides:
             paired = proposal_pairs(project, bucket, annotations, proposals)
             decided: tuple[tuple[VerdictAction, frozenset[int]], ...] = (
-                ("accepted", gestures.accept), ("rejected", gestures.reject))
+                ("accepted", gestures.accept),
+                ("rejected", gestures.reject),
+            )
             for action, indices in decided:
                 for i in sorted(indices):
                     if not 0 <= i < len(proposals):
-                        raise ValueError(f"bucket {bucket.name!r} holds {len(proposals)} "
-                                         f"proposals for {stem}, not one at index {i}")
+                        raise ValueError(
+                            f"bucket {bucket.name!r} holds {len(proposals)} "
+                            f"proposals for {stem}, not one at index {i}"
+                        )
                     if action == "accepted" and i in paired:
-                        annotations[paired[i]] = signed_off(annotations[paired[i]], author, now)
+                        annotations[paired[i]] = signed_off(
+                            annotations[paired[i]], author, now
+                        )
                         accepted[i] = paired[i]
                     elif action == "accepted":
-                        annotations.append(replace(signed_off(proposals[i], author, now),
-                                                   score=None, attributes={}))
+                        annotations.append(
+                            replace(
+                                signed_off(proposals[i], author, now),
+                                score=None,
+                                attributes={},
+                            )
+                        )
                         accepted[i] = len(annotations) - 1
-                    verdicts.append(Verdict(proposal=i, action=action, by=author, at=now))
+                    verdicts.append(
+                        Verdict(proposal=i, action=action, by=author, at=now)
+                    )
             record_verdicts(txn, verdict, verdicts)
-        marks = {s: held for s, held in stored.marks.items() if gestures.complete.get(s, True)}
+        marks = {
+            s: held
+            for s, held in stored.marks.items()
+            if gestures.complete.get(s, True)
+        }
         for subject in (s for s, made in gestures.complete.items() if made):
-            marks.setdefault(subject, []).append(CompletionMark(
-                rect=gestures.rect or (0, 0, width, height), by=author, at=now,
-                digest=subject_digest(annotations, subject),
-                proposals_hidden=gestures.proposals_hidden))
-        written = document_payload(annotations, width, height, keep_empty=True, marks=marks)
+            marks.setdefault(subject, []).append(
+                CompletionMark(
+                    rect=gestures.rect or (0, 0, width, height),
+                    by=author,
+                    at=now,
+                    digest=subject_digest(annotations, subject),
+                    proposals_hidden=gestures.proposals_hidden,
+                )
+            )
+        written = document_payload(
+            annotations, width, height, keep_empty=True, marks=marks
+        )
         assert written is not None  # keep_empty always yields a record
         version = txn.write(key, written)
-        flags = resolved_by_removal(flags, stored.annotations, annotations, by=author, at=now)
+        flags = resolved_by_removal(
+            flags, stored.annotations, annotations, by=author, at=now
+        )
         if flags != held_flags:
             txn.write(flags_key, flags_record(flags))
-        txn.append(audit, audit_entry("save_label_document", {
-            "capture": capture, "stem": stem, "n_annotations": len(annotations),
-            "version": version.token, "accepted": sorted(gestures.accept),
-            "rejected": sorted(gestures.reject), "confirmed": sorted(gestures.confirm),
-            "complete": dict(gestures.complete),
-            "flagged": [flag.id for flag in new_flags],
-            "resolved": sorted(flag.id for flag in flags
-                               if not flag.open and flag.id in open_ids),
-        }, actor, "ok"))
+        txn.append(
+            audit,
+            audit_entry(
+                "save_label_document",
+                {
+                    "capture": capture,
+                    "stem": stem,
+                    "n_annotations": len(annotations),
+                    "version": version.token,
+                    "accepted": sorted(gestures.accept),
+                    "rejected": sorted(gestures.reject),
+                    "confirmed": sorted(gestures.confirm),
+                    "complete": dict(gestures.complete),
+                    "flagged": [flag.id for flag in new_flags],
+                    "resolved": sorted(
+                        flag.id
+                        for flag in flags
+                        if not flag.open and flag.id in open_ids
+                    ),
+                },
+                actor,
+                "ok",
+            ),
+        )
     return version, label_document(written), accepted
 
 
@@ -423,7 +535,9 @@ def list_subjects(dataset_root: str | Path) -> list[str]:
 
     if not subjects_path(dataset_root).is_file():
         return []
-    return [s.name for s in subject_registry.read_registry(dataset_root).subjects]
+    return [
+        s.name for s in subject_registry.read_registry(dataset_root).subjects
+    ]
 
 
 def capture_label_keys(dataset_root: str | Path, capture: str) -> list[Key]:
@@ -431,16 +545,23 @@ def capture_label_keys(dataset_root: str | Path, capture: str) -> list[Key]:
     return tcip_store.keys(LABEL_DOCUMENTS, str(dataset_root), (capture,))
 
 
-def capture_subjects(dataset_root: str | Path, capture: str) -> tuple[list[str], list[str]]:
+def capture_subjects(
+    dataset_root: str | Path, capture: str
+) -> tuple[list[str], list[str]]:
     """The distinct subjects the label documents of ``capture`` hold, sorted, and the stem of
     every one of them that will not read."""
-    from tcip_annotation.json_io import UnreadableLabelDocumentError, read_label_document
+    from tcip_annotation.json_io import (
+        UnreadableLabelDocumentError,
+        read_label_document,
+    )
 
     found: set[str] = set()
     unreadable: list[str] = []
     for key in capture_label_keys(dataset_root, capture):
         try:
-            found.update(a.subject for a in read_label_document(key).annotations)
+            found.update(
+                a.subject for a in read_label_document(key).annotations
+            )
         except UnreadableLabelDocumentError:
             unreadable.append(key.parts[-1])
     return sorted(found), unreadable

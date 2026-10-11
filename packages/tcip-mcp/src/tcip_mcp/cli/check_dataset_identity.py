@@ -22,15 +22,20 @@ from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, prog=prog)
     ap.add_argument("dataset_root")
-    ap.add_argument("--project", required=True,
-                    help="the project whose dataset registry names this dataset")
+    ap.add_argument(
+        "--project",
+        required=True,
+        help="the project whose dataset registry names this dataset",
+    )
     args = ap.parse_args(argv)
     project = bound_project(args.project)
 
     root = located(args.dataset_root, project)
     current = dataset_fingerprint(root)
     if current is None:
-        print(f"no fingerprint for {root} (no images/labels, bespoke or empty)")
+        print(
+            f"no fingerprint for {root} (no images/labels, bespoke or empty)"
+        )
         return 0
 
     try:
@@ -42,16 +47,22 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     recorded = identity["fingerprint"]
 
     if recorded is None:
-        print(f"NEVER-RECORDED: {root} carries no recorded fingerprint yet; nothing to compare "
-              f"current={current} against. Register with register_dataset to stamp one.")
+        print(
+            f"NEVER-RECORDED: {root} carries no recorded fingerprint yet; nothing to compare "
+            f"current={current} against. Register with register_dataset to stamp one."
+        )
         status = 4
     elif recorded == current:
-        print(f"OK: {root} unchanged (id={ds_id} crop={identity['crop']} fingerprint={current})")
+        print(
+            f"OK: {root} unchanged (id={ds_id} crop={identity['crop']} fingerprint={current})"
+        )
         status = 0
     else:
-        print(f"CHANGED: {root} content differs from its recorded identity "
-              f"(recorded={recorded} current={current}); "
-              "a number reproduced from it is no longer valid")
+        print(
+            f"CHANGED: {root} content differs from its recorded identity "
+            f"(recorded={recorded} current={current}); "
+            "a number reproduced from it is no longer valid"
+        )
         status = 2
 
     for r in read_datasets(project):
@@ -61,14 +72,20 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
         try:
             registered = require_dataset_identity(entry_path)
         except (ValueError, OSError) as exc:
-            print(f"  GONE: id {ds_id} is registered at {entry_path}, which holds no readable "
-                  f"identity ({exc}); it is now at {root}")
+            print(
+                f"  GONE: id {ds_id} is registered at {entry_path}, which holds no readable "
+                f"identity ({exc}); it is now at {root}"
+            )
             continue
         if registered != identity:
-            print(f"  DIVERGED: id {ds_id} is registered at {entry_path}, whose identity "
-                  f"{registered} is not {root}'s {identity}")
+            print(
+                f"  DIVERGED: id {ds_id} is registered at {entry_path}, whose identity "
+                f"{registered} is not {root}'s {identity}"
+            )
         elif entry_path.resolve() != root:
-            print(f"  MOVED: id {ds_id} is registered at {entry_path} and is now at {root}")
+            print(
+                f"  MOVED: id {ds_id} is registered at {entry_path} and is now at {root}"
+            )
     return status
 
 

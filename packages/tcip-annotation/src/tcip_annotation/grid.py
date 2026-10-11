@@ -23,7 +23,9 @@ def column_label(index: int) -> str:
 def column_index(label: str) -> int:
     """0-based column index for a spreadsheet-style ``label``; inverse of :func:`column_label`."""
     if not label or not all("A" <= ch <= "Z" for ch in label):
-        raise ValueError(f"Invalid column label: {label!r}. Expected letters A-Z.")
+        raise ValueError(
+            f"Invalid column label: {label!r}. Expected letters A-Z."
+        )
     n = 0
     for ch in label:
         n = n * 26 + (ord(ch) - ord("A") + 1)
@@ -35,13 +37,25 @@ def cell_fields(cell: Any) -> tuple[str, float, float, float, float]:
     carrying ``name`` plus the half-open native-pixel rect ``x0, y0, x1, y1``.
     """
     if isinstance(cell, dict):
-        return (str(cell["name"]), float(cell["x0"]), float(cell["y0"]),
-                float(cell["x1"]), float(cell["y1"]))
-    return (str(cell.name), float(cell.x0), float(cell.y0),
-            float(cell.x1), float(cell.y1))
+        return (
+            str(cell["name"]),
+            float(cell["x0"]),
+            float(cell["y0"]),
+            float(cell["x1"]),
+            float(cell["y1"]),
+        )
+    return (
+        str(cell.name),
+        float(cell.x0),
+        float(cell.y0),
+        float(cell.x1),
+        float(cell.y1),
+    )
 
 
-def grid_to_rect(cell: str, cells: "list[Any]") -> tuple[float, float, float, float]:
+def grid_to_rect(
+    cell: str, cells: "list[Any]"
+) -> tuple[float, float, float, float]:
     """Resolve a grid cell reference (e.g. 'B3') to the named cell's half-open native-pixel rect
     ``(x0, y0, x1, y1)``.
 
@@ -52,9 +66,13 @@ def grid_to_rect(cell: str, cells: "list[Any]") -> tuple[float, float, float, fl
     """
     wanted = cell.strip().upper()
     if re.fullmatch(r"[A-Z]+[0-9]+", wanted) is None:
-        raise ValueError(f"Invalid cell reference: {cell!r}. Expected format like 'B3'.")
+        raise ValueError(
+            f"Invalid cell reference: {cell!r}. Expected format like 'B3'."
+        )
     if not cells:
-        raise ValueError("cells is empty: there is no grid to resolve a cell name against")
+        raise ValueError(
+            "cells is empty: there is no grid to resolve a cell name against"
+        )
 
     max_col = max_row = -1
     for c in cells:
@@ -65,5 +83,9 @@ def grid_to_rect(cell: str, cells: "list[Any]") -> tuple[float, float, float, fl
         if parsed is not None:
             max_col = max(max_col, column_index(parsed.group(1)))
             max_row = max(max_row, int(parsed.group(2)))
-    hint = f" Use A1 through {column_label(max_col)}{max_row}." if max_col >= 0 else ""
+    hint = (
+        f" Use A1 through {column_label(max_col)}{max_row}."
+        if max_col >= 0
+        else ""
+    )
     raise ValueError(f"Cell '{wanted}' is not in this grid.{hint}")

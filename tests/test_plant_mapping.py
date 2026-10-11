@@ -33,9 +33,15 @@ DATE = "2026-02-11"
 def stamp(tmp_path: Path):
     """Stamps read by the platform's own reader off geotagged photographs written under
     ``tmp_path``, each captured ``seconds`` after one start time."""
+
     def make(stem: str, lat: float, lon: float, seconds: int):
         path = tmp_path / DATE / f"{stem}.JPG"
-        write_geo_image(path, lat, lon, datetime(2026, 2, 11, 9) + timedelta(seconds=seconds))
+        write_geo_image(
+            path,
+            lat,
+            lon,
+            datetime(2026, 2, 11, 9) + timedelta(seconds=seconds),
+        )
         return read_image_stamp(path, DATE)
 
     return make
@@ -139,7 +145,9 @@ def test_segment_runs_uniform_gaps_stay_one_run(stamp) -> None:
     assert [s.stem for s in runs[0]] == ["a", "b", "c", "d", "e", "f", "g"]
 
 
-def test_segment_runs_duplicate_gps_gap_does_not_hijack_the_split(stamp) -> None:
+def test_segment_runs_duplicate_gps_gap_does_not_hijack_the_split(
+    stamp,
+) -> None:
     # A duplicate/cached EXIF GPS reading between two rapid captures (an exact 0 m gap) carries
     # no walking-pace information; it must not be read as an "infinitely large" jump that wins
     # over a genuine row-transition jump elsewhere in the sequence.
@@ -228,7 +236,9 @@ def test_persist_and_load_mapping_round_trip(tmp_path: Path) -> None:
     assert {a.plot_name for a in loaded.assignments[DATE]} == set(PLOTS)
 
 
-def test_load_mapping_refuses_a_record_missing_capture_digests(tmp_path: Path) -> None:
+def test_load_mapping_refuses_a_record_missing_capture_digests(
+    tmp_path: Path,
+) -> None:
     """A record without its capture digests (one the producer wrote, then stripped) fails the
     required-keys read naming the missing key."""
     _one_build(tmp_path)
@@ -241,19 +251,26 @@ def test_load_mapping_refuses_a_record_missing_capture_digests(tmp_path: Path) -
         load_mapping(tmp_path, "mapping")
 
 
-def test_build_mapping_empty_dir_refuses_naming_no_capture(tmp_path: Path) -> None:
+def test_build_mapping_empty_dir_refuses_naming_no_capture(
+    tmp_path: Path,
+) -> None:
     """No capture at all under the requested dates refuses by name, naming the images root."""
     with pytest.raises(Exception, match="no capture under") as exc:
         build_mapping(
-            tmp_path / "nope", [], name="mapping", dataset_root=tmp_path / "ds",
-            dataset_id="ds-1", project=tmp_path,
-            plant_registry={"name": "unregistered", "digest": "0" * 64}, nn_tolerance_m=10.0,
+            tmp_path / "nope",
+            [],
+            name="mapping",
+            dataset_root=tmp_path / "ds",
+            dataset_id="ds-1",
+            project=tmp_path,
+            plant_registry={"name": "unregistered", "digest": "0" * 64},
+            nn_tolerance_m=10.0,
         )
     assert type(exc.value).__name__ == "UngeoreferencedCaptureError"
 
 
 def test_persisting_a_mapping_into_a_directory_that_does_not_exist_yet_still_lands(
-    tmp_path: Path
+    tmp_path: Path,
 ) -> None:
     """The first mapping of a fresh project, whose state directory holds nothing yet, lands
     where it is named and reads back."""
@@ -264,7 +281,7 @@ def test_persisting_a_mapping_into_a_directory_that_does_not_exist_yet_still_lan
 
 
 def test_persisting_a_mapping_waits_on_the_lock_its_record_is_written_under(
-    tmp_path: Path
+    tmp_path: Path,
 ) -> None:
     """The write takes the database's write lock, and reports the contention rather than
     writing past a holder of it."""

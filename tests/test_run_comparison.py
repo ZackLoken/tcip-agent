@@ -9,15 +9,22 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 
-def _opened(project, experiment_id: str, *, data_dir=None, split: dict | None = None):
+def _opened(
+    project, experiment_id: str, *, data_dir=None, split: dict | None = None
+):
     """A detector run, over two frames of its own (or those under ``data_dir``) and stating
     ``split``, resolved and opened by the launcher's own producer and writer."""
     from tests._verified_checkpoint_fixtures import (
-        detection_config, fixture_data_dir, opened_run, unbuilt_source,
+        detection_config,
+        fixture_data_dir,
+        opened_run,
+        unbuilt_source,
     )
 
-    config = detection_config(data_dir or fixture_data_dir(project, experiment_id),
-                              model_source=unbuilt_source("detection"))
+    config = detection_config(
+        data_dir or fixture_data_dir(project, experiment_id),
+        model_source=unbuilt_source("detection"),
+    )
     if split is not None:
         config["data"]["split"] = split
     return opened_run(project, config, experiment_id=experiment_id)
@@ -28,24 +35,40 @@ def _bound(experiment_id: str, tmp_path, **split):
     binding being ``split``."""
     from tests._chain_fixtures import training_config
     from tests._verified_checkpoint_fixtures import opened_run, unbuilt_source
-    from tests.test_selection_binding import _draw, _two_subject_two_date_dataset
+    from tests.test_selection_binding import (
+        _draw,
+        _two_subject_two_date_dataset,
+    )
 
     selection_dir = tmp_path / "splits" / "2024-01-01"
     if not selection_dir.exists():
-        _draw(tmp_path, _two_subject_two_date_dataset(tmp_path / "bound-ds"), selection_dir, seed=7)
-    return opened_run(tmp_path, training_config(
-        unbuilt_source("detection"),
-        {"split": {"selection_dir": str(selection_dir), **split}}),
-        experiment_id=experiment_id), selection_dir
+        _draw(
+            tmp_path,
+            _two_subject_two_date_dataset(tmp_path / "bound-ds"),
+            selection_dir,
+            seed=7,
+        )
+    return opened_run(
+        tmp_path,
+        training_config(
+            unbuilt_source("detection"),
+            {"split": {"selection_dir": str(selection_dir), **split}},
+        ),
+        experiment_id=experiment_id,
+    ), selection_dir
 
 
 def _compared(project, *experiment_ids: str) -> list[dict]:
     from tcip_mcp.experiments import compare_experiments
 
-    return compare_experiments(list(experiment_ids), project=project)["experiments"]
+    return compare_experiments(list(experiment_ids), project=project)[
+        "experiments"
+    ]
 
 
-def test_same_dataset_fingerprint_is_none_not_true_when_one_id_is_an_error(tmp_path):
+def test_same_dataset_fingerprint_is_none_not_true_when_one_id_is_an_error(
+    tmp_path,
+):
     """An error entry is never dropped from the fingerprint judgment: two matching fingerprints
     beside one missing run do not compare as the same data."""
     from tcip_mcp.experiments import compare_experiments
@@ -55,14 +78,21 @@ def test_same_dataset_fingerprint_is_none_not_true_when_one_id_is_an_error(tmp_p
     shared = _config(_make_dataset(tmp_path / "shared"))
     opened_run(tmp_path, shared, experiment_id="e1")
     opened_run(tmp_path, shared, experiment_id="e2")
-    assert compare_experiments(["e1", "e2"], project=tmp_path)["same_dataset_fingerprint"] is True
+    assert (
+        compare_experiments(["e1", "e2"], project=tmp_path)[
+            "same_dataset_fingerprint"
+        ]
+        is True
+    )
 
     result = compare_experiments(["e1", "e2", "missing"], project=tmp_path)
     assert any("error" in c for c in result["experiments"])
     assert result["same_dataset_fingerprint"] is None
 
 
-def test_compare_experiments_reports_task_and_subject_from_the_runs_records(tmp_path):
+def test_compare_experiments_reports_task_and_subject_from_the_runs_records(
+    tmp_path,
+):
     """The task is read off the launch record, the subject off the data section the run
     resolved."""
     _opened(tmp_path, "exp-task-subject")
@@ -77,10 +107,14 @@ def test_registry_lists_the_checkpoint_this_run_completed(tmp_path):
     time; a run with no completed checkpoint lists none."""
     from tests._verified_checkpoint_fixtures import finished_run
 
-    finished_run(tmp_path, experiment_id="exp-registered", metrics={"val_map50": 0.5})
+    finished_run(
+        tmp_path, experiment_id="exp-registered", metrics={"val_map50": 0.5}
+    )
     _opened(tmp_path, "exp-unfinished")
 
-    registered, unfinished = _compared(tmp_path, "exp-registered", "exp-unfinished")
+    registered, unfinished = _compared(
+        tmp_path, "exp-registered", "exp-unfinished"
+    )
     assert [e["name"] for e in registered["registry"]] == ["exp-registered"]
     assert registered["registry"][0]["metrics"] == {"val_map50": 0.5}
     assert registered["registry"][0]["metrics_source"] == "training_source"
@@ -93,7 +127,10 @@ def test_split_reports_a_bound_selection_directory(tmp_path):
 
     (c,) = _compared(tmp_path, "exp-bound-split")
     assert c["split"] == {
-        "case": "bound", "selection_dir": str(selection_dir), "seed": 7, "redraw": False,
+        "case": "bound",
+        "selection_dir": str(selection_dir),
+        "seed": 7,
+        "redraw": False,
     }
 
 
@@ -103,8 +140,10 @@ def test_split_reports_a_redrawn_bound_selection_distinctly(tmp_path):
     _bound("exp-bound-plain", tmp_path)
     _bound("exp-bound-redrawn", tmp_path, redraw_within_selection=True, seed=7)
 
-    plain, redrawn = (c["split"]
-                      for c in _compared(tmp_path, "exp-bound-plain", "exp-bound-redrawn"))
+    plain, redrawn = (
+        c["split"]
+        for c in _compared(tmp_path, "exp-bound-plain", "exp-bound-redrawn")
+    )
     assert plain != redrawn
     assert (plain["redraw"], redrawn["redraw"]) == (False, True)
 
@@ -124,21 +163,35 @@ def test_status_error_names_a_diverged_run_reason(tmp_path):
     from tests.test_lifecycle_wiring import _stock_run
     from tests.tiny_trainer_fixtures import ALWAYS_DIVERGED_MODEL
 
-    run_dir = _stock_run(tmp_path, ALWAYS_DIVERGED_MODEL, 3, "exp-diverged-cmp")
-    assert "2 consecutive full training passes" in observe(run_dir).final["status_error"]
+    run_dir = _stock_run(
+        tmp_path, ALWAYS_DIVERGED_MODEL, 3, "exp-diverged-cmp"
+    )
+    assert (
+        "2 consecutive full training passes"
+        in observe(run_dir).final["status_error"]
+    )
     _opened(tmp_path, "exp-healthy-cmp")
 
-    diverged, healthy = _compared(tmp_path, "exp-diverged-cmp", "exp-healthy-cmp")
+    diverged, healthy = _compared(
+        tmp_path, "exp-diverged-cmp", "exp-healthy-cmp"
+    )
     assert "2 consecutive full training passes" in diverged["status_error"]
     assert healthy["status_error"] is None
 
 
-def _register(project, experiment_id: str, metric_value: float, *,
-              metric: str = "val_map50") -> None:
+def _register(
+    project,
+    experiment_id: str,
+    metric_value: float,
+    *,
+    metric: str = "val_map50",
+) -> None:
     """A run completed through the platform's own producer, its checkpoint carrying ``metric``."""
     from tests._verified_checkpoint_fixtures import finished_run
 
-    finished_run(project, experiment_id=experiment_id, metrics={metric: metric_value})
+    finished_run(
+        project, experiment_id=experiment_id, metrics={metric: metric_value}
+    )
 
 
 def test_available_metrics_excludes_an_unmarked_experiments_metric(tmp_path):
@@ -158,8 +211,12 @@ def test_rank_registered_models_ranks_only_within_the_marked_set(tmp_path):
     _register(tmp_path, "exp-low", 0.5)
     _register(tmp_path, "exp-high", 0.9)
 
-    res = rank_registered_models(tmp_path, metric="val_map50", include_unverified=True,
-                                 experiment_ids=["exp-low"])
+    res = rank_registered_models(
+        tmp_path,
+        metric="val_map50",
+        include_unverified=True,
+        experiment_ids=["exp-low"],
+    )
     assert (res["name"], res["experiment_id"]) == ("exp-low", "exp-low")
 
 
@@ -172,12 +229,18 @@ def test_rank_registered_models_names_the_marked_set_when_the_filter_empties_a_n
 
     _register(tmp_path, "exp-other", 0.7)
 
-    res = rank_registered_models(tmp_path, metric="val_map50", experiment_ids=["exp-marked"])
-    assert res["error"] == "none of the marked experiments registered a checkpoint"
+    res = rank_registered_models(
+        tmp_path, metric="val_map50", experiment_ids=["exp-marked"]
+    )
+    assert (
+        res["error"]
+        == "none of the marked experiments registered a checkpoint"
+    )
 
 
 def test_a_ranking_over_a_marked_set_that_registered_nothing_reads_the_registry_once(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     import tcip_mcp.model_registry as model_registry
     from tcip_mcp.tools.model_tools import ranked_registered_model
@@ -191,29 +254,45 @@ def test_a_ranking_over_a_marked_set_that_registered_nothing_reads_the_registry_
         return real(project_path)
 
     monkeypatch.setattr(model_registry, "read_registry_index", counted)
-    res = ranked_registered_model(tmp_path, "val_map50", higher_is_better=None,
-                                  include_unverified=False, experiment_ids=["exp-marked"], tag=None)
-    assert res["error"] == "none of the marked experiments registered a checkpoint"
+    res = ranked_registered_model(
+        tmp_path,
+        "val_map50",
+        higher_is_better=None,
+        include_unverified=False,
+        experiment_ids=["exp-marked"],
+        tag=None,
+    )
+    assert (
+        res["error"]
+        == "none of the marked experiments registered a checkpoint"
+    )
     assert len(reads) == 1
 
 
-def test_compare_best_route_422s_with_no_registered_checkpoint(opened_client: TestClient, tmp_path):
+def test_compare_best_route_422s_with_no_registered_checkpoint(
+    opened_client: TestClient, tmp_path
+):
     """A project with no completed run and no foreign registration answers the ranking's own
     refusal as 422, and the asking writes no registry index."""
     import tcip_store
 
     from tcip_mcp.model_registry import registry_index_key
 
-    resp = opened_client.post("/api/training/compare/best", json={
-        "experiment_ids": ["exp-a"], "metric": "val_map50",
-    })
+    resp = opened_client.post(
+        "/api/training/compare/best",
+        json={
+            "experiment_ids": ["exp-a"],
+            "metric": "val_map50",
+        },
+    )
     assert resp.status_code == 422
     assert resp.json()["detail"]["message"] == "No models registered"
     assert tcip_store.read(registry_index_key(tmp_path), default=None) is None
 
 
 def test_compare_best_route_409s_when_the_index_will_not_decode(
-        opened_client: TestClient, monkeypatch):
+    opened_client: TestClient, monkeypatch
+):
     """A corrupt index is not a project with no models: the route answers 409, not the 404 an
     absent index answers."""
     import tcip_mcp.model_registry as model_registry
@@ -224,39 +303,56 @@ def test_compare_best_route_409s_when_the_index_will_not_decode(
 
     monkeypatch.setattr(model_registry, "read_registry_index", _boom)
 
-    resp = opened_client.post("/api/training/compare/best", json={
-        "experiment_ids": ["exp-a"], "metric": "val_map50",
-    })
+    resp = opened_client.post(
+        "/api/training/compare/best",
+        json={
+            "experiment_ids": ["exp-a"],
+            "metric": "val_map50",
+        },
+    )
     assert resp.status_code == 409
     assert "registry unreadable" in resp.json()["detail"]
 
 
-def test_compare_best_route_422s_on_the_tools_own_error(opened_client: TestClient, tmp_path):
+def test_compare_best_route_422s_on_the_tools_own_error(
+    opened_client: TestClient, tmp_path
+):
     _register(tmp_path, "exp-a", 0.7)
 
-    resp = opened_client.post("/api/training/compare/best", json={
-        "experiment_ids": ["exp-a"], "metric": "val_map99",
-    })
+    resp = opened_client.post(
+        "/api/training/compare/best",
+        json={
+            "experiment_ids": ["exp-a"],
+            "metric": "val_map99",
+        },
+    )
     assert resp.status_code == 422
     detail = resp.json()["detail"]
     assert "no declared ranking direction" in detail["message"]
     assert detail["needs_direction"] is True
 
 
-def test_compare_best_route_422s_when_the_marked_set_registered_nothing(opened_client: TestClient,
-                                                                        tmp_path):
+def test_compare_best_route_422s_when_the_marked_set_registered_nothing(
+    opened_client: TestClient, tmp_path
+):
     _register(tmp_path, "exp-other", 0.7)
 
-    resp = opened_client.post("/api/training/compare/best", json={
-        "experiment_ids": ["exp-marked"], "metric": "val_map50",
-    })
+    resp = opened_client.post(
+        "/api/training/compare/best",
+        json={
+            "experiment_ids": ["exp-marked"],
+            "metric": "val_map50",
+        },
+    )
     assert resp.status_code == 422
     assert resp.json()["detail"]["message"] == (
-        "none of the marked experiments registered a checkpoint")
+        "none of the marked experiments registered a checkpoint"
+    )
 
 
 def test_an_empty_metric_lists_through_the_listing_route_and_refuses_through_the_ranking_one(
-    opened_client: TestClient, tmp_path,
+    opened_client: TestClient,
+    tmp_path,
 ):
     _register(tmp_path, "exp-a", 0.7)
 
@@ -264,21 +360,35 @@ def test_an_empty_metric_lists_through_the_listing_route_and_refuses_through_the
     assert listed.status_code == 200
     assert [m["experiment_id"] for m in listed.json()["models"]] == ["exp-a"]
 
-    resp = opened_client.post("/api/training/compare/best", json={
-        "experiment_ids": ["exp-a"], "metric": ""})
+    resp = opened_client.post(
+        "/api/training/compare/best",
+        json={"experiment_ids": ["exp-a"], "metric": ""},
+    )
     assert resp.status_code == 422
     assert "names the metric it ranks by" in resp.json()["detail"]["message"]
 
 
-def test_compare_best_route_projects_the_answer(opened_client: TestClient, tmp_path):
+def test_compare_best_route_projects_the_answer(
+    opened_client: TestClient, tmp_path
+):
     _register(tmp_path, "exp-a", 0.7)
 
-    resp = opened_client.post("/api/training/compare/best", json={
-        "experiment_ids": ["exp-a"], "metric": "val_map50", "include_unverified": True,
-    })
+    resp = opened_client.post(
+        "/api/training/compare/best",
+        json={
+            "experiment_ids": ["exp-a"],
+            "metric": "val_map50",
+            "include_unverified": True,
+        },
+    )
     assert resp.status_code == 200
     assert resp.json() == {
-        "name": "exp-a", "experiment_id": "exp-a", "metrics": {"val_map50": 0.7},
-        "metrics_source": "training_source", "ranking_basis": "val_map50",
-        "higher_is_better": True, "direction_source": "declared", "excluded_unverified": [],
+        "name": "exp-a",
+        "experiment_id": "exp-a",
+        "metrics": {"val_map50": 0.7},
+        "metrics_source": "training_source",
+        "ranking_basis": "val_map50",
+        "higher_is_better": True,
+        "direction_source": "declared",
+        "excluded_unverified": [],
     }

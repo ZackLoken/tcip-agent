@@ -21,7 +21,8 @@ from PIL import Image  # noqa: E402
 from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
 from tcip_mcp.pipelines.data.selection import ClassScope, read_selection  # noqa: E402
 from tcip_mcp.pipelines.data.split_construction import (  # noqa: E402
-    auto_train_val, partition_samples,
+    auto_train_val,
+    partition_samples,
 )
 from tcip_mcp.pipelines.schemas import DataSpec  # noqa: E402
 from tcip_mcp.tools.data_tools import draw_splits  # noqa: E402
@@ -34,7 +35,9 @@ from tests._verified_checkpoint_fixtures import partition_side, unbuilt_source  
 def _train_val(project: Path, task: str, data: DataSpec):
     """``split_construction.auto_train_val`` of a ``task`` run of ``project`` over ``data``, which
     declares no dataset builder, untransformed: ``(train_ds, val_ds, partition, resolved)``."""
-    return auto_train_val(project, task, data, None, staged_layout(project, {}))
+    return auto_train_val(
+        project, task, data, None, staged_layout(project, {})
+    )
 
 
 STEMS = ("a", "b", "c", "d", "e", "f", "g", "h")
@@ -45,14 +48,23 @@ def _resolved(project: Path, experiment_id: str, task: str, data_cfg: dict):
     launch record says it resolved, and the train and val datasets the child's own context
     producer builds its loaders from out of that record."""
     from tcip_mcp.experiments import observe, run_resolution
-    from tcip_mcp.pipelines.training.subprocess_worker import prepare_run_context
+    from tcip_mcp.pipelines.training.subprocess_worker import (
+        prepare_run_context,
+    )
     from tests._verified_checkpoint_fixtures import opened_run
 
-    run_dir = opened_run(project, training_config(unbuilt_source(task), data_cfg),
-                         experiment_id=experiment_id)
+    run_dir = opened_run(
+        project,
+        training_config(unbuilt_source(task), data_cfg),
+        experiment_id=experiment_id,
+    )
     ctx = prepare_run_context(observe(run_dir))
     val = ctx.val_loader.dataset if ctx.val_loader is not None else None
-    return run_resolution(experiment_id, project=project), ctx.train_loader.dataset, val
+    return (
+        run_resolution(experiment_id, project=project),
+        ctx.train_loader.dataset,
+        val,
+    )
 
 
 def _mask_dataset(root: Path) -> tuple[Path, Path]:
@@ -62,19 +74,27 @@ def _mask_dataset(root: Path) -> tuple[Path, Path]:
     images_dir.mkdir(parents=True, exist_ok=True)
     masks_dir.mkdir(parents=True, exist_ok=True)
     for index, stem in enumerate(STEMS):
-        Image.new("RGB", (16, 16), (10 * index, 20, 30)).save(images_dir / f"{stem}.png")
-        painted_frame(16, 16, 0, [((0, 0, index + 1, index + 1), 1)], mode="L").save(
-            masks_dir / f"{stem}.png")
+        Image.new("RGB", (16, 16), (10 * index, 20, 30)).save(
+            images_dir / f"{stem}.png"
+        )
+        painted_frame(
+            16, 16, 0, [((0, 0, index + 1, index + 1), 1)], mode="L"
+        ).save(masks_dir / f"{stem}.png")
     return images_dir, masks_dir
 
 
 def _table_dataset(root: Path) -> tuple[Path, Path]:
     """A dataset whose ground truth is one table row per image, each row a distinct label."""
-    images_dir, csv_path = root / "images" / UNDATED_BUCKET, root / "labels.csv"
+    images_dir, csv_path = (
+        root / "images" / UNDATED_BUCKET,
+        root / "labels.csv",
+    )
     images_dir.mkdir(parents=True, exist_ok=True)
     rows = []
     for index, stem in enumerate(STEMS):
-        Image.new("RGB", (16, 16), (10 * index, 20, 30)).save(images_dir / f"{stem}.png")
+        Image.new("RGB", (16, 16), (10 * index, 20, 30)).save(
+            images_dir / f"{stem}.png"
+        )
         rows.append((stem, index % 3))
     with open(csv_path, "w", newline="") as handle:
         writer = csv.writer(handle)
@@ -84,9 +104,17 @@ def _table_dataset(root: Path) -> tuple[Path, Path]:
 
 
 def _drawn(root: Path, ground_truth: Path, out: Path, *, seed: int = 4):
-    result = draw_splits(out.parent, str(root), output_path=str(out),
-                         ground_truth=str(ground_truth), seed=seed, val_ratio=0.25,
-                         calibration_ratio=0.125, holdout_ratio=0.125, group_by="stem")
+    result = draw_splits(
+        out.parent,
+        str(root),
+        output_path=str(out),
+        ground_truth=str(ground_truth),
+        seed=seed,
+        val_ratio=0.25,
+        calibration_ratio=0.125,
+        holdout_ratio=0.125,
+        group_by="stem",
+    )
     assert "error" not in result, result
     return read_selection(out, project=out.parent)
 
@@ -94,7 +122,9 @@ def _drawn(root: Path, ground_truth: Path, out: Path, *, seed: int = 4):
 # -- a bound run trains over exactly the selection's own samples ---------------
 
 
-def test_a_bound_semantic_seg_run_trains_over_exactly_its_selections_samples(tmp_path: Path):
+def test_a_bound_semantic_seg_run_trains_over_exactly_its_selections_samples(
+    tmp_path: Path,
+):
     """The loaders hold exactly the samples the selection recorded on each side, each reading the
     mask it names, and the held-out calibration side builds neither loader."""
     root = tmp_path / "ds"
@@ -103,16 +133,24 @@ def test_a_bound_semantic_seg_run_trains_over_exactly_its_selections_samples(tmp
     drawn = _drawn(root, masks_dir, out)
 
     data = DataSpec.model_validate({"split": {"selection_dir": str(out)}})
-    train_ds, val_ds, partition, _data = _train_val(tmp_path, "semantic_seg", data)
+    train_ds, val_ds, partition, _data = _train_val(
+        tmp_path, "semantic_seg", data
+    )
 
-    assert sorted(train_ds.stems) == sorted(s.location for s in drawn.on("train"))
+    assert sorted(train_ds.stems) == sorted(
+        s.location for s in drawn.on("train")
+    )
     assert sorted(val_ds.stems) == sorted(s.location for s in drawn.on("val"))
     held_out = {s.location for s in drawn.on("calibration")}
     assert held_out and not held_out & set(train_ds.stems + val_ds.stems)
-    assert partition_side(partition, "train") == sorted(s.member for s in drawn.on("train"))
+    assert partition_side(partition, "train") == sorted(
+        s.member for s in drawn.on("train")
+    )
 
 
-def test_a_bound_classification_run_trains_over_exactly_its_selections_samples(tmp_path: Path):
+def test_a_bound_classification_run_trains_over_exactly_its_selections_samples(
+    tmp_path: Path,
+):
     """The same for a table: each side holds the rows the selection put on it, by row key."""
     root = tmp_path / "ds"
     _images_dir, csv_path = _table_dataset(root)
@@ -121,13 +159,18 @@ def test_a_bound_classification_run_trains_over_exactly_its_selections_samples(t
 
     data = DataSpec.model_validate({"split": {"selection_dir": str(out)}})
     train_ds, val_ds, partition, _data = _train_val(
-        tmp_path, "classification", data)
+        tmp_path, "classification", data
+    )
 
-    assert sorted(train_ds.stems) == sorted(s.location for s in drawn.on("train"))
+    assert sorted(train_ds.stems) == sorted(
+        s.location for s in drawn.on("train")
+    )
     assert sorted(val_ds.stems) == sorted(s.location for s in drawn.on("val"))
     held_out = {s.location for s in drawn.on("calibration")}
     assert held_out and not held_out & set(train_ds.stems + val_ds.stems)
-    assert {s.ground_truth for s in partition_samples(partition)} == {str(csv_path)}
+    assert {s.ground_truth for s in partition_samples(partition)} == {
+        str(csv_path)
+    }
 
 
 def _document_dataset(root: Path) -> tuple[Path, None]:
@@ -140,13 +183,21 @@ def _document_dataset(root: Path) -> tuple[Path, None]:
     images_dir = root / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True, exist_ok=True)
     for stem in STEMS:
-        Image.new("RGB", (16, 16), (10, 20, 30)).save(images_dir / f"{stem}.png")
-        label_image(images_dir / f"{stem}.png",
-                    [Annotation(subject="bud", geometry=BBox(1, 1, 8, 8))], 16, 16)
+        Image.new("RGB", (16, 16), (10, 20, 30)).save(
+            images_dir / f"{stem}.png"
+        )
+        label_image(
+            images_dir / f"{stem}.png",
+            [Annotation(subject="bud", geometry=BBox(1, 1, 8, 8))],
+            16,
+            16,
+        )
     return images_dir, None
 
 
-def _drop_ground_truth_of_a(images_dir: Path, ground_truth: Path | None) -> None:
+def _drop_ground_truth_of_a(
+    images_dir: Path, ground_truth: Path | None
+) -> None:
     """Remove member ``a``'s ground truth: its label document, its row from a table, its mask
     from a directory."""
     import tcip_store
@@ -156,7 +207,9 @@ def _drop_ground_truth_of_a(images_dir: Path, ground_truth: Path | None) -> None
     if ground_truth is None:
         tcip_store.delete(image_label_key(images_dir / "a.png"))
     elif ground_truth.suffix == ".csv":
-        rows = [r for r in csv.reader(ground_truth.open(newline="")) if r[0] != "a"]
+        rows = [
+            r for r in csv.reader(ground_truth.open(newline="")) if r[0] != "a"
+        ]
         with open(ground_truth, "w", newline="") as handle:
             csv.writer(handle).writerows(rows)
     else:
@@ -173,19 +226,32 @@ def _drop_image_of_a(images_dir: Path, ground_truth: Path | None) -> None:
         label_image(images_dir / "a.png", [], 16, 16, keep_empty=True)
 
 
-@pytest.mark.parametrize("dataset", [_document_dataset, _mask_dataset, _table_dataset],
-                         ids=["document", "mask", "table"])
+@pytest.mark.parametrize(
+    "dataset",
+    [_document_dataset, _mask_dataset, _table_dataset],
+    ids=["document", "mask", "table"],
+)
 @pytest.mark.parametrize("drop", ["ground_truth", "image"])
 def test_a_recorded_sample_is_tallied_as_a_fresh_admission_tallies_it(
-    tmp_path: Path, dataset, drop: str,
+    tmp_path: Path,
+    dataset,
+    drop: str,
 ):
     """One admission evaluates a directory's candidates and a selection's recorded samples alike:
     with one member's ground truth or image gone, the refusal of the recorded samples names the
     tallies a fresh admission over the same members answers."""
-    from tcip_mcp.pipelines.data.label_queries import admit, admits, readmitted_samples
+    from tcip_mcp.pipelines.data.label_queries import (
+        admit,
+        admits,
+        readmitted_samples,
+    )
 
     images_dir, ground_truth = dataset(tmp_path / "ds")
-    scope = ClassScope(subject="bud", attributes=()) if dataset is _document_dataset else None
+    scope = (
+        ClassScope(subject="bud", attributes=())
+        if dataset is _document_dataset
+        else None
+    )
     admission = admit(images_dir, ground_truth, scope=scope)
     samples = admission.every_sample()
     if drop == "image":
@@ -193,35 +259,55 @@ def test_a_recorded_sample_is_tallied_as_a_fresh_admission_tallies_it(
     else:
         _drop_ground_truth_of_a(images_dir, ground_truth)
 
-    fresh = admit(images_dir, ground_truth, scope=admission.scope,
-                  members=[s.member for s in samples])
-    refused = ", ".join(f"{name}={count}" for name, count in sorted(fresh.tallies.items())
-                        if not admits(name))
+    fresh = admit(
+        images_dir,
+        ground_truth,
+        scope=admission.scope,
+        members=[s.member for s in samples],
+    )
+    refused = ", ".join(
+        f"{name}={count}"
+        for name, count in sorted(fresh.tallies.items())
+        if not admits(name)
+    )
     assert refused == "absent=1"
     with pytest.raises(ValueError, match=f"a\\.png'\\]\\): {refused}\\."):
         readmitted_samples(samples, admission.scope)
 
 
-def test_a_directory_named_like_a_mask_is_admitted_by_neither_read_of_it(tmp_path: Path):
+def test_a_directory_named_like_a_mask_is_admitted_by_neither_read_of_it(
+    tmp_path: Path,
+):
     """What a mask is is one predicate, so the admission that enumerates a directory and the
     re-admission that checks a recorded sample's own path cannot disagree: a directory named
     ``a.1.png`` is a mask to neither."""
     from tcip_mcp.pipelines.data.label_queries import admit, readmitted_samples
 
-    images_dir, masks_dir = tmp_path / "images" / UNDATED_BUCKET, tmp_path / "masks"
+    images_dir, masks_dir = (
+        tmp_path / "images" / UNDATED_BUCKET,
+        tmp_path / "masks",
+    )
     images_dir.mkdir(parents=True)
     masks_dir.mkdir()
     for stem in ("a.1", "b"):
-        Image.new("RGB", (16, 16), (10, 20, 30)).save(images_dir / f"{stem}.png")
-    Image.fromarray(np.zeros((16, 16), dtype=np.uint8), mode="L").save(masks_dir / "b.png")
+        Image.new("RGB", (16, 16), (10, 20, 30)).save(
+            images_dir / f"{stem}.png"
+        )
+    Image.fromarray(np.zeros((16, 16), dtype=np.uint8), mode="L").save(
+        masks_dir / "b.png"
+    )
     (masks_dir / "a.1.png").mkdir()
 
     admitted = admit(images_dir, masks_dir)
     assert [record.member for record in admitted.records] == ["b"]
     # Admits valid work: what it did admit still admits when it is checked again.
     readmitted_samples(
-        admitted.samples({record.member: "train" for record in admitted.records}, lambda m: m),
-        admitted.scope)
+        admitted.samples(
+            {record.member: "train" for record in admitted.records},
+            lambda m: m,
+        ),
+        admitted.scope,
+    )
 
 
 # -- each sample reaches its own ground truth ----------------------------------
@@ -237,8 +323,10 @@ def test_a_mask_sample_reaches_its_own_mask(tmp_path: Path):
     drawn = _drawn(root, masks_dir, out)
 
     train_ds, _val_ds, _partition, _data = _train_val(
-        tmp_path, "semantic_seg",
-        DataSpec.model_validate({"split": {"selection_dir": str(out)}}))
+        tmp_path,
+        "semantic_seg",
+        DataSpec.model_validate({"split": {"selection_dir": str(out)}}),
+    )
 
     by_identity = {s.location: s for s in drawn.samples}
     for index, key in enumerate(train_ds.stems):
@@ -259,8 +347,10 @@ def test_a_row_key_sample_reaches_the_row_it_names(tmp_path: Path):
     drawn = _drawn(root, csv_path, out)
 
     train_ds, _val_ds, _partition, _data = _train_val(
-        tmp_path, "classification",
-        DataSpec.model_validate({"split": {"selection_dir": str(out)}}))
+        tmp_path,
+        "classification",
+        DataSpec.model_validate({"split": {"selection_dir": str(out)}}),
+    )
 
     by_identity = {s.location: s for s in drawn.samples}
     for index, key in enumerate(train_ds.stems):
@@ -274,18 +364,30 @@ def test_a_row_key_sample_reaches_the_row_it_names(tmp_path: Path):
 # -- an unbound run's loaders answer for their own membership -------------------
 
 
-def test_an_unbound_semantic_seg_run_reads_its_membership_off_its_own_samples(tmp_path: Path):
+def test_an_unbound_semantic_seg_run_reads_its_membership_off_its_own_samples(
+    tmp_path: Path,
+):
     """No selection: the run's own producer admits the masks beside the images and every loader is
     built from those samples, so membership is read off the loaders rather than off a record."""
     root = tmp_path / "ds"
     images_dir, masks_dir = _mask_dataset(root)
-    data = DataSpec.model_validate({"images_dir": str(images_dir), "labels_dir": str(masks_dir),
-                                    "split": {"val_ratio": 0.25, "seed": 7}})
+    data = DataSpec.model_validate(
+        {
+            "images_dir": str(images_dir),
+            "labels_dir": str(masks_dir),
+            "split": {"val_ratio": 0.25, "seed": 7},
+        }
+    )
 
-    train_ds, val_ds, partition, _data = _train_val(tmp_path, "semantic_seg", data)
+    train_ds, val_ds, partition, _data = _train_val(
+        tmp_path, "semantic_seg", data
+    )
 
     assert val_ds is not None
-    members = {ds: {ds.sample_of(key).member for key in ds.stems} for ds in (train_ds, val_ds)}
+    members = {
+        ds: {ds.sample_of(key).member for key in ds.stems}
+        for ds in (train_ds, val_ds)
+    }
     assert members[train_ds].isdisjoint(members[val_ds])
     assert members[train_ds] | members[val_ds] == set(STEMS)
     assert partition_side(partition, "train") == sorted(members[train_ds])
@@ -295,23 +397,39 @@ def test_an_unbound_semantic_seg_run_reads_its_membership_off_its_own_samples(tm
     for ds in (train_ds, val_ds):
         for key in ds.stems:
             sample = ds.sample_of(key)
-            assert sample.source == key, "a sample is indexed by its own source"
+            assert sample.source == key, (
+                "a sample is indexed by its own source"
+            )
             assert Path(sample.source) == images_dir / f"{sample.member}.png"
-            assert Path(sample.ground_truth) == masks_dir / f"{sample.member}.png"
+            assert (
+                Path(sample.ground_truth) == masks_dir / f"{sample.member}.png"
+            )
 
 
-def test_an_unbound_regression_run_reads_its_membership_off_its_own_samples(tmp_path: Path):
+def test_an_unbound_regression_run_reads_its_membership_off_its_own_samples(
+    tmp_path: Path,
+):
     """The same for a table: the run's own producer admits the rows naming an image that exists,
     and each loader indexes exactly the rows it was handed."""
     root = tmp_path / "ds"
     images_dir, csv_path = _table_dataset(root)
-    data = DataSpec.model_validate({"images_dir": str(images_dir), "labels_dir": str(csv_path),
-                                    "split": {"val_ratio": 0.25, "seed": 7}})
+    data = DataSpec.model_validate(
+        {
+            "images_dir": str(images_dir),
+            "labels_dir": str(csv_path),
+            "split": {"val_ratio": 0.25, "seed": 7},
+        }
+    )
 
-    train_ds, val_ds, partition, _data = _train_val(tmp_path, "regression", data)
+    train_ds, val_ds, partition, _data = _train_val(
+        tmp_path, "regression", data
+    )
 
     assert val_ds is not None
-    members = {ds: {ds.sample_of(key).member for key in ds.stems} for ds in (train_ds, val_ds)}
+    members = {
+        ds: {ds.sample_of(key).member for key in ds.stems}
+        for ds in (train_ds, val_ds)
+    }
     assert members[train_ds].isdisjoint(members[val_ds])
     assert members[train_ds] | members[val_ds] == set(STEMS)
     assert partition_side(partition, "train") == sorted(members[train_ds])
@@ -319,7 +437,9 @@ def test_an_unbound_regression_run_reads_its_membership_off_its_own_samples(tmp_
     for ds in (train_ds, val_ds):
         for key in ds.stems:
             sample = ds.sample_of(key)
-            assert sample.source == key, "a sample is indexed by its own source"
+            assert sample.source == key, (
+                "a sample is indexed by its own source"
+            )
             assert Path(sample.ground_truth) == csv_path
             assert Path(key) == images_dir / f"{sample.member}.png"
 
@@ -333,24 +453,36 @@ def test_a_dotted_row_key_names_one_member_end_to_end(tmp_path: Path):
     resolved partition the assessment's disjointness joins against by that name.
     """
     root = tmp_path / "ds"
-    images_dir, csv_path = root / "images" / UNDATED_BUCKET, root / "labels.csv"
+    images_dir, csv_path = (
+        root / "images" / UNDATED_BUCKET,
+        root / "labels.csv",
+    )
     images_dir.mkdir(parents=True, exist_ok=True)
     dotted = [f"a.{index}" for index in range(8)]
     rows = []
     for index, key in enumerate(dotted):
-        Image.new("RGB", (16, 16), (10 * index, 20, 30)).save(images_dir / f"{key}.png")
+        Image.new("RGB", (16, 16), (10 * index, 20, 30)).save(
+            images_dir / f"{key}.png"
+        )
         rows.append((key, index % 3))
     with open(csv_path, "w", newline="") as handle:
         writer = csv.writer(handle)
         writer.writerow(("stem", "label"))
         writer.writerows(rows)
 
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(csv_path),
-                "split": {"val_ratio": 0.5, "seed": 3, "group_by": "stem"}}
-    resolved, train_ds, val_ds = _resolved(tmp_path, "exp-dotted", "classification", data_cfg)
+    data_cfg = {
+        "images_dir": str(images_dir),
+        "labels_dir": str(csv_path),
+        "split": {"val_ratio": 0.5, "seed": 3, "group_by": "stem"},
+    }
+    resolved, train_ds, val_ds = _resolved(
+        tmp_path, "exp-dotted", "classification", data_cfg
+    )
 
     # The loaders name every row apart, not one collapsed member.
-    named = {ds.sample_of(k).member for ds in (train_ds, val_ds) for k in ds.stems}
+    named = {
+        ds.sample_of(k).member for ds in (train_ds, val_ds) for k in ds.stems
+    }
     assert named == set(dotted)
     assert len(train_ds.stems) == train_ds.num_samples
 
@@ -362,7 +494,9 @@ def test_a_dotted_row_key_names_one_member_end_to_end(tmp_path: Path):
 # -- freezing a run whose ground truth is not a label document -----------------
 
 
-def _frozen(project: Path, experiment_id: str, task: str, data_cfg: dict) -> dict:
+def _frozen(
+    project: Path, experiment_id: str, task: str, data_cfg: dict
+) -> dict:
     """Resolve a run under ``project`` through the child's own producer, which records its
     resolved record, and freeze it."""
     from tcip_mcp.tools.data_tools import freeze_selection
@@ -377,8 +511,11 @@ def test_a_mask_run_freezes_into_a_selection_its_bind_accepts(tmp_path: Path):
     and a later run binds to exactly that partition."""
     root = tmp_path / "ds"
     images_dir, masks_dir = _mask_dataset(root)
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(masks_dir),
-                "split": {"val_ratio": 0.25, "seed": 7}}
+    data_cfg = {
+        "images_dir": str(images_dir),
+        "labels_dir": str(masks_dir),
+        "split": {"val_ratio": 0.25, "seed": 7},
+    }
 
     result = _frozen(tmp_path, "exp-mask-freeze", "semantic_seg", data_cfg)
 
@@ -391,12 +528,20 @@ def test_a_mask_run_freezes_into_a_selection_its_bind_accepts(tmp_path: Path):
         assert Path(sample.ground_truth).is_file()
 
     train_ds, val_ds, partition, _data = _train_val(
-        tmp_path, "semantic_seg",
-        DataSpec.model_validate({"split": {"selection_dir": result["selection_dir"]}}))
-    assert sorted(train_ds.stems) == sorted(s.location for s in frozen.on("train"))
+        tmp_path,
+        "semantic_seg",
+        DataSpec.model_validate(
+            {"split": {"selection_dir": result["selection_dir"]}}
+        ),
+    )
+    assert sorted(train_ds.stems) == sorted(
+        s.location for s in frozen.on("train")
+    )
     assert val_ds is not None
     assert result["train"] == len(frozen.on("train"))
-    assert partition_side(partition, "train") == sorted(s.member for s in frozen.on("train"))
+    assert partition_side(partition, "train") == sorted(
+        s.member for s in frozen.on("train")
+    )
 
 
 def test_a_table_run_freezes_into_a_selection_its_bind_accepts(tmp_path: Path):
@@ -404,8 +549,11 @@ def test_a_table_run_freezes_into_a_selection_its_bind_accepts(tmp_path: Path):
     run read, and a later run binds to exactly that partition."""
     root = tmp_path / "ds"
     images_dir, csv_path = _table_dataset(root)
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(csv_path),
-                "split": {"val_ratio": 0.25, "seed": 7}}
+    data_cfg = {
+        "images_dir": str(images_dir),
+        "labels_dir": str(csv_path),
+        "split": {"val_ratio": 0.25, "seed": 7},
+    }
 
     result = _frozen(tmp_path, "exp-table-freeze", "classification", data_cfg)
 
@@ -415,26 +563,38 @@ def test_a_table_run_freezes_into_a_selection_its_bind_accepts(tmp_path: Path):
     assert all(s.row_key is not None for s in frozen.samples)
 
     train_ds, val_ds, _partition, _data = _train_val(
-        tmp_path, "classification",
-        DataSpec.model_validate({"split": {"selection_dir": result["selection_dir"]}}))
-    assert sorted(train_ds.stems) == sorted(s.location for s in frozen.on("train"))
+        tmp_path,
+        "classification",
+        DataSpec.model_validate(
+            {"split": {"selection_dir": result["selection_dir"]}}
+        ),
+    )
+    assert sorted(train_ds.stems) == sorted(
+        s.location for s in frozen.on("train")
+    )
     assert val_ds is not None
 
 
-def test_a_mask_edited_after_the_run_refuses_the_freeze_by_name(tmp_path: Path):
+def test_a_mask_edited_after_the_run_refuses_the_freeze_by_name(
+    tmp_path: Path,
+):
     """A member's mask replaced after the run digests differently from the ``at_run`` the record
     holds, so freezing refuses and names it rather than composing a selection over ground truth
     the run never saw."""
     root = tmp_path / "ds"
     images_dir, masks_dir = _mask_dataset(root)
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(masks_dir),
-                "split": {"val_ratio": 0.25, "seed": 7}}
+    data_cfg = {
+        "images_dir": str(images_dir),
+        "labels_dir": str(masks_dir),
+        "split": {"val_ratio": 0.25, "seed": 7},
+    }
     from tcip_mcp.tools.data_tools import freeze_selection
 
     _resolved(tmp_path, "exp-mask-moved", "semantic_seg", data_cfg)
 
     painted_frame(16, 16, 0, [((0, 0, 12, 12), 1)], mode="L").save(
-        masks_dir / f"{STEMS[0]}.png")
+        masks_dir / f"{STEMS[0]}.png"
+    )
 
     result = freeze_selection(tmp_path, "exp-mask-moved")
 
@@ -449,27 +609,42 @@ def _three_class_masks(root: Path) -> tuple[Path, Path]:
     images_dir.mkdir(parents=True, exist_ok=True)
     masks_dir.mkdir(parents=True, exist_ok=True)
     for index, stem in enumerate(STEMS[:4]):
-        Image.new("RGB", (16, 16), (10 * index, 20, 30)).save(images_dir / f"{stem}.png")
-        extents = [((0, 0, 8, 8), 1)] + ([((8, 8, 16, 16), 2)] if index == 0 else [])
-        painted_frame(16, 16, 0, extents, mode="L").save(masks_dir / f"{stem}.png")
+        Image.new("RGB", (16, 16), (10 * index, 20, 30)).save(
+            images_dir / f"{stem}.png"
+        )
+        extents = [((0, 0, 8, 8), 1)] + (
+            [((8, 8, 16, 16), 2)] if index == 0 else []
+        )
+        painted_frame(16, 16, 0, extents, mode="L").save(
+            masks_dir / f"{stem}.png"
+        )
     return images_dir, masks_dir
 
 
-def test_a_stated_class_count_refuses_on_the_run_path_whatever_its_value(tmp_path: Path):
+def test_a_stated_class_count_refuses_on_the_run_path_whatever_its_value(
+    tmp_path: Path,
+):
     """A built-in loader's count is the one its ground truth derives, never an input: a config
     stating one refuses on the run path before any loader is built, whether it is below, above or
     equal to the derived count, and a config stating none records the derived count."""
     images_dir, masks_dir = _three_class_masks(tmp_path / "ds")
-    base = {"images_dir": str(images_dir), "labels_dir": str(masks_dir),
-            "split": {"group_by": "stem", "val_ratio": 0.25, "seed": 3}}
+    base = {
+        "images_dir": str(images_dir),
+        "labels_dir": str(masks_dir),
+        "split": {"group_by": "stem", "val_ratio": 0.25, "seed": 3},
+    }
 
     for stated in (2, 3, 9):
         with pytest.raises(ValueError, match=r"states \['num_classes'\]"):
-            _train_val(tmp_path, "semantic_seg",
-                           DataSpec.model_validate({**base, "num_classes": stated}))
+            _train_val(
+                tmp_path,
+                "semantic_seg",
+                DataSpec.model_validate({**base, "num_classes": stated}),
+            )
 
     _train_ds, val_ds, _partition, resolved = _train_val(
-        tmp_path, "semantic_seg", DataSpec.model_validate(base))
+        tmp_path, "semantic_seg", DataSpec.model_validate(base)
+    )
     assert val_ds is not None
     assert resolved.num_classes == 3 and resolved.num_ranks is None
 
@@ -485,21 +660,34 @@ def test_a_table_run_stating_a_count_refuses(tmp_path: Path):
             [("stem", "label"), *((s, i % 2) for i, s in enumerate(STEMS))]
         )
     with pytest.raises(ValueError, match=r"states \['num_classes'\]"):
-        run_over("classification", str(images_dir), str(csv_path), stated={"num_classes": 9})
+        run_over(
+            "classification",
+            str(images_dir),
+            str(csv_path),
+            stated={"num_classes": 9},
+        )
 
     _dataset, data = run_over("classification", str(images_dir), str(csv_path))
     assert data["num_classes"] == 2
 
 
-def test_a_runs_unstated_class_count_is_read_once_over_every_sample(tmp_path: Path):
+def test_a_runs_unstated_class_count_is_read_once_over_every_sample(
+    tmp_path: Path,
+):
     """A class reaching one side only still sizes the run: the count a config states none of is
     read off every sample the run was handed, before the split, and recorded once."""
     images_dir, masks_dir = _three_class_masks(tmp_path / "ds")
-    data = DataSpec.model_validate({"images_dir": str(images_dir), "labels_dir": str(masks_dir),
-                                    "split": {"group_by": "stem", "val_ratio": 0.25, "seed": 3}})
+    data = DataSpec.model_validate(
+        {
+            "images_dir": str(images_dir),
+            "labels_dir": str(masks_dir),
+            "split": {"group_by": "stem", "val_ratio": 0.25, "seed": 3},
+        }
+    )
 
     train_ds, val_ds, partition, resolved = _train_val(
-        tmp_path, "semantic_seg", data)
+        tmp_path, "semantic_seg", data
+    )
 
     # The one mask reaching class 2 is on the validation side, which is the disagreement a
     # per-loader count would produce here.
@@ -509,7 +697,9 @@ def test_a_runs_unstated_class_count_is_read_once_over_every_sample(tmp_path: Pa
     assert resolved.num_channels == train_ds.expected_channels
 
 
-def test_a_runs_metrics_are_reported_over_the_class_space_it_trains_in(tmp_path: Path):
+def test_a_runs_metrics_are_reported_over_the_class_space_it_trains_in(
+    tmp_path: Path,
+):
     """The half being scored is never asked how many classes there are: a training half whose
     masks reach only class 1 is still measured over the three the run trains in, so the two halves
     of one run report metrics on one scale."""
@@ -521,22 +711,41 @@ def test_a_runs_metrics_are_reported_over_the_class_space_it_trains_in(tmp_path:
     from tests import bespoke_models
 
     images_dir, masks_dir = _three_class_masks(tmp_path / "ds")
-    data = DataSpec.model_validate({"images_dir": str(images_dir), "labels_dir": str(masks_dir),
-                                    "split": {"group_by": "stem", "val_ratio": 0.25, "seed": 3}})
+    data = DataSpec.model_validate(
+        {
+            "images_dir": str(images_dir),
+            "labels_dir": str(masks_dir),
+            "split": {"group_by": "stem", "val_ratio": 0.25, "seed": 3},
+        }
+    )
 
     train_ds, _val_ds, _partition, resolved = _train_val(
-        tmp_path, "semantic_seg", data)
-    held = {int(np.array(Image.open(masks_dir / f"{stem}.png")).max())
-            for stem in STEMS[1:4]}
-    assert held == {1}, "the training half reaches only class 1, which is what this measures"
+        tmp_path, "semantic_seg", data
+    )
+    held = {
+        int(np.array(Image.open(masks_dir / f"{stem}.png")).max())
+        for stem in STEMS[1:4]
+    }
+    assert held == {1}, (
+        "the training half reaches only class 1, which is what this measures"
+    )
 
     count = resolved.num_classes
     assert count is not None
     model = bespoke_models.build_bespoke_semantic_seg(num_classes=count)
-    loader = DataLoader(train_ds, batch_size=1, collate_fn=task_collate("semantic_seg"))
-    result = evaluate(model, loader, torch.device("cpu"), "semantic_seg",
-                      dims={"in_chans": 3, "num_classes": count}, conf_threshold=None,
-                      iou_threshold=IOU_THRESHOLD, score_weights=None)
+    loader = DataLoader(
+        train_ds, batch_size=1, collate_fn=task_collate("semantic_seg")
+    )
+    result = evaluate(
+        model,
+        loader,
+        torch.device("cpu"),
+        "semantic_seg",
+        dims={"in_chans": 3, "num_classes": count},
+        conf_threshold=None,
+        iou_threshold=IOU_THRESHOLD,
+        score_weights=None,
+    )
 
     assert sorted(result["per_class_iou"]) == [0, 1, 2]
 
@@ -554,21 +763,30 @@ def test_the_place_and_the_record_read_one_ground_truth_shape(tmp_path: Path):
     images_dir, masks_dir = _mask_dataset(root)
     _table_images, csv_path = _table_dataset(tmp_path / "table")
 
-    for place, member in ((str(csv_path), str(csv_path)),
-                          (str(masks_dir), str(masks_dir / f"{STEMS[0]}.png")),
-                          (None, image_label_key(images_dir / f"{STEMS[0]}.png"))):
+    for place, member in (
+        (str(csv_path), str(csv_path)),
+        (str(masks_dir), str(masks_dir / f"{STEMS[0]}.png")),
+        (None, image_label_key(images_dir / f"{STEMS[0]}.png")),
+    ):
         assert ground_truth_shape(place) == shape_of(member, None), place
 
 
-def test_a_mask_run_refuses_a_stated_class_space_and_admits_the_empty_one(tmp_path: Path):
+def test_a_mask_run_refuses_a_stated_class_space_and_admits_the_empty_one(
+    tmp_path: Path,
+):
     """A mask raster carries its own classes, so a scope naming a subject over it refuses by name;
     the explicit empty scope admits and is what the run records."""
     images_dir, masks_dir = _mask_dataset(tmp_path / "ds")
 
     def data(scope: dict) -> DataSpec:
         return DataSpec.model_validate(
-            {"images_dir": str(images_dir), "labels_dir": str(masks_dir), "scope": scope,
-             "split": {"group_by": "stem", "val_ratio": 0.25, "seed": 5}})
+            {
+                "images_dir": str(images_dir),
+                "labels_dir": str(masks_dir),
+                "scope": scope,
+                "split": {"group_by": "stem", "val_ratio": 0.25, "seed": 5},
+            }
+        )
 
     with pytest.raises(ValueError, match="carries its own classes"):
         _train_val(tmp_path, "semantic_seg", data({"subject": "leaf"}))
@@ -580,7 +798,9 @@ def test_a_mask_run_refuses_a_stated_class_space_and_admits_the_empty_one(tmp_pa
 # -- two producers of one record, compared against each other ------------------
 
 
-def test_the_bound_and_drawn_mask_routes_record_one_directory_the_same_way(tmp_path: Path):
+def test_the_bound_and_drawn_mask_routes_record_one_directory_the_same_way(
+    tmp_path: Path,
+):
     """The same mask directory is admitted twice, once by a run bound to a selection drawn over it
     and once by a run that drew its own split. The two partition it differently, which is what
     each route is for; what they may not do is disagree about which members that directory holds,
@@ -594,27 +814,40 @@ def test_the_bound_and_drawn_mask_routes_record_one_directory_the_same_way(tmp_p
     def trained(experiment_id: str, data_cfg: dict) -> dict:
         """Every member the run trains or validates on, with the ground truth, its digest at the
         run and the source the record names for it."""
-        partition = _resolved(tmp_path, experiment_id, "semantic_seg", data_cfg)[0].partition
-        return {s.member: (s.ground_truth, s.ground_truth_digest, s.source)
-                for s in partition_samples(partition) if s.side in ("train", "val")}
+        partition = _resolved(
+            tmp_path, experiment_id, "semantic_seg", data_cfg
+        )[0].partition
+        return {
+            s.member: (s.ground_truth, s.ground_truth_digest, s.source)
+            for s in partition_samples(partition)
+            if s.side in ("train", "val")
+        }
 
     bound = trained("exp-mask-bound", {"split": {"selection_dir": str(out)}})
-    drawn = trained("exp-mask-drawn",
-                    {"images_dir": str(images_dir), "labels_dir": str(masks_dir),
-                     "split": {"val_ratio": 0.25, "seed": 7}})
+    drawn = trained(
+        "exp-mask-drawn",
+        {
+            "images_dir": str(images_dir),
+            "labels_dir": str(masks_dir),
+            "split": {"val_ratio": 0.25, "seed": 7},
+        },
+    )
 
-    assert {Path(truth).parent for truth, _digest, _source in (*bound.values(), *drawn.values())
-            } == {masks_dir}
+    assert {
+        Path(truth).parent
+        for truth, _digest, _source in (*bound.values(), *drawn.values())
+    } == {masks_dir}
     # The bound run holds out a calibration side the drawn one trains on, so the two agree on
     # every member they both name rather than on the union.
     assert bound and drawn and set(bound) <= set(drawn)
-    assert (
-        {member: bound[member] for member in bound}
-        == {member: drawn[member] for member in bound}
-    )
+    assert {member: bound[member] for member in bound} == {
+        member: drawn[member] for member in bound
+    }
 
 
-def test_a_document_run_and_a_mask_run_record_the_same_images_the_same_way(tmp_path: Path):
+def test_a_document_run_and_a_mask_run_record_the_same_images_the_same_way(
+    tmp_path: Path,
+):
     """The same images are trained twice, once over a per-image label document each and once over a
     ``<stem>.png`` mask each, at the same seed and grouping policy. The two ground truths are
     genuinely different records, so the digests and the scopes differ; what the one producer may
@@ -623,51 +856,87 @@ def test_a_document_run_and_a_mask_run_record_the_same_images_the_same_way(tmp_p
     """
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.subject_registry import SubjectRegistry, Subject
-    from tests._producer_fixtures import image_label_key, label_image, registry_over
+    from tests._producer_fixtures import (
+        image_label_key,
+        label_image,
+        registry_over,
+    )
 
     root = tmp_path / "ds"
     images_dir, masks_dir = _mask_dataset(root)
     registry_over(root, SubjectRegistry(subjects=(Subject(name="leaf"),)))
     for stem in STEMS:
-        label_image(images_dir / f"{stem}.png",
-                    [Annotation(subject="leaf", geometry=BBox(2, 2, 8, 8))], 16, 16)
+        label_image(
+            images_dir / f"{stem}.png",
+            [Annotation(subject="leaf", geometry=BBox(2, 2, 8, 8))],
+            16,
+            16,
+        )
 
     split = {"group_by": "stem", "val_ratio": 0.25, "seed": 11}
 
-    def resolved(experiment_id: str, task: str, data_cfg: dict) -> tuple[dict, dict, dict]:
+    def resolved(
+        experiment_id: str, task: str, data_cfg: dict
+    ) -> tuple[dict, dict, dict]:
         """The resolved partition, and what the loaders this run actually built say each
         member's own ground truth and source are."""
-        record, train_ds, val_ds = _resolved(tmp_path, experiment_id, task, data_cfg)
-        served = [ds.sample_of(key) for ds in (train_ds, val_ds) for key in ds.stems]
+        record, train_ds, val_ds = _resolved(
+            tmp_path, experiment_id, task, data_cfg
+        )
+        served = [
+            ds.sample_of(key) for ds in (train_ds, val_ds) for key in ds.stems
+        ]
         served_truth = {s.member: s.ground_truth for s in served}
         served_sources = {s.member: s.source for s in served}
         return record.partition, served_truth, served_sources
 
     document_run, document_served, document_sources = resolved(
-        "exp-shape-document", "detection", {
-            "images_dir": str(images_dir), "scope": {"subject": "leaf"}, "split": dict(split)})
+        "exp-shape-document",
+        "detection",
+        {
+            "images_dir": str(images_dir),
+            "scope": {"subject": "leaf"},
+            "split": dict(split),
+        },
+    )
     mask_run, mask_served, mask_sources = resolved(
-        "exp-shape-mask", "semantic_seg", {
-            "images_dir": str(images_dir), "labels_dir": str(masks_dir),
-            "split": dict(split)})
+        "exp-shape-mask",
+        "semantic_seg",
+        {
+            "images_dir": str(images_dir),
+            "labels_dir": str(masks_dir),
+            "split": dict(split),
+        },
+    )
 
-    assert set(document_run) == set(mask_run), "one record shape, whatever the ground truth is"
+    assert set(document_run) == set(mask_run), (
+        "one record shape, whatever the ground truth is"
+    )
     assert document_run["group_by"] == mask_run["group_by"] == "stem"
 
     def by_member(partition: dict) -> dict:
         return {s.member: s for s in partition_samples(partition)}
 
-    document_samples, mask_samples = by_member(document_run), by_member(mask_run)
+    document_samples, mask_samples = (
+        by_member(document_run),
+        by_member(mask_run),
+    )
     assert {m: s.ground_truth for m, s in document_samples.items()} == {
-        m: image_label_key(images_dir / f"{m}.png") for m in STEMS}
-    assert {Path(s.ground_truth).parent for s in mask_samples.values()} == {masks_dir}
+        m: image_label_key(images_dir / f"{m}.png") for m in STEMS
+    }
+    assert {Path(s.ground_truth).parent for s in mask_samples.values()} == {
+        masks_dir
+    }
     assert {m: (s.side, s.group) for m, s in document_samples.items()} == {
-        m: (s.side, s.group) for m, s in mask_samples.items()}
+        m: (s.side, s.group) for m, s in mask_samples.items()
+    }
 
     # One assertion over both shapes: each path the record names for a member is the path the
     # loader that trained on it read, so a record naming any other file fails here.
-    for samples, served, sources in ((document_samples, document_served, document_sources),
-                                     (mask_samples, mask_served, mask_sources)):
+    for samples, served, sources in (
+        (document_samples, document_served, document_sources),
+        (mask_samples, mask_served, mask_sources),
+    ):
         assert {m: s.ground_truth for m, s in samples.items()} == served
         assert {m: s.source for m, s in samples.items()} == sources
 

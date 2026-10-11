@@ -27,7 +27,12 @@ from tcip_store.errors import (
     VersionConflictError,
 )
 from tcip_store.model import (
-    REQUIRED, Key, Version, Versioned, canonical_path, refuse_inside_transaction,
+    REQUIRED,
+    Key,
+    Version,
+    Versioned,
+    canonical_path,
+    refuse_inside_transaction,
 )
 
 _TEMP_SUFFIX = ".tmp"
@@ -36,7 +41,9 @@ _LOCK_SUFFIX = ".lock"
 DATABASE_FILENAME = "store.db"
 """The database file a root's records and logs live in, under the root's ``.tcip`` directory."""
 
-_DATABASE_SIDECARS = frozenset({f"{DATABASE_FILENAME}-wal", f"{DATABASE_FILENAME}-shm"})
+_DATABASE_SIDECARS = frozenset(
+    {f"{DATABASE_FILENAME}-wal", f"{DATABASE_FILENAME}-shm"}
+)
 
 DEFAULT_LOCK_TIMEOUT_S = 30.0
 
@@ -104,7 +111,9 @@ def lock_file_for(path: Path | str) -> Path:
 
 
 @contextmanager
-def path_lock(path: Path | str, *, timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) -> Generator[None]:
+def path_lock(
+    path: Path | str, *, timeout_s: float = DEFAULT_LOCK_TIMEOUT_S
+) -> Generator[None]:
     """Hold this process's one lock pair for a filesystem path, across threads and processes.
 
     The parent directory must already exist: the lock file lands beside the data file. Raises
@@ -133,12 +142,17 @@ def database_file(root: str) -> Path:
 
 def database_roots(tree: Path) -> list[Path]:
     """Every root at or under the absolute ``tree`` whose database exists, sorted."""
-    return sorted(db.parent.parent for db in tree.rglob(DATABASE_FILENAME)
-                  if db == database_file(str(db.parent.parent)))
+    return sorted(
+        db.parent.parent
+        for db in tree.rglob(DATABASE_FILENAME)
+        if db == database_file(str(db.parent.parent))
+    )
 
 
 @contextmanager
-def transition_lock(root: str, *, timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) -> Generator[None]:
+def transition_lock(
+    root: str, *, timeout_s: float = DEFAULT_LOCK_TIMEOUT_S
+) -> Generator[None]:
     """Hold the lock a root's database is created under; creating the root's ``.tcip`` directory
     is its first act."""
     db_path = database_file(root)
@@ -182,7 +196,9 @@ def _ensure_parent(path: Path) -> None:
 
 def _stage_bytes(path: Path, data: bytes) -> str:
     """Write ``data`` to a flushed temp file beside ``path`` and return the temp file's path."""
-    fd, temp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=_TEMP_SUFFIX)
+    fd, temp = tempfile.mkstemp(
+        dir=str(path.parent), prefix=f".{path.name}.", suffix=_TEMP_SUFFIX
+    )
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(data)
@@ -198,7 +214,9 @@ def _apply_staged(temp: str, path: Path) -> None:
     """Make one staged temp file the file at ``path`` and flush the rename; a rename that fails
     removes its staging file."""
     try:
-        retry_while_denied(lambda: os.replace(temp, path), DEFAULT_LOCK_TIMEOUT_S)
+        retry_while_denied(
+            lambda: os.replace(temp, path), DEFAULT_LOCK_TIMEOUT_S
+        )
     except BaseException:
         _remove_quietly(temp)
         raise
@@ -235,7 +253,9 @@ def _locked(path: Path) -> Generator[None]:
         raise StoreBusyError(str(path), DEFAULT_LOCK_TIMEOUT_S) from None
 
 
-def require_version(entry: Key | str, data: bytes | None, expect: Version) -> None:
+def require_version(
+    entry: Key | str, data: bytes | None, expect: Version
+) -> None:
     """Refuse (``VersionConflictError`` naming ``entry``) when the stored bytes ``data``,
     ``None`` for an absent entry, are not the version ``expect`` names."""
     current = Version.ABSENT if data is None else _version_of(data)
@@ -243,24 +263,34 @@ def require_version(entry: Key | str, data: bytes | None, expect: Version) -> No
         raise VersionConflictError(entry, expect, current)
 
 
-def versioned(data: bytes | None, default: Any, decode: Callable[[bytes], Any],
-              absent: str) -> Versioned:
+def versioned(
+    data: bytes | None,
+    default: Any,
+    decode: Callable[[bytes], Any],
+    absent: str,
+) -> Versioned:
     """Stored bytes ``data`` as their decoded value (``decode``) and their version, or, for an
     absent entry (``data`` ``None``), ``default`` paired with ``Version.ABSENT``; ``NotFoundError``
     stating ``absent`` when no default was given."""
     if data is not None:
         return Versioned(decode(data), _version_of(data))
     if default is REQUIRED:
-        raise NotFoundError(f"{absent}. Pass default= if absence is meaningful to this caller")
+        raise NotFoundError(
+            f"{absent}. Pass default= if absence is meaningful to this caller"
+        )
     return Versioned(default, Version.ABSENT)
 
 
 def read_blob_versioned(path: Path, *, default: Any = REQUIRED) -> Versioned:
     """A file's bytes and their version, read together (:func:`versioned`)."""
-    return versioned(_read_bytes(path), default, bytes, f"{path} does not exist")
+    return versioned(
+        _read_bytes(path), default, bytes, f"{path} does not exist"
+    )
 
 
-def put_blob(path: Path, data: bytes, *, expect: Version | None = None) -> Version:
+def put_blob(
+    path: Path, data: bytes, *, expect: Version | None = None
+) -> Version:
     """Write a file whole, atomically, and return the version derived from its bytes.
 
     ``expect`` compares against the stored version re-read under the path's lock: a mismatch
@@ -313,8 +343,12 @@ def is_sharing_violation(exc: PermissionError) -> bool:
     return getattr(exc, "winerror", None) == SHARING_VIOLATION
 
 
-def retry_while_denied(action: Callable[[], Any], budget_s: float, *,
-                       denied: Callable[[PermissionError], bool] = lambda exc: True) -> Any:
+def retry_while_denied(
+    action: Callable[[], Any],
+    budget_s: float,
+    *,
+    denied: Callable[[PermissionError], bool] = lambda exc: True,
+) -> Any:
     """Run a filesystem action a conflicting handle may deny for a while, retrying a
     ``PermissionError`` that ``denied`` accepts (by default every one) after a jittered wait
     capped at the time left of ``budget_s`` from the first attempt; the denial is raised instead
@@ -327,6 +361,11 @@ def retry_while_denied(action: Callable[[], Any], budget_s: float, *,
         except PermissionError as exc:
             if not denied(exc):
                 raise
-            time.sleep(min(random.uniform(0.005, 0.05), max(0.0, deadline - time.monotonic())))
+            time.sleep(
+                min(
+                    random.uniform(0.005, 0.05),
+                    max(0.0, deadline - time.monotonic()),
+                )
+            )
             if time.monotonic() >= deadline:
                 raise

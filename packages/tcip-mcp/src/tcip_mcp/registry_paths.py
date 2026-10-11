@@ -16,10 +16,15 @@ def is_external_form(stored: str) -> bool:
     """Whether ``stored`` is an absolute path by either platform's own path grammar; either grammar
     recognizing it as absolute makes it external.
     """
-    return PurePosixPath(stored).is_absolute() or PureWindowsPath(stored).is_absolute()
+    return (
+        PurePosixPath(stored).is_absolute()
+        or PureWindowsPath(stored).is_absolute()
+    )
 
 
-def nearest_containing_ancestor(start: Path, root: Path, *, tolerant: bool) -> Path | None:
+def nearest_containing_ancestor(
+    start: Path, root: Path, *, tolerant: bool
+) -> Path | None:
     """The nearest of ``start`` and its parents that is the same file as ``root``, or ``None`` when
     none is.
 
@@ -51,11 +56,14 @@ def located(path: str | Path, project: str | Path | None) -> Path:
     if project is None and not Path(path).is_absolute():
         raise RelativePathWithoutProjectError(
             f"{str(path)!r} is relative and nothing here holds a project to read it against: "
-            "state an absolute path, or call the project tool on its project")
+            "state an absolute path, or call the project tool on its project"
+        )
     return (Path(project or "") / path).resolve()
 
 
-def stored_path(path: str | Path, root: str | Path, *, tolerant: bool = True) -> str:
+def stored_path(
+    path: str | Path, root: str | Path, *, tolerant: bool = True
+) -> str:
     """What a record stores for ``path`` (:func:`located` against ``root``): relative POSIX when
     it lies at or under ``root`` (``root`` itself stored ``"."``), absolute otherwise, so a stored
     path stores as itself.
@@ -66,7 +74,9 @@ def stored_path(path: str | Path, root: str | Path, *, tolerant: bool = True) ->
     its nearest existing ancestor. The relative form never carries a ``..`` segment.
     """
     resolved = located(path, root)
-    ancestor = nearest_containing_ancestor(resolved, Path(root), tolerant=tolerant)
+    ancestor = nearest_containing_ancestor(
+        resolved, Path(root), tolerant=tolerant
+    )
     if ancestor is None:
         return str(resolved)
     return resolved.relative_to(ancestor).as_posix()
@@ -78,7 +88,9 @@ class CheckpointRegistryRootUnusableError(ValueError):
     """
 
 
-def checkpoint_registry_path_for(checkpoint_path: str | Path, root: str | Path) -> str:
+def checkpoint_registry_path_for(
+    checkpoint_path: str | Path, root: str | Path
+) -> str:
     """What a checkpoint registry entry stores for its path: relative POSIX when
     ``checkpoint_path`` resolves under ``root``, absolute otherwise.
 
@@ -121,7 +133,9 @@ def resolved_registry_path(root: str | Path, stored: str) -> Path:
     ``..`` segment under either platform's own path grammar.
     """
     if not stored:
-        raise RegistryPathEmptyError("registry entry carries no path to resolve")
+        raise RegistryPathEmptyError(
+            "registry entry carries no path to resolve"
+        )
     if is_external_form(stored):
         return Path(stored)
     parts = PurePosixPath(stored).parts
@@ -146,7 +160,9 @@ def within(prefix: tuple[str, ...], fields: PathFields) -> PathFields:
     return tuple(prefix + field for field in fields)
 
 
-def _each_path(value: Any, steps: tuple[str, ...], convert: Callable[[str], str]) -> Any:
+def _each_path(
+    value: Any, steps: tuple[str, ...], convert: Callable[[str], str]
+) -> Any:
     if value is None:
         return None
     if not steps:
@@ -155,7 +171,9 @@ def _each_path(value: Any, steps: tuple[str, ...], convert: Callable[[str], str]
     if step == "[]":
         return [_each_path(item, rest, convert) for item in value]
     if step == "*":
-        return {key: _each_path(item, rest, convert) for key, item in value.items()}
+        return {
+            key: _each_path(item, rest, convert) for key, item in value.items()
+        }
     if step == "{}":
         return {convert(key): item for key, item in value.items()}
     if step == "0":
@@ -169,7 +187,9 @@ def recorded_paths(record: Any, fields: PathFields, root: str | Path) -> Any:
     """A copy of ``record`` with each path ``fields`` names as :func:`stored_path` stores it
     against ``root``. An absent or ``None`` field stays as it is."""
     for field in fields:
-        record = _each_path(record, field, lambda path: stored_path(path, root))
+        record = _each_path(
+            record, field, lambda path: stored_path(path, root)
+        )
     return record
 
 
@@ -177,8 +197,11 @@ def runtime_paths(record: Any, fields: PathFields, root: str | Path) -> Any:
     """A copy of ``record``, written by :func:`recorded_paths`, with each path ``fields`` names
     resolved against ``root`` (:func:`resolved_registry_path`)."""
     for field in fields:
-        record = _each_path(record, field,
-                            lambda stored: str(resolved_registry_path(root, stored)))
+        record = _each_path(
+            record,
+            field,
+            lambda stored: str(resolved_registry_path(root, stored)),
+        )
     return record
 
 

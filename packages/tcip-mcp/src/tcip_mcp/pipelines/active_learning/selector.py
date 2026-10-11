@@ -21,8 +21,11 @@ def unscoreable(predictions: list[dict]) -> list[dict]:
     """Predictions with no confidence-bearing signal: no ``scores`` key (checked by presence;
     ``scores: []`` is a scored negative) and no ``*_confidences`` head output.
     """
-    return [pred for pred in predictions
-            if "scores" not in pred and not _confidence_values(pred)]
+    return [
+        pred
+        for pred in predictions
+        if "scores" not in pred and not _confidence_values(pred)
+    ]
 
 
 def review_queue(

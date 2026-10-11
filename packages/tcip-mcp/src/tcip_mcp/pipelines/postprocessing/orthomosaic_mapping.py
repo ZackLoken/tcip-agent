@@ -116,7 +116,9 @@ def _read_projected_epsg(geokeys: tuple[int, ...], path: Path) -> int:
     """
     geokeys = tuple(geokeys)
     if len(geokeys) < 4:
-        raise GeoreferencingError(f"{path}: GeoKeyDirectoryTag is too short to hold a header.")
+        raise GeoreferencingError(
+            f"{path}: GeoKeyDirectoryTag is too short to hold a header."
+        )
     num_keys = int(geokeys[3])
     entries = geokeys[4 : 4 + num_keys * 4]
     if len(entries) < num_keys * 4:
@@ -145,11 +147,15 @@ def _read_projected_epsg(geokeys: tuple[int, ...], path: Path) -> int:
             "raster rather than guess how to interpret its coordinates."
         )
     if projected_epsg is None:
-        raise GeoreferencingError(f"{path}: GeoKeyDirectoryTag has no ProjectedCSTypeGeoKey.")
+        raise GeoreferencingError(
+            f"{path}: GeoKeyDirectoryTag has no ProjectedCSTypeGeoKey."
+        )
     return projected_epsg
 
 
-def pixel_to_native(transform: GeoTransform, pixel_x: float, pixel_y: float) -> tuple[float, float]:
+def pixel_to_native(
+    transform: GeoTransform, pixel_x: float, pixel_y: float
+) -> tuple[float, float]:
     """The (easting, northing) in ``transform``'s native projected CRS for pixel (column, row)
     ``(pixel_x, pixel_y)``, via the tiepoint + pixel-scale GeoTIFF affine, rows increasing
     southward."""
@@ -200,16 +206,22 @@ class OrthomosaicGeoreference:
         self._to_wgs84: "pyproj.Transformer | None" = None
 
     @classmethod
-    def of(cls, georeference: "GeoTransform | GeoreferencingError | None",
-           ) -> "OrthomosaicGeoreference":
+    def of(
+        cls,
+        georeference: "GeoTransform | GeoreferencingError | None",
+    ) -> "OrthomosaicGeoreference":
         """The georeference a raster's one georeference read answered (an open reader's or a TIFF
         header's ``georeference``). Raises the reason that read refused, or
         :class:`GeoreferencingError` for a raster whose reader reads no GeoTIFF tags."""
         if isinstance(georeference, GeoTransform):
             return cls(georeference)
-        raise georeference or GeoreferencingError("this raster carries no GeoTIFF tags to read")
+        raise georeference or GeoreferencingError(
+            "this raster carries no GeoTIFF tags to read"
+        )
 
-    def pixel_to_native(self, pixel_x: float, pixel_y: float) -> tuple[float, float]:
+    def pixel_to_native(
+        self, pixel_x: float, pixel_y: float
+    ) -> tuple[float, float]:
         """(easting, northing) in this raster's own native projected CRS."""
         return pixel_to_native(self.transform, pixel_x, pixel_y)
 
@@ -219,11 +231,15 @@ class OrthomosaicGeoreference:
 
         if self._to_wgs84 is None:
             self._to_wgs84 = pyproj.Transformer.from_crs(
-                f"EPSG:{self.transform.epsg}", f"EPSG:{WGS84_EPSG}", always_xy=True
+                f"EPSG:{self.transform.epsg}",
+                f"EPSG:{WGS84_EPSG}",
+                always_xy=True,
             )
         return self._to_wgs84
 
-    def pixel_to_wgs84(self, pixel_x: float, pixel_y: float) -> tuple[float, float]:
+    def pixel_to_wgs84(
+        self, pixel_x: float, pixel_y: float
+    ) -> tuple[float, float]:
         """(lat, lon) in WGS84 for raster pixel ``(pixel_x, pixel_y)``."""
         native_x, native_y = self.pixel_to_native(pixel_x, pixel_y)
         lon, lat = self._transformer().transform(native_x, native_y)
@@ -232,7 +248,9 @@ class OrthomosaicGeoreference:
     def wgs84_to_native(self, lat: float, lon: float) -> tuple[float, float]:
         """(easting, northing) in this raster's own native projected CRS for a WGS84
         ``(lat, lon)``."""
-        native_x, native_y = self._transformer().transform(lon, lat, direction="INVERSE")
+        native_x, native_y = self._transformer().transform(
+            lon, lat, direction="INVERSE"
+        )
         return native_x, native_y
 
     def wgs84_to_pixel(self, lat: float, lon: float) -> tuple[float, float]:
@@ -248,7 +266,9 @@ class OrthomosaicGeoreference:
 
         factor, reason = meters_per_crs_unit(self.transform.epsg)
         if factor is None:
-            raise ValueError(f"this raster's distances cannot be stated in meters: {reason}")
+            raise ValueError(
+                f"this raster's distances cannot be stated in meters: {reason}"
+            )
         return factor
 
 
@@ -296,7 +316,11 @@ def detection_location(box: Sequence[float]) -> tuple[float, float]:
 
 
 def plants_in_frame(
-    plants: list[PlantRecord], georef: OrthomosaicGeoreference, *, width: int, height: int,
+    plants: list[PlantRecord],
+    georef: OrthomosaicGeoreference,
+    *,
+    width: int,
+    height: int,
 ) -> tuple[list[PlantRecord], list[PlantRecord]]:
     """``(in_frame, outside)``: ``plants`` partitioned by whether their projected pixel position
     falls inside this raster's own frame, the half-open test ``0 <= px < width`` and ``0 <= py <
@@ -331,11 +355,21 @@ def assign_detections_to_plants(
     for i, box in enumerate(boxes):
         cx, cy = detection_location(box)
         lat, lon = georeference.pixel_to_wgs84(cx, cy)
-        index, distance_m = nearest_plant((lat, lon), plants, within_m=nn_tolerance_m)
+        index, distance_m = nearest_plant(
+            (lat, lon), plants, within_m=nn_tolerance_m
+        )
         plant = plants[index] if index is not None else None
-        out.append(DetectionAssignment(
-            detection_index=i, pixel_x=cx, pixel_y=cy, lat=lat, lon=lon,
-            plot_name=plant.plot_name if plant else None,
-            accession_name=plant.accession_name if plant else None,
-            source="nearest_neighbor" if plant else "unmapped", distance_m=distance_m))
+        out.append(
+            DetectionAssignment(
+                detection_index=i,
+                pixel_x=cx,
+                pixel_y=cy,
+                lat=lat,
+                lon=lon,
+                plot_name=plant.plot_name if plant else None,
+                accession_name=plant.accession_name if plant else None,
+                source="nearest_neighbor" if plant else "unmapped",
+                distance_m=distance_m,
+            )
+        )
     return out

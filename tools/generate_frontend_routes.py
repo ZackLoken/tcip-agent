@@ -68,7 +68,9 @@ def route_name(path: str, method: str) -> str:
     for segment in segments:
         if segment.startswith("{"):
             match = _PARAM_RE.match(segment)
-            assert match is not None, f"malformed path parameter segment {segment!r}"
+            assert match is not None, (
+                f"malformed path parameter segment {segment!r}"
+            )
             parts.append("By" + _camel(match.group(1), upper_first=True))
         else:
             parts.append(_camel(segment, upper_first=True))
@@ -95,11 +97,17 @@ def collect_routes(app) -> list[tuple[str, str, str]]:
     found: list[tuple[str, str, str]] = []
     for route in iter_api_routes(app):
         if isinstance(route, APIRoute):
-            assert route.methods is not None, "FastAPI's own APIRoute always populates methods"
+            assert route.methods is not None, (
+                "FastAPI's own APIRoute always populates methods"
+            )
             for method in sorted(route.methods - {"HEAD", "OPTIONS"}):
-                found.append((route_name(route.path, method), route.path, method))
+                found.append(
+                    (route_name(route.path, method), route.path, method)
+                )
         else:
-            found.append((route_name(route.path, "WEBSOCKET"), route.path, "WEBSOCKET"))
+            found.append(
+                (route_name(route.path, "WEBSOCKET"), route.path, "WEBSOCKET")
+            )
 
     by_name: dict[str, tuple[str, str, str]] = {}
     for entry in found:
@@ -121,7 +129,11 @@ def _entry(name: str, path: str) -> str:
     args = ", ".join(f"{_camel(p, upper_first=False)}: string" for p in params)
     body = re.sub(
         r"\{([^}:]+)(?::[^}]*)?\}",
-        lambda m: "${encodeURIComponent(" + _camel(m.group(1), upper_first=False) + ")}",
+        lambda m: (
+            "${encodeURIComponent("
+            + _camel(m.group(1), upper_first=False)
+            + ")}"
+        ),
         path,
     )
     single = f"  {name}: ({args}) => `{body}`,\n"
@@ -132,7 +144,11 @@ def _entry(name: str, path: str) -> str:
 
 def render(app) -> str:
     """The full text of the generated module."""
-    return HEADER + "".join(_entry(name, path) for name, path, _ in collect_routes(app)) + FOOTER
+    return (
+        HEADER
+        + "".join(_entry(name, path) for name, path, _ in collect_routes(app))
+        + FOOTER
+    )
 
 
 def collect_proxy_entries(app) -> list[tuple[str, bool]]:
@@ -152,7 +168,9 @@ def collect_proxy_entries(app) -> list[tuple[str, bool]]:
         if not segments:
             continue
         prefix = "/" + segments[0]
-        ws_by_prefix[prefix] = ws_by_prefix.get(prefix, False) or method == "WEBSOCKET"
+        ws_by_prefix[prefix] = (
+            ws_by_prefix.get(prefix, False) or method == "WEBSOCKET"
+        )
     return sorted(ws_by_prefix.items())
 
 
@@ -177,10 +195,16 @@ def render_proxy(app) -> str:
     binds and answers to (``tcip_mcp.web_client.LOOPBACK_HOST``) for the dev server to serve on."""
     from tcip_mcp.web_client import LOOPBACK_HOST
 
-    body = "".join(f'  {{ path: "{path}", ws: {str(ws).lower()} }},\n'
-                   for path, ws in collect_proxy_entries(app))
-    return (PROXY_HEADER + body + PROXY_FOOTER
-            + f'\nexport const LOOPBACK_HOST = "{LOOPBACK_HOST}";\n')
+    body = "".join(
+        f'  {{ path: "{path}", ws: {str(ws).lower()} }},\n'
+        for path, ws in collect_proxy_entries(app)
+    )
+    return (
+        PROXY_HEADER
+        + body
+        + PROXY_FOOTER
+        + f'\nexport const LOOPBACK_HOST = "{LOOPBACK_HOST}";\n'
+    )
 
 
 def main() -> int:
@@ -188,7 +212,9 @@ def main() -> int:
 
     GENERATED_PATH.write_text(render(app), encoding="utf-8", newline="\n")
     print(f"wrote {GENERATED_PATH}")
-    PROXY_GENERATED_PATH.write_text(render_proxy(app), encoding="utf-8", newline="\n")
+    PROXY_GENERATED_PATH.write_text(
+        render_proxy(app), encoding="utf-8", newline="\n"
+    )
     print(f"wrote {PROXY_GENERATED_PATH}")
     return 0
 

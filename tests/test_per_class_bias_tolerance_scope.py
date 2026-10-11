@@ -20,7 +20,9 @@ pytest.importorskip("torch")
 
 from tcip_mcp.pipelines.operating_point import count_criterion  # noqa: E402
 
-ENTRY = fx.with_fields(fx.BUD_OPENING, count_bias_tolerance_frac=0.01, count_error_tolerance=100.0)
+ENTRY = fx.with_fields(
+    fx.BUD_OPENING, count_bias_tolerance_frac=0.01, count_error_tolerance=100.0
+)
 N_IMAGES = 6
 DENSE_PER_IMAGE = 250
 RARE_PER_IMAGE = 10
@@ -49,17 +51,40 @@ def _records(prefix: str, offset: float, *, spurious: bool) -> list[dict]:
             dt.append({"bbox": box, "category_id": 2, "score": 0.9})
         if spurious:
             for k in range(SPURIOUS_PER_IMAGE):
-                dt.append({"bbox": [offset + 50.0 * k, 1500.0 + 10.0 * i, 20.0, 20.0],
-                           "category_id": 2, "score": 0.9})
-        recs.append({"image_id": f"{prefix}{i}", "width": 20000, "height": 3000, "gt": gt,
-                     "dt": dt, "count": len(dt), "cap": len(dt) + 1})
+                dt.append(
+                    {
+                        "bbox": [
+                            offset + 50.0 * k,
+                            1500.0 + 10.0 * i,
+                            20.0,
+                            20.0,
+                        ],
+                        "category_id": 2,
+                        "score": 0.9,
+                    }
+                )
+        recs.append(
+            {
+                "image_id": f"{prefix}{i}",
+                "width": 20000,
+                "height": 3000,
+                "gt": gt,
+                "dt": dt,
+                "count": len(dt),
+                "cap": len(dt) + 1,
+            }
+        )
     return recs
 
 
 def _criterion(*, spurious: bool):
-    return count_criterion(_records("c", 0.0, spurious=spurious),
-                           _records("h", 100000.0, spurious=spurious), ENTRY,
-                           staged_conf_floor=0.05, staged_conf_floor_attribute_path=None)
+    return count_criterion(
+        _records("c", 0.0, spurious=spurious),
+        _records("h", 100000.0, spurious=spurious),
+        ENTRY,
+        staged_conf_floor=0.05,
+        staged_conf_floor_attribute_path=None,
+    )
 
 
 def test_a_rare_class_is_not_granted_the_dense_class_density_as_its_tolerance():
@@ -81,7 +106,10 @@ def test_a_rare_class_is_not_granted_the_dense_class_density_as_its_tolerance():
     assert "count_bias_exceeds_tolerance" not in failures
     assert rare["tolerance"] < evidence["pooled_count_bias_tolerance"] / 10
     assert rare["bias"] > rare["tolerance"]
-    assert rare["passed"] is False and evidence["per_class"]["1"]["passed"] is True
+    assert (
+        rare["passed"] is False
+        and evidence["per_class"]["1"]["passed"] is True
+    )
     assert "count_bias_exceeds_tolerance_per_class" in failures
 
 

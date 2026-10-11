@@ -17,7 +17,9 @@ def viz_output_path(project: Path, name: str, suffix: str = ".png") -> str:
     viz_dir = (Path(project) / ".tcip" / "artifacts" / "viz").resolve()
     viz_dir.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%d_%H%M%S")
-    return str(viz_dir / f"{stamp}_{time.time_ns() % 1_000_000:06d}_{name}{suffix}")
+    return str(
+        viz_dir / f"{stamp}_{time.time_ns() % 1_000_000:06d}_{name}{suffix}"
+    )
 
 
 def repo_root_from_here() -> Path:

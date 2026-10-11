@@ -23,7 +23,10 @@ DECLARED_HEADERS = {
 
 
 def _post_and_capture_broadcast(
-    client: TestClient, project_id: str, event_type: str, data: dict,
+    client: TestClient,
+    project_id: str,
+    event_type: str,
+    data: dict,
     headers: dict | None = None,
 ) -> tuple[Any, dict]:
     """Post a panel event for the open project, whose id is ``project_id``, while subscribed to
@@ -35,7 +38,11 @@ def _post_and_capture_broadcast(
             ws.receive_json()  # drain what the open project already retained on this panel
         posted = client.post(
             "/api/events/meta",
-            json={"event_type": event_type, "data": data, "project_id": project_id},
+            json={
+                "event_type": event_type,
+                "data": data,
+                "project_id": project_id,
+            },
             headers=headers or {},
         )
         event = ws.receive_json()
@@ -43,32 +50,49 @@ def _post_and_capture_broadcast(
 
 
 def test_a_push_with_the_identity_headers_is_replayed_with_what_it_declared(
-    opened_client: TestClient, opened,
+    opened_client: TestClient,
+    opened,
 ) -> None:
     posted, event = _post_and_capture_broadcast(
-        opened_client, opened.id, "identity_declared", {}, headers=DECLARED_HEADERS
+        opened_client,
+        opened.id,
+        "identity_declared",
+        {},
+        headers=DECLARED_HEADERS,
     )
     assert posted.status_code == 200, posted.text
     assert [event[field] for field in IDENTITY_FIELDS] == [
-        "reviewing-harness", "1.2.3", "mcp_0123", "term_abc"
+        "reviewing-harness",
+        "1.2.3",
+        "mcp_0123",
+        "term_abc",
     ]
     assert not any("harness" in field for field in event)
 
 
 def test_a_push_without_the_headers_is_replayed_with_the_fields_empty(
-    opened_client: TestClient, opened,
+    opened_client: TestClient,
+    opened,
 ) -> None:
-    posted, event = _post_and_capture_broadcast(opened_client, opened.id, "identity_absent", {})
+    posted, event = _post_and_capture_broadcast(
+        opened_client, opened.id, "identity_absent", {}
+    )
     assert posted.status_code == 200, posted.text
     assert posted.json()["status"] == "ok"
-    assert [event[field] for field in IDENTITY_FIELDS] == [None] * len(IDENTITY_FIELDS)
+    assert [event[field] for field in IDENTITY_FIELDS] == [None] * len(
+        IDENTITY_FIELDS
+    )
 
 
 def test_a_partial_declaration_records_only_what_was_sent(
-    opened_client: TestClient, opened,
+    opened_client: TestClient,
+    opened,
 ) -> None:
     _, event = _post_and_capture_broadcast(
-        opened_client, opened.id, "identity_partial", {},
+        opened_client,
+        opened.id,
+        "identity_partial",
+        {},
         headers={"X-TCIP-Agent-Client-Name": "reviewing-harness"},
     )
     assert event["agent_client_name"] == "reviewing-harness"

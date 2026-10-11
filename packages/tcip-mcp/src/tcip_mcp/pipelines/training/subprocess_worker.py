@@ -26,7 +26,10 @@ def _parse_args() -> argparse.Namespace:
 
 
 def prepare_run_context(
-    observation: "RunObservation", *, origin: str = "training", epoch_hook: Any = None,
+    observation: "RunObservation",
+    *,
+    origin: str = "training",
+    epoch_hook: Any = None,
 ) -> "TrainContext":
     """Build the ``TrainContext`` of the observed run from what its launch record resolved,
     resolving nothing again: its config with the resolved data section, its objective, its
@@ -35,11 +38,16 @@ def prepare_run_context(
     ``origin`` and ``epoch_hook`` are the context's own.
     """
     from tcip_mcp.pipelines.data.split_construction import (
-        partition_samples, partition_spatial, recorded_datasets,
+        partition_samples,
+        partition_spatial,
+        recorded_datasets,
     )
     from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
     from tcip_mcp.pipelines.training.envelope import TrainContext
-    from tcip_mcp.pipelines.training.generic_trainer import run_loaders, run_transforms
+    from tcip_mcp.pipelines.training.generic_trainer import (
+        run_loaders,
+        run_transforms,
+    )
     from tcip_mcp.pipelines.training.run_registry import observed_run
 
     run_dir = observation.directory
@@ -52,23 +60,38 @@ def prepare_run_context(
     task = spec.model_source.task
     partition = cast(dict, observation.resolution)["partition"]
     spatial = partition_spatial(partition)
-    train_ds, val_ds = recorded_datasets(task, spec.data, partition_samples(partition), spatial,
-                                         run_transforms(spec), run_obj.layout)
+    train_ds, val_ds = recorded_datasets(
+        task,
+        spec.data,
+        partition_samples(partition),
+        spatial,
+        run_transforms(spec),
+        run_obj.layout,
+    )
     train_loader, val_loader = run_loaders(run_obj, train_ds, val_ds)
     if val_loader is None and task in DETECTION_TASKS:
         logger.warning(
             "No validation loader for %s run %s: best-model selection and the stop rule read the "
             "training loss. Bind a selection through data.split.selection_dir, or enable "
-            "auto_val.", task, run_dir.name,
+            "auto_val.",
+            task,
+            run_dir.name,
         )
     return TrainContext(
-        run=run_obj, train_loader=train_loader, val_loader=val_loader, spatial=spatial,
-        resume_from=run_record["resume_from"] or "", epoch_hook=epoch_hook,
+        run=run_obj,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        spatial=spatial,
+        resume_from=run_record["resume_from"] or "",
+        epoch_hook=epoch_hook,
     )
 
 
 def run_directory(
-    run_dir: Path, *, origin: str = "training", epoch_hook: Any = None,
+    run_dir: Path,
+    *,
+    origin: str = "training",
+    epoch_hook: Any = None,
 ) -> "TrainRun":
     """Run the run whose directory is ``run_dir`` to its final status and return it: refuse one
     that has ended before anything is written (``experiments.require_open``), observe it once,
@@ -77,20 +100,33 @@ def run_directory(
     envelope opens closes the run ``failed`` naming it (``envelope.close_run``) and propagates.
     """
     from tcip_mcp.experiments import keep_heartbeat, observe, require_open
-    from tcip_mcp.pipelines.training.envelope import close_run, run_training_envelope
+    from tcip_mcp.pipelines.training.envelope import (
+        close_run,
+        run_training_envelope,
+    )
 
     require_open(run_dir)
     observation = observe(run_dir)
     stop = keep_heartbeat(run_dir)
     try:
         try:
-            ctx = prepare_run_context(observation, origin=origin, epoch_hook=epoch_hook)
+            ctx = prepare_run_context(
+                observation, origin=origin, epoch_hook=epoch_hook
+            )
         except Exception as exc:
-            logger.exception("Pre-training setup failed for run %s: %s", run_dir.name, exc)
+            logger.exception(
+                "Pre-training setup failed for run %s: %s", run_dir.name, exc
+            )
             from tcip_mcp.experiments import project_of_run
 
-            close_run(run_dir, project_of_run(run_dir), "failed", str(exc), checkpoint=None,
-                      arguments={"experiment_id": run_dir.name})
+            close_run(
+                run_dir,
+                project_of_run(run_dir),
+                "failed",
+                str(exc),
+                checkpoint=None,
+                arguments={"experiment_id": run_dir.name},
+            )
             raise
         run_training_envelope(ctx)
         return ctx.run

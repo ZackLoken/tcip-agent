@@ -2,20 +2,44 @@
 
 Schema::
 
-    { "width": W, "height": H,
-      "annotations": [
-        { "subject": "<subject>",
-          "bbox": [x, y, w, h],                 # COCO xywh, pixel, a box only
-          "segmentation": [[x1,y1, ...], ...],  # pixel polygon, one or more rings (optional)
-          "point": [x, y],                      # pixel point, a prompt or keypoint (optional)
-          "attributes": {"<attribute>": "<value>"},   # attr name -> value name
-          "score": 0.91,                        # predictions only
-          "iscrowd": true,                      # a region of unseparated objects (optional)
-          "created_by": "model:<sha>", "created_at": "...",
-          "accepted_by": "user:breeder", "accepted_at": "..." } ],
-      "complete": {"<subject>": [
-        { "rect": [x, y, w, h], "by": "user:breeder", "at": "...",
-          "digest": "<the subject's annotations>", "proposals_hidden": false } ]} }
+    {
+        "width": W,
+        "height": H,
+        "annotations": [
+            {
+                "subject": "<subject>",
+                "bbox": [x, y, w, h],  # COCO xywh, pixel, a box only
+                "segmentation": [
+                    [x1, y1, ...],
+                    ...,
+                ],  # pixel polygon, one or more rings (optional)
+                "point": [
+                    x,
+                    y,
+                ],  # pixel point, a prompt or keypoint (optional)
+                "attributes": {
+                    "<attribute>": "<value>"
+                },  # attr name -> value name
+                "score": 0.91,  # predictions only
+                "iscrowd": true,  # a region of unseparated objects (optional)
+                "created_by": "model:<sha>",
+                "created_at": "...",
+                "accepted_by": "user:breeder",
+                "accepted_at": "...",
+            }
+        ],
+        "complete": {
+            "<subject>": [
+                {
+                    "rect": [x, y, w, h],
+                    "by": "user:breeder",
+                    "at": "...",
+                    "digest": "<the subject's annotations>",
+                    "proposals_hidden": false,
+                }
+            ]
+        },
+    }
 
 A stored value that is not this object (``null`` included), an ``annotations`` that is not a
 list, a record :func:`annotation_of_record` refuses or a completion mark :func:`completion_marks`
@@ -36,7 +60,13 @@ import tcip_store
 from tcip_store import Key, Version, scalar_number
 
 from tcip_annotation.state import (
-    Annotation, BBox, Point, Polygon, bbox_of, is_detection, polygonal,
+    Annotation,
+    BBox,
+    Point,
+    Polygon,
+    bbox_of,
+    is_detection,
+    polygonal,
     prediction_score,
 )
 
@@ -56,7 +86,9 @@ def safe_score(x) -> float:
     give."""
     v = float(x)
     if not math.isfinite(v):
-        raise ValueError(f"confidence {x!r} is not a finite number, so it cannot be stored as one.")
+        raise ValueError(
+            f"confidence {x!r} is not a finite number, so it cannot be stored as one."
+        )
     return round(v, 4)
 
 
@@ -64,9 +96,14 @@ def _numbers(value, key: str, count: int | None = None) -> list[float]:
     """``value`` as floats: a list of JSON numbers, exactly ``count`` of them when given. Raises
     ``ValueError`` naming ``key`` for anything else, a numeric string included.
     """
-    if (not isinstance(value, list) or (count is not None and len(value) != count)
-            or not all(scalar_number(v) for v in value)):
-        raise ValueError(f"{key} {value!r} is not a list of {count or 'some'} numbers")
+    if (
+        not isinstance(value, list)
+        or (count is not None and len(value) != count)
+        or not all(scalar_number(v) for v in value)
+    ):
+        raise ValueError(
+            f"{key} {value!r} is not a list of {count or 'some'} numbers"
+        )
     return [float(v) for v in value]
 
 
@@ -74,7 +111,9 @@ def _polygon_of(segmentation) -> Polygon:
     """A ``segmentation``'s flat ``x, y`` rings as a :class:`Polygon`, which refuses a ring too
     short to be a shape, or ``ValueError`` naming what the value is instead."""
     if not isinstance(segmentation, list):
-        raise ValueError(f"segmentation {segmentation!r} is not a list of rings")
+        raise ValueError(
+            f"segmentation {segmentation!r} is not a list of rings"
+        )
     rings: list[list[tuple[float, float]]] = []
     for ring in segmentation:
         flat = _numbers(ring, "segmentation ring")
@@ -88,8 +127,12 @@ def attributes_of(raw) -> dict[str, str]:
     """Supplied attribute values, name to value name: anything but a mapping of names to non-empty
     value names raises ``ValueError``.
     """
-    if not isinstance(raw, dict) or not all(isinstance(v, str) and v for v in raw.values()):
-        raise ValueError(f"attributes {raw!r} are not attribute names mapped to value names")
+    if not isinstance(raw, dict) or not all(
+        isinstance(v, str) and v for v in raw.values()
+    ):
+        raise ValueError(
+            f"attributes {raw!r} are not attribute names mapped to value names"
+        )
     return dict(raw)
 
 
@@ -133,7 +176,9 @@ def ring_vertex(vertex) -> tuple:
         return vertex["x"], vertex["y"]
     if isinstance(vertex, (list, tuple)) and len(vertex) == 2:
         return vertex[0], vertex[1]
-    raise ValueError(f"ring vertex {vertex!r} is not an [x, y] pair or an {{x, y}} mapping")
+    raise ValueError(
+        f"ring vertex {vertex!r} is not an [x, y] pair or an {{x, y}} mapping"
+    )
 
 
 def annotation_from_payload(payload: Mapping) -> Annotation:
@@ -152,21 +197,37 @@ def annotation_from_payload(payload: Mapping) -> Annotation:
     rings, corners = payload.get("rings"), payload.get("bbox")
     if rings is None and payload.get("points") is not None:
         rings = [payload["points"]]
-    segmentation = rings if not isinstance(rings, list) else [
-        [c for v in ring for c in ring_vertex(v)] if isinstance(ring, list) else ring
-        for ring in rings]
-    return annotation_of_record({
-        "subject": payload.get("subject"),
-        "segmentation": segmentation,
-        "bbox": xywh(*_numbers(corners, "bbox", 4)) if corners is not None else None,
-        "point": payload.get("point"),
-        "attributes": payload.get("attributes"),
-        "iscrowd": payload.get("iscrowd"),
-    })
+    segmentation = (
+        rings
+        if not isinstance(rings, list)
+        else [
+            [c for v in ring for c in ring_vertex(v)]
+            if isinstance(ring, list)
+            else ring
+            for ring in rings
+        ]
+    )
+    return annotation_of_record(
+        {
+            "subject": payload.get("subject"),
+            "segmentation": segmentation,
+            "bbox": xywh(*_numbers(corners, "bbox", 4))
+            if corners is not None
+            else None,
+            "point": payload.get("point"),
+            "attributes": payload.get("attributes"),
+            "iscrowd": payload.get("iscrowd"),
+        }
+    )
 
 
-def stamped(contents: Iterable[Annotation], stored: Iterable[Annotation], *, author: str,
-            now: str) -> list[Annotation]:
+def stamped(
+    contents: Iterable[Annotation],
+    stored: Iterable[Annotation],
+    *,
+    author: str,
+    now: str,
+) -> list[Annotation]:
     """``contents`` with their provenance: each one whose stored content (:func:`stored_content`)
     equals a not yet claimed record of ``stored`` takes that record's provenance, and every other
     one is authored by ``author`` at ``now`` with no sign-off."""
@@ -176,8 +237,11 @@ def stamped(contents: Iterable[Annotation], stored: Iterable[Annotation], *, aut
     out = []
     for content in contents:
         held = unclaimed.get(_content_key(content))
-        source = held.pop(0) if held else Annotation(content.subject, created_by=author,
-                                                     created_at=now)
+        source = (
+            held.pop(0)
+            if held
+            else Annotation(content.subject, created_by=author, created_at=now)
+        )
         out.append(replace(content, **_held_provenance(source)))
     return out
 
@@ -212,20 +276,45 @@ def annotation_of_record(o) -> Annotation:
     """
     o = annotation_object(o)
     subject = o.get("subject")
-    present = {k: o[k] for k in ("segmentation", "bbox", "point", "score", "attributes", "iscrowd",
-                                 *_PROV_KEYS) if o.get(k) is not None}
-    polygon = _polygon_of(present["segmentation"]) if "segmentation" in present else None
+    present = {
+        k: o[k]
+        for k in (
+            "segmentation",
+            "bbox",
+            "point",
+            "score",
+            "attributes",
+            "iscrowd",
+            *_PROV_KEYS,
+        )
+        if o.get(k) is not None
+    }
+    polygon = (
+        _polygon_of(present["segmentation"])
+        if "segmentation" in present
+        else None
+    )
     box = None
     if "bbox" in present:
         x, y, w, h = _numbers(present["bbox"], "bbox", 4)
         box = BBox(x, y, x + w, y + h)
         check_box_extent(box, where=f"subject {subject!r}")
-    point = _numbers(present["point"], "point", 2) if "point" in present else None
-    score = _numbers([present["score"]], "score", 1)[0] if "score" in present else None
+    point = (
+        _numbers(present["point"], "point", 2) if "point" in present else None
+    )
+    score = (
+        _numbers([present["score"]], "score", 1)[0]
+        if "score" in present
+        else None
+    )
     return Annotation(
-        subject=subject, geometry=polygon or box or (Point(*point) if point else None),
-        attributes=attributes_of(present["attributes"]) if "attributes" in present else {},
-        score=score, iscrowd="iscrowd" in present and iscrowd_of(present["iscrowd"]),
+        subject=subject,
+        geometry=polygon or box or (Point(*point) if point else None),
+        attributes=attributes_of(present["attributes"])
+        if "attributes" in present
+        else {},
+        score=score,
+        iscrowd="iscrowd" in present and iscrowd_of(present["iscrowd"]),
         **{k: present[k] for k in _PROV_KEYS if k in present},
     )
 
@@ -238,8 +327,9 @@ def _annotations_of(data: Any) -> list[Annotation]:
     and for any record :func:`annotation_of_record` refuses, naming the record's index.
     """
     if not isinstance(data, dict):
-        raise UnreadableLabelDocumentError(f"is a {type(data).__name__}, not the object a label "
-                                      "document is")
+        raise UnreadableLabelDocumentError(
+            f"is a {type(data).__name__}, not the object a label document is"
+        )
     raw = data.get(ANNOTATIONS_KEY)
     if not isinstance(raw, list):
         raise UnreadableLabelDocumentError(
@@ -268,11 +358,16 @@ SubjectState = Literal["complete", "negative", "partial", "unannotated"]
 ``unannotated``)."""
 
 _STATE_OF: dict[tuple[bool, bool], SubjectState] = {
-    (True, True): "complete", (True, False): "negative",
-    (False, True): "partial", (False, False): "unannotated"}
+    (True, True): "complete",
+    (True, False): "negative",
+    (False, True): "partial",
+    (False, False): "unannotated",
+}
 """Each subject state by whether the subject is finished and whether annotations hold it."""
 
-FINISHED_STATES = frozenset(s for (finished, _), s in _STATE_OF.items() if finished)
+FINISHED_STATES = frozenset(
+    s for (finished, _), s in _STATE_OF.items() if finished
+)
 """The states :meth:`LabelDocument.state` answers for a subject :meth:`LabelDocument.finished`."""
 
 
@@ -300,11 +395,14 @@ def canonical_digest(value) -> str:
 def subject_digest(annotations: Iterable[Annotation], subject: str) -> str:
     """The :func:`canonical_digest` of ``subject``'s annotations as stored, provenance aside, in
     an order independent of the order they were drawn in."""
-    return canonical_digest(sorted(_content_key(a) for a in annotations if a.subject == subject))
+    return canonical_digest(
+        sorted(_content_key(a) for a in annotations if a.subject == subject)
+    )
 
 
-def _live(marks: Mapping[str, list[CompletionMark]],
-          annotations: list[Annotation]) -> dict[str, list[CompletionMark]]:
+def _live(
+    marks: Mapping[str, list[CompletionMark]], annotations: list[Annotation]
+) -> dict[str, list[CompletionMark]]:
     """Each subject's marks whose digest still names that subject's annotations."""
     live = {}
     for subject, held in marks.items():
@@ -315,32 +413,45 @@ def _live(marks: Mapping[str, list[CompletionMark]],
     return live
 
 
-def completion_marks(data: dict,
-                     annotations: list[Annotation]) -> dict[str, list[CompletionMark]]:
+def completion_marks(
+    data: dict, annotations: list[Annotation]
+) -> dict[str, list[CompletionMark]]:
     """The live completion marks a parsed document holds, by subject: the ones whose digest still
     names that subject's ``annotations``. Raises :class:`UnreadableLabelDocumentError` naming the
     subject and index of a mark that is not a rect of four numbers, a person (:func:`is_person`), a
     time, a digest and a ``proposals_hidden`` flag."""
     raw = data.get(COMPLETION_KEY) or {}
     if not isinstance(raw, dict):
-        raise UnreadableLabelDocumentError(f"{COMPLETION_KEY!r} is {raw!r}, not marks by subject")
+        raise UnreadableLabelDocumentError(
+            f"{COMPLETION_KEY!r} is {raw!r}, not marks by subject"
+        )
     marks: dict[str, list[CompletionMark]] = {}
     for subject, held in raw.items():
         if not isinstance(held, list):
             raise UnreadableLabelDocumentError(
-                f"{subject!r} completion marks are {held!r}, not a list")
+                f"{subject!r} completion marks are {held!r}, not a list"
+            )
         for i, m in enumerate(held):
             try:
                 if not is_person(m["by"]):
-                    raise ValueError(f"by {m['by']!r} is not a person's recorded identity")
-                marks.setdefault(subject, []).append(CompletionMark(
-                    rect=cast(tuple, tuple(_numbers(m["rect"], "rect", 4))),
-                    by=m["by"], at=_text(m["at"], "at"),
-                    digest=_text(m["digest"], "digest"),
-                    proposals_hidden=_flag(m["proposals_hidden"])))
+                    raise ValueError(
+                        f"by {m['by']!r} is not a person's recorded identity"
+                    )
+                marks.setdefault(subject, []).append(
+                    CompletionMark(
+                        rect=cast(
+                            tuple, tuple(_numbers(m["rect"], "rect", 4))
+                        ),
+                        by=m["by"],
+                        at=_text(m["at"], "at"),
+                        digest=_text(m["digest"], "digest"),
+                        proposals_hidden=_flag(m["proposals_hidden"]),
+                    )
+                )
             except (KeyError, TypeError, ValueError) as exc:
                 raise UnreadableLabelDocumentError(
-                    f"{subject!r} completion mark {i} is not a mark: {exc!r}") from exc
+                    f"{subject!r} completion mark {i} is not a mark: {exc!r}"
+                ) from exc
     return _live(marks, annotations)
 
 
@@ -358,16 +469,27 @@ def _flag(value) -> bool:
     return value
 
 
-def covers(marks: Iterable[CompletionMark], rect: tuple[float, float, float, float]) -> bool:
+def covers(
+    marks: Iterable[CompletionMark], rect: tuple[float, float, float, float]
+) -> bool:
     """Whether the union of ``marks``' rects covers the half-open pixel ``rect`` ``(x0, y0, x1,
     y1)``, every point of it."""
     boxes = [(x, y, x + w, y + h) for x, y, w, h in (m.rect for m in marks)]
     x0, y0, x1, y1 = rect
-    xs = sorted({x0, x1, *(min(max(v, x0), x1) for b in boxes for v in (b[0], b[2]))})
-    ys = sorted({y0, y1, *(min(max(v, y0), y1) for b in boxes for v in (b[1], b[3]))})
+    xs = sorted(
+        {x0, x1, *(min(max(v, x0), x1) for b in boxes for v in (b[0], b[2]))}
+    )
+    ys = sorted(
+        {y0, y1, *(min(max(v, y0), y1) for b in boxes for v in (b[1], b[3]))}
+    )
     return all(
-        any(b[0] <= (ax + bx) / 2 <= b[2] and b[1] <= (ay + by) / 2 <= b[3] for b in boxes)
-        for ax, bx in zip(xs, xs[1:]) for ay, by in zip(ys, ys[1:]))
+        any(
+            b[0] <= (ax + bx) / 2 <= b[2] and b[1] <= (ay + by) / 2 <= b[3]
+            for b in boxes
+        )
+        for ax, bx in zip(xs, xs[1:])
+        for ay, by in zip(ys, ys[1:])
+    )
 
 
 @dataclass(frozen=True)
@@ -385,17 +507,26 @@ class LabelDocument:
 
     def finished(self, subject: str) -> bool:
         """Whether this document's live marks for ``subject`` cover the whole image."""
-        return bool(self.width and self.height and covers(
-            self.marks.get(subject, []), (0, 0, self.width, self.height)))
+        return bool(
+            self.width
+            and self.height
+            and covers(
+                self.marks.get(subject, []), (0, 0, self.width, self.height)
+            )
+        )
 
     def state(self, subject: str) -> SubjectState:
         """What this document says about ``subject``: :meth:`finished` or not, holding it by
         :func:`annotations_hold_subject` or not."""
-        return _STATE_OF[self.finished(subject),
-                         annotations_hold_subject(self.annotations, subject)]
+        return _STATE_OF[
+            self.finished(subject),
+            annotations_hold_subject(self.annotations, subject),
+        ]
 
 
-def annotations_hold_subject(annotations: Iterable[Annotation], subject: str) -> bool:
+def annotations_hold_subject(
+    annotations: Iterable[Annotation], subject: str
+) -> bool:
     """Whether any of ``annotations`` names ``subject``, geometry or not: an image-level record
     counts."""
     return any(a.subject == subject for a in annotations)
@@ -405,12 +536,18 @@ def label_document(data: dict) -> LabelDocument:
     """A stored per-image document as a :class:`LabelDocument`; refuses as
     :func:`_annotations_of` and :func:`completion_marks` do."""
     annotations = _annotations_of(data)
-    return LabelDocument(annotations=annotations, width=data.get("width"),
-                         height=data.get("height"), marks=completion_marks(data, annotations),
-                         cap=data.get(CAP_KEY))
+    return LabelDocument(
+        annotations=annotations,
+        width=data.get("width"),
+        height=data.get("height"),
+        marks=completion_marks(data, annotations),
+        cap=data.get(CAP_KEY),
+    )
 
 
-NO_DOCUMENT = LabelDocument(annotations=[], width=None, height=None, marks={}, cap=None)
+NO_DOCUMENT = LabelDocument(
+    annotations=[], width=None, height=None, marks={}, cap=None
+)
 """What :func:`read_document_versioned` answers for a key holding no record."""
 
 
@@ -427,7 +564,8 @@ def document_at(key: Key, stored: tcip_store.Versioned) -> LabelDocument:
         return label_document(stored.value)
     except UnreadableLabelDocumentError as exc:
         raise UnreadableLabelDocumentError(
-            f"{key.store}{list(key.parts)} under {key.root}: {exc}") from exc
+            f"{key.store}{list(key.parts)} under {key.root}: {exc}"
+        ) from exc
 
 
 def read_stored(key: Key, **default: Any) -> tcip_store.Versioned:
@@ -455,9 +593,11 @@ def read_label_document(key: Key, version: str | None = None) -> LabelDocument:
     decode raises :class:`UnreadableLabelDocumentError` naming it."""
     stored = read_stored(key)
     if version is not None and stored.version.token != version:
-        raise UnreadableLabelDocumentError(f"{key.store}{list(key.parts)} under {key.root} is at "
-                                      f"version {stored.version.token}, not {version}, the one "
-                                      "measured")
+        raise UnreadableLabelDocumentError(
+            f"{key.store}{list(key.parts)} under {key.root} is at "
+            f"version {stored.version.token}, not {version}, the one "
+            "measured"
+        )
     return document_at(key, stored)
 
 
@@ -475,7 +615,9 @@ def read_predictions(key: Key) -> LabelDocument:
     return document
 
 
-def detection_annotations(annotations: Iterable[Annotation]) -> list[Annotation]:
+def detection_annotations(
+    annotations: Iterable[Annotation],
+) -> list[Annotation]:
     """``annotations`` narrowed to the detections a count counts
     (:func:`~tcip_annotation.state.is_detection`: a crowd region and a ``Point`` excluded).
     """
@@ -486,10 +628,14 @@ def detection_annotations(annotations: Iterable[Annotation]) -> list[Annotation]
 
 PERSON_IDENTITY_PREFIX = "user:"
 
-_BLANKS = r" \t\n\v\f\r\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
-PERSON_NAME_RULE = (f"^(?![{_BLANKS}]*{PERSON_IDENTITY_PREFIX}[{_BLANKS}]*$)[{_BLANKS}]*"
-                    f"(?:{PERSON_IDENTITY_PREFIX})?[{_BLANKS}]*"
-                    rf"([^{_BLANKS}](?:[\d\D]*[^{_BLANKS}])?)[{_BLANKS}]*$")
+_BLANKS = (
+    r" \t\n\v\f\r\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+)
+PERSON_NAME_RULE = (
+    f"^(?![{_BLANKS}]*{PERSON_IDENTITY_PREFIX}[{_BLANKS}]*$)[{_BLANKS}]*"
+    f"(?:{PERSON_IDENTITY_PREFIX})?[{_BLANKS}]*"
+    rf"([^{_BLANKS}](?:[\d\D]*[^{_BLANKS}])?)[{_BLANKS}]*$"
+)
 """The one rule for a string that names a person, with or without :data:`PERSON_IDENTITY_PREFIX`
 in front: the name is what stands between the optional prefix and the end once blanks (the
 whitespace JavaScript's ``trim`` cuts, the byte-order mark included) are cut from both sides, and
@@ -570,7 +716,11 @@ def provenance_facts(annotations: list[Annotation]) -> ProvenanceFacts:
             scored += 1
         if is_unadjudicated_agent_authorship(a):
             machine_authored.append(i)
-    return ProvenanceFacts(total=len(annotations), scored=scored, machine_authored=machine_authored)
+    return ProvenanceFacts(
+        total=len(annotations),
+        scored=scored,
+        machine_authored=machine_authored,
+    )
 
 
 def require_reference_ground_truth(annotations: list[Annotation]) -> None:
@@ -582,7 +732,11 @@ def require_reference_ground_truth(annotations: list[Annotation]) -> None:
     the offending records.
     """
     facts = provenance_facts(annotations)
-    scored, total, agent_authored = facts.scored, facts.total, facts.machine_authored
+    scored, total, agent_authored = (
+        facts.scored,
+        facts.total,
+        facts.machine_authored,
+    )
     if scored:
         raise ValueError(
             f"{scored} of {total} annotations in the reference carry a prediction score, so they "
@@ -593,7 +747,9 @@ def require_reference_ground_truth(annotations: list[Annotation]) -> None:
             "breeder-confirmed sample of the model's outputs instead."
         )
     if agent_authored:
-        producers = ", ".join(sorted({str(annotations[i].created_by) for i in agent_authored}))
+        producers = ", ".join(
+            sorted({str(annotations[i].created_by) for i in agent_authored})
+        )
         raise ValueError(
             f"{len(agent_authored)} of {total} annotations in the reference are authored by "
             f"{producers}, which names no person under this platform's {PERSON_IDENTITY_PREFIX}"
@@ -607,7 +763,9 @@ def require_reference_ground_truth(annotations: list[Annotation]) -> None:
 # ── writer ─────────────────────────────────────────────────────────────────
 
 
-def xywh(x1: float, y1: float, x2: float, y2: float, *, on_grid: bool = True) -> list[float]:
+def xywh(
+    x1: float, y1: float, x2: float, y2: float, *, on_grid: bool = True
+) -> list[float]:
     """A box in corner form as this schema's ``bbox``: COCO ``[x, y, w, h]``.
 
     A pixel box is put on the 2-decimal quantum, the grid the stored document lives on and the grid
@@ -633,9 +791,14 @@ def _stored_bbox_or_raise(bbox: BBox, *, where: str) -> list[float]:
     return xywh(bbox.x1, bbox.y1, bbox.x2, bbox.y2)
 
 
-def _rounded_rings(rings: list[list[tuple[float, float]]]) -> list[list[tuple[float, float]]]:
+def _rounded_rings(
+    rings: list[list[tuple[float, float]]],
+) -> list[list[tuple[float, float]]]:
     """A polygon's rings with each vertex rounded to the document's stored 2-decimal grid."""
-    return [[(round(float(x), 2), round(float(y), 2)) for x, y in ring] for ring in rings]
+    return [
+        [(round(float(x), 2), round(float(y), 2)) for x, y in ring]
+        for ring in rings
+    ]
 
 
 def geometry_extent_ok(geometry: BBox | Polygon) -> bool:
@@ -644,7 +807,9 @@ def geometry_extent_ok(geometry: BBox | Polygon) -> bool:
     :func:`document_payload` stores them in.
     """
     if polygonal(geometry):
-        return stored_box_extent_ok(bbox_of(Polygon(_rounded_rings(geometry.rings))))
+        return stored_box_extent_ok(
+            bbox_of(Polygon(_rounded_rings(geometry.rings)))
+        )
     return stored_box_extent_ok(cast(BBox, geometry))
 
 
@@ -657,13 +822,18 @@ def stored_content(a: Annotation) -> dict:
     geom = a.geometry
     if polygonal(geom):
         if not geometry_extent_ok(geom):
-            raise ValueError(f"{a.subject!r} annotation's polygon rounds to no positive extent at "
-                             "the document's stored grid")
+            raise ValueError(
+                f"{a.subject!r} annotation's polygon rounds to no positive extent at "
+                "the document's stored grid"
+            )
         rec["segmentation"] = [
-            [c for xy in ring for c in xy] for ring in _rounded_rings(geom.rings)
+            [c for xy in ring for c in xy]
+            for ring in _rounded_rings(geom.rings)
         ]
     elif isinstance(geom, BBox):
-        rec["bbox"] = _stored_bbox_or_raise(geom, where=f"{a.subject!r} annotation")
+        rec["bbox"] = _stored_bbox_or_raise(
+            geom, where=f"{a.subject!r} annotation"
+        )
     elif isinstance(geom, Point):
         rec["point"] = [round(geom.x, 2), round(geom.y, 2)]
     if a.attributes:
@@ -689,7 +859,11 @@ def client_annotation(a: Annotation) -> dict:
     ``iscrowd`` always stated; and the provenance fields the record holds
     (:func:`_held_provenance`).
     """
-    out: dict = {"subject": a.subject, "attributes": dict(a.attributes), "iscrowd": a.iscrowd}
+    out: dict = {
+        "subject": a.subject,
+        "attributes": dict(a.attributes),
+        "iscrowd": a.iscrowd,
+    }
     geom = a.geometry
     if polygonal(geom):
         out["rings"] = [[[x, y] for x, y in ring] for ring in geom.rings]
@@ -702,10 +876,15 @@ def client_annotation(a: Annotation) -> dict:
     return {**out, **_held_provenance(a)}
 
 
-def document_payload(annotations, width: int, height: int, *,
-                     keep_empty: bool = False,
-                     marks: Mapping[str, list[CompletionMark]] | None = None,
-                     cap: int | None = None) -> dict | None:
+def document_payload(
+    annotations,
+    width: int,
+    height: int,
+    *,
+    keep_empty: bool = False,
+    marks: Mapping[str, list[CompletionMark]] | None = None,
+    cap: int | None = None,
+) -> dict | None:
     """The record one image's per-image document holds: its frame, its annotations, of
     ``marks`` each subject's whose digest still names that subject's annotations here, and a
     prediction document's detection ``cap`` when given. Refuses (``ValueError``) the first
@@ -713,25 +892,46 @@ def document_payload(annotations, width: int, height: int, *,
     ``keep_empty`` is not set.
     """
     annotations = list(annotations)
-    records = [{**stored_content(a), **_held_provenance(a)} for a in annotations]
+    records = [
+        {**stored_content(a), **_held_provenance(a)} for a in annotations
+    ]
     live = _live(marks or {}, annotations)
     if not records and not live and not keep_empty:
         return None
-    payload: dict = {"width": int(width), "height": int(height), ANNOTATIONS_KEY: records}
+    payload: dict = {
+        "width": int(width),
+        "height": int(height),
+        ANNOTATIONS_KEY: records,
+    }
     if cap is not None:
         payload[CAP_KEY] = int(cap)
     if live:
         payload[COMPLETION_KEY] = {
-            subject: [{"rect": list(m.rect), "by": m.by, "at": m.at, "digest": m.digest,
-                       "proposals_hidden": m.proposals_hidden} for m in held]
-            for subject, held in sorted(live.items())}
+            subject: [
+                {
+                    "rect": list(m.rect),
+                    "by": m.by,
+                    "at": m.at,
+                    "digest": m.digest,
+                    "proposals_hidden": m.proposals_hidden,
+                }
+                for m in held
+            ]
+            for subject, held in sorted(live.items())
+        }
     return payload
 
 
-def write_label_document(key: Key, annotations, width: int, height: int, *,
-                         keep_empty: bool = False, expect: Version | None = None,
-                         marks: Mapping[str, list[CompletionMark]] | None = None,
-                         ) -> Version | None:
+def write_label_document(
+    key: Key,
+    annotations,
+    width: int,
+    height: int,
+    *,
+    keep_empty: bool = False,
+    expect: Version | None = None,
+    marks: Mapping[str, list[CompletionMark]] | None = None,
+) -> Version | None:
     """Write all of an image's annotations, and the completion ``marks`` still live over them
     (:func:`document_payload`), as the document ``key`` names. An empty list writes an empty
     document under ``keep_empty``, else removes the document. ``expect`` (a version
@@ -739,7 +939,9 @@ def write_label_document(key: Key, annotations, width: int, height: int, *,
     ``VersionConflictError`` with nothing written. Returns the new version, or ``None`` when the
     document was removed.
     """
-    payload = document_payload(annotations, width, height, keep_empty=keep_empty, marks=marks)
+    payload = document_payload(
+        annotations, width, height, keep_empty=keep_empty, marks=marks
+    )
     if payload is None:
         tcip_store.delete(key, expect=expect)
         return None
@@ -768,8 +970,9 @@ class UndeclaredValueError(ValueError):
     """A record carries a value its attribute does not declare."""
 
 
-def attribute_ids(a: Annotation, subject: str,
-                  attributes: Iterable[AttributeRecord]) -> list[int] | None:
+def attribute_ids(
+    a: Annotation, subject: str, attributes: Iterable[AttributeRecord]
+) -> list[int] | None:
     """The id of ``a``'s value under each of ``attributes``, in their order, :data:`UNASSESSED`
     where ``a`` carries no value for one; ``None`` for a record of a subject other than
     ``subject``. Refuses (:class:`UndeclaredValueError`) a value its attribute does not declare,
@@ -782,13 +985,21 @@ def attribute_ids(a: Annotation, subject: str,
         if value is not None and value not in attribute.values:
             raise UndeclaredValueError(
                 f"a record of {subject!r} carries {attribute.name}={value!r}, which that "
-                f"attribute does not declare (it declares {list(attribute.values)}).")
-        row.append(UNASSESSED if value is None else attribute.values.index(value))
+                f"attribute does not declare (it declares {list(attribute.values)})."
+            )
+        row.append(
+            UNASSESSED if value is None else attribute.values.index(value)
+        )
     return row
 
 
-def attribute_values(ids: Iterable[int], attributes: Iterable[AttributeRecord]) -> dict[str, str]:
+def attribute_values(
+    ids: Iterable[int], attributes: Iterable[AttributeRecord]
+) -> dict[str, str]:
     """``{name: value}`` for each of ``attributes`` the id row ``ids`` assesses, the inverse of
     :func:`attribute_ids`."""
-    return {attribute.name: attribute.values[int(i)]
-            for attribute, i in zip(attributes, ids, strict=True) if int(i) != UNASSESSED}
+    return {
+        attribute.name: attribute.values[int(i)]
+        for attribute, i in zip(attributes, ids, strict=True)
+        if int(i) != UNASSESSED
+    }

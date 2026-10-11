@@ -42,12 +42,18 @@ def main() -> None:
         print("FAKE_PREPARATION_FAILED", file=sys.stderr, flush=True)
         sys.exit(3)
     print("FAKE_TERMINAL_READY", flush=True)
-    print(f"[session:{os.environ.get('TCIP_TERMINAL_SESSION', '')}]", flush=True)
+    print(
+        f"[session:{os.environ.get('TCIP_TERMINAL_SESSION', '')}]", flush=True
+    )
     paste_after = os.environ.get("FAKE_TERMINAL_PASTE_AFTER_S")
     if paste_after is not None:
         if _input_arrives_within(float(paste_after)):
             print("EARLY_INPUT", flush=True)
-        print("\x1b[?2004h" + os.environ["FAKE_TERMINAL_COMPOSER_READY"], end="", flush=True)
+        print(
+            "\x1b[?2004h" + os.environ["FAKE_TERMINAL_COMPOSER_READY"],
+            end="",
+            flush=True,
+        )
     for line in sys.stdin:
         text = line.replace("\x1b[200~", "").replace("\x1b[201~", "").strip()
         if text == "exit":

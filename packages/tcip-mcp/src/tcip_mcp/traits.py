@@ -25,11 +25,11 @@ if TYPE_CHECKING:
 COUNT_UNBIASED = "count_unbiased"
 # DETECTION_F1 optimizes matching quality; the phenotype is presence/localization.
 DETECTION_F1 = "detection_f1"
-PRESENCE = "presence"             # only whether the object is present
+PRESENCE = "presence"  # only whether the object is present
 
 # Localization, what counts as "finding" an object.
 CENTER_MATCH = "center_match"  # predicted center within a derived tolerance of a GT center
-IOU_MATCH = "iou_match"        # IoU >= a derived/def threshold
+IOU_MATCH = "iou_match"  # IoU >= a derived/def threshold
 
 # ── the delivery kinds ───────────────────────────────────────────────────────
 
@@ -49,7 +49,9 @@ DELIVERY_KINDS = (
 """The delivered artifact shapes. Each kind decides which spec fields an operationalization of it
 rests on, whether it names delivered phenotypes, and whether it names value keys."""
 
-DETECTOR_KINDS = frozenset({STATE_CROSSING_DATES, PER_IMAGE_COUNT, PER_PLANT_COUNT_AGGREGATE})
+DETECTOR_KINDS = frozenset(
+    {STATE_CROSSING_DATES, PER_IMAGE_COUNT, PER_PLANT_COUNT_AGGREGATE}
+)
 """Kinds measured off a detector's detections of the operationalization's measured subject; the
 other kinds are measured off a scalar head (ordinal or regression)."""
 
@@ -60,21 +62,35 @@ else:
     DeliveryKind = Literal[DELIVERY_KINDS]
     Localization = Literal["", CENTER_MATCH, IOU_MATCH]
 
-_COUNT_FIELDS = ("count_objective", "localization", "count_bias_tolerance_frac",
-                 "count_error_tolerance", "holdout_match_quality_floor")
+_COUNT_FIELDS = (
+    "count_objective",
+    "localization",
+    "count_bias_tolerance_frac",
+    "count_error_tolerance",
+    "holdout_match_quality_floor",
+)
 CONSTITUTING_FIELDS: dict[str, tuple[str, ...]] = {
-    STATE_CROSSING_DATES: ("positive_state", "milestone_on", "milestone_fractions",
-                           *_COUNT_FIELDS, "classifier_agreement_floor"),
+    STATE_CROSSING_DATES: (
+        "positive_state",
+        "milestone_on",
+        "milestone_fractions",
+        *_COUNT_FIELDS,
+        "classifier_agreement_floor",
+    ),
     PER_IMAGE_COUNT: _COUNT_FIELDS,
     PER_PLANT_COUNT_AGGREGATE: _COUNT_FIELDS,
     PER_PLANT_ORDINAL_AGGREGATE: ("ordinal_agreement_floor",),
-    PER_PLANT_REGRESSION_AGGREGATE: ("regression_criterion", "regression_skill_floor"),
+    PER_PLANT_REGRESSION_AGGREGATE: (
+        "regression_criterion",
+        "regression_skill_floor",
+    ),
 }
 """The spec fields an operationalization of each kind rests on, its assessment's criterion
 included, each required to hold a value before the operationalization is proposed."""
 
 LOCALIZATION_FIELDS: dict[str, tuple[str, ...]] = {
-    CENTER_MATCH: (), IOU_MATCH: ("iou_jitter_px", "iou_margin"),
+    CENTER_MATCH: (),
+    IOU_MATCH: ("iou_jitter_px", "iou_margin"),
 }
 """The spec fields each localization's match criterion compares by, required beside
 ``localization`` wherever a kind rests on it."""
@@ -90,19 +106,23 @@ def criterion_fields(entry: TraitEntry, kind: str) -> tuple[str, ...]:
     return (*fields, *LOCALIZATION_FIELDS.get(entry.localization, ()))
 
 
-PHENOTYPE_NAMING_KINDS = frozenset({
-    STATE_CROSSING_DATES,
-    PER_PLANT_COUNT_AGGREGATE,
-    PER_PLANT_ORDINAL_AGGREGATE,
-    PER_PLANT_REGRESSION_AGGREGATE,
-})
+PHENOTYPE_NAMING_KINDS = frozenset(
+    {
+        STATE_CROSSING_DATES,
+        PER_PLANT_COUNT_AGGREGATE,
+        PER_PLANT_ORDINAL_AGGREGATE,
+        PER_PLANT_REGRESSION_AGGREGATE,
+    }
+)
 """Kinds whose delivered file carries a phenotype name, hence whose operationalization binds one."""
 
-VALUE_KEY_KINDS = frozenset({
-    PER_PLANT_COUNT_AGGREGATE,
-    PER_PLANT_ORDINAL_AGGREGATE,
-    PER_PLANT_REGRESSION_AGGREGATE,
-})
+VALUE_KEY_KINDS = frozenset(
+    {
+        PER_PLANT_COUNT_AGGREGATE,
+        PER_PLANT_ORDINAL_AGGREGATE,
+        PER_PLANT_REGRESSION_AGGREGATE,
+    }
+)
 """Kinds whose rows carry a value key, hence whose operationalization bounds the set."""
 
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
@@ -124,7 +144,9 @@ def _crops_traits() -> list[dict]:
     """crops.yml's trait records, read whole; a file that is missing or will not parse raises."""
     import yaml
 
-    return yaml.safe_load(crops_yml_path().read_text(encoding="utf-8"))["traits"]
+    return yaml.safe_load(crops_yml_path().read_text(encoding="utf-8"))[
+        "traits"
+    ]
 
 
 def registered_crops() -> set[str]:
@@ -135,7 +157,11 @@ def registered_crops() -> set[str]:
 def crops_units() -> dict[str, str]:
     """trait name -> crops.yml's declared physical unit, for every trait that declares one; a
     count or ordinal trait with no physical unit is absent from this mapping."""
-    return {t["name"]: t["units"] for t in _crops_traits() if isinstance(t.get("units"), str)}
+    return {
+        t["name"]: t["units"]
+        for t in _crops_traits()
+        if isinstance(t.get("units"), str)
+    }
 
 
 _METRIC_LENGTH_UNITS = {"mm", "cm", "m", "km", "um"}
@@ -151,7 +177,9 @@ def crops_length_units() -> set[str]:
 def crops_definitions() -> dict[str, str]:
     """trait name -> crops.yml's declared definition, for every trait that carries one."""
     return {
-        t["name"]: t["definition"] for t in _crops_traits() if isinstance(t.get("definition"), str)
+        t["name"]: t["definition"]
+        for t in _crops_traits()
+        if isinstance(t.get("definition"), str)
     }
 
 
@@ -161,7 +189,9 @@ def crops_definitions() -> dict[str, str]:
 class Operationalization(BaseModel):
     """What a trait's delivered number means for one delivery kind, in the breeder's terms."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True, use_attribute_docstrings=True)
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, use_attribute_docstrings=True
+    )
 
     statement: Text
     """What the delivered number means, in the breeder's own words."""
@@ -181,7 +211,9 @@ class PositiveState(BaseModel):
     """The state a fraction counts: one attribute of the measured subject, and its value that is
     positive."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True, use_attribute_docstrings=True)
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, use_attribute_docstrings=True
+    )
 
     attribute: Text
     """The measured subject's attribute, as ``subjects.json`` declares it."""
@@ -197,7 +229,9 @@ class TraitEntry(BaseModel):
     Every field is required; a field not yet decided is stated as empty or null. A proposal is
     checked by :func:`check_proposed_entry`."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True, use_attribute_docstrings=True)
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, use_attribute_docstrings=True
+    )
 
     name: Text
     """The trait's name in this project; its record is keyed by it."""
@@ -261,46 +295,58 @@ class TraitEntry(BaseModel):
 QUESTIONS: dict[str, str] = {
     "count_objective": (
         "Does every object on an image have to be found, or is it enough that misses and false "
-        "finds cancel out in the total?"),
+        "finds cancel out in the total?"
+    ),
     "count_bias_tolerance_frac": (
         "By what fraction of a typical image's count may the model's average count be off "
-        "before the number is no use to you?"),
+        "before the number is no use to you?"
+    ),
     "count_error_tolerance": (
         "How many objects off may one image's count be, for nine images in ten, before that "
-        "image's number is no use to you?"),
+        "image's number is no use to you?"
+    ),
     "holdout_match_quality_floor": (
         "What share of the real objects must the model find, and what share of its finds must "
-        "be real, on images it never trained on?"),
+        "be real, on images it never trained on?"
+    ),
     "classifier_agreement_floor": (
         "How far beyond chance must the model's call of the state agree with yours before a "
-        "fraction built from it means anything?"),
+        "fraction built from it means anything?"
+    ),
     "ordinal_agreement_floor": (
         "How far beyond chance must the model's scores agree with yours before a plant's "
-        "score from it means anything?"),
+        "score from it means anything?"
+    ),
     "regression_criterion": (
         "Should the model's values be judged by how much of the spread between plants they "
-        "explain, or by how closely they agree with yours value for value?"),
+        "explain, or by how closely they agree with yours value for value?"
+    ),
     "regression_skill_floor": (
         "By the judgment you chose for the model's values (the share of the spread between "
         "plants they explain, or how closely they agree with yours value for value), how high "
-        "must they score before a plant's value from them means anything?"),
+        "must they score before a plant's value from them means anything?"
+    ),
     "localization": (
         "Does finding an object mean the model's mark lands near its center, or that the "
-        "model's outline overlaps it?"),
+        "model's outline overlaps it?"
+    ),
     "iou_jitter_px": (
         "If the same person boxed one object twice, how many pixels apart, on the images the "
         "reference is drawn on, would the two boxes sit? The match threshold models two equal "
-        "boxes of the objects' typical size moved apart by that much."),
+        "boxes of the objects' typical size moved apart by that much."
+    ),
     "iou_margin": (
         "By how much overlap (0 to 1, as an absolute amount) may the model's box fall short of "
-        "the overlap those two repeat boxes reach and still count as finding the object?"),
+        "the overlap those two repeat boxes reach and still count as finding the object?"
+    ),
     "milestone_on": "Which share of a plant's objects do the milestone dates track?",
     "milestone_fractions": "At which shares of that state across a plant do you record a date?",
     "scale_tolerance_frac": (
         "By what fraction may two physical measurements of the same reference object disagree "
-        "before the scale behind a length is no use to you?"),
+        "before the scale behind a length is no use to you?"
+    ),
     "positive_state": "Which attribute of the subject, and which of its values, is the state a "
-                      "fraction counts?",
+    "fraction counts?",
 }
 """The breeder's question for each spec field a measurement criterion compares against, asked
 when the field is still unauthored."""
@@ -319,7 +365,8 @@ def authored(entry: TraitEntry, names: tuple[str, ...]) -> None:
         raise UnauthoredFieldError(
             f"Trait {entry.name!r} leaves {missing} unauthored, so nothing states what this "
             f"measurement is held to. Ask the breeder: {questions} Propose their answer with "
-            "propose_trait and have them confirm it in the Setup tab.")
+            "propose_trait and have them confirm it in the Setup tab."
+        )
 
 
 def check_proposed_entry(entry: TraitEntry) -> None:
@@ -337,30 +384,44 @@ def check_proposed_entry(entry: TraitEntry) -> None:
         )
     for kind, stated in entry.operationalizations.items():
         authored(entry, criterion_fields(entry, kind))
-        off_spec = [p for p in stated.delivered_phenotypes if p not in entry.delivers]
+        off_spec = [
+            p for p in stated.delivered_phenotypes if p not in entry.delivers
+        ]
         if off_spec:
             raise ValueError(
                 f"the {kind} operationalization covers {off_spec}, which this trait does not "
                 f"deliver ({list(entry.delivers)})"
             )
-        if (kind in PHENOTYPE_NAMING_KINDS) != bool(stated.delivered_phenotypes):
+        if (kind in PHENOTYPE_NAMING_KINDS) != bool(
+            stated.delivered_phenotypes
+        ):
             raise ValueError(
                 f"a {kind} operationalization's delivered_phenotypes must "
-                + ("name at least one delivered phenotype" if kind in PHENOTYPE_NAMING_KINDS
-                   else "be empty, since its file names no phenotype")
+                + (
+                    "name at least one delivered phenotype"
+                    if kind in PHENOTYPE_NAMING_KINDS
+                    else "be empty, since its file names no phenotype"
+                )
             )
         if (kind in VALUE_KEY_KINDS) != bool(stated.delivered_value_keys):
             raise ValueError(
                 f"a {kind} operationalization's delivered_value_keys must "
-                + ("name the value keys its rows carry" if kind in VALUE_KEY_KINDS
-                   else "be empty, since its writer fixes the row schema")
+                + (
+                    "name the value keys its rows carry"
+                    if kind in VALUE_KEY_KINDS
+                    else "be empty, since its writer fixes the row schema"
+                )
             )
 
 
 def entry_sha256(entry: TraitEntry) -> str:
     """The content hash of ``entry``: SHA-256 over its canonical JSON form."""
     encoded = json.dumps(
-        entry.model_dump(mode="json"), sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        entry.model_dump(mode="json"),
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
@@ -369,7 +430,9 @@ class TraitRevision(BaseModel):
     was proposed, and the breeder's confirmation or withdrawal once made. Who proposed it is the
     ``propose_trait`` audit line's identity."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True, use_attribute_docstrings=True)
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, use_attribute_docstrings=True
+    )
 
     number: int
     """1 for the first revision, one more for each revision after it."""
@@ -395,8 +458,11 @@ class TraitRevision(BaseModel):
     def ref(self) -> dict[str, Any]:
         """This revision as every record and delivered file names it: the trait, the revision
         number and the entry's content hash."""
-        return {"trait": self.entry.name, "trait_revision": self.number,
-                "trait_revision_sha256": self.entry_sha256}
+        return {
+            "trait": self.entry.name,
+            "trait_revision": self.number,
+            "trait_revision_sha256": self.entry_sha256,
+        }
 
 
 class TraitRecord(BaseModel):
@@ -434,27 +500,37 @@ def trait_names(project: str | Path) -> list[str]:
     """Every trait with a record in the project, sorted."""
     from tcip_mcp.project_paths import project_state_dir
 
-    return sorted(k.parts[0] for k in ts.keys(TRAITS_STORE, str(project_state_dir(project))))
+    return sorted(
+        k.parts[0]
+        for k in ts.keys(TRAITS_STORE, str(project_state_dir(project)))
+    )
 
 
-def _record(trait: str, project: str | Path, value: dict | None) -> TraitRecord:
+def _record(
+    trait: str, project: str | Path, value: dict | None
+) -> TraitRecord:
     """``trait``'s stored ``value`` read through its schema. An absent value raises
     :class:`TraitUnknownError` naming the project's traits; a value the schema refuses raises."""
     if value is None:
         raise TraitUnknownError(
-            f"Unknown trait {trait!r}. Traits in this project: {trait_names(project)}")
+            f"Unknown trait {trait!r}. Traits in this project: {trait_names(project)}"
+        )
     return TraitRecord.model_validate(value)
 
 
 def read_trait(trait: str, project: str | Path) -> TraitRecord:
     """One trait's record, read through its schema; refuses as :func:`_record` does."""
-    return _record(trait, project, ts.read(trait_key(project, trait), default=None))
+    return _record(
+        trait, project, ts.read(trait_key(project, trait), default=None)
+    )
 
 
 # ── the proposal and the confirmation ────────────────────────────────────────
 
 
-def resolve_statement_registry(project: str | Path, dataset_root: str) -> SubjectRegistry:
+def resolve_statement_registry(
+    project: str | Path, dataset_root: str
+) -> SubjectRegistry:
     """The registry a ``state_crossing_dates`` operationalization's positive state is checked
     against.
 
@@ -519,8 +595,11 @@ def propose_trait(
     crossing = entry.operationalizations.get(STATE_CROSSING_DATES)
     if crossing is not None:
         registry = resolve_statement_registry(project, dataset_root)
-        problem = positive_state_problem(registry, crossing.measured_subject,
-                                         cast(PositiveState, entry.positive_state))
+        problem = positive_state_problem(
+            registry,
+            crossing.measured_subject,
+            cast(PositiveState, entry.positive_state),
+        )
         if problem is not None:
             raise ValueError(
                 f"the {STATE_CROSSING_DATES} operationalization of {entry.name!r} names positive "
@@ -530,17 +609,38 @@ def propose_trait(
     key = trait_key(project, entry.name)
     with ts.transaction(key) as txn:
         stored = txn.read(key, default=None)
-        revisions = () if stored is None else _record(entry.name, project, stored).revisions
-        revision = TraitRevision(
-            number=len(revisions) + 1, entry=entry, entry_sha256=entry_sha256(entry),
-            rationale=rationale, relayed_note=relayed_note, proposed_at=now_iso(),
-            confirmed_by=None, confirmed_at=None, withdrawn_by=None, withdrawn_at=None,
+        revisions = (
+            ()
+            if stored is None
+            else _record(entry.name, project, stored).revisions
         )
-        txn.write(key, TraitRecord(revisions=(*revisions, revision)).model_dump(mode="json"))
+        revision = TraitRevision(
+            number=len(revisions) + 1,
+            entry=entry,
+            entry_sha256=entry_sha256(entry),
+            rationale=rationale,
+            relayed_note=relayed_note,
+            proposed_at=now_iso(),
+            confirmed_by=None,
+            confirmed_at=None,
+            withdrawn_by=None,
+            withdrawn_at=None,
+        )
+        txn.write(
+            key,
+            TraitRecord(revisions=(*revisions, revision)).model_dump(
+                mode="json"
+            ),
+        )
     record_event_or_raise(
         "propose_trait",
-        {"trait": entry.name, "revision": revision.number, "entry_sha256": revision.entry_sha256},
-        actor=None, scope=project,
+        {
+            "trait": entry.name,
+            "revision": revision.number,
+            "entry_sha256": revision.entry_sha256,
+        },
+        actor=None,
+        scope=project,
     )
     return revision
 
@@ -573,9 +673,13 @@ def confirm_revision(
 
     key = trait_key(project, trait)
     with ts.transaction(key) as txn:
-        revisions = list(_record(trait, project, txn.read(key, default=None)).revisions)
+        revisions = list(
+            _record(trait, project, txn.read(key, default=None)).revisions
+        )
         if not 1 <= number <= len(revisions):
-            raise ValueError(f"trait {trait!r} has revisions 1 to {len(revisions)}, not {number}")
+            raise ValueError(
+                f"trait {trait!r} has revisions 1 to {len(revisions)}, not {number}"
+            )
         revision = revisions[number - 1]
         if entry_sha256 != revision.entry_sha256:
             raise RevisionMovedError(
@@ -583,17 +687,32 @@ def confirm_revision(
                 f"{entry_sha256} that was shown; re-read it and confirm what it holds"
             )
         if confirmed and revision.confirmed_at is not None:
-            raise ValueError(f"revision {number} of {trait!r} was already confirmed")
+            raise ValueError(
+                f"revision {number} of {trait!r} was already confirmed"
+            )
         if not confirmed and not revision.confirmed:
-            raise ValueError(f"revision {number} of {trait!r} holds no confirmation to withdraw")
-        stamp = ({"confirmed_by": actor, "confirmed_at": now_iso()} if confirmed
-                 else {"withdrawn_by": actor, "withdrawn_at": now_iso()})
+            raise ValueError(
+                f"revision {number} of {trait!r} holds no confirmation to withdraw"
+            )
+        stamp = (
+            {"confirmed_by": actor, "confirmed_at": now_iso()}
+            if confirmed
+            else {"withdrawn_by": actor, "withdrawn_at": now_iso()}
+        )
         revisions[number - 1] = revision.model_copy(update=stamp)
-        txn.write(key, TraitRecord(revisions=tuple(revisions)).model_dump(mode="json"))
+        txn.write(
+            key,
+            TraitRecord(revisions=tuple(revisions)).model_dump(mode="json"),
+        )
     record_event_or_raise(
         "confirm_trait_revision",
-        {"trait": trait, "revision": number, "entry_sha256": entry_sha256,
-         "confirmed": confirmed},
-        actor=actor, scope=project,
+        {
+            "trait": trait,
+            "revision": number,
+            "entry_sha256": entry_sha256,
+            "confirmed": confirmed,
+        },
+        actor=actor,
+        scope=project,
     )
     return revisions[number - 1]

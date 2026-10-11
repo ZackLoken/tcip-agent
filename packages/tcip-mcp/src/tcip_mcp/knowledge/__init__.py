@@ -70,7 +70,9 @@ def _parse_frontmatter(path: Path) -> tuple[dict, str]:
     if not isinstance(description, str) or not description.strip():
         raise ValueError(f"{path}: frontmatter has no non-empty 'description'")
     if "\n" in description:
-        raise ValueError(f"{path}: 'description' carries a newline; it must be one line")
+        raise ValueError(
+            f"{path}: 'description' carries a newline; it must be one line"
+        )
     return {"name": name, "description": description}, body.lstrip("\n")
 
 
@@ -92,7 +94,11 @@ def list_documents() -> list[DocumentInfo]:
                 "document name must be unique"
             )
         seen[name] = path
-        documents.append(DocumentInfo(name=name, description=front["description"], path=path))
+        documents.append(
+            DocumentInfo(
+                name=name, description=front["description"], path=path
+            )
+        )
     return documents
 
 

@@ -28,8 +28,9 @@ AGENTS_BLOCK_END = "<!-- tcip:harness-discovery:end -->"
 AGENTS_BLOCK_MAX_BYTES = 16 * 1024
 
 
-def _render_skill_md(name: str, description: str, document_path: Path,
-                     read_instruction: str) -> str:
+def _render_skill_md(
+    name: str, description: str, document_path: Path, read_instruction: str
+) -> str:
     """One knowledge document's SKILL.md text: its own frontmatter, verbatim, plus a body that
     points at the canonical content instead of duplicating it, phrased per `read_instruction`
     for the harness the tree is generated for."""
@@ -37,7 +38,10 @@ def _render_skill_md(name: str, description: str, document_path: Path,
 
     front = yaml.safe_dump(
         {"name": name, "description": description},
-        sort_keys=False, allow_unicode=True, default_flow_style=False, width=float("inf"),
+        sort_keys=False,
+        allow_unicode=True,
+        default_flow_style=False,
+        width=float("inf"),
     )
     relative_path = document_path.resolve().relative_to(REPO_ROOT).as_posix()
     body = f"The content is at `{relative_path}`. {read_instruction}\n"
@@ -47,15 +51,23 @@ def _render_skill_md(name: str, description: str, document_path: Path,
 def render_skill(name: str, description: str, document_path: Path) -> str:
     """The generated Claude Code SKILL.md text for one knowledge document."""
     return _render_skill_md(
-        name, description, document_path, "Read it in full with Read before acting in its domain."
+        name,
+        description,
+        document_path,
+        "Read it in full with Read before acting in its domain.",
     )
 
 
-def render_agents_skill(name: str, description: str, document_path: Path) -> str:
+def render_agents_skill(
+    name: str, description: str, document_path: Path
+) -> str:
     """The generated Codex/Antigravity SKILL.md text for one knowledge document, phrased for a
     harness with its own file reader rather than a Claude tool."""
     return _render_skill_md(
-        name, description, document_path, "Read it in full before acting in its domain."
+        name,
+        description,
+        document_path,
+        "Read it in full before acting in its domain.",
     )
 
 
@@ -72,8 +84,12 @@ def render_agents_block(documents) -> str:
         "",
     ]
     for document in documents:
-        relative_path = document.path.resolve().relative_to(REPO_ROOT).as_posix()
-        lines.append(f"- {document.name}: {document.description} (`{relative_path}`)")
+        relative_path = (
+            document.path.resolve().relative_to(REPO_ROOT).as_posix()
+        )
+        lines.append(
+            f"- {document.name}: {document.description} (`{relative_path}`)"
+        )
     lines += [
         "",
         "The `serve_domain_knowledge` MCP tool returns this same index when called without a name, "
@@ -117,7 +133,8 @@ def _write_skill_tree(skills_dir: Path, render, documents) -> list[Path]:
         skill_path = skill_dir / "SKILL.md"
         skill_path.write_text(
             render(document.name, document.description, document.path),
-            encoding="utf-8", newline="\n",
+            encoding="utf-8",
+            newline="\n",
         )
         written.append(skill_path)
     return written
@@ -147,22 +164,27 @@ def write_agents_block(documents=None, path: Path = AGENTS_MD_PATH) -> Path:
         new_text = (prefix + "\n\n" if prefix else "") + block
     elif start != -1 and end != -1:
         if end <= start:
-            raise ValueError(f"{path}: end marker appears above the start marker, malformed")
+            raise ValueError(
+                f"{path}: end marker appears above the start marker, malformed"
+            )
         # block carries the newline after its own end marker; drop the file's copy of that
         # same newline so repeated regeneration does not grow the file by one line each run.
         after = end + len(AGENTS_BLOCK_END)
-        if text[after:after + 1] == "\n":
+        if text[after : after + 1] == "\n":
             after += 1
         new_text = text[:start] + block + text[after:]
     else:
-        raise ValueError(f"{path}: carries a start marker or an end marker but not both, malformed")
+        raise ValueError(
+            f"{path}: carries a start marker or an end marker but not both, malformed"
+        )
     path.write_text(new_text, encoding="utf-8", newline="\n")
     return path
 
 
 RESEARCH_DOCUMENT = "cv-research"
 _SOURCE_LIST = re.compile(
-    r"The allowed/preferred set:\s*\n\n(.*?)\n\nSearch discipline:", re.DOTALL)
+    r"The allowed/preferred set:\s*\n\n(.*?)\n\nSearch discipline:", re.DOTALL
+)
 _BACKTICK_HOST = re.compile(r"`([a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,})`")
 _WEBFETCH = "WebFetch(domain:"
 
@@ -172,7 +194,9 @@ def research_hosts(document_text: str) -> list[str]:
     `ValueError` when the document carries no source list."""
     block = _SOURCE_LIST.search(document_text)
     if block is None:
-        raise ValueError(f"the {RESEARCH_DOCUMENT} document carries no source list")
+        raise ValueError(
+            f"the {RESEARCH_DOCUMENT} document carries no source list"
+        )
     return _BACKTICK_HOST.findall(block.group(1))
 
 
@@ -181,7 +205,9 @@ def render_claude_settings(settings_text: str, hosts: list[str]) -> str:
     `hosts`, after every other allow entry."""
     settings = json.loads(settings_text)
     permissions = settings["permissions"]
-    permissions["allow"] = [rule for rule in permissions["allow"] if not rule.startswith(_WEBFETCH)]
+    permissions["allow"] = [
+        rule for rule in permissions["allow"] if not rule.startswith(_WEBFETCH)
+    ]
     permissions["allow"] += [f"{_WEBFETCH}{host})" for host in hosts]
     return json.dumps(settings, indent=2) + "\n"
 
@@ -191,8 +217,12 @@ def expected_claude_settings() -> str:
     from tcip_mcp.knowledge import document_path
     from tcip_web.terminal import CLAUDE_SETTINGS
 
-    hosts = research_hosts(document_path(RESEARCH_DOCUMENT).read_text(encoding="utf-8"))
-    return render_claude_settings(CLAUDE_SETTINGS.read_text(encoding="utf-8"), hosts)
+    hosts = research_hosts(
+        document_path(RESEARCH_DOCUMENT).read_text(encoding="utf-8")
+    )
+    return render_claude_settings(
+        CLAUDE_SETTINGS.read_text(encoding="utf-8"), hosts
+    )
 
 
 def generate(root: Path = REPO_ROOT) -> list[Path]:
@@ -203,11 +233,15 @@ def generate(root: Path = REPO_ROOT) -> list[Path]:
 
     documents = list_documents()
     written = _write_skill_tree(root / CLAUDE_SKILLS, render_skill, documents)
-    written += _write_skill_tree(root / AGENTS_SKILLS, render_agents_skill, documents)
+    written += _write_skill_tree(
+        root / AGENTS_SKILLS, render_agents_skill, documents
+    )
     written.append(write_agents_block(documents, root / AGENTS_MD))
     settings = root / CLAUDE_SETTINGS.relative_to(REPO_ROOT)
     settings.parent.mkdir(parents=True, exist_ok=True)
-    settings.write_text(expected_claude_settings(), encoding="utf-8", newline="\n")
+    settings.write_text(
+        expected_claude_settings(), encoding="utf-8", newline="\n"
+    )
     written.append(settings)
     return written
 

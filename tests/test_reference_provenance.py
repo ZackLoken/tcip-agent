@@ -31,14 +31,21 @@ def _documents(root: Path, stems, annotations) -> list[Annotation]:
     held = []
     for s in stems:
         key = label_key(root, UNDATED_BUCKET, s)
-        json_io.write_label_document(key, annotations(s), IMG, IMG, keep_empty=True)
+        json_io.write_label_document(
+            key, annotations(s), IMG, IMG, keep_empty=True
+        )
         held += json_io.read_label_document(key).annotations
     return held
 
 
 def _prediction(box=(2, 2, 10, 10)):
-    return Annotation(subject="bud", geometry=BBox(*box), score=0.87, created_by=PRODUCER,
-                      created_at="2026-01-01T00:00:00+00:00")
+    return Annotation(
+        subject="bud",
+        geometry=BBox(*box),
+        score=0.87,
+        created_by=PRODUCER,
+        created_at="2026-01-01T00:00:00+00:00",
+    )
 
 
 def _hand(box=(2, 2, 10, 10), **kw):
@@ -49,8 +56,11 @@ STEMS = [f"src{g}_{t}_0" for g in range(4) for t in range(2)]
 
 
 def test_a_reference_of_the_models_own_predictions_refuses_whole(tmp_path):
-    documents = _documents(tmp_path, STEMS,
-                           lambda s: [_prediction(), _prediction(box=(15, 15, 25, 25))])
+    documents = _documents(
+        tmp_path,
+        STEMS,
+        lambda s: [_prediction(), _prediction(box=(15, 15, 25, 25))],
+    )
 
     with pytest.raises(ValueError) as exc:
         json_io.require_reference_ground_truth(documents)
@@ -59,9 +69,14 @@ def test_a_reference_of_the_models_own_predictions_refuses_whole(tmp_path):
     assert "accept the model's proposals in the editor" in str(exc.value)
 
 
-def test_a_mixed_reference_refuses_whole_rather_than_keeping_its_clean_subset(tmp_path):
-    documents = _documents(tmp_path, STEMS, lambda s: [_hand()] + (
-        [_prediction()] if s == "src0_0_0" else []))
+def test_a_mixed_reference_refuses_whole_rather_than_keeping_its_clean_subset(
+    tmp_path,
+):
+    documents = _documents(
+        tmp_path,
+        STEMS,
+        lambda s: [_hand()] + ([_prediction()] if s == "src0_0_0" else []),
+    )
 
     with pytest.raises(ValueError, match="1 of 9 annotations"):
         json_io.require_reference_ground_truth(documents)
@@ -69,8 +84,13 @@ def test_a_mixed_reference_refuses_whole_rather_than_keeping_its_clean_subset(tm
 
 def test_ground_truth_an_agent_authored_that_nobody_ruled_on_refuses(tmp_path):
     """The same output with its score dropped: no reviewer took responsibility for any of it."""
-    documents = _documents(tmp_path, STEMS, lambda s: [
-        _hand(created_by=PRODUCER, created_at="2026-01-01T00:00:00+00:00")])
+    documents = _documents(
+        tmp_path,
+        STEMS,
+        lambda s: [
+            _hand(created_by=PRODUCER, created_at="2026-01-01T00:00:00+00:00")
+        ],
+    )
 
     with pytest.raises(ValueError) as exc:
         json_io.require_reference_ground_truth(documents)
@@ -82,42 +102,69 @@ def test_ground_truth_an_agent_authored_that_nobody_ruled_on_refuses(tmp_path):
 
 
 def test_a_bare_tool_name_reads_as_a_machine_author(tmp_path):
-    documents = _documents(tmp_path, ["a"], lambda s: [_hand(created_by="sam")])
+    documents = _documents(
+        tmp_path, ["a"], lambda s: [_hand(created_by="sam")]
+    )
 
     with pytest.raises(ValueError, match="authored by sam"):
         json_io.require_reference_ground_truth(documents)
 
 
-@pytest.mark.parametrize("producer", [
-    n for n in REFUSED_NAMES if n.startswith(json_io.PERSON_IDENTITY_PREFIX)])
+@pytest.mark.parametrize(
+    "producer",
+    [n for n in REFUSED_NAMES if n.startswith(json_io.PERSON_IDENTITY_PREFIX)],
+)
 def test_the_prefix_naming_no_one_is_no_persons_authorship(tmp_path, producer):
-    documents = _documents(tmp_path, ["a"], lambda s: [_hand(created_by=producer)])
+    documents = _documents(
+        tmp_path, ["a"], lambda s: [_hand(created_by=producer)]
+    )
 
     with pytest.raises(ValueError, match=f"authored by {producer}"):
         json_io.require_reference_ground_truth(documents)
 
 
-@pytest.mark.parametrize("record", [
-    _hand(),
-    _hand(created_by="user:breeder", created_at="2026-01-01T00:00:00+00:00"),
-    _hand(created_by=PRODUCER, accepted_by="user:breeder",
-          accepted_at="2026-01-02T00:00:00+00:00"),
-], ids=["unattributed", "a-persons", "reviewer-accepted"])
+@pytest.mark.parametrize(
+    "record",
+    [
+        _hand(),
+        _hand(
+            created_by="user:breeder", created_at="2026-01-01T00:00:00+00:00"
+        ),
+        _hand(
+            created_by=PRODUCER,
+            accepted_by="user:breeder",
+            accepted_at="2026-01-02T00:00:00+00:00",
+        ),
+    ],
+    ids=["unattributed", "a-persons", "reviewer-accepted"],
+)
 def test_ground_truth_a_person_stands_behind_is_a_reference(tmp_path, record):
-    json_io.require_reference_ground_truth(_documents(tmp_path, STEMS, lambda s: [record]))
+    json_io.require_reference_ground_truth(
+        _documents(tmp_path, STEMS, lambda s: [record])
+    )
 
 
-def test_the_assessment_refuses_a_reference_of_the_models_own_predictions(tmp_path):
+def test_the_assessment_refuses_a_reference_of_the_models_own_predictions(
+    tmp_path,
+):
     """The rail runs inside the assessment, before any inference over the reference."""
     pytest.importorskip("torch")
     from tests._chain_fixtures import (
-        assess, confirm_count_trait, draw_reference_selection, synthetic_capture, train_on,
+        assess,
+        confirm_count_trait,
+        draw_reference_selection,
+        synthetic_capture,
+        train_on,
     )
 
     root = tmp_path / "ds"
     synthetic_capture(root)
-    selection = draw_reference_selection(tmp_path, root, tmp_path / "selection")
-    checkpoint = train_on(tmp_path / "selection", tmp_path, "exp-self-reference")
+    selection = draw_reference_selection(
+        tmp_path, root, tmp_path / "selection"
+    )
+    checkpoint = train_on(
+        tmp_path / "selection", tmp_path, "exp-self-reference"
+    )
     confirm_count_trait(tmp_path)
     held = selection.on("holdout")[0]
     json_io.write_label_document(held.ground_truth, [_prediction()], 64, 64)

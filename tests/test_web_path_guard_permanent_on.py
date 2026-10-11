@@ -27,7 +27,9 @@ from tests._producer_fixtures import write_image
 from tests._trait_fixtures import propose, seed_confirmed_crossing
 from tests._trait_fixtures import BUD_OPENING
 from tests._web_fixtures import new_project, open_new_project
-from tests.test_results_mapping_summary_and_audit_anchoring import _capture_fixture
+from tests.test_results_mapping_summary_and_audit_anchoring import (
+    _capture_fixture,
+)
 
 if TYPE_CHECKING:
     from tests._chain_fixtures import Series
@@ -43,7 +45,8 @@ def outside(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 def test_the_workspace_is_admitted_and_a_sibling_outside_it_is_refused_with_no_env_var(
-    tmp_path: Path, outside: Path,
+    tmp_path: Path,
+    outside: Path,
 ) -> None:
     from tcip_web.paths import allowed_roots
 
@@ -57,7 +60,8 @@ def test_the_workspace_is_admitted_and_a_sibling_outside_it_is_refused_with_no_e
 
 
 def test_a_workspace_project_reached_through_a_link_is_admitted_as_itself(
-    tmp_path: Path, outside: Path,
+    tmp_path: Path,
+    outside: Path,
 ) -> None:
     """A project the workspace lists through a junction or symlink resolves elsewhere and must
     still be admitted, or the front door would list a project no route can open."""
@@ -67,20 +71,34 @@ def test_a_workspace_project_reached_through_a_link_is_admitted_as_itself(
         link.symlink_to(real, target_is_directory=True)
     except (OSError, NotImplementedError) as exc:
         pytest.skip(f"symlinks not available on this machine: {exc}")
-    assert assert_path_allowed(str(link / "images")) == (real / "images").resolve()
+    assert (
+        assert_path_allowed(str(link / "images"))
+        == (real / "images").resolve()
+    )
 
 
 def test_a_dataset_registered_to_a_workspace_project_is_admitted_wherever_it_lives(
-    tmp_path: Path, outside: Path,
+    tmp_path: Path,
+    outside: Path,
 ) -> None:
     project = new_project(tmp_path).root
     external = outside / "field-data"
     (external / "images").mkdir(parents=True)
     with pytest.raises(ValueError):
         assert_path_allowed(str(external / "images"))
-    upsert_dataset(project, {"id": "ds-1", "path": str(external), "crop": "currant",
-                             "fingerprint": "v1:f"})
-    assert assert_path_allowed(str(external / "images")) == (external / "images").resolve()
+    upsert_dataset(
+        project,
+        {
+            "id": "ds-1",
+            "path": str(external),
+            "crop": "currant",
+            "fingerprint": "v1:f",
+        },
+    )
+    assert (
+        assert_path_allowed(str(external / "images"))
+        == (external / "images").resolve()
+    )
 
 
 def test_a_dataset_registered_as_the_projects_own_tree_contributes_no_relative_root(
@@ -119,21 +137,27 @@ def test_an_imports_staging_tree_is_never_admitted_even_under_the_workspace(
 
 
 def test_image_roots_stay_additive_on_top_of_the_derived_set(
-    tmp_path: Path, outside: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    outside: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tcip_web.state import store
 
     extra = outside / "archive"
     extra.mkdir()
     store.configure(store.workspace, (extra.resolve(),))
-    assert assert_path_allowed(str(extra / "scan.tif")) == (extra / "scan.tif").resolve()
+    assert (
+        assert_path_allowed(str(extra / "scan.tif"))
+        == (extra / "scan.tif").resolve()
+    )
     inside = tmp_path / "still-admitted"
     inside.mkdir()
     assert assert_path_allowed(str(inside)) == inside.resolve()
 
 
 def test_a_path_that_does_not_exist_yet_is_judged_by_its_nearest_existing_ancestor(
-    tmp_path: Path, outside: Path,
+    tmp_path: Path,
+    outside: Path,
 ) -> None:
     to_write = tmp_path / "proj" / "results_export" / "x.csv"
     assert assert_path_allowed(str(to_write)) == to_write.resolve()
@@ -141,7 +165,10 @@ def test_a_path_that_does_not_exist_yet_is_judged_by_its_nearest_existing_ancest
         assert_path_allowed(str(outside / "results_export" / "x.csv"))
 
 
-@pytest.mark.skipif(os.name != "nt", reason="case-insensitive spellings are a Windows path shape")
+@pytest.mark.skipif(
+    os.name != "nt",
+    reason="case-insensitive spellings are a Windows path shape",
+)
 def test_containment_is_by_identity_so_a_case_variant_spelling_is_the_same_directory(
     tmp_path: Path,
 ) -> None:
@@ -153,7 +180,8 @@ def test_containment_is_by_identity_so_a_case_variant_spelling_is_the_same_direc
 
 
 def test_a_registry_that_will_not_decode_raises_rather_than_admitting_nothing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tcip_mcp.tools import project_tools
     from tcip_web.paths import allowed_roots
@@ -172,43 +200,84 @@ def test_a_registry_that_will_not_decode_raises_rather_than_admitting_nothing(
 
 
 def test_dataset_routes_refuse_an_outside_root_and_serve_an_inside_one(
-    client: TestClient, tmp_path: Path, outside: Path,
+    client: TestClient,
+    tmp_path: Path,
+    outside: Path,
 ) -> None:
     open_new_project(tmp_path)
     inside = tmp_path / "proj"
     write_image(inside / "images" / "2026-02-11" / "a.jpg", (8, 8))
     write_image(outside / "images" / "2026-02-11" / "a.jpg", (8, 8))
 
-    assert client.get("/api/dataset/tree", params={"dataset_root": str(outside)}).status_code == 403
-    assert client.post("/api/dataset/select", json={
-        "dataset_root": str(outside), "date": "2026-02-11"}).status_code == 403
+    assert (
+        client.get(
+            "/api/dataset/tree", params={"dataset_root": str(outside)}
+        ).status_code
+        == 403
+    )
+    assert (
+        client.post(
+            "/api/dataset/select",
+            json={"dataset_root": str(outside), "date": "2026-02-11"},
+        ).status_code
+        == 403
+    )
     assert store.state.dataset.dataset_root is None
 
-    assert client.get("/api/dataset/tree", params={"dataset_root": str(inside)}).status_code == 200
-    selected = client.post("/api/dataset/select", json={
-        "dataset_root": str(inside), "date": "2026-02-11"})
+    assert (
+        client.get(
+            "/api/dataset/tree", params={"dataset_root": str(inside)}
+        ).status_code
+        == 200
+    )
+    selected = client.post(
+        "/api/dataset/select",
+        json={"dataset_root": str(inside), "date": "2026-02-11"},
+    )
     assert selected.status_code == 200
     assert selected.json()["selection"]["image_list"] == ["a.jpg"]
 
 
 def test_the_proposals_route_confines_the_image_whose_bucket_it_reads(
-    client: TestClient, tmp_path: Path, outside: Path,
+    client: TestClient,
+    tmp_path: Path,
+    outside: Path,
 ) -> None:
     from tcip_mcp.tools.proposal_tools import stage_proposals
 
     inside = open_new_project(tmp_path / "proj").root
     image = write_image(inside / "images" / "2026-02-11" / "a.jpg", (8, 8))
-    staged = stage_proposals(inside, str(image), model_name="sketch", boxes=[
-        {"subject": "bud", "conf": 0.9, "cx": 0.5, "cy": 0.5, "w": 0.2, "h": 0.2}])
+    staged = stage_proposals(
+        inside,
+        str(image),
+        model_name="sketch",
+        boxes=[
+            {
+                "subject": "bud",
+                "conf": 0.9,
+                "cx": 0.5,
+                "cy": 0.5,
+                "w": 0.2,
+                "h": 0.2,
+            }
+        ],
+    )
     assert "error" not in staged, staged
     stranger = write_image(outside / "images" / "2026-02-11" / "a.jpg", (8, 8))
 
-    assert client.get("/api/annotate/proposals", params={
-        "image_path": str(stranger), "bucket": staged["bucket"]}).status_code == 403
+    assert (
+        client.get(
+            "/api/annotate/proposals",
+            params={"image_path": str(stranger), "bucket": staged["bucket"]},
+        ).status_code
+        == 403
+    )
     assert not (outside / ".tcip").exists()
 
-    resp = client.get("/api/annotate/proposals", params={
-        "image_path": str(image), "bucket": staged["bucket"]})
+    resp = client.get(
+        "/api/annotate/proposals",
+        params={"image_path": str(image), "bucket": staged["bucket"]},
+    )
     assert resp.status_code == 200, resp.text
     assert len(resp.json()["proposals"]) == 1
 
@@ -226,7 +295,8 @@ def _series(project: Path) -> Series:
 
 
 def test_a_results_door_refuses_until_a_project_is_open_and_then_serves_its_own_evidence(
-    client: TestClient, tmp_path: Path,
+    client: TestClient,
+    tmp_path: Path,
 ) -> None:
     series = _series(tmp_path)
     body = series.body()
@@ -236,11 +306,17 @@ def test_a_results_door_refuses_until_a_project_is_open_and_then_serves_its_own_
     assert "no project is open" in refused.json()["detail"]
 
     asyncio.run(store.open_project(series.project))
-    assert client.post("/api/results/phenology_measurement", json=body).status_code == 200
+    assert (
+        client.post(
+            "/api/results/phenology_measurement", json=body
+        ).status_code
+        == 200
+    )
 
 
 def test_a_delivery_from_another_projects_evidence_is_refused_by_name(
-    client: TestClient, tmp_path: Path,
+    client: TestClient,
+    tmp_path: Path,
 ) -> None:
     """Project B, open and fully set up, is handed project A's mapping and predictions: both inside
     the managed allow-set, neither belonging to B. No export and no audit line lands in B."""
@@ -253,17 +329,27 @@ def test_a_delivery_from_another_projects_evidence_is_refused_by_name(
     resp = client.post("/api/results/phenology_measurement", json=body)
     assert resp.status_code == 403
     assert "does not belong to project" in resp.json()["detail"]
-    resp = client.post("/api/results/export_csv",
-                       json={**body, "payload": "milestones", "filename": "x.csv",
-                             "user": "tester"})
+    resp = client.post(
+        "/api/results/export_csv",
+        json={
+            **body,
+            "payload": "milestones",
+            "filename": "x.csv",
+            "user": "tester",
+        },
+    )
     assert resp.status_code == 403
     assert not (b / "results_export").exists()
-    assert not any(r["tool"] in ("results.export_csv", "delivery_event")
-                   for r in tcip_store.read_log(audit_log_key(b)).records)
+    assert not any(
+        r["tool"] in ("results.export_csv", "delivery_event")
+        for r in tcip_store.read_log(audit_log_key(b)).records
+    )
 
 
 def test_a_delivery_from_a_dataset_registered_to_the_open_project_is_admitted(
-    client: TestClient, tmp_path: Path, outside: Path,
+    client: TestClient,
+    tmp_path: Path,
+    outside: Path,
 ) -> None:
     """Evidence living outside the workspace entirely, registered to the project, passes the
     belonging rail. The measurement then judges the relocated buckets on its own terms, so the
@@ -285,7 +371,9 @@ def test_a_delivery_from_a_dataset_registered_to_the_open_project_is_admitted(
 
 
 def test_a_mapping_build_writes_and_audits_under_the_open_project_only(
-    client: TestClient, tmp_path: Path, outside: Path,
+    client: TestClient,
+    tmp_path: Path,
+    outside: Path,
 ) -> None:
     payload = _capture_fixture(tmp_path)
     open_new_project(tmp_path)
@@ -293,28 +381,43 @@ def test_a_mapping_build_writes_and_audits_under_the_open_project_only(
     # The payload carries no path: a persist_path pointed outside the project names nothing
     # this door reads, so the build still lands under the open project, addressed by name.
     elsewhere = outside / "plant_mapping.json"
-    resp = client.post("/api/results/plant_mapping/build",
-                       json={**payload, "persist_path": str(elsewhere)})
+    resp = client.post(
+        "/api/results/plant_mapping/build",
+        json={**payload, "persist_path": str(elsewhere)},
+    )
     assert resp.status_code == 200, resp.text
     assert not elsewhere.exists()
 
-    foreign_images = write_image(outside / "images" / "2026-02-11" / "z.jpg", (8, 8)).parent.parent
-    resp = client.post("/api/results/plant_mapping/build",
-                       json={**payload, "images_root": str(foreign_images)})
+    foreign_images = write_image(
+        outside / "images" / "2026-02-11" / "z.jpg", (8, 8)
+    ).parent.parent
+    resp = client.post(
+        "/api/results/plant_mapping/build",
+        json={**payload, "images_root": str(foreign_images)},
+    )
     assert resp.status_code == 403
     assert "does not belong to project" in resp.json()["detail"]
 
     # The breeder's plant-location file is reference data picked from wherever they keep it.
     moved_csv = outside / "plots.csv"
-    moved_csv.write_text(Path(payload["csv_path"]).read_text(encoding="utf-8"), encoding="utf-8")
+    moved_csv.write_text(
+        Path(payload["csv_path"]).read_text(encoding="utf-8"), encoding="utf-8"
+    )
     from tests._mapping_fixtures import register_plant_registry_for
 
-    moved_registry = register_plant_registry_for(tmp_path, [moved_csv], name="moved-plots")
-    ok = client.post("/api/results/plant_mapping/build",
-                     json={**payload, "plant_registry": moved_registry})
+    moved_registry = register_plant_registry_for(
+        tmp_path, [moved_csv], name="moved-plots"
+    )
+    ok = client.post(
+        "/api/results/plant_mapping/build",
+        json={**payload, "plant_registry": moved_registry},
+    )
     assert ok.status_code == 200, ok.text
-    built = [r for r in tcip_store.read_log(audit_log_key(tmp_path)).records
-             if r["tool"] == "plant_mapping_built"]
+    built = [
+        r
+        for r in tcip_store.read_log(audit_log_key(tmp_path)).records
+        if r["tool"] == "plant_mapping_built"
+    ]
     assert len(built) == 2
     assert built[-1]["arguments"]["name"] == payload["name"]
     from tcip_mcp.pipelines.postprocessing import plant_mapping
@@ -328,7 +431,8 @@ def test_a_mapping_build_writes_and_audits_under_the_open_project_only(
 
 
 def test_the_picker_browses_the_whole_machine_from_a_local_connection(
-    client: TestClient, outside: Path,
+    client: TestClient,
+    outside: Path,
 ) -> None:
     (outside / "somewhere").mkdir()
     resp = client.get("/api/fs/list", params={"path": str(outside)})

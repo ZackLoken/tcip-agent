@@ -9,7 +9,10 @@ import tcip_store
 
 from tcip_annotation import Annotation
 from tcip_annotation.json_io import (
-    UnreadableLabelDocumentError, client_annotation, read_document_versioned, read_predictions,
+    UnreadableLabelDocumentError,
+    client_annotation,
+    read_document_versioned,
+    read_predictions,
 )
 
 from tcip_annotation.matching import REVIEW_CONF_FLOOR, Matching
@@ -27,8 +30,11 @@ if TYPE_CHECKING:
 
 def _summary(annotations: list[Annotation]) -> dict:
     """A document's annotations as a read returns them: their count, subjects and records."""
-    return {"count": len(annotations), "subjects": sorted({a.subject for a in annotations}),
-            "annotations": [client_annotation(a) for a in annotations]}
+    return {
+        "count": len(annotations),
+        "subjects": sorted({a.subject for a in annotations}),
+        "annotations": [client_annotation(a) for a in annotations],
+    }
 
 
 def read_annotations(image_path: str, bucket: str | None = None) -> dict:
@@ -57,9 +63,15 @@ def read_annotations(image_path: str, bucket: str | None = None) -> dict:
         labels, version = read_document_versioned(key)
         if version != tcip_store.Version.ABSENT:
             result["labels"] = _summary(labels.annotations)
-        document = read_bucket(key.root, bucket).document_key(img.stem) if bucket else None
+        document = (
+            read_bucket(key.root, bucket).document_key(img.stem)
+            if bucket
+            else None
+        )
         if document is not None:
-            result["predictions"] = _summary(read_predictions(document).annotations)
+            result["predictions"] = _summary(
+                read_predictions(document).annotations
+            )
     except (UnreadableLabelDocumentError, ValueError) as exc:
         return {"error": str(exc)}
     return result
@@ -98,7 +110,10 @@ def save_annotations(
     raises ``UnreadableLabelDocumentError`` through this door.
     """
     from tcip_mcp.dataset_layout import save_label_document
-    from tcip_mcp.web_client import PANEL_EVENT_LABELS_WRITTEN, post_panel_event
+    from tcip_mcp.web_client import (
+        PANEL_EVENT_LABELS_WRITTEN,
+        post_panel_event,
+    )
 
     image_path = str(located(image_path, bound.root))
     img = Path(image_path)
@@ -108,13 +123,24 @@ def save_annotations(
     w, h = image_path_dimensions(image_path)
     try:
         key = label_key_of(image_path)
-        save_label_document(bound.root, key, annotations, width=w, height=h,
-                            author="save_annotations", actor=None)  # the answer is for the editor
+        save_label_document(
+            bound.root,
+            key,
+            annotations,
+            width=w,
+            height=h,
+            author="save_annotations",
+            actor=None,
+        )  # the answer is for the editor
     except ValueError as exc:
         return {"error": str(exc)}
 
-    post_panel_event(bound, "annotate", PANEL_EVENT_LABELS_WRITTEN,
-                     {"image_path": image_path})
+    post_panel_event(
+        bound,
+        "annotate",
+        PANEL_EVENT_LABELS_WRITTEN,
+        {"image_path": image_path},
+    )
     capture, stem = key.parts
     return {"capture": capture, "written": [stem], "count": len(annotations)}
 
@@ -126,29 +152,54 @@ def _counts(m: Matching) -> dict:
 
 def _totals(metrics: dict) -> dict:
     """The TP/FP/FN a scoring's ``metrics`` report with the precision, recall and F1 they give."""
-    return {k: metrics[k] for k in ("tp", "fp", "fn", "precision", "recall", "f1")}
+    return {
+        k: metrics[k] for k in ("tp", "fp", "fn", "precision", "recall", "f1")
+    }
 
 
-def _detection_breakdown(m: Matching, gt: list[Annotation],
-                         preds: list[Annotation]) -> list[dict]:
+def _detection_breakdown(
+    m: Matching, gt: list[Annotation], preds: list[Annotation]
+) -> list[dict]:
     """Per-detection records from the one matcher's matching ``m``: each projected as every read
     door projects one (:func:`~tcip_annotation.json_io.client_annotation`), tagged ``tp`` for a
     pair, ``fp`` for an unpaired detection and ``fn`` for a missed object, with its indices."""
     return (
-        [{**client_annotation(preds[p]), "tag": "tp", "gt_idx": g, "pred_idx": p}
-         for g, p in m.pairs]
-        + [{**client_annotation(preds[p]), "tag": "fp", "pred_idx": p} for p in m.unpaired]
-        + [{**client_annotation(gt[g]), "tag": "fn", "gt_idx": g} for g in m.missed])
+        [
+            {
+                **client_annotation(preds[p]),
+                "tag": "tp",
+                "gt_idx": g,
+                "pred_idx": p,
+            }
+            for g, p in m.pairs
+        ]
+        + [
+            {**client_annotation(preds[p]), "tag": "fp", "pred_idx": p}
+            for p in m.unpaired
+        ]
+        + [
+            {**client_annotation(gt[g]), "tag": "fn", "gt_idx": g}
+            for g in m.missed
+        ]
+    )
 
 
 def _rounded(totals: dict) -> dict:
     """``totals`` with its precision, recall and F1 rounded to four places."""
-    return {k: round(v, 4) if k in ("precision", "recall", "f1") else v
-            for k, v in totals.items()}
+    return {
+        k: round(v, 4) if k in ("precision", "recall", "f1") else v
+        for k, v in totals.items()
+    }
 
 
-def _evaluate_image(image: Path, bucket: Bucket, iou_threshold: float, conf_threshold: float,
-                    detail: bool, trait: TraitEntry | None) -> dict:
+def _evaluate_image(
+    image: Path,
+    bucket: Bucket,
+    iou_threshold: float,
+    conf_threshold: float,
+    detail: bool,
+    trait: TraitEntry | None,
+) -> dict:
     """``bucket``'s predictions for one image matched against its ground truth
     (:func:`~tcip_mcp.pipelines.training.evaluation.score_bucket`), with ``matches``, the
     ``[gt_idx, pred_idx]`` pairs the one matcher draws per subject over the predictions at or above
@@ -158,26 +209,44 @@ def _evaluate_image(image: Path, bucket: Bucket, iou_threshold: float, conf_thre
     from tcip_mcp.pipelines.image_utils import resolve_image_path
     from tcip_mcp.pipelines.training.evaluation import score_bucket
 
-    (one,), metrics = score_bucket([resolve_image_path(image)], bucket,
-                                   iou_threshold=iou_threshold, conf_threshold=conf_threshold,
-                                   trait=trait)
+    (one,), metrics = score_bucket(
+        [resolve_image_path(image)],
+        bucket,
+        iou_threshold=iou_threshold,
+        conf_threshold=conf_threshold,
+        trait=trait,
+    )
     if one.preds is None:
-        raise ValueError(f"bucket {bucket.name!r} names no document for {image.name}: it was "
-                         "not predicted, so there is nothing to score.")
-    out = {"image": str(image), **_rounded(_totals(metrics)),
-           "map50": round(metrics["map50"], 4),
-           "governing_criterion": metrics["governing_criterion"],
-           "iou_threshold": iou_threshold, "conf_threshold": conf_threshold,
-           "matches": [list(pair) for pair in one.matching.pairs]}
+        raise ValueError(
+            f"bucket {bucket.name!r} names no document for {image.name}: it was "
+            "not predicted, so there is nothing to score."
+        )
+    out = {
+        "image": str(image),
+        **_rounded(_totals(metrics)),
+        "map50": round(metrics["map50"], 4),
+        "governing_criterion": metrics["governing_criterion"],
+        "iou_threshold": iou_threshold,
+        "conf_threshold": conf_threshold,
+        "matches": [list(pair) for pair in one.matching.pairs],
+    }
     if detail:
         img_w, img_h = one.header.display_frame
-        out.update(img_w=img_w, img_h=img_h,
-                   detections=_detection_breakdown(one.matching, one.gt, one.preds))
+        out.update(
+            img_w=img_w,
+            img_h=img_h,
+            detections=_detection_breakdown(one.matching, one.gt, one.preds),
+        )
     return out
 
 
-def _evaluate_folder(images_dir: str, bucket: Bucket, iou_threshold: float,
-                     conf_threshold: float, trait: TraitEntry | None) -> dict:
+def _evaluate_folder(
+    images_dir: str,
+    bucket: Bucket,
+    iou_threshold: float,
+    conf_threshold: float,
+    trait: TraitEntry | None,
+) -> dict:
     """Aggregate detection metrics across the logical images of one images directory against
     ``bucket``'s documents for them
     (:func:`~tcip_mcp.pipelines.training.evaluation.score_bucket`), the images it names no
@@ -187,23 +256,45 @@ def _evaluate_folder(images_dir: str, bucket: Bucket, iou_threshold: float,
     descended. A directory holding two raw images under one case-folded stem is refused by
     ``list_logical_images``.
     """
-    from tcip_mcp.pipelines.image_utils import list_logical_images, source_path_of
+    from tcip_mcp.pipelines.image_utils import (
+        list_logical_images,
+        source_path_of,
+    )
     from tcip_mcp.pipelines.training.evaluation import score_bucket
 
-    images = sorted(list_logical_images(images_dir).values(), key=source_path_of)
-    scored, m = score_bucket(images, bucket, iou_threshold=iou_threshold,
-                             conf_threshold=conf_threshold, trait=trait)
+    images = sorted(
+        list_logical_images(images_dir).values(), key=source_path_of
+    )
+    scored, m = score_bucket(
+        images,
+        bucket,
+        iou_threshold=iou_threshold,
+        conf_threshold=conf_threshold,
+        trait=trait,
+    )
     predicted = [one for one in scored if one.preds is not None]
     counts = {"tp": "total_tp", "fp": "total_fp", "fn": "total_fn"}
     totals = {counts.get(k, k): v for k, v in _rounded(_totals(m)).items()}
-    return {"path": images_dir, "image_count": len(predicted),
-            "not_predicted": [source_path_of(one.header.source) for one in scored
-                              if one.preds is None],
-            "map": round(m["map"], 4), "map50": round(m["map50"], 4), **totals,
-            "governing_criterion": m["governing_criterion"],
-            "per_image": [{"image": Path(source_path_of(one.header.source)).name,
-                           **_counts(one.matching)}
-                          for one in predicted]}
+    return {
+        "path": images_dir,
+        "image_count": len(predicted),
+        "not_predicted": [
+            source_path_of(one.header.source)
+            for one in scored
+            if one.preds is None
+        ],
+        "map": round(m["map"], 4),
+        "map50": round(m["map50"], 4),
+        **totals,
+        "governing_criterion": m["governing_criterion"],
+        "per_image": [
+            {
+                "image": Path(source_path_of(one.header.source)).name,
+                **_counts(one.matching),
+            }
+            for one in predicted
+        ],
+    }
 
 
 def score_predictions(
@@ -252,16 +343,23 @@ def score_predictions(
     try:
         found = read_bucket(source_root([p]), bucket)
         if p.is_file():
-            return _evaluate_image(p, found, iou_threshold, conf_threshold, detail, trait)
-        return _evaluate_folder(str(p), found, iou_threshold, conf_threshold, trait)
+            return _evaluate_image(
+                p, found, iou_threshold, conf_threshold, detail, trait
+            )
+        return _evaluate_folder(
+            str(p), found, iou_threshold, conf_threshold, trait
+        )
     except (UnreadableLabelDocumentError, ValueError) as exc:
         return {"error": str(exc)}
 
 
 @tool()
 def write_subject_registry(
-    project: Path, dataset_root: str, subjects: dict,
-    allow_removals: bool = False, allow_type_changes: bool = False,
+    project: Path,
+    dataset_root: str,
+    subjects: dict,
+    allow_removals: bool = False,
+    allow_type_changes: bool = False,
 ) -> dict:
     """Write the dataset's subject registry: ``subjects``, each subject's ``description`` and
     ``attributes`` (each ``categorical`` or ``ordinal`` with ordered ``values``), validated
@@ -290,9 +388,20 @@ def write_subject_registry(
 
     try:
         result = subject_registry.replace_registry(
-            located(dataset_root, project), registry, expect=None, allow_removals=allow_removals,
-            allow_type_changes=allow_type_changes, actor=None)
-    except (subject_registry.RegistryError, VersionConflictError, AuditEntryNotWrittenError) as exc:
+            located(dataset_root, project),
+            registry,
+            expect=None,
+            allow_removals=allow_removals,
+            allow_type_changes=allow_type_changes,
+            actor=None,
+        )
+    except (
+        subject_registry.RegistryError,
+        VersionConflictError,
+        AuditEntryNotWrittenError,
+    ) as exc:
         return {"error": str(exc)}
-    return {"subjects_path": result["subjects_path"],
-            "subjects": [s.name for s in registry.subjects]}
+    return {
+        "subjects_path": result["subjects_path"],
+        "subjects": [s.name for s in registry.subjects],
+    }

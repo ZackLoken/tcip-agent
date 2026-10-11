@@ -28,7 +28,9 @@ from typing import TYPE_CHECKING, Any, Protocol
 import numpy as np
 
 from tcip_mcp.pipelines.data.band_groups import (
-    MANIFEST_EXT, BandGroupRef, read_band_group_manifest,
+    MANIFEST_EXT,
+    BandGroupRef,
+    read_band_group_manifest,
 )
 
 if TYPE_CHECKING:
@@ -36,7 +38,8 @@ if TYPE_CHECKING:
     from tifffile import TiffFile
 
     from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
-        GeoreferencingError, GeoTransform,
+        GeoreferencingError,
+        GeoTransform,
     )
 
 # The containers band data is read out of as an array. Any other extension is a photographic frame
@@ -132,7 +135,8 @@ class Rect:
 
 
 def rect_contains_rect(
-    outer: tuple[int, int, int, int], inner: tuple[int, int, int, int],
+    outer: tuple[int, int, int, int],
+    inner: tuple[int, int, int, int],
 ) -> bool:
     """Whether half-open pixel rect ``inner`` lies fully inside half-open pixel rect ``outer``."""
     ox0, oy0, ox1, oy1 = outer
@@ -140,7 +144,9 @@ def rect_contains_rect(
     return ox0 <= ix0 and oy0 <= iy0 and ix1 <= ox1 and iy1 <= oy1
 
 
-def rects_overlap(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> bool:
+def rects_overlap(
+    a: tuple[int, int, int, int], b: tuple[int, int, int, int]
+) -> bool:
     """Whether two half-open pixel rects share any pixel; sharing only an edge does not count."""
     ax0, ay0, ax1, ay1 = a
     bx0, by0, bx1, by1 = b
@@ -162,8 +168,9 @@ class WindowSampling:
     pixel_fraction: float
 
 
-def sample_windows(width: int, height: int, *, seed: int, window_size: int,
-                   max_windows: int) -> list[Rect]:
+def sample_windows(
+    width: int, height: int, *, seed: int, window_size: int, max_windows: int
+) -> list[Rect]:
     """A deterministic, seeded selection of pixel windows over a ``width`` x ``height`` raster.
 
     The raster is divided into a grid of ``window_size`` squares (edge cells are short, never
@@ -174,16 +181,24 @@ def sample_windows(width: int, height: int, *, seed: int, window_size: int,
     import numpy as np
 
     if width <= 0 or height <= 0:
-        raise ValueError(f"cannot sample windows from a {height}x{width} raster")
+        raise ValueError(
+            f"cannot sample windows from a {height}x{width} raster"
+        )
     if window_size <= 0 or max_windows <= 0:
-        raise ValueError("window_size and max_windows must both be positive, got "
-                         f"window_size={window_size}, max_windows={max_windows}")
-    cells = [Rect(x, y, min(x + window_size, width), min(y + window_size, height))
-             for y in range(0, height, window_size)
-             for x in range(0, width, window_size)]
+        raise ValueError(
+            "window_size and max_windows must both be positive, got "
+            f"window_size={window_size}, max_windows={max_windows}"
+        )
+    cells = [
+        Rect(x, y, min(x + window_size, width), min(y + window_size, height))
+        for y in range(0, height, window_size)
+        for x in range(0, width, window_size)
+    ]
     if max_windows >= len(cells):
         return cells
-    chosen = np.random.default_rng(seed).choice(len(cells), size=max_windows, replace=False)
+    chosen = np.random.default_rng(seed).choice(
+        len(cells), size=max_windows, replace=False
+    )
     return [cells[i] for i in sorted(int(c) for c in chosen)]
 
 
@@ -222,10 +237,13 @@ class RasterSource(Protocol):
     @property
     def resident_bytes(self) -> int: ...
 
-    def read_region(self, rect: Rect, *,
-                    target_size: tuple[int, int] | None = None) -> tuple[np.ndarray, ReadSpec]: ...
+    def read_region(
+        self, rect: Rect, *, target_size: tuple[int, int] | None = None
+    ) -> tuple[np.ndarray, ReadSpec]: ...
 
-    def read_window(self, y0: int, y1: int, x0: int, x1: int) -> np.ndarray: ...
+    def read_window(
+        self, y0: int, y1: int, x0: int, x1: int
+    ) -> np.ndarray: ...
 
     def level_dims(self) -> list[tuple[int, int]]: ...
 
@@ -258,8 +276,9 @@ class _ClosableSource:
         decoded; :class:`GdalSource` answers its overview levels."""
         return []
 
-    def read_region(self, rect: Rect, *,
-                    target_size: tuple[int, int] | None = None) -> tuple[np.ndarray, "ReadSpec"]:
+    def read_region(
+        self, rect: Rect, *, target_size: tuple[int, int] | None = None
+    ) -> tuple[np.ndarray, "ReadSpec"]:
         """Return ``([H, W, C] pixels, ReadSpec)`` for ``rect``; every subclass provides its own."""
         raise NotImplementedError
 
@@ -278,7 +297,9 @@ class _ClosableSource:
 def _check_region(rect: Rect, height: int, width: int) -> None:
     """Raise ``ValueError`` unless ``rect`` is a non-empty region inside a ``height`` x ``width``
     raster."""
-    if not (0 <= rect.y0 < rect.y1 <= height) or not (0 <= rect.x0 < rect.x1 <= width):
+    if not (0 <= rect.y0 < rect.y1 <= height) or not (
+        0 <= rect.x0 < rect.x1 <= width
+    ):
         raise ValueError(
             f"region [{rect.y0}:{rect.y1}, {rect.x0}:{rect.x1}] is out of bounds for a "
             f"{height}x{width} raster"
@@ -309,7 +330,9 @@ class _RegionView:
         self.height = rect.height
         self.width = rect.width
         self.num_channels = parent.num_channels
-        self.band_interpretations = getattr(parent, "band_interpretations", None)
+        self.band_interpretations = getattr(
+            parent, "band_interpretations", None
+        )
 
     def read_window(self, y0: int, y1: int, x0: int, x1: int) -> np.ndarray:
         """The pixel window ``[y0:y1, x0:x1]`` in this view's own local coordinate space,
@@ -327,19 +350,29 @@ def scaled_size(width: int, height: int, scale: Fraction) -> tuple[int, int]:
     """The ``(width, height)`` a ``width`` x ``height`` rect is read at under one ``scale``: each
     edge times the scale, rounded down, and at least one pixel. The one integer geometry a
     resampled read's size is admitted by."""
-    return max(1, math.floor(width * scale)), max(1, math.floor(height * scale))
+    return max(1, math.floor(width * scale)), max(
+        1, math.floor(height * scale)
+    )
 
 
-def level_window(rect: Rect, width: int, height: int, level_w: int, level_h: int) -> Rect:
+def level_window(
+    rect: Rect, width: int, height: int, level_w: int, level_h: int
+) -> Rect:
     """``rect`` of a ``width`` x ``height`` raster mapped onto a level of ``level_w`` x
     ``level_h`` pixels: its origin rounded down and its exclusive end rounded up, so the window
     covers every level pixel the rect touches. The one window geometry a level read opens and a
     read plan is decided on."""
-    return Rect(rect.x0 * level_w // width, rect.y0 * level_h // height,
-                -(-rect.x1 * level_w // width), -(-rect.y1 * level_h // height))
+    return Rect(
+        rect.x0 * level_w // width,
+        rect.y0 * level_h // height,
+        -(-rect.x1 * level_w // width),
+        -(-rect.y1 * level_h // height),
+    )
 
 
-def _check_target_size(rect: Rect, target_size: tuple[int, int]) -> tuple[int, int]:
+def _check_target_size(
+    rect: Rect, target_size: tuple[int, int]
+) -> tuple[int, int]:
     """Validate a ``(width, height)`` output size against ``rect`` and return it as ints.
 
     The target must be :func:`scaled_size` of the rect under some one scale, tried at the smallest
@@ -348,8 +381,10 @@ def _check_target_size(rect: Rect, target_size: tuple[int, int]) -> tuple[int, i
     out_w, out_h = int(target_size[0]), int(target_size[1])
     if out_w <= 0 or out_h <= 0:
         raise ValueError(f"target_size must be positive, got {out_w}x{out_h}")
-    scale = max(Fraction(out_w, rect.width) if out_w > 1 else Fraction(0),
-                Fraction(out_h, rect.height) if out_h > 1 else Fraction(0))
+    scale = max(
+        Fraction(out_w, rect.width) if out_w > 1 else Fraction(0),
+        Fraction(out_h, rect.height) if out_h > 1 else Fraction(0),
+    )
     if scaled_size(rect.width, rect.height, scale) != (out_w, out_h):
         raise ValueError(
             f"target_size {out_w}x{out_h} does not preserve the aspect ratio of the "
@@ -363,24 +398,38 @@ def _area_downsample(region: np.ndarray, out_w: int, out_h: int) -> np.ndarray:
     ``INTER_AREA``, the one area resampler used for every backend that resamples in memory."""
     import cv2
 
-    return hwc_array(cv2.resize(region, (out_w, out_h), interpolation=cv2.INTER_AREA))
+    return hwc_array(
+        cv2.resize(region, (out_w, out_h), interpolation=cv2.INTER_AREA)
+    )
 
 
-def _serve_region(region: np.ndarray, rect: Rect, backend: str,
-                  target_size: tuple[int, int] | None) -> tuple[np.ndarray, ReadSpec]:
+def _serve_region(
+    region: np.ndarray,
+    rect: Rect,
+    backend: str,
+    target_size: tuple[int, int] | None,
+) -> tuple[np.ndarray, ReadSpec]:
     """The read tail every in-memory backend shares: the native copy as-is, or area-downsampled to
     an aspect-preserving ``target_size``."""
     if target_size is None:
         return region, ReadSpec(backend)
     out_w, out_h = _check_target_size(rect, target_size)
-    return _area_downsample(region, out_w, out_h), ReadSpec(backend, resample="area")
+    return _area_downsample(region, out_w, out_h), ReadSpec(
+        backend, resample="area"
+    )
 
 
-def channel_first_reinterpreted(shape: tuple[int, ...], num_channels: int | None) -> bool:
+def channel_first_reinterpreted(
+    shape: tuple[int, ...], num_channels: int | None
+) -> bool:
     """Whether a channel-last reading of a 3-D ``shape`` is instead taken as channel-first: the
     leading axis matches the caller's expected band count while the trailing one does not.
     """
-    return len(shape) == 3 and shape[0] == num_channels and shape[2] != num_channels
+    return (
+        len(shape) == 3
+        and shape[0] == num_channels
+        and shape[2] != num_channels
+    )
 
 
 def hwc_array(img: Any) -> np.ndarray:
@@ -413,7 +462,8 @@ def _palette_lut(colormap: np.ndarray) -> np.ndarray:
     raw = np.asarray(colormap)
     if raw.shape != (3, 256):
         raise ValueError(
-            f"a ColorMap tag shaped {raw.shape} holds no RGB palette for uint8 indices")
+            f"a ColorMap tag shaped {raw.shape} holds no RGB palette for uint8 indices"
+        )
     return (raw.astype(np.uint16) >> 8).astype(np.uint8).T
 
 
@@ -425,7 +475,8 @@ def tiff_header(tif: "TiffFile") -> _TiffHeader:
     import tifffile
 
     from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
-        GeoreferencingError, geotransform_of,
+        GeoreferencingError,
+        geotransform_of,
     )
 
     path = Path(tif.filehandle.path)
@@ -434,27 +485,49 @@ def tiff_header(tif: "TiffFile") -> _TiffHeader:
         series = tif.series[0] if tif.series else None
         if series is not None:
             page = series.keyframe
-            shape, axes, dtype = (tuple(int(x) for x in series.shape), str(series.axes),
-                                  series.dtype)
+            shape, axes, dtype = (
+                tuple(int(x) for x in series.shape),
+                str(series.axes),
+                series.dtype,
+            )
             palette = page.photometric == tifffile.PHOTOMETRIC.PALETTE
-            colormap = page.tags["ColorMap"].value if "ColorMap" in page.tags else None
+            colormap = (
+                page.tags["ColorMap"].value
+                if "ColorMap" in page.tags
+                else None
+            )
             try:
-                georeference: GeoTransform | GeoreferencingError = geotransform_of(
-                    page.tags, path)
+                georeference: GeoTransform | GeoreferencingError = (
+                    geotransform_of(page.tags, path)
+                )
             except GeoreferencingError as refusal:
                 georeference = refusal
     except Exception as exc:  # noqa: BLE001, tifffile raises its own kinds for a file it cannot read
-        raise ValueError(f"cannot read the TIFF header of '{path}': {exc}") from exc
+        raise ValueError(
+            f"cannot read the TIFF header of '{path}': {exc}"
+        ) from exc
     if series is None:
-        raise ValueError(f"cannot read the TIFF header of '{path}': it holds no image series")
+        raise ValueError(
+            f"cannot read the TIFF header of '{path}': it holds no image series"
+        )
     if not palette:
-        return _TiffHeader(path, shape, axes, np.dtype(dtype), None, georeference)
+        return _TiffHeader(
+            path, shape, axes, np.dtype(dtype), None, georeference
+        )
     if dtype != np.dtype("uint8") or colormap is None:
         raise ValueError(
             f"'{path}' is a palette TIFF of {dtype} "
             f"{'with' if colormap is not None else 'without'} a ColorMap tag; the palette images "
-            "this platform serves are uint8 with a ColorMap tag")
-    return _TiffHeader(path, shape, axes, np.dtype(dtype), _palette_lut(colormap), georeference)
+            "this platform serves are uint8 with a ColorMap tag"
+        )
+    return _TiffHeader(
+        path,
+        shape,
+        axes,
+        np.dtype(dtype),
+        _palette_lut(colormap),
+        georeference,
+    )
 
 
 _CHANNEL_LAST = (0, 1, 2)
@@ -477,12 +550,21 @@ class _Layout:
     @property
     def frame(self) -> tuple[int, int, int]:
         """The ``(height, width, channels)`` frame the decode serves in."""
-        return (self.decoded[self.order[0]], self.decoded[self.order[1]],
-                self.decoded[self.order[2]])
+        return (
+            self.decoded[self.order[0]],
+            self.decoded[self.order[1]],
+            self.decoded[self.order[2]],
+        )
 
 
-def _array_layout(shape: tuple[int, ...], num_channels: int | None, path: Path, *,
-                  planar: bool = False, stacked: bool = False) -> _Layout:
+def _array_layout(
+    shape: tuple[int, ...],
+    num_channels: int | None,
+    path: Path,
+    *,
+    planar: bool = False,
+    stacked: bool = False,
+) -> _Layout:
     """The :class:`_Layout` an array of ``shape`` decoded from ``path`` serves at
     ``num_channels``: a 2-D array gains a trailing one-band axis; a 3-D one is channel-first when
     its container states a ``planar`` sample axis, when :func:`channel_first_reinterpreted` says
@@ -490,15 +572,23 @@ def _array_layout(shape: tuple[int, ...], num_channels: int | None, path: Path, 
     is the smaller outer one. Raises ``ValueError`` naming ``path`` and the shape for an array of
     any other number of dimensions."""
     if len(shape) not in (2, 3):
-        raise ValueError(f"'{path}' decodes to an array shaped {tuple(shape)}, which is not a "
-                         "2-D image: an image array is (height, width) or three-dimensional with "
-                         "one band axis.")
-    decoded = (int(shape[0]), int(shape[1]), int(shape[2]) if len(shape) == 3 else 1)
+        raise ValueError(
+            f"'{path}' decodes to an array shaped {tuple(shape)}, which is not a "
+            "2-D image: an image array is (height, width) or three-dimensional with "
+            "one band axis."
+        )
+    decoded = (
+        int(shape[0]),
+        int(shape[1]),
+        int(shape[2]) if len(shape) == 3 else 1,
+    )
     if planar or num_channels is not None:
         first = planar or channel_first_reinterpreted(shape, num_channels)
     else:
         first = stacked and len(shape) == 3 and decoded[0] < decoded[2]
-    return _Layout(decoded, _CHANNEL_FIRST if first else _CHANNEL_LAST, stacked)
+    return _Layout(
+        decoded, _CHANNEL_FIRST if first else _CHANNEL_LAST, stacked
+    )
 
 
 def _layout(header: _TiffHeader, num_channels: int | None) -> _Layout:
@@ -507,8 +597,13 @@ def _layout(header: _TiffHeader, num_channels: int | None) -> _Layout:
     the facts only its axes state (a planar ``SYX`` series, a stacked one)."""
     palette = header.palette_lut is not None
     shape = (*header.shape, 3) if palette else header.shape
-    return _array_layout(shape, num_channels, header.path, planar=header.axes == "SYX",
-                         stacked=header.axes not in _FRAME_AXES)
+    return _array_layout(
+        shape,
+        num_channels,
+        header.path,
+        planar=header.axes == "SYX",
+        stacked=header.axes not in _FRAME_AXES,
+    )
 
 
 class _ArraySource(_ClosableSource):
@@ -534,13 +629,14 @@ class _ArraySource(_ClosableSource):
         )
         return int(self._array.nbytes)
 
-    def read_region(self, rect: Rect, *,
-                    target_size: tuple[int, int] | None = None) -> tuple[np.ndarray, ReadSpec]:
+    def read_region(
+        self, rect: Rect, *, target_size: tuple[int, int] | None = None
+    ) -> tuple[np.ndarray, ReadSpec]:
         assert self._array is not None, (
             "read_region called after close(): a closed source holds no array"
         )
         _check_region(rect, self.height, self.width)
-        region = np.array(self._array[rect.y0:rect.y1, rect.x0:rect.x1])
+        region = np.array(self._array[rect.y0 : rect.y1, rect.x0 : rect.x1])
         return _serve_region(region, rect, self._backend, target_size)
 
     def _release(self) -> None:
@@ -563,7 +659,9 @@ class PhotographicSource(_ClosableSource):
         decoded; it is decoded here and closed."""
         from tcip_annotation.utils import auto_orient_image
 
-        self.image = auto_orient_image(opened).convert(_PIL_MODES[num_channels])
+        self.image = auto_orient_image(opened).convert(
+            _PIL_MODES[num_channels]
+        )
         opened.close()
         self.width, self.height = self.image.size
         self.num_channels = len(self.image.getbands())
@@ -574,14 +672,21 @@ class PhotographicSource(_ClosableSource):
     def resident_bytes(self) -> int:
         """The peak this source can hold, stated before any read: the PIL frame plus the ndarray
         copy :meth:`read_region` materializes from it on first use."""
-        return int(2 * self.width * self.height * self.num_channels * self.dtype.itemsize)
+        return int(
+            2
+            * self.width
+            * self.height
+            * self.num_channels
+            * self.dtype.itemsize
+        )
 
-    def read_region(self, rect: Rect, *,
-                    target_size: tuple[int, int] | None = None) -> tuple[np.ndarray, ReadSpec]:
+    def read_region(
+        self, rect: Rect, *, target_size: tuple[int, int] | None = None
+    ) -> tuple[np.ndarray, ReadSpec]:
         _check_region(rect, self.height, self.width)
         if self._frame is None:
             self._frame = hwc_array(self.image)
-        region = np.array(self._frame[rect.y0:rect.y1, rect.x0:rect.x1])
+        region = np.array(self._frame[rect.y0 : rect.y1, rect.x0 : rect.x1])
         return _serve_region(region, rect, "photographic", target_size)
 
     def _release(self) -> None:
@@ -652,12 +757,17 @@ class BandGroupSource(_ClosableSource):
     def resident_bytes(self) -> int:
         return sum(int(m.resident_bytes) for m in self._members)
 
-    def read_region(self, rect: Rect, *,
-                    target_size: tuple[int, int] | None = None) -> tuple[np.ndarray, ReadSpec]:
-        reads = [m.read_region(rect, target_size=target_size) for m in self._members]
+    def read_region(
+        self, rect: Rect, *, target_size: tuple[int, int] | None = None
+    ) -> tuple[np.ndarray, ReadSpec]:
+        reads = [
+            m.read_region(rect, target_size=target_size) for m in self._members
+        ]
         member_spec = reads[0][1]
-        return (np.concatenate([pixels for pixels, _spec in reads], axis=-1),
-                ReadSpec("band_group", resample=member_spec.resample))
+        return (
+            np.concatenate([pixels for pixels, _spec in reads], axis=-1),
+            ReadSpec("band_group", resample=member_spec.resample),
+        )
 
     def _release(self) -> None:
         for member in self._members:
@@ -708,7 +818,8 @@ class GdalSource(_ClosableSource):
             self.band_interpretations = ("red", "green", "blue")
         else:
             self.band_interpretations = tuple(
-                interp.name.lower() for interp in self._ds.colorinterp)
+                interp.name.lower() for interp in self._ds.colorinterp
+            )
 
     @property
     def resident_bytes(self) -> int:
@@ -716,20 +827,35 @@ class GdalSource(_ClosableSource):
         # share of the budget), not in this process's pooled accounting.
         return 0
 
-    def read_region(self, rect: Rect, *, target_size: tuple[int, int] | None = None,
-                    level: int = 0) -> tuple[np.ndarray, ReadSpec]:
+    def read_region(
+        self,
+        rect: Rect,
+        *,
+        target_size: tuple[int, int] | None = None,
+        level: int = 0,
+    ) -> tuple[np.ndarray, ReadSpec]:
         _check_region(rect, self.height, self.width)
         if level and target_size is None:
-            raise ValueError("a read off an overview level is always resampled: name target_size")
+            raise ValueError(
+                "a read off an overview level is always resampled: name target_size"
+            )
         ds = self._ds if level == 0 else self._level_dataset(level - 1)
-        window = level_window(rect, self.width, self.height, int(ds.width), int(ds.height))
-        out = None if target_size is None else _check_target_size(rect, target_size)
+        window = level_window(
+            rect, self.width, self.height, int(ds.width), int(ds.height)
+        )
+        out = (
+            None
+            if target_size is None
+            else _check_target_size(rect, target_size)
+        )
         pixels, resample = self._read_window(ds, window, out)
         if out is None:
             return pixels, ReadSpec(self._backend)
         return pixels, ReadSpec(self._backend, resample=resample)
 
-    def read_level_region(self, level: int, rect: Rect) -> tuple[np.ndarray, ReadSpec]:
+    def read_level_region(
+        self, level: int, rect: Rect
+    ) -> tuple[np.ndarray, ReadSpec]:
         """``rect`` in the pixel grid of overview level ``level`` (1 the finest), read at that
         level's own resolution."""
         ds = self._level_dataset(level - 1)
@@ -737,8 +863,9 @@ class GdalSource(_ClosableSource):
         pixels, _resample = self._read_window(ds, rect, None)
         return pixels, ReadSpec(self._backend)
 
-    def _read_window(self, ds, window: Rect, out: "tuple[int, int] | None"
-                     ) -> tuple[np.ndarray, "str | None"]:
+    def _read_window(
+        self, ds, window: Rect, out: "tuple[int, int] | None"
+    ) -> tuple[np.ndarray, "str | None"]:
         """``window`` of dataset ``ds`` as ``[H, W, C]``, area-averaged to ``out`` when given (a
         palette raster's indices expanded first, never averaged), and the resampling used."""
         from rasterio.enums import Resampling
@@ -747,24 +874,38 @@ class GdalSource(_ClosableSource):
         win = Window(window.x0, window.y0, window.width, window.height)
         if self._palette_lut is not None:
             rgb = self._palette_lut[ds.read(1, window=win)]
-            return (rgb, None) if out is None else (_area_downsample(rgb, *out), "area")
+            return (
+                (rgb, None)
+                if out is None
+                else (_area_downsample(rgb, *out), "area")
+            )
         if out is None:
             arr = ds.read(window=win)
         else:
-            arr = ds.read(window=win, out_shape=(self.num_channels, out[1], out[0]),
-                          resampling=Resampling.average)
+            arr = ds.read(
+                window=win,
+                out_shape=(self.num_channels, out[1], out[0]),
+                resampling=Resampling.average,
+            )
         # GDAL returns [C, H, W]; contiguous copy in the platform's [H, W, C] order.
-        return (np.ascontiguousarray(np.transpose(arr, (1, 2, 0))),
-                None if out is None else "average")
+        return (
+            np.ascontiguousarray(np.transpose(arr, (1, 2, 0))),
+            None if out is None else "average",
+        )
 
     def level_dims(self) -> list[tuple[int, int]]:
         """The ``(width, height)`` of each reduced-resolution level GDAL serves this raster at,
         finest first, each read off the level's own dataset (:meth:`_level_dataset`): internal
         overviews, or an external sidecar
         :func:`~tcip_mcp.pipelines.overviews.sidecar_valid` confirms; none otherwise."""
-        from tcip_mcp.pipelines.overviews import overview_sidecar, sidecar_valid
+        from tcip_mcp.pipelines.overviews import (
+            overview_sidecar,
+            sidecar_valid,
+        )
 
-        if overview_sidecar(self.path).is_file() and not sidecar_valid(self.path):
+        if overview_sidecar(self.path).is_file() and not sidecar_valid(
+            self.path
+        ):
             return []
         levels = map(self._level_dataset, range(len(self._ds.overviews(1))))
         return [(int(level.width), int(level.height)) for level in levels]
@@ -816,10 +957,17 @@ class SourceHeader:
     PIL), or an array container's extension cut to ``"tif"``, ``"npy"`` or ``"npz"``."""
 
     def __init__(self, source: "str | Path | BandGroupRef"):
-        self.source = source if isinstance(source, BandGroupRef) else Path(source)
+        self.source = (
+            source if isinstance(source, BandGroupRef) else Path(source)
+        )
         ext = self.path.suffix.lower()
-        self.kind = ("group" if ext == MANIFEST_EXT
-                     else ext[1:4] if ext in ARRAY_CONTAINER_EXTS else "photo")
+        self.kind = (
+            "group"
+            if ext == MANIFEST_EXT
+            else ext[1:4]
+            if ext in ARRAY_CONTAINER_EXTS
+            else "photo"
+        )
 
     @property
     def path(self) -> Path:
@@ -839,7 +987,9 @@ class SourceHeader:
         try:
             tif = tifffile.TiffFile(str(self.path))
         except Exception as exc:  # noqa: BLE001, tifffile raises its own kinds for a bad file
-            raise ValueError(f"cannot read the TIFF header of '{self.path}': {exc}") from exc
+            raise ValueError(
+                f"cannot read the TIFF header of '{self.path}': {exc}"
+            ) from exc
         weakref.finalize(self, tif.close)
         return tif
 
@@ -872,7 +1022,9 @@ class SourceHeader:
         """A photograph's band count and EXIF-upright ``(width, height)``, from its PIL header."""
         from tcip_annotation.utils import oriented_size
 
-        return len(self._photo_image.getbands()), oriented_size(self._photo_image)
+        return len(self._photo_image.getbands()), oriented_size(
+            self._photo_image
+        )
 
     @cached_property
     def group(self) -> BandGroupRef:
@@ -895,7 +1047,8 @@ class SourceHeader:
                 raise ValueError(
                     f"band group {self.group.stem!r} ({self.group.manifest_path}): band {name!r} "
                     f"({member.path.name}) holds {bands} bands; each member of a band group is "
-                    "one band.")
+                    "one band."
+                )
         return members
 
     @cached_property
@@ -954,7 +1107,8 @@ class SourceHeader:
         if num_channels not in _PIL_MODES:
             raise ValueError(
                 f"Cannot load a {num_channels}-channel image from '{self.path.suffix}'. "
-                "Use .npy/.npz or a multi-band GeoTIFF (.tif/.tiff).")
+                "Use .npy/.npz or a multi-band GeoTIFF (.tif/.tiff)."
+            )
 
     def windowed(self, num_channels: int) -> "RasterSource | None":
         """The one dispatch: the reader that serves the source at ``num_channels`` without
@@ -966,7 +1120,10 @@ class SourceHeader:
         ``num_channels`` is not the one its axes describe), GDAL cannot open it, or the frame GDAL
         opens is not that one. Every other kind decodes whole."""
         if self.kind == "npy":
-            return NpySource(self.array, _array_layout(self.array.shape, num_channels, self.path))
+            return NpySource(
+                self.array,
+                _array_layout(self.array.shape, num_channels, self.path),
+            )
         if self.kind != "tif":
             return None
         own = _layout(self.tiff, None)
@@ -1002,7 +1159,10 @@ class SourceHeader:
         if self.kind == "tif":
             return TiffWholeSource(self, _layout(self.tiff, num_channels))
         if self.kind == "npz":
-            return NpzSource(self.array, _array_layout(self.array.shape, num_channels, self.path))
+            return NpzSource(
+                self.array,
+                _array_layout(self.array.shape, num_channels, self.path),
+            )
         self._refuse_unless_photographic(num_channels)
         return PhotographicSource(self._photo_image, num_channels)
 
@@ -1012,7 +1172,9 @@ class SourceHeader:
         return self.open(self.route_channels)
 
 
-def open_raster(source: "str | Path | BandGroupRef", num_channels: int) -> RasterSource:
+def open_raster(
+    source: "str | Path | BandGroupRef", num_channels: int
+) -> RasterSource:
     """:meth:`SourceHeader.open` of ``source`` at ``num_channels``: a 5-band GeoTIFF opened at 3
     still reads as 5 bands."""
     return SourceHeader(source).open(num_channels)
@@ -1038,12 +1200,16 @@ def source_version(header: "SourceHeader") -> tuple:
     manifest can be rewritten to name another file and a member can be rewritten under an
     untouched manifest."""
     if header.kind == "group":
-        members = tuple((name, *file_version(p)) for name, p in header.group.bands.items())
+        members = tuple(
+            (name, *file_version(p)) for name, p in header.group.bands.items()
+        )
         return file_version(header.path), members
     return file_version(header.path)
 
 
-def pooled_source(header: SourceHeader, num_channels: int) -> "RasterSource | None":
+def pooled_source(
+    header: SourceHeader, num_channels: int
+) -> "RasterSource | None":
     """The windowed reader for ``header``'s source from this process's pool, opening one through
     :meth:`SourceHeader.windowed` if it holds none; ``None`` for a source that decodes whole,
     and nothing is pooled.
@@ -1128,7 +1294,11 @@ class RasterIdentity:
 
 
 def raster_content_identity(
-    src: RasterSource, *, seed: int, window_size: int, max_windows: int,
+    src: RasterSource,
+    *,
+    seed: int,
+    window_size: int,
+    max_windows: int,
 ) -> RasterIdentity:
     """The content identity of the open raster ``src``.
 
@@ -1144,36 +1314,56 @@ def raster_content_identity(
     """
     try:
         windows = sample_windows(
-            src.width, src.height, seed=seed, window_size=window_size, max_windows=max_windows)
+            src.width,
+            src.height,
+            seed=seed,
+            window_size=window_size,
+            max_windows=max_windows,
+        )
         digest = hashlib.sha256()
         covered = 0
         for rect in windows:
             region = np.ascontiguousarray(src.read_region(rect)[0])
-            digest.update(f"{rect.x0},{rect.y0},{rect.x1},{rect.y1}|".encode("ascii"))
+            digest.update(
+                f"{rect.x0},{rect.y0},{rect.x1},{rect.y1}|".encode("ascii")
+            )
             digest.update(region.tobytes())
             covered += rect.width * rect.height
     except ValueError:
         raise
     except Exception as exc:  # noqa: BLE001, uniformly named as this function's own refusal
-        raise ValueError(f"cannot read this raster for a content identity: {exc}") from exc
+        raise ValueError(
+            f"cannot read this raster for a content identity: {exc}"
+        ) from exc
     import dataclasses
 
-    from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import GeoTransform
+    from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
+        GeoTransform,
+    )
 
     georeference = src.georeference
     return RasterIdentity(
-        width=int(src.width), height=int(src.height), num_channels=int(src.num_channels),
-        dtype=str(src.dtype), pixel_checksum=digest.hexdigest(), seed=int(seed),
-        window_size=int(window_size), max_windows=int(max_windows),
+        width=int(src.width),
+        height=int(src.height),
+        num_channels=int(src.num_channels),
+        dtype=str(src.dtype),
+        pixel_checksum=digest.hexdigest(),
+        seed=int(seed),
+        window_size=int(window_size),
+        max_windows=int(max_windows),
         pixel_fraction=float(covered / float(src.width * src.height)),
         band_interpretations=getattr(src, "band_interpretations", None),
-        geotransform=(dataclasses.asdict(georeference)
-                      if isinstance(georeference, GeoTransform) else None),
+        geotransform=(
+            dataclasses.asdict(georeference)
+            if isinstance(georeference, GeoTransform)
+            else None
+        ),
     )
 
 
 def open_as_recorded(
-    recorded: dict, source: "str | Path | BandGroupRef",
+    recorded: dict,
+    source: "str | Path | BandGroupRef",
 ) -> tuple[RasterSource, RasterIdentity | None]:
     """``source`` opened at the count a previously recorded :func:`raster_content_identity`
     result (its ``dataclasses.asdict`` form) was taken at, for the caller to close, beside its
@@ -1184,14 +1374,17 @@ def open_as_recorded(
     src = open_raster(source, int(recorded["num_channels"]))
     try:
         fresh = raster_content_identity(
-            src, seed=int(recorded["seed"]), window_size=int(recorded["window_size"]),
+            src,
+            seed=int(recorded["seed"]),
+            window_size=int(recorded["window_size"]),
             max_windows=int(recorded["max_windows"]),
         )
     except Exception:
         src.close()
         raise
     matches = (
-        fresh.width == int(recorded["width"]) and fresh.height == int(recorded["height"])
+        fresh.width == int(recorded["width"])
+        and fresh.height == int(recorded["height"])
         and fresh.num_channels == int(recorded["num_channels"])
         and fresh.dtype == recorded["dtype"]
         and fresh.pixel_checksum == recorded["pixel_checksum"]
@@ -1203,12 +1396,16 @@ def content_identity(src: RasterSource) -> RasterIdentity:
     """:func:`raster_content_identity` of the open raster ``src`` under the platform's own
     sampling budget."""
     return raster_content_identity(
-        src, seed=CONTENT_IDENTITY_SEED, window_size=CONTENT_IDENTITY_WINDOW_SIZE,
-        max_windows=CONTENT_IDENTITY_MAX_WINDOWS)
+        src,
+        seed=CONTENT_IDENTITY_SEED,
+        window_size=CONTENT_IDENTITY_WINDOW_SIZE,
+        max_windows=CONTENT_IDENTITY_MAX_WINDOWS,
+    )
 
 
 def georeferenced_raster_identity_mismatch(
-    recorded: dict, fresh: RasterIdentity | None,
+    recorded: dict,
+    fresh: RasterIdentity | None,
 ) -> str | None:
     """``None`` when ``fresh``, :func:`open_as_recorded`'s answer for a recorded
     :func:`raster_content_identity` result, is content-identical to it and carries the
@@ -1226,8 +1423,12 @@ def georeferenced_raster_identity_mismatch(
     if recorded_gt == supplied_gt:
         return None
     if recorded_gt is None or supplied_gt is None:
-        return (f"georeferencing mismatch: recorded geotransform {recorded_gt!r}, "
-                f"supplied {supplied_gt!r}")
+        return (
+            f"georeferencing mismatch: recorded geotransform {recorded_gt!r}, "
+            f"supplied {supplied_gt!r}"
+        )
     differing = [k for k in recorded_gt if recorded_gt[k] != supplied_gt[k]]
     return "georeferencing mismatch: " + ", ".join(
-        f"{k} recorded {recorded_gt[k]!r}, supplied {supplied_gt[k]!r}" for k in differing)
+        f"{k} recorded {recorded_gt[k]!r}, supplied {supplied_gt[k]!r}"
+        for k in differing
+    )

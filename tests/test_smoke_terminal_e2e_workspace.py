@@ -26,7 +26,8 @@ def _load():
 
 
 def test_runs_under_the_given_workspace_never_the_machines_last_opened_project(
-        tmp_path, monkeypatch):
+    tmp_path, monkeypatch
+):
     """A live workspace whose last-opened pointer names a real project must not decide what this
     run touches: the run sees the workspace it was given, opens nothing for a row that cannot
     launch, and leaves the live project's log as it was."""
@@ -39,9 +40,13 @@ def test_runs_under_the_given_workspace_never_the_machines_last_opened_project(
 
     live_project = new_project(tmp_path)
     workspace.write_last_opened(tmp_path.parent, live_project.id)
-    live_lines = len(tcip_store.read_log(audit_log_key(live_project.root)).records)
+    live_lines = len(
+        tcip_store.read_log(audit_log_key(live_project.root)).records
+    )
     monkeypatch.delenv(pty_host.TERMINAL_CMD_ENV, raising=False)
-    row = dataclasses.replace(pty_host.PROVIDERS[0], executable="tcip-smoke-test-nonexistent-cli")
+    row = dataclasses.replace(
+        pty_host.PROVIDERS[0], executable="tcip-smoke-test-nonexistent-cli"
+    )
     monkeypatch.setattr(pty_host, "PROVIDERS", (row,))
 
     scratch_ws = tmp_path.parent.parent / "scratch-workspace"
@@ -52,11 +57,15 @@ def test_runs_under_the_given_workspace_never_the_machines_last_opened_project(
     assert os.environ["TCIP_WORKSPACE"] == str(scratch_ws)
     assert store.workspace == scratch_ws.resolve()
     assert store.opened is None
-    assert len(tcip_store.read_log(audit_log_key(live_project.root)).records) == live_lines
+    assert (
+        len(tcip_store.read_log(audit_log_key(live_project.root)).records)
+        == live_lines
+    )
 
 
 def test_the_signal_is_a_friction_report_of_the_open_project_carrying_the_token(
-        opened_project, opened_client):
+    opened_project, opened_client
+):
     """``reported`` answers only while ``report_friction`` has recorded, in the open project,
     exactly one report whose detail carries the token, of the requested category: the token
     anywhere else, a report of another category, or a second call is not it."""
@@ -64,8 +73,12 @@ def test_the_signal_is_a_friction_report_of_the_open_project_carrying_the_token(
 
     mod = _load()
     token = "ack-0123456789ab"
-    report_friction(opened_project, mod.REQUESTED_CATEGORY, "an unrelated report",
-                    context={"note": token})
+    report_friction(
+        opened_project,
+        mod.REQUESTED_CATEGORY,
+        "an unrelated report",
+        context={"note": token},
+    )
     assert not mod.reported(opened_client, token)
 
     report_friction(opened_project, mod.REQUESTED_CATEGORY, f"smoke {token}")
@@ -79,7 +92,9 @@ def test_the_signal_is_a_friction_report_of_the_open_project_carrying_the_token(
     assert not mod.reported(opened_client, other)
 
 
-def test_the_websocket_url_is_absolute_and_carries_the_served_host(tmp_path, client):
+def test_the_websocket_url_is_absolute_and_carries_the_served_host(
+    tmp_path, client
+):
     """``terminal_ws_url`` is absolute and names the client's own host."""
     mod = _load()
 

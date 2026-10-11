@@ -70,12 +70,19 @@ def plan_overview_build(ds) -> dict:
     raster (whose indices are resampled by nearest, never averaged)."""
     path = ds.name
     if ds.overviews(1):
-        return {"refusal": f"{path} already carries internal overviews; nothing to build"}
+        return {
+            "refusal": f"{path} already carries internal overviews; nothing to build"
+        }
     levels = overview_levels(int(ds.width), int(ds.height))
     if not levels:
-        return {"refusal": f"{path}'s longest edge is within {PYRAMID_FLOOR_EDGE} pixels; there "
-                           "is no overview level to build"}
-    return {"levels": levels, "palette": SourceHeader(path).tiff.palette_lut is not None}
+        return {
+            "refusal": f"{path}'s longest edge is within {PYRAMID_FLOOR_EDGE} pixels; there "
+            "is no overview level to build"
+        }
+    return {
+        "levels": levels,
+        "palette": SourceHeader(path).tiff.palette_lut is not None,
+    }
 
 
 def sidecar_valid(path: str | Path) -> bool:
@@ -112,8 +119,9 @@ def overview_levels(width: int, height: int) -> list[int]:
     return levels
 
 
-def build_overviews(path: str | Path,
-                    *, progress_cb: "Callable[[int], object] | None" = None) -> Path:
+def build_overviews(
+    path: str | Path, *, progress_cb: "Callable[[int], object] | None" = None
+) -> Path:
     """Build ``path``'s external ``.ovr`` pyramid as :func:`plan_overview_build` plans it and
     return the sidecar's path. The raster is read once, in the child process the build runs in:
     its header and one GDAL open plan and write the levels.
@@ -139,7 +147,8 @@ def build_overviews(path: str | Path,
     if sidecar.exists():
         if sidecar_valid(path):
             raise ValueError(
-                f"{sidecar} already holds a valid overview pyramid; refusing to rebuild over it")
+                f"{sidecar} already holds a valid overview pyramid; refusing to rebuild over it"
+            )
         sidecar.unlink()
 
     def canceled(written: int) -> bool:
@@ -155,13 +164,19 @@ def build_overviews(path: str | Path,
 
     child = subprocess.Popen(
         [sys.executable, "-c", _BUILD_CHILD, str(path)],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
     )
-    assert child.stdout is not None and child.stderr is not None, "both were piped above"
+    assert child.stdout is not None and child.stderr is not None, (
+        "both were piped above"
+    )
     stated = child.stdout.readline()
     if not stated:
         child.wait()
-        abandon(f"overview build for {path} failed: {(child.stderr.read() or '').strip()}")
+        abandon(
+            f"overview build for {path} failed: {(child.stderr.read() or '').strip()}"
+        )
     plan = json.loads(stated)
     if "refusal" in plan:
         child.wait()
@@ -173,7 +188,9 @@ def build_overviews(path: str | Path,
             child.wait(timeout=30)
             abandon(f"overview build for {path} canceled")
     if child.returncode != 0:
-        abandon(f"overview build for {path} failed: {(child.stderr.read() or '').strip()}")
+        abandon(
+            f"overview build for {path} failed: {(child.stderr.read() or '').strip()}"
+        )
     if progress_cb is not None:
         progress_cb(sidecar.stat().st_size)
     return sidecar

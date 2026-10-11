@@ -25,14 +25,29 @@ from tcip_mcp.cli import bound_project
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, prog=prog)
-    parser.add_argument("--dataset-root", required=True,
-                        help="The dataset root the bucket is published under.")
-    parser.add_argument("--bucket", required=True, help="The published bucket's name.")
-    parser.add_argument("--project", required=True,
-                         help="The project the renders land under.")
-    parser.add_argument("--task", default="detect", choices=("detect", "segment"))
-    parser.add_argument("--top-k", type=int, default=10, help="Number of worst cases to render.")
-    parser.add_argument("--class-names", default="", help="Comma-separated class names.")
+    parser.add_argument(
+        "--dataset-root",
+        required=True,
+        help="The dataset root the bucket is published under.",
+    )
+    parser.add_argument(
+        "--bucket", required=True, help="The published bucket's name."
+    )
+    parser.add_argument(
+        "--project", required=True, help="The project the renders land under."
+    )
+    parser.add_argument(
+        "--task", default="detect", choices=("detect", "segment")
+    )
+    parser.add_argument(
+        "--top-k",
+        type=int,
+        default=10,
+        help="Number of worst cases to render.",
+    )
+    parser.add_argument(
+        "--class-names", default="", help="Comma-separated class names."
+    )
     args = parser.parse_args(argv)
 
     project = bound_project(args.project)

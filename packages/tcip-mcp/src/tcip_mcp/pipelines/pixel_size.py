@@ -51,7 +51,10 @@ def meters_per_crs_unit(epsg: int) -> tuple[float | None, str]:
         return None, "its georeferencing is not projected"
     codes = {axis.unit_code for axis in crs.axis_info}
     if len(codes) != 1 or next(iter(codes)) not in _UNIT_CODES_TO_METERS:
-        return None, f"its CRS EPSG:{epsg}'s units are not meter, foot or US survey foot"
+        return (
+            None,
+            f"its CRS EPSG:{epsg}'s units are not meter, foot or US survey foot",
+        )
     return crs.axis_info[0].unit_conversion_factor, ""
 
 
@@ -95,9 +98,13 @@ def resolve_pixel_size(header: "SourceHeader") -> tuple[PixelSize | None, str]:
         return None, reason
     if gt.pixel_scale_x <= 0 or gt.pixel_scale_y <= 0:
         return None, "its pixel scale is zero or negative"
-    if not math.isclose(gt.pixel_scale_x, gt.pixel_scale_y, rel_tol=_ANISOTROPY_REL_TOL):
+    if not math.isclose(
+        gt.pixel_scale_x, gt.pixel_scale_y, rel_tol=_ANISOTROPY_REL_TOL
+    ):
         return None, "its pixel scales differ by axis"
 
     meters_per_px = gt.pixel_scale_x * factor
-    clause = f"a projected geotransform (EPSG:{gt.epsg}, {meters_per_px:.6g} m/px)"
+    clause = (
+        f"a projected geotransform (EPSG:{gt.epsg}, {meters_per_px:.6g} m/px)"
+    )
     return PixelSize(meters_per_px=meters_per_px, source_clause=clause), ""

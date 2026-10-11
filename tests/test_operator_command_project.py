@@ -14,7 +14,9 @@ from tests._producer_fixtures import write_image
 
 
 def _image(tmp_path: Path) -> Path:
-    return write_image(tmp_path / "images" / "field.png", (64, 48), (40, 90, 60))
+    return write_image(
+        tmp_path / "images" / "field.png", (64, 48), (40, 90, 60)
+    )
 
 
 def test_a_render_command_leaves_no_audit_line_anywhere(tmp_path):
@@ -26,13 +28,18 @@ def test_a_render_command_leaves_no_audit_line_anywhere(tmp_path):
     from tcip_mcp.tools.project_tools import initialize_project
 
     project = tmp_path / "project"
-    assert "error" not in initialize_project(str(project), "Grid project", "east block")
+    assert "error" not in initialize_project(
+        str(project), "Grid project", "east block"
+    )
     image = _image(tmp_path)
     cwd = tmp_path / "operator_cwd"
     cwd.mkdir()
 
-    result = run_tcip("overlay-reference-grid",
-                      ["--image", str(image), "--project", str(project)], cwd=cwd)
+    result = run_tcip(
+        "overlay-reference-grid",
+        ["--image", str(image), "--project", str(project)],
+        cwd=cwd,
+    )
 
     assert result.returncode == 0, result.stderr
     rows = ts.read_log(audit_log_key(project)).records
@@ -46,8 +53,11 @@ def test_a_command_naming_no_project_refuses_and_writes_nothing(tmp_path):
     not_a_project.mkdir()
     image = _image(tmp_path)
 
-    result = run_tcip("overlay-reference-grid",
-                      ["--image", str(image), "--project", str(not_a_project)], cwd=tmp_path)
+    result = run_tcip(
+        "overlay-reference-grid",
+        ["--image", str(image), "--project", str(not_a_project)],
+        cwd=tmp_path,
+    )
 
     assert result.returncode != 0, result.stdout
     assert "names no readable project" in result.stderr

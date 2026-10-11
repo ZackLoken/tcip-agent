@@ -31,14 +31,22 @@ def _version(dataset_root):
 
 
 def _bud_bush() -> SubjectRegistry:
-    return SubjectRegistry(subjects=(
-        Subject(name="bush", description="one currant bush crown"),
-        Subject(
-            name="bud",
-            description="a currant bud",
-            attributes=(Attribute(name="opening", type="categorical", values=("closed", "open")),),
-        ),
-    ))
+    return SubjectRegistry(
+        subjects=(
+            Subject(name="bush", description="one currant bush crown"),
+            Subject(
+                name="bud",
+                description="a currant bud",
+                attributes=(
+                    Attribute(
+                        name="opening",
+                        type="categorical",
+                        values=("closed", "open"),
+                    ),
+                ),
+            ),
+        )
+    )
 
 
 def test_a_stored_subject_stating_no_description_refuses_and_a_request_s_states_an_empty_one():
@@ -50,7 +58,8 @@ def test_a_stored_subject_stating_no_description_refuses_and_a_request_s_states_
         registry_from_dict({"bud": {}})
 
     assert registry_from_request({"bud": {}}) == SubjectRegistry(
-        subjects=(Subject(name="bud", description=""),))
+        subjects=(Subject(name="bud", description=""),)
+    )
 
 
 def test_dict_and_file_roundtrip_preserve_the_registry(tmp_path):
@@ -63,7 +72,10 @@ def test_dict_and_file_roundtrip_preserve_the_registry(tmp_path):
     # bush carries no attributes -> no 'attributes' key rather than an empty one
     on_disk = json.loads(path.read_text(encoding="utf-8"))
     assert "attributes" not in on_disk["bush"]
-    assert on_disk["bud"]["attributes"]["opening"]["values"] == ["closed", "open"]
+    assert on_disk["bud"]["attributes"]["opening"]["values"] == [
+        "closed",
+        "open",
+    ]
 
 
 def _scope(tmp_path, registry, subject):
@@ -81,20 +93,45 @@ def test_a_value_id_is_its_declared_position_never_a_sorted_one(tmp_path):
     from tcip_annotation.json_io import UNASSESSED, attribute_ids
     from tcip_annotation.state import Annotation
 
-    reg = SubjectRegistry(subjects=(
-        Subject(name="bud", attributes=(
-            Attribute(name="opening", type="categorical", values=("open", "closed")),
-            Attribute(name="severity", type="ordinal", values=("none", "light", "severe")),)),
-    ))
+    reg = SubjectRegistry(
+        subjects=(
+            Subject(
+                name="bud",
+                attributes=(
+                    Attribute(
+                        name="opening",
+                        type="categorical",
+                        values=("open", "closed"),
+                    ),
+                    Attribute(
+                        name="severity",
+                        type="ordinal",
+                        values=("none", "light", "severe"),
+                    ),
+                ),
+            ),
+        )
+    )
     scope = _scope(tmp_path, reg, "bud")
     assert scope.attributes == reg.subjects[0].attributes
-    assert attribute_ids(Annotation(subject="bud", attributes={
-        "opening": "closed", "severity": "light"}), "bud", scope.attributes) == [1, 1]
-    assert attribute_ids(Annotation(subject="bud", attributes={"opening": "open"}), "bud",
-                         scope.attributes) == [0, UNASSESSED]
+    assert attribute_ids(
+        Annotation(
+            subject="bud",
+            attributes={"opening": "closed", "severity": "light"},
+        ),
+        "bud",
+        scope.attributes,
+    ) == [1, 1]
+    assert attribute_ids(
+        Annotation(subject="bud", attributes={"opening": "open"}),
+        "bud",
+        scope.attributes,
+    ) == [0, UNASSESSED]
 
 
-def test_a_subject_with_no_attributes_reads_none_and_an_absent_subject_refuses(tmp_path):
+def test_a_subject_with_no_attributes_reads_none_and_an_absent_subject_refuses(
+    tmp_path,
+):
     # rail admits valid work: bush (detection-only) loads and reads an empty attribute tuple
     reg = registry_from_dict({"bush": {"description": "a bush"}})
     assert _scope(tmp_path, reg, "bush").attributes == ()
@@ -102,14 +139,35 @@ def test_a_subject_with_no_attributes_reads_none_and_an_absent_subject_refuses(t
         _scope(tmp_path, reg, "acorn")
 
 
-@pytest.mark.parametrize("bad", [
-    # numeric not allowed
-    {"bud": {"attributes": {"opening": {"type": "numeric", "values": ["1"]}}}},
-    {"bud": {"attributes": {"opening": {"type": "categorical", "values": []}}}},  # empty values
-    # dup values
-    {"bud": {"attributes": {"opening": {"type": "categorical", "values": ["a", "a"]}}}},
-    {"bud": {"attributes": {"opening": {"values": ["closed"]}}}},  # missing type
-])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        # numeric not allowed
+        {
+            "bud": {
+                "attributes": {"opening": {"type": "numeric", "values": ["1"]}}
+            }
+        },
+        {
+            "bud": {
+                "attributes": {
+                    "opening": {"type": "categorical", "values": []}
+                }
+            }
+        },  # empty values
+        # dup values
+        {
+            "bud": {
+                "attributes": {
+                    "opening": {"type": "categorical", "values": ["a", "a"]}
+                }
+            }
+        },
+        {
+            "bud": {"attributes": {"opening": {"values": ["closed"]}}}
+        },  # missing type
+    ],
+)
 def test_malformed_registry_refuses(bad):
     with pytest.raises(RegistryError):
         registry_from_dict(bad)
@@ -118,47 +176,79 @@ def test_malformed_registry_refuses(bad):
 def test_ordinal_file_roundtrip_preserves_type_and_rank(tmp_path):
     # The apex on-disk risk: a writer that sorted or flattened ordinal metadata would reorder the
     # ranks. Declared order here is deliberately not alphabetical, so a sorting writer is caught.
-    reg = SubjectRegistry(subjects=(
-        Subject(name="leaf", attributes=(
-            Attribute(name="efb_severity", type="ordinal",
-                      values=("none", "light", "moderate", "severe")),)),
-    ))
+    reg = SubjectRegistry(
+        subjects=(
+            Subject(
+                name="leaf",
+                attributes=(
+                    Attribute(
+                        name="efb_severity",
+                        type="ordinal",
+                        values=("none", "light", "moderate", "severe"),
+                    ),
+                ),
+            ),
+        )
+    )
     registry_over(tmp_path, reg)
     back = read_registry(tmp_path)
-    assert back == reg  # type and declared value order both survive the round-trip
+    assert (
+        back == reg
+    )  # type and declared value order both survive the round-trip
     leaf = back.subject("leaf")
-    assert leaf is not None and leaf.attribute("efb_severity").type == "ordinal"  # type: ignore[union-attr]
+    assert (
+        leaf is not None and leaf.attribute("efb_severity").type == "ordinal"
+    )  # type: ignore[union-attr]
     assert leaf.attribute("efb_severity").values == (  # type: ignore[union-attr]
-        "none", "light", "moderate", "severe")
+        "none",
+        "light",
+        "moderate",
+        "severe",
+    )
 
 
 def test_attribute_refuses_bad_values_at_construction():
     # The invariant travels with the type, so a positional id can never silently collapse a value,
     # however the Attribute was built, not only via the JSON parser.
     with pytest.raises(ValueError):
-        Attribute(name="opening", type="categorical", values=("closed", "closed"))  # duplicate
+        Attribute(
+            name="opening", type="categorical", values=("closed", "closed")
+        )  # duplicate
     with pytest.raises(ValueError):
         Attribute(name="opening", type="categorical", values=())  # empty
     with pytest.raises(ValueError):
-        Attribute(name="opening", type="numeric", values=("closed",))  # numeric not an attr type
+        Attribute(
+            name="opening", type="numeric", values=("closed",)
+        )  # numeric not an attr type
 
 
 def test_absent_or_null_attributes_valid_but_falsy_malformed_refused():
-    for ok in ({"bush": {"description": ""}},
-               {"bush": {"description": "", "attributes": None}}):  # detection-only subject
+    for ok in (
+        {"bush": {"description": ""}},
+        {"bush": {"description": "", "attributes": None}},
+    ):  # detection-only subject
         bush = registry_from_dict(ok).subject("bush")
         assert bush is not None and bush.attributes == ()
-    for bad in (False, 0, "", []):  # a falsy but wrong-typed attributes is malformed, not "none"
+    for bad in (
+        False,
+        0,
+        "",
+        [],
+    ):  # a falsy but wrong-typed attributes is malformed, not "none"
         with pytest.raises(RegistryError):
             registry_from_dict({"bush": {"attributes": bad}})
 
 
-def test_a_present_but_undecodable_registry_refuses_and_an_absent_one_says_so(tmp_path):
+def test_a_present_but_undecodable_registry_refuses_and_an_absent_one_says_so(
+    tmp_path,
+):
     """Absence and corruption are different answers, and neither is an empty registry: reading an
     undecodable one as empty leaves every name-based label under it with nothing to resolve against.
     """
     path = tmp_path / "subjects.json"
-    path.write_bytes(b'{"bud": {"description": "a currant bud"')  # truncated mid-object
+    path.write_bytes(
+        b'{"bud": {"description": "a currant bud"'
+    )  # truncated mid-object
 
     with pytest.raises(RegistryError):
         read_registry(tmp_path)
@@ -170,7 +260,9 @@ def test_a_present_but_undecodable_registry_refuses_and_an_absent_one_says_so(tm
     assert read_registry(tmp_path).subject("bud") is not None
 
 
-def test_a_copied_registry_declares_the_same_document_in_the_same_order(tmp_path):
+def test_a_copied_registry_declares_the_same_document_in_the_same_order(
+    tmp_path,
+):
     """A registry placed beside another dataset's data declares exactly what its source declares,
     so a digest or an id assignment taken against either one reads the same declared order.
     """
@@ -179,19 +271,32 @@ def test_a_copied_registry_declares_the_same_document_in_the_same_order(tmp_path
     source, destination = tmp_path / "source", tmp_path / "destination"
     source.mkdir()
     destination.mkdir()
-    registry_over(source, SubjectRegistry(subjects=(
-        Subject(name="bud", description="a description with an ümlaut"),
-        Subject(name="bush"),
-    )))
+    registry_over(
+        source,
+        SubjectRegistry(
+            subjects=(
+                Subject(
+                    name="bud", description="a description with an ümlaut"
+                ),
+                Subject(name="bush"),
+            )
+        ),
+    )
 
     copy_registry(source, destination)
 
-    assert (destination / "subjects.json").read_bytes() == (source / "subjects.json").read_bytes()
-    assert [s.name for s in read_registry(destination).subjects] == \
-        ["bud", "bush"]
+    assert (destination / "subjects.json").read_bytes() == (
+        source / "subjects.json"
+    ).read_bytes()
+    assert [s.name for s in read_registry(destination).subjects] == [
+        "bud",
+        "bush",
+    ]
 
 
-def test_copy_registry_refuses_when_the_destination_already_holds_one(tmp_path):
+def test_copy_registry_refuses_when_the_destination_already_holds_one(
+    tmp_path,
+):
     """A materialization or split re-run must not replace a destination registry silently: the
     first copy is create-only, and a second copy attempt over the same destination refuses."""
     from tcip_mcp.subject_registry import copy_registry
@@ -200,7 +305,9 @@ def test_copy_registry_refuses_when_the_destination_already_holds_one(tmp_path):
     source.mkdir()
     destination.mkdir()
     registry_over(source, SubjectRegistry(subjects=(Subject(name="bud"),)))
-    registry_over(destination, SubjectRegistry(subjects=(Subject(name="bush"),)))
+    registry_over(
+        destination, SubjectRegistry(subjects=(Subject(name="bush"),))
+    )
 
     with pytest.raises(RegistryError):
         copy_registry(source, destination)
@@ -212,14 +319,22 @@ def test_copy_registry_refuses_when_the_destination_already_holds_one(tmp_path):
 def _leaf_bush() -> SubjectRegistry:
     """A generic two-subject registry (a subject declaring no attribute, one declaring one), for the
     registry-write tests below."""
-    return SubjectRegistry(subjects=(
-        Subject(name="bush", description="one plant crown"),
-        Subject(
-            name="leaf",
-            description="one leaf",
-            attributes=(Attribute(name="stage", type="categorical", values=("early", "late")),),
-        ),
-    ))
+    return SubjectRegistry(
+        subjects=(
+            Subject(name="bush", description="one plant crown"),
+            Subject(
+                name="leaf",
+                description="one leaf",
+                attributes=(
+                    Attribute(
+                        name="stage",
+                        type="categorical",
+                        values=("early", "late"),
+                    ),
+                ),
+            ),
+        )
+    )
 
 
 def test_replace_registry_refuses_an_empty_registry(tmp_path):
@@ -227,7 +342,12 @@ def test_replace_registry_refuses_an_empty_registry(tmp_path):
     from tcip_store import Version
 
     with pytest.raises(RegistryError):
-        replace_registry(tmp_path, SubjectRegistry(subjects=()), expect=Version.ABSENT, actor=None)
+        replace_registry(
+            tmp_path,
+            SubjectRegistry(subjects=()),
+            expect=Version.ABSENT,
+            actor=None,
+        )
 
 
 def test_replace_registry_first_write_succeeds_and_reports_the_save(tmp_path):
@@ -235,10 +355,15 @@ def test_replace_registry_first_write_succeeds_and_reports_the_save(tmp_path):
     from tcip_store import Version
 
     # admits valid work: a first write over an absent registry, asserted with Version.ABSENT.
-    result = replace_registry(tmp_path, _leaf_bush(), expect=Version.ABSENT, actor=None)
+    result = replace_registry(
+        tmp_path, _leaf_bush(), expect=Version.ABSENT, actor=None
+    )
     assert read_registry(tmp_path) == _leaf_bush()
-    assert result == {"subjects_path": str(tmp_path / "subjects.json"), "n_subjects": 2,
-                      "version": _version(tmp_path).token}
+    assert result == {
+        "subjects_path": str(tmp_path / "subjects.json"),
+        "n_subjects": 2,
+        "version": _version(tmp_path).token,
+    }
 
 
 def test_replace_registry_admits_growing_the_registry(tmp_path):
@@ -246,26 +371,46 @@ def test_replace_registry_admits_growing_the_registry(tmp_path):
     from tcip_store import Version
 
     # admits valid work: adding a subject/attribute/value never drops a declared name.
-    replace_registry(tmp_path, SubjectRegistry(subjects=(Subject(name="bush"),)),
-                     expect=Version.ABSENT, actor=None)
-    grown = SubjectRegistry(subjects=(
-        Subject(name="bush"),
-        Subject(name="leaf", attributes=(
-            Attribute(name="stage", type="categorical", values=("early", "late")),)),
-    ))
+    replace_registry(
+        tmp_path,
+        SubjectRegistry(subjects=(Subject(name="bush"),)),
+        expect=Version.ABSENT,
+        actor=None,
+    )
+    grown = SubjectRegistry(
+        subjects=(
+            Subject(name="bush"),
+            Subject(
+                name="leaf",
+                attributes=(
+                    Attribute(
+                        name="stage",
+                        type="categorical",
+                        values=("early", "late"),
+                    ),
+                ),
+            ),
+        )
+    )
     replace_registry(tmp_path, grown, expect=_version(tmp_path), actor=None)
     assert read_registry(tmp_path) == grown
 
 
-def test_replace_registry_refuses_dropping_a_declared_name_without_allow_removals(tmp_path):
+def test_replace_registry_refuses_dropping_a_declared_name_without_allow_removals(
+    tmp_path,
+):
     from tcip_mcp.subject_registry import replace_registry
     from tcip_store import Version
 
     replace_registry(tmp_path, _leaf_bush(), expect=Version.ABSENT, actor=None)
     shrunk = SubjectRegistry(subjects=(Subject(name="bush"),))  # drops leaf
     with pytest.raises(RegistryError, match="leaf"):
-        replace_registry(tmp_path, shrunk, expect=_version(tmp_path), actor=None)
-    assert read_registry(tmp_path) == _leaf_bush()  # refusal leaves the stored registry untouched
+        replace_registry(
+            tmp_path, shrunk, expect=_version(tmp_path), actor=None
+        )
+    assert (
+        read_registry(tmp_path) == _leaf_bush()
+    )  # refusal leaves the stored registry untouched
 
 
 def test_replace_registry_allows_removals_when_stated(tmp_path):
@@ -274,7 +419,13 @@ def test_replace_registry_allows_removals_when_stated(tmp_path):
 
     replace_registry(tmp_path, _leaf_bush(), expect=Version.ABSENT, actor=None)
     shrunk = SubjectRegistry(subjects=(Subject(name="bush"),))
-    replace_registry(tmp_path, shrunk, expect=_version(tmp_path), allow_removals=True, actor=None)
+    replace_registry(
+        tmp_path,
+        shrunk,
+        expect=_version(tmp_path),
+        allow_removals=True,
+        actor=None,
+    )
     assert read_registry(tmp_path) == shrunk
 
 
@@ -282,52 +433,109 @@ def test_replace_registry_refuses_a_stale_expect_version(tmp_path):
     from tcip_mcp.subject_registry import replace_registry
     from tcip_store import Version, VersionConflictError
 
-    replace_registry(tmp_path, SubjectRegistry(subjects=(Subject(name="bush"),)),
-                     expect=Version.ABSENT, actor=None)
+    replace_registry(
+        tmp_path,
+        SubjectRegistry(subjects=(Subject(name="bush"),)),
+        expect=Version.ABSENT,
+        actor=None,
+    )
     stale = _version(tmp_path)
     replace_registry(
-        tmp_path, SubjectRegistry(subjects=(Subject(name="bush"), Subject(name="leaf"))),
-        expect=stale, actor=None)
+        tmp_path,
+        SubjectRegistry(subjects=(Subject(name="bush"), Subject(name="leaf"))),
+        expect=stale,
+        actor=None,
+    )
     with pytest.raises(VersionConflictError):
         replace_registry(
-            tmp_path, SubjectRegistry(subjects=(Subject(name="bush"), Subject(name="tip"))),
-            expect=stale, allow_removals=True, actor=None)
+            tmp_path,
+            SubjectRegistry(
+                subjects=(Subject(name="bush"), Subject(name="tip"))
+            ),
+            expect=stale,
+            allow_removals=True,
+            actor=None,
+        )
 
 
-def test_replace_registry_refuses_undecodable_bytes_without_allow_removals(tmp_path):
+def test_replace_registry_refuses_undecodable_bytes_without_allow_removals(
+    tmp_path,
+):
     from tcip_mcp.subject_registry import replace_registry
 
     path = tmp_path / "subjects.json"
-    path.write_bytes(b'{"leaf": {"description": "one leaf"')  # truncated mid-object
+    path.write_bytes(
+        b'{"leaf": {"description": "one leaf"'
+    )  # truncated mid-object
     with pytest.raises(RegistryError):
-        replace_registry(tmp_path, SubjectRegistry(subjects=(Subject(name="bush"),)),
-                         expect=None, actor=None)
+        replace_registry(
+            tmp_path,
+            SubjectRegistry(subjects=(Subject(name="bush"),)),
+            expect=None,
+            actor=None,
+        )
     assert path.read_bytes() == b'{"leaf": {"description": "one leaf"'
 
 
-def test_replace_registry_repairs_undecodable_bytes_when_allow_removals(tmp_path):
+def test_replace_registry_repairs_undecodable_bytes_when_allow_removals(
+    tmp_path,
+):
     from tcip_mcp.subject_registry import replace_registry
 
     path = tmp_path / "subjects.json"
     path.write_bytes(b'{"leaf": {"description": "one leaf"')
     replace_registry(
-        tmp_path, SubjectRegistry(subjects=(Subject(name="bush"),)), expect=None,
-        allow_removals=True, actor=None)
-    assert read_registry(tmp_path) == SubjectRegistry(subjects=(Subject(name="bush"),))
+        tmp_path,
+        SubjectRegistry(subjects=(Subject(name="bush"),)),
+        expect=None,
+        allow_removals=True,
+        actor=None,
+    )
+    assert read_registry(tmp_path) == SubjectRegistry(
+        subjects=(Subject(name="bush"),)
+    )
 
 
-def test_replace_registry_refuses_a_same_values_type_flip_without_allow_type_changes(tmp_path):
+def test_replace_registry_refuses_a_same_values_type_flip_without_allow_type_changes(
+    tmp_path,
+):
     from tcip_mcp.subject_registry import replace_registry
     from tcip_store import Version
 
-    categorical = SubjectRegistry(subjects=(Subject(name="bud", attributes=(
-        Attribute(name="opening", type="categorical", values=("closed", "open")),)),))
+    categorical = SubjectRegistry(
+        subjects=(
+            Subject(
+                name="bud",
+                attributes=(
+                    Attribute(
+                        name="opening",
+                        type="categorical",
+                        values=("closed", "open"),
+                    ),
+                ),
+            ),
+        )
+    )
     replace_registry(tmp_path, categorical, expect=Version.ABSENT, actor=None)
-    ordinal = SubjectRegistry(subjects=(Subject(name="bud", attributes=(
-        Attribute(name="opening", type="ordinal", values=("closed", "open")),)),))
+    ordinal = SubjectRegistry(
+        subjects=(
+            Subject(
+                name="bud",
+                attributes=(
+                    Attribute(
+                        name="opening",
+                        type="ordinal",
+                        values=("closed", "open"),
+                    ),
+                ),
+            ),
+        )
+    )
 
     with pytest.raises(RegistryError, match="bud.opening"):
-        replace_registry(tmp_path, ordinal, expect=_version(tmp_path), actor=None)
+        replace_registry(
+            tmp_path, ordinal, expect=_version(tmp_path), actor=None
+        )
     assert read_registry(tmp_path) == categorical
 
 
@@ -335,30 +543,87 @@ def test_replace_registry_refuses_the_reverse_type_flip_too(tmp_path):
     from tcip_mcp.subject_registry import replace_registry
     from tcip_store import Version
 
-    ordinal = SubjectRegistry(subjects=(Subject(name="bud", attributes=(
-        Attribute(name="opening", type="ordinal", values=("closed", "open")),)),))
+    ordinal = SubjectRegistry(
+        subjects=(
+            Subject(
+                name="bud",
+                attributes=(
+                    Attribute(
+                        name="opening",
+                        type="ordinal",
+                        values=("closed", "open"),
+                    ),
+                ),
+            ),
+        )
+    )
     replace_registry(tmp_path, ordinal, expect=Version.ABSENT, actor=None)
-    categorical = SubjectRegistry(subjects=(Subject(name="bud", attributes=(
-        Attribute(name="opening", type="categorical", values=("closed", "open")),)),))
+    categorical = SubjectRegistry(
+        subjects=(
+            Subject(
+                name="bud",
+                attributes=(
+                    Attribute(
+                        name="opening",
+                        type="categorical",
+                        values=("closed", "open"),
+                    ),
+                ),
+            ),
+        )
+    )
 
     with pytest.raises(RegistryError, match="bud.opening"):
-        replace_registry(tmp_path, categorical, expect=_version(tmp_path), actor=None)
+        replace_registry(
+            tmp_path, categorical, expect=_version(tmp_path), actor=None
+        )
     assert read_registry(tmp_path) == ordinal
 
 
-def test_replace_registry_allow_removals_alone_does_not_admit_a_type_flip(tmp_path):
+def test_replace_registry_allow_removals_alone_does_not_admit_a_type_flip(
+    tmp_path,
+):
     from tcip_mcp.subject_registry import replace_registry
     from tcip_store import Version
 
-    categorical = SubjectRegistry(subjects=(Subject(name="bud", attributes=(
-        Attribute(name="opening", type="categorical", values=("closed", "open")),)),))
+    categorical = SubjectRegistry(
+        subjects=(
+            Subject(
+                name="bud",
+                attributes=(
+                    Attribute(
+                        name="opening",
+                        type="categorical",
+                        values=("closed", "open"),
+                    ),
+                ),
+            ),
+        )
+    )
     replace_registry(tmp_path, categorical, expect=Version.ABSENT, actor=None)
-    ordinal = SubjectRegistry(subjects=(Subject(name="bud", attributes=(
-        Attribute(name="opening", type="ordinal", values=("closed", "open")),)),))
+    ordinal = SubjectRegistry(
+        subjects=(
+            Subject(
+                name="bud",
+                attributes=(
+                    Attribute(
+                        name="opening",
+                        type="ordinal",
+                        values=("closed", "open"),
+                    ),
+                ),
+            ),
+        )
+    )
 
     with pytest.raises(RegistryError, match="bud.opening"):
-        replace_registry(tmp_path, ordinal, expect=_version(tmp_path), allow_removals=True,
-                         actor=None)
+        replace_registry(
+            tmp_path,
+            ordinal,
+            expect=_version(tmp_path),
+            allow_removals=True,
+            actor=None,
+        )
 
 
 def test_replace_registry_admits_a_type_flip_with_allow_type_changes(tmp_path):
@@ -366,29 +631,84 @@ def test_replace_registry_admits_a_type_flip_with_allow_type_changes(tmp_path):
     from tcip_mcp.subject_registry import replace_registry
     from tcip_store import Version
 
-    categorical = SubjectRegistry(subjects=(Subject(name="bud", attributes=(
-        Attribute(name="opening", type="categorical", values=("closed", "open")),)),))
+    categorical = SubjectRegistry(
+        subjects=(
+            Subject(
+                name="bud",
+                attributes=(
+                    Attribute(
+                        name="opening",
+                        type="categorical",
+                        values=("closed", "open"),
+                    ),
+                ),
+            ),
+        )
+    )
     replace_registry(tmp_path, categorical, expect=Version.ABSENT, actor=None)
 
-    ordinal = SubjectRegistry(subjects=(Subject(name="bud", attributes=(
-        Attribute(name="opening", type="ordinal", values=("closed", "open")),)),))
-    replace_registry(tmp_path, ordinal, expect=_version(tmp_path), allow_type_changes=True,
-                     actor=None)
+    ordinal = SubjectRegistry(
+        subjects=(
+            Subject(
+                name="bud",
+                attributes=(
+                    Attribute(
+                        name="opening",
+                        type="ordinal",
+                        values=("closed", "open"),
+                    ),
+                ),
+            ),
+        )
+    )
+    replace_registry(
+        tmp_path,
+        ordinal,
+        expect=_version(tmp_path),
+        allow_type_changes=True,
+        actor=None,
+    )
 
     assert read_registry(tmp_path) == ordinal
 
 
-def test_replace_registry_admits_a_values_only_growth_and_a_same_type_resave(tmp_path):
+def test_replace_registry_admits_a_values_only_growth_and_a_same_type_resave(
+    tmp_path,
+):
     """The type-flip refusal never fires over a growth or a re-save that restates the same
     type."""
     from tcip_mcp.subject_registry import replace_registry
     from tcip_store import Version
 
-    two_values = SubjectRegistry(subjects=(Subject(name="bud", attributes=(
-        Attribute(name="opening", type="categorical", values=("closed", "open")),)),))
+    two_values = SubjectRegistry(
+        subjects=(
+            Subject(
+                name="bud",
+                attributes=(
+                    Attribute(
+                        name="opening",
+                        type="categorical",
+                        values=("closed", "open"),
+                    ),
+                ),
+            ),
+        )
+    )
     replace_registry(tmp_path, two_values, expect=Version.ABSENT, actor=None)
-    grown = SubjectRegistry(subjects=(Subject(name="bud", attributes=(
-        Attribute(name="opening", type="categorical", values=("closed", "partial", "open")),)),))
+    grown = SubjectRegistry(
+        subjects=(
+            Subject(
+                name="bud",
+                attributes=(
+                    Attribute(
+                        name="opening",
+                        type="categorical",
+                        values=("closed", "partial", "open"),
+                    ),
+                ),
+            ),
+        )
+    )
     replace_registry(tmp_path, grown, expect=_version(tmp_path), actor=None)
     assert read_registry(tmp_path) == grown
     replace_registry(tmp_path, grown, expect=_version(tmp_path), actor=None)
@@ -398,74 +718,177 @@ def test_replace_registry_admits_a_values_only_growth_and_a_same_type_resave(tmp
 def test_write_subject_registry_refuses_a_type_flip_without_the_flag(tmp_path):
     from tcip_mcp.tools.annotation_tools import write_subject_registry
 
-    write_subject_registry(tmp_path, str(tmp_path), {"bud": {"attributes": {
-        "opening": {"type": "categorical", "values": ["closed", "open"]}}}})
-    result = write_subject_registry(tmp_path, str(tmp_path), {"bud": {"attributes": {
-        "opening": {"type": "ordinal", "values": ["closed", "open"]}}}})
+    write_subject_registry(
+        tmp_path,
+        str(tmp_path),
+        {
+            "bud": {
+                "attributes": {
+                    "opening": {
+                        "type": "categorical",
+                        "values": ["closed", "open"],
+                    }
+                }
+            }
+        },
+    )
+    result = write_subject_registry(
+        tmp_path,
+        str(tmp_path),
+        {
+            "bud": {
+                "attributes": {
+                    "opening": {
+                        "type": "ordinal",
+                        "values": ["closed", "open"],
+                    }
+                }
+            }
+        },
+    )
 
     assert "error" in result and "allow_type_changes" in result["error"]
-    assert read_registry(tmp_path).subject("bud").attribute("opening").type == \
-        "categorical"
+    assert (
+        read_registry(tmp_path).subject("bud").attribute("opening").type
+        == "categorical"
+    )
 
 
-def test_write_subject_registry_allow_removals_alone_still_refuses_a_type_flip(tmp_path):
-    from tcip_mcp.tools.annotation_tools import write_subject_registry
-
-    write_subject_registry(tmp_path, str(tmp_path), {"bud": {"attributes": {
-        "opening": {"type": "categorical", "values": ["closed", "open"]}}}})
-    result = write_subject_registry(tmp_path, str(tmp_path), {"bud": {"attributes": {
-        "opening": {"type": "ordinal", "values": ["closed", "open"]}}}}, allow_removals=True)
-
-    assert "error" in result and "allow_type_changes" in result["error"]
-
-
-def test_write_subject_registry_admits_a_type_flip_with_allow_type_changes(tmp_path):
-    from tcip_mcp.tools.annotation_tools import write_subject_registry
-
-    write_subject_registry(tmp_path, str(tmp_path), {"bud": {"attributes": {
-        "opening": {"type": "categorical", "values": ["closed", "open"]}}}})
-    result = write_subject_registry(tmp_path, str(tmp_path), {"bud": {"attributes": {
-        "opening": {"type": "ordinal", "values": ["closed", "open"]}}}}, allow_type_changes=True)
-
-    assert "error" not in result
-    assert read_registry(tmp_path).subject("bud").attribute("opening").type == \
-        "ordinal"
-
-
-def test_write_subject_registry_refuses_dropping_a_declared_subject_without_allow_removals(
-        tmp_path):
+def test_write_subject_registry_allow_removals_alone_still_refuses_a_type_flip(
+    tmp_path,
+):
     from tcip_mcp.tools.annotation_tools import write_subject_registry
 
     write_subject_registry(
-        tmp_path, str(tmp_path), {"leaf": {"description": "one leaf"}, "bush": {}})
-    result = write_subject_registry(tmp_path, str(tmp_path), {"bush": {}})  # drops leaf
+        tmp_path,
+        str(tmp_path),
+        {
+            "bud": {
+                "attributes": {
+                    "opening": {
+                        "type": "categorical",
+                        "values": ["closed", "open"],
+                    }
+                }
+            }
+        },
+    )
+    result = write_subject_registry(
+        tmp_path,
+        str(tmp_path),
+        {
+            "bud": {
+                "attributes": {
+                    "opening": {
+                        "type": "ordinal",
+                        "values": ["closed", "open"],
+                    }
+                }
+            }
+        },
+        allow_removals=True,
+    )
+
+    assert "error" in result and "allow_type_changes" in result["error"]
+
+
+def test_write_subject_registry_admits_a_type_flip_with_allow_type_changes(
+    tmp_path,
+):
+    from tcip_mcp.tools.annotation_tools import write_subject_registry
+
+    write_subject_registry(
+        tmp_path,
+        str(tmp_path),
+        {
+            "bud": {
+                "attributes": {
+                    "opening": {
+                        "type": "categorical",
+                        "values": ["closed", "open"],
+                    }
+                }
+            }
+        },
+    )
+    result = write_subject_registry(
+        tmp_path,
+        str(tmp_path),
+        {
+            "bud": {
+                "attributes": {
+                    "opening": {
+                        "type": "ordinal",
+                        "values": ["closed", "open"],
+                    }
+                }
+            }
+        },
+        allow_type_changes=True,
+    )
+
+    assert "error" not in result
+    assert (
+        read_registry(tmp_path).subject("bud").attribute("opening").type
+        == "ordinal"
+    )
+
+
+def test_write_subject_registry_refuses_dropping_a_declared_subject_without_allow_removals(
+    tmp_path,
+):
+    from tcip_mcp.tools.annotation_tools import write_subject_registry
+
+    write_subject_registry(
+        tmp_path,
+        str(tmp_path),
+        {"leaf": {"description": "one leaf"}, "bush": {}},
+    )
+    result = write_subject_registry(
+        tmp_path, str(tmp_path), {"bush": {}}
+    )  # drops leaf
 
     assert "error" in result and "leaf" in result["error"]
     assert read_registry(tmp_path).subject("leaf") is not None
 
 
-def test_write_subject_registry_admits_a_removal_stated_as_deliberate(tmp_path):
+def test_write_subject_registry_admits_a_removal_stated_as_deliberate(
+    tmp_path,
+):
     from tcip_mcp.tools.annotation_tools import write_subject_registry
 
     write_subject_registry(
-        tmp_path, str(tmp_path), {"leaf": {"description": "one leaf"}, "bush": {}})
-    result = write_subject_registry(tmp_path, str(tmp_path), {"bush": {}}, allow_removals=True)
+        tmp_path,
+        str(tmp_path),
+        {"leaf": {"description": "one leaf"}, "bush": {}},
+    )
+    result = write_subject_registry(
+        tmp_path, str(tmp_path), {"bush": {}}, allow_removals=True
+    )
 
     assert "error" not in result
     assert read_registry(tmp_path).subject("leaf") is None
 
 
-def test_write_subject_registry_refuses_undecodable_existing_bytes_without_allow_removals(tmp_path):
+def test_write_subject_registry_refuses_undecodable_existing_bytes_without_allow_removals(
+    tmp_path,
+):
     from tcip_mcp.tools.annotation_tools import write_subject_registry
 
     path = tmp_path / "subjects.json"
-    path.write_bytes(b'{"leaf": {"description": "one leaf"')  # truncated mid-object
+    path.write_bytes(
+        b'{"leaf": {"description": "one leaf"'
+    )  # truncated mid-object
 
     result = write_subject_registry(tmp_path, str(tmp_path), {"bush": {}})
 
     assert "error" in result
     assert path.read_bytes() == b'{"leaf": {"description": "one leaf"'
 
-    repaired = write_subject_registry(tmp_path, str(tmp_path), {"bush": {}}, allow_removals=True)
+    repaired = write_subject_registry(
+        tmp_path, str(tmp_path), {"bush": {}}, allow_removals=True
+    )
     assert "error" not in repaired
-    assert read_registry(tmp_path) == SubjectRegistry(subjects=(Subject(name="bush"),))
+    assert read_registry(tmp_path) == SubjectRegistry(
+        subjects=(Subject(name="bush"),)
+    )

@@ -2,25 +2,47 @@
 writer opened under the test's project."""
 
 
-def _opened(project, experiment_id: str, builder: str = "my_models:tree_detector", **facts):
+def _opened(
+    project,
+    experiment_id: str,
+    builder: str = "my_models:tree_detector",
+    **facts,
+):
     """A run of ``project`` of a detector built by ``builder``, declared in a ``my_models.py`` of
     its own, over its own two frames, opened by the launcher's own writer; ``facts`` are
     ``open_run``'s other keywords."""
-    from tests._verified_checkpoint_fixtures import detection_config, fixture_data_dir, opened_run
+    from tests._verified_checkpoint_fixtures import (
+        detection_config,
+        fixture_data_dir,
+        opened_run,
+    )
 
     models = fixture_data_dir(project, experiment_id) / "my_models.py"
     models.parent.mkdir(parents=True, exist_ok=True)
     models.write_text("", encoding="utf-8")
-    config = detection_config(fixture_data_dir(project, experiment_id), model_source={
-        "builder": builder, "source_files": [str(models)], "task": "detection"})
+    config = detection_config(
+        fixture_data_dir(project, experiment_id),
+        model_source={
+            "builder": builder,
+            "source_files": [str(models)],
+            "task": "detection",
+        },
+    )
     return opened_run(project, config, experiment_id=experiment_id, **facts)
 
 
 def test_experiment_list_compare_lineage(tmp_path):
-    from tcip_mcp.experiments import compare_experiments, get_experiment_lineage, observe, run_rows
+    from tcip_mcp.experiments import (
+        compare_experiments,
+        get_experiment_lineage,
+        observe,
+        run_rows,
+    )
     from tests._verified_checkpoint_fixtures import log_epoch
 
-    e1 = _opened(tmp_path, "e1", "my_models:tv_resnet50_det", relaunched_from="e0")
+    e1 = _opened(
+        tmp_path, "e1", "my_models:tv_resnet50_det", relaunched_from="e0"
+    )
     log_epoch(e1, 1, {"map50": 0.6})
     _opened(tmp_path, "e2", "my_models:fcos_det")
 
@@ -31,20 +53,28 @@ def test_experiment_list_compare_lineage(tmp_path):
     first = next(c for c in cmp["experiments"] if c["experiment_id"] == "e1")
     assert first["model"] == "my_models:tv_resnet50_det"
     assert first["last_logged_metrics"]["map50"] == 0.6
-    assert any("error" in c for c in cmp["experiments"])   # the missing run is reported
+    assert any(
+        "error" in c for c in cmp["experiments"]
+    )  # the missing run is reported
 
     lineage = get_experiment_lineage("e1", project=tmp_path)["lineage"]
     assert lineage["data"] == observe(e1).record["resolved"]["data"]
     assert lineage["relaunched_from"] == "e0"
-    assert lineage["checkpoint"] is None  # no final status names a checkpoint yet
+    assert (
+        lineage["checkpoint"] is None
+    )  # no final status names a checkpoint yet
     assert "error" in get_experiment_lineage("nope", project=tmp_path)
 
 
-def test_a_completed_runs_lineage_names_the_checkpoint_its_final_status_names(tmp_path):
+def test_a_completed_runs_lineage_names_the_checkpoint_its_final_status_names(
+    tmp_path,
+):
     from tcip_mcp.experiments import get_experiment_lineage, observe
     from tests._verified_checkpoint_fixtures import finished_run
 
-    checkpoint = observe(finished_run(tmp_path, experiment_id="exp-done")).checkpoint
+    checkpoint = observe(
+        finished_run(tmp_path, experiment_id="exp-done")
+    ).checkpoint
     assert checkpoint is not None
 
     lineage = get_experiment_lineage("exp-done", project=tmp_path)["lineage"]
@@ -64,33 +94,55 @@ def test_get_experiment_tool_pages_epoch_rows_bounded_by_n_epochs(tmp_path):
     full = get_experiment(tmp_path, "exp-paged")
     assert full["n_epochs"] == 5
 
-    page = get_experiment(tmp_path, "exp-paged", metrics_limit=2, metrics_offset=1)
+    page = get_experiment(
+        tmp_path, "exp-paged", metrics_limit=2, metrics_offset=1
+    )
     assert page["n_epochs"] == 5
     assert [r["epoch"] for r in page["metrics"]] == [1, 2]
 
 
-def test_get_experiment_tool_lineage_view_admits_defaults_refuses_pagination(tmp_path):
+def test_get_experiment_tool_lineage_view_admits_defaults_refuses_pagination(
+    tmp_path,
+):
     """A rail must admit valid work: the ordinary view='lineage' call (no pagination args)
     still succeeds; a non-default pagination arg under that view is refused as meaningless."""
     from tcip_mcp.tools.experiment_tools import get_experiment
 
     _opened(tmp_path, "exp-lineage")
 
-    assert "error" not in get_experiment(tmp_path, "exp-lineage", view="lineage")
-    assert "error" in get_experiment(tmp_path, "exp-lineage", view="lineage", metrics_limit=3)
-    assert "error" in get_experiment(tmp_path, "exp-lineage", view="lineage", metrics_offset=2)
+    assert "error" not in get_experiment(
+        tmp_path, "exp-lineage", view="lineage"
+    )
+    assert "error" in get_experiment(
+        tmp_path, "exp-lineage", view="lineage", metrics_limit=3
+    )
+    assert "error" in get_experiment(
+        tmp_path, "exp-lineage", view="lineage", metrics_offset=2
+    )
 
 
-def test_compare_experiments_reports_the_last_row_and_rows_logged_after_the_end(tmp_path):
+def test_compare_experiments_reports_the_last_row_and_rows_logged_after_the_end(
+    tmp_path,
+):
     """The final status is written once; a row an outside writer appends later with a later
     instant is counted, never hidden, and a completed run's own rows are not."""
-    from tcip_mcp.experiments import METRICS_FILE, append_row, compare_experiments, now_iso
+    from tcip_mcp.experiments import (
+        METRICS_FILE,
+        append_row,
+        compare_experiments,
+        now_iso,
+    )
     from tests._verified_checkpoint_fixtures import finished_run
 
     run_dir = finished_run(tmp_path, experiment_id="exp-ended")
-    append_row(run_dir / METRICS_FILE, {"epoch": 0, "timestamp": now_iso(), "loss": 0.5})
-    append_row(run_dir / METRICS_FILE,
-               {"epoch": 1, "timestamp": "2000-01-01T00:00:00+00:00", "loss": 0.4})
+    append_row(
+        run_dir / METRICS_FILE,
+        {"epoch": 0, "timestamp": now_iso(), "loss": 0.5},
+    )
+    append_row(
+        run_dir / METRICS_FILE,
+        {"epoch": 1, "timestamp": "2000-01-01T00:00:00+00:00", "loss": 0.4},
+    )
 
     (c,) = compare_experiments(["exp-ended"], project=tmp_path)["experiments"]
     assert c["state"] == "completed"
@@ -99,7 +151,9 @@ def test_compare_experiments_reports_the_last_row_and_rows_logged_after_the_end(
     assert c["n_epochs"] == 2
 
 
-def test_compare_experiments_stale_heartbeat_compares_interrupted(tmp_path, monkeypatch):
+def test_compare_experiments_stale_heartbeat_compares_interrupted(
+    tmp_path, monkeypatch
+):
     """A run with no final status reads running while its heartbeat is fresh, with no
     rows-after-end count since it has not ended, and interrupted once it goes stale."""
     from tcip_mcp import experiments
@@ -107,22 +161,33 @@ def test_compare_experiments_stale_heartbeat_compares_interrupted(tmp_path, monk
 
     _opened(tmp_path, "exp-live")
 
-    (live,) = compare_experiments(["exp-live"], project=tmp_path)["experiments"]
+    (live,) = compare_experiments(["exp-live"], project=tmp_path)[
+        "experiments"
+    ]
     assert (live["state"], live["rows_after_end"]) == ("running", None)
 
     monkeypatch.setattr(experiments, "HEARTBEAT_STALE_SECONDS", -1.0)
-    (stale,) = compare_experiments(["exp-live"], project=tmp_path)["experiments"]
+    (stale,) = compare_experiments(["exp-live"], project=tmp_path)[
+        "experiments"
+    ]
     assert stale["state"] == "interrupted"
 
 
-def test_compare_experiments_rows_after_end_compares_instants_across_offsets(tmp_path):
+def test_compare_experiments_rows_after_end_compares_instants_across_offsets(
+    tmp_path,
+):
     """rows_after_end parses each row's timestamp (and the final status's ``ended``) as an
     instant and compares strictly-after, so a row stamped in a different UTC offset, or a bare
     "Z", still compares on the instant it actually names rather than on its ISO text; a row
     whose timestamp does not decode refuses the run's comparison, naming the row."""
     from datetime import datetime, timedelta, timezone
 
-    from tcip_mcp.experiments import METRICS_FILE, append_row, compare_experiments, observe
+    from tcip_mcp.experiments import (
+        METRICS_FILE,
+        append_row,
+        compare_experiments,
+        observe,
+    )
     from tests._verified_checkpoint_fixtures import finished_run
 
     run_dir = finished_run(tmp_path, experiment_id="exp-instants")
@@ -131,21 +196,49 @@ def test_compare_experiments_rows_after_end_compares_instants_across_offsets(tmp
     ended = datetime.fromisoformat(final["ended"])
 
     def at(offset_s: float, zone: timezone) -> str:
-        return (ended + timedelta(seconds=offset_s)).astimezone(zone).isoformat()
+        return (
+            (ended + timedelta(seconds=offset_s)).astimezone(zone).isoformat()
+        )
 
     rows = [
-        {"epoch": 1, "timestamp": at(1, timezone(timedelta(hours=-6))), "loss": 0.1},  # after
-        {"epoch": 2, "timestamp": at(-1, timezone(timedelta(hours=5))), "loss": 0.2},  # before
-        {"epoch": 3, "timestamp": at(-1, timezone.utc).replace("+00:00", "Z"), "loss": 0.3},
-        {"epoch": 4, "timestamp": at(0, timezone.utc), "loss": 0.4},  # same instant: not after
+        {
+            "epoch": 1,
+            "timestamp": at(1, timezone(timedelta(hours=-6))),
+            "loss": 0.1,
+        },  # after
+        {
+            "epoch": 2,
+            "timestamp": at(-1, timezone(timedelta(hours=5))),
+            "loss": 0.2,
+        },  # before
+        {
+            "epoch": 3,
+            "timestamp": at(-1, timezone.utc).replace("+00:00", "Z"),
+            "loss": 0.3,
+        },
+        {
+            "epoch": 4,
+            "timestamp": at(0, timezone.utc),
+            "loss": 0.4,
+        },  # same instant: not after
         {"epoch": 5, "timestamp": at(1, timezone.utc), "loss": 0.5},  # after
     ]
     for row in rows:
         append_row(run_dir / METRICS_FILE, row)
 
-    rows_after_end = compare_experiments(["exp-instants"], project=tmp_path)["experiments"][0]
+    rows_after_end = compare_experiments(["exp-instants"], project=tmp_path)[
+        "experiments"
+    ][0]
     assert rows_after_end["rows_after_end"] == 2
 
-    append_row(run_dir / METRICS_FILE, {"epoch": 6, "timestamp": 1704110401, "loss": 0.6})
-    (refused,) = compare_experiments(["exp-instants"], project=tmp_path)["experiments"]
-    assert "epoch': 6" in refused["error"] and "no decodable timestamp" in refused["error"]
+    append_row(
+        run_dir / METRICS_FILE,
+        {"epoch": 6, "timestamp": 1704110401, "loss": 0.6},
+    )
+    (refused,) = compare_experiments(["exp-instants"], project=tmp_path)[
+        "experiments"
+    ]
+    assert (
+        "epoch': 6" in refused["error"]
+        and "no decodable timestamp" in refused["error"]
+    )

@@ -24,7 +24,9 @@ from tcip_mcp.pipelines.overviews import (
 )
 
 
-def _deep_pyramid_raster(tmp_path: Path, *, width: int = 32768, height: int = 8) -> Path:
+def _deep_pyramid_raster(
+    tmp_path: Path, *, width: int = 32768, height: int = 8
+) -> Path:
     """A raster wide enough to need several decimation levels, so its sidecar holds one page per
     level rather than the single page a two-level pyramid would."""
     path = tmp_path / "deep.tif"
@@ -52,7 +54,9 @@ def _page_count(sidecar: Path) -> int:
         return len(tif.pages)
 
 
-def _zero_byte_counts(sidecar: Path, page_index: int, first: int, last: int) -> None:
+def _zero_byte_counts(
+    sidecar: Path, page_index: int, first: int, last: int
+) -> None:
     """Zero the byte counts of tiles ``[first, last)`` on one pyramid level, the on-disk state a
     build leaves for tiles it never reached."""
     with tifffile.TiffFile(str(sidecar)) as tif:
@@ -67,7 +71,8 @@ def _zero_byte_counts(sidecar: Path, page_index: int, first: int, last: int) -> 
 
 
 def test_a_sidecar_whose_tiles_are_only_partly_written_is_invalid_and_is_rebuilt(
-        tmp_path: Path) -> None:
+    tmp_path: Path,
+) -> None:
     """A build killed partway leaves written tiles beside unwritten ones. The written half is no
     evidence the pyramid is usable: the unwritten tiles read back as zeros, so the sidecar is
     invalid and the next build replaces it rather than refusing as if it were sound."""
@@ -76,12 +81,18 @@ def test_a_sidecar_whose_tiles_are_only_partly_written_is_invalid_and_is_rebuilt
     assert sidecar_valid(path)
 
     written = _tile_byte_counts(sidecar, 0)
-    assert len(written) >= 4, "fixture needs several tiles per level to be partly written"
+    assert len(written) >= 4, (
+        "fixture needs several tiles per level to be partly written"
+    )
     _zero_byte_counts(sidecar, 0, 0, len(written) // 2)
 
     after = _tile_byte_counts(sidecar, 0)
-    assert any(count == 0 for count in after), "fixture must leave some tiles unwritten"
-    assert any(count > 0 for count in after), "fixture must leave some tiles written"
+    assert any(count == 0 for count in after), (
+        "fixture must leave some tiles unwritten"
+    )
+    assert any(count > 0 for count in after), (
+        "fixture must leave some tiles written"
+    )
 
     assert sidecar_valid(path) is False
 
@@ -90,13 +101,17 @@ def test_a_sidecar_whose_tiles_are_only_partly_written_is_invalid_and_is_rebuilt
     assert sidecar_valid(path)
 
 
-def test_a_sidecar_is_invalid_when_a_deeper_pyramid_level_is_unwritten(tmp_path: Path) -> None:
+def test_a_sidecar_is_invalid_when_a_deeper_pyramid_level_is_unwritten(
+    tmp_path: Path,
+) -> None:
     """Validity covers every decimation level, not just the first. A build that wrote the coarsest
     level and stopped leaves the deeper ones empty, and a display-scale read served from one of
     those levels returns zeros."""
     path = _deep_pyramid_raster(tmp_path)
     sidecar = build_overviews(path)
-    assert _page_count(sidecar) >= 3, "fixture needs several levels for a deeper one to be empty"
+    assert _page_count(sidecar) >= 3, (
+        "fixture needs several levels for a deeper one to be empty"
+    )
     assert sidecar_valid(path)
 
     deeper = _tile_byte_counts(sidecar, 1)
@@ -105,14 +120,16 @@ def test_a_sidecar_is_invalid_when_a_deeper_pyramid_level_is_unwritten(tmp_path:
 
     first_level = _tile_byte_counts(sidecar, 0)
     assert first_level and all(count > 0 for count in first_level), (
-        "the first level must stay fully written, or the deeper level is not what fails validity")
+        "the first level must stay fully written, or the deeper level is not what fails validity"
+    )
     assert all(count == 0 for count in _tile_byte_counts(sidecar, 1))
 
     assert sidecar_valid(path) is False
 
 
 def test_reported_progress_is_the_sidecar_bytes_on_disk_and_ends_at_the_finished_file(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A watcher is handed what the build knows, the sidecar's bytes on disk, and nothing it
     estimates. Every value reported while the build runs is at most the sidecar's size when the
     watcher reads it, and the last is the finished sidecar's size."""
@@ -122,21 +139,32 @@ def test_reported_progress_is_the_sidecar_bytes_on_disk_and_ends_at_the_finished
     samples: list[tuple[int, int]] = []
 
     def watch(written: int) -> None:
-        samples.append((written, sidecar.stat().st_size if sidecar.exists() else 0))
+        samples.append(
+            (written, sidecar.stat().st_size if sidecar.exists() else 0)
+        )
 
     build_overviews(path, progress_cb=watch)
     finished = sidecar.stat().st_size
 
-    part_way = [(written, size) for written, size in samples if 30_000 < size < 0.9 * finished]
-    assert part_way, "the build finished without ever being sampled part way through"
+    part_way = [
+        (written, size)
+        for written, size in samples
+        if 30_000 < size < 0.9 * finished
+    ]
+    assert part_way, (
+        "the build finished without ever being sampled part way through"
+    )
 
     for written, size in samples:
-        assert written <= size, f"reported {written} with {size} sidecar bytes on disk"
+        assert written <= size, (
+            f"reported {written} with {size} sidecar bytes on disk"
+        )
     assert samples[-1][0] == finished
 
 
 def test_canceling_a_build_that_has_started_writing_deletes_the_sidecar(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Canceling once tiles are on disk must take the half-written sidecar with it. Left behind,
     it opens as a structurally complete pyramid whose unreached tiles read back as zeros, and the
     next open serves those zeros instead of rebuilding."""
@@ -155,12 +183,16 @@ def test_canceling_a_build_that_has_started_writing_deletes_the_sidecar(
     with pytest.raises(RuntimeError, match="canceled"):
         build_overviews(path, progress_cb=cancel_once_started)
 
-    assert canceled_at, "the build was never canceled while its sidecar held written tiles"
+    assert canceled_at, (
+        "the build was never canceled while its sidecar held written tiles"
+    )
     assert not sidecar.exists()
     assert not overview_dims(path)
 
 
-def test_a_deep_pyramid_carries_one_level_per_decimation_step(tmp_path: Path) -> None:
+def test_a_deep_pyramid_carries_one_level_per_decimation_step(
+    tmp_path: Path,
+) -> None:
     """A raster far above the pyramid floor gets a level per power-of-2 step down to it, and the
     sidecar holds a page for each, halving in both dimensions, rounded up, as it goes."""
     path = _deep_pyramid_raster(tmp_path)

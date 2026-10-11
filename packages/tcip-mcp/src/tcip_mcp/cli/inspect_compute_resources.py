@@ -19,8 +19,11 @@ from tcip_mcp.cli import bound_project
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, prog=prog)
-    parser.add_argument("--project", required=True,
-                         help="The project this run resolves against.")
+    parser.add_argument(
+        "--project",
+        required=True,
+        help="The project this run resolves against.",
+    )
     args = parser.parse_args(argv)
 
     project = bound_project(args.project)

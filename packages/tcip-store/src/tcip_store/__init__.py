@@ -12,7 +12,14 @@ from tcip_store.errors import (
     VersionConflictError,
 )
 from tcip_store.file_backend import delete_blob, put_blob, read_blob_versioned
-from tcip_store.model import REQUIRED, Key, LogPage, Version, Versioned, canonical_path
+from tcip_store.model import (
+    REQUIRED,
+    Key,
+    LogPage,
+    Version,
+    Versioned,
+    canonical_path,
+)
 from tcip_store.sqlite_backend import Txn
 from tcip_store.store import (
     append,

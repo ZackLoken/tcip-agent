@@ -41,7 +41,13 @@ from pydantic.json_schema import models_json_schema
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 GENERATED_PATH = (
-    _REPO_ROOT / "packages" / "tcip-web" / "frontend" / "src" / "api" / "types.generated.ts"
+    _REPO_ROOT
+    / "packages"
+    / "tcip-web"
+    / "frontend"
+    / "src"
+    / "api"
+    / "types.generated.ts"
 )
 
 HEADER = """/**
@@ -57,50 +63,137 @@ HEADER = """/**
 
 """
 
-_PRIMITIVE = {"string": "string", "number": "number", "integer": "number", "boolean": "boolean"}
+_PRIMITIVE = {
+    "string": "string",
+    "number": "number",
+    "integer": "number",
+    "boolean": "boolean",
+}
 
 
 def declared_models() -> list[type[BaseModel]]:
     """The models this script renders, in the order their interfaces are emitted."""
     from tcip_web.routes.images import ServingCell, ViewReads
-    from tcip_web.routes.projects import OpenRequest, ProjectSummary, RemovalRequest, RenameRequest
+    from tcip_web.routes.projects import (
+        OpenRequest,
+        ProjectSummary,
+        RemovalRequest,
+        RenameRequest,
+    )
     from tcip_web.routes.results import (
-        AcknowledgmentPayload, ConfirmRevisionPayload, ExportCountCsvPayload, ExportCsvPayload,
-        OrthomosaicPlantCountsDelivery, PerImageCountDelivery, PhenologyPayload, RegisteredModel,
+        AcknowledgmentPayload,
+        ConfirmRevisionPayload,
+        ExportCountCsvPayload,
+        ExportCsvPayload,
+        OrthomosaicPlantCountsDelivery,
+        PerImageCountDelivery,
+        PhenologyPayload,
+        RegisteredModel,
         RegisteredModels,
     )
     from tcip_mcp.pipelines.execution import Stated
-    from tcip_mcp.traits import Operationalization, PositiveState, TraitEntry, TraitRevision
+    from tcip_mcp.traits import (
+        Operationalization,
+        PositiveState,
+        TraitEntry,
+        TraitRevision,
+    )
     from tcip_mcp.pipelines.delivery_events_schema import (
-        Acknowledgment, BucketFinding, CanopySegmentDisclosure, CanopySegmentsDocument,
-        DeliveryEventRecord, MatchTolerance, PlantMappingDisclosure, PlantRegistryDisclosure,
-        PlantRegistryReference, Producer, SegmentTieDisclosure,
+        Acknowledgment,
+        BucketFinding,
+        CanopySegmentDisclosure,
+        CanopySegmentsDocument,
+        DeliveryEventRecord,
+        MatchTolerance,
+        PlantMappingDisclosure,
+        PlantRegistryDisclosure,
+        PlantRegistryReference,
+        Producer,
+        SegmentTieDisclosure,
     )
     from tcip_web.routes.annotate import LaunchPriorityQueuePayload
     from tcip_web.routes.canvas import CanvasStatePayload
     from tcip_web.routes.sessions import (
-        ImageEntry, ImageEventPayload, SessionPlace, SessionRef, SessionSummary, SessionWrite,
+        ImageEntry,
+        ImageEventPayload,
+        SessionPlace,
+        SessionRef,
+        SessionSummary,
+        SessionWrite,
     )
     from tcip_web.routes.terminal import (
-        CreateSessionRequest, LaunchedProgram, ProviderStatus, SubmitRequest, TerminalInputFrame,
-        TerminalLaunch, TerminalResizeFrame, TerminalStatus,
+        CreateSessionRequest,
+        LaunchedProgram,
+        ProviderStatus,
+        SubmitRequest,
+        TerminalInputFrame,
+        TerminalLaunch,
+        TerminalResizeFrame,
+        TerminalStatus,
     )
-    from tcip_mcp.experiments import RunRow, SweepGroup, TrainingDetail, TrainingListing
+    from tcip_mcp.experiments import (
+        RunRow,
+        SweepGroup,
+        TrainingDetail,
+        TrainingListing,
+    )
     from tcip_web.routes.training import TrainingRowFrame, TrainingStatusFrame
 
-    return [LaunchPriorityQueuePayload, CanvasStatePayload, ImageEntry, ImageEventPayload,
-            SessionRef, SessionPlace, SessionWrite, SessionSummary, ServingCell, ViewReads, RunRow,
-            SweepGroup, TrainingDetail,
-            TrainingListing, TrainingRowFrame, TrainingStatusFrame, TerminalInputFrame,
-            TerminalResizeFrame, CreateSessionRequest, LaunchedProgram, TerminalLaunch,
-            ProviderStatus, TerminalStatus, SubmitRequest, ProjectSummary, OpenRequest,
-            RemovalRequest, RenameRequest, PhenologyPayload, RegisteredModel, RegisteredModels,
-            AcknowledgmentPayload, ExportCsvPayload, PerImageCountDelivery,
-            OrthomosaicPlantCountsDelivery, ExportCountCsvPayload, MatchTolerance,
-            PlantRegistryReference, PlantMappingDisclosure, PlantRegistryDisclosure,
-            CanopySegmentsDocument, SegmentTieDisclosure, CanopySegmentDisclosure, Producer,
-            BucketFinding, Acknowledgment, DeliveryEventRecord, Operationalization,
-            PositiveState, TraitEntry, TraitRevision, ConfirmRevisionPayload, Stated]
+    return [
+        LaunchPriorityQueuePayload,
+        CanvasStatePayload,
+        ImageEntry,
+        ImageEventPayload,
+        SessionRef,
+        SessionPlace,
+        SessionWrite,
+        SessionSummary,
+        ServingCell,
+        ViewReads,
+        RunRow,
+        SweepGroup,
+        TrainingDetail,
+        TrainingListing,
+        TrainingRowFrame,
+        TrainingStatusFrame,
+        TerminalInputFrame,
+        TerminalResizeFrame,
+        CreateSessionRequest,
+        LaunchedProgram,
+        TerminalLaunch,
+        ProviderStatus,
+        TerminalStatus,
+        SubmitRequest,
+        ProjectSummary,
+        OpenRequest,
+        RemovalRequest,
+        RenameRequest,
+        PhenologyPayload,
+        RegisteredModel,
+        RegisteredModels,
+        AcknowledgmentPayload,
+        ExportCsvPayload,
+        PerImageCountDelivery,
+        OrthomosaicPlantCountsDelivery,
+        ExportCountCsvPayload,
+        MatchTolerance,
+        PlantRegistryReference,
+        PlantMappingDisclosure,
+        PlantRegistryDisclosure,
+        CanopySegmentsDocument,
+        SegmentTieDisclosure,
+        CanopySegmentDisclosure,
+        Producer,
+        BucketFinding,
+        Acknowledgment,
+        DeliveryEventRecord,
+        Operationalization,
+        PositiveState,
+        TraitEntry,
+        TraitRevision,
+        ConfirmRevisionPayload,
+        Stated,
+    ]
 
 
 TRANSPORT_MODELS = ("GuiState", "DatasetSelection", "ViewState")
@@ -121,10 +214,16 @@ def string_constants() -> dict[str, str]:
     from tcip_mcp.pipelines.training.evaluation import VAL_METRIC_PREFIX
     from tcip_web.routes.images import IMAGE_ERROR_HEADER, OVERVIEWS_REQUIRED
 
-    return {"IMAGE_ERROR_HEADER": IMAGE_ERROR_HEADER, "OVERVIEWS_REQUIRED": OVERVIEWS_REQUIRED,
-            "NOT_FINITE_SUFFIX": NOT_FINITE_SUFFIX, "VAL_METRIC_PREFIX": VAL_METRIC_PREFIX,
-            "EPOCH_KEY": EPOCH_KEY, "STEP_KEY": STEP_KEY, "TIMESTAMP_KEY": TIMESTAMP_KEY,
-            "PERSON_NAME_RULE": PERSON_NAME_RULE}
+    return {
+        "IMAGE_ERROR_HEADER": IMAGE_ERROR_HEADER,
+        "OVERVIEWS_REQUIRED": OVERVIEWS_REQUIRED,
+        "NOT_FINITE_SUFFIX": NOT_FINITE_SUFFIX,
+        "VAL_METRIC_PREFIX": VAL_METRIC_PREFIX,
+        "EPOCH_KEY": EPOCH_KEY,
+        "STEP_KEY": STEP_KEY,
+        "TIMESTAMP_KEY": TIMESTAMP_KEY,
+        "PERSON_NAME_RULE": PERSON_NAME_RULE,
+    }
 
 
 def tuple_constants() -> dict[str, tuple[str, ...]]:
@@ -135,10 +234,14 @@ def tuple_constants() -> dict[str, tuple[str, ...]]:
     from tcip_mcp.subject_registry import ATTR_TYPES
     from tcip_mcp.web_client import PLATFORM_PANEL_EVENTS, TAB_NAMES
 
-    return {"TAB_NAMES": TAB_NAMES, "PLATFORM_PANEL_EVENTS": PLATFORM_PANEL_EVENTS,
-            "TERMINAL_STATES": tuple(sorted(TERMINAL_STATES)), "ATTR_TYPES": ATTR_TYPES,
-            "AGENT_IDENTITY_FIELDS": RECORD_FIELDS,
-            "FINISHED_STATES": tuple(sorted(FINISHED_STATES))}
+    return {
+        "TAB_NAMES": TAB_NAMES,
+        "PLATFORM_PANEL_EVENTS": PLATFORM_PANEL_EVENTS,
+        "TERMINAL_STATES": tuple(sorted(TERMINAL_STATES)),
+        "ATTR_TYPES": ATTR_TYPES,
+        "AGENT_IDENTITY_FIELDS": RECORD_FIELDS,
+        "FINISHED_STATES": tuple(sorted(FINISHED_STATES)),
+    }
 
 
 def platform_panel_event_constants() -> list[tuple[str, str]]:
@@ -146,8 +249,11 @@ def platform_panel_event_constants() -> list[tuple[str, str]]:
     the module's own declaration order."""
     from tcip_mcp import web_client
 
-    return [(name, value) for name, value in vars(web_client).items()
-            if name.startswith("PANEL_EVENT_") and isinstance(value, str)]
+    return [
+        (name, value)
+        for name, value in vars(web_client).items()
+        if name.startswith("PANEL_EVENT_") and isinstance(value, str)
+    ]
 
 
 def literal_aliases() -> dict[str, tuple[str, ...]]:
@@ -159,8 +265,12 @@ def literal_aliases() -> dict[str, tuple[str, ...]]:
     from tcip_mcp.pipelines.band_stats import StretchMode
     from tcip_web.jobstore import JOB_STATES
 
-    return {"JobStatus": JOB_STATES, "StretchMode": get_args(StretchMode),
-            "SubjectState": get_args(SubjectState), "VerdictAction": get_args(VerdictAction)}
+    return {
+        "JobStatus": JOB_STATES,
+        "StretchMode": get_args(StretchMode),
+        "SubjectState": get_args(SubjectState),
+        "VerdictAction": get_args(VerdictAction),
+    }
 
 
 def _ts_type(schema: dict, where: str) -> str:
@@ -181,7 +291,11 @@ def _ts_type(schema: dict, where: str) -> str:
         # single value TypeScript can narrow the discriminated union on.
         return json.dumps(schema["const"])
     kind = schema.get("type")
-    if kind is None and not schema.keys() - {"default", "title", "description"}:
+    if kind is None and not schema.keys() - {
+        "default",
+        "title",
+        "description",
+    }:
         return "unknown"  # a field carried uninterpreted (``Any``): the backend reads it
     if kind == "null":
         return "null"
@@ -190,14 +304,21 @@ def _ts_type(schema: dict, where: str) -> str:
     if kind == "object":
         # A free-form object (no fixed property set) is the only object shape reached here: a
         # model's own fields arrive as a ``$ref`` instead, so a fixed non-``$ref`` shape refuses.
-        if not schema.get("properties") and schema.get("additionalProperties") is True:
+        if (
+            not schema.get("properties")
+            and schema.get("additionalProperties") is True
+        ):
             return "Record<string, unknown>"
-        if not schema.get("properties") and isinstance(schema.get("additionalProperties"), dict):
+        if not schema.get("properties") and isinstance(
+            schema.get("additionalProperties"), dict
+        ):
             # dict[str, T] (a typed mapping, not free-form): Record<string, T>.
             return f"Record<string, {_ts_type(schema['additionalProperties'], where)}>"
     if kind == "array":
         if "prefixItems" in schema:
-            items = ", ".join(_ts_type(s, where) for s in schema["prefixItems"])
+            items = ", ".join(
+                _ts_type(s, where) for s in schema["prefixItems"]
+            )
             return f"[{items}]"
         if "items" in schema:
             item_schema = schema["items"]
@@ -207,7 +328,9 @@ def _ts_type(schema: dict, where: str) -> str:
             if "anyOf" in item_schema or len(item_schema.get("enum", [])) > 1:
                 item_type = f"({item_type})"
             return f"{item_type}[]"
-    raise SystemExit(f"generate_frontend_types.py cannot map the schema for {where}: {schema}")
+    raise SystemExit(
+        f"generate_frontend_types.py cannot map the schema for {where}: {schema}"
+    )
 
 
 def _interface(name: str, schema: dict) -> str:
@@ -216,7 +339,9 @@ def _interface(name: str, schema: dict) -> str:
     lines = [f"export interface {name} {{\n"]
     for prop, prop_schema in schema.get("properties", {}).items():
         optional = "" if prop in required else "?"
-        lines.append(f"  {prop}{optional}: {_ts_type(prop_schema, f'{name}.{prop}')};\n")
+        lines.append(
+            f"  {prop}{optional}: {_ts_type(prop_schema, f'{name}.{prop}')};\n"
+        )
     lines.append("}\n")
     return "".join(lines)
 
@@ -227,24 +352,47 @@ def render() -> str:
 
     models = declared_models()
     _, combined = models_json_schema(
-        [(m, "validation") for m in models] + [(GuiState, "serialization")])
+        [(m, "validation") for m in models] + [(GuiState, "serialization")]
+    )
     defs = combined["$defs"]
     body = "\n".join(_interface(m.__name__, defs[m.__name__]) for m in models)
-    body += "\n" + "\n".join(_interface(name, defs[name]) for name in TRANSPORT_MODELS)
+    body += "\n" + "\n".join(
+        _interface(name, defs[name]) for name in TRANSPORT_MODELS
+    )
     defaults = json.dumps(GuiState().model_dump(mode="json"), indent=2)
     body += f"\nexport const GUI_STATE_DEFAULTS: GuiState = {defaults};\n"
-    constant = f"export const RENDER_CACHE_VERSION = {render_cache_version()};\n\n"
-    strings = "".join(f"export const {name} = {json.dumps(value)};\n\n"
-                      for name, value in string_constants().items())
-    panel_event_names = "".join(
-        f"export const {name} = {json.dumps(value)};\n"
-        for name, value in platform_panel_event_constants()) + "\n"
-    tuples = "".join(f"export const {name} = "
-                     f"[{', '.join(json.dumps(m) for m in members)}] as const;\n\n"
-                     for name, members in tuple_constants().items())
-    aliases = "".join(f"export type {name} = {' | '.join(json.dumps(m) for m in members)};\n\n"
-                      for name, members in literal_aliases().items())
-    return HEADER + constant + strings + panel_event_names + tuples + aliases + body
+    constant = (
+        f"export const RENDER_CACHE_VERSION = {render_cache_version()};\n\n"
+    )
+    strings = "".join(
+        f"export const {name} = {json.dumps(value)};\n\n"
+        for name, value in string_constants().items()
+    )
+    panel_event_names = (
+        "".join(
+            f"export const {name} = {json.dumps(value)};\n"
+            for name, value in platform_panel_event_constants()
+        )
+        + "\n"
+    )
+    tuples = "".join(
+        f"export const {name} = "
+        f"[{', '.join(json.dumps(m) for m in members)}] as const;\n\n"
+        for name, members in tuple_constants().items()
+    )
+    aliases = "".join(
+        f"export type {name} = {' | '.join(json.dumps(m) for m in members)};\n\n"
+        for name, members in literal_aliases().items()
+    )
+    return (
+        HEADER
+        + constant
+        + strings
+        + panel_event_names
+        + tuples
+        + aliases
+        + body
+    )
 
 
 def main() -> int:

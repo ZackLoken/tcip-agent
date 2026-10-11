@@ -43,23 +43,31 @@ def test_concurrent_threads_no_torn_or_lost_lines(tmp_path, unstarved_backend):
                 ts.append(audit_log_key(tmp_path), {"tag": tag, "i": i})
             except Exception as exc:
                 with record:
-                    refusals.append(f"thread {tag} entry {i}: {type(exc).__name__}: {exc}")
+                    refusals.append(
+                        f"thread {tag} entry {i}: {type(exc).__name__}: {exc}"
+                    )
                 return
             with record:
                 appended.append((tag, i))
 
-    threads = [threading.Thread(target=worker, args=(t,)) for t in range(n_threads)]
+    threads = [
+        threading.Thread(target=worker, args=(t,)) for t in range(n_threads)
+    ]
     for t in threads:
         t.start()
     for t in threads:
         t.join()
 
-    assert not refusals, "an append raised instead of returning: " + "; ".join(refusals)
+    assert not refusals, "an append raised instead of returning: " + "; ".join(
+        refusals
+    )
     assert len(appended) == n_threads * per_thread
 
     page = ts.read_log(audit_log_key(tmp_path))
     assert page.corrupt == ()
-    assert Counter((r["tag"], r["i"]) for r in page.records) == Counter(appended)
+    assert Counter((r["tag"], r["i"]) for r in page.records) == Counter(
+        appended
+    )
 
 
 _PROCESS_APPENDER = """\
@@ -80,15 +88,26 @@ finally:
 """
 
 
-def test_concurrent_processes_no_torn_or_lost_lines(tmp_path, unstarved_backend):
+def test_concurrent_processes_no_torn_or_lost_lines(
+    tmp_path, unstarved_backend
+):
     """Two separate processes (mirroring the terminal + sidecar MCP instances)."""
     per_process = 50
     timeout_s = _generous_lock_timeout_s()
     procs = [
         subprocess.Popen(
-            [sys.executable, "-c", _PROCESS_APPENDER, str(tmp_path), f"proc{n}",
-             str(timeout_s), str(per_process)],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            [
+                sys.executable,
+                "-c",
+                _PROCESS_APPENDER,
+                str(tmp_path),
+                f"proc{n}",
+                str(timeout_s),
+                str(per_process),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
         )
         for n in range(2)
     ]
@@ -108,8 +127,12 @@ def test_concurrent_processes_no_torn_or_lost_lines(tmp_path, unstarved_backend)
 
 def test_an_ordinary_event_lands_in_the_log_its_scope_names(tmp_path):
     """The rail admits the plain call: one event, recorded whole, in the named root's log."""
-    record_event_or_raise("save_label_document", {"n_annotations": 3}, actor="user:breeder",
-                          scope=str(tmp_path))
+    record_event_or_raise(
+        "save_label_document",
+        {"n_annotations": 3},
+        actor="user:breeder",
+        scope=str(tmp_path),
+    )
 
     page = ts.read_log(audit_log_key(tmp_path))
     assert [r["tool"] for r in page.records] == ["save_label_document"]

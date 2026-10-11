@@ -86,7 +86,9 @@ class Stage:
 
 
 def _load_workflow() -> "dict[str, Any]":
-    loaded: "dict[str, Any]" = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))
+    loaded: "dict[str, Any]" = yaml.safe_load(
+        CI_WORKFLOW.read_text(encoding="utf-8")
+    )
     return loaded
 
 
@@ -105,17 +107,26 @@ def _resolve_text(text: str, leg: "dict[str, Any]") -> str:
     resolved = _MATRIX_EXPR.sub(repl, text)
     stray = _ANY_EXPR.search(resolved)
     if stray:
-        raise UnresolvedExpressionError(f"unresolvable expression {stray.group(0)!r} in {text!r}")
+        raise UnresolvedExpressionError(
+            f"unresolvable expression {stray.group(0)!r} in {text!r}"
+        )
     return resolved
 
 
 def _matrix_legs(job: "dict[str, Any]") -> "list[dict[str, Any]]":
-    matrix = ((job.get("strategy") or {}).get("matrix") or {})
-    axes = [(name, values) for name, values in matrix.items() if isinstance(values, list)]
+    matrix = (job.get("strategy") or {}).get("matrix") or {}
+    axes = [
+        (name, values)
+        for name, values in matrix.items()
+        if isinstance(values, list)
+    ]
     if not axes:
         return [{}]
     names = [name for name, _ in axes]
-    return [dict(zip(names, combo)) for combo in itertools.product(*(v for _, v in axes))]
+    return [
+        dict(zip(names, combo))
+        for combo in itertools.product(*(v for _, v in axes))
+    ]
 
 
 def _first_effective_line(run_text: str) -> str:
@@ -150,26 +161,41 @@ def build_plan() -> "list[Stage]":
         job = jobs[job_name]
         job_env_raw = job.get("env") or {}
         for leg in _matrix_legs(job):
-            leg_suffix = f" [{'/'.join(str(v) for v in leg.values())}]" if leg else ""
-            job_env = {k: _resolve_text(str(v), leg) for k, v in job_env_raw.items()}
+            leg_suffix = (
+                f" [{'/'.join(str(v) for v in leg.values())}]" if leg else ""
+            )
+            job_env = {
+                k: _resolve_text(str(v), leg) for k, v in job_env_raw.items()
+            }
             for step in job.get("steps", []):
                 name = step.get("name") or step.get("uses") or "<unnamed step>"
                 run_text = step.get("run")
                 cwd = REPO_ROOT
                 working_dir = step.get("working-directory")
                 if working_dir:
-                    cwd = (REPO_ROOT / _resolve_text(working_dir, leg)).resolve()
-                step_env = {k: _resolve_text(str(v), leg)
-                            for k, v in (step.get("env") or {}).items()}
+                    cwd = (
+                        REPO_ROOT / _resolve_text(working_dir, leg)
+                    ).resolve()
+                step_env = {
+                    k: _resolve_text(str(v), leg)
+                    for k, v in (step.get("env") or {}).items()
+                }
                 if run_text is not None:
                     run_text = _resolve_text(run_text, leg)
                     if job_name == "python" and name == "Run tests":
                         # -n auto scales to CI's runner; the documented local invocation is -n 4.
                         run_text = run_text.replace("-n auto", "-n 4")
-                stages.append(Stage(
-                    key=f"{job_name}:{name}{leg_suffix}", job=job_name, name=name, run=run_text,
-                    cwd=cwd, env={**job_env, **step_env}, skip_reason=_skip_reason(step),
-                ))
+                stages.append(
+                    Stage(
+                        key=f"{job_name}:{name}{leg_suffix}",
+                        job=job_name,
+                        name=name,
+                        run=run_text,
+                        cwd=cwd,
+                        env={**job_env, **step_env},
+                        skip_reason=_skip_reason(step),
+                    )
+                )
     return stages
 
 
@@ -210,7 +236,11 @@ def _resolve_git_bash() -> str:
     candidates: "list[pathlib.Path]" = []
     try:
         probe = subprocess.run(
-            ["git", "--exec-path"], capture_output=True, text=True, timeout=10, check=False,
+            ["git", "--exec-path"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         probe = None
@@ -220,7 +250,13 @@ def _resolve_git_bash() -> str:
     candidates.append(pathlib.Path("C:/Program Files/Git/bin/bash.exe"))
     local_app_data = os.environ.get("LOCALAPPDATA")
     if local_app_data:
-        candidates.append(pathlib.Path(local_app_data) / "Programs" / "Git" / "bin" / "bash.exe")
+        candidates.append(
+            pathlib.Path(local_app_data)
+            / "Programs"
+            / "Git"
+            / "bin"
+            / "bash.exe"
+        )
     for candidate in candidates:
         if candidate.is_file():
             return str(candidate)
@@ -237,13 +273,21 @@ def _safe_filename(key: str) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", type=pathlib.Path, required=True,
-                        help="directory to write per-stage output and summary.json into")
+    parser.add_argument(
+        "--out",
+        type=pathlib.Path,
+        required=True,
+        help="directory to write per-stage output and summary.json into",
+    )
     parser.add_argument("--timeout", type=int, default=7200)
-    parser.add_argument("--only", action="append", default=None,
-                        help="a stage key to run instead of the full plan (job:name[leg]); "
-                             "repeat --only for more than one, since a key may itself carry "
-                             "a comma")
+    parser.add_argument(
+        "--only",
+        action="append",
+        default=None,
+        help="a stage key to run instead of the full plan (job:name[leg]); "
+        "repeat --only for more than one, since a key may itself carry "
+        "a comma",
+    )
     args = parser.parse_args()
 
     if args.out.resolve() == RECORDED_BASELINE.resolve():
@@ -266,45 +310,92 @@ def main() -> int:
     for stage in plan:
         if stage.skip_reason:
             print(f"{stage.key:<40} skipped: {stage.skip_reason}")
-            results.append({"stage": stage.key, "job": stage.job, "skipped": True,
-                            "skip_reason": stage.skip_reason})
+            results.append(
+                {
+                    "stage": stage.key,
+                    "job": stage.job,
+                    "skipped": True,
+                    "skip_reason": stage.skip_reason,
+                }
+            )
             continue
 
-        started = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+        started = (
+            datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+        )
         clock = time.perf_counter()
         env = {**os.environ, **stage.env}
         assert stage.run is not None
         try:
-            done = subprocess.run([bash, "-c", stage.run], cwd=str(stage.cwd), env=env,
-                                  capture_output=True, text=True, timeout=args.timeout,
-                                  check=False, shell=False)
-            out, err, code, timed_out = done.stdout, done.stderr, done.returncode, False
+            done = subprocess.run(
+                [bash, "-c", stage.run],
+                cwd=str(stage.cwd),
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=args.timeout,
+                check=False,
+                shell=False,
+            )
+            out, err, code, timed_out = (
+                done.stdout,
+                done.stderr,
+                done.returncode,
+                False,
+            )
         except subprocess.TimeoutExpired as exc:
-            out = exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")
-            err = exc.stderr.decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+            out = (
+                exc.stdout.decode()
+                if isinstance(exc.stdout, bytes)
+                else (exc.stdout or "")
+            )
+            err = (
+                exc.stderr.decode()
+                if isinstance(exc.stderr, bytes)
+                else (exc.stderr or "")
+            )
             code, timed_out = -1, True
         duration = time.perf_counter() - clock
 
         stem = _safe_filename(stage.key)
         (args.out / f"{stem}.stdout.txt").write_text(out, encoding="utf-8")
         (args.out / f"{stem}.stderr.txt").write_text(err, encoding="utf-8")
-        results.append({"stage": stage.key, "job": stage.job, "skipped": False,
-                        "started": started, "duration_s": round(duration, 1),
-                        "exit_code": code, "timed_out": timed_out})
+        results.append(
+            {
+                "stage": stage.key,
+                "job": stage.job,
+                "skipped": False,
+                "started": started,
+                "duration_s": round(duration, 1),
+                "exit_code": code,
+                "timed_out": timed_out,
+            }
+        )
         print(f"{stage.key:<40}{code:>5}{duration:>9.1f}s")
 
     pin = mypy_pin()
-    mypy_stage_ran = any(r["job"] == "mypy" and not r["skipped"] for r in results)
+    mypy_stage_ran = any(
+        r["job"] == "mypy" and not r["skipped"] for r in results
+    )
     mypy_version_on_caller_path = None
     if mypy_stage_ran:
         try:
-            probe = subprocess.run(["mypy", "--version"], capture_output=True, text=True,
-                                   timeout=60, check=False)
-            mypy_version_on_caller_path = (probe.stdout or probe.stderr).strip() or None
+            probe = subprocess.run(
+                ["mypy", "--version"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+            mypy_version_on_caller_path = (
+                probe.stdout or probe.stderr
+            ).strip() or None
         except (OSError, subprocess.SubprocessError):
             mypy_version_on_caller_path = None
 
-    total = round(sum(r.get("duration_s", 0.0) for r in results if not r["skipped"]), 1)
+    total = round(
+        sum(r.get("duration_s", 0.0) for r in results if not r["skipped"]), 1
+    )
     summary = {
         "shell": bash,
         "shell_note": "Git Bash on Windows",
@@ -316,12 +407,18 @@ def main() -> int:
         "total_duration_s": total,
         "stages": results,
     }
-    (args.out / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    (args.out / "summary.json").write_text(
+        json.dumps(summary, indent=2), encoding="utf-8"
+    )
     ran = sum(1 for r in results if not r["skipped"])
     skipped = sum(1 for r in results if r["skipped"])
-    print(f"\ntotal {total}s across {ran} run stage(s), {skipped} skipped -> "
-          f"{args.out / 'summary.json'}")
-    return 0 if all(r["skipped"] or r["exit_code"] == 0 for r in results) else 1
+    print(
+        f"\ntotal {total}s across {ran} run stage(s), {skipped} skipped -> "
+        f"{args.out / 'summary.json'}"
+    )
+    return (
+        0 if all(r["skipped"] or r["exit_code"] == 0 for r in results) else 1
+    )
 
 
 if __name__ == "__main__":

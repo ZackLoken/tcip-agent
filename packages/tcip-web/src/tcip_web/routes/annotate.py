@@ -27,7 +27,10 @@ from tcip_annotation.json_io import (
 )
 from tcip_annotation.state import Annotation
 from tcip_store import Key, Version, VersionConflictError
-from tcip_mcp.pipelines.active_learning import DEFAULT_REVIEW_BUDGET, DEFAULT_SCORER
+from tcip_mcp.pipelines.active_learning import (
+    DEFAULT_REVIEW_BUDGET,
+    DEFAULT_SCORER,
+)
 from tcip_web import jobstore
 from tcip_web.paths import allowed_image, allowed_path
 from tcip_web.state import store
@@ -111,8 +114,12 @@ def annotation_dict(a: Annotation) -> dict:
 def _completion(doc: LabelDocument) -> dict:
     """Each subject ``doc`` holds or marks, with its state
     (:meth:`~tcip_annotation.json_io.LabelDocument.state`)."""
-    return {subject: doc.state(subject)
-            for subject in sorted({a.subject for a in doc.annotations} | set(doc.marks))}
+    return {
+        subject: doc.state(subject)
+        for subject in sorted(
+            {a.subject for a in doc.annotations} | set(doc.marks)
+        )
+    }
 
 
 def _admitted(image_path: str) -> tuple[Key, int, int]:
@@ -147,16 +154,29 @@ def load_labels(image_path: str) -> dict:
     return _labels_body(image_path, key, w, h, doc, version)
 
 
-def _labels_body(image_path: str, key: Key, w: int, h: int, doc: LabelDocument,
-                 version: Version) -> dict:
+def _labels_body(
+    image_path: str,
+    key: Key,
+    w: int,
+    h: int,
+    doc: LabelDocument,
+    version: Version,
+) -> dict:
     """The label document as the editor adopts it, with the version token that goes with it: what
     a load answers and what a save answers, so the editor takes a save's token only together
     with the document it names."""
-    return {"image_path": image_path, "img_width": w, "img_height": h,
-            "annotations": [{**annotation_dict(a), "index": i}
-                            for i, a in enumerate(doc.annotations)],
-            "completion": _completion(doc), "flags": _flags(key),
-            "base_mtime": version.token}
+    return {
+        "image_path": image_path,
+        "img_width": w,
+        "img_height": h,
+        "annotations": [
+            {**annotation_dict(a), "index": i}
+            for i, a in enumerate(doc.annotations)
+        ],
+        "completion": _completion(doc),
+        "flags": _flags(key),
+        "base_mtime": version.token,
+    }
 
 
 @router.post("/labels")
@@ -176,29 +196,52 @@ def save_labels(payload: SavePayload) -> dict:
 
     person = actor(payload.user)
     key, w, h = _admitted(payload.image_path)
-    expect = Version(payload.base_mtime) if payload.base_mtime is not None else None
-    for name, noun, indices in (("accept", "a proposal", payload.accept),
-                                ("reject", "a proposal", payload.reject),
-                                ("confirm", "an annotation position", payload.confirm)):
+    expect = (
+        Version(payload.base_mtime) if payload.base_mtime is not None else None
+    )
+    for name, noun, indices in (
+        ("accept", "a proposal", payload.accept),
+        ("reject", "a proposal", payload.reject),
+        ("confirm", "an annotation position", payload.confirm),
+    ):
         if len(set(indices)) != len(indices):
-            raise HTTPException(400, f"{name} names {noun} more than once: {indices}")
+            raise HTTPException(
+                400, f"{name} names {noun} more than once: {indices}"
+            )
     gestures = Gestures(
-        bucket=payload.bucket, accept=frozenset(payload.accept),
-        reject=frozenset(payload.reject), confirm=frozenset(payload.confirm),
-        complete=payload.complete, rect=payload.rect,
+        bucket=payload.bucket,
+        accept=frozenset(payload.accept),
+        reject=frozenset(payload.reject),
+        confirm=frozenset(payload.confirm),
+        complete=payload.complete,
+        rect=payload.rect,
         proposals_hidden=payload.proposals_hidden,
         flag=tuple(FlagRequest(**f.model_dump()) for f in payload.flag),
-        resolve=payload.resolve)
+        resolve=payload.resolve,
+    )
     try:
         version, doc, accepted = save_label_document(
-            store.held().root, key, [ap.model_dump() for ap in payload.annotations],
-            width=w, height=h, author=person, actor=person, expect=expect, gestures=gestures)
+            store.held().root,
+            key,
+            [ap.model_dump() for ap in payload.annotations],
+            width=w,
+            height=h,
+            author=person,
+            actor=person,
+            expect=expect,
+            gestures=gestures,
+        )
     except VersionConflictError as exc:
-        raise HTTPException(409, {"message": "label document changed since it was loaded"}) from exc
+        raise HTTPException(
+            409, {"message": "label document changed since it was loaded"}
+        ) from exc
     except (ValueError, UnreadableLabelDocumentError) as exc:
         raise HTTPException(400, str(exc)) from exc
-    return {"status": "ok", **_labels_body(payload.image_path, key, w, h, doc, version),
-            "accepted": accepted}
+    return {
+        "status": "ok",
+        **_labels_body(payload.image_path, key, w, h, doc, version),
+        "accepted": accepted,
+    }
 
 
 @router.get("/proposals")
@@ -215,23 +258,38 @@ def load_proposals(image_path: str, bucket: str) -> dict:
     from tcip_annotation.verdicts import read_verdicts
 
     from tcip_mcp.delivery import admitted_conf
-    from tcip_mcp.dataset_layout import image_proposals, proposal_pairs, verdict_key_of
+    from tcip_mcp.dataset_layout import (
+        image_proposals,
+        proposal_pairs,
+        verdict_key_of,
+    )
 
     root = store.held().root
     key, _w, _h = _admitted(image_path)
     annotations = _read(key)[0].annotations
     try:
         published, proposals = image_proposals(bucket, key)
-        decisions = {v.proposal: v.action for v in read_verdicts(verdict_key_of(key, bucket))}
+        decisions = {
+            v.proposal: v.action
+            for v in read_verdicts(verdict_key_of(key, bucket))
+        }
         paired = proposal_pairs(root, published, annotations, proposals)
     except (ValueError, UnreadableLabelDocumentError) as exc:
         raise HTTPException(400, str(exc)) from exc
     conf, reason = admitted_conf(root, published)
-    return {"bucket": published.name, "operating_point": {"conf": conf, "reason": reason},
-            "proposals": [
-                {**annotation_dict(p), "index": i, "paired": paired.get(i),
-                 "decision": decisions.get(i)}
-                for i, p in enumerate(proposals)]}
+    return {
+        "bucket": published.name,
+        "operating_point": {"conf": conf, "reason": reason},
+        "proposals": [
+            {
+                **annotation_dict(p),
+                "index": i,
+                "paired": paired.get(i),
+                "decision": decisions.get(i),
+            }
+            for i, p in enumerate(proposals)
+        ],
+    }
 
 
 @dataclass
@@ -262,8 +320,13 @@ def _pq_worker(job: PriorityQueueJob) -> None:
         from tcip_mcp.tools.feedback_tools import ranked_review_queue
 
         result = ranked_review_queue(
-            Path(job.project), Path(job.checkpoint_path), Path(job.images_dir),
-            method=job.method, budget=job.budget, subject=job.subject)
+            Path(job.project),
+            Path(job.checkpoint_path),
+            Path(job.images_dir),
+            method=job.method,
+            budget=job.budget,
+            subject=job.subject,
+        )
         if "error" in result:
             job.status, job.error = "failed", result["error"]
         else:
@@ -292,13 +355,20 @@ def launch_priority_queue(payload: LaunchPriorityQueuePayload) -> dict:
     checkpoint_path = allowed_path(payload.checkpoint_path)
     images_dir = allowed_path(payload.images_dir)
     if not checkpoint_path.is_file():
-        raise HTTPException(404, f"checkpoint not found: {payload.checkpoint_path}")
+        raise HTTPException(
+            404, f"checkpoint not found: {payload.checkpoint_path}"
+        )
     if not images_dir.is_dir():
         raise HTTPException(404, f"images_dir not found: {payload.images_dir}")
     job = PriorityQueueJob(
-        job_id=f"pq-{uuid.uuid4().hex[:8]}", project=str(store.held().root),
-        checkpoint_path=str(checkpoint_path), images_dir=str(images_dir),
-        subject=payload.subject, method=payload.method, budget=payload.budget)
+        job_id=f"pq-{uuid.uuid4().hex[:8]}",
+        project=str(store.held().root),
+        checkpoint_path=str(checkpoint_path),
+        images_dir=str(images_dir),
+        subject=payload.subject,
+        method=payload.method,
+        budget=payload.budget,
+    )
     _pq_registry.register(job.job_id, job)
     threading.Thread(target=_pq_worker, args=(job,), daemon=True).start()
     return {"status": "launched", "job_id": job.job_id}
@@ -311,5 +381,11 @@ def get_priority_queue_job(job_id: str) -> dict:
     job = _pq_registry.get(job_id)
     if job is None:
         raise HTTPException(404, f"job not found: {job_id}")
-    return {"job_id": job.job_id, "status": job.status, "error": job.error, "queue": job.queue,
-            "total_candidates": job.total_candidates, "reviewed_skipped": job.reviewed_skipped}
+    return {
+        "job_id": job.job_id,
+        "status": job.status,
+        "error": job.error,
+        "queue": job.queue,
+        "total_candidates": job.total_candidates,
+        "reviewed_skipped": job.reviewed_skipped,
+    }

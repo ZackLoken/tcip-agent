@@ -46,29 +46,64 @@ def _dataset(tmp_path: Path, stems=STEMS) -> OpenProject:
     raw = tmp_path / "raw"
     raw.mkdir()
     for index, stem in enumerate(stems):
-        Image.new("RGB", (IMG, IMG), color=(40 + index, 60, 50)).save(raw / f"{stem}.png")
+        Image.new("RGB", (IMG, IMG), color=(40 + index, 60, 50)).save(
+            raw / f"{stem}.png"
+        )
     made = named_project(tmp_path / "fruit_count", "Fruit count")
     ingested = ingest_images(made.root, source=str(raw), date_from=DATE)
     assert "error" not in ingested, ingested
-    registered = write_subject_registry(made.root, str(made.root), subjects={
-        SUBJECT: {"description": "one fruit"}, "leaf": {"description": "one leaf"}})
+    registered = write_subject_registry(
+        made.root,
+        str(made.root),
+        subjects={
+            SUBJECT: {"description": "one fruit"},
+            "leaf": {"description": "one leaf"},
+        },
+    )
     assert "error" not in registered, registered
     return made
 
 
-def _document(path: Path, *, images=None, annotations=None, categories=None) -> Path:
+def _document(
+    path: Path, *, images=None, annotations=None, categories=None
+) -> Path:
     """An external COCO document: two burs as a box, one as a polygon, one image unannotated."""
     doc = {
-        "images": images if images is not None else [
-            {"id": index + 1, "file_name": f"{stem}.png", "width": IMG, "height": IMG}
-            for index, stem in enumerate(STEMS)],
-        "annotations": annotations if annotations is not None else [
-            {"id": 1, "image_id": 1, "category_id": 7, "bbox": BOX, "iscrowd": 0,
-             "created_by": "user:breeder", "created_at": "2025-09-15T08:00:00+00:00"},
-            {"id": 2, "image_id": 2, "category_id": 7, "segmentation": [RING],
-             "bbox": [30.0, 30.0, 20.0, 24.0], "iscrowd": 0},
+        "images": images
+        if images is not None
+        else [
+            {
+                "id": index + 1,
+                "file_name": f"{stem}.png",
+                "width": IMG,
+                "height": IMG,
+            }
+            for index, stem in enumerate(STEMS)
         ],
-        "categories": categories if categories is not None else [{"id": 7, "name": SUBJECT}],
+        "annotations": annotations
+        if annotations is not None
+        else [
+            {
+                "id": 1,
+                "image_id": 1,
+                "category_id": 7,
+                "bbox": BOX,
+                "iscrowd": 0,
+                "created_by": "user:breeder",
+                "created_at": "2025-09-15T08:00:00+00:00",
+            },
+            {
+                "id": 2,
+                "image_id": 2,
+                "category_id": 7,
+                "segmentation": [RING],
+                "bbox": [30.0, 30.0, 20.0, 24.0],
+                "iscrowd": 0,
+            },
+        ],
+        "categories": categories
+        if categories is not None
+        else [{"id": 7, "name": SUBJECT}],
     }
     path.write_text(json.dumps(doc), encoding="utf-8")
     return path
@@ -95,28 +130,49 @@ def _loader(task: str, root: Path):
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
     from tcip_mcp.pipelines.schemas import DataSpec
 
-    data = DataSpec.model_validate({"images_dir": str(root / "images" / DATE),
-                                    "scope": {"subject": SUBJECT}, "auto_val": False})
+    data = DataSpec.model_validate(
+        {
+            "images_dir": str(root / "images" / DATE),
+            "scope": {"subject": SUBJECT},
+            "auto_val": False,
+        }
+    )
     from tests._producer_fixtures import staged_layout
 
-    loader, _, _, _ = auto_train_val(root, task, data, None, staged_layout(root, {}))
+    loader, _, _, _ = auto_train_val(
+        root, task, data, None, staged_layout(root, {})
+    )
     return loader
 
 
 def _targets(task: str, root: Path) -> dict:
     """Each admitted image's target, read off the loader the ordinary producer builds."""
     loader = _loader(task, root)
-    return {loader.sample_of(key).member: loader[i][1] for i, key in enumerate(loader.stems)}
+    return {
+        loader.sample_of(key).member: loader[i][1]
+        for i, key in enumerate(loader.stems)
+    }
 
 
 def _person_label() -> list:
     """One leaf a person drew, stamped as the save door stamps it."""
-    return [json_io.stamped([json_io.annotation_from_payload(
-        {"subject": "leaf", "bbox": [1, 1, 5, 5]})], [], author="user:breeder",
-        now="2025-09-16")[0]]
+    return [
+        json_io.stamped(
+            [
+                json_io.annotation_from_payload(
+                    {"subject": "leaf", "bbox": [1, 1, 5, 5]}
+                )
+            ],
+            [],
+            author="user:breeder",
+            now="2025-09-16",
+        )[0]
+    ]
 
 
-def test_an_imported_documents_images_train_with_the_boxes_it_stated(tmp_path: Path):
+def test_an_imported_documents_images_train_with_the_boxes_it_stated(
+    tmp_path: Path,
+):
     """A detection loader over the imported documents reads back the box and the polygon's
     extent the COCO document stated; the image it gave no annotation gets no document, so it is
     not admitted as a negative."""
@@ -136,7 +192,9 @@ def test_an_imported_documents_images_train_with_the_boxes_it_stated(tmp_path: P
     assert targets["tree_02"]["boxes"].tolist() == [[30.0, 30.0, 50.0, 54.0]]
 
 
-def test_images_sitting_flat_under_images_are_no_capture_to_import_into(tmp_path: Path):
+def test_images_sitting_flat_under_images_are_no_capture_to_import_into(
+    tmp_path: Path,
+):
     """Images placed by hand in the flat ``images/`` root are no capture: the import refuses
     naming the capture it was given, and writes nothing."""
     from PIL import Image
@@ -148,18 +206,29 @@ def test_images_sitting_flat_under_images_are_no_capture_to_import_into(tmp_path
     (root / "images").mkdir(parents=True)
     for index, stem in enumerate(STEMS):
         Image.new("RGB", (IMG, IMG), color=(40 + index, 60, 50)).save(
-            root / "images" / f"{stem}.png")
-    registered = write_subject_registry(root, str(root), subjects={
-        SUBJECT: {"description": "one fruit"}, "leaf": {"description": "one leaf"}})
+            root / "images" / f"{stem}.png"
+        )
+    registered = write_subject_registry(
+        root,
+        str(root),
+        subjects={
+            SUBJECT: {"description": "one fruit"},
+            "leaf": {"description": "one leaf"},
+        },
+    )
     assert "error" not in registered, registered
 
     result = _import(_document(tmp_path / "external.json"), root)
 
     assert f"{DATE!r} names no capture" in result["error"], result
-    assert capture_label_keys(root, UNDATED_BUCKET) == [] and _written(root) == []
+    assert (
+        capture_label_keys(root, UNDATED_BUCKET) == [] and _written(root) == []
+    )
 
 
-def test_an_imported_documents_images_train_with_the_polygons_it_stated(tmp_path: Path):
+def test_an_imported_documents_images_train_with_the_polygons_it_stated(
+    tmp_path: Path,
+):
     """An instance_seg loader over the imported documents rasterizes exactly the polygon the COCO
     document stated for each image."""
     pytest.importorskip("torch")
@@ -168,9 +237,13 @@ def test_an_imported_documents_images_train_with_the_polygons_it_stated(tmp_path
 
     shifted = [c - 20.0 for c in RING]
     root = _dataset(tmp_path).root
-    annotations = [{"id": 1, "image_id": 1, "category_id": 7, "segmentation": [shifted]},
-                   {"id": 2, "image_id": 2, "category_id": 7, "segmentation": [RING]}]
-    result = _import(_document(tmp_path / "external.json", annotations=annotations), root)
+    annotations = [
+        {"id": 1, "image_id": 1, "category_id": 7, "segmentation": [shifted]},
+        {"id": 2, "image_id": 2, "category_id": 7, "segmentation": [RING]},
+    ]
+    result = _import(
+        _document(tmp_path / "external.json", annotations=annotations), root
+    )
     assert "error" not in result, result
 
     targets = _targets("instance_seg", root)
@@ -178,10 +251,16 @@ def test_an_imported_documents_images_train_with_the_polygons_it_stated(tmp_path
     assert sorted(targets) == ["tree_01", "tree_02"]
     for stem, ring in (("tree_01", shifted), ("tree_02", RING)):
         stated = Image.new("L", (IMG, IMG), 0)
-        ImageDraw.Draw(stated).polygon(list(zip(ring[0::2], ring[1::2])), fill=1)
+        ImageDraw.Draw(stated).polygon(
+            list(zip(ring[0::2], ring[1::2])), fill=1
+        )
         xs, ys = ring[0::2], ring[1::2]
-        assert targets[stem]["boxes"].tolist() == [[min(xs), min(ys), max(xs), max(ys)]]
-        assert np.array_equal(targets[stem]["masks"][0].numpy(), np.array(stated))
+        assert targets[stem]["boxes"].tolist() == [
+            [min(xs), min(ys), max(xs), max(ys)]
+        ]
+        assert np.array_equal(
+            targets[stem]["masks"][0].numpy(), np.array(stated)
+        )
 
 
 def test_an_imported_record_keeps_the_provenance_the_document_carried_and_gains_none(
@@ -190,14 +269,24 @@ def test_an_imported_record_keeps_the_provenance_the_document_carried_and_gains_
     root = _dataset(tmp_path).root
     assert "error" not in _import(_document(tmp_path / "external.json"), root)
 
-    (authored,) = json_io.read_label_document(_label(root, "tree_01")).annotations
+    (authored,) = json_io.read_label_document(
+        _label(root, "tree_01")
+    ).annotations
     (bare,) = json_io.read_label_document(_label(root, "tree_02")).annotations
     assert (authored.created_by, authored.created_at) == (
-        "user:breeder", "2025-09-15T08:00:00+00:00")
-    assert (bare.created_by, bare.created_at, bare.accepted_by) == (None, None, None)
+        "user:breeder",
+        "2025-09-15T08:00:00+00:00",
+    )
+    assert (bare.created_by, bare.created_at, bare.accepted_by) == (
+        None,
+        None,
+        None,
+    )
 
 
-def test_the_import_leaves_one_row_with_the_documents_path_and_digest(tmp_path: Path):
+def test_the_import_leaves_one_row_with_the_documents_path_and_digest(
+    tmp_path: Path,
+):
     """Every row the import leaves in the dataset's log is counted, and there is one: the
     library's import event. The digest is recomputed here from the document's bytes by the stated
     convention, ``sha256(bytes)``, never through the code under test."""
@@ -210,16 +299,23 @@ def test_the_import_leaves_one_row_with_the_documents_path_and_digest(tmp_path: 
     assert "error" not in _import(document, root)
 
     rows = audit_rows(root)[before:]
-    assert [(row["tool"], row["status"]) for row in rows] == [("coco_document_imported", "ok")]
+    assert [(row["tool"], row["status"]) for row in rows] == [
+        ("coco_document_imported", "ok")
+    ]
     (event,) = rows
     assert event["arguments"]["document"] == str(document.resolve())
     assert event["arguments"]["written"] == ["tree_01", "tree_02"]
-    assert event["document_digest"] == hashlib.sha256(document.read_bytes()).hexdigest()
+    assert (
+        event["document_digest"]
+        == hashlib.sha256(document.read_bytes()).hexdigest()
+    )
     for stem in _written(root):
         assert "external.json" not in json.dumps(ts.read(_label(root, stem)))
 
 
-def test_the_digest_names_the_bytes_the_labels_came_from(tmp_path: Path, monkeypatch):
+def test_the_digest_names_the_bytes_the_labels_came_from(
+    tmp_path: Path, monkeypatch
+):
     """The document is read once: replacing it while the import writes leaves the event's digest
     the one of the bytes the labels were decoded from, never of a second read."""
     import hashlib
@@ -230,13 +326,19 @@ def test_the_digest_names_the_bytes_the_labels_came_from(tmp_path: Path, monkeyp
     real_transaction = ts.transaction
 
     def replacing(*keys, **kwargs):
-        document.write_text(json.dumps({"images": [], "categories": []}), encoding="utf-8")
+        document.write_text(
+            json.dumps({"images": [], "categories": []}), encoding="utf-8"
+        )
         return real_transaction(*keys, **kwargs)
 
     monkeypatch.setattr(ts, "transaction", replacing)
     assert "error" not in _import(document, root)
 
-    (event,) = [row for row in audit_rows(root) if row["tool"] == "coco_document_imported"]
+    (event,) = [
+        row
+        for row in audit_rows(root)
+        if row["tool"] == "coco_document_imported"
+    ]
     assert event["document_digest"] == hashlib.sha256(read_bytes).hexdigest()
     assert document.read_bytes() != read_bytes
 
@@ -245,8 +347,10 @@ def test_every_declared_category_must_be_registered(tmp_path: Path):
     """A category the document declares but no record uses is still a declaration the registry
     must be able to name, and the import refuses on it by name, writing nothing."""
     root = _dataset(tmp_path).root
-    document = _document(tmp_path / "external.json",
-                         categories=[{"id": 7, "name": SUBJECT}, {"id": 9, "name": "husk"}])
+    document = _document(
+        tmp_path / "external.json",
+        categories=[{"id": 7, "name": SUBJECT}, {"id": 9, "name": "husk"}],
+    )
 
     result = _import(document, root)
 
@@ -255,47 +359,72 @@ def test_every_declared_category_must_be_registered(tmp_path: Path):
     assert _written(root) == []
 
 
-@pytest.mark.parametrize("name", ["", None, ["husk"]], ids=["empty", "null", "list"])
-def test_a_category_name_no_subject_can_carry_is_refused_by_the_registry(tmp_path: Path, name):
+@pytest.mark.parametrize(
+    "name", ["", None, ["husk"]], ids=["empty", "null", "list"]
+)
+def test_a_category_name_no_subject_can_carry_is_refused_by_the_registry(
+    tmp_path: Path, name
+):
     """A declared name is the subject its records take, so the registry answers for it: one no
     subject can carry is named in the import's refusal, whatever its shape."""
     root = _dataset(tmp_path).root
-    document = _document(tmp_path / "external.json",
-                         categories=[{"id": 7, "name": SUBJECT}, {"id": 9, "name": name}])
+    document = _document(
+        tmp_path / "external.json",
+        categories=[{"id": 7, "name": SUBJECT}, {"id": 9, "name": name}],
+    )
 
     result = _import(document, root)
 
-    assert f"category {name!r} is not a subject" in result.get("error", ""), result
+    assert f"category {name!r} is not a subject" in result.get("error", ""), (
+        result
+    )
     assert _written(root) == []
 
 
-def test_an_image_not_under_the_dataset_refuses_the_whole_import(tmp_path: Path):
+def test_an_image_not_under_the_dataset_refuses_the_whole_import(
+    tmp_path: Path,
+):
     root = _dataset(tmp_path).root
-    images = [{"id": 1, "file_name": "tree_01.png", "width": IMG, "height": IMG},
-              {"id": 2, "file_name": "tree_99.png", "width": IMG, "height": IMG}]
+    images = [
+        {"id": 1, "file_name": "tree_01.png", "width": IMG, "height": IMG},
+        {"id": 2, "file_name": "tree_99.png", "width": IMG, "height": IMG},
+    ]
 
-    result = _import(_document(tmp_path / "external.json", images=images), root)
+    result = _import(
+        _document(tmp_path / "external.json", images=images), root
+    )
 
     assert "error" in result and "'tree_99.png'" in result["error"]
     assert _written(root) == []
 
 
-@pytest.mark.parametrize("file_name", ["tree_02.jpg", "north/tree_02.png"],
-                         ids=["another_extension", "directory_prefix"])
-def test_an_ordinary_image_is_named_by_its_own_file_name(tmp_path: Path, file_name: str):
+@pytest.mark.parametrize(
+    "file_name",
+    ["tree_02.jpg", "north/tree_02.png"],
+    ids=["another_extension", "directory_prefix"],
+)
+def test_an_ordinary_image_is_named_by_its_own_file_name(
+    tmp_path: Path, file_name: str
+):
     """Only a ``.bandgroup`` capture is tied by stem; an ordinary image the document names by
     another file name is not the dataset's image of that stem."""
     root = _dataset(tmp_path).root
-    images = [{"id": 1, "file_name": "tree_01.png", "width": IMG, "height": IMG},
-              {"id": 2, "file_name": file_name, "width": IMG, "height": IMG}]
+    images = [
+        {"id": 1, "file_name": "tree_01.png", "width": IMG, "height": IMG},
+        {"id": 2, "file_name": file_name, "width": IMG, "height": IMG},
+    ]
 
-    result = _import(_document(tmp_path / "external.json", images=images), root)
+    result = _import(
+        _document(tmp_path / "external.json", images=images), root
+    )
 
     assert "error" in result and f"{file_name!r} is not in" in result["error"]
     assert _written(root) == []
 
 
-def test_an_existing_per_image_document_refuses_the_whole_import(tmp_path: Path):
+def test_an_existing_per_image_document_refuses_the_whole_import(
+    tmp_path: Path,
+):
     """A label a person may have edited is never replaced by an import."""
     from tcip_mcp.tools.annotation_tools import save_annotations
 
@@ -303,13 +432,18 @@ def test_an_existing_per_image_document_refuses_the_whole_import(tmp_path: Path)
     root = made.root
     image = root / "images" / DATE / "tree_02.png"
     assert "error" not in save_annotations(
-        bound_to(made), str(image),
-        annotations=[{"subject": "leaf", "bbox": [1, 1, 5, 5]}])
+        bound_to(made),
+        str(image),
+        annotations=[{"subject": "leaf", "bbox": [1, 1, 5, 5]}],
+    )
     before = ts.read_versioned(_label(root, "tree_02")).version
 
     result = _import(_document(tmp_path / "external.json"), root)
 
-    assert "error" in result and "already holds a label document for ['tree_02']" in result["error"]
+    assert (
+        "error" in result
+        and "already holds a label document for ['tree_02']" in result["error"]
+    )
     assert ts.read_versioned(_label(root, "tree_02")).version == before
     assert _written(root) == ["tree_02"]
 
@@ -323,20 +457,33 @@ def test_an_unannotated_images_faults_still_refuse_the_import(tmp_path: Path):
     root = made.root
     image = root / "images" / DATE / "tree_03.png"
     assert "error" not in save_annotations(
-        bound_to(made), str(image),
-        annotations=[{"subject": "leaf", "bbox": [1, 1, 5, 5]}])
-    images = [{"id": index + 1, "file_name": f"{stem}.png", "width": IMG, "height": IMG}
-              for index, stem in enumerate(STEMS)]
+        bound_to(made),
+        str(image),
+        annotations=[{"subject": "leaf", "bbox": [1, 1, 5, 5]}],
+    )
+    images = [
+        {
+            "id": index + 1,
+            "file_name": f"{stem}.png",
+            "width": IMG,
+            "height": IMG,
+        }
+        for index, stem in enumerate(STEMS)
+    ]
     images[2]["width"] = IMG * 2
 
-    result = _import(_document(tmp_path / "external.json", images=images), root)
+    result = _import(
+        _document(tmp_path / "external.json", images=images), root
+    )
 
     assert "error" in result
     assert "'tree_03.png' is stated as" in result["error"]
     assert _written(root) == ["tree_03"]
 
 
-def test_an_unannotated_images_existing_document_is_kept_and_admits_the_import(tmp_path: Path):
+def test_an_unannotated_images_existing_document_is_kept_and_admits_the_import(
+    tmp_path: Path,
+):
     """An image the document gives no annotation writes nothing, so a person's document on it
     stands beside the import's own documents."""
     from tcip_mcp.tools.annotation_tools import save_annotations
@@ -345,8 +492,10 @@ def test_an_unannotated_images_existing_document_is_kept_and_admits_the_import(t
     root = made.root
     image = root / "images" / DATE / "tree_03.png"
     assert "error" not in save_annotations(
-        bound_to(made), str(image),
-        annotations=[{"subject": "leaf", "bbox": [1, 1, 5, 5]}])
+        bound_to(made),
+        str(image),
+        annotations=[{"subject": "leaf", "bbox": [1, 1, 5, 5]}],
+    )
     before = ts.read_versioned(_label(root, "tree_03")).version
 
     result = _import(_document(tmp_path / "external.json"), root)
@@ -355,13 +504,24 @@ def test_an_unannotated_images_existing_document_is_kept_and_admits_the_import(t
     assert ts.read_versioned(_label(root, "tree_03")).version == before
 
 
-def test_a_frame_the_image_does_not_have_refuses_the_whole_import(tmp_path: Path):
+def test_a_frame_the_image_does_not_have_refuses_the_whole_import(
+    tmp_path: Path,
+):
     """A document stating another size for an image drew its geometry in another pixel frame."""
     root = _dataset(tmp_path).root
-    images = [{"id": 1, "file_name": "tree_01.png", "width": IMG * 2, "height": IMG * 2},
-              {"id": 2, "file_name": "tree_02.png", "width": IMG, "height": IMG}]
+    images = [
+        {
+            "id": 1,
+            "file_name": "tree_01.png",
+            "width": IMG * 2,
+            "height": IMG * 2,
+        },
+        {"id": 2, "file_name": "tree_02.png", "width": IMG, "height": IMG},
+    ]
 
-    result = _import(_document(tmp_path / "external.json", images=images), root)
+    result = _import(
+        _document(tmp_path / "external.json", images=images), root
+    )
 
     assert "error" in result and "'tree_01.png'" in result["error"]
     assert _written(root) == []
@@ -371,33 +531,52 @@ def test_a_repeated_image_reports_every_fault_it_carries(tmp_path: Path):
     """A second record naming the same capture, stated at another frame, is reported as both
     faults: naming one does not stop the pass from asking the rest."""
     root = _dataset(tmp_path).root
-    images = [{"id": 1, "file_name": "tree_01.png", "width": IMG, "height": IMG},
-              {"id": 2, "file_name": "tree_01.png", "width": IMG * 2, "height": IMG}]
+    images = [
+        {"id": 1, "file_name": "tree_01.png", "width": IMG, "height": IMG},
+        {"id": 2, "file_name": "tree_01.png", "width": IMG * 2, "height": IMG},
+    ]
 
-    result = _import(_document(tmp_path / "external.json", images=images), root)
+    result = _import(
+        _document(tmp_path / "external.json", images=images), root
+    )
 
     assert "error" in result
-    assert "the capture 'tree_01' another record already names" in result["error"]
+    assert (
+        "the capture 'tree_01' another record already names" in result["error"]
+    )
     assert "is stated as" in result["error"]
     assert _written(root) == []
 
 
 def test_image_and_category_ids_listed_twice_refuse_by_name(tmp_path: Path):
     root = _dataset(tmp_path).root
-    images = [{"id": 1, "file_name": "tree_01.png", "width": IMG, "height": IMG},
-              {"id": 1, "file_name": "tree_02.png", "width": IMG, "height": IMG}]
+    images = [
+        {"id": 1, "file_name": "tree_01.png", "width": IMG, "height": IMG},
+        {"id": 1, "file_name": "tree_02.png", "width": IMG, "height": IMG},
+    ]
     annotations = [{"id": 1, "image_id": 1, "category_id": 7, "bbox": BOX}]
 
     result = _import(
-        _document(tmp_path / "external.json", images=images, annotations=annotations), root)
+        _document(
+            tmp_path / "external.json", images=images, annotations=annotations
+        ),
+        root,
+    )
 
-    assert "error" in result and "image id 1 is listed twice" in result["error"]
+    assert (
+        "error" in result and "image id 1 is listed twice" in result["error"]
+    )
     assert _written(root) == []
 
     categories = [{"id": 7, "name": SUBJECT}, {"id": 7, "name": "leaf"}]
-    result = _import(_document(tmp_path / "external.json", categories=categories), root)
+    result = _import(
+        _document(tmp_path / "external.json", categories=categories), root
+    )
 
-    assert "error" in result and "category id 7 is declared twice" in result["error"]
+    assert (
+        "error" in result
+        and "category id 7 is declared twice" in result["error"]
+    )
     assert _written(root) == []
 
 
@@ -405,10 +584,19 @@ def test_a_record_the_writer_refuses_writes_nothing(tmp_path: Path):
     """Every image is encoded by the writer's one encoder before the first write, so a box the
     stored grid collapses on the second image leaves the first image unwritten too."""
     root = _dataset(tmp_path).root
-    annotations = [{"id": 1, "image_id": 1, "category_id": 7, "bbox": BOX},
-                   {"id": 2, "image_id": 2, "category_id": 7, "bbox": [10.0, 10.0, 0.004, 5.0]}]
+    annotations = [
+        {"id": 1, "image_id": 1, "category_id": 7, "bbox": BOX},
+        {
+            "id": 2,
+            "image_id": 2,
+            "category_id": 7,
+            "bbox": [10.0, 10.0, 0.004, 5.0],
+        },
+    ]
 
-    result = _import(_document(tmp_path / "external.json", annotations=annotations), root)
+    result = _import(
+        _document(tmp_path / "external.json", annotations=annotations), root
+    )
 
     assert "error" in result and "'tree_02.png'" in result["error"]
     assert _written(root) == []
@@ -420,7 +608,9 @@ def _label_placed_before_the_writes(monkeypatch, key, annotations) -> None:
     real_transaction = ts.transaction
 
     def interleaved(*keys, **kwargs):
-        json_io.write_label_document(key, annotations, IMG, IMG, keep_empty=True)
+        json_io.write_label_document(
+            key, annotations, IMG, IMG, keep_empty=True
+        )
         monkeypatch.setattr(ts, "transaction", real_transaction)
         return real_transaction(*keys, **kwargs)
 
@@ -428,7 +618,8 @@ def _label_placed_before_the_writes(monkeypatch, key, annotations) -> None:
 
 
 def test_an_import_whose_second_document_conflicts_leaves_no_document_written(
-    tmp_path: Path, monkeypatch,
+    tmp_path: Path,
+    monkeypatch,
 ):
     """The import's writes commit as one unit: a person's label landing on the second document
     between the validation pass and the writes refuses the whole import, the label is kept, the
@@ -437,18 +628,28 @@ def test_an_import_whose_second_document_conflicts_leaves_no_document_written(
 
     root = _dataset(tmp_path).root
     document = _document(tmp_path / "external.json")
-    _label_placed_before_the_writes(monkeypatch, _label(root, "tree_02"), _person_label())
+    _label_placed_before_the_writes(
+        monkeypatch, _label(root, "tree_02"), _person_label()
+    )
 
-    with pytest.raises(ValueError, match=r"already holds a label document for \['tree_02'\]"):
+    with pytest.raises(
+        ValueError, match=r"already holds a label document for \['tree_02'\]"
+    ):
         import_coco_document(document, root, date=DATE, project=root)
 
     (kept,) = json_io.read_label_document(_label(root, "tree_02")).annotations
     assert (kept.subject, kept.created_by) == ("leaf", "user:breeder")
     assert _written(root) == ["tree_02"]
-    assert not [row for row in audit_rows(root) if row["tool"] == "coco_document_imported"]
+    assert not [
+        row
+        for row in audit_rows(root)
+        if row["tool"] == "coco_document_imported"
+    ]
 
 
-def test_a_pass_whose_document_fails_to_encode_publishes_nothing(tmp_path: Path, monkeypatch):
+def test_a_pass_whose_document_fails_to_encode_publishes_nothing(
+    tmp_path: Path, monkeypatch
+):
     """A failure encoding the second document of a pass leaves no document, no bucket record and
     no publication line: the publication commits whole or not at all."""
     pytest.importorskip("torch")
@@ -458,7 +659,8 @@ def test_a_pass_whose_document_fails_to_encode_publishes_nothing(tmp_path: Path,
     from tcip_mcp.pipelines.execution import Stated
     from tests._predictor_fixtures import StubPredictor, install
     from tests._verified_checkpoint_fixtures import (
-        SAMPLE_CONF, registered_checkpoint,
+        SAMPLE_CONF,
+        registered_checkpoint,
     )
 
     root = _dataset(tmp_path).root
@@ -475,79 +677,131 @@ def test_a_pass_whose_document_fails_to_encode_publishes_nothing(tmp_path: Path,
     monkeypatch.setattr(export, "encode_predictions", failing_second_document)
     ckpt = registered_checkpoint(tmp_path)
     with pytest.raises(OSError):
-        itools.run_inference(tmp_path, ckpt, str(root / "images" / DATE),
-                             bucket=f"detector/{DATE}",
-                             stated=Stated(tile=False, conf=SAMPLE_CONF))
+        itools.run_inference(
+            tmp_path,
+            ckpt,
+            str(root / "images" / DATE),
+            bucket=f"detector/{DATE}",
+            stated=Stated(tile=False, conf=SAMPLE_CONF),
+        )
 
     assert len(calls) == 2
     assert not ts.exists(bucket_key(root, f"detector/{DATE}"))
     assert ts.keys(PREDICTION_DOCUMENTS, str(root)) == []
-    assert not [row for row in audit_rows(root) if row["tool"] == "prediction_bucket_published"]
+    assert not [
+        row
+        for row in audit_rows(root)
+        if row["tool"] == "prediction_bucket_published"
+    ]
 
 
-def test_an_import_that_committed_no_document_leaves_no_event(tmp_path: Path, monkeypatch):
+def test_an_import_that_committed_no_document_leaves_no_event(
+    tmp_path: Path, monkeypatch
+):
     """An act that committed nothing leaves no line: a valid document whose images carry no
     annotation writes nothing, and one whose first document was claimed has written nothing
     either."""
     from tcip_mcp.pipelines.data.coco_import import import_coco_document
 
     root = _dataset(tmp_path).root
-    assert _import(_document(tmp_path / "empty.json", annotations=[]), root)["written"] == []
-    assert not [row for row in audit_rows(root) if row["tool"] == "coco_document_imported"]
+    assert (
+        _import(_document(tmp_path / "empty.json", annotations=[]), root)[
+            "written"
+        ]
+        == []
+    )
+    assert not [
+        row
+        for row in audit_rows(root)
+        if row["tool"] == "coco_document_imported"
+    ]
 
-    _label_placed_before_the_writes(monkeypatch, _label(root, "tree_01"), _person_label())
+    _label_placed_before_the_writes(
+        monkeypatch, _label(root, "tree_01"), _person_label()
+    )
     with pytest.raises(ValueError, match="already holds a label document"):
-        import_coco_document(_document(tmp_path / "external.json"), root, date=DATE,
-                             project=root)
+        import_coco_document(
+            _document(tmp_path / "external.json"),
+            root,
+            date=DATE,
+            project=root,
+        )
     assert _written(root) == ["tree_01"]
-    assert not [row for row in audit_rows(root) if row["tool"] == "coco_document_imported"]
+    assert not [
+        row
+        for row in audit_rows(root)
+        if row["tool"] == "coco_document_imported"
+    ]
 
 
-def test_an_annotation_naming_no_listed_image_refuses_the_whole_import(tmp_path: Path):
+def test_an_annotation_naming_no_listed_image_refuses_the_whole_import(
+    tmp_path: Path,
+):
     root = _dataset(tmp_path).root
-    annotations = [{"id": 1, "image_id": 1, "category_id": 7, "bbox": BOX},
-                   {"id": 2, "image_id": 42, "category_id": 7, "bbox": BOX}]
+    annotations = [
+        {"id": 1, "image_id": 1, "category_id": 7, "bbox": BOX},
+        {"id": 2, "image_id": 42, "category_id": 7, "bbox": BOX},
+    ]
 
-    result = _import(_document(tmp_path / "external.json", annotations=annotations), root)
+    result = _import(
+        _document(tmp_path / "external.json", annotations=annotations), root
+    )
 
     assert "error" in result and "42" in result["error"]
     assert _written(root) == []
 
 
-@pytest.mark.parametrize("date", ["../elsewhere", "2025-09-15"], ids=["not_a_name", "no_bucket"])
+@pytest.mark.parametrize(
+    "date", ["../elsewhere", "2025-09-15"], ids=["not_a_name", "no_bucket"]
+)
 def test_a_date_that_names_no_capture_refuses(tmp_path: Path, date: str):
     """A date names the capture the images sit in; a name that is no bucket of the dataset, well
     formed or not, has nothing to import into."""
     from tcip_mcp.tools.ingest_tools import import_coco
 
     root = _dataset(tmp_path).root
-    result = import_coco(root, str(_document(tmp_path / "external.json")), str(root), date)
+    result = import_coco(
+        root, str(_document(tmp_path / "external.json")), str(root), date
+    )
     assert "error" in result and "names no capture" in result["error"]
 
 
 def test_a_document_that_lists_no_image_refuses(tmp_path: Path):
     root = _dataset(tmp_path).root
-    result = _import(_document(tmp_path / "external.json", images=[], annotations=[]), root)
+    result = _import(
+        _document(tmp_path / "external.json", images=[], annotations=[]), root
+    )
     assert "error" in result and "nothing to import" in result["error"]
 
 
-@pytest.mark.parametrize("annotations", [None, [None]], ids=["null", "null_record"])
+@pytest.mark.parametrize(
+    "annotations", [None, [None]], ids=["null", "null_record"]
+)
 def test_a_malformed_annotations_container_refuses_by_name_through_the_tool(
-    tmp_path: Path, annotations,
+    tmp_path: Path,
+    annotations,
 ):
     root = _dataset(tmp_path).root
     document = tmp_path / "external.json"
-    document.write_text(json.dumps({
-        "images": [{"id": 1, "file_name": "tree_01.png"}],
-        "categories": [{"id": 7, "name": SUBJECT}], "annotations": annotations,
-    }), encoding="utf-8")
+    document.write_text(
+        json.dumps(
+            {
+                "images": [{"id": 1, "file_name": "tree_01.png"}],
+                "categories": [{"id": 7, "name": SUBJECT}],
+                "annotations": annotations,
+            }
+        ),
+        encoding="utf-8",
+    )
 
     result = _import(document, root)
 
     assert "error" in result and "external.json" in result["error"]
 
 
-def test_a_band_grouped_capture_resolves_by_the_stem_the_document_names(tmp_path: Path):
+def test_a_band_grouped_capture_resolves_by_the_stem_the_document_names(
+    tmp_path: Path,
+):
     """An external document names a grouped capture by one of its own file names; the import ties
     it by stem to the ``.bandgroup`` manifest, and the written document is the capture's own."""
     import numpy as np
@@ -560,12 +814,18 @@ def test_a_band_grouped_capture_resolves_by_the_stem_the_document_names(tmp_path
     band_g, band_r = images_dir / "plot7_G.tif", images_dir / "plot7_R.tif"
     tifffile.imwrite(str(band_g), np.full((IMG, IMG), 111, dtype=np.uint16))
     tifffile.imwrite(str(band_r), np.full((IMG, IMG), 222, dtype=np.uint16))
-    write_band_group_manifest(images_dir, "plot7", {"Green": band_g, "Red": band_r})
+    write_band_group_manifest(
+        images_dir, "plot7", {"Green": band_g, "Red": band_r}
+    )
     images = [{"id": 1, "file_name": "plot7.tif", "width": IMG, "height": IMG}]
     annotations = [{"id": 1, "image_id": 1, "category_id": 7, "bbox": BOX}]
 
     result = _import(
-        _document(tmp_path / "external.json", images=images, annotations=annotations), root)
+        _document(
+            tmp_path / "external.json", images=images, annotations=annotations
+        ),
+        root,
+    )
 
     assert "error" not in result, result
     assert result["written"] == ["plot7"]
@@ -578,20 +838,41 @@ CROWD = [36.0, 34.0, 20.0, 18.0]
 
 def _crowd_document(tmp_path: Path) -> Path:
     """One bur as a box and one crowd region of burs on the first image."""
-    return _document(tmp_path / "external.json", annotations=[
-        {"id": 1, "image_id": 1, "category_id": 7, "bbox": BOX, "iscrowd": 0},
-        {"id": 2, "image_id": 1, "category_id": 7, "bbox": CROWD, "iscrowd": 1},
-    ])
+    return _document(
+        tmp_path / "external.json",
+        annotations=[
+            {
+                "id": 1,
+                "image_id": 1,
+                "category_id": 7,
+                "bbox": BOX,
+                "iscrowd": 0,
+            },
+            {
+                "id": 2,
+                "image_id": 1,
+                "category_id": 7,
+                "bbox": CROWD,
+                "iscrowd": 1,
+            },
+        ],
+    )
 
 
-def test_a_crowd_region_imports_and_reaches_training_and_evaluation_as_one(tmp_path: Path):
+def test_a_crowd_region_imports_and_reaches_training_and_evaluation_as_one(
+    tmp_path: Path,
+):
     """The crowd flag the document stated is written, read back, carried on the detection
     loader's target under ``iscrowd``, and carried onto the evaluation ground truth both builders
     form; the built-in heads are handed the target with the crowd row removed."""
     torch = pytest.importorskip("torch")
-    from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset, instance_targets
+    from tcip_mcp.pipelines.data.datasets import (
+        TiledDetectionDataset,
+        instance_targets,
+    )
     from tcip_mcp.pipelines.training.evaluation import (
-        records_from_annotation, records_from_detector,
+        records_from_annotation,
+        records_from_detector,
     )
 
     root = _dataset(tmp_path).root
@@ -604,19 +885,31 @@ def test_a_crowd_region_imports_and_reaches_training_and_evaluation_as_one(tmp_p
 
     target = _targets("detection", root)["tree_01"]
     assert target["iscrowd"].tolist() == [0, 1]
-    tiled = TiledDetectionDataset(_loader("detection", root), tile_size=IMG, overlap=0.0,
-                                  sliver_frac=0.5)  # stated: one box derives no spread
+    tiled = TiledDetectionDataset(
+        _loader("detection", root), tile_size=IMG, overlap=0.0, sliver_frac=0.5
+    )  # stated: one box derives no spread
     assert tiled.num_samples == 1  # tree_01, whole, in its one tile
     assert tiled[0][1]["iscrowd"].tolist() == [0, 1]
-    assert tiled.class_distribution == {0: 1}  # the one object; the crowd region is none
+    assert tiled.class_distribution == {
+        0: 1
+    }  # the one object; the crowd region is none
     (heads,) = instance_targets([target])
     x, y, w, h = BOX
-    assert heads["boxes"].tolist() == [[x, y, x + w, y + h]] and heads["iscrowd"].tolist() == [0]
+    assert heads["boxes"].tolist() == [[x, y, x + w, y + h]] and heads[
+        "iscrowd"
+    ].tolist() == [0]
 
-    from_annotations = records_from_annotation(gt, [], width=IMG, height=IMG, cap=None)
-    no_detections = {"boxes": torch.zeros((0, 4)), "labels": torch.zeros((0,), dtype=torch.int64),
-                     "scores": torch.zeros((0,))}
-    from_detector = records_from_detector(target, no_detections, width=IMG, height=IMG, cap=1)
+    from_annotations = records_from_annotation(
+        gt, [], width=IMG, height=IMG, cap=None
+    )
+    no_detections = {
+        "boxes": torch.zeros((0, 4)),
+        "labels": torch.zeros((0,), dtype=torch.int64),
+        "scores": torch.zeros((0,)),
+    }
+    from_detector = records_from_detector(
+        target, no_detections, width=IMG, height=IMG, cap=1
+    )
     assert [g["iscrowd"] for g in from_annotations["gt"]] == [0, 1]
     assert [g["iscrowd"] for g in from_detector["gt"]] == [0, 1]
 
@@ -634,22 +927,40 @@ def _uncompressed_counts(mask) -> list[int]:
     return counts + [run]
 
 
-@pytest.mark.parametrize("compressed", [True, False], ids=["compressed", "uncompressed"])
-def test_a_run_length_mask_imports_as_the_rings_its_mask_yields(tmp_path: Path, compressed):
+@pytest.mark.parametrize(
+    "compressed", [True, False], ids=["compressed", "uncompressed"]
+)
+def test_a_run_length_mask_imports_as_the_rings_its_mask_yields(
+    tmp_path: Path, compressed
+):
     import numpy as np
     from pycocotools import mask as mask_utils
 
     from tcip_annotation.mask_contours import mask_to_polygon_rings
     from tests._producer_fixtures import painted_array
 
-    mask = painted_array(IMG, IMG, [((12, 10, 40, 30), 1), ((44, 40, 60, 52), 1)])
-    counts: object = (mask_utils.encode(np.asfortranarray(mask))["counts"].decode("ascii")
-                      if compressed else _uncompressed_counts(mask))
+    mask = painted_array(
+        IMG, IMG, [((12, 10, 40, 30), 1), ((44, 40, 60, 52), 1)]
+    )
+    counts: object = (
+        mask_utils.encode(np.asfortranarray(mask))["counts"].decode("ascii")
+        if compressed
+        else _uncompressed_counts(mask)
+    )
     root = _dataset(tmp_path).root
-    annotations = [{"id": 1, "image_id": 1, "category_id": 7, "iscrowd": 0,
-                    "segmentation": {"size": [IMG, IMG], "counts": counts}}]
+    annotations = [
+        {
+            "id": 1,
+            "image_id": 1,
+            "category_id": 7,
+            "iscrowd": 0,
+            "segmentation": {"size": [IMG, IMG], "counts": counts},
+        }
+    ]
 
-    result = _import(_document(tmp_path / "external.json", annotations=annotations), root)
+    result = _import(
+        _document(tmp_path / "external.json", annotations=annotations), root
+    )
 
     assert "error" not in result, result
     (ann,) = json_io.read_label_document(_label(root, "tree_01")).annotations
@@ -657,14 +968,24 @@ def test_a_run_length_mask_imports_as_the_rings_its_mask_yields(tmp_path: Path, 
     assert len(ann.geometry.rings) == 2
 
 
-def test_a_run_length_mask_that_yields_no_ring_refuses_by_record(tmp_path: Path):
+def test_a_run_length_mask_that_yields_no_ring_refuses_by_record(
+    tmp_path: Path,
+):
     root = _dataset(tmp_path).root
     empty = [IMG * IMG]  # one run of background: nothing is foreground
-    annotations = [{"id": 1, "image_id": 1, "category_id": 7, "bbox": BOX},
-                   {"id": 2, "image_id": 2, "category_id": 7,
-                    "segmentation": {"size": [IMG, IMG], "counts": empty}}]
+    annotations = [
+        {"id": 1, "image_id": 1, "category_id": 7, "bbox": BOX},
+        {
+            "id": 2,
+            "image_id": 2,
+            "category_id": 7,
+            "segmentation": {"size": [IMG, IMG], "counts": empty},
+        },
+    ]
 
-    result = _import(_document(tmp_path / "external.json", annotations=annotations), root)
+    result = _import(
+        _document(tmp_path / "external.json", annotations=annotations), root
+    )
 
     assert "error" in result
     assert "record 1 a polygon needs at least one ring" in result["error"]
@@ -675,44 +996,85 @@ def test_every_fault_the_document_carries_is_reported_together(tmp_path: Path):
     """A duplicate category, an unmapped category, a wrong frame and a missing image are each
     independent of the others, and one refusal names all four."""
     root = _dataset(tmp_path).root
-    images = [{"id": 1, "file_name": "tree_01.png", "width": IMG * 2, "height": IMG},
-              {"id": 2, "file_name": "tree_99.png", "width": IMG, "height": IMG}]
-    annotations = [{"id": 1, "image_id": 1, "category_id": 7, "bbox": BOX},
-                   {"id": 2, "image_id": 1, "category_id": 8, "bbox": BOX}]
+    images = [
+        {"id": 1, "file_name": "tree_01.png", "width": IMG * 2, "height": IMG},
+        {"id": 2, "file_name": "tree_99.png", "width": IMG, "height": IMG},
+    ]
+    annotations = [
+        {"id": 1, "image_id": 1, "category_id": 7, "bbox": BOX},
+        {"id": 2, "image_id": 1, "category_id": 8, "bbox": BOX},
+    ]
     categories = [{"id": 7, "name": SUBJECT}, {"id": 7, "name": "leaf"}]
 
-    result = _import(_document(tmp_path / "external.json", images=images,
-                               annotations=annotations, categories=categories), root)
+    result = _import(
+        _document(
+            tmp_path / "external.json",
+            images=images,
+            annotations=annotations,
+            categories=categories,
+        ),
+        root,
+    )
 
     assert "error" in result
-    for fault in ("category id 7 is declared twice", "record 1 names category_id 8",
-                  "'tree_01.png' is stated as", "'tree_99.png' is not in"):
+    for fault in (
+        "category id 7 is declared twice",
+        "record 1 names category_id 8",
+        "'tree_01.png' is stated as",
+        "'tree_99.png' is not in",
+    ):
         assert fault in result["error"], (fault, result["error"])
 
 
-def test_a_missing_image_is_reported_whatever_document_its_stem_holds(tmp_path: Path):
+def test_a_missing_image_is_reported_whatever_document_its_stem_holds(
+    tmp_path: Path,
+):
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     made = _dataset(tmp_path)
     root = made.root
     assert "error" not in save_annotations(
-        bound_to(made), str(root / "images" / DATE / "tree_02.png"),
-        annotations=[{"subject": "leaf", "bbox": [1, 1, 5, 5]}])
-    images = [{"id": 1, "file_name": "tree_01.png", "width": IMG, "height": IMG},
-              {"id": 2, "file_name": "tree_02.jpg", "width": IMG, "height": IMG}]
+        bound_to(made),
+        str(root / "images" / DATE / "tree_02.png"),
+        annotations=[{"subject": "leaf", "bbox": [1, 1, 5, 5]}],
+    )
+    images = [
+        {"id": 1, "file_name": "tree_01.png", "width": IMG, "height": IMG},
+        {"id": 2, "file_name": "tree_02.jpg", "width": IMG, "height": IMG},
+    ]
 
-    result = _import(_document(tmp_path / "external.json", images=images), root)
+    result = _import(
+        _document(tmp_path / "external.json", images=images), root
+    )
 
     assert "error" in result
     assert "'tree_02.jpg' is not in" in result["error"]
     assert _written(root) == ["tree_02"]
 
 
-@pytest.mark.parametrize("change, fault", [
-    ({"categories": [{"id": 7, "name": SUBJECT}, {"id": 7.5, "name": None}]}, "category 1 "),
-    ({"images": [{"file_name": "tree_01.png"}]}, "image record 0 names id None"),
-    ({"annotations": [{"id": 1, "category_id": 7, "bbox": BOX}]}, "record 0 names image_id None"),
-], ids=["float_null_category", "no_image_id", "no_annotation_image_id"])
+@pytest.mark.parametrize(
+    "change, fault",
+    [
+        (
+            {
+                "categories": [
+                    {"id": 7, "name": SUBJECT},
+                    {"id": 7.5, "name": None},
+                ]
+            },
+            "category 1 ",
+        ),
+        (
+            {"images": [{"file_name": "tree_01.png"}]},
+            "image record 0 names id None",
+        ),
+        (
+            {"annotations": [{"id": 1, "category_id": 7, "bbox": BOX}]},
+            "record 0 names image_id None",
+        ),
+    ],
+    ids=["float_null_category", "no_image_id", "no_annotation_image_id"],
+)
 def test_a_malformed_identity_refuses_by_index(tmp_path: Path, change, fault):
     root = _dataset(tmp_path).root
     document = _document(tmp_path / "external.json", **change)
@@ -724,25 +1086,48 @@ def test_a_malformed_identity_refuses_by_index(tmp_path: Path, change, fault):
 
 
 @pytest.mark.parametrize("image_id", [[], {}], ids=["list", "object"])
-def test_an_image_id_that_is_no_identity_is_a_fault_never_a_lookup_key(tmp_path: Path, image_id):
+def test_an_image_id_that_is_no_identity_is_a_fault_never_a_lookup_key(
+    tmp_path: Path, image_id
+):
     # An id found invalid is reported and never used to look the image's records up, so an
     # unhashable id is one more fault in the tool's structured error rather than a TypeError.
     root = _dataset(tmp_path).root
-    images = [{"id": image_id, "file_name": "tree_01.png", "width": IMG, "height": IMG},
-              {"id": 2, "file_name": "tree_02.png", "width": IMG, "height": IMG}]
+    images = [
+        {
+            "id": image_id,
+            "file_name": "tree_01.png",
+            "width": IMG,
+            "height": IMG,
+        },
+        {"id": 2, "file_name": "tree_02.png", "width": IMG, "height": IMG},
+    ]
 
-    result = _import(_document(tmp_path / "external.json", images=images), root)
+    result = _import(
+        _document(tmp_path / "external.json", images=images), root
+    )
 
-    assert f"image record 0 names id {image_id!r}, not an integer image id" in result["error"]
+    assert (
+        f"image record 0 names id {image_id!r}, not an integer image id"
+        in result["error"]
+    )
     assert _written(root) == []
 
 
-def test_a_records_identity_and_content_faults_are_both_reported(tmp_path: Path):
+def test_a_records_identity_and_content_faults_are_both_reported(
+    tmp_path: Path,
+):
     root = _dataset(tmp_path).root
-    annotations = [{"id": 1, "image_id": 1, "category_id": 7, "bbox": BOX},
-                   {"id": 2, "image_id": None, "category_id": 7, "bbox": [1.0, 2.0, 3.0]}]
+    annotations = [
+        {"id": 1, "image_id": 1, "category_id": 7, "bbox": BOX},
+        {"id": 2, "image_id": None, "category_id": 7, "bbox": [1.0, 2.0, 3.0]},
+    ]
 
-    result = _import(_document(tmp_path / "external.json", annotations=annotations), root)
+    result = _import(
+        _document(tmp_path / "external.json", annotations=annotations), root
+    )
 
     assert "record 1 names image_id None" in result["error"], result
-    assert "record 1 bbox [1.0, 2.0, 3.0] is not a list of 4 numbers" in result["error"], result
+    assert (
+        "record 1 bbox [1.0, 2.0, 3.0] is not a list of 4 numbers"
+        in result["error"]
+    ), result

@@ -66,7 +66,9 @@ def test_skill_asserts_no_fabricated_traits(name: str) -> None:
 def test_skill_asserts_no_off_crop_traits(name: str, crop_key: str) -> None:
     """Every real trait a per-crop document backticks is assigned to that crop in crops.yml."""
     allnames, by_crop = guardrail.load_vocab()
-    off_crop = guardrail.off_crop_tokens(_document_text(name), allnames, by_crop[crop_key])
+    off_crop = guardrail.off_crop_tokens(
+        _document_text(name), allnames, by_crop[crop_key]
+    )
     assert not off_crop, (
         f"{name}: backticks trait(s) crops.yml does not assign to {crop_key!r}: "
         f"{off_crop}. Either the document or crops.yml's crop assignment is wrong."
@@ -85,32 +87,41 @@ def test_backtick_regex_catches_no_underscore_and_mixed_case_names() -> None:
     assert "fruit_juice_pH" in toks
     assert "plant_height" in toks
     # single-word tokens still don't match the token-shaped regex: documented blind spot
-    assert guardrail.extract_backtick_snake("See `dbh` and `sex` here.") == set()
+    assert (
+        guardrail.extract_backtick_snake("See `dbh` and `sex` here.") == set()
+    )
 
 
 def test_mentioned_trait_names_finds_single_word_traits() -> None:
     """`mentioned_trait_names` is membership search, not regex extraction: it finds `dbh` even
     though `extract_backtick_snake` (the fabrication-check regex) structurally cannot."""
     allnames, _ = guardrail.load_vocab()
-    found = guardrail.mentioned_trait_names("Measure `dbh` on the standing tree.", allnames)
+    found = guardrail.mentioned_trait_names(
+        "Measure `dbh` on the standing tree.", allnames
+    )
     assert "dbh" in found
 
 
-def test_the_guardrail_checks_the_vocabulary_the_registry_itself_loads(monkeypatch) -> None:
+def test_the_guardrail_checks_the_vocabulary_the_registry_itself_loads(
+    monkeypatch,
+) -> None:
     """One read of the controlled vocabulary serves both the runtime registry and this check.
     Two reads can disagree, and the disagreement shows up as a skill passing a check the platform
     would fail on the same name, so the vocabulary the guardrail sees is the registry's."""
     from tcip_mcp import traits
 
     monkeypatch.setattr(
-        traits, "_crops_traits",
-        lambda: [{"name": "measure_one", "crops": ["crop_one"]}])
+        traits,
+        "_crops_traits",
+        lambda: [{"name": "measure_one", "crops": ["crop_one"]}],
+    )
 
     allnames, by_crop = guardrail.load_vocab()
     assert allnames == {"measure_one"}
     assert by_crop["crop_one"] == {"measure_one"}
     assert guardrail.unknown_trait_tokens(
-        "Records `plant_height` for the block.", allnames) == ["plant_height"]
+        "Records `plant_height` for the block.", allnames
+    ) == ["plant_height"]
 
 
 def test_a_readable_vocabulary_is_checked() -> None:
@@ -119,7 +130,12 @@ def test_a_readable_vocabulary_is_checked() -> None:
     allnames, by_crop = guardrail.load_vocab()
     assert "dbh" in allnames
     assert by_crop["hazelnut"]
-    assert guardrail.unknown_trait_tokens("Measure `dbh` on the standing tree.", allnames) == []
+    assert (
+        guardrail.unknown_trait_tokens(
+            "Measure `dbh` on the standing tree.", allnames
+        )
+        == []
+    )
 
 
 def test_off_crop_tokens_catches_single_word_mis_assignment() -> None:
@@ -129,5 +145,8 @@ def test_off_crop_tokens_catches_single_word_mis_assignment() -> None:
     assert "dbh" in allnames
     assert "dbh" not in by_crop.get("currant", set())
     off_crop = guardrail.off_crop_tokens(
-        "This currant skill mentions `dbh` by mistake.", allnames, by_crop.get("currant", set()))
+        "This currant skill mentions `dbh` by mistake.",
+        allnames,
+        by_crop.get("currant", set()),
+    )
     assert "dbh" in off_crop

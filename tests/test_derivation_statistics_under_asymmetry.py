@@ -30,11 +30,16 @@ def test_num_classes_sizes_the_head_for_the_highest_id_not_the_ids_present():
     assert num_classes_from_distribution({0: 1, 1: 1, 5: 3}) == 6
 
 
-@pytest.mark.parametrize("boxes,label_ratio", [
-    ([(10.0, 40.0)] * 20, 4.0),   # uniformly tall
-    ([(40.0, 10.0)] * 20, 0.25),  # uniformly wide
-])
-def test_anchor_ratios_keep_square_coverage_on_a_uniformly_open_dataset(boxes, label_ratio):
+@pytest.mark.parametrize(
+    "boxes,label_ratio",
+    [
+        ([(10.0, 40.0)] * 20, 4.0),  # uniformly tall
+        ([(40.0, 10.0)] * 20, 0.25),  # uniformly wide
+    ],
+)
+def test_anchor_ratios_keep_square_coverage_on_a_uniformly_open_dataset(
+    boxes, label_ratio
+):
     """The derived anchor set spans the GT's own shape distribution and still covers a square-ish
     object. A class whose p10 and p90 both sit away from 1.0 would otherwise leave anchors that
     match nothing near square, so an instance closer to square than the rest of its class loses
@@ -56,8 +61,12 @@ def test_localization_tolerance_normalizes_by_the_characteristic_size_its_siblin
     square = [[(0, 0, 30, 30), (40, 0, 30, 30), (80, 0, 30, 30)]]
     open = [[(0, 0, 10, 90), (40, 0, 10, 90), (80, 0, 10, 90)]]
 
-    assert float(np.mean(char_sizes(xywh_corners(b) for b in square))) == pytest.approx(30.0)
-    assert float(np.mean(char_sizes(xywh_corners(b) for b in open))) == pytest.approx(30.0)
+    assert float(
+        np.mean(char_sizes(xywh_corners(b) for b in square))
+    ) == pytest.approx(30.0)
+    assert float(
+        np.mean(char_sizes(xywh_corners(b) for b in open))
+    ) == pytest.approx(30.0)
 
     tol_square = derive_localization_tolerance_frac(square)
     tol_open = derive_localization_tolerance_frac(open)
@@ -74,10 +83,18 @@ def test_block_scale_takes_the_typical_spacing_not_one_dragged_up_by_isolated_ob
     spacing the dense majority actually has."""
     from tests._verified_checkpoint_fixtures import objects_over
 
-    dense = [[x, 0, x + 10, 10] for x in range(0, 600, 100)]  # 6 boxes, 100px apart
-    isolated = [[5000, 0, 5010, 10], [5900, 0, 5910, 10]]     # 900px apart, far from the row
+    dense = [
+        [x, 0, x + 10, 10] for x in range(0, 600, 100)
+    ]  # 6 boxes, 100px apart
+    isolated = [
+        [5000, 0, 5010, 10],
+        [5900, 0, 5910, 10],
+    ]  # 900px apart, far from the row
     px, source = derive_block_scale_px(
-        tile_size=50, objects=objects_over(dense + isolated, 6000 * 100))
+        tile_size=50, objects=objects_over(dense + isolated, 6000 * 100)
+    )
     assert "GT object-spacing" in source
     assert px == 100
-    assert px > 50  # above the tile_size floor, so the floor is not what produced this number
+    assert (
+        px > 50
+    )  # above the tile_size floor, so the floor is not what produced this number

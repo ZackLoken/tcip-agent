@@ -21,14 +21,20 @@ def _rows(project: Path) -> list[dict]:
 
 
 def test_a_successful_monitor_result_audits_nothing_and_carries_no_refusal_key(
-        tmp_path: Path) -> None:
+    tmp_path: Path,
+) -> None:
     """The stream's own read: a run whose status carries ``status_error: None`` polled through
     ``monitor_training`` leaves the log exactly as it found it, and its row carries no ``error``
     key a refusal check could misread."""
     from tcip_mcp.tools.training_tools import monitor_training
-    from tests._verified_checkpoint_fixtures import detection_config, opened_run
+    from tests._verified_checkpoint_fixtures import (
+        detection_config,
+        opened_run,
+    )
 
-    opened_run(tmp_path, detection_config(tmp_path / "ds"), experiment_id="exp-polled")
+    opened_run(
+        tmp_path, detection_config(tmp_path / "ds"), experiment_id="exp-polled"
+    )
     before = len(_rows(tmp_path))
 
     result = monitor_training(tmp_path, "exp-polled")
@@ -41,14 +47,25 @@ def test_a_successful_monitor_result_audits_nothing_and_carries_no_refusal_key(
 
 
 def test_read_only_doors_leave_no_line(tmp_path: Path) -> None:
-    from tcip_mcp.tools.experiment_tools import get_experiment, list_experiments
+    from tcip_mcp.tools.experiment_tools import (
+        get_experiment,
+        list_experiments,
+    )
     from tcip_mcp.tools.knowledge_tools import serve_domain_knowledge
     from tcip_mcp.tools.meta_tools import read_audit_log
     from tcip_mcp.tools.project_tools import view_gui_state
-    from tcip_mcp.tools.training_tools import inspect_compute_resources, monitor_training
-    from tests._verified_checkpoint_fixtures import detection_config, opened_run
+    from tcip_mcp.tools.training_tools import (
+        inspect_compute_resources,
+        monitor_training,
+    )
+    from tests._verified_checkpoint_fixtures import (
+        detection_config,
+        opened_run,
+    )
 
-    opened_run(tmp_path, detection_config(tmp_path / "ds"), experiment_id="exp-read")
+    opened_run(
+        tmp_path, detection_config(tmp_path / "ds"), experiment_id="exp-read"
+    )
     before = len(_rows(tmp_path))
 
     get_experiment(tmp_path, "exp-read")
@@ -64,7 +81,9 @@ def test_read_only_doors_leave_no_line(tmp_path: Path) -> None:
     assert len(_rows(tmp_path)) == before
 
 
-def test_a_phenology_look_on_screen_leaves_no_line(tmp_path: Path, client) -> None:
+def test_a_phenology_look_on_screen_leaves_no_line(
+    tmp_path: Path, client
+) -> None:
     """The Results tab's measurement door computes and shows; it ships nothing and writes nothing,
     so the project's log reads the same before and after a successful look."""
     pytest.importorskip("torch")
@@ -88,17 +107,26 @@ def test_ranking_a_review_queue_leaves_no_line(
     from tcip_mcp.tools.feedback_tools import prioritize_review_queue
 
     from tests.test_feedback_tools import _bound_checkpoint, _stub_scorer
-    from tests.test_selection_ground_truth_digests import DATES, _dataset, _draw
+    from tests.test_selection_ground_truth_digests import (
+        DATES,
+        _dataset,
+        _draw,
+    )
 
     root = _dataset(tmp_path / "data")
     manifest_dir = tmp_path / "manifest"
     _draw(tmp_path, root, manifest_dir)
-    _run_dir, ckpt_path = _bound_checkpoint(tmp_path, manifest_dir, "exp-ranked")
+    _run_dir, ckpt_path = _bound_checkpoint(
+        tmp_path, manifest_dir, "exp-ranked"
+    )
     _stub_scorer(monkeypatch)
     before = _rows(tmp_path)
 
     result = prioritize_review_queue(
-        tmp_path, checkpoint_path=ckpt_path, images_dir=str(root / "images" / DATES[0]))
+        tmp_path,
+        checkpoint_path=ckpt_path,
+        images_dir=str(root / "images" / DATES[0]),
+    )
 
     assert "error" not in result, result
     assert result["queue"]
@@ -111,7 +139,9 @@ def test_a_mutating_door_still_leaves_one_line(tmp_path: Path) -> None:
     from tcip_mcp.tools.meta_tools import report_friction
 
     before = len(_rows(tmp_path))
-    result = report_friction(tmp_path, "unexpected_behavior", "a real mutation")
+    result = report_friction(
+        tmp_path, "unexpected_behavior", "a real mutation"
+    )
 
     assert "error" not in result
     rows = _rows(tmp_path)
@@ -120,7 +150,9 @@ def test_a_mutating_door_still_leaves_one_line(tmp_path: Path) -> None:
     assert rows[-1]["status"] == "ok"
 
 
-def test_a_return_is_ok_a_raise_is_an_exception_and_a_refusal_is_no_line(tmp_path: Path) -> None:
+def test_a_return_is_ok_a_raise_is_an_exception_and_a_refusal_is_no_line(
+    tmp_path: Path,
+) -> None:
     """A refusal returned as the error dict every tool returns is no act and leaves no line; a
     dict whose ``error`` is null is an ordinary answer."""
     from tcip_mcp.audit import audited

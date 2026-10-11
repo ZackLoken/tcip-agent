@@ -28,16 +28,22 @@ def _forget_agent_identity_between_tests():
 def _launch_record(project, experiment_id: str) -> dict:
     from tcip_mcp.experiments import RUN_FILE, experiment_dir, read_record
 
-    return read_record(experiment_dir(experiment_id, project=project) / RUN_FILE)
+    return read_record(
+        experiment_dir(experiment_id, project=project) / RUN_FILE
+    )
 
 
 def _row(project, experiment_id: str) -> dict:
     from tcip_mcp.experiments import run_rows
 
-    return next(r for r in run_rows(project) if r.experiment_id == experiment_id).model_dump()
+    return next(
+        r for r in run_rows(project) if r.experiment_id == experiment_id
+    ).model_dump()
 
 
-def test_a_launch_no_agent_declared_itself_to_shows_an_empty_declaration(tmp_path, monkeypatch):
+def test_a_launch_no_agent_declared_itself_to_shows_an_empty_declaration(
+    tmp_path, monkeypatch
+):
     """A launch outside an MCP handshake leaves its launch event carrying no identity, and that
     is what the run's row shows: the fact available, never a guess about who."""
     from tcip_mcp.tools import training_tools
@@ -47,14 +53,18 @@ def test_a_launch_no_agent_declared_itself_to_shows_an_empty_declaration(tmp_pat
     _fake_popen(monkeypatch, [])
 
     result = training_tools.launch_training(
-        tmp_path, small_detection_config(images_dir), actor=None)
+        tmp_path, small_detection_config(images_dir), actor=None
+    )
     assert "error" not in result, result
     assert _row(tmp_path, result["experiment_id"])["launch"] == {}
-    assert "launched_by" not in _launch_record(tmp_path, result["experiment_id"])
+    assert "launched_by" not in _launch_record(
+        tmp_path, result["experiment_id"]
+    )
 
 
 def test_a_launch_inside_an_mcp_handshake_shows_the_agents_declaration_from_its_event(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     """A launch made while an MCP handshake is in force shows the connected agent's identity,
     read off the launch event that names the run, never off the run's own record."""
@@ -68,17 +78,23 @@ def test_a_launch_inside_an_mcp_handshake_shows_the_agents_declaration_from_its_
 
     identity = agent_identity.begin("claude-code", "2.1.238")
     result = training_tools.launch_training(
-        tmp_path, small_detection_config(images_dir), actor=None)
+        tmp_path, small_detection_config(images_dir), actor=None
+    )
     agent_identity.end()
     assert "error" not in result, result
     assert _row(tmp_path, result["experiment_id"])["launch"] == {
-        "agent_client_name": "claude-code", "agent_client_version": "2.1.238",
+        "agent_client_name": "claude-code",
+        "agent_client_version": "2.1.238",
         "agent_session": identity.agent_session,
     }
-    assert "launched_by" not in _launch_record(tmp_path, result["experiment_id"])
+    assert "launched_by" not in _launch_record(
+        tmp_path, result["experiment_id"]
+    )
 
 
-def test_launch_refuses_when_the_launch_record_cannot_be_written(tmp_path, monkeypatch):
+def test_launch_refuses_when_the_launch_record_cannot_be_written(
+    tmp_path, monkeypatch
+):
     """A launch record that cannot be written refuses the launch by name before the subprocess,
     and leaves no directory that reads as a run."""
     from tcip_store import StoreError
@@ -98,10 +114,14 @@ def test_launch_refuses_when_the_launch_record_cannot_be_written(tmp_path, monke
     monkeypatch.setattr(experiments_mod, "write_once", _raise)
 
     result = training_tools.launch_training(
-        tmp_path, small_detection_config(images_dir), actor=None)
+        tmp_path, small_detection_config(images_dir), actor=None
+    )
 
     assert result["error"] == "launch_training: disk full"
-    assert not any("tcip_mcp.pipelines.training.subprocess_worker" in argv for argv in captured)
+    assert not any(
+        "tcip_mcp.pipelines.training.subprocess_worker" in argv
+        for argv in captured
+    )
     assert run_dirs(tmp_path) == []
 
 
@@ -118,10 +138,15 @@ def test_a_launch_records_the_seed_it_draws(tmp_path, monkeypatch):
     result = training_tools.launch_training(tmp_path, cfg, actor=None)
     assert "error" not in result, result
     assert "seed" not in cfg
-    assert isinstance(_launch_record(tmp_path, result["experiment_id"])["config"]["seed"], int)
+    assert isinstance(
+        _launch_record(tmp_path, result["experiment_id"])["config"]["seed"],
+        int,
+    )
 
 
-def test_a_spawn_failure_leaves_a_directory_that_reads_interrupted(tmp_path, monkeypatch):
+def test_a_spawn_failure_leaves_a_directory_that_reads_interrupted(
+    tmp_path, monkeypatch
+):
     """A Popen failure after the launch record propagates out of launch_training, and the one
     directory it opened reads interrupted once its heartbeat window has passed."""
     import subprocess
@@ -140,7 +165,8 @@ def test_a_spawn_failure_leaves_a_directory_that_reads_interrupted(tmp_path, mon
 
     with pytest.raises(OSError):
         training_tools.launch_training(
-            tmp_path, small_detection_config(images_dir), actor=None)
+            tmp_path, small_detection_config(images_dir), actor=None
+        )
 
     monkeypatch.setattr(experiments_mod, "HEARTBEAT_STALE_SECONDS", -1.0)
     (opened,) = run_dirs(tmp_path)

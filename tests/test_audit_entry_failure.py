@@ -18,12 +18,14 @@ class _AppendRefusedError(RuntimeError):
 
 def _refuse_append(monkeypatch: pytest.MonkeyPatch) -> None:
     refuse_audit_appends(
-        monkeypatch, error=_AppendRefusedError("the audit log could not be appended to")
+        monkeypatch,
+        error=_AppendRefusedError("the audit log could not be appended to"),
     )
 
 
 def test_append_failure_after_a_successful_body_refuses_and_names_the_committed_call(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A committed mutation with no audit line is told to the caller, not left to a log line."""
 
@@ -38,14 +40,18 @@ def test_append_failure_after_a_successful_body_refuses_and_names_the_committed_
     with pytest.raises(RuntimeError) as caught:
         stage_something(tmp_path, 3)
 
-    assert type(caught.value) is audit_module.MutationCommittedWithoutAuditLineError
+    assert (
+        type(caught.value)
+        is audit_module.MutationCommittedWithoutAuditLineError
+    )
     assert caught.value.tool == "stage_something"
     assert "do not retry it blind" in str(caught.value)
     assert isinstance(caught.value.__cause__, _AppendRefusedError)
 
 
 def test_a_failed_body_keeps_its_own_exception_when_the_audit_of_it_cannot_be_written(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The audit-of-failure is the decorator's business; the failure itself is the caller's."""
 
@@ -96,6 +102,7 @@ def test_a_failing_body_against_a_healthy_log_still_records_the_call_and_re_rais
 
 def test_a_door_with_no_project_parameter_is_refused_at_decoration() -> None:
     with pytest.raises(ValueError, match="needs a project parameter"):
+
         @audited
         def stage_something(count: int) -> dict:
             return {"count": count}
@@ -105,14 +112,16 @@ def test_a_door_with_no_project_parameter_is_refused_at_decoration() -> None:
 
 
 def test_record_event_or_raise_raises_audit_entry_not_written_when_the_append_fails(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A confirmation that already committed must not be reported as silently unrecorded."""
     _refuse_append(monkeypatch)
 
     with pytest.raises(audit_module.AuditEntryNotWrittenError) as caught:
-        audit_module.record_event_or_raise("confirm_something", {"trait": "bloom"}, actor=None,
-                                           scope=tmp_path)
+        audit_module.record_event_or_raise(
+            "confirm_something", {"trait": "bloom"}, actor=None, scope=tmp_path
+        )
 
     assert caught.value.tool == "confirm_something"
     assert "do not retry it blind" in str(caught.value)
@@ -124,7 +133,11 @@ def test_record_event_or_raise_against_a_healthy_log_writes_one_entry_and_return
 ) -> None:
     """The rail admits the work it exists beside: a healthy append lands one line."""
     audit_module.record_event_or_raise(
-        "confirm_something", {"trait": "bloom"}, actor=None, status="ok", scope=tmp_path,
+        "confirm_something",
+        {"trait": "bloom"},
+        actor=None,
+        status="ok",
+        scope=tmp_path,
         note="confirmed",
     )
 

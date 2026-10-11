@@ -18,10 +18,14 @@ from tcip_mcp.pipelines.operating_point import count_criterion  # noqa: E402
 
 N_IMAGES = 4
 OBJECTS_PER_IMAGE = 8
-ENTRY = fx.with_fields(fx.BUD_OPENING, count_bias_tolerance_frac=0.1, count_error_tolerance=1.0)
+ENTRY = fx.with_fields(
+    fx.BUD_OPENING, count_bias_tolerance_frac=0.1, count_error_tolerance=1.0
+)
 
 
-def _records(prefix: str, offset: float, n_images: int = N_IMAGES) -> list[dict]:
+def _records(
+    prefix: str, offset: float, n_images: int = N_IMAGES
+) -> list[dict]:
     """One record per image, every object matched exactly by one detection at score 0.9. Boxes sit
     100 px apart, well outside the tolerance this GT derives.
     """
@@ -32,8 +36,17 @@ def _records(prefix: str, offset: float, n_images: int = N_IMAGES) -> list[dict]
             box = [offset + 100.0 * k, 50.0 + 10.0 * i, 40.0, 40.0]
             gt.append({"bbox": box, "category_id": 1, "iscrowd": 0})
             dt.append({"bbox": box, "category_id": 1, "score": 0.9})
-        recs.append({"image_id": f"{prefix}{i}", "width": 4000, "height": 1000, "gt": gt,
-                     "dt": dt, "count": len(dt), "cap": len(dt) + 1})
+        recs.append(
+            {
+                "image_id": f"{prefix}{i}",
+                "width": 4000,
+                "height": 1000,
+                "gt": gt,
+                "dt": dt,
+                "count": len(dt),
+                "cap": len(dt) + 1,
+            }
+        )
     return recs
 
 
@@ -47,12 +60,18 @@ def test_every_conf_label_the_registered_pickers_can_record_has_a_registered_imp
     labels = set()
     for objective in sorted(COUNT_OBJECTIVE_PICKERS):
         _conf, evidence, _failures = count_criterion(
-            _records("c", 0.0), _records("h", 100000.0),
-            fx.with_fields(ENTRY, count_objective=objective), staged_conf_floor=0.05,
-            staged_conf_floor_attribute_path=None)
+            _records("c", 0.0),
+            _records("h", 100000.0),
+            fx.with_fields(ENTRY, count_objective=objective),
+            staged_conf_floor=0.05,
+            staged_conf_floor_attribute_path=None,
+        )
         labels.add(evidence["conf_derived_from"])
 
-    assert sorted(lbl for lbl in labels if lbl not in DERIVATION_IMPLEMENTATIONS) == []
+    assert (
+        sorted(lbl for lbl in labels if lbl not in DERIVATION_IMPLEMENTATIONS)
+        == []
+    )
     assert len(labels) == 2  # two pickers
 
 
@@ -61,10 +80,17 @@ def test_a_floor_mismatch_across_the_reference_is_surfaced_and_never_fails_it():
     the holdout; the mismatch reads over both sides and is evidence, never a failure."""
     cal = _records("c", 0.0)
     hold = _records("h", 100000.0)
-    hold[0]["dt"].append({"bbox": [900000.0, 50.0, 40.0, 40.0], "category_id": 1, "score": 0.05})
+    hold[0]["dt"].append(
+        {"bbox": [900000.0, 50.0, 40.0, 40.0], "category_id": 1, "score": 0.05}
+    )
 
-    _conf, evidence, failures = count_criterion(cal, hold, ENTRY, staged_conf_floor=0.05,
-                                                staged_conf_floor_attribute_path=None)
+    _conf, evidence, failures = count_criterion(
+        cal,
+        hold,
+        ENTRY,
+        staged_conf_floor=0.05,
+        staged_conf_floor_attribute_path=None,
+    )
 
     assert evidence["observed_min_score"] == pytest.approx(0.05)
     assert evidence["staged_conf_floor"] == pytest.approx(0.05)
@@ -72,7 +98,11 @@ def test_a_floor_mismatch_across_the_reference_is_surfaced_and_never_fails_it():
     assert failures == []
 
     _conf, evidence, _failures = count_criterion(
-        cal, _records("h", 100000.0), ENTRY, staged_conf_floor=0.05,
-        staged_conf_floor_attribute_path=None)
+        cal,
+        _records("h", 100000.0),
+        ENTRY,
+        staged_conf_floor=0.05,
+        staged_conf_floor_attribute_path=None,
+    )
     assert evidence["observed_min_score"] == pytest.approx(0.9)
     assert evidence["conf_floor_mismatch"] is True

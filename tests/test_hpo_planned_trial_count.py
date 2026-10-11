@@ -21,11 +21,19 @@ from tests._training_values import tune_arguments
 SPACE = {
     "optimizer.head_lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2},
     "batch_size": {"type": "categorical", "choices": [2, 4, 8]},
-    "optimizer.weight_decay": {"type": "loguniform", "low": 1e-5, "high": 1e-2},
+    "optimizer.weight_decay": {
+        "type": "loguniform",
+        "low": 1e-5,
+        "high": 1e-2,
+    },
 }
 """A sample space: two sampled axes and one three-choice categorical axis."""
 
-BASELINE = {"optimizer.head_lr": 3e-4, "batch_size": 4, "optimizer.weight_decay": 1e-4}
+BASELINE = {
+    "optimizer.head_lr": 3e-4,
+    "batch_size": 4,
+    "optimizer.weight_decay": 1e-4,
+}
 """A sample baseline point over :data:`SPACE`'s own axes."""
 
 SEEDED_SPLIT = SplitSpec.model_validate({"seed": 42})
@@ -33,7 +41,9 @@ SEEDED_SPLIT = SplitSpec.model_validate({"seed": 42})
 
 
 def _paired_space(draws: int, param_space: dict = SPACE) -> dict:
-    return split_draw_search_space(param_space, resolved_draw_seeds(SEEDED_SPLIT, draws, None))
+    return split_draw_search_space(
+        param_space, resolved_draw_seeds(SEEDED_SPLIT, draws, None)
+    )
 
 
 # -- the measured counts over the sample space --------------------------------------
@@ -94,7 +104,9 @@ def test_planned_trial_count_over_an_empty_param_space_run_through_split_draw_se
     """Above one draw, an empty param_space run through split_draw_search_space first carries
     only the paired seed axis: the paired sweep runs the seed axis alone."""
     space = _paired_space(2, {})
-    assert space == {"data.split.seed": {"type": "categorical", "choices": [42, 43]}}
+    assert space == {
+        "data.split.seed": {"type": "categorical", "choices": [42, 43]}
+    }
     assert planned_trial_count(space, 1, "grid", 2, None) == 2
 
 
@@ -103,7 +115,9 @@ def test_planned_trial_count_over_a_backend_search_alg_name():
     generator's own count, never a claim about how many points the backend searcher itself would
     draw (build_search_alg's own refusal of an uninstalled backend lives inside tune_search, not
     here)."""
-    space = {"optimizer.head_lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2}}
+    space = {
+        "optimizer.head_lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2}
+    }
     assert planned_trial_count(space, 4, "bayesopt", 1, None) == 4
 
 
@@ -127,7 +141,9 @@ def test_planned_trial_count_raises_on_a_categorical_with_no_choices():
 
 
 @pytest.mark.parametrize("search_alg", ["grid", "random"])
-def test_planned_trial_count_raises_on_an_int_axis_whose_low_exceeds_high(search_alg):
+def test_planned_trial_count_raises_on_an_int_axis_whose_low_exceeds_high(
+    search_alg,
+):
     """An int axis with low above high names no value to train, gridded or sampled:
     space_axes refuses it by name, before anything is counted."""
     space = {"batch_size": {"type": "int", "low": 8, "high": 2}}
@@ -158,8 +174,13 @@ def test_planned_trial_count_counts_a_large_sampled_int_span_and_refuses_it_grid
 
 def test_planned_trial_count_refuses_an_int_axis_past_the_samplers_int64_range():
     with pytest.raises(ValueError, match="'x'.*int64"):
-        planned_trial_count({"x": {"type": "int", "low": 0, "high": 10**30}}, 2, "random", 1,
-                            None)
+        planned_trial_count(
+            {"x": {"type": "int", "low": 0, "high": 10**30}},
+            2,
+            "random",
+            1,
+            None,
+        )
 
 
 # -- the shared derivation, and where the count lands --------------------------------
@@ -180,14 +201,19 @@ def test_tune_search_and_planned_trial_count_share_one_search_space_derivation(
         raise RuntimeError("stop before Ray")
 
     monkeypatch.setattr(hpo, "_search_space_and_points", recorder)
-    space = {"optimizer.head_lr": {"type": "loguniform", "low": 1e-4, "high": 1e-2}}
+    space = {
+        "optimizer.head_lr": {"type": "loguniform", "low": 1e-4, "high": 1e-2}
+    }
 
     with pytest.raises(RuntimeError, match="stop before Ray"):
         hpo.planned_trial_count(space, 3, "random", 1, None)
     with pytest.raises(RuntimeError, match="stop before Ray"):
         hpo.tune_search(
-            objective_fn=lambda config, report: report(0.0), param_space=space,
-            sweep_dir=tmp_path / "sweep", **tune_arguments(num_samples=3))
+            objective_fn=lambda config, report: report(0.0),
+            param_space=space,
+            sweep_dir=tmp_path / "sweep",
+            **tune_arguments(num_samples=3),
+        )
 
     assert len(calls) == 2
     assert calls[0] == calls[1] == ((space, "random", 1, None), {})
@@ -196,13 +222,17 @@ def test_tune_search_and_planned_trial_count_share_one_search_space_derivation(
 def test_split_draw_search_space_at_one_draw_returns_param_space_itself():
     """At split_draws of one or below no seeds resolve, and split_draw_search_space is then a
     no-op: the same object back."""
-    space = {"optimizer.head_lr": {"type": "loguniform", "low": 1e-4, "high": 1e-2}}
+    space = {
+        "optimizer.head_lr": {"type": "loguniform", "low": 1e-4, "high": 1e-2}
+    }
     seeds = resolved_draw_seeds(SplitSpec.model_validate({}), 1, None)
     assert seeds is None
     assert split_draw_search_space(space, seeds) is space
 
 
-def test_planned_trial_count_leaves_nothing_under_home_or_the_project_root(tmp_path, monkeypatch):
+def test_planned_trial_count_leaves_nothing_under_home_or_the_project_root(
+    tmp_path, monkeypatch
+):
     """planned_trial_count builds no searcher and no experiment, so a monkeypatched home
     directory and project root both stay empty after a real count."""
     home = tmp_path / "home"
@@ -224,8 +254,12 @@ def test_planned_trial_count_leaves_nothing_under_home_or_the_project_root(tmp_p
 
 
 def _trials_ray_yields(
-    param_space: dict, num_samples: int, search_alg: str, draws: int,
-    baseline_params: dict | None, storage_path,
+    param_space: dict,
+    num_samples: int,
+    search_alg: str,
+    draws: int,
+    baseline_params: dict | None,
+    storage_path,
 ) -> tuple[int, int]:
     """Build the searcher tune_search launches for this sweep and drain it, returning the number
     of trials next_trial() actually yielded and the total_samples tally read back afterwards."""
@@ -234,41 +268,58 @@ def _trials_ray_yields(
     from tcip_mcp.pipelines.training.hpo import build_search_alg
 
     space, points, alg = _search_space_and_points(
-        param_space, search_alg, draws, baseline_params)
-    generator = build_search_alg(alg, seed=0, points_to_evaluate=points,
-                                 constant_grid_search=draws > 1)
-    generator.add_configurations(Experiment(
-        name="drained_count", run=lambda config: None, config=space,
-        num_samples=num_samples, storage_path=str(storage_path),
-    ))
+        param_space, search_alg, draws, baseline_params
+    )
+    generator = build_search_alg(
+        alg, seed=0, points_to_evaluate=points, constant_grid_search=draws > 1
+    )
+    generator.add_configurations(
+        Experiment(
+            name="drained_count",
+            run=lambda config: None,
+            config=space,
+            num_samples=num_samples,
+            storage_path=str(storage_path),
+        )
+    )
     yielded = 0
     while generator.next_trial() is not None:
         yielded += 1
         if yielded > 1000:
-            raise AssertionError("the generator did not exhaust within 1000 trials")
+            raise AssertionError(
+                "the generator did not exhaust within 1000 trials"
+            )
     return yielded, generator.total_samples
 
 
-@pytest.mark.parametrize("search_alg, draws, baseline_params", [
-    ("random", 1, None),
-    ("random", 3, None),
-    ("grid", 1, None),
-    ("grid", 2, None),
-    ("grid", 3, {"optimizer.head_lr": 0.001}),
-    ("random", 2, {"optimizer.head_lr": 0.001}),
-])
+@pytest.mark.parametrize(
+    "search_alg, draws, baseline_params",
+    [
+        ("random", 1, None),
+        ("random", 3, None),
+        ("grid", 1, None),
+        ("grid", 2, None),
+        ("grid", 3, {"optimizer.head_lr": 0.001}),
+        ("random", 2, {"optimizer.head_lr": 0.001}),
+    ],
+)
 def test_planned_trial_count_equals_the_trials_the_generator_yields(
-        search_alg, draws, baseline_params, tmp_path):
+    search_alg, draws, baseline_params, tmp_path
+):
     """Coverage that the tally the door reads is the launched count, not merely a number the same
     function computes twice: a separately built generator is drained to exhaustion, and the trials
     it yielded, its own total_samples, and planned_trial_count's answer are all one number."""
     param_space = SPACE if draws == 1 else _paired_space(draws)
 
     yielded, tally = _trials_ray_yields(
-        param_space, 5, search_alg, draws, baseline_params, tmp_path)
+        param_space, 5, search_alg, draws, baseline_params, tmp_path
+    )
 
     assert yielded == tally
-    assert planned_trial_count(param_space, 5, search_alg, draws, baseline_params) == yielded
+    assert (
+        planned_trial_count(param_space, 5, search_alg, draws, baseline_params)
+        == yielded
+    )
 
 
 @pytest.mark.parametrize("draws", [2, 3, 4])

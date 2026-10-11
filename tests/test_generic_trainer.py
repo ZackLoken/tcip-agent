@@ -16,11 +16,14 @@ from tests._chain_fixtures import training_config
 
 # mint_experiment_id: id uniqueness (same-second and cross-thread)
 
+
 def test_mint_experiment_id_unique_within_one_second():
     from tcip_mcp.experiments import mint_experiment_id
 
     ids = {mint_experiment_id() for _ in range(50)}
-    assert len(ids) == 50  # the uuid suffix, not a counter, keeps same-second calls from colliding
+    assert (
+        len(ids) == 50
+    )  # the uuid suffix, not a counter, keeps same-second calls from colliding
 
 
 def test_mint_experiment_id_unique_across_threads():
@@ -48,10 +51,13 @@ def test_mint_experiment_id_unique_across_threads():
 
 # seeded: reproducibility, every run gets a recorded seed
 
+
 def _spec(**stated):
     from tests._verified_checkpoint_fixtures import unbuilt_source
 
-    return train_config(training_config(unbuilt_source("detection"), {}, **stated))
+    return train_config(
+        training_config(unbuilt_source("detection"), {}, **stated)
+    )
 
 
 def test_seeded_draws_and_records_a_seed_when_unset():
@@ -71,7 +77,11 @@ def test_seeded_drawn_seeds_are_independent():
 def _context(tmp_path, **stated):
     """The context of a one-epoch regression run over two frames and no validation side, with
     ``stated``'s config keys, opened by the launcher's own producer."""
-    from tests.tiny_trainer_fixtures import frames_data, regressor_config, run_context
+    from tests.tiny_trainer_fixtures import (
+        frames_data,
+        regressor_config,
+        run_context,
+    )
 
     data = frames_data(tmp_path / "ds", [0.1, 0.5], [0.2, 1.0])
     return run_context(tmp_path, regressor_config(data=data, **stated))
@@ -97,6 +107,7 @@ def test_train_applies_the_runs_seed(tmp_path, monkeypatch):
 # train: setup failures must reach a terminal status, never strand "running"
 # ====================================================================
 
+
 def test_train_with_unwritable_output_dir_marks_run_failed(tmp_path):
     import shutil
 
@@ -116,14 +127,18 @@ def test_train_with_unwritable_output_dir_marks_run_failed(tmp_path):
 
 def _run_artifacts(directory):
     """What a run left behind, without the storage layer's own lock bookkeeping."""
-    return sorted(p.name for p in directory.iterdir() if not p.name.endswith(".lock"))
+    return sorted(
+        p.name for p in directory.iterdir() if not p.name.endswith(".lock")
+    )
 
 
 def test_a_checkpoint_loads_back_exactly_what_was_saved(tmp_path):
     """A checkpoint is only worth writing if ``torch.load`` returns the payload unchanged."""
     path = gt.checkpoint_path(tmp_path, "model_best")
 
-    landed = gt.write_checkpoint({"epoch": 3, "weights": torch.zeros(2, 2)}, path)
+    landed = gt.write_checkpoint(
+        {"epoch": 3, "weights": torch.zeros(2, 2)}, path
+    )
 
     loaded = torch.load(landed, weights_only=False)
     assert loaded["epoch"] == 3
@@ -132,7 +147,9 @@ def test_a_checkpoint_loads_back_exactly_what_was_saved(tmp_path):
     assert _run_artifacts(tmp_path) == ["model_best.pt"]
 
 
-def test_a_failed_checkpoint_write_preserves_the_previous_one(tmp_path, monkeypatch):
+def test_a_failed_checkpoint_write_preserves_the_previous_one(
+    tmp_path, monkeypatch
+):
     path = gt.checkpoint_path(tmp_path, "model_best")
     gt.write_checkpoint({"epoch": 1}, path)
 
@@ -145,11 +162,15 @@ def test_a_failed_checkpoint_write_preserves_the_previous_one(tmp_path, monkeypa
     monkeypatch.undo()
 
     # The previous checkpoint is intact and loadable; the staged file was cleaned up.
-    assert torch.load(tmp_path / "model_best.pt", weights_only=False)["epoch"] == 1
+    assert (
+        torch.load(tmp_path / "model_best.pt", weights_only=False)["epoch"]
+        == 1
+    )
     assert _run_artifacts(tmp_path) == ["model_best.pt"]
 
 
 # capture_rng_state / restore_rng_state: put the four streams back where they were
+
 
 def test_capture_and_restore_rng_state_roundtrip():
     import random

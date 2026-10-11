@@ -23,11 +23,15 @@ import pytest_timeout
 
 
 @pytest.hookimpl
-def pytest_timeout_set_timer(item: pytest.Item, settings: pytest_timeout.Settings) -> bool | None:
+def pytest_timeout_set_timer(
+    item: pytest.Item, settings: pytest_timeout.Settings
+) -> bool | None:
     if settings.method != "thread" or pytest_timeout.is_debugging():
         return None
     faulthandler.dump_traceback_later(
-        settings.timeout, exit=True, file=item.config.stash[fault_handler_stderr_fd_key],
+        settings.timeout,
+        exit=True,
+        file=item.config.stash[fault_handler_stderr_fd_key],
     )
     # pytest-timeout's own cancel hook calls this attribute when the item finishes.
     item.cancel_timeout = faulthandler.cancel_dump_traceback_later  # type: ignore[attr-defined]

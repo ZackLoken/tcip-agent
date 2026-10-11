@@ -14,7 +14,9 @@ def test_repo_root_finds_the_marker() -> None:
     assert (root / ".mcp.json").is_file()
 
 
-def test_repo_root_climbs_past_a_package_level_claude_md(tmp_path: Path, monkeypatch) -> None:
+def test_repo_root_climbs_past_a_package_level_claude_md(
+    tmp_path: Path, monkeypatch
+) -> None:
     """A package subdir with its own CLAUDE.md must not stop the climb before the true repo
     root's .mcp.json."""
     root = tmp_path / "repo"

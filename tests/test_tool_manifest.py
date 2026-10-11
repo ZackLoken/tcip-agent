@@ -53,7 +53,9 @@ def test_server_imports_with_torch_absent():
     )
     result = subprocess.run(
         [sys.executable, "-c", _BLOCK_TORCH_AND_IMPORT_SERVER],
-        capture_output=True, text=True, timeout=60,
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
     assert result.returncode == 0, result.stderr
     assert int(result.stdout.strip()) > 0
@@ -65,7 +67,9 @@ def test_block_torch_finder_actually_blocks_torch_import():
     never calls, which would leave torch importable while looking like it was blocked."""
     result = subprocess.run(
         [sys.executable, "-c", _BLOCK_TORCH_AND_TRY_IMPORT],
-        capture_output=True, text=True, timeout=60,
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "blocked"

@@ -25,7 +25,9 @@ from tests._trait_fixtures import BUD_OPENING
 
 # An attribute whose positive value sits at id 2 with no record ever carrying id 1.
 SPARSE = cr.Attribute("opening", "categorical", ("closed", "partial", "open"))
-REGISTRY = cr.SubjectRegistry(subjects=(cr.Subject(name="bud", attributes=(SPARSE,)),))
+REGISTRY = cr.SubjectRegistry(
+    subjects=(cr.Subject(name="bud", attributes=(SPARSE,)),)
+)
 
 
 class _Assignment:
@@ -48,8 +50,12 @@ def test_crossing_uses_the_bracket_that_exists_in_time():
     between them. A series whose fraction order differs from its capture order (the ordinary case
     for a noisy curve) must not be re-ordered into a bracket that never happened.
     """
-    series = [("2026-03-09", 0.30), ("2026-03-01", 0.10), ("2026-03-13", 0.90),
-              ("2026-03-05", 0.70)]
+    series = [
+        ("2026-03-09", 0.30),
+        ("2026-03-01", 0.10),
+        ("2026-03-13", 0.90),
+        ("2026-03-05", 0.70),
+    ]
 
     c = phenology.crossing_date(series, 0.50)
 
@@ -107,7 +113,9 @@ def test_first_capture_exactly_on_the_target_keeps_its_date_when_the_curve_falls
     assert c.date == "2026-03-01"
 
 
-def test_milestones_of_a_noisy_plant_and_a_steady_plant_are_each_read_in_capture_order(tmp_path):
+def test_milestones_of_a_noisy_plant_and_a_steady_plant_are_each_read_in_capture_order(
+    tmp_path,
+):
     """Two plants observed on the same four dates, one whose fraction dips mid-season and one that
     rises steadily, get their milestones from their own series in capture order. The mapping's dates
     are supplied out of order, as an assembled mapping file has them, which changes no result.
@@ -122,17 +130,38 @@ def test_milestones_of_a_noisy_plant_and_a_steady_plant_are_each_read_in_capture
         "2026-03-09": {"P1": (3, 7), "P2": (3, 1)},
         "2026-03-13": {"P1": (9, 1), "P2": (4, 0)},
     }
-    buckets = {d: published(tmp_path, f"run/{d}", [
-        predicted(tmp_path / "ds" / "images" / d / f"{plant}_{d}.jpg", _states(pos, neg),
-                  (SPARSE,))
-        for plant, (pos, neg) in counts[d].items()], scope={"subject": "bud"},
-        registry=REGISTRY) for d in dates}
-    mapping = {d: [_Assignment(f"P1_{d}", "P1", "acc-noisy"),
-                   _Assignment(f"P2_{d}", "P2", "acc-steady")]
-               for d in ["2026-03-09", "2026-03-01", "2026-03-13", "2026-03-05"]}
+    buckets = {
+        d: published(
+            tmp_path,
+            f"run/{d}",
+            [
+                predicted(
+                    tmp_path / "ds" / "images" / d / f"{plant}_{d}.jpg",
+                    _states(pos, neg),
+                    (SPARSE,),
+                )
+                for plant, (pos, neg) in counts[d].items()
+            ],
+            scope={"subject": "bud"},
+            registry=REGISTRY,
+        )
+        for d in dates
+    }
+    mapping = {
+        d: [
+            _Assignment(f"P1_{d}", "P1", "acc-noisy"),
+            _Assignment(f"P2_{d}", "P2", "acc-steady"),
+        ]
+        for d in ["2026-03-09", "2026-03-01", "2026-03-13", "2026-03-05"]
+    }
 
-    out = phenology.per_plant_phenology(mapping, buckets, BUD_OPENING, ["P1", "P2"],
-                                        require_all_dates_complete=phenology.REQUIRE_ALL_DATES_COMPLETE)
+    out = phenology.per_plant_phenology(
+        mapping,
+        buckets,
+        BUD_OPENING,
+        ["P1", "P2"],
+        require_all_dates_complete=phenology.REQUIRE_ALL_DATES_COMPLETE,
+    )
 
     rows = {r["plant_id"]: r for r in out["rows"]}
     assert set(rows) == {"P1", "P2"}
@@ -152,7 +181,9 @@ def test_milestones_of_a_noisy_plant_and_a_steady_plant_are_each_read_in_capture
 # -- the counts the fraction is built from --------------------------------
 
 
-def test_positive_detections_are_the_named_value_not_a_fixed_position(tmp_path):
+def test_positive_detections_are_the_named_value_not_a_fixed_position(
+    tmp_path,
+):
     """The positive state is whichever value the trait names, wherever it sits in its attribute's
     declared order. An attribute whose positive value sits at id 2 with no record at id 1 counts
     the same as one whose values are all in use.
@@ -165,24 +196,42 @@ def test_positive_detections_are_the_named_value_not_a_fixed_position(tmp_path):
     p = prediction_key(tmp_path, "run/2026-03-05", "img")
     json_io.write_label_document(
         p,
-        [Annotation(subject="bud", geometry=BBox(1, 1, 4, 9), score=0.9,
-                   attributes={"opening": "open"}),
-         Annotation(subject="bud", geometry=BBox(6, 1, 9, 4), score=0.8,
-                   attributes={"opening": "closed"}),
-         Annotation(subject="bud", geometry=BBox(11, 2, 14, 12), score=0.7,
-                   attributes={"opening": "open"})],
-        40, 24,
+        [
+            Annotation(
+                subject="bud",
+                geometry=BBox(1, 1, 4, 9),
+                score=0.9,
+                attributes={"opening": "open"},
+            ),
+            Annotation(
+                subject="bud",
+                geometry=BBox(6, 1, 9, 4),
+                score=0.8,
+                attributes={"opening": "closed"},
+            ),
+            Annotation(
+                subject="bud",
+                geometry=BBox(11, 2, 14, 12),
+                score=0.7,
+                attributes={"opening": "open"},
+            ),
+        ],
+        40,
+        24,
     )
 
     registry_over(tmp_path, REGISTRY)
     scope = registry_scope(tmp_path / "images", "bud")
-    total, positive, unclassified = phenology.count_by_class(p, BUD_OPENING.positive_state,
-                                                             scope=scope)
+    total, positive, unclassified = phenology.count_by_class(
+        p, BUD_OPENING.positive_state, scope=scope
+    )
 
     assert (total, positive, unclassified) == (3, 2, 0)
 
 
-def test_a_bucket_the_prediction_writer_produced_reads_back_with_its_own_classes(tmp_path):
+def test_a_bucket_the_prediction_writer_produced_reads_back_with_its_own_classes(
+    tmp_path,
+):
     """A bucket published through the real publication reads back through the readers here with
     the values the run decoded through: the record's attribute and each detection's own decoded
     value have to line up, or a bucket whose every detection carries the state's attribute counts
@@ -192,20 +241,29 @@ def test_a_bucket_the_prediction_writer_produced_reads_back_with_its_own_classes
     from tests._chain_fixtures import predicted, published
 
     image = tmp_path / "ds" / "images" / "2026-03-05" / "P1_2026-03-05.jpg"
-    bucket = published(tmp_path, "run/2026-03-05",
-                       [predicted(image, ["open", "closed", "open"], (SPARSE,))],
-                       scope={"subject": "bud"}, registry=REGISTRY)
+    bucket = published(
+        tmp_path,
+        "run/2026-03-05",
+        [predicted(image, ["open", "closed", "open"], (SPARSE,))],
+        scope={"subject": "bud"},
+        registry=REGISTRY,
+    )
 
     assert bucket.scope.attributes == (SPARSE,)
-    counts = phenology.count_by_class(bucket.document_key(image.stem),
-                                      BUD_OPENING.positive_state, scope=bucket.scope)
+    counts = phenology.count_by_class(
+        bucket.document_key(image.stem),
+        BUD_OPENING.positive_state,
+        scope=bucket.scope,
+    )
     assert counts == (3, 2, 0)
 
 
 # -- the delivered CSV ----------------------------------------------------
 
 
-def test_delivered_csv_marks_a_milestone_the_first_capture_only_bounds(tmp_path: Path):
+def test_delivered_csv_marks_a_milestone_the_first_capture_only_bounds(
+    tmp_path: Path,
+):
     """A plant already at half its buds on the first capture ships that date with its bound, so a
     breeder reading the CSV can tell an upper bound from a date the observations measured. The later
     dip below the target does not move the delivered date to the re-crossing.
@@ -218,9 +276,14 @@ def test_delivered_csv_marks_a_milestone_the_first_capture_only_bounds(tmp_path:
     out_csv = tmp_path / "out" / "bud_phenology.csv"
 
     res = deliver_phenology_milestones(
-        tmp_path, trait=body["trait"], mapping_name=body["mapping_name"], plants=["PLANT_A"],
-        dataset_root=body["dataset_root"], buckets=body["buckets"],
-        output_csv_path=str(out_csv))
+        tmp_path,
+        trait=body["trait"],
+        mapping_name=body["mapping_name"],
+        plants=["PLANT_A"],
+        dataset_root=body["dataset_root"],
+        buckets=body["buckets"],
+        output_csv_path=str(out_csv),
+    )
 
     assert "error" not in res, res
     rows = csv_rows(out_csv)

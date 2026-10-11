@@ -27,7 +27,9 @@ def test_refuses_without_a_project_and_plants_no_store(tmp_path):
     assert not (cwd / ".tcip").exists()
 
 
-def test_renders_the_overlay_and_echoes_grid_geometry_under_the_named_project(project, tmp_path):
+def test_renders_the_overlay_and_echoes_grid_geometry_under_the_named_project(
+    project, tmp_path
+):
     img = project / "images" / "a.jpg"
     img.parent.mkdir()
     Image.new("RGB", (640, 480), color=(90, 110, 70)).save(img)
@@ -36,12 +38,17 @@ def test_renders_the_overlay_and_echoes_grid_geometry_under_the_named_project(pr
 
     result = run_tcip(
         "overlay-reference-grid",
-        ["--image", str(img), "--project", str(project), "--tile-size", "80"], cwd=cwd)
+        ["--image", str(img), "--project", str(project), "--tile-size", "80"],
+        cwd=cwd,
+    )
 
     assert result.returncode == 0, result.stderr
     body = json.loads(result.stdout)
     assert "error" not in body
-    assert Path(body["image_path"]).parent == (project / ".tcip" / "artifacts" / "viz").resolve()
+    assert (
+        Path(body["image_path"]).parent
+        == (project / ".tcip" / "artifacts" / "viz").resolve()
+    )
     assert body["tile_size"] == 80
     assert body["cols"] == 8 and body["rows"] == 6
     assert not (cwd / ".tcip").exists()

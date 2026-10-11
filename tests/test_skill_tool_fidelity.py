@@ -48,7 +48,9 @@ def test_orphan_allow_list_is_empty():
     assert guardrail.ORPHAN_ALLOW == frozenset()
 
 
-def test_fabricated_tool_names_catches_a_retired_name_in_a_fixture_table(tmp_path):
+def test_fabricated_tool_names_catches_a_retired_name_in_a_fixture_table(
+    tmp_path,
+):
     """A Tools table naming a retired tool is reported as fabricated."""
     fixture = tmp_path / "SKILL.md"
     fixture.write_text(
@@ -77,7 +79,9 @@ def test_fabricated_tool_names_skips_a_non_identifier_first_token(tmp_path):
     assert guardrail.fabricated_tool_names([fixture]) == {}
 
 
-def test_fabricated_tool_names_extracts_the_name_from_a_call_signature(tmp_path):
+def test_fabricated_tool_names_extracts_the_name_from_a_call_signature(
+    tmp_path,
+):
     """A documented call signature or a keyword note in the first cell still yields the plain
     name, so `get_experiment` (`view='lineage'`)-shaped cells check correctly."""
     fixture = tmp_path / "SKILL.md"
@@ -91,7 +95,9 @@ def test_fabricated_tool_names_extracts_the_name_from_a_call_signature(tmp_path)
     assert guardrail.fabricated_tool_names([fixture]) == {}
 
 
-def test_fabrication_check_does_not_reach_a_retired_name_in_running_prose(tmp_path):
+def test_fabrication_check_does_not_reach_a_retired_name_in_running_prose(
+    tmp_path,
+):
     """The stated reach: a fabricated or retired name outside any Tools table is invisible to
     the fabrication half, so a green run over prose-only text is not coverage of that shape."""
     fixture = tmp_path / "SKILL.md"
@@ -102,7 +108,9 @@ def test_fabrication_check_does_not_reach_a_retired_name_in_running_prose(tmp_pa
     assert guardrail.fabricated_tool_names([fixture]) == {}
 
 
-def test_fabrication_check_does_not_reach_a_differently_headed_tool_table(tmp_path):
+def test_fabrication_check_does_not_reach_a_differently_headed_tool_table(
+    tmp_path,
+):
     """The stated second reach gap: a table documenting tools under a header other than "Tool"
     (the phenology skill's piece inventory, headed "Piece", is the live case) is invisible to
     the fabrication half even when it names a retired tool, so a green run over that shape is
@@ -131,7 +139,9 @@ def test_fabricated_tool_names_catches_an_invented_console_command(tmp_path):
         "| `tcip frobnicate` | an invented command |\n",
         encoding="utf-8",
     )
-    assert guardrail.fabricated_tool_names([fixture]) == {str(fixture): ["tcip frobnicate"]}
+    assert guardrail.fabricated_tool_names([fixture]) == {
+        str(fixture): ["tcip frobnicate"]
+    }
 
 
 def test_fabricated_tool_names_admits_a_real_console_command(tmp_path):
@@ -147,15 +157,22 @@ def test_fabricated_tool_names_admits_a_real_console_command(tmp_path):
 
 
 def test_orphan_tool_names_catches_a_registered_name_missing_from_every_surface(
-        monkeypatch, tmp_path):
+    monkeypatch, tmp_path
+):
     """A registered tool named nowhere in any surface is reported as an orphan, the condition a
     rename reaches when it clears the stale mentions without writing the new name down."""
     from tcip_mcp import server
 
-    monkeypatch.setattr(server, "list_registered_tools", lambda: ["run_inference", "orphaned_tool"])
+    monkeypatch.setattr(
+        server,
+        "list_registered_tools",
+        lambda: ["run_inference", "orphaned_tool"],
+    )
 
     fixture = tmp_path / "SKILL.md"
-    fixture.write_text("Only `run_inference` is named here.\n", encoding="utf-8")
+    fixture.write_text(
+        "Only `run_inference` is named here.\n", encoding="utf-8"
+    )
     assert guardrail.orphan_tool_names([fixture]) == ["orphaned_tool"]
 
 
@@ -164,9 +181,13 @@ def test_orphan_tool_names_accepts_the_call_form_too(monkeypatch, tmp_path):
     named: tools are conventionally documented with their arguments, not the bare name."""
     from tcip_mcp import server
 
-    monkeypatch.setattr(server, "list_registered_tools", lambda: ["run_inference"])
+    monkeypatch.setattr(
+        server, "list_registered_tools", lambda: ["run_inference"]
+    )
 
     fixture = tmp_path / "SKILL.md"
     fixture.write_text(
-        "Call `run_inference(checkpoint_path=...)` to score a batch.\n", encoding="utf-8")
+        "Call `run_inference(checkpoint_path=...)` to score a batch.\n",
+        encoding="utf-8",
+    )
     assert guardrail.orphan_tool_names([fixture]) == []

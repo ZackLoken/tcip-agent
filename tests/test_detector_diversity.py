@@ -32,10 +32,13 @@ def _features():
 # Necks: add_p2
 # --------------------------------------------------------------------------
 
+
 def test_fpn_add_p2_adds_finer_level():
     out = FPN([64, 128, 256, 512], 64, add_p2=True)(_features())
     assert set(out.keys()) == {"p0", "p1", "p2", "p3", "p4"}
-    assert out["p0"].shape[-1] == 2 * out["p1"].shape[-1]  # extra level is 2x finer
+    assert (
+        out["p0"].shape[-1] == 2 * out["p1"].shape[-1]
+    )  # extra level is 2x finer
 
 
 def test_pan_add_p2_levels_and_convs():
@@ -51,21 +54,34 @@ def test_necks_default_off_unchanged():
     fpn_out = FPN([64, 128, 256, 512], 64)(_features())
     assert set(fpn_out.keys()) == {"p0", "p1", "p2", "p3"}
     assert fpn_out["p0"].shape[1] == 64
-    assert set(PAN([64, 128, 256, 512], 64)(_features()).keys()) == {"p0", "p1", "p2", "p3"}
+    assert set(PAN([64, 128, 256, 512], 64)(_features()).keys()) == {
+        "p0",
+        "p1",
+        "p2",
+        "p3",
+    }
 
 
 # --------------------------------------------------------------------------
 # Detectors
 # --------------------------------------------------------------------------
 
+
 def test_detection_anchor_count_with_p2():
     import timm
 
     from tcip_mcp.pipelines.components.backbones import BackboneWrapper
-    from tcip_mcp.pipelines.components.detectors import BackboneNeckAdapter, _build_faster_rcnn
+    from tcip_mcp.pipelines.components.detectors import (
+        BackboneNeckAdapter,
+        _build_faster_rcnn,
+    )
 
-    _m = timm.create_model("resnet18", pretrained=False, features_only=True,
-                           out_indices=(1, 2, 3, 4))
+    _m = timm.create_model(
+        "resnet18",
+        pretrained=False,
+        features_only=True,
+        out_indices=(1, 2, 3, 4),
+    )
     bb = BackboneWrapper(_m, _m.feature_info.channels())
     neck = FPN(bb.out_channels, 256, add_p2=True)  # 5 pyramid levels
     adapter = BackboneNeckAdapter(bb, neck)
@@ -73,13 +89,20 @@ def test_detection_anchor_count_with_p2():
         names = list(adapter(torch.zeros(1, 3, 64, 64)).keys())
     assert len(names) == 5
     det = _build_faster_rcnn(  # must not raise (guards the [..][:5] truncation crash)
-        adapter, 1, featmap_names=names, num_levels=len(names), min_size=64, max_size=128)
+        adapter,
+        1,
+        featmap_names=names,
+        num_levels=len(names),
+        min_size=64,
+        max_size=128,
+    )
     assert len(det.rpn.anchor_generator.sizes) == 5
 
 
 # --------------------------------------------------------------------------
 # End-to-end (anchor-free)
 # --------------------------------------------------------------------------
+
 
 def test_detection_anchor_free_e2e(tmp_path: Path):
     from torchvision.utils import save_image
@@ -94,15 +117,24 @@ def test_detection_anchor_free_e2e(tmp_path: Path):
     images_dir.mkdir(parents=True, exist_ok=True)
     for i in range(4):
         save_image(torch.rand(3, 64, 64), str(images_dir / f"img{i}.png"))
-        label_image(images_dir / f"img{i}.png",
-                    [Annotation(subject="bud", geometry=BBox(19.2, 19.2, 44.8, 44.8))], 64, 64)
+        label_image(
+            images_dir / f"img{i}.png",
+            [Annotation(subject="bud", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
+            64,
+            64,
+        )
 
     # No validation side: loss is the only metric coherent to select on without one.
-    cfg = training_config(built_detector(detector="fcos"),
-                          {"images_dir": str(images_dir), "scope": {"subject": "bud"},
-                           "auto_val": False},
-                          optimizer=adamw_optimizer(),
-                          evaluation=evaluation_block(selection_metric="loss"))
+    cfg = training_config(
+        built_detector(detector="fcos"),
+        {
+            "images_dir": str(images_dir),
+            "scope": {"subject": "bud"},
+            "auto_val": False,
+        },
+        optimizer=adamw_optimizer(),
+        evaluation=evaluation_block(selection_metric="loss"),
+    )
     ctx = run_context(tmp_path, cfg)
     run = train(ctx.run, ctx.train_loader, val_loader=None)
     assert run.status == "completed", run.status_error

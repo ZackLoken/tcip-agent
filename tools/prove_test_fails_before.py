@@ -53,6 +53,7 @@ working tree, the index nor the stash list, and computes no verdict.
 ``--per-test-timeout`` passes ``--timeout`` through to pytest-timeout; a selected test that does
 not finish within it is named and the verdict is INDETERMINATE.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -73,7 +74,12 @@ PLUGIN_MODULE = "_fail_before_outcome"
 OUTCOME_ENV = "FAIL_BEFORE_OUTCOME_JSON"
 CURRENT_TEST_ENV = "FAIL_BEFORE_CURRENT_TEST"
 
-GUARDS, VACUOUS, INDETERMINATE, REFUSED = "GUARDS", "VACUOUS", "INDETERMINATE", "REFUSED"
+GUARDS, VACUOUS, INDETERMINATE, REFUSED = (
+    "GUARDS",
+    "VACUOUS",
+    "INDETERMINATE",
+    "REFUSED",
+)
 EXIT = {GUARDS: 0, VACUOUS: 1, INDETERMINATE: 2, REFUSED: 3}
 
 PLUGIN_SOURCE = '''\
@@ -204,9 +210,13 @@ def _test_file_relative_to_repo(raw: str) -> tuple[str | None, str]:
 
 
 def git_output(*args: str) -> str:
-    proc = subprocess.run(["git", *args], cwd=REPO, capture_output=True, text=True)
+    proc = subprocess.run(
+        ["git", *args], cwd=REPO, capture_output=True, text=True
+    )
     if proc.returncode != 0:
-        raise RuntimeError(f"git {' '.join(args)} failed: {proc.stderr.strip()}")
+        raise RuntimeError(
+            f"git {' '.join(args)} failed: {proc.stderr.strip()}"
+        )
     return proc.stdout
 
 
@@ -227,11 +237,15 @@ def _uncommitted_paths() -> list[str]:
     return paths
 
 
-def _resolve_baseline(named: str | None, integration: str) -> tuple[str | None, str, str]:
+def _resolve_baseline(
+    named: str | None, integration: str
+) -> tuple[str | None, str, str]:
     """Return (revision, how it was chosen, why it is unusable if it is)."""
     if named:
         try:
-            sha = git_output("rev-parse", "--verify", f"{named}^{{commit}}").strip()
+            sha = git_output(
+                "rev-parse", "--verify", f"{named}^{{commit}}"
+            ).strip()
         except RuntimeError as exc:
             return None, f"named by the caller as {named}", str(exc)
         return sha, f"named by the caller as {named}", ""
@@ -250,36 +264,54 @@ def _resolve_baseline(named: str | None, integration: str) -> tuple[str | None, 
     except RuntimeError as exc:
         return None, f"merge-base against {integration}", str(exc)
     if base == head:
-        return None, f"merge-base against {integration}", (
-            f"the working tree carries no uncommitted source change and HEAD is already contained "
-            f"in {integration}, so no tree here precedes a change. Name the pre-change revision "
-            f"with --baseline."
+        return (
+            None,
+            f"merge-base against {integration}",
+            (
+                f"the working tree carries no uncommitted source change and HEAD is already contained "
+                f"in {integration}, so no tree here precedes a change. Name the pre-change revision "
+                f"with --baseline."
+            ),
         )
     return base, f"merge-base of HEAD and {integration}", ""
 
 
-def _changed_source_files(baseline: str, declared: list[str],
-                          test_rev: str | None) -> tuple[list[str], str]:
+def _changed_source_files(
+    baseline: str, declared: list[str], test_rev: str | None
+) -> tuple[list[str], str]:
     """The source-side files that differ between the baseline and the tree the test comes from,
     and how they were found; a ``declared`` path counts only when it differs too."""
     if test_rev:
-        tracked = git_output("diff", "--name-only", baseline, test_rev, "--").splitlines()
+        tracked = git_output(
+            "diff", "--name-only", baseline, test_rev, "--"
+        ).splitlines()
         untracked: list[str] = []
         how = f"git diff {baseline[:8]}..{test_rev[:8]}, test tree excluded"
     else:
-        tracked = git_output("diff", "--name-only", baseline, "--").splitlines()
-        untracked = git_output("ls-files", "--others", "--exclude-standard").splitlines()
+        tracked = git_output(
+            "diff", "--name-only", baseline, "--"
+        ).splitlines()
+        untracked = git_output(
+            "ls-files", "--others", "--exclude-standard"
+        ).splitlines()
         how = f"git diff against {baseline[:8]} plus untracked files, test tree excluded"
-    changed = sorted({p.strip() for p in [*tracked, *untracked]
-                      if p.strip() and not _is_test_side(p.strip())})
+    changed = sorted(
+        {
+            p.strip()
+            for p in [*tracked, *untracked]
+            if p.strip() and not _is_test_side(p.strip())
+        }
+    )
     if declared:
         wanted = {p.replace("\\", "/") for p in declared}
         kept = sorted(wanted & set(changed))
         ignored = sorted(wanted - set(changed))
         note = f"declared with --change and confirmed to differ ({how})"
         if ignored:
-            note += ("; declared but identical at the baseline, so not counted: "
-                     f"{', '.join(ignored)}")
+            note += (
+                "; declared but identical at the baseline, so not counted: "
+                f"{', '.join(ignored)}"
+            )
         return kept, note
     return changed, how
 
@@ -287,20 +319,43 @@ def _changed_source_files(baseline: str, declared: list[str],
 def _snapshot_via_temporary_index(head: str, index_path: Path) -> str | None:
     """Build the snapshot commit through a scratch index; ``None`` if this form fails here."""
     env = {**os.environ, "GIT_INDEX_FILE": str(index_path)}
-    read = subprocess.run(["git", "read-tree", head], cwd=REPO, env=env,
-                          capture_output=True, text=True)
+    read = subprocess.run(
+        ["git", "read-tree", head],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
     if read.returncode != 0:
         return None
-    added = subprocess.run(["git", "add", "-A"], cwd=REPO, env=env, capture_output=True, text=True)
+    added = subprocess.run(
+        ["git", "add", "-A"], cwd=REPO, env=env, capture_output=True, text=True
+    )
     if added.returncode != 0:
         return None
-    tree = subprocess.run(["git", "write-tree"], cwd=REPO, env=env, capture_output=True, text=True)
+    tree = subprocess.run(
+        ["git", "write-tree"],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
     if tree.returncode != 0 or not tree.stdout.strip():
         return None
     commit = subprocess.run(
-        ["git", "commit-tree", tree.stdout.strip(), "-p", head, "-m",
-         "prove_test_fails_before.py working-tree snapshot"],
-        cwd=REPO, env=env, capture_output=True, text=True,
+        [
+            "git",
+            "commit-tree",
+            tree.stdout.strip(),
+            "-p",
+            head,
+            "-m",
+            "prove_test_fails_before.py working-tree snapshot",
+        ],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
     )
     if commit.returncode != 0 or not commit.stdout.strip():
         return None
@@ -311,8 +366,15 @@ def _snapshot_via_stash_create() -> str | None:
     """The fallback when the temporary-index form fails here: covers tracked changes only, and
     touches neither the tree, the index, nor the stash list, same as the form it falls back from."""
     out = subprocess.run(
-        ["git", "stash", "create", "prove_test_fails_before.py working-tree snapshot"],
-        cwd=REPO, capture_output=True, text=True,
+        [
+            "git",
+            "stash",
+            "create",
+            "prove_test_fails_before.py working-tree snapshot",
+        ],
+        cwd=REPO,
+        capture_output=True,
+        text=True,
     )
     hashed = out.stdout.strip()
     return hashed or None
@@ -333,7 +395,8 @@ def snapshot_working_tree() -> tuple[str, str]:
         return commit, "git stash create (tracked changes only)"
     raise RuntimeError(
         "could not snapshot the working tree: the temporary-index form failed here and git "
-        "stash create produced nothing, most likely because there are no tracked changes to stash")
+        "stash create produced nothing, most likely because there are no tracked changes to stash"
+    )
 
 
 def materialize(rev: str, dest: Path) -> None:
@@ -351,7 +414,9 @@ def _overlay_test_tree(dest: Path, test_rev: str | None) -> int:
     of files copied."""
     if test_rev:
         archive = subprocess.run(
-            ["git", "archive", test_rev, "--", TEST_TREE], cwd=REPO, check=True,
+            ["git", "archive", test_rev, "--", TEST_TREE],
+            cwd=REPO,
+            check=True,
             stdout=subprocess.PIPE,
         ).stdout
         with tarfile.open(fileobj=io.BytesIO(archive), mode="r") as tar:
@@ -370,7 +435,9 @@ def _overlay_test_tree(dest: Path, test_rev: str | None) -> int:
     return copied
 
 
-def child_env(tree: Path, outcome_json: Path, current_test_path: Path) -> dict[str, str]:
+def child_env(
+    tree: Path, outcome_json: Path, current_test_path: Path
+) -> dict[str, str]:
     srcs = [str(p) for p in sorted(tree.glob("packages/*/src"))]
     sep = ";" if sys.platform == "win32" else ":"
     env = {
@@ -384,7 +451,9 @@ def child_env(tree: Path, outcome_json: Path, current_test_path: Path) -> dict[s
     return env
 
 
-def prove_tree_imports(tree: Path, env: dict[str, str]) -> tuple[bool, dict[str, str]]:
+def prove_tree_imports(
+    tree: Path, env: dict[str, str]
+) -> tuple[bool, dict[str, str]]:
     """Confirm each package resolves inside the baseline tree, not the editable-installed checkout.
 
     The three packages are installed editable pointing at the working checkout, so a run that
@@ -407,15 +476,24 @@ def prove_tree_imports(tree: Path, env: dict[str, str]) -> tuple[bool, dict[str,
         "sys.stdout.write(json.dumps(out))\n"
     )
     proc = subprocess.run(
-        [sys.executable, "-c", probe], cwd=tree, env=env, capture_output=True, text=True
+        [sys.executable, "-c", probe],
+        cwd=tree,
+        env=env,
+        capture_output=True,
+        text=True,
     )
     try:
         resolved = json.loads(proc.stdout)
     except json.JSONDecodeError:
-        return False, {"probe": f"probe produced no JSON: {proc.stdout!r} {proc.stderr[-500:]!r}"}
+        return False, {
+            "probe": f"probe produced no JSON: {proc.stdout!r} {proc.stderr[-500:]!r}"
+        }
     root = str(tree.resolve()).lower()
-    ok = all(str(Path(p).resolve()).lower().startswith(root)
-             for p in resolved.values() if p and "IMPORT FAILED" not in p)
+    ok = all(
+        str(Path(p).resolve()).lower().startswith(root)
+        for p in resolved.values()
+        if p and "IMPORT FAILED" not in p
+    )
     ok = ok and not any("IMPORT FAILED" in p for p in resolved.values())
     return ok, resolved
 
@@ -426,22 +504,41 @@ def install_outcome_plugin(tree: Path) -> None:
     (tree / f"{PLUGIN_MODULE}.py").write_text(PLUGIN_SOURCE, encoding="utf-8")
 
 
-def run_capturing_outcome(tree: Path, targets: list[str], expr: str, env: dict[str, str],
-                          outcome_json: Path, timeout: int, per_test_timeout: float | None = None):
+def run_capturing_outcome(
+    tree: Path,
+    targets: list[str],
+    expr: str,
+    env: dict[str, str],
+    outcome_json: Path,
+    timeout: int,
+    per_test_timeout: float | None = None,
+):
     """Run pytest in `tree` and return its process plus what it observed, or None if it
     reported none."""
     # The child session keeps its temporary root inside this run's own tree: pytest deletes all
     # but the last few roots under the shared one, including another session's, at every start.
     cmd = [
-        sys.executable, "-m", "pytest", *targets,
-        "-q", "-p", "no:cacheprovider", "-p", PLUGIN_MODULE, "--rootdir", str(tree),
-        "--basetemp", str(tree / ".pytest-basetemp"),
+        sys.executable,
+        "-m",
+        "pytest",
+        *targets,
+        "-q",
+        "-p",
+        "no:cacheprovider",
+        "-p",
+        PLUGIN_MODULE,
+        "--rootdir",
+        str(tree),
+        "--basetemp",
+        str(tree / ".pytest-basetemp"),
     ]
     if expr:
         cmd += ["-k", expr]
     if per_test_timeout:
         cmd += ["--timeout", str(per_test_timeout)]
-    proc = subprocess.run(cmd, cwd=tree, env=env, capture_output=True, text=True, timeout=timeout)
+    proc = subprocess.run(
+        cmd, cwd=tree, env=env, capture_output=True, text=True, timeout=timeout
+    )
     observed = None
     if outcome_json.is_file():
         observed = json.loads(outcome_json.read_text(encoding="utf-8"))
@@ -555,14 +652,21 @@ def _failure_kind(entry: dict, tree: Path) -> str:
         return "behavioral"
     if _crash_outside_test_tree(entry.get("crash_path"), tree):
         return "behavioral"
-    if entry.get("exc_typename") == "TypeError" and _is_call_signature_mismatch(headline):
+    if entry.get(
+        "exc_typename"
+    ) == "TypeError" and _is_call_signature_mismatch(headline):
         return "fixture"
     return "behavioral"
 
 
-def _classify(observed: dict, baseline_precedes: bool, tree: Path) -> tuple[str, str]:
+def _classify(
+    observed: dict, baseline_precedes: bool, tree: Path
+) -> tuple[str, str]:
     if observed.get("internal_error"):
-        return REFUSED, "pytest hit an internal error, so nothing it reported can be trusted."
+        return (
+            REFUSED,
+            "pytest hit an internal error, so nothing it reported can be trusted.",
+        )
     if observed["collect_errors"]:
         first = observed["collect_errors"][0]["nodeid"]
         return REFUSED, (
@@ -571,7 +675,10 @@ def _classify(observed: dict, baseline_precedes: bool, tree: Path) -> tuple[str,
             "introduces, which means the baseline predates more than the change under test."
         )
     if not observed["collected"]:
-        return REFUSED, "nothing was selected, so nothing was evaluated. Check the -k expression."
+        return (
+            REFUSED,
+            "nothing was selected, so nothing was evaluated. Check the -k expression.",
+        )
 
     outcomes = [t["outcome"] for t in observed["tests"]]
     if outcomes and all(o == "skipped" for o in outcomes):
@@ -579,7 +686,9 @@ def _classify(observed: dict, baseline_precedes: bool, tree: Path) -> tuple[str,
             f"all {len(outcomes)} selected tests were skipped, so nothing was evaluated. A "
             "module-level importorskip at the baseline will do this."
         )
-    failed = [t for t in observed["tests"] if t["outcome"] in ("failed", "error")]
+    failed = [
+        t for t in observed["tests"] if t["outcome"] in ("failed", "error")
+    ]
     kinds = [_failure_kind(t, tree) for t in failed]
     unreached = [t for t, k in zip(failed, kinds) if k == "unreached"]
     timed_out = [t for t, k in zip(failed, kinds) if k == "timeout"]
@@ -593,8 +702,11 @@ def _classify(observed: dict, baseline_precedes: bool, tree: Path) -> tuple[str,
             "baseline is a different fact from a slow pass or a real failure."
         )
     if failed and not behavioral and fixture:
-        discount = (f" {len(unreached)} further failure(s) rest on a missing import or file."
-                    if unreached else "")
+        discount = (
+            f" {len(unreached)} further failure(s) rest on a missing import or file."
+            if unreached
+            else ""
+        )
         return REFUSED, (
             f"{len(fixture)} of {len(failed)} failing test(s) are fixture-shaped: {len(fixture)} "
             f"failed on an error other than the assertion the test names "
@@ -612,14 +724,24 @@ def _classify(observed: dict, baseline_precedes: bool, tree: Path) -> tuple[str,
         discount_parts = []
         if unreached:
             discount_parts.append(
-                f"{len(unreached)} further failure(s) rest on a missing import or file")
+                f"{len(unreached)} further failure(s) rest on a missing import or file"
+            )
         if fixture:
-            discount_parts.append(f"{len(fixture)} further failure(s) are fixture-shaped")
-        discount = (f" {' and '.join(discount_parts)}, not evidence either way."
-                    if discount_parts else "")
-        caveat = "" if baseline_precedes else (
-            " No source file differs between the baseline and the tree this test comes from, "
-            "so this is a fact about the baseline rather than proof that a change here is guarded."
+            discount_parts.append(
+                f"{len(fixture)} further failure(s) are fixture-shaped"
+            )
+        discount = (
+            f" {' and '.join(discount_parts)}, not evidence either way."
+            if discount_parts
+            else ""
+        )
+        caveat = (
+            ""
+            if baseline_precedes
+            else (
+                " No source file differs between the baseline and the tree this test comes from, "
+                "so this is a fact about the baseline rather than proof that a change here is guarded."
+            )
         )
         return GUARDS, (
             f"{len(behavioral)} of {observed['collected']} selected tests failed on the behavior "
@@ -639,35 +761,67 @@ def _classify(observed: dict, baseline_precedes: bool, tree: Path) -> tuple[str,
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("test_file", help="path, repo-relative, e.g. tests/test_foo.py")
+    ap.add_argument(
+        "test_file", help="path, repo-relative, e.g. tests/test_foo.py"
+    )
     ap.add_argument("-k", dest="expr", default="", help="pytest -k expression")
-    ap.add_argument("--baseline", default=None,
-                    help="pre-change revision; default is HEAD for uncommitted work, else the "
-                         "merge-base against the integration branch")
-    ap.add_argument("--baseline-from-working-tree", action="store_true",
-                    help="snapshot the current working tree into a commit and print its hash; "
-                         "computes no verdict. Take this before applying the fix, then re-run "
-                         "normally with --baseline <the printed hash>.")
-    ap.add_argument("--integration", default="main",
-                    help="branch to take a merge-base against (default main)")
-    ap.add_argument("--test-rev", default=None,
-                    help="take the test tree from this revision instead of the working tree, to "
-                         "check a guard claim already in the history; requires --baseline")
-    ap.add_argument("--change", action="append", default=[],
-                    help="a source file the change touches; repeatable. Overrides the computed set")
-    ap.add_argument("--json", dest="json_out", default=None, help="write the full record here")
-    ap.add_argument("--timeout", type=int, default=900,
-                    help="seconds to allow pytest (default 900)")
-    ap.add_argument("--per-test-timeout", type=float, default=None,
-                    help="seconds pytest-timeout allows one test (passed through as --timeout); "
-                         "a test that does not finish within it scores INDETERMINATE by name, "
-                         "told apart from a hang that says nothing and a real pass or failure")
+    ap.add_argument(
+        "--baseline",
+        default=None,
+        help="pre-change revision; default is HEAD for uncommitted work, else the "
+        "merge-base against the integration branch",
+    )
+    ap.add_argument(
+        "--baseline-from-working-tree",
+        action="store_true",
+        help="snapshot the current working tree into a commit and print its hash; "
+        "computes no verdict. Take this before applying the fix, then re-run "
+        "normally with --baseline <the printed hash>.",
+    )
+    ap.add_argument(
+        "--integration",
+        default="main",
+        help="branch to take a merge-base against (default main)",
+    )
+    ap.add_argument(
+        "--test-rev",
+        default=None,
+        help="take the test tree from this revision instead of the working tree, to "
+        "check a guard claim already in the history; requires --baseline",
+    )
+    ap.add_argument(
+        "--change",
+        action="append",
+        default=[],
+        help="a source file the change touches; repeatable. Overrides the computed set",
+    )
+    ap.add_argument(
+        "--json",
+        dest="json_out",
+        default=None,
+        help="write the full record here",
+    )
+    ap.add_argument(
+        "--timeout",
+        type=int,
+        default=900,
+        help="seconds to allow pytest (default 900)",
+    )
+    ap.add_argument(
+        "--per-test-timeout",
+        type=float,
+        default=None,
+        help="seconds pytest-timeout allows one test (passed through as --timeout); "
+        "a test that does not finish within it scores INDETERMINATE by name, "
+        "told apart from a hang that says nothing and a real pass or failure",
+    )
     args = ap.parse_args()
 
     if args.baseline_from_working_tree:
         if args.baseline:
             ap.error(
-                "--baseline-from-working-tree and --baseline name the baseline two ways at once")
+                "--baseline-from-working-tree and --baseline name the baseline two ways at once"
+            )
         commit, method = snapshot_working_tree()
         expr_flag = f"-k {args.expr!r} " if args.expr else ""
         print(f"snapshot {commit} ({method})")
@@ -682,8 +836,12 @@ def main() -> int:
         )
         return 0
 
-    record: dict = {"test_file": args.test_file, "k": args.expr, "verdict": None,
-                    "test_tree_from": args.test_rev or "the working tree"}
+    record: dict = {
+        "test_file": args.test_file,
+        "k": args.expr,
+        "verdict": None,
+        "test_tree_from": args.test_rev or "the working tree",
+    }
 
     test_file, refusal = _test_file_relative_to_repo(args.test_file)
     if test_file is None:
@@ -692,19 +850,30 @@ def main() -> int:
     record["test_file"] = test_file
 
     if args.test_rev and not args.baseline:
-        record.update(verdict=REFUSED, why=(
-            "--test-rev needs an explicit --baseline. The commit before a test is inside the "
-            "change in a one-file-per-commit history, so guessing one would decide the verdict."
-        ))
+        record.update(
+            verdict=REFUSED,
+            why=(
+                "--test-rev needs an explicit --baseline. The commit before a test is inside the "
+                "change in a one-file-per-commit history, so guessing one would decide the verdict."
+            ),
+        )
         return _report(record, args.json_out)
 
     if args.test_rev:
-        listed = git_output("ls-tree", "--name-only", "-r", args.test_rev, "--", test_file).strip()
+        listed = git_output(
+            "ls-tree", "--name-only", "-r", args.test_rev, "--", test_file
+        ).strip()
         if not listed:
-            record.update(verdict=REFUSED, why=f"{test_file} does not exist at {args.test_rev}.")
+            record.update(
+                verdict=REFUSED,
+                why=f"{test_file} does not exist at {args.test_rev}.",
+            )
             return _report(record, args.json_out)
     elif not (REPO / test_file).is_file():
-        record.update(verdict=REFUSED, why=f"{test_file} does not exist in the working tree.")
+        record.update(
+            verdict=REFUSED,
+            why=f"{test_file} does not exist in the working tree.",
+        )
         return _report(record, args.json_out)
 
     rev, how, unusable = _resolve_baseline(args.baseline, args.integration)
@@ -713,10 +882,15 @@ def main() -> int:
         record.update(verdict=REFUSED, why=unusable)
         return _report(record, args.json_out)
 
-    changed, how_changed = _changed_source_files(rev, args.change, args.test_rev)
+    changed, how_changed = _changed_source_files(
+        rev, args.change, args.test_rev
+    )
     baseline_precedes = bool(changed)
-    record["change_under_test"] = {"source_files": changed, "how_determined": how_changed,
-                                   "baseline_precedes_change": baseline_precedes}
+    record["change_under_test"] = {
+        "source_files": changed,
+        "how_determined": how_changed,
+        "baseline_precedes_change": baseline_precedes,
+    }
 
     tmp = Path(tempfile.mkdtemp(prefix="failbefore-"))
     tree = tmp / "tree"
@@ -725,7 +899,8 @@ def main() -> int:
     try:
         materialize(rev, tree)
         record["test_tree_overlay"] = {
-            "from": f"{TEST_TREE}/ at {args.test_rev}" if args.test_rev
+            "from": f"{TEST_TREE}/ at {args.test_rev}"
+            if args.test_rev
             else f"{TEST_TREE}/ in the working tree",
             "files": _overlay_test_tree(tree, args.test_rev),
         }
@@ -733,56 +908,91 @@ def main() -> int:
 
         env = child_env(tree, outcome_json, current_test_path)
         imports_ok, resolved = prove_tree_imports(tree, env)
-        record["harness_proof"] = {"resolved": resolved, "baseline_source_imported": imports_ok}
+        record["harness_proof"] = {
+            "resolved": resolved,
+            "baseline_source_imported": imports_ok,
+        }
         if not imports_ok:
-            record.update(verdict=REFUSED, why=(
-                "the baseline tree's own source is not what got imported, so any verdict would "
-                "describe the working checkout instead. Resolved module paths are recorded."
-            ))
+            record.update(
+                verdict=REFUSED,
+                why=(
+                    "the baseline tree's own source is not what got imported, so any verdict would "
+                    "describe the working checkout instead. Resolved module paths are recorded."
+                ),
+            )
             return _report(record, args.json_out)
 
         try:
             proc, observed = run_capturing_outcome(
-                tree, [test_file], args.expr, env, outcome_json, args.timeout,
-                per_test_timeout=args.per_test_timeout)
+                tree,
+                [test_file],
+                args.expr,
+                env,
+                outcome_json,
+                args.timeout,
+                per_test_timeout=args.per_test_timeout,
+            )
         except subprocess.TimeoutExpired:
-            record.update(verdict=REFUSED, why=f"pytest did not finish within {args.timeout}s.")
+            record.update(
+                verdict=REFUSED,
+                why=f"pytest did not finish within {args.timeout}s.",
+            )
             return _report(record, args.json_out)
 
-        record["pytest"] = {"exit_code": proc.returncode,
-                            "tail": proc.stdout.strip().splitlines()[-15:]}
+        record["pytest"] = {
+            "exit_code": proc.returncode,
+            "tail": proc.stdout.strip().splitlines()[-15:],
+        }
         if observed is None:
             timed_out_nodeid = (
                 current_test_path.read_text(encoding="utf-8").strip()
-                if args.per_test_timeout and current_test_path.is_file() else ""
+                if args.per_test_timeout and current_test_path.is_file()
+                else ""
             )
             if timed_out_nodeid:
-                record.update(verdict=INDETERMINATE, why=(
-                    f"{timed_out_nodeid} was running when the process ended without reporting an "
-                    f"outcome, under --per-test-timeout ({args.per_test_timeout}s). The marker "
-                    "names which test did not finish, not why: a hang killed outright (the thread "
-                    "method pytest-timeout uses where SIGALRM is unavailable) and a crash read the "
-                    "same here, and either is a different fact from a slow pass or a real failure."
-                ))
+                record.update(
+                    verdict=INDETERMINATE,
+                    why=(
+                        f"{timed_out_nodeid} was running when the process ended without reporting an "
+                        f"outcome, under --per-test-timeout ({args.per_test_timeout}s). The marker "
+                        "names which test did not finish, not why: a hang killed outright (the thread "
+                        "method pytest-timeout uses where SIGALRM is unavailable) and a crash read the "
+                        "same here, and either is a different fact from a slow pass or a real failure."
+                    ),
+                )
                 return _report(record, args.json_out)
-            record.update(verdict=REFUSED, why=(
-                "pytest reported no outcome record, which happens on a usage error before the "
-                "session starts. Its output is recorded under pytest.tail."
-            ))
-            record["pytest"]["stderr_tail"] = proc.stderr.strip().splitlines()[-15:]
+            record.update(
+                verdict=REFUSED,
+                why=(
+                    "pytest reported no outcome record, which happens on a usage error before the "
+                    "session starts. Its output is recorded under pytest.tail."
+                ),
+            )
+            record["pytest"]["stderr_tail"] = proc.stderr.strip().splitlines()[
+                -15:
+            ]
             return _report(record, args.json_out)
 
         # _failure_kind and _classify resolve crash_path against tree, so they run before the
         # materialized tree is removed below.
         record["observed"] = {
             "collected": observed["collected"],
-            "counts": {o: sum(1 for t in observed["tests"] if t["outcome"] == o)
-                       for o in sorted({t["outcome"] for t in observed["tests"]})},
+            "counts": {
+                o: sum(1 for t in observed["tests"] if t["outcome"] == o)
+                for o in sorted({t["outcome"] for t in observed["tests"]})
+            },
             "collect_errors": observed["collect_errors"],
-            "failures": [{"nodeid": t["nodeid"], "headline": t.get("headline", ""),
-                          "kind": _failure_kind(t, tree), "crash_path": t.get("crash_path"),
-                          "crash_lineno": t.get("crash_lineno")}
-                         for t in observed["tests"] if t["outcome"] in ("failed", "error")],
+            "failures": [
+                {
+                    "nodeid": t["nodeid"],
+                    "headline": t.get("headline", ""),
+                    "kind": _failure_kind(t, tree),
+                    "crash_path": t.get("crash_path"),
+                    "crash_lineno": t.get("crash_lineno"),
+                }
+                for t in observed["tests"]
+                if t["outcome"] in ("failed", "error")
+            ],
         }
         verdict, why = _classify(observed, baseline_precedes, tree)
         record.update(verdict=verdict, why=why)
@@ -798,22 +1008,34 @@ def _report(record: dict, json_out: str | None) -> int:
     print()
     print(f"{verdict}: {record['why']}")
     if baseline.get("revision"):
-        print(f"  baseline      {baseline['revision'][:12]} ({baseline['how_chosen']})")
+        print(
+            f"  baseline      {baseline['revision'][:12]} ({baseline['how_chosen']})"
+        )
     change = record.get("change_under_test", {})
     if change:
         files = change["source_files"]
-        shown = ", ".join(files[:4]) + (f" and {len(files) - 4} more" if len(files) > 4 else "")
-        print(f"  change        {len(files)} source file(s){': ' + shown if files else ''}")
+        shown = ", ".join(files[:4]) + (
+            f" and {len(files) - 4} more" if len(files) > 4 else ""
+        )
+        print(
+            f"  change        {len(files)} source file(s){': ' + shown if files else ''}"
+        )
     observed = record.get("observed", {})
     if observed:
-        print(f"  observed      {observed['collected']} selected, {observed['counts']}")
+        print(
+            f"  observed      {observed['collected']} selected, {observed['counts']}"
+        )
     for failure in observed.get("failures", [])[:10]:
         print(f"  failing       {failure['nodeid']}  [{failure['kind']}]")
         print(f"                {failure['headline']}")
         if failure.get("crash_path"):
-            print(f"                {failure['crash_path']}:{failure.get('crash_lineno')}")
+            print(
+                f"                {failure['crash_path']}:{failure.get('crash_lineno')}"
+            )
     if json_out:
-        Path(json_out).write_text(json.dumps(record, indent=2), encoding="utf-8")
+        Path(json_out).write_text(
+            json.dumps(record, indent=2), encoding="utf-8"
+        )
         print(f"  record        {json_out}")
     return EXIT[verdict]
 

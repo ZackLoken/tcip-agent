@@ -43,15 +43,17 @@ class PatchProposer:
             return []
         x1, y1 = float(xs.min()), float(ys.min())
         x2, y2 = float(xs.max()), float(ys.max())
-        return [{
-            "candidate_id": 0,
-            "bbox": [x1, y1, x2, y2],
-            "area": int(mask.sum()),
-            "score": 0.9,
-            "engine": "patch",
-            "engine_meta": {},
-            "rings": [[(x1, y1), (x2, y1), (x2, y2), (x1, y2)]],
-        }]
+        return [
+            {
+                "candidate_id": 0,
+                "bbox": [x1, y1, x2, y2],
+                "area": int(mask.sum()),
+                "score": 0.9,
+                "engine": "patch",
+                "engine_meta": {},
+                "rings": [[(x1, y1), (x2, y1), (x2, y2), (x1, y2)]],
+            }
+        ]
 
 
 @pytest.fixture
@@ -65,36 +67,55 @@ def patched_frame(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     x1, y1, x2, y2 = PATCH
     path = images / "region.png"
     # The patch engine reports inclusive extents, so the patch covers its far edge too.
-    painted_frame(FRAME_W, FRAME_H, (20, 20, 20),
-                  [((x1, y1, x2 + 1, y2 + 1), (255, 0, 0))]).save(path)
+    painted_frame(
+        FRAME_W,
+        FRAME_H,
+        (20, 20, 20),
+        [((x1, y1, x2 + 1, y2 + 1), (255, 0, 0))],
+    ).save(path)
 
-    monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: PatchProposer())
+    monkeypatch.setattr(
+        proposal, "resolve_proposer", lambda engine: PatchProposer()
+    )
     return path
 
 
 def _propose_over_the_region(project: Path, image: Path) -> dict:
     from tcip_mcp.tools.proposal_tools import propose_annotations
 
-    result = propose_annotations(project, image_path=str(image), engine="patch",
-                                 grid_cells=REGION_CELLS, tile_size=TILE_SIZE)
+    result = propose_annotations(
+        project,
+        image_path=str(image),
+        engine="patch",
+        grid_cells=REGION_CELLS,
+        tile_size=TILE_SIZE,
+    )
     assert "error" not in result, result
     assert result["candidate_count"] == 1
     return result
 
 
 def test_accept_refuses_an_image_no_run_staged_proposals_for(
-    patched_frame: Path, tmp_path: Path,
+    patched_frame: Path,
+    tmp_path: Path,
 ) -> None:
     """Nothing staged is a refusal naming the tool to run, never an empty acceptance."""
     from tcip_mcp.tools.proposal_tools import stage_proposals
 
-    accepted = stage_proposals(tmp_path, image_path=str(patched_frame),
-                                assignments=[{"candidate_id": 0, "subject": "leaf"}])
-    assert accepted["error"] == "No proposals found for region. Run propose_annotations first."
+    accepted = stage_proposals(
+        tmp_path,
+        image_path=str(patched_frame),
+        assignments=[{"candidate_id": 0, "subject": "leaf"}],
+    )
+    assert (
+        accepted["error"]
+        == "No proposals found for region. Run propose_annotations first."
+    )
 
 
 def test_region_scoped_mask_rings_are_staged_at_their_full_frame_location(
-    patched_frame: Path, tmp_path: Path,
+    patched_frame: Path,
+    tmp_path: Path,
 ) -> None:
     """The mask a breeder confirms covers the object, not the crop-local coordinates the engine
     saw. The region rect starts well inside the frame on both axes, so an untranslated ring
@@ -105,13 +126,20 @@ def test_region_scoped_mask_rings_are_staged_at_their_full_frame_location(
     from tcip_mcp.tools.proposal_tools import stage_proposals
 
     _propose_over_the_region(tmp_path, patched_frame)
-    accepted = stage_proposals(tmp_path, image_path=str(patched_frame),
-                                assignments=[{"candidate_id": 0, "subject": "leaf"}])
+    accepted = stage_proposals(
+        tmp_path,
+        image_path=str(patched_frame),
+        assignments=[{"candidate_id": 0, "subject": "leaf"}],
+    )
     assert "error" not in accepted, accepted
     assert accepted["proposal_count"] == 1
 
-    bucket = read_bucket(parse_image_path(patched_frame)[0], accepted["bucket"])
-    staged = json_io.read_label_document(bucket.document_key(patched_frame.stem)).annotations
+    bucket = read_bucket(
+        parse_image_path(patched_frame)[0], accepted["bucket"]
+    )
+    staged = json_io.read_label_document(
+        bucket.document_key(patched_frame.stem)
+    ).annotations
     assert len(staged) == 1
     pts = [p for ring in staged[0].geometry.rings for p in ring]
     assert pts
@@ -121,7 +149,8 @@ def test_region_scoped_mask_rings_are_staged_at_their_full_frame_location(
 
 
 def test_region_scoped_bbox_and_mask_rings_describe_the_same_place(
-    patched_frame: Path, tmp_path: Path,
+    patched_frame: Path,
+    tmp_path: Path,
 ) -> None:
     """The bbox the tool reports and the rings it caches are two views of one candidate: both
     are read as full-frame, so they must not be translated by different origins."""
@@ -138,4 +167,7 @@ def test_region_scoped_bbox_and_mask_rings_describe_the_same_place(
     xs = [float(p[0]) for p in pts]
     ys = [float(p[1]) for p in pts]
     assert [min(xs), min(ys), max(xs), max(ys)] == reported
-    assert envelope["region"]["rect"][:2] != [0, 0]   # the region really is offset from the origin
+    assert envelope["region"]["rect"][:2] != [
+        0,
+        0,
+    ]  # the region really is offset from the origin

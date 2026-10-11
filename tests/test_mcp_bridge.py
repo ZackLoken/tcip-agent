@@ -77,7 +77,9 @@ class TestMcpBridge:
 
         self.queue: Queue = Queue()
         self.reader = threading.Thread(
-            target=_reader_thread, args=(self.proc.stdout, self.queue), daemon=True
+            target=_reader_thread,
+            args=(self.proc.stdout, self.queue),
+            daemon=True,
         )
         self.reader.start()
 
@@ -90,7 +92,9 @@ class TestMcpBridge:
         except subprocess.TimeoutExpired:
             self.proc.kill()
 
-    def _call(self, method: str, params: dict | None = None, msg_id: int = 1) -> dict:
+    def _call(
+        self, method: str, params: dict | None = None, msg_id: int = 1
+    ) -> dict:
         msg: dict = {"jsonrpc": "2.0", "id": msg_id, "method": method}
         if params is not None:
             msg["params"] = params
@@ -100,19 +104,26 @@ class TestMcpBridge:
     def test_initialize_and_list_tools(self):
         """Server responds to initialize and tools/list."""
         # Initialize
-        resp = self._call("initialize", {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {},
-            "clientInfo": {"name": "test", "version": "0.1.0"},
-        }, msg_id=1)
+        resp = self._call(
+            "initialize",
+            {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "test", "version": "0.1.0"},
+            },
+            msg_id=1,
+        )
         assert "result" in resp, f"Initialize failed: {resp}"
         assert "capabilities" in resp["result"]
 
         # Send initialized notification (no response expected)
-        _send_jsonrpc(self.proc, {
-            "jsonrpc": "2.0",
-            "method": "notifications/initialized",
-        })
+        _send_jsonrpc(
+            self.proc,
+            {
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized",
+            },
+        )
 
         # List tools
         resp = self._call("tools/list", {}, msg_id=2)

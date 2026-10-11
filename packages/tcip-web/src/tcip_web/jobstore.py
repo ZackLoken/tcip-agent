@@ -58,7 +58,9 @@ class JobRegistry:
             self._insert(job_id, job)
 
     def find_or_register(
-        self, match: Callable[[Any], bool], make: Callable[[], Any],
+        self,
+        match: Callable[[Any], bool],
+        make: Callable[[], Any],
     ) -> tuple[Any, bool]:
         """Under one lock acquisition: the first live job ``match`` accepts, or ``make()``'s new
         job once inserted (:meth:`_insert`). Returns ``(job, created)``, ``created`` true only

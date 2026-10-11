@@ -14,7 +14,9 @@ from pathlib import Path
 
 import pytest
 
-torch = pytest.importorskip("torch")  # evaluation.py imports torch at module load
+torch = pytest.importorskip(
+    "torch"
+)  # evaluation.py imports torch at module load
 
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     evaluate,
@@ -28,6 +30,7 @@ from tests._training_values import IOU_THRESHOLD  # noqa: E402
 # semantic_seg_metrics: exact values on tiny synthetic maps
 # --------------------------------------------------------------------------
 
+
 def test_perfect_overlap_is_one():
     gt = torch.tensor([[0, 0, 1, 1], [0, 0, 1, 1]])
     m = semantic_seg_metrics(gt.clone(), gt, num_classes=2)
@@ -39,7 +42,9 @@ def test_perfect_overlap_is_one():
 
 def test_disjoint_is_zero():
     gt = torch.zeros(4, 4, dtype=torch.long)
-    pred = torch.ones(4, 4, dtype=torch.long)  # every pixel wrong, class swapped
+    pred = torch.ones(
+        4, 4, dtype=torch.long
+    )  # every pixel wrong, class swapped
     m = semantic_seg_metrics(pred, gt, num_classes=2)
     assert m["mIoU"] == pytest.approx(0.0)
     assert m["dice"] == pytest.approx(0.0)
@@ -97,6 +102,7 @@ def test_batched_shapes_flatten():
 # evaluate() surfaces the metric for a semantic_seg run
 # --------------------------------------------------------------------------
 
+
 def test_evaluate_semantic_seg_surfaces_miou(tmp_path: Path):
     pytest.importorskip("torchvision")
     from PIL import Image
@@ -116,18 +122,35 @@ def test_evaluate_semantic_seg_surfaces_miou(tmp_path: Path):
         arr = (np.random.rand(side, side, 3) * 255).astype(np.uint8)
         Image.fromarray(arr).save(images_dir / f"img{i}.png")
         block = (side // 4, side // 4, side // 2, side // 2)
-        painted_frame(side, side, 0, [(block, 1)], mode="L").save(masks_dir / f"img{i}.png")
+        painted_frame(side, side, 0, [(block, 1)], mode="L").save(
+            masks_dir / f"img{i}.png"
+        )
 
     dataset = dataset_over("semantic_seg", str(images_dir), str(masks_dir))
-    loader = DataLoader(dataset, batch_size=2, collate_fn=task_collate("semantic_seg"))
+    loader = DataLoader(
+        dataset, batch_size=2, collate_fn=task_collate("semantic_seg")
+    )
     model = bespoke_models.build_bespoke_semantic_seg(num_classes=2)
 
-    result = evaluate(model, loader, torch.device("cpu"), "semantic_seg",
-                      dims={"in_chans": 3, "num_classes": 2}, conf_threshold=None,
-                      iou_threshold=IOU_THRESHOLD, score_weights=None)
+    result = evaluate(
+        model,
+        loader,
+        torch.device("cpu"),
+        "semantic_seg",
+        dims={"in_chans": 3, "num_classes": 2},
+        conf_threshold=None,
+        iou_threshold=IOU_THRESHOLD,
+        score_weights=None,
+    )
 
     assert "loss" in result
-    for key in ("mIoU", "dice", "pixel_acc", "per_class_iou", "per_class_dice"):
+    for key in (
+        "mIoU",
+        "dice",
+        "pixel_acc",
+        "per_class_iou",
+        "per_class_dice",
+    ):
         assert key in result, f"missing {key}"
     assert 0.0 <= result["mIoU"] <= 1.0
     assert 0.0 <= result["dice"] <= 1.0

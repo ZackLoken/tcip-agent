@@ -24,32 +24,57 @@ from tcip_mcp.cli import bound_project
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, prog=prog)
-    parser.add_argument("--path", required=True,
-                        help="An image file (single-image match) or an images directory "
-                             "(aggregate); a relative one is under --project, and refused "
-                             "without it.")
-    parser.add_argument("--bucket", required=True,
-                        help="The name of the bucket, published under --path's dataset root, "
-                             "whose documents are scored.")
-    parser.add_argument("--project", default=None,
-                        help="The project a relative --path lies under and the trait's "
-                             "confirmed revision is read from. Required with --trait.")
-    parser.add_argument("--iou-threshold", type=float, default=0.5,
-                        help="IoU threshold for a positive match (the AP@0.5 comparability "
-                             "convention).")
-    parser.add_argument("--conf-threshold", type=float, default=None,
-                        help="Minimum confidence to consider a prediction. Omitted uses the "
-                             "tool's own default.")
-    parser.add_argument("--detail", action="store_true",
-                        help="Single-image only: also return the per-detection breakdown.")
-    parser.add_argument("--trait", default=None,
-                        help="When set, the trait's derived localization criterion governs the "
-                             "reported TP/FP/FN count; map50 stays a labeled comparability "
-                             "metric. Absent -> the IoU convention governs.")
+    parser.add_argument(
+        "--path",
+        required=True,
+        help="An image file (single-image match) or an images directory "
+        "(aggregate); a relative one is under --project, and refused "
+        "without it.",
+    )
+    parser.add_argument(
+        "--bucket",
+        required=True,
+        help="The name of the bucket, published under --path's dataset root, "
+        "whose documents are scored.",
+    )
+    parser.add_argument(
+        "--project",
+        default=None,
+        help="The project a relative --path lies under and the trait's "
+        "confirmed revision is read from. Required with --trait.",
+    )
+    parser.add_argument(
+        "--iou-threshold",
+        type=float,
+        default=0.5,
+        help="IoU threshold for a positive match (the AP@0.5 comparability "
+        "convention).",
+    )
+    parser.add_argument(
+        "--conf-threshold",
+        type=float,
+        default=None,
+        help="Minimum confidence to consider a prediction. Omitted uses the "
+        "tool's own default.",
+    )
+    parser.add_argument(
+        "--detail",
+        action="store_true",
+        help="Single-image only: also return the per-detection breakdown.",
+    )
+    parser.add_argument(
+        "--trait",
+        default=None,
+        help="When set, the trait's derived localization criterion governs the "
+        "reported TP/FP/FN count; map50 stays a labeled comparability "
+        "metric. Absent -> the IoU convention governs.",
+    )
     args = parser.parse_args(argv)
 
     if args.trait and args.project is None:
-        parser.error("--trait requires --project, the project its confirmed revision is in")
+        parser.error(
+            "--trait requires --project, the project its confirmed revision is in"
+        )
     if args.project is not None:
         project = bound_project(args.project)
     else:
@@ -65,10 +90,20 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
 
     from tcip_mcp.tools.annotation_tools import score_predictions
 
-    stated = {} if args.conf_threshold is None else {"conf_threshold": args.conf_threshold}
+    stated = (
+        {}
+        if args.conf_threshold is None
+        else {"conf_threshold": args.conf_threshold}
+    )
     result = score_predictions(
-        args.path, args.bucket, iou_threshold=args.iou_threshold, detail=args.detail,
-        trait=trait, project=project, **stated)
+        args.path,
+        args.bucket,
+        iou_threshold=args.iou_threshold,
+        detail=args.detail,
+        trait=trait,
+        project=project,
+        **stated,
+    )
     print(json.dumps(result, indent=2))
     return 1 if "error" in result else 0
 

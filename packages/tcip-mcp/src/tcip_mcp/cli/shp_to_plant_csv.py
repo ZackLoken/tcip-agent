@@ -22,7 +22,10 @@ from pathlib import Path
 
 def _validate_round_trip(csv_path: Path, n_written: int) -> int:
     """Read ``csv_path`` back through ``read_plant_csvs`` and fail loudly, naming the cause."""
-    from tcip_mcp.pipelines.postprocessing.plant_mapping import PLANT_CSV_COLUMNS, read_plant_csvs
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        PLANT_CSV_COLUMNS,
+        read_plant_csvs,
+    )
 
     parsed = read_plant_csvs([csv_path])
     if len(parsed) == 0:
@@ -67,7 +70,9 @@ def convert_shp_to_plant_csv(
 
     result = read_plant_shapefile(shp_path, field_map=field_map)
     if not result.rows:
-        raise ValueError(f"{shp_path}: zero features with readable geometry; nothing to convert.")
+        raise ValueError(
+            f"{shp_path}: zero features with readable geometry; nothing to convert."
+        )
 
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     with csv_path.open("w", newline="", encoding="utf-8") as f:
@@ -110,17 +115,23 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
             field_map[csv_col] = cli_value
 
     try:
-        result = convert_shp_to_plant_csv(args.shp_path, args.csv_path, field_map=field_map or None)
+        result = convert_shp_to_plant_csv(
+            args.shp_path, args.csv_path, field_map=field_map or None
+        )
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
-    print(f"Wrote {result['n_features']} plant record(s) to {result['csv_path']} "
-          f"(source geometry: {', '.join(result['geometry_kinds'])}); "
-          f"read_plant_csvs parsed {result['n_parsed']} back.")
+    print(
+        f"Wrote {result['n_features']} plant record(s) to {result['csv_path']} "
+        f"(source geometry: {', '.join(result['geometry_kinds'])}); "
+        f"read_plant_csvs parsed {result['n_parsed']} back."
+    )
     if result["missing_fields"]:
-        print(f"Note: no source attribute field found for {result['missing_fields']}; "
-              "written empty in the CSV.")
+        print(
+            f"Note: no source attribute field found for {result['missing_fields']}; "
+            "written empty in the CSV."
+        )
     return 0
 
 

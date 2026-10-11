@@ -39,6 +39,7 @@ from tcip_mcp.tools.annotation_tools import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture()
 def project_dir(tmp_path: Path) -> Path:
     """Fully populated TCIP project with images, labels, predictions, and a nested registry."""
@@ -52,7 +53,10 @@ def project_dir(tmp_path: Path) -> Path:
     from tests._producer_fixtures import label_image, registry_over
 
     registry_over(
-        root, SubjectRegistry(subjects=(Subject(name="bud", description="a currant bud"),))
+        root,
+        SubjectRegistry(
+            subjects=(Subject(name="bud", description="a currant bud"),)
+        ),
     )
 
     # 5 synthetic images (640x480 gray) with GT labels and predictions
@@ -63,13 +67,27 @@ def project_dir(tmp_path: Path) -> Path:
         img.save(images / f"{name}.jpg")
 
         # GT: 2 boxes per image, name-based per-image JSON (pixel xyxy).
-        label_image(images / f"{name}.jpg",
-                    [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264)),
-                     Annotation(subject="bud", geometry=BBox(176, 132, 208, 156))], 640, 480)
+        label_image(
+            images / f"{name}.jpg",
+            [
+                Annotation(subject="bud", geometry=BBox(288, 216, 352, 264)),
+                Annotation(subject="bud", geometry=BBox(176, 132, 208, 156)),
+            ],
+            640,
+            480,
+        )
         # Predictions: 1 matching (TP) + 1 false positive (FP), the confidence in each score.
-        results.append({"image": str(images / f"{name}.jpg"), "width": 640, "height": 480,
-                        "boxes": [[288, 216, 352, 264], [499.2, 374.4, 524.8, 393.6]],
-                        "scores": [0.92, 0.60], "labels": [1, 1], "cap": 3})
+        results.append(
+            {
+                "image": str(images / f"{name}.jpg"),
+                "width": 640,
+                "height": 480,
+                "boxes": [[288, 216, 352, 264], [499.2, 374.4, 524.8, 393.6]],
+                "scores": [0.92, 0.60],
+                "labels": [1, 1],
+                "cap": 3,
+            }
+        )
     pytest.importorskip("torch")
     from tests._chain_fixtures import published
 
@@ -84,6 +102,7 @@ BUCKET = "live/2-11-26"
 # E2E Pipeline Test
 # ---------------------------------------------------------------------------
 
+
 class TestE2EPipeline:
     """Walk the full pipeline using MCP tools, asserting state at each step."""
 
@@ -91,7 +110,9 @@ class TestE2EPipeline:
         root = str(project_dir)
 
         # ── Step 1: Init project ─────────────────────────────────────
-        created = initialize_project(root, "North orchard", site="north orchard")
+        created = initialize_project(
+            root, "North orchard", site="north orchard"
+        )
         assert (project_dir / ".tcip").is_dir()
         assert (project_dir / ".tcip" / "artifacts").is_dir()
 
@@ -109,7 +130,9 @@ class TestE2EPipeline:
 
         # ── Step 4: Validate data quality ────────────────────────────
         findings: list[tuple[str, str]] = []
-        doctor.check_data_quality(Path(root), findings, census=doctor._census(Path(root), findings))
+        doctor.check_data_quality(
+            Path(root), findings, census=doctor._census(Path(root), findings)
+        )
         assert not [f for f in findings if f[0] == "error"]
 
         # ── Step 5: Load annotations for one image ───────────────────
@@ -126,8 +149,12 @@ class TestE2EPipeline:
             {"subject": "bud", "bbox": [400, 300, 440, 340]},
         ]
         save_result = save_annotations(
-            BoundProject(project_dir, created["id"], workspace_from_environment()), img_path,
-            annotations=new_anns)
+            BoundProject(
+                project_dir, created["id"], workspace_from_environment()
+            ),
+            img_path,
+            annotations=new_anns,
+        )
         assert save_result["count"] == 3  # 3 annotations written
         assert len(save_result["written"]) == 1
 
@@ -139,7 +166,9 @@ class TestE2EPipeline:
         assert len(doc.annotations) == 3  # we wrote 3 boxes
 
         # ── Step 7: Evaluate single image detections ─────────────────
-        eval_result = score_predictions(img_path, BUCKET, iou_threshold=0.5, conf_threshold=0.25)
+        eval_result = score_predictions(
+            img_path, BUCKET, iou_threshold=0.5, conf_threshold=0.25
+        )
         assert "error" not in eval_result
         # Should have precision, recall, f1 keys
         assert "precision" in eval_result
@@ -148,16 +177,25 @@ class TestE2EPipeline:
         assert isinstance(eval_result["precision"], float)
 
         # ── Step 8: Detailed per-detection breakdown (score_predictions detail=True) ─
-        match_result = score_predictions(img_path, BUCKET, iou_threshold=0.5, conf_threshold=0.25,
-                                         detail=True)
+        match_result = score_predictions(
+            img_path,
+            BUCKET,
+            iou_threshold=0.5,
+            conf_threshold=0.25,
+            detail=True,
+        )
         assert "error" not in match_result
         assert "detections" in match_result
         assert "img_w" in match_result
         assert "img_h" in match_result
 
         # ── Step 9: Evaluate full dataset ────────────────────────────
-        dataset_eval = score_predictions(str(project_dir / "images" / "2-11-26"), BUCKET,
-                                         iou_threshold=0.5, conf_threshold=0.25)
+        dataset_eval = score_predictions(
+            str(project_dir / "images" / "2-11-26"),
+            BUCKET,
+            iou_threshold=0.5,
+            conf_threshold=0.25,
+        )
         assert "error" not in dataset_eval
         assert dataset_eval["image_count"] == 5
         assert "precision" in dataset_eval
@@ -168,9 +206,16 @@ class TestE2EPipeline:
         from tcip_mcp.pipelines.data.selection import read_selection
 
         split_dir = tmp_path / "splits"
-        split_result = draw_splits(project_dir, root, output_path=str(split_dir),
-                                   subject="bud", seed=1, val_ratio=0.25,
-                                   calibration_ratio=0.125, holdout_ratio=0.125)
+        split_result = draw_splits(
+            project_dir,
+            root,
+            output_path=str(split_dir),
+            subject="bud",
+            seed=1,
+            val_ratio=0.25,
+            calibration_ratio=0.125,
+            holdout_ratio=0.125,
+        )
         assert split_result["total_stems"] == 5
         drawn = read_selection(split_dir, project=project_dir)
         assert drawn.on("train")
@@ -213,8 +258,12 @@ class TestE2EPipelineEdgeCases:
         for i in range(3):
             img = Image.new("RGB", (64, 64))
             img.save(images / f"img_{i:03d}.jpg")
-        label_image(images / "img_000.jpg",
-                    [Annotation(subject="bud", geometry=BBox(28, 28, 36, 36))], 64, 64)
+        label_image(
+            images / "img_000.jpg",
+            [Annotation(subject="bud", geometry=BBox(28, 28, 36, 36))],
+            64,
+            64,
+        )
 
         ds = scan_dataset(str(tmp_path))
         assert ds["image_count"] == 3
@@ -233,15 +282,21 @@ class TestE2EPipelineEdgeCases:
         img = Image.new("RGB", (640, 480))
         img_path = images / "test.jpg"
         img.save(img_path)
-        label_image(img_path, [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264))],
-                    640, 480)
+        label_image(
+            img_path,
+            [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264))],
+            640,
+            480,
+        )
 
         # A bucket name never published: evaluate should handle gracefully
         result = score_predictions(str(img_path), "none/2026-01-01")
         # Either returns an error dict or metrics with 0 TP
         assert isinstance(result, dict)
 
-    def test_save_annotations_writes_a_first_label_document(self, tmp_path: Path, bound):
+    def test_save_annotations_writes_a_first_label_document(
+        self, tmp_path: Path, bound
+    ):
         """save_annotations writes an image's first label document."""
         import tcip_store
 
@@ -253,8 +308,12 @@ class TestE2EPipelineEdgeCases:
         img_path = images / "new_img.jpg"
         img.save(img_path)
 
-        result = save_annotations(bound, str(img_path), annotations=[
-            {"subject": "bud", "bbox": [10, 10, 50, 50]},
-        ])
+        result = save_annotations(
+            bound,
+            str(img_path),
+            annotations=[
+                {"subject": "bud", "bbox": [10, 10, 50, 50]},
+            ],
+        )
         assert result["count"] == 1
         assert tcip_store.exists(image_label_key(img_path))

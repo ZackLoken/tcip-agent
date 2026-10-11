@@ -30,17 +30,25 @@ def _write_one_image(dataset_root: Path) -> Path:
     images_root = dataset_root / "images"
     _write_geo_image(
         images_root / "2026-02-11" / "P1_20260211.jpg",
-        PLANTS[0]["lat"], PLANTS[0]["lon"], datetime(2026, 2, 11, 9, 30),
+        PLANTS[0]["lat"],
+        PLANTS[0]["lon"],
+        datetime(2026, 2, 11, 9, 30),
     )
     return images_root
 
 
-def _build(tmp_path: Path, plants: list[dict], nn_tolerance_m: float | None) -> tuple:
+def _build(
+    tmp_path: Path, plants: list[dict], nn_tolerance_m: float | None
+) -> tuple:
     images_root = _write_one_image(tmp_path)
     plant_csv = write_plant_csv(tmp_path / "plants.csv", plants)
     build = build_mapping(
-        images_root, [plant_csv], name="valley", dataset_root=tmp_path / "ds",
-        dataset_id="ds-1", project=tmp_path,
+        images_root,
+        [plant_csv],
+        name="valley",
+        dataset_root=tmp_path / "ds",
+        dataset_id="ds-1",
+        project=tmp_path,
         plant_registry={"name": "unregistered", "digest": "0" * 64},
         nn_tolerance_m=nn_tolerance_m,
     )
@@ -61,7 +69,9 @@ def test_refuses_naming_the_parameter_when_fewer_than_two_plants_have_positions(
         _build(tmp_path, PLANTS[:1], None)
 
 
-def test_honors_a_stated_value_when_the_layout_derives_no_pitch(tmp_path: Path) -> None:
+def test_honors_a_stated_value_when_the_layout_derives_no_pitch(
+    tmp_path: Path,
+) -> None:
     build, pitch = _build(tmp_path, PLANTS[:1], 2.0)
     assert pitch == 0.0
     assert build.nn_tolerance_m == {"value": 2.0, "source": "stated"}
@@ -74,7 +84,9 @@ def test_honors_a_stated_value_at_or_under_the_cap(tmp_path: Path) -> None:
     assert build.nn_tolerance_m["value"] == pytest.approx(0.1)
 
 
-def test_caps_a_stated_value_above_the_grid_pitch_ceiling(tmp_path: Path) -> None:
+def test_caps_a_stated_value_above_the_grid_pitch_ceiling(
+    tmp_path: Path,
+) -> None:
     build, pitch = _build(tmp_path, PLANTS, 5.0)
     cap = pitch / 6
     assert 5.0 > cap

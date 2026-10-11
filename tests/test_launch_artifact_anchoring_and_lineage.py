@@ -38,7 +38,9 @@ def recorded_children(monkeypatch):
 
     monkeypatch.setattr(subprocess, "Popen", _RecordedChild)
     monkeypatch.setattr(
-        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
+        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard",
+        lambda *a, **k: {},
+    )
     return children
 
 
@@ -55,22 +57,40 @@ def _canonical_dataset(root: Path, date: str = "2-11-26") -> Path:
     images_dir.mkdir(parents=True)
     registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
     for i in range(2):
-        Image.new("RGB", (96, 64), color=(110, 120, 130)).save(images_dir / f"img_{i}.png")
-        label_image(images_dir / f"img_{i}.png",
-                    [Annotation(subject="bud", geometry=BBox(8, 6, 40, 22))], 96, 64)
+        Image.new("RGB", (96, 64), color=(110, 120, 130)).save(
+            images_dir / f"img_{i}.png"
+        )
+        label_image(
+            images_dir / f"img_{i}.png",
+            [Annotation(subject="bud", geometry=BBox(8, 6, 40, 22))],
+            96,
+            64,
+        )
     return images_dir
 
 
-def _detection_config(images_dir: Path, builder: str = BESPOKE_DETECTION) -> dict:
+def _detection_config(
+    images_dir: Path, builder: str = BESPOKE_DETECTION
+) -> dict:
     """A one-image-per-batch ``training_config`` of the detection ``builder`` at 64/96 px over
     every admitted image of ``images_dir``, selecting on its loss since nothing is held out."""
     from tests._chain_fixtures import BESPOKE_MODELS, training_config
 
     return training_config(
-        {"builder": builder, "builder_kwargs": {"min_size": 64, "max_size": 96},
-         "source_files": [BESPOKE_MODELS], "task": "detection"},
-        {"images_dir": str(images_dir), "scope": {"subject": "bud"}, "auto_val": False},
-        batch_size=1, evaluation=evaluation_block(selection_metric="loss"))
+        {
+            "builder": builder,
+            "builder_kwargs": {"min_size": 64, "max_size": 96},
+            "source_files": [BESPOKE_MODELS],
+            "task": "detection",
+        },
+        {
+            "images_dir": str(images_dir),
+            "scope": {"subject": "bud"},
+            "auto_val": False,
+        },
+        batch_size=1,
+        evaluation=evaluation_block(selection_metric="loss"),
+    )
 
 
 def _launch_record(res: dict) -> dict:
@@ -81,7 +101,8 @@ def _launch_record(res: dict) -> dict:
 
 
 def test_the_run_directory_lies_under_its_project_not_the_process_cwd(
-        tmp_path: Path, monkeypatch, recorded_children) -> None:
+    tmp_path: Path, monkeypatch, recorded_children
+) -> None:
     """The run directory handed to the child and the run record written into it resolve under the
     project's experiments directory, never under the launching process's cwd."""
     pytest.importorskip("torchvision")
@@ -106,7 +127,8 @@ def test_the_run_directory_lies_under_its_project_not_the_process_cwd(
 
 
 def test_launched_run_records_the_datasets_identity_in_its_run_record(
-        tmp_path: Path, recorded_children) -> None:
+    tmp_path: Path, recorded_children
+) -> None:
     """The run record carries the identity of the data section's dataset, so the metric this run
     produces can be traced back to the exact content it trained on. A registered dataset's minted
     id and its recomputed fingerprint both land there, not None."""
@@ -121,11 +143,15 @@ def test_launched_run_records_the_datasets_identity_in_its_run_record(
     res = training_tools_launch(tmp_path, _detection_config(images_dir))
 
     dataset = _launch_record(res)["dataset"]
-    assert dataset == {"id": registered["id"], "fingerprint": registered["fingerprint"]}
+    assert dataset == {
+        "id": registered["id"],
+        "fingerprint": registered["fingerprint"],
+    }
 
 
 def test_launch_records_what_the_smoke_contract_checked(
-        tmp_path: Path, monkeypatch, recorded_children) -> None:
+    tmp_path: Path, monkeypatch, recorded_children
+) -> None:
     """launch_training records a model_contract (subject/gating/batch_source/dims/issues/
     gradient_magnitudes) on the run record, what the launch-time smoke actually checked, and the
     caller's own config dict is never the one mutated to carry it."""
@@ -139,14 +165,21 @@ def test_launch_records_what_the_smoke_contract_checked(
     assert "model_contract" not in launched_config
 
     record = _launch_record(res)["model_contract"]
-    assert record["subject"] == "the model as built at launch, before any training step"
+    assert (
+        record["subject"]
+        == "the model as built at launch, before any training step"
+    )
     assert record["gating"] is True
     assert record["issues"] == []
-    assert isinstance(record["gradient_magnitudes"], dict) and record["gradient_magnitudes"]
+    assert (
+        isinstance(record["gradient_magnitudes"], dict)
+        and record["gradient_magnitudes"]
+    )
 
 
 def test_launch_omitting_overfit_check_records_null(
-        tmp_path: Path, monkeypatch, recorded_children) -> None:
+    tmp_path: Path, monkeypatch, recorded_children
+) -> None:
     """The flag defaults off: the record carries overfit_check: null, never a missing key."""
     pytest.importorskip("torchvision")
     project = tmp_path / "project"
@@ -160,7 +193,8 @@ def test_launch_omitting_overfit_check_records_null(
 
 
 def test_launch_with_overfit_check_records_the_rendered_report(
-        tmp_path: Path, monkeypatch, recorded_children) -> None:
+    tmp_path: Path, monkeypatch, recorded_children
+) -> None:
     """``launch_training(overfit_check=True)`` runs the diagnostic on the contract's own batch
     and records the rendered report on both the returned dict and the persisted config."""
     pytest.importorskip("torchvision")
@@ -171,7 +205,8 @@ def test_launch_with_overfit_check_records_the_rendered_report(
 
     images_dir = _canonical_dataset(project / "ds")
     res = training_tools.launch_training(
-        project, _detection_config(images_dir), overfit_check=True, actor=None)
+        project, _detection_config(images_dir), overfit_check=True, actor=None
+    )
     assert "error" not in res, res
     assert res["overfit_check"] is not None
     assert "passed" in res["overfit_check"]
@@ -181,7 +216,8 @@ def test_launch_with_overfit_check_records_the_rendered_report(
 
 
 def test_launch_with_overfit_check_over_a_diverging_model_proceeds_with_a_json_safe_record(
-        tmp_path: Path, monkeypatch, recorded_children) -> None:
+    tmp_path: Path, monkeypatch, recorded_children
+) -> None:
     """A model whose loss diverges to nan under the overfit diagnostic never blocks the launch,
     since the check is voluntary and non-gating: the run proceeds, and the persisted report
     renders the non-finite losses as null with the state named beside them, so the record this
@@ -195,8 +231,12 @@ def test_launch_with_overfit_check_over_a_diverging_model_proceeds_with_a_json_s
     project.mkdir()
 
     images_dir = _canonical_dataset(project / "ds")
-    config = _detection_config(images_dir, "bespoke_models:build_diverging_detection")
-    res = training_tools.launch_training(project, config, overfit_check=True, actor=None)
+    config = _detection_config(
+        images_dir, "bespoke_models:build_diverging_detection"
+    )
+    res = training_tools.launch_training(
+        project, config, overfit_check=True, actor=None
+    )
     assert "error" not in res, res
 
     record = _launch_record(res)["model_contract"]
@@ -204,11 +244,16 @@ def test_launch_with_overfit_check_over_a_diverging_model_proceeds_with_a_json_s
     report = record["overfit_check"]
     assert report["passed"] is False
     assert any(loss is None for loss in report["losses"])
-    assert report.get("final_state") in ("nan", "positive_infinity", "negative_infinity")
+    assert report.get("final_state") in (
+        "nan",
+        "positive_infinity",
+        "negative_infinity",
+    )
 
 
 def test_the_run_record_the_worker_reads_carries_the_seed_and_the_training_keys(
-        tmp_path: Path, monkeypatch, recorded_children) -> None:
+    tmp_path: Path, monkeypatch, recorded_children
+) -> None:
     """The writer is the real launch_training (Popen and TensorBoard stubbed by
     recorded_children so no subprocess actually spawns); the reader is the one the training
     child performs, the run directory's own ``run.json``. The trainer's keys sit at the config's

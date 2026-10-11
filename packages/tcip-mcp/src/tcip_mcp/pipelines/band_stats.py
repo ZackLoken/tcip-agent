@@ -59,21 +59,31 @@ def band_ranges(pixels) -> list[BandRange]:
     from tcip_mcp.pipelines.raster_source import hwc_array
 
     arr = hwc_array(pixels)
-    return [BandRange(float(arr[:, :, i].min()), float(arr[:, :, i].max()))
-            for i in range(arr.shape[-1])]
+    return [
+        BandRange(float(arr[:, :, i].min()), float(arr[:, :, i].max()))
+        for i in range(arr.shape[-1])
+    ]
 
 
-def clip_bounds(band, percentiles: tuple[float, float] = DISPLAY_CLIP_PERCENTILES
-                ) -> tuple[float, float]:
+def clip_bounds(
+    band, percentiles: tuple[float, float] = DISPLAY_CLIP_PERCENTILES
+) -> tuple[float, float]:
     """The values ``percentiles`` cuts a band at, in the band's own dtype units."""
     import numpy as np
 
-    lo, hi = np.percentile(np.asarray(band, dtype=np.float64), list(percentiles))
+    lo, hi = np.percentile(
+        np.asarray(band, dtype=np.float64), list(percentiles)
+    )
     return float(lo), float(hi)
 
 
-def full_scale_denominator(band, source_dtype, *, sampled_maximum: float | None = None,
-                           sampled_minimum: float | None = None) -> float:
+def full_scale_denominator(
+    band,
+    source_dtype,
+    *,
+    sampled_maximum: float | None = None,
+    sampled_minimum: float | None = None,
+) -> float:
     """The divisor that puts a band on its own full scale with no data-range stretch applied.
 
     An integer raster divides by its dtype's maximum, the scale ``image_utils.pil_to_tensor``
@@ -112,7 +122,9 @@ def _stretch_between(raw, low: float, high: float):
     return np.zeros_like(raw)
 
 
-def stretch_band(band, mode: str, source_dtype, bounds: tuple[float, float] | None = None):
+def stretch_band(
+    band, mode: str, source_dtype, bounds: tuple[float, float] | None = None
+):
     """One band as ``uint8`` display pixels, stretched by ``mode``.
 
     ``minmax`` spans the band's own data range, ``percent_clip`` spans
@@ -133,22 +145,37 @@ def stretch_band(band, mode: str, source_dtype, bounds: tuple[float, float] | No
         sampled_maximum, sampled_minimum = (
             (None, None) if bounds is None else (bounds[1], bounds[0])
         )
-        out = raw / full_scale_denominator(
-            raw, source_dtype, sampled_maximum=sampled_maximum,
-            sampled_minimum=sampled_minimum) * 255.0
+        out = (
+            raw
+            / full_scale_denominator(
+                raw,
+                source_dtype,
+                sampled_maximum=sampled_maximum,
+                sampled_minimum=sampled_minimum,
+            )
+            * 255.0
+        )
     elif mode == "percent_clip":
         low, high = clip_bounds(raw) if bounds is None else bounds
         out = _stretch_between(raw, low, high)
     elif mode == "minmax":
-        low, high = (float(raw.min()), float(raw.max())) if bounds is None else bounds
+        low, high = (
+            (float(raw.min()), float(raw.max())) if bounds is None else bounds
+        )
         out = _stretch_between(raw, low, high)
     else:
-        raise ValueError(f"stretch mode must be one of {sorted(STRETCH_MODES)}, got {mode!r}")
+        raise ValueError(
+            f"stretch mode must be one of {sorted(STRETCH_MODES)}, got {mode!r}"
+        )
     return np.clip(out, 0, 255).astype(np.uint8)
 
 
-def composite_display_rgb(pixels, band_indices, stretch: str,
-                          bounds: list[tuple[float, float]] | None = None):
+def composite_display_rgb(
+    pixels,
+    band_indices,
+    stretch: str,
+    bounds: list[tuple[float, float]] | None = None,
+):
     """Three of ``pixels``' bands stretched independently and stacked into ``uint8 [H, W, 3]``.
 
     ``pixels`` is ``[H, W, C]`` (a 2-D array reads as one band) and ``band_indices`` names exactly
@@ -167,13 +194,22 @@ def composite_display_rgb(pixels, band_indices, stretch: str,
         raise ValueError(f"a display composite is 3 bands, got {len(idxs)}")
     for i in idxs:
         if not 0 <= i < arr.shape[-1]:
-            raise ValueError(f"band index {i} is out of range for a {arr.shape[-1]}-band array")
+            raise ValueError(
+                f"band index {i} is out of range for a {arr.shape[-1]}-band array"
+            )
     if bounds is not None and len(bounds) != len(idxs):
-        raise ValueError(f"bounds must hold one (low, high) pair per selected band, got "
-                         f"{len(bounds)} for {len(idxs)} bands")
+        raise ValueError(
+            f"bounds must hold one (low, high) pair per selected band, got "
+            f"{len(bounds)} for {len(idxs)} bands"
+        )
     per_band = [None, None, None] if bounds is None else list(bounds)
-    return np.stack([stretch_band(arr[:, :, i], stretch, arr.dtype, b)
-                     for i, b in zip(idxs, per_band)], axis=-1)
+    return np.stack(
+        [
+            stretch_band(arr[:, :, i], stretch, arr.dtype, b)
+            for i, b in zip(idxs, per_band)
+        ],
+        axis=-1,
+    )
 
 
 def _reservoir_take(reservoir, seen: int, values, size: int, rng):
@@ -197,7 +233,9 @@ def _reservoir_take(reservoir, seen: int, values, size: int, rng):
         seen += head.shape[0]
         values = values[room:]
     if values.shape[0]:
-        slots = rng.integers(0, np.arange(seen + 1, seen + values.shape[0] + 1))
+        slots = rng.integers(
+            0, np.arange(seen + 1, seen + values.shape[0] + 1)
+        )
         keep = slots < size
         # Repeated slots assign in stream order and the last write wins, which is what replacing
         # one pixel at a time would leave behind.
@@ -206,10 +244,15 @@ def _reservoir_take(reservoir, seen: int, values, size: int, rng):
     return reservoir, seen
 
 
-def sampled_band_ranges(src: "RasterSource", *, seed: int,
-                        window_size: int, max_windows: int, reservoir_size: int,
-                        percentiles: tuple[float, float] = DISPLAY_CLIP_PERCENTILES,
-                        ) -> SampledBandRanges:
+def sampled_band_ranges(
+    src: "RasterSource",
+    *,
+    seed: int,
+    window_size: int,
+    max_windows: int,
+    reservoir_size: int,
+    percentiles: tuple[float, float] = DISPLAY_CLIP_PERCENTILES,
+) -> SampledBandRanges:
     """Per-band display bounds from a seeded sample of the open reader ``src``'s pixel windows,
     in one pass.
 
@@ -229,10 +272,17 @@ def sampled_band_ranges(src: "RasterSource", *, seed: int,
     from tcip_mcp.pipelines import raster_source
 
     if reservoir_size <= 0:
-        raise ValueError(f"reservoir_size must be positive, got {reservoir_size}")
+        raise ValueError(
+            f"reservoir_size must be positive, got {reservoir_size}"
+        )
 
     windows = raster_source.sample_windows(
-        src.width, src.height, seed=seed, window_size=window_size, max_windows=max_windows)
+        src.width,
+        src.height,
+        seed=seed,
+        window_size=window_size,
+        max_windows=max_windows,
+    )
     rng = np.random.default_rng(seed)
     lows = highs = None
     reservoir = None
@@ -245,16 +295,22 @@ def sampled_band_ranges(src: "RasterSource", *, seed: int,
         band_hi = flat.max(axis=0).astype(np.float64)
         lows = band_lo if lows is None else np.minimum(lows, band_lo)
         highs = band_hi if highs is None else np.maximum(highs, band_hi)
-        reservoir, seen = _reservoir_take(reservoir, seen, flat, reservoir_size, rng)
+        reservoir, seen = _reservoir_take(
+            reservoir, seen, flat, reservoir_size, rng
+        )
         covered += rect.width * rect.height
     fraction = covered / float(src.width * src.height)
     # sample_windows always returns at least one window for a raster with positive dimensions,
     # so the loop above ran at least once.
     assert lows is not None and highs is not None and reservoir is not None
     return SampledBandRanges(
-        ranges=[BandRange(float(lo), float(hi)) for lo, hi in zip(lows, highs)],
-        clip_bounds=[clip_bounds(reservoir[:, i], percentiles)
-                     for i in range(reservoir.shape[1])],
+        ranges=[
+            BandRange(float(lo), float(hi)) for lo, hi in zip(lows, highs)
+        ],
+        clip_bounds=[
+            clip_bounds(reservoir[:, i], percentiles)
+            for i in range(reservoir.shape[1])
+        ],
         seed=int(seed),
         pixel_fraction=float(fraction),
     )

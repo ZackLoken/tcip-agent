@@ -21,16 +21,28 @@ from tcip_mcp.cli import bound_project
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, prog=prog)
-    parser.add_argument("--config", required=True,
-                        help="Path to a JSON file holding the full training configuration.")
-    parser.add_argument("--project", required=True,
-                        help="The project the config's own project-relative reads resolve under.")
-    parser.add_argument("--smoke", action="store_true",
-                        help="Build the model and run check_model_contract; a contract failure "
-                             "is a guaranteed real-run failure, so it blocks.")
-    parser.add_argument("--overfit", action="store_true",
-                        help="With --smoke, also run the voluntary overfit_check diagnostic; "
-                             "never gates, a noisy-but-valid model can fail it.")
+    parser.add_argument(
+        "--config",
+        required=True,
+        help="Path to a JSON file holding the full training configuration.",
+    )
+    parser.add_argument(
+        "--project",
+        required=True,
+        help="The project the config's own project-relative reads resolve under.",
+    )
+    parser.add_argument(
+        "--smoke",
+        action="store_true",
+        help="Build the model and run check_model_contract; a contract failure "
+        "is a guaranteed real-run failure, so it blocks.",
+    )
+    parser.add_argument(
+        "--overfit",
+        action="store_true",
+        help="With --smoke, also run the voluntary overfit_check diagnostic; "
+        "never gates, a noisy-but-valid model can fail it.",
+    )
     args = parser.parse_args(argv)
 
     project = bound_project(args.project)
@@ -38,9 +50,13 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     from tcip_mcp.registry_paths import located
     from tcip_mcp.tools.training_tools import preflight_config
 
-    config = json.loads(located(args.config, project).read_text(encoding="utf-8"))
+    config = json.loads(
+        located(args.config, project).read_text(encoding="utf-8")
+    )
 
-    result = preflight_config(project, config, smoke=args.smoke, overfit=args.overfit)
+    result = preflight_config(
+        project, config, smoke=args.smoke, overfit=args.overfit
+    )
     print(json.dumps(result, indent=2))
     return 0 if not result.get("issues") else 2
 

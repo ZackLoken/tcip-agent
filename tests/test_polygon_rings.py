@@ -41,15 +41,27 @@ def test_bbox_of_multi_ring_polygon_is_independent_of_ring_order() -> None:
     """
     a_first = bbox_of(Polygon([LOBE_A, LOBE_B]))
     b_first = bbox_of(Polygon([LOBE_B, LOBE_A]))
-    assert (a_first.x1, a_first.y1, a_first.x2, a_first.y2) == (10.0, 10.0, 90.0, 80.0)
-    assert (b_first.x1, b_first.y1, b_first.x2, b_first.y2) == (10.0, 10.0, 90.0, 80.0)
+    assert (a_first.x1, a_first.y1, a_first.x2, a_first.y2) == (
+        10.0,
+        10.0,
+        90.0,
+        80.0,
+    )
+    assert (b_first.x1, b_first.y1, b_first.x2, b_first.y2) == (
+        10.0,
+        10.0,
+        90.0,
+        80.0,
+    )
 
 
 def test_bbox_of_grows_with_each_added_ring() -> None:
     """Every ring contributes: adding one can only widen the enclosing box, never be ignored."""
     one = bbox_of(Polygon([LOBE_A]))
     two = bbox_of(Polygon([LOBE_A, LOBE_B]))
-    three = bbox_of(Polygon([LOBE_A, LOBE_B, [(0.0, 0.0), (5.0, 0.0), (5.0, 5.0)]]))
+    three = bbox_of(
+        Polygon([LOBE_A, LOBE_B, [(0.0, 0.0), (5.0, 0.0), (5.0, 5.0)]])
+    )
 
     assert (two.x2 - two.x1) > (one.x2 - one.x1)
     assert (two.y2 - two.y1) > (one.y2 - one.y1)

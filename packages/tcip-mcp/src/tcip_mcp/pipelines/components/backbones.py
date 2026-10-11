@@ -20,8 +20,13 @@ request for 4)::
     import timm
     from tcip_mcp.pipelines.components.backbones import BackboneWrapper
 
-    m = timm.create_model("resnet50", pretrained=True, features_only=True,
-                          out_indices=(1, 2, 3, 4), in_chans=5)
+    m = timm.create_model(
+        "resnet50",
+        pretrained=True,
+        features_only=True,
+        out_indices=(1, 2, 3, 4),
+        in_chans=5,
+    )
     backbone = BackboneWrapper(m, m.feature_info.channels())
 """
 
@@ -111,6 +116,7 @@ class BackboneWrapper(nn.Module):
 # Stage freezing helpers
 # ---------------------------------------------------------------------------
 
+
 def _freeze_timm_stages(model: nn.Module, freeze_to: int) -> None:
     """Freeze timm backbone up to a feature stage index."""
     for p in model.parameters():
@@ -130,7 +136,9 @@ def _freeze_timm_stages(model: nn.Module, freeze_to: int) -> None:
 
 
 def _freeze_sequential_fraction(
-    model: nn.Module, freeze_to: int, total: int,
+    model: nn.Module,
+    freeze_to: int,
+    total: int,
 ) -> None:
     """Freeze first *freeze_to/total* of named children."""
     for p in model.parameters():

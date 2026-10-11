@@ -10,8 +10,14 @@ from typing import Any
 from tcip_mcp.registry_paths import located, nearest_containing_ancestor
 
 __all__ = [
-    "allowed_optional", "allowed_path", "allowed_roots", "assert_path_allowed",
-    "image_roots_from_environment", "resolved_path", "safe_join", "within",
+    "allowed_optional",
+    "allowed_path",
+    "allowed_roots",
+    "assert_path_allowed",
+    "image_roots_from_environment",
+    "resolved_path",
+    "safe_join",
+    "within",
 ]
 
 
@@ -81,7 +87,9 @@ def _existing_anchor(resolved: Path) -> Path | None:
 def _contained(anchor: Path, root: Path) -> bool:
     """Whether ``anchor`` is the same directory as ``root`` or sits below it, by identity; an
     ancestor that cannot be compared raises."""
-    return nearest_containing_ancestor(anchor, root, tolerant=False) is not None
+    return (
+        nearest_containing_ancestor(anchor, root, tolerant=False) is not None
+    )
 
 
 def within(resolved: Path, root: Path) -> bool:
@@ -92,7 +100,9 @@ def within(resolved: Path, root: Path) -> bool:
     """
     try:
         anchor = _existing_anchor(resolved)
-        return anchor is not None and root.exists() and _contained(anchor, root)
+        return (
+            anchor is not None and root.exists() and _contained(anchor, root)
+        )
     except OSError:
         return False
 

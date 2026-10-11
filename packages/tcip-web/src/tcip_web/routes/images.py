@@ -26,7 +26,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from tcip_mcp.pipelines.display_bounds import plan_read, planned_read, within_cap
+from tcip_mcp.pipelines.display_bounds import (
+    plan_read,
+    planned_read,
+    within_cap,
+)
 from tcip_web import jobstore
 from tcip_web.paths import allowed_file, resolved_image
 
@@ -82,7 +86,9 @@ class _Encoding:
         return f"image/{self.pil_format.lower()}"
 
 
-_DISPLAY_ENCODING = _Encoding("JPEG", {"quality": 95, "subsampling": 0}, 65_500)
+_DISPLAY_ENCODING = _Encoding(
+    "JPEG", {"quality": 95, "subsampling": 0}, 65_500
+)
 """A display read, the whole frame, a region served scaled or a tile of an overview level: JPEG
 at quality 95 with chroma subsampling off. Measured on one RGB orthomosaic (239921x141130, one
 sensor, one site) read off its overviews at 4:4:4, as bytes and median encode time of three
@@ -98,8 +104,11 @@ orthomosaic: level 1 took 775 to 986 ms and 25.8 to 26.0 MB, level 6 took 1902 t
 19.7 to 19.8 MB. PNG encoded a 10,000,000 pixel row here; no edge limit was found."""
 
 
-def display_cap(display_pixels: int = Query(
-        ..., ge=1, description="The requesting display's device-pixel count")) -> int:
+def display_cap(
+    display_pixels: int = Query(
+        ..., ge=1, description="The requesting display's device-pixel count"
+    ),
+) -> int:
     """The area cap one display-bound read for the requesting display is held to: that display's
     own device-pixel count."""
     return display_pixels
@@ -127,7 +136,9 @@ def _cache_byte_budget(cache_dir: Path) -> int:
     if _cache_budget_bytes is None:
         import shutil
 
-        _cache_budget_bytes = shutil.disk_usage(cache_dir).free // _CACHE_BUDGET_DIVISOR
+        _cache_budget_bytes = (
+            shutil.disk_usage(cache_dir).free // _CACHE_BUDGET_DIVISOR
+        )
     return _cache_budget_bytes
 
 
@@ -233,8 +244,11 @@ def _evict_lru(cache_dir: Path) -> None:
         entries: list[tuple[float, Path, int]] = []
         total = 0
         for p in cache_dir.iterdir():
-            if not (p.is_file()
-                    and p.suffix in (_DISPLAY_ENCODING.suffix, _NATIVE_ENCODING.suffix)):
+            if not (
+                p.is_file()
+                and p.suffix
+                in (_DISPLAY_ENCODING.suffix, _NATIVE_ENCODING.suffix)
+            ):
                 continue
             st = p.stat()
             size = st.st_size
@@ -260,8 +274,12 @@ def _evict_lru(cache_dir: Path) -> None:
 @router.get("/view")
 def get_view_reads(
     path: str = Query(..., description="Absolute path to the image file"),
-    x0: int = Query(..., ge=0, description="View left edge, full-resolution pixels"),
-    y0: int = Query(..., ge=0, description="View top edge, full-resolution pixels"),
+    x0: int = Query(
+        ..., ge=0, description="View left edge, full-resolution pixels"
+    ),
+    y0: int = Query(
+        ..., ge=0, description="View top edge, full-resolution pixels"
+    ),
     x1: int = Query(..., ge=0, description="View right edge, exclusive"),
     y1: int = Query(..., ge=0, description="View bottom edge, exclusive"),
     area_cap: int = Depends(display_cap),
@@ -281,27 +299,59 @@ def get_view_reads(
     the ones the image route's own plain read opens the raster at
     (``SourceHeader.route_channels``). Refuses a view with no pixels inside the raster.
     """
-    from tcip_mcp.pipelines.raster_source import Rect, SourceHeader, level_window, rects_overlap
-    from tcip_mcp.pipelines.reference_grid import derive_serving_tile_size, reference_cells
+    from tcip_mcp.pipelines.raster_source import (
+        Rect,
+        SourceHeader,
+        level_window,
+        rects_overlap,
+    )
+    from tcip_mcp.pipelines.reference_grid import (
+        derive_serving_tile_size,
+        reference_cells,
+    )
 
     header = SourceHeader(resolved_image(path)[1])
     width, height = header.display_frame
     x1, y1 = min(x1, width), min(y1, height)
     if not (x0 < x1 and y0 < y1):
-        raise HTTPException(400, f"view [{y0}:{y1}, {x0}:{x1}] holds no pixel of this "
-                                 f"{width}x{height} raster")
+        raise HTTPException(
+            400,
+            f"view [{y0}:{y1}, {x0}:{x1}] holds no pixel of this "
+            f"{width}x{height} raster",
+        )
     view = Rect(x0, y0, x1, y1)
 
-    def cells(level: int, level_w: int, level_h: int, window: Rect) -> ViewReads:
+    def cells(
+        level: int, level_w: int, level_h: int, window: Rect
+    ) -> ViewReads:
         sx, sy = width / level_w, height / level_h
         encoding = _DISPLAY_ENCODING if level else _NATIVE_ENCODING
-        edge = derive_serving_tile_size(level_w, level_h, area_cap, encoding.max_edge)
-        return ViewReads(reads=[
-            ServingCell(name=c.name, level=level, x0=c.x0, y0=c.y0, x1=c.x1, y1=c.y1,
-                        nx0=c.x0 * sx, ny0=c.y0 * sy, nx1=c.x1 * sx, ny1=c.y1 * sy)
-            for c in reference_cells(level_w, level_h, edge, 0.0, clamp=True)
-            if rects_overlap((c.x0, c.y0, c.x1, c.y1),
-                             (window.x0, window.y0, window.x1, window.y1))])
+        edge = derive_serving_tile_size(
+            level_w, level_h, area_cap, encoding.max_edge
+        )
+        return ViewReads(
+            reads=[
+                ServingCell(
+                    name=c.name,
+                    level=level,
+                    x0=c.x0,
+                    y0=c.y0,
+                    x1=c.x1,
+                    y1=c.y1,
+                    nx0=c.x0 * sx,
+                    ny0=c.y0 * sy,
+                    nx1=c.x1 * sx,
+                    ny1=c.y1 * sy,
+                )
+                for c in reference_cells(
+                    level_w, level_h, edge, 0.0, clamp=True
+                )
+                if rects_overlap(
+                    (c.x0, c.y0, c.x1, c.y1),
+                    (window.x0, window.y0, window.x1, window.y1),
+                )
+            ]
+        )
 
     if within_cap(view.width, view.height, area_cap):
         return cells(0, width, height, view)
@@ -312,23 +362,44 @@ def get_view_reads(
             dims = reader.level_dims()
     plan = plan_read(view, width, height, dims, area_cap)
     if plan.level == 0:
-        return ViewReads(reads=[ServingCell(name="view", level=0, x0=x0, y0=y0, x1=x1, y1=y1,
-                                            nx0=x0, ny0=y0, nx1=x1, ny1=y1)])
+        return ViewReads(
+            reads=[
+                ServingCell(
+                    name="view",
+                    level=0,
+                    x0=x0,
+                    y0=y0,
+                    x1=x1,
+                    y1=y1,
+                    nx0=x0,
+                    ny0=y0,
+                    nx1=x1,
+                    ny1=y1,
+                )
+            ]
+        )
     level_w, level_h = dims[plan.level - 1]
-    return cells(plan.level, level_w, level_h,
-                 level_window(view, width, height, level_w, level_h))
+    return cells(
+        plan.level,
+        level_w,
+        level_h,
+        level_window(view, width, height, level_w, level_h),
+    )
 
 
 def _parse_band_tokens(raw: str) -> list[str]:
     tokens = [t.strip() for t in raw.split(",") if t.strip()]
     if len(tokens) != 3:
         raise HTTPException(
-            400, f"bands must name exactly 3 bands (R,G,B), got {len(tokens)}: {raw!r}"
+            400,
+            f"bands must name exactly 3 bands (R,G,B), got {len(tokens)}: {raw!r}",
         )
     return tokens
 
 
-def _band_index(token: str, declared_names: "list[str] | None", total_bands: int) -> int:
+def _band_index(
+    token: str, declared_names: "list[str] | None", total_bands: int
+) -> int:
     if declared_names and token in declared_names:
         return declared_names.index(token)
     try:
@@ -341,7 +412,10 @@ def _band_index(token: str, declared_names: "list[str] | None", total_bands: int
             + " and not a valid 0-based index",
         ) from None
     if not (0 <= idx < total_bands):
-        raise HTTPException(400, f"band index {idx} out of range for a {total_bands}-band image")
+        raise HTTPException(
+            400,
+            f"band index {idx} out of range for a {total_bands}-band image",
+        )
     return idx
 
 
@@ -353,7 +427,8 @@ def _overviews_required(path: str, reason: str) -> HTTPException:
         400,
         f"{reason} Reading it needs its reduced-resolution overviews: build them with POST "
         f'/api/images/overviews {{"path": "{path}"}}, then ask again.',
-        headers={IMAGE_ERROR_HEADER: OVERVIEWS_REQUIRED})
+        headers={IMAGE_ERROR_HEADER: OVERVIEWS_REQUIRED},
+    )
 
 
 def _overview_stats(raster, dims: list[tuple[int, int]]):
@@ -367,8 +442,14 @@ def _overview_stats(raster, dims: list[tuple[int, int]]):
     from tcip_mcp.pipelines.raster_source import Rect
 
     whole = Rect(0, 0, raster.width, raster.height)
-    plan = plan_read(whole, raster.width, raster.height, dims, PYRAMID_FLOOR_EDGE**2,
-                     PYRAMID_FLOOR_EDGE)
+    plan = plan_read(
+        whole,
+        raster.width,
+        raster.height,
+        dims,
+        PYRAMID_FLOOR_EDGE**2,
+        PYRAMID_FLOOR_EDGE,
+    )
     pixels, _spec = planned_read(raster, whole, plan)
     clips = [clip_bounds(pixels[:, :, i]) for i in range(pixels.shape[-1])]
     return band_ranges(pixels), clips, (plan.width, plan.height)
@@ -392,7 +473,9 @@ def _source_identity(header) -> tuple:
     return raster_source.source_version(header), sidecar
 
 
-def _memo(cache: "OrderedDict[tuple, _V]", key: tuple, compute: "Callable[[], _V]") -> "_V":
+def _memo(
+    cache: "OrderedDict[tuple, _V]", key: tuple, compute: "Callable[[], _V]"
+) -> "_V":
     """What ``cache`` holds under ``key``; on a miss, ``compute()``'s answer, stored there with
     the :data:`_STATS_CACHE_MAX` most recently used kept. A concurrent miss on the same key
     computes twice and stores the same value."""
@@ -434,22 +517,38 @@ def _stats_of(raster) -> _RasterStats:
                 str(raster.path),
                 f"this {raster.width}x{raster.height} raster holds "
                 f"{raster.width * raster.height} pixels, over the {sample_budget} its "
-                "display statistics can be read from native pixels for.")
+                "display statistics can be read from native pixels for.",
+            )
         ranges, clips, served = _overview_stats(raster, dims)
-        return _RasterStats(dtype=dtype, num_channels=channels, ranges=ranges,
-                            clip_bounds=clips, overview_size=served,
-                            interpretations=interpretations)
+        return _RasterStats(
+            dtype=dtype,
+            num_channels=channels,
+            ranges=ranges,
+            clip_bounds=clips,
+            overview_size=served,
+            interpretations=interpretations,
+        )
     sampled = sampled_band_ranges(
-        raster, seed=_STATS_SEED, window_size=_STATS_WINDOW_SIZE,
-        max_windows=_STATS_MAX_WINDOWS, reservoir_size=_STATS_RESERVOIR_SIZE)
+        raster,
+        seed=_STATS_SEED,
+        window_size=_STATS_WINDOW_SIZE,
+        max_windows=_STATS_MAX_WINDOWS,
+        reservoir_size=_STATS_RESERVOIR_SIZE,
+    )
     return _RasterStats(
-        dtype=dtype, num_channels=channels, ranges=list(sampled.ranges),
-        clip_bounds=list(sampled.clip_bounds), seed=sampled.seed,
-        pixel_fraction=sampled.pixel_fraction, interpretations=interpretations)
+        dtype=dtype,
+        num_channels=channels,
+        ranges=list(sampled.ranges),
+        clip_bounds=list(sampled.clip_bounds),
+        seed=sampled.seed,
+        pixel_fraction=sampled.pixel_fraction,
+        interpretations=interpretations,
+    )
 
 
-def _sampled_bounds(stats: _RasterStats, idxs: "list[int]", stretch: str
-                    ) -> "list[tuple[float, float]]":
+def _sampled_bounds(
+    stats: _RasterStats, idxs: "list[int]", stretch: str
+) -> "list[tuple[float, float]]":
     """The ``(low, high)`` pair per selected band a region render stretches between, in the same
     order as ``idxs``: the clip cut points for ``percent_clip``, the sampled range otherwise
     (``none`` reads both ends, as the sampled minimum and maximum a float raster's divisor comes
@@ -470,7 +569,10 @@ def _plain_rgb(pixels, dtype, bounds: "tuple[float, float] | None"):
     """
     import numpy as np
 
-    from tcip_mcp.pipelines.band_stats import full_scale_denominator, stretch_band
+    from tcip_mcp.pipelines.band_stats import (
+        full_scale_denominator,
+        stretch_band,
+    )
 
     arr = np.asarray(pixels)
     if arr.shape[-1] == 1:
@@ -480,8 +582,11 @@ def _plain_rgb(pixels, dtype, bounds: "tuple[float, float] | None"):
     if arr.dtype == np.uint8:
         return np.ascontiguousarray(arr)
     divisor = full_scale_denominator(
-        arr, dtype, sampled_maximum=None if bounds is None else bounds[1],
-        sampled_minimum=None if bounds is None else bounds[0])
+        arr,
+        dtype,
+        sampled_maximum=None if bounds is None else bounds[1],
+        sampled_minimum=None if bounds is None else bounds[0],
+    )
     return stretch_band(arr, "none", dtype, (0.0, divisor))
 
 
@@ -491,18 +596,34 @@ def serve_image(
     path: str = Query(..., description="Absolute path to the image file"),
     area_cap: int = Depends(display_cap),
     bands: str | None = Query(
-        None, description="3 comma-separated band names or 0-based indices, e.g. "
-                          "'NIR,Red,Green' or '3,2,1'; selects a live composite instead of the "
-                          "file's own pixels as-is."),
+        None,
+        description="3 comma-separated band names or 0-based indices, e.g. "
+        "'NIR,Red,Green' or '3,2,1'; selects a live composite instead of the "
+        "file's own pixels as-is.",
+    ),
     stretch: str = Query(
-        "minmax", description="minmax|percent_clip|none; applied only when compositing bands "
-                              "(bands given, or path names a .bandgroup-grouped capture)."),
-    x0: int | None = Query(None, ge=0, description="Region left edge, full-resolution pixels"),
-    y0: int | None = Query(None, ge=0, description="Region top edge, full-resolution pixels"),
-    x1: int | None = Query(None, ge=0, description="Region right edge, exclusive"),
-    y1: int | None = Query(None, ge=0, description="Region bottom edge, exclusive"),
-    level: int = Query(0, ge=0, description="The overview level the region is a tile of (0 "
-                                            "native), its corners in that level's pixel grid"),
+        "minmax",
+        description="minmax|percent_clip|none; applied only when compositing bands "
+        "(bands given, or path names a .bandgroup-grouped capture).",
+    ),
+    x0: int | None = Query(
+        None, ge=0, description="Region left edge, full-resolution pixels"
+    ),
+    y0: int | None = Query(
+        None, ge=0, description="Region top edge, full-resolution pixels"
+    ),
+    x1: int | None = Query(
+        None, ge=0, description="Region right edge, exclusive"
+    ),
+    y1: int | None = Query(
+        None, ge=0, description="Region bottom edge, exclusive"
+    ),
+    level: int = Query(
+        0,
+        ge=0,
+        description="The overview level the region is a tile of (0 "
+        "native), its corners in that level's pixel grid",
+    ),
 ) -> Response:
     """Serve a raster, whole or one region of it, within the requesting display's area cap.
 
@@ -542,27 +663,47 @@ def serve_image(
     from tcip_mcp.pipelines.overviews import overview_levels
 
     if stretch not in STRETCH_MODES:
-        raise HTTPException(400, f"stretch must be one of {sorted(STRETCH_MODES)}, got {stretch!r}")
+        raise HTTPException(
+            400,
+            f"stretch must be one of {sorted(STRETCH_MODES)}, got {stretch!r}",
+        )
     src, source = resolved_image(path)
 
     corners = (x0, y0, x1, y1)
     if any(c is None for c in corners) and any(c is not None for c in corners):
-        raise HTTPException(400, "a region needs all four of x0, y0, x1, y1, or none of them")
+        raise HTTPException(
+            400, "a region needs all four of x0, y0, x1, y1, or none of them"
+        )
     whole_view = corners[0] is None
     native = False
     if not whole_view:
         # the all-or-none guard above already requires every corner set when not whole_view
-        assert x0 is not None and y0 is not None and x1 is not None and y1 is not None
+        assert (
+            x0 is not None
+            and y0 is not None
+            and x1 is not None
+            and y1 is not None
+        )
         if not (x0 < x1 and y0 < y1):
             raise HTTPException(
-                400, f"region [{y0}:{y1}, {x0}:{x1}] is empty; x0 < x1 and y0 < y1 are required")
+                400,
+                f"region [{y0}:{y1}, {x0}:{x1}] is empty; x0 < x1 and y0 < y1 are required",
+            )
         native = within_cap(x1 - x0, y1 - y0, area_cap)
-    if level and not (native and x0 is not None and y0 is not None and x1 is not None
-                      and y1 is not None and _DISPLAY_ENCODING.max_edge is not None
-                      and max(x1 - x0, y1 - y0) <= _DISPLAY_ENCODING.max_edge):
+    if level and not (
+        native
+        and x0 is not None
+        and y0 is not None
+        and x1 is not None
+        and y1 is not None
+        and _DISPLAY_ENCODING.max_edge is not None
+        and max(x1 - x0, y1 - y0) <= _DISPLAY_ENCODING.max_edge
+    ):
         raise HTTPException(
-            400, f"a tile of overview level {level} is a region of at most this display's cap "
-                 f"of {area_cap} pixels and no edge past {_DISPLAY_ENCODING.max_edge}")
+            400,
+            f"a tile of overview level {level} is a region of at most this display's cap "
+            f"of {area_cap} pixels and no edge past {_DISPLAY_ENCODING.max_edge}",
+        )
 
     band_tokens = _parse_band_tokens(bands) if bands is not None else None
     header = raster_source.SourceHeader(source)
@@ -589,8 +730,11 @@ def serve_image(
         try:
             extra = json.loads(cached_headers.read_text(encoding="utf-8"))
             cached.touch()  # refresh mtime so LRU eviction keeps the working set
-            return FileResponse(cached, media_type=encoding.media_type,
-                                headers={**cache_headers, **extra})
+            return FileResponse(
+                cached,
+                media_type=encoding.media_type,
+                headers={**cache_headers, **extra},
+            )
         except (OSError, ValueError):
             pass  # an unreadable cache entry is rendered again, never served as-is
 
@@ -600,21 +744,33 @@ def serve_image(
         # A truncated or otherwise unreadable file fails its header read here, before any
         # raster is opened: the request's own fault, answered as one.
         raise HTTPException(400, f"could not open this image: {exc}") from exc
-    open_channels = own_channels if composite_requested else header.route_channels
+    open_channels = (
+        own_channels if composite_requested else header.route_channels
+    )
     opening = True
     try:
         with header.open(open_channels) as raster:
             opening = False
             dims = raster.level_dims()
-            grid_w, grid_h = dims[level - 1] if 0 < level <= len(dims) else (
-                raster.width, raster.height)
+            grid_w, grid_h = (
+                dims[level - 1]
+                if 0 < level <= len(dims)
+                else (raster.width, raster.height)
+            )
             if level and (grid_w, grid_h) == (raster.width, raster.height):
-                raise HTTPException(400, f"this raster has no overview level {level}")
+                raise HTTPException(
+                    400, f"this raster has no overview level {level}"
+                )
             if whole_view:
                 rect = raster_source.Rect(0, 0, raster.width, raster.height)
             else:
                 # the all-or-none guard above already requires every corner set when not whole_view
-                assert x0 is not None and y0 is not None and x1 is not None and y1 is not None
+                assert (
+                    x0 is not None
+                    and y0 is not None
+                    and x1 is not None
+                    and y1 is not None
+                )
                 rect = raster_source.Rect(x0, y0, x1, y1)
             if not whole_view and (rect.x1 > grid_w or rect.y1 > grid_h):
                 raise HTTPException(
@@ -628,18 +784,28 @@ def serve_image(
                 pixels, _spec = raster.read_level_region(level, rect)
                 served_size = (rect.width, rect.height)
             else:
-                plan = plan_read(rect, raster.width, raster.height, dims, area_cap,
-                                 encoding.max_edge)
+                plan = plan_read(
+                    rect,
+                    raster.width,
+                    raster.height,
+                    dims,
+                    area_cap,
+                    encoding.max_edge,
+                )
                 # A raster no pyramid can be built for is at most the floor edge square: read
                 # natively.
-                if (not plan.fits and plan.level == 0
-                        and isinstance(raster, raster_source.GdalSource)
-                        and overview_levels(raster.width, raster.height)):
+                if (
+                    not plan.fits
+                    and plan.level == 0
+                    and isinstance(raster, raster_source.GdalSource)
+                    and overview_levels(raster.width, raster.height)
+                ):
                     raise _overviews_required(
                         path,
                         f"serving this {rect.width}x{rect.height} read at {plan.width}x"
                         f"{plan.height} would decode {rect.width * rect.height} pixels natively, "
-                        f"over this display's cap of {area_cap}.")
+                        f"over this display's cap of {area_cap}.",
+                    )
                 pixels, _spec = planned_read(raster, rect, plan)
                 served_size = (plan.width, plan.height)
             channels = int(raster.num_channels)
@@ -648,23 +814,42 @@ def serve_image(
             # A region's bounds come from the raster's own sample, a whole view's from the pixels
             # it served; a scale that reads no pixel statistic (a dtype ceiling) asks for neither.
             integer = np.issubdtype(dtype, np.integer)
-            wants_bounds = (not (stretch == "none" and integer)) if composite else not integer
+            wants_bounds = (
+                (not (stretch == "none" and integer))
+                if composite
+                else not integer
+            )
             sampled = None
             if wants_bounds and not whole_view:
-                sampled = _memo(_stats_cache, (*identity, open_channels),
-                                lambda: _stats_of(raster))
+                sampled = _memo(
+                    _stats_cache,
+                    (*identity, open_channels),
+                    lambda: _stats_of(raster),
+                )
 
-        declared_names = list(header.group.bands) if header.kind == "group" else None
+        declared_names = (
+            list(header.group.bands) if header.kind == "group" else None
+        )
         if band_tokens is None:
             idxs = [min(i, channels - 1) for i in range(3)]
         else:
-            idxs = [_band_index(t, declared_names, channels) for t in band_tokens]
+            idxs = [
+                _band_index(t, declared_names, channels) for t in band_tokens
+            ]
 
         if composite and stretch == "none" and integer:
             rgb = composite_display_rgb(pixels, idxs, stretch, None)
         elif composite:
-            rgb = composite_display_rgb(pixels, idxs, stretch, (
-                None if sampled is None else _sampled_bounds(sampled, idxs, stretch)))
+            rgb = composite_display_rgb(
+                pixels,
+                idxs,
+                stretch,
+                (
+                    None
+                    if sampled is None
+                    else _sampled_bounds(sampled, idxs, stretch)
+                ),
+            )
         elif integer:
             rgb = _plain_rgb(pixels, dtype, None)
         else:
@@ -672,18 +857,26 @@ def serve_image(
             # sees it, so its level must not set the scale the other three are divided by.
             ranges = band_ranges(pixels) if sampled is None else sampled.ranges
             band_bounds = (
-                min(ranges[i].minimum for i in idxs), max(ranges[i].maximum for i in idxs))
+                min(ranges[i].minimum for i in idxs),
+                max(ranges[i].maximum for i in idxs),
+            )
             rgb = _plain_rgb(pixels, dtype, band_bounds)
 
         buf = io.BytesIO()
         Image.fromarray(np.ascontiguousarray(rgb), mode="RGB").save(
-            buf, encoding.pil_format, **encoding.options)
+            buf, encoding.pil_format, **encoding.options
+        )
         data = buf.getvalue()
     except HTTPException:
         raise
     except ValueError as exc:
-        what = ("open this image" if opening
-                else "read this image" if whole_view else "read this region")
+        what = (
+            "open this image"
+            if opening
+            else "read this image"
+            if whole_view
+            else "read this region"
+        )
         raise HTTPException(400, f"could not {what}: {exc}") from exc
     except Exception as exc:
         raise HTTPException(500, f"could not process image: {exc}") from exc
@@ -700,8 +893,11 @@ def serve_image(
     except OSError:
         pass  # cache is best-effort; the response below is already rendered
 
-    return Response(content=data, media_type=encoding.media_type,
-                    headers={**cache_headers, **extra})
+    return Response(
+        content=data,
+        media_type=encoding.media_type,
+        headers={**cache_headers, **extra},
+    )
 
 
 @router.get("/bands")
@@ -759,12 +955,18 @@ def get_bands(path: str = Query(...)) -> dict:
             "min": stats.ranges[i].minimum,
             "max": stats.ranges[i].maximum,
         }
-        if stats.interpretations is not None and i < len(stats.interpretations):
+        if stats.interpretations is not None and i < len(
+            stats.interpretations
+        ):
             band["interpretation"] = stats.interpretations[i]
         bands.append(band)
     if stats.overview_size is not None:
-        return {"band_count": len(names), "bands": bands, "sampled": False,
-                "overview_size": list(stats.overview_size)}
+        return {
+            "band_count": len(names),
+            "bands": bands,
+            "sampled": False,
+            "overview_size": list(stats.overview_size),
+        }
     return {
         "band_count": len(names),
         "bands": bands,
@@ -797,8 +999,13 @@ class OverviewBuildPayload(BaseModel):
 
 
 def _overview_summary(job: OverviewJob) -> dict:
-    return {"job_id": job.job_id, "path": job.path, "status": job.status,
-            "bytes_written": job.bytes_written, "error": job.error}
+    return {
+        "job_id": job.job_id,
+        "path": job.path,
+        "status": job.status,
+        "bytes_written": job.bytes_written,
+        "error": job.error,
+    }
 
 
 def _overview_worker(job: OverviewJob) -> None:
@@ -839,10 +1046,14 @@ def build_image_overviews(payload: OverviewBuildPayload) -> dict:
     src = allowed_file(payload.path)
     job, created = _overview_registry.find_or_register(
         lambda existing: existing.path == str(src) and jobstore.live(existing),
-        lambda: OverviewJob(job_id=f"ovr-{uuid.uuid4().hex[:8]}", path=str(src)),
+        lambda: OverviewJob(
+            job_id=f"ovr-{uuid.uuid4().hex[:8]}", path=str(src)
+        ),
     )
     if created:
-        threading.Thread(target=_overview_worker, args=(job,), daemon=True).start()
+        threading.Thread(
+            target=_overview_worker, args=(job,), daemon=True
+        ).start()
     return _overview_summary(job)
 
 

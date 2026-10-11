@@ -27,13 +27,23 @@ def stop_rule(patience: int = 50, min_delta: float = 0.0) -> dict:
 
 def adamw_optimizer() -> dict:
     """A sample AdamW ``optimizer`` block."""
-    return {"name": "adamw", "backbone_lr": 1e-4, "head_lr": 1e-3, "weight_decay": 0.0}
+    return {
+        "name": "adamw",
+        "backbone_lr": 1e-4,
+        "head_lr": 1e-3,
+        "weight_decay": 0.0,
+    }
 
 
 def sgd_optimizer() -> dict:
     """A sample SGD ``optimizer`` block, its momentum stated."""
-    return {"name": "sgd", "backbone_lr": 1e-3, "head_lr": 1e-2, "weight_decay": 0.0,
-            "momentum": 0.9}
+    return {
+        "name": "sgd",
+        "backbone_lr": 1e-3,
+        "head_lr": 1e-2,
+        "weight_decay": 0.0,
+        "momentum": 0.9,
+    }
 
 
 VALIDATION_CONF = 0.35
@@ -51,12 +61,18 @@ SCORE_WEIGHTS = {"loss": 0.5, "f1": 0.3, "map50": 0.2}
 def evaluation_block(**stated) -> dict:
     """An ``evaluation`` block at :data:`VALIDATION_CONF` weighting its objective by
     :data:`SCORE_WEIGHTS`, with ``stated`` over it."""
-    return {"conf_threshold": VALIDATION_CONF, "score_weights": dict(SCORE_WEIGHTS), **stated}
+    return {
+        "conf_threshold": VALIDATION_CONF,
+        "score_weights": dict(SCORE_WEIGHTS),
+        **stated,
+    }
 
 
 def sweep_space() -> dict:
     """A fresh copy of the sample search space: the head learning rate, sampled log-uniformly."""
-    return {"optimizer.head_lr": {"type": "loguniform", "low": 1e-4, "high": 1e-2}}
+    return {
+        "optimizer.head_lr": {"type": "loguniform", "low": 1e-4, "high": 1e-2}
+    }
 
 
 def fifo_scheduler() -> dict:
@@ -73,14 +89,32 @@ def fifo_search() -> dict:
 def asha_scheduler(**stated) -> dict:
     """A sample ``asha`` trial ``scheduler`` block stating every setting its Ray class takes,
     with ``stated`` over them."""
-    return {"name": "asha", "time_attr": "training_iteration", "max_t": 3, "grace_period": 1,
-            "reduction_factor": 2, "brackets": 1, "stop_last_trials": True, **stated}
+    return {
+        "name": "asha",
+        "time_attr": "training_iteration",
+        "max_t": 3,
+        "grace_period": 1,
+        "reduction_factor": 2,
+        "brackets": 1,
+        "stop_last_trials": True,
+        **stated,
+    }
 
 
 def tune_arguments(**stated) -> dict:
     """``hpo.tune_search``'s arguments for a sample one-trial random search scheduling nothing
     and seeking the lowest ``objective``, with ``stated`` over them; ``objective_fn``,
     ``param_space`` and ``sweep_dir`` are the caller's own."""
-    return {"metric": "objective", "mode": "min", "num_samples": 1, "search_alg": "random",
-            "scheduler": fifo_scheduler(), "seed": 0, "max_concurrent": 1,
-            "baseline_params": None, "resources_per_trial": None, "split_draws": 1, **stated}
+    return {
+        "metric": "objective",
+        "mode": "min",
+        "num_samples": 1,
+        "search_alg": "random",
+        "scheduler": fifo_scheduler(),
+        "seed": 0,
+        "max_concurrent": 1,
+        "baseline_params": None,
+        "resources_per_trial": None,
+        "split_draws": 1,
+        **stated,
+    }

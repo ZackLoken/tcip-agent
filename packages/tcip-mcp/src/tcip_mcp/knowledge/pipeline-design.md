@@ -82,9 +82,18 @@ The building blocks are plain importable symbols, e.g.:
 ```python
 from tcip_mcp.pipelines.components.backbones import BackboneWrapper
 from tcip_mcp.pipelines.components.necks import FPN, PAN
-from tcip_mcp.pipelines.components.heads import ClassificationHead, SemanticSegHead
-from tcip_mcp.pipelines.components.losses import build_loss, compute_class_weights
-from tcip_mcp.pipelines.components.detectors import build_detector, BackboneNeckAdapter
+from tcip_mcp.pipelines.components.heads import (
+    ClassificationHead,
+    SemanticSegHead,
+)
+from tcip_mcp.pipelines.components.losses import (
+    build_loss,
+    compute_class_weights,
+)
+from tcip_mcp.pipelines.components.detectors import (
+    build_detector,
+    BackboneNeckAdapter,
+)
 ```
 
 Compose them inside your own `nn.Module`, or ignore them and write the network from scratch.
@@ -239,33 +248,49 @@ tiling persistence) against a `model_source` builder; run each stage's model wit
 # through the audited envelope, so provenance and immutability hold across the whole run.
 stage_a = launch_training(config={"model_source": {...}, "data": {...}})
 stage_b = launch_training(config={"model_source": {...}, "data": {...}})
-run_inference(checkpoint_path=stage_b_best, images_dir=images_dir, bucket="stage-b/<date>")
+run_inference(
+    checkpoint_path=stage_b_best,
+    images_dir=images_dir,
+    bucket="stage-b/<date>",
+)
 
 # aggregate_per_plant never guesses plant identity from a filename; supply a real plant_id_fn.
 # build_plant_mapping (a GNSS + capture-sequence resolver) is the real mechanism.
 from pathlib import Path
 from tcip_mcp.pipelines.postprocessing.plant_mapping import load_mapping
 
-build = load_mapping(project_root, mapping_name)  # from a prior build_plant_mapping call
+build = load_mapping(
+    project_root, mapping_name
+)  # from a prior build_plant_mapping call
 by_stem = {row["stem"]: row for rows in build.rows().values() for row in rows}
+
 
 def plant_id_fn(image_path: str) -> str | None:
     row = by_stem.get(Path(image_path).stem)
     return row["plot_name"] if row else None
 
+
 # Each row carries its assignment's own source, distance_m and plant_attribution, read by those names.
 image_results = [
     {**r, **{k: row[k] for k in ("source", "distance_m", "plant_attribution")}}
-    for r in read_stage_b_preds_as_image_results("stage-b/<date>")  # your own per-image count reader
+    for r in read_stage_b_preds_as_image_results(
+        "stage-b/<date>"
+    )  # your own per-image count reader
     if (row := by_stem.get(Path(r["image"]).stem))
 ]
 
 # The final CSV is a phenotype delivery door: it clears the one gate over the published buckets
 # the counts came from, and an unvalidated bucket refuses without a breeder's recorded acknowledgment.
 summaries = aggregate_per_plant(image_results, plant_id_fn=plant_id_fn)
-deliver_per_plant_csv(summaries, "phenotype.csv", delivered_phenotype="<phenotype>",
-                      delivery_kind="per_plant_count_aggregate", plants=[...],
-                      dataset_root=dataset_root, buckets=["stage-b/<date>"])
+deliver_per_plant_csv(
+    summaries,
+    "phenotype.csv",
+    delivered_phenotype="<phenotype>",
+    delivery_kind="per_plant_count_aggregate",
+    plants=[...],
+    dataset_root=dataset_root,
+    buckets=["stage-b/<date>"],
+)
 ```
 
 How many stages there are, and what each one does, is your decomposition to derive; the chaining

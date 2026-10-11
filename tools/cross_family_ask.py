@@ -34,7 +34,9 @@ import tomllib
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
-LOCAL_APP_DATA = pathlib.Path(os.environ.get("LOCALAPPDATA", pathlib.Path.home() / "AppData/Local"))
+LOCAL_APP_DATA = pathlib.Path(
+    os.environ.get("LOCALAPPDATA", pathlib.Path.home() / "AppData/Local")
+)
 
 
 def resolve_harness(name: str, env_var: str, *fallbacks: pathlib.Path) -> str:
@@ -52,10 +54,13 @@ def resolve_harness(name: str, env_var: str, *fallbacks: pathlib.Path) -> str:
 
 
 CODEX = resolve_harness(
-    "codex", "TCIP_CODEX_BIN",
+    "codex",
+    "TCIP_CODEX_BIN",
     pathlib.Path.home() / ".codex/packages/standalone/current/bin/codex.exe",
 )
-AGY = resolve_harness("agy", "TCIP_AGY_BIN", LOCAL_APP_DATA / "agy/bin/agy.exe")
+AGY = resolve_harness(
+    "agy", "TCIP_AGY_BIN", LOCAL_APP_DATA / "agy/bin/agy.exe"
+)
 CLAUDE = resolve_harness("claude", "TCIP_CLAUDE_BIN")
 
 
@@ -70,10 +75,14 @@ def load_tcip_mcp_config() -> dict:
     try:
         declared = json.loads(mcp_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise SystemExit(f"cannot read the tcip MCP server block from {mcp_path}: {exc}") from exc
+        raise SystemExit(
+            f"cannot read the tcip MCP server block from {mcp_path}: {exc}"
+        ) from exc
     server = declared.get("mcpServers", {}).get("tcip")
     if server is None:
-        raise SystemExit(f"{mcp_path} has no mcpServers.tcip block for the tcip condition to use")
+        raise SystemExit(
+            f"{mcp_path} has no mcpServers.tcip block for the tcip condition to use"
+        )
     return {"mcpServers": {"tcip": server}}
 
 
@@ -138,7 +147,9 @@ def model_id_effort(family: str, model: str | None) -> str | None:
     return None
 
 
-def effective_effort(family: str, model: str | None, effort: str | None) -> str | None:
+def effective_effort(
+    family: str, model: str | None, effort: str | None
+) -> str | None:
     """The effort a run records and, where the harness takes one, passes.
 
     A model id that states its own effort is the effort, whatever `--effort` said beside it, so
@@ -152,7 +163,8 @@ def effective_effort(family: str, model: str | None, effort: str | None) -> str 
     if family == "claude" and effort and effort not in CLAUDE_EFFORTS:
         raise SystemExit(
             f"claude effort {effort!r} is not one of {', '.join(CLAUDE_EFFORTS)}; the harness "
-            "would ignore it and run on its default")
+            "would ignore it and run on its default"
+        )
     return effort
 
 
@@ -173,7 +185,8 @@ def resolve_codex_model(requested: str | None) -> tuple[str, str]:
             return str(model), str(CODEX_CONFIG)
     raise SystemExit(
         "codex model is unnamed: pass --model or set `model` in ~/.codex/config.toml; a run "
-        "on the harness's built-in default would not record which model answered")
+        "on the harness's built-in default would not record which model answered"
+    )
 
 
 def claude_model_used(stdout: str) -> str | None:
@@ -197,7 +210,9 @@ def claude_model_used(stdout: str) -> str | None:
 def model_matches(requested: str, used: str) -> bool:
     """Whether the model the harness reports corresponds to the one requested: a full id must
     appear as itself, an alias must appear inside every reported id."""
-    return all(requested == name or requested in name for name in used.split(","))
+    return all(
+        requested == name or requested in name for name in used.split(",")
+    )
 
 
 GUIDANCE_PREFIX = (
@@ -222,12 +237,24 @@ def as_text(stream: object) -> str:
 def failed_run_meta(family: str, exc: BaseException) -> dict:
     """A metadata row for a run that raised, shaped like a real one so the summary still prints."""
     meta = {
-        "question_id": None, "condition": None, "condition_description": None,
-        "family": family, "executable": None, "harness_version": "unknown",
-        "model_requested": None, "model_resolved": None, "model_source": None,
-        "model_used": None, "model_mismatch": False, "effort_requested": None,
-        "started": now(), "duration_s": 0.0, "exit_code": -3, "timed_out": False,
-        "response_chars": 0, "response_source": "runner_error",
+        "question_id": None,
+        "condition": None,
+        "condition_description": None,
+        "family": family,
+        "executable": None,
+        "harness_version": "unknown",
+        "model_requested": None,
+        "model_resolved": None,
+        "model_source": None,
+        "model_used": None,
+        "model_mismatch": False,
+        "effort_requested": None,
+        "started": now(),
+        "duration_s": 0.0,
+        "exit_code": -3,
+        "timed_out": False,
+        "response_chars": 0,
+        "response_source": "runner_error",
         "runner_error": f"{type(exc).__name__}: {exc}",
     }
     meta["fault"] = describe_fault(meta)
@@ -241,7 +268,11 @@ def now() -> str:
 def harness_version(exe: str | pathlib.Path, flag: str = "--version") -> str:
     try:
         out = subprocess.run(
-            [str(exe), flag], capture_output=True, text=True, timeout=60, check=False
+            [str(exe), flag],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
         )
         return (out.stdout or out.stderr).strip().splitlines()[0]
     except (OSError, subprocess.SubprocessError, IndexError):
@@ -260,46 +291,74 @@ def image_preface(family: str, images: tuple[pathlib.Path, ...]) -> str:
         return ""
     names = [str(path) for path in images]
     if family == "antigravity":
-        return ("Review the attached image(s) " + " ".join(f"@{n}" for n in names)
-                + " before answering.\n\n")
+        return (
+            "Review the attached image(s) "
+            + " ".join(f"@{n}" for n in names)
+            + " before answering.\n\n"
+        )
     if family == "codex":
-        return ("The image(s) attached to this prompt are " + ", ".join(names)
-                + ". Review them before answering.\n\n")
-    return ("Read the image(s) at " + ", ".join(names)
-            + " with your image-capable file reader before answering.\n\n")
+        return (
+            "The image(s) attached to this prompt are "
+            + ", ".join(names)
+            + ". Review them before answering.\n\n"
+        )
+    return (
+        "Read the image(s) at "
+        + ", ".join(names)
+        + " with your image-capable file reader before answering.\n\n"
+    )
 
 
-def build_claude(prompt_file: pathlib.Path, run_dir: pathlib.Path, cwd: pathlib.Path,
-                 condition: dict, model: str | None, effort: str | None,
-                 timeout: int,
-                 images: tuple[pathlib.Path, ...] = ()) -> tuple[list[str], pathlib.Path | None]:
+def build_claude(
+    prompt_file: pathlib.Path,
+    run_dir: pathlib.Path,
+    cwd: pathlib.Path,
+    condition: dict,
+    model: str | None,
+    effort: str | None,
+    timeout: int,
+    images: tuple[pathlib.Path, ...] = (),
+) -> tuple[list[str], pathlib.Path | None]:
     argv = [
         CLAUDE,
         "--print",
-        "--output-format", "json",
-        "--permission-mode", "plan",
+        "--output-format",
+        "json",
+        "--permission-mode",
+        "plan",
         "--no-session-persistence",
-        "--add-dir", str(cwd),
+        "--add-dir",
+        str(cwd),
     ]
     if effort:
         argv += ["--effort", effort]
     if condition["mcp"] == "tcip":
         cfg = run_dir / "mcp.json"
-        cfg.write_text(json.dumps(load_tcip_mcp_config(), indent=2), encoding="utf-8")
+        cfg.write_text(
+            json.dumps(load_tcip_mcp_config(), indent=2), encoding="utf-8"
+        )
         argv += ["--mcp-config", str(cfg), "--strict-mcp-config"]
     else:
         cfg = run_dir / "mcp.json"
-        cfg.write_text(json.dumps({"mcpServers": {}}, indent=2), encoding="utf-8")
+        cfg.write_text(
+            json.dumps({"mcpServers": {}}, indent=2), encoding="utf-8"
+        )
         argv += ["--mcp-config", str(cfg), "--strict-mcp-config"]
     if model:
         argv += ["--model", model]
     return argv, None
 
 
-def build_codex(prompt_file: pathlib.Path, run_dir: pathlib.Path, cwd: pathlib.Path,
-                condition: dict, model: str | None, effort: str | None,
-                timeout: int,
-                images: tuple[pathlib.Path, ...] = ()) -> tuple[list[str], pathlib.Path | None]:
+def build_codex(
+    prompt_file: pathlib.Path,
+    run_dir: pathlib.Path,
+    cwd: pathlib.Path,
+    condition: dict,
+    model: str | None,
+    effort: str | None,
+    timeout: int,
+    images: tuple[pathlib.Path, ...] = (),
+) -> tuple[list[str], pathlib.Path | None]:
     """Build a headless Codex invocation.
 
     Headless `codex exec` does not load locally spawned stdio MCP servers, verified
@@ -317,11 +376,14 @@ def build_codex(prompt_file: pathlib.Path, run_dir: pathlib.Path, cwd: pathlib.P
     for image in images:
         argv += ["-i", str(image)]
     argv += [
-        "--sandbox", "read-only",
-        "--cd", str(cwd),
+        "--sandbox",
+        "read-only",
+        "--cd",
+        str(cwd),
         "--ephemeral",
         "--json",
-        "--output-last-message", str(last),
+        "--output-last-message",
+        str(last),
     ]
     if condition["mcp"] != "tcip":
         argv += ["--ignore-user-config"]
@@ -333,10 +395,16 @@ def build_codex(prompt_file: pathlib.Path, run_dir: pathlib.Path, cwd: pathlib.P
     return argv, last
 
 
-def build_agy(prompt_file: pathlib.Path, run_dir: pathlib.Path, cwd: pathlib.Path,
-              condition: dict, model: str | None, effort: str | None,
-              timeout: int,
-              images: tuple[pathlib.Path, ...] = ()) -> tuple[list[str], pathlib.Path | None]:
+def build_agy(
+    prompt_file: pathlib.Path,
+    run_dir: pathlib.Path,
+    cwd: pathlib.Path,
+    condition: dict,
+    model: str | None,
+    effort: str | None,
+    timeout: int,
+    images: tuple[pathlib.Path, ...] = (),
+) -> tuple[list[str], pathlib.Path | None]:
     """Build a headless Antigravity invocation.
 
     MCP servers come from `~/.gemini/config/mcp_config.json` and are global, so the
@@ -349,11 +417,15 @@ def build_agy(prompt_file: pathlib.Path, run_dir: pathlib.Path, cwd: pathlib.Pat
     """
     argv = [
         str(AGY),
-        "--print", prompt_file.read_text(encoding="utf-8"),
-        "--output-format", "json",
+        "--print",
+        prompt_file.read_text(encoding="utf-8"),
+        "--output-format",
+        "json",
         "--sandbox",
-        "--print-timeout", f"{timeout}s",
-        "--add-dir", str(cwd),
+        "--print-timeout",
+        f"{timeout}s",
+        "--add-dir",
+        str(cwd),
     ]
     if model:
         argv += ["--model", model]
@@ -362,7 +434,11 @@ def build_agy(prompt_file: pathlib.Path, run_dir: pathlib.Path, cwd: pathlib.Pat
     return argv, None
 
 
-BUILDERS = {"claude": build_claude, "codex": build_codex, "antigravity": build_agy}
+BUILDERS = {
+    "claude": build_claude,
+    "codex": build_codex,
+    "antigravity": build_agy,
+}
 EXECUTABLES = {"claude": CLAUDE, "codex": CODEX, "antigravity": AGY}
 STDIN_FAMILIES = {"claude", "codex"}
 
@@ -383,8 +459,10 @@ def describe_fault(meta: dict) -> str:
     if meta["response_chars"] == 0:
         return "it produced no answer text, so there is nothing to review"
     if meta.get("model_mismatch"):
-        return (f"it ran on {meta.get('model_used')} after {meta['model_resolved']} was asked for, "
-                "so the answer is not the comparison that was requested")
+        return (
+            f"it ran on {meta.get('model_used')} after {meta['model_resolved']} was asked for, "
+            "so the answer is not the comparison that was requested"
+        )
     return ""
 
 
@@ -399,9 +477,13 @@ def print_verdict(faults: list[tuple[str, str]], total: int) -> None:
     if not faults:
         print(f"\nRUN OK: {total} of {total} families answered.")
         return
-    lines = [f"\nRUN FAILED: {len(faults)} of {total} families produced no usable answer."]
+    lines = [
+        f"\nRUN FAILED: {len(faults)} of {total} families produced no usable answer."
+    ]
     lines += [f"  {family}: {why}" for family, why in faults]
-    lines.append("  Nothing here is reviewable evidence. Re-run before relying on it.")
+    lines.append(
+        "  Nothing here is reviewable evidence. Re-run before relying on it."
+    )
     text = "\n".join(lines)
     print(text)
     print(text, file=sys.stderr)
@@ -438,8 +520,9 @@ MAX_RAW_STREAM_CHARS = 100_000
 ANSWER_KEYS = ("result", "response", "text", "content", "final_response")
 
 
-def extract_response(family: str, stdout: str,
-                     last_message: pathlib.Path | None) -> tuple[str, str]:
+def extract_response(
+    family: str, stdout: str, last_message: pathlib.Path | None
+) -> tuple[str, str]:
     """Pull the final assistant text out of whatever shape the harness emitted.
 
     Returns the text and the route it came from. The route is recorded per run because an answer
@@ -447,7 +530,9 @@ def extract_response(family: str, stdout: str,
     and a comparison that cannot tell them apart is reading two different things as one.
     """
     if last_message and last_message.exists():
-        text = last_message.read_text(encoding="utf-8", errors="replace").strip()
+        text = last_message.read_text(
+            encoding="utf-8", errors="replace"
+        ).strip()
         if text:
             return text, "final_message_file"
     try:
@@ -511,11 +596,19 @@ def extract_response(family: str, stdout: str,
     return stripped, "raw_stdout"
 
 
-def run_one(family: str, question_id: str, condition_name: str, prompt: str,
-            cwd: pathlib.Path, out_root: pathlib.Path, timeout: int,
-            model: str | None, effort: str | None,
-            images: list[pathlib.Path] | None = None,
-            prompt_source: str | None = None) -> dict:
+def run_one(
+    family: str,
+    question_id: str,
+    condition_name: str,
+    prompt: str,
+    cwd: pathlib.Path,
+    out_root: pathlib.Path,
+    timeout: int,
+    model: str | None,
+    effort: str | None,
+    images: list[pathlib.Path] | None = None,
+    prompt_source: str | None = None,
+) -> dict:
     condition = CONDITIONS[condition_name]
     run_dir = out_root / question_id / condition_name / family
     # A prior meta.json here is this family's own earlier run under the same question and condition.
@@ -524,7 +617,8 @@ def run_one(family: str, question_id: str, condition_name: str, prompt: str,
 
     resolved_images = tuple(image.resolve() for image in images or [])
     body = image_preface(family, resolved_images) + (
-        (GUIDANCE_PREFIX + prompt) if condition["guidance"] else prompt)
+        (GUIDANCE_PREFIX + prompt) if condition["guidance"] else prompt
+    )
     prompt_file = run_dir / "prompt.txt"
     prompt_file.write_text(body, encoding="utf-8")
 
@@ -532,9 +626,19 @@ def run_one(family: str, question_id: str, condition_name: str, prompt: str,
     model_source = "flag" if model else "parity table"
     if family == "codex":
         resolved_model, model_source = resolve_codex_model(resolved_model)
-    resolved_effort = effective_effort(family, resolved_model, effort or PARITY[family]["effort"])
-    argv, last = BUILDERS[family](prompt_file, run_dir, cwd, condition,
-                                  resolved_model, resolved_effort, timeout, images=resolved_images)
+    resolved_effort = effective_effort(
+        family, resolved_model, effort or PARITY[family]["effort"]
+    )
+    argv, last = BUILDERS[family](
+        prompt_file,
+        run_dir,
+        cwd,
+        condition,
+        resolved_model,
+        resolved_effort,
+        timeout,
+        images=resolved_images,
+    )
 
     (run_dir / "argv.txt").write_text("\n".join(argv), encoding="utf-8")
 
@@ -556,7 +660,11 @@ def run_one(family: str, question_id: str, condition_name: str, prompt: str,
             cwd=str(cwd),
             check=False,
         )
-        stdout, stderr, code = completed.stdout, completed.stderr, completed.returncode
+        stdout, stderr, code = (
+            completed.stdout,
+            completed.stderr,
+            completed.returncode,
+        )
         timed_out = False
     except subprocess.TimeoutExpired as exc:
         stdout = exc.stdout or ""
@@ -566,7 +674,12 @@ def run_one(family: str, question_id: str, condition_name: str, prompt: str,
         code = -1
         timed_out = True
     except OSError as exc:
-        stdout, stderr, code, timed_out = "", f"launch failed: {exc}", -2, False
+        stdout, stderr, code, timed_out = (
+            "",
+            f"launch failed: {exc}",
+            -2,
+            False,
+        )
 
     duration = (datetime.datetime.now() - clock).total_seconds()
     # A harness that produces nothing, or that a timeout captured as raw bytes, is an outcome to
@@ -581,10 +694,16 @@ def run_one(family: str, question_id: str, condition_name: str, prompt: str,
     # the record and a bogus value fails the run by name (see the PARITY note).
     model_used = claude_model_used(stdout) if family == "claude" else None
     model_mismatch = bool(
-        model_used and resolved_model and not model_matches(resolved_model, model_used))
+        model_used
+        and resolved_model
+        and not model_matches(resolved_model, model_used)
+    )
     if model_mismatch:
-        print(f"model mismatch: {family} ran {model_used} for a request of {resolved_model}; "
-              "pass the model's full id", file=sys.stderr)
+        print(
+            f"model mismatch: {family} ran {model_used} for a request of {resolved_model}; "
+            "pass the model's full id",
+            file=sys.stderr,
+        )
 
     meta = {
         "question_id": question_id,
@@ -617,7 +736,9 @@ def run_one(family: str, question_id: str, condition_name: str, prompt: str,
         "response_source": response_source,
     }
     meta["fault"] = describe_fault(meta)
-    (run_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    (run_dir / "meta.json").write_text(
+        json.dumps(meta, indent=2), encoding="utf-8"
+    )
     return meta
 
 
@@ -625,26 +746,52 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--question-id", required=True)
     parser.add_argument("--prompt-file", type=pathlib.Path, required=True)
-    parser.add_argument("--condition", default="as-shipped", choices=sorted(CONDITIONS))
+    parser.add_argument(
+        "--condition", default="as-shipped", choices=sorted(CONDITIONS)
+    )
     parser.add_argument("--families", default="claude,codex,antigravity")
     parser.add_argument("--cwd", type=pathlib.Path, default=REPO_ROOT)
-    parser.add_argument("--out", type=pathlib.Path, default=REPO_ROOT / "docs/audit/cross-family")
+    parser.add_argument(
+        "--out",
+        type=pathlib.Path,
+        default=REPO_ROOT / "docs/audit/cross-family",
+    )
     parser.add_argument("--timeout", type=int, default=1800)
-    parser.add_argument("--model", default=None,
-                        help="Override the per-family parity model for every harness.")
-    parser.add_argument("--effort", default=None,
-                        help="Override the per-family parity reasoning effort.")
-    parser.add_argument("--serial", action="store_true", help="Run families one at a time.")
-    parser.add_argument("--image", action="append", type=pathlib.Path, default=[],
-                        help="An image file to attach to the question; repeatable. Each family "
-                             "receives it the way that harness takes an image.")
-    parser.add_argument("--family-prompt", action="append", default=[], metavar="FAMILY=PATH",
-                        help="Override the shared --prompt-file for one family alone; repeatable, "
-                             "e.g. --family-prompt codex=docs/audit/codex-only-prompt.txt. Every "
-                             "other family still gets --prompt-file.")
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="Override the per-family parity model for every harness.",
+    )
+    parser.add_argument(
+        "--effort",
+        default=None,
+        help="Override the per-family parity reasoning effort.",
+    )
+    parser.add_argument(
+        "--serial", action="store_true", help="Run families one at a time."
+    )
+    parser.add_argument(
+        "--image",
+        action="append",
+        type=pathlib.Path,
+        default=[],
+        help="An image file to attach to the question; repeatable. Each family "
+        "receives it the way that harness takes an image.",
+    )
+    parser.add_argument(
+        "--family-prompt",
+        action="append",
+        default=[],
+        metavar="FAMILY=PATH",
+        help="Override the shared --prompt-file for one family alone; repeatable, "
+        "e.g. --family-prompt codex=docs/audit/codex-only-prompt.txt. Every "
+        "other family still gets --prompt-file.",
+    )
     args = parser.parse_args()
 
-    missing_images = [str(image) for image in args.image if not image.is_file()]
+    missing_images = [
+        str(image) for image in args.image if not image.is_file()
+    ]
     if missing_images:
         parser.error("image not found: " + "; ".join(missing_images))
 
@@ -661,7 +808,8 @@ def main() -> int:
             parser.error(f"--family-prompt must be FAMILY=PATH, got {item!r}")
         if name not in BUILDERS:
             parser.error(
-                f"--family-prompt names an unknown family {name!r}. Known: {sorted(BUILDERS)}")
+                f"--family-prompt names an unknown family {name!r}. Known: {sorted(BUILDERS)}"
+            )
         path = pathlib.Path(path_text.strip())
         if not path.is_file():
             parser.error(f"--family-prompt file not found for {name}: {path}")
@@ -670,16 +818,20 @@ def main() -> int:
     missing = []
     for family in families:
         exe = EXECUTABLES[family]
-        found = shutil.which(str(exe)) or (pathlib.Path(exe).exists() and str(exe))
+        found = shutil.which(str(exe)) or (
+            pathlib.Path(exe).exists() and str(exe)
+        )
         if not found:
             missing.append(f"{family} ({exe})")
     if missing:
         parser.error("harness not found: " + "; ".join(missing))
 
     if CONDITIONS[args.condition]["mcp"] == "tcip" and "codex" in families:
-        print("note: headless codex reaches no locally spawned MCP server, so its run in this "
-              "condition has repository access only. Antigravity covers MCP questions for a "
-              "second family.\n")
+        print(
+            "note: headless codex reaches no locally spawned MCP server, so its run in this "
+            "condition has repository access only. Antigravity covers MCP questions for a "
+            "second family.\n"
+        )
 
     prompt = args.prompt_file.read_text(encoding="utf-8-sig")
     prompt_source = str(args.prompt_file)
@@ -691,7 +843,9 @@ def main() -> int:
         return override.read_text(encoding="utf-8-sig"), str(override)
 
     print(f"question : {args.question_id}")
-    print(f"condition: {args.condition} ({CONDITIONS[args.condition]['description']})")
+    print(
+        f"condition: {args.condition} ({CONDITIONS[args.condition]['description']})"
+    )
     print(f"families : {', '.join(families)}")
     print(f"cwd      : {args.cwd}")
     print(f"out      : {args.out}")
@@ -701,19 +855,44 @@ def main() -> int:
     if args.serial:
         for family in families:
             family_prompt, family_prompt_source = prompt_for(family)
-            results.append(run_one(family, args.question_id, args.condition, family_prompt,
-                                   args.cwd, args.out, args.timeout, args.model,
-                                   args.effort, images=args.image,
-                                   prompt_source=family_prompt_source))
+            results.append(
+                run_one(
+                    family,
+                    args.question_id,
+                    args.condition,
+                    family_prompt,
+                    args.cwd,
+                    args.out,
+                    args.timeout,
+                    args.model,
+                    args.effort,
+                    images=args.image,
+                    prompt_source=family_prompt_source,
+                )
+            )
     else:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(families)) as pool:
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=len(families)
+        ) as pool:
             futures = {}
             for family in families:
                 family_prompt, family_prompt_source = prompt_for(family)
-                futures[pool.submit(run_one, family, args.question_id, args.condition,
-                                    family_prompt, args.cwd, args.out, args.timeout, args.model,
-                                    args.effort, images=args.image,
-                                    prompt_source=family_prompt_source)] = family
+                futures[
+                    pool.submit(
+                        run_one,
+                        family,
+                        args.question_id,
+                        args.condition,
+                        family_prompt,
+                        args.cwd,
+                        args.out,
+                        args.timeout,
+                        args.model,
+                        args.effort,
+                        images=args.image,
+                        prompt_source=family_prompt_source,
+                    )
+                ] = family
             for future in concurrent.futures.as_completed(futures):
                 family = futures[future]
                 try:
@@ -724,20 +903,33 @@ def main() -> int:
                     results.append(failed_run_meta(family, exc))
 
     results.sort(key=lambda r: r["family"])
-    print(f"{'family':<14}{'exit':>6}{'secs':>9}{'chars':>9}  {'answer from':<20}"
-          f"{'model (effort)':<34}version")
+    print(
+        f"{'family':<14}{'exit':>6}{'secs':>9}{'chars':>9}  {'answer from':<20}"
+        f"{'model (effort)':<34}version"
+    )
     for meta in results:
         used = meta.get("model_used")
-        model = (f"{used} for {meta['model_resolved']}" if meta.get("model_mismatch")
-                 else used or meta["model_resolved"] or "?")
-        print(f"{meta['family']:<14}{meta['exit_code']:>6}{meta['duration_s']:>9}"
-              f"{meta['response_chars']:>9}  {meta['response_source']:<20}"
-              f"{f'{model} ({meta['effort_requested']})':<34}{meta['harness_version']}")
-    recovered = [m['family'] for m in results if m['response_source'] == "denied_write_draft"]
+        model = (
+            f"{used} for {meta['model_resolved']}"
+            if meta.get("model_mismatch")
+            else used or meta["model_resolved"] or "?"
+        )
+        print(
+            f"{meta['family']:<14}{meta['exit_code']:>6}{meta['duration_s']:>9}"
+            f"{meta['response_chars']:>9}  {meta['response_source']:<20}"
+            f"{f'{model} ({meta['effort_requested']})':<34}{meta['harness_version']}"
+        )
+    recovered = [
+        m["family"]
+        for m in results
+        if m["response_source"] == "denied_write_draft"
+    ]
     if recovered:
-        print(f"\nnote: recovered the answer from a refused write for: {', '.join(recovered)}. "
-              "That harness composed its answer as a file the sandbox denied, so its reply text "
-              "was only a pointer to it.")
+        print(
+            f"\nnote: recovered the answer from a refused write for: {', '.join(recovered)}. "
+            "That harness composed its answer as a file the sandbox denied, so its reply text "
+            "was only a pointer to it."
+        )
 
     summary = args.out / args.question_id / args.condition / "summary.json"
     # A re-run naming a subset of families must not drop the rows of the families it did not

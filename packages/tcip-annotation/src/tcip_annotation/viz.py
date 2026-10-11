@@ -21,26 +21,26 @@ if TYPE_CHECKING:
 # 20-class color palette (RGB), indexed by class id modulo its length; the same palette across
 # every renderer in this module, not the GUI annotation canvas's own colors
 COLOR_PALETTE: list[tuple[int, int, int]] = [
-    (255, 0, 0),       # red
-    (0, 255, 0),       # green
-    (0, 0, 255),       # blue
-    (255, 255, 0),     # yellow
-    (255, 0, 255),     # magenta
-    (0, 255, 255),     # cyan
-    (255, 128, 0),     # orange
-    (128, 0, 255),     # purple
-    (0, 128, 255),     # sky blue
-    (255, 0, 128),     # rose
-    (128, 255, 0),     # lime
-    (0, 255, 128),     # spring green
-    (128, 128, 0),     # olive
-    (128, 0, 128),     # dark purple
-    (0, 128, 128),     # teal
-    (255, 128, 128),   # salmon
-    (128, 255, 128),   # light green
-    (128, 128, 255),   # light blue
-    (255, 255, 128),   # cream
-    (255, 128, 255),   # pink
+    (255, 0, 0),  # red
+    (0, 255, 0),  # green
+    (0, 0, 255),  # blue
+    (255, 255, 0),  # yellow
+    (255, 0, 255),  # magenta
+    (0, 255, 255),  # cyan
+    (255, 128, 0),  # orange
+    (128, 0, 255),  # purple
+    (0, 128, 255),  # sky blue
+    (255, 0, 128),  # rose
+    (128, 255, 0),  # lime
+    (0, 255, 128),  # spring green
+    (128, 128, 0),  # olive
+    (128, 0, 128),  # dark purple
+    (0, 128, 128),  # teal
+    (255, 128, 128),  # salmon
+    (128, 255, 128),  # light green
+    (128, 128, 255),  # light blue
+    (255, 255, 128),  # cream
+    (255, 128, 255),  # pink
 ]
 
 
@@ -64,7 +64,9 @@ def _rgb_frame(image: "Image.Image | np.ndarray") -> Image.Image:
     return Image.fromarray(arr, mode="RGB")
 
 
-def _get_scale(orig_w: int, orig_h: int, render_w: int, render_h: int) -> tuple[float, float]:
+def _get_scale(
+    orig_w: int, orig_h: int, render_w: int, render_h: int
+) -> tuple[float, float]:
     """Get scale factors from original image to render dimensions."""
     return render_w / orig_w, render_h / orig_h
 
@@ -81,12 +83,20 @@ def _saved(img: Image.Image, output_path: str, **options) -> str:
     return output_path
 
 
-def _label(draw: ImageDraw.ImageDraw, xy: tuple[float, float], text: str, font,
-           background, fill=(255, 255, 255)) -> None:
+def _label(
+    draw: ImageDraw.ImageDraw,
+    xy: tuple[float, float],
+    text: str,
+    font,
+    background,
+    fill=(255, 255, 255),
+) -> None:
     """``text`` at ``xy`` over a ``background`` box padded two pixels each side."""
     x, y = xy
     left, top, right, bottom = font.getbbox(text)
-    draw.rectangle([x, y, x + right - left + 4, y + bottom - top + 4], fill=background)
+    draw.rectangle(
+        [x, y, x + right - left + 4, y + bottom - top + 4], fill=background
+    )
     draw.text((x + 2, y + 2), text, fill=fill, font=font)
 
 
@@ -225,8 +235,8 @@ def render_comparison(
     font = _try_font(11)
     sx, sy = _get_scale(orig_w, orig_h, img.size[0], img.size[1])
 
-    gt_color = (0, 255, 0)      # green for ground truth
-    pred_color = (255, 0, 0)    # red for predictions
+    gt_color = (0, 255, 0)  # green for ground truth
+    pred_color = (255, 0, 0)  # red for predictions
     match_color = (255, 255, 0)  # yellow for match lines
 
     # Draw GT boxes
@@ -251,9 +261,17 @@ def render_comparison(
         from tcip_annotation.matching import box_centers
 
         for gt_idx, pred_idx in matches:
-            ends = box_centers([[b["x1"], b["y1"], b["x2"], b["y2"]]
-                                for b in (gt_boxes[gt_idx], pred_boxes[pred_idx])]) * (sx, sy)
-            draw.line([tuple(end) for end in ends.tolist()], fill=match_color, width=1)
+            ends = box_centers(
+                [
+                    [b["x1"], b["y1"], b["x2"], b["y2"]]
+                    for b in (gt_boxes[gt_idx], pred_boxes[pred_idx])
+                ]
+            ) * (sx, sy)
+            draw.line(
+                [tuple(end) for end in ends.tolist()],
+                fill=match_color,
+                width=1,
+            )
 
     return _saved(img, output_path)
 
@@ -303,11 +321,24 @@ def render_grid(
             # Draw error placeholder
             x_off = col * cell_size
             y_off = row * cell_size
-            draw.rectangle([x_off, y_off, x_off + cell_size, y_off + cell_size], fill=(64, 0, 0))
-            draw.text((x_off + 4, y_off + cell_size // 2), "Error", fill=(255, 128, 128))
+            draw.rectangle(
+                [x_off, y_off, x_off + cell_size, y_off + cell_size],
+                fill=(64, 0, 0),
+            )
+            draw.text(
+                (x_off + 4, y_off + cell_size // 2),
+                "Error",
+                fill=(255, 128, 128),
+            )
 
         if titles and i < len(titles):
-            _label(draw, (col * cell_size + 4, row * cell_size + 2), titles[i], font, (0, 0, 0))
+            _label(
+                draw,
+                (col * cell_size + 4, row * cell_size + 2),
+                titles[i],
+                font,
+                (0, 0, 0),
+            )
 
     return _saved(grid, output_path)
 
@@ -371,15 +402,22 @@ def render_candidates(
             fill=(0, 0, 0, 200),
         )
         overlay_draw.text(
-            (cx - tw // 2, cy - th // 2), num_text,
-            fill=(255, 255, 255), font=font_label,
+            (cx - tw // 2, cy - th // 2),
+            num_text,
+            fill=(255, 255, 255),
+            font=font_label,
         )
 
         # Proposal score below the number (neutral across engines)
         info = f"s={cand['score']:.2f}"
-        overlay_draw.text((cx - 12, cy + radius + 2), info, fill=color, font=font_small)
+        overlay_draw.text(
+            (cx - 12, cy + radius + 2), info, fill=color, font=font_small
+        )
 
-    return _saved(Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB"), output_path)
+    return _saved(
+        Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB"),
+        output_path,
+    )
 
 
 def render_grid_overlay(
@@ -424,8 +462,10 @@ def render_grid_overlay(
 
     font = _try_font(14)
 
-    scaled = [(name, x0 * sx, y0 * sy, x1 * sx, y1 * sy)
-              for name, x0, y0, x1, y1 in map(cell_fields, cells)]
+    scaled = [
+        (name, x0 * sx, y0 * sy, x1 * sx, y1 * sy)
+        for name, x0, y0, x1, y1 in map(cell_fields, cells)
+    ]
 
     for _name, x0, y0, x1, y1 in scaled:
         # A far edge that scales to the frame size lands one past the last pixel row or
@@ -443,7 +483,14 @@ def render_grid_overlay(
         left, _top, right, _bottom = font.getbbox(name)
         if right - left + 6 > x1 - x0:
             continue
-        _label(draw, (int(x0) + 2, int(y0) + 1), name, font, (0, 0, 0), fill=label_color)
+        _label(
+            draw,
+            (int(x0) + 2, int(y0) + 1),
+            name,
+            font,
+            (0, 0, 0),
+            fill=label_color,
+        )
 
     return _saved(img, output_path)
 
@@ -453,12 +500,18 @@ def _hex_rgb(color: str) -> tuple[int, int, int]:
     it."""
     from PIL import ImageColor
 
-    if not (isinstance(color, str) and color.startswith("#") and len(color) in (4, 7)):
+    if not (
+        isinstance(color, str)
+        and color.startswith("#")
+        and len(color) in (4, 7)
+    ):
         raise ValueError(f"shape color {color!r} is not #RGB or #RRGGBB")
     return ImageColor.getrgb(color)[:3]  # type: ignore[return-value]
 
 
-def _dashed_segment(draw, p1, p2, fill, width: int, dash: float, gap: float) -> None:
+def _dashed_segment(
+    draw, p1, p2, fill, width: int, dash: float, gap: float
+) -> None:
     """Draw p1→p2 as dashes (PIL has no native dashed lines)."""
     x1, y1 = p1
     x2, y2 = p2
@@ -469,8 +522,11 @@ def _dashed_segment(draw, p1, p2, fill, width: int, dash: float, gap: float) -> 
     pos = 0.0
     while pos < length:
         end = min(pos + dash, length)
-        draw.line([(x1 + ux * pos, y1 + uy * pos), (x1 + ux * end, y1 + uy * end)],
-                  fill=fill, width=width)
+        draw.line(
+            [(x1 + ux * pos, y1 + uy * pos), (x1 + ux * end, y1 + uy * end)],
+            fill=fill,
+            width=width,
+        )
         pos = end + gap
 
 
@@ -480,13 +536,24 @@ def _dash_pixels(dash, stroke: int) -> tuple[float, float] | None:
     ``on`` and a non-negative ``off`` refuses (``ValueError``), an empty one included."""
     if dash is None:
         return None
-    if (not isinstance(dash, (list, tuple)) or len(dash) != 2
-            or not all(isinstance(u, (int, float)) and not isinstance(u, bool)
-                       and math.isfinite(u) for u in dash)):
-        raise ValueError(f"dash {dash!r} is not an [on, off] pair of finite numbers")
+    if (
+        not isinstance(dash, (list, tuple))
+        or len(dash) != 2
+        or not all(
+            isinstance(u, (int, float))
+            and not isinstance(u, bool)
+            and math.isfinite(u)
+            for u in dash
+        )
+    ):
+        raise ValueError(
+            f"dash {dash!r} is not an [on, off] pair of finite numbers"
+        )
     on, off = (float(u) * stroke for u in dash)
     if on <= 0 or off < 0:
-        raise ValueError(f"dash {list(dash)!r} needs a positive on length and a non-negative off")
+        raise ValueError(
+            f"dash {list(dash)!r} needs a positive on length and a non-negative off"
+        )
     return on, off
 
 
@@ -505,13 +572,21 @@ class _CanvasShape(NamedTuple):
     dash: tuple[float, float] | None
 
 
-def _draw_path(draw, pts, color, width: int, dash: tuple[float, float] | None,
-               closed: bool) -> None:
+def _draw_path(
+    draw,
+    pts,
+    color,
+    width: int,
+    dash: tuple[float, float] | None,
+    closed: bool,
+) -> None:
     """Draw ``pts`` as one path, solid or as ``dash`` (on, off) lengths in pixels."""
     seg_pts = list(pts) + ([pts[0]] if closed and len(pts) > 2 else [])
     if dash is not None:
         for a, b in zip(seg_pts, seg_pts[1:]):
-            _dashed_segment(draw, a, b, color, width, dash=dash[0], gap=dash[1])
+            _dashed_segment(
+                draw, a, b, color, width, dash=dash[0], gap=dash[1]
+            )
     elif len(seg_pts) > 1:
         draw.line(seg_pts, fill=color, width=width, joint="curve")
 
@@ -543,7 +618,9 @@ def render_canvas_state(
     """
     img = _rgb_frame(image)
     ox, oy = region[0], region[1]
-    sx, sy = _get_scale(region[2] - ox, region[3] - oy, img.size[0], img.size[1])
+    sx, sy = _get_scale(
+        region[2] - ox, region[3] - oy, img.size[0], img.size[1]
+    )
 
     overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
@@ -569,18 +646,25 @@ def render_canvas_state(
                 pts = [(x1, y1), (x2, y1), (x2, y2), (x1, y2)]
             elif kind == "point":
                 pts = [tx(s["points"][0])]
-            elif kind in ("polygon", "polyline") and len(s["points"]) >= _MIN_VERTICES[kind]:
+            elif (
+                kind in ("polygon", "polyline")
+                and len(s["points"]) >= _MIN_VERTICES[kind]
+            ):
                 pts = [tx(p) for p in s["points"]]
             else:
                 raise ValueError(f"kind {kind!r} with {s.get('points')!r}")
         except (KeyError, TypeError, ValueError, IndexError) as exc:
-            raise ValueError(f"canvas shape {i} is not a box, point, polygon or polyline the "
-                             f"canvas draws: {exc!r}") from exc
+            raise ValueError(
+                f"canvas shape {i} is not a box, point, polygon or polyline the "
+                f"canvas draws: {exc!r}"
+            ) from exc
         try:
             dash = _dash_pixels(s.get("dash"), lw)
         except (TypeError, ValueError) as exc:
-            raise ValueError(f"canvas shape {i} carries a dash the canvas does not draw: "
-                             f"{exc!r}") from exc
+            raise ValueError(
+                f"canvas shape {i} carries a dash the canvas does not draw: "
+                f"{exc!r}"
+            ) from exc
         closed = kind in ("box", "polygon")
         parsed.append(_CanvasShape(s, pts, color, closed, dash))
         label = s.get("label")
@@ -595,16 +679,23 @@ def render_canvas_state(
         if not s.get("halo"):
             continue
         try:
-            halo = _hex_rgb(s["halo"]["color"]) + (round(255 * float(s["halo"]["opacity"])),)
+            halo = _hex_rgb(s["halo"]["color"]) + (
+                round(255 * float(s["halo"]["opacity"])),
+            )
             halo_w = max(1, round(lw * float(s["halo"]["width_factor"])))
         except (KeyError, TypeError, ValueError) as exc:
-            raise ValueError(f"canvas shape {i} carries a halo the canvas does not draw: "
-                             f"{exc!r}") from exc
+            raise ValueError(
+                f"canvas shape {i} carries a halo the canvas does not draw: "
+                f"{exc!r}"
+            ) from exc
         if s["kind"] == "point":
             px, py = pts[0]
             reach = dot_r * 1.6 * 3.2
-            draw.ellipse([px - reach, py - reach, px + reach, py + reach],
-                         outline=halo, width=halo_w)
+            draw.ellipse(
+                [px - reach, py - reach, px + reach, py + reach],
+                outline=halo,
+                width=halo_w,
+            )
         else:
             _draw_path(draw, pts, halo, halo_w, None, closed=closed)
     for shape in parsed:  # pass 3: outlines + vertices
@@ -615,21 +706,40 @@ def render_canvas_state(
             px, py = pts[0]
             core = dot_r * 1.6
             inner, outer = core * 1.9, core * 3.2
-            draw.ellipse([px - core, py - core, px + core, py + core], fill=color + (255,))
+            draw.ellipse(
+                [px - core, py - core, px + core, py + core],
+                fill=color + (255,),
+            )
             for dx, dy in ((0, -1), (0, 1), (-1, 0), (1, 0)):
-                _draw_path(draw, [(px + dx * inner, py + dy * inner),
-                                  (px + dx * outer, py + dy * outer)],
-                           color + (255,), lw, dash, closed=False)
+                _draw_path(
+                    draw,
+                    [
+                        (px + dx * inner, py + dy * inner),
+                        (px + dx * outer, py + dy * outer),
+                    ],
+                    color + (255,),
+                    lw,
+                    dash,
+                    closed=False,
+                )
             continue
         _draw_path(draw, pts, color + (255,), lw, dash, closed=closed)
-        if s["kind"] == "polyline" and s.get("vertices", True):  # a drawing's laid vertices
+        if s["kind"] == "polyline" and s.get(
+            "vertices", True
+        ):  # a drawing's laid vertices
             for px, py in pts:
-                draw.ellipse([px - dot_r, py - dot_r, px + dot_r, py + dot_r],
-                             fill=color + (255,))
+                draw.ellipse(
+                    [px - dot_r, py - dot_r, px + dot_r, py + dot_r],
+                    fill=color + (255,),
+                )
 
     img = Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB")
     draw2 = ImageDraw.Draw(img)
-    for (ax, ay), text, color in labels:  # halo text, drawn after compositing so it stays crisp
+    for (
+        (ax, ay),
+        text,
+        color,
+    ) in labels:  # halo text, drawn after compositing so it stays crisp
         x, y = ax + 2, max(0.0, ay - (out_w // 90) - 4)
         for dx, dy in ((-1, -1), (-1, 1), (1, -1), (1, 1)):
             draw2.text((x + dx, y + dy), text, fill=(0, 0, 0), font=font)

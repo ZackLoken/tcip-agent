@@ -12,7 +12,12 @@ from pydantic import BaseModel
 
 from tcip_store.errors import BadKeyError
 
-from tcip_mcp.experiments import RunRow, TrainingDetail, TrainingListing, training_listing
+from tcip_mcp.experiments import (
+    RunRow,
+    TrainingDetail,
+    TrainingListing,
+    training_listing,
+)
 from tcip_mcp.identity import actor
 from tcip_web.routes._body_common import EmptyBodyPayload, PersonPayload
 from tcip_web.state import NoProjectOpenError, store
@@ -25,7 +30,9 @@ router = APIRouter(prefix="/api/training", tags=["training"])
 def _refused(result: dict) -> HTTPException:
     """A tool's error dict ``result`` as a 422 whose detail carries its fields, the ``error``
     reason named ``message``."""
-    return HTTPException(422, {("message" if k == "error" else k): v for k, v in result.items()})
+    return HTTPException(
+        422, {("message" if k == "error" else k): v for k, v in result.items()}
+    )
 
 
 @router.get("/runs/{experiment_id}/splits")
@@ -63,27 +70,41 @@ def relaunch_route(payload: RelaunchPayload) -> dict:
     """
     from tcip_mcp.audit import AuditEntryNotWrittenError
     from tcip_mcp.experiments import SWEEP_FILE, named_directory, observe
-    from tcip_mcp.tools.training_tools import data_with_selection, launch_sweep, launch_training
+    from tcip_mcp.tools.training_tools import (
+        data_with_selection,
+        launch_sweep,
+        launch_training,
+    )
     from tcip_web.routes.audit_gap import audit_gap_409
 
     person = actor(payload.user)
     project = store.held().root
     source = named_directory(payload.relaunched_from, project=project)
     if source is None:
-        raise HTTPException(404, f"no run or sweep named {payload.relaunched_from}")
+        raise HTTPException(
+            404, f"no run or sweep named {payload.relaunched_from}"
+        )
     try:
         if (source / SWEEP_FILE).is_file():
             if payload.selection_dir:
-                raise HTTPException(422, "a sweep relaunches from its own recorded input")
+                raise HTTPException(
+                    422, "a sweep relaunches from its own recorded input"
+                )
             result = launch_sweep(project, source, actor=person)
         else:
             observation = observe(source)
             spec = observation.spec
             if payload.selection_dir:
-                data = data_with_selection(spec.data, payload.selection_dir, project)
+                data = data_with_selection(
+                    spec.data, payload.selection_dir, project
+                )
                 spec = spec.model_copy(update={"data": data})
-            result = launch_training(project, spec.record(), relaunched_from=source.name,
-                                     actor=person)
+            result = launch_training(
+                project,
+                spec.record(),
+                relaunched_from=source.name,
+                actor=person,
+            )
     except AuditEntryNotWrittenError as exc:
         raise audit_gap_409(exc, exc.arguments) from exc
     if result.get("error"):
@@ -110,7 +131,9 @@ def get_run(experiment_id: str) -> TrainingDetail:
 
 
 @router.post("/runs/{experiment_id}/tensorboard")
-def launch_run_tensorboard(experiment_id: str, payload: EmptyBodyPayload) -> dict:
+def launch_run_tensorboard(
+    experiment_id: str, payload: EmptyBodyPayload
+) -> dict:
     """Start (or reuse) a TensorBoard over the board (``experiments.board_of``) of the run, trial
     or sweep ``experiment_id`` names, keyed by that directory.
 
@@ -119,7 +142,9 @@ def launch_run_tensorboard(experiment_id: str, payload: EmptyBodyPayload) -> dic
     with that error alone.
     """
     from tcip_mcp.experiments import board_of, named_directory, observe
-    from tcip_mcp.pipelines.training.tensorboard_manager import launch_tensorboard
+    from tcip_mcp.pipelines.training.tensorboard_manager import (
+        launch_tensorboard,
+    )
 
     directory = named_directory(experiment_id, project=store.held().root)
     if directory is None:
@@ -128,7 +153,12 @@ def launch_run_tensorboard(experiment_id: str, payload: EmptyBodyPayload) -> dic
     error = observe(directory).status_error
     if not any(board.rglob("events.out.tfevents*")):
         raise HTTPException(
-            404, {"message": error or f"run produced no logs: {experiment_id}", "no_logs": True})
+            404,
+            {
+                "message": error or f"run produced no logs: {experiment_id}",
+                "no_logs": True,
+            },
+        )
     if error:
         raise HTTPException(404, error)
     return launch_tensorboard(str(board))
@@ -140,7 +170,9 @@ def cancel_run_route(experiment_id: str, payload: PersonPayload) -> dict:
     (``cancel_training``), by the person ``user`` names; its refusal answers 404."""
     from tcip_mcp.tools.training_tools import cancel_training
 
-    result = cancel_training(store.held().root, experiment_id, actor=actor(payload.user))
+    result = cancel_training(
+        store.held().root, experiment_id, actor=actor(payload.user)
+    )
     if result.get("error"):
         raise HTTPException(404, result["error"])
     return result
@@ -154,7 +186,9 @@ class ExperimentComparePayload(BaseModel):
 def compare_runs_route(payload: ExperimentComparePayload) -> dict:
     from tcip_mcp.experiments import compare_experiments
 
-    return compare_experiments(payload.experiment_ids, project=store.held().root)
+    return compare_experiments(
+        payload.experiment_ids, project=store.held().root
+    )
 
 
 class CompareBestPayload(BaseModel):
@@ -180,9 +214,13 @@ def compare_best_route(payload: CompareBestPayload) -> dict:
 
     try:
         result = ranked_registered_model(
-            store.held().root, payload.metric, higher_is_better=payload.higher_is_better,
-            include_unverified=payload.include_unverified, experiment_ids=payload.experiment_ids,
-            tag=None)
+            store.held().root,
+            payload.metric,
+            higher_is_better=payload.higher_is_better,
+            include_unverified=payload.include_unverified,
+            experiment_ids=payload.experiment_ids,
+            tag=None,
+        )
     except DecodeError as exc:
         raise HTTPException(409, f"registry unreadable: {exc}") from exc
     if "error" in result:
@@ -203,7 +241,9 @@ def compare_best_route(payload: CompareBestPayload) -> dict:
 @router.get("/metric-directions")
 def metric_directions_route() -> dict:
     """Every metric name evaluation.py declares a ranking direction for, with that direction."""
-    from tcip_mcp.pipelines.training.evaluation import HIGHER_IS_BETTER_BY_METRIC
+    from tcip_mcp.pipelines.training.evaluation import (
+        HIGHER_IS_BETTER_BY_METRIC,
+    )
 
     return {"higher_is_better": dict(HIGHER_IS_BETTER_BY_METRIC)}
 
@@ -248,39 +288,66 @@ async def _stream_metrics(
     is not a single directory name raises ``BadKeyError``. Every read runs off the event loop.
     """
     from tcip_mcp.experiments import (
-        EPOCH_KEY, TERMINAL_STATES, epoch_rows, find_observation, launch_declarations, observe,
-        partition_rows, read_rows, run_name, run_summary,
+        EPOCH_KEY,
+        TERMINAL_STATES,
+        epoch_rows,
+        find_observation,
+        launch_declarations,
+        observe,
+        partition_rows,
+        read_rows,
+        run_name,
+        run_summary,
     )
 
-    observation = await asyncio.to_thread(find_observation, run_name(experiment_id),
-                                          project=project)
+    observation = await asyncio.to_thread(
+        find_observation, run_name(experiment_id), project=project
+    )
     if observation is None:
-        await ws.send_json(TrainingStatusFrame(
-            type="status", experiment_id=experiment_id, status=None,
-            error=f"Run not found: {experiment_id}").model_dump())
+        await ws.send_json(
+            TrainingStatusFrame(
+                type="status",
+                experiment_id=experiment_id,
+                status=None,
+                error=f"Run not found: {experiment_id}",
+            ).model_dump()
+        )
         return
     cursor = 0
     sent: list[dict] = []
 
     while True:
-        rows, cursor = await asyncio.to_thread(read_rows, observation.metrics_log, after=cursor)
+        rows, cursor = await asyncio.to_thread(
+            read_rows, observation.metrics_log, after=cursor
+        )
         epochs, batches = partition_rows(rows)
         sent += epochs
         touched = [row.get(EPOCH_KEY) for row in epochs]
         for row in epoch_rows(sent):
             if row.get(EPOCH_KEY) in touched:
-                frame = TrainingRowFrame(type="metric", experiment_id=experiment_id, row=row)
+                frame = TrainingRowFrame(
+                    type="metric", experiment_id=experiment_id, row=row
+                )
                 await ws.send_json(frame.model_dump())
         if batches:
-            await ws.send_json(TrainingRowFrame(
-                type="batch", experiment_id=experiment_id, row=batches[-1]).model_dump())
+            await ws.send_json(
+                TrainingRowFrame(
+                    type="batch", experiment_id=experiment_id, row=batches[-1]
+                ).model_dump()
+            )
         if observation.state in TERMINAL_STATES:
             launches = await asyncio.to_thread(launch_declarations, project)
-            status = await asyncio.to_thread(run_summary, observation, sent,
-                                             launches.get(experiment_id))
-            await ws.send_json(TrainingStatusFrame(
-                type="status", experiment_id=experiment_id, status=status,
-                error=None).model_dump())
+            status = await asyncio.to_thread(
+                run_summary, observation, sent, launches.get(experiment_id)
+            )
+            await ws.send_json(
+                TrainingStatusFrame(
+                    type="status",
+                    experiment_id=experiment_id,
+                    status=status,
+                    error=None,
+                ).model_dump()
+            )
             break
         await asyncio.sleep(poll_seconds)
         observation = await asyncio.to_thread(observe, observation.directory)

@@ -27,7 +27,9 @@ from pathlib import Path
 
 import pytest
 
-torch = pytest.importorskip("torch")  # evaluation.py imports torch at module load
+torch = pytest.importorskip(
+    "torch"
+)  # evaluation.py imports torch at module load
 
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.pipelines.postprocessing import phenology as phenology_mod  # noqa: E402
@@ -45,26 +47,53 @@ from tests._dense_op_fixtures import toy_records as _sweep_records  # noqa: E402
 
 # ── 1. conf operating-point sweep + count-unbiased pick + the count criterion ──
 
+
 def test_golden_sweep_curve_exact():
     recs = _sweep_records()
     assert gt_class_avg_size(recs) == pytest.approx(20.0)
     tol = 0.5 * gt_class_avg_size(recs)
     assert tol == pytest.approx(10.0)
 
-    sweep = derive_operating_point_curve(recs, criterion={"kind": "center_match", "tolerance": tol})
+    sweep = derive_operating_point_curve(
+        recs, criterion={"kind": "center_match", "tolerance": tol}
+    )
     assert sweep["criterion"]["tolerance"] == pytest.approx(10.0)
     assert sweep["class_id"] is None
 
     # The full swept curve, pinned exactly (conf grid = {0.0} ∪ observed scores).
     expected = [
-        {"conf": 0.0, "tp": 3, "fp": 1, "fn": 0, "count_bias_mean": 0.5,
-         "abs_count_error_mean": 0.5},
-        {"conf": 0.3, "tp": 3, "fp": 1, "fn": 0, "count_bias_mean": 0.5,
-         "abs_count_error_mean": 0.5},
-        {"conf": 0.6, "tp": 2, "fp": 1, "fn": 1, "count_bias_mean": 0.0,
-         "abs_count_error_mean": 1.0},
-        {"conf": 0.9, "tp": 2, "fp": 0, "fn": 1, "count_bias_mean": -0.5,
-         "abs_count_error_mean": 0.5},
+        {
+            "conf": 0.0,
+            "tp": 3,
+            "fp": 1,
+            "fn": 0,
+            "count_bias_mean": 0.5,
+            "abs_count_error_mean": 0.5,
+        },
+        {
+            "conf": 0.3,
+            "tp": 3,
+            "fp": 1,
+            "fn": 0,
+            "count_bias_mean": 0.5,
+            "abs_count_error_mean": 0.5,
+        },
+        {
+            "conf": 0.6,
+            "tp": 2,
+            "fp": 1,
+            "fn": 1,
+            "count_bias_mean": 0.0,
+            "abs_count_error_mean": 1.0,
+        },
+        {
+            "conf": 0.9,
+            "tp": 2,
+            "fp": 0,
+            "fn": 1,
+            "count_bias_mean": -0.5,
+            "abs_count_error_mean": 0.5,
+        },
     ]
     curve = sweep["curve"]
     assert len(curve) == len(expected)
@@ -81,8 +110,13 @@ def test_golden_sweep_curve_exact():
 
 def test_golden_pick_count_unbiased_and_f1_max():
     recs = _sweep_records()
-    sweep = derive_operating_point_curve(recs, criterion={
-        "kind": "center_match", "tolerance": 0.5 * gt_class_avg_size(recs)})
+    sweep = derive_operating_point_curve(
+        recs,
+        criterion={
+            "kind": "center_match",
+            "tolerance": 0.5 * gt_class_avg_size(recs),
+        },
+    )
     assert pick_count_unbiased(sweep) == pytest.approx(0.6)
     assert pick_f1_max(sweep) == pytest.approx(0.0)
     # count bias vanishes at the count-unbiased pick, over-counts (+0.5) at the F1-max pick
@@ -100,9 +134,16 @@ def test_golden_count_criterion_over_a_dense_distinct_reference():
     from tests import _trait_fixtures as fx
 
     cal, hold = good_cal_holdout()
-    entry = fx.with_fields(BUD_OPENING, count_bias_tolerance_frac=0.1, count_error_tolerance=1.0)
-    conf, evidence, failures = count_criterion(cal, hold, entry, staged_conf_floor=0.01,
-                                               staged_conf_floor_attribute_path=None)
+    entry = fx.with_fields(
+        BUD_OPENING, count_bias_tolerance_frac=0.1, count_error_tolerance=1.0
+    )
+    conf, evidence, failures = count_criterion(
+        cal,
+        hold,
+        entry,
+        staged_conf_floor=0.01,
+        staged_conf_floor_attribute_path=None,
+    )
     # count-unbiased pick: bias vanishes once the low-conf FP drops
     assert conf == pytest.approx(0.9)
     assert evidence["conf_derived_from"] == "count-unbiased count curve"
@@ -111,9 +152,16 @@ def test_golden_count_criterion_over_a_dense_distinct_reference():
     from tests._verified_checkpoint_fixtures import objects_over
 
     frame = float(cal[0]["width"] * cal[0]["height"])
-    regions = [objects_over([[x, y, x + w, y + h] for x, y, w, h in (a["bbox"] for a in
-                                                                    gt_objects(r))],
-                            r["width"] * r["height"]) for r in cal + hold]
+    regions = [
+        objects_over(
+            [
+                [x, y, x + w, y + h]
+                for x, y, w, h in (a["bbox"] for a in gt_objects(r))
+            ],
+            r["width"] * r["height"],
+        )
+        for r in cal + hold
+    ]
     assert derive_object_density(regions) * frame == pytest.approx(80)
 
 
@@ -132,18 +180,29 @@ _PHENO_SERIES = [
 def test_golden_crossing_dates_interpolated():
     # The return is a Crossing record (date + evidentiary bound), not a bare string.
     # 0.05 lies midway 0.0 to 0.10, 10 days
-    assert phenology_mod.crossing_date(_PHENO_SERIES, 0.05).date == "2026-02-15"
-    assert phenology_mod.crossing_date(_PHENO_SERIES, 0.50).date == "2026-03-01"
-    assert phenology_mod.crossing_date(_PHENO_SERIES, 0.95).date == "2026-03-12"
+    assert (
+        phenology_mod.crossing_date(_PHENO_SERIES, 0.05).date == "2026-02-15"
+    )
+    assert (
+        phenology_mod.crossing_date(_PHENO_SERIES, 0.50).date == "2026-03-01"
+    )
+    assert (
+        phenology_mod.crossing_date(_PHENO_SERIES, 0.95).date == "2026-03-12"
+    )
     # 0.97 observed, not 0.95 exactly
-    assert phenology_mod.crossing_date(_PHENO_SERIES, 0.95).bound == "interpolated"
+    assert (
+        phenology_mod.crossing_date(_PHENO_SERIES, 0.95).bound
+        == "interpolated"
+    )
     assert phenology_mod.crossing_date(_PHENO_SERIES, 0.97).bound == "exact"
     # never reached within the observed window -> right-censored at the last observed date, not a
     # bare None: distinguishable from "no observations at all".
     c99 = phenology_mod.crossing_date(_PHENO_SERIES, 0.99)
     assert c99.date == "2026-03-12"
     assert c99.bound == "right_censored"
-    assert phenology_mod.crossing_date([], 0.99) is None  # no observations at all -> still None
+    assert (
+        phenology_mod.crossing_date([], 0.99) is None
+    )  # no observations at all -> still None
 
 
 def test_golden_plant_milestones_shape_and_values():
@@ -160,22 +219,43 @@ def test_golden_per_plant_phenology_series_and_milestones(tmp_path: Path):
     from tests._chain_fixtures import predicted, published
 
     opening = cr.Attribute("opening", "categorical", ("closed", "open"))
-    registry = cr.SubjectRegistry(subjects=(cr.Subject(name="bud", attributes=(opening,)),))
+    registry = cr.SubjectRegistry(
+        subjects=(cr.Subject(name="bud", attributes=(opening,)),)
+    )
 
     def bucket(date: str, stem: str, values: list[str]):
         image = tmp_path / "ds" / "images" / date / f"{stem}.png"
-        return published(tmp_path, f"run/{date}", [predicted(image, values, (opening,))],
-                         scope={"subject": "bud"}, registry=registry)
+        return published(
+            tmp_path,
+            f"run/{date}",
+            [predicted(image, values, (opening,))],
+            scope={"subject": "bud"},
+            registry=registry,
+        )
 
-    buckets = {"2026-02-11": bucket("2026-02-11", "P1_a", ["closed", "closed", "closed", "open"]),
-               "2026-03-09": bucket("2026-03-09", "P1_b", ["open", "open", "open", "closed"])}
+    buckets = {
+        "2026-02-11": bucket(
+            "2026-02-11", "P1_a", ["closed", "closed", "closed", "open"]
+        ),
+        "2026-03-09": bucket(
+            "2026-03-09", "P1_b", ["open", "open", "open", "closed"]
+        ),
+    }
     mapping = {
-        "2026-02-11": [{"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}],
-        "2026-03-09": [{"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}],
+        "2026-02-11": [
+            {"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}
+        ],
+        "2026-03-09": [
+            {"stem": "P1_b", "plot_name": "P1", "accession_name": "acc-9"}
+        ],
     }
     res = phenology_mod.per_plant_phenology(
-        mapping, buckets, BUD_OPENING, ["P1"],
-        require_all_dates_complete=phenology_mod.REQUIRE_ALL_DATES_COMPLETE)
+        mapping,
+        buckets,
+        BUD_OPENING,
+        ["P1"],
+        require_all_dates_complete=phenology_mod.REQUIRE_ALL_DATES_COMPLETE,
+    )
 
     # Both buckets carry the state's attribute on every detection, so the fraction is delivered.
     assert res["positive_class_assessed"] is True
@@ -197,18 +277,33 @@ def test_golden_per_plant_phenology_series_and_milestones(tmp_path: Path):
 # ── 3. the execution record a pass runs under: what it states, and an unstated value refused ──
 
 
-def test_golden_execution_record_of_an_untiled_pass_runs_at_what_it_states(tmp_path):
+def test_golden_execution_record_of_an_untiled_pass_runs_at_what_it_states(
+    tmp_path,
+):
     """Every value a pass runs under is recorded with where it came from: an untiled detector
     pass runs at the conf it states, sourced ``explicit``, and the density its checkpoint
     recorded, sourced ``derived``, and stating no conf refuses."""
-    from tcip_mcp.pipelines.execution import ExecutionRefusedError, Stated, prepare
-    from tests._verified_checkpoint_fixtures import SAMPLE_CONF, verified_checkpoint
+    from tcip_mcp.pipelines.execution import (
+        ExecutionRefusedError,
+        Stated,
+        prepare,
+    )
+    from tests._verified_checkpoint_fixtures import (
+        SAMPLE_CONF,
+        verified_checkpoint,
+    )
 
     checkpoint = verified_checkpoint(tmp_path)
-    record = prepare(checkpoint, Stated(tile=False, conf=SAMPLE_CONF)).runnable().execution.record()
+    record = (
+        prepare(checkpoint, Stated(tile=False, conf=SAMPLE_CONF))
+        .runnable()
+        .execution.record()
+    )
 
     assert (record["conf"], record["density"]) == (
-        SAMPLE_CONF, checkpoint.spec.data.train_object_density)
+        SAMPLE_CONF,
+        checkpoint.spec.data.train_object_density,
+    )
     assert record["sources"] == {"conf": "explicit", "density": "derived"}
     assert record["tile_size"] is None and record["cross_tile_nms"] is None
     with pytest.raises(ExecutionRefusedError, match="conf"):
@@ -217,31 +312,51 @@ def test_golden_execution_record_of_an_untiled_pass_runs_at_what_it_states(tmp_p
 
 # ── 4. no inference operating-point default, and the stated values each door hands on ──
 
-def test_golden_no_operating_point_default_survives_and_each_door_takes_stated_values(tmp_path):
+
+def test_golden_no_operating_point_default_survives_and_each_door_takes_stated_values(
+    tmp_path,
+):
     # No module carries an inference operating-point default: each value is stated, derived from
     # a reference the caller holds, or refused, and every door hands its stated values on whole.
     from tcip_mcp.pipelines import execution as execution_mod
     from tcip_mcp.pipelines import operating_point as operating_point_mod
     from tcip_mcp.pipelines.data import datasets as datasets_mod
-    from tcip_mcp.pipelines.inference import generic_predictor as generic_predictor_mod
+    from tcip_mcp.pipelines.inference import (
+        generic_predictor as generic_predictor_mod,
+    )
     from tcip_mcp.pipelines.training import eval_runners as runners
     from tcip_mcp.pipelines.training import evaluation as evaluation_mod
     from tcip_mcp.tools import training_tools as training_tools_mod
 
     # The operating point carries no shared fallback constant at all: a caller states each value
     # or derives it from a reference it holds.
-    for name in ("DEFAULT_TILE_SIZE", "DEFAULT_TILED", "DEFAULT_NMS_IOU", "DEFAULT_CONF",
-                 "DEFAULT_MAX_DETS", "DEFAULT_OVERLAP"):
+    for name in (
+        "DEFAULT_TILE_SIZE",
+        "DEFAULT_TILED",
+        "DEFAULT_NMS_IOU",
+        "DEFAULT_CONF",
+        "DEFAULT_MAX_DETS",
+        "DEFAULT_OVERLAP",
+    ):
         assert not hasattr(execution_mod, name), name
     assert not hasattr(datasets_mod, "TILE_SIZE")
 
-    for name in ("DEFAULT_CONF", "DEFAULT_MAX_DETS", "DEFAULT_NMS_IOU", "DEFAULT_OVERLAP",
-                 "_DEFAULT_CROSS_TILE_NMS", "_DEFAULT_MAX_DETS", "DEFAULT_TILE_SIZE"):
+    for name in (
+        "DEFAULT_CONF",
+        "DEFAULT_MAX_DETS",
+        "DEFAULT_NMS_IOU",
+        "DEFAULT_OVERLAP",
+        "_DEFAULT_CROSS_TILE_NMS",
+        "_DEFAULT_MAX_DETS",
+        "DEFAULT_TILE_SIZE",
+    ):
         assert not hasattr(operating_point_mod, name), name
 
     # generic_predictor's sliced primitive defaults nothing it runs under: the caller hands it
     # the whole execution record.
-    gp_sig = inspect.signature(generic_predictor_mod.GenericPredictor.predict_sliced)
+    gp_sig = inspect.signature(
+        generic_predictor_mod.GenericPredictor.predict_sliced
+    )
     for name in ("execution", "tile_batch_size", "require_masks"):
         assert gp_sig.parameters[name].default is inspect.Parameter.empty
 
@@ -250,18 +365,26 @@ def test_golden_no_operating_point_default_survives_and_each_door_takes_stated_v
     ev_sig = inspect.signature(training_tools_mod.evaluate_model)
     assert ev_sig.parameters["stated"].default is None
     assert ev_sig.parameters["iou_threshold"].default == 0.5
-    assert not {"conf_threshold", "cross_tile_nms", "max_dets"} & set(ev_sig.parameters)
+    assert not {"conf_threshold", "cross_tile_nms", "max_dets"} & set(
+        ev_sig.parameters
+    )
 
     ff_sig = inspect.signature(runners.run_full_frame_evaluation)
     # The stated execution values arrive whole and resolve inside the runner's own prepared pass.
     assert ff_sig.parameters["stated"].default is inspect.Parameter.empty
-    assert not {"conf_threshold", "cross_tile_nms", "max_dets", "tile_size", "overlap"} & set(
-        ff_sig.parameters)
+    assert not {
+        "conf_threshold",
+        "cross_tile_nms",
+        "max_dets",
+        "tile_size",
+        "overlap",
+    } & set(ff_sig.parameters)
     assert not hasattr(evaluation_mod, "DEFAULT_SCORE_WEIGHTS")
 
 
 def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_none(
-        tmp_path, monkeypatch):
+    tmp_path, monkeypatch
+):
     """Each of the three regimes, constructed genuinely (a tiling block for the tile-level run,
     nothing for the single pass, use_tiled_inference=True for the full frame), runs at the conf
     the caller states, recorded ``explicit``, and refuses naming ``conf`` when none is stated."""
@@ -271,7 +394,9 @@ def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_n
     from tcip_mcp.pipelines.schemas import TilingSpec
     from tcip_mcp.tools import training_tools as training_tools_mod
     from tests._verified_checkpoint_fixtures import (
-        SAMPLE_CONF, SAMPLE_DETECTOR_PASS, registered_checkpoint,
+        SAMPLE_CONF,
+        SAMPLE_DETECTOR_PASS,
+        registered_checkpoint,
     )
 
     from tests._producer_fixtures import label_image
@@ -279,9 +404,15 @@ def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_n
     def _dataset(root):
         images_dir = root / "images" / UNDATED_BUCKET
         images_dir.mkdir(parents=True)
-        Image.new("RGB", (64, 64), color=(120, 120, 120)).save(images_dir / "a.png")
-        label_image(images_dir / "a.png", [Annotation(subject="bud", geometry=BBox(5, 5, 20, 20))],
-                    64, 64)
+        Image.new("RGB", (64, 64), color=(120, 120, 120)).save(
+            images_dir / "a.png"
+        )
+        label_image(
+            images_dir / "a.png",
+            [Annotation(subject="bud", geometry=BBox(5, 5, 20, 20))],
+            64,
+            64,
+        )
         return images_dir
 
     from PIL import Image
@@ -300,40 +431,76 @@ def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_n
         model = _DummyModel()
 
         def predict_sliced(self, path, **kw):
-            return {"width": 64, "height": 64, "boxes": [], "scores": [], "labels": [],
-                    "count": 0, "cap": 1}
+            return {
+                "width": 64,
+                "height": 64,
+                "boxes": [],
+                "scores": [],
+                "labels": [],
+                "count": 0,
+                "cap": 1,
+            }
 
     # The checkpoint is built through the unpatched build_model before the stubs below go in.
     checkpoint = registered_checkpoint(tmp_path)
     tile_ds, single_ds, ff_default_ds = (
         (_dataset(tmp_path / root_name), checkpoint)
-        for root_name in ("tile", "single", "ff-default"))
+        for root_name in ("tile", "single", "ff-default")
+    )
 
-    monkeypatch.setattr(evaluation, "evaluate",
-                        lambda *a, **k: {"loss": 0.1, "precision": 0.4, "recall": 0.5, "f1": 0.44})
-    monkeypatch.setattr(predictor_mod, "GenericPredictor", lambda *a, **kw: _StubPredictor())
+    monkeypatch.setattr(
+        evaluation,
+        "evaluate",
+        lambda *a, **k: {
+            "loss": 0.1,
+            "precision": 0.4,
+            "recall": 0.5,
+            "f1": 0.44,
+        },
+    )
+    monkeypatch.setattr(
+        predictor_mod, "GenericPredictor", lambda *a, **kw: _StubPredictor()
+    )
 
-    unstated_conf = {k: v for k, v in SAMPLE_DETECTOR_PASS.items() if k != "conf"}
-    tiling = TilingSpec.model_validate({"tile_size": 64, "overlap": 0.0, "sliver_frac": 0.5})
-    regimes = [(tile_ds, {"tiling": tiling}),
-               (single_ds, {}), (ff_default_ds, {"use_tiled_inference": True})]
+    unstated_conf = {
+        k: v for k, v in SAMPLE_DETECTOR_PASS.items() if k != "conf"
+    }
+    tiling = TilingSpec.model_validate(
+        {"tile_size": 64, "overlap": 0.0, "sliver_frac": 0.5}
+    )
+    regimes = [
+        (tile_ds, {"tiling": tiling}),
+        (single_ds, {}),
+        (ff_default_ds, {"use_tiled_inference": True}),
+    ]
     for (images_dir, ckpt), regime in regimes:
         refused = training_tools_mod.evaluate_model(
-            tmp_path, str(ckpt), str(images_dir), **regime,
-            stated=execution_mod.Stated(**unstated_conf))
+            tmp_path,
+            str(ckpt),
+            str(images_dir),
+            **regime,
+            stated=execution_mod.Stated(**unstated_conf),
+        )
         assert "conf" in refused.get("error", ""), (regime, refused)
         ran = training_tools_mod.evaluate_model(
-            tmp_path, str(ckpt), str(images_dir), **regime,
-            stated=execution_mod.Stated(**SAMPLE_DETECTOR_PASS))
+            tmp_path,
+            str(ckpt),
+            str(images_dir),
+            **regime,
+            stated=execution_mod.Stated(**SAMPLE_DETECTOR_PASS),
+        )
         assert "error" not in ran, (regime, ran)
-        assert (ran["execution"]["conf"], ran["execution"]["sources"]["conf"]) == (
-            SAMPLE_CONF, "explicit"), regime
+        assert (
+            ran["execution"]["conf"],
+            ran["execution"]["sources"]["conf"],
+        ) == (SAMPLE_CONF, "explicit"), regime
 
 
 # ══════════════════════════════════════════════════════════════════════════
 # 5. IoU-matching eval metrics at iou_threshold=0.5 (current criterion, to be replaced by a
 #    derived center-match tolerance)
 # ══════════════════════════════════════════════════════════════════════════
+
 
 def _iou_records():
     """Discriminating fixture: an exact match, a 2px-shifted match (IoU~0.68 -> hit@0.5, miss@0.75),
@@ -345,20 +512,34 @@ def _iou_records():
 
     def dt(x, y, w, h, score, cid=1):
         return {
-            "category_id": cid, "bbox": [float(x), float(y), float(w), float(h)], "score": score
+            "category_id": cid,
+            "bbox": [float(x), float(y), float(w), float(h)],
+            "score": score,
         }
 
     return [
-        {"width": 100, "height": 100,
-         "gt": [gt(10, 10, 20, 20), gt(60, 60, 20, 20)],
-         "dt": [dt(10, 10, 20, 20, 0.95), dt(62, 62, 20, 20, 0.85), dt(90, 5, 8, 8, 0.6)]},
+        {
+            "width": 100,
+            "height": 100,
+            "gt": [gt(10, 10, 20, 20), gt(60, 60, 20, 20)],
+            "dt": [
+                dt(10, 10, 20, 20, 0.95),
+                dt(62, 62, 20, 20, 0.85),
+                dt(90, 5, 8, 8, 0.6),
+            ],
+        },
         {"width": 100, "height": 100, "gt": [gt(40, 40, 20, 20)], "dt": []},
     ]
 
 
 def _metrics(iou_threshold: float) -> dict:
-    return detection_metrics(_iou_records(), trait=None, conf_threshold=0.25,
-                             iou_threshold=iou_threshold, by_mask=False)
+    return detection_metrics(
+        _iou_records(),
+        trait=None,
+        conf_threshold=0.25,
+        iou_threshold=iou_threshold,
+        by_mask=False,
+    )
 
 
 def test_golden_coco_metrics_at_iou_050():

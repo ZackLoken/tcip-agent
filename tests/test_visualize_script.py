@@ -23,7 +23,9 @@ def _fixture(root: Path) -> Path:
     images.mkdir(parents=True)
     img = images / "a.jpg"
     Image.new("RGB", (100, 80), color=(120, 120, 120)).save(img)
-    label_image(img, [Annotation(subject="bud", geometry=BBox(1, 1, 40, 30))], 100, 80)
+    label_image(
+        img, [Annotation(subject="bud", geometry=BBox(1, 1, 40, 30))], 100, 80
+    )
     return img
 
 
@@ -32,7 +34,9 @@ def test_refuses_without_a_project_and_plants_no_store(tmp_path):
     cwd = tmp_path / "operator_cwd"
     cwd.mkdir()
 
-    result = run_tcip("visualize", ["--source", "annotations", "--path", str(img)], cwd=cwd)
+    result = run_tcip(
+        "visualize", ["--source", "annotations", "--path", str(img)], cwd=cwd
+    )
 
     assert result.returncode != 0, result.stdout
     assert "--project" in result.stderr
@@ -45,8 +49,17 @@ def test_refuses_a_directory_holding_no_project_record(tmp_path):
     bare.mkdir()
 
     result = run_tcip(
-        "visualize", ["--source", "annotations", "--path", str(img), "--project", str(bare)],
-        cwd=tmp_path)
+        "visualize",
+        [
+            "--source",
+            "annotations",
+            "--path",
+            str(img),
+            "--project",
+            str(bare),
+        ],
+        cwd=tmp_path,
+    )
 
     assert result.returncode != 0, result.stdout
     assert "initialize_project" in result.stdout + result.stderr
@@ -59,11 +72,23 @@ def test_renders_annotations_under_the_named_project(project, tmp_path):
     cwd.mkdir()
 
     result = run_tcip(
-        "visualize", ["--source", "annotations", "--path", str(img), "--project", str(project)],
-        cwd=cwd)
+        "visualize",
+        [
+            "--source",
+            "annotations",
+            "--path",
+            str(img),
+            "--project",
+            str(project),
+        ],
+        cwd=cwd,
+    )
 
     assert result.returncode == 0, result.stderr
     body = json.loads(result.stdout)
     assert "error" not in body
-    assert Path(body["image_path"]).parent == (project / ".tcip" / "artifacts" / "viz").resolve()
+    assert (
+        Path(body["image_path"]).parent
+        == (project / ".tcip" / "artifacts" / "viz").resolve()
+    )
     assert not (cwd / ".tcip").exists()

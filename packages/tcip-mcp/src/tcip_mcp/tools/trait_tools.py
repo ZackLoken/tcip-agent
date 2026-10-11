@@ -33,7 +33,10 @@ def propose_trait(
     """
     try:
         revision = traits.propose_trait(
-            project, entry, rationale=rationale, relayed_note=relayed_note,
+            project,
+            entry,
+            rationale=rationale,
+            relayed_note=relayed_note,
             dataset_root=dataset_root,
         )
     except ValueError as e:

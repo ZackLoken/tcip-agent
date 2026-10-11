@@ -21,8 +21,12 @@ from tcip_web.trust_boundary import origin_allowed
 
 # -- Origin trust boundary ------------------------------------------------
 
-LOCAL_ARRIVAL = {"type": "websocket", "scheme": "ws", "server": ["127.0.0.1", 8765],
-                 "headers": [(b"host", b"127.0.0.1:8765")]}
+LOCAL_ARRIVAL = {
+    "type": "websocket",
+    "scheme": "ws",
+    "server": ["127.0.0.1", 8765],
+    "headers": [(b"host", b"127.0.0.1:8765")],
+}
 
 
 def test_origin_without_a_parseable_host_is_not_local() -> None:
@@ -51,7 +55,9 @@ def test_local_browser_and_non_browser_clients_are_still_admitted() -> None:
 # -- containment under the backend's workspace and image roots ------------
 
 
-def test_sibling_sharing_a_root_name_prefix_is_outside_the_root(tmp_path, monkeypatch) -> None:
+def test_sibling_sharing_a_root_name_prefix_is_outside_the_root(
+    tmp_path, monkeypatch
+) -> None:
     """Containment is by path component, never by string prefix.
 
     ``<root>-secret`` sits beside the allowed root, not inside it, while ``<root>/sub``
@@ -105,7 +111,9 @@ def test_every_configured_root_is_honored_not_only_the_first(
         assert_path_allowed(str(leak))
 
 
-def test_derived_default_canonicalises_the_path_it_admits(tmp_path, monkeypatch) -> None:
+def test_derived_default_canonicalises_the_path_it_admits(
+    tmp_path, monkeypatch
+) -> None:
     """A path under the derived allow-set (here, the workspace) resolves to an absolute path.
 
     Callers treat the return value as the path to open, so a dot segment must be collapsed, and
@@ -165,7 +173,9 @@ def test_symlink_inside_the_root_pointing_out_is_refused(tmp_path) -> None:
 # -- the workspace's own exclusion: .removed ---------------------------------------------
 
 
-def test_a_removed_holding_directory_is_excluded_like_imports(tmp_path) -> None:
+def test_a_removed_holding_directory_is_excluded_like_imports(
+    tmp_path,
+) -> None:
     """``.removed`` sits directly under the workspace, itself an allowed root, so the exclusion
     has to be by name: nothing else keeps a moved-project archive out of a guarded route."""
     ws = (tmp_path / "ws").resolve()
@@ -181,7 +191,9 @@ def test_a_removed_holding_directory_is_excluded_like_imports(tmp_path) -> None:
         assert_path_allowed(str(target))
 
 
-@pytest.mark.skipif(os.name != "nt", reason="drive-relative parts are a Windows path shape")
+@pytest.mark.skipif(
+    os.name != "nt", reason="drive-relative parts are a Windows path shape"
+)
 def test_drive_relative_part_cannot_replace_the_root_anchor(tmp_path) -> None:
     """A part naming another drive relocates the join off the root and must be refused.
 

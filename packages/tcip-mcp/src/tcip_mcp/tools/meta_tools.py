@@ -50,13 +50,17 @@ def read_report(project_path: str, report_id: str) -> dict:
     key = friction_report_key(project_path, report_id)
     entry = tcip_store.read(key)
     if not isinstance(entry, dict):
-        raise DecodeError(f"{key.store}{list(key.parts)} under {key.root} is not a JSON object")
+        raise DecodeError(
+            f"{key.store}{list(key.parts)} under {key.root} is not a JSON object"
+        )
     return entry
 
 
 def read_retrospective(project_path: str, project_id: str) -> str:
     """One project's retrospective text, or ``""`` when it has none."""
-    return tcip_store.read(retrospective_key(project_path, project_id), default="")
+    return tcip_store.read(
+        retrospective_key(project_path, project_id), default=""
+    )
 
 
 @dataclass(frozen=True)
@@ -103,9 +107,14 @@ def report_row(document: MemoryDocument) -> dict:
     entry = document.value
     if isinstance(entry, DecodeError):
         return {"report_id": document.name, "malformed": str(entry)}
-    return {"report_id": document.name, "timestamp": entry["timestamp"],
-            "category": entry["category"], "detail": entry["detail"],
-            "context": entry["context"], "user_disagreement": entry["user_disagreement"]}
+    return {
+        "report_id": document.name,
+        "timestamp": entry["timestamp"],
+        "category": entry["category"],
+        "detail": entry["detail"],
+        "context": entry["context"],
+        "user_disagreement": entry["user_disagreement"],
+    }
 
 
 _RETROSPECTIVE_SECTION = re.compile(r"^## Retrospective: (.+)$", re.MULTILINE)
@@ -120,7 +129,10 @@ def _latest_section(content: str) -> str:
     string is the latest moment. A document whose headers do not parse states no time and is
     never given one.
     """
-    stated = [match.group(1).strip() for match in _RETROSPECTIVE_SECTION.finditer(content)]
+    stated = [
+        match.group(1).strip()
+        for match in _RETROSPECTIVE_SECTION.finditer(content)
+    ]
     return max(stated) if stated else ""
 
 
@@ -130,7 +142,9 @@ def retrospective_documents(project_path: str) -> list[MemoryDocument]:
     for key in tcip_store.keys(RETROSPECTIVE_STORE, str(project_path)):
         name = key.parts[0]
         content = read_retrospective(project_path, name)
-        documents.append(MemoryDocument(name, content, _latest_section(content)))
+        documents.append(
+            MemoryDocument(name, content, _latest_section(content))
+        )
     return _newest_first(documents)
 
 
@@ -173,7 +187,9 @@ def report_friction(
     }
 
     tcip_store.replace(
-        friction_report_key(str(project), report_id), entry, expect=Version.ABSENT,
+        friction_report_key(str(project), report_id),
+        entry,
+        expect=Version.ABSENT,
     )
 
     return {
@@ -210,10 +226,15 @@ def load_project_memory(
         return _load_reports(str(project), limit, category, filter_substring)
     if kind == "retrospectives":
         return _load_retrospectives(str(project), limit, filter_substring)
-    return {"error": f"unknown kind '{kind}'", "valid_kinds": ["reports", "retrospectives"]}
+    return {
+        "error": f"unknown kind '{kind}'",
+        "valid_kinds": ["reports", "retrospectives"],
+    }
 
 
-def _parse_audit_bound(label: str, value: str, *, end_of_day: bool = False) -> datetime:
+def _parse_audit_bound(
+    label: str, value: str, *, end_of_day: bool = False
+) -> datetime:
     """Parse a caller-supplied ``since``/``until`` bound (ISO-8601, a trailing ``Z`` accepted, a
     naive value read as UTC), or raise naming which bound and why.
 
@@ -225,7 +246,9 @@ def _parse_audit_bound(label: str, value: str, *, end_of_day: bool = False) -> d
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
-        raise ValueError(f"{label} {value!r} is not a parseable ISO-8601 timestamp") from None
+        raise ValueError(
+            f"{label} {value!r} is not a parseable ISO-8601 timestamp"
+        ) from None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     if end_of_day and "T" not in value:
@@ -295,23 +318,36 @@ def read_audit_log(
 
     try:
         records, _cursor = audit_entries(key.root)
-        since_dt = _parse_audit_bound("since", since) if since is not None else None
-        until_dt = (
-            _parse_audit_bound("until", until, end_of_day=True) if until is not None else None
+        since_dt = (
+            _parse_audit_bound("since", since) if since is not None else None
         )
-        timed = [(datetime.fromisoformat(entry["timestamp"]), entry) for entry in records]
+        until_dt = (
+            _parse_audit_bound("until", until, end_of_day=True)
+            if until is not None
+            else None
+        )
+        timed = [
+            (datetime.fromisoformat(entry["timestamp"]), entry)
+            for entry in records
+        ]
     except ValueError as exc:
         return {"error": str(exc), "scope_resolved": key.root}
 
     def _matches(at: datetime, entry: Mapping[str, Any]) -> bool:
-        return ((tool is None or entry["tool"] == tool)
-                and (status is None or entry["status"] == status)
-                and (since_dt is None or at >= since_dt)
-                and (until_dt is None or at <= until_dt))
+        return (
+            (tool is None or entry["tool"] == tool)
+            and (status is None or entry["status"] == status)
+            and (since_dt is None or at >= since_dt)
+            and (until_dt is None or at <= until_dt)
+        )
 
     filtered = [(at, entry) for at, entry in timed if _matches(at, entry)]
-    newest_first = [entry for _at, entry in sorted(filtered, key=lambda pair: pair[0],
-                                                   reverse=True)]
+    newest_first = [
+        entry
+        for _at, entry in sorted(
+            filtered, key=lambda pair: pair[0], reverse=True
+        )
+    ]
     truncated = max(0, len(newest_first) - limit)
     entries = newest_first[:limit]
     skipped = (len(records) - len(filtered)) + truncated
@@ -324,14 +360,23 @@ def read_audit_log(
     }
 
 
-def _memory_page(corpus: str, noun: str, documents: list[MemoryDocument], limit: int,
-                 row: Callable[[MemoryDocument], dict | None]) -> dict:
+def _memory_page(
+    corpus: str,
+    noun: str,
+    documents: list[MemoryDocument],
+    limit: int,
+    row: Callable[[MemoryDocument], dict | None],
+) -> dict:
     """Up to ``limit`` rows ``row`` makes of ``documents`` in order (a ``None`` row is skipped)
     under ``corpus``, with their count and how many documents exist; with no documents, a note
     naming ``noun``."""
     if not documents:
-        return {corpus: [], "count": 0, "total_available": 0,
-                "note": f"no {noun} recorded under this project yet."}
+        return {
+            corpus: [],
+            "count": 0,
+            "total_available": 0,
+            "note": f"no {noun} recorded under this project yet.",
+        }
     rows: list[dict] = []
     for document in documents:
         made = row(document)
@@ -339,7 +384,11 @@ def _memory_page(corpus: str, noun: str, documents: list[MemoryDocument], limit:
             rows.append(made)
             if len(rows) >= limit:
                 break
-    return {corpus: rows, "count": len(rows), "total_available": len(documents)}
+    return {
+        corpus: rows,
+        "count": len(rows),
+        "total_available": len(documents),
+    }
 
 
 def _load_reports(
@@ -356,7 +405,13 @@ def _load_reports(
             return None
         return made
 
-    return _memory_page("reports", "friction reports", report_documents(project_path), limit, row)
+    return _memory_page(
+        "reports",
+        "friction reports",
+        report_documents(project_path),
+        limit,
+        row,
+    )
 
 
 @tool()
@@ -465,7 +520,11 @@ def _load_retrospectives(
 
     def row(document: MemoryDocument) -> dict | None:
         content = document.value
-        if needle and needle not in document.name.lower() and needle not in content.lower():
+        if (
+            needle
+            and needle not in document.name.lower()
+            and needle not in content.lower()
+        ):
             return None
         return {
             "project_id": document.name,
@@ -473,5 +532,10 @@ def _load_retrospectives(
             "content": content,
         }
 
-    return _memory_page("retrospectives", "retrospectives", retrospective_documents(project_path),
-                        limit, row)
+    return _memory_page(
+        "retrospectives",
+        "retrospectives",
+        retrospective_documents(project_path),
+        limit,
+        row,
+    )

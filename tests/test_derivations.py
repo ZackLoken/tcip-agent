@@ -32,7 +32,9 @@ def test_probe_channels_from_raster(tmp_path):
 
 
 def test_num_classes_from_distribution():
-    assert num_classes_from_distribution({0: 5, 1: 3}) == 2  # ids 0..1 -> 2 classes
+    assert (
+        num_classes_from_distribution({0: 5, 1: 3}) == 2
+    )  # ids 0..1 -> 2 classes
     assert num_classes_from_distribution({0: 10}) == 1
     assert num_classes_from_distribution({}) == 0
 
@@ -49,8 +51,10 @@ def _regions(boxes_per_image):
     """One region per image of the xywh ``boxes_per_image``, over a 200 px square frame."""
     from tests._verified_checkpoint_fixtures import objects_over
 
-    return [objects_over([[x, y, x + w, y + h] for x, y, w, h in boxes], 200 * 200)
-            for boxes in boxes_per_image]
+    return [
+        objects_over([[x, y, x + w, y + h] for x, y, w, h in boxes], 200 * 200)
+        for boxes in boxes_per_image
+    ]
 
 
 def test_derive_cross_tile_nms_dense_cluster_exceeds_sparse():
@@ -78,7 +82,9 @@ def test_derive_cross_tile_nms_answers_near_duplicates_unbounded_and_refuses_ful
     # Near-duplicate neighbors (IoU 19/21) answer their own tail plus the margin; neighbors that
     # overlap fully leave the margin nowhere below 1 to land.
     near = [[(0, 0, 20, 20), (1, 0, 20, 20)]]
-    assert derive_cross_tile_nms(_regions(near)) == pytest.approx(19 / 21 + 0.05)
+    assert derive_cross_tile_nms(_regions(near)) == pytest.approx(
+        19 / 21 + 0.05
+    )
     with pytest.raises(ValueError, match="cross_tile_nms"):
         derive_cross_tile_nms(_regions([[(0, 0, 20, 20), (0, 0, 20, 20)]]))
 
@@ -88,14 +94,17 @@ def test_derive_cross_tile_nms_refuses_where_the_margin_exhausts_the_interval():
     # threshold past 1 and refuses naming it, while 3 px apart (IoU 97/103) answers below 1.
     with pytest.raises(ValueError, match="margin 0.05"):
         derive_cross_tile_nms(_regions([[(0, 0, 100, 100), (2, 0, 100, 100)]]))
-    assert derive_cross_tile_nms(_regions([[(0, 0, 100, 100), (3, 0, 100, 100)]])) == (
-        pytest.approx(97 / 103 + 0.05))
+    assert derive_cross_tile_nms(
+        _regions([[(0, 0, 100, 100), (3, 0, 100, 100)]])
+    ) == (pytest.approx(97 / 103 + 0.05))
 
 
 def test_derive_cross_tile_nms_reads_the_neighbor_iou_tail():
     # A box nested in another: IoU 0.25, so the threshold sits a margin above it.
     nested = [[(0, 0, 20, 20), (5, 5, 10, 10)]]
-    assert derive_cross_tile_nms(_regions(nested)) == pytest.approx(0.25 + 0.05)
+    assert derive_cross_tile_nms(_regions(nested)) == pytest.approx(
+        0.25 + 0.05
+    )
 
 
 def test_derive_localization_tolerance_frac_tight_spacing_stays_tighter_than_loose():
@@ -103,7 +112,15 @@ def test_derive_localization_tolerance_frac_tight_spacing_stays_tighter_than_loo
     # (10px between centers) must derive a smaller fraction than loose spacing (100px): the
     # tolerance has to stay well inside how close real neighbors actually get, or two distinct
     # nearby objects start double-matching to one detection.
-    tight = [[(0, 0, 20, 20), (10, 0, 20, 20), (20, 0, 20, 20), (30, 0, 20, 20), (40, 0, 20, 20)]]
+    tight = [
+        [
+            (0, 0, 20, 20),
+            (10, 0, 20, 20),
+            (20, 0, 20, 20),
+            (30, 0, 20, 20),
+            (40, 0, 20, 20),
+        ]
+    ]
     loose = [[(0, 0, 20, 20), (100, 0, 20, 20), (200, 0, 20, 20)]]
     t_tight = derive_localization_tolerance_frac(tight)
     t_loose = derive_localization_tolerance_frac(loose)
@@ -121,12 +138,19 @@ def test_derive_localization_tolerance_frac_refuses_a_zero_spacing_percentile_on
     with pytest.raises(ValueError, match="spacing is 0 px"):
         derive_localization_tolerance_frac(stacked)
     spaced = [(100.0 * i, 0, 20, 20) for i in range(1, 29)]
-    assert derive_localization_tolerance_frac([spaced + [(0, 0, 20, 20)] * 2]) > 0
+    assert (
+        derive_localization_tolerance_frac([spaced + [(0, 0, 20, 20)] * 2]) > 0
+    )
 
 
 def test_derive_localization_tolerance_frac_no_same_image_neighbor_returns_none():
     # Every image holds at most one box of this class -> no neighbor spacing to measure from.
-    assert derive_localization_tolerance_frac([[(0, 0, 20, 20)], [(0, 0, 10, 10)]]) is None
+    assert (
+        derive_localization_tolerance_frac(
+            [[(0, 0, 20, 20)], [(0, 0, 10, 10)]]
+        )
+        is None
+    )
     assert derive_localization_tolerance_frac([]) is None
 
 
@@ -148,7 +172,8 @@ def test_derive_sliver_frac_can_exceed_one_when_small_boxes_drag_the_mean_down()
     # One tiny box among ten large ones: the low percentile sits near 100 and the mean near 91.
     sizes = [1.0] + [100.0] * 10
     assert derive_sliver_frac(sizes) == pytest.approx(
-        float(np.percentile(sizes, 10)) / float(np.mean(sizes)))
+        float(np.percentile(sizes, 10)) / float(np.mean(sizes))
+    )
     assert derive_sliver_frac(sizes) > 1
 
 
@@ -161,7 +186,9 @@ def test_derive_sliver_frac_too_few_samples_returns_none():
     # A single box's ratio to itself is trivially ~1.0 regardless of the class's real variation:
     # not a spread, just noise. Below five sizes it must refuse rather than derive from it.
     assert derive_sliver_frac([25.6]) is None
-    assert derive_sliver_frac([10.0, 20.0, 30.0, 40.0]) is None  # 4 sizes, fewer than five
+    assert (
+        derive_sliver_frac([10.0, 20.0, 30.0, 40.0]) is None
+    )  # 4 sizes, fewer than five
 
 
 def _label_percentile(label: str) -> float:
@@ -178,23 +205,33 @@ def test_the_localization_tolerance_is_the_method_its_label_names():
     from tcip_mcp.pipelines.training.evaluation import localization_frac
 
     spacings = [5.0, 8.0, 13.0, 21.0, 34.0, 55.0, 89.0, 144.0]
-    frac, label = localization_frac(fx.COUNT_SPEC, [[[0.0, 0.0, 20.0, 20.0], [d, 0.0, 20.0, 20.0]]
-                                                   for d in spacings])
+    frac, label = localization_frac(
+        fx.COUNT_SPEC,
+        [[[0.0, 0.0, 20.0, 20.0], [d, 0.0, 20.0, 20.0]] for d in spacings],
+    )
     assert label.startswith("half the p"), label
     nearest = [d for d in spacings for _ in range(2)]
-    assert frac == pytest.approx(0.5 * np.percentile(nearest, _label_percentile(label)) / 20)
+    assert frac == pytest.approx(
+        0.5 * np.percentile(nearest, _label_percentile(label)) / 20
+    )
 
 
 def test_the_sliver_cutoff_is_the_method_its_label_names():
     """The registered label's percentile over the mean is the cutoff derived from a spread of
     characteristic sizes."""
-    from tcip_mcp.pipelines.derivations import _STATIC_DERIVATION_IMPLEMENTATIONS
+    from tcip_mcp.pipelines.derivations import (
+        _STATIC_DERIVATION_IMPLEMENTATIONS,
+    )
 
-    label = next(name for name, impl in _STATIC_DERIVATION_IMPLEMENTATIONS.items()
-                 if impl == "tcip_mcp.pipelines.derivations.derive_sliver_frac")
+    label = next(
+        name
+        for name, impl in _STATIC_DERIVATION_IMPLEMENTATIONS.items()
+        if impl == "tcip_mcp.pipelines.derivations.derive_sliver_frac"
+    )
     sizes = [3.0, 5.0, 8.0, 13.0, 21.0, 34.0, 55.0, 89.0]
     assert derive_sliver_frac(sizes) == pytest.approx(
-        np.percentile(sizes, _label_percentile(label)) / np.mean(sizes))
+        np.percentile(sizes, _label_percentile(label)) / np.mean(sizes)
+    )
 
 
 JITTER = {"jitter_px": fx.IOU_JITTER_PX, "margin": fx.IOU_MARGIN}
@@ -204,7 +241,9 @@ JITTER = {"jitter_px": fx.IOU_JITTER_PX, "margin": fx.IOU_MARGIN}
 def test_derive_iou_match_threshold_exact_value():
     # char size 60 -> modeled IoU (60-12)/(60+12) = 2/3 -> threshold 2/3 - margin 0.05.
     boxes = [[(0, 0, 60, 60)]]
-    assert derive_iou_match_threshold(boxes, **JITTER) == pytest.approx(2 / 3 - 0.05)
+    assert derive_iou_match_threshold(boxes, **JITTER) == pytest.approx(
+        2 / 3 - 0.05
+    )
 
 
 def test_derive_iou_match_threshold_scales_with_object_size():
@@ -215,28 +254,40 @@ def test_derive_iou_match_threshold_scales_with_object_size():
     assert large > small
 
 
-@pytest.mark.parametrize("size, jitter_px, margin", [(1000, 12.0, 0.05), (60, 0.0, 0.0),
-                                                     (60, 50.0, 0.0)])
-def test_derive_iou_match_threshold_answers_the_modeled_value_at_either_end(size, jitter_px,
-                                                                           margin):
+@pytest.mark.parametrize(
+    "size, jitter_px, margin",
+    [(1000, 12.0, 0.05), (60, 0.0, 0.0), (60, 50.0, 0.0)],
+)
+def test_derive_iou_match_threshold_answers_the_modeled_value_at_either_end(
+    size, jitter_px, margin
+):
     """No cutoff stands over the model: a large box, an exact repeat and a near-disjoint one each
     answer the modeled IoU less the margin."""
     expected = (size - jitter_px) / (size + jitter_px) - margin
-    assert derive_iou_match_threshold([[(0, 0, size, size)]], jitter_px=jitter_px,
-                                      margin=margin) == pytest.approx(expected)
+    assert derive_iou_match_threshold(
+        [[(0, 0, size, size)]], jitter_px=jitter_px, margin=margin
+    ) == pytest.approx(expected)
 
 
 @pytest.mark.parametrize("jitter_px", [60.0, 90.0])
-def test_derive_iou_match_threshold_refuses_a_jitter_at_or_past_the_box_size(jitter_px):
+def test_derive_iou_match_threshold_refuses_a_jitter_at_or_past_the_box_size(
+    jitter_px,
+):
     with pytest.raises(ValueError, match="iou_jitter_px"):
-        derive_iou_match_threshold([[(0, 0, 60, 60)]], jitter_px=jitter_px, margin=0.0)
+        derive_iou_match_threshold(
+            [[(0, 0, 60, 60)]], jitter_px=jitter_px, margin=0.0
+        )
 
 
 @pytest.mark.parametrize("margin", [0.5, 0.8])
-def test_derive_iou_match_threshold_refuses_a_margin_that_swallows_the_modeled_iou(margin):
+def test_derive_iou_match_threshold_refuses_a_margin_that_swallows_the_modeled_iou(
+    margin,
+):
     # Boxes of 60 px 20 px apart model IoU 0.5: a margin of 0.5 or more leaves no threshold.
     with pytest.raises(ValueError, match="iou_margin"):
-        derive_iou_match_threshold([[(0, 0, 60, 60)]], jitter_px=20.0, margin=margin)
+        derive_iou_match_threshold(
+            [[(0, 0, 60, 60)]], jitter_px=20.0, margin=margin
+        )
 
 
 def test_derive_iou_match_threshold_no_boxes_returns_none():
@@ -245,10 +296,13 @@ def test_derive_iou_match_threshold_no_boxes_returns_none():
     assert derive_iou_match_threshold([[(0, 0, 0, 0)]], **JITTER) is None
 
 
-@pytest.mark.parametrize("fn", [
-    derive_localization_tolerance_frac,
-    functools.partial(derive_iou_match_threshold, **JITTER),
-])
+@pytest.mark.parametrize(
+    "fn",
+    [
+        derive_localization_tolerance_frac,
+        functools.partial(derive_iou_match_threshold, **JITTER),
+    ],
+)
 def test_derive_box_functions_raise_valueerror_on_malformed_gt_boxes(fn):
     # A bare Python operation on malformed input raises whatever exception type it happens to hit
     # (TypeError on None, ValueError on an unpack mismatch, IndexError from numpy); every derive_*
@@ -275,15 +329,21 @@ def test_derive_block_scale_px_gt_object_spacing_floored_at_tile_size():
     # Objects 200px apart, tile_size 50: the derived scale (median NN spacing) is 200, well above
     # the floor, so the floor never engages.
     boxes = [(x, 0, 20, 20) for x in range(0, 1000, 200)]
-    px, source = derive_block_scale_px(tile_size=50, objects=_regions([boxes])[0])
+    px, source = derive_block_scale_px(
+        tile_size=50, objects=_regions([boxes])[0]
+    )
     assert px == 200
     assert "GT object-spacing" in source
 
 
 def test_derive_block_scale_px_floors_at_tile_size_when_spacing_is_smaller():
     boxes = [(x, 0, 5, 5) for x in range(0, 100, 10)]  # 10px spacing
-    px, source = derive_block_scale_px(tile_size=64, objects=_regions([boxes])[0])
-    assert px == 64  # the tile_size floor wins over the smaller measured spacing
+    px, source = derive_block_scale_px(
+        tile_size=64, objects=_regions([boxes])[0]
+    )
+    assert (
+        px == 64
+    )  # the tile_size floor wins over the smaller measured spacing
     assert "floored at tile_size" in source
 
 
@@ -299,10 +359,16 @@ def test_derive_block_scale_px_insufficient_plant_registry_refuses_named():
     boxes = [(x, 0, 20, 20) for x in range(0, 1000, 200)]
     with pytest.raises(ValueError, match="plant grid pitch is underivable"):
         derive_block_scale_px(
-            tile_size=50, objects=_regions([boxes])[0], plants=one_plant, raster_path=None)
+            tile_size=50,
+            objects=_regions([boxes])[0],
+            plants=one_plant,
+            raster_path=None,
+        )
 
 
-def test_derive_block_scale_px_plant_pitch_via_projected_geotransform(tmp_path):
+def test_derive_block_scale_px_plant_pitch_via_projected_geotransform(
+    tmp_path,
+):
     from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
     from tests._geotiff_fixtures import write_geotiff
 
@@ -314,16 +380,23 @@ def test_derive_block_scale_px_plant_pitch_via_projected_geotransform(tmp_path):
     ]
     raster_path = tmp_path / "mosaic.tif"
     write_geotiff(raster_path)
-    boxes = [(x, 0, 20, 20) for x in range(0, 40, 20)]  # sparse GT: the plant path must win
+    boxes = [
+        (x, 0, 20, 20) for x in range(0, 40, 20)
+    ]  # sparse GT: the plant path must win
     px, source = derive_block_scale_px(
-        tile_size=16, objects=_regions([boxes])[0], plants=plants,
-        raster_path=str(raster_path))
+        tile_size=16,
+        objects=_regions([boxes])[0],
+        plants=plants,
+        raster_path=str(raster_path),
+    )
     assert "plant grid pitch" in source
     assert "EPSG:32615" in source
     assert px == pytest.approx(200, rel=0.05)  # ~100m / 0.5 m-per-px = ~200px
 
 
-def test_derive_block_scale_px_reads_the_rasters_header_once(tmp_path, monkeypatch):
+def test_derive_block_scale_px_reads_the_rasters_header_once(
+    tmp_path, monkeypatch
+):
     """The refusal of an unreadable raster and the pixel size the plant pitch converts through
     come off one header read."""
     from tcip_mcp.pipelines import raster_source
@@ -345,13 +418,18 @@ def test_derive_block_scale_px_reads_the_rasters_header_once(tmp_path, monkeypat
 
     monkeypatch.setattr(raster_source, "tiff_header", counting)
     _px, source = derive_block_scale_px(
-        tile_size=16, objects=_regions([[(0, 0, 20, 20)]])[0], plants=plants,
-        raster_path=str(raster_path))
+        tile_size=16,
+        objects=_regions([[(0, 0, 20, 20)]])[0],
+        plants=plants,
+        raster_path=str(raster_path),
+    )
     assert "plant grid pitch" in source
     assert len(reads) == 1
 
 
-def test_derive_block_scale_px_converts_a_foot_unit_raster_through_its_crs(tmp_path):
+def test_derive_block_scale_px_converts_a_foot_unit_raster_through_its_crs(
+    tmp_path,
+):
     """A raster in US survey feet (EPSG 2264) converts the plant-pitch meters through the CRS's
     own unit conversion factor, not a naive meter-blind pixel-scale division."""
     from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
@@ -359,20 +437,33 @@ def test_derive_block_scale_px_converts_a_foot_unit_raster_through_its_crs(tmp_p
 
     plants = [
         PlantRecord("p0", "a0", 0, 0, 0, 45.0, -93.0),
-        PlantRecord("p1", "a1", 0, 0, 0, 45.000898, -93.0),  # ~99.96m north (haversine_m)
+        PlantRecord(
+            "p1", "a1", 0, 0, 0, 45.000898, -93.0
+        ),  # ~99.96m north (haversine_m)
     ]
     raster_path = tmp_path / "mosaic.tif"
-    write_geotiff(raster_path, pixel_scale=(1.0, 1.0, 0.0), projected_epsg=2264)
-    boxes = [(x, 0, 20, 20) for x in range(0, 40, 20)]  # sparse GT: the plant path must win
+    write_geotiff(
+        raster_path, pixel_scale=(1.0, 1.0, 0.0), projected_epsg=2264
+    )
+    boxes = [
+        (x, 0, 20, 20) for x in range(0, 40, 20)
+    ]  # sparse GT: the plant path must win
     px, source = derive_block_scale_px(
-        tile_size=16, objects=_regions([boxes])[0], plants=plants,
-        raster_path=str(raster_path))
+        tile_size=16,
+        objects=_regions([boxes])[0],
+        plants=plants,
+        raster_path=str(raster_path),
+    )
     assert "plant grid pitch" in source
     assert "EPSG:2264" in source
-    assert px == 328  # 99.96m / 0.3048006 ft-per-m factor; a meter-blind read would give 100
+    assert (
+        px == 328
+    )  # 99.96m / 0.3048006 ft-per-m factor; a meter-blind read would give 100
 
 
-def test_derive_block_scale_px_photographic_raster_path_refuses_named(tmp_path):
+def test_derive_block_scale_px_photographic_raster_path_refuses_named(
+    tmp_path,
+):
     """A ``raster_path`` that is not a raster file at all (a photographic plot image) is refused
     by name rather than silently downgraded to the GT-object-spacing fallback."""
     from PIL import Image
@@ -388,12 +479,17 @@ def test_derive_block_scale_px_photographic_raster_path_refuses_named(tmp_path):
     boxes = [(x, 0, 20, 20) for x in range(0, 40, 20)]
     with pytest.raises(ValueError) as exc_info:
         derive_block_scale_px(
-            tile_size=16, objects=_regions([boxes])[0], plants=plants,
-            raster_path=str(photo_path))
+            tile_size=16,
+            objects=_regions([boxes])[0],
+            plants=plants,
+            raster_path=str(photo_path),
+        )
     assert str(photo_path) in str(exc_info.value)
 
 
-def test_derive_block_scale_px_anisotropic_raster_falls_back_to_gt_spacing(tmp_path):
+def test_derive_block_scale_px_anisotropic_raster_falls_back_to_gt_spacing(
+    tmp_path,
+):
     """A raster whose axes carry differing pixel scales has no single pixel size to convert the
     plant pitch through, so the derivation falls back to GT-object-spacing rather than average
     the two axes."""
@@ -408,13 +504,18 @@ def test_derive_block_scale_px_anisotropic_raster_falls_back_to_gt_spacing(tmp_p
     write_geotiff(raster_path, pixel_scale=(0.5, 0.6, 0.0))
     boxes = [(x, 0, 20, 20) for x in range(0, 1000, 200)]
     px, source = derive_block_scale_px(
-        tile_size=50, objects=_regions([boxes])[0], plants=plants,
-        raster_path=str(raster_path))
+        tile_size=50,
+        objects=_regions([boxes])[0],
+        plants=plants,
+        raster_path=str(raster_path),
+    )
     assert "GT object-spacing" in source  # fell back, not a refusal
     assert px == 200
 
 
-def test_derive_block_scale_px_unprojected_raster_falls_back_to_gt_spacing(monkeypatch, tmp_path):
+def test_derive_block_scale_px_unprojected_raster_falls_back_to_gt_spacing(
+    monkeypatch, tmp_path
+):
     from tcip_mcp.pipelines.postprocessing import orthomosaic_mapping
     from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
     from tests._geotiff_fixtures import write_geotiff
@@ -434,8 +535,11 @@ def test_derive_block_scale_px_unprojected_raster_falls_back_to_gt_spacing(monke
     write_geotiff(raster_path)
     boxes = [(x, 0, 20, 20) for x in range(0, 1000, 200)]
     px, source = derive_block_scale_px(
-        tile_size=50, objects=_regions([boxes])[0], plants=plants,
-        raster_path=str(raster_path))
+        tile_size=50,
+        objects=_regions([boxes])[0],
+        plants=plants,
+        raster_path=str(raster_path),
+    )
     assert "GT object-spacing" in source  # fell back, not a refusal
     assert px == 200
 
@@ -454,11 +558,16 @@ def test_derive_block_scale_px_truncated_raster_refuses_named(tmp_path):
     boxes = [(x, 0, 20, 20) for x in range(0, 1000, 200)]
     with pytest.raises(ValueError, match="could not be opened as a raster"):
         derive_block_scale_px(
-            tile_size=50, objects=_regions([boxes])[0], plants=plants,
-            raster_path=str(raster_path))
+            tile_size=50,
+            objects=_regions([boxes])[0],
+            plants=plants,
+            raster_path=str(raster_path),
+        )
 
 
-def test_derive_block_scale_px_npy_raster_refuses_named_for_no_georeference(tmp_path):
+def test_derive_block_scale_px_npy_raster_refuses_named_for_no_georeference(
+    tmp_path,
+):
     """guard. An .npy array container is a raster by suffix but carries no georeferencing tags at
     all; it is refused by name, distinct from the truncated-file words above, rather than tried
     through the header's georeference read."""
@@ -473,8 +582,11 @@ def test_derive_block_scale_px_npy_raster_refuses_named_for_no_georeference(tmp_
     boxes = [(x, 0, 20, 20) for x in range(0, 1000, 200)]
     with pytest.raises(ValueError, match="carries no georeferencing tags"):
         derive_block_scale_px(
-            tile_size=50, objects=_regions([boxes])[0], plants=plants,
-            raster_path=str(raster_path))
+            tile_size=50,
+            objects=_regions([boxes])[0],
+            plants=plants,
+            raster_path=str(raster_path),
+        )
 
 
 def test_write_subject_registry(tmp_path):
@@ -486,10 +598,19 @@ def test_write_subject_registry(tmp_path):
     out = tmp_path / "subjects.json"
     # The expert authors the nested registry: two ordered values of a categorical attribute.
     res = write_subject_registry(
-        tmp_path, str(tmp_path),
-        subjects={"bud": {"description": "a currant bud",
-                             "attributes": {"opening": {"type": "categorical",
-                                                           "values": ["closed", "open"]}}}},
+        tmp_path,
+        str(tmp_path),
+        subjects={
+            "bud": {
+                "description": "a currant bud",
+                "attributes": {
+                    "opening": {
+                        "type": "categorical",
+                        "values": ["closed", "open"],
+                    }
+                },
+            }
+        },
     )
     assert "error" not in res
     assert res["subjects"] == ["bud"]
@@ -498,12 +619,14 @@ def test_write_subject_registry(tmp_path):
     # on-disk nested shape carries the same value order.
     reg = subject_registry.read_registry(tmp_path)
     assert reg.subjects[0].attribute("opening").values == ("closed", "open")  # type: ignore[union-attr]
-    assert json.loads(out.read_text())["bud"]["attributes"]["opening"]["values"] == \
-        ["closed", "open"]
+    assert json.loads(out.read_text())["bud"]["attributes"]["opening"][
+        "values"
+    ] == ["closed", "open"]
 
 
 def test_write_subject_registry_no_labels(tmp_path):
     from tcip_mcp.tools.annotation_tools import write_subject_registry
+
     # An empty registry mapping is not authorable: the tool refuses rather than writing nothing.
     res = write_subject_registry(tmp_path, str(tmp_path), subjects={})
     assert "error" in res

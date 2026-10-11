@@ -25,10 +25,17 @@ def _persist_a_selection(project: OpenProject) -> None:
         (images / name).write_bytes(b"")
     store = StateStore()
     asyncio.run(store.open_project(project))
-    asyncio.run(store.mutate(
-        {"active_tab": "annotate",
-         "dataset": selection_for(project.root, "bud", "2026-02-11", None, 1)},
-        project=project))
+    asyncio.run(
+        store.mutate(
+            {
+                "active_tab": "annotate",
+                "dataset": selection_for(
+                    project.root, "bud", "2026-02-11", None, 1
+                ),
+            },
+            project=project,
+        )
+    )
 
 
 def test_view_gui_state_reads_what_the_backend_persisted_and_reopens(made):
@@ -41,7 +48,10 @@ def test_view_gui_state_reads_what_the_backend_persisted_and_reopens(made):
     asyncio.run(reopened.open_project(made))
 
     assert ctx["dataset"] == reopened.state.dataset.model_dump(mode="json")
-    assert ctx["dataset"]["subject"] == "bud" and ctx["dataset"]["date"] == "2026-02-11"
+    assert (
+        ctx["dataset"]["subject"] == "bud"
+        and ctx["dataset"]["date"] == "2026-02-11"
+    )
     assert ctx["active_tab"] == "annotate"
     assert Path(ctx["current_image"]).name == "IMG_0133.JPG"
     assert "2026-02-11" in ctx["current_image"]
@@ -68,6 +78,7 @@ def test_view_gui_state_refuses_a_snapshot_that_does_not_decode(project):
 
 def test_inspect_project_reports_the_project_it_is_given(project):
     from tcip_mcp.tools.project_tools import inspect_project
+
     st = inspect_project(project)
     assert st["project_path"] == str(project)
     assert st["display_name"] == "Test project"

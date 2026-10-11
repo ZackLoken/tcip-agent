@@ -23,14 +23,29 @@ from tcip_mcp.cli import bound_project
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, prog=prog)
-    parser.add_argument("--image", required=True,
-                        help="The image file; a relative one is under --project.")
-    parser.add_argument("--project", required=True, help="The project the artifact lands under.")
-    parser.add_argument("--tile-size", type=int, default=None,
-                        help="Cell edge in native pixels; omitted derives a legible default.")
-    parser.add_argument("--overlap", type=float, default=0.0,
-                        help="Cell overlap as a fraction of tile_size, training tiling's "
-                             "semantics.")
+    parser.add_argument(
+        "--image",
+        required=True,
+        help="The image file; a relative one is under --project.",
+    )
+    parser.add_argument(
+        "--project",
+        required=True,
+        help="The project the artifact lands under.",
+    )
+    parser.add_argument(
+        "--tile-size",
+        type=int,
+        default=None,
+        help="Cell edge in native pixels; omitted derives a legible default.",
+    )
+    parser.add_argument(
+        "--overlap",
+        type=float,
+        default=0.0,
+        help="Cell overlap as a fraction of tile_size, training tiling's "
+        "semantics.",
+    )
     args = parser.parse_args(argv)
 
     project = bound_project(args.project)

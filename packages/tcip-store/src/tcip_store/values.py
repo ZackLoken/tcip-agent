@@ -19,7 +19,9 @@ def encode_record(value: Any) -> bytes:
     """A record's bytes: UTF-8 JSON indented by two, keys in their authored order, a trailing
     newline. Refuses what :func:`check_json_value` refuses, before anything is spelled."""
     check_json_value(value)
-    text = json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False, sort_keys=False)
+    text = json.dumps(
+        value, indent=2, ensure_ascii=False, allow_nan=False, sort_keys=False
+    )
     return f"{text}\n".encode("utf-8")
 
 
@@ -27,7 +29,9 @@ def encode_log_line(value: Any) -> bytes:
     """A log entry's bytes: UTF-8 JSON on one line, keys in their authored order. Refuses as
     :func:`encode_record` does."""
     check_json_value(value)
-    return json.dumps(value, ensure_ascii=False, allow_nan=False, sort_keys=False).encode("utf-8")
+    return json.dumps(
+        value, ensure_ascii=False, allow_nan=False, sort_keys=False
+    ).encode("utf-8")
 
 
 def decode_value(data: bytes) -> Any:
@@ -68,7 +72,10 @@ def stored_number(field: str, value: Any) -> dict[str, Any]:
     A finite number, or None, is carried as itself. A non-finite one becomes null plus
     ``<field>_state``.
     """
-    if isinstance(value, float) and (state := non_finite_state(value)) is not None:
+    if (
+        isinstance(value, float)
+        and (state := non_finite_state(value)) is not None
+    ):
         return {field: None, f"{field}{NOT_FINITE_SUFFIX}": state}
     return {field: value}
 

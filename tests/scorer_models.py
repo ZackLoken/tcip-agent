@@ -24,16 +24,23 @@ class EmptyThenLowDetector(torch.nn.Module):
     def forward(self, imgs):
         self._n += 1
         scores = torch.tensor([]) if self._n == 1 else torch.tensor([0.3, 0.4])
-        return [{"scores": scores, "boxes": torch.zeros((len(scores), 4)),
-                 "labels": torch.zeros((len(scores),), dtype=torch.int64)}]
+        return [
+            {
+                "scores": scores,
+                "boxes": torch.zeros((len(scores), 4)),
+                "labels": torch.zeros((len(scores),), dtype=torch.int64),
+            }
+        ]
 
 
 class TwoHeadClassifier(torch.nn.Module):
     """Two classification heads with fixed logits."""
 
     def forward(self, x):
-        return {"head0_logits": torch.tensor([[2.0, 0.0]]),
-                "head1_logits": torch.tensor([[0.0, 0.0]])}
+        return {
+            "head0_logits": torch.tensor([[2.0, 0.0]]),
+            "head1_logits": torch.tensor([[0.0, 0.0]]),
+        }
 
 
 class ConvBackbone(torch.nn.Module):
@@ -48,7 +55,12 @@ class ScorelessDetector(torch.nn.Module):
     """Returns one box and its label and no ``scores``."""
 
     def forward(self, imgs):
-        return [{"boxes": torch.zeros((1, 4)), "labels": torch.zeros((1,), dtype=torch.int64)}]
+        return [
+            {
+                "boxes": torch.zeros((1, 4)),
+                "labels": torch.zeros((1,), dtype=torch.int64),
+            }
+        ]
 
 
 def build_empty_then_low(**_: Any) -> torch.nn.Module:
@@ -80,8 +92,16 @@ def predictor_for(tmp_path: Path, builder: str, task: str) -> Any:
     from tests._chain_fixtures import BESPOKE_MODELS
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    src = {"builder": f"scorer_models:{builder}", "builder_kwargs": {},
-           "source_files": [str(REPO_ROOT / "tests" / "scorer_models.py"), BESPOKE_MODELS],
-           "task": task}
+    src = {
+        "builder": f"scorer_models:{builder}",
+        "builder_kwargs": {},
+        "source_files": [
+            str(REPO_ROOT / "tests" / "scorer_models.py"),
+            BESPOKE_MODELS,
+        ],
+        "task": task,
+    }
     path = registered_checkpoint(tmp_path, model_source=src)
-    return GenericPredictor(load_registered_checkpoint(path, project=tmp_path), device="cpu")
+    return GenericPredictor(
+        load_registered_checkpoint(path, project=tmp_path), device="cpu"
+    )

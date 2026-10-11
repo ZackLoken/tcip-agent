@@ -33,11 +33,15 @@ def pytest_configure(config: pytest.Config) -> None:
 
 
 @pytest.hookimpl(wrapper=True, tryfirst=True)
-def pytest_runtest_protocol(item: pytest.Item) -> Generator[None, object, object]:
+def pytest_runtest_protocol(
+    item: pytest.Item,
+) -> Generator[None, object, object]:
     run_id = os.environ.get("PYTEST_XDIST_TESTRUNUID")
     if item.get_closest_marker(MARK) is None or run_id is None:
         return (yield)
     from filelock import FileLock
 
-    with FileLock(Path(tempfile.gettempdir()) / f"tcip-ray-cluster-{run_id}.lock"):
+    with FileLock(
+        Path(tempfile.gettempdir()) / f"tcip-ray-cluster-{run_id}.lock"
+    ):
         return (yield)

@@ -56,7 +56,9 @@ def test_registered_models_are_recorded_in_the_index_not_copied_into_the_registr
         assert entry["sha256"] == hashlib.sha256(ckpt.read_bytes()).hexdigest()
 
 
-def test_registering_a_checkpoint_again_supersedes_its_earlier_entry(tmp_path: Path) -> None:
+def test_registering_a_checkpoint_again_supersedes_its_earlier_entry(
+    tmp_path: Path,
+) -> None:
     """A checkpoint registered again, under its old name or another, replaces that checkpoint's
     one entry; two different checkpoints are two entries whatever they are named. The inventory
     keeps one entry per checkpoint, so a reader counting registered models never counts one
@@ -65,18 +67,32 @@ def test_registering_a_checkpoint_again_supersedes_its_earlier_entry(tmp_path: P
     root.mkdir()
     reg = ModelRegistry(str(root))
 
-    ckpt_v1 = produced_checkpoint(tmp_path / "model_epoch8.pt", "epoch-8-weights")
-    ckpt_v2 = produced_checkpoint(tmp_path / "model_epoch19.pt", "epoch-19-weights-after-resume")
-    companion = produced_checkpoint(tmp_path / "leaf_model.pt", "a separate run")
+    ckpt_v1 = produced_checkpoint(
+        tmp_path / "model_epoch8.pt", "epoch-8-weights"
+    )
+    ckpt_v2 = produced_checkpoint(
+        tmp_path / "model_epoch19.pt", "epoch-19-weights-after-resume"
+    )
+    companion = produced_checkpoint(
+        tmp_path / "leaf_model.pt", "a separate run"
+    )
 
-    reg.register_model("currant_bud_detector_v1", str(ckpt_v1),
-                       metrics={"val_map50": 0.61})
-    reg.register_model("chestnut_leaf_area_seg_v2", str(companion),
-                       metrics={"val_map50": 0.55})
-    reg.register_model("currant_bud_detector_v1_final", str(ckpt_v1),
-                       metrics={"val_map50": 0.74})
-    reg.register_model("currant_bud_detector_v1", str(ckpt_v2),
-                       metrics={"val_map50": 0.80})
+    reg.register_model(
+        "currant_bud_detector_v1", str(ckpt_v1), metrics={"val_map50": 0.61}
+    )
+    reg.register_model(
+        "chestnut_leaf_area_seg_v2",
+        str(companion),
+        metrics={"val_map50": 0.55},
+    )
+    reg.register_model(
+        "currant_bud_detector_v1_final",
+        str(ckpt_v1),
+        metrics={"val_map50": 0.74},
+    )
+    reg.register_model(
+        "currant_bud_detector_v1", str(ckpt_v2), metrics={"val_map50": 0.80}
+    )
 
     inventory = ModelRegistry(str(root)).list_models()
     assert len(inventory) == 3
@@ -85,5 +101,6 @@ def test_registering_a_checkpoint_again_supersedes_its_earlier_entry(tmp_path: P
     assert superseding["name"] == "currant_bud_detector_v1_final"
     assert superseding["metrics"]["val_map50"] == 0.74
     assert superseding["checkpoint_path"] == str(ckpt_v1)
-    assert by_sha[hashlib.sha256(ckpt_v2.read_bytes()).hexdigest()]["name"] == (
-        "currant_bud_detector_v1")
+    assert by_sha[hashlib.sha256(ckpt_v2.read_bytes()).hexdigest()][
+        "name"
+    ] == ("currant_bud_detector_v1")

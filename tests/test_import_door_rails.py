@@ -29,7 +29,9 @@ def _hand_zip(path: Path, members: dict[str, bytes]) -> Path:
 # ── rail 2: a non-empty destination refuses and changes nothing ────────────────────────────
 
 
-def test_import_refuses_a_non_empty_destination_and_changes_nothing(tmp_path, monkeypatch):
+def test_import_refuses_a_non_empty_destination_and_changes_nothing(
+    tmp_path, monkeypatch
+):
     root = one_labeled_capture(tmp_path / "source")
     zip_path = tmp_path / "bundle.zip"
     assert "error" not in archive_project(root, str(zip_path))
@@ -37,7 +39,11 @@ def test_import_refuses_a_non_empty_destination_and_changes_nothing(tmp_path, mo
     dest = tmp_path / "dest"
     dest.mkdir()
     (dest / "subjects.json").write_bytes(b"already here")
-    ts.replace(gui_snapshot_key(dest), {"active_subject": "x"}, expect=ts.Version.ABSENT)
+    ts.replace(
+        gui_snapshot_key(dest),
+        {"active_subject": "x"},
+        expect=ts.Version.ABSENT,
+    )
 
     result = import_project(str(zip_path), str(dest))
 
@@ -65,7 +71,9 @@ def test_import_admits_a_pre_existing_empty_destination(tmp_path):
 
 
 def test_import_refuses_a_member_named_as_a_database_sidecar(tmp_path):
-    zip_path = _hand_zip(tmp_path / "bundle.zip", {".tcip/store.db-wal": b"not a log"})
+    zip_path = _hand_zip(
+        tmp_path / "bundle.zip", {".tcip/store.db-wal": b"not a log"}
+    )
     dest = tmp_path / "dest"
 
     result = import_project(str(zip_path), str(dest))
@@ -101,7 +109,9 @@ def test_import_refuses_a_zip_slip_path(tmp_path):
     assert not dest.exists()
 
 
-def test_extract_zip_refuses_a_sibling_directory_that_shares_stagings_name_as_a_prefix(tmp_path):
+def test_extract_zip_refuses_a_sibling_directory_that_shares_stagings_name_as_a_prefix(
+    tmp_path,
+):
     """A string-prefix escape check reads a member resolving to ``<staging.name>extra/`` as
     contained, since that sibling's path literally starts with staging's own path; containment
     by ``relative_to`` does not."""
@@ -117,12 +127,16 @@ def test_extract_zip_refuses_a_sibling_directory_that_shares_stagings_name_as_a_
         _extract_zip(evil_zip, staging)
 
 
-def test_import_refuses_a_corrupt_zip_without_stranding_a_staging_tree(tmp_path):
+def test_import_refuses_a_corrupt_zip_without_stranding_a_staging_tree(
+    tmp_path,
+):
     root = one_labeled_capture(tmp_path / "source")
     zip_path = tmp_path / "bundle.zip"
     assert "error" not in archive_project(root, str(zip_path))
     data = zip_path.read_bytes()
-    zip_path.write_bytes(data[: len(data) // 2])  # truncated: no longer a readable zip
+    zip_path.write_bytes(
+        data[: len(data) // 2]
+    )  # truncated: no longer a readable zip
 
     dest = tmp_path / "dest"
     result = import_project(str(zip_path), str(dest))
@@ -153,7 +167,9 @@ def test_a_record_travels_inside_the_database_the_archive_copies(tmp_path):
 # ── rail 13: concurrency ─────────────────────────────────────────────────────────────────────
 
 
-def test_a_locked_staging_sibling_is_left_alone_while_another_import_completes(tmp_path):
+def test_a_locked_staging_sibling_is_left_alone_while_another_import_completes(
+    tmp_path,
+):
     import filelock
 
     root = one_labeled_capture(tmp_path / "source")
@@ -179,7 +195,9 @@ def test_a_locked_staging_sibling_is_left_alone_while_another_import_completes(t
         raw_lock.release()
 
 
-def test_a_free_locked_leftover_staging_sibling_is_swept_with_its_lock_file(tmp_path):
+def test_a_free_locked_leftover_staging_sibling_is_swept_with_its_lock_file(
+    tmp_path,
+):
     root = one_labeled_capture(tmp_path / "source")
     zip_path = tmp_path / "bundle.zip"
     assert "error" not in archive_project(root, str(zip_path))
@@ -225,7 +243,11 @@ def test_dataset_registry_stores_the_relative_dot_after_import(tmp_path):
 def test_dataset_registry_travels_with_nothing_rewritten(tmp_path):
     """The accessor resolves the stored "." against wherever the project was actually
     imported, so nothing about the registry needed rewriting for the move to survive."""
-    from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets, register_dataset
+    from tcip_mcp.tools.project_tools import (
+        dataset_entry_path,
+        read_datasets,
+        register_dataset,
+    )
 
     root = one_labeled_capture(tmp_path / "source")
     registered = register_dataset(root, str(root), crop="currant")
@@ -274,13 +296,21 @@ def _annotated_dataset(root: Path, n: int) -> None:
     images_dir.mkdir(parents=True, exist_ok=True)
     for i in range(n):
         stem = f"img_{i:03d}"
-        Image.new("RGB", (640, 480), color=(128, 128, 128)).save(images_dir / f"{stem}.jpg")
-        label_image(images_dir / f"{stem}.jpg",
-                    [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264))], 640, 480)
+        Image.new("RGB", (640, 480), color=(128, 128, 128)).save(
+            images_dir / f"{stem}.jpg"
+        )
+        label_image(
+            images_dir / f"{stem}.jpg",
+            [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264))],
+            640,
+            480,
+        )
     registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
 
 
-def test_a_splits_root_nested_under_a_nested_dataset_root_archives_and_round_trips(tmp_path):
+def test_a_splits_root_nested_under_a_nested_dataset_root_archives_and_round_trips(
+    tmp_path,
+):
     """A dataset sits under a project, and draw_splits partitions it in place, landing
     selection.json under the dataset root rather than beside it. The cross-anchor constraint must
     admit that nesting rather than refusing the whole project."""
@@ -291,9 +321,16 @@ def test_a_splits_root_nested_under_a_nested_dataset_root_archives_and_round_tri
     curated = project / "curated"
     _annotated_dataset(curated, 4)
 
-    splits_result = draw_splits(project, str(curated), subject="bud",
-                                output_path=str(curated / "splits"), seed=1, val_ratio=0.25,
-                                calibration_ratio=0.125, holdout_ratio=0.125)
+    splits_result = draw_splits(
+        project,
+        str(curated),
+        subject="bud",
+        output_path=str(curated / "splits"),
+        seed=1,
+        val_ratio=0.25,
+        calibration_ratio=0.125,
+        holdout_ratio=0.125,
+    )
     assert "error" not in splits_result, splits_result
 
     zip_path = tmp_path / "bundle.zip"
@@ -303,10 +340,15 @@ def test_a_splits_root_nested_under_a_nested_dataset_root_archives_and_round_tri
     dest = tmp_path / "dest"
     imported = import_project(str(zip_path), str(dest))
     assert "error" not in imported, imported
-    assert ts.read(selection_key(dest / "curated" / "splits"))["scope"]["subject"] == "bud"
+    assert (
+        ts.read(selection_key(dest / "curated" / "splits"))["scope"]["subject"]
+        == "bud"
+    )
 
 
-def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, monkeypatch):
+def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(
+    tmp_path, monkeypatch
+):
     """initialize_project, register_dataset, a confirmed trait revision, a completed run's
     directory, an HPO sweep's directory and a project-relative splits manifest, all through their
     own real producers; archived, imported into a fresh destination, and read back at once. The
@@ -319,14 +361,19 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
     from tcip_mcp.traits import read_trait
     from tcip_mcp.tools.data_tools import draw_splits
     from tcip_mcp.tools.project_tools import (
-        dataset_entry_path, initialize_project, read_datasets, register_dataset,
+        dataset_entry_path,
+        initialize_project,
+        read_datasets,
+        register_dataset,
     )
 
     from tests._trait_fixtures import COUNT_TRAIT, seed_confirmed_count
 
     root = tmp_path / "source"
     _annotated_dataset(root, 4)
-    assert "error" not in initialize_project(str(root), "North orchard", site="north orchard")
+    assert "error" not in initialize_project(
+        str(root), "North orchard", site="north orchard"
+    )
     assert "error" not in register_dataset(root, str(root), crop="currant")
     confirmed = seed_confirmed_count(root)
     assert confirmed.confirmed
@@ -346,20 +393,40 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
     from tests._training_values import fifo_search, sweep_space
 
     monkeypatch.setattr(tt, "_run_hpo_trial", fake_trial)
-    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.training.hpo.tune_search", fake_search
+    )
     hpo_result = tt.run_hyperparameter_search(
         root,
         base_config=training_config(
-            {"builder": BESPOKE_DETECTION, "source_files": [BESPOKE_MODELS], "task": "detection"},
-            {"images_dir": str(root / "images" / "2026-03-04"),
-             "scope": {"subject": "bud"}, "split": {"seed": 0, "val_ratio": 0.15}}),
-        param_space=sweep_space(), n_trials=1, **fifo_search(), search_seed=0
+            {
+                "builder": BESPOKE_DETECTION,
+                "source_files": [BESPOKE_MODELS],
+                "task": "detection",
+            },
+            {
+                "images_dir": str(root / "images" / "2026-03-04"),
+                "scope": {"subject": "bud"},
+                "split": {"seed": 0, "val_ratio": 0.15},
+            },
+        ),
+        param_space=sweep_space(),
+        n_trials=1,
+        **fifo_search(),
+        search_seed=0,
     )
     sweep_id = hpo_result["sweep"]["sweep_id"]
 
-    splits_result = draw_splits(root, str(root), output_path=str(root / "splits_out"),
-                                subject="bud", seed=1, val_ratio=0.25, calibration_ratio=0.125,
-                                holdout_ratio=0.125)
+    splits_result = draw_splits(
+        root,
+        str(root),
+        output_path=str(root / "splits_out"),
+        subject="bud",
+        seed=1,
+        val_ratio=0.25,
+        calibration_ratio=0.125,
+        holdout_ratio=0.125,
+    )
     assert "error" not in splits_result, splits_result
 
     zip_path = tmp_path / "bundle.zip"
@@ -389,7 +456,9 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(tmp_path, 
 
     sweep = tt.monitor_training(dest, sweep_id)["sweep"]
     assert sweep["state"] == "completed"
-    assert [t["trial_params"] for t in sweep["trials"]] == [{"optimizer.head_lr": 0.1}]
+    assert [t["trial_params"] for t in sweep["trials"]] == [
+        {"optimizer.head_lr": 0.1}
+    ]
 
     selection = ts.read(selection_key(dest / "splits_out"))
     assert selection["scope"]["subject"] == "bud"

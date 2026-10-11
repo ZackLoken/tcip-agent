@@ -47,13 +47,17 @@ def polluted_project(tmp_path: Path) -> tuple[Path, ModelRegistry]:
     for i, (name, content) in enumerate(_RUNS.items()):
         ckpt = _checkpoint(leak_dir / f"{name}.pt", content)
         reg.register_model(
-            name, str(ckpt),
-            metrics={"val_map50": 0.5 + 0.1 * i}, tags=["detector", f"experiment:run{i}"],
+            name,
+            str(ckpt),
+            metrics={"val_map50": 0.5 + 0.1 * i},
+            tags=["detector", f"experiment:run{i}"],
         )
     return root, reg
 
 
-def test_doctor_flags_every_registry_entry_the_registry_wrote(polluted_project) -> None:
+def test_doctor_flags_every_registry_entry_the_registry_wrote(
+    polluted_project,
+) -> None:
     """The doctor's registry check reads the index by key; every entry the registry holds must be
     visible to it, named and with its checkpoint path, or the mandated data-state check degrades
     into a silent pass on a polluted project."""
@@ -68,11 +72,14 @@ def test_doctor_flags_every_registry_entry_the_registry_wrote(polluted_project) 
     assert len(errors) == len(_RUNS)
     for entry in registered:
         assert any(
-            entry["name"] in msg and entry["checkpoint_path"] in msg for msg in errors
+            entry["name"] in msg and entry["checkpoint_path"] in msg
+            for msg in errors
         ), f"no doctor finding names the registered model {entry['name']}"
 
 
-def test_doctor_reports_nothing_for_a_project_with_no_registered_models(tmp_path: Path) -> None:
+def test_doctor_reports_nothing_for_a_project_with_no_registered_models(
+    tmp_path: Path,
+) -> None:
     """A project that has registered nothing is a clean state, not a finding."""
     root = tmp_path / "proj"
     root.mkdir()
@@ -91,7 +98,10 @@ def test_identity_resolution_matches_a_registered_checkpoint_by_content(
     produced it, matched on the content hash its final status names: the binding a run's own
     completion recorded, not a caller-asserted tag."""
     pytest.importorskip("torch")
-    from tests._verified_checkpoint_fixtures import finished_run, registered_checkpoint
+    from tests._verified_checkpoint_fixtures import (
+        finished_run,
+        registered_checkpoint,
+    )
 
     root = tmp_path / "proj"
     root.mkdir()
@@ -106,7 +116,8 @@ def test_identity_resolution_matches_a_registered_checkpoint_by_content(
     checkpoint = load_registered_checkpoint(delivered, project=root)
     assert checkpoint.producer == {
         "checkpoint_sha256": hashlib.sha256(trained.read_bytes()).hexdigest(),
-        "experiment_id": "bud_run3"}
+        "experiment_id": "bud_run3",
+    }
 
 
 def test_doctor_reports_an_index_that_will_not_decode_rather_than_reading_it_as_no_models(
@@ -135,7 +146,9 @@ def test_doctor_reports_an_index_that_will_not_decode_rather_than_reading_it_as_
     assert "will not decode" in findings[0][1]
 
 
-def test_a_readable_index_is_still_read_entry_by_entry(polluted_project) -> None:
+def test_a_readable_index_is_still_read_entry_by_entry(
+    polluted_project,
+) -> None:
     """The decode refusal is scoped to an index that will not parse.
 
     A readable index is still walked entry by entry, so raising on corruption cannot collapse

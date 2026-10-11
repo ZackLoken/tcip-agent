@@ -11,7 +11,9 @@ from pathlib import Path
 from tests._cli_fixtures import run_tcip
 
 
-def test_write_project_site_replaces_the_site_and_keeps_the_id_and_name(project: Path):
+def test_write_project_site_replaces_the_site_and_keeps_the_id_and_name(
+    project: Path,
+):
     from tcip_mcp.project_record import read_record
 
     before = read_record(project)
@@ -24,7 +26,9 @@ def test_write_project_site_replaces_the_site_and_keeps_the_id_and_name(project:
     assert after == {**before, "site": "south orchard"}
 
 
-def test_write_project_site_refuses_a_directory_holding_no_project_record(tmp_path: Path):
+def test_write_project_site_refuses_a_directory_holding_no_project_record(
+    tmp_path: Path,
+):
     bare = tmp_path / "bare"
     bare.mkdir()
 

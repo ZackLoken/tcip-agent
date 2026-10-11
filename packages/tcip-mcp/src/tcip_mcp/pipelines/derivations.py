@@ -32,7 +32,9 @@ def num_classes_from_distribution(class_distribution: dict[int, int]) -> int:
     return int(max(class_distribution)) + 1
 
 
-def gt_aspect_ratios(class_distribution_boxes: list[tuple[float, float]]) -> list[float] | None:
+def gt_aspect_ratios(
+    class_distribution_boxes: list[tuple[float, float]],
+) -> list[float] | None:
     """Aspect ratios (h/w) spanning the GT box-shape distribution, for anchor coverage.
 
     Returns a small ratio set covering the p10..p90 of GT box aspect ratios (plus 1.0), the two
@@ -43,15 +45,26 @@ def gt_aspect_ratios(class_distribution_boxes: list[tuple[float, float]]) -> lis
 
         from tcip_mcp.pipelines.derivations import gt_aspect_ratios
         from tcip_mcp.pipelines.components.detectors import build_detector
-        ratios = gt_aspect_ratios([(b.w, b.h) for b in gt_boxes])   # this dataset's shapes
+
+        ratios = gt_aspect_ratios(
+            [(b.w, b.h) for b in gt_boxes]
+        )  # this dataset's shapes
         if ratios is None:
-            ratios = [0.5, 1.0, 2.0]                                 # underivable, yours to stamp
-        names = list(adapter(torch.zeros(1, in_chans, h, w)).keys())  # this adapter's actual keys
-        model = build_detector("faster_rcnn", adapter, num_classes=n,
-                               featmap_names=names, num_levels=len(names),
-                               aspect_ratios=tuple(ratios))
+            ratios = [0.5, 1.0, 2.0]  # underivable, yours to stamp
+        names = list(
+            adapter(torch.zeros(1, in_chans, h, w)).keys()
+        )  # this adapter's actual keys
+        model = build_detector(
+            "faster_rcnn",
+            adapter,
+            num_classes=n,
+            featmap_names=names,
+            num_levels=len(names),
+            aspect_ratios=tuple(ratios),
+        )
     """
     import numpy as np
+
     ratios = [h / w for (w, h) in class_distribution_boxes if w > 0 and h > 0]
     if not ratios:
         # Underivable: a pinned (0.5, 1, 2) returned as if derived would be indistinguishable from
@@ -63,12 +76,16 @@ def gt_aspect_ratios(class_distribution_boxes: list[tuple[float, float]]) -> lis
 
 
 def _validate_gt_boxes_per_image(
-    gt_boxes_per_image: "Sequence[Sequence[Sequence[float]]]", *, fn_name: str,
+    gt_boxes_per_image: "Sequence[Sequence[Sequence[float]]]",
+    *,
+    fn_name: str,
 ) -> list[list[tuple[float, float, float, float]]]:
     """Validate and normalize ``gt_boxes_per_image`` into concrete ``(x, y, w, h)`` float tuples,
     or raise ``ValueError`` naming exactly what was wrong.
     """
-    if not isinstance(gt_boxes_per_image, Sequence) or isinstance(gt_boxes_per_image, (str, bytes)):
+    if not isinstance(gt_boxes_per_image, Sequence) or isinstance(
+        gt_boxes_per_image, (str, bytes)
+    ):
         raise ValueError(
             f"{fn_name}: gt_boxes_per_image must be a sequence of per-image box lists, got "
             f"{type(gt_boxes_per_image).__name__}"
@@ -82,7 +99,11 @@ def _validate_gt_boxes_per_image(
             )
         image_boxes: list[tuple[float, float, float, float]] = []
         for j, box in enumerate(boxes):
-            if not isinstance(box, Sequence) or isinstance(box, (str, bytes)) or len(box) != 4:
+            if (
+                not isinstance(box, Sequence)
+                or isinstance(box, (str, bytes))
+                or len(box) != 4
+            ):
                 raise ValueError(
                     f"{fn_name}: gt_boxes_per_image[{i}][{j}] must be a 4-element (x, y, w, h) "
                     f"box, got {box!r}"
@@ -99,10 +120,14 @@ def _validate_gt_boxes_per_image(
     return validated
 
 
-def _validate_char_sizes(char_sizes: Sequence[float], *, fn_name: str) -> list[float]:
+def _validate_char_sizes(
+    char_sizes: Sequence[float], *, fn_name: str
+) -> list[float]:
     """Validate and normalize ``char_sizes`` into concrete floats, or raise ``ValueError`` naming
     exactly what was wrong, the same contract as ``_validate_gt_boxes_per_image``."""
-    if not isinstance(char_sizes, Sequence) or isinstance(char_sizes, (str, bytes)):
+    if not isinstance(char_sizes, Sequence) or isinstance(
+        char_sizes, (str, bytes)
+    ):
         raise ValueError(
             f"{fn_name}: char_sizes must be a sequence of numbers, got {type(char_sizes).__name__}"
         )
@@ -111,7 +136,9 @@ def _validate_char_sizes(char_sizes: Sequence[float], *, fn_name: str) -> list[f
         try:
             validated.append(float(s))
         except (TypeError, ValueError) as e:
-            raise ValueError(f"{fn_name}: char_sizes[{i}] is not numeric ({s!r}): {e}") from e
+            raise ValueError(
+                f"{fn_name}: char_sizes[{i}] is not numeric ({s!r}): {e}"
+            ) from e
     return validated
 
 
@@ -142,8 +169,10 @@ def _neighbor_min_center_distances(boxes: np.ndarray) -> list[float]:
     return dist.min(axis=1).tolist()
 
 
-LOCALIZATION_TOLERANCE_DERIVATION = ("half the p10 of the GT nearest-neighbor center spacing over "
-                                     "the mean characteristic size")
+LOCALIZATION_TOLERANCE_DERIVATION = (
+    "half the p10 of the GT nearest-neighbor center spacing over "
+    "the mean characteristic size"
+)
 """The label a criterion names a tolerance :func:`derive_localization_tolerance_frac` derived
 by."""
 
@@ -170,7 +199,8 @@ def derive_localization_tolerance_frac(
     from tcip_annotation.matching import box_sizes, xywh_corners
 
     gt_boxes_per_image = _validate_gt_boxes_per_image(
-        gt_boxes_per_image, fn_name="derive_localization_tolerance_frac")
+        gt_boxes_per_image, fn_name="derive_localization_tolerance_frac"
+    )
     dists: list[float] = []
     sizes: list[float] = []
     for boxes in gt_boxes_per_image:
@@ -187,7 +217,8 @@ def derive_localization_tolerance_frac(
         raise ValueError(
             f"the reference's p10 nearest same-class center spacing is {spacing:g} px: that "
             "percentile of its boxes share a center, so the spacing model derives no "
-            "center-match tolerance")
+            "center-match tolerance"
+        )
     return spacing * 0.5 / avg_size
 
 
@@ -209,8 +240,10 @@ def char_sizes(boxes: Iterable[np.ndarray]) -> list[float]:
     return [s for arr in boxes for s in box_sizes(arr).tolist() if s > 0]
 
 
-OBJECT_DENSITY_DERIVATION = ("p99 over the object-bearing regions of their objects per pixel; a "
-                             "frame keeps ceil(density x its pixels) detections")
+OBJECT_DENSITY_DERIVATION = (
+    "p99 over the object-bearing regions of their objects per pixel; a "
+    "frame keeps ceil(density x its pixels) detections"
+)
 """The label an execution record names a density :func:`derive_object_density` derived by."""
 
 
@@ -224,12 +257,16 @@ def derive_object_density(regions: Sequence[Region]) -> float:
     import numpy as np
 
     if not regions:
-        raise ValueError("an object density is derived from counted regions, and none were "
-                         "counted.")
+        raise ValueError(
+            "an object density is derived from counted regions, and none were "
+            "counted."
+        )
     bearing = [len(r.boxes) / r.area for r in regions if len(r.boxes)]
     if not bearing:
-        raise ValueError(f"none of the {len(regions)} counted regions is object-bearing, so no "
-                         "frame's detection cap has a basis.")
+        raise ValueError(
+            f"none of the {len(regions)} counted regions is object-bearing, so no "
+            "frame's detection cap has a basis."
+        )
     return float(np.quantile(bearing, 0.99))
 
 
@@ -241,16 +278,21 @@ def detection_cap(density: float, pixels: float) -> int:
     return math.ceil(density * pixels)
 
 
-TILE_EDGE_DERIVATION = "5 x the p99 of the objects' larger box side, rounded up to a pixel"
+TILE_EDGE_DERIVATION = (
+    "5 x the p99 of the objects' larger box side, rounded up to a pixel"
+)
 """The label an execution record names a tile edge :func:`derive_tile_geometry` derived by."""
-TILE_OVERLAP_DERIVATION = ("the p99 of the objects' larger box side, rounded up to a pixel, as "
-                           "the least overlap the lattice lays between neighboring tiles")
+TILE_OVERLAP_DERIVATION = (
+    "the p99 of the objects' larger box side, rounded up to a pixel, as "
+    "the least overlap the lattice lays between neighboring tiles"
+)
 """The label an execution record names a tile overlap :func:`derive_tile_geometry` derived
 by."""
 
 
-def derive_tile_geometry(regions: Sequence[Region], *, tile_size: int | None,
-                         overlap: float | None) -> tuple[int, float]:
+def derive_tile_geometry(
+    regions: Sequence[Region], *, tile_size: int | None, overlap: float | None
+) -> tuple[int, float]:
     """A tile lattice's ``(edge, overlap)``: a stated value as given; else, with the extent the
     99th percentile of the larger side of the ``regions``' boxes rounded up to a pixel, the edge
     five times the extent (:data:`TILE_EDGE_DERIVATION`) and the overlap the ratio under which
@@ -267,19 +309,28 @@ def derive_tile_geometry(regions: Sequence[Region], *, tile_size: int | None,
 
     if tile_size is not None and overlap is not None:
         return int(tile_size), float(overlap)
-    sides = [s for r in regions for s in np.maximum(r.boxes[:, 2] - r.boxes[:, 0],
-                                                    r.boxes[:, 3] - r.boxes[:, 1]).tolist()
-             if s > 0]
+    sides = [
+        s
+        for r in regions
+        for s in np.maximum(
+            r.boxes[:, 2] - r.boxes[:, 0], r.boxes[:, 3] - r.boxes[:, 1]
+        ).tolist()
+        if s > 0
+    ]
     if not sides:
-        raise ValueError("the tile edge and overlap derive from the ground truth's object "
-                         "extents, and it holds no object; state tile_size and overlap.")
+        raise ValueError(
+            "the tile edge and overlap derive from the ground truth's object "
+            "extents, and it holds no object; state tile_size and overlap."
+        )
     extent = math.ceil(float(np.percentile(sides, 99)))
     edge = int(tile_size) if tile_size is not None else 5 * extent
     if overlap is None:
         if extent >= edge:
-            raise ValueError(f"the ground truth's p99 object side of {extent} px reaches the "
-                             f"{edge} px tile edge, so no overlap holds it whole in a tile; "
-                             "state a larger tile_size.")
+            raise ValueError(
+                f"the ground truth's p99 object side of {extent} px reaches the "
+                f"{edge} px tile edge, so no overlap holds it whole in a tile; "
+                "state a larger tile_size."
+            )
         overlap = overlap_ratio(edge, extent)
     return edge, float(overlap)
 
@@ -292,7 +343,10 @@ IOU_MATCH_DERIVATION = (
 
 
 def derive_iou_match_threshold(
-    gt_boxes_per_image: Sequence[Sequence[Sequence[float]]], *, jitter_px: float, margin: float,
+    gt_boxes_per_image: Sequence[Sequence[Sequence[float]]],
+    *,
+    jitter_px: float,
+    margin: float,
 ) -> float | None:
     """The IoU threshold for an ``iou_match`` trait, from the GT's own characteristic box size, or
     ``None`` if underivable.
@@ -311,7 +365,8 @@ def derive_iou_match_threshold(
     filtered to the trait's own class.
     """
     gt_boxes_per_image = _validate_gt_boxes_per_image(
-        gt_boxes_per_image, fn_name="derive_iou_match_threshold")
+        gt_boxes_per_image, fn_name="derive_iou_match_threshold"
+    )
     from tcip_annotation.matching import xywh_corners
 
     sizes = char_sizes(xywh_corners(boxes) for boxes in gt_boxes_per_image)
@@ -324,12 +379,14 @@ def derive_iou_match_threshold(
         raise ValueError(
             f"iou_jitter_px {jitter_px} is at or past the reference's mean characteristic box size "
             f"{avg_size:.4g} px: two boxes displaced that far do not overlap, so the IoU model "
-            "derives no match threshold")
+            "derives no match threshold"
+        )
     modeled = (avg_size - jitter_px) / (avg_size + jitter_px)
     if modeled - margin <= 0:
         raise ValueError(
             f"iou_margin {margin} swallows the modeled IoU {modeled:.4g} of two boxes "
-            f"{jitter_px} px apart: a threshold at or below zero matches every detection")
+            f"{jitter_px} px apart: a threshold at or below zero matches every detection"
+        )
     return modeled - margin
 
 
@@ -348,6 +405,7 @@ def derive_sliver_frac(char_sizes: Sequence[float]) -> float | None:
     :func:`char_sizes`.
     """
     import numpy as np
+
     char_sizes = _validate_char_sizes(char_sizes, fn_name="derive_sliver_frac")
     sizes = [s for s in char_sizes if s > 0]
     if len(sizes) < 5:
@@ -359,7 +417,10 @@ def derive_sliver_frac(char_sizes: Sequence[float]) -> float | None:
 
 
 def derive_block_scale_px(
-    *, tile_size: int, objects: Region, plants: "list | None" = None,
+    *,
+    tile_size: int,
+    objects: Region,
+    plants: "list | None" = None,
     raster_path: "str | Path | None" = None,
 ) -> tuple[int, str]:
     """The pixel buffer/block scale for block-aware calibration's recursive sub-banding, floored at
@@ -387,7 +448,9 @@ def derive_block_scale_px(
     import statistics
 
     if plants:
-        from tcip_mcp.pipelines.postprocessing.plant_mapping import grid_pitch_m
+        from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+            grid_pitch_m,
+        )
 
         pitch_m = grid_pitch_m(plants)
         if pitch_m <= 0.0:
@@ -406,12 +469,14 @@ def derive_block_scale_px(
                 raise ValueError(
                     "derive_block_scale_px: raster_path is not a raster file this derivation can "
                     f"read a pixel size from ({raster}); pass the training raster, or "
-                    "raster_path=None to use the GT-object-spacing-derived block scale")
+                    "raster_path=None to use the GT-object-spacing-derived block scale"
+                )
             if header.kind != "tif":
                 raise ValueError(
                     f"derive_block_scale_px: raster_path ({raster}) is an array container, which "
                     "carries no georeferencing tags, so there is no pixel size to read; pass "
-                    "raster_path=None to use the GT-object-spacing-derived block scale instead")
+                    "raster_path=None to use the GT-object-spacing-derived block scale instead"
+                )
             try:
                 header.georeference  # the one header read; an unreadable raster refuses here
             except ValueError as exc:
@@ -442,7 +507,10 @@ def derive_block_scale_px(
 
 
 def band_normalization_stats(
-    image_paths: "Sequence[str | Path | BandGroupRef]", num_channels: int, *, max_images: int = 50,
+    image_paths: "Sequence[str | Path | BandGroupRef]",
+    num_channels: int,
+    *,
+    max_images: int = 50,
 ) -> tuple[list[float], list[float], list[str]] | None:
     """Per-band ``(mean, std, paths_read)`` in [0, 1] over at most ``max_images`` of
     ``image_paths`` read at ``num_channels`` bands, or ``None`` when no raster could be read.
@@ -451,13 +519,21 @@ def band_normalization_stats(
     """
     import numpy as np
 
-    from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor, source_path_of
+    from tcip_mcp.pipelines.image_utils import (
+        load_image,
+        pil_to_tensor,
+        source_path_of,
+    )
 
     moments = _BandMoments(num_channels)
     paths_read: list[str] = []
     for path in list(image_paths)[:max_images]:
         try:
-            arr = pil_to_tensor(load_image(path, num_channels)).numpy().astype(np.float64)
+            arr = (
+                pil_to_tensor(load_image(path, num_channels))
+                .numpy()
+                .astype(np.float64)
+            )
         except Exception:  # noqa: BLE001, an unreadable raster is skipped, not fatal
             continue
         if moments.add(arr):
@@ -487,7 +563,7 @@ class _BandMoments:
             return False
         flat = tensor_pixels.reshape(self.num_channels, -1)
         self.sums += flat.sum(axis=1)
-        self.sqs += (flat ** 2).sum(axis=1)
+        self.sqs += (flat**2).sum(axis=1)
         self.pixels += flat.shape[1]
         return True
 
@@ -498,7 +574,7 @@ class _BandMoments:
         if not self.pixels:
             return None
         mean = self.sums / self.pixels
-        var = np.maximum(self.sqs / self.pixels - mean ** 2, 0.0)
+        var = np.maximum(self.sqs / self.pixels - mean**2, 0.0)
         return [float(m) for m in mean], [float(s) for s in np.sqrt(var)]
 
 
@@ -515,8 +591,13 @@ class SampledNormalizationStats:
 
 
 def band_normalization_stats_sampled(
-    image_paths: "Sequence[str | Path | BandGroupRef]", num_channels: int, *, seed: int,
-    window_size: int, max_windows_per_image: int, max_images: int = 50,
+    image_paths: "Sequence[str | Path | BandGroupRef]",
+    num_channels: int,
+    *,
+    seed: int,
+    window_size: int,
+    max_windows_per_image: int,
+    max_images: int = 50,
 ) -> SampledNormalizationStats | None:
     """Per-band ``(mean, std)`` in [0, 1] over seeded pixel windows of this dataset's rasters.
 
@@ -545,9 +626,17 @@ def band_normalization_stats_sampled(
                 total += src.width * src.height
                 label = source_path_of(path)
                 for rect in raster_source.sample_windows(
-                        src.width, src.height, seed=seed, window_size=window_size,
-                        max_windows=max_windows_per_image):
-                    moments.add(pil_to_tensor(src.read_region(rect)[0]).numpy().astype(np.float64))
+                    src.width,
+                    src.height,
+                    seed=seed,
+                    window_size=window_size,
+                    max_windows=max_windows_per_image,
+                ):
+                    moments.add(
+                        pil_to_tensor(src.read_region(rect)[0])
+                        .numpy()
+                        .astype(np.float64)
+                    )
                     read.append((label, rect))
                     covered += rect.width * rect.height
         except Exception:  # noqa: BLE001, an unreadable raster is skipped, not fatal
@@ -557,13 +646,16 @@ def band_normalization_stats_sampled(
         return None
     mean, std = stats
     sampling = raster_source.WindowSampling(
-        tuple(read), int(seed), covered / total if total else 0.0)
+        tuple(read), int(seed), covered / total if total else 0.0
+    )
     return SampledNormalizationStats(mean, std, sampling)
 
 
 def image_stats_provenance(
     result: "tuple[list[float], list[float], list[str]] | SampledNormalizationStats",
-    *, window_size: int | None = None, max_windows_per_image: int | None = None,
+    *,
+    window_size: int | None = None,
+    max_windows_per_image: int | None = None,
 ) -> dict:
     """Render either band-normalization result into ``model_source.image_stats_sampling``.
 
@@ -576,8 +668,10 @@ def image_stats_provenance(
     if isinstance(result, SampledNormalizationStats):
         sampling = result.sampling
         return {
-            "windows": [[label, {"x0": r.x0, "y0": r.y0, "x1": r.x1, "y1": r.y1}]
-                        for label, r in sampling.windows],
+            "windows": [
+                [label, {"x0": r.x0, "y0": r.y0, "x1": r.x1, "y1": r.y1}]
+                for label, r in sampling.windows
+            ],
             "seed": sampling.seed,
             "pixel_fraction": sampling.pixel_fraction,
             "window_size": window_size,
@@ -626,7 +720,8 @@ def derive_cross_tile_nms(regions: Sequence[Region]) -> float | None:
         raise ValueError(
             f"the reference's neighboring boxes overlap up to IoU {overlap:.3g} at p99, and the "
             f"margin 0.05 carries the threshold to {threshold:.3g}, past the IoU interval; state "
-            "cross_tile_nms")
+            "cross_tile_nms"
+        )
     return threshold
 
 
@@ -650,7 +745,9 @@ _STATIC_DERIVATION_IMPLEMENTATIONS: dict[str, object] = {
 """Each derivation label authored here, every one but the count-objective ones, mapped to the
 callable that computes it."""
 
-_CURVE_IMPLEMENTATION = "tcip_mcp.pipelines.training.evaluation.derive_operating_point_curve"
+_CURVE_IMPLEMENTATION = (
+    "tcip_mcp.pipelines.training.evaluation.derive_operating_point_curve"
+)
 
 
 def _derivation_implementations() -> dict[str, object]:
@@ -659,7 +756,10 @@ def _derivation_implementations() -> dict[str, object]:
     from tcip_mcp.pipelines.operating_point import COUNT_OBJECTIVE_PICKERS
 
     return {
-        **{label: _CURVE_IMPLEMENTATION for _picker, label in COUNT_OBJECTIVE_PICKERS.values()},
+        **{
+            label: _CURVE_IMPLEMENTATION
+            for _picker, label in COUNT_OBJECTIVE_PICKERS.values()
+        },
         **_STATIC_DERIVATION_IMPLEMENTATIONS,
     }
 

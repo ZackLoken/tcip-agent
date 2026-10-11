@@ -16,7 +16,12 @@ import tcip_store
 from pydantic import ConfigDict, TypeAdapter
 from tcip_store import Key, encode_record
 
-from tcip_mcp.registry_paths import PathFields, recorded_paths, runtime_paths, within
+from tcip_mcp.registry_paths import (
+    PathFields,
+    recorded_paths,
+    runtime_paths,
+    within,
+)
 from tcip_mcp.subject_registry import Attribute, named
 
 if TYPE_CHECKING:
@@ -145,7 +150,11 @@ class ClassScope:
         outside these fields refuses by name.
         """
         stated = record.get("scope")
-        return cls.recorded(None if stated is None else TypeAdapter(cls).validate_python(stated))
+        return cls.recorded(
+            None
+            if stated is None
+            else TypeAdapter(cls).validate_python(stated)
+        )
 
     @staticmethod
     def recorded(scope: "ClassScope | None") -> "ClassScope":
@@ -155,17 +164,23 @@ class ClassScope:
             raise ValueError(
                 "this record carries no scope: the class space its ground truth was admitted "
                 "under is not recorded, so no reader can hold targets or predictions to it. "
-                "Produce it through an admission, which records one.")
+                "Produce it through an admission, which records one."
+            )
         return scope
 
-    def state_ids(self, state: "PositiveState | None") -> tuple[int, int] | None:
+    def state_ids(
+        self, state: "PositiveState | None"
+    ) -> tuple[int, int] | None:
         """``(column, value id)`` of ``state`` under this class space: its attribute's position
         among the declared attributes and its value's among that attribute's values. ``None`` for
         no state, a space naming no subject, or one whose attributes do not list ``state``; a
         subject's space whose attributes were never read refuses (:meth:`admitted_for`)."""
         if state is None or self.subject is None:
             return None
-        attributes = cast(tuple, self.admitted_for(DOCUMENT, f"class space {self}").attributes)
+        attributes = cast(
+            tuple,
+            self.admitted_for(DOCUMENT, f"class space {self}").attributes,
+        )
         found = named(attributes, state.attribute)
         if found is None or state.value not in found.values:
             return None
@@ -222,7 +237,10 @@ class Selection:
 
     def counts(self) -> dict[str, int]:
         """How many samples each side holds, every side named even at zero."""
-        return {side: sum(1 for s in self.samples if s.side == side) for side in SIDES}
+        return {
+            side: sum(1 for s in self.samples if s.side == side)
+            for side in SIDES
+        }
 
 
 def source_digests(samples: Iterable[Sample]) -> dict[str, str]:
@@ -239,7 +257,11 @@ def source_digests(samples: Iterable[Sample]) -> dict[str, str]:
     for sample in resolved(list(samples)):
         if sample.source not in by_source:
             source = sample.image
-            files = list(source.bands.values()) if isinstance(source, BandGroupRef) else [source]
+            files = (
+                list(source.bands.values())
+                if isinstance(source, BandGroupRef)
+                else [source]
+            )
             h = hashlib.sha256()
             for path in files:
                 h.update(Path(path).read_bytes())
@@ -279,8 +301,12 @@ def refuse_crossing_sides(samples: Sequence[Sample]) -> None:
     for sample in samples:
         by_location.setdefault(sample.location, set()).add(sample.side)
         by_group.setdefault(sample.group, set()).add(sample.side)
-    crossing_ids = sorted(i for i, sides in by_location.items() if len(sides) > 1)
-    crossing_groups = sorted(g for g, sides in by_group.items() if len(sides) > 1)
+    crossing_ids = sorted(
+        i for i, sides in by_location.items() if len(sides) > 1
+    )
+    crossing_groups = sorted(
+        g for g, sides in by_group.items() if len(sides) > 1
+    )
     if crossing_ids:
         raise ValueError(
             f"{len(crossing_ids)} source(s) of this selection are on more than one side "
@@ -311,7 +337,10 @@ GROUND_TRUTH_PATHS: PathFields = ((), ("root",))
 """The fields of a stored ground truth (:func:`ground_truth_record`) that name a path: a mask's or
 a table's path itself, or a document key's root."""
 
-SAMPLE_PATHS: PathFields = (("source",), *within(("ground_truth",), GROUND_TRUTH_PATHS))
+SAMPLE_PATHS: PathFields = (
+    ("source",),
+    *within(("ground_truth",), GROUND_TRUTH_PATHS),
+)
 """The fields of a sample document that name a path."""
 
 SELECTION_PATHS: PathFields = within(("samples", "[]"), SAMPLE_PATHS)
@@ -339,9 +368,11 @@ def ground_truth_of(stored: Any) -> Key | str:
 def sample_document(sample: Sample) -> dict[str, Any]:
     """The JSON shape one sample is held in, the one :func:`read_sample` reads back."""
     doc: dict[str, Any] = {
-        "member": sample.member, "source": sample.source,
+        "member": sample.member,
+        "source": sample.source,
         "ground_truth": ground_truth_record(sample.ground_truth),
-        "group": sample.group, "side": sample.side,
+        "group": sample.group,
+        "side": sample.side,
     }
     if sample.rect is not None:
         doc["rect"] = list(sample.rect)
@@ -370,31 +401,42 @@ def read_sample(raw: Any, position: int, where: str) -> Sample:
     a malformed ``rect``."""
     if not isinstance(raw, dict):
         raise ValueError(
-            f"sample {position} of the record at {where} is a {type(raw).__name__}, not a mapping.")
-    missing = [k for k in ("member", "source", "ground_truth", "group", "side") if not raw.get(k)]
+            f"sample {position} of the record at {where} is a {type(raw).__name__}, not a mapping."
+        )
+    missing = [
+        k
+        for k in ("member", "source", "ground_truth", "group", "side")
+        if not raw.get(k)
+    ]
     if missing:
         raise ValueError(
             f"sample {position} of the record at {where} carries no {missing}: every sample names "
-            "its own member, source, ground truth, group key and side.")
+            "its own member, source, ground truth, group key and side."
+        )
     side = str(raw["side"])
     if side not in SIDES:
         raise ValueError(
             f"sample {position} of the record at {where} is on side {side!r}, which is none of "
-            f"{list(SIDES)}.")
+            f"{list(SIDES)}."
+        )
     rect_raw = raw.get("rect")
     rect: tuple[int, int, int, int] | None = None
     if rect_raw is not None:
         if not isinstance(rect_raw, (list, tuple)) or len(rect_raw) != 4:
             raise ValueError(
                 f"sample {position} of the record at {where} carries rect {rect_raw!r}, not a "
-                "half-open pixel rect (x0, y0, x1, y1).")
+                "half-open pixel rect (x0, y0, x1, y1)."
+            )
         x0, y0, x1, y1 = (int(v) for v in rect_raw)
         rect = (x0, y0, x1, y1)
     row_key = raw.get("row_key")
     return Sample(
-        member=str(raw["member"]), source=str(raw["source"]),
+        member=str(raw["member"]),
+        source=str(raw["source"]),
         ground_truth=ground_truth_of(raw["ground_truth"]),
-        group=str(raw["group"]), side=side, rect=rect,
+        group=str(raw["group"]),
+        side=side,
+        rect=rect,
         row_key=str(row_key) if row_key is not None else None,
         ground_truth_digest=raw.get("ground_truth_digest"),
     )
@@ -421,9 +463,14 @@ def as_selection(document: Any, *, where: str) -> Selection:
             f"the selection at {where} lists no samples: a selection is its sample list, so an "
             "empty one binds nothing. Draw it again over the current data."
         )
-    samples = [read_sample(raw, position, where) for position, raw in enumerate(raw_samples)]
+    samples = [
+        read_sample(raw, position, where)
+        for position, raw in enumerate(raw_samples)
+    ]
     refuse_crossing_sides(samples)
-    scope = ClassScope.of(document).admitted_for(samples[0].shape, f"the selection at {where}")
+    scope = ClassScope.of(document).admitted_for(
+        samples[0].shape, f"the selection at {where}"
+    )
     return Selection(
         samples=tuple(samples),
         scope=scope,
@@ -433,14 +480,19 @@ def as_selection(document: Any, *, where: str) -> Selection:
     )
 
 
-def stored_selection_document(selection: Selection, project: str | Path) -> dict[str, Any]:
+def stored_selection_document(
+    selection: Selection, project: str | Path
+) -> dict[str, Any]:
     """The document a selection of ``project`` is stored as: :func:`selection_document` with its
     paths stored against ``project`` (:data:`SELECTION_PATHS`)."""
-    return recorded_paths(selection_document(selection), SELECTION_PATHS, project)
+    return recorded_paths(
+        selection_document(selection), SELECTION_PATHS, project
+    )
 
 
-def write_selection(selection_dir: str | Path, selection: Selection, *,
-                    project: str | Path) -> Selection:
+def write_selection(
+    selection_dir: str | Path, selection: Selection, *, project: str | Path
+) -> Selection:
     """Write ``selection``, a selection of ``project``, under ``selection_dir``
     (:func:`stored_selection_document`), and answer it back.
 
@@ -450,11 +502,15 @@ def write_selection(selection_dir: str | Path, selection: Selection, *,
     as_selection(selection_document(selection), where=str(selection_dir))
     out_dir = Path(selection_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    tcip_store.replace(selection_key(out_dir), stored_selection_document(selection, project))
+    tcip_store.replace(
+        selection_key(out_dir), stored_selection_document(selection, project)
+    )
     return selection
 
 
-def read_selection(selection_dir: str | Path, *, project: str | Path) -> Selection:
+def read_selection(
+    selection_dir: str | Path, *, project: str | Path
+) -> Selection:
     """The selection of ``project`` recorded under ``selection_dir``.
 
     Refuses with ``ValueError`` naming ``selection_dir`` when nothing is recorded there, when the
@@ -463,12 +519,15 @@ def read_selection(selection_dir: str | Path, *, project: str | Path) -> Selecti
     document = _read_selection_document(selection_dir, project)
     if document is None:
         raise ValueError(
-            f"no selection recorded under {selection_dir}; run draw_splits first.")
+            f"no selection recorded under {selection_dir}; run draw_splits first."
+        )
     return as_selection(document, where=str(selection_dir))
 
 
 def read_selection_checked(
-    selection_dir: str | Path, *, project: str | Path,
+    selection_dir: str | Path,
+    *,
+    project: str | Path,
 ) -> tuple[Selection | None, str | None]:
     """:func:`read_selection` answering ``(selection, None)``, ``(None, None)`` for an absence, or
     ``(None, text)`` for a record that exists and is refused."""
@@ -481,15 +540,22 @@ def read_selection_checked(
         return None, str(exc)
 
 
-def _read_selection_document(selection_dir: str | Path, project: str | Path) -> Any | None:
+def _read_selection_document(
+    selection_dir: str | Path, project: str | Path
+) -> Any | None:
     from tcip_store import DecodeError
 
     try:
         document = tcip_store.read(selection_key(selection_dir), default=None)
     except DecodeError as exc:
         raise ValueError(
-            f"the selection at {selection_dir} could not be read: {exc}") from exc
-    return None if document is None else runtime_paths(document, SELECTION_PATHS, project)
+            f"the selection at {selection_dir} could not be read: {exc}"
+        ) from exc
+    return (
+        None
+        if document is None
+        else runtime_paths(document, SELECTION_PATHS, project)
+    )
 
 
 def ground_truth_digest(ground_truth: Key | str) -> str:
@@ -505,6 +571,7 @@ def ground_truth_digest(ground_truth: Key | str) -> str:
 def moved_ground_truth(recorded: Mapping[Key | str, str]) -> list[Key | str]:
     """The ground truths among ``recorded`` (each to the digest recorded for it) that no longer
     digest to it, one gone since among them, in ``recorded``'s order."""
+
     def moved(ground_truth: Key | str, digest: str) -> bool:
         try:
             return ground_truth_digest(ground_truth) != digest
@@ -519,4 +586,6 @@ def selection_digest(selection: Selection, project: str | Path) -> str:
     (:func:`stored_selection_document`)."""
     import hashlib
 
-    return hashlib.sha256(encode_record(stored_selection_document(selection, project))).hexdigest()
+    return hashlib.sha256(
+        encode_record(stored_selection_document(selection, project))
+    ).hexdigest()

@@ -21,7 +21,10 @@ class FPN(nn.Module):
     """
 
     def __init__(
-        self, in_channels_list: list[int], out_channels: int = 256, add_p2: bool = False
+        self,
+        in_channels_list: list[int],
+        out_channels: int = 256,
+        add_p2: bool = False,
     ) -> None:
         super().__init__()
         self.out_channels = out_channels
@@ -31,12 +34,16 @@ class FPN(nn.Module):
         self.output_convs = nn.ModuleList()
         for in_ch in in_channels_list:
             self.lateral_convs.append(nn.Conv2d(in_ch, out_channels, 1))
-            self.output_convs.append(nn.Conv2d(out_channels, out_channels, 3, padding=1))
+            self.output_convs.append(
+                nn.Conv2d(out_channels, out_channels, 3, padding=1)
+            )
         # Opt-in extra finer level (yolo11-p2 analog): 2x upsample of the finest lateral.
         if add_p2:
             self.p2_conv = nn.Conv2d(out_channels, out_channels, 3, padding=1)
 
-    def forward(self, features: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    def forward(
+        self, features: dict[str, torch.Tensor]
+    ) -> dict[str, torch.Tensor]:
         keys = sorted(features.keys())
         feat_list = [features[k] for k in keys]
 
@@ -46,14 +53,18 @@ class FPN(nn.Module):
         # Top-down pathway
         for i in range(len(laterals) - 2, -1, -1):
             up = functional.interpolate(
-                laterals[i + 1], size=laterals[i].shape[-2:], mode="nearest")
+                laterals[i + 1], size=laterals[i].shape[-2:], mode="nearest"
+            )
             laterals[i] = laterals[i] + up
 
         # 3x3 convs to remove aliasing, finest -> coarsest.
         outs = [conv(laterals[i]) for i, conv in enumerate(self.output_convs)]
         if self.add_p2:
             extra = self.p2_conv(
-                functional.interpolate(laterals[0], scale_factor=2, mode="nearest"))
+                functional.interpolate(
+                    laterals[0], scale_factor=2, mode="nearest"
+                )
+            )
             outs.insert(0, extra)  # new finest level at index 0
         return {f"p{i}": f for i, f in enumerate(outs)}
 
@@ -65,7 +76,10 @@ class PAN(nn.Module):
     """
 
     def __init__(
-        self, in_channels_list: list[int], out_channels: int = 256, add_p2: bool = False
+        self,
+        in_channels_list: list[int],
+        out_channels: int = 256,
+        add_p2: bool = False,
     ) -> None:
         super().__init__()
         self.out_channels = out_channels
@@ -76,14 +90,18 @@ class PAN(nn.Module):
                 nn.Conv2d(out_channels, out_channels, 3, stride=2, padding=1)
             )
 
-    def forward(self, features: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    def forward(
+        self, features: dict[str, torch.Tensor]
+    ) -> dict[str, torch.Tensor]:
         fpn_out = self.fpn(features)
         keys = sorted(fpn_out.keys())
         feat_list = [fpn_out[k] for k in keys]
 
         # Bottom-up pathway
         for i in range(len(self.bottom_up_convs)):
-            feat_list[i + 1] = feat_list[i + 1] + self.bottom_up_convs[i](feat_list[i])
+            feat_list[i + 1] = feat_list[i + 1] + self.bottom_up_convs[i](
+                feat_list[i]
+            )
 
         return {f"p{i}": f for i, f in enumerate(feat_list)}
 
@@ -99,7 +117,9 @@ class IdentityNeck(nn.Module):
         super().__init__()
         self.out_channels = in_channels_list[-1] if in_channels_list else 0
 
-    def forward(self, features: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    def forward(
+        self, features: dict[str, torch.Tensor]
+    ) -> dict[str, torch.Tensor]:
         return features
 
 

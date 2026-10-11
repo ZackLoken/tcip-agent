@@ -57,14 +57,18 @@ class Key:
 
     def __post_init__(self) -> None:
         if not isinstance(self.store, str) or not self.store:
-            raise BadKeyError(f"a key's store must be a non-empty string; got {self.store!r}")
+            raise BadKeyError(
+                f"a key's store must be a non-empty string; got {self.store!r}"
+            )
         if not self.root:
             raise BadKeyError(
-                f"{self.store!r} key carries no root: name the root the entry hangs off")
+                f"{self.store!r} key carries no root: name the root the entry hangs off"
+            )
         for part in self.parts:
             if not isinstance(part, str) or not part:
                 raise BadKeyError(
-                    f"{self.store!r} key part must be a non-empty string; got {part!r}")
+                    f"{self.store!r} key part must be a non-empty string; got {part!r}"
+                )
 
 
 @dataclass(frozen=True)

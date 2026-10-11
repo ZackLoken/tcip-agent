@@ -42,15 +42,25 @@ def _source(builder: str):
     from tests import REPO_ROOT
     from tests._chain_fixtures import training_config
 
-    spec = train_config(training_config(
-        {"builder": builder, "builder_kwargs": {}, "source_files": [__file__],
-         "task": "classification"}, {}))
+    spec = train_config(
+        training_config(
+            {
+                "builder": builder,
+                "builder_kwargs": {},
+                "source_files": [__file__],
+                "task": "classification",
+            },
+            {},
+        )
+    )
     return spec.model_source, staged_sources(spec, REPO_ROOT).layout
 
 
 def test_build_from_model_source_imports_builder():
     source, layout = _source(f"{Path(__file__).stem}:_bespoke_builder")
-    model = build_from_model_source(source, layout, {"in_chans": 3, "num_classes": 2})
+    model = build_from_model_source(
+        source, layout, {"in_chans": 3, "num_classes": 2}
+    )
     assert isinstance(model, TCIPModel)
 
 
@@ -69,14 +79,18 @@ def test_build_from_model_source_bad_builder_raises():
 # TCIPModel Protocol: duck-type marker, not an architecture requirement
 # --------------------------------------------------------------------------
 
+
 def test_tcip_model_protocol_membership():
-    assert isinstance(bespoke_models.build_bespoke_classifier(num_classes=2), TCIPModel)
+    assert isinstance(
+        bespoke_models.build_bespoke_classifier(num_classes=2), TCIPModel
+    )
     assert not isinstance(object(), TCIPModel)
 
 
 # --------------------------------------------------------------------------
 # check_model_contract: behavioral smoke on the measurement boundary
 # --------------------------------------------------------------------------
+
 
 def test_check_model_contract_classification_ok():
     model = bespoke_models.build_bespoke_classifier(num_classes=2)
@@ -96,7 +110,9 @@ def test_check_model_contract_records_per_parameter_gradient_magnitudes():
     mags = report["gradient_magnitudes"]
     assert isinstance(mags, dict) and mags
     named = dict(model.named_parameters())
-    assert set(mags) <= set(named)  # every reported name is a real parameter of this model
+    assert set(mags) <= set(
+        named
+    )  # every reported name is a real parameter of this model
     assert all(isinstance(v, float) and v >= 0.0 for v in mags.values())
 
 
@@ -117,14 +133,18 @@ def test_check_model_contract_gradient_norm_survives_a_float32_overflow():
 
         def forward(self, images, targets=None):
             if self.training:
-                return {"loss": self.w.sum() + self.lin(torch.rand(1, 4)).sum() * 0}
+                return {
+                    "loss": self.w.sum() + self.lin(torch.rand(1, 4)).sum() * 0
+                }
             return {"logits": self.lin(torch.rand(1, 4))}
 
-    report = check_model_contract(_NearOverflowGradient(), "classification", dims=CLS_DIMS)
+    report = check_model_contract(
+        _NearOverflowGradient(), "classification", dims=CLS_DIMS
+    )
     assert report["ok"], report["issues"]
     norm = report["gradient_magnitudes"]["w"]
     assert math.isfinite(norm)
-    assert norm == pytest.approx(2e38 * 2 ** 0.5, rel=1e-6)
+    assert norm == pytest.approx(2e38 * 2**0.5, rel=1e-6)
 
 
 def test_check_model_contract_rejects_prediction_free_eval_output():
@@ -143,7 +163,9 @@ def test_check_model_contract_rejects_prediction_free_eval_output():
 
     report = check_model_contract(_Empty(), "classification", dims=CLS_DIMS)
     assert report["ok"] is False
-    assert any("no tensor value" in i for i in report["issues"]), report["issues"]
+    assert any("no tensor value" in i for i in report["issues"]), report[
+        "issues"
+    ]
 
 
 def test_check_model_contract_accepts_a_ragged_nested_eval_output():
@@ -169,7 +191,9 @@ def test_check_model_contract_accepts_a_ragged_nested_eval_output():
 
 
 def test_check_model_contract_detection_ok():
-    model = bespoke_models.build_bespoke_detection(num_classes=1, min_size=64, max_size=128)
+    model = bespoke_models.build_bespoke_detection(
+        num_classes=1, min_size=64, max_size=128
+    )
     report = check_model_contract(model, "detection", dims=DET_DIMS)
     assert report["ok"], report["issues"]
     assert report["eval_output_type"] == "list[dict]"
@@ -179,9 +203,12 @@ def test_check_model_contract_detection_ok():
 # overfit_check: the loss must fall on a fixed tiny batch
 # --------------------------------------------------------------------------
 
+
 def test_overfit_check_classification_passes():
     model = bespoke_models.build_bespoke_classifier(num_classes=2)
-    report = overfit_check(model, "classification", steps=25, dims=CLS_DIMS, seed=0)
+    report = overfit_check(
+        model, "classification", steps=25, dims=CLS_DIMS, seed=0
+    )
     assert report["passed"], report["issue"]
     assert report["final"] < report["initial"]
     assert len(report["losses"]) == 25
@@ -189,13 +216,18 @@ def test_overfit_check_classification_passes():
 
 # render_overfit_report: the record-safe form of a raw overfit_check report
 
+
 def test_render_overfit_report_passes_through_a_finite_report():
     from tcip_mcp.pipelines.model_contract import render_overfit_report
 
     model = bespoke_models.build_bespoke_classifier(num_classes=2)
-    raw = overfit_check(model, "classification", steps=5, dims=CLS_DIMS, seed=0)
+    raw = overfit_check(
+        model, "classification", steps=5, dims=CLS_DIMS, seed=0
+    )
     rendered = render_overfit_report(raw)
-    check_json_value(rendered, path="overfit_check")  # never raises for a finite report
+    check_json_value(
+        rendered, path="overfit_check"
+    )  # never raises for a finite report
     assert rendered["passed"] == raw["passed"]
     assert rendered["initial"] == raw["initial"]
     assert rendered["final"] == raw["final"]
@@ -207,9 +239,13 @@ def test_render_overfit_report_keeps_a_diverging_models_state():
     rendered form keeps the state as a named companion field instead of losing it."""
     from tcip_mcp.pipelines.model_contract import render_overfit_report
 
-    raw = {"passed": False, "issue": "loss became non-finite during overfitting",
-           "losses": [1.0, float("nan"), float("inf")],
-           "initial": 1.0, "final": float("nan")}
+    raw = {
+        "passed": False,
+        "issue": "loss became non-finite during overfitting",
+        "losses": [1.0, float("nan"), float("inf")],
+        "initial": 1.0,
+        "final": float("nan"),
+    }
     rendered = render_overfit_report(raw)
     check_json_value(rendered, path="overfit_check")
     assert rendered["final"] is None

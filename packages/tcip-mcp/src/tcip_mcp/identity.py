@@ -19,6 +19,8 @@ def actor(name: str) -> str:
     (:class:`NoActorError`) when ``name`` names no person."""
     person = person_name(name)
     if person is None:
-        raise NoActorError("an act records who made it, and the request names no one; state the "
-                      "person's name")
+        raise NoActorError(
+            "an act records who made it, and the request names no one; state the "
+            "person's name"
+        )
     return PERSON_IDENTITY_PREFIX + person

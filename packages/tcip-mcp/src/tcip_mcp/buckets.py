@@ -77,21 +77,30 @@ class Bucket:
         names it, or ``None`` when the record names none for that image."""
         from tcip_mcp.dataset_layout import prediction_key
 
-        return prediction_key(self.root, self.name, stem) if stem in self.documents else None
+        return (
+            prediction_key(self.root, self.name, stem)
+            if stem in self.documents
+            else None
+        )
 
     @property
     def document_keys(self) -> list[tcip_store.Key]:
         """Every document the record names, in stem order."""
         from tcip_mcp.dataset_layout import prediction_key
 
-        return [prediction_key(self.root, self.name, stem) for stem in sorted(self.documents)]
+        return [
+            prediction_key(self.root, self.name, stem)
+            for stem in sorted(self.documents)
+        ]
 
     def raster(self, project: Path) -> str | None:
         """The raster this bucket was predicted on, resolved against ``project``, or ``None`` for
         a bucket of per-image predictions."""
         from tcip_mcp.registry_paths import runtime_paths
 
-        return runtime_paths({"raster_path": self.raster_path}, _PATHS, project)["raster_path"]
+        return runtime_paths(
+            {"raster_path": self.raster_path}, _PATHS, project
+        )["raster_path"]
 
 
 def read_bucket(dataset_root: str | Path, name: str) -> Bucket:
@@ -109,20 +118,28 @@ def read_bucket(dataset_root: str | Path, name: str) -> Bucket:
         raise NotABucketError(
             f"no bucket {name!r} is published under {dataset_root}, so nothing states who "
             "produced its documents or how. Publish predictions through run_inference, or stage "
-            "proposals through stage_proposals.")
+            "proposals through stage_proposals."
+        )
     execution = record.pop("execution")
     scope = ClassScope.of(record)
     del record["scope"]
-    return Bucket(root=dataset_root, name=name, scope=scope,
-                  execution=Execution.of(execution) if execution is not None else None, **record)
+    return Bucket(
+        root=dataset_root,
+        name=name,
+        scope=scope,
+        execution=Execution.of(execution) if execution is not None else None,
+        **record,
+    )
 
 
 def buckets_under(dataset_root: str | Path) -> list[Bucket]:
     """Every bucket published under ``dataset_root``, in name order."""
     from tcip_mcp.dataset_layout import PREDICTION_BUCKETS
 
-    return [read_bucket(dataset_root, key.parts[0])
-            for key in tcip_store.keys(PREDICTION_BUCKETS, str(dataset_root))]
+    return [
+        read_bucket(dataset_root, key.parts[0])
+        for key in tcip_store.keys(PREDICTION_BUCKETS, str(dataset_root))
+    ]
 
 
 def by_recorded_date(buckets: Iterable[Bucket]) -> dict[str, Bucket]:
@@ -131,11 +148,15 @@ def by_recorded_date(buckets: Iterable[Bucket]) -> dict[str, Bucket]:
     dated: dict[str, Bucket] = {}
     for bucket in buckets:
         if bucket.date is None:
-            raise ValueError(f"bucket {bucket.name!r} records no capture date, so it stands for no "
-                             "date of a series.")
+            raise ValueError(
+                f"bucket {bucket.name!r} records no capture date, so it stands for no "
+                "date of a series."
+            )
         if bucket.date in dated:
-            raise ValueError(f"buckets {dated[bucket.date].name!r} and {bucket.name!r} both record "
-                             f"capture date {bucket.date}: a series takes one bucket per date.")
+            raise ValueError(
+                f"buckets {dated[bucket.date].name!r} and {bucket.name!r} both record "
+                f"capture date {bucket.date}: a series takes one bucket per date."
+            )
         dated[bucket.date] = bucket
     return dated
 
@@ -147,7 +168,9 @@ def shared_root(buckets: Iterable[Bucket]) -> Path:
     return _one_root((b.root for b in buckets), "a delivery's buckets")
 
 
-def buckets_by_date(dataset_root: str | Path, dates: list[str]) -> dict[str, list[str]]:
+def buckets_by_date(
+    dataset_root: str | Path, dates: list[str]
+) -> dict[str, list[str]]:
     """For each of ``dates``, the names of the buckets under ``dataset_root`` whose record states
     that capture date."""
     grouped: dict[str, list[str]] = {d: [] for d in dates}
@@ -164,14 +187,22 @@ def pass_documents(p: Pass, results: Iterable[dict]) -> Iterator[Document]:
     it
     (:func:`~tcip_mcp.pipelines.postprocessing.export.encode_predictions`), any other head's as
     its own output (:func:`~tcip_mcp.pipelines.postprocessing.export.encode_head_output`)."""
-    from tcip_mcp.pipelines.postprocessing.export import encode_head_output, encode_predictions
+    from tcip_mcp.pipelines.postprocessing.export import (
+        encode_head_output,
+        encode_predictions,
+    )
 
     created_by = prediction_producer(p.checkpoint)
     detector = p.execution.conf is not None
     for r in results:
-        yield Document(r["image"], *(
-            encode_predictions(r, created_by=created_by, scope=p.scope) if detector
-            else encode_head_output(r, task=p.checkpoint.task)))
+        yield Document(
+            r["image"],
+            *(
+                encode_predictions(r, created_by=created_by, scope=p.scope)
+                if detector
+                else encode_head_output(r, task=p.checkpoint.task)
+            ),
+        )
 
 
 def _one_root(roots: Iterable[Path], what: str) -> Path:
@@ -179,8 +210,10 @@ def _one_root(roots: Iterable[Path], what: str) -> Path:
     naming ``what`` and the roots."""
     found = {tcip_store.canonical_path(root): root for root in roots}
     if len(found) != 1:
-        raise ValueError(f"{what} lie under {sorted(found) or 'no'} dataset root(s), and they "
-                         "belong to one.")
+        raise ValueError(
+            f"{what} lie under {sorted(found) or 'no'} dataset root(s), and they "
+            "belong to one."
+        )
     return next(iter(found.values()))
 
 
@@ -193,17 +226,27 @@ def source_root(sources: Iterable[str | Path]) -> Path:
     def root_of(source: str | Path) -> Path:
         root = dataset_root_of(source)
         if root is None:
-            raise ValueError(f"{source} lies under no dataset image tree, so no dataset root holds "
-                             "a bucket of its predictions.")
+            raise ValueError(
+                f"{source} lies under no dataset image tree, so no dataset root holds "
+                "a bucket of its predictions."
+            )
         return root
 
     return _one_root(map(root_of, sources), "a bucket's source images")
 
 
 def publish(
-    project: Path, root: Path, name: str, documents: Iterable[Document], *,
-    producer: dict[str, str | None], scope: ClassScope, execution: Execution | None,
-    raster_path: str | None, raster_identity: dict | None, assessment_id: str | None,
+    project: Path,
+    root: Path,
+    name: str,
+    documents: Iterable[Document],
+    *,
+    producer: dict[str, str | None],
+    scope: ClassScope,
+    execution: Execution | None,
+    raster_path: str | None,
+    raster_identity: dict | None,
+    assessment_id: str | None,
     actor: str | None,
 ) -> Bucket:
     """Publish ``documents`` as the bucket ``name`` under the dataset root ``root`` (the one
@@ -227,31 +270,55 @@ def publish(
     stems = [Path(d.source).stem for d in documents]
     repeated = sorted(s for s, n in Counter(stems).items() if n > 1)
     if repeated:
-        raise ValueError(f"two documents of one publication name the stems {repeated}, and a "
-                         "document is written once.")
-    capture = capture_of(raster_path if raster_path is not None else documents[0].source)
+        raise ValueError(
+            f"two documents of one publication name the stems {repeated}, and a "
+            "document is written once."
+        )
+    capture = capture_of(
+        raster_path if raster_path is not None else documents[0].source
+    )
     record = {
-        "producer": producer, "scope": asdict(scope),
+        "producer": producer,
+        "scope": asdict(scope),
         "execution": execution.record() if execution is not None else None,
-        "dataset_id": capture[0], "date": capture[1], "raster_path": raster_path,
+        "dataset_id": capture[0],
+        "date": capture[1],
+        "raster_path": raster_path,
         "raster_identity": raster_identity,
-        "documents": {Path(d.source).stem: Path(d.source).name for d in documents},
-        "dropped_boxes": sum(d.dropped for d in documents), "assessment_id": assessment_id,
+        "documents": {
+            Path(d.source).stem: Path(d.source).name for d in documents
+        },
+        "dropped_boxes": sum(d.dropped for d in documents),
+        "assessment_id": assessment_id,
     }
     keys = {stem: prediction_key(root, name, stem) for stem in stems}
     held, audit = bucket_key(root, name), audit_log_key(root)
     with tcip_store.transaction(held, audit, *keys.values()) as txn:
-        if txn.read_versioned(held, default=None).version != tcip_store.Version.ABSENT:
+        if (
+            txn.read_versioned(held, default=None).version
+            != tcip_store.Version.ABSENT
+        ):
             raise BucketExistsError(
                 f"bucket {name!r} is already published under {root}: a bucket is published "
                 "once, so a new publication, a resumed raster pass included, names a bucket that "
-                "does not exist yet.")
+                "does not exist yet."
+            )
         for document, stem in zip(documents, stems, strict=True):
             txn.write(keys[stem], document.data)
         txn.write(held, recorded_paths(record, _PATHS, project))
-        txn.append(audit, audit_entry("prediction_bucket_published", {
-            "dataset_root": str(root), "bucket": name,
-            "dropped_boxes": record["dropped_boxes"]}, actor, "ok"))
+        txn.append(
+            audit,
+            audit_entry(
+                "prediction_bucket_published",
+                {
+                    "dataset_root": str(root),
+                    "bucket": name,
+                    "dropped_boxes": record["dropped_boxes"],
+                },
+                actor,
+                "ok",
+            ),
+        )
     return read_bucket(root, name)
 
 
@@ -264,12 +331,22 @@ def detection_rows(bucket: Bucket) -> list[dict[str, Any]]:
     """Every document of ``bucket``, in stem order, as ``{"image", "count", "scores"}``: the
     source filename its record names, and the real detections it holds (a ``Point`` and a crowd
     region excluded) with their scores."""
-    from tcip_annotation.json_io import detection_annotations, read_label_document
+    from tcip_annotation.json_io import (
+        detection_annotations,
+        read_label_document,
+    )
     from tcip_annotation.state import prediction_score
 
     rows = []
     for key in bucket.document_keys:
-        annotations = detection_annotations(read_label_document(key).annotations)
-        rows.append({"image": bucket.documents[key.parts[-1]], "count": len(annotations),
-                     "scores": [prediction_score(a) for a in annotations]})
+        annotations = detection_annotations(
+            read_label_document(key).annotations
+        )
+        rows.append(
+            {
+                "image": bucket.documents[key.parts[-1]],
+                "count": len(annotations),
+                "scores": [prediction_score(a) for a in annotations],
+            }
+        )
     return rows

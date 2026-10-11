@@ -34,36 +34,57 @@ def _state_changing_calls() -> list[tuple[str, str]]:
 
 def test_the_walk_itself_is_non_empty() -> None:
     assert _state_changing_calls(), (
-        "no state-changing routes found; the route walk itself is broken")
+        "no state-changing routes found; the route walk itself is broken"
+    )
 
 
-def test_every_state_changing_route_refuses_a_foreign_origin(client: TestClient) -> None:
+def test_every_state_changing_route_refuses_a_foreign_origin(
+    client: TestClient,
+) -> None:
     """A foreign Origin never reaches a handler: the check runs before routing, so this fails
     at the first enumerated path whether or not that path resolves to a real record."""
     for method, path in _state_changing_calls():
-        resp = client.request(method, path, json={}, headers={"origin": FOREIGN_ORIGIN})
-        assert resp.status_code == 403, (method, path, resp.status_code, resp.text)
+        resp = client.request(
+            method, path, json={}, headers={"origin": FOREIGN_ORIGIN}
+        )
+        assert resp.status_code == 403, (
+            method,
+            path,
+            resp.status_code,
+            resp.text,
+        )
         assert resp.status_code != 422
         assert "origin not allowed" in resp.text
         assert EXPOSURE_REFUSAL not in resp.text
 
 
-def test_a_null_or_duplicated_origin_is_refused_the_same_way(client: TestClient) -> None:
+def test_a_null_or_duplicated_origin_is_refused_the_same_way(
+    client: TestClient,
+) -> None:
     method, path = _state_changing_calls()[0]
-    duplicated = [("origin", "http://127.0.0.1"), ("origin", "http://localhost:5173")]
+    duplicated = [
+        ("origin", "http://127.0.0.1"),
+        ("origin", "http://localhost:5173"),
+    ]
     for headers in ({"origin": "null"}, duplicated):
         resp = client.request(method, path, json={}, headers=headers)
         assert resp.status_code == 403, (headers, resp.status_code, resp.text)
         assert "origin not allowed" in resp.text
 
 
-def test_a_foreign_origin_post_to_a_path_no_route_serves_still_refuses(client: TestClient) -> None:
-    resp = client.post("/api/does/not/exist", json={}, headers={"origin": FOREIGN_ORIGIN})
+def test_a_foreign_origin_post_to_a_path_no_route_serves_still_refuses(
+    client: TestClient,
+) -> None:
+    resp = client.post(
+        "/api/does/not/exist", json={}, headers={"origin": FOREIGN_ORIGIN}
+    )
     assert resp.status_code == 403
     assert "origin not allowed" in resp.text
 
 
-def test_a_permitted_origin_still_reaches_the_handler(client: TestClient) -> None:
+def test_a_permitted_origin_still_reaches_the_handler(
+    client: TestClient,
+) -> None:
     """A request from the backend's own origin, from the Vite dev server's origin, and with no
     Origin header reaches the handler's own outcome: both origins are loopback hosts, and a
     missing Origin is a non-browser client."""
@@ -73,8 +94,11 @@ def test_a_permitted_origin_still_reaches_the_handler(client: TestClient) -> Non
         resp = client.post("/api/state/tab", json=body, headers=headers)
         assert resp.status_code == 200, (origin, resp.status_code, resp.text)
 
-        resp = client.post("/api/sessions/end", headers=headers,
-                           json={"project_id": "000000000000", "started": "never"})
+        resp = client.post(
+            "/api/sessions/end",
+            headers=headers,
+            json={"project_id": "000000000000", "started": "never"},
+        )
         assert resp.status_code == 409, (origin, resp.status_code, resp.text)
         assert "origin not allowed" not in resp.text
 
@@ -87,7 +111,9 @@ def test_an_empty_origin_refuses_on_the_tab_route(client: TestClient) -> None:
     assert "origin not allowed" in resp.text
 
 
-def test_a_get_with_a_foreign_origin_answers_as_it_does_without_one(client: TestClient) -> None:
+def test_a_get_with_a_foreign_origin_answers_as_it_does_without_one(
+    client: TestClient,
+) -> None:
     with_origin = client.get("/health", headers={"origin": FOREIGN_ORIGIN})
     without_origin = client.get("/health")
     assert with_origin.status_code == without_origin.status_code == 200

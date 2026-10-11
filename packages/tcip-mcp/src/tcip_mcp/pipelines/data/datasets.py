@@ -24,18 +24,44 @@ from torch.utils.data import Dataset
 from tcip_mcp.pipelines import raster_source
 from tcip_mcp.pipelines.data.band_groups import BandGroupRef
 from tcip_annotation.json_io import LabelDocument
-from tcip_annotation.state import Polygon, box_derivable, object_rows, polygonal
+from tcip_annotation.state import (
+    Polygon,
+    box_derivable,
+    object_rows,
+    polygonal,
+)
 
-from tcip_mcp.pipelines.data.label_queries import acquired, json_det_targets, resolved
-from tcip_mcp.pipelines.derivations import Region, num_classes_from_distribution
+from tcip_mcp.pipelines.data.label_queries import (
+    acquired,
+    json_det_targets,
+    resolved,
+)
+from tcip_mcp.pipelines.derivations import (
+    Region,
+    num_classes_from_distribution,
+)
 from tcip_mcp.pipelines.data.selection import (
-    DOCUMENT, MASK, SHAPE_DESCRIPTIONS, TABLE, ClassScope, Sample, refuse_unreadable_samples,
+    DOCUMENT,
+    MASK,
+    SHAPE_DESCRIPTIONS,
+    TABLE,
+    ClassScope,
+    Sample,
+    refuse_unreadable_samples,
 )
 from tcip_mcp.pipelines.image_utils import (
-    frame_size, load_image, pil_to_tensor, pixel_array,
+    frame_size,
+    load_image,
+    pil_to_tensor,
+    pixel_array,
     to_pil_if_faithful,
 )
-from tcip_mcp.pipelines.schemas import DatasetSourceSchema, DataSpec, TilingSpec, run_tiling
+from tcip_mcp.pipelines.schemas import (
+    DatasetSourceSchema,
+    DataSpec,
+    TilingSpec,
+    run_tiling,
+)
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.model_build import SourceLayout
@@ -47,7 +73,9 @@ class BaseDataset(Dataset, ABC):
     """Abstract base for all task-specific datasets."""
 
     task_type: str = ""
-    expected_channels: int  # input channels the dataset yields, stamped by build_dataset
+    expected_channels: (
+        int  # input channels the dataset yields, stamped by build_dataset
+    )
 
     @property
     @abstractmethod
@@ -105,7 +133,9 @@ class BaseImageDataset(BaseDataset):
     @classmethod
     def refuse_other_shapes(cls, samples: Sequence[Sample]) -> None:
         """Refuse a sample whose own ground truth is not the shape this loader reads, naming it."""
-        wrong = [s.location for s in samples if s.shape != cls.ground_truth_shape]
+        wrong = [
+            s.location for s in samples if s.shape != cls.ground_truth_shape
+        ]
         if wrong:
             raise ValueError(
                 f"{len(wrong)} sample(s) name ground truth a {cls.task_type} loader does not "
@@ -156,7 +186,11 @@ class BaseImageDataset(BaseDataset):
         reads = self.reads_geometry
         wrong = []
         for sample in samples:
-            mine = [a for a in sample.read.annotations if a.subject == self.scope.subject]
+            mine = [
+                a
+                for a in sample.read.annotations
+                if a.subject == self.scope.subject
+            ]
             if mine and not any(reads(a.geometry) for a in mine):
                 wrong.append(sample.location)
         if wrong:
@@ -184,7 +218,10 @@ class BaseImageDataset(BaseDataset):
         """Apply PIL transforms (when applicable) or convert straight to a tensor."""
         if self.transforms is not None and isinstance(img, Image.Image):
             return self.transforms(img, target)
-        if self.transforms is not None and not BaseImageDataset._warned_ndarray_transforms:
+        if (
+            self.transforms is not None
+            and not BaseImageDataset._warned_ndarray_transforms
+        ):
             # Warned once: config claiming augmentation the model never saw is a provenance break.
             BaseImageDataset._warned_ndarray_transforms = True
             logger.warning(
@@ -199,6 +236,7 @@ class BaseImageDataset(BaseDataset):
 # ====================================================================
 # Detection
 # ====================================================================
+
 
 def indexed_sample_keys(dataset: Any) -> set[str]:
     """The sample keys a built dataset actually indexes, however many examples each one yields.
@@ -216,11 +254,20 @@ def target_tensors(target: Any) -> dict[str, torch.Tensor]:
     ``attributes`` rows when it carries them, as the tensors every detection loader emits,
     ``iscrowd`` under torchvision's reference key."""
     return {
-        "boxes": torch.tensor(target["boxes"], dtype=torch.float32).reshape(-1, 4),
+        "boxes": torch.tensor(target["boxes"], dtype=torch.float32).reshape(
+            -1, 4
+        ),
         "labels": torch.tensor(target["labels"], dtype=torch.int64),
         "iscrowd": torch.tensor(crowd_of(target), dtype=torch.int64),
-        **({"attributes": torch.as_tensor(target["attributes"], dtype=torch.int64)}
-           if "attributes" in target else {}),
+        **(
+            {
+                "attributes": torch.as_tensor(
+                    target["attributes"], dtype=torch.int64
+                )
+            }
+            if "attributes" in target
+            else {}
+        ),
     }
 
 
@@ -233,9 +280,11 @@ def crowd_of(target: Mapping[str, Any]) -> Any:
     """A detection target's per-box crowd flags, which every detection producer states; a target
     stating none refuses (``ValueError``) naming the key."""
     if target.get("iscrowd") is None:
-        raise ValueError("this detection target states no 'iscrowd': whether each row is one "
-                         "object or a crowd region is its producer's to state, so a bespoke "
-                         "dataset emits it beside its boxes and labels.")
+        raise ValueError(
+            "this detection target states no 'iscrowd': whether each row is one "
+            "object or a crowd region is its producer's to state, so a bespoke "
+            "dataset emits it beside its boxes and labels."
+        )
     return target["iscrowd"]
 
 
@@ -243,14 +292,20 @@ def object_region(target: Mapping[str, Any], area: float) -> Region:
     """The objects of a detection ``target`` (its rows but the crowd regions, :func:`object_rows`),
     their xyxy boxes and labels, over a region of ``area`` pixels."""
     keep = object_rows(crowd_of(target))
-    return Region(boxes=np.asarray(target["boxes"], dtype=np.float32).reshape(-1, 4)[keep],
-                  labels=np.asarray(target["labels"], dtype=np.int64).reshape(-1)[keep],
-                  area=float(area))
+    return Region(
+        boxes=np.asarray(target["boxes"], dtype=np.float32).reshape(-1, 4)[
+            keep
+        ],
+        labels=np.asarray(target["labels"], dtype=np.int64).reshape(-1)[keep],
+        area=float(area),
+    )
 
 
 def class_counts(regions: Iterable[Region]) -> dict[int, int]:
     """Objects per 0-indexed class id over ``regions``."""
-    return dict(Counter(int(label) - 1 for r in regions for label in r.labels.tolist()))
+    return dict(
+        Counter(int(label) - 1 for r in regions for label in r.labels.tolist())
+    )
 
 
 def instance_targets(targets: list[dict]) -> list[dict]:
@@ -260,8 +315,9 @@ def instance_targets(targets: list[dict]) -> list[dict]:
     out = []
     for t in targets:
         keep = object_rows(crowd_of(t))
-        out.append({k: v[keep] if k in PER_BOX_KEYS else v
-                    for k, v in t.items()})
+        out.append(
+            {k: v[keep] if k in PER_BOX_KEYS else v for k, v in t.items()}
+        )
     return out
 
 
@@ -272,7 +328,11 @@ class DocumentDataset(BaseImageDataset):
     ground_truth_shape = DOCUMENT
 
     def __init__(
-        self, samples: Sequence[Sample], transforms: Any = None, *, scope: ClassScope,
+        self,
+        samples: Sequence[Sample],
+        transforms: Any = None,
+        *,
+        scope: ClassScope,
     ) -> None:
         self.transforms = transforms
         self.scope = scope
@@ -286,8 +346,11 @@ class DocumentDataset(BaseImageDataset):
         """One sample's label ``document`` (:meth:`document`) as the target
         :func:`json_det_targets` reads under this run's own class space and this task's own
         geometry (``reads_geometry``)."""
-        return json_det_targets(document.annotations, self.scope,
-                                reads=cast("Callable[[Any], bool]", self.reads_geometry))
+        return json_det_targets(
+            document.annotations,
+            self.scope,
+            reads=cast("Callable[[Any], bool]", self.reads_geometry),
+        )
 
     def region(self, stem: str) -> Region:
         """One sample's objects over the frame its label document records
@@ -295,7 +358,9 @@ class DocumentDataset(BaseImageDataset):
         from tcip_mcp.pipelines.data.splits import label_document_extent
 
         document = self.document(stem)
-        width, height = label_document_extent(document, f"{stem}'s label document")
+        width, height = label_document_extent(
+            document, f"{stem}'s label document"
+        )
         return object_region(self.det_targets(document), width * height)
 
     @property
@@ -312,7 +377,9 @@ class DocumentDataset(BaseImageDataset):
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
         stem = self.stems[idx]
         img = self._open_image(stem)
-        target = self.tensors({**self.det_targets(self.document(stem)), "size": frame_size(img)})
+        target = self.tensors(
+            {**self.det_targets(self.document(stem)), "size": frame_size(img)}
+        )
         return self._finalize(img, {**target, "image_id": idx})
 
 
@@ -334,8 +401,10 @@ class DetectionDataset(DocumentDataset):
 # Tiled Detection (SAHI's slice lattice)
 # ====================================================================
 
-def slice_candidates(boxes: np.ndarray,
-                     slices: list[tuple[int, int, int, int]]) -> list[np.ndarray]:
+
+def slice_candidates(
+    boxes: np.ndarray, slices: list[tuple[int, int, int, int]]
+) -> list[np.ndarray]:
     """Each slice's candidate rows of a frame whose full-image xyxy ``boxes`` are given: the
     ascending indices of every row whose box can meet the slice's half-open ``(x0, y0, x1, y1)``
     extent, a superset :func:`clip_rows_to_tile` decides on. Found from the slice origins each
@@ -363,8 +432,11 @@ def slice_candidates(boxes: np.ndarray,
 
 
 def clip_rows_to_tile(
-    shapes: Sequence[Any], boxes: np.ndarray, rows: np.ndarray,
-    tile: tuple[int, int, int, int], min_box_size: float,
+    shapes: Sequence[Any],
+    boxes: np.ndarray,
+    rows: np.ndarray,
+    tile: tuple[int, int, int, int],
+    min_box_size: float,
 ) -> tuple[np.ndarray, np.ndarray, list[Polygon]]:
     """The ``rows`` of a frame clipped once to the half-open pixel ``tile`` ``(x0, y0, x1, y1)``:
     each row's region (``shapes``, its Shapely geometry,
@@ -381,17 +453,37 @@ def clip_rows_to_tile(
 
     x0, y0, x1, y1 = tile
     rows = np.asarray(rows, dtype=np.int64)
-    clipped = shapely.intersection(np.asarray(shapes, dtype=object)[rows],
-                                   shapely.box(x0, y0, x1, y1))
+    clipped = shapely.intersection(
+        np.asarray(shapes, dtype=object)[rows], shapely.box(x0, y0, x1, y1)
+    )
     bounds = np.nan_to_num(shapely.bounds(clipped)).reshape(-1, 4)
     frame = np.asarray(boxes, dtype=np.float64).reshape(-1, 4)[rows]
-    crosses = ((frame[:, 0] < x0) | (frame[:, 1] < y0) | (frame[:, 2] > x1)
-               | (frame[:, 3] > y1))
-    keep = (shapely.area(clipped) > 0) & ~(crosses & (box_sizes(bounds) < min_box_size))
-    pieces = [[p for p in shapely.get_parts(region) if isinstance(p, shapely.Polygon) and p.area]
-              for region in clipped[keep]]
-    regions = [Polygon(rings=[[(x - x0, y - y0) for x, y in p.exterior.coords[:-1]]
-                              for p in parts]) for parts in pieces]
+    crosses = (
+        (frame[:, 0] < x0)
+        | (frame[:, 1] < y0)
+        | (frame[:, 2] > x1)
+        | (frame[:, 3] > y1)
+    )
+    keep = (shapely.area(clipped) > 0) & ~(
+        crosses & (box_sizes(bounds) < min_box_size)
+    )
+    pieces = [
+        [
+            p
+            for p in shapely.get_parts(region)
+            if isinstance(p, shapely.Polygon) and p.area
+        ]
+        for region in clipped[keep]
+    ]
+    regions = [
+        Polygon(
+            rings=[
+                [(x - x0, y - y0) for x, y in p.exterior.coords[:-1]]
+                for p in parts
+            ]
+        )
+        for parts in pieces
+    ]
     local = (bounds[keep] - [x0, y0, x0, y0]).astype(np.float32)
     return local, rows[keep], regions
 
@@ -411,11 +503,13 @@ def _validated_keep_regions(
         vals = tuple(int(v) for v in region)
         if len(vals) != 4:
             raise ValueError(
-                f"keep region {region!r} must be a half-open pixel rect (x0, y0, x1, y1)")
+                f"keep region {region!r} must be a half-open pixel rect (x0, y0, x1, y1)"
+            )
         x0, y0, x1, y1 = vals
         if x1 <= x0 or y1 <= y0:
             raise ValueError(
-                f"keep region {vals!r} has no extent: half-open needs x0 < x1 and y0 < y1")
+                f"keep region {vals!r} has no extent: half-open needs x0 < x1 and y0 < y1"
+            )
         regions.append(vals)
     return regions
 
@@ -464,7 +558,10 @@ class TiledDetectionDataset(BaseImageDataset):
         transforms: Any = None,
         keep_regions: Sequence[tuple[int, int, int, int]] | None = None,
     ) -> None:
-        from tcip_mcp.pipelines.derivations import char_sizes, derive_sliver_frac
+        from tcip_mcp.pipelines.derivations import (
+            char_sizes,
+            derive_sliver_frac,
+        )
         from tcip_mcp.pipelines.raster_source import rect_contains_rect
         from tcip_mcp.pipelines.slicing import is_full_slice, slice_lattice
 
@@ -482,7 +579,9 @@ class TiledDetectionDataset(BaseImageDataset):
         self.tiles_dropped_outside_regions = 0
 
         # Pass 1: every image's dims and rows, and the objects of each whole frame.
-        stems_data: list[tuple[str, np.ndarray, dict[str, np.ndarray], list, int, int]] = []
+        stems_data: list[
+            tuple[str, np.ndarray, dict[str, np.ndarray], list, int, int]
+        ] = []
         frames: list[Region] = []
         for stem in base.stems:
             # Acquired now, so an unreadable layout refuses here rather than mid-epoch.
@@ -491,16 +590,23 @@ class TiledDetectionDataset(BaseImageDataset):
             src = raster_source.pooled_source(header, self.expected_channels)
             windowed = src is not None
             channels = None if src is None else int(src.num_channels)
-            itemsize = None if src is None else int(np.dtype(src.dtype).itemsize)
+            itemsize = (
+                None if src is None else int(np.dtype(src.dtype).itemsize)
+            )
             self._source_frames[stem] = {
-                "width": int(w), "height": int(h), "channels": channels,
-                "dtype_itemsize": itemsize, "windowed": windowed,
+                "width": int(w),
+                "height": int(h),
+                "channels": channels,
+                "dtype_itemsize": itemsize,
+                "windowed": windowed,
             }
             # The frame the boxes were drawn in, which a multi-band raster can decode differently.
             from tcip_mcp.pipelines.data.splits import label_document_extent
 
             document = base.document(stem)
-            authored = label_document_extent(document, f"{stem}'s label document")
+            authored = label_document_extent(
+                document, f"{stem}'s label document"
+            )
             if authored != (w, h):
                 raise ValueError(
                     f"tiled dataset frame mismatch for stem {stem!r}: the labels record a "
@@ -512,8 +618,11 @@ class TiledDetectionDataset(BaseImageDataset):
                 )
             full = base.det_targets(document)
             fb = np.asarray(full["boxes"], dtype=np.float32).reshape(-1, 4)
-            rows_of: dict[str, np.ndarray] = {k: np.asarray(full[k], dtype=np.int64)
-                                              for k in PER_BOX_KEYS if k != "boxes" and k in full}
+            rows_of: dict[str, np.ndarray] = {
+                k: np.asarray(full[k], dtype=np.int64)
+                for k in PER_BOX_KEYS
+                if k != "boxes" and k in full
+            }
             stems_data.append((stem, fb, rows_of, full["geometry"], w, h))
             frames.append(object_region(full, w * h))
 
@@ -526,7 +635,8 @@ class TiledDetectionDataset(BaseImageDataset):
             raise ValueError(
                 f"the tile-seam sliver cutoff derives from the ground truth's own box-size spread, "
                 f"and this dataset holds {len(sizes)} box(es), too few to measure one; state "
-                "tiling.sliver_frac for this run.")
+                "tiling.sliver_frac for this run."
+            )
         min_box_size = sliver_frac * class_avg_size
 
         for stem, fb, rows_of, geometries, w, h in stems_data:
@@ -543,11 +653,20 @@ class TiledDetectionDataset(BaseImageDataset):
                 slices = kept
             shapes = [shapely_geometry(geometry_rings(g)) for g in geometries]
             for s, candidates in zip(slices, slice_candidates(fb, slices)):
-                tb, rows, clipped = clip_rows_to_tile(shapes, fb, candidates, s, min_box_size)
+                tb, rows, clipped = clip_rows_to_tile(
+                    shapes, fb, candidates, s, min_box_size
+                )
                 if skip_empty and len(tb) == 0:
                     continue
-                self._index.append({"stem": stem, "slice": s, "boxes": tb, "geometry": clipped,
-                                    **{k: v[rows] for k, v in rows_of.items()}})
+                self._index.append(
+                    {
+                        "stem": stem,
+                        "slice": s,
+                        "boxes": tb,
+                        "geometry": clipped,
+                        **{k: v[rows] for k, v in rows_of.items()},
+                    }
+                )
 
     @property
     def stems(self) -> list[str]:
@@ -571,14 +690,19 @@ class TiledDetectionDataset(BaseImageDataset):
     def regions(self) -> list[Region]:
         """Each indexed tile's objects over its own pixel area (:func:`object_region`), in index
         order."""
-        return [object_region(e, (x1 - x0) * (y1 - y0))
-                for e in self._index for x0, y0, x1, y1 in [e["slice"]]]
+        return [
+            object_region(e, (x1 - x0) * (y1 - y0))
+            for e in self._index
+            for x0, y0, x1, y1 in [e["slice"]]
+        ]
 
     @property
     def class_distribution(self) -> dict[int, int]:
         return class_counts(self.regions)
 
-    def _read_windowed_tile(self, stem: str, info: dict, s: tuple[int, int, int, int]):
+    def _read_windowed_tile(
+        self, stem: str, info: dict, s: tuple[int, int, int, int]
+    ):
         """One slice through the pooled windowed source: its ``[H, W, C]`` array and the source's
         band interpretations.
 
@@ -586,9 +710,18 @@ class TiledDetectionDataset(BaseImageDataset):
         returned window's shape disagrees with the requested rect.
         """
         src = raster_source.pooled_source(
-            raster_source.SourceHeader(self.image_of(stem)), self.expected_channels)
-        if src is None or (src.width, src.height) != (info["width"], info["height"]):
-            opened = "a whole decode" if src is None else f"{src.width}x{src.height}"
+            raster_source.SourceHeader(self.image_of(stem)),
+            self.expected_channels,
+        )
+        if src is None or (src.width, src.height) != (
+            info["width"],
+            info["height"],
+        ):
+            opened = (
+                "a whole decode"
+                if src is None
+                else f"{src.width}x{src.height}"
+            )
             raise ValueError(
                 f"tiled dataset frame changed for stem {stem!r}: indexed at "
                 f"{info['width']}x{info['height']} through a windowed reader but the source now "
@@ -615,7 +748,9 @@ class TiledDetectionDataset(BaseImageDataset):
         info = self._source_frames[stem]
         interpretations = None
         if info["windowed"]:
-            region, interpretations = self._read_windowed_tile(stem, info, e["slice"])
+            region, interpretations = self._read_windowed_tile(
+                stem, info, e["slice"]
+            )
         else:
             img = self._open_image(stem)
             w, h = frame_size(img)
@@ -628,13 +763,19 @@ class TiledDetectionDataset(BaseImageDataset):
             arr, interpretations = pixel_array(img)
             region = arr[y0:y1, x0:x1]
         tile = to_pil_if_faithful(region, band_interpretations=interpretations)
-        return self._finalize(tile, {**self._tensors({**e, "size": (x1 - x0, y1 - y0)}),
-                                     "image_id": idx})
+        return self._finalize(
+            tile,
+            {
+                **self._tensors({**e, "size": (x1 - x0, y1 - y0)}),
+                "image_id": idx,
+            },
+        )
 
 
 # ====================================================================
 # Instance Segmentation
 # ====================================================================
+
 
 class InstanceSegDataset(DocumentDataset):
     """Instance masks from per-image polygons: the producer's own samples, each naming its own
@@ -648,11 +789,15 @@ class InstanceSegDataset(DocumentDataset):
     def tensors(target: Mapping[str, Any]) -> dict[str, torch.Tensor]:
         """:func:`target_tensors` beside ``masks``, each row's polygon rasterized on the
         ``size`` ``(width, height)`` of the image it is served with (:func:`instance_masks`)."""
-        return {**target_tensors(target),
-                "masks": instance_masks(target["geometry"], target["size"])}
+        return {
+            **target_tensors(target),
+            "masks": instance_masks(target["geometry"], target["size"]),
+        }
 
 
-def instance_masks(polygons: Sequence[Any], size: tuple[int, int]) -> torch.Tensor:
+def instance_masks(
+    polygons: Sequence[Any], size: tuple[int, int]
+) -> torch.Tensor:
     """Each polygon of ``polygons`` filled on its own ``size`` ``(width, height)`` canvas, as a
     ``[N, height, width]`` uint8 tensor. Every ring of a polygon fills its one mask: a multi-ring
     instance is one occlusion-split object."""
@@ -673,6 +818,7 @@ def instance_masks(polygons: Sequence[Any], size: tuple[int, int]) -> torch.Tens
 # Semantic Segmentation
 # ====================================================================
 
+
 class SemanticSegDataset(BaseImageDataset):
     """PNG mask images where pixel values are class IDs, over a recorded sample list.
 
@@ -684,7 +830,9 @@ class SemanticSegDataset(BaseImageDataset):
     ground_truth_shape = MASK
     ground_truth_count = "num_classes"
 
-    def __init__(self, samples: Sequence[Sample], transforms: Any = None) -> None:
+    def __init__(
+        self, samples: Sequence[Sample], transforms: Any = None
+    ) -> None:
         self.transforms = transforms
         self._init_from_samples(samples)
 
@@ -699,6 +847,7 @@ class SemanticSegDataset(BaseImageDataset):
 # ====================================================================
 # Classification
 # ====================================================================
+
 
 def table_values(samples: Sequence[Sample]) -> list[str]:
     """Each sample's own table-row value, as its one read answered it
@@ -716,18 +865,24 @@ class TableDataset(BaseImageDataset):
     target_key = ""
     convert: "staticmethod[[str], Any]" = staticmethod(int)
 
-    def __init__(self, samples: Sequence[Sample], transforms: Any = None) -> None:
+    def __init__(
+        self, samples: Sequence[Sample], transforms: Any = None
+    ) -> None:
         self.transforms = transforms
         self._init_from_samples(samples)
-        self._values = [self.convert(self._samples[k].read) for k in self._keys]
+        self._values = [
+            self.convert(self._samples[k].read) for k in self._keys
+        ]
 
     @property
     def class_distribution(self) -> dict[int, int]:
         return dict(Counter(self._values)) if self.ground_truth_count else {}
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
-        return self._finalize(self._open_image(self.stems[idx]),
-                              {self.target_key: self._values[idx]})
+        return self._finalize(
+            self._open_image(self.stems[idx]),
+            {self.target_key: self._values[idx]},
+        )
 
 
 class ClassificationDataset(TableDataset):
@@ -770,8 +925,9 @@ _DATASET_MAP: dict[str, type[BaseImageDataset]] = {
 only through a bespoke ``dataset_source`` builder."""
 
 
-def builtin_loader(task: str, dataset_source: DatasetSourceSchema | None = None
-                   ) -> type[BaseImageDataset] | None:
+def builtin_loader(
+    task: str, dataset_source: DatasetSourceSchema | None = None
+) -> type[BaseImageDataset] | None:
     """The built-in loader a run of ``task`` is read by: ``None`` for a run naming a bespoke
     ``dataset_source`` and for a task no built-in loader reads."""
     return None if dataset_source else _DATASET_MAP.get(task)
@@ -783,7 +939,11 @@ BespokeSource = tuple[DatasetSourceSchema, "SourceLayout"]
 
 
 def build_from_dataset_source(
-    bespoke: BespokeSource, *, task: str, samples: Sequence[Sample], scope: ClassScope,
+    bespoke: BespokeSource,
+    *,
+    task: str,
+    samples: Sequence[Sample],
+    scope: ClassScope,
     transforms: Any,
 ) -> Dataset:
     """Import the agent's dataset builder a ``dataset_source`` names from its run's layout
@@ -803,8 +963,12 @@ def build_from_dataset_source(
     dataset_source, layout = bespoke
     fn = import_source_builder(dataset_source.builder, layout)
     builder_kwargs = dataset_source.builder_kwargs or {}
-    context = {"task": task, "samples": resolved(samples), "scope": scope,
-               "transforms": transforms}
+    context = {
+        "task": task,
+        "samples": resolved(samples),
+        "scope": scope,
+        "transforms": transforms,
+    }
     restated = sorted(set(context) & set(builder_kwargs))
     if restated:
         raise ValueError(
@@ -839,9 +1003,12 @@ def _band_count(samples: Sequence[Sample]) -> int:
     if not counts:
         raise ValueError(
             "a loader is built over the samples the platform's own producer named, and none were "
-            "handed here, so there is no source to read a band count from.")
+            "handed here, so there is no source to read a band count from."
+        )
     if len(counts) > 1:
-        named = ", ".join(f"{count} in {counts[count]}" for count in sorted(counts))
+        named = ", ".join(
+            f"{count} in {counts[count]}" for count in sorted(counts)
+        )
         raise ValueError(
             f"the sources this run was handed carry different band counts ({named}): one model "
             f"reads one band count, so training over both would read every image of one of them "
@@ -862,11 +1029,15 @@ SIZE_NAMES = GROUND_TRUTH_COUNTS + ("num_channels",)
 def stated_sizes(data: DataSpec) -> dict[str, int]:
     """The sizes a data block states or records, absent where it states none."""
     sizes = {name: getattr(data, name) for name in SIZE_NAMES}
-    return {name: int(size) for name, size in sizes.items() if size is not None}
+    return {
+        name: int(size) for name, size in sizes.items() if size is not None
+    }
 
 
 def resolve_sizes(
-    task: str, stated: "Mapping[str, int]", samples: Sequence[Sample],
+    task: str,
+    stated: "Mapping[str, int]",
+    samples: Sequence[Sample],
     dataset_source: DatasetSourceSchema | None = None,
 ) -> dict[str, int]:
     """The sizes a run's loaders are built at: what its caller states (``stated``, by
@@ -890,7 +1061,9 @@ def resolve_sizes(
         resolved["num_channels"] = _band_count(samples)
     if cls is None:
         return resolved
-    stated_counts = [count for count in GROUND_TRUTH_COUNTS if count in resolved]
+    stated_counts = [
+        count for count in GROUND_TRUTH_COUNTS if count in resolved
+    ]
     if stated_counts:
         raise ValueError(
             f"this {task} run states {stated_counts}: a built-in loader's count is the one its "
@@ -900,16 +1073,28 @@ def resolve_sizes(
     name = cls.ground_truth_count
     if name is None:
         return resolved
-    ids = (Counter(int(v) for s in acquired(samples) for v in np.unique(cls.read_mask(s)))
-           if cls.ground_truth_shape == MASK
-           else Counter(int(value) for value in table_values(samples)))
+    ids = (
+        Counter(
+            int(v)
+            for s in acquired(samples)
+            for v in np.unique(cls.read_mask(s))
+        )
+        if cls.ground_truth_shape == MASK
+        else Counter(int(value) for value in table_values(samples))
+    )
     resolved[name] = num_classes_from_distribution(ids)
     return resolved
 
 
 def build_dataset(
-    task: str, *, samples: Sequence[Sample], sizes: "Mapping[str, int]", scope: ClassScope,
-    transforms: Any = None, tiling: TilingSpec | None = None, **unowned: Any,
+    task: str,
+    *,
+    samples: Sequence[Sample],
+    sizes: "Mapping[str, int]",
+    scope: ClassScope,
+    transforms: Any = None,
+    tiling: TilingSpec | None = None,
+    **unowned: Any,
 ) -> Dataset:
     """Factory: build the platform's dataset for ``task``.
 
@@ -934,7 +1119,8 @@ def build_dataset(
             f"augmentation this run resolved, and nothing else, so anything further could answer "
             f"for a membership, a class space or a format this run's own record does not state. "
             f"Drop {sorted(unowned)}; a dataset_source builds through build_from_dataset_source "
-            "(ctx.build_dataset from a training body), configured by its builder_kwargs.")
+            "(ctx.build_dataset from a training body), configured by its builder_kwargs."
+        )
 
     from tcip_mcp.pipelines.model_build import resolve_named
 
@@ -948,13 +1134,17 @@ def build_dataset(
             raise ValueError(
                 f"build_dataset was given an enabled tiling with tile_size {tiler.tile_size!r} "
                 f"and overlap {tiler.overlap!r}: a tiler runs on one whole lattice; state both, "
-                "or resolve them with split_construction.resolved_tiling.")
+                "or resolve them with split_construction.resolved_tiling."
+            )
         base = construct(samples=samples, **declared)
-        assert isinstance(base, DocumentDataset), "a task that tiles reads label documents"
+        assert isinstance(base, DocumentDataset), (
+            "a task that tiles reads label documents"
+        )
         # Stamped before the tiler indexes every image at the base's band count.
         base.expected_channels = sizes["num_channels"]
-        ds: BaseDataset = TiledDetectionDataset(base, transforms=transforms,
-                                                **tiler.tiler_options())
+        ds: BaseDataset = TiledDetectionDataset(
+            base, transforms=transforms, **tiler.tiler_options()
+        )
     else:
         ds = construct(samples=samples, transforms=transforms, **declared)
 

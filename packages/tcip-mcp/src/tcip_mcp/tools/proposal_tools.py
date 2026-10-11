@@ -23,7 +23,8 @@ from tcip_annotation.viz import render_candidates, render_detections
 
 from tcip_mcp.audit import now_iso, record_event_or_raise
 from tcip_mcp.pipelines.image_utils import (
-    BandGroupIncompleteError, resolve_image_path,
+    BandGroupIncompleteError,
+    resolve_image_path,
 )
 from tcip_mcp.pipelines.raster_source import SourceHeader
 from tcip_mcp.project_paths import viz_output_path
@@ -47,7 +48,9 @@ class _StatedSubject(BaseModel):
     subject: str
 
 
-def proposal_staging_key(dataset_root: str | Path, capture: str, stem: str) -> ts.Key:
+def proposal_staging_key(
+    dataset_root: str | Path, capture: str, stem: str
+) -> ts.Key:
     """The candidates the latest proposal run produced for one dataset image, whole, under the
     dataset root, by the image's capture and stem."""
     return ts.Key(PROPOSAL_STAGING_STORE, str(dataset_root), (capture, stem))
@@ -70,8 +73,12 @@ def _region_rect_from_cells(cells: list, names: list[str]) -> "Rect":
     from tcip_mcp.pipelines.raster_source import Rect
 
     matched = [grid_to_rect(name, cells) for name in names]
-    return Rect(int(min(r[0] for r in matched)), int(min(r[1] for r in matched)),
-                int(max(r[2] for r in matched)), int(max(r[3] for r in matched)))
+    return Rect(
+        int(min(r[0] for r in matched)),
+        int(min(r[1] for r in matched)),
+        int(max(r[2] for r in matched)),
+        int(max(r[3] for r in matched)),
+    )
 
 
 def _write_region_crop(pixels: "np.ndarray") -> Path:
@@ -92,7 +99,9 @@ def _write_region_crop(pixels: "np.ndarray") -> Path:
     return Path(tmp)
 
 
-def _offset_candidates(candidates: list[dict], origin: tuple[float, float]) -> list[dict]:
+def _offset_candidates(
+    candidates: list[dict], origin: tuple[float, float]
+) -> list[dict]:
     """Candidates proposed against a region crop's own pixels, translated into the source image's
     full-frame native coordinates by the crop's own origin.
     """
@@ -102,7 +111,9 @@ def _offset_candidates(candidates: list[dict], origin: tuple[float, float]) -> l
         c = dict(c)
         x1, y1, x2, y2 = c["bbox"]
         c["bbox"] = [x1 + ox, y1 + oy, x2 + ox, y2 + oy]
-        c["rings"] = [[(x + ox, y + oy) for x, y in ring] for ring in c["rings"]]
+        c["rings"] = [
+            [(x + ox, y + oy) for x, y in ring] for ring in c["rings"]
+        ]
         shifted.append(c)
     return shifted
 
@@ -175,7 +186,12 @@ def propose_annotations(
         source = resolve_image_path(img)
         proposer = resolve_proposer(engine)
         raster = SourceHeader(source).open_at_route_count()
-    except (FileNotFoundError, BandGroupIncompleteError, ValueError, ImportError) as e:
+    except (
+        FileNotFoundError,
+        BandGroupIncompleteError,
+        ValueError,
+        ImportError,
+    ) as e:
         return {"error": str(e)}
     # The region crop, the engine's pass, the render and the staged content identity all read
     # this one reader.
@@ -187,35 +203,48 @@ def propose_annotations(
         region_info: dict | None = None
         if grid_cells is not None:
             if not grid_cells:
-                return {"error": "grid_cells is empty; name at least one cell to scope the region."}
+                return {
+                    "error": "grid_cells is empty; name at least one cell to scope the region."
+                }
             if tile_size is None:
-                return {"error": "grid_cells requires tile_size, the cell edge of the grid the "
-                                 "cells were read off (overlay_reference_grid echoes it back, "
-                                 "with overlap). Without it a cell name resolves against a grid "
-                                 "nobody rendered."}
+                return {
+                    "error": "grid_cells requires tile_size, the cell edge of the grid the "
+                    "cells were read off (overlay_reference_grid echoes it back, "
+                    "with overlap). Without it a cell name resolves against a grid "
+                    "nobody rendered."
+                }
             from tcip_mcp.pipelines.reference_grid import reference_cells
 
             try:
-                cells = reference_cells(raster.width, raster.height, tile_size, overlap,
-                                        clamp=True)
+                cells = reference_cells(
+                    raster.width, raster.height, tile_size, overlap, clamp=True
+                )
                 rect = _region_rect_from_cells(cells, grid_cells)
                 pixels, _spec = raster.read_region(rect)
             except ValueError as e:
                 return {"error": str(e)}
             if pixels.dtype != "uint8" or pixels.shape[-1] != 3:
-                return {"error": "A region crop is handed to the engine as an RGB image, and "
-                                 f"{img.name} reads as {pixels.shape[-1]} band(s) of "
-                                 f"{pixels.dtype}. Propose over the whole frame instead, or "
-                                 "bring an engine that reads this source itself."}
+                return {
+                    "error": "A region crop is handed to the engine as an RGB image, and "
+                    f"{img.name} reads as {pixels.shape[-1]} band(s) of "
+                    f"{pixels.dtype}. Propose over the whole frame instead, or "
+                    "bring an engine that reads this source itself."
+                }
             crop_tmp = _write_region_crop(pixels)
             propose_path = str(crop_tmp)
             origin = (float(rect.x0), float(rect.y0))
-            region_info = {"grid_cells": list(grid_cells), "tile_size": tile_size,
-                           "overlap": overlap, "rect": [rect.x0, rect.y0, rect.x1, rect.y1]}
+            region_info = {
+                "grid_cells": list(grid_cells),
+                "tile_size": tile_size,
+                "overlap": overlap,
+                "rect": [rect.x0, rect.y0, rect.x1, rect.y1],
+            }
 
         try:
             try:
-                candidates = proposer.propose(propose_path, **(engine_params or {}))
+                candidates = proposer.propose(
+                    propose_path, **(engine_params or {})
+                )
             except ImportError as e:
                 return {"error": str(e)}
             except FileNotFoundError as e:
@@ -235,9 +264,12 @@ def propose_annotations(
                 pass
             else:
                 if ts.delete(stale):
-                    record_event_or_raise("propose_annotations",
-                                          {"image_path": image_path, "staged": 0},
-                                          actor=None, scope=stale.root)
+                    record_event_or_raise(
+                        "propose_annotations",
+                        {"image_path": image_path, "staged": 0},
+                        actor=None,
+                        scope=stale.root,
+                    )
             return {
                 "image_path": None,
                 "engine": engine,
@@ -254,14 +286,20 @@ def propose_annotations(
                 Polygon(rings=candidate["rings"])
                 candidate["score"] = float(candidate["score"])
         except (KeyError, TypeError, ValueError) as exc:
-            return {"error": f"Engine {engine!r} proposed a candidate this platform cannot "
-                             f"hold: {exc}"}
+            return {
+                "error": f"Engine {engine!r} proposed a candidate this platform cannot "
+                f"hold: {exc}"
+            }
 
         from tcip_mcp.tools.vision_tools import _read_for_display
 
         read = _read_for_display(raster)
-        out = render_candidates(read.pixels, candidates, native_size=read.native_size,
-                                output_path=viz_output_path(project, "candidates"))
+        out = render_candidates(
+            read.pixels,
+            candidates,
+            native_size=read.native_size,
+            output_path=viz_output_path(project, "candidates"),
+        )
 
         # The envelope records the engine so stage_proposals's assignments regime stamps the
         # right producer.
@@ -279,11 +317,16 @@ def propose_annotations(
 
             from tcip_mcp.pipelines.raster_source import content_identity
 
-            envelope["image_identity"] = dataclasses.asdict(content_identity(raster))
+            envelope["image_identity"] = dataclasses.asdict(
+                content_identity(raster)
+            )
             ts.replace(address, envelope)
-            record_event_or_raise("propose_annotations", {
-                "image_path": image_path, "staged": len(candidates)}, actor=None,
-                scope=address.root)
+            record_event_or_raise(
+                "propose_annotations",
+                {"image_path": image_path, "staged": len(candidates)},
+                actor=None,
+                scope=address.root,
+            )
             staged = True
             stage_note = ""
 
@@ -292,8 +335,8 @@ def propose_annotations(
         "image_path": out,
         "engine": engine,
         "summary": f"Engine {engine!r} proposed {len(candidates)} candidates{region_note}."
-                   f"{stage_note} Review the numbered overlay, then call stage_proposals "
-                   f"with subject assignments.",
+        f"{stage_note} Review the numbered overlay, then call stage_proposals "
+        f"with subject assignments.",
         "candidate_count": len(candidates),
         "staged": staged,
         "candidates": [
@@ -308,8 +351,13 @@ def propose_annotations(
     }
 
 
-def _stage_assignments_regime(project: Path, image_path: str, img: Path, address: ts.Key,
-                               assignments: list[dict]) -> dict:
+def _stage_assignments_regime(
+    project: Path,
+    image_path: str,
+    img: Path,
+    address: ts.Key,
+    assignments: list[dict],
+) -> dict:
     """Stage the candidates ``assignments`` names, each with its subject, from the record staged
     at ``address`` for ``img``; refuses when that record is absent or the image's content no
     longer matches the content identity it recorded."""
@@ -321,7 +369,9 @@ def _stage_assignments_regime(project: Path, image_path: str, img: Path, address
     # Load cached proposals from the same record propose_annotations staged them in.
     envelope = ts.read(address, default=None)
     if envelope is None:
-        return {"error": f"No proposals found for {img.stem}. Run propose_annotations first."}
+        return {
+            "error": f"No proposals found for {img.stem}. Run propose_annotations first."
+        }
 
     from tcip_mcp.pipelines.raster_source import open_as_recorded
     from tcip_mcp.tools.vision_tools import (
@@ -337,14 +387,18 @@ def _stage_assignments_regime(project: Path, image_path: str, img: Path, address
         raster, fresh = open_as_recorded(identity, source)
         with raster:
             if fresh is None:
-                return {"error": f"{image_path} does not match the image propose_annotations "
-                                 "ran on: its content has changed since that run staged these "
-                                 "candidates. Run propose_annotations again on the current "
-                                 "image."}
+                return {
+                    "error": f"{image_path} does not match the image propose_annotations "
+                    "ran on: its content has changed since that run staged these "
+                    "candidates. Run propose_annotations again on the current "
+                    "image."
+                }
             read = _read_for_display(raster)
     except ValueError as exc:
-        return {"error": f"Could not read {image_path} to verify it against its staged "
-                         f"proposals: {exc}"}
+        return {
+            "error": f"Could not read {image_path} to verify it against its staged "
+            f"proposals: {exc}"
+        }
 
     engine = envelope["engine"]
     candidates = envelope["candidates"]
@@ -361,12 +415,19 @@ def _stage_assignments_regime(project: Path, image_path: str, img: Path, address
         cand = cand_map.get(assign["candidate_id"])
         if cand is None:
             continue
-        rings = [[(float(x), float(y)) for x, y in ring] for ring in cand["rings"]]
+        rings = [
+            [(float(x), float(y)) for x, y in ring] for ring in cand["rings"]
+        ]
         try:
-            proposals.append(Annotation(
-                subject=_StatedSubject.model_validate(assign).subject,
-                geometry=Polygon(rings=rings),
-                score=cand["score"], created_by=engine, created_at=staged_at))
+            proposals.append(
+                Annotation(
+                    subject=_StatedSubject.model_validate(assign).subject,
+                    geometry=Polygon(rings=rings),
+                    score=cand["score"],
+                    created_by=engine,
+                    created_at=staged_at,
+                )
+            )
         except ValueError as exc:
             return {"error": f"assignment {i}: {exc}"}
         n_poly += 1
@@ -374,18 +435,31 @@ def _stage_assignments_regime(project: Path, image_path: str, img: Path, address
     # Model output for a human to accept on the Annotate canvas, never written straight to
     # ground truth.
     try:
-        bucket = _stage_document(project, address, engine, img, annotations=proposals,
-                                 img_w=w, img_h=h)
+        bucket = _stage_document(
+            project,
+            address,
+            engine,
+            img,
+            annotations=proposals,
+            img_w=w,
+            img_h=h,
+        )
     except ValueError as exc:
         return {"error": str(exc)}
 
     idx, index = _subject_indexer()
-    out = render_detections(read.pixels, [_box_dict(a, index) for a in proposals],
-                            native_size=read.native_size, class_names=_name_map(idx),
-                            output_path=viz_output_path(project, "staged"))
+    out = render_detections(
+        read.pixels,
+        [_box_dict(a, index) for a in proposals],
+        native_size=read.native_size,
+        class_names=_name_map(idx),
+        output_path=viz_output_path(project, "staged"),
+    )
 
-    note = (f"Staged {n_poly} proposal(s) from {len(assignments)} {engine!r} candidates as "
-            f"predictions (created_by={engine!r}) for review, not ground truth.")
+    note = (
+        f"Staged {n_poly} proposal(s) from {len(assignments)} {engine!r} candidates as "
+        f"predictions (created_by={engine!r}) for review, not ground truth."
+    )
 
     return {
         "image_path": out,
@@ -396,8 +470,16 @@ def _stage_assignments_regime(project: Path, image_path: str, img: Path, address
     }
 
 
-def _stage_document(project: Path, address: ts.Key, producer: str, image: Path, *,
-                    annotations: list[Annotation], img_w: int, img_h: int) -> str | None:
+def _stage_document(
+    project: Path,
+    address: ts.Key,
+    producer: str,
+    image: Path,
+    *,
+    annotations: list[Annotation],
+    img_w: int,
+    img_h: int,
+) -> str | None:
     """Publish ``annotations`` as the bucket of one staged proposal for ``image``, named
     ``<producer>/<capture>/<stem>`` under the image's dataset root (both read off the image's
     staging key ``address``)
@@ -414,14 +496,30 @@ def _stage_document(project: Path, address: ts.Key, producer: str, image: Path, 
     data = json_io.document_payload(annotations, img_w, img_h)
     assert data is not None, "a non-empty proposal encodes a document"
     name = "/".join([producer, *address.parts])
-    return publish(project, Path(address.root), name, [Document(str(image), data)],
-                   producer={"proposed_by": producer},
-                   scope=ClassScope(), execution=None, raster_path=None, raster_identity=None,
-                   assessment_id=None, actor=None).name
+    return publish(
+        project,
+        Path(address.root),
+        name,
+        [Document(str(image), data)],
+        producer={"proposed_by": producer},
+        scope=ClassScope(),
+        execution=None,
+        raster_path=None,
+        raster_identity=None,
+        assessment_id=None,
+        actor=None,
+    ).name
 
 
-def _stage_explicit_regime(project: Path, image_path: str, img: Path, address: ts.Key,
-                           model_name: str, boxes: list[dict], polygons: list[dict]) -> dict:
+def _stage_explicit_regime(
+    project: Path,
+    image_path: str,
+    img: Path,
+    address: ts.Key,
+    model_name: str,
+    boxes: list[dict],
+    polygons: list[dict],
+) -> dict:
     """Stage explicit boxes and polygons, each carrying a ``subject``, as one staged proposal of
     ``model_name`` for the image (:func:`_stage_document`)."""
     from tcip_annotation.json_io import ring_vertex
@@ -429,8 +527,10 @@ def _stage_explicit_regime(project: Path, image_path: str, img: Path, address: t
     from tcip_mcp.workspace import is_valid_name
 
     if not is_valid_name(model_name):
-        return {"error": f"model_name must be a single safe path segment (no separators/'..'), "
-                         f"got {model_name!r}"}
+        return {
+            "error": f"model_name must be a single safe path segment (no separators/'..'), "
+            f"got {model_name!r}"
+        }
 
     def _unnormalized(vals) -> bool:
         return any(v < -0.01 or v > 1.5 for v in vals)
@@ -438,10 +538,17 @@ def _stage_explicit_regime(project: Path, image_path: str, img: Path, address: t
     norm_boxes: list[tuple[Any, float, float, float, float, float]] = []
     for i, b in enumerate(boxes):
         try:
-            cx, cy, w, h = float(b["cx"]), float(b["cy"]), float(b["w"]), float(b["h"])
+            cx, cy, w, h = (
+                float(b["cx"]),
+                float(b["cy"]),
+                float(b["w"]),
+                float(b["h"]),
+            )
             conf = float(b["conf"])
         except (KeyError, TypeError, ValueError):
-            return {"error": f"box {i} needs numeric conf, cx, cy, w, h (normalized): {b!r}"}
+            return {
+                "error": f"box {i} needs numeric conf, cx, cy, w, h (normalized): {b!r}"
+            }
         if _unnormalized((cx, cy, w, h)):
             return {
                 "error": f"box {i} coords {(cx, cy, w, h)} look un-normalized; "
@@ -464,8 +571,11 @@ def _stage_explicit_regime(project: Path, image_path: str, img: Path, address: t
         return b.x2 - b.x1 >= 1.0 and b.y2 - b.y1 >= 1.0
 
     def _out_of_pixel_bounds(ring: list[tuple[float, float]]) -> bool:
-        return (any(x < -pixel_margin or x > img_w + pixel_margin for x, _ in ring)
-                or any(y < -pixel_margin or y > img_h + pixel_margin for _, y in ring))
+        return any(
+            x < -pixel_margin or x > img_w + pixel_margin for x, _ in ring
+        ) or any(
+            y < -pixel_margin or y > img_h + pixel_margin for _, y in ring
+        )
 
     created_at = now_iso()
 
@@ -477,8 +587,10 @@ def _stage_explicit_regime(project: Path, image_path: str, img: Path, address: t
         has_rings = "rings" in p
         if has_points == has_rings:
             offered = sorted(k for k in ("points", "rings") if k in p)
-            return {"error": f"polygon {i} must carry exactly one of 'points' or 'rings', got "
-                             f"{offered}: {p!r}"}
+            return {
+                "error": f"polygon {i} must carry exactly one of 'points' or 'rings', got "
+                f"{offered}: {p!r}"
+            }
         try:
             conf = float(p["conf"])
         except (KeyError, TypeError, ValueError):
@@ -488,31 +600,51 @@ def _stage_explicit_regime(project: Path, image_path: str, img: Path, address: t
             try:
                 pts = [(float(x), float(y)) for x, y in p["points"]]
             except (TypeError, ValueError):
-                return {"error": f"polygon {i} points must be [x, y] pairs (normalized): {p!r}"}
+                return {
+                    "error": f"polygon {i} points must be [x, y] pairs (normalized): {p!r}"
+                }
             if _unnormalized([v for xy in pts for v in xy]):
-                return {"error": f"polygon {i} points look un-normalized; x/y must be in [0,1]"}
+                return {
+                    "error": f"polygon {i} points look un-normalized; x/y must be in [0,1]"
+                }
             rings_px = [[(x * img_w, y * img_h) for x, y in pts]]
         else:
             try:
-                rings_px = [[(float(x), float(y)) for x, y in map(ring_vertex, ring)]
-                            for ring in p["rings"]]
+                rings_px = [
+                    [(float(x), float(y)) for x, y in map(ring_vertex, ring)]
+                    for ring in p["rings"]
+                ]
             except (TypeError, ValueError, KeyError):
-                return {"error": f"polygon {i} rings must be a list of rings of [x, y] pairs or "
-                                 f"{{'x':, 'y':}} mappings (pixel coordinates): {p!r}"}
+                return {
+                    "error": f"polygon {i} rings must be a list of rings of [x, y] pairs or "
+                    f"{{'x':, 'y':}} mappings (pixel coordinates): {p!r}"
+                }
         try:
-            proposal = Annotation(subject=_StatedSubject.model_validate(p).subject,
-                                  geometry=Polygon(rings=rings_px),
-                                  score=conf, created_by=model_name, created_at=created_at)
+            proposal = Annotation(
+                subject=_StatedSubject.model_validate(p).subject,
+                geometry=Polygon(rings=rings_px),
+                score=conf,
+                created_by=model_name,
+                created_at=created_at,
+            )
         except ValueError as exc:
             return {"error": f"polygon {i}: {exc}"}
         if has_rings:
-            sub_pixel = [j for j, ring in enumerate(rings_px) if not _spans_a_pixel(ring)]
+            sub_pixel = [
+                j
+                for j, ring in enumerate(rings_px)
+                if not _spans_a_pixel(ring)
+            ]
             if sub_pixel:
-                return {"error": f"polygon {i} ring(s) {sub_pixel} span under a pixel in an axis; "
-                                 f"rings are pixel coordinates, not normalized ones: {p!r}"}
+                return {
+                    "error": f"polygon {i} ring(s) {sub_pixel} span under a pixel in an axis; "
+                    f"rings are pixel coordinates, not normalized ones: {p!r}"
+                }
             if any(_out_of_pixel_bounds(ring) for ring in rings_px):
-                return {"error": f"polygon {i} rings look out of the image's pixel bounds "
-                                 f"({img_w}x{img_h}): {rings_px!r}"}
+                return {
+                    "error": f"polygon {i} rings look out of the image's pixel bounds "
+                    f"({img_w}x{img_h}): {rings_px!r}"
+                }
         polygon_proposals.append(proposal)
 
     # A box of nothing is no detection: dropped rather than staged, so it never reaches the
@@ -522,9 +654,13 @@ def _stage_explicit_regime(project: Path, image_path: str, img: Path, address: t
     for i, (stated, conf, cx, cy, w, h) in enumerate(norm_boxes):
         box = BBox.from_normalized_center((cx, cy, w, h), img_w, img_h)
         try:
-            proposal = Annotation(subject=_StatedSubject.model_validate(stated).subject,
-                                  geometry=box, score=conf,
-                                  created_by=model_name, created_at=created_at)
+            proposal = Annotation(
+                subject=_StatedSubject.model_validate(stated).subject,
+                geometry=box,
+                score=conf,
+                created_by=model_name,
+                created_at=created_at,
+            )
         except ValueError as exc:
             return {"error": f"box {i}: {exc}"}
         if not stored_box_extent_ok(box):
@@ -535,21 +671,34 @@ def _stage_explicit_regime(project: Path, image_path: str, img: Path, address: t
     proposals: list[Annotation] = box_proposals + polygon_proposals
 
     try:
-        bucket = _stage_document(project, address, model_name, img, annotations=proposals,
-                                 img_w=img_w, img_h=img_h)
+        bucket = _stage_document(
+            project,
+            address,
+            model_name,
+            img,
+            annotations=proposals,
+            img_w=img_w,
+            img_h=img_h,
+        )
     except ValueError as exc:
         return {"error": str(exc)}
 
-    note = ("staged as a prediction bucket for canvas review, not committed as ground truth; the "
-            "human accepts each proposal on the Annotate tab before it becomes GT "
-            "(focus_human_attention tab='annotate' to send them). It is never promoted to a "
-            "reference.")
+    note = (
+        "staged as a prediction bucket for canvas review, not committed as ground truth; the "
+        "human accepts each proposal on the Annotate tab before it becomes GT "
+        "(focus_human_attention tab='annotate' to send them). It is never promoted to a "
+        "reference."
+    )
 
     return {
         "staged": len(proposals),
-        "n_detect": len(box_proposals), "n_segment": len(polygon_proposals),
+        "n_detect": len(box_proposals),
+        "n_segment": len(polygon_proposals),
         "dropped_boxes": dropped_boxes,
-        "bucket": bucket, "model_name": model_name, "date": address.parts[0], "stem": img.stem,
+        "bucket": bucket,
+        "model_name": model_name,
+        "date": address.parts[0],
+        "stem": img.stem,
         "note": note,
     }
 
@@ -606,11 +755,15 @@ def stage_proposals(
             boxes/polygons, refused with assignments.
     """
     if assignments is not None and (boxes or polygons):
-        return {"error": "assignments cannot be combined with boxes/polygons: pick one input "
-                         "regime per call."}
+        return {
+            "error": "assignments cannot be combined with boxes/polygons: pick one input "
+            "regime per call."
+        }
     if assignments is None and not boxes and not polygons:
-        return {"error": "provide assignments (propose_annotations's staged candidates), or "
-                         "boxes/polygons (explicit shapes) with model_name."}
+        return {
+            "error": "provide assignments (propose_annotations's staged candidates), or "
+            "boxes/polygons (explicit shapes) with model_name."
+        }
 
     image_path = str(located(image_path, project))
     img = Path(image_path)
@@ -624,12 +777,25 @@ def stage_proposals(
 
     if assignments is not None:
         if model_name is not None:
-            return {"error": "model_name is refused alongside assignments: the staged record's "
-                             "own engine names the bucket."}
-        return _stage_assignments_regime(project, image_path, img, address, assignments)
+            return {
+                "error": "model_name is refused alongside assignments: the staged record's "
+                "own engine names the bucket."
+            }
+        return _stage_assignments_regime(
+            project, image_path, img, address, assignments
+        )
 
     if model_name is None:
-        return {"error": "model_name is required with boxes/polygons: the real producer, "
-                         "stamped as created_by."}
-    return _stage_explicit_regime(project, image_path, img, address, model_name, boxes or [],
-                                  polygons or [])
+        return {
+            "error": "model_name is required with boxes/polygons: the real producer, "
+            "stamped as created_by."
+        }
+    return _stage_explicit_regime(
+        project,
+        image_path,
+        img,
+        address,
+        model_name,
+        boxes or [],
+        polygons or [],
+    )

@@ -22,7 +22,9 @@ SCOPE = {"subject": fx.COUNT_SUBJECT}
 
 def _images(images_dir: Path) -> list[Path]:
     """The capture's image files, without the lock sidecars beside them."""
-    return sorted(p for p in images_dir.iterdir() if not is_bookkeeping(p.name))
+    return sorted(
+        p for p in images_dir.iterdir() if not is_bookkeeping(p.name)
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -34,9 +36,13 @@ def _recorded_meaning(tmp_path):
 def _deliver(project: Path, root: Path, bucket: str, **overrides) -> dict:
     from tcip_mcp.tools.inference_tools import deliver_per_image_counts
 
-    return deliver_per_image_counts(project, str(root), bucket,
-                                    str(project / "out" / "counts.csv"),
-                                    trait=overrides.get("trait", fx.COUNT_TRAIT))
+    return deliver_per_image_counts(
+        project,
+        str(root),
+        bucket,
+        str(project / "out" / "counts.csv"),
+        trait=overrides.get("trait", fx.COUNT_TRAIT),
+    )
 
 
 def _bucket(project: Path, scope: dict = SCOPE, **published_kw) -> str:
@@ -45,7 +51,9 @@ def _bucket(project: Path, scope: dict = SCOPE, **published_kw) -> str:
     name = f"{scope['subject'] or 'raster'}/2026-01-01"
     names = [scope["subject"]] * 2 if scope["subject"] else []
     image = project / "ds" / "images" / "2026-01-01" / "a.png"
-    return published(project, name, [predicted(image, names)], scope=scope, **published_kw).name
+    return published(
+        project, name, [predicted(image, names)], scope=scope, **published_kw
+    ).name
 
 
 def test_a_name_no_bucket_record_answers_for_refuses(tmp_path):
@@ -66,8 +74,13 @@ def test_a_mosaic_bucket_refuses_naming_the_per_plant_door(tmp_path):
     tifffile.imwrite(str(raster), np.zeros((32, 32, 3), dtype=np.uint8))
     from tests._chain_fixtures import predicted, published
 
-    bucket = published(tmp_path, "mosaic/run", [predicted(raster, [fx.COUNT_SUBJECT])],
-                       scope=SCOPE, raster_path=raster).name
+    bucket = published(
+        tmp_path,
+        "mosaic/run",
+        [predicted(raster, [fx.COUNT_SUBJECT])],
+        scope=SCOPE,
+        raster_path=raster,
+    ).name
 
     res = _deliver(tmp_path, tmp_path / "ds", bucket)
 
@@ -91,12 +104,16 @@ def test_a_bucket_counting_another_subject_refuses_and_its_own_subject_is_admitt
 
 
 def test_an_unknown_trait_answers_an_error_dict(tmp_path):
-    res = _deliver(tmp_path, tmp_path / "ds", _bucket(tmp_path), trait="no-such-trait")
+    res = _deliver(
+        tmp_path, tmp_path / "ds", _bucket(tmp_path), trait="no-such-trait"
+    )
 
     assert "no-such-trait" in res["error"]
 
 
-def test_an_assessed_bucket_delivers_validated_counts_naming_the_producer(tmp_path):
+def test_an_assessed_bucket_delivers_validated_counts_naming_the_producer(
+    tmp_path,
+):
     from tcip_mcp.delivery import read_delivery_events
     from tests._chain_fixtures import run_the_chain
 
@@ -115,7 +132,9 @@ def test_an_assessed_bucket_delivers_validated_counts_naming_the_producer(tmp_pa
     assert event.population == [p.stem for p in _images(chain.images_dir)]
 
 
-def test_reading_a_published_bucket_to_a_delivered_csv_imports_no_torch(tmp_path):
+def test_reading_a_published_bucket_to_a_delivered_csv_imports_no_torch(
+    tmp_path,
+):
     """Delivering from a bucket needs no GPU, no predictor and no checkpoint: the delivery runs in
     a subprocess with torch blocked from importing at all."""
     from tests._chain_fixtures import run_the_chain
@@ -143,8 +162,12 @@ assert "error" not in r, r
 assert "torch" not in sys.modules, "the delivery pulled torch into sys.modules"
 print("ok")
 """
-    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True,
-                            timeout=120)
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "ok"
     assert out_csv.exists()

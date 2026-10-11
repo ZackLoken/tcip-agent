@@ -17,7 +17,11 @@ import tcip_store
 from tcip_mcp import dataset_layout
 from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.data.band_groups import MANIFEST_EXT
-from tcip_mcp.pipelines.image_utils import IMAGE_EXTS, bucket_logical_identities, stem_collision_key
+from tcip_mcp.pipelines.image_utils import (
+    IMAGE_EXTS,
+    bucket_logical_identities,
+    stem_collision_key,
+)
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
 
@@ -60,7 +64,10 @@ def _photographic_capture_date(path: Path) -> tuple[str | None, str | None]:
         return None, None
     iso = _iso_date(raw)
     if iso is None:
-        return None, f"EXIF DateTimeOriginal {str(raw)!r} is not a date this reads"
+        return (
+            None,
+            f"EXIF DateTimeOriginal {str(raw)!r} is not a date this reads",
+        )
     return iso, None
 
 
@@ -81,7 +88,14 @@ def _gdal_capture_date(path: Path) -> tuple[str | None, str | None]:
                 raw = ds.tags(ns="EXIF").get("EXIF_DateTimeOriginal")
             if not raw:
                 items = {k.lower(): v for k, v in tags.items()}
-                raw = next((items[name] for name in _GDAL_DATE_ITEMS if items.get(name)), None)
+                raw = next(
+                    (
+                        items[name]
+                        for name in _GDAL_DATE_ITEMS
+                        if items.get(name)
+                    ),
+                    None,
+                )
     except Exception as exc:  # noqa: BLE001, rasterio raises driver-specific errors
         return None, f"raster metadata could not be read: {exc}"
     if not raw:
@@ -151,7 +165,8 @@ def _bucket_for(path: Path, date_from: str) -> tuple[str, str | None]:
 
 
 def _collision_refusal(
-    dest_root: Path, resolved_sources: list[tuple[Path, str, str | None]],
+    dest_root: Path,
+    resolved_sources: list[tuple[Path, str, str | None]],
 ) -> str | None:
     """The whole-call refusal naming every source that would create a second logical image under a
     stem key another source, an existing raw file, or an existing band-group manifest already holds
@@ -162,21 +177,32 @@ def _collision_refusal(
     out of this refusal and out of ``identities``, whether or not its own bytes match that file,
     and is skipped by the copy loop's own ``dest.exists()`` check.
     """
-    buckets = sorted({bucket for _src, bucket, _unreadable in resolved_sources})
+    buckets = sorted(
+        {bucket for _src, bucket, _unreadable in resolved_sources}
+    )
     collisions: dict[str, dict[str, list[Path]]] = {}
     for bucket in buckets:
         # disk_identities is a fixed pre-call snapshot for the re-ingest carve-out below, never
         # mutated: a batch-mate sharing a key must never read as one already on disk.
-        disk_identities = bucket_logical_identities(dataset_layout.image_dir(dest_root, bucket))
-        identities = {key: list(paths) for key, paths in disk_identities.items()}
+        disk_identities = bucket_logical_identities(
+            dataset_layout.image_dir(dest_root, bucket)
+        )
+        identities = {
+            key: list(paths) for key, paths in disk_identities.items()
+        }
         for src_path, src_bucket, _unreadable in resolved_sources:
             if src_bucket != bucket:
                 continue
             key = stem_collision_key(src_path.stem)
-            dest = dataset_layout.image_path(dest_root, bucket, src_path.stem, src_path.suffix)
+            dest = dataset_layout.image_path(
+                dest_root, bucket, src_path.stem, src_path.suffix
+            )
             disk_existing = disk_identities.get(key, [])
-            if len(disk_existing) == 1 and disk_existing[0].suffix.lower() != MANIFEST_EXT \
-                    and disk_existing[0].name == dest.name:
+            if (
+                len(disk_existing) == 1
+                and disk_existing[0].suffix.lower() != MANIFEST_EXT
+                and disk_existing[0].name == dest.name
+            ):
                 continue  # the exact re-ingest of a file already on disk, not a second identity
             identities.setdefault(key, []).append(src_path)
             if len(identities[key]) > 1:
@@ -185,10 +211,15 @@ def _collision_refusal(
     if not collisions:
         return None
     lines = [
-        f"bucket {bucket!r}, stem {key!r}: " + ", ".join(str(p) for p in collisions[bucket][key])
-        for bucket in sorted(collisions) for key in sorted(collisions[bucket])
+        f"bucket {bucket!r}, stem {key!r}: "
+        + ", ".join(str(p) for p in collisions[bucket][key])
+        for bucket in sorted(collisions)
+        for key in sorted(collisions[bucket])
     ]
-    return "stem collision, refusing the whole call before any byte is copied: " + "; ".join(lines)
+    return (
+        "stem collision, refusing the whole call before any byte is copied: "
+        + "; ".join(lines)
+    )
 
 
 @tool()
@@ -243,7 +274,9 @@ def ingest_images(
     if not sources:
         return {"error": f"No images found under {source!r}"}
 
-    resolved_sources = [(src_path, *_bucket_for(src_path, date_from)) for src_path in sources]
+    resolved_sources = [
+        (src_path, *_bucket_for(src_path, date_from)) for src_path in sources
+    ]
 
     collision_error = _collision_refusal(project, resolved_sources)
     if collision_error is not None:
@@ -259,7 +292,9 @@ def ingest_images(
     touched_buckets: set[str] = set()
 
     for src_path, bucket, date_unreadable in resolved_sources:
-        dest = dataset_layout.image_path(project, bucket, src_path.stem, src_path.suffix)
+        dest = dataset_layout.image_path(
+            project, bucket, src_path.stem, src_path.suffix
+        )
         if dest.exists():
             # No-overwrite: the exact re-ingest of a file already placed; every other stem
             # collision was already refused above, whole-call.
@@ -290,13 +325,21 @@ def ingest_images(
                 src_path.unlink()
                 moved += 1
             except OSError:
-                logger.warning("ingest: could not remove source after move: %s", src_path)
+                logger.warning(
+                    "ingest: could not remove source after move: %s", src_path
+                )
                 copied += 1
 
         touched_buckets.add(bucket)
         if date_unreadable:
-            unreadable_dates.append({"source": str(src_path), "dest": str(dest),
-                                     "bucket": bucket, "reason": date_unreadable})
+            unreadable_dates.append(
+                {
+                    "source": str(src_path),
+                    "dest": str(dest),
+                    "bucket": bucket,
+                    "reason": date_unreadable,
+                }
+            )
         if bucket == dataset_layout.UNDATED_BUCKET:
             undated += 1
         else:
@@ -304,7 +347,9 @@ def ingest_images(
 
     band_groups_result: dict = {"formed": [], "refused": [], "manifests": []}
     if detect_band_groups:
-        from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
+        from tcip_mcp.pipelines.data.band_groups import (
+            detect_and_write_band_groups,
+        )
 
         for bucket in sorted(touched_buckets):
             bucket_dir = dataset_layout.image_dir(project, bucket)
@@ -332,7 +377,9 @@ def ingest_images(
 
 
 @tool()
-def import_coco(project: Path, document: str, dataset_root: str, date: str) -> dict:
+def import_coco(
+    project: Path, document: str, dataset_root: str, date: str
+) -> dict:
     """Convert an external dataset-level COCO document into the dataset's per-image label
     documents.
 
@@ -360,6 +407,8 @@ def import_coco(project: Path, document: str, dataset_root: str, date: str) -> d
     from tcip_mcp.pipelines.data.coco_import import import_coco_document
 
     try:
-        return import_coco_document(document, dataset_root, date=date, project=project)
+        return import_coco_document(
+            document, dataset_root, date=date, project=project
+        )
     except (ValueError, FileNotFoundError) as exc:
         return {"error": str(exc)}

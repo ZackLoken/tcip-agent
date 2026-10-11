@@ -25,8 +25,9 @@ from tcip_mcp.server import tool
 
 @tool()
 @audited
-def register_plant_registry(project: Path, name: str, csv_paths: list[str], *, crop: str,
-                            site: str) -> dict:
+def register_plant_registry(
+    project: Path, name: str, csv_paths: list[str], *, crop: str, site: str
+) -> dict:
     """Register a plant-locations CSV set under a name that later doors cite instead of file paths.
 
     Reads every path in ``csv_paths`` through ``read_plant_csvs``, one file at a time, and refuses
@@ -61,19 +62,28 @@ def register_plant_registry(project: Path, name: str, csv_paths: list[str], *, c
         return {"error": f"plant CSV(s) not found: {missing}"}
 
     shapefile_suffixes = {".shp", ".shx", ".dbf", ".prj"}
-    shapefile_paths = [str(p) for p in paths if p.suffix.casefold() in shapefile_suffixes]
+    shapefile_paths = [
+        str(p) for p in paths if p.suffix.casefold() in shapefile_suffixes
+    ]
     if shapefile_paths:
-        return {"error": (
-            f"{shapefile_paths} look like shapefile parts, not plant-locations CSVs (this "
-            "registry re-verifies and re-parses each file from its own one-snapshot bytes at "
-            "delivery, which a multi-file shapefile has no single-file form for); run "
-            "tcip shp-to-plant-csv <plants.shp> <plants.csv> and register the CSV instead")}
+        return {
+            "error": (
+                f"{shapefile_paths} look like shapefile parts, not plant-locations CSVs (this "
+                "registry re-verifies and re-parses each file from its own one-snapshot bytes at "
+                "delivery, which a multi-file shapefile has no single-file form for); run "
+                "tcip shp-to-plant-csv <plants.shp> <plants.csv> and register the CSV instead"
+            )
+        }
 
     try:
         return plant_mapping.register_plant_registry_record(
-            project, name, paths, crop=crop, site=site)
-    except (plant_mapping.NoGeoreferencedPlantsError, plant_mapping.PlantRegistryNameConflictError,
-            ValueError) as exc:
+            project, name, paths, crop=crop, site=site
+        )
+    except (
+        plant_mapping.NoGeoreferencedPlantsError,
+        plant_mapping.PlantRegistryNameConflictError,
+        ValueError,
+    ) as exc:
         return {"error": str(exc)}
 
 
@@ -127,12 +137,22 @@ def build_plant_mapping(
 
     try:
         return plant_mapping.build_plant_mapping(
-            project, name, located(images_root, project), plant_registry, dates=dates,
-            nn_tolerance_m=nn_tolerance_m, supersede=supersede, actor=None).served()
+            project,
+            name,
+            located(images_root, project),
+            plant_registry,
+            dates=dates,
+            nn_tolerance_m=nn_tolerance_m,
+            supersede=supersede,
+            actor=None,
+        ).served()
     except plant_mapping.MappingRebuildError as exc:
         return {"error": str(exc), "citing_events": exc.event_ids}
-    except (plant_mapping.UngeoreferencedCaptureError, AuditEntryNotWrittenError,
-            ValueError) as exc:
+    except (
+        plant_mapping.UngeoreferencedCaptureError,
+        AuditEntryNotWrittenError,
+        ValueError,
+    ) as exc:
         return {"error": str(exc)}
 
 
@@ -178,26 +198,48 @@ def deliver_phenology_milestones(
     """
     from tcip_mcp.delivery import DeliveryRefusedError
     from tcip_mcp.operationalization import OperationalizationRefusedError
-    from tcip_mcp.pipelines.postprocessing.plant_mapping import MappingDeliveryError
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        MappingDeliveryError,
+    )
     from tcip_mcp.subject_registry import RegistryError
     from tcip_mcp.traits import TraitUnknownError
 
     try:
         measurement = phenology.measure_phenology(
-            project, trait=trait, mapping_name=mapping_name,
-            dataset_root=located(dataset_root, project), buckets=buckets, plants=plants,
-            require_all_dates_complete=require_all_dates_complete)
+            project,
+            trait=trait,
+            mapping_name=mapping_name,
+            dataset_root=located(dataset_root, project),
+            buckets=buckets,
+            plants=plants,
+            require_all_dates_complete=require_all_dates_complete,
+        )
         delivered = phenology.deliver_phenology(
-            project, measurement, curves=False, output_path=located(output_csv_path, project),
-            acknowledgment_id=acknowledgment_id, door="deliver_phenology_milestones", actor=None)
+            project,
+            measurement,
+            curves=False,
+            output_path=located(output_csv_path, project),
+            acknowledgment_id=acknowledgment_id,
+            door="deliver_phenology_milestones",
+            actor=None,
+        )
     except phenology.measurement_refusals() as exc:
         return {"error": str(exc)}
-    except (DeliveryRefusedError, OperationalizationRefusedError, TraitUnknownError, RegistryError,
-            MappingDeliveryError, ValueError) as exc:
+    except (
+        DeliveryRefusedError,
+        OperationalizationRefusedError,
+        TraitUnknownError,
+        RegistryError,
+        MappingDeliveryError,
+        ValueError,
+    ) as exc:
         return {"error": str(exc)}
     disclosure = measurement.plant_mapping
-    return {**delivered, "n_plants": len(measurement.rows),
-            "n_images_unattributed": disclosure["images_unattributed"],
-            "dates_delivered": disclosure["dates_delivered"],
-            "captures_unverified": disclosure["captures_unverified"],
-            "plant_csvs_unverified": disclosure["plant_csvs_unverified"]}
+    return {
+        **delivered,
+        "n_plants": len(measurement.rows),
+        "n_images_unattributed": disclosure["images_unattributed"],
+        "dates_delivered": disclosure["dates_delivered"],
+        "captures_unverified": disclosure["captures_unverified"],
+        "plant_csvs_unverified": disclosure["plant_csvs_unverified"],
+    }

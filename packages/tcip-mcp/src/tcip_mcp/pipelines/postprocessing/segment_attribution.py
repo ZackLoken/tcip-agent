@@ -21,9 +21,16 @@ from tcip_annotation.json_io import (
     authorship_of,
     is_unadjudicated_prediction,
 )
-from tcip_annotation.matching import box_ring, point_in_polygon, shapely_geometry
+from tcip_annotation.matching import (
+    box_ring,
+    point_in_polygon,
+    shapely_geometry,
+)
 from tcip_annotation.state import (
-    BBox, Polygon, box_derivable, polygonal,
+    BBox,
+    Polygon,
+    box_derivable,
+    polygonal,
 )
 
 from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
@@ -32,7 +39,9 @@ from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
     plants_in_frame,
 )
 from tcip_mcp.pipelines.postprocessing.plant_mapping import (
-    PlantRecord, SegmentSource, require_named_plants,
+    PlantRecord,
+    SegmentSource,
+    require_named_plants,
 )
 
 
@@ -65,7 +74,11 @@ def _polygon_of(geometry: BBox | Polygon) -> Polygon:
 
 
 def load_canopy_segments(
-    document: LabelDocument, *, subject: str, raster_stem: str, raster_identity: dict,
+    document: LabelDocument,
+    *,
+    subject: str,
+    raster_stem: str,
+    raster_identity: dict,
 ) -> list[CanopySegment]:
     """The canopy segments of ``subject`` in the raster's own label ``document`` (the caller read
     it by the raster's key), checked against the raster's frame and against the canopy rule's own
@@ -82,7 +95,9 @@ def load_canopy_segments(
     unattributed record a reviewer has accepted, all admit.
     """
     if (int(document.width or -1), int(document.height or -1)) != (
-            int(raster_identity["width"]), int(raster_identity["height"])):
+        int(raster_identity["width"]),
+        int(raster_identity["height"]),
+    ):
         raise CanopySegmentError(
             f"the canopy segment document of raster stem {raster_stem!r} is "
             f"{document.width}x{document.height}, the raster is "
@@ -107,7 +122,11 @@ def load_canopy_segments(
             )
     for i, a in enumerate(annotations):
         if not box_derivable(a.geometry):
-            named = "an image-level label" if a.geometry is None else type(a.geometry).__name__
+            named = (
+                "an image-level label"
+                if a.geometry is None
+                else type(a.geometry).__name__
+            )
             raise CanopySegmentError(
                 f"canopy segment {i} of subject {subject!r} carries {named}, which names no "
                 "region; delete this record or replace it with a boundary (a box or a traced "
@@ -118,16 +137,24 @@ def load_canopy_segments(
         authorship = authorship_of(a)
         if authorship in ("person", "tool_accepted"):
             continue
-        by = ("carries no created_by at all," if authorship == "unattributed" else
-              f"is authored by {a.created_by!r}, which names no person under this platform's "
-              f"{PERSON_IDENTITY_PREFIX}<name> convention,")
+        by = (
+            "carries no created_by at all,"
+            if authorship == "unattributed"
+            else f"is authored by {a.created_by!r}, which names no person under this platform's "
+            f"{PERSON_IDENTITY_PREFIX}<name> convention,"
+        )
         raise CanopySegmentError(
             f"canopy segment {i} of subject {subject!r} {by} and no person accepted it; a canopy "
             "boundary must be positively a person's, a reviewer's acceptance included"
         )
 
-    return [CanopySegment(segment_index=i, polygon=_polygon_of(cast("BBox | Polygon", a.geometry)))
-            for i, a in enumerate(annotations)]
+    return [
+        CanopySegment(
+            segment_index=i,
+            polygon=_polygon_of(cast("BBox | Polygon", a.geometry)),
+        )
+        for i, a in enumerate(annotations)
+    ]
 
 
 @dataclass
@@ -176,8 +203,11 @@ class SegmentTie:
     def plants_within_position_error(self) -> list[str]:
         """Plot names of every plant inside a segment but within the position error of its
         boundary, read off the untied segments."""
-        return sorted(s.plant_within_position_error for s in self.untied
-                      if s.plant_within_position_error is not None)
+        return sorted(
+            s.plant_within_position_error
+            for s in self.untied
+            if s.plant_within_position_error is not None
+        )
 
     @property
     def segments_without_plant(self) -> int:
@@ -185,19 +215,30 @@ class SegmentTie:
         return sum(s.plant_within_position_error is None for s in self.untied)
 
 
-def _clearance_m(plant: tuple[float, float], polygon: Polygon,
-                 georef: OrthomosaicGeoreference) -> float:
+def _clearance_m(
+    plant: tuple[float, float],
+    polygon: Polygon,
+    georef: OrthomosaicGeoreference,
+) -> float:
     """The distance in meters from ``plant``, a position in the raster's native CRS, to
     ``polygon``'s boundary, the boundary put into that CRS through the raster's own affine and the
     distance taken there, then scaled by the meters one native unit spans."""
-    rings = [[georef.pixel_to_native(x, y) for x, y in ring] for ring in polygon.rings]
+    rings = [
+        [georef.pixel_to_native(x, y) for x, y in ring]
+        for ring in polygon.rings
+    ]
     native = ShapelyPoint(plant).distance(shapely_geometry(rings).boundary)
     return native * georef.meters_per_native_unit()
 
 
 def tie_segments_to_plants(
-    segments: list[CanopySegment], plants: list[PlantRecord], georef: OrthomosaicGeoreference,
-    *, width: int, height: int, position_error_m: float,
+    segments: list[CanopySegment],
+    plants: list[PlantRecord],
+    georef: OrthomosaicGeoreference,
+    *,
+    width: int,
+    height: int,
+    position_error_m: float,
 ) -> SegmentTie:
     """Tie every one of ``segments`` to the one registry plant, if any, whose own projected
     position it contains with a clearance in meters of at least ``position_error_m``, the error
@@ -214,20 +255,28 @@ def tie_segments_to_plants(
     :class:`SegmentTie`.
     """
     if not math.isfinite(position_error_m) or position_error_m < 0:
-        raise ValueError(f"position_error_m is a distance in meters; {position_error_m} is not a "
-                         "finite, nonnegative one")
+        raise ValueError(
+            f"position_error_m is a distance in meters; {position_error_m} is not a "
+            "finite, nonnegative one"
+        )
     require_named_plants(plants)
 
-    in_frame, outside = plants_in_frame(plants, georef, width=width, height=height)
+    in_frame, outside = plants_in_frame(
+        plants, georef, width=width, height=height
+    )
     if not in_frame:
         raise ValueError(
             "no registry plant lies inside this raster's frame; canopy segments cannot be tied to "
             "any plant"
         )
 
-    plant_pixel = {p.plot_name: georef.wgs84_to_pixel(p.lat, p.lon) for p in in_frame}
+    plant_pixel = {
+        p.plot_name: georef.wgs84_to_pixel(p.lat, p.lon) for p in in_frame
+    }
     plant_segments: dict[str, list[int]] = {p.plot_name: [] for p in in_frame}
-    segment_plants: dict[int, list[PlantRecord]] = {s.segment_index: [] for s in segments}
+    segment_plants: dict[int, list[PlantRecord]] = {
+        s.segment_index: [] for s in segments
+    }
     for s in segments:
         for p in in_frame:
             px, py = plant_pixel[p.plot_name]
@@ -257,19 +306,36 @@ def tie_segments_to_plants(
     for s in segments:
         contained = segment_plants[s.segment_index]
         if not contained:
-            untied.append(UntiedSegment(segment_index=s.segment_index, polygon=s.polygon,
-                                        plant_within_position_error=None))
+            untied.append(
+                UntiedSegment(
+                    segment_index=s.segment_index,
+                    polygon=s.polygon,
+                    plant_within_position_error=None,
+                )
+            )
             continue
         p = contained[0]
-        clearance_m = _clearance_m(georef.wgs84_to_native(p.lat, p.lon), s.polygon, georef)
+        clearance_m = _clearance_m(
+            georef.wgs84_to_native(p.lat, p.lon), s.polygon, georef
+        )
         if clearance_m < position_error_m:
-            untied.append(UntiedSegment(segment_index=s.segment_index, polygon=s.polygon,
-                                        plant_within_position_error=p.plot_name))
+            untied.append(
+                UntiedSegment(
+                    segment_index=s.segment_index,
+                    polygon=s.polygon,
+                    plant_within_position_error=p.plot_name,
+                )
+            )
             continue
-        tied.append(TiedSegment(
-            segment_index=s.segment_index, polygon=s.polygon, plot_name=p.plot_name,
-            accession_name=p.accession_name, clearance_m=clearance_m,
-        ))
+        tied.append(
+            TiedSegment(
+                segment_index=s.segment_index,
+                polygon=s.polygon,
+                plot_name=p.plot_name,
+                accession_name=p.accession_name,
+                clearance_m=clearance_m,
+            )
+        )
 
     plants_without_segment = sorted(
         p.plot_name for p in in_frame if not plant_segments[p.plot_name]
@@ -277,7 +343,9 @@ def tie_segments_to_plants(
     plants_outside_raster = sorted(p.plot_name for p in outside)
 
     return SegmentTie(
-        tied=tied, untied=untied, plants_without_segment=plants_without_segment,
+        tied=tied,
+        untied=untied,
+        plants_without_segment=plants_without_segment,
         plants_outside_raster=plants_outside_raster,
     )
 
@@ -310,8 +378,9 @@ class SegmentAssignment:
     a canopy boundary a person accepted, never a mask-level or area measurement."""
 
 
-def assign_detections_to_segments(boxes: Sequence[Sequence[float]],
-                                  tie: SegmentTie) -> list[SegmentAssignment]:
+def assign_detections_to_segments(
+    boxes: Sequence[Sequence[float]], tie: SegmentTie
+) -> list[SegmentAssignment]:
     """One :class:`SegmentAssignment` per xyxy box of ``boxes`` (full-mosaic pixel space), its
     centroid tested against every candidate segment ``tie`` holds, tied and untied both."""
     candidates: list[TiedSegment | UntiedSegment] = [*tie.tied, *tie.untied]
@@ -333,11 +402,21 @@ def assign_detections_to_segments(boxes: Sequence[Sequence[float]],
             source = "segment_without_plant"
         else:
             source = "segment_plant_within_position_error"
-        out.append(SegmentAssignment(
-            detection_index=i, pixel_x=cx, pixel_y=cy,
-            segment_index=hit.segment_index if hit is not None else None,
-            plot_name=tied.plot_name if tied else None,
-            accession_name=tied.accession_name if tied else None, source=source, distance_m=None,
-            overlapping_segment_indices=tuple(s.segment_index for s in hits)
-            if len(hits) > 1 else ()))
+        out.append(
+            SegmentAssignment(
+                detection_index=i,
+                pixel_x=cx,
+                pixel_y=cy,
+                segment_index=hit.segment_index if hit is not None else None,
+                plot_name=tied.plot_name if tied else None,
+                accession_name=tied.accession_name if tied else None,
+                source=source,
+                distance_m=None,
+                overlapping_segment_indices=tuple(
+                    s.segment_index for s in hits
+                )
+                if len(hits) > 1
+                else (),
+            )
+        )
     return out

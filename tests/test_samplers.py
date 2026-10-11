@@ -35,13 +35,24 @@ def _patch_gdal_cache(monkeypatch, cache_bytes: int) -> None:
 
 
 def _frame(width=10000, channels=3, itemsize=1, windowed=True):
-    return {"width": width, "height": 4096, "channels": channels,
-            "dtype_itemsize": itemsize, "windowed": windowed}
+    return {
+        "width": width,
+        "height": 4096,
+        "channels": channels,
+        "dtype_itemsize": itemsize,
+        "windowed": windowed,
+    }
 
 
-def _lattice_entries(stems, tile_ys=(0, 512, 1024, 1536), tile_xs=(0, 512, 1024), tile=512):
-    return [(stem, (tx, ty, tx + tile, ty + tile))
-            for stem in stems for ty in tile_ys for tx in tile_xs]
+def _lattice_entries(
+    stems, tile_ys=(0, 512, 1024, 1536), tile_xs=(0, 512, 1024), tile=512
+):
+    return [
+        (stem, (tx, ty, tx + tile, ty + tile))
+        for stem in stems
+        for ty in tile_ys
+        for tx in tile_xs
+    ]
 
 
 def _two_source_dataset():
@@ -61,7 +72,9 @@ def _band_key(dataset, sampler, idx):
 def _assert_contiguous_bands(dataset, sampler, indices):
     keys = [_band_key(dataset, sampler, i) for i in indices]
     groups = [key for key, _run in itertools.groupby(keys)]
-    assert len(groups) == len(set(groups)), "a (source, band) group was split apart"
+    assert len(groups) == len(set(groups)), (
+        "a (source, band) group was split apart"
+    )
 
 
 def _assert_banded(dataset, sampler, order):
@@ -79,7 +92,9 @@ def _assert_bands_owned_by_one_worker(dataset, sampler, per_worker_streams):
     for worker, stream in per_worker_streams.items():
         _assert_contiguous_bands(dataset, sampler, stream)
         for key in {_band_key(dataset, sampler, i) for i in stream}:
-            assert key not in owner, f"band {key} split across workers {owner[key]} and {worker}"
+            assert key not in owner, (
+                f"band {key} split across workers {owner[key]} and {worker}"
+            )
             owner[key] = worker
 
 
@@ -91,7 +106,9 @@ def test_tile_locality_orders_are_banded_and_differ_across_epochs(monkeypatch):
     epochs the order changes (a sampler seeded once at construction would freeze it)."""
     from tcip_mcp.pipelines.data.samplers import TileLocalitySampler
 
-    _patch_gdal_cache(monkeypatch, 62_000_000)  # (31e6 // 30000 rows) // 512 pitch = 2 tile rows
+    _patch_gdal_cache(
+        monkeypatch, 62_000_000
+    )  # (31e6 // 30000 rows) // 512 pitch = 2 tile rows
     ds = _two_source_dataset()
     sampler = TileLocalitySampler(ds, num_workers=0)
     assert sampler.band_tile_rows == 2
@@ -117,7 +134,9 @@ def test_tile_locality_order_reproducible_under_global_seed(monkeypatch):
     assert first == again
 
 
-def test_tile_locality_band_height_derived_from_cache_and_row_cost(monkeypatch):
+def test_tile_locality_band_height_derived_from_cache_and_row_cost(
+    monkeypatch,
+):
     """The band height is a runtime derivation, half the per-reader cache share over the
     costliest windowed source's row bytes over the lattice row pitch, never a pinned
     constant."""
@@ -125,7 +144,9 @@ def test_tile_locality_band_height_derived_from_cache_and_row_cost(monkeypatch):
 
     ds = _two_source_dataset()
 
-    _patch_gdal_cache(monkeypatch, 8_000_000)  # too small for even one full tile row: floor of 1
+    _patch_gdal_cache(
+        monkeypatch, 8_000_000
+    )  # too small for even one full tile row: floor of 1
     assert TileLocalitySampler(ds, num_workers=0).band_tile_rows == 1
 
     _patch_gdal_cache(monkeypatch, 62_000_000)
@@ -147,7 +168,10 @@ def test_tile_locality_band_height_uses_per_worker_cache_share(monkeypatch):
     _patch_gdal_cache(monkeypatch, 124_000_000)
     ds = _two_source_dataset()
     assert TileLocalitySampler(ds, num_workers=0).band_tile_rows == 4
-    assert TileLocalitySampler(ds, num_workers=2, batch_size=3).band_tile_rows == 2
+    assert (
+        TileLocalitySampler(ds, num_workers=2, batch_size=3).band_tile_rows
+        == 2
+    )
 
 
 def test_tile_locality_single_tile_row_sources_band_to_one(monkeypatch):
@@ -155,7 +179,9 @@ def test_tile_locality_single_tile_row_sources_band_to_one(monkeypatch):
     from tcip_mcp.pipelines.data.samplers import TileLocalitySampler
 
     _patch_gdal_cache(monkeypatch, 62_000_000)
-    ds = _StubTiledDataset(_lattice_entries(["a"], tile_ys=(0,)), {"a": _frame()})
+    ds = _StubTiledDataset(
+        _lattice_entries(["a"], tile_ys=(0,)), {"a": _frame()}
+    )
     sampler = TileLocalitySampler(ds, num_workers=0)
     assert sampler.band_tile_rows == 1
     assert sorted(iter(sampler)) == list(range(3))
@@ -164,17 +190,23 @@ def test_tile_locality_single_tile_row_sources_band_to_one(monkeypatch):
 # ── multi-worker lanes ────────────────────────────────────────────────
 
 
-def test_tile_locality_multi_worker_order_is_laned_per_dispatched_worker(monkeypatch):
+def test_tile_locality_multi_worker_order_is_laned_per_dispatched_worker(
+    monkeypatch,
+):
     """The DataLoader dispatches batch i to worker i mod num_workers, so chunking the
     emitted order into batches and dealing chunks round-robin must reconstruct, for every
     worker, a read stream whose (source, band) groups stay contiguous; consecutive epochs
     still differ."""
     from tcip_mcp.pipelines.data.samplers import TileLocalitySampler
 
-    _patch_gdal_cache(monkeypatch, 124_000_000)  # per-worker share at 2 workers: band of 2 rows
+    _patch_gdal_cache(
+        monkeypatch, 124_000_000
+    )  # per-worker share at 2 workers: band of 2 rows
     ds = _two_source_dataset()
     num_workers, batch_size = 2, 3
-    sampler = TileLocalitySampler(ds, num_workers=num_workers, batch_size=batch_size)
+    sampler = TileLocalitySampler(
+        ds, num_workers=num_workers, batch_size=batch_size
+    )
     assert sampler.band_tile_rows == 2
 
     torch.manual_seed(1)
@@ -182,17 +214,25 @@ def test_tile_locality_multi_worker_order_is_laned_per_dispatched_worker(monkeyp
     epoch2 = list(iter(sampler))
     for order in (epoch1, epoch2):
         assert sorted(order) == list(range(len(ds)))
-        chunks = [order[i:i + batch_size] for i in range(0, len(order), batch_size)]
+        chunks = [
+            order[i : i + batch_size] for i in range(0, len(order), batch_size)
+        ]
         per_worker = {
-            worker: [idx for ci, chunk in enumerate(chunks)
-                     if ci % num_workers == worker for idx in chunk]
+            worker: [
+                idx
+                for ci, chunk in enumerate(chunks)
+                if ci % num_workers == worker
+                for idx in chunk
+            ]
             for worker in range(num_workers)
         }
         _assert_bands_owned_by_one_worker(ds, sampler, per_worker)
     assert epoch1 != epoch2
 
 
-def test_tile_locality_lanes_land_on_their_worker_through_a_real_loader(monkeypatch):
+def test_tile_locality_lanes_land_on_their_worker_through_a_real_loader(
+    monkeypatch,
+):
     """End to end through torch's multiprocessing DataLoader: each real worker's received
     index stream stays banded, which holds only if the round-robin batch dispatch delivers
     each lane's batches to one worker. Sample values carry the worker pid, so the mapping is
@@ -213,7 +253,9 @@ def test_tile_locality_lanes_land_on_their_worker_through_a_real_loader(monkeypa
     served = 0
     for indices, pids in loader:
         pid_set = set(pids.tolist())
-        assert len(pid_set) == 1, "one batch was served by more than one worker"
+        assert len(pid_set) == 1, (
+            "one batch was served by more than one worker"
+        )
         per_worker.setdefault(pid_set.pop(), []).extend(indices.tolist())
         served += len(indices)
 
@@ -236,7 +278,9 @@ def test_tile_locality_refuses_when_no_source_is_windowed(monkeypatch):
     from tcip_mcp.pipelines.data.samplers import TileLocalitySampler
 
     _patch_gdal_cache(monkeypatch, 62_000_000)
-    ds = _StubTiledDataset(_lattice_entries(["a"]), {"a": _frame(windowed=False)})
+    ds = _StubTiledDataset(
+        _lattice_entries(["a"]), {"a": _frame(windowed=False)}
+    )
     with pytest.raises(ValueError, match="windowed"):
         TileLocalitySampler(ds, num_workers=0)
 
@@ -256,14 +300,18 @@ def test_tile_locality_refuses_multi_worker_without_batch_size(monkeypatch):
 
     _patch_gdal_cache(monkeypatch, 62_000_000)
     with pytest.raises(ValueError, match="batch_size"):
-        build_sampler({"name": "tile_locality"}, _two_source_dataset(), num_workers=2)
+        build_sampler(
+            {"name": "tile_locality"}, _two_source_dataset(), num_workers=2
+        )
 
 
 def test_tile_locality_refuses_windowed_source_without_dtype_size(monkeypatch):
     from tcip_mcp.pipelines.data.samplers import TileLocalitySampler
 
     _patch_gdal_cache(monkeypatch, 62_000_000)
-    ds = _StubTiledDataset(_lattice_entries(["a"]), {"a": _frame(itemsize=None)})
+    ds = _StubTiledDataset(
+        _lattice_entries(["a"]), {"a": _frame(itemsize=None)}
+    )
     with pytest.raises(ValueError, match="dtype_itemsize"):
         TileLocalitySampler(ds, num_workers=0)
 
@@ -284,11 +332,18 @@ class _TinyClassDataset:
 
 
 def test_build_sampler_builds_tile_locality_through_the_factory(monkeypatch):
-    from tcip_mcp.pipelines.data.samplers import TileLocalitySampler, build_sampler
+    from tcip_mcp.pipelines.data.samplers import (
+        TileLocalitySampler,
+        build_sampler,
+    )
 
     _patch_gdal_cache(monkeypatch, 62_000_000)
-    sampler = build_sampler({"name": "tile_locality"}, _two_source_dataset(),
-                            num_workers=2, batch_size=4)
+    sampler = build_sampler(
+        {"name": "tile_locality"},
+        _two_source_dataset(),
+        num_workers=2,
+        batch_size=4,
+    )
     assert isinstance(sampler, TileLocalitySampler)
 
 
@@ -298,21 +353,34 @@ def test_build_sampler_imbalance_samplers_build_with_or_without_the_loader_conte
     from tcip_mcp.pipelines.data import samplers
 
     ds = _TinyClassDataset()
-    for block in ({"name": "class_balanced"}, {"name": "oversample", "min_count": 3},
-                  {"name": "weighted_random"}):
+    for block in (
+        {"name": "class_balanced"},
+        {"name": "oversample", "min_count": 3},
+        {"name": "weighted_random"},
+    ):
         for kwargs in ({}, {"num_workers": 4, "batch_size": 8}):
             sampler = samplers.build_sampler(block, ds, **kwargs)
             assert len(list(iter(sampler))) >= len(ds)
 
 
-@pytest.mark.parametrize("block, named", [
-    ({"name": "oversample"}, "min_count"),
-    ({"name": "class_balanced", "min_count": 5}, "min_count"),
-    ({"name": "random"}, "Unknown sampler 'random'"),
-    ({"name": "tile_locality", "num_workers": 4}, "train loader supplies"),
-], ids=["oversample-without-its-count", "a-count-its-sampler-does-not-take", "random",
-        "the-loaders-own-worker-count"])
-def test_a_sampler_block_its_sampler_refuses_is_refused_at_preflight_by_name(block, named):
+@pytest.mark.parametrize(
+    "block, named",
+    [
+        ({"name": "oversample"}, "min_count"),
+        ({"name": "class_balanced", "min_count": 5}, "min_count"),
+        ({"name": "random"}, "Unknown sampler 'random'"),
+        ({"name": "tile_locality", "num_workers": 4}, "train loader supplies"),
+    ],
+    ids=[
+        "oversample-without-its-count",
+        "a-count-its-sampler-does-not-take",
+        "random",
+        "the-loaders-own-worker-count",
+    ],
+)
+def test_a_sampler_block_its_sampler_refuses_is_refused_at_preflight_by_name(
+    block, named
+):
     """guard. The oversampler's count has no default: a config naming the oversampler with no
     ``min_count``, or a sampler stated with a value it does not take, refuses naming it where
     training's reads are checked; ``random`` is no sampler name, the absent block being the
@@ -325,18 +393,28 @@ def test_a_sampler_block_its_sampler_refuses_is_refused_at_preflight_by_name(blo
         train_config(classifier_config(1, {}, sampler=block)).trainer_reads()
 
 
-def test_a_stated_oversampler_count_is_the_count_the_train_loader_draws_at(tmp_path):
+def test_a_stated_oversampler_count_is_the_count_the_train_loader_draws_at(
+    tmp_path,
+):
     """guard. The train loader built for a run (``generic_trainer.run_loaders``) draws through the
     oversampler at the count its config states: four samples of two classes, two each,
     duplicated up to five per class, read 4 + 2 * 3 * 2 indices an epoch. The run is the
     launcher's own; the samples are a dataset naming each class under the key the sampler
     reads."""
     from tcip_mcp.pipelines.training.generic_trainer import run_loaders
-    from tests.tiny_trainer_fixtures import classifier_config, frames_data, run_context
+    from tests.tiny_trainer_fixtures import (
+        classifier_config,
+        frames_data,
+        run_context,
+    )
 
     data = frames_data(tmp_path / "ds", [0.1, 0.2, 0.8, 0.9], [0, 0, 1, 1])
-    ctx = run_context(tmp_path, classifier_config(
-        1, data, sampler={"name": "oversample", "min_count": 5}))
+    ctx = run_context(
+        tmp_path,
+        classifier_config(
+            1, data, sampler={"name": "oversample", "min_count": 5}
+        ),
+    )
     train_loader, _ = run_loaders(ctx.run, _TinyClassDataset(), None)
 
     assert len(list(iter(train_loader.sampler))) == 4 + 2 * 3 * 2

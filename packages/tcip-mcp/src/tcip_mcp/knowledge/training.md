@@ -113,10 +113,14 @@ nests keys under one is refused by `preflight_config` by name, since nothing wou
 config = {
     "model_source": {  # importable nn.Module builder, see pipeline-design skill
         "builder": "my_module:build_net",
-        "builder_kwargs": {"pretrained": False},  # the builder's own options; the platform hands
-        "task": "detection",                      # it in_chans and the class count itself
-        "source_files": ["code/my_module.py"],    # the files the run imports, the builder's
-    },                                            # module (and a loop's) among them
+        "builder_kwargs": {
+            "pretrained": False
+        },  # the builder's own options; the platform hands
+        "task": "detection",  # it in_chans and the class count itself
+        "source_files": [
+            "code/my_module.py"
+        ],  # the files the run imports, the builder's
+    },  # module (and a loop's) among them
     # "training_source": "my_module:train",  # optional custom train(ctx) loop, a bare
     #     dotted string ("module:function"), not a dict, see pipeline-design skill
     "data": {
@@ -129,18 +133,27 @@ config = {
     # each ... below is a value you tune for this dataset
     "batch_size": ...,
     "stages": [{"freeze_to": ...}],
-    "optimizer": {"name": "adamw", "backbone_lr": ..., "head_lr": ..., "weight_decay": ...},
+    "optimizer": {
+        "name": "adamw",
+        "backbone_lr": ...,
+        "head_lr": ...,
+        "weight_decay": ...,
+    },
     "scheduler": {"type": "cosine", "eta_min": ..., "horizon_epochs": ...},
     "early_stopping": {"patience": ..., "min_delta": ...},
     "checkpoint_every_n_epochs": ...,
     "mixed_precision": True,
     "device": "cuda",
-    "seed": 42,             # optional, reproducible init/shuffle when set
+    "seed": 42,  # optional, reproducible init/shuffle when set
     "deterministic": False,  # optional, cuDNN deterministic algorithms (slower)
     # optional; each transform states every value its constructor takes
     "augmentation": {
         "horizontal_flip": {"p": ...},
-        "random_crop": {"size": [..., ...], "min_scale": ..., "max_scale": ...},
+        "random_crop": {
+            "size": [..., ...],
+            "min_scale": ...,
+            "max_scale": ...,
+        },
     },
 }
 ```
@@ -225,12 +238,24 @@ task/data and to state; match them to the space and budget, since none has a def
 
 ```python
 run_hyperparameter_search(
-    base_config=config, n_trials=..., search_alg="optuna", search_seed=17,
-    scheduler={"name": "asha", "time_attr": "training_iteration", "max_t": ...,
-               "grace_period": ..., "reduction_factor": ..., "brackets": ...,
-               "stop_last_trials": ...},
-    param_space={"optimizer.head_lr": {"type": "loguniform", "low": ..., "high": ...},
-                 "batch_size": {"type": "categorical", "choices": [...]}})
+    base_config=config,
+    n_trials=...,
+    search_alg="optuna",
+    search_seed=17,
+    scheduler={
+        "name": "asha",
+        "time_attr": "training_iteration",
+        "max_t": ...,
+        "grace_period": ...,
+        "reduction_factor": ...,
+        "brackets": ...,
+        "stop_last_trials": ...,
+    },
+    param_space={
+        "optimizer.head_lr": {"type": "loguniform", "low": ..., "high": ...},
+        "batch_size": {"type": "categorical", "choices": [...]},
+    },
+)
 ```
 - `param_space` (required) names each swept value by its config key or a dotted path into one
   (`optimizer.head_lr`), each range or choice set from the data and the model in hand. The base

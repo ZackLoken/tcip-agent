@@ -47,17 +47,33 @@ def _xmp(capture_uuid: str, band_name: str, wavelength: float) -> bytes:
     return xmp.encode("utf-8")
 
 
-def _write_band_file(path: Path, capture_uuid: str, band_name: str, wavelength: float,
-                     fill: int = 100, shape=(4, 4)) -> None:
+def _write_band_file(
+    path: Path,
+    capture_uuid: str,
+    band_name: str,
+    wavelength: float,
+    fill: int = 100,
+    shape=(4, 4),
+) -> None:
     arr = np.full(shape, fill, dtype=np.uint16)
     tifffile.imwrite(
-        str(path), arr,
-        extratags=[(700, "B", 0, _xmp(capture_uuid, band_name, wavelength), True)],
+        str(path),
+        arr,
+        extratags=[
+            (700, "B", 0, _xmp(capture_uuid, band_name, wavelength), True)
+        ],
     )
 
 
-def _xmp_with_identity(capture_uuid: str, band_name: str, wavelength: float, *,
-                      utc: str, lat: float, lon: float) -> bytes:
+def _xmp_with_identity(
+    capture_uuid: str,
+    band_name: str,
+    wavelength: float,
+    *,
+    utc: str,
+    lat: float,
+    lon: float,
+) -> bytes:
     """As :func:`_xmp`, plus the secondary identity tags (timestamp + GPS fix) real DJI files
     carry, needed to exercise the identity-disagreement guard, which the bare :func:`_xmp` shape
     (no identity tags at all) can never trigger (every check is skipped when its tag is absent)."""
@@ -81,17 +97,38 @@ def _xmp_with_identity(capture_uuid: str, band_name: str, wavelength: float, *,
     return xmp.encode("utf-8")
 
 
-def _write_band_file_with_identity(path: Path, capture_uuid: str, band_name: str, wavelength: float,
-                                   *, utc: str, lat: float, lon: float,
-                                   fill: int = 100, shape=(4, 4)) -> None:
+def _write_band_file_with_identity(
+    path: Path,
+    capture_uuid: str,
+    band_name: str,
+    wavelength: float,
+    *,
+    utc: str,
+    lat: float,
+    lon: float,
+    fill: int = 100,
+    shape=(4, 4),
+) -> None:
     arr = np.full(shape, fill, dtype=np.uint16)
     tifffile.imwrite(
-        str(path), arr,
-        extratags=[(700, "B", 0,
-                   _xmp_with_identity(
-                       capture_uuid, band_name, wavelength, utc=utc, lat=lat, lon=lon
-                   ),
-                   True)],
+        str(path),
+        arr,
+        extratags=[
+            (
+                700,
+                "B",
+                0,
+                _xmp_with_identity(
+                    capture_uuid,
+                    band_name,
+                    wavelength,
+                    utc=utc,
+                    lat=lat,
+                    lon=lon,
+                ),
+                True,
+            )
+        ],
     )
 
 
@@ -110,7 +147,9 @@ def dji_copy(tmp_path: Path) -> Path:
 
 @requires_real_dji_data
 def test_detects_all_16_captures_from_real_dji_data(dji_copy):
-    from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
+    from tcip_mcp.pipelines.data.band_groups import (
+        detect_and_write_band_groups,
+    )
 
     result = detect_and_write_band_groups(dji_copy)
     assert len(result["formed"]) == 16
@@ -125,13 +164,17 @@ def test_detects_all_16_captures_from_real_dji_data(dji_copy):
 @requires_real_dji_data
 def test_real_data_manifest_records_true_wavelengths(dji_copy):
     from tcip_mcp.pipelines.data.band_groups import (
-        detect_and_write_band_groups, read_band_group_manifest,
+        detect_and_write_band_groups,
+        read_band_group_manifest,
     )
 
     result = detect_and_write_band_groups(dji_copy)
     ref = read_band_group_manifest(Path(result["manifests"][0]))
     assert ref.central_wavelength_nm == {
-        "Green": 560.0, "NIR": 860.0, "Red": 650.0, "RedEdge": 730.0,
+        "Green": 560.0,
+        "NIR": 860.0,
+        "Red": 650.0,
+        "RedEdge": 730.0,
     }
     for p in ref.bands.values():
         assert p.is_file()
@@ -139,11 +182,15 @@ def test_real_data_manifest_records_true_wavelengths(dji_copy):
 
 @requires_real_dji_data
 def test_real_data_detection_is_idempotent(dji_copy):
-    from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
+    from tcip_mcp.pipelines.data.band_groups import (
+        detect_and_write_band_groups,
+    )
 
     first = detect_and_write_band_groups(dji_copy)
     assert len(first["manifests"]) == 16
-    manifest_mtimes = {p: Path(p).stat().st_mtime_ns for p in first["manifests"]}
+    manifest_mtimes = {
+        p: Path(p).stat().st_mtime_ns for p in first["manifests"]
+    }
 
     second = detect_and_write_band_groups(dji_copy)
     assert second["formed"] == []  # a recorded fact is not re-inferred
@@ -187,23 +234,48 @@ def test_duplicate_band_identity_is_refused_not_silently_overwritten(tmp_path):
     """Uses agreeing identity tags on all three files so this isolates the duplicate-band-name
     guard specifically; without them, the newer "no secondary signal at all" guard would refuse
     the group first, for a different reason than the one this test pins."""
-    from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
+    from tcip_mcp.pipelines.data.band_groups import (
+        detect_and_write_band_groups,
+    )
 
     d = tmp_path / "images"
     d.mkdir()
     utc, lat, lon = "2023-05-23T17:06:28.931664", 43.196946355, -90.058003633
     _write_band_file_with_identity(
-        d / "cap_G1.tif", "capA", "Green", 560, utc=utc, lat=lat, lon=lon, fill=10,
+        d / "cap_G1.tif",
+        "capA",
+        "Green",
+        560,
+        utc=utc,
+        lat=lat,
+        lon=lon,
+        fill=10,
     )
     _write_band_file_with_identity(
-        d / "cap_G2.tif", "capA", "Green", 560, utc=utc, lat=lat, lon=lon, fill=20,
+        d / "cap_G2.tif",
+        "capA",
+        "Green",
+        560,
+        utc=utc,
+        lat=lat,
+        lon=lon,
+        fill=20,
     )  # same band, same capture
     _write_band_file_with_identity(
-        d / "cap_R.tif", "capA", "Red", 650, utc=utc, lat=lat, lon=lon, fill=30,
+        d / "cap_R.tif",
+        "capA",
+        "Red",
+        650,
+        utc=utc,
+        lat=lat,
+        lon=lon,
+        fill=30,
     )
 
     result = detect_and_write_band_groups(d)
-    assert result["formed"] == []  # refused, never one file silently overwriting the other
+    assert (
+        result["formed"] == []
+    )  # refused, never one file silently overwriting the other
     assert len(result["refused"]) == 1
     refusal = result["refused"][0]
     assert refusal["band"] == "Green"
@@ -214,36 +286,62 @@ def test_duplicate_band_identity_is_refused_not_silently_overwritten(tmp_path):
 # ── identity-disagreement guard ─────────────────────────────
 
 
-def test_two_unrelated_captures_sharing_a_group_id_are_refused_not_spliced(tmp_path):
+def test_two_unrelated_captures_sharing_a_group_id_are_refused_not_spliced(
+    tmp_path,
+):
     """Two disjoint-band-name captures (A_G/A_NIR, B_R/B_RE) sharing one fabricated group id,
     with disagreeing timestamp+GPS, must be refused, not silently merged into one confident,
     wrong 4-band composite."""
-    from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
+    from tcip_mcp.pipelines.data.band_groups import (
+        detect_and_write_band_groups,
+    )
 
     d = tmp_path / "images"
     d.mkdir()
     same_gid = "collided-group-id"
     # Capture A: one place/time.
     _write_band_file_with_identity(
-        d / "A_G.tif", same_gid, "Green", 560,
-        utc="2023-05-23T17:06:28.931664", lat=43.196946355, lon=-90.058003633,
+        d / "A_G.tif",
+        same_gid,
+        "Green",
+        560,
+        utc="2023-05-23T17:06:28.931664",
+        lat=43.196946355,
+        lon=-90.058003633,
     )
     _write_band_file_with_identity(
-        d / "A_NIR.tif", same_gid, "NIR", 860,
-        utc="2023-05-23T17:06:28.931804", lat=43.196946275, lon=-90.058003629,
+        d / "A_NIR.tif",
+        same_gid,
+        "NIR",
+        860,
+        utc="2023-05-23T17:06:28.931804",
+        lat=43.196946275,
+        lon=-90.058003629,
     )
     # Capture B: a different place and time entirely, but the same (colliding/reused) group id.
     _write_band_file_with_identity(
-        d / "B_R.tif", same_gid, "Red", 650,
-        utc="2023-05-23T17:08:17.691590", lat=43.197026713, lon=-90.051619588,
+        d / "B_R.tif",
+        same_gid,
+        "Red",
+        650,
+        utc="2023-05-23T17:08:17.691590",
+        lat=43.197026713,
+        lon=-90.051619588,
     )
     _write_band_file_with_identity(
-        d / "B_RE.tif", same_gid, "RedEdge", 730,
-        utc="2023-05-23T17:08:17.691682", lat=43.197026632, lon=-90.051619582,
+        d / "B_RE.tif",
+        same_gid,
+        "RedEdge",
+        730,
+        utc="2023-05-23T17:08:17.691682",
+        lat=43.197026632,
+        lon=-90.051619582,
     )
 
     result = detect_and_write_band_groups(d)
-    assert result["formed"] == []  # refused, never spliced into one 4-band group
+    assert (
+        result["formed"] == []
+    )  # refused, never spliced into one 4-band group
     assert not list(d.glob("*.bandgroup"))
     assert len(result["refused"]) == 1
     refusal = result["refused"][0]
@@ -251,15 +349,22 @@ def test_two_unrelated_captures_sharing_a_group_id_are_refused_not_spliced(tmp_p
     # this is the identity-disagreement refusal, not the duplicate-band one
     assert refusal["band"] is None
     assert set(refusal["files"]) == {
-        str(d / "A_G.tif"), str(d / "A_NIR.tif"), str(d / "B_R.tif"), str(d / "B_RE.tif"),
+        str(d / "A_G.tif"),
+        str(d / "A_NIR.tif"),
+        str(d / "B_R.tif"),
+        str(d / "B_RE.tif"),
     }
 
 
-def test_a_colliding_group_id_with_no_identity_signal_at_all_is_refused(tmp_path):
+def test_a_colliding_group_id_with_no_identity_signal_at_all_is_refused(
+    tmp_path,
+):
     """A group id match with every identity-check tag absent (not disagreeing, never recorded)
     must refuse too, not silently accept: an unconfirmed match is exactly as unproven as a
     disagreeing one."""
-    from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
+    from tcip_mcp.pipelines.data.band_groups import (
+        detect_and_write_band_groups,
+    )
 
     d = tmp_path / "images"
     d.mkdir()
@@ -280,30 +385,48 @@ def test_a_colliding_group_id_with_no_identity_signal_at_all_is_refused(tmp_path
 
 def test_a_genuine_capture_with_identity_tags_still_forms_normally(tmp_path):
     """4 files sharing a group id and agreeing timestamp/GPS (one capture) form a group."""
-    from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
+    from tcip_mcp.pipelines.data.band_groups import (
+        detect_and_write_band_groups,
+    )
 
     d = tmp_path / "images"
     d.mkdir()
     gid = "real-capture"
-    bands = [("Green", 560, "cap_G.tif"), ("NIR", 860, "cap_NIR.tif"),
-             ("Red", 650, "cap_R.tif"), ("RedEdge", 730, "cap_RE.tif")]
+    bands = [
+        ("Green", 560, "cap_G.tif"),
+        ("NIR", 860, "cap_NIR.tif"),
+        ("Red", 650, "cap_R.tif"),
+        ("RedEdge", 730, "cap_RE.tif"),
+    ]
     for band_name, wl, filename in bands:
         _write_band_file_with_identity(
-            d / filename, gid, band_name, wl,
+            d / filename,
+            gid,
+            band_name,
+            wl,
             # Sub-millisecond/sub-meter jitter across the 4 siblings, matching the real sample.
-            utc="2023-05-23T17:06:28.931664", lat=43.196946355, lon=-90.058003633,
+            utc="2023-05-23T17:06:28.931664",
+            lat=43.196946355,
+            lon=-90.058003633,
         )
 
     result = detect_and_write_band_groups(d)
     assert result["refused"] == []
     assert len(result["formed"]) == 1
-    assert sorted(result["formed"][0]["bands"]) == ["Green", "NIR", "Red", "RedEdge"]
+    assert sorted(result["formed"][0]["bands"]) == [
+        "Green",
+        "NIR",
+        "Red",
+        "RedEdge",
+    ]
 
 
 def test_no_metadata_and_no_manifest_leaves_files_independent(tmp_path):
     """Refuse, don't guess: a file with no embedded correlation metadata and no explicit
     manifest stays exactly as independent as it is today; no filename-pattern fallback."""
-    from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
+    from tcip_mcp.pipelines.data.band_groups import (
+        detect_and_write_band_groups,
+    )
 
     d = tmp_path / "images"
     d.mkdir()
@@ -316,7 +439,9 @@ def test_no_metadata_and_no_manifest_leaves_files_independent(tmp_path):
 
 
 def test_a_lone_file_with_a_group_id_forms_no_group(tmp_path):
-    from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
+    from tcip_mcp.pipelines.data.band_groups import (
+        detect_and_write_band_groups,
+    )
 
     d = tmp_path / "images"
     d.mkdir()
@@ -342,23 +467,50 @@ def test_a_group_whose_stem_a_standalone_file_holds_is_refused_through_ingest(
     src.mkdir()
     utc, lat, lon = "2023-05-23T17:06:28.931664", 43.196946355, -90.058003633
     _write_band_file_with_identity(
-        src / "capA_G.tif", "gidA", "Green", 560, utc=utc, lat=lat, lon=lon,
+        src / "capA_G.tif",
+        "gidA",
+        "Green",
+        560,
+        utc=utc,
+        lat=lat,
+        lon=lon,
     )
     _write_band_file_with_identity(
-        src / "capA_R.tif", "gidA", "Red", 650, utc=utc, lat=lat, lon=lon,
+        src / "capA_R.tif",
+        "gidA",
+        "Red",
+        650,
+        utc=utc,
+        lat=lat,
+        lon=lon,
     )
     # A standalone raw file whose stem is exactly capA's own canonical stem.
     tifffile.imwrite(str(src / "capA.tif"), np.zeros((4, 4), dtype=np.uint16))
     _write_band_file_with_identity(
-        src / "capB_G.tif", "gidB", "Green", 560, utc=utc, lat=lat, lon=lon,
+        src / "capB_G.tif",
+        "gidB",
+        "Green",
+        560,
+        utc=utc,
+        lat=lat,
+        lon=lon,
     )
     _write_band_file_with_identity(
-        src / "capB_R.tif", "gidB", "Red", 650, utc=utc, lat=lat, lon=lon,
+        src / "capB_R.tif",
+        "gidB",
+        "Red",
+        650,
+        utc=utc,
+        lat=lat,
+        lon=lon,
     )
 
     project = tmp_path / "proj_bandcollide_case"
     manifest = ingest_images(
-        project, source=str(src), date_from="none", detect_band_groups=True,
+        project,
+        source=str(src),
+        date_from="none",
+        detect_band_groups=True,
     )
     assert "error" not in manifest
     bg = manifest["band_groups"]
@@ -373,10 +525,14 @@ def test_a_group_whose_stem_a_standalone_file_holds_is_refused_through_ingest(
     assert (bucket_dir / "capB.bandgroup").exists()
 
 
-def test_explicit_group_id_equal_to_one_of_its_own_members_stem_forms(tmp_path):
+def test_explicit_group_id_equal_to_one_of_its_own_members_stem_forms(
+    tmp_path,
+):
     """A group_id equal to one of the group's own members' stems forms: the collision check
     excludes the members the group claims."""
-    from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
+    from tcip_mcp.pipelines.data.band_groups import (
+        detect_and_write_band_groups,
+    )
     from tcip_mcp.pipelines.image_utils import list_logical_images
 
     d = tmp_path / "images"
@@ -385,7 +541,8 @@ def test_explicit_group_id_equal_to_one_of_its_own_members_stem_forms(tmp_path):
         tifffile.imwrite(str(d / name), np.zeros((4, 4), dtype=np.uint16))
 
     result = detect_and_write_band_groups(
-        d, explicit_groups={"cap": {"Blue": "cap.tif", "Green": "cap_other.tif"}},
+        d,
+        explicit_groups={"cap": {"Blue": "cap.tif", "Green": "cap_other.tif"}},
     )
 
     assert result["refused"] == []
@@ -394,8 +551,12 @@ def test_explicit_group_id_equal_to_one_of_its_own_members_stem_forms(tmp_path):
     assert set(list_logical_images(d)) == {"cap"}
 
 
-def test_two_explicit_group_ids_folding_to_one_key_form_one_and_refuse_the_other(tmp_path):
-    from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
+def test_two_explicit_group_ids_folding_to_one_key_form_one_and_refuse_the_other(
+    tmp_path,
+):
+    from tcip_mcp.pipelines.data.band_groups import (
+        detect_and_write_band_groups,
+    )
 
     d = tmp_path / "images"
     d.mkdir()
@@ -403,7 +564,8 @@ def test_two_explicit_group_ids_folding_to_one_key_form_one_and_refuse_the_other
         tifffile.imwrite(str(d / name), np.zeros((4, 4), dtype=np.uint16))
 
     result = detect_and_write_band_groups(
-        d, explicit_groups={
+        d,
+        explicit_groups={
             "Cap": {"Blue": "a1.tif", "Green": "a2.tif"},
             "cap": {"Blue": "b1.tif", "Green": "b2.tif"},
         },
@@ -416,10 +578,14 @@ def test_two_explicit_group_ids_folding_to_one_key_form_one_and_refuse_the_other
     assert {formed_stem, refused_group_id} == {"Cap", "cap"}
 
 
-def test_a_group_that_claims_a_members_stem_lets_a_later_group_form_under_it(tmp_path):
+def test_a_group_that_claims_a_members_stem_lets_a_later_group_form_under_it(
+    tmp_path,
+):
     """A second group in one pass whose stem equals a member the first group claims (``y.tif``)
     forms: that member's raw identity is gone once the first manifest is written."""
-    from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
+    from tcip_mcp.pipelines.data.band_groups import (
+        detect_and_write_band_groups,
+    )
     from tcip_mcp.pipelines.image_utils import list_logical_images
 
     d = tmp_path / "images"
@@ -428,7 +594,8 @@ def test_a_group_that_claims_a_members_stem_lets_a_later_group_form_under_it(tmp
         tifffile.imwrite(str(d / name), np.zeros((4, 4), dtype=np.uint16))
 
     result = detect_and_write_band_groups(
-        d, explicit_groups={
+        d,
+        explicit_groups={
             "capA": {"Blue": "y.tif", "Green": "other.tif"},
             "y": {"Blue": "y_band1.tif", "Green": "y_band2.tif"},
         },
@@ -443,7 +610,9 @@ def test_a_group_that_claims_a_members_stem_lets_a_later_group_form_under_it(tmp
 
 
 def test_explicit_manifest_groups_a_sensor_with_no_embedded_metadata(tmp_path):
-    from tcip_mcp.pipelines.data.band_groups import detect_and_write_band_groups
+    from tcip_mcp.pipelines.data.band_groups import (
+        detect_and_write_band_groups,
+    )
 
     d = tmp_path / "images"
     d.mkdir()
@@ -451,7 +620,11 @@ def test_explicit_manifest_groups_a_sensor_with_no_embedded_metadata(tmp_path):
         tifffile.imwrite(str(d / name), np.zeros((4, 4), dtype=np.uint16))
 
     explicit = {
-        "cap1": {"Blue": "cap1_band1.tif", "Green": "cap1_band2.tif", "Red": "cap1_band3.tif"},
+        "cap1": {
+            "Blue": "cap1_band1.tif",
+            "Green": "cap1_band2.tif",
+            "Red": "cap1_band3.tif",
+        },
     }
     result = detect_and_write_band_groups(d, explicit_groups=explicit)
     assert len(result["formed"]) == 1
@@ -462,11 +635,15 @@ def test_explicit_manifest_groups_a_sensor_with_no_embedded_metadata(tmp_path):
 
 
 def test_explicit_manifest_drops_a_group_missing_files(tmp_path):
-    from tcip_mcp.pipelines.data.band_groups import groups_from_explicit_mapping
+    from tcip_mcp.pipelines.data.band_groups import (
+        groups_from_explicit_mapping,
+    )
 
     d = tmp_path / "images"
     d.mkdir()
-    tifffile.imwrite(str(d / "only_one.tif"), np.zeros((4, 4), dtype=np.uint16))
+    tifffile.imwrite(
+        str(d / "only_one.tif"), np.zeros((4, 4), dtype=np.uint16)
+    )
 
     groups, used = groups_from_explicit_mapping(
         d, {"capX": {"Blue": "only_one.tif", "Green": "missing.tif"}}
@@ -492,8 +669,11 @@ def test_manifest_round_trip(tmp_path):
     band_b.write_bytes(b"y")
 
     manifest_path = write_band_group_manifest(
-        d, "cap42", {"Red": band_a, "Blue": band_b},
-        central_wavelength_nm={"Red": 650.0, "Blue": 470.0}, source="explicit-manifest",
+        d,
+        "cap42",
+        {"Red": band_a, "Blue": band_b},
+        central_wavelength_nm={"Red": 650.0, "Blue": 470.0},
+        source="explicit-manifest",
     )
     assert manifest_path == d / "cap42.bandgroup"
     # Path.stem recovers the canonical stem directly: the whole reason .bandgroup was chosen
@@ -526,7 +706,10 @@ def test_ingest_images_groups_real_dji_bucket(tmp_path, monkeypatch):
 
     proj = tmp_path / "ms_valley_farm"
     manifest = ingest_images(
-        proj, source=str(REAL_DJI_DIR), date_from="2023-05-23", detect_band_groups=True,
+        proj,
+        source=str(REAL_DJI_DIR),
+        date_from="2023-05-23",
+        detect_band_groups=True,
     )
     assert "error" not in manifest
     assert manifest["copied"] == 64
@@ -535,10 +718,14 @@ def test_ingest_images_groups_real_dji_bucket(tmp_path, monkeypatch):
 
     images_dir = proj / "images" / "2023-05-23"
     assert len(list(images_dir.glob("*.bandgroup"))) == 16
-    assert len(list(images_dir.glob("*.TIF"))) == 64  # originals untouched, still all present
+    assert (
+        len(list(images_dir.glob("*.TIF"))) == 64
+    )  # originals untouched, still all present
 
 
-def test_ingest_images_default_skips_band_group_detection(tmp_path, monkeypatch):
+def test_ingest_images_default_skips_band_group_detection(
+    tmp_path, monkeypatch
+):
     """``detect_band_groups`` defaults False: an ordinary ingest runs no band-group detection."""
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "workspace"))
     from PIL import Image
@@ -550,10 +737,16 @@ def test_ingest_images_default_skips_band_group_detection(tmp_path, monkeypatch)
     Image.new("RGB", (16, 16)).save(src / "a.jpg")
 
     manifest = ingest_images(tmp_path / "plain_proj_default", source=str(src))
-    assert manifest["band_groups"] == {"formed": [], "refused": [], "manifests": []}
+    assert manifest["band_groups"] == {
+        "formed": [],
+        "refused": [],
+        "manifests": [],
+    }
 
 
-def test_a_manifest_recorded_mid_detection_is_kept_rather_than_overwritten(tmp_path, monkeypatch):
+def test_a_manifest_recorded_mid_detection_is_kept_rather_than_overwritten(
+    tmp_path, monkeypatch
+):
     """A recorded band group is a fact, and a detection pass that reached the same stem a moment
     later must not replace it with its own inference.
 
@@ -581,10 +774,13 @@ def test_a_manifest_recorded_mid_detection_is_kept_rather_than_overwritten(tmp_p
             manifest_path.write_bytes(recorded)
         return original(images_dir, stem, bands, **kwargs)
 
-    monkeypatch.setattr(band_groups, "write_band_group_manifest", racing_writer)
+    monkeypatch.setattr(
+        band_groups, "write_band_group_manifest", racing_writer
+    )
 
     result = band_groups.detect_and_write_band_groups(
-        images, explicit_groups={"cap": {"Green": "a.tif", "Red": "b.tif"}},
+        images,
+        explicit_groups={"cap": {"Green": "a.tif", "Red": "b.tif"}},
     )
 
     assert raced == ["cap"]

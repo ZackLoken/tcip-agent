@@ -14,7 +14,9 @@ import pytest
 from tcip_annotation.json_io import LabelDocument, read_label_document
 from tcip_annotation.state import Annotation, BBox, Point, Polygon
 
-from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import OrthomosaicGeoreference
+from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
+    OrthomosaicGeoreference,
+)
 from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
 from tcip_mcp.pipelines.postprocessing.segment_attribution import (
     CanopySegmentError,
@@ -23,7 +25,10 @@ from tcip_mcp.pipelines.postprocessing.segment_attribution import (
     tie_segments_to_plants,
 )
 
-from tests._geotiff_fixtures import geotransform_of_file, write_canonical_dataset_raster
+from tests._geotiff_fixtures import (
+    geotransform_of_file,
+    write_canonical_dataset_raster,
+)
 from tests._mapping_fixtures import POSITION_ERROR_M
 from tests._producer_fixtures import image_label_key, label_image
 
@@ -32,7 +37,9 @@ WIDTH = HEIGHT = 64
 
 def _setup(tmp_path: Path) -> tuple[Path, Path, OrthomosaicGeoreference, dict]:
     dataset_root = tmp_path / "ds"
-    raster_path = write_canonical_dataset_raster(dataset_root, width=WIDTH, height=HEIGHT)
+    raster_path = write_canonical_dataset_raster(
+        dataset_root, width=WIDTH, height=HEIGHT
+    )
     georef = OrthomosaicGeoreference(geotransform_of_file(raster_path))
     raster_identity = {"width": WIDTH, "height": HEIGHT}
     return dataset_root, raster_path, georef, raster_identity
@@ -43,8 +50,9 @@ def _stored(raster_path: Path) -> LabelDocument:
     return read_label_document(image_label_key(raster_path))
 
 
-def _write_document(raster_path: Path, annotations: list[Annotation],
-                    width: int = WIDTH) -> LabelDocument:
+def _write_document(
+    raster_path: Path, annotations: list[Annotation], width: int = WIDTH
+) -> LabelDocument:
     """``annotations`` saved as the raster's label document at ``width`` by ``HEIGHT``; the
     document as read back."""
     label_image(raster_path, annotations, width, HEIGHT, keep_empty=True)
@@ -55,114 +63,230 @@ def _square(x0: float, y0: float, x1: float, y1: float) -> Polygon:
     return Polygon(rings=[[(x0, y0), (x1, y0), (x1, y1), (x0, y1)]])
 
 
-def _plant(georef: OrthomosaicGeoreference, plot_name: str, px: float, py: float) -> PlantRecord:
+def _plant(
+    georef: OrthomosaicGeoreference, plot_name: str, px: float, py: float
+) -> PlantRecord:
     lat, lon = georef.pixel_to_wgs84(px, py)
-    return PlantRecord(plot_name=plot_name, accession_name=f"acc-{plot_name}", plot_number=None,
-                       row_number=None, col_number=None, lat=lat, lon=lon)
+    return PlantRecord(
+        plot_name=plot_name,
+        accession_name=f"acc-{plot_name}",
+        plot_number=None,
+        row_number=None,
+        col_number=None,
+        lat=lat,
+        lon=lon,
+    )
 
 
 # ── load_canopy_segments ──────────────────────────────────────────────────
 
 
-def test_load_canopy_segments_admits_a_hand_traced_polygon_and_a_box(tmp_path: Path) -> None:
+def test_load_canopy_segments_admits_a_hand_traced_polygon_and_a_box(
+    tmp_path: Path,
+) -> None:
     _, raster_path, _georef, identity = _setup(tmp_path)
     anns = [
-        Annotation(subject="canopy", geometry=_square(5, 5, 20, 20),
-                  created_by="user:breeder", created_at="t"),
-        Annotation(subject="canopy", geometry=BBox(30, 30, 45, 45),
-                  created_by="user:breeder", created_at="t"),
+        Annotation(
+            subject="canopy",
+            geometry=_square(5, 5, 20, 20),
+            created_by="user:breeder",
+            created_at="t",
+        ),
+        Annotation(
+            subject="canopy",
+            geometry=BBox(30, 30, 45, 45),
+            created_by="user:breeder",
+            created_at="t",
+        ),
     ]
     data = _write_document(raster_path, anns)
 
     segments = load_canopy_segments(
-        data, subject="canopy", raster_stem=raster_path.stem, raster_identity=identity)
+        data,
+        subject="canopy",
+        raster_stem=raster_path.stem,
+        raster_identity=identity,
+    )
 
     assert [s.segment_index for s in segments] == [0, 1]
     assert segments[0].polygon.rings[0][0] == (5.0, 5.0)
     # A box is admitted as the rectangle it is: four corners, in box_ring's order.
-    assert segments[1].polygon.rings[0] == [(30.0, 30.0), (45.0, 30.0), (45.0, 45.0), (30.0, 45.0)]
+    assert segments[1].polygon.rings[0] == [
+        (30.0, 30.0),
+        (45.0, 30.0),
+        (45.0, 45.0),
+        (30.0, 45.0),
+    ]
 
 
-def test_load_canopy_segments_excludes_annotations_of_another_subject(tmp_path: Path) -> None:
+def test_load_canopy_segments_excludes_annotations_of_another_subject(
+    tmp_path: Path,
+) -> None:
     _, raster_path, _georef, identity = _setup(tmp_path)
     anns = [
-        Annotation(subject="canopy", geometry=_square(5, 5, 20, 20), created_by="user:breeder"),
-        Annotation(subject="other", geometry=_square(30, 30, 40, 40), created_by="user:breeder"),
+        Annotation(
+            subject="canopy",
+            geometry=_square(5, 5, 20, 20),
+            created_by="user:breeder",
+        ),
+        Annotation(
+            subject="other",
+            geometry=_square(30, 30, 40, 40),
+            created_by="user:breeder",
+        ),
     ]
     data = _write_document(raster_path, anns)
 
     segments = load_canopy_segments(
-        data, subject="canopy", raster_stem=raster_path.stem, raster_identity=identity)
+        data,
+        subject="canopy",
+        raster_stem=raster_path.stem,
+        raster_identity=identity,
+    )
 
     assert len(segments) == 1
 
 
-def test_load_canopy_segments_refuses_a_document_whose_size_differs(tmp_path: Path) -> None:
+def test_load_canopy_segments_refuses_a_document_whose_size_differs(
+    tmp_path: Path,
+) -> None:
     _, raster_path, _georef, identity = _setup(tmp_path)
-    data = _write_document(raster_path, [
-        Annotation(subject="canopy", geometry=_square(5, 5, 20, 20), created_by="user:breeder"),
-    ], width=999)
+    data = _write_document(
+        raster_path,
+        [
+            Annotation(
+                subject="canopy",
+                geometry=_square(5, 5, 20, 20),
+                created_by="user:breeder",
+            ),
+        ],
+        width=999,
+    )
 
     with pytest.raises(CanopySegmentError, match="999"):
         load_canopy_segments(
-            data, subject="canopy", raster_stem=raster_path.stem, raster_identity=identity)
+            data,
+            subject="canopy",
+            raster_stem=raster_path.stem,
+            raster_identity=identity,
+        )
 
 
-def test_load_canopy_segments_refuses_when_no_annotation_of_subject_exists(tmp_path: Path) -> None:
+def test_load_canopy_segments_refuses_when_no_annotation_of_subject_exists(
+    tmp_path: Path,
+) -> None:
     _, raster_path, _georef, identity = _setup(tmp_path)
-    data = _write_document(raster_path, [
-        Annotation(subject="other", geometry=_square(5, 5, 20, 20), created_by="user:breeder"),
-    ])
+    data = _write_document(
+        raster_path,
+        [
+            Annotation(
+                subject="other",
+                geometry=_square(5, 5, 20, 20),
+                created_by="user:breeder",
+            ),
+        ],
+    )
 
     with pytest.raises(CanopySegmentError, match="canopy"):
         load_canopy_segments(
-            data, subject="canopy", raster_stem=raster_path.stem, raster_identity=identity)
+            data,
+            subject="canopy",
+            raster_stem=raster_path.stem,
+            raster_identity=identity,
+        )
 
 
-def test_load_canopy_segments_refuses_a_point_naming_the_record(tmp_path: Path) -> None:
+def test_load_canopy_segments_refuses_a_point_naming_the_record(
+    tmp_path: Path,
+) -> None:
     _, raster_path, _georef, identity = _setup(tmp_path)
-    data = _write_document(raster_path, [
-        Annotation(subject="canopy", geometry=Point(10.0, 10.0), created_by="user:breeder"),
-    ])
+    data = _write_document(
+        raster_path,
+        [
+            Annotation(
+                subject="canopy",
+                geometry=Point(10.0, 10.0),
+                created_by="user:breeder",
+            ),
+        ],
+    )
 
     with pytest.raises(CanopySegmentError, match="Point"):
         load_canopy_segments(
-            data, subject="canopy", raster_stem=raster_path.stem, raster_identity=identity)
+            data,
+            subject="canopy",
+            raster_stem=raster_path.stem,
+            raster_identity=identity,
+        )
 
 
-def test_load_canopy_segments_refuses_a_geometry_less_annotation(tmp_path: Path) -> None:
+def test_load_canopy_segments_refuses_a_geometry_less_annotation(
+    tmp_path: Path,
+) -> None:
     """An image-level label of the stated subject (a subject with no geometry at all) names no
     region, same as a Point, and must not reach the box-to-polygon conversion."""
     _, raster_path, _georef, identity = _setup(tmp_path)
-    data = _write_document(raster_path, [
-        Annotation(subject="canopy", geometry=None, created_by="user:breeder"),
-    ])
+    data = _write_document(
+        raster_path,
+        [
+            Annotation(
+                subject="canopy", geometry=None, created_by="user:breeder"
+            ),
+        ],
+    )
 
-    with pytest.raises(CanopySegmentError, match="image-level label, which names no region"):
+    with pytest.raises(
+        CanopySegmentError, match="image-level label, which names no region"
+    ):
         load_canopy_segments(
-            data, subject="canopy", raster_stem=raster_path.stem, raster_identity=identity)
+            data,
+            subject="canopy",
+            raster_stem=raster_path.stem,
+            raster_identity=identity,
+        )
 
 
 def test_load_canopy_segments_refuses_a_scored_polygon(tmp_path: Path) -> None:
     _, raster_path, _georef, identity = _setup(tmp_path)
-    data = _write_document(raster_path, [
-        Annotation(subject="canopy", geometry=_square(5, 5, 20, 20), score=0.9, created_by="sam"),
-    ])
+    data = _write_document(
+        raster_path,
+        [
+            Annotation(
+                subject="canopy",
+                geometry=_square(5, 5, 20, 20),
+                score=0.9,
+                created_by="sam",
+            ),
+        ],
+    )
 
     with pytest.raises(CanopySegmentError, match="prediction score"):
         load_canopy_segments(
-            data, subject="canopy", raster_stem=raster_path.stem, raster_identity=identity)
+            data,
+            subject="canopy",
+            raster_stem=raster_path.stem,
+            raster_identity=identity,
+        )
 
 
-def test_load_canopy_segments_refuses_a_polygon_with_no_created_by(tmp_path: Path) -> None:
+def test_load_canopy_segments_refuses_a_polygon_with_no_created_by(
+    tmp_path: Path,
+) -> None:
     _, raster_path, _georef, identity = _setup(tmp_path)
-    data = _write_document(raster_path, [
-        Annotation(subject="canopy", geometry=_square(5, 5, 20, 20)),
-    ])
+    data = _write_document(
+        raster_path,
+        [
+            Annotation(subject="canopy", geometry=_square(5, 5, 20, 20)),
+        ],
+    )
 
     with pytest.raises(CanopySegmentError, match="no created_by"):
         load_canopy_segments(
-            data, subject="canopy", raster_stem=raster_path.stem, raster_identity=identity)
+            data,
+            subject="canopy",
+            raster_stem=raster_path.stem,
+            raster_identity=identity,
+        )
 
 
 def test_load_canopy_segments_admits_a_polygon_with_no_created_by_a_person_signed_off(
@@ -172,12 +296,21 @@ def test_load_canopy_segments_admits_a_polygon_with_no_created_by_a_person_signe
 
     _, raster_path, _georef, identity = _setup(tmp_path)
     unattributed = Annotation(subject="canopy", geometry=_square(5, 5, 20, 20))
-    data = _write_document(raster_path, [
-        signed_off(unattributed, "user:breeder", "2026-01-01T00:00:00+00:00"),
-    ])
+    data = _write_document(
+        raster_path,
+        [
+            signed_off(
+                unattributed, "user:breeder", "2026-01-01T00:00:00+00:00"
+            ),
+        ],
+    )
 
     segments = load_canopy_segments(
-        data, subject="canopy", raster_stem=raster_path.stem, raster_identity=identity)
+        data,
+        subject="canopy",
+        raster_stem=raster_path.stem,
+        raster_identity=identity,
+    )
 
     assert len(segments) == 1
 
@@ -186,17 +319,30 @@ def test_load_canopy_segments_refuses_a_machine_authored_polygon_with_no_persons
     tmp_path: Path,
 ) -> None:
     _, raster_path, _georef, identity = _setup(tmp_path)
-    data = _write_document(raster_path, [
-        Annotation(subject="canopy", geometry=_square(5, 5, 20, 20), created_by="sam"),
-    ])
+    data = _write_document(
+        raster_path,
+        [
+            Annotation(
+                subject="canopy",
+                geometry=_square(5, 5, 20, 20),
+                created_by="sam",
+            ),
+        ],
+    )
 
     with pytest.raises(CanopySegmentError, match="no person"):
         load_canopy_segments(
-            data, subject="canopy", raster_stem=raster_path.stem, raster_identity=identity)
+            data,
+            subject="canopy",
+            raster_stem=raster_path.stem,
+            raster_identity=identity,
+        )
 
 
 def test_load_canopy_segments_admits_a_proposed_polygon_accepted_through_the_save_door(
-    tmp_path: Path, client, opened_project: Path,
+    tmp_path: Path,
+    client,
+    opened_project: Path,
 ) -> None:
     """A staged polygon proposal accepted through the editor's save door delivers: the platform's
     own producer of a person's ``accepted_by``, never a hand-written provenance pair.
@@ -205,42 +351,80 @@ def test_load_canopy_segments_admits_a_proposed_polygon_accepted_through_the_sav
 
     _dataset_root, raster_path, _georef, identity = _setup(tmp_path)
     ring = [[5.0, 5.0], [20.0, 5.0], [20.0, 20.0], [5.0, 20.0]]
-    staged = stage_proposals(tmp_path, str(raster_path), model_name="segmenter", polygons=[
-        {"subject": "canopy", "conf": 0.9, "rings": [ring]}])
+    staged = stage_proposals(
+        tmp_path,
+        str(raster_path),
+        model_name="segmenter",
+        polygons=[{"subject": "canopy", "conf": 0.9, "rings": [ring]}],
+    )
     assert "error" not in staged, staged
 
-    resp = client.post("/api/annotate/labels", json={
-        "image_path": str(raster_path), "annotations": [],
-        "bucket": staged["bucket"], "accept": [0], "user": "breeder",
-    })
+    resp = client.post(
+        "/api/annotate/labels",
+        json={
+            "image_path": str(raster_path),
+            "annotations": [],
+            "bucket": staged["bucket"],
+            "accept": [0],
+            "user": "breeder",
+        },
+    )
     assert resp.status_code == 200, resp.text
 
     stored = _stored(raster_path)
     segments = load_canopy_segments(
-        stored, subject="canopy", raster_stem=raster_path.stem, raster_identity=identity)
+        stored,
+        subject="canopy",
+        raster_stem=raster_path.stem,
+        raster_identity=identity,
+    )
     assert len(segments) == 1
     accepted = stored.annotations[0]
     assert (accepted.created_by, accepted.accepted_by, accepted.score) == (
-        "segmenter", "user:breeder", None)
+        "segmenter",
+        "user:breeder",
+        None,
+    )
 
 
 # ── tie_segments_to_plants ────────────────────────────────────────────────
 
 
 def test_tie_segments_to_plants_ties_two_disjoint_segments_each_to_one_plant(
-        tmp_path: Path) -> None:
+    tmp_path: Path,
+) -> None:
     _, raster_path, georef, _identity = _setup(tmp_path)
-    segments_data = _write_document(raster_path, [
-        Annotation(subject="canopy", geometry=_square(0, 0, 20, 20), created_by="user:breeder"),
-        Annotation(subject="canopy", geometry=_square(30, 30, 50, 50), created_by="user:breeder"),
-    ])
+    segments_data = _write_document(
+        raster_path,
+        [
+            Annotation(
+                subject="canopy",
+                geometry=_square(0, 0, 20, 20),
+                created_by="user:breeder",
+            ),
+            Annotation(
+                subject="canopy",
+                geometry=_square(30, 30, 50, 50),
+                created_by="user:breeder",
+            ),
+        ],
+    )
     segments = load_canopy_segments(
-        segments_data, subject="canopy", raster_stem=raster_path.stem,
-        raster_identity={"width": WIDTH, "height": HEIGHT})
+        segments_data,
+        subject="canopy",
+        raster_stem=raster_path.stem,
+        raster_identity={"width": WIDTH, "height": HEIGHT},
+    )
     plants = [_plant(georef, "plot0", 10, 10), _plant(georef, "plot1", 40, 40)]
 
-    tie = tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT,
-                                 position_error_m=POSITION_ERROR_M)
+    tie = tie_segments_to_plants(
+        segments,
+        plants,
+        georef,
+        width=WIDTH,
+        height=HEIGHT,
+        position_error_m=POSITION_ERROR_M,
+    )
 
     assert {t.plot_name for t in tie.tied} == {"plot0", "plot1"}
     assert tie.untied == []
@@ -250,216 +434,451 @@ def test_tie_segments_to_plants_ties_two_disjoint_segments_each_to_one_plant(
 
 
 def test_tie_segments_to_plants_leaves_a_plant_within_the_position_error_untied(
-        tmp_path: Path) -> None:
+    tmp_path: Path,
+) -> None:
     """A plant whose projected position clears its segment's boundary by less than the stated
     position error is not tied: a displaced position could have put it in a neighbor's canopy.
     The bound is the project's; a negative one refuses."""
     _, raster_path, georef, _identity = _setup(tmp_path)
-    segments_data = _write_document(raster_path, [
-        Annotation(subject="canopy", geometry=_square(0, 0, 20, 20), created_by="user:breeder"),
-        Annotation(subject="canopy", geometry=_square(30, 30, 50, 50), created_by="user:breeder"),
-    ])
+    segments_data = _write_document(
+        raster_path,
+        [
+            Annotation(
+                subject="canopy",
+                geometry=_square(0, 0, 20, 20),
+                created_by="user:breeder",
+            ),
+            Annotation(
+                subject="canopy",
+                geometry=_square(30, 30, 50, 50),
+                created_by="user:breeder",
+            ),
+        ],
+    )
     segments = load_canopy_segments(
-        segments_data, subject="canopy", raster_stem=raster_path.stem,
-        raster_identity={"width": WIDTH, "height": HEIGHT})
+        segments_data,
+        subject="canopy",
+        raster_stem=raster_path.stem,
+        raster_identity={"width": WIDTH, "height": HEIGHT},
+    )
     plants = [_plant(georef, "plot0", 10, 10), _plant(georef, "plot1", 31, 40)]
 
-    tie = tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT,
-                                 position_error_m=POSITION_ERROR_M)
+    tie = tie_segments_to_plants(
+        segments,
+        plants,
+        georef,
+        width=WIDTH,
+        height=HEIGHT,
+        position_error_m=POSITION_ERROR_M,
+    )
     safe = next(t for t in tie.tied if t.plot_name == "plot0").clearance_m
     tight = next(t for t in tie.tied if t.plot_name == "plot1").clearance_m
     assert tight < safe
 
-    bounded = tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT,
-                                     position_error_m=(tight + safe) / 2)
+    bounded = tie_segments_to_plants(
+        segments,
+        plants,
+        georef,
+        width=WIDTH,
+        height=HEIGHT,
+        position_error_m=(tight + safe) / 2,
+    )
     assert [t.plot_name for t in bounded.tied] == ["plot0"]
     assert bounded.plants_within_position_error == ["plot1"]
     assert [s.segment_index for s in bounded.untied] == [1]
     assert bounded.plants_without_segment == []
     # The untied segment holds a plant: it is no plantless segment, and a detection in it says so.
     assert bounded.segments_without_plant == 0
-    (inside,) = assign_detections_to_segments([[38.0, 38.0, 42.0, 42.0]], bounded)
-    assert (inside.source, inside.plot_name) == ("segment_plant_within_position_error", None)
+    (inside,) = assign_detections_to_segments(
+        [[38.0, 38.0, 42.0, 42.0]], bounded
+    )
+    assert (inside.source, inside.plot_name) == (
+        "segment_plant_within_position_error",
+        None,
+    )
 
     for bound in (-1.0, float("nan"), float("inf")):
         with pytest.raises(ValueError, match="finite, nonnegative"):
-            tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT,
-                                   position_error_m=bound)
+            tie_segments_to_plants(
+                segments,
+                plants,
+                georef,
+                width=WIDTH,
+                height=HEIGHT,
+                position_error_m=bound,
+            )
 
 
-def _one_segment_tie(transform, plant_px: tuple[float, float], segment: Polygon,
-                     position_error_m: float):
+def _one_segment_tie(
+    transform,
+    plant_px: tuple[float, float],
+    segment: Polygon,
+    position_error_m: float,
+):
     """The tie of ``segment`` to one plant at pixel ``plant_px`` under the georeference
     ``transform`` states, on a 100-pixel frame."""
-    from tcip_mcp.pipelines.postprocessing.segment_attribution import CanopySegment
+    from tcip_mcp.pipelines.postprocessing.segment_attribution import (
+        CanopySegment,
+    )
 
     georef = OrthomosaicGeoreference(transform)
     return tie_segments_to_plants(
-        [CanopySegment(segment_index=0, polygon=segment)], [_plant(georef, "plot0", *plant_px)],
-        georef, width=100, height=100, position_error_m=position_error_m)
+        [CanopySegment(segment_index=0, polygon=segment)],
+        [_plant(georef, "plot0", *plant_px)],
+        georef,
+        width=100,
+        height=100,
+        position_error_m=position_error_m,
+    )
 
 
 def test_the_clearance_is_measured_in_meters_on_a_raster_in_feet():
     """EPSG:2263 states its coordinates in US survey feet: a plant two feet (0.61 m) inside its
     segment's boundary is within a 1 m position error, not two units clear of it."""
-    from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import GeoTransform
+    from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
+        GeoTransform,
+    )
 
-    feet = GeoTransform(tiepoint_pixel_x=0.0, tiepoint_pixel_y=0.0,
-                        tiepoint_native_x=1_000_000.0, tiepoint_native_y=200_000.0,
-                        pixel_scale_x=1.0, pixel_scale_y=1.0, epsg=2263)
+    feet = GeoTransform(
+        tiepoint_pixel_x=0.0,
+        tiepoint_pixel_y=0.0,
+        tiepoint_native_x=1_000_000.0,
+        tiepoint_native_y=200_000.0,
+        pixel_scale_x=1.0,
+        pixel_scale_y=1.0,
+        epsg=2263,
+    )
 
-    tie = _one_segment_tie(feet, (2.0, 50.0), _square(0, 0, 90, 90), position_error_m=1.0)
+    tie = _one_segment_tie(
+        feet, (2.0, 50.0), _square(0, 0, 90, 90), position_error_m=1.0
+    )
 
     assert tie.tied == []
     assert tie.plants_within_position_error == ["plot0"]
-    clear = _one_segment_tie(feet, (2.0, 50.0), _square(0, 0, 90, 90),
-                             position_error_m=POSITION_ERROR_M)
-    assert clear.tied[0].clearance_m == pytest.approx(2 * 0.3048006096, rel=1e-4)
+    clear = _one_segment_tie(
+        feet,
+        (2.0, 50.0),
+        _square(0, 0, 90, 90),
+        position_error_m=POSITION_ERROR_M,
+    )
+    assert clear.tied[0].clearance_m == pytest.approx(
+        2 * 0.3048006096, rel=1e-4
+    )
 
 
 def test_the_clearance_is_the_nearest_boundary_in_meters_on_anisotropic_pixels():
     """Pixels 10 m wide and 1 m tall: a plant 2 pixels (20 m) from the segment's left edge and 5
     pixels (5 m) from its top edge clears the boundary by 5 m, so a 10 m bound leaves it untied."""
-    from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import GeoTransform
+    from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
+        GeoTransform,
+    )
 
-    anisotropic = GeoTransform(tiepoint_pixel_x=0.0, tiepoint_pixel_y=0.0,
-                               tiepoint_native_x=500_000.0, tiepoint_native_y=4_800_000.0,
-                               pixel_scale_x=10.0, pixel_scale_y=1.0, epsg=32615)
+    anisotropic = GeoTransform(
+        tiepoint_pixel_x=0.0,
+        tiepoint_pixel_y=0.0,
+        tiepoint_native_x=500_000.0,
+        tiepoint_native_y=4_800_000.0,
+        pixel_scale_x=10.0,
+        pixel_scale_y=1.0,
+        epsg=32615,
+    )
 
-    tie = _one_segment_tie(anisotropic, (2.0, 5.0), _square(0, 0, 10, 99), position_error_m=10.0)
+    tie = _one_segment_tie(
+        anisotropic, (2.0, 5.0), _square(0, 0, 10, 99), position_error_m=10.0
+    )
 
     assert tie.tied == []
     assert tie.plants_within_position_error == ["plot0"]
-    clear = _one_segment_tie(anisotropic, (2.0, 5.0), _square(0, 0, 10, 99),
-                             position_error_m=4.0)
+    clear = _one_segment_tie(
+        anisotropic, (2.0, 5.0), _square(0, 0, 10, 99), position_error_m=4.0
+    )
     assert clear.tied[0].clearance_m == pytest.approx(5.0, rel=1e-6)
 
 
-def test_tie_segments_to_plants_leaves_a_plantless_segment_untied(tmp_path: Path) -> None:
+def test_tie_segments_to_plants_leaves_a_plantless_segment_untied(
+    tmp_path: Path,
+) -> None:
     _, raster_path, georef, _identity = _setup(tmp_path)
-    segments_data = _write_document(raster_path, [
-        Annotation(subject="canopy", geometry=_square(0, 0, 20, 20), created_by="user:breeder"),
-        Annotation(subject="canopy", geometry=_square(30, 30, 50, 50), created_by="user:breeder"),
-    ])
+    segments_data = _write_document(
+        raster_path,
+        [
+            Annotation(
+                subject="canopy",
+                geometry=_square(0, 0, 20, 20),
+                created_by="user:breeder",
+            ),
+            Annotation(
+                subject="canopy",
+                geometry=_square(30, 30, 50, 50),
+                created_by="user:breeder",
+            ),
+        ],
+    )
     segments = load_canopy_segments(
-        segments_data, subject="canopy", raster_stem=raster_path.stem,
-        raster_identity={"width": WIDTH, "height": HEIGHT})
+        segments_data,
+        subject="canopy",
+        raster_stem=raster_path.stem,
+        raster_identity={"width": WIDTH, "height": HEIGHT},
+    )
     plants = [_plant(georef, "plot0", 10, 10)]
 
-    tie = tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT,
-                                 position_error_m=POSITION_ERROR_M)
+    tie = tie_segments_to_plants(
+        segments,
+        plants,
+        georef,
+        width=WIDTH,
+        height=HEIGHT,
+        position_error_m=POSITION_ERROR_M,
+    )
 
     assert [t.plot_name for t in tie.tied] == ["plot0"]
     assert [s.segment_index for s in tie.untied] == [1]
     assert tie.segments_without_plant == 1
 
 
-def test_tie_segments_to_plants_refuses_a_segment_containing_two_plants(tmp_path: Path) -> None:
+def test_tie_segments_to_plants_refuses_a_segment_containing_two_plants(
+    tmp_path: Path,
+) -> None:
     _, raster_path, georef, _identity = _setup(tmp_path)
-    segments_data = _write_document(raster_path, [
-        Annotation(subject="canopy", geometry=_square(0, 0, 30, 30), created_by="user:breeder"),
-    ])
+    segments_data = _write_document(
+        raster_path,
+        [
+            Annotation(
+                subject="canopy",
+                geometry=_square(0, 0, 30, 30),
+                created_by="user:breeder",
+            ),
+        ],
+    )
     segments = load_canopy_segments(
-        segments_data, subject="canopy", raster_stem=raster_path.stem,
-        raster_identity={"width": WIDTH, "height": HEIGHT})
+        segments_data,
+        subject="canopy",
+        raster_stem=raster_path.stem,
+        raster_identity={"width": WIDTH, "height": HEIGHT},
+    )
     plants = [_plant(georef, "plot0", 10, 10), _plant(georef, "plot1", 15, 15)]
 
     with pytest.raises(ValueError, match="more than one plant"):
-        tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT,
-                                 position_error_m=POSITION_ERROR_M)
+        tie_segments_to_plants(
+            segments,
+            plants,
+            georef,
+            width=WIDTH,
+            height=HEIGHT,
+            position_error_m=POSITION_ERROR_M,
+        )
 
 
-def test_tie_segments_to_plants_refuses_a_plant_inside_two_segments(tmp_path: Path) -> None:
+def test_tie_segments_to_plants_refuses_a_plant_inside_two_segments(
+    tmp_path: Path,
+) -> None:
     _, raster_path, georef, _identity = _setup(tmp_path)
-    segments_data = _write_document(raster_path, [
-        Annotation(subject="canopy", geometry=_square(0, 0, 30, 30), created_by="user:breeder"),
-        Annotation(subject="canopy", geometry=_square(5, 5, 25, 25), created_by="user:breeder"),
-    ])
+    segments_data = _write_document(
+        raster_path,
+        [
+            Annotation(
+                subject="canopy",
+                geometry=_square(0, 0, 30, 30),
+                created_by="user:breeder",
+            ),
+            Annotation(
+                subject="canopy",
+                geometry=_square(5, 5, 25, 25),
+                created_by="user:breeder",
+            ),
+        ],
+    )
     segments = load_canopy_segments(
-        segments_data, subject="canopy", raster_stem=raster_path.stem,
-        raster_identity={"width": WIDTH, "height": HEIGHT})
+        segments_data,
+        subject="canopy",
+        raster_stem=raster_path.stem,
+        raster_identity={"width": WIDTH, "height": HEIGHT},
+    )
     plants = [_plant(georef, "plot0", 15, 15)]
 
     with pytest.raises(ValueError, match="more than one canopy segment"):
-        tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT,
-                                 position_error_m=POSITION_ERROR_M)
+        tie_segments_to_plants(
+            segments,
+            plants,
+            georef,
+            width=WIDTH,
+            height=HEIGHT,
+            position_error_m=POSITION_ERROR_M,
+        )
 
 
-def test_tie_segments_to_plants_refuses_a_blank_named_plant(tmp_path: Path) -> None:
+def test_tie_segments_to_plants_refuses_a_blank_named_plant(
+    tmp_path: Path,
+) -> None:
     _, raster_path, georef, _identity = _setup(tmp_path)
-    segments_data = _write_document(raster_path, [
-        Annotation(subject="canopy", geometry=_square(0, 0, 20, 20), created_by="user:breeder"),
-    ])
+    segments_data = _write_document(
+        raster_path,
+        [
+            Annotation(
+                subject="canopy",
+                geometry=_square(0, 0, 20, 20),
+                created_by="user:breeder",
+            ),
+        ],
+    )
     segments = load_canopy_segments(
-        segments_data, subject="canopy", raster_stem=raster_path.stem,
-        raster_identity={"width": WIDTH, "height": HEIGHT})
+        segments_data,
+        subject="canopy",
+        raster_stem=raster_path.stem,
+        raster_identity={"width": WIDTH, "height": HEIGHT},
+    )
     plants = [_plant(georef, "", 10, 10)]
 
     with pytest.raises(ValueError, match="blank plot_name"):
-        tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT,
-                                 position_error_m=POSITION_ERROR_M)
+        tie_segments_to_plants(
+            segments,
+            plants,
+            georef,
+            width=WIDTH,
+            height=HEIGHT,
+            position_error_m=POSITION_ERROR_M,
+        )
 
 
-def test_tie_segments_to_plants_refuses_a_duplicate_plot_name(tmp_path: Path) -> None:
+def test_tie_segments_to_plants_refuses_a_duplicate_plot_name(
+    tmp_path: Path,
+) -> None:
     _, raster_path, georef, _identity = _setup(tmp_path)
-    segments_data = _write_document(raster_path, [
-        Annotation(subject="canopy", geometry=_square(0, 0, 20, 20), created_by="user:breeder"),
-        Annotation(subject="canopy", geometry=_square(30, 30, 50, 50), created_by="user:breeder"),
-    ])
+    segments_data = _write_document(
+        raster_path,
+        [
+            Annotation(
+                subject="canopy",
+                geometry=_square(0, 0, 20, 20),
+                created_by="user:breeder",
+            ),
+            Annotation(
+                subject="canopy",
+                geometry=_square(30, 30, 50, 50),
+                created_by="user:breeder",
+            ),
+        ],
+    )
     segments = load_canopy_segments(
-        segments_data, subject="canopy", raster_stem=raster_path.stem,
-        raster_identity={"width": WIDTH, "height": HEIGHT})
+        segments_data,
+        subject="canopy",
+        raster_stem=raster_path.stem,
+        raster_identity={"width": WIDTH, "height": HEIGHT},
+    )
     plants = [_plant(georef, "plot0", 10, 10), _plant(georef, "plot0", 40, 40)]
 
     with pytest.raises(ValueError, match="duplicate plot_name"):
-        tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT,
-                                 position_error_m=POSITION_ERROR_M)
+        tie_segments_to_plants(
+            segments,
+            plants,
+            georef,
+            width=WIDTH,
+            height=HEIGHT,
+            position_error_m=POSITION_ERROR_M,
+        )
 
 
-def test_tie_segments_to_plants_refuses_when_no_plant_is_in_frame(tmp_path: Path) -> None:
+def test_tie_segments_to_plants_refuses_when_no_plant_is_in_frame(
+    tmp_path: Path,
+) -> None:
     _, raster_path, georef, _identity = _setup(tmp_path)
-    segments_data = _write_document(raster_path, [
-        Annotation(subject="canopy", geometry=_square(0, 0, 20, 20), created_by="user:breeder"),
-    ])
+    segments_data = _write_document(
+        raster_path,
+        [
+            Annotation(
+                subject="canopy",
+                geometry=_square(0, 0, 20, 20),
+                created_by="user:breeder",
+            ),
+        ],
+    )
     segments = load_canopy_segments(
-        segments_data, subject="canopy", raster_stem=raster_path.stem,
-        raster_identity={"width": WIDTH, "height": HEIGHT})
+        segments_data,
+        subject="canopy",
+        raster_stem=raster_path.stem,
+        raster_identity={"width": WIDTH, "height": HEIGHT},
+    )
     plants = [_plant(georef, "plot0", -50, -50)]
 
     with pytest.raises(ValueError, match="no registry plant"):
-        tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT,
-                                 position_error_m=POSITION_ERROR_M)
+        tie_segments_to_plants(
+            segments,
+            plants,
+            georef,
+            width=WIDTH,
+            height=HEIGHT,
+            position_error_m=POSITION_ERROR_M,
+        )
 
 
-def test_tie_segments_to_plants_names_a_plant_outside_the_raster(tmp_path: Path) -> None:
+def test_tie_segments_to_plants_names_a_plant_outside_the_raster(
+    tmp_path: Path,
+) -> None:
     _, raster_path, georef, _identity = _setup(tmp_path)
-    segments_data = _write_document(raster_path, [
-        Annotation(subject="canopy", geometry=_square(0, 0, 20, 20), created_by="user:breeder"),
-    ])
+    segments_data = _write_document(
+        raster_path,
+        [
+            Annotation(
+                subject="canopy",
+                geometry=_square(0, 0, 20, 20),
+                created_by="user:breeder",
+            ),
+        ],
+    )
     segments = load_canopy_segments(
-        segments_data, subject="canopy", raster_stem=raster_path.stem,
-        raster_identity={"width": WIDTH, "height": HEIGHT})
-    plants = [_plant(georef, "plot0", 10, 10), _plant(georef, "plot1", -50, -50)]
+        segments_data,
+        subject="canopy",
+        raster_stem=raster_path.stem,
+        raster_identity={"width": WIDTH, "height": HEIGHT},
+    )
+    plants = [
+        _plant(georef, "plot0", 10, 10),
+        _plant(georef, "plot1", -50, -50),
+    ]
 
-    tie = tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT,
-                                 position_error_m=POSITION_ERROR_M)
+    tie = tie_segments_to_plants(
+        segments,
+        plants,
+        georef,
+        width=WIDTH,
+        height=HEIGHT,
+        position_error_m=POSITION_ERROR_M,
+    )
 
     assert tie.plants_outside_raster == ["plot1"]
     assert [t.plot_name for t in tie.tied] == ["plot0"]
 
 
-def test_tie_segments_to_plants_names_an_in_frame_plant_with_no_segment(tmp_path: Path) -> None:
+def test_tie_segments_to_plants_names_an_in_frame_plant_with_no_segment(
+    tmp_path: Path,
+) -> None:
     _, raster_path, georef, _identity = _setup(tmp_path)
-    segments_data = _write_document(raster_path, [
-        Annotation(subject="canopy", geometry=_square(0, 0, 20, 20), created_by="user:breeder"),
-    ])
+    segments_data = _write_document(
+        raster_path,
+        [
+            Annotation(
+                subject="canopy",
+                geometry=_square(0, 0, 20, 20),
+                created_by="user:breeder",
+            ),
+        ],
+    )
     segments = load_canopy_segments(
-        segments_data, subject="canopy", raster_stem=raster_path.stem,
-        raster_identity={"width": WIDTH, "height": HEIGHT})
+        segments_data,
+        subject="canopy",
+        raster_stem=raster_path.stem,
+        raster_identity={"width": WIDTH, "height": HEIGHT},
+    )
     plants = [_plant(georef, "plot0", 10, 10), _plant(georef, "plot1", 45, 45)]
 
-    tie = tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT,
-                                 position_error_m=POSITION_ERROR_M)
+    tie = tie_segments_to_plants(
+        segments,
+        plants,
+        georef,
+        width=WIDTH,
+        height=HEIGHT,
+        position_error_m=POSITION_ERROR_M,
+    )
 
     assert tie.plants_without_segment == ["plot1"]
     assert [t.plot_name for t in tie.tied] == ["plot0"]
@@ -472,21 +891,48 @@ def test_assign_detections_to_segments_attributes_a_containment_and_names_the_re
     tmp_path: Path,
 ) -> None:
     _, raster_path, georef, _identity = _setup(tmp_path)
-    segments_data = _write_document(raster_path, [
-        Annotation(subject="canopy", geometry=_square(0, 0, 20, 20), created_by="user:breeder"),
-        Annotation(subject="canopy", geometry=_square(30, 30, 50, 50), created_by="user:breeder"),
-    ])
+    segments_data = _write_document(
+        raster_path,
+        [
+            Annotation(
+                subject="canopy",
+                geometry=_square(0, 0, 20, 20),
+                created_by="user:breeder",
+            ),
+            Annotation(
+                subject="canopy",
+                geometry=_square(30, 30, 50, 50),
+                created_by="user:breeder",
+            ),
+        ],
+    )
     segments = load_canopy_segments(
-        segments_data, subject="canopy", raster_stem=raster_path.stem,
-        raster_identity={"width": WIDTH, "height": HEIGHT})
-    plants = [_plant(georef, "plot0", 10, 10)]  # segment 1 (30..50) stays untied
-    tie = tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT,
-                                 position_error_m=POSITION_ERROR_M)
+        segments_data,
+        subject="canopy",
+        raster_stem=raster_path.stem,
+        raster_identity={"width": WIDTH, "height": HEIGHT},
+    )
+    plants = [
+        _plant(georef, "plot0", 10, 10)
+    ]  # segment 1 (30..50) stays untied
+    tie = tie_segments_to_plants(
+        segments,
+        plants,
+        georef,
+        width=WIDTH,
+        height=HEIGHT,
+        position_error_m=POSITION_ERROR_M,
+    )
 
     detections = [
-        [8.0, 8.0, 12.0, 12.0],       # centroid (10, 10): inside the tied segment
-        [58.0, 58.0, 62.0, 62.0],     # centroid (60, 60): inside no segment
-        [38.0, 38.0, 42.0, 42.0],     # centroid (40, 40): inside the untied segment
+        [8.0, 8.0, 12.0, 12.0],  # centroid (10, 10): inside the tied segment
+        [58.0, 58.0, 62.0, 62.0],  # centroid (60, 60): inside no segment
+        [
+            38.0,
+            38.0,
+            42.0,
+            42.0,
+        ],  # centroid (40, 40): inside the untied segment
     ]
 
     assignments = assign_detections_to_segments(detections, tie)
@@ -506,18 +952,40 @@ def test_assign_detections_to_segments_attributes_a_containment_and_names_the_re
     assert assignments[2].plot_name is None
 
 
-def test_assign_detections_to_segments_attributes_an_overlap_to_neither(tmp_path: Path) -> None:
+def test_assign_detections_to_segments_attributes_an_overlap_to_neither(
+    tmp_path: Path,
+) -> None:
     _, raster_path, georef, _identity = _setup(tmp_path)
-    segments_data = _write_document(raster_path, [
-        Annotation(subject="canopy", geometry=_square(0, 0, 30, 30), created_by="user:breeder"),
-        Annotation(subject="canopy", geometry=_square(20, 0, 50, 30), created_by="user:breeder"),
-    ])
+    segments_data = _write_document(
+        raster_path,
+        [
+            Annotation(
+                subject="canopy",
+                geometry=_square(0, 0, 30, 30),
+                created_by="user:breeder",
+            ),
+            Annotation(
+                subject="canopy",
+                geometry=_square(20, 0, 50, 30),
+                created_by="user:breeder",
+            ),
+        ],
+    )
     segments = load_canopy_segments(
-        segments_data, subject="canopy", raster_stem=raster_path.stem,
-        raster_identity={"width": WIDTH, "height": HEIGHT})
+        segments_data,
+        subject="canopy",
+        raster_stem=raster_path.stem,
+        raster_identity={"width": WIDTH, "height": HEIGHT},
+    )
     plants = [_plant(georef, "plot0", 10, 10), _plant(georef, "plot1", 40, 10)]
-    tie = tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT,
-                                 position_error_m=POSITION_ERROR_M)
+    tie = tie_segments_to_plants(
+        segments,
+        plants,
+        georef,
+        width=WIDTH,
+        height=HEIGHT,
+        position_error_m=POSITION_ERROR_M,
+    )
 
     # centroid (25, 15) lies in both segments' overlap (20..30 on x).
     detections = [[23.0, 13.0, 27.0, 17.0]]
@@ -530,16 +998,34 @@ def test_assign_detections_to_segments_attributes_an_overlap_to_neither(tmp_path
     assert set(assignments[0].overlapping_segment_indices) == {0, 1}
 
 
-def test_assign_detections_to_segments_no_boxes_returns_empty(tmp_path: Path) -> None:
+def test_assign_detections_to_segments_no_boxes_returns_empty(
+    tmp_path: Path,
+) -> None:
     _, raster_path, georef, _identity = _setup(tmp_path)
-    segments_data = _write_document(raster_path, [
-        Annotation(subject="canopy", geometry=_square(0, 0, 20, 20), created_by="user:breeder"),
-    ])
+    segments_data = _write_document(
+        raster_path,
+        [
+            Annotation(
+                subject="canopy",
+                geometry=_square(0, 0, 20, 20),
+                created_by="user:breeder",
+            ),
+        ],
+    )
     segments = load_canopy_segments(
-        segments_data, subject="canopy", raster_stem=raster_path.stem,
-        raster_identity={"width": WIDTH, "height": HEIGHT})
+        segments_data,
+        subject="canopy",
+        raster_stem=raster_path.stem,
+        raster_identity={"width": WIDTH, "height": HEIGHT},
+    )
     plants = [_plant(georef, "plot0", 10, 10)]
-    tie = tie_segments_to_plants(segments, plants, georef, width=WIDTH, height=HEIGHT,
-                                 position_error_m=POSITION_ERROR_M)
+    tie = tie_segments_to_plants(
+        segments,
+        plants,
+        georef,
+        width=WIDTH,
+        height=HEIGHT,
+        position_error_m=POSITION_ERROR_M,
+    )
 
     assert assign_detections_to_segments([], tie) == []

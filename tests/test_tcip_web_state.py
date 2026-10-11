@@ -12,7 +12,11 @@ from pydantic import ValidationError
 import tcip_store
 from tcip_mcp.web_client import DatasetSelection, GuiState, gui_snapshot_key
 from tcip_web.state import (
-    GuiMutationInvalidError, Held, NoProjectOpenError, OpenProject, ProjectNotOpenError,
+    GuiMutationInvalidError,
+    Held,
+    NoProjectOpenError,
+    OpenProject,
+    ProjectNotOpenError,
     StateStore,
 )
 
@@ -28,7 +32,9 @@ def test_version_increments_on_mutate() -> None:
     assert store.version == 2
 
 
-def test_a_change_persists_to_the_project_open_when_it_is_made(tmp_path: Path) -> None:
+def test_a_change_persists_to_the_project_open_when_it_is_made(
+    tmp_path: Path,
+) -> None:
     store = StateStore()
     proj_a = named_project(tmp_path / "A", "A")
     proj_b = named_project(tmp_path / "B", "B")
@@ -37,7 +43,10 @@ def test_a_change_persists_to_the_project_open_when_it_is_made(tmp_path: Path) -
     asyncio.run(store.open_project(proj_b))
     asyncio.run(store.mutate({"active_tab": "results"}, project=store.held()))
 
-    assert tcip_store.read(gui_snapshot_key(proj_b.root))["active_tab"] == "results"
+    assert (
+        tcip_store.read(gui_snapshot_key(proj_b.root))["active_tab"]
+        == "results"
+    )
     assert not tcip_store.exists(gui_snapshot_key(proj_a.root))
 
 
@@ -61,7 +70,9 @@ def test_a_mutation_made_for_a_project_no_longer_open_is_refused_and_not_held(
     assert not tcip_store.exists(gui_snapshot_key(proj_b.root))
 
 
-def test_a_mutation_made_for_no_project_persists_nowhere(tmp_path: Path) -> None:
+def test_a_mutation_made_for_no_project_persists_nowhere(
+    tmp_path: Path,
+) -> None:
     """A mutation made while no project was open is held and persisted nowhere, whatever is
     open by the time it is applied: not under a project opened meanwhile, and not after a
     close."""
@@ -81,7 +92,9 @@ def test_a_mutation_made_for_no_project_persists_nowhere(tmp_path: Path) -> None
     assert not tcip_store.exists(gui_snapshot_key(project.root))
 
 
-def test_a_state_that_cannot_be_persisted_raises_and_is_not_held(tmp_path: Path, monkeypatch):
+def test_a_state_that_cannot_be_persisted_raises_and_is_not_held(
+    tmp_path: Path, monkeypatch
+):
     import tcip_mcp.web_client as web_client
 
     store = StateStore()
@@ -92,17 +105,30 @@ def test_a_state_that_cannot_be_persisted_raises_and_is_not_held(tmp_path: Path,
 
     monkeypatch.setattr(web_client.tcip_store, "replace", _refuse)
     with pytest.raises(tcip_store.StoreError):
-        asyncio.run(store.mutate({"active_tab": "results"}, project=store.held()))
+        asyncio.run(
+            store.mutate({"active_tab": "results"}, project=store.held())
+        )
     assert store.state.active_tab == "annotate"
 
 
-def test_a_reopened_project_holds_the_state_it_persisted(tmp_path: Path) -> None:
+def test_a_reopened_project_holds_the_state_it_persisted(
+    tmp_path: Path,
+) -> None:
     project = named_project(tmp_path / "A", "A")
     (project.root / "ds" / "images" / "undated").mkdir(parents=True)
     store = StateStore()
     asyncio.run(store.open_project(project))
-    asyncio.run(store.mutate({"active_tab": "results", "dataset": DatasetSelection(
-        dataset_root=str(project.root / "ds"), date="undated")}, project=store.held()))
+    asyncio.run(
+        store.mutate(
+            {
+                "active_tab": "results",
+                "dataset": DatasetSelection(
+                    dataset_root=str(project.root / "ds"), date="undated"
+                ),
+            },
+            project=store.held(),
+        )
+    )
 
     # A fresh store simulates a backend restart.
     restarted = StateStore()
@@ -111,7 +137,9 @@ def test_a_reopened_project_holds_the_state_it_persisted(tmp_path: Path) -> None
     assert restarted.state.dataset.dataset_root == str(project.root / "ds")
 
 
-def test_opening_a_project_with_no_snapshot_holds_a_fresh_state(tmp_path: Path) -> None:
+def test_opening_a_project_with_no_snapshot_holds_a_fresh_state(
+    tmp_path: Path,
+) -> None:
     store = StateStore()
     asyncio.run(store.open_project(named_project(tmp_path / "A", "A")))
     assert store.state == GuiState()
@@ -126,8 +154,11 @@ def test_opening_a_project_whose_snapshot_does_not_decode_refuses_and_leaves_the
     proj_a = named_project(tmp_path / "A", "A")
     proj_b = named_project(tmp_path / "B", "B")
     asyncio.run(store.open_project(proj_a))
-    tcip_store.replace(gui_snapshot_key(proj_b.root), {"active_tab": "not-a-real-tab"},
-                       expect=tcip_store.Version.ABSENT)
+    tcip_store.replace(
+        gui_snapshot_key(proj_b.root),
+        {"active_tab": "not-a-real-tab"},
+        expect=tcip_store.Version.ABSENT,
+    )
 
     with pytest.raises(ValidationError):
         asyncio.run(store.open_project(proj_b))
@@ -171,11 +202,15 @@ def test_mutate_refuses_an_unknown_tab_and_holds_nothing() -> None:
     assert store.state.active_tab == "annotate"
 
 
-def test_mutate_refuses_a_built_model_with_a_wrongly_typed_field_and_holds_nothing() -> None:
+def test_mutate_refuses_a_built_model_with_a_wrongly_typed_field_and_holds_nothing() -> (
+    None
+):
     """A pre-built model instance passes model_copy untouched (revalidate_instances="never"), so
     mutate must dump it and validate the merged result rather than trust it as already valid."""
     store = StateStore()
-    bad_dataset = DatasetSelection.model_construct(current_image_index="banana")
+    bad_dataset = DatasetSelection.model_construct(
+        current_image_index="banana"
+    )
     with pytest.raises(GuiMutationInvalidError):
         asyncio.run(store.mutate({"dataset": bad_dataset}, project=None))
     assert store.version == 0
@@ -192,13 +227,17 @@ def test_mutate_refuses_an_unknown_top_level_key_and_holds_nothing() -> None:
     assert store.state.active_tab == "annotate"
 
 
-def test_retained_events_are_the_open_projects_and_go_when_another_opens(tmp_path: Path) -> None:
+def test_retained_events_are_the_open_projects_and_go_when_another_opens(
+    tmp_path: Path,
+) -> None:
     store = StateStore()
     proj_a = named_project(tmp_path / "A", "A")
     proj_b = named_project(tmp_path / "B", "B")
     asyncio.run(store.open_project(proj_a))
     store.retain_event("meta", {"event_type": "for_a"})
-    assert [e["event_type"] for e in store.retained_events("meta")] == ["for_a"]
+    assert [e["event_type"] for e in store.retained_events("meta")] == [
+        "for_a"
+    ]
 
     asyncio.run(store.open_project(proj_b))
     assert store.retained_events("meta") == []
@@ -206,7 +245,9 @@ def test_retained_events_are_the_open_projects_and_go_when_another_opens(tmp_pat
     assert store.retained_events("meta") == []
 
 
-def test_admission_answers_the_open_project_and_refuses_any_other(tmp_path: Path) -> None:
+def test_admission_answers_the_open_project_and_refuses_any_other(
+    tmp_path: Path,
+) -> None:
     store = StateStore()
     project = named_project(tmp_path / "A", "A")
     with pytest.raises(NoProjectOpenError):
@@ -250,7 +291,9 @@ def test_admission_reads_the_open_project_once(tmp_path: Path) -> None:
     assert refused.value.open_project_id == proj_b.id
 
 
-def test_a_switch_publishes_nothing_until_its_departure_commits(tmp_path: Path, monkeypatch):
+def test_a_switch_publishes_nothing_until_its_departure_commits(
+    tmp_path: Path, monkeypatch
+):
     """Opening B departs from A in A's stats transaction; while that transaction is open, and when
     its commit fails, the store still holds A with A's state, and B is published, identity and
     state together, only once the commit has returned."""

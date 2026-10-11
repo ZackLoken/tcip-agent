@@ -20,8 +20,12 @@ def _project_with_records(tmp_path: Path) -> Path:
     from tests import _trait_fixtures as fx
 
     project = new_project(tmp_path).root
-    report_friction(project, category="missing_tool", detail="a separator / in the detail")
-    write_retrospective(project, project_id="p", task="t", worked="w", did_not_work="d")
+    report_friction(
+        project, category="missing_tool", detail="a separator / in the detail"
+    )
+    write_retrospective(
+        project, project_id="p", task="t", worked="w", did_not_work="d"
+    )
     fx.seed_confirmed_count(project)
     return project
 
@@ -30,7 +34,9 @@ def _held(project: Path) -> dict[tuple, object]:
     """Every record and every log each database under ``project`` holds, read through the seam,
     by ``(root relative to the project, store, parts, suffix)``."""
     held: dict[tuple, object] = {}
-    for root in {database.parent.parent for database in project.rglob("store.db")}:
+    for root in {
+        database.parent.parent for database in project.rglob("store.db")
+    }:
         relative = root.relative_to(project).as_posix()
         for store in ts.stores(str(root)):
             for key in ts.keys(store, str(root)):
@@ -45,16 +51,22 @@ def _dumped(out: Path) -> dict[tuple, object]:
     """Every file under ``out``, its names read back through ``unquote``, by the same tuple."""
     dumped: dict[tuple, object] = {}
     for path in (p for p in out.rglob("*") if p.is_file()):
-        relative, store, *parts = (unquote(name, errors="surrogatepass") for name in
-                                   path.relative_to(out).with_suffix("").parts)
+        relative, store, *parts = (
+            unquote(name, errors="surrogatepass")
+            for name in path.relative_to(out).with_suffix("").parts
+        )
         data = path.read_bytes()
         dumped[(relative, store, tuple(parts), path.suffix)] = (
-            [ts.decode_value(line) for line in data.splitlines()] if path.suffix == ".jsonl"
-            else ts.decode_value(data))
+            [ts.decode_value(line) for line in data.splitlines()]
+            if path.suffix == ".jsonl"
+            else ts.decode_value(data)
+        )
     return dumped
 
 
-def test_the_records_a_database_holds_and_the_records_its_dump_writes_agree(tmp_path: Path):
+def test_the_records_a_database_holds_and_the_records_its_dump_writes_agree(
+    tmp_path: Path,
+):
     """Store by store, the dump's files read back to exactly the keys and values each database
     answers."""
     project = _project_with_records(tmp_path)
@@ -76,26 +88,45 @@ def test_every_key_the_store_admits_dumps_to_its_own_file_inside_the_destination
     ``out_dir``, and a key holding both a record and log entries dumps both."""
     project = new_project(tmp_path).root
     root = str(project)
-    for parts, value in (((), {"n": 0}), (("..", "..", "escaped"), {"n": 1}),
-                         (("A",), {"n": 2}), (("a",), {"n": 3}), (("both",), {"n": 4}),
-                         ((chr(0xD800),), {"n": 5})):
+    for parts, value in (
+        ((), {"n": 0}),
+        (("..", "..", "escaped"), {"n": 1}),
+        (("A",), {"n": 2}),
+        (("a",), {"n": 3}),
+        (("both",), {"n": 4}),
+        ((chr(0xD800),), {"n": 5}),
+    ):
         ts.replace(ts.Key("probe", root, parts), value)
     ts.append(ts.Key("probe", root, ("both",)), {"i": 1})
     out = tmp_path.parent / "dump"
 
     written = dump_store(project, out)
 
-    assert all(path.resolve().is_relative_to(out.resolve()) for path in written)
-    assert len(set(path.as_posix().lower() for path in written)) == len(written)
+    assert all(
+        path.resolve().is_relative_to(out.resolve()) for path in written
+    )
+    assert len(set(path.as_posix().lower() for path in written)) == len(
+        written
+    )
     dumped = _dumped(out)
-    assert {parts: value for (_, store, parts, suffix), value in dumped.items()
-            if store == "probe" and suffix == ".json"} == {
-        (): {"n": 0}, ("..", "..", "escaped"): {"n": 1}, ("A",): {"n": 2}, ("a",): {"n": 3},
-        ("both",): {"n": 4}, (chr(0xD800),): {"n": 5}}
+    assert {
+        parts: value
+        for (_, store, parts, suffix), value in dumped.items()
+        if store == "probe" and suffix == ".json"
+    } == {
+        (): {"n": 0},
+        ("..", "..", "escaped"): {"n": 1},
+        ("A",): {"n": 2},
+        ("a",): {"n": 3},
+        ("both",): {"n": 4},
+        (chr(0xD800),): {"n": 5},
+    }
     assert dumped[(".", "probe", ("both",), ".jsonl")] == [{"i": 1}]
 
 
-def test_the_dump_refuses_a_directory_inside_the_project_and_admits_one_outside(tmp_path: Path):
+def test_the_dump_refuses_a_directory_inside_the_project_and_admits_one_outside(
+    tmp_path: Path,
+):
     project = _project_with_records(tmp_path)
 
     with pytest.raises(ValueError, match="inside the project"):
@@ -105,7 +136,9 @@ def test_the_dump_refuses_a_directory_inside_the_project_and_admits_one_outside(
     assert dump_store(project, tmp_path.parent / "dump")
 
 
-def test_the_command_writes_the_dump_and_answers_how_many_files(tmp_path: Path):
+def test_the_command_writes_the_dump_and_answers_how_many_files(
+    tmp_path: Path,
+):
     project = _project_with_records(tmp_path)
     out = tmp_path.parent / "dump"
     ts.release_root(project)

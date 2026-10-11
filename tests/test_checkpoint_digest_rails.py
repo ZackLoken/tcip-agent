@@ -35,11 +35,18 @@ def _images(tmp_path: Path, n: int = 1, size: int = 100):
     return images_dir, paths
 
 
-def _register(tmp_path: Path, ckpt_path: str, *, name: str = "rail-model",
-              tags: list[str] | None = None) -> dict:
+def _register(
+    tmp_path: Path,
+    ckpt_path: str,
+    *,
+    name: str = "rail-model",
+    tags: list[str] | None = None,
+) -> dict:
     from tcip_mcp.tools.model_tools import register_model
 
-    result = register_model(tmp_path, name=name, checkpoint_path=ckpt_path, tags=tags)
+    result = register_model(
+        tmp_path, name=name, checkpoint_path=ckpt_path, tags=tags
+    )
     assert "error" not in result, result
     return result
 
@@ -52,9 +59,14 @@ def _infer(tmp_path: Path, ckpt: str, bucket: str = "preds") -> dict:
     from tests._verified_checkpoint_fixtures import SAMPLE_CONF
 
     images_dir, _ = _images(tmp_path)
-    return run_inference(tmp_path, ckpt, images_dir=str(images_dir), bucket=bucket,
-                         device="cpu",
-                         stated=Stated(tile=False, conf=SAMPLE_CONF))
+    return run_inference(
+        tmp_path,
+        ckpt,
+        images_dir=str(images_dir),
+        bucket=bucket,
+        device="cpu",
+        stated=Stated(tile=False, conf=SAMPLE_CONF),
+    )
 
 
 def _published(tmp_path: Path, bucket: str) -> bool:
@@ -68,7 +80,10 @@ def _published(tmp_path: Path, bucket: str) -> bool:
 # Rail 1: an unregistered checkpoint the platform's own producer wrote is refused by name, at
 # every door, writing nothing.
 
-def test_run_inference_refuses_an_unregistered_checkpoint_and_writes_nothing(tmp_path):
+
+def test_run_inference_refuses_an_unregistered_checkpoint_and_writes_nothing(
+    tmp_path,
+):
     r = _infer(tmp_path, secondary_checkpoint(tmp_path))
 
     assert "register_model" in r["error"]
@@ -76,7 +91,9 @@ def test_run_inference_refuses_an_unregistered_checkpoint_and_writes_nothing(tmp
     assert not _published(tmp_path, "preds")
 
 
-def test_evaluate_model_refuses_an_unregistered_checkpoint_by_bare_path(tmp_path):
+def test_evaluate_model_refuses_an_unregistered_checkpoint_by_bare_path(
+    tmp_path,
+):
     ckpt = secondary_checkpoint(tmp_path)
     images_dir, _ = _images(tmp_path)
 
@@ -92,9 +109,13 @@ def test_assess_checkpoint_refuses_an_unregistered_checkpoint(tmp_path):
 
     fx.seed_confirmed_count(tmp_path)
 
-    r = assess_checkpoint(tmp_path, checkpoint_path=secondary_checkpoint(tmp_path),
-                          trait=fx.COUNT_TRAIT, delivery_kind="per_image_count",
-                          selection_dir=str(tmp_path / "selection"))
+    r = assess_checkpoint(
+        tmp_path,
+        checkpoint_path=secondary_checkpoint(tmp_path),
+        trait=fx.COUNT_TRAIT,
+        delivery_kind="per_image_count",
+        selection_dir=str(tmp_path / "selection"),
+    )
 
     assert "register_model" in r["error"]
     assert not (tmp_path / ".tcip" / "assessments").exists()
@@ -109,9 +130,16 @@ def test_web_inference_worker_refuses_an_unregistered_checkpoint(tmp_path):
     ckpt = secondary_checkpoint(tmp_path)
     images_dir, _ = _images(tmp_path)
 
-    job = InferenceJob(job_id="rail1", actor="user:tester", checkpoint_path=ckpt,
-                       images_dir=str(images_dir), dataset_root=str(tmp_path), bucket="out",
-                       project=str(tmp_path), stated=Stated(tile=False, **SAMPLE_DETECTOR_PASS))
+    job = InferenceJob(
+        job_id="rail1",
+        actor="user:tester",
+        checkpoint_path=ckpt,
+        images_dir=str(images_dir),
+        dataset_root=str(tmp_path),
+        bucket="out",
+        project=str(tmp_path),
+        stated=Stated(tile=False, **SAMPLE_DETECTOR_PASS),
+    )
     _worker(job)
     assert job.status == "failed"
     assert "register_model" in job.error
@@ -165,7 +193,9 @@ def test_triage_predictions_admits_a_checkpoint_registered_under_the_project_it_
     assert "error" not in r, r
 
 
-def test_review_priority_route_worker_fails_the_job_on_an_unregistered_checkpoint(tmp_path):
+def test_review_priority_route_worker_fails_the_job_on_an_unregistered_checkpoint(
+    tmp_path,
+):
     """The review-priority route's own worker, driven directly, fails its job on a checkpoint
     nothing registered."""
     pytest.importorskip("fastapi")
@@ -174,8 +204,15 @@ def test_review_priority_route_worker_fails_the_job_on_an_unregistered_checkpoin
     ckpt = secondary_checkpoint(tmp_path)
     images_dir, _ = _images(tmp_path)
 
-    job = PriorityQueueJob(job_id="rail1-pq", checkpoint_path=ckpt, images_dir=str(images_dir),
-                           subject=None, method="combined", budget=10, project=str(tmp_path))
+    job = PriorityQueueJob(
+        job_id="rail1-pq",
+        checkpoint_path=ckpt,
+        images_dir=str(images_dir),
+        subject=None,
+        method="combined",
+        budget=10,
+        project=str(tmp_path),
+    )
     _pq_worker(job)
     assert job.status == "failed"
     assert "register_model" in job.error
@@ -183,7 +220,8 @@ def test_review_priority_route_worker_fails_the_job_on_an_unregistered_checkpoin
 
 
 def test_review_priority_route_worker_completes_the_job_with_a_registered_checkpoint(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     """The admitting half: a checkpoint a run of the job's own project completed runs
     _pq_worker to a completed job rather than a failed one."""
@@ -197,11 +235,22 @@ def test_review_priority_route_worker_completes_the_job_with_a_registered_checkp
     images_dir, _ = _images(tmp_path)
 
     monkeypatch.setattr(
-        al_scorer, "resolve_scorer",
-        lambda method, task: SimpleNamespace(score=lambda sources, predictor: []))
+        al_scorer,
+        "resolve_scorer",
+        lambda method, task: SimpleNamespace(
+            score=lambda sources, predictor: []
+        ),
+    )
 
-    job = PriorityQueueJob(job_id="rail7-pq", checkpoint_path=ckpt, images_dir=str(images_dir),
-                           subject=None, method="combined", budget=10, project=str(tmp_path))
+    job = PriorityQueueJob(
+        job_id="rail7-pq",
+        checkpoint_path=ckpt,
+        images_dir=str(images_dir),
+        subject=None,
+        method="combined",
+        budget=10,
+        project=str(tmp_path),
+    )
     _pq_worker(job)
     assert job.status == "completed", job.error
     assert job.queue == []
@@ -210,14 +259,19 @@ def test_review_priority_route_worker_completes_the_job_with_a_registered_checkp
 # Rail 2: a registered checkpoint whose bytes are replaced (in place, or by rename) after
 # registration is refused: the digest of the bytes actually loaded names no entry.
 
-def test_run_inference_refuses_a_checkpoint_overwritten_in_place_after_registration(tmp_path):
+
+def test_run_inference_refuses_a_checkpoint_overwritten_in_place_after_registration(
+    tmp_path,
+):
     ckpt = Path(registered_checkpoint(tmp_path))
     ckpt.write_bytes(Path(secondary_checkpoint(tmp_path)).read_bytes())
 
     assert "register_model" in _infer(tmp_path, str(ckpt))["error"]
 
 
-def test_run_inference_refuses_a_registered_checkpoint_replaced_by_rename(tmp_path):
+def test_run_inference_refuses_a_registered_checkpoint_replaced_by_rename(
+    tmp_path,
+):
     ckpt = Path(registered_checkpoint(tmp_path))
     other = tmp_path / "other.pt"
     other.write_bytes(Path(secondary_checkpoint(tmp_path)).read_bytes())
@@ -230,17 +284,23 @@ def test_run_inference_refuses_a_registered_checkpoint_replaced_by_rename(tmp_pa
 # Rail 4: one sha256 resolves to exactly one owner, the run whose completion names those bytes,
 # whatever order foreign registrations of the same bytes came in.
 
+
 def _identical_runs_data(tmp_path) -> dict:
     """One data section over which runs of one id and seed, one in each of two projects, train
     identical bytes, outside both projects, so each checkpoint spells its locations the same
     way."""
-    from tests._verified_checkpoint_fixtures import SCOPED_DATA, detection_images
+    from tests._verified_checkpoint_fixtures import (
+        SCOPED_DATA,
+        detection_images,
+    )
 
     shared = tmp_path.parent / f"{tmp_path.name}-shared"
     return {**detection_images(shared, SCOPED_DATA["scope"]), **SCOPED_DATA}
 
 
-def test_a_foreign_registration_after_its_run_completed_leaves_the_run_its_one_owner(tmp_path):
+def test_a_foreign_registration_after_its_run_completed_leaves_the_run_its_one_owner(
+    tmp_path,
+):
     from tcip_mcp.model_registry import registered_entries
     from tcip_mcp.tools.model_tools import register_model
 
@@ -248,28 +308,47 @@ def test_a_foreign_registration_after_its_run_completed_leaves_the_run_its_one_o
     copy = tmp_path / "copy.pt"
     copy.write_bytes(Path(ckpt).read_bytes())
 
-    owner = register_model(tmp_path, name="entry-untagged", checkpoint_path=str(copy))
+    owner = register_model(
+        tmp_path, name="entry-untagged", checkpoint_path=str(copy)
+    )
 
     assert owner["experiment_id"] == "expA"
-    assert [e["experiment_id"] for e in registered_entries(tmp_path)] == ["expA"]
+    assert [e["experiment_id"] for e in registered_entries(tmp_path)] == [
+        "expA"
+    ]
 
 
-def test_a_foreign_registration_before_its_run_completed_leaves_the_run_its_one_owner(tmp_path):
+def test_a_foreign_registration_before_its_run_completed_leaves_the_run_its_one_owner(
+    tmp_path,
+):
     """The same bytes registered as foreign first and then named by a run's completion resolve
     to one entry, the run's. A run of the same id in another project trains them: each
     checkpoint names its run's snapshot by the run's own directory under its project."""
     from tcip_mcp.experiments import observe
-    from tcip_mcp.model_registry import load_registered_checkpoint, registered_entries
+    from tcip_mcp.model_registry import (
+        load_registered_checkpoint,
+        registered_entries,
+    )
     from tcip_mcp.tools.model_tools import register_model
 
     data = _identical_runs_data(tmp_path)
-    elsewhere = observe(finished_run(tmp_path.parent / f"{tmp_path.name}-elsewhere",
-                                     experiment_id="expA", seed=7, data=data)).checkpoint
+    elsewhere = observe(
+        finished_run(
+            tmp_path.parent / f"{tmp_path.name}-elsewhere",
+            experiment_id="expA",
+            seed=7,
+            data=data,
+        )
+    ).checkpoint
     assert elsewhere is not None
-    registered = register_model(tmp_path, name="foreign-first", checkpoint_path=elsewhere["path"])
+    registered = register_model(
+        tmp_path, name="foreign-first", checkpoint_path=elsewhere["path"]
+    )
     assert registered["experiment_id"] is None
 
-    run = observe(finished_run(tmp_path, experiment_id="expA", seed=7, data=data)).checkpoint
+    run = observe(
+        finished_run(tmp_path, experiment_id="expA", seed=7, data=data)
+    ).checkpoint
     assert run is not None and run["sha256"] == elsewhere["sha256"]
 
     (entry,) = registered_entries(tmp_path)
@@ -278,19 +357,28 @@ def test_a_foreign_registration_before_its_run_completed_leaves_the_run_its_one_
     assert loaded.experiment_id == "expA"
 
 
-def test_two_foreign_registrations_of_one_sha256_resolve_to_one_entry(tmp_path):
+def test_two_foreign_registrations_of_one_sha256_resolve_to_one_entry(
+    tmp_path,
+):
     """The registry is keyed by a checkpoint's bytes: the same foreign bytes registered twice,
     from two paths under two names, leave one entry for those bytes, the later registration's,
     and a load of either copy resolves to that one entry."""
-    from tcip_mcp.model_registry import load_registered_checkpoint, registered_entries
+    from tcip_mcp.model_registry import (
+        load_registered_checkpoint,
+        registered_entries,
+    )
     from tcip_mcp.tools.model_tools import register_model
 
     ckpt = foreign_checkpoint(tmp_path, name="first-name")
     copy = tmp_path / "copy.pt"
     copy.write_bytes(Path(ckpt).read_bytes())
-    assert "error" not in register_model(tmp_path, name="second-name", checkpoint_path=str(copy))
+    assert "error" not in register_model(
+        tmp_path, name="second-name", checkpoint_path=str(copy)
+    )
 
-    (entry,) = [e for e in registered_entries(tmp_path) if e["experiment_id"] is None]
+    (entry,) = [
+        e for e in registered_entries(tmp_path) if e["experiment_id"] is None
+    ]
     assert entry["name"] == "second-name"
     for path in (ckpt, str(copy)):
         loaded = load_registered_checkpoint(path, project=tmp_path)
@@ -299,6 +387,7 @@ def test_two_foreign_registrations_of_one_sha256_resolve_to_one_entry(tmp_path):
 
 
 # Rail 5: an unregistered checkpoint is refused without being unpickled.
+
 
 def _touch_marker(marker_path: str) -> "_SideEffectOnUnpickle":
     Path(marker_path).write_text("unpickled", encoding="utf-8")
@@ -315,11 +404,18 @@ class _SideEffectOnUnpickle:
         return (_touch_marker, (self._marker_path,))
 
 
-def test_run_inference_refuses_without_unpickling_a_side_effect_payload(tmp_path):
+def test_run_inference_refuses_without_unpickling_a_side_effect_payload(
+    tmp_path,
+):
     marker = tmp_path / "unpickled.marker"
     ckpt = tmp_path / "m.pt"
-    torch.save({STATE_DICT_KEY: {},
-                "carries_side_effect": _SideEffectOnUnpickle(str(marker))}, str(ckpt))
+    torch.save(
+        {
+            STATE_DICT_KEY: {},
+            "carries_side_effect": _SideEffectOnUnpickle(str(marker)),
+        },
+        str(ckpt),
+    )
 
     assert "register_model" in _infer(tmp_path, str(ckpt))["error"]
     assert not marker.exists()  # the payload was never unpickled
@@ -327,7 +423,10 @@ def test_run_inference_refuses_without_unpickling_a_side_effect_payload(tmp_path
 
 # Rail 6: valid work the rail admits.
 
-def test_run_inference_admits_a_registered_checkpoint_and_records_its_digest(tmp_path):
+
+def test_run_inference_admits_a_registered_checkpoint_and_records_its_digest(
+    tmp_path,
+):
     from tcip_mcp.buckets import read_bucket
 
     ckpt = registered_checkpoint(tmp_path)
@@ -338,10 +437,15 @@ def test_run_inference_admits_a_registered_checkpoint_and_records_its_digest(tmp
     digest = hashlib.sha256(Path(ckpt).read_bytes()).hexdigest()
     assert r["checkpoint_sha256"] == digest
     bucket = read_bucket(tmp_path, "preds")
-    assert bucket.producer["checkpoint_sha256"] == digest and bucket.assessment_id is None
+    assert (
+        bucket.producer["checkpoint_sha256"] == digest
+        and bucket.assessment_id is None
+    )
 
 
-def test_run_inference_admits_the_same_checkpoint_copied_to_another_path(tmp_path):
+def test_run_inference_admits_the_same_checkpoint_copied_to_another_path(
+    tmp_path,
+):
     ckpt = registered_checkpoint(tmp_path)
     copy = tmp_path / "copy.pt"
     copy.write_bytes(Path(ckpt).read_bytes())
@@ -349,7 +453,9 @@ def test_run_inference_admits_the_same_checkpoint_copied_to_another_path(tmp_pat
     r = _infer(tmp_path, str(copy))
 
     assert "error" not in r, r
-    assert r["checkpoint_sha256"] == hashlib.sha256(copy.read_bytes()).hexdigest()
+    assert (
+        r["checkpoint_sha256"] == hashlib.sha256(copy.read_bytes()).hexdigest()
+    )
 
 
 def test_run_inference_admits_a_second_checkpoint_of_a_run_registered_under_a_distinct_name(
@@ -363,24 +469,34 @@ def test_run_inference_admits_a_second_checkpoint_of_a_run_registered_under_a_di
 
     r = _infer(tmp_path, second)
     assert "error" not in r, r
-    assert r["checkpoint_sha256"] == hashlib.sha256(Path(second).read_bytes()).hexdigest()
+    assert (
+        r["checkpoint_sha256"]
+        == hashlib.sha256(Path(second).read_bytes()).hexdigest()
+    )
     assert r["experiment_id"] is None
 
 
 # Rail 7: a checkpoint a completed envelope run registered by completing runs with no further
 # step, and carries the run as its producer.
 
-def test_a_completed_runs_weights_run_through_run_inference_with_no_further_step(tmp_path):
+
+def test_a_completed_runs_weights_run_through_run_inference_with_no_further_step(
+    tmp_path,
+):
     ckpt = registered_checkpoint(tmp_path, experiment_id="exp-rail7")
 
     r = _infer(tmp_path, ckpt)
 
     assert "error" not in r, r
-    assert r["checkpoint_sha256"] == hashlib.sha256(Path(ckpt).read_bytes()).hexdigest()
+    assert (
+        r["checkpoint_sha256"]
+        == hashlib.sha256(Path(ckpt).read_bytes()).hexdigest()
+    )
     assert r["experiment_id"] == "exp-rail7"
 
 
 # Rail 10: register_model and load_registered_checkpoint agree on one file's digest.
+
 
 def test_registration_digest_and_load_digest_agree(tmp_path):
     ckpt = secondary_checkpoint(tmp_path)
@@ -392,13 +508,20 @@ def test_registration_digest_and_load_digest_agree(tmp_path):
     assert checkpoint.sha256 == reg["sha256"]
 
 
-def test_a_completed_runs_final_status_and_the_load_agree_on_its_digest(tmp_path):
+def test_a_completed_runs_final_status_and_the_load_agree_on_its_digest(
+    tmp_path,
+):
     """The completion's recorded digest and the load's recomputed one are one digest, and the
     metrics a ranking reads are the ones the checkpoint's own payload carries."""
     from tcip_mcp.experiments import observe
-    from tcip_mcp.model_registry import ModelRegistry, load_registered_checkpoint
+    from tcip_mcp.model_registry import (
+        ModelRegistry,
+        load_registered_checkpoint,
+    )
 
-    run_dir = finished_run(tmp_path, experiment_id="exp-digest", metrics={"map": 0.9})
+    run_dir = finished_run(
+        tmp_path, experiment_id="exp-digest", metrics={"map": 0.9}
+    )
     checkpoint = observe(run_dir).checkpoint
     assert checkpoint is not None
     loaded = load_registered_checkpoint(checkpoint["path"], project=tmp_path)
@@ -413,9 +536,14 @@ def test_ctx_save_checkpoint_admits_a_state_naming_no_reserved_key(tmp_path):
     from tcip_mcp.experiments import observe
     from tcip_mcp.pipelines.training.envelope import TrainContext
     from tcip_mcp.pipelines.training.run_registry import observed_run
-    from tests._verified_checkpoint_fixtures import detection_config, opened_run
+    from tests._verified_checkpoint_fixtures import (
+        detection_config,
+        opened_run,
+    )
 
-    run = observed_run(observe(opened_run(tmp_path, detection_config(tmp_path / "data"))))
+    run = observed_run(
+        observe(opened_run(tmp_path, detection_config(tmp_path / "data")))
+    )
     ctx = TrainContext(run=run, train_loader=None)
 
     path = ctx.save_checkpoint({STATE_DICT_KEY: {}})
@@ -424,6 +552,7 @@ def test_ctx_save_checkpoint_admits_a_state_naming_no_reserved_key(tmp_path):
 
 # Rail 8: the doctor lists a published bucket whose record names a digest no entry names, and
 # stays silent on one whose digest an entry names.
+
 
 def test_doctor_lists_a_bucket_naming_an_unregistered_digest_and_stays_silent_on_a_registered_one(
     tmp_path,
@@ -439,13 +568,26 @@ def test_doctor_lists_a_bucket_naming_an_unregistered_digest_and_stays_silent_on
     stale = _infer(tmp_path, ckpt, "stale/2026-01-01")
     # A bucket is any name its caller gives, a date segment or none.
     undated = _infer(tmp_path, ckpt, "undated-model")
-    assert "error" not in good and "error" not in stale and "error" not in undated
+    assert (
+        "error" not in good and "error" not in stale and "error" not in undated
+    )
     assert good["checkpoint_sha256"] == reg["sha256"]
-    for bucket, digest in (("stale/2026-01-01", "a" * 64), ("undated-model", "b" * 64)):
+    for bucket, digest in (
+        ("stale/2026-01-01", "a" * 64),
+        ("undated-model", "b" * 64),
+    ):
         key = bucket_key(tmp_path, bucket)
         record = tcip_store.read(key)
-        tcip_store.replace(key, {**record, "producer": {**record["producer"],
-                                                        "checkpoint_sha256": digest}})
+        tcip_store.replace(
+            key,
+            {
+                **record,
+                "producer": {
+                    **record["producer"],
+                    "checkpoint_sha256": digest,
+                },
+            },
+        )
 
     findings: list = []
     doctor_module.check_registry(tmp_path, findings)

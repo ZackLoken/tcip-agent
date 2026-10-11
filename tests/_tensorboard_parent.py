@@ -73,7 +73,9 @@ def main() -> None:
 
     returned_pid = launched["info"]["pid"]
     guardian_expected = sys.platform != "win32" and "--no-tie" not in flags
-    print(returned_pid, _standin_pid(returned_pid, guardian_expected), flush=True)
+    print(
+        returned_pid, _standin_pid(returned_pid, guardian_expected), flush=True
+    )
 
     if mode == "sleep":
         time.sleep(120)

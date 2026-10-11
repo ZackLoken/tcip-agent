@@ -41,6 +41,10 @@ def resolve_proposer(engine: str) -> Proposer:
     (:func:`~tcip_mcp.pipelines.model_build.resolve_named`, whose refusals propagate)."""
     from tcip_mcp.pipelines.model_build import resolve_named
 
-    target = resolve_named(engine, _ENGINES, kind="proposal engine",
-                           register="register_proposal_engine")
+    target = resolve_named(
+        engine,
+        _ENGINES,
+        kind="proposal engine",
+        register="register_proposal_engine",
+    )
     return target() if engine not in _ENGINES and callable(target) else target

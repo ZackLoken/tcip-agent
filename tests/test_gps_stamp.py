@@ -14,8 +14,12 @@ from tests._image_fixtures import write_geo_image
 _WHEN = datetime(2024, 5, 1, 10, 0, 0)
 
 
-def test_a_latitude_missing_its_hemisphere_reference_refuses_naming_the_image(tmp_path: Path):
-    from tcip_mcp.pipelines.postprocessing.plant_mapping import read_image_stamp
+def test_a_latitude_missing_its_hemisphere_reference_refuses_naming_the_image(
+    tmp_path: Path,
+):
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        read_image_stamp,
+    )
 
     path = tmp_path / "2024-05-01" / "tree_a.jpg"
     write_geo_image(path, 42.0, -93.0, _WHEN, omit=(0x0001,))
@@ -26,20 +30,27 @@ def test_a_latitude_missing_its_hemisphere_reference_refuses_naming_the_image(tm
 
 
 def test_a_stamp_with_every_reference_reads_its_position(tmp_path: Path):
-    from tcip_mcp.pipelines.postprocessing.plant_mapping import read_image_stamp
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        read_image_stamp,
+    )
 
     path = tmp_path / "2024-05-01" / "tree_a.jpg"
     write_geo_image(path, 42.0, -93.0, _WHEN)
 
     position = read_image_stamp(path, "2024-05-01").position
     assert position is not None
-    assert position[0] == pytest.approx(42.0) and position[1] == pytest.approx(-93.0)
+    assert position[0] == pytest.approx(42.0) and position[1] == pytest.approx(
+        -93.0
+    )
 
 
 def test_a_latitude_with_no_longitude_is_unattributed_never_measured_at_longitude_zero(
-        tmp_path: Path):
+    tmp_path: Path,
+):
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
-        PlantRecord, assign_plants, read_image_stamp,
+        PlantRecord,
+        assign_plants,
+        read_image_stamp,
     )
 
     lone = tmp_path / "2024-05-01" / "tree_a.jpg"
@@ -48,8 +59,15 @@ def test_a_latitude_with_no_longitude_is_unattributed_never_measured_at_longitud
     assert stamp.position is None
 
     # A plant at longitude 0 beside the latitude: a defaulted longitude would match it.
-    plant = PlantRecord(plot_name="P1", accession_name="A", plot_number=None, row_number=None,
-                        col_number=None, lat=0.00001, lon=0.0)
+    plant = PlantRecord(
+        plot_name="P1",
+        accession_name="A",
+        plot_number=None,
+        row_number=None,
+        col_number=None,
+        lat=0.00001,
+        lon=0.0,
+    )
     (assignment,) = assign_plants([stamp], [plant], nn_tolerance_m=1.0)
     assert assignment.source == "unmapped"
     assert assignment.plot_name is None and assignment.distance_m is None

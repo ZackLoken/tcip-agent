@@ -17,25 +17,53 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 GENERATED_PATH = (
-    _REPO_ROOT / "packages" / "tcip-web" / "frontend" / "src" / "test" / "traitListings.json")
+    _REPO_ROOT
+    / "packages"
+    / "tcip-web"
+    / "frontend"
+    / "src"
+    / "test"
+    / "traitListings.json"
+)
 
 _STEM_ENTRY = {
-    "name": "stem", "delivers": ["stem_count"], "positive_state": None, "milestone_fractions": [],
-    "milestone_on": "", "majority_milestone": "", "phenology_prefix": "", "majority_label": "",
-    "count_objective": "count_unbiased", "localization": "center_match",
-    "localization_tolerance": "half_class_avg_size", "localization_tolerance_frac": 0.5,
-    "count_bias_tolerance_frac": 0.1, "count_error_tolerance": 2,
-    "classifier_agreement_floor": None, "ordinal_agreement_floor": None,
-    "regression_skill_floor": None, "regression_criterion": "", "scale_tolerance_frac": None,
-    "holdout_match_quality_floor": 0.5, "notes": "",
-    "operationalizations": {"per_image_count": {
-        "statement": "One stem per detected box.",
-        "mechanism": "the detector's boxes at the calibrated operating point",
-        "measured_subject": "stem", "delivered_phenotypes": [], "delivered_value_keys": []}},
+    "name": "stem",
+    "delivers": ["stem_count"],
+    "positive_state": None,
+    "milestone_fractions": [],
+    "milestone_on": "",
+    "majority_milestone": "",
+    "phenology_prefix": "",
+    "majority_label": "",
+    "count_objective": "count_unbiased",
+    "localization": "center_match",
+    "localization_tolerance": "half_class_avg_size",
+    "localization_tolerance_frac": 0.5,
+    "count_bias_tolerance_frac": 0.1,
+    "count_error_tolerance": 2,
+    "classifier_agreement_floor": None,
+    "ordinal_agreement_floor": None,
+    "regression_skill_floor": None,
+    "regression_criterion": "",
+    "scale_tolerance_frac": None,
+    "holdout_match_quality_floor": 0.5,
+    "notes": "",
+    "operationalizations": {
+        "per_image_count": {
+            "statement": "One stem per detected box.",
+            "mechanism": "the detector's boxes at the calibrated operating point",
+            "measured_subject": "stem",
+            "delivered_phenotypes": [],
+            "delivered_value_keys": [],
+        }
+    },
 }
 _MILESTONE_ENTRY = {
-    **_STEM_ENTRY, "name": "subject_a", "milestone_fractions": [0.5, 0.95],
-    "milestone_on": "positive_fraction", "operationalizations": {},
+    **_STEM_ENTRY,
+    "name": "subject_a",
+    "milestone_fractions": [0.5, 0.95],
+    "milestone_on": "positive_fraction",
+    "operationalizations": {},
 }
 
 
@@ -70,20 +98,34 @@ def listings(workspace: Path) -> dict[str, dict]:
     client = TestClient(app, base_url="http://127.0.0.1")
 
     def opened(name: str) -> Path:
-        created = initialize_project(str(workspace / name), name, "fixture orchard")
-        response = client.post("/api/projects/open", json={"id": created["id"], "user": "grower"})
+        created = initialize_project(
+            str(workspace / name), name, "fixture orchard"
+        )
+        response = client.post(
+            "/api/projects/open", json={"id": created["id"], "user": "grower"}
+        )
         response.raise_for_status()
         return Path(created["project_path"])
 
     def propose(project: Path, entry: dict) -> traits.TraitRevision:
         return traits.propose_trait(
-            project, traits.TraitEntry.model_validate(entry),
-            rationale="The breeder counts every stem.", relayed_note="")
+            project,
+            traits.TraitEntry.model_validate(entry),
+            rationale="The breeder counts every stem.",
+            relayed_note="",
+        )
 
     def confirm(revision: traits.TraitRevision) -> None:
-        response = client.post("/api/results/traits/confirm", json={
-            "trait": revision.entry.name, "revision": revision.number,
-            "entry_sha256": revision.entry_sha256, "user": "grower", "confirmed": True})
+        response = client.post(
+            "/api/results/traits/confirm",
+            json={
+                "trait": revision.entry.name,
+                "revision": revision.number,
+                "entry_sha256": revision.entry_sha256,
+                "user": "grower",
+                "confirmed": True,
+            },
+        )
         response.raise_for_status()
 
     def listing() -> dict:
@@ -96,7 +138,8 @@ def listings(workspace: Path) -> dict[str, dict]:
     confirm(propose(setup, _STEM_ENTRY))
     second = json.loads(json.dumps(_STEM_ENTRY))
     second["operationalizations"]["per_image_count"]["statement"] = (
-        "Only stems above the graft union.")
+        "Only stems above the graft union."
+    )
     propose(setup, second)
     served["setup"] = listing()
 
@@ -117,7 +160,9 @@ def main() -> int:
         tcip_store.bind()
         served = listings(workspace)
         tcip_store.release_root(workspace)
-    GENERATED_PATH.write_text(json.dumps(served, indent=2) + "\n", encoding="utf-8", newline="\n")
+    GENERATED_PATH.write_text(
+        json.dumps(served, indent=2) + "\n", encoding="utf-8", newline="\n"
+    )
     print(f"wrote {GENERATED_PATH}")
     return 0
 

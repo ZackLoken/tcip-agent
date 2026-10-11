@@ -16,14 +16,16 @@ from pathlib import Path
 # Generic English function words, filtered out so recurrence-counting surfaces whatever
 # actually recurs in a project's own reports/retrospectives, not a fixed, maintained,
 # domain-specific vocabulary that goes stale the moment this project's vocabulary shifts.
-_STOPWORDS = frozenset("""
+_STOPWORDS = frozenset(
+    """
 a an the and or but if then than so to of in on at by for with as is was were are be been being
 it its this that these those there here which what when where who whom how why i you we they he
 she him her them his their my your our do does did doing have has had having would could should
 can will just also not no yes very more most some any all each every other such into out up down
 off over under again once about against between through during before after above below from
 because while still only own same too now one two
-""".split())
+""".split()
+)
 
 _WORD = re.compile(r"[a-z][a-z0-9']{2,}")
 
@@ -32,22 +34,31 @@ def _terms(text: str) -> list[str]:
     """The non-stopword words of ``text`` and its adjacent non-stopword word pairs, repeats kept."""
     raw = _WORD.findall(text.lower())
     return [w for w in raw if w not in _STOPWORDS] + [
-        f"{a} {b}" for a, b in zip(raw, raw[1:]) if a not in _STOPWORDS and b not in _STOPWORDS]
+        f"{a} {b}"
+        for a, b in zip(raw, raw[1:])
+        if a not in _STOPWORDS and b not in _STOPWORDS
+    ]
 
 
-def _ranked(counts: Counter[str], top: int, floor: int) -> list[tuple[str, int]]:
+def _ranked(
+    counts: Counter[str], top: int, floor: int
+) -> list[tuple[str, int]]:
     """The ``top`` most counted entries of ``counts``, each counted at least ``floor`` times."""
     return [(term, n) for term, n in counts.most_common() if n >= floor][:top]
 
 
-def _themes(text: str, top: int = 12, min_count: int = 2) -> list[tuple[str, int]]:
+def _themes(
+    text: str, top: int = 12, min_count: int = 2
+) -> list[tuple[str, int]]:
     """The ``top`` most frequent of ``text``'s terms, each mentioned at least ``min_count``
     times."""
     return _ranked(Counter(_terms(text)), top, min_count)
 
 
 def _cross_project_themes(
-    per_project_tokens: dict[str, set[str]], top: int = 12, min_projects: int = 2
+    per_project_tokens: dict[str, set[str]],
+    top: int = 12,
+    min_projects: int = 2,
 ) -> list[tuple[str, int]]:
     """The ``top`` terms present in at least ``min_projects`` of the projects' term sets, counted
     once per project."""
@@ -62,10 +73,15 @@ def build_workspace_worksheet(workspace: Path) -> str:
     nothing."""
     from tcip_mcp.workspace import project_dirs
 
-    lines: list[str] = [f"# Cross-project learning-review worksheet: {workspace}", ""]
+    lines: list[str] = [
+        f"# Cross-project learning-review worksheet: {workspace}",
+        "",
+    ]
     projects = project_dirs(workspace)
     if not projects:
-        lines.append("\nNo projects with a `.tcip/` directory found under this workspace.")
+        lines.append(
+            "\nNo projects with a `.tcip/` directory found under this workspace."
+        )
         return "\n".join(lines) + "\n"
 
     per_project_tokens: dict[str, set[str]] = {}
@@ -112,12 +128,22 @@ def _gather(project: Path) -> tuple[list[dict], list, str]:
     """``project``'s friction reports as :func:`~tcip_mcp.tools.meta_tools.report_row` lists
     them, its retrospectives (latest stated section first), and the free text of the decoded
     reports and the retrospectives joined."""
-    from tcip_mcp.tools.meta_tools import report_documents, report_row, retrospective_documents
+    from tcip_mcp.tools.meta_tools import (
+        report_documents,
+        report_row,
+        retrospective_documents,
+    )
 
-    reports = [report_row(document) for document in report_documents(str(project))]
+    reports = [
+        report_row(document) for document in report_documents(str(project))
+    ]
     retros = retrospective_documents(str(project))
-    text = " ".join([*(r["detail"] for r in reports if "malformed" not in r),
-                     *(document.value for document in retros)])
+    text = " ".join(
+        [
+            *(r["detail"] for r in reports if "malformed" not in r),
+            *(document.value for document in retros),
+        ]
+    )
     return reports, retros, text
 
 
@@ -137,11 +163,15 @@ def build_worksheet(project: Path) -> str:
 
     themes = _themes(text)
     if themes:
-        lines.append("\n## Recurring themes (candidates for a skill line or a CLAUDE.md rule)")
+        lines.append(
+            "\n## Recurring themes (candidates for a skill line or a CLAUDE.md rule)"
+        )
         for word, n in themes:
             lines.append(f"- {word} ×{n}")
 
-    disagreements = [r for r in reports if "malformed" not in r and r["user_disagreement"]]
+    disagreements = [
+        r for r in reports if "malformed" not in r and r["user_disagreement"]
+    ]
     if disagreements:
         lines.append(
             f"\n## Disagreements ({len(disagreements)}): the owner pushed back or disagreed"
@@ -170,13 +200,21 @@ def build_worksheet(project: Path) -> str:
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     ap = argparse.ArgumentParser(
-        description="Gather learning-review material into one worksheet.", prog=prog)
+        description="Gather learning-review material into one worksheet.",
+        prog=prog,
+    )
     scope = ap.add_mutually_exclusive_group(required=True)
-    scope.add_argument("--project", default=None,
-                       help="the project holding the friction reports and retrospectives")
-    scope.add_argument("--workspace", action="store_true",
-                       help="cross-project mode: gather across every project under the TCIP "
-                            "workspace TCIP_WORKSPACE names")
+    scope.add_argument(
+        "--project",
+        default=None,
+        help="the project holding the friction reports and retrospectives",
+    )
+    scope.add_argument(
+        "--workspace",
+        action="store_true",
+        help="cross-project mode: gather across every project under the TCIP "
+        "workspace TCIP_WORKSPACE names",
+    )
     args = ap.parse_args(argv)
 
     if args.workspace:

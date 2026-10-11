@@ -12,17 +12,29 @@ from tests._producer_fixtures import dataset_over  # noqa: E402
 
 def test_pil_to_tensor_grayscale_and_multiband():
     from tcip_mcp.pipelines.image_utils import pil_to_tensor
-    assert pil_to_tensor(np.zeros((8, 8), dtype=np.uint8)).shape == (1, 8, 8)  # [H,W] -> [1,H,W]
-    assert pil_to_tensor(np.ones((8, 8, 5), dtype=np.float32)).shape == (5, 8, 8)  # 5-band
+
+    assert pil_to_tensor(np.zeros((8, 8), dtype=np.uint8)).shape == (
+        1,
+        8,
+        8,
+    )  # [H,W] -> [1,H,W]
+    assert pil_to_tensor(np.ones((8, 8, 5), dtype=np.float32)).shape == (
+        5,
+        8,
+        8,
+    )  # 5-band
     assert pil_to_tensor(Image.new("RGB", (8, 8))).shape == (3, 8, 8)
 
 
 def test_load_image_grayscale_pil_and_npy_multiband(tmp_path):
     from tcip_mcp.pipelines.image_utils import load_image
+
     png = tmp_path / "x.png"
     Image.new("RGB", (16, 16), (200, 100, 50)).save(png)
     g = load_image(png, 1)
-    assert isinstance(g, Image.Image) and g.mode == "L"        # RGB -> grayscale on request
+    assert (
+        isinstance(g, Image.Image) and g.mode == "L"
+    )  # RGB -> grayscale on request
 
     npy = tmp_path / "ms.npy"
     np.save(npy, np.zeros((16, 16, 6), dtype=np.float32))
@@ -35,8 +47,12 @@ def test_build_dataset_grayscale_yields_one_channel(tmp_path):
     images_dir.mkdir(parents=True)
     Image.new("RGB", (16, 16)).save(images_dir / "a.png")
     (tmp_path / "labels.csv").write_text("stem,label\na,0\n")
-    ds = dataset_over("classification", str(images_dir), str(tmp_path / "labels.csv"),
-                      stated={"num_channels": 1})
+    ds = dataset_over(
+        "classification",
+        str(images_dir),
+        str(tmp_path / "labels.csv"),
+        stated={"num_channels": 1},
+    )
     img, _ = ds[0]
     assert img.shape[0] == 1
 
@@ -51,14 +67,27 @@ def test_grayscale_classification_end_to_end(tmp_path):
     images_dir.mkdir(parents=True)
     rows = ["stem,label"]
     for i in range(4):
-        Image.new("RGB", (32, 32), (30 * i, 40, 50)).save(images_dir / f"img{i}.png")
+        Image.new("RGB", (32, 32), (30 * i, 40, 50)).save(
+            images_dir / f"img{i}.png"
+        )
         rows.append(f"img{i},{i % 2}")
     labels = tmp_path / "ds" / "labels.csv"
     labels.write_text("\n".join(rows) + "\n")
 
-    ctx = run_context(tmp_path, training_config(
-        CLASSIFIER_SOURCE, {"images_dir": str(images_dir), "labels_dir": str(labels),
-                            "num_channels": 1, "auto_val": False}))
+    ctx = run_context(
+        tmp_path,
+        training_config(
+            CLASSIFIER_SOURCE,
+            {
+                "images_dir": str(images_dir),
+                "labels_dir": str(labels),
+                "num_channels": 1,
+                "auto_val": False,
+            },
+        ),
+    )
     assert ctx.train_loader.dataset[0][0].shape[0] == 1
     run = train(ctx.run, ctx.train_loader)
-    assert run.status == "completed"  # 1-channel data + 1-channel model trains end to end
+    assert (
+        run.status == "completed"
+    )  # 1-channel data + 1-channel model trains end to end

@@ -23,6 +23,7 @@ pytest.importorskip("torch")
 
 from tests._chain_fixtures import BESPOKE_DETECTION, BESPOKE_MODELS  # noqa: E402
 from tests._producer_fixtures import gray_frame  # noqa: E402
+
 pytest.importorskip("torchvision")
 import torch  # noqa: E402
 
@@ -37,8 +38,14 @@ _RUN_DATA = {"num_channels": 3, "scope": {"subject": "bud"}}
 class _GeometryStub:
     """Only the geometry facts ``resolve_tile_geometry`` reads off a predictor."""
 
-    def __init__(self, *, train_tile_size=None, train_overlap=None, train_native_size=None,
-                 train_augmentation=None) -> None:
+    def __init__(
+        self,
+        *,
+        train_tile_size=None,
+        train_overlap=None,
+        train_native_size=None,
+        train_augmentation=None,
+    ) -> None:
         self.train_tile_size = train_tile_size
         self.train_overlap = train_overlap
         self.train_native_size = train_native_size
@@ -52,32 +59,48 @@ class _MiddleHalfDetector(torch.nn.Module):
     tensor, whatever ``min_size`` is, which is what makes a doubled correction visible.
     """
 
-    def __init__(self, min_size: int, max_size: int, channels: int = 3) -> None:
+    def __init__(
+        self, min_size: int, max_size: int, channels: int = 3
+    ) -> None:
         super().__init__()
-        from torchvision.models.detection.transform import GeneralizedRCNNTransform
+        from torchvision.models.detection.transform import (
+            GeneralizedRCNNTransform,
+        )
 
         self.transform = GeneralizedRCNNTransform(
-            min_size, max_size, [0.0] * channels, [1.0] * channels)
+            min_size, max_size, [0.0] * channels, [1.0] * channels
+        )
         # One box scored 0.9 per input: within any cap and above any threshold a test states.
         self.score_thresh = 0.0
         self.detections_per_img = 100
 
     def forward(self, images):
-        original_sizes = [(int(im.shape[-2]), int(im.shape[-1])) for im in images]
+        original_sizes = [
+            (int(im.shape[-2]), int(im.shape[-1])) for im in images
+        ]
         image_list, _ = self.transform(images)
         results = [
-            {"boxes": torch.tensor([[w * 0.25, h * 0.25, w * 0.75, h * 0.75]], dtype=torch.float32),
-             "scores": torch.tensor([0.9]),
-             "labels": torch.tensor([1])}
+            {
+                "boxes": torch.tensor(
+                    [[w * 0.25, h * 0.25, w * 0.75, h * 0.75]],
+                    dtype=torch.float32,
+                ),
+                "scores": torch.tensor([0.9]),
+                "labels": torch.tensor([1]),
+            }
             for h, w in image_list.image_sizes
         ]
-        return self.transform.postprocess(results, image_list.image_sizes, original_sizes)
+        return self.transform.postprocess(
+            results, image_list.image_sizes, original_sizes
+        )
 
 
 def _geometry(stub, *, tile_size=None, overlap=None, tiled=True) -> tuple:
     from tcip_mcp.pipelines.slicing import resolve_tile_geometry
 
-    g = resolve_tile_geometry(stub, tiled=tiled, tile_size=tile_size, overlap=overlap)
+    g = resolve_tile_geometry(
+        stub, tiled=tiled, tile_size=tile_size, overlap=overlap
+    )
     return g.tile_size, g.tile_size_source
 
 
@@ -87,7 +110,9 @@ def _stub_predictor(model, *, task: str = "detection") -> GenericPredictor:
     p.in_chans = 3
     p.attribute_sizes = []
     p.device = torch.device("cpu")
-    p.model_source = ModelSourceSchema.model_validate({"builder": "m:f", "task": task})
+    p.model_source = ModelSourceSchema.model_validate(
+        {"builder": "m:f", "task": task}
+    )
     p.model = model.eval()
     return p
 
@@ -98,15 +123,23 @@ def _sliced(pred, source, *, tile_resize, **kwargs) -> dict:
     from tests._verified_checkpoint_fixtures import tiled_record
 
     return pred.predict_sliced(
-        source, execution=tiled_record(tile_size=TILE, overlap=0.0, conf=0.0,
-                                       tile_resize=tile_resize),
-        tile_batch_size=8, require_masks=True, **kwargs)
+        source,
+        execution=tiled_record(
+            tile_size=TILE, overlap=0.0, conf=0.0, tile_resize=tile_resize
+        ),
+        tile_batch_size=8,
+        require_masks=True,
+        **kwargs,
+    )
 
 
 def _expected_middle_half_boxes() -> set[tuple[float, float, float, float]]:
     """The middle half of every tile on a gapless 2x2 lattice, in image pixel space."""
-    return {(x + TILE * 0.25, y + TILE * 0.25, x + TILE * 0.75, y + TILE * 0.75)
-            for x in (0, TILE) for y in (0, TILE)}
+    return {
+        (x + TILE * 0.25, y + TILE * 0.25, x + TILE * 0.75, y + TILE * 0.75)
+        for x in (0, TILE)
+        for y in (0, TILE)
+    }
 
 
 # --- which tier the geometry comes from ---------------------------------
@@ -116,14 +149,20 @@ def test_square_untiled_training_frame_yields_a_tile_edge():
     """A run that trained untiled on frames that all shared one square size justifies tiling at
     that frame: an object in such a tile reaches the model at the scale a whole training frame
     presented it at."""
-    assert _geometry(_GeometryStub(train_native_size=[512, 512])) == (512, "native_ratio")
+    assert _geometry(_GeometryStub(train_native_size=[512, 512])) == (
+        512,
+        "native_ratio",
+    )
 
 
 def test_rectangular_untiled_training_frame_yields_no_tile_edge():
     """Tile geometry is a single square edge everywhere it travels, and no square edge reproduces a
     rectangular frame's scale on both axes. Refuse, rather than pick an edge that silently
     mis-scales one axis."""
-    assert _geometry(_GeometryStub(train_native_size=[1024, 768])) == (None, "unavailable")
+    assert _geometry(_GeometryStub(train_native_size=[1024, 768])) == (
+        None,
+        "unavailable",
+    )
 
 
 def test_persisted_tile_geometry_outranks_the_native_frame():
@@ -140,11 +179,18 @@ def test_explicit_tile_size_outranks_the_native_frame():
     assert _geometry(stub, tile_size=320, tiled=False) == (320, "explicit")
 
 
-@pytest.mark.parametrize("stamp", [None, [512], [0, 0], ["wide", "tall"], 512, [-4, -4]])
-def test_an_unusable_native_frame_stamp_yields_no_tile_edge_and_never_raises(stamp):
+@pytest.mark.parametrize(
+    "stamp", [None, [512], [0, 0], ["wide", "tall"], 512, [-4, -4]]
+)
+def test_an_unusable_native_frame_stamp_yields_no_tile_edge_and_never_raises(
+    stamp,
+):
     """A checkpoint this platform did not write can carry anything under that key, and
     ``resolve_tile_geometry`` is a fact-return every caller relies on not to raise."""
-    assert _geometry(_GeometryStub(train_native_size=stamp)) == (None, "unavailable")
+    assert _geometry(_GeometryStub(train_native_size=stamp)) == (
+        None,
+        "unavailable",
+    )
 
 
 # --- the recorded train-time resize -------------------------------------
@@ -163,17 +209,23 @@ def test_a_recorded_resize_is_read_through_the_builders_own_chain():
     from tcip_mcp.pipelines.data.augmentations import recorded_resize
 
     assert recorded_resize({"resize": {"size": [320, 240]}}) == (320, 240)
-    assert recorded_resize({"resize": {"size": [800, 600]},
-                            "horizontal_flip": {"p": 0.5}}) == (800, 600)
+    assert recorded_resize(
+        {"resize": {"size": [800, 600]}, "horizontal_flip": {"p": 0.5}}
+    ) == (800, 600)
 
 
-@pytest.mark.parametrize("config, refusal", [
-    ({"not_a_transform": {"p": 0.5}}, "Unknown augmentation"),
-    ({"resize": [640, 640]}, "'resize'"),
-    ({"resize": True}, "'resize'"),
-    ("nadir_rotation", "'nadir_rotation'"),
-])
-def test_an_unbuildable_recorded_config_raises_rather_than_reading_as_no_resize(config, refusal):
+@pytest.mark.parametrize(
+    "config, refusal",
+    [
+        ({"not_a_transform": {"p": 0.5}}, "Unknown augmentation"),
+        ({"resize": [640, 640]}, "'resize'"),
+        ({"resize": True}, "'resize'"),
+        ("nadir_rotation", "'nadir_rotation'"),
+    ],
+)
+def test_an_unbuildable_recorded_config_raises_rather_than_reading_as_no_resize(
+    config, refusal
+):
     """A config the builder refuses (an unknown transform, a shorthand, a preset name) raises its
     refusal here too, never read as a run that pinned no size."""
     from tcip_mcp.pipelines.data.augmentations import recorded_resize
@@ -188,8 +240,12 @@ def test_the_recorded_resize_travels_only_with_a_native_frame_tile_edge():
     from tcip_mcp.pipelines.slicing import resolve_tile_geometry
 
     augmentation = {"resize": {"size": [640, 640]}}
-    native = _GeometryStub(train_native_size=[512, 512], train_augmentation=augmentation)
-    persisted = _GeometryStub(train_tile_size=512, train_augmentation=augmentation)
+    native = _GeometryStub(
+        train_native_size=[512, 512], train_augmentation=augmentation
+    )
+    persisted = _GeometryStub(
+        train_tile_size=512, train_augmentation=augmentation
+    )
 
     def resize(stub, **kw):
         return resolve_tile_geometry(stub, overlap=None, **kw).tile_resize
@@ -198,15 +254,25 @@ def test_the_recorded_resize_travels_only_with_a_native_frame_tile_edge():
     assert resize(native, tiled=False, tile_size=None) is None
     assert resize(persisted, tiled=True, tile_size=None) is None
     assert resize(native, tiled=True, tile_size=512) is None
-    assert resize(
-        _GeometryStub(train_augmentation=augmentation), tiled=True, tile_size=None) is None
+    assert (
+        resize(
+            _GeometryStub(train_augmentation=augmentation),
+            tiled=True,
+            tile_size=None,
+        )
+        is None
+    )
 
 
-def test_a_checkpoint_carries_its_untiled_training_geometry_to_the_predictor(tmp_path):
+def test_a_checkpoint_carries_its_untiled_training_geometry_to_the_predictor(
+    tmp_path,
+):
     from tcip_mcp.model_registry import load_registered_checkpoint
 
     checkpoint = load_registered_checkpoint(
-        _native_frame_checkpoint(tmp_path, {"resize": {"size": [32, 32]}}), project=tmp_path)
+        _native_frame_checkpoint(tmp_path, {"resize": {"size": [32, 32]}}),
+        project=tmp_path,
+    )
 
     pred = GenericPredictor(checkpoint, device="cpu")
 
@@ -228,7 +294,9 @@ def test_tiles_at_native_size_with_no_recorded_resize(tmp_path):
     assert {tuple(b) for b in r["boxes"]} == _expected_middle_half_boxes()
 
 
-def test_a_recorded_resize_is_undone_per_axis_and_not_confused_with_the_detectors_own(tmp_path):
+def test_a_recorded_resize_is_undone_per_axis_and_not_confused_with_the_detectors_own(
+    tmp_path,
+):
     """``min_size`` (800) is deliberately unlike both the tile edge (64) and the resize target
     (128x96), and the target is deliberately not square. Boxes must land exactly where the
     no-resize pass puts them: the detector's internal transform already maps its own boxes back to
@@ -261,10 +329,14 @@ def test_a_windowed_raster_source_is_resized_and_undone_the_same_way():
 
     r = _sliced(pred, _Reader(), tile_resize=(128, 96), source_label="raster")
 
-    assert {tuple(round(v, 4) for v in b) for b in r["boxes"]} == _expected_middle_half_boxes()
+    assert {
+        tuple(round(v, 4) for v in b) for b in r["boxes"]
+    } == _expected_middle_half_boxes()
 
 
-def test_a_windowed_alpha_tagged_source_is_resized_and_undone_the_same_way(caplog):
+def test_a_windowed_alpha_tagged_source_is_resized_and_undone_the_same_way(
+    caplog,
+):
     """A windowed 4-band reader whose ``band_interpretations`` declares the 4th band alpha gets
     the recorded resize applied and undone as the 3-band case does, logging no skip warning."""
     import logging
@@ -280,13 +352,19 @@ def test_a_windowed_alpha_tagged_source_is_resized_and_undone_the_same_way(caplo
         def read_window(self, y0, y1, x0, x1):
             return np.full((y1 - y0, x1 - x0, 4), 120, dtype=np.uint8)
 
-    pred = _stub_predictor(_MiddleHalfDetector(min_size=800, max_size=1333, channels=4))
+    pred = _stub_predictor(
+        _MiddleHalfDetector(min_size=800, max_size=1333, channels=4)
+    )
     pred.in_chans = 4
 
     with caplog.at_level(logging.WARNING):
-        r = _sliced(pred, _Reader(), tile_resize=(128, 96), source_label="raster")
+        r = _sliced(
+            pred, _Reader(), tile_resize=(128, 96), source_label="raster"
+        )
 
-    assert {tuple(round(v, 4) for v in b) for b in r["boxes"]} == _expected_middle_half_boxes()
+    assert {
+        tuple(round(v, 4) for v in b) for b in r["boxes"]
+    } == _expected_middle_half_boxes()
     assert not any("recorded train-time resize" in m for m in caplog.messages)
 
 
@@ -306,13 +384,19 @@ def test_a_windowed_undeclared_fourth_band_source_keeps_its_own_pixels(caplog):
         def read_window(self, y0, y1, x0, x1):
             return np.full((y1 - y0, x1 - x0, 4), 120, dtype=np.uint8)
 
-    pred = _stub_predictor(_MiddleHalfDetector(min_size=800, max_size=1333, channels=4))
+    pred = _stub_predictor(
+        _MiddleHalfDetector(min_size=800, max_size=1333, channels=4)
+    )
     pred.in_chans = 4
 
     with caplog.at_level(logging.WARNING):
-        r = _sliced(pred, _Reader(), tile_resize=(128, 96), source_label="raster")
+        r = _sliced(
+            pred, _Reader(), tile_resize=(128, 96), source_label="raster"
+        )
 
-    assert {tuple(round(v, 4) for v in b) for b in r["boxes"]} == _expected_middle_half_boxes()
+    assert {
+        tuple(round(v, 4) for v in b) for b in r["boxes"]
+    } == _expected_middle_half_boxes()
     assert any("recorded train-time resize" in m for m in caplog.messages)
 
 
@@ -339,42 +423,78 @@ def test_a_tile_no_pil_mode_represents_keeps_its_own_pixels(tmp_path, caplog):
 # --- the doors on either side of the tier -------------------------------
 
 
-def _trained_checkpoint(tmp_path: Path, tiling: dict, *, size: int = TILE, **config) -> str:
+def _trained_checkpoint(
+    tmp_path: Path, tiling: dict, *, size: int = TILE, **config
+) -> str:
     """The checkpoint a run under ``tmp_path`` completed over two square ``size`` px bud frames of
     its own, its tiny detector resizing between ``size`` and twice it, under ``tiling`` and with
     ``config``'s keys in place of its config's own; registered by completing."""
     from tests._producer_fixtures import seed_bud_images
-    from tests._verified_checkpoint_fixtures import fixture_data_dir, registered_checkpoint
+    from tests._verified_checkpoint_fixtures import (
+        fixture_data_dir,
+        registered_checkpoint,
+    )
 
-    images = seed_bud_images(fixture_data_dir(tmp_path, f"frames-{size}") / "images"
-                             / UNDATED_BUCKET, n=2, size=size)
+    images = seed_bud_images(
+        fixture_data_dir(tmp_path, f"frames-{size}")
+        / "images"
+        / UNDATED_BUCKET,
+        n=2,
+        size=size,
+    )
     return registered_checkpoint(
-        tmp_path, model_source={"builder": BESPOKE_DETECTION, "task": "detection",
-                                "source_files": [BESPOKE_MODELS],
-                                "builder_kwargs": {"min_size": size, "max_size": size * 2}},
-        data={"images_dir": str(images), "tiling": tiling, **_RUN_DATA}, **config)
+        tmp_path,
+        model_source={
+            "builder": BESPOKE_DETECTION,
+            "task": "detection",
+            "source_files": [BESPOKE_MODELS],
+            "builder_kwargs": {"min_size": size, "max_size": size * 2},
+        },
+        data={"images_dir": str(images), "tiling": tiling, **_RUN_DATA},
+        **config,
+    )
 
 
-def _native_frame_checkpoint(tmp_path: Path, augmentation: dict | None = None) -> str:
+def _native_frame_checkpoint(
+    tmp_path: Path, augmentation: dict | None = None
+) -> str:
     """:func:`_trained_checkpoint` of an untiled run, under ``augmentation`` when given."""
-    return _trained_checkpoint(tmp_path, {"enabled": False},
-                               **({} if augmentation is None else {"augmentation": augmentation}))
+    return _trained_checkpoint(
+        tmp_path,
+        {"enabled": False},
+        **({} if augmentation is None else {"augmentation": augmentation}),
+    )
 
 
-def test_a_tiled_pass_over_a_native_frame_checkpoint_says_what_it_rests_on(tmp_path):
+def test_a_tiled_pass_over_a_native_frame_checkpoint_says_what_it_rests_on(
+    tmp_path,
+):
     """The rail admits the work: a caller who asks to tile a checkpoint whose only geometry is its
     untiled training frame gets a real pass at that frame's edge, its record naming that basis and
     the recorded resize each tile runs through; an untiled frame records no overlap, so the caller
     states one."""
-    from tests._verified_checkpoint_fixtures import SAMPLE_OVERLAP, predicted_over
+    from tests._verified_checkpoint_fixtures import (
+        SAMPLE_OVERLAP,
+        predicted_over,
+    )
 
     ckpt = _native_frame_checkpoint(tmp_path, {"resize": {"size": [32, 32]}})
 
-    p, results = predicted_over(tmp_path, ckpt, str(Path(gray_frame(tmp_path, IMAGE)).parent),
-                                device="cpu", tile=True, overlap=SAMPLE_OVERLAP, conf=0.0)
+    p, results = predicted_over(
+        tmp_path,
+        ckpt,
+        str(Path(gray_frame(tmp_path, IMAGE)).parent),
+        device="cpu",
+        tile=True,
+        overlap=SAMPLE_OVERLAP,
+        conf=0.0,
+    )
 
     assert len(results) == 1
-    assert (p.execution.tile_size, p.execution.sources["tile_size"]) == (TILE, "native_ratio")
+    assert (p.execution.tile_size, p.execution.sources["tile_size"]) == (
+        TILE,
+        "native_ratio",
+    )
     assert p.execution.tile_resize == (32, 32)
 
 
@@ -385,8 +505,13 @@ def test_a_native_frame_checkpoint_stays_untiled_unless_asked(tmp_path):
 
     ckpt = _native_frame_checkpoint(tmp_path)
 
-    p, _results = predicted_over(tmp_path, ckpt, str(Path(gray_frame(tmp_path, IMAGE)).parent),
-                                 device="cpu", conf=0.0)
+    p, _results = predicted_over(
+        tmp_path,
+        ckpt,
+        str(Path(gray_frame(tmp_path, IMAGE)).parent),
+        device="cpu",
+        conf=0.0,
+    )
 
     assert p.execution.tile_size is None
 
@@ -402,12 +527,18 @@ def _native_frame_gt(images_dir: Path) -> None:
 
     from tests._producer_fixtures import label_image
 
-    Image.new("RGB", (IMAGE, IMAGE), (120, 120, 120)).save(images_dir / "a.png")
+    Image.new("RGB", (IMAGE, IMAGE), (120, 120, 120)).save(
+        images_dir / "a.png"
+    )
     label_image(
         images_dir / "a.png",
-        [Annotation(subject="bud", geometry=BBox(*b))
-         for b in sorted(_expected_middle_half_boxes())],
-        IMAGE, IMAGE)
+        [
+            Annotation(subject="bud", geometry=BBox(*b))
+            for b in sorted(_expected_middle_half_boxes())
+        ],
+        IMAGE,
+        IMAGE,
+    )
 
 
 def _persisted_regime_predictor():
@@ -429,7 +560,8 @@ def _native_frame_regime_predictor():
 
 
 def test_delivery_grade_evaluation_admits_a_native_frame_basis_and_reproduces_the_persisted_one(
-        tmp_path, monkeypatch):
+    tmp_path, monkeypatch
+):
     """A checkpoint whose only tiling basis is its own
     uniform untiled training frame reaches the delivery-grade gate and produces the identical
     counts, metrics and box coordinates a persisted tiled regime already trusted would, even though
@@ -438,8 +570,13 @@ def test_delivery_grade_evaluation_admits_a_native_frame_basis_and_reproduces_th
     import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
     from tcip_mcp.pipelines.execution import Stated, execution_record
     from tcip_mcp.pipelines.slicing import resolve_tile_geometry
-    from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
-    from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS, verified_checkpoint
+    from tcip_mcp.pipelines.training.eval_runners import (
+        run_full_frame_evaluation,
+    )
+    from tests._verified_checkpoint_fixtures import (
+        SAMPLE_DETECTOR_PASS,
+        verified_checkpoint,
+    )
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True)
@@ -447,49 +584,99 @@ def test_delivery_grade_evaluation_admits_a_native_frame_basis_and_reproduces_th
     checkpoint = verified_checkpoint(tmp_path)
     stated = Stated(**SAMPLE_DETECTOR_PASS)
 
-    monkeypatch.setattr(predictor_mod, "GenericPredictor",
-                        lambda *a, **kw: _persisted_regime_predictor())
+    monkeypatch.setattr(
+        predictor_mod,
+        "GenericPredictor",
+        lambda *a, **kw: _persisted_regime_predictor(),
+    )
     persisted = run_full_frame_evaluation(
-        checkpoint, checkpoint_admission(checkpoint, images_dir), stated=stated)
-    monkeypatch.setattr(predictor_mod, "GenericPredictor",
-                        lambda *a, **kw: _native_frame_regime_predictor())
+        checkpoint, checkpoint_admission(checkpoint, images_dir), stated=stated
+    )
+    monkeypatch.setattr(
+        predictor_mod,
+        "GenericPredictor",
+        lambda *a, **kw: _native_frame_regime_predictor(),
+    )
     native = run_full_frame_evaluation(
-        checkpoint, checkpoint_admission(checkpoint, images_dir), stated=stated)
+        checkpoint, checkpoint_admission(checkpoint, images_dir), stated=stated
+    )
     monkeypatch.undo()
 
-    persisted_execution, native_execution = persisted["execution"], native["execution"]
+    persisted_execution, native_execution = (
+        persisted["execution"],
+        native["execution"],
+    )
     assert persisted_execution["sources"]["tile_size"] == "derived"
     assert native_execution["sources"]["tile_size"] == "native_ratio"
-    assert native_execution["tile_size"] == persisted_execution["tile_size"] == TILE
-    assert persisted["tp"] == 4 and persisted["fp"] == 0 and persisted["fn"] == 0
-    for key in ("tp", "fp", "fn", "n_gt", "n_pred", "precision", "recall", "f1", "map", "map50"):
+    assert (
+        native_execution["tile_size"]
+        == persisted_execution["tile_size"]
+        == TILE
+    )
+    assert (
+        persisted["tp"] == 4 and persisted["fp"] == 0 and persisted["fn"] == 0
+    )
+    for key in (
+        "tp",
+        "fp",
+        "fn",
+        "n_gt",
+        "n_pred",
+        "precision",
+        "recall",
+        "f1",
+        "map",
+        "map50",
+    ):
         assert native[key] == persisted[key], key
 
     # The metrics alone cannot distinguish "byte-identical boxes" from "close enough to still
     # match": run the exact geometry each regime resolved directly and compare coordinates.
     persisted_predictor, native_predictor = (
-        _persisted_regime_predictor(), _native_frame_regime_predictor())
-    p_geo = resolve_tile_geometry(persisted_predictor, tiled=True, tile_size=None, overlap=None)
-    n_geo = resolve_tile_geometry(native_predictor, tiled=True, tile_size=None, overlap=None)
+        _persisted_regime_predictor(),
+        _native_frame_regime_predictor(),
+    )
+    p_geo = resolve_tile_geometry(
+        persisted_predictor, tiled=True, tile_size=None, overlap=None
+    )
+    n_geo = resolve_tile_geometry(
+        native_predictor, tiled=True, tile_size=None, overlap=None
+    )
     assert n_geo.tile_resize == (TILE * 2, TILE * 2)
     unfiltered = stated.model_copy(update={"conf": 0.0})
-    r_p, r_n = (predictor.predict_sliced(
-        str(images_dir / "a.png"),
-        execution=execution_record(checkpoint, unfiltered, geo, None),
-        tile_batch_size=8, require_masks=False)
-        for predictor, geo in ((persisted_predictor, p_geo), (native_predictor, n_geo)))
-    assert ({tuple(b) for b in r_p["boxes"]} == {tuple(b) for b in r_n["boxes"]}
-            == _expected_middle_half_boxes())
+    r_p, r_n = (
+        predictor.predict_sliced(
+            str(images_dir / "a.png"),
+            execution=execution_record(checkpoint, unfiltered, geo, None),
+            tile_batch_size=8,
+            require_masks=False,
+        )
+        for predictor, geo in (
+            (persisted_predictor, p_geo),
+            (native_predictor, n_geo),
+        )
+    )
+    assert (
+        {tuple(b) for b in r_p["boxes"]}
+        == {tuple(b) for b in r_n["boxes"]}
+        == _expected_middle_half_boxes()
+    )
 
 
 def test_delivery_grade_evaluation_forwards_the_native_frame_resize_into_predict_sliced(
-        tmp_path, monkeypatch):
+    tmp_path, monkeypatch
+):
     """A native-frame checkpoint whose recorded chain pins a resize reaches ``predict_sliced``
     with it, so the evaluation door never silently runs each tile at its own native size."""
     import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
     from tcip_mcp.pipelines.execution import Stated
-    from tcip_mcp.pipelines.training.eval_runners import run_full_frame_evaluation
-    from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS, verified_checkpoint
+    from tcip_mcp.pipelines.training.eval_runners import (
+        run_full_frame_evaluation,
+    )
+    from tests._verified_checkpoint_fixtures import (
+        SAMPLE_DETECTOR_PASS,
+        verified_checkpoint,
+    )
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True)
@@ -510,8 +697,11 @@ def test_delivery_grade_evaluation_forwards_the_native_frame_resize_into_predict
 
     checkpoint = verified_checkpoint(tmp_path)
     monkeypatch.setattr(predictor_mod, "GenericPredictor", _spy_predictor)
-    r = run_full_frame_evaluation(checkpoint, checkpoint_admission(checkpoint, images_dir),
-                                  stated=Stated(**SAMPLE_DETECTOR_PASS))
+    r = run_full_frame_evaluation(
+        checkpoint,
+        checkpoint_admission(checkpoint, images_dir),
+        stated=Stated(**SAMPLE_DETECTOR_PASS),
+    )
 
     assert "error" not in r
     assert captured["execution"].tile_resize == (TILE * 2, TILE * 2)
@@ -521,7 +711,10 @@ def test_delivery_grade_evaluation_forwards_the_native_frame_resize_into_predict
 
 
 def test_an_explicit_edge_contradicting_persisted_geometry_refuses():
-    from tcip_mcp.pipelines.slicing import TileEdgeContradictionError, resolve_tile_geometry
+    from tcip_mcp.pipelines.slicing import (
+        TileEdgeContradictionError,
+        resolve_tile_geometry,
+    )
 
     stub = _GeometryStub(train_tile_size=128)
 
@@ -535,7 +728,10 @@ def test_an_explicit_edge_contradicting_persisted_geometry_refuses():
 
 
 def test_an_explicit_edge_contradicting_the_native_frame_refuses():
-    from tcip_mcp.pipelines.slicing import TileEdgeContradictionError, resolve_tile_geometry
+    from tcip_mcp.pipelines.slicing import (
+        TileEdgeContradictionError,
+        resolve_tile_geometry,
+    )
 
     stub = _GeometryStub(train_native_size=[512, 512])
 
@@ -593,15 +789,28 @@ def test_an_explicit_edge_on_a_checkpoint_recording_no_geometry_clears():
 def _tiled_checkpoint(tmp_path: Path, tile_size: int) -> str:
     """:func:`_trained_checkpoint` of a run tiled at ``tile_size`` over frames of that size."""
     return _trained_checkpoint(  # sliver_frac stated: one box per frame derives no spread
-        tmp_path, {"tile_size": tile_size, "overlap": 0.2, "sliver_frac": 0.5}, size=tile_size)
+        tmp_path,
+        {"tile_size": tile_size, "overlap": 0.2, "sliver_frac": 0.5},
+        size=tile_size,
+    )
 
 
-@pytest.mark.parametrize("make, recorded", [
-    (lambda tmp_path: _tiled_checkpoint(tmp_path, 128), "128"),
-    (lambda tmp_path: _trained_checkpoint(tmp_path, {"enabled": False}, size=512), "512"),
-], ids=["persisted-geometry", "native-frame"])
+@pytest.mark.parametrize(
+    "make, recorded",
+    [
+        (lambda tmp_path: _tiled_checkpoint(tmp_path, 128), "128"),
+        (
+            lambda tmp_path: _trained_checkpoint(
+                tmp_path, {"enabled": False}, size=512
+            ),
+            "512",
+        ),
+    ],
+    ids=["persisted-geometry", "native-frame"],
+)
 def test_a_stated_edge_contradicting_the_checkpoints_geometry_refuses_the_pass(
-        tmp_path, make, recorded):
+    tmp_path, make, recorded
+):
     """A caller-typed tile edge that differs from the checkpoint's own persisted training geometry,
     or from its recorded untiled training frame when it persists none, is a real contradiction,
     never a caller override to trust blindly."""
@@ -611,19 +820,38 @@ def test_a_stated_edge_contradicting_the_checkpoints_geometry_refuses_the_pass(
     ckpt = make(tmp_path)
 
     with pytest.raises(ExecutionRefusedError) as exc_info:
-        predicted_over(tmp_path, ckpt, str(Path(gray_frame(tmp_path, IMAGE)).parent), device="cpu",
-                       tile=True, tile_size=64, conf=0.0)
+        predicted_over(
+            tmp_path,
+            ckpt,
+            str(Path(gray_frame(tmp_path, IMAGE)).parent),
+            device="cpu",
+            tile=True,
+            tile_size=64,
+            conf=0.0,
+        )
     assert "64" in str(exc_info.value) and recorded in str(exc_info.value)
 
 
-def test_a_stated_edge_matching_persisted_geometry_is_admitted_as_stated(tmp_path):
+def test_a_stated_edge_matching_persisted_geometry_is_admitted_as_stated(
+    tmp_path,
+):
     """The rail refuses a contradiction, not an explicit edge that simply agrees."""
     from tests._verified_checkpoint_fixtures import predicted_over
 
     ckpt = _tiled_checkpoint(tmp_path, TILE)
 
-    p, results = predicted_over(tmp_path, ckpt, str(Path(gray_frame(tmp_path, IMAGE)).parent),
-                                device="cpu", tile=True, tile_size=TILE, conf=0.0)
+    p, results = predicted_over(
+        tmp_path,
+        ckpt,
+        str(Path(gray_frame(tmp_path, IMAGE)).parent),
+        device="cpu",
+        tile=True,
+        tile_size=TILE,
+        conf=0.0,
+    )
 
     assert len(results) == 1
-    assert (p.execution.tile_size, p.execution.sources["tile_size"]) == (TILE, "explicit")
+    assert (p.execution.tile_size, p.execution.sources["tile_size"]) == (
+        TILE,
+        "explicit",
+    )

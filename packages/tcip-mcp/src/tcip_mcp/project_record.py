@@ -55,10 +55,14 @@ def validate_text(label: str, value: object) -> str:
     :data:`_MAX_TEXT_LENGTH` characters refuses by name.
     """
     if not isinstance(value, str):
-        raise ValueError(f"{label} must be a string, got {type(value).__name__}")
+        raise ValueError(
+            f"{label} must be a string, got {type(value).__name__}"
+        )
     text = value.strip()
     if not text:
-        raise ValueError(f"{label} is empty (after stripping surrounding whitespace)")
+        raise ValueError(
+            f"{label} is empty (after stripping surrounding whitespace)"
+        )
     for offset, ch in enumerate(text):
         if not ch.isprintable():
             raise ValueError(
@@ -81,7 +85,10 @@ def read_record(project_path: str | Path) -> dict:
     document that does not decode raises the store's own ``DecodeError``, and a root the store
     refuses raises its ``StoreError``. Never creates a store.
     """
-    return _checked(project_path, tcip_store.read(project_record_key(project_path), default=None))
+    return _checked(
+        project_path,
+        tcip_store.read(project_record_key(project_path), default=None),
+    )
 
 
 def existing_project(value: str | Path) -> tuple[Path, dict]:
@@ -91,7 +98,9 @@ def existing_project(value: str | Path) -> tuple[Path, dict]:
     project = Path(value).resolve()
     fields = record_fields(project)
     if fields["record_problem"] is not None:
-        raise ValueError(f"{project} names no readable project: {fields['record_problem']}")
+        raise ValueError(
+            f"{project} names no readable project: {fields['record_problem']}"
+        )
     return project, fields
 
 
@@ -105,9 +114,16 @@ def _checked(project_path: str | Path, raw: object) -> dict:
             f"{project_path} is not a project yet: create it with initialize_project"
         )
     try:
-        if not isinstance(raw, dict) or not isinstance(raw.get("id"), str) or not raw["id"]:
+        if (
+            not isinstance(raw, dict)
+            or not isinstance(raw.get("id"), str)
+            or not raw["id"]
+        ):
             raise ValueError("no id")
-        for field, label in (("display_name", "display name"), ("site", "site")):
+        for field, label in (
+            ("display_name", "display name"),
+            ("site", "site"),
+        ):
             if validate_text(label, raw.get(field)) != raw[field]:
                 raise ValueError(f"the {label} is not stored as its text")
     except ValueError as exc:
@@ -118,7 +134,9 @@ def _checked(project_path: str | Path, raw: object) -> dict:
     return raw
 
 
-def create_record(project_path: str | Path, display_name: str, site: str) -> dict:
+def create_record(
+    project_path: str | Path, display_name: str, site: str
+) -> dict:
     """Write a new project's record with a freshly minted id, its one creator, and return it.
 
     A project already recording the same display name and site is returned as it stands, its id
@@ -130,7 +148,9 @@ def create_record(project_path: str | Path, display_name: str, site: str) -> dic
     text = validate_text("site", site)
     document = {"id": mint_id(), "display_name": name, "site": text}
     try:
-        tcip_store.replace(project_record_key(project_path), document, expect=Version.ABSENT)
+        tcip_store.replace(
+            project_record_key(project_path), document, expect=Version.ABSENT
+        )
         return document
     except VersionConflictError:
         existing = read_record(project_path)
@@ -148,7 +168,9 @@ def create_record(project_path: str | Path, display_name: str, site: str) -> dic
     return existing
 
 
-def _update(project_path: str | Path, field: str, value: str) -> tuple[dict, str]:
+def _update(
+    project_path: str | Path, field: str, value: str
+) -> tuple[dict, str]:
     """Replace one field of a readable record under compare-and-swap; return the record written
     and the value it replaced."""
     key = project_record_key(project_path)
@@ -166,7 +188,9 @@ def _update(project_path: str | Path, field: str, value: str) -> tuple[dict, str
 def replace_site(project_path: str | Path, site: str) -> dict:
     """Correct the site a readable record holds; its id and display name are kept. Returns
     ``{"site", "previous_site"}``."""
-    record, previous = _update(project_path, "site", validate_text("site", site))
+    record, previous = _update(
+        project_path, "site", validate_text("site", site)
+    )
     return {"site": record["site"], "previous_site": previous}
 
 
@@ -177,15 +201,24 @@ def rename_project(project: Path, display_name: str, *, actor: str) -> dict:
     :func:`read_record` refuse."""
     from tcip_mcp.audit import record_event_or_raise
 
-    record, previous = _update(project, "display_name", validate_text("display name", display_name))
+    record, previous = _update(
+        project, "display_name", validate_text("display name", display_name)
+    )
     record_event_or_raise(
         "project_renamed",
-        {"id": record["id"], "display_name": record["display_name"],
-         "previous_display_name": previous},
-        actor=actor, scope=project,
+        {
+            "id": record["id"],
+            "display_name": record["display_name"],
+            "previous_display_name": previous,
+        },
+        actor=actor,
+        scope=project,
     )
-    return {"id": record["id"], "display_name": record["display_name"],
-            "previous_display_name": previous}
+    return {
+        "id": record["id"],
+        "display_name": record["display_name"],
+        "previous_display_name": previous,
+    }
 
 
 def record_fields(project_path: str | Path) -> dict:
@@ -193,6 +226,14 @@ def record_fields(project_path: str | Path) -> dict:
     or three ``None`` beside the text of why the record would not read. Never raises."""
     try:
         record = read_record(project_path)
-    except (ProjectRecordMissingError, ProjectRecordInvalidError, StoreError, OSError) as exc:
+    except (
+        ProjectRecordMissingError,
+        ProjectRecordInvalidError,
+        StoreError,
+        OSError,
+    ) as exc:
         return {**dict.fromkeys(_RECORD_FIELDS), "record_problem": str(exc)}
-    return {**{field: record[field] for field in _RECORD_FIELDS}, "record_problem": None}
+    return {
+        **{field: record[field] for field in _RECORD_FIELDS},
+        "record_problem": None,
+    }

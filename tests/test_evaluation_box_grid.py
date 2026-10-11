@@ -20,13 +20,19 @@ ON_GRID_BOX = (12.25, 30.5, 60.75, 80.0)
 
 def _detector_pass(gt_boxes, pred_boxes):
     """A torchvision-shaped GT target and detector output over one image."""
-    target = {"boxes": torch.tensor(gt_boxes, dtype=torch.float32),
-              "labels": torch.ones(len(gt_boxes), dtype=torch.int64),
-              "iscrowd": torch.zeros(len(gt_boxes), dtype=torch.int64),  # every row one object
-              "image_id": 1}
-    output = {"boxes": torch.tensor(pred_boxes, dtype=torch.float32),
-              "labels": torch.ones(len(pred_boxes), dtype=torch.int64),
-              "scores": torch.full((len(pred_boxes),), 0.9)}
+    target = {
+        "boxes": torch.tensor(gt_boxes, dtype=torch.float32),
+        "labels": torch.ones(len(gt_boxes), dtype=torch.int64),
+        "iscrowd": torch.zeros(
+            len(gt_boxes), dtype=torch.int64
+        ),  # every row one object
+        "image_id": 1,
+    }
+    output = {
+        "boxes": torch.tensor(pred_boxes, dtype=torch.float32),
+        "labels": torch.ones(len(pred_boxes), dtype=torch.int64),
+        "scores": torch.full((len(pred_boxes),), 0.9),
+    }
     return target, output
 
 
@@ -36,7 +42,9 @@ def test_a_prediction_off_the_stored_grid_is_put_on_it_before_scoring():
     from tcip_mcp.pipelines.training.evaluation import records_from_detector
 
     target, output = _detector_pass([ON_GRID_BOX], [SUB_QUANTUM_BOX])
-    record = records_from_detector(target, output, width=200, height=200, cap=2)
+    record = records_from_detector(
+        target, output, width=200, height=200, cap=2
+    )
 
     assert record["dt"][0]["bbox"] == QUANTIZED_BOX
 
@@ -47,7 +55,9 @@ def test_ground_truth_already_on_the_stored_grid_is_unchanged():
     from tcip_mcp.pipelines.training.evaluation import records_from_detector
 
     target, output = _detector_pass([ON_GRID_BOX], [])
-    record = records_from_detector(target, output, width=200, height=200, cap=1)
+    record = records_from_detector(
+        target, output, width=200, height=200, cap=1
+    )
 
     x1, y1, x2, y2 = ON_GRID_BOX
     assert record["gt"][0]["bbox"] == [x1, y1, x2 - x1, y2 - y1]
@@ -59,9 +69,15 @@ def test_an_annotation_prediction_off_the_stored_grid_is_put_on_it_before_scorin
     from tcip_mcp.pipelines.training.evaluation import records_from_annotation
 
     gt = [Annotation(subject="target", geometry=BBox(*ON_GRID_BOX))]
-    preds = [Annotation(subject="target", geometry=BBox(*SUB_QUANTUM_BOX), score=0.9)]
+    preds = [
+        Annotation(
+            subject="target", geometry=BBox(*SUB_QUANTUM_BOX), score=0.9
+        )
+    ]
 
-    record = records_from_annotation(gt, preds, width=200, height=200, cap=None)
+    record = records_from_annotation(
+        gt, preds, width=200, height=200, cap=None
+    )
 
     x1, y1, x2, y2 = ON_GRID_BOX
     assert record["gt"][0]["bbox"] == [x1, y1, x2 - x1, y2 - y1]
@@ -77,28 +93,49 @@ def test_the_grid_is_the_one_the_label_writer_owns():
     assert not hasattr(evaluation, "_xyxy_to_xywh")
 
 
-def test_scoring_labels_read_back_from_disk_is_unaffected_by_the_shared_grid(tmp_path):
+def test_scoring_labels_read_back_from_disk_is_unaffected_by_the_shared_grid(
+    tmp_path,
+):
     """Ordinary work must still pass: stored labels scored against predictions that reproduce them
     match exactly, with no metric moved by putting both sides through the same derivation."""
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.pipelines.training.evaluation import detection_metrics, records_from_annotation
+    from tcip_mcp.pipelines.training.evaluation import (
+        detection_metrics,
+        records_from_annotation,
+    )
 
     from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
 
     label = label_key(tmp_path, UNDATED_BUCKET, "image_one")
     json_io.write_label_document(
         label,
-        [Annotation(subject="target", geometry=BBox(*ON_GRID_BOX)),
-         Annotation(subject="target", geometry=BBox(100.0, 100.5, 140.25, 150.75))],
-        200, 200)
+        [
+            Annotation(subject="target", geometry=BBox(*ON_GRID_BOX)),
+            Annotation(
+                subject="target", geometry=BBox(100.0, 100.5, 140.25, 150.75)
+            ),
+        ],
+        200,
+        200,
+    )
 
     stored = json_io.read_label_document(label).annotations
-    preds = [Annotation(subject=a.subject, geometry=a.geometry, score=0.9) for a in stored]
-    record = records_from_annotation(stored, preds, width=200, height=200, cap=None)
+    preds = [
+        Annotation(subject=a.subject, geometry=a.geometry, score=0.9)
+        for a in stored
+    ]
+    record = records_from_annotation(
+        stored, preds, width=200, height=200, cap=None
+    )
 
-    metrics = detection_metrics([record], trait=None, iou_threshold=0.5, conf_threshold=0.25,
-                                by_mask=False)
+    metrics = detection_metrics(
+        [record],
+        trait=None,
+        iou_threshold=0.5,
+        conf_threshold=0.25,
+        by_mask=False,
+    )
 
     assert metrics["map50"] == 1.0
     assert metrics["precision"] == 1.0

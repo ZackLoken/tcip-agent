@@ -26,7 +26,9 @@ def test_list_documents_returns_one_entry_per_markdown_file():
     """Never a hardcoded count: as many entries as there are .md files under KNOWLEDGE_DIR."""
     documents = list_documents()
     on_disk = list(KNOWLEDGE_DIR.rglob("*.md"))
-    assert documents, "the walk found no documents; the count comparison below would prove nothing"
+    assert documents, (
+        "the walk found no documents; the count comparison below would prove nothing"
+    )
     assert len(documents) == len(on_disk)
     names = [d.name for d in documents]
     assert len(names) == len(set(names)), "document names must be unique"
@@ -57,7 +59,9 @@ def test_document_path_raises_for_an_unknown_name():
         document_path("not-a-real-document")
 
 
-def test_malformed_frontmatter_raises_value_error_naming_the_file(tmp_path, monkeypatch):
+def test_malformed_frontmatter_raises_value_error_naming_the_file(
+    tmp_path, monkeypatch
+):
     from tcip_mcp import knowledge
 
     monkeypatch.setattr(knowledge, "KNOWLEDGE_DIR", tmp_path)
@@ -82,24 +86,34 @@ def test_duplicate_document_name_raises_value_error(tmp_path, monkeypatch):
     assert "dup" in str(excinfo.value)
 
 
-def test_non_utf8_document_raises_value_error_naming_the_file(tmp_path, monkeypatch):
+def test_non_utf8_document_raises_value_error_naming_the_file(
+    tmp_path, monkeypatch
+):
     from tcip_mcp import knowledge
 
     monkeypatch.setattr(knowledge, "KNOWLEDGE_DIR", tmp_path)
     bad = tmp_path / "latin1.md"
-    bad.write_bytes("---\nname: latin1\ndescription: caf\xe9\n---\nbody\n".encode("latin-1"))
+    bad.write_bytes(
+        "---\nname: latin1\ndescription: caf\xe9\n---\nbody\n".encode(
+            "latin-1"
+        )
+    )
     with pytest.raises(ValueError) as excinfo:
         knowledge.list_documents()
     assert str(bad) in str(excinfo.value)
 
 
-def test_a_utf8_bom_does_not_defeat_the_frontmatter_check(tmp_path, monkeypatch):
+def test_a_utf8_bom_does_not_defeat_the_frontmatter_check(
+    tmp_path, monkeypatch
+):
     from tcip_mcp import knowledge
 
     monkeypatch.setattr(knowledge, "KNOWLEDGE_DIR", tmp_path)
     doc = tmp_path / "bommed.md"
     doc.write_bytes(
-        '---\nname: bommed\ndescription: "has a byte-order mark"\n---\nbody\n'.encode("utf-8-sig")
+        '---\nname: bommed\ndescription: "has a byte-order mark"\n---\nbody\n'.encode(
+            "utf-8-sig"
+        )
     )
     documents = knowledge.list_documents()
     assert [d.name for d in documents] == ["bommed"]
@@ -112,8 +126,10 @@ def test_a_name_carrying_a_slash_raises_value_error(tmp_path, monkeypatch):
     monkeypatch.setattr(knowledge, "KNOWLEDGE_DIR", tmp_path)
     bad = tmp_path / "slashed.md"
     bad.write_text(
-        ('---\nname: "crops/currant"\n'
-         'description: "a name that is not a single segment"\n---\nbody\n'),
+        (
+            '---\nname: "crops/currant"\n'
+            'description: "a name that is not a single segment"\n---\nbody\n'
+        ),
         encoding="utf-8",
     )
     with pytest.raises(ValueError) as excinfo:
@@ -121,7 +137,9 @@ def test_a_name_carrying_a_slash_raises_value_error(tmp_path, monkeypatch):
     assert str(bad) in str(excinfo.value)
 
 
-def test_a_description_carrying_a_newline_raises_value_error(tmp_path, monkeypatch):
+def test_a_description_carrying_a_newline_raises_value_error(
+    tmp_path, monkeypatch
+):
     from tcip_mcp import knowledge
 
     monkeypatch.setattr(knowledge, "KNOWLEDGE_DIR", tmp_path)
@@ -145,7 +163,9 @@ def test_the_vocabulary_still_loads_through_the_relocated_path():
     from tcip_mcp import traits
 
     records = traits._crops_traits()
-    assert records, "crops.yml must still load real trait records from the relocated path"
+    assert records, (
+        "crops.yml must still load real trait records from the relocated path"
+    )
 
 
 def test_import_tcip_mcp_server_succeeds_and_registers_serve_domain_knowledge():
@@ -176,7 +196,9 @@ def test_serve_domain_knowledge_with_no_name_returns_the_index():
     assert names == {d.name for d in list_documents()}
     for entry in result["documents"]:
         assert entry["path"], f"{entry['name']}: index entry carries no path"
-        assert not Path(entry["path"]).is_absolute(), f"{entry['name']}: path is not repo-relative"
+        assert not Path(entry["path"]).is_absolute(), (
+            f"{entry['name']}: path is not repo-relative"
+        )
 
 
 def test_serve_domain_knowledge_with_a_name_returns_that_documents_body():

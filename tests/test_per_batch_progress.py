@@ -8,8 +8,15 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from tcip_mcp.experiments import (  # noqa: E402
-    EPOCH_KEY, METRICS_FILE, STEP_KEY, best_selection, epoch_rows, observe, partition_rows,
-    read_rows, run_summary,
+    EPOCH_KEY,
+    METRICS_FILE,
+    STEP_KEY,
+    best_selection,
+    epoch_rows,
+    observe,
+    partition_rows,
+    read_rows,
+    run_summary,
 )
 from tcip_mcp.pipelines.training.envelope import TrainContext  # noqa: E402
 from tests.tiny_trainer_fixtures import (  # noqa: E402
@@ -29,18 +36,30 @@ TRAIN_INTENSITIES = [0.10, 0.25, 0.40, 0.55, 0.70, 0.85]
 VAL_INTENSITIES = [0.15, 0.35, 0.60, 0.90]
 
 
-def _context(tmp_path, hook_calls: list, intensities=TRAIN_INTENSITIES, *,
-             validated: bool = True, **extra) -> TrainContext:
+def _context(
+    tmp_path,
+    hook_calls: list,
+    intensities=TRAIN_INTENSITIES,
+    *,
+    validated: bool = True,
+    **extra,
+) -> TrainContext:
     """The context of a regression run over opposed frames (``validated``, else over its
     training frames alone with no validation side), its training frames at ``intensities`` (by
     default three training batches an epoch), opened by the launcher's own producer, recording
     every epoch hook call into ``hook_calls``; ``extra`` are config keys."""
     root = tmp_path / "ds"
-    data = (opposed_regression_data(root, intensities, VAL_INTENSITIES) if validated
-            else frames_data(root, intensities, [2.0 * c for c in intensities]))
+    data = (
+        opposed_regression_data(root, intensities, VAL_INTENSITIES)
+        if validated
+        else frames_data(root, intensities, [2.0 * c for c in intensities])
+    )
     config = regressor_config(2, data=data, **extra)
-    return run_context(tmp_path, config,
-                       epoch_hook=lambda epoch, metrics: hook_calls.append(epoch))
+    return run_context(
+        tmp_path,
+        config,
+        epoch_hook=lambda epoch, metrics: hook_calls.append(epoch),
+    )
 
 
 def test_a_run_admits_what_its_training_reads_once(tmp_path, monkeypatch):
@@ -77,7 +96,9 @@ def test_a_run_resolves_what_its_evaluation_reads_once(tmp_path, monkeypatch):
         calls.append(1)
         return real(spec, project)
 
-    ctx = _context(tmp_path, [], evaluation={"iou_threshold": 0.6, "trait": "bud_opening"})
+    ctx = _context(
+        tmp_path, [], evaluation={"iou_threshold": 0.6, "trait": "bud_opening"}
+    )
     monkeypatch.setattr(generic_trainer, "config_trait", counted)
     assert ctx.default_train().status == "completed"
     model = ctx.build_model()
@@ -88,7 +109,8 @@ def test_a_run_resolves_what_its_evaluation_reads_once(tmp_path, monkeypatch):
 
 @pytest.mark.usefixtures("seed_bud_trait_spec")
 def test_the_trainers_validation_and_a_bodys_evaluation_hand_evaluate_one_keyword_set(
-        tmp_path, monkeypatch):
+    tmp_path, monkeypatch
+):
     """Over one run stating its own IoU threshold and a confirmed trait, the trainer's
     validation and ``ctx.evaluate`` hand ``evaluate`` the same keywords, the trait's entry
     among them."""
@@ -102,11 +124,14 @@ def test_the_trainers_validation_and_a_bodys_evaluation_hand_evaluate_one_keywor
         def evaluate(*args, **kwargs):
             handed[route] = kwargs
             return real(*args, **kwargs)
+
         return evaluate
 
     monkeypatch.setattr(generic_trainer, "evaluate", recorded("trainer"))
     monkeypatch.setattr(evaluation, "evaluate", recorded("body"))
-    ctx = _context(tmp_path, [], evaluation={"iou_threshold": 0.6, "trait": "bud_opening"})
+    ctx = _context(
+        tmp_path, [], evaluation={"iou_threshold": 0.6, "trait": "bud_opening"}
+    )
     assert ctx.default_train().status == "completed"
     ctx.evaluate(ctx.build_model())
 
@@ -116,7 +141,8 @@ def test_the_trainers_validation_and_a_bodys_evaluation_hand_evaluate_one_keywor
 
 
 def test_the_trainer_logs_a_batch_row_at_the_stated_cadence_and_no_reader_takes_it_for_an_epoch(
-        tmp_path):
+    tmp_path,
+):
     hook_calls: list = []
     ctx = _context(tmp_path, hook_calls, log_every_n_batches=2)
     run = ctx.default_train()
@@ -124,7 +150,11 @@ def test_the_trainer_logs_a_batch_row_at_the_stated_cadence_and_no_reader_takes_
 
     rows = read_rows(ctx.run_dir / METRICS_FILE)[0]
     batches = batch_rows(rows)
-    assert [(row[STEP_KEY], row[EPOCH_KEY]) for row in batches] == [(2, 1), (4, 2), (6, 2)]
+    assert [(row[STEP_KEY], row[EPOCH_KEY]) for row in batches] == [
+        (2, 1),
+        (4, 2),
+        (6, 2),
+    ]
     assert all(isinstance(row["batch_loss"], float) for row in batches)
 
     epochs = epoch_rows(rows)
@@ -136,7 +166,9 @@ def test_the_trainer_logs_a_batch_row_at_the_stated_cadence_and_no_reader_takes_
 
 
 @pytest.mark.parametrize("n_batches", [3, 19, 29, 30, 31])
-def test_a_config_stating_no_cadence_logs_ten_batch_rows_every_epoch(tmp_path, n_batches):
+def test_a_config_stating_no_cadence_logs_ten_batch_rows_every_epoch(
+    tmp_path, n_batches
+):
     """No stated cadence: each of two epochs logs ten rows (every batch of a shorter epoch),
     spaced evenly over the epoch, the gaps between them never differing by more than one batch,
     the last at the epoch's own final batch."""
@@ -147,13 +179,20 @@ def test_a_config_stating_no_cadence_logs_ten_batch_rows_every_epoch(tmp_path, n
     for epoch in (1, 2):
         steps = [row[STEP_KEY] for row in batches if row[EPOCH_KEY] == epoch]
         assert len(steps) == len(set(steps)) == min(10, n_batches)
-        assert all((epoch - 1) * n_batches < step <= epoch * n_batches for step in steps)
+        assert all(
+            (epoch - 1) * n_batches < step <= epoch * n_batches
+            for step in steps
+        )
         assert steps[-1] == epoch * n_batches
-        gaps = [b - a for a, b in zip([(epoch - 1) * n_batches, *steps], steps)]
+        gaps = [
+            b - a for a, b in zip([(epoch - 1) * n_batches, *steps], steps)
+        ]
         assert max(gaps) - min(gaps) <= 1, gaps
 
 
-def test_the_best_selection_reads_epoch_rows_and_never_a_batch_row_s_selection(tmp_path):
+def test_the_best_selection_reads_epoch_rows_and_never_a_batch_row_s_selection(
+    tmp_path,
+):
     """A bespoke loop's batch row carrying a ``selection`` better than every epoch's does not
     become the run's best selection."""
     ctx = _context(tmp_path, [])
@@ -166,7 +205,9 @@ def test_the_best_selection_reads_epoch_rows_and_never_a_batch_row_s_selection(t
     assert best_selection(rows, {"higher_is_better": True}) == 0.7
 
 
-def test_a_bespoke_loop_logs_a_batch_row_and_neither_sink_takes_the_other_s_stamp(tmp_path):
+def test_a_bespoke_loop_logs_a_batch_row_and_neither_sink_takes_the_other_s_stamp(
+    tmp_path,
+):
     hook_calls: list = []
     ctx = _context(tmp_path, hook_calls)
 
@@ -179,7 +220,11 @@ def test_a_bespoke_loop_logs_a_batch_row_and_neither_sink_takes_the_other_s_stam
 
     rows = read_rows(ctx.run_dir / METRICS_FILE)[0]
     (batch,) = batch_rows(rows)
-    assert (batch[STEP_KEY], batch[EPOCH_KEY], batch["batch_loss"]) == (5, 1, 0.3)
+    assert (batch[STEP_KEY], batch[EPOCH_KEY], batch["batch_loss"]) == (
+        5,
+        1,
+        0.3,
+    )
     (epoch,) = epoch_rows(rows)
     assert epoch["train_loss"] == 0.4 and "batch_loss" not in epoch
     assert hook_calls == [1]

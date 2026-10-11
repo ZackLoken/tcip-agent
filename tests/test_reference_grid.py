@@ -15,13 +15,18 @@ from tcip_mcp.pipelines.reference_grid import (
 
 
 class TestReferenceCells:
-    @pytest.mark.parametrize("width,height,tile", [
-        (640, 480, 80),      # exact multiple
-        (100, 80, 64),       # truncated edge cells
-        (4096, 4096, 4096),  # single cell
-        (10, 3, 4),          # sliver edges
-    ])
-    def test_clamped_zero_overlap_is_an_exact_partition(self, width, height, tile):
+    @pytest.mark.parametrize(
+        "width,height,tile",
+        [
+            (640, 480, 80),  # exact multiple
+            (100, 80, 64),  # truncated edge cells
+            (4096, 4096, 4096),  # single cell
+            (10, 3, 4),  # sliver edges
+        ],
+    )
+    def test_clamped_zero_overlap_is_an_exact_partition(
+        self, width, height, tile
+    ):
         """Union of the clamped cells is the extent and no two cells share a pixel."""
         cells = reference_cells(width, height, tile, 0.0, clamp=True)
         covered = 0
@@ -32,9 +37,13 @@ class TestReferenceCells:
         assert covered == width * height
         rects = [(c.x0, c.y0, c.x1, c.y1) for c in cells]
         for i, a in enumerate(rects):
-            for b in rects[i + 1:]:
-                assert a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1], \
-                    f"cells overlap: {a} and {b}"
+            for b in rects[i + 1 :]:
+                assert (
+                    a[2] <= b[0]
+                    or b[2] <= a[0]
+                    or a[3] <= b[1]
+                    or b[3] <= a[1]
+                ), f"cells overlap: {a} and {b}"
 
     def test_unclamped_overlap_steps_origins_and_keeps_full_size_rects(self):
         """overlap > 0 under clamp=False steps origins by the overlapped stride while they lie
@@ -42,7 +51,13 @@ class TestReferenceCells:
         width, height, tile, overlap = 500, 300, 224, 0.2
         cells = reference_cells(width, height, tile, overlap)
         assert sorted({(c.x0, c.y0) for c in cells}) == [
-            (0, 0), (0, 179), (179, 0), (179, 179), (358, 0), (358, 179)]
+            (0, 0),
+            (0, 179),
+            (179, 0),
+            (179, 179),
+            (358, 0),
+            (358, 179),
+        ]
         assert all(c.x1 - c.x0 == tile and c.y1 - c.y0 == tile for c in cells)
         assert any(c.x1 > width or c.y1 > height for c in cells)
 
@@ -52,7 +67,11 @@ class TestReferenceCells:
         160, and the clamped cells reach 200 on both axes."""
         cells = reference_cells(200, 200, 100, 0.2, clamp=True)
 
-        assert sorted({c.x0 for c in cells}) == sorted({c.y0 for c in cells}) == [0, 80, 160]
+        assert (
+            sorted({c.x0 for c in cells})
+            == sorted({c.y0 for c in cells})
+            == [0, 80, 160]
+        )
         assert max(c.x1 for c in cells) == max(c.y1 for c in cells) == 200
 
     def test_names_are_column_letter_plus_row(self):
@@ -80,8 +99,17 @@ square edge is 1920 pixels."""
 
 
 class TestDerivations:
-    @pytest.mark.parametrize("width,height", [(141130, 239921), (4000, 3000), (5000, 64),
-                                              (640, 480), (1, 100_000), (100_000, 1)])
+    @pytest.mark.parametrize(
+        "width,height",
+        [
+            (141130, 239921),
+            (4000, 3000),
+            (5000, 64),
+            (640, 480),
+            (1, 100_000),
+            (100_000, 1),
+        ],
+    )
     def test_every_serving_cell_fits_the_cap(self, width, height):
         tile = derive_serving_tile_size(width, height, CAP)
         cells = reference_cells(width, height, tile, clamp=True)
@@ -103,9 +131,12 @@ class TestDerivations:
         assert geometry["rows"] == 125
 
     def test_derivations_are_deterministic(self):
-        assert (derive_serving_tile_size(7000, 5000, CAP)
-                == derive_serving_tile_size(7000, 5000, CAP))
-        assert derive_pointing_tile_size(7000, 5000) == derive_pointing_tile_size(7000, 5000)
+        assert derive_serving_tile_size(
+            7000, 5000, CAP
+        ) == derive_serving_tile_size(7000, 5000, CAP)
+        assert derive_pointing_tile_size(
+            7000, 5000
+        ) == derive_pointing_tile_size(7000, 5000)
 
     def test_pointing_grain_is_fixed_in_render_space(self):
         """Images at or past the artifact bound share one pointing grain: the cell count
@@ -146,10 +177,21 @@ class TestDerivations:
 class TestGridGeometry:
     def test_round_trips_through_reference_cells(self):
         geometry = grid_geometry(100, 80, 64)
-        cells = reference_cells(geometry["width"], geometry["height"],
-                                geometry["tile_size"], geometry["overlap"], clamp=True)
-        assert geometry == {"width": 100, "height": 80, "tile_size": 64, "overlap": 0.0,
-                            "cols": 2, "rows": 2}
+        cells = reference_cells(
+            geometry["width"],
+            geometry["height"],
+            geometry["tile_size"],
+            geometry["overlap"],
+            clamp=True,
+        )
+        assert geometry == {
+            "width": 100,
+            "height": 80,
+            "tile_size": 64,
+            "overlap": 0.0,
+            "cols": 2,
+            "rows": 2,
+        }
         assert len(cells) == geometry["cols"] * geometry["rows"]
 
     def test_tile_size_is_required(self):

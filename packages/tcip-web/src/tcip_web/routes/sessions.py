@@ -30,7 +30,9 @@ def _session_start(sessions: list[dict[str, Any]]) -> str:
     or one microsecond past the latest's stamp when this instant does not exceed it, so no two
     sessions of a project share a stamp and the stamp identifies the session."""
     now = datetime.fromisoformat(now_iso())
-    latest = datetime.fromisoformat(sessions[0]["started"]) if sessions else None
+    latest = (
+        datetime.fromisoformat(sessions[0]["started"]) if sessions else None
+    )
     if latest is not None and now <= latest:
         now = latest + timedelta(microseconds=1)
     return now.isoformat()
@@ -121,8 +123,11 @@ async def image_event(payload: ImageEventPayload) -> SessionWrite:
 
     person = actor(payload.user)
     entry = payload.model_dump(exclude={"user", "project_id", "started"})
-    if not (payload.seconds or payload.annotations_added
-            or payload.activity == "negative_confirmation"):
+    if not (
+        payload.seconds
+        or payload.annotations_added
+        or payload.activity == "negative_confirmation"
+    ):
         return SessionWrite(status="noop", session=None)
 
     def land(root: Path) -> tuple[Path, SessionWrite]:
@@ -131,15 +136,23 @@ async def image_event(payload: ImageEventPayload) -> SessionWrite:
     if payload.started is None:
         root, written = await store.admitted(payload.project_id, land)
     else:
-        root, written = await asyncio.to_thread(land, workspace_project(payload.project_id)[0])
+        root, written = await asyncio.to_thread(
+            land, workspace_project(payload.project_id)[0]
+        )
     if written.status == "ok":
-        await asyncio.to_thread(_answering, written, lambda: audit.record_event_or_raise(
-            "image_event", entry, actor=person, scope=root))
+        await asyncio.to_thread(
+            _answering,
+            written,
+            lambda: audit.record_event_or_raise(
+                "image_event", entry, actor=person, scope=root
+            ),
+        )
     return written
 
 
-def _land(root: Path, started: Optional[str], entry: dict[str, Any],
-          person: str) -> SessionWrite:
+def _land(
+    root: Path, started: Optional[str], entry: dict[str, Any], person: str
+) -> SessionWrite:
     """``entry`` appended, in one transaction on ``root``'s stats record, to the session
     ``started`` names, refused (409 naming why) unless it is ``person``'s and unended; with
     ``started`` ``None``, to the latest session when it is ``person``'s and unended, else to a
@@ -150,26 +163,60 @@ def _land(root: Path, started: Optional[str], entry: dict[str, Any],
         data = txn.read(key, default={"sessions": []})
         sessions: list[dict[str, Any]] = data["sessions"]
         for held in sessions:
-            if any(e["contribution_id"] == entry["contribution_id"] for e in held["entries"]):
-                return SessionWrite(status="noop", session=SessionPlace(
-                    started=held["started"], ended=held["ended"] is not None))
+            if any(
+                e["contribution_id"] == entry["contribution_id"]
+                for e in held["entries"]
+            ):
+                return SessionWrite(
+                    status="noop",
+                    session=SessionPlace(
+                        started=held["started"],
+                        ended=held["ended"] is not None,
+                    ),
+                )
         if started is None:
-            if not sessions or sessions[0]["ended"] is not None or sessions[0]["user"] != person:
-                sessions.insert(0, {"user": person, "started": _session_start(sessions),
-                                    "ended": None, "entries": []})
+            if (
+                not sessions
+                or sessions[0]["ended"] is not None
+                or sessions[0]["user"] != person
+            ):
+                sessions.insert(
+                    0,
+                    {
+                        "user": person,
+                        "started": _session_start(sessions),
+                        "ended": None,
+                        "entries": [],
+                    },
+                )
             session = sessions[0]
         else:
-            named = next((s for s in sessions if s["started"] == started), None)
-            if named is None or named["ended"] is not None or named["user"] != person:
-                why = ("carries no session started then" if named is None
-                       else "ended that session" if named["ended"] is not None
-                       else "holds that session for another person")
+            named = next(
+                (s for s in sessions if s["started"] == started), None
+            )
+            if (
+                named is None
+                or named["ended"] is not None
+                or named["user"] != person
+            ):
+                why = (
+                    "carries no session started then"
+                    if named is None
+                    else "ended that session"
+                    if named["ended"] is not None
+                    else "holds that session for another person"
+                )
                 raise HTTPException(
-                    status_code=409, detail=f"the project {why}: {started}; contribution refused")
+                    status_code=409,
+                    detail=f"the project {why}: {started}; contribution refused",
+                )
             session = named
         session["entries"].append(entry)
         txn.write(key, data)
-    return SessionWrite(status="ok", session=SessionPlace(started=session["started"], ended=False))
+    return SessionWrite(
+        status="ok",
+        session=SessionPlace(started=session["started"], ended=False),
+    )
 
 
 @router.post("/end")
@@ -198,9 +245,13 @@ def end_sessions(root: Path, started: Optional[str]) -> list[dict[str, Any]]:
     key = annotation_stats_key(str(root))
     with tcip_store.transaction(key) as txn:
         data = txn.read(key, default={"sessions": []})
-        named = [s for s in data["sessions"] if started in (None, s["started"])]
+        named = [
+            s for s in data["sessions"] if started in (None, s["started"])
+        ]
         if started is not None and not named:
-            raise LookupError(f"no session of the open project started at {started}")
+            raise LookupError(
+                f"no session of the open project started at {started}"
+            )
         ended = [s for s in named if s["ended"] is None]
         stamp = now_iso()
         for session in ended:
@@ -215,8 +266,12 @@ def record_ended(root: Path, ended: list[dict[str, Any]]) -> None:
     (:func:`end_sessions`), by its person; raises ``AuditEntryNotWrittenError`` when one cannot
     follow."""
     for session in ended:
-        audit.record_event_or_raise("session_ended", {"started": session["started"]},
-                                    actor=session["user"], scope=root)
+        audit.record_event_or_raise(
+            "session_ended",
+            {"started": session["started"]},
+            actor=session["user"],
+            scope=root,
+        )
 
 
 def _answering(written: SessionWrite, record: Callable[[], None]) -> None:
@@ -235,7 +290,9 @@ def load_sessions() -> dict[str, list[SessionSummary]]:
     """Every recorded session, latest first, each with the throughput its entries amount to."""
     from tcip_web.state import store
 
-    data = tcip_store.read(annotation_stats_key(str(store.held().root)), default={"sessions": []})
+    data = tcip_store.read(
+        annotation_stats_key(str(store.held().root)), default={"sessions": []}
+    )
     return {"sessions": [_summary(s) for s in data["sessions"]]}
 
 
@@ -247,12 +304,17 @@ def _summary(session: dict[str, Any]) -> SessionSummary:
         by_activity[e.activity] += e.seconds
     added = sum(e.annotations_added for e in entries)
     return SessionSummary(
-        user=session["user"], started=session["started"], ended=session["ended"],
+        user=session["user"],
+        started=session["started"],
+        ended=session["ended"],
         entries=entries,
-        images_annotated=len({e.image_name for e in entries if e.annotations_added}),
+        images_annotated=len(
+            {e.image_name for e in entries if e.annotations_added}
+        ),
         total_annotations=added,
         total_time_seconds=round(sum(e.seconds for e in entries), 2),
         seconds_by_activity={k: round(v, 2) for k, v in by_activity.items()},
-        avg_seconds_per_annotation=(round(by_activity["new_annotation"] / added, 2)
-                                    if added else None),
+        avg_seconds_per_annotation=(
+            round(by_activity["new_annotation"] / added, 2) if added else None
+        ),
     )

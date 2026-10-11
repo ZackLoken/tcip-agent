@@ -12,7 +12,8 @@ from typing import Literal, Optional, Union
 from pydantic import BaseModel, ConfigDict
 
 from tcip_mcp.pipelines.postprocessing.plant_mapping import (
-    ToleranceSource, UnattributedSegmentSource,
+    ToleranceSource,
+    UnattributedSegmentSource,
 )
 from tcip_mcp.traits import Text
 
@@ -178,7 +179,9 @@ class Acknowledgment(BaseModel):
     recorded_at: str
 
 
-PlantMapping = Union[PlantMappingDisclosure, PlantRegistryDisclosure, CanopySegmentDisclosure]
+PlantMapping = Union[
+    PlantMappingDisclosure, PlantRegistryDisclosure, CanopySegmentDisclosure
+]
 """The one of three disclosures a delivery's ``plant_mapping`` is."""
 
 

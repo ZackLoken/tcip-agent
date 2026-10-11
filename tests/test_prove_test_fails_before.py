@@ -29,9 +29,21 @@ BASELINE = "b8ed53a4"
 
 def _run_guard_check(test_file: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, str(SCRIPT), test_file, "-k", KNOWN_GUARD, "--test-rev", TEST_REV,
-         "--baseline", BASELINE],
-        cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=300,
+        [
+            sys.executable,
+            str(SCRIPT),
+            test_file,
+            "-k",
+            KNOWN_GUARD,
+            "--test-rev",
+            TEST_REV,
+            "--baseline",
+            BASELINE,
+        ],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=300,
     )
 
 
@@ -51,7 +63,10 @@ def test_a_path_outside_tests_is_refused_by_name():
     outside = REPO_ROOT / "tools" / "prove_test_fails_before.py"
     result = subprocess.run(
         [sys.executable, str(SCRIPT), str(outside)],
-        cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=60,
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
     assert result.returncode == 3, result.stdout + result.stderr
     assert "REFUSED" in result.stdout
@@ -64,11 +79,16 @@ def test_a_relative_and_absolute_dotdot_path_outside_tests_are_both_refused():
     (tests/../tools/x.py) must refuse the same way its absolute spelling does, not be
     materialized as if it were a real tests/ path."""
     relative = "tests/../tools/prove_test_fails_before.py"
-    absolute = str(REPO_ROOT / "tests" / ".." / "tools" / "prove_test_fails_before.py")
+    absolute = str(
+        REPO_ROOT / "tests" / ".." / "tools" / "prove_test_fails_before.py"
+    )
     for spelling in (relative, absolute):
         result = subprocess.run(
             [sys.executable, str(SCRIPT), spelling],
-            cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=60,
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
         assert result.returncode == 3, result.stdout + result.stderr
         assert "REFUSED" in result.stdout

@@ -107,7 +107,9 @@ def workspace_project(project_id: str) -> tuple[Path, dict]:
     ``project_id`` (:func:`tcip_mcp.workspace.project_by_id`); 404 naming why when none, or two,
     do."""
     try:
-        return workspace.project_by_id(workspace.project_records(store.workspace), project_id)
+        return workspace.project_by_id(
+            workspace.project_records(store.workspace), project_id
+        )
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
 
@@ -126,7 +128,9 @@ async def open_last_opened() -> None:
     if project_id is None:
         return
     try:
-        root, _ = workspace.project_by_id(workspace.project_records(store.workspace), project_id)
+        root, _ = workspace.project_by_id(
+            workspace.project_records(store.workspace), project_id
+        )
     except LookupError as exc:
         logger.warning("Opening no project at start: %s", exc)
         return
@@ -152,7 +156,11 @@ async def open_project(req: OpenRequest) -> dict:
         await _open(OpenProject(root, record["id"]))
     except (ValueError, StoreError) as exc:
         raise HTTPException(409, str(exc)) from exc
-    return {"id": record["id"], "display_name": record["display_name"], "path": str(root)}
+    return {
+        "id": record["id"],
+        "display_name": record["display_name"],
+        "path": str(root),
+    }
 
 
 def _job_conflict(target: Path) -> str | None:
@@ -163,12 +171,16 @@ def _job_conflict(target: Path) -> str | None:
 
     for job in inference._registry.list(str(target)):
         if live(job):
-            return (f"inference job {job.job_id!r} is not finished; ask the agent to cancel it "
-                    "or wait for it to finish")
+            return (
+                f"inference job {job.job_id!r} is not finished; ask the agent to cancel it "
+                "or wait for it to finish"
+            )
     for job in annotate._pq_registry.list(str(target)):
         if live(job):
-            return (f"a review priority-queue scoring pass ({job.job_id!r}) is not finished; "
-                    "wait for it to finish")
+            return (
+                f"a review priority-queue scoring pass ({job.job_id!r}) is not finished; "
+                "wait for it to finish"
+            )
     return None
 
 
@@ -190,7 +202,9 @@ async def remove_project(req: RemovalRequest) -> dict:
     project, fields = workspace_project(req.id)
     display_name = fields["display_name"]
     if req.confirm_name != display_name:
-        raise HTTPException(400, f"type the project's name {display_name!r} to remove it")
+        raise HTTPException(
+            400, f"type the project's name {display_name!r} to remove it"
+        )
     conflict = _job_conflict(project)
     if conflict is not None:
         raise HTTPException(409, conflict)
@@ -199,8 +213,15 @@ async def remove_project(req: RemovalRequest) -> dict:
         anyio.from_thread.run(store.close_project, req.id)
 
     try:
-        return await anyio.to_thread.run_sync(functools.partial(
-            workspace.remove_project, store.workspace, project, actor=person, release=release))
+        return await anyio.to_thread.run_sync(
+            functools.partial(
+                workspace.remove_project,
+                store.workspace,
+                project,
+                actor=person,
+                release=release,
+            )
+        )
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
 
