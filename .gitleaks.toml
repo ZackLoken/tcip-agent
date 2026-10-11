@@ -1,0 +1,19 @@
+# The secret scan (gitleaks, in CI and pre-commit) over the repository and its history.
+
+title = "tcip-agent"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Sample values gitleaks's generic-api-key rule reads as keys: plant accession names in test fixtures and smoke scripts, a smoke test's own friction token, a GeoTIFF key name, and a tuning route test's metric key."
+regexTarget = "line"
+regexes = [
+  '''accession_name''',
+  '''ProjectedCSTypeGeoKey''',
+]
+paths = [
+  '''tests/test_smoke_terminal_e2e_workspace\.py''',
+  '''tests/test_tcip_web_tuning_routes\.py''',
+  '''scripts/smoke_phenology_e2e\.py''',
+]
