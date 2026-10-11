@@ -23,17 +23,29 @@ from tcip_mcp.cli import bound_project
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, prog=prog)
-    parser.add_argument("project_path", help="Root directory of the project. Also where this "
-                                              "run's audit line is recorded.")
-    parser.add_argument("--output-path", default="",
-                         help="Destination path for the ZIP file. Exactly one of "
-                              "--output-path/--output-dir is required.")
-    parser.add_argument("--output-dir", default="",
-                         help="Destination directory to write the bundle into as a tree, "
-                              "instead of a ZIP. Refuses a destination inside project_path or a "
-                              "destination that already holds anything.")
-    parser.add_argument("--include-models", action="store_true",
-                         help="Include registered model checkpoints (can be large).")
+    parser.add_argument(
+        "project_path",
+        help="Root directory of the project. Also where this "
+        "run's audit line is recorded.",
+    )
+    parser.add_argument(
+        "--output-path",
+        default="",
+        help="Destination path for the ZIP file. Exactly one of "
+        "--output-path/--output-dir is required.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default="",
+        help="Destination directory to write the bundle into as a tree, "
+        "instead of a ZIP. Refuses a destination inside project_path or a "
+        "destination that already holds anything.",
+    )
+    parser.add_argument(
+        "--include-models",
+        action="store_true",
+        help="Include registered model checkpoints (can be large).",
+    )
     args = parser.parse_args(argv)
 
     project = bound_project(args.project_path)
@@ -41,7 +53,9 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     from tcip_mcp.tools.project_tools import archive_project
 
     result = archive_project(
-        project, output_path=args.output_path, output_dir=args.output_dir,
+        project,
+        output_path=args.output_path,
+        output_dir=args.output_dir,
         include_models=args.include_models,
     )
     if "error" in result:

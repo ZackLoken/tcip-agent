@@ -19,6 +19,7 @@ from tcip_mcp.pipelines.measurement import instance_geometries, mask_geometry
 
 # ── rectangle: every pixel quantity is exact ─────────────────────────────
 
+
 def _rect_mask(h=64, w=64, r0=5, r1=24, c0=10, c1=49):
     """Solid rectangle: rows r0..r1 (inclusive), cols c0..c1 -> (r1-r0+1) x (c1-c0+1)."""
     from tests._producer_fixtures import painted_array
@@ -31,11 +32,17 @@ def test_rectangle_pixel_measurements_exact():
     g = mask_geometry(m, unit="mm")
     assert g["empty"] is False
     assert g["area_px"] == 40 * 20
-    assert g["principal_axis_extent_px"] == 40.0   # major axis == the longer side
-    assert g["secondary_axis_extent_px"] == 20.0   # minor axis == the shorter side
+    assert (
+        g["principal_axis_extent_px"] == 40.0
+    )  # major axis == the longer side
+    assert (
+        g["secondary_axis_extent_px"] == 20.0
+    )  # minor axis == the shorter side
     assert g["perimeter_px"] == 2 * (40 + 20)
     assert g["centroid_px"] == pytest.approx((29.5, 14.5))
-    assert g["angle_deg"] == pytest.approx(0.0, abs=1e-6)  # horizontal major axis
+    assert g["angle_deg"] == pytest.approx(
+        0.0, abs=1e-6
+    )  # horizontal major axis
 
 
 def test_rectangle_physical_scale_converts_px_to_mm():
@@ -74,13 +81,17 @@ def test_no_gsd_parameter_survives_anywhere_in_the_module():
     import importlib
     import inspect
 
-    mg = importlib.import_module("tcip_mcp.pipelines.measurement.mask_geometry")
+    mg = importlib.import_module(
+        "tcip_mcp.pipelines.measurement.mask_geometry"
+    )
     for name, fn in vars(mg).items():
         if not inspect.isfunction(fn) or fn.__module__ != mg.__name__:
             continue
         params = inspect.signature(fn).parameters
         assert "gsd" not in params, f"{name} still takes a gsd parameter"
-        assert "mm_per_px" not in params, f"{name} still takes an mm_per_px parameter"
+        assert "mm_per_px" not in params, (
+            f"{name} still takes an mm_per_px parameter"
+        )
 
 
 def test_no_length_or_width_key_survives_under_any_alias():
@@ -92,13 +103,17 @@ def test_no_length_or_width_key_survives_under_any_alias():
     from measurement code outside this module is recognized the same way this module's own
     fields are.
     """
-    from tcip_mcp.pipelines.measurement.mask_geometry import unit_from_value_key
+    from tcip_mcp.pipelines.measurement.mask_geometry import (
+        unit_from_value_key,
+    )
 
     for g in (
         mask_geometry(_rect_mask(), unit="mm"),
         mask_geometry(_rect_mask(), scale=0.5, unit="mm"),
     ):
-        assert not [k for k in g if k.startswith(("length", "width"))], sorted(g)
+        assert not [k for k in g if k.startswith(("length", "width"))], sorted(
+            g
+        )
     assert unit_from_value_key("length_mm") == ("mm", "mm")
     assert unit_from_value_key("width_cm") == ("cm", "cm")
     assert unit_from_value_key("principal_axis_extent_mm") == ("mm", "mm")
@@ -108,9 +123,15 @@ def test_no_length_or_width_key_survives_under_any_alias():
 
 # ── ellipse: area/axes correct within a pixel-discretization tolerance ─────
 
+
 def test_ellipse_area_and_axes():
     h = w = 128
-    cx, cy, a, b = 64.0, 64.0, 30.0, 15.0   # semi-axes: 30 along x (major), 15 along y (minor)
+    cx, cy, a, b = (
+        64.0,
+        64.0,
+        30.0,
+        15.0,
+    )  # semi-axes: 30 along x (major), 15 along y (minor)
     yy, xx = np.ogrid[:h, :w]
     m = (((xx - cx) / a) ** 2 + ((yy - cy) / b) ** 2 <= 1.0).astype(np.uint8)
     g = mask_geometry(m, unit="mm")
@@ -122,30 +143,42 @@ def test_ellipse_area_and_axes():
 
 # ── degenerate / empty masks ──────────────────────────────────────────────
 
+
 def test_empty_mask_is_handled_without_inventing_a_measurement():
     g = mask_geometry(np.zeros((32, 32), dtype=np.uint8), scale=2.0, unit="mm")
     assert g["empty"] is True
     assert g["area_px"] == 0.0
-    assert g["principal_axis_extent_px"] == 0.0 and g["secondary_axis_extent_px"] == 0.0
+    assert (
+        g["principal_axis_extent_px"] == 0.0
+        and g["secondary_axis_extent_px"] == 0.0
+    )
     assert g["centroid_px"] is None and g["centroid_mm"] is None
-    assert g["area_mm2"] == 0.0        # scale still applied, still zero
+    assert g["area_mm2"] == 0.0  # scale still applied, still zero
 
 
 def test_single_row_line_is_1px_wide():
-    m = _rect_mask(h=16, w=16, r0=8, r1=8, c0=3, c1=12)  # a 10 px horizontal line
+    m = _rect_mask(
+        h=16, w=16, r0=8, r1=8, c0=3, c1=12
+    )  # a 10 px horizontal line
     g = mask_geometry(m, unit="mm")
     assert g["area_px"] == 10.0
-    assert g["principal_axis_extent_px"] == 10.0 and g["secondary_axis_extent_px"] == 1.0
+    assert (
+        g["principal_axis_extent_px"] == 10.0
+        and g["secondary_axis_extent_px"] == 1.0
+    )
     assert g["perimeter_px"] == 2 * (10 + 1)
 
 
 # ── input shapes: [1,H,W], torch tensor, and [N,H,W] instance stacks ──────
 
+
 def test_accepts_chw_and_soft_masks():
-    m = _rect_mask().astype(np.float32)[None]         # [1, H, W], float
-    soft = m * 0.9                                     # soft probabilities, still >= 0.5 in-shape
+    m = _rect_mask().astype(np.float32)[None]  # [1, H, W], float
+    soft = m * 0.9  # soft probabilities, still >= 0.5 in-shape
     assert mask_geometry(soft, unit="mm")["area_px"] == 40 * 20
-    assert mask_geometry(m * 0.4, unit="mm")["empty"] is True     # all below threshold -> empty
+    assert (
+        mask_geometry(m * 0.4, unit="mm")["empty"] is True
+    )  # all below threshold -> empty
 
 
 def test_accepts_torch_tensor():
@@ -155,7 +188,9 @@ def test_accepts_torch_tensor():
 
 
 def test_instance_geometries_over_a_stack():
-    stack = np.stack([_rect_mask(), np.zeros((64, 64), dtype=np.uint8)])  # one real, one empty
+    stack = np.stack(
+        [_rect_mask(), np.zeros((64, 64), dtype=np.uint8)]
+    )  # one real, one empty
     out = instance_geometries(stack, scale=0.5, unit="mm")
     assert len(out) == 2
     assert out[0]["area_mm2"] == pytest.approx(200.0)
@@ -170,11 +205,18 @@ def test_instance_geometries_carries_the_callers_unit():
 
 # ── the binarize threshold the record names ───────────────────────────────
 
+
 def test_the_binarize_threshold_records_its_value_and_source():
     from tcip_mcp.pipelines.measurement.mask_geometry import (
-        DEFAULT_MASK_BINARIZE_THRESHOLD, resolve_binarize_threshold,
+        DEFAULT_MASK_BINARIZE_THRESHOLD,
+        resolve_binarize_threshold,
     )
 
-    assert resolve_binarize_threshold() == {"value": DEFAULT_MASK_BINARIZE_THRESHOLD,
-                                            "source": "default"}
-    assert resolve_binarize_threshold(0.3) == {"value": 0.3, "source": "explicit"}
+    assert resolve_binarize_threshold() == {
+        "value": DEFAULT_MASK_BINARIZE_THRESHOLD,
+        "source": "default",
+    }
+    assert resolve_binarize_threshold(0.3) == {
+        "value": 0.3,
+        "source": "explicit",
+    }

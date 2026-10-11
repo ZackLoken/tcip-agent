@@ -41,7 +41,14 @@ from tcip_store.file_backend import (
     transition_lock,
     versioned,
 )
-from tcip_store.model import REQUIRED, Key, LogPage, Version, Versioned, canonical_path
+from tcip_store.model import (
+    REQUIRED,
+    Key,
+    LogPage,
+    Version,
+    Versioned,
+    canonical_path,
+)
 from tcip_store.values import decode_value, encode_log_line, encode_record
 
 SCHEMA_DDL = """
@@ -79,8 +86,12 @@ def _schema_of(conn: sqlite3.Connection) -> tuple[tuple[str, str, str], ...]:
     """Every schema object a database holds, with its stored sql normalized for comparison against
     the DDL executed afresh.
     """
-    rows = conn.execute("select type, name, sql from sqlite_master order by type, name").fetchall()
-    return tuple((kind, name, " ".join((sql or "").split())) for kind, name, sql in rows)
+    rows = conn.execute(
+        "select type, name, sql from sqlite_master order by type, name"
+    ).fetchall()
+    return tuple(
+        (kind, name, " ".join((sql or "").split())) for kind, name, sql in rows
+    )
 
 
 _reference_lock = threading.Lock()
@@ -168,11 +179,14 @@ def _refuse_rollback_journal(db_path: Path, mode: str) -> None:
         )
 
 
-def open_verified(db_path: Path, root: str,
-                  timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) -> sqlite3.Connection:
+def open_verified(
+    db_path: Path, root: str, timeout_s: float = DEFAULT_LOCK_TIMEOUT_S
+) -> sqlite3.Connection:
     """Open a published database, verify it, and leave it in WAL at full synchronous; a database
     not already in WAL is converted under ``root``'s transition lock."""
-    conn = sqlite3.connect(str(db_path), isolation_level=None, check_same_thread=False)
+    conn = sqlite3.connect(
+        str(db_path), isolation_level=None, check_same_thread=False
+    )
     try:
         verify_identity(conn, db_path)
         mode = str(conn.execute("pragma journal_mode").fetchone()[0]).lower()
@@ -233,14 +247,20 @@ def _decoded(key: Key, data: bytes) -> Any:
 def _versioned(key: Key, data: bytes | None, default: Any) -> Versioned:
     """A stored record as :func:`~tcip_store.file_backend.versioned` answers it, its bytes
     decoded through :func:`_decoded`."""
-    return versioned(data, default, lambda stored: _decoded(key, stored),
-                     f"{key.store}{list(key.parts)} has no record under {key.root}")
+    return versioned(
+        data,
+        default,
+        lambda stored: _decoded(key, stored),
+        f"{key.store}{list(key.parts)} has no record under {key.root}",
+    )
 
 
 class SqliteBackend:
     """The store over one SQLite database per root, one connection per process, thread and root."""
 
-    def __init__(self, *, lock_timeout_s: float = DEFAULT_LOCK_TIMEOUT_S) -> None:
+    def __init__(
+        self, *, lock_timeout_s: float = DEFAULT_LOCK_TIMEOUT_S
+    ) -> None:
         _, timeout_error = _filelock_classes()
         self.lock_timeout_s = lock_timeout_s
         self._timeout_error = timeout_error
@@ -267,7 +287,9 @@ class SqliteBackend:
             return slot[2] == root or slot[2].startswith(prefix)
 
         with self._idle:
-            self._idle.wait_for(lambda: not any(under(slot) for slot in self._busy))
+            self._idle.wait_for(
+                lambda: not any(under(slot) for slot in self._busy)
+            )
             for slot in [s for s in self._connections if under(s)]:
                 self._connections.pop(slot).close()
 
@@ -275,8 +297,12 @@ class SqliteBackend:
 
     @contextmanager
     def _connection(
-        self, root: str, keys: tuple[Key, ...] = (), timeout_s: float | None = None,
-        *, create: bool,
+        self,
+        root: str,
+        keys: tuple[Key, ...] = (),
+        timeout_s: float | None = None,
+        *,
+        create: bool,
     ) -> Generator[sqlite3.Connection | None]:
         """This process, thread and root's connection, held in use (so :meth:`release` waits for
         it) until the block returns. With no database at ``root``, a write (``create``) builds one
@@ -310,8 +336,13 @@ class SqliteBackend:
                     del self._busy[slot]
                 self._idle.notify_all()
 
-    def _publish(self, db_path: Path, root: str, keys: tuple[Key, ...],
-                 timeout_s: float | None) -> None:
+    def _publish(
+        self,
+        db_path: Path,
+        root: str,
+        keys: tuple[Key, ...],
+        timeout_s: float | None,
+    ) -> None:
         """Build a database beside its destination and install it atomically and exclusively.
 
         The transition lock is held across the existence re-check, the build and the install, so
@@ -328,7 +359,9 @@ class SqliteBackend:
         try:
             if db_path.is_file():
                 return
-            temp = db_path.parent / creation_temp_name(db_path.name, uuid.uuid4().hex)
+            temp = db_path.parent / creation_temp_name(
+                db_path.name, uuid.uuid4().hex
+            )
             try:
                 self._build(temp)
                 _fsync_path(temp)
@@ -375,7 +408,9 @@ class SqliteBackend:
                 "locked" in text or "busy" in text
             )
             if contended and keys:
-                raise StoreBusyError(keys[0], time.monotonic() - started) from exc
+                raise StoreBusyError(
+                    keys[0], time.monotonic() - started
+                ) from exc
             root = keys[0].root if keys else "?"
             raise StoreError(
                 f"the store database under {root} refused the operation: {exc}"
@@ -393,9 +428,12 @@ class SqliteBackend:
         with ExitStack() as held:
             with self._mapped(keys):
                 conn = held.enter_context(
-                    self._connection(keys[0].root, keys, timeout, create=True))
+                    self._connection(keys[0].root, keys, timeout, create=True)
+                )
                 assert conn is not None
-                conn.execute(f"pragma busy_timeout = {int(max(0.0, timeout) * 1000)}")
+                conn.execute(
+                    f"pragma busy_timeout = {int(max(0.0, timeout) * 1000)}"
+                )
             with self._mapped(keys):
                 conn.execute("begin immediate")
             try:
@@ -415,12 +453,19 @@ class SqliteBackend:
         )
 
     def _drop(self, conn: sqlite3.Connection, key: Key) -> bool:
-        return conn.execute("delete from records where store = ? and parts = ?",
-                            (key.store, encode_parts(key.parts))).rowcount > 0
+        return (
+            conn.execute(
+                "delete from records where store = ? and parts = ?",
+                (key.store, encode_parts(key.parts)),
+            ).rowcount
+            > 0
+        )
 
     def _append(self, conn: sqlite3.Connection, key: Key, data: bytes) -> None:
-        conn.execute("insert into log_entries (store, parts, entry) values (?, ?, ?)",
-                     (key.store, encode_parts(key.parts), data))
+        conn.execute(
+            "insert into log_entries (store, parts, entry) values (?, ?, ?)",
+            (key.store, encode_parts(key.parts), data),
+        )
 
     def _stored(self, conn: sqlite3.Connection, key: Key) -> bytes | None:
         row = conn.execute(
@@ -431,18 +476,28 @@ class SqliteBackend:
 
     # ── records ─────────────────────────────────────────────────────────────────
 
-    def read_versioned(self, key: Key, *, default: Any = REQUIRED) -> Versioned:
+    def read_versioned(
+        self, key: Key, *, default: Any = REQUIRED
+    ) -> Versioned:
         data = None
-        with self._mapped((key,)), self._connection(key.root, create=False) as conn:
+        with (
+            self._mapped((key,)),
+            self._connection(key.root, create=False) as conn,
+        ):
             if conn is not None:
                 data = self._stored(conn, key)
         return _versioned(key, data, default)
 
     def exists(self, key: Key) -> bool:
-        with self._mapped((key,)), self._connection(key.root, create=False) as conn:
+        with (
+            self._mapped((key,)),
+            self._connection(key.root, create=False) as conn,
+        ):
             return conn is not None and self._stored(conn, key) is not None
 
-    def replace(self, key: Key, value: Any, *, expect: Version | None = None) -> Version:
+    def replace(
+        self, key: Key, value: Any, *, expect: Version | None = None
+    ) -> Version:
         data = _encoded(key, encode_record, value)
         with self._write((key,)) as conn:
             if expect is not None:
@@ -463,13 +518,16 @@ class SqliteBackend:
         with self._write(tuple(keys), timeout_s=timeout_s) as conn:
             yield Txn(self, conn, tuple(keys))
 
-    def keys(self, store: str, root: str, prefix: tuple[str, ...] = ()) -> list[Key]:
+    def keys(
+        self, store: str, root: str, prefix: tuple[str, ...] = ()
+    ) -> list[Key]:
         with self._mapped(()), self._connection(root, create=False) as conn:
             if conn is None:
                 return []
             rows = conn.execute(
                 "select parts from records where store = ? "
-                "union select parts from log_entries where store = ?", (store, store)
+                "union select parts from log_entries where store = ?",
+                (store, store),
             ).fetchall()
         found = [
             Key(store, root, parts)
@@ -500,7 +558,10 @@ class SqliteBackend:
         row's id, which autoincrement never reuses; an entry that will not decode is reported
         through ``corrupt``."""
         start = int(after) if after else 0
-        with self._mapped((key,)), self._connection(key.root, create=False) as conn:
+        with (
+            self._mapped((key,)),
+            self._connection(key.root, create=False) as conn,
+        ):
             if conn is None:
                 return LogPage(records=[], cursor=str(start))
             rows = conn.execute(
@@ -517,7 +578,9 @@ class SqliteBackend:
             except DecodeError:
                 corrupt.append(position)
             cursor = row_id
-        return LogPage(records=records, cursor=str(cursor), corrupt=tuple(corrupt))
+        return LogPage(
+            records=records, cursor=str(cursor), corrupt=tuple(corrupt)
+        )
 
     def clear_log(self, key: Key) -> int:
         """Delete every committed entry of this log, returning how many there were."""
@@ -532,8 +595,12 @@ class Txn:
     """A transaction's handle over the keys it names: reads and writes inside one commit, a read
     seeing this transaction's own writes. A key the transaction does not name is refused."""
 
-    def __init__(self, backend: SqliteBackend, conn: sqlite3.Connection,
-                 keys: tuple[Key, ...]) -> None:
+    def __init__(
+        self,
+        backend: SqliteBackend,
+        conn: sqlite3.Connection,
+        keys: tuple[Key, ...],
+    ) -> None:
         self._backend = backend
         self._conn = conn
         self._keys = keys
@@ -545,7 +612,9 @@ class Txn:
                 "the body touches in transaction(...)"
             )
 
-    def read_versioned(self, key: Key, *, default: Any = REQUIRED) -> Versioned:
+    def read_versioned(
+        self, key: Key, *, default: Any = REQUIRED
+    ) -> Versioned:
         """One of the transaction's records and its version; absence answers ``default`` at
         ``Version.ABSENT`` or raises ``NotFoundError``."""
         self._held(key)
@@ -570,4 +639,6 @@ class Txn:
     def append(self, key: Key, record: Mapping[str, Any]) -> None:
         """Append one entry to one of the transaction's logs."""
         self._held(key)
-        self._backend._append(self._conn, key, _encoded(key, encode_log_line, record))
+        self._backend._append(
+            self._conn, key, _encoded(key, encode_log_line, record)
+        )

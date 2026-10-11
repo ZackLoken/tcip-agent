@@ -26,7 +26,10 @@ DETECTION_TASKS = frozenset({"detection", "instance_seg"})
 # unsupported (the platform has no fixed task taxonomy), but it cannot be smoked blind, so the
 # caller supplies ``sample_batch=`` instead of the contract inventing a shape for it.
 _SYNTHESIZABLE_TASKS = DETECTION_TASKS | {
-    "classification", "ordinal", "regression", "semantic_seg",
+    "classification",
+    "ordinal",
+    "regression",
+    "semantic_seg",
 }
 _COUNTED_TASKS = _SYNTHESIZABLE_TASKS - DETECTION_TASKS - {"regression"}
 """The tasks whose synthetic target carries a class or rank id, so a batch for one cannot be
@@ -52,26 +55,43 @@ class TCIPModel(Protocol):
     def __call__(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
-def no_batch_reason(task: str, dims: "Mapping[str, Any] | None", sample_batch: Any) -> str | None:
+def no_batch_reason(
+    task: str, dims: "Mapping[str, Any] | None", sample_batch: Any
+) -> str | None:
     """Why this call can smoke nothing, or ``None`` when it can."""
     if sample_batch is not None:
         return None
     if task not in _SYNTHESIZABLE_TASKS:
-        return (f"no synthetic batch schema for task {task!r}; pass sample_batch= (an (images, "
-                f"targets) pair from this run's dataset) to smoke it. Schemas exist for "
-                f"{sorted(_SYNTHESIZABLE_TASKS)}.")
-    missing = ("a frame size" if dims is None or dims.get("img_size") is None else
-               "a class count" if task in _COUNTED_TASKS and dims.get("num_classes") is None
-               else None)
+        return (
+            f"no synthetic batch schema for task {task!r}; pass sample_batch= (an (images, "
+            f"targets) pair from this run's dataset) to smoke it. Schemas exist for "
+            f"{sorted(_SYNTHESIZABLE_TASKS)}."
+        )
+    missing = (
+        "a frame size"
+        if dims is None or dims.get("img_size") is None
+        else "a class count"
+        if task in _COUNTED_TASKS and dims.get("num_classes") is None
+        else None
+    )
     if missing is not None:
-        return (f"no dimensions to synthesize a {task} batch at: this run states {missing} "
-                f"nowhere. Pass dims= (its own resolved dimensions) or sample_batch= (an "
-                f"(images, targets) pair from its dataset).")
+        return (
+            f"no dimensions to synthesize a {task} batch at: this run states {missing} "
+            f"nowhere. Pass dims= (its own resolved dimensions) or sample_batch= (an "
+            f"(images, targets) pair from its dataset)."
+        )
     return None
 
 
-def _synth_batch(task: str, *, in_chans: int, img_size: tuple[int, int], device: Any,
-                 num_classes: int | None = None, attributes: Any = ()):
+def _synth_batch(
+    task: str,
+    *,
+    in_chans: int,
+    img_size: tuple[int, int],
+    device: Any,
+    num_classes: int | None = None,
+    attributes: Any = (),
+):
     """A minimal batch in the exact shape ``generic_trainer`` feeds ``model.forward`` for ``task``:
     per-sample ``(image, target)`` items shaped like a dataset's ``__getitem__``, collated with the
     trainer's own ``task_collate``, each image ``img_size``, ``(width, height)``.
@@ -92,47 +112,85 @@ def _synth_batch(task: str, *, in_chans: int, img_size: tuple[int, int], device:
         img = torch.rand(in_chans, height, width, device=device)
         box = [width * 0.2, height * 0.2, width * 0.7, height * 0.7]
         # One foreground instance (labels are 1-indexed), through the loaders' own tensor builder.
-        tensors = target_tensors({"boxes": [box], "labels": [1], "iscrowd": [False],
-                                  **({"attributes": [[0] * len(attributes)]} if attributes
-                                     else {})})
+        tensors = target_tensors(
+            {
+                "boxes": [box],
+                "labels": [1],
+                "iscrowd": [False],
+                **(
+                    {"attributes": [[0] * len(attributes)]}
+                    if attributes
+                    else {}
+                ),
+            }
+        )
         target: dict[str, Any] = {k: v.to(device) for k, v in tensors.items()}
         target["image_id"] = 0
         if task == "instance_seg":
-            mask = torch.zeros((1, height, width), dtype=torch.uint8, device=device)
-            mask[0, int(height * 0.2):int(height * 0.7), int(width * 0.2):int(width * 0.7)] = 1
+            mask = torch.zeros(
+                (1, height, width), dtype=torch.uint8, device=device
+            )
+            mask[
+                0,
+                int(height * 0.2) : int(height * 0.7),
+                int(width * 0.2) : int(width * 0.7),
+            ] = 1
             target["masks"] = mask
         return collate([(img, target)])
 
     if task == "regression":
-        return collate([(torch.rand(in_chans, height, width, device=device),
-                         {"values": torch.rand((), device=device)}) for _ in range(2)])
+        return collate(
+            [
+                (
+                    torch.rand(in_chans, height, width, device=device),
+                    {"values": torch.rand((), device=device)},
+                )
+                for _ in range(2)
+            ]
+        )
 
-    assert num_classes is not None, "a counted task reaches here with its own count"
+    assert num_classes is not None, (
+        "a counted task reaches here with its own count"
+    )
     items = []
     for _ in range(2):
         img = torch.rand(in_chans, height, width, device=device)
         if task == "ordinal":
             # A 0-dim tensor, not a python scalar: the stacking collate rebuilds a scalar on the
             # cpu.
-            target = {"ranks": torch.randint(0, num_classes, (), device=device)}
+            target = {
+                "ranks": torch.randint(0, num_classes, (), device=device)
+            }
         elif task == "semantic_seg":
-            target = {"masks": torch.randint(0, num_classes, (height, width), device=device)}
+            target = {
+                "masks": torch.randint(
+                    0, num_classes, (height, width), device=device
+                )
+            }
         else:
-            target = {"labels": torch.randint(0, num_classes, (), device=device)}
+            target = {
+                "labels": torch.randint(0, num_classes, (), device=device)
+            }
         items.append((img, target))
     return collate(items)
 
 
-def _driving_batch(task: str, dims: "Mapping[str, Any] | None", sample_batch: Any,
-                   device: Any) -> tuple[Any, Any]:
+def _driving_batch(
+    task: str, dims: "Mapping[str, Any] | None", sample_batch: Any, device: Any
+) -> tuple[Any, Any]:
     """The ``(images, targets)`` a model is driven with, as the trainer hands it: ``sample_batch``
     when given, else synthesized; a detection task's targets through ``instance_targets``.
     """
     from tcip_mcp.pipelines.data.datasets import instance_targets
 
-    images, targets = (sample_batch if sample_batch is not None else
-                       _synth_batch(task, device=device, **(dims or {})))
-    return images, instance_targets(targets) if task in DETECTION_TASKS else targets
+    images, targets = (
+        sample_batch
+        if sample_batch is not None
+        else _synth_batch(task, device=device, **(dims or {}))
+    )
+    return images, instance_targets(
+        targets
+    ) if task in DETECTION_TASKS else targets
 
 
 def _contains_tensor(value: Any, _depth: int = 0, _max_depth: int = 4) -> bool:
@@ -151,7 +209,9 @@ def _contains_tensor(value: Any, _depth: int = 0, _max_depth: int = 4) -> bool:
     if isinstance(value, (list, tuple)):
         return any(_contains_tensor(v, _depth + 1, _max_depth) for v in value)
     if isinstance(value, dict):
-        return any(_contains_tensor(v, _depth + 1, _max_depth) for v in value.values())
+        return any(
+            _contains_tensor(v, _depth + 1, _max_depth) for v in value.values()
+        )
     return False
 
 
@@ -161,7 +221,9 @@ def _forward_loss(model: Any, images: Any, targets: Any):
     if isinstance(out, dict):
         terms = [v for v in out.values() if hasattr(v, "requires_grad")]
         if not terms:
-            raise ValueError("train-mode forward returned a dict with no tensor loss terms")
+            raise ValueError(
+                "train-mode forward returned a dict with no tensor loss terms"
+            )
         loss = terms[0]
         for t in terms[1:]:
             loss = loss + t
@@ -170,8 +232,12 @@ def _forward_loss(model: Any, images: Any, targets: Any):
 
 
 def check_model_contract(
-    model: TCIPModel, task: str, *, dims: "Mapping[str, Any] | None" = None,
-    device: str = "cpu", sample_batch: Any = None,
+    model: TCIPModel,
+    task: str,
+    *,
+    dims: "Mapping[str, Any] | None" = None,
+    device: str = "cpu",
+    sample_batch: Any = None,
 ) -> dict:
     """Behavioral smoke test of the measurement boundary. Returns a report; never raises.
 
@@ -187,9 +253,14 @@ def check_model_contract(
     import torch
 
     issues: list[str] = []
-    report: dict[str, Any] = {"ok": False, "issues": issues, "train_loss": None,
-                              "eval_output_type": None, "not_smokeable": None,
-                              "gradient_magnitudes": None}
+    report: dict[str, Any] = {
+        "ok": False,
+        "issues": issues,
+        "train_loss": None,
+        "eval_output_type": None,
+        "not_smokeable": None,
+        "gradient_magnitudes": None,
+    }
     # Never invent a batch shape: a green report earned against a guessed one proves nothing, so
     # a caller with no schema or no dimensions is told to smoke a real batch instead.
     report["not_smokeable"] = no_batch_reason(task, dims, sample_batch)
@@ -207,22 +278,30 @@ def check_model_contract(
         images, targets = _driving_batch(task, dims, sample_batch, dev)
         loss = _forward_loss(model, images, targets)
         if not (hasattr(loss, "requires_grad") and loss.requires_grad):
-            issues.append("train-mode loss does not require grad (no learnable path)")
+            issues.append(
+                "train-mode loss does not require grad (no learnable path)"
+            )
         lv = float(loss.detach())
         report["train_loss"] = lv
         if not torch.isfinite(torch.tensor(lv)):
             issues.append(f"train-mode loss is not finite ({lv})")
         loss.backward()
-        named_grads = [(name, p.grad) for name, p in model.named_parameters()
-                       if getattr(p, "grad", None) is not None]
+        named_grads = [
+            (name, p.grad)
+            for name, p in model.named_parameters()
+            if getattr(p, "grad", None) is not None
+        ]
         grads = [g for _, g in named_grads]
         # float64: an L2 norm summed in the gradient's own float32 dtype can overflow to inf even
         # when every element is finite, which would fail check_json_value once this is persisted.
         gradient_magnitudes = {
-            name: float(g.detach().to(torch.float64).norm()) for name, g in named_grads
+            name: float(g.detach().to(torch.float64).norm())
+            for name, g in named_grads
         }
         if not grads:
-            issues.append("no parameter received a gradient from the train-mode loss")
+            issues.append(
+                "no parameter received a gradient from the train-mode loss"
+            )
         elif not all(torch.isfinite(g).all() for g in grads):
             issues.append("some parameter gradients are not finite")
         elif not all(math.isfinite(v) for v in gradient_magnitudes.values()):
@@ -247,13 +326,21 @@ def check_model_contract(
                 required = required | {"masks"}
             if dims and dims.get("attributes"):
                 required = required | {"attributes"}
-            if not (isinstance(out, list) and out and isinstance(out[0], dict)
-                    and required <= set(out[0])):
-                issues.append(f"detection eval output is not list[dict] with {sorted(required)}")
+            if not (
+                isinstance(out, list)
+                and out
+                and isinstance(out[0], dict)
+                and required <= set(out[0])
+            ):
+                issues.append(
+                    f"detection eval output is not list[dict] with {sorted(required)}"
+                )
         else:
             report["eval_output_type"] = "dict"
             if not isinstance(out, dict):
-                issues.append(f"non-detection eval output is not a dict (got {type(out).__name__})")
+                issues.append(
+                    f"non-detection eval output is not a dict (got {type(out).__name__})"
+                )
             elif not any(_contains_tensor(v) for v in out.values()):
                 # Which keys a task uses is the agent's to choose, so none are named here. But a
                 # dict carrying no tensor, anywhere in a value's own list/tuple/dict nesting, not
@@ -270,8 +357,14 @@ def check_model_contract(
 
 
 def overfit_check(
-    model: TCIPModel, task: str, *, dims: "Mapping[str, Any] | None" = None,
-    steps: int = 20, seed: int = 0, lr: float = 1e-2, device: str = "cpu",
+    model: TCIPModel,
+    task: str,
+    *,
+    dims: "Mapping[str, Any] | None" = None,
+    steps: int = 20,
+    seed: int = 0,
+    lr: float = 1e-2,
+    device: str = "cpu",
     sample_batch: Any = None,
 ) -> dict:
     """Drive ``steps`` optimizer updates on one fixed tiny batch; the loss must fall.
@@ -291,7 +384,13 @@ def overfit_check(
 
     reason = no_batch_reason(task, dims, sample_batch)
     if reason is not None:
-        return {"passed": False, "losses": [], "initial": None, "final": None, "issue": reason}
+        return {
+            "passed": False,
+            "losses": [],
+            "initial": None,
+            "final": None,
+            "issue": reason,
+        }
     set_seed(seed)
     dev = torch.device(device)
     try:
@@ -302,13 +401,21 @@ def overfit_check(
     try:
         images, targets = _driving_batch(task, dims, sample_batch, dev)
     except ValueError as exc:  # report, never raise: this returns a dict
-        return {"passed": False, "losses": [], "initial": None, "final": None, "issue": str(exc)}
+        return {
+            "passed": False,
+            "losses": [],
+            "initial": None,
+            "final": None,
+            "issue": str(exc),
+        }
     losses: list[float] = []
     issue: str | None = None
     try:
         # Built inside the try: a model with no trainable parameter (every parameter frozen, a
         # legitimate stage-0 configuration) makes Adam raise, and that belongs in the report.
-        optimizer = torch.optim.Adam((p for p in model.parameters() if p.requires_grad), lr=lr)
+        optimizer = torch.optim.Adam(
+            (p for p in model.parameters() if p.requires_grad), lr=lr
+        )
         model.train()
         for _ in range(max(1, steps)):
             optimizer.zero_grad()
@@ -319,7 +426,9 @@ def overfit_check(
     except Exception as exc:  # noqa: BLE001
         issue = f"optimization step failed: {exc}"
 
-    finite = bool(losses) and all(torch.isfinite(torch.tensor(v)) for v in losses)
+    finite = bool(losses) and all(
+        torch.isfinite(torch.tensor(v)) for v in losses
+    )
     decreased = bool(losses) and losses[-1] < losses[0]
     if issue is None:
         if not finite:
@@ -344,7 +453,10 @@ def render_overfit_report(report: dict) -> dict:
     non-finite state; ``losses`` is a positional list with no sibling slot per entry, so each goes
     through :func:`tcip_store.values.finite_or_none`, which drops the state and keeps the null.
     """
-    rendered: dict[str, Any] = {"passed": report["passed"], "issue": report["issue"]}
+    rendered: dict[str, Any] = {
+        "passed": report["passed"],
+        "issue": report["issue"],
+    }
     rendered.update(stored_number("initial", report["initial"]))
     rendered.update(stored_number("final", report["final"]))
     rendered["losses"] = [finite_or_none(v) for v in report["losses"]]

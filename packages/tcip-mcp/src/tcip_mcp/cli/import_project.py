@@ -21,12 +21,18 @@ import sys
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, prog=prog)
-    parser.add_argument("bundle_path", help="Path to the bundle archive-project wrote: a ZIP "
-                                            "file, or a directory tree written by its "
-                                            "--output-dir mode.")
-    parser.add_argument("destination", help="Directory to extract into; must not already exist, "
-                                             "or must be an empty directory. Also where this "
-                                             "run's audit line is recorded.")
+    parser.add_argument(
+        "bundle_path",
+        help="Path to the bundle archive-project wrote: a ZIP "
+        "file, or a directory tree written by its "
+        "--output-dir mode.",
+    )
+    parser.add_argument(
+        "destination",
+        help="Directory to extract into; must not already exist, "
+        "or must be an empty directory. Also where this "
+        "run's audit line is recorded.",
+    )
     args = parser.parse_args(argv)
 
     from tcip_store import bind

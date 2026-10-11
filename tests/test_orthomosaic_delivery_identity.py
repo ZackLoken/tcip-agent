@@ -18,8 +18,16 @@ pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
 from tests.test_orthomosaic_tools import (  # noqa: E402, F401
-    _GRID, _PLANT_PIXELS, SCOPE, TIEPOINT_NATIVE_X, TILE, _bespoke_detection_checkpoint,
-    _plant_grid_csv, _plant_registry, _raster, _write_geo_raster,
+    _GRID,
+    _PLANT_PIXELS,
+    SCOPE,
+    TIEPOINT_NATIVE_X,
+    TILE,
+    _bespoke_detection_checkpoint,
+    _plant_grid_csv,
+    _plant_registry,
+    _raster,
+    _write_geo_raster,
 )
 
 BUCKET = "preds/2026-01-01"
@@ -32,19 +40,33 @@ def _produced_bucket(tmp_path: Path, raster_path: Path) -> str:
     from tests.test_orthomosaic_tools import RASTER_PASS
 
     result = run_inference(
-        tmp_path, _bespoke_detection_checkpoint(tmp_path), bucket=BUCKET,
-        raster_path=str(raster_path), stated=RASTER_PASS)
+        tmp_path,
+        _bespoke_detection_checkpoint(tmp_path),
+        bucket=BUCKET,
+        raster_path=str(raster_path),
+        stated=RASTER_PASS,
+    )
     assert "error" not in result, result
     return result["bucket"]
 
 
 def _delivered(tmp_path: Path, bucket: str, raster_path: Path) -> dict:
-    from tcip_mcp.tools.orthomosaic_tools import deliver_orthomosaic_plant_counts
+    from tcip_mcp.tools.orthomosaic_tools import (
+        deliver_orthomosaic_plant_counts,
+    )
 
-    registry = _plant_registry(tmp_path, _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS))
+    registry = _plant_registry(
+        tmp_path, _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
+    )
     return deliver_orthomosaic_plant_counts(
-        tmp_path, str(tmp_path / "ds"), bucket, registry, str(tmp_path / "counts.csv"),
-        "stem_count", _GRID)
+        tmp_path,
+        str(tmp_path / "ds"),
+        bucket,
+        registry,
+        str(tmp_path / "counts.csv"),
+        "stem_count",
+        _GRID,
+    )
 
 
 def test_a_raster_whose_tiepoint_moved_since_publication_refuses(tmp_path):
@@ -79,11 +101,22 @@ def test_a_bucket_of_per_image_predictions_refuses_naming_what_it_is(tmp_path):
 
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
-    bucket = published(tmp_path, "frames/2026-01-01",
-                       [{"image": str(raster_path.parent / "img1.jpg"), "width": 64,
-                         "height": 64, "boxes": [], "scores": [], "labels": [],
-                         "cap": 1}],
-                       scope=SCOPE).name
+    bucket = published(
+        tmp_path,
+        "frames/2026-01-01",
+        [
+            {
+                "image": str(raster_path.parent / "img1.jpg"),
+                "width": 64,
+                "height": 64,
+                "boxes": [],
+                "scores": [],
+                "labels": [],
+                "cap": 1,
+            }
+        ],
+        scope=SCOPE,
+    ).name
 
     refused = _delivered(tmp_path, bucket, raster_path)
 
@@ -91,7 +124,9 @@ def test_a_bucket_of_per_image_predictions_refuses_naming_what_it_is(tmp_path):
     assert not (tmp_path / "counts.csv").exists()
 
 
-def test_the_raster_it_was_produced_on_passes_the_identity_check_and_meets_the_gate(tmp_path):
+def test_the_raster_it_was_produced_on_passes_the_identity_check_and_meets_the_gate(
+    tmp_path,
+):
     """The producer's own recorded identity admits the unchanged raster; this bucket was never
     assessed and this door takes no acknowledgment, so the refusal named is the gate's."""
     from tcip_mcp.buckets import read_bucket

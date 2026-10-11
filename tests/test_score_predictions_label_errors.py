@@ -25,15 +25,28 @@ def _published(project: Path, name: str, image: Path, registry=None):
     bucket."""
     from tests._chain_fixtures import published
 
-    attributes = registry.subjects[0].attributes if registry is not None else ()
-    result = {"image": str(image), "width": 100, "height": 80, "boxes": [[1.0, 1.0, 5.0, 5.0]],
-              "scores": [0.9], "labels": [1], "cap": 2}
+    attributes = (
+        registry.subjects[0].attributes if registry is not None else ()
+    )
+    result = {
+        "image": str(image),
+        "width": 100,
+        "height": 80,
+        "boxes": [[1.0, 1.0, 5.0, 5.0]],
+        "scores": [0.9],
+        "labels": [1],
+        "cap": 2,
+    }
     if attributes:
         result["attributes"] = [[len(a.values) - 1 for a in attributes]]
-    return published(project, name, [result], scope={"subject": "bud"}, registry=registry)
+    return published(
+        project, name, [result], scope={"subject": "bud"}, registry=registry
+    )
 
 
-def test_score_predictions_single_image_reports_an_unreadable_gt(tmp_path: Path) -> None:
+def test_score_predictions_single_image_reports_an_unreadable_gt(
+    tmp_path: Path,
+) -> None:
     from tests._record_damage_fixtures import damage_record
 
     img = tmp_path / "images" / UNDATED_BUCKET / "IMG_0000.jpg"
@@ -48,7 +61,9 @@ def test_score_predictions_single_image_reports_an_unreadable_gt(tmp_path: Path)
     assert "IMG_0000" in res["error"]
 
 
-def test_score_predictions_folder_reports_an_unreadable_prediction(tmp_path: Path) -> None:
+def test_score_predictions_folder_reports_an_unreadable_prediction(
+    tmp_path: Path,
+) -> None:
     from tests._record_damage_fixtures import damage_record
 
     images = tmp_path / "ds" / "images" / UNDATED_BUCKET
@@ -74,9 +89,23 @@ def test_score_predictions_over_attributed_documents_scores_the_object_class(
     img = tmp_path / "images" / UNDATED_BUCKET / "IMG_0000.jpg"
     write_image(img)
     label_image(img, ONE_BUD, 100, 80)
-    _published(tmp_path, "classifier", img,
-               cr.SubjectRegistry(subjects=(cr.Subject(name="bud", attributes=(
-                   cr.Attribute("opening", "categorical", ("closed", "open")),)),)))
+    _published(
+        tmp_path,
+        "classifier",
+        img,
+        cr.SubjectRegistry(
+            subjects=(
+                cr.Subject(
+                    name="bud",
+                    attributes=(
+                        cr.Attribute(
+                            "opening", "categorical", ("closed", "open")
+                        ),
+                    ),
+                ),
+            )
+        ),
+    )
 
     res = score_predictions(str(img), "classifier")
 
@@ -84,7 +113,9 @@ def test_score_predictions_over_attributed_documents_scores_the_object_class(
     assert res["tp"] == 1
 
 
-def test_a_predicted_image_with_no_label_document_is_refused_as_a_reference(tmp_path: Path):
+def test_a_predicted_image_with_no_label_document_is_refused_as_a_reference(
+    tmp_path: Path,
+):
     """An image the bucket predicted and nobody labeled has no reference: scoring and the count
     triage refuse naming its document, never measuring it against an empty one."""
     from tcip_annotation.json_io import UnreadableLabelDocumentError
@@ -97,11 +128,15 @@ def test_a_predicted_image_with_no_label_document_is_refused_as_a_reference(tmp_
     res = score_predictions(str(img), "baseline")
 
     assert "IMG_0000" in res["error"] and "has no record" in res["error"], res
-    with pytest.raises(UnreadableLabelDocumentError, match="IMG_0000.*has no record"):
+    with pytest.raises(
+        UnreadableLabelDocumentError, match="IMG_0000.*has no record"
+    ):
         get_worst_predictions(bucket)
 
 
-def test_an_image_the_bucket_names_no_document_for_is_unknown_never_a_miss(tmp_path: Path):
+def test_an_image_the_bucket_names_no_document_for_is_unknown_never_a_miss(
+    tmp_path: Path,
+):
     """A labeled image the bucket's record never predicted is no false negative and no triage
     score: scoring and triage leave it out and name it, while the image it did predict scores."""
     from tcip_mcp.tools.vision_tools import get_worst_predictions
@@ -116,8 +151,15 @@ def test_an_image_the_bucket_names_no_document_for_is_unknown_never_a_miss(tmp_p
     triaged = get_worst_predictions(bucket)
 
     assert "error" not in scored, scored
-    assert (scored["total_tp"], scored["total_fn"], scored["image_count"]) == (1, 0, 1)
+    assert (scored["total_tp"], scored["total_fn"], scored["image_count"]) == (
+        1,
+        0,
+        1,
+    )
     assert scored["not_predicted"] == [str(images / "IMG_0001.jpg")]
     assert [w["stem"] for w in triaged["worst_images"]] == ["IMG_0000"]
     assert triaged["not_predicted"] == ["IMG_0001"]
-    assert "not predicted" in score_predictions(str(images / "IMG_0001.jpg"), "baseline")["error"]
+    assert (
+        "not predicted"
+        in score_predictions(str(images / "IMG_0001.jpg"), "baseline")["error"]
+    )

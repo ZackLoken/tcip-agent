@@ -28,9 +28,15 @@ def _job(job_id, images_dir, bucket, ckpt, project):
     from tcip_web.routes.inference import InferenceJob
 
     return InferenceJob(
-        job_id=job_id, actor="user:tester", project=str(project), checkpoint_path=str(ckpt),
-        dataset_root=str(dataset_root_of(images_dir)), images_dir=str(images_dir), bucket=bucket,
-        stated=Stated(tile=False, conf=0.25, postprocess="nms"))
+        job_id=job_id,
+        actor="user:tester",
+        project=str(project),
+        checkpoint_path=str(ckpt),
+        dataset_root=str(dataset_root_of(images_dir)),
+        images_dir=str(images_dir),
+        bucket=bucket,
+        stated=Stated(tile=False, conf=0.25, postprocess="nms"),
+    )
 
 
 def _launch_through_the_route(client, dataset, bucket, ckpt, *, tile: bool):
@@ -38,9 +44,17 @@ def _launch_through_the_route(client, dataset, bucket, ckpt, *, tile: bool):
     its worker ends."""
     from tcip_web.routes.inference import _get
 
-    resp = client.post("/api/inference/launch", json={
-        "user": "tester", "checkpoint_path": str(ckpt), "dataset_root": str(dataset), "date": DATE,
-        "bucket": bucket, "stated": {"tile": tile, **SAMPLE_DETECTOR_PASS}})
+    resp = client.post(
+        "/api/inference/launch",
+        json={
+            "user": "tester",
+            "checkpoint_path": str(ckpt),
+            "dataset_root": str(dataset),
+            "date": DATE,
+            "bucket": bucket,
+            "stated": {"tile": tile, **SAMPLE_DETECTOR_PASS},
+        },
+    )
     assert resp.status_code == 200, resp.text
     job = _get(resp.json()["job_id"])
     job.thread.join(60)
@@ -53,7 +67,10 @@ def _documents(root: Path, bucket: str) -> list[str]:
 
     from tcip_mcp.dataset_layout import PREDICTION_DOCUMENTS
 
-    return [k.parts[-1] for k in tcip_store.keys(PREDICTION_DOCUMENTS, str(root), (bucket,))]
+    return [
+        k.parts[-1]
+        for k in tcip_store.keys(PREDICTION_DOCUMENTS, str(root), (bucket,))
+    ]
 
 
 def _published(root: Path, bucket: str) -> bool:
@@ -69,10 +86,16 @@ def _record(root: Path, bucket: str) -> dict:
 
     from tcip_mcp.buckets import read_bucket
 
-    return {k: v for k, v in asdict(read_bucket(root, bucket)).items() if k not in ("root", "name")}
+    return {
+        k: v
+        for k, v in asdict(read_bucket(root, bucket)).items()
+        if k not in ("root", "name")
+    }
 
 
-def test_the_gui_worker_and_the_mcp_door_publish_the_same_bucket_record(tmp_path, monkeypatch):
+def test_the_gui_worker_and_the_mcp_door_publish_the_same_bucket_record(
+    tmp_path, monkeypatch
+):
     """One checkpoint over one image directory with the same stated values: the two doors' own
     bucket records agree on everything but the name each was published under."""
     pytest.importorskip("fastapi")
@@ -86,14 +109,23 @@ def test_the_gui_worker_and_the_mcp_door_publish_the_same_bucket_record(tmp_path
     job = _job("prepared", images_dir, f"gui/{DATE}", ckpt, tmp_path)
     _worker(job)
     assert job.status == "completed", job.error
-    mcp = run_inference(tmp_path, ckpt, str(images_dir), bucket=f"mcp/{DATE}", stated=job.stated)
+    mcp = run_inference(
+        tmp_path,
+        ckpt,
+        str(images_dir),
+        bucket=f"mcp/{DATE}",
+        stated=job.stated,
+    )
     assert "error" not in mcp, mcp
 
     assert _record(tmp_path, f"gui/{DATE}") == _record(tmp_path, f"mcp/{DATE}")
 
 
 def test_a_pass_failing_after_its_first_document_publishes_nothing_on_either_door(
-    tmp_path, opened_project, client, monkeypatch,
+    tmp_path,
+    opened_project,
+    client,
+    monkeypatch,
 ):
     """A pass that dies between images leaves no document, no record and no line, the GUI's pass
     and the MCP door's alike: a publication is one commit."""
@@ -120,12 +152,19 @@ def test_a_pass_failing_after_its_first_document_publishes_nothing_on_either_doo
 
     monkeypatch.setattr(export, "encode_predictions", failing_second_document)
 
-    job = _launch_through_the_route(client, dataset, f"gui/{DATE}", ckpt, tile=False)
+    job = _launch_through_the_route(
+        client, dataset, f"gui/{DATE}", ckpt, tile=False
+    )
     assert job.status == "failed" and job.error == "disk full"
 
     with pytest.raises(OSError, match="disk full"):
-        run_inference(tmp_path, ckpt, str(images_dir), bucket=f"mcp/{DATE}",
-                      stated=Stated(tile=False, **SAMPLE_DETECTOR_PASS))
+        run_inference(
+            tmp_path,
+            ckpt,
+            str(images_dir),
+            bucket=f"mcp/{DATE}",
+            stated=Stated(tile=False, **SAMPLE_DETECTOR_PASS),
+        )
 
     for bucket in (f"gui/{DATE}", f"mcp/{DATE}"):
         assert _documents(dataset, bucket) == []
@@ -134,7 +173,10 @@ def test_a_pass_failing_after_its_first_document_publishes_nothing_on_either_doo
 
 
 def test_a_pass_the_mcp_door_refuses_the_gui_refuses_alike_with_nothing_published(
-    tmp_path, opened_project, client, monkeypatch,
+    tmp_path,
+    opened_project,
+    client,
+    monkeypatch,
 ):
     """A refusal the pass raises before its first write refuses a GUI run as it refuses the MCP
     door's: the same reason, no document, no record, no line."""
@@ -149,9 +191,16 @@ def test_a_pass_the_mcp_door_refuses_the_gui_refuses_alike_with_nothing_publishe
     install(monkeypatch, StubPredictor())
     ckpt = registered_checkpoint(tmp_path)
 
-    job = _launch_through_the_route(client, dataset, f"run/{DATE}", ckpt, tile=True)
-    mcp = run_inference(tmp_path, ckpt, str(images_dir), bucket=f"mcp/{DATE}",
-                        stated=Stated(tile=True, **SAMPLE_DETECTOR_PASS))
+    job = _launch_through_the_route(
+        client, dataset, f"run/{DATE}", ckpt, tile=True
+    )
+    mcp = run_inference(
+        tmp_path,
+        ckpt,
+        str(images_dir),
+        bucket=f"mcp/{DATE}",
+        stated=Stated(tile=True, **SAMPLE_DETECTOR_PASS),
+    )
 
     assert job.status == "failed"
     assert job.error == mcp["error"]
@@ -161,7 +210,9 @@ def test_a_pass_the_mcp_door_refuses_the_gui_refuses_alike_with_nothing_publishe
     assert audit_rows(dataset) == []
 
 
-def test_a_canceled_gui_pass_publishes_what_it_predicted(tmp_path, monkeypatch):
+def test_a_canceled_gui_pass_publishes_what_it_predicted(
+    tmp_path, monkeypatch
+):
     """A cancel stops the stream at the next image boundary: the documents already predicted are
     published, the record names exactly those, and the job ends canceled."""
     pytest.importorskip("fastapi")
@@ -183,14 +234,22 @@ def test_a_canceled_gui_pass_publishes_what_it_predicted(tmp_path, monkeypatch):
 
     _worker(job)
 
-    assert (job.status, job.done, job.total, job.error) == ("canceled", 1, 2, None)
+    assert (job.status, job.done, job.total, job.error) == (
+        "canceled",
+        1,
+        2,
+        None,
+    )
     assert _documents(dataset, job.bucket) == ["a"]
     assert _record(dataset, job.bucket)["documents"] == {"a": "a.jpg"}
     assert [(r["tool"], r["status"]) for r in audit_rows(dataset)] == [
-        ("prediction_bucket_published", "ok")]
+        ("prediction_bucket_published", "ok")
+    ]
 
 
-def test_a_full_gui_pass_publishes_every_document_and_the_record(tmp_path, monkeypatch):
+def test_a_full_gui_pass_publishes_every_document_and_the_record(
+    tmp_path, monkeypatch
+):
     """Every prediction document and the record that states who produced them are published, the
     images predicted in the order the pass walked them, and the job reports its summary."""
     pytest.importorskip("fastapi")
@@ -223,7 +282,9 @@ def test_a_full_gui_pass_publishes_every_document_and_the_record(tmp_path, monke
     assert job.error is None
     bucket = read_bucket(tmp_path, job.bucket)
     for stem in ("a", "b"):
-        (annotation,) = json_io.read_predictions(bucket.document_key(stem)).annotations
+        (annotation,) = json_io.read_predictions(
+            bucket.document_key(stem)
+        ).annotations
         assert annotation.score == pytest.approx(0.9)
 
     record = _record(tmp_path, job.bucket)
@@ -233,12 +294,23 @@ def test_a_full_gui_pass_publishes_every_document_and_the_record(tmp_path, monke
     assert record["assessment_id"] is None
     assert record["documents"] == {"a": "a.jpg", "b": "b.jpg"}
 
-    assert set(_summary(job)) == {"job_id", "status", "done", "total", "images_dir",
-                                 "dataset_root", "bucket", "error", "dropped_boxes"}
+    assert set(_summary(job)) == {
+        "job_id",
+        "status",
+        "done",
+        "total",
+        "images_dir",
+        "dataset_root",
+        "bucket",
+        "error",
+        "dropped_boxes",
+    }
     assert [Path(p).stem for p in written] == ["a", "b"]
 
 
-def test_a_gui_run_and_an_mcp_run_leave_the_same_publication_lines(tmp_path, monkeypatch):
+def test_a_gui_run_and_an_mcp_run_leave_the_same_publication_lines(
+    tmp_path, monkeypatch
+):
     """Each run leaves the publication's one line and nothing else in its dataset's log, and each
     bucket's record names the run that produced its checkpoint."""
     pytest.importorskip("fastapi")
@@ -259,16 +331,32 @@ def test_a_gui_run_and_an_mcp_run_leave_the_same_publication_lines(tmp_path, mon
         if door == "gui":
             _worker(_job(door, images_dir, bucket, ckpt, tmp_path))
         else:
-            result = run_inference(tmp_path, ckpt, str(images_dir), bucket=bucket,
-                                   stated=Stated(tile=False, **SAMPLE_DETECTOR_PASS))
+            result = run_inference(
+                tmp_path,
+                ckpt,
+                str(images_dir),
+                bucket=bucket,
+                stated=Stated(tile=False, **SAMPLE_DETECTOR_PASS),
+            )
             assert "error" not in result, result
         rows[door] = audit_rows(dataset)[before:]
-        assert _record(dataset, bucket)["producer"]["experiment_id"] == Path(ckpt).parent.name
+        assert (
+            _record(dataset, bucket)["producer"]["experiment_id"]
+            == Path(ckpt).parent.name
+        )
 
     def shape(records: list[dict]) -> list[tuple]:
         return [(r["tool"], sorted(r["arguments"])) for r in records]
 
-    assert shape(rows["gui"]) == shape(rows["mcp"]) == [
-        ("prediction_bucket_published", ["bucket", "dataset_root", "dropped_boxes"])]
+    assert (
+        shape(rows["gui"])
+        == shape(rows["mcp"])
+        == [
+            (
+                "prediction_bucket_published",
+                ["bucket", "dataset_root", "dropped_boxes"],
+            )
+        ]
+    )
     assert rows["gui"][0]["actor"] == "user:tester"
     assert "actor" not in rows["mcp"][0]

@@ -22,8 +22,13 @@ def _refusals() -> tuple[type[Exception], ...]:
     from tcip_mcp.model_registry import UnregisteredCheckpointError
     from tcip_mcp.traits import TraitUnknownError
 
-    return (ValueError, UnreadableLabelDocumentError, UnregisteredCheckpointError,
-            TraitUnknownError, FileNotFoundError)
+    return (
+        ValueError,
+        UnreadableLabelDocumentError,
+        UnregisteredCheckpointError,
+        TraitUnknownError,
+        FileNotFoundError,
+    )
 
 
 def _answer(assessment: Assessment) -> dict[str, Any]:
@@ -31,9 +36,13 @@ def _answer(assessment: Assessment) -> dict[str, Any]:
     in ``assessment.json``, counted instead."""
     answer = asdict(assessment)
     samples = answer["reference"].pop("samples")
-    return {**answer,
-            "execution": assessment.execution.record() if assessment.execution else None,
-            "reference": {**answer["reference"], "n_samples": len(samples)}}
+    return {
+        **answer,
+        "execution": assessment.execution.record()
+        if assessment.execution
+        else None,
+        "reference": {**answer["reference"], "n_samples": len(samples)},
+    }
 
 
 @tool()
@@ -74,9 +83,17 @@ def assess_checkpoint(
     from tcip_mcp.assessment import assess
 
     try:
-        return _answer(assess(
-            project, checkpoint_path=checkpoint_path, trait=trait, delivery_kind=delivery_kind,
-            selection_dir=selection_dir, stated=stated or Stated(), device=device))
+        return _answer(
+            assess(
+                project,
+                checkpoint_path=checkpoint_path,
+                trait=trait,
+                delivery_kind=delivery_kind,
+                selection_dir=selection_dir,
+                stated=stated or Stated(),
+                device=device,
+            )
+        )
     except _refusals() as exc:
         return {"error": str(exc)}
 
@@ -113,16 +130,29 @@ def assess_reserved_regions(
     from tcip_mcp.assessment import assess_reserved_regions as assess
 
     try:
-        return _answer(assess(
-            project, checkpoint_path=checkpoint_path, trait=trait, delivery_kind=delivery_kind,
-            k_cal=k_cal, k_test=k_test, stated=stated or Stated(), device=device))
+        return _answer(
+            assess(
+                project,
+                checkpoint_path=checkpoint_path,
+                trait=trait,
+                delivery_kind=delivery_kind,
+                k_cal=k_cal,
+                k_test=k_test,
+                stated=stated or Stated(),
+                device=device,
+            )
+        )
     except _refusals() as exc:
         return {"error": str(exc)}
 
 
 @tool()
 def calibrate_physical_scale(
-    project: Path, trait: str, selection_dir: str, reference_csv: str, unit: str,
+    project: Path,
+    trait: str,
+    selection_dir: str,
+    reference_csv: str,
+    unit: str,
     reference_subject: str,
 ) -> dict:
     """Derive a per-pixel physical scale on a selection's calibration side and check it against
@@ -144,8 +174,15 @@ def calibrate_physical_scale(
     from tcip_mcp.assessment import assess_physical_scale
 
     try:
-        return _answer(assess_physical_scale(
-            project, trait=trait, selection_dir=selection_dir, reference_csv=reference_csv,
-            unit=unit, reference_subject=reference_subject))
+        return _answer(
+            assess_physical_scale(
+                project,
+                trait=trait,
+                selection_dir=selection_dir,
+                reference_csv=reference_csv,
+                unit=unit,
+                reference_subject=reference_subject,
+            )
+        )
     except _refusals() as exc:
         return {"error": str(exc)}

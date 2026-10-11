@@ -13,7 +13,9 @@ import tcip_store as ts
 from tcip_annotation import Annotation, Point, bbox_of
 from tcip_annotation.state import box_derivable, polygonal, prediction_score
 from tcip_annotation.json_io import (
-    UnreadableLabelDocumentError, read_document_versioned, read_predictions,
+    UnreadableLabelDocumentError,
+    read_document_versioned,
+    read_predictions,
 )
 from tcip_annotation.viz import (
     render_canvas_state,
@@ -53,7 +55,9 @@ class DisplayRead(NamedTuple):
     native_size: tuple[int, int]
 
 
-def _clamped_rect(region: tuple[float, float, float, float], width: int, height: int) -> Rect:
+def _clamped_rect(
+    region: tuple[float, float, float, float], width: int, height: int
+) -> Rect:
     """An ``(x, y, w, h)`` region clamped to a non-empty rect inside a ``width`` x ``height``
     raster.
     """
@@ -64,12 +68,20 @@ def _clamped_rect(region: tuple[float, float, float, float], width: int, height:
 
     x0 = clamp(region[0], 0, width - 1)
     y0 = clamp(region[1], 0, height - 1)
-    return Rect(x0, y0,
-                clamp(x0 + region[2], x0 + 1, width), clamp(y0 + region[3], y0 + 1, height))
+    return Rect(
+        x0,
+        y0,
+        clamp(x0 + region[2], x0 + 1, width),
+        clamp(y0 + region[3], y0 + 1, height),
+    )
 
 
-def _read_for_display(raster: "RasterSource", *, max_edge: int = VIZ_ARTIFACT_MAX_EDGE,
-                      region: tuple[float, float, float, float] | None = None) -> DisplayRead:
+def _read_for_display(
+    raster: "RasterSource",
+    *,
+    max_edge: int = VIZ_ARTIFACT_MAX_EDGE,
+    region: tuple[float, float, float, float] | None = None,
+) -> DisplayRead:
     """Read the open ``raster`` as display pixels a renderer can draw on.
 
     The raster layer serves the region (an ``(x, y, w, h)`` rectangle in the raster's own grid, or
@@ -85,20 +97,36 @@ def _read_for_display(raster: "RasterSource", *, max_edge: int = VIZ_ARTIFACT_MA
     from tcip_mcp.pipelines.raster_source import Rect
 
     native = (int(raster.width), int(raster.height))
-    rect = (Rect(0, 0, raster.width, raster.height) if region is None
-            else _clamped_rect(region, raster.width, raster.height))
-    plan = plan_read(rect, raster.width, raster.height, raster.level_dims(),
-                     rect.width * rect.height, max_edge)
+    rect = (
+        Rect(0, 0, raster.width, raster.height)
+        if region is None
+        else _clamped_rect(region, raster.width, raster.height)
+    )
+    plan = plan_read(
+        rect,
+        raster.width,
+        raster.height,
+        raster.level_dims(),
+        rect.width * rect.height,
+        max_edge,
+    )
     pixels, _spec = planned_read(raster, rect, plan)
     bands = int(pixels.shape[-1])
     idxs = [0, 1, 2] if bands >= 3 else [0, 0, 0]
     plain = bands in (1, 3, 4) and pixels.dtype == "uint8"
-    return DisplayRead(composite_display_rgb(pixels, idxs, "none" if plain else "minmax"),
-                       rect, native)
+    return DisplayRead(
+        composite_display_rgb(pixels, idxs, "none" if plain else "minmax"),
+        rect,
+        native,
+    )
 
 
-def _display_of(header: "SourceHeader", *, max_edge: int = VIZ_ARTIFACT_MAX_EDGE,
-                region: tuple[float, float, float, float] | None = None) -> DisplayRead:
+def _display_of(
+    header: "SourceHeader",
+    *,
+    max_edge: int = VIZ_ARTIFACT_MAX_EDGE,
+    region: tuple[float, float, float, float] | None = None,
+) -> DisplayRead:
     """:func:`_read_for_display` of the source ``header`` describes, opened once at the image
     route's count (:meth:`~tcip_mcp.pipelines.raster_source.SourceHeader.open_at_route_count`)."""
     with header.open_at_route_count() as raster:
@@ -135,7 +163,11 @@ def _n_points(anns: list[Annotation]) -> int:
 
 
 def _point_note(n: int) -> str:
-    return f" ({n} point annotation(s) not drawn, no point renderer yet)" if n else ""
+    return (
+        f" ({n} point annotation(s) not drawn, no point renderer yet)"
+        if n
+        else ""
+    )
 
 
 def _legend_name(a: Annotation, *, scope) -> str:
@@ -149,28 +181,49 @@ def _legend_name(a: Annotation, *, scope) -> str:
 
     if scope is None or scope.subject is None:
         return a.subject
-    attributes = scope.admitted_for(DOCUMENT, "the rendered bucket's scope").attributes
+    attributes = scope.admitted_for(
+        DOCUMENT, "the rendered bucket's scope"
+    ).attributes
     ids = attribute_ids(a, scope.subject, attributes)
-    return " ".join([a.subject, *(attribute_values(ids, attributes).values() if ids else ())])
+    return " ".join(
+        [
+            a.subject,
+            *(attribute_values(ids, attributes).values() if ids else ()),
+        ]
+    )
 
 
-def _box_dict(a: Annotation, index: Callable[[str], int], *, scope=None) -> dict:
+def _box_dict(
+    a: Annotation, index: Callable[[str], int], *, scope=None
+) -> dict:
     geometry = a.geometry
-    assert box_derivable(geometry), \
+    assert box_derivable(geometry), (
         "every caller passes a _boxable-filtered or box-rendered annotation"
+    )
     b = bbox_of(geometry)
-    d = {"x1": b.x1, "y1": b.y1, "x2": b.x2, "y2": b.y2,
-        "class_id": index(_legend_name(a, scope=scope))}
+    d = {
+        "x1": b.x1,
+        "y1": b.y1,
+        "x2": b.x2,
+        "y2": b.y2,
+        "class_id": index(_legend_name(a, scope=scope)),
+    }
     if a.score is not None:
         d["score"] = a.score
     return d
 
 
-def _poly_dict(a: Annotation, index: Callable[[str], int], *, scope=None) -> dict:
+def _poly_dict(
+    a: Annotation, index: Callable[[str], int], *, scope=None
+) -> dict:
     geometry = a.geometry
-    assert polygonal(geometry), "called only for the segmentation task's own shapes"
-    return {"rings": [[[p[0], p[1]] for p in ring] for ring in geometry.rings],
-            "class_id": index(_legend_name(a, scope=scope))}
+    assert polygonal(geometry), (
+        "called only for the segmentation task's own shapes"
+    )
+    return {
+        "rings": [[[p[0], p[1]] for p in ring] for ring in geometry.rings],
+        "class_id": index(_legend_name(a, scope=scope)),
+    }
 
 
 def visualize(
@@ -221,20 +274,37 @@ def visualize(
     """
     path = str(located(path, project))
     if source == "annotations":
-        return _viz_annotations(project, path, task=task, class_names=class_names)
+        return _viz_annotations(
+            project, path, task=task, class_names=class_names
+        )
     if source in ("predictions", "comparison") and not bucket:
-        return {"error": f"source={source!r} requires bucket, the published bucket whose "
-                         "predictions to render."}
+        return {
+            "error": f"source={source!r} requires bucket, the published bucket whose "
+            "predictions to render."
+        }
     if source == "predictions":
         return _viz_predictions(
-            project, path, bucket, task=task, class_names=class_names,
-            conf_threshold=conf_threshold)
+            project,
+            path,
+            bucket,
+            task=task,
+            class_names=class_names,
+            conf_threshold=conf_threshold,
+        )
     if source == "comparison":
         return _viz_comparison(
-            project, path, bucket, task=task, iou_threshold=iou_threshold,
-            class_names=class_names, conf_threshold=conf_threshold)
+            project,
+            path,
+            bucket,
+            task=task,
+            iou_threshold=iou_threshold,
+            class_names=class_names,
+            conf_threshold=conf_threshold,
+        )
     if source == "dataset":
-        return _viz_dataset_sample(project, path, n=n, task=task, class_names=class_names)
+        return _viz_dataset_sample(
+            project, path, n=n, task=task, class_names=class_names
+        )
     return {
         "error": f"Unknown source '{source}'. "
         "Use 'annotations', 'predictions', 'comparison', or 'dataset'."
@@ -261,12 +331,19 @@ def _viz_annotations(
         return {"error": f"Image not found: {image_path}"}
 
     from tcip_mcp.dataset_layout import label_key_of
-    from tcip_mcp.pipelines.image_utils import resolve_image_path, source_path_of
+    from tcip_mcp.pipelines.image_utils import (
+        resolve_image_path,
+        source_path_of,
+    )
 
     try:
         source = resolve_image_path(image_path)
         anns = _labels_at(label_key_of(source_path_of(source)))
-    except (UnreadableLabelDocumentError, ValueError, FileNotFoundError) as exc:
+    except (
+        UnreadableLabelDocumentError,
+        ValueError,
+        FileNotFoundError,
+    ) as exc:
         return {"error": str(exc)}
     if anns is None:
         return {"error": f"No labels found for {img.stem}"}
@@ -276,21 +353,35 @@ def _viz_annotations(
     read = _display_of(SourceHeader(source))
     if task == "detect":
         shapes = _boxable(anns)
-        out = render_detections(read.pixels, [_box_dict(a, index) for a in shapes],
-                                native_size=read.native_size, class_names=_name_map(idx),
-                                output_path=viz_output_path(project, "detections"))
+        out = render_detections(
+            read.pixels,
+            [_box_dict(a, index) for a in shapes],
+            native_size=read.native_size,
+            class_names=_name_map(idx),
+            output_path=viz_output_path(project, "detections"),
+        )
         summary = f"Rendered {len(shapes)} detections on {img.name}"
         if shapes:
             from collections import Counter
+
             counts = Counter(a.subject for a in shapes)
-            summary += ": " + ", ".join(f"{v} {k}" for k, v in counts.most_common())
+            summary += ": " + ", ".join(
+                f"{v} {k}" for k, v in counts.most_common()
+            )
         summary += _point_note(n_points)
     else:
         shapes = [a for a in anns if polygonal(a.geometry)]
-        out = render_segmentations(read.pixels, [_poly_dict(a, index) for a in shapes],
-                                   native_size=read.native_size, class_names=_name_map(idx),
-                                   output_path=viz_output_path(project, "segmentations"))
-        summary = f"Rendered {len(shapes)} segmentation masks on {img.name}" + _point_note(n_points)
+        out = render_segmentations(
+            read.pixels,
+            [_poly_dict(a, index) for a in shapes],
+            native_size=read.native_size,
+            class_names=_name_map(idx),
+            output_path=viz_output_path(project, "segmentations"),
+        )
+        summary = (
+            f"Rendered {len(shapes)} segmentation masks on {img.name}"
+            + _point_note(n_points)
+        )
 
     return {
         "image_path": out,
@@ -320,7 +411,10 @@ def _viz_predictions(
     """
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.dataset_layout import parse_image_path
-    from tcip_mcp.pipelines.image_utils import resolve_image_path, source_path_of
+    from tcip_mcp.pipelines.image_utils import (
+        resolve_image_path,
+        source_path_of,
+    )
 
     img = Path(image_path)
     if not img.is_file():
@@ -332,9 +426,15 @@ def _viz_predictions(
         found = read_bucket(root, bucket)
         pred_key, scope = found.document_key(stem), found.scope
         if pred_key is None:
-            return {"error": f"No predictions found for {stem} in bucket {bucket!r}"}
+            return {
+                "error": f"No predictions found for {stem} in bucket {bucket!r}"
+            }
         preds = read_predictions(pred_key).annotations
-    except (UnreadableLabelDocumentError, ValueError, FileNotFoundError) as exc:
+    except (
+        UnreadableLabelDocumentError,
+        ValueError,
+        FileNotFoundError,
+    ) as exc:
         return {"error": str(exc)}
     preds = [a for a in preds if prediction_score(a) >= conf_threshold]
     idx, index = _subject_indexer()
@@ -344,17 +444,29 @@ def _viz_predictions(
     if task == "detect":
         shapes = _boxable(preds)
         out = render_detections(
-            read.pixels, [_box_dict(a, index, scope=scope) for a in shapes],
-            native_size=read.native_size, class_names=_name_map(idx),
-            output_path=viz_output_path(project, "detections"))
-        summary = f"Rendered {len(shapes)} predictions on {img.name}" + _point_note(n_points)
+            read.pixels,
+            [_box_dict(a, index, scope=scope) for a in shapes],
+            native_size=read.native_size,
+            class_names=_name_map(idx),
+            output_path=viz_output_path(project, "detections"),
+        )
+        summary = (
+            f"Rendered {len(shapes)} predictions on {img.name}"
+            + _point_note(n_points)
+        )
     else:
         shapes = [a for a in preds if polygonal(a.geometry)]
         out = render_segmentations(
-            read.pixels, [_poly_dict(a, index, scope=scope) for a in shapes],
-            native_size=read.native_size, class_names=_name_map(idx),
-            output_path=viz_output_path(project, "segmentations"))
-        summary = f"Rendered {len(shapes)} prediction masks on {img.name}" + _point_note(n_points)
+            read.pixels,
+            [_poly_dict(a, index, scope=scope) for a in shapes],
+            native_size=read.native_size,
+            class_names=_name_map(idx),
+            output_path=viz_output_path(project, "segmentations"),
+        )
+        summary = (
+            f"Rendered {len(shapes)} prediction masks on {img.name}"
+            + _point_note(n_points)
+        )
 
     return {
         "image_path": out,
@@ -385,7 +497,10 @@ def _viz_comparison(
     """
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.dataset_layout import parse_image_path
-    from tcip_mcp.pipelines.image_utils import resolve_image_path, source_path_of
+    from tcip_mcp.pipelines.image_utils import (
+        resolve_image_path,
+        source_path_of,
+    )
     from tcip_mcp.pipelines.training.evaluation import score_bucket
 
     img = Path(image_path)
@@ -395,33 +510,62 @@ def _viz_comparison(
     idx, index = _subject_indexer()
     try:
         source = resolve_image_path(image_path)
-        found = read_bucket(parse_image_path(source_path_of(source))[0], bucket)
-        (one,), _metrics = score_bucket([source], found, iou_threshold=iou_threshold,
-                                        conf_threshold=conf_threshold, trait=None)
-    except (UnreadableLabelDocumentError, ValueError, FileNotFoundError) as exc:
+        found = read_bucket(
+            parse_image_path(source_path_of(source))[0], bucket
+        )
+        (one,), _metrics = score_bucket(
+            [source],
+            found,
+            iou_threshold=iou_threshold,
+            conf_threshold=conf_threshold,
+            trait=None,
+        )
+    except (
+        UnreadableLabelDocumentError,
+        ValueError,
+        FileNotFoundError,
+    ) as exc:
         return {"error": str(exc)}
     preds_all = one.preds or []
     gt_dicts = [_box_dict(a, index) for a in _boxable(one.gt)]
-    pred_dicts = [_box_dict(a, index, scope=found.scope) for a in _boxable(preds_all)]
+    pred_dicts = [
+        _box_dict(a, index, scope=found.scope) for a in _boxable(preds_all)
+    ]
     # The matching indexes the whole documents; the renderer draws their boxable entries.
-    gpos = {i: k for k, i in enumerate(
-        i for i, a in enumerate(one.gt) if box_derivable(a.geometry))}
-    ppos = {i: k for k, i in enumerate(
-        i for i, a in enumerate(preds_all) if box_derivable(a.geometry))}
+    gpos = {
+        i: k
+        for k, i in enumerate(
+            i for i, a in enumerate(one.gt) if box_derivable(a.geometry)
+        )
+    }
+    ppos = {
+        i: k
+        for k, i in enumerate(
+            i for i, a in enumerate(preds_all) if box_derivable(a.geometry)
+        )
+    }
     tp_matches = [(gpos[g], ppos[p]) for g, p in one.matching.pairs]
     tp, fp, fn = one.matching.counts
 
     read = _display_of(one.header)
-    out = render_comparison(read.pixels, gt_dicts, pred_dicts, native_size=read.native_size,
-                            matches=tp_matches, class_names=_name_map(idx),
-                            output_path=viz_output_path(project, "comparison"))
+    out = render_comparison(
+        read.pixels,
+        gt_dicts,
+        pred_dicts,
+        native_size=read.native_size,
+        matches=tp_matches,
+        class_names=_name_map(idx),
+        output_path=viz_output_path(project, "comparison"),
+    )
 
     return {
         "image_path": out,
         "summary": f"GT={len(gt_dicts)}, Pred={len(pred_dicts)}, TP={tp}, FP={fp}, FN={fn}",
         "gt_count": len(gt_dicts),
         "pred_count": len(pred_dicts),
-        "tp": tp, "fp": fp, "fn": fn,
+        "tp": tp,
+        "fp": fp,
+        "fn": fn,
     }
 
 
@@ -456,19 +600,30 @@ def _ranked(bucket: Bucket, top_k: int) -> tuple[dict, dict[str, tuple]]:
     from tcip_annotation.json_io import detection_annotations
 
     from tcip_mcp.dataset_layout import capture_label_keys, image_dir
-    from tcip_mcp.pipelines.image_utils import resolve_image_paths, source_path_of
+    from tcip_mcp.pipelines.image_utils import (
+        resolve_image_paths,
+        source_path_of,
+    )
     from tcip_mcp.pipelines.training.evaluation import bucket_reads
 
     capture = bucket.date
     if capture is None:
-        raise ValueError(f"bucket {bucket.name!r} records no capture, so no label document "
-                         "answers for its images.")
-    read = bucket_reads(resolve_image_paths(
-        image_dir(bucket.root, capture) / name for _stem, name in sorted(bucket.documents.items())),
-        bucket)
+        raise ValueError(
+            f"bucket {bucket.name!r} records no capture, so no label document "
+            "answers for its images."
+        )
+    read = bucket_reads(
+        resolve_image_paths(
+            image_dir(bucket.root, capture) / name
+            for _stem, name in sorted(bucket.documents.items())
+        ),
+        bucket,
+    )
     # Every image is one of the bucket's own documents, so each carries its predictions.
-    by_stem = {Path(source_path_of(src)).stem: (src, gt, document.annotations)
-               for src, gt, document in read}
+    by_stem = {
+        Path(source_path_of(src)).stem: (src, gt, document.annotations)
+        for src, gt, document in read
+    }
     # Both sides counted as a count counts: objects with a box, a crowd region and a Point none.
     scores: list[tuple[str, float]] = []
     for stem, (_img, gt, predicted) in by_stem.items():
@@ -481,7 +636,9 @@ def _ranked(bucket: Bucket, top_k: int) -> tuple[dict, dict[str, tuple]]:
         # Simple error heuristic: |pred - gt| + missed + extra + low confidence
         missed = max(0, n_gt - n_pred)
         extra = max(0, n_pred - n_gt)
-        avg_conf = sum(map(prediction_score, preds)) / n_pred if n_pred else 0.0
+        avg_conf = (
+            sum(map(prediction_score, preds)) / n_pred if n_pred else 0.0
+        )
 
         # Higher score = worse prediction
         error_score = missed * 2.0 + extra * 1.0 + (1.0 - avg_conf)
@@ -492,10 +649,15 @@ def _ranked(bucket: Bucket, top_k: int) -> tuple[dict, dict[str, tuple]]:
 
     return {
         "capture": capture,
-        "worst_images": [{"stem": s, "error_score": round(sc, 3)} for s, sc in worst],
+        "worst_images": [
+            {"stem": s, "error_score": round(sc, 3)} for s, sc in worst
+        ],
         "total_evaluated": len(scores),
-        "not_predicted": [key.parts[-1] for key in capture_label_keys(bucket.root, capture)
-                          if key.parts[-1] not in bucket.documents],
+        "not_predicted": [
+            key.parts[-1]
+            for key in capture_label_keys(bucket.root, capture)
+            if key.parts[-1] not in bucket.documents
+        ],
     }, by_stem
 
 
@@ -527,8 +689,14 @@ def render_failure_cases(
     from tcip_mcp.buckets import read_bucket
 
     try:
-        worst, by_stem = _ranked(read_bucket(located(dataset_root, project), bucket), top_k)
-    except (UnreadableLabelDocumentError, ValueError, FileNotFoundError) as exc:
+        worst, by_stem = _ranked(
+            read_bucket(located(dataset_root, project), bucket), top_k
+        )
+    except (
+        UnreadableLabelDocumentError,
+        ValueError,
+        FileNotFoundError,
+    ) as exc:
         return {"error": str(exc)}
 
     worst_items = worst.get("worst_images", [])
@@ -547,16 +715,26 @@ def render_failure_cases(
         pred_dicts = [_box_dict(a, index) for a in _boxable(preds)]
 
         out = viz_output_path(project, f"failure_{len(case_paths):03d}_{stem}")
-        render_comparison(read.pixels, gt_dicts, pred_dicts, native_size=read.native_size,
-                          class_names=_name_map(idx), output_path=out)
+        render_comparison(
+            read.pixels,
+            gt_dicts,
+            pred_dicts,
+            native_size=read.native_size,
+            class_names=_name_map(idx),
+            output_path=out,
+        )
         case_paths.append(out)
         titles.append(f"{stem} (err={item['error_score']:.1f})")
 
     # Render grid of all failure cases
     grid_path = None
     if case_paths:
-        grid_path = render_grid(case_paths, titles=titles, cols=min(4, len(case_paths)),
-                                output_path=viz_output_path(project, "failures"))
+        grid_path = render_grid(
+            case_paths,
+            titles=titles,
+            cols=min(4, len(case_paths)),
+            output_path=viz_output_path(project, "failures"),
+        )
 
     return {
         "image_path": grid_path,
@@ -577,9 +755,16 @@ def _viz_dataset_sample(
     class_names: str = "",
 ) -> dict:
     """Render a grid of random annotated dataset samples."""
-    from tcip_mcp.dataset_layout import image_dir, image_root, label_key, list_dates
+    from tcip_mcp.dataset_layout import (
+        image_dir,
+        image_root,
+        label_key,
+        list_dates,
+    )
     from tcip_mcp.pipelines.image_utils import (
-        BandGroupIncompleteError, list_logical_images, refuse_incomplete_band_group,
+        BandGroupIncompleteError,
+        list_logical_images,
+        refuse_incomplete_band_group,
     )
 
     root = Path(folder_path)
@@ -588,8 +773,13 @@ def _viz_dataset_sample(
         return {"error": f"Images directory not found: {images_dir}"}
 
     # Every logical image of every capture, a grouped capture as one entry.
-    all_images = [(capture, stem, src) for capture in list_dates(root)
-                  for stem, src in sorted(list_logical_images(image_dir(root, capture)).items())]
+    all_images = [
+        (capture, stem, src)
+        for capture in list_dates(root)
+        for stem, src in sorted(
+            list_logical_images(image_dir(root, capture)).items()
+        )
+    ]
     if not all_images:
         return {"error": "No images found in dataset"}
 
@@ -610,27 +800,42 @@ def _viz_dataset_sample(
             idx, index = _subject_indexer()
             if task == "detect":
                 shapes = _boxable(anns)
-                out = render_detections(read.pixels, [_box_dict(a, index) for a in shapes],
-                                        native_size=read.native_size, class_names=_name_map(idx),
-                                        output_path=viz_output_path(project, "detections"))
+                out = render_detections(
+                    read.pixels,
+                    [_box_dict(a, index) for a in shapes],
+                    native_size=read.native_size,
+                    class_names=_name_map(idx),
+                    output_path=viz_output_path(project, "detections"),
+                )
             else:
                 shapes = [a for a in anns if polygonal(a.geometry)]
-                out = render_segmentations(read.pixels, [_poly_dict(a, index) for a in shapes],
-                                           native_size=read.native_size,
-                                           class_names=_name_map(idx),
-                                           output_path=viz_output_path(project, "segmentations"))
+                out = render_segmentations(
+                    read.pixels,
+                    [_poly_dict(a, index) for a in shapes],
+                    native_size=read.native_size,
+                    class_names=_name_map(idx),
+                    output_path=viz_output_path(project, "segmentations"),
+                )
             titles.append(f"{stem} ({len(shapes)})")
         else:
             # An unlabeled sample renders too, with nothing drawn on it: the grid tiles rendered
             # artifacts, so every cell has to be one.
-            out = render_detections(read.pixels, [], native_size=read.native_size,
-                                    output_path=viz_output_path(project, "detections"))
+            out = render_detections(
+                read.pixels,
+                [],
+                native_size=read.native_size,
+                output_path=viz_output_path(project, "detections"),
+            )
             titles.append(f"{stem} (no labels)")
 
         rendered_paths.append(out)
 
-    grid_path = render_grid(rendered_paths, titles=titles, cols=min(4, len(rendered_paths)),
-                            output_path=viz_output_path(project, "grid"))
+    grid_path = render_grid(
+        rendered_paths,
+        titles=titles,
+        cols=min(4, len(rendered_paths)),
+        output_path=viz_output_path(project, "grid"),
+    )
 
     return {
         "image_path": grid_path,
@@ -677,7 +882,10 @@ def capture_live_canvas(
     import time as _time
 
     from tcip_mcp.web_client import (
-        PANEL_EVENT_CANVAS_STATE_REQUEST, canvas_geometry_key, canvas_meta_key, post_panel_event,
+        PANEL_EVENT_CANVAS_STATE_REQUEST,
+        canvas_geometry_key,
+        canvas_meta_key,
+        post_panel_event,
     )
 
     project = bound.root
@@ -689,57 +897,84 @@ def capture_live_canvas(
     refreshed = False
     ping: dict = {}
     if refresh:
-        ping = post_panel_event(bound, "app", PANEL_EVENT_CANVAS_STATE_REQUEST, {})
+        ping = post_panel_event(
+            bound, "app", PANEL_EVENT_CANVAS_STATE_REQUEST, {}
+        )
         if ping.get("delivered"):
             for _ in range(12):  # ~2.4s for the GUI's flush to land
                 _time.sleep(0.2)
                 cur = ts.read(meta_doc, default=None)
-                if cur and (since is None or _received_at(cur, "canvas_live") > since):
+                if cur and (
+                    since is None or _received_at(cur, "canvas_live") > since
+                ):
                     refreshed = True
                     break
 
     state = ts.read(meta_doc, default=None)
     if state is None:
-        return {"error": "No canvas state has been pushed for this project; the GUI pushes its "
-                         "canvas only while it has this project open.",
-                "refresh_answer": ping}
+        return {
+            "error": "No canvas state has been pushed for this project; the GUI pushes its "
+            "canvas only while it has this project open.",
+            "refresh_answer": ping,
+        }
 
     from tcip_mcp.pipelines.image_utils import resolve_image_path
     from tcip_mcp.registry_paths import resolved_registry_path
 
     src_image = str(resolved_registry_path(project, state["image_path"]))
     if not Path(src_image).is_file():
-        return {"error": f"Canvas state references a missing image: {src_image}"}
+        return {
+            "error": f"Canvas state references a missing image: {src_image}"
+        }
 
     # Geometry is valid only when its identity matches the meta document: a heartbeat for a
     # different image/tab means the stored shapes are stale and must not render.
     sdoc = ts.read(shapes_doc, default=None) or {}
-    shapes_valid = (
-        sdoc.get("image_path") == state.get("image_path") and sdoc.get("tab") == state.get("tab")
-    )
+    shapes_valid = sdoc.get("image_path") == state.get(
+        "image_path"
+    ) and sdoc.get("tab") == state.get("tab")
     shapes: list = (sdoc.get("shapes") or []) if shapes_valid else []
     viewport = state.get("viewport")
     # Read exactly the region being rendered: the human's viewport is a rectangle in the
     # image's own grid, so a raster far too large to decode whole is still capturable.
     region = None
-    if crop_to_viewport and viewport and viewport.get("w") and viewport.get("h"):
-        region = (float(viewport.get("x", 0)), float(viewport.get("y", 0)),
-                  float(viewport["w"]), float(viewport["h"]))
-    read = _display_of(SourceHeader(resolve_image_path(src_image)), max_edge=max_edge,
-                       region=region)
+    if (
+        crop_to_viewport
+        and viewport
+        and viewport.get("w")
+        and viewport.get("h")
+    ):
+        region = (
+            float(viewport.get("x", 0)),
+            float(viewport.get("y", 0)),
+            float(viewport["w"]),
+            float(viewport["h"]),
+        )
+    read = _display_of(
+        SourceHeader(resolve_image_path(src_image)),
+        max_edge=max_edge,
+        region=region,
+    )
     try:
-        out = render_canvas_state(read.pixels, shapes,
-                                  region=(read.rect.x0, read.rect.y0, read.rect.x1, read.rect.y1),
-                                  output_path=viz_output_path(project, "canvas", suffix=".jpg"))
+        out = render_canvas_state(
+            read.pixels,
+            shapes,
+            region=(read.rect.x0, read.rect.y0, read.rect.x1, read.rect.y1),
+            output_path=viz_output_path(project, "canvas", suffix=".jpg"),
+        )
     except ValueError as exc:
-        return {"error": f"the pushed canvas state for {src_image} will not render: {exc}"}
+        return {
+            "error": f"the pushed canvas state for {src_image} will not render: {exc}"
+        }
     ping_delivered = bool(ping.get("delivered"))
 
     now = datetime.now(timezone.utc)
     from collections import Counter
 
     tag_counts = dict(Counter(str(s.get("tag") or "untagged") for s in shapes))
-    creator_counts = dict(Counter(str(s["created_by"]) for s in shapes if s.get("created_by")))
+    creator_counts = dict(
+        Counter(str(s["created_by"]) for s in shapes if s.get("created_by"))
+    )
 
     age = round((now - _received_at(state, "canvas_live")).total_seconds(), 1)
     if refreshed or age < 5.0:
@@ -753,7 +988,9 @@ def capture_live_canvas(
             f"({len(shapes)} shapes, {age}s old; not live: the GUI did not answer the refresh "
             "ping, see refresh_answer)."
         )
-    summary += " Read image_path with your own image-capable read tool to see it."
+    summary += (
+        " Read image_path with your own image-capable read tool to see it."
+    )
     return {
         "image_path": out,
         "source_image": src_image,
@@ -770,8 +1007,13 @@ def capture_live_canvas(
         "shape_counts_by_tag": tag_counts,
         "shape_counts_by_creator": creator_counts,
         "state_age_seconds": age,
-        "shapes_age_seconds": (round((now - _received_at(sdoc, "canvas_shapes")).total_seconds(), 1)
-                               if shapes_valid else None),
+        "shapes_age_seconds": (
+            round(
+                (now - _received_at(sdoc, "canvas_shapes")).total_seconds(), 1
+            )
+            if shapes_valid
+            else None
+        ),
         # True when no valid geometry exists for this image/tab yet (heartbeat-only or stale).
         "shapes_missing": not shapes_valid,
         # Did a fresh push land after our ping? False + delivered ping = GUI not listening here.
@@ -828,14 +1070,18 @@ def overlay_reference_grid(
         cells = reference_cells(w, h, tile_size, overlap, clamp=True)
     except ValueError as e:
         return {"error": str(e)}
-    out = render_grid_overlay(display.pixels, cells, native_size=(w, h),
-                              output_path=viz_output_path(project, "grid_overlay"))
+    out = render_grid_overlay(
+        display.pixels,
+        cells,
+        native_size=(w, h),
+        output_path=viz_output_path(project, "grid_overlay"),
+    )
 
     geometry = grid_geometry(w, h, tile_size, overlap)
     return {
         "image_path": out,
         "summary": f"Reference grid ({geometry['cols']}x{geometry['rows']}, tile_size "
-                   f"{tile_size}) rendered on {img.name}. Reference cells like 'A1' "
-                   f"(top-left) to '{cells[-1].name}' (bottom-right).",
+        f"{tile_size}) rendered on {img.name}. Reference cells like 'A1' "
+        f"(top-left) to '{cells[-1].name}' (bottom-right).",
         **geometry,
     }

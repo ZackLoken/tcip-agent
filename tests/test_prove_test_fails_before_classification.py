@@ -29,7 +29,9 @@ EXIT = {"GUARDS": 0, "VACUOUS": 1, "INDETERMINATE": 2, "REFUSED": 3}
 
 
 def _git(repo: Path, *args: str) -> str:
-    proc = subprocess.run(["git", *args], cwd=str(repo), capture_output=True, text=True)
+    proc = subprocess.run(
+        ["git", *args], cwd=str(repo), capture_output=True, text=True
+    )
     assert proc.returncode == 0, proc.stderr
     return proc.stdout
 
@@ -57,11 +59,21 @@ def _commit_all(repo: Path, message: str) -> str:
     return _git(repo, "rev-parse", "HEAD").strip()
 
 
-def _run(repo: Path, test_file: str, baseline: str) -> subprocess.CompletedProcess:
+def _run(
+    repo: Path, test_file: str, baseline: str
+) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, str(repo / "tools" / "prove_test_fails_before.py"),
-         test_file, "--baseline", baseline],
-        cwd=str(repo), capture_output=True, text=True, timeout=120,
+        [
+            sys.executable,
+            str(repo / "tools" / "prove_test_fails_before.py"),
+            test_file,
+            "--baseline",
+            baseline,
+        ],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
 
 
@@ -69,22 +81,28 @@ def test_a_fixture_shaped_type_error_in_the_test_body_is_refused(tmp_path):
     """A constructor called with a keyword the baseline does not accept raises TypeError at the
     call site, inside the test file itself: the code under test was never reached."""
     repo = _scratch_repo(tmp_path)
-    _write(repo / "widgets.py",
-           "class Widget:\n"
-           "    def __init__(self, size):\n"
-           "        self.size = size\n")
+    _write(
+        repo / "widgets.py",
+        "class Widget:\n"
+        "    def __init__(self, size):\n"
+        "        self.size = size\n",
+    )
     baseline = _commit_all(repo, "widget carries no color")
 
-    _write(repo / "widgets.py",
-           "class Widget:\n"
-           "    def __init__(self, size, color=None):\n"
-           "        self.size = size\n"
-           "        self.color = color\n")
-    _write(repo / "tests" / "test_widgets.py",
-           "def test_widget_carries_a_color():\n"
-           "    from widgets import Widget\n"
-           "    w = Widget(size=3, color='red')\n"
-           "    assert w.color == 'red'\n")
+    _write(
+        repo / "widgets.py",
+        "class Widget:\n"
+        "    def __init__(self, size, color=None):\n"
+        "        self.size = size\n"
+        "        self.color = color\n",
+    )
+    _write(
+        repo / "tests" / "test_widgets.py",
+        "def test_widget_carries_a_color():\n"
+        "    from widgets import Widget\n"
+        "    w = Widget(size=3, color='red')\n"
+        "    assert w.color == 'red'\n",
+    )
     _commit_all(repo, "widget carries a color")
 
     result = _run(repo, "tests/test_widgets.py", baseline)
@@ -100,29 +118,35 @@ def test_a_setup_fixture_error_is_refused(tmp_path):
     """A fixture that fails during setup never lets the test body run, so its failure carries the
     same weight as any other fixture-shaped error: a run to redo, not a guard."""
     repo = _scratch_repo(tmp_path)
-    _write(repo / "widgets.py",
-           "class Widget:\n"
-           "    def __init__(self, size):\n"
-           "        self.size = size\n")
+    _write(
+        repo / "widgets.py",
+        "class Widget:\n"
+        "    def __init__(self, size):\n"
+        "        self.size = size\n",
+    )
     baseline = _commit_all(repo, "widget carries no color")
 
-    _write(repo / "widgets.py",
-           "class Widget:\n"
-           "    def __init__(self, size, color=None):\n"
-           "        self.size = size\n"
-           "        self.color = color\n")
-    _write(repo / "tests" / "test_widgets.py",
-           "import pytest\n"
-           "\n"
-           "\n"
-           "@pytest.fixture\n"
-           "def thing():\n"
-           "    from widgets import Widget\n"
-           "    return Widget(size=3, color='red')\n"
-           "\n"
-           "\n"
-           "def test_uses_thing(thing):\n"
-           "    assert thing.color == 'red'\n")
+    _write(
+        repo / "widgets.py",
+        "class Widget:\n"
+        "    def __init__(self, size, color=None):\n"
+        "        self.size = size\n"
+        "        self.color = color\n",
+    )
+    _write(
+        repo / "tests" / "test_widgets.py",
+        "import pytest\n"
+        "\n"
+        "\n"
+        "@pytest.fixture\n"
+        "def thing():\n"
+        "    from widgets import Widget\n"
+        "    return Widget(size=3, color='red')\n"
+        "\n"
+        "\n"
+        "def test_uses_thing(thing):\n"
+        "    assert thing.color == 'red'\n",
+    )
     _commit_all(repo, "widget carries a color")
 
     result = _run(repo, "tests/test_widgets.py", baseline)
@@ -142,10 +166,12 @@ def test_an_assertion_failure_guards(tmp_path):
     baseline = _commit_all(repo, "double is a no-op")
 
     _write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
-    _write(repo / "tests" / "test_widgets.py",
-           "def test_double_doubles():\n"
-           "    from widgets import double\n"
-           "    assert double(3) == 6\n")
+    _write(
+        repo / "tests" / "test_widgets.py",
+        "def test_double_doubles():\n"
+        "    from widgets import double\n"
+        "    assert double(3) == 6\n",
+    )
     _commit_all(repo, "double actually doubles")
 
     result = _run(repo, "tests/test_widgets.py", baseline)
@@ -161,22 +187,28 @@ def test_a_value_error_raised_from_code_under_test_guards(tmp_path):
     Admits-valid-work coverage rather than a guard for any defect fixed here: a crash frame
     outside tests/ already scored GUARDS under the classification this file's other cases fix."""
     repo = _scratch_repo(tmp_path)
-    _write(repo / "widgets.py",
-           "def normalize(value):\n"
-           "    if value <= 0:\n"
-           "        raise ValueError('must be positive')\n"
-           "    return value\n")
+    _write(
+        repo / "widgets.py",
+        "def normalize(value):\n"
+        "    if value <= 0:\n"
+        "        raise ValueError('must be positive')\n"
+        "    return value\n",
+    )
     baseline = _commit_all(repo, "normalize wrongly rejects zero")
 
-    _write(repo / "widgets.py",
-           "def normalize(value):\n"
-           "    if value < 0:\n"
-           "        raise ValueError('must be positive')\n"
-           "    return value\n")
-    _write(repo / "tests" / "test_widgets.py",
-           "def test_normalize_permits_zero():\n"
-           "    from widgets import normalize\n"
-           "    assert normalize(0) == 0\n")
+    _write(
+        repo / "widgets.py",
+        "def normalize(value):\n"
+        "    if value < 0:\n"
+        "        raise ValueError('must be positive')\n"
+        "    return value\n",
+    )
+    _write(
+        repo / "tests" / "test_widgets.py",
+        "def test_normalize_permits_zero():\n"
+        "    from widgets import normalize\n"
+        "    assert normalize(0) == 0\n",
+    )
     _commit_all(repo, "normalize permits zero")
 
     result = _run(repo, "tests/test_widgets.py", baseline)
@@ -194,30 +226,36 @@ def test_a_fixture_calling_package_code_that_raises_is_refused(tmp_path):
     as the code under test raising. ``_failure_kind`` reads the failure's phase, so this scores
     REFUSED, not GUARDS."""
     repo = _scratch_repo(tmp_path)
-    _write(repo / "widgets.py",
-           "def make_widget():\n"
-           "    raise ValueError('widgets are not ready yet')\n")
+    _write(
+        repo / "widgets.py",
+        "def make_widget():\n"
+        "    raise ValueError('widgets are not ready yet')\n",
+    )
     baseline = _commit_all(repo, "widgets are not buildable")
 
-    _write(repo / "widgets.py",
-           "class Widget:\n"
-           "    pass\n"
-           "\n"
-           "\n"
-           "def make_widget():\n"
-           "    return Widget()\n")
-    _write(repo / "tests" / "test_widgets.py",
-           "import pytest\n"
-           "\n"
-           "\n"
-           "@pytest.fixture\n"
-           "def widget():\n"
-           "    from widgets import make_widget\n"
-           "    return make_widget()\n"
-           "\n"
-           "\n"
-           "def test_widget_builds(widget):\n"
-           "    assert widget is not None\n")
+    _write(
+        repo / "widgets.py",
+        "class Widget:\n"
+        "    pass\n"
+        "\n"
+        "\n"
+        "def make_widget():\n"
+        "    return Widget()\n",
+    )
+    _write(
+        repo / "tests" / "test_widgets.py",
+        "import pytest\n"
+        "\n"
+        "\n"
+        "@pytest.fixture\n"
+        "def widget():\n"
+        "    from widgets import make_widget\n"
+        "    return make_widget()\n"
+        "\n"
+        "\n"
+        "def test_widget_builds(widget):\n"
+        "    assert widget is not None\n",
+    )
     _commit_all(repo, "widgets are buildable")
 
     result = _run(repo, "tests/test_widgets.py", baseline)
@@ -233,13 +271,22 @@ def test_a_fixture_calling_package_code_that_raises_is_refused(tmp_path):
 
 def _snapshot(repo: Path, test_file: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, str(repo / "tools" / "prove_test_fails_before.py"),
-         test_file, "--baseline-from-working-tree"],
-        cwd=str(repo), capture_output=True, text=True, timeout=60,
+        [
+            sys.executable,
+            str(repo / "tools" / "prove_test_fails_before.py"),
+            test_file,
+            "--baseline-from-working-tree",
+        ],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
 
 
-def test_baseline_from_working_tree_captures_tracked_and_untracked_changes_untouched(tmp_path):
+def test_baseline_from_working_tree_captures_tracked_and_untracked_changes_untouched(
+    tmp_path,
+):
     """A tracked modification and an untracked file both land in the printed snapshot's tree,
     and the working tree, the index, and the stash list are all unchanged afterward."""
     repo = _scratch_repo(tmp_path)
@@ -277,30 +324,45 @@ def test_baseline_from_working_tree_excludes_ignored_files(tmp_path):
     assert "ignored.txt" not in listing
 
 
-def test_baseline_from_working_tree_together_with_baseline_is_refused(tmp_path):
+def test_baseline_from_working_tree_together_with_baseline_is_refused(
+    tmp_path,
+):
     repo = _scratch_repo(tmp_path)
     _write(repo / "widgets.py", "def double(x):\n    return x\n")
     baseline = _commit_all(repo, "double is a no-op")
 
     proc = subprocess.run(
-        [sys.executable, str(repo / "tools" / "prove_test_fails_before.py"),
-         "tests/test_widgets.py", "--baseline-from-working-tree", "--baseline", baseline],
-        cwd=str(repo), capture_output=True, text=True, timeout=60,
+        [
+            sys.executable,
+            str(repo / "tools" / "prove_test_fails_before.py"),
+            "tests/test_widgets.py",
+            "--baseline-from-working-tree",
+            "--baseline",
+            baseline,
+        ],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
     assert proc.returncode != 0
 
 
-def test_the_two_step_flow_snapshot_then_fix_then_baseline_reports_guards(tmp_path):
+def test_the_two_step_flow_snapshot_then_fix_then_baseline_reports_guards(
+    tmp_path,
+):
     """The honest shape: snapshot before the fix, apply the fix, then run normally with
     --baseline <the printed hash>, exactly as an operator would."""
     repo = _scratch_repo(tmp_path)
     _write(repo / "widgets.py", "def double(x):\n    return x\n")
     _commit_all(repo, "double is a no-op")
 
-    _write(repo / "tests" / "test_widgets.py",
-           "def test_double_doubles():\n"
-           "    from widgets import double\n"
-           "    assert double(3) == 6\n")
+    _write(
+        repo / "tests" / "test_widgets.py",
+        "def test_double_doubles():\n"
+        "    from widgets import double\n"
+        "    assert double(3) == 6\n",
+    )
 
     proc = _snapshot(repo, "tests/test_widgets.py")
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -313,29 +375,37 @@ def test_the_two_step_flow_snapshot_then_fix_then_baseline_reports_guards(tmp_pa
     assert "GUARDS" in result.stdout
 
 
-def test_a_bare_file_not_found_error_outside_the_assertion_is_refused_not_guards(tmp_path):
+def test_a_bare_file_not_found_error_outside_the_assertion_is_refused_not_guards(
+    tmp_path,
+):
     """A helper module outside tests/ opens a data file the baseline commit does not carry (the
     tests/ overlay cannot supply it, living as it does outside tests/); the crash frame sits in
     that helper, outside tests/, so the code under test was never reached and this scores
     REFUSED, never GUARDS."""
     repo = _scratch_repo(tmp_path)
     _write(repo / "widgets.py", "def double(x):\n    return x\n")
-    _write(repo / "loader.py",
-           "def load_expected():\n"
-           "    with open('data/expected.txt') as f:\n"
-           "        return int(f.read())\n")
+    _write(
+        repo / "loader.py",
+        "def load_expected():\n"
+        "    with open('data/expected.txt') as f:\n"
+        "        return int(f.read())\n",
+    )
     baseline = _commit_all(repo, "double is a no-op, no recorded value yet")
 
     (repo / "data").mkdir()
     _write(repo / "data" / "expected.txt", "6\n")
     _write(repo / "widgets.py", "def double(x):\n    return x * 2\n")
-    _write(repo / "tests" / "test_widgets.py",
-           "def test_double_matches_the_recorded_value():\n"
-           "    from widgets import double\n"
-           "    from loader import load_expected\n"
-           "    expected = load_expected()\n"
-           "    assert double(3) == expected\n")
-    _commit_all(repo, "double actually doubles, checked against a recorded value")
+    _write(
+        repo / "tests" / "test_widgets.py",
+        "def test_double_matches_the_recorded_value():\n"
+        "    from widgets import double\n"
+        "    from loader import load_expected\n"
+        "    expected = load_expected()\n"
+        "    assert double(3) == expected\n",
+    )
+    _commit_all(
+        repo, "double actually doubles, checked against a recorded value"
+    )
 
     result = _run(repo, "tests/test_widgets.py", baseline)
 
@@ -344,7 +414,9 @@ def test_a_bare_file_not_found_error_outside_the_assertion_is_refused_not_guards
     assert "[unreached]" in result.stdout
 
 
-def test_a_file_not_found_error_at_the_tests_own_assertion_line_guards(tmp_path):
+def test_a_file_not_found_error_at_the_tests_own_assertion_line_guards(
+    tmp_path,
+):
     """The fix under test writes a file; the guard test's own assertion reads it back directly
     (never through a helper outside tests/), so at the baseline, before the fix, that read raises
     FileNotFoundError with its crash frame inside the test's own body. That is behavioral
@@ -354,18 +426,24 @@ def test_a_file_not_found_error_at_the_tests_own_assertion_line_guards(tmp_path)
     _write(repo / "widgets.py", "def write_summary(path):\n    pass\n")
     baseline = _commit_all(repo, "write_summary is a no-op")
 
-    _write(repo / "widgets.py",
-           "def write_summary(path):\n"
-           "    with open(path, 'w') as f:\n"
-           "        f.write('6')\n")
-    _write(repo / "tests" / "test_widgets.py",
-           "def test_write_summary_writes_the_expected_content(tmp_path):\n"
-           "    from widgets import write_summary\n"
-           "    out = tmp_path / 'summary.txt'\n"
-           "    write_summary(out)\n"
-           "    with open(out) as f:\n"
-           "        assert f.read() == '6'\n")
-    _commit_all(repo, "write_summary actually writes, checked by reading it back")
+    _write(
+        repo / "widgets.py",
+        "def write_summary(path):\n"
+        "    with open(path, 'w') as f:\n"
+        "        f.write('6')\n",
+    )
+    _write(
+        repo / "tests" / "test_widgets.py",
+        "def test_write_summary_writes_the_expected_content(tmp_path):\n"
+        "    from widgets import write_summary\n"
+        "    out = tmp_path / 'summary.txt'\n"
+        "    write_summary(out)\n"
+        "    with open(out) as f:\n"
+        "        assert f.read() == '6'\n",
+    )
+    _commit_all(
+        repo, "write_summary actually writes, checked by reading it back"
+    )
 
     result = _run(repo, "tests/test_widgets.py", baseline)
 
@@ -379,17 +457,24 @@ def test_a_file_not_found_error_at_the_tests_own_assertion_line_guards(tmp_path)
 def _load_tool():
     """Import the real module under test by path, for a pure classification-logic check that
     needs no scratch repository or subprocess of its own."""
-    spec = importlib.util.spec_from_file_location("prove_test_fails_before_under_test", SCRIPT)
+    spec = importlib.util.spec_from_file_location(
+        "prove_test_fails_before_under_test", SCRIPT
+    )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-@pytest.mark.parametrize("headline", [
-    "Timeout (>5.0s) from pytest-timeout.",
-    "Failed: Timeout (>1.0s) from pytest-timeout.",
-])
-def test_the_signal_method_timeout_message_is_a_timeout_not_a_behavioral_pass(headline):
+@pytest.mark.parametrize(
+    "headline",
+    [
+        "Timeout (>5.0s) from pytest-timeout.",
+        "Failed: Timeout (>1.0s) from pytest-timeout.",
+    ],
+)
+def test_the_signal_method_timeout_message_is_a_timeout_not_a_behavioral_pass(
+    headline,
+):
     """guard. Where SIGALRM exists, pytest-timeout raises pytest.fail(PYTEST_FAILURE_MESSAGE), a
     Failed exception that would otherwise misread as a genuine assertion failure (GUARDS). pytest
     writes that headline both bare and prefixed with the exception class, and the prefixed form is
@@ -399,7 +484,9 @@ def test_the_signal_method_timeout_message_is_a_timeout_not_a_behavioral_pass(he
     assert tool._failure_kind(entry, Path(".")) == "timeout"
 
 
-def test_a_hung_test_under_per_test_timeout_reports_indeterminate_naming_it(tmp_path):
+def test_a_hung_test_under_per_test_timeout_reports_indeterminate_naming_it(
+    tmp_path,
+):
     """guard. A hung test scores INDETERMINATE and is named, on either host, rather than a bare
     no-outcome refusal that reads the same as any other crash.
 
@@ -409,18 +496,26 @@ def test_a_hung_test_under_per_test_timeout_reports_indeterminate_naming_it(tmp_
     headline's own pattern is what keeps it from reading as the test's own assertion. This
     asserts the verdict and the name, never the route, so it holds on both."""
     repo = _scratch_repo(tmp_path)
-    _write(repo / "tests" / "test_widgets.py",
-           "import time\n"
-           "\n"
-           "\n"
-           "def test_hangs_forever():\n"
-           "    time.sleep(30)\n")
+    _write(
+        repo / "tests" / "test_widgets.py",
+        "import time\n\n\ndef test_hangs_forever():\n    time.sleep(30)\n",
+    )
     _commit_all(repo, "a test that hangs")
 
     proc = subprocess.run(
-        [sys.executable, str(repo / "tools" / "prove_test_fails_before.py"),
-         "tests/test_widgets.py", "--baseline", "HEAD", "--per-test-timeout", "1"],
-        cwd=str(repo), capture_output=True, text=True, timeout=60,
+        [
+            sys.executable,
+            str(repo / "tools" / "prove_test_fails_before.py"),
+            "tests/test_widgets.py",
+            "--baseline",
+            "HEAD",
+            "--per-test-timeout",
+            "1",
+        ],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
 
     assert "INDETERMINATE" in proc.stdout
@@ -435,18 +530,19 @@ def test_a_key_error_on_a_package_result_guards(tmp_path):
     frame inside tests/ that is neither AssertionError/Failed nor outside tests/ still scores
     GUARDS rather than falling through to fixture-shaped."""
     repo = _scratch_repo(tmp_path)
-    _write(repo / "widgets.py",
-           "def describe():\n"
-           "    return {'size': 3}\n")
+    _write(repo / "widgets.py", "def describe():\n    return {'size': 3}\n")
     baseline = _commit_all(repo, "describe carries no color")
 
-    _write(repo / "widgets.py",
-           "def describe():\n"
-           "    return {'size': 3, 'color': 'red'}\n")
-    _write(repo / "tests" / "test_widgets.py",
-           "def test_describe_carries_a_color():\n"
-           "    from widgets import describe\n"
-           "    assert describe()['color'] == 'red'\n")
+    _write(
+        repo / "widgets.py",
+        "def describe():\n    return {'size': 3, 'color': 'red'}\n",
+    )
+    _write(
+        repo / "tests" / "test_widgets.py",
+        "def test_describe_carries_a_color():\n"
+        "    from widgets import describe\n"
+        "    assert describe()['color'] == 'red'\n",
+    )
     _commit_all(repo, "describe carries a color")
 
     result = _run(repo, "tests/test_widgets.py", baseline)

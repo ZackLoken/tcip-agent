@@ -30,7 +30,10 @@ pytest.importorskip("torchvision")
 
 from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
 from tests._chain_fixtures import (  # noqa: E402
-    BESPOKE_INSTANCE_SEG, BESPOKE_ORDINAL, BESPOKE_REGRESSOR, BESPOKE_SEMANTIC_SEG,
+    BESPOKE_INSTANCE_SEG,
+    BESPOKE_ORDINAL,
+    BESPOKE_REGRESSOR,
+    BESPOKE_SEMANTIC_SEG,
 )
 from tests._image_fixtures import write_noise_image  # noqa: E402
 from tests._producer_fixtures import dataset_over, label_image, run_over  # noqa: E402
@@ -49,8 +52,12 @@ _save_png = partial(write_noise_image, size=IMG)
 def _model_source(builder: str, task: str, **kwargs) -> dict:
     from tests._chain_fixtures import BESPOKE_MODELS
 
-    return {"builder": builder, "builder_kwargs": kwargs, "source_files": [BESPOKE_MODELS],
-            "task": task}
+    return {
+        "builder": builder,
+        "builder_kwargs": kwargs,
+        "source_files": [BESPOKE_MODELS],
+        "task": task,
+    }
 
 
 def _train_config(model_source: dict, data: dict, batch_size: int) -> dict:
@@ -58,23 +65,41 @@ def _train_config(model_source: dict, data: dict, batch_size: int) -> dict:
 
     # No val_loader at any call site below: loss is the only metric coherent to select on
     # without one, detection/instance_seg's own default (objective) needs a validation pass.
-    return training_config(model_source, data, optimizer=adamw_optimizer(), batch_size=batch_size,
-                           evaluation=evaluation_block(selection_metric="loss"))
+    return training_config(
+        model_source,
+        data,
+        optimizer=adamw_optimizer(),
+        batch_size=batch_size,
+        evaluation=evaluation_block(selection_metric="loss"),
+    )
 
 
-def _trained(model_source: dict, data: dict, tmp_path: Path, *, batch_size: int = 2):
+def _trained(
+    model_source: dict, data: dict, tmp_path: Path, *, batch_size: int = 2
+):
     """The observation of a run of ``tmp_path`` over :func:`_train_config` at ``batch_size``,
     opened by the launcher's own producer over the places ``data`` names with no validation side
     and trained to its end by the child's own entry."""
     from tcip_mcp.experiments import observe
     from tests._verified_checkpoint_fixtures import worker_run
 
-    return observe(worker_run(tmp_path, _train_config(model_source, {**data, "auto_val": False},
-                                                      batch_size)))
+    return observe(
+        worker_run(
+            tmp_path,
+            _train_config(
+                model_source, {**data, "auto_val": False}, batch_size
+            ),
+        )
+    )
 
 
 def _assert_trained(observation) -> None:
-    from tcip_mcp.experiments import EPOCH_KEY, METRICS_FILE, epoch_rows, read_rows
+    from tcip_mcp.experiments import (
+        EPOCH_KEY,
+        METRICS_FILE,
+        epoch_rows,
+        read_rows,
+    )
 
     assert observation.state == "completed", observation.final
     rows = epoch_rows(read_rows(observation.directory / METRICS_FILE)[0])
@@ -88,43 +113,66 @@ def _assert_trained(observation) -> None:
 # Box-style tasks (detection, instance_seg): torchvision detector path
 # --------------------------------------------------------------------------
 
+
 def test_detection_e2e(tmp_path: Path):
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     for i in range(4):
         _save_png(images_dir / f"img{i}.png")
         # one centered box covering the middle of the image
-        label_image(images_dir / f"img{i}.png",
-                    [Annotation(subject="bud", geometry=BBox(19.2, 19.2, 44.8, 44.8))], IMG, IMG)
+        label_image(
+            images_dir / f"img{i}.png",
+            [Annotation(subject="bud", geometry=BBox(19.2, 19.2, 44.8, 44.8))],
+            IMG,
+            IMG,
+        )
 
     from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
-    _assert_trained(_trained(BUILT_DETECTOR, {"images_dir": str(images_dir),
-                                              "scope": {"subject": "bud"}}, tmp_path))
+    _assert_trained(
+        _trained(
+            BUILT_DETECTOR,
+            {"images_dir": str(images_dir), "scope": {"subject": "bud"}},
+            tmp_path,
+        )
+    )
 
 
 def test_instance_seg_e2e(tmp_path: Path):
     images_dir = tmp_path / "images" / UNDATED_BUCKET
-    square = Polygon([[(19.2, 19.2), (44.8, 19.2), (44.8, 44.8), (19.2, 44.8)]])
+    square = Polygon(
+        [[(19.2, 19.2), (44.8, 19.2), (44.8, 44.8), (19.2, 44.8)]]
+    )
     for i in range(4):
         _save_png(images_dir / f"img{i}.png")
         # a square polygon (>= 3 vertices)
-        label_image(images_dir / f"img{i}.png", [Annotation(subject="bud", geometry=square)],
-                    IMG, IMG)
+        label_image(
+            images_dir / f"img{i}.png",
+            [Annotation(subject="bud", geometry=square)],
+            IMG,
+            IMG,
+        )
 
     dataset, _data = run_over("instance_seg", str(images_dir), subject="bud")
     # Guard the polygon -> mask rasterization path (datasets.py). With the mask_rcnn
     # detector these masks now reach the Mask R-CNN mask loss during training.
     assert dataset[0][1]["masks"].shape[0] > 0
 
-    model_source = _model_source(BESPOKE_INSTANCE_SEG, "instance_seg", min_size=IMG,
-                                 max_size=IMG * 2)
-    _assert_trained(_trained(model_source, {"images_dir": str(images_dir),
-                                            "scope": {"subject": "bud"}}, tmp_path))
+    model_source = _model_source(
+        BESPOKE_INSTANCE_SEG, "instance_seg", min_size=IMG, max_size=IMG * 2
+    )
+    _assert_trained(
+        _trained(
+            model_source,
+            {"images_dir": str(images_dir), "scope": {"subject": "bud"}},
+            tmp_path,
+        )
+    )
 
 
 # --------------------------------------------------------------------------
 # Dense / scalar tasks (semantic_seg, ordinal, regression): stack-collate path
 # --------------------------------------------------------------------------
+
 
 def test_semantic_seg_e2e(tmp_path: Path):
     images_dir = tmp_path / "images" / UNDATED_BUCKET
@@ -135,14 +183,23 @@ def test_semantic_seg_e2e(tmp_path: Path):
     block = (IMG // 4, IMG // 4, IMG // 2, IMG // 2)
     for i in range(4):
         _save_png(images_dir / f"img{i}.png")
-        painted_frame(IMG, IMG, 0, [(block, 1)], mode="L").save(masks_dir / f"img{i}.png")
+        painted_frame(IMG, IMG, 0, [(block, 1)], mode="L").save(
+            masks_dir / f"img{i}.png"
+        )
 
     model_source = _model_source(BESPOKE_SEMANTIC_SEG, "semantic_seg")
-    _assert_trained(_trained(model_source, {"images_dir": str(images_dir),
-                                            "labels_dir": str(masks_dir)}, tmp_path))
+    _assert_trained(
+        _trained(
+            model_source,
+            {"images_dir": str(images_dir), "labels_dir": str(masks_dir)},
+            tmp_path,
+        )
+    )
 
 
-def _write_csv(path: Path, rows: list[tuple[str, object]], header: tuple[str, str]) -> None:
+def _write_csv(
+    path: Path, rows: list[tuple[str, object]], header: tuple[str, str]
+) -> None:
     with open(path, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(header)
@@ -159,9 +216,14 @@ def test_ordinal_e2e(tmp_path: Path):
     _write_csv(csv_path, rows, ("stem", "rank"))
 
     model_source = _model_source(BESPOKE_ORDINAL, "ordinal")
-    _assert_trained(_trained(model_source, {"images_dir": str(images_dir),
-                                            "labels_dir": str(csv_path)}, tmp_path,
-                             batch_size=3))
+    _assert_trained(
+        _trained(
+            model_source,
+            {"images_dir": str(images_dir), "labels_dir": str(csv_path)},
+            tmp_path,
+            batch_size=3,
+        )
+    )
 
 
 def test_ordinal_derives_num_ranks_from_data(tmp_path: Path):
@@ -180,9 +242,14 @@ def test_ordinal_derives_num_ranks_from_data(tmp_path: Path):
     assert data["num_ranks"] == 7 and data.get("num_classes") is None
 
     model_source = _model_source(BESPOKE_ORDINAL, "ordinal")
-    _assert_trained(_trained(model_source, {"images_dir": str(images_dir),
-                                            "labels_dir": str(csv_path)}, tmp_path,
-                             batch_size=7))
+    _assert_trained(
+        _trained(
+            model_source,
+            {"images_dir": str(images_dir), "labels_dir": str(csv_path)},
+            tmp_path,
+            batch_size=7,
+        )
+    )
 
 
 def test_ordinal_num_ranks_stated_raises(tmp_path: Path):
@@ -198,7 +265,9 @@ def test_ordinal_num_ranks_stated_raises(tmp_path: Path):
     _write_csv(csv_path, rows, ("stem", "rank"))
 
     with pytest.raises(ValueError, match="num_ranks"):
-        dataset_over("ordinal", str(images_dir), str(csv_path), stated={"num_ranks": 5})
+        dataset_over(
+            "ordinal", str(images_dir), str(csv_path), stated={"num_ranks": 5}
+        )
 
 
 def test_classification_derives_num_classes_from_data(tmp_path: Path):
@@ -227,7 +296,12 @@ def test_classification_num_classes_stated_raises(tmp_path: Path):
     _write_csv(csv_path, rows, ("stem", "label"))
 
     with pytest.raises(ValueError, match="num_classes"):
-        dataset_over("classification", str(images_dir), str(csv_path), stated={"num_classes": 2})
+        dataset_over(
+            "classification",
+            str(images_dir),
+            str(csv_path),
+            stated={"num_classes": 2},
+        )
 
 
 def test_regression_e2e(tmp_path: Path):
@@ -240,9 +314,14 @@ def test_regression_e2e(tmp_path: Path):
     _write_csv(csv_path, rows, ("stem", "value"))
 
     model_source = _model_source(BESPOKE_REGRESSOR, "regression")
-    _assert_trained(_trained(model_source, {"images_dir": str(images_dir),
-                                            "labels_dir": str(csv_path)}, tmp_path,
-                             batch_size=3))
+    _assert_trained(
+        _trained(
+            model_source,
+            {"images_dir": str(images_dir), "labels_dir": str(csv_path)},
+            tmp_path,
+            batch_size=3,
+        )
+    )
 
 
 def test_ordinal_evaluate_model_e2e(tmp_path: Path, monkeypatch):
@@ -258,12 +337,17 @@ def test_ordinal_evaluate_model_e2e(tmp_path: Path, monkeypatch):
     _write_csv(csv_path, rows, ("stem", "rank"))
 
     model_source = _model_source(BESPOKE_ORDINAL, "ordinal")
-    observation = _trained(model_source, {"images_dir": str(images_dir),
-                                          "labels_dir": str(csv_path)}, tmp_path, batch_size=3)
+    observation = _trained(
+        model_source,
+        {"images_dir": str(images_dir), "labels_dir": str(csv_path)},
+        tmp_path,
+        batch_size=3,
+    )
     _assert_trained(observation)
 
-    result = evaluate_model(tmp_path, observation.directory.name, str(images_dir),
-                            str(csv_path))
+    result = evaluate_model(
+        tmp_path, observation.directory.name, str(images_dir), str(csv_path)
+    )
     assert "error" not in result, result
     assert "mae" in result
     assert "quadratic_weighted_kappa" in result
@@ -282,12 +366,17 @@ def test_regression_evaluate_model_e2e(tmp_path: Path, monkeypatch):
     _write_csv(csv_path, rows, ("stem", "value"))
 
     model_source = _model_source(BESPOKE_REGRESSOR, "regression")
-    observation = _trained(model_source, {"images_dir": str(images_dir),
-                                          "labels_dir": str(csv_path)}, tmp_path, batch_size=3)
+    observation = _trained(
+        model_source,
+        {"images_dir": str(images_dir), "labels_dir": str(csv_path)},
+        tmp_path,
+        batch_size=3,
+    )
     _assert_trained(observation)
 
-    result = evaluate_model(tmp_path, observation.directory.name, str(images_dir),
-                            str(csv_path))
+    result = evaluate_model(
+        tmp_path, observation.directory.name, str(images_dir), str(csv_path)
+    )
     assert "error" not in result, result
     assert "mae" in result
     assert "r_squared" in result

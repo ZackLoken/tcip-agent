@@ -40,9 +40,17 @@ def dataset_root(tmp_path: Path) -> Path:
 
 
 def _subjects() -> dict:
-    return {"bud": {"description": "a currant bud",
-                       "attributes": {"opening": {"type": "categorical",
-                                                     "values": ["closed", "open"]}}}}
+    return {
+        "bud": {
+            "description": "a currant bud",
+            "attributes": {
+                "opening": {
+                    "type": "categorical",
+                    "values": ["closed", "open"],
+                }
+            },
+        }
+    }
 
 
 def test_registry_write_records_in_the_dataset_named_by_its_root_argument(
@@ -50,7 +58,9 @@ def test_registry_write_records_in_the_dataset_named_by_its_root_argument(
 ) -> None:
     from tcip_mcp.tools.annotation_tools import write_subject_registry
 
-    assert "error" not in write_subject_registry(project, str(dataset_root), subjects=_subjects())
+    assert "error" not in write_subject_registry(
+        project, str(dataset_root), subjects=_subjects()
+    )
 
     rows = _rows_for(dataset_root, "replace_registry")
     assert len(rows) == 1, _entries(dataset_root)
@@ -65,8 +75,9 @@ def test_label_write_records_in_the_dataset_holding_the_image_it_names(
 
     image = dataset_root / "images" / CAPTURE_DATE / "IMG_0001.JPG"
     result = save_annotations(
-        bound, str(image),
-        annotations=[{"subject": "bud", "bbox": [10, 10, 40, 40]}]
+        bound,
+        str(image),
+        annotations=[{"subject": "bud", "bbox": [10, 10, 40, 40]}],
     )
     assert "error" not in result
 
@@ -84,8 +95,9 @@ def test_propose_annotations_records_in_the_dataset_named_by_the_image_it_ran_ag
     from tcip_mcp.tools.proposal_tools import propose_annotations
 
     image = dataset_root / "images" / CAPTURE_DATE / "IMG_0001.JPG"
-    result = propose_annotations(project, image_path=str(image),
-                                 engine=STUB_ENGINE)
+    result = propose_annotations(
+        project, image_path=str(image), engine=STUB_ENGINE
+    )
     assert "error" not in result, result
 
     rows = _rows_for(dataset_root, "propose_annotations")
@@ -105,8 +117,9 @@ def test_propose_annotations_staging_nothing_leaves_no_audit_line(
     image = loose / "IMG_0002.JPG"
     Image.new("RGB", (100, 80)).save(image)
 
-    result = propose_annotations(project, image_path=str(image),
-                                 engine=STUB_ENGINE)
+    result = propose_annotations(
+        project, image_path=str(image), engine=STUB_ENGINE
+    )
     assert "error" not in result, result
     assert result["staged"] is False
 
@@ -126,7 +139,11 @@ def test_unscoped_mutating_tool_records_in_the_project_log_with_the_entry_shape(
     rows = _rows_for(project, "report_friction")
     assert len(rows) == 1
     assert set(rows[0]) == {
-        "timestamp", "tool", "arguments", "status", "duration_ms",
+        "timestamp",
+        "tool",
+        "arguments",
+        "status",
+        "duration_ms",
     }
     assert "project" not in rows[0]["arguments"]
     assert _rows_for(dataset_root, "report_friction") == []
@@ -145,7 +162,8 @@ def test_a_label_write_of_an_image_under_no_dataset_refuses_and_records_nothing(
     Image.new("RGB", (100, 80)).save(image)
 
     result = save_annotations(
-        bound, str(image),
+        bound,
+        str(image),
         annotations=[{"subject": "bud", "bbox": [10, 10, 40, 40]}],
     )
     assert "is not a capture" in result["error"]
@@ -154,11 +172,15 @@ def test_a_label_write_of_an_image_under_no_dataset_refuses_and_records_nothing(
     assert _entries(loose) == []
 
 
-def test_scope_argument_left_unset_leaves_the_call_in_the_project(tmp_path: Path) -> None:
+def test_scope_argument_left_unset_leaves_the_call_in_the_project(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp.audit import audited
 
     @audited(scope_arg="dataset_root")
-    def stage_something(project: Path, dataset_root: str | None = None) -> dict:
+    def stage_something(
+        project: Path, dataset_root: str | None = None
+    ) -> dict:
         return {"ok": True}
 
     stage_something(tmp_path)
@@ -196,7 +218,8 @@ def test_relative_scope_argument_resolves_against_the_project_not_the_process_cw
 
 
 def test_a_scope_resolution_that_raises_refuses_rather_than_filing_the_event_in_the_project(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A declared dataset event whose destination cannot be worked out is not rerouted: an entry
     filed in the project's log on a resolver failure is one nobody tracing that dataset finds."""
@@ -214,7 +237,10 @@ def test_a_scope_resolution_that_raises_refuses_rather_than_filing_the_event_in_
     with pytest.raises(RuntimeError) as caught:
         curate_something(tmp_path, "anywhere")
 
-    assert type(caught.value) is audit_module.MutationCommittedWithoutAuditLineError
+    assert (
+        type(caught.value)
+        is audit_module.MutationCommittedWithoutAuditLineError
+    )
     assert isinstance(caught.value.__cause__, RuntimeError)
     assert _rows_for(tmp_path, "curate_something") == []
 
@@ -224,6 +250,7 @@ def test_scope_argument_naming_no_parameter_is_refused_at_decoration() -> None:
     from tcip_mcp.audit import audited
 
     with pytest.raises(ValueError, match="names no parameter"):
+
         @audited(scope_arg="datset_root")
         def stage_something(project: Path, dataset_root: str) -> dict:
             return {"ok": True}

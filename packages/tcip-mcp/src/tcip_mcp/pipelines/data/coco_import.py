@@ -14,11 +14,16 @@ def _rle_mask(segmentation: dict) -> Any:
     try:
         height, width = segmentation["size"]
         counts = segmentation["counts"]
-        rle = (mask_utils.frPyObjects(segmentation, height, width) if isinstance(counts, list)
-               else {"size": [height, width], "counts": counts.encode("ascii")})
+        rle = (
+            mask_utils.frPyObjects(segmentation, height, width)
+            if isinstance(counts, list)
+            else {"size": [height, width], "counts": counts.encode("ascii")}
+        )
         return mask_utils.decode(rle)
     except (KeyError, TypeError, ValueError, AttributeError) as exc:
-        raise ValueError(f"carries a run-length mask that does not decode ({exc!r})") from exc
+        raise ValueError(
+            f"carries a run-length mask that does not decode ({exc!r})"
+        ) from exc
 
 
 def _read_coco(document: Path) -> tuple[dict, str]:
@@ -34,15 +39,20 @@ def _read_coco(document: Path) -> tuple[dict, str]:
         stored = tcip_store.read_blob_versioned(document)
         coco = json.loads(stored.value.decode("utf-8-sig"))
     except (tcip_store.NotFoundError, OSError, ValueError) as exc:
-        raise ValueError(f"{document} does not read as a JSON document: {exc}") from exc
+        raise ValueError(
+            f"{document} does not read as a JSON document: {exc}"
+        ) from exc
     if not isinstance(coco, dict):
-        raise ValueError(f"{document} decodes to a {type(coco).__name__}, not the object a COCO "
-                         "document is")
+        raise ValueError(
+            f"{document} decodes to a {type(coco).__name__}, not the object a COCO "
+            "document is"
+        )
     return coco, stored.version.token
 
 
-def import_coco_document(document: str | Path, dataset_root: str | Path, *, date: str,
-                         project: Path) -> dict:
+def import_coco_document(
+    document: str | Path, dataset_root: str | Path, *, date: str, project: Path
+) -> dict:
     """Write one per-image label document for every image ``document`` lists, keyed under the
     capture ``date`` of ``dataset_root`` (both :func:`~tcip_mcp.registry_paths.located` against
     ``project``), and record the import on the dataset's audit log with
@@ -72,7 +82,9 @@ def import_coco_document(document: str | Path, dataset_root: str | Path, *, date
     from tcip_mcp import dataset_layout
     from tcip_mcp.audit import audit_entry, audit_log_key
     from tcip_mcp.pipelines.image_utils import (
-        BandGroupRef, list_logical_images, refuse_incomplete_band_group,
+        BandGroupRef,
+        list_logical_images,
+        refuse_incomplete_band_group,
     )
     from tcip_mcp.pipelines.raster_source import SourceHeader
     from tcip_mcp.registry_paths import located
@@ -81,23 +93,33 @@ def import_coco_document(document: str | Path, dataset_root: str | Path, *, date
     document, root = located(document, project), located(dataset_root, project)
     source = str(document)
     coco, digest = _read_coco(document)
-    categories, by_image, problems = parse_coco_annotations(coco, decode_rle=_rle_mask)
+    categories, by_image, problems = parse_coco_annotations(
+        coco, decode_rle=_rle_mask
+    )
 
     dates = dataset_layout.list_dates(root)
     if date not in dates:
-        raise ValueError(f"{date!r} names no capture under {dataset_layout.image_root(root)} "
-                         f"(its buckets: {dates})")
+        raise ValueError(
+            f"{date!r} names no capture under {dataset_layout.image_root(root)} "
+            f"(its buckets: {dates})"
+        )
     images = coco.get("images")
     if not isinstance(images, list) or not images:
-        raise ValueError(f"{source} lists no image, so there is nothing to import")
+        raise ValueError(
+            f"{source} lists no image, so there is nothing to import"
+        )
     registry = registry_for_dataset_root(root)
     if registry is None:
-        raise ValueError(f"{root} has no subject registry; write one with write_subject_registry "
-                         "before importing labels into it")
+        raise ValueError(
+            f"{root} has no subject registry; write one with write_subject_registry "
+            "before importing labels into it"
+        )
 
     declared = {repr(s.name) for s in registry.subjects}
-    problems += [f"category {name} is not a subject the registry declares"
-                 for name in sorted(set(map(repr, categories.values())) - declared)]
+    problems += [
+        f"category {name} is not a subject the registry declares"
+        for name in sorted(set(map(repr, categories.values())) - declared)
+    ]
     images_dir = dataset_layout.image_dir(root, date)
     logical = list_logical_images(images_dir)
     writes: dict[tcip_store.Key, dict] = {}
@@ -111,26 +133,37 @@ def import_coco_document(document: str | Path, dataset_root: str | Path, *, date
         name = str(record.get("file_name") or "")
         identified = is_coco_id(image_id)
         if not identified:
-            problems.append(f"image record {i} names id {image_id!r}, not an integer image id")
+            problems.append(
+                f"image record {i} names id {image_id!r}, not an integer image id"
+            )
         elif image_id in ids:
             problems.append(f"image id {image_id!r} is listed twice")
         else:
             ids.add(image_id)
         found = logical.get(Path(name).stem)
-        if not (isinstance(found, BandGroupRef) or (found is not None and found.name == name)):
+        if not (
+            isinstance(found, BandGroupRef)
+            or (found is not None and found.name == name)
+        ):
             problems.append(f"image {name!r} is not in {images_dir}")
             found = None
         stem = found.stem if found is not None else Path(name).stem
         if found is None:
             continue
         if stem in stems:
-            problems.append(f"image {name!r} is the capture {stem!r} another record already names")
+            problems.append(
+                f"image {name!r} is the capture {stem!r} another record already names"
+            )
         stems.add(stem)
-        width, height = SourceHeader(refuse_incomplete_band_group(found)).display_frame
+        width, height = SourceHeader(
+            refuse_incomplete_band_group(found)
+        ).display_frame
         stated = (record.get("width"), record.get("height"))
         if stated != (None, None) and stated != (width, height):
-            problems.append(f"image {name!r} is stated as {stated}, but decodes to "
-                            f"{(width, height)}")
+            problems.append(
+                f"image {name!r} is stated as {stated}, but decodes to "
+                f"{(width, height)}"
+            )
         if not identified:
             continue
         try:
@@ -140,23 +173,45 @@ def import_coco_document(document: str | Path, dataset_root: str | Path, *, date
             continue
         if data is not None:
             writes[dataset_layout.label_key(root, date, stem)] = data
-    problems += [f"annotations name image id {image_id!r}, which the document does not list"
-                 for image_id in sorted(set(by_image) - ids)]
+    problems += [
+        f"annotations name image id {image_id!r}, which the document does not list"
+        for image_id in sorted(set(by_image) - ids)
+    ]
     if problems:
-        raise ValueError(f"{source} was not imported, nothing written: " + "; ".join(problems))
+        raise ValueError(
+            f"{source} was not imported, nothing written: "
+            + "; ".join(problems)
+        )
 
-    arguments = {"document": source, "capture": date,
-                 "written": sorted(key.parts[-1] for key in writes)}
+    arguments = {
+        "document": source,
+        "capture": date,
+        "written": sorted(key.parts[-1] for key in writes),
+    }
     if writes:
         audit = audit_log_key(root)
         with tcip_store.transaction(audit, *writes) as txn:
-            present = sorted(key.parts[-1] for key in writes if txn.read_versioned(
-                key, default=None).version != tcip_store.Version.ABSENT)
+            present = sorted(
+                key.parts[-1]
+                for key in writes
+                if txn.read_versioned(key, default=None).version
+                != tcip_store.Version.ABSENT
+            )
             if present:
-                raise ValueError(f"{source} was not imported, nothing written: the capture "
-                                 f"already holds a label document for {present}")
+                raise ValueError(
+                    f"{source} was not imported, nothing written: the capture "
+                    f"already holds a label document for {present}"
+                )
             for key, data in writes.items():
                 txn.write(key, data)
-            txn.append(audit, audit_entry("coco_document_imported", arguments, None, "ok",
-                                          {"document_digest": digest}))
+            txn.append(
+                audit,
+                audit_entry(
+                    "coco_document_imported",
+                    arguments,
+                    None,
+                    "ok",
+                    {"document_digest": digest},
+                ),
+            )
     return arguments

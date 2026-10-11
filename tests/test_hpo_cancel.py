@@ -12,7 +12,9 @@ from tests._training_values import fifo_search, sweep_space
 from tests._verified_checkpoint_fixtures import opened_sweep
 
 
-def _stub_search(monkeypatch, *, before=None, raises: Exception | None = None) -> list[dict]:
+def _stub_search(
+    monkeypatch, *, before=None, raises: Exception | None = None
+) -> list[dict]:
     """Replace Ray Tune's search with one answering the sweep's log directory, first calling
     ``before(sweep_root)``, or raising ``raises``; returns the calls it received."""
     calls: list[dict] = []
@@ -25,7 +27,9 @@ def _stub_search(monkeypatch, *, before=None, raises: Exception | None = None) -
         if raises is not None:
             raise raises
 
-    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.training.hpo.tune_search", fake_search
+    )
     return calls
 
 
@@ -39,14 +43,18 @@ def test_a_cancel_naming_no_run_or_sweep_refuses(project) -> None:
 
 
 def test_a_cancel_written_before_the_run_ends_the_sweep_canceled_before_its_first_trial(
-    project, real_hpo_base_config, monkeypatch,
+    project,
+    real_hpo_base_config,
+    monkeypatch,
 ) -> None:
     """A cancel the opened sweep's directory holds when its run starts (a relaunch canceled
     before its worker ran) ends the sweep canceled, its final status carrying the reason, and
     never starts the search."""
     from tcip_mcp import experiments
     from tcip_mcp.tools.training_tools import (
-        _CANCEL_BEFORE_START_REASON, monitor_training, run_sweep,
+        _CANCEL_BEFORE_START_REASON,
+        monitor_training,
+        run_sweep,
     )
 
     calls = _stub_search(monkeypatch)
@@ -55,50 +63,83 @@ def test_a_cancel_written_before_the_run_ends_the_sweep_canceled_before_its_firs
 
     result = run_sweep(opened)
 
-    assert (result.state, result.status_error) == ("canceled", _CANCEL_BEFORE_START_REASON)
+    assert (result.state, result.status_error) == (
+        "canceled",
+        _CANCEL_BEFORE_START_REASON,
+    )
     assert calls == []
     sweep = monitor_training(project, opened.name)["sweep"]
-    assert (sweep["state"], sweep["status_error"]) == ("canceled", _CANCEL_BEFORE_START_REASON)
+    assert (sweep["state"], sweep["status_error"]) == (
+        "canceled",
+        _CANCEL_BEFORE_START_REASON,
+    )
 
 
-@pytest.mark.parametrize("raises", [None, RuntimeError("the Ray cluster was torn down mid-sweep")],
-                         ids=["search-returns", "search-raises"])
+@pytest.mark.parametrize(
+    "raises",
+    [None, RuntimeError("the Ray cluster was torn down mid-sweep")],
+    ids=["search-returns", "search-raises"],
+)
 def test_a_cancel_landing_mid_search_ends_the_sweep_canceled(
-    project, real_hpo_base_config, monkeypatch, raises,
+    project,
+    real_hpo_base_config,
+    monkeypatch,
+    raises,
 ) -> None:
     """A cancel that lands while the search runs ends the sweep canceled whether the search
     returns or raises once it stops."""
     from tcip_mcp import experiments
     from tcip_mcp.tools.training_tools import (
-        _CANCEL_DURING_RUN_REASON, monitor_training, run_hyperparameter_search,
+        _CANCEL_DURING_RUN_REASON,
+        monitor_training,
+        run_hyperparameter_search,
     )
 
     _stub_search(monkeypatch, before=experiments.request_cancel, raises=raises)
 
-    result = run_hyperparameter_search(project, base_config=real_hpo_base_config,
-                                       param_space=sweep_space(), n_trials=1, **fifo_search(),
-                                       search_seed=0)
+    result = run_hyperparameter_search(
+        project,
+        base_config=real_hpo_base_config,
+        param_space=sweep_space(),
+        n_trials=1,
+        **fifo_search(),
+        search_seed=0,
+    )
 
     assert (result["sweep"]["state"], result["sweep"]["status_error"]) == (
-        "canceled", _CANCEL_DURING_RUN_REASON)
+        "canceled",
+        _CANCEL_DURING_RUN_REASON,
+    )
     sweep = monitor_training(project, result["sweep"]["sweep_id"])["sweep"]
-    assert (sweep["state"], sweep["status_error"]) == ("canceled", _CANCEL_DURING_RUN_REASON)
+    assert (sweep["state"], sweep["status_error"]) == (
+        "canceled",
+        _CANCEL_DURING_RUN_REASON,
+    )
 
 
 def test_a_cancel_after_the_sweep_ended_refuses_and_leaves_its_final_status_as_written(
-    project, real_hpo_base_config, monkeypatch,
+    project,
+    real_hpo_base_config,
+    monkeypatch,
 ) -> None:
     """A cancel arriving after the sweep ended refuses by name and writes nothing: its final
     status is the one it ended with."""
     from tcip_mcp.experiments import cancel_requested, experiment_dir
     from tcip_mcp.tools.training_tools import (
-        cancel_training, monitor_training, run_hyperparameter_search,
+        cancel_training,
+        monitor_training,
+        run_hyperparameter_search,
     )
 
     _stub_search(monkeypatch)
-    sweep_id = run_hyperparameter_search(project, base_config=real_hpo_base_config,
-                                         param_space=sweep_space(), n_trials=1,
-                                         **fifo_search(), search_seed=0)["sweep"]["sweep_id"]
+    sweep_id = run_hyperparameter_search(
+        project,
+        base_config=real_hpo_base_config,
+        param_space=sweep_space(),
+        n_trials=1,
+        **fifo_search(),
+        search_seed=0,
+    )["sweep"]["sweep_id"]
 
     result = cancel_training(project, sweep_id, actor=None)
 
@@ -107,7 +148,9 @@ def test_a_cancel_after_the_sweep_ended_refuses_and_leaves_its_final_status_as_w
     assert monitor_training(project, sweep_id)["sweep"]["state"] == "completed"
 
 
-def test_a_second_cancel_keeps_the_time_of_the_first(project, real_hpo_base_config) -> None:
+def test_a_second_cancel_keeps_the_time_of_the_first(
+    project, real_hpo_base_config
+) -> None:
     """The cancellation record is written once: a repeated request keeps the first request's
     time."""
     from tcip_mcp.experiments import request_cancel
@@ -120,7 +163,9 @@ def test_a_second_cancel_keeps_the_time_of_the_first(project, real_hpo_base_conf
 
 
 def test_a_sweep_cancel_reaches_only_a_sweep_of_the_project_it_is_handed(
-    project, real_hpo_base_config, tmp_path_factory,
+    project,
+    real_hpo_base_config,
+    tmp_path_factory,
 ) -> None:
     """The cancel resolves the sweep under the project it is handed; another project holds no
     such sweep and refuses."""
@@ -138,7 +183,8 @@ def test_a_sweep_cancel_reaches_only_a_sweep_of_the_project_it_is_handed(
 
 
 def test_run_hpo_trial_reports_nothing_and_opens_no_run_when_the_sweep_is_canceled(
-    project, real_hpo_base_config,
+    project,
+    real_hpo_base_config,
 ) -> None:
     from tcip_mcp.experiments import request_cancel, run_dirs
     from tcip_mcp.tools.training_tools import _run_hpo_trial
@@ -160,7 +206,9 @@ class _FakeTrial:
         self.trial_id = trial_id
 
 
-def test_sweep_stopper_stop_all_true_once_ray_no_longer_holds_any_trial_live(tmp_path) -> None:
+def test_sweep_stopper_stop_all_true_once_ray_no_longer_holds_any_trial_live(
+    tmp_path,
+) -> None:
     from tcip_mcp.experiments import request_cancel
     from tcip_mcp.pipelines.training.hpo import _build_sweep_stopper
 
@@ -171,13 +219,17 @@ def test_sweep_stopper_stop_all_true_once_ray_no_longer_holds_any_trial_live(tmp
     callback.on_trial_start(0, [], trial)
     request_cancel(tmp_path)
     assert stopper.stop_all() is False  # Ray still holds the trial live
-    assert stopper("running_trial", {}) is True  # per-trial call always follows the request
+    assert (
+        stopper("running_trial", {}) is True
+    )  # per-trial call always follows the request
 
     callback.on_trial_complete(0, [], trial)
     assert stopper.stop_all() is True  # Ray no longer holds any trial live
 
 
-def test_sweep_stopper_stop_all_true_at_once_for_a_trial_ray_killed_outright(tmp_path) -> None:
+def test_sweep_stopper_stop_all_true_at_once_for_a_trial_ray_killed_outright(
+    tmp_path,
+) -> None:
     """A trial Ray kills outright never writes its final status, so a disk-based check alone
     would read it as running until the heartbeat window passed; the callback's own live set, fed
     by Ray's own ``on_trial_error`` report, says otherwise at once."""
@@ -201,17 +253,25 @@ def test_sweep_stopper_stop_all_true_after_the_stale_window_elapses_regardless_o
     from tcip_mcp.pipelines.training.hpo import _build_sweep_stopper
 
     stopper, callback = _build_sweep_stopper(tmp_path)
-    callback.on_trial_start(0, [], _FakeTrial("stuck_trial"))  # Ray never reports it finished
+    callback.on_trial_start(
+        0, [], _FakeTrial("stuck_trial")
+    )  # Ray never reports it finished
 
     experiments.request_cancel(tmp_path)
-    assert stopper.stop_all() is False  # freshly requested: still inside the window
+    assert (
+        stopper.stop_all() is False
+    )  # freshly requested: still inside the window
 
     monkeypatch.setattr(experiments, "HEARTBEAT_STALE_SECONDS", -1.0)
-    assert stopper.stop_all() is True  # the bounded fallback: Ray's own stop takes over
+    assert (
+        stopper.stop_all() is True
+    )  # the bounded fallback: Ray's own stop takes over
 
 
 def test_run_hyperparameter_search_refuses_a_relaunched_from_naming_no_sweep_under_this_root(
-    project, real_hpo_base_config, monkeypatch,
+    project,
+    real_hpo_base_config,
+    monkeypatch,
 ) -> None:
     """relaunched_from must name a sweep this root holds: a name that resolves to nothing is
     refused before any directory is made, rather than recorded as lineage nothing answers for;
@@ -221,12 +281,23 @@ def test_run_hyperparameter_search_refuses_a_relaunched_from_naming_no_sweep_und
 
     _stub_search(monkeypatch)
     result = run_hyperparameter_search(
-        project, base_config=real_hpo_base_config, param_space=sweep_space(), n_trials=1,
-        **fifo_search(), relaunched_from="hpo_does_not_exist", search_seed=0)
+        project,
+        base_config=real_hpo_base_config,
+        param_space=sweep_space(),
+        n_trials=1,
+        **fifo_search(),
+        relaunched_from="hpo_does_not_exist",
+        search_seed=0,
+    )
     assert "hpo_does_not_exist" in result["error"]
     assert sweep_dirs(project) == []
 
-    admitted = run_hyperparameter_search(project, base_config=real_hpo_base_config,
-                                         param_space=sweep_space(), n_trials=1, **fifo_search(),
-                                         search_seed=0)
+    admitted = run_hyperparameter_search(
+        project,
+        base_config=real_hpo_base_config,
+        param_space=sweep_space(),
+        n_trials=1,
+        **fifo_search(),
+        search_seed=0,
+    )
     assert "error" not in admitted, admitted

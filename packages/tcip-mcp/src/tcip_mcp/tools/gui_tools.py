@@ -13,7 +13,9 @@ from pathlib import Path
 from tcip_annotation import Annotation, BBox
 from tcip_annotation.state import polygonal
 from tcip_annotation.json_io import (
-    UnreadableLabelDocumentError, read_document_versioned, read_label_document,
+    UnreadableLabelDocumentError,
+    read_document_versioned,
+    read_label_document,
 )
 
 from tcip_mcp.server import tool
@@ -24,13 +26,21 @@ def _logical_image_names(images_dir) -> list[str]:
     """Every logical image's on-disk display name under ``images_dir``: a plain file's own name, or
     (for a ``.bandgroup``-grouped capture) its manifest's filename.
     """
-    from tcip_mcp.pipelines.image_utils import list_logical_images, logical_image_name
+    from tcip_mcp.pipelines.image_utils import (
+        list_logical_images,
+        logical_image_name,
+    )
 
-    return [logical_image_name(src) for src in list_logical_images(images_dir).values()]
+    return [
+        logical_image_name(src)
+        for src in list_logical_images(images_dir).values()
+    ]
 
 
 @tool()
-def push_panel_event(bound: BoundProject, panel: str, event_type: str, data: dict) -> dict:
+def push_panel_event(
+    bound: BoundProject, panel: str, event_type: str, data: dict
+) -> dict:
     """Push structured data to a TCIP GUI panel via the tcip-web backend serving the bound
     project's workspace, which delivers it only while it has this project open.
 
@@ -51,7 +61,9 @@ def push_panel_event(bound: BoundProject, panel: str, event_type: str, data: dic
     from tcip_mcp.web_client import VALID_PANELS, post_panel_event
 
     if panel not in VALID_PANELS:
-        return {"error": f"Unknown panel: {panel}. Valid: {sorted(VALID_PANELS)}"}
+        return {
+            "error": f"Unknown panel: {panel}. Valid: {sorted(VALID_PANELS)}"
+        }
 
     result = post_panel_event(bound, panel, event_type, data)
     result.setdefault("panel", panel)
@@ -100,7 +112,11 @@ def focus_human_attention(
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.dataset_layout import image_dir, label_key
     from tcip_mcp.registry_paths import located
-    from tcip_mcp.web_client import ANNOTATE_MODES, PANEL_EVENT_ANNOTATE_FOCUS, post_panel_event
+    from tcip_mcp.web_client import (
+        ANNOTATE_MODES,
+        PANEL_EVENT_ANNOTATE_FOCUS,
+        post_panel_event,
+    )
 
     dataset_root = str(located(dataset_root, bound.root))
     try:
@@ -124,48 +140,73 @@ def focus_human_attention(
         try:
             if found is None:
                 held[name] = read_document_versioned(
-                    label_key(dataset_root, date, stem))[0].annotations
+                    label_key(dataset_root, date, stem)
+                )[0].annotations
             else:
                 document = found.document_key(stem)
-                held[name] = read_label_document(document).annotations if document else []
+                held[name] = (
+                    read_label_document(document).annotations
+                    if document
+                    else []
+                )
         except UnreadableLabelDocumentError as exc:
             unreadable[name] = str(exc)
-    holding = [i for i, name in enumerate(images)
-               if name in held and annotations_hold_subject(held[name], subject)]
+    holding = [
+        i
+        for i, name in enumerate(images)
+        if name in held and annotations_hold_subject(held[name], subject)
+    ]
 
     if image_index is None:
         image_index = holding[0] if holding else 0
     if not 0 <= image_index < len(images):
-        return {"error": f"image_index {image_index} names none of the {len(images)} images on "
-                         f"{date}"}
+        return {
+            "error": f"image_index {image_index} names none of the {len(images)} images on "
+            f"{date}"
+        }
     target_name = images[image_index]
     if target_name in unreadable:
         return {"error": unreadable[target_name]}
     if mode is None:
-        mode = _TASK_MODE.get(_subject_task(held[target_name], subject) or "", "box")
+        mode = _TASK_MODE.get(
+            _subject_task(held[target_name], subject) or "", "box"
+        )
     if mode not in ANNOTATE_MODES:
         vocabulary = ", ".join(repr(m) for m in ANNOTATE_MODES)
         return {"error": f"mode must be one of {vocabulary}, got {mode!r}"}
 
     payload = {
-        "dataset_root": dataset_root, "subject": subject, "date": date,
-        "image_index": image_index, "mode": mode, "active_subject": subject,
-        "bucket": bucket, "proposal": proposal,
+        "dataset_root": dataset_root,
+        "subject": subject,
+        "date": date,
+        "image_index": image_index,
+        "mode": mode,
+        "active_subject": subject,
+        "bucket": bucket,
+        "proposal": proposal,
     }
     return {
         **post_panel_event(bound, "app", PANEL_EVENT_ANNOTATE_FOCUS, payload),
-        "subject": subject, "date": date, "image_index": image_index, "mode": mode,
-        "bucket": bucket, "proposal": proposal,
-        "n_images": len(images), "n_holding_subject": len(holding), "image": target_name,
+        "subject": subject,
+        "date": date,
+        "image_index": image_index,
+        "mode": mode,
+        "bucket": bucket,
+        "proposal": proposal,
+        "n_images": len(images),
+        "n_holding_subject": len(holding),
+        "image": target_name,
         "unreadable": sorted(unreadable),
     }
 
 
 def _subject_task(anns: list[Annotation], subject: str) -> str | None:
-    """"segment" if ``subject`` has a polygon here, "detect" if it has a box, "point" if its only
+    """ "segment" if ``subject`` has a polygon here, "detect" if it has a box, "point" if its only
     geometry here is a point, else None (no geometry-bearing annotation of ``subject``).
     """
-    scoped = [a for a in anns if a.subject == subject and a.geometry is not None]
+    scoped = [
+        a for a in anns if a.subject == subject and a.geometry is not None
+    ]
     if any(polygonal(a.geometry) for a in scoped):
         return "segment"
     if any(isinstance(a.geometry, BBox) for a in scoped):

@@ -31,16 +31,31 @@ SKEWED_VALUES = [1.0, 10.0, 100.0]
 SKEWED_INTENSITIES = [0.2, 0.5, 0.9]
 
 
-def _trained(tmp_path, values=SKEWED_VALUES, intensities=SKEWED_INTENSITIES, *,
-             accumulation: int = 1):
+def _trained(
+    tmp_path,
+    values=SKEWED_VALUES,
+    intensities=SKEWED_INTENSITIES,
+    *,
+    accumulation: int = 1,
+):
     """A run over training frames at ``intensities`` valued ``values`` and no validation side,
     one frame a batch at ``accumulation`` batches a step, opened by the launcher's own producer
     and trained over its own loader, which serves its first epoch in an order seeded from the
     run's config."""
     config = regressor_config(
-        1, data=frames_data(tmp_path / "ds", intensities, values), builder=BUILDER,
-        gradient_accumulation_steps=accumulation, batch_size=1, seed=0,
-        optimizer={"name": "adamw", "backbone_lr": 0.01, "head_lr": 0.01, "weight_decay": 0.0})
+        1,
+        data=frames_data(tmp_path / "ds", intensities, values),
+        builder=BUILDER,
+        gradient_accumulation_steps=accumulation,
+        batch_size=1,
+        seed=0,
+        optimizer={
+            "name": "adamw",
+            "backbone_lr": 0.01,
+            "head_lr": 0.01,
+            "weight_decay": 0.0,
+        },
+    )
     ctx = run_context(tmp_path, config)
     return train(ctx.run, ctx.train_loader)
 
@@ -60,7 +75,10 @@ def _record_steps(monkeypatch, steps: list) -> None:
     """Append to ``steps``, at every optimizer step, the gradient the parameters carry and the
     training batches the run's model was fed since the previous step."""
     fed: list = []
-    real_build_model, real_build_optimizer = gt.build_from_model_source, gt.build_optimizer
+    real_build_model, real_build_optimizer = (
+        gt.build_from_model_source,
+        gt.build_optimizer,
+    )
 
     def build_model(source, plan, dims):
         model = real_build_model(source, plan, dims)
@@ -68,8 +86,12 @@ def _record_steps(monkeypatch, steps: list) -> None:
         def record(module, args):
             if module.training:
                 images, targets = args
-                fed.append((images.detach().clone(),
-                            {k: v.detach().clone() for k, v in targets.items()}))
+                fed.append(
+                    (
+                        images.detach().clone(),
+                        {k: v.detach().clone() for k, v in targets.items()},
+                    )
+                )
 
         model.register_forward_pre_hook(record)
         return model
@@ -78,9 +100,19 @@ def _record_steps(monkeypatch, steps: list) -> None:
         optimizer = real_build_optimizer(*args, **kwargs)
 
         def hook(opt, *_):
-            steps.append((torch.cat([
-                p.grad.detach().reshape(-1) for group in opt.param_groups
-                for p in group["params"] if p.grad is not None]).clone(), list(fed)))
+            steps.append(
+                (
+                    torch.cat(
+                        [
+                            p.grad.detach().reshape(-1)
+                            for group in opt.param_groups
+                            for p in group["params"]
+                            if p.grad is not None
+                        ]
+                    ).clone(),
+                    list(fed),
+                )
+            )
             fed.clear()
 
         optimizer.register_step_pre_hook(hook)
@@ -94,8 +126,12 @@ def _window_sizes(steps: list) -> list[int]:
     """How many batches each of ``steps`` covers, after asserting that each step's gradient is
     the mean of the independent gradients of exactly the batches fed since the step before, and
     that no two batches share a gradient, so a step carrying another window's cannot pass."""
-    batch_grads = [_batch_gradient(*batch) for _, batches in steps for batch in batches]
-    assert len({round(float(g.sum()), 6) for g in batch_grads}) == len(batch_grads)
+    batch_grads = [
+        _batch_gradient(*batch) for _, batches in steps for batch in batches
+    ]
+    assert len({round(float(g.sum()), 6) for g in batch_grads}) == len(
+        batch_grads
+    )
     for gradient, batches in steps:
         assert batches
         own = sum(_batch_gradient(*batch) for batch in batches) / len(batches)
@@ -103,7 +139,9 @@ def _window_sizes(steps: list) -> list[int]:
     return [len(batches) for _, batches in steps]
 
 
-def test_each_optimizer_step_sees_only_its_own_batch_gradient(tmp_path, monkeypatch):
+def test_each_optimizer_step_sees_only_its_own_batch_gradient(
+    tmp_path, monkeypatch
+):
     """One step per batch at accumulation 1, each carrying that batch's gradient alone."""
     steps: list = []
     _record_steps(monkeypatch, steps)
@@ -129,18 +167,27 @@ def test_no_accumulated_gradient_survives_the_run(tmp_path, monkeypatch):
         assert param.grad is None or float(param.grad.abs().max()) == 0.0
 
 
-def test_gradient_accumulation_combines_only_its_own_window(tmp_path, monkeypatch):
+def test_gradient_accumulation_combines_only_its_own_window(
+    tmp_path, monkeypatch
+):
     """Accumulation still holds: with two batches per step, a step carries the mean of exactly
     those two batches' gradients, and the window does not carry over into the next step."""
     steps: list = []
     _record_steps(monkeypatch, steps)
-    run = _trained(tmp_path, [1.0, 10.0, 100.0, 1000.0], [0.2, 0.5, 0.9, 0.35], accumulation=2)
+    run = _trained(
+        tmp_path,
+        [1.0, 10.0, 100.0, 1000.0],
+        [0.2, 0.5, 0.9, 0.35],
+        accumulation=2,
+    )
 
     assert run.status == "completed", run.status_error
     assert _window_sizes(steps) == [2, 2]
 
 
-def test_an_epoch_last_shorter_window_averages_over_the_batches_it_holds(tmp_path, monkeypatch):
+def test_an_epoch_last_shorter_window_averages_over_the_batches_it_holds(
+    tmp_path, monkeypatch
+):
     """Three batches at accumulation two: the second window holds one batch, and its step carries
     that batch's own gradient, not half of it."""
     steps: list = []

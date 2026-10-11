@@ -31,6 +31,7 @@ class NoProjectError(ToolError):
 def tool(**options: Any) -> Callable[[_Tool], _Tool]:
     """Declare the decorated function an MCP tool, with ``options`` passed to the server's own
     registration when :func:`build_server` builds a server, and return it unchanged."""
+
     def decorate(fn: _Tool) -> _Tool:
         _TOOLS.append((fn, options))
         return fn
@@ -66,7 +67,9 @@ _CONTEXT = ("project", "bound", "actor")
 directory; ``bound``, the :class:`~tcip_mcp.workspace.BoundProject` whole; ``actor``, ``None``."""
 
 
-def _bound(fn: Callable[..., Any], binding: BoundProject | None) -> Callable[..., Any]:
+def _bound(
+    fn: Callable[..., Any], binding: BoundProject | None
+) -> Callable[..., Any]:
     """``fn`` as the server registers it: each :data:`_CONTEXT` parameter it takes is registered
     without it, every call passing the server's own value, since no person makes an act an MCP
     client calls and the project is the one the server was started for. With no binding, a call
@@ -81,12 +84,16 @@ def _bound(fn: Callable[..., Any], binding: BoundProject | None) -> Callable[...
         if binding is None:
             raise NoProjectError(
                 "this MCP server was started for no project, so no tool that acts on "
-                "one can run; restart it with --project <path> naming the project")
+                "one can run; restart it with --project <path> naming the project"
+            )
         values = {"project": binding.root, "bound": binding, "actor": None}
         return fn(*args, **{name: values[name] for name in bound}, **kwargs)
 
     entry.__signature__ = sig.replace(  # type: ignore[attr-defined]
-        parameters=[p for name, p in sig.parameters.items() if name not in bound])
+        parameters=[
+            p for name, p in sig.parameters.items() if name not in bound
+        ]
+    )
     return entry
 
 
@@ -94,7 +101,9 @@ def build_server(binding: BoundProject | None) -> MCPServer:
     """A server registering every declared tool, each acting on the project of ``binding`` or,
     with ``None``, a server started for no project, which serves only the tools taking no
     :data:`_CONTEXT` parameter."""
-    server = MCPServer("tcip-pipeline", lifespan=agent_identity.session_lifespan)
+    server = MCPServer(
+        "tcip-pipeline", lifespan=agent_identity.session_lifespan
+    )
     # Records which harness connected, from the handshake, before any tool call is served.
     server.middleware.append(agent_identity.record_connecting_client)
     for fn, options in _TOOLS:
@@ -104,8 +113,10 @@ def build_server(binding: BoundProject | None) -> MCPServer:
 
 def list_registered_tools() -> list[str]:
     """Return the sorted names of all tools a server registers."""
-    return sorted(fn.__name__ if "name" not in options else options["name"]
-                  for fn, options in _TOOLS)
+    return sorted(
+        fn.__name__ if "name" not in options else options["name"]
+        for fn, options in _TOOLS
+    )
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -114,9 +125,12 @@ def main(argv: list[str] | None = None) -> None:
     ``--project`` names a directory holding no project record; refuses what
     :func:`~tcip_mcp.workspace.workspace_from_environment` refuses when a project is named."""
     parser = argparse.ArgumentParser(prog="python -m tcip_mcp")
-    parser.add_argument("--project", default=None,
-                        help="the project every project tool acts on; omitted, only the tools "
-                             "that need no project run")
+    parser.add_argument(
+        "--project",
+        default=None,
+        help="the project every project tool acts on; omitted, only the tools "
+        "that need no project run",
+    )
     args = parser.parse_args(argv)
 
     from tcip_store import bind
@@ -128,7 +142,9 @@ def main(argv: list[str] | None = None) -> None:
 
         try:
             root, record = existing_project(args.project)
-            binding = BoundProject(root, record["id"], workspace_from_environment())
+            binding = BoundProject(
+                root, record["id"], workspace_from_environment()
+            )
         except ValueError as exc:
             raise SystemExit(f"--project: {exc}") from exc
     # Size GDAL's block cache once per process, at the entry point, never at source construction.

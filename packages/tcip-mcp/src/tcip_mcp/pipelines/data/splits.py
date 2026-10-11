@@ -56,11 +56,17 @@ def count_label_lines(document: "LabelDocument", scope: "ClassScope") -> int:
     from tcip_annotation.state import instances
 
     # A crowd region is never one object, so it is never counted as one.
-    return sum(1 for a in instances(document.annotations) if scope.subject is None
-               or json_io.attribute_ids(a, scope.subject, ()) is not None)
+    return sum(
+        1
+        for a in instances(document.annotations)
+        if scope.subject is None
+        or json_io.attribute_ids(a, scope.subject, ()) is not None
+    )
 
 
-def label_document_extent(document: "LabelDocument", where: str) -> tuple[int, int]:
+def label_document_extent(
+    document: "LabelDocument", where: str
+) -> tuple[int, int]:
     """``(width, height)`` one per-image label ``document`` records, the frame its geometry was
     authored against. A document that states no positive width and height refuses
     (``ValueError``) naming ``where``.
@@ -70,13 +76,19 @@ def label_document_extent(document: "LabelDocument", where: str) -> tuple[int, i
         raise ValueError(
             f"{where} states no positive width and height ({w!r}, {h!r}): the frame its "
             "geometry was drawn in is unknown, so nothing can place that geometry on the image. "
-            "Write the label document through the annotation store, which records the frame.")
+            "Write the label document through the annotation store, which records the frame."
+        )
     return w, h
 
 
 def group_balanced_split(
-    stems: Sequence[str], *, counts: Mapping[str, int], weighted: bool,
-    group_key_fn: Callable[[str], str], splits: Mapping[str, float], seed: int,
+    stems: Sequence[str],
+    *,
+    counts: Mapping[str, int],
+    weighted: bool,
+    group_key_fn: Callable[[str], str],
+    splits: Mapping[str, float],
+    seed: int,
     min_foreground_groups: Mapping[str, int],
 ) -> dict[str, list[str]]:
     """Partition ``stems`` onto the sides ``splits`` names, each at its positive fraction, keeping
@@ -94,8 +106,10 @@ def group_balanced_split(
     stems = list(stems)
     missing = sorted(s for s in stems if s not in counts)
     if missing:
-        raise ValueError(f"no foreground count for {len(missing)} member(s) {missing[:10]}: a "
-                         "draw balances only on counts measured for every member")
+        raise ValueError(
+            f"no foreground count for {len(missing)} member(s) {missing[:10]}: a "
+            "draw balances only on counts measured for every member"
+        )
     fracs = dict(splits)
     active = list(fracs)
 
@@ -157,12 +171,18 @@ def group_balanced_split(
         best_split: str | None = None
         best_score: float | None = None
         for n in active:
-            ann_ratio = (state_ann[n] + group_ann[gk]) / max(1.0, targets_ann[n])
-            tile_ratio = (state_tiles[n] + group_tiles[gk]) / max(1.0, targets_tiles[n])
+            ann_ratio = (state_ann[n] + group_ann[gk]) / max(
+                1.0, targets_ann[n]
+            )
+            tile_ratio = (state_tiles[n] + group_tiles[gk]) / max(
+                1.0, targets_tiles[n]
+            )
             score = 0.7 * ann_ratio + 0.3 * tile_ratio
             if best_score is None or score < best_score:
                 best_split, best_score = n, score
-        assert best_split is not None, "active is non-empty, so the loop above always assigns"
+        assert best_split is not None, (
+            "active is non-empty, so the loop above always assigns"
+        )
         assignment[gk] = best_split
         used.add(gk)
         state_ann[best_split] += group_ann[gk]
@@ -172,7 +192,9 @@ def group_balanced_split(
     total_all_tiles = sum(group_tiles.values()) or 1
     tile_target_all = {n: fracs[n] * total_all_tiles for n in fracs}
     for gk in sorted(bg_groups, key=lambda g: group_tiles[g], reverse=True):
-        best_split = max(active, key=lambda n: tile_target_all[n] - state_tiles[n])
+        best_split = max(
+            active, key=lambda n: tile_target_all[n] - state_tiles[n]
+        )
         assignment[gk] = best_split
         state_tiles[best_split] += group_tiles[gk]
 
@@ -182,7 +204,9 @@ def group_balanced_split(
 
 
 def foreground_group_count(
-    members: Iterable[str], counts: Mapping[str, int], group_of: Callable[[str], str],
+    members: Iterable[str],
+    counts: Mapping[str, int],
+    group_of: Callable[[str], str],
 ) -> int:
     """How many distinct groups among ``members`` carry foreground. ``counts`` is each member's own
     foreground count under the caller's own key for it
@@ -192,7 +216,10 @@ def foreground_group_count(
 
 
 def refuse_insufficient_foreground_groups(
-    foreground_groups: int, minimums: dict[str, int], *, remedy: str,
+    foreground_groups: int,
+    minimums: dict[str, int],
+    *,
+    remedy: str,
 ) -> None:
     """Refuses, before any write, a draw whose tree holds fewer foreground groups than the sum of
     the per-side minimums a caller states, naming every requested side and its minimum, the
@@ -214,14 +241,19 @@ def member_identity(capture: str, stem: str) -> str:
     return f"{capture}/{stem}"
 
 
-def recorded_group_by(group_by: str, group_key_map: Mapping[str, str] | None) -> str:
+def recorded_group_by(
+    group_by: str, group_key_map: Mapping[str, str] | None
+) -> str:
     """The grouping policy a draw records: ``"explicit_map"`` when a group key map overrides
     ``group_by``, else ``group_by`` itself."""
     return "explicit_map" if group_key_map else group_by
 
 
 def resolve_group_key_fn(
-    group_by: str, stems: Sequence[str], *, group_key_map: dict[str, str] | None = None,
+    group_by: str,
+    stems: Sequence[str],
+    *,
+    group_key_map: dict[str, str] | None = None,
 ) -> Callable[[str], str]:
     """Resolve a grouping policy to a callable. An unrecognized ``group_by`` string, or a
     ``group_key_map`` missing coverage for some of ``stems``, raises.
@@ -231,7 +263,9 @@ def resolve_group_key_fn(
         if missing:
             preview = missing[:10]
             more = f" (+{len(missing) - 10} more)" if len(missing) > 10 else ""
-            raise ValueError(f"group_key_map is missing {len(missing)} stem(s): {preview}{more}")
+            raise ValueError(
+                f"group_key_map is missing {len(missing)} stem(s): {preview}{more}"
+            )
         return lambda s: group_key_map[s]
     from tcip_mcp.pipelines.model_build import resolve_named
 
@@ -239,7 +273,10 @@ def resolve_group_key_fn(
 
 
 def recorded_group_key_fn(
-    group_by: str, *, date: str, stems: Sequence[str] = (),
+    group_by: str,
+    *,
+    date: str,
+    stems: Sequence[str] = (),
     group_key_map: dict[str, str] | None = None,
 ) -> Callable[[str], str]:
     """The group key a draw records for a bare stem admitted out of capture ``date``'s directory:
@@ -250,7 +287,9 @@ def recorded_group_key_fn(
     is handed out; with neither, the named policy alone answers.
     """
     identities = [member_identity(date, stem) for stem in stems]
-    key_fn = resolve_group_key_fn(group_by, identities, group_key_map=group_key_map)
+    key_fn = resolve_group_key_fn(
+        group_by, identities, group_key_map=group_key_map
+    )
     return lambda stem: key_fn(member_identity(date, stem))
 
 
@@ -327,7 +366,9 @@ class SpatialStripSplit:
     realized_fractions: dict[str, float]
     realized_discard_fraction: float
 
-    def identity_for(self, stem: str, box: tuple[int, int, int, int]) -> str | None:
+    def identity_for(
+        self, stem: str, box: tuple[int, int, int, int]
+    ) -> str | None:
         """The region identity for the lattice slice ``box`` of ``stem``, or ``None`` when it
         falls in a dropped gap."""
         idx = _region_index(self.region_bounds, self.axis, box)
@@ -336,8 +377,11 @@ class SpatialStripSplit:
         return spatial_strip_identity(stem, f"strip_{self.axis}_{idx}")
 
 
-def _region_index(region_bounds: list[tuple[str, int, int]], axis: str,
-                  box: tuple[int, int, int, int]) -> int | None:
+def _region_index(
+    region_bounds: list[tuple[str, int, int]],
+    axis: str,
+    box: tuple[int, int, int, int],
+) -> int | None:
     """Index into ``region_bounds`` of the region the slice ``box`` lies wholly inside along
     ``axis``, or ``None`` when it falls in a dropped gap (a buffer band or past the extent)."""
     lo, hi = (box[0], box[2]) if axis == "x" else (box[1], box[3])
@@ -348,7 +392,9 @@ def _region_index(region_bounds: list[tuple[str, int, int]], axis: str,
     return idx if start <= lo and hi <= end else None
 
 
-def _center_out_order(slots: list[tuple[str, float]]) -> list[tuple[str, float]]:
+def _center_out_order(
+    slots: list[tuple[str, float]],
+) -> list[tuple[str, float]]:
     """Order slots by descending share, largest first, then placed axis-center-out: each next
     (smaller) slot alternately extends the left or right end of the growing arrangement, so every
     slot but the largest faces at most one differently-assigned neighbor. A tie among equal shares
@@ -365,9 +411,12 @@ def _center_out_order(slots: list[tuple[str, float]]) -> list[tuple[str, float]]
 
 
 def _strip_regions(
-    spans: list[tuple[int, int]], buffer: int,
-    split_names: tuple[str, ...], fractions: tuple[float, ...],
-    discard_ceiling: float, stripes_per_split: int,
+    spans: list[tuple[int, int]],
+    buffer: int,
+    split_names: tuple[str, ...],
+    fractions: tuple[float, ...],
+    discard_ceiling: float,
+    stripes_per_split: int,
 ) -> list[tuple[str, int, int]]:
     """Merged, buffer-shrunk ``(name, start, end)`` pixel regions along one axis, in axis order,
     cut and shrunk over the lattice's own slice ``spans`` (each slice's ``(start, end)`` on the
@@ -381,7 +430,9 @@ def _strip_regions(
     n = len(spans)
     axis_span = spans[-1][1] - spans[0][0]
     n_splits = len(split_names)
-    max_stripes = max(1, int(discard_ceiling * axis_span / max(1, n_splits * buffer)))
+    max_stripes = max(
+        1, int(discard_ceiling * axis_span / max(1, n_splits * buffer))
+    )
     stripes = max(1, min(stripes_per_split, max_stripes))
 
     slots: list[tuple[str, float]] = []
@@ -393,7 +444,10 @@ def _strip_regions(
     cursor = 0.0
     for i, (name, share) in enumerate(slots):
         end_f = n if i == len(slots) - 1 else cursor + share * n
-        start_idx, end_idx = int(round(cursor)), max(int(round(end_f)), int(round(cursor)))
+        start_idx, end_idx = (
+            int(round(cursor)),
+            max(int(round(end_f)), int(round(cursor))),
+        )
         raw.append((name, start_idx, end_idx))
         cursor = end_f
 
@@ -420,9 +474,16 @@ def _strip_regions(
 
 
 def spatial_strip_split(
-    width: int, height: int, tile_size: int, overlap: float, *,
-    fractions: tuple[float, ...], split_names: tuple[str, ...],
-    buffer: int | None = None, discard_ceiling: float = 0.05, stripes_per_split: int = 1,
+    width: int,
+    height: int,
+    tile_size: int,
+    overlap: float,
+    *,
+    fractions: tuple[float, ...],
+    split_names: tuple[str, ...],
+    buffer: int | None = None,
+    discard_ceiling: float = 0.05,
+    stripes_per_split: int = 1,
 ) -> SpatialStripSplit:
     """Split one image's own tile lattice into disjoint pixel-space strips, one side per name, for
     the case where there are too few source images to hold one out whole: a strip is train, val, or
@@ -454,7 +515,9 @@ def spatial_strip_split(
     if any(f < 0 for f in fractions):
         raise ValueError(f"fractions must be non-negative, got {fractions}.")
     if abs(sum(fractions) - 1.0) > 1e-6:
-        raise ValueError(f"fractions must sum to 1.0, got {fractions} (sum={sum(fractions)}).")
+        raise ValueError(
+            f"fractions must sum to 1.0, got {fractions} (sum={sum(fractions)})."
+        )
     if tile_size <= 0:
         raise ValueError(f"tile_size must be positive, got {tile_size}.")
     if buffer is None:
@@ -489,7 +552,11 @@ def spatial_strip_split(
     axis = "x" if len(x_spans) >= len(y_spans) else "y"
 
     region_bounds = _strip_regions(
-        x_spans if axis == "x" else y_spans, buffer, active_names, active_fracs, discard_ceiling,
+        x_spans if axis == "x" else y_spans,
+        buffer,
+        active_names,
+        active_fracs,
+        discard_ceiling,
         stripes_per_split,
     )
     if len({name for name, _, _ in region_bounds}) < len(active_names):
@@ -515,20 +582,34 @@ def spatial_strip_split(
             f"kept={kept}. Try a smaller buffer, fewer stripes_per_split, or a larger image."
         )
 
-    regions: dict[str, list[tuple[int, int, int, int]]] = {name: [] for name in active_names}
+    regions: dict[str, list[tuple[int, int, int, int]]] = {
+        name: [] for name in active_names
+    }
     for name, start, end in region_bounds:
-        rect = (start, 0, end, height) if axis == "x" else (0, start, width, end)
+        rect = (
+            (start, 0, end, height) if axis == "x" else (0, start, width, end)
+        )
         regions[name].append(rect)
 
     total_kept = sum(kept.values()) or 1
     tiles_within_extent = len(in_extent)
     return SpatialStripSplit(
-        width=width, height=height, tile_size=tile_size, overlap=overlap,
-        axis=axis, buffer=buffer, split_names=split_names,
-        requested_fractions=fractions, stripes_per_split=stripes_per_split,
-        discard_ceiling=discard_ceiling, regions=regions, region_bounds=region_bounds,
-        total_tiles=total_tiles, tiles_dropped_past_extent=tiles_dropped_past_extent,
+        width=width,
+        height=height,
+        tile_size=tile_size,
+        overlap=overlap,
+        axis=axis,
+        buffer=buffer,
+        split_names=split_names,
+        requested_fractions=fractions,
+        stripes_per_split=stripes_per_split,
+        discard_ceiling=discard_ceiling,
+        regions=regions,
+        region_bounds=region_bounds,
+        total_tiles=total_tiles,
+        tiles_dropped_past_extent=tiles_dropped_past_extent,
         tiles_dropped_outside_regions=dropped_outside,
-        kept_tiles=kept, realized_fractions={n: kept[n] / total_kept for n in active_names},
+        kept_tiles=kept,
+        realized_fractions={n: kept[n] / total_kept for n in active_names},
         realized_discard_fraction=dropped_outside / tiles_within_extent,
     )

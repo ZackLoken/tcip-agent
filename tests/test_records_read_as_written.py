@@ -25,20 +25,27 @@ def test_a_registered_entry_ranks_through_best_model(tmp_path: Path) -> None:
     registry.register_model("m", str(ckpt), metrics={"val_map50": 0.7})
 
     models = ModelRegistry(str(tmp_path)).list_models()
-    best = best_model(models, "val_map50", higher_is_better=True, include_unverified=True)
+    best = best_model(
+        models, "val_map50", higher_is_better=True, include_unverified=True
+    )
     assert best is not None and best["name"] == "m"
     # Each entry's own recorded producer reads back: this foreign one names none.
     assert [m["experiment_id"] for m in models] == [None]
 
 
-def test_a_checkpoint_stating_no_task_refuses_naming_where_to_state_it(tmp_path: Path) -> None:
+def test_a_checkpoint_stating_no_task_refuses_naming_where_to_state_it(
+    tmp_path: Path,
+) -> None:
     import pytest
 
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     stated = registered_checkpoint(tmp_path)
-    assert load_registered_checkpoint(stated, project=tmp_path).task == "detection"
+    assert (
+        load_registered_checkpoint(stated, project=tmp_path).task
+        == "detection"
+    )
 
     # Written past the producer, which builds no model for a config naming no task.
     torch = pytest.importorskip("torch")
@@ -47,17 +54,26 @@ def test_a_checkpoint_stating_no_task_refuses_naming_where_to_state_it(tmp_path:
     from tests._verified_checkpoint_fixtures import SCOPED_DATA
 
     unstated = tmp_path / "unstated.pt"
-    torch.save({STATE_DICT_KEY: {},
-                CONFIG_KEY: {"model_source": {
-                                 "builder": BESPOKE_DETECTION},
-                             "data": dict(SCOPED_DATA)}}, str(unstated))
-    assert "error" not in register_model(name="unstated", checkpoint_path=str(unstated),
-                                         project=tmp_path)
+    torch.save(
+        {
+            STATE_DICT_KEY: {},
+            CONFIG_KEY: {
+                "model_source": {"builder": BESPOKE_DETECTION},
+                "data": dict(SCOPED_DATA),
+            },
+        },
+        str(unstated),
+    )
+    assert "error" not in register_model(
+        name="unstated", checkpoint_path=str(unstated), project=tmp_path
+    )
     with pytest.raises(ValueError, match="model_source.task"):
         load_registered_checkpoint(str(unstated), project=tmp_path).task
 
 
-def test_a_proposed_trait_reads_back_as_the_entry_it_proposed(tmp_path: Path) -> None:
+def test_a_proposed_trait_reads_back_as_the_entry_it_proposed(
+    tmp_path: Path,
+) -> None:
     from tcip_mcp import traits
 
     from tests import _trait_fixtures as fx
@@ -68,7 +84,9 @@ def test_a_proposed_trait_reads_back_as_the_entry_it_proposed(tmp_path: Path) ->
     assert traits.read_trait("leaf", tmp_path).latest.entry == proposed
 
 
-def test_a_trait_record_lacking_an_entry_field_fails_at_the_schema(tmp_path: Path) -> None:
+def test_a_trait_record_lacking_an_entry_field_fails_at_the_schema(
+    tmp_path: Path,
+) -> None:
     import pytest
     import tcip_store as ts
     from pydantic import ValidationError
@@ -88,7 +106,9 @@ def test_a_trait_record_lacking_an_entry_field_fails_at_the_schema(tmp_path: Pat
 
 
 def test_a_sweep_final_status_lacking_its_state_fails_at_the_read(
-    tmp_path: Path, real_hpo_base_config: dict, monkeypatch,
+    tmp_path: Path,
+    real_hpo_base_config: dict,
+    monkeypatch,
 ) -> None:
     """The final status the sweep launch itself writes reads back as its state; the same record
     with ``state`` removed fails the read by name."""
@@ -102,14 +122,27 @@ def test_a_sweep_final_status_lacking_its_state_fails_at_the_read(
     def fake_search(**kw):
         return None
 
-    monkeypatch.setattr("tcip_mcp.pipelines.training.hpo.tune_search", fake_search)
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.training.hpo.tune_search", fake_search
+    )
     result = tt.run_hyperparameter_search(
-        tmp_path, base_config=real_hpo_base_config, param_space=sweep_space(), n_trials=1,
-        **fifo_search(), search_seed=0)
+        tmp_path,
+        base_config=real_hpo_base_config,
+        param_space=sweep_space(),
+        n_trials=1,
+        **fifo_search(),
+        search_seed=0,
+    )
     sweep_id = result["sweep"]["sweep_id"]
-    assert tt.monitor_training(tmp_path, sweep_id)["sweep"]["state"] == "completed"
+    assert (
+        tt.monitor_training(tmp_path, sweep_id)["sweep"]["state"]
+        == "completed"
+    )
 
-    final = tt.experiments.experiment_dir(sweep_id, project=tmp_path) / FINAL_STATUS_FILE
+    final = (
+        tt.experiments.experiment_dir(sweep_id, project=tmp_path)
+        / FINAL_STATUS_FILE
+    )
     damaged = read_record(final)
     del damaged["state"]
     final.write_bytes(encode_record(damaged))
@@ -117,11 +150,16 @@ def test_a_sweep_final_status_lacking_its_state_fails_at_the_read(
         tt.monitor_training(tmp_path, sweep_id)
 
 
-def test_a_completion_mark_lacking_its_time_fails_at_the_read(tmp_path: Path) -> None:
+def test_a_completion_mark_lacking_its_time_fails_at_the_read(
+    tmp_path: Path,
+) -> None:
     import pytest
 
     import tcip_store
-    from tcip_annotation.json_io import UnreadableLabelDocumentError, read_label_document
+    from tcip_annotation.json_io import (
+        UnreadableLabelDocumentError,
+        read_label_document,
+    )
     from tests._producer_fixtures import image_label_key, mark_complete
 
     image = tmp_path / "images" / UNDATED_BUCKET / "IMG_1.png"
@@ -135,5 +173,7 @@ def test_a_completion_mark_lacking_its_time_fails_at_the_read(tmp_path: Path) ->
     del stored["complete"]["bud"][0]["at"]
     tcip_store.replace(label, stored)
 
-    with pytest.raises(UnreadableLabelDocumentError, match=r"KeyError\('at'\)"):
+    with pytest.raises(
+        UnreadableLabelDocumentError, match=r"KeyError\('at'\)"
+    ):
         read_label_document(label)

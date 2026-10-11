@@ -18,7 +18,9 @@ from tcip_mcp.pipelines.schemas import OptimizerSpec
 
 
 def _build_sgd(params, *, lr: float, weight_decay: float, momentum: float):
-    return torch.optim.SGD(params, lr=lr, momentum=momentum, weight_decay=weight_decay)
+    return torch.optim.SGD(
+        params, lr=lr, momentum=momentum, weight_decay=weight_decay
+    )
 
 
 def _build_adam(params, *, lr: float, weight_decay: float):
@@ -50,8 +52,13 @@ _OPTIMIZER_BUILDERS: dict[str, Callable[..., torch.optim.Optimizer]] = {
 }
 
 
-def build_optimizer(spec: OptimizerSpec, model: nn.Module, *, backbone_lr: float,
-                    head_lr: float) -> torch.optim.Optimizer:
+def build_optimizer(
+    spec: OptimizerSpec,
+    model: nn.Module,
+    *,
+    backbone_lr: float,
+    head_lr: float,
+) -> torch.optim.Optimizer:
     """The optimizer ``spec`` names over ``model`` at ``backbone_lr``/``head_lr`` (the block's own
     rates, or a stage's scaled ones), with the block's weight decay and, for ``sgd``, its
     momentum; each registered builder takes the settings it reads and no other.
@@ -69,10 +76,14 @@ def build_optimizer(spec: OptimizerSpec, model: nn.Module, *, backbone_lr: float
 
     factory = resolve_named(spec.name, _OPTIMIZER_BUILDERS, kind="optimizer")
     settings = {} if spec.momentum is None else {"momentum": spec.momentum}
-    return factory(param_groups, lr=head_lr, weight_decay=spec.weight_decay, **settings)
+    return factory(
+        param_groups, lr=head_lr, weight_decay=spec.weight_decay, **settings
+    )
 
 
-def compute_lr_scale(effective_batch: int, reference_batch: int, power: float) -> float:
+def compute_lr_scale(
+    effective_batch: int, reference_batch: int, power: float
+) -> float:
     """The LR multiplier ``(effective_batch / reference_batch) ** power``. Both batches are
     positive counts the caller states or derives."""
     return (effective_batch / reference_batch) ** power
@@ -87,10 +98,14 @@ TRAINING_STATE_KEYS = (STATE_DICT_KEY, OPTIMIZER_STATE_KEY, GROUPS_KEY)
 def _copied(value: Any) -> Any:
     """An independent copy of one optimizer-state value: a tensor cloned, anything else deep
     copied."""
-    return value.detach().clone() if torch.is_tensor(value) else deepcopy(value)
+    return (
+        value.detach().clone() if torch.is_tensor(value) else deepcopy(value)
+    )
 
 
-def capture_training_state(model: nn.Module, optimizer: torch.optim.Optimizer) -> dict:
+def capture_training_state(
+    model: nn.Module, optimizer: torch.optim.Optimizer
+) -> dict:
     """The model's and the optimizer's state at this moment, every value an independent copy:
     the model's whole ``state_dict`` (weights and buffers) on the CPU under ``STATE_DICT_KEY``;
     the optimizer's per-parameter state by parameter name under :data:`OPTIMIZER_STATE_KEY`,
@@ -101,33 +116,57 @@ def capture_training_state(model: nn.Module, optimizer: torch.optim.Optimizer) -
     learning rate and whatever else a scheduler or a bespoke ``get_param_groups`` sets) copied
     as they are. :func:`restore_training_state` puts it back. Refuses (``KeyError``)
     an optimizer holding a parameter that is not one of ``model``'s named parameters."""
-    name_of: dict[torch.Tensor, str] = {p: n for n, p in model.named_parameters()}
+    name_of: dict[torch.Tensor, str] = {
+        p: n for n, p in model.named_parameters()
+    }
     return {
-        STATE_DICT_KEY: {k: v.detach().cpu().clone() for k, v in model.state_dict().items()},
-        OPTIMIZER_STATE_KEY: {name_of[p]: {k: _copied(v.cpu() if torch.is_tensor(v) else v)
-                                           for k, v in buf.items()}
-                              for p, buf in optimizer.state.items()},
-        GROUPS_KEY: [{"members": [name_of[p] for p in group["params"]],
-                      "settings": {k: _copied(v) for k, v in group.items() if k != "params"}}
-                     for group in optimizer.param_groups],
+        STATE_DICT_KEY: {
+            k: v.detach().cpu().clone() for k, v in model.state_dict().items()
+        },
+        OPTIMIZER_STATE_KEY: {
+            name_of[p]: {
+                k: _copied(v.cpu() if torch.is_tensor(v) else v)
+                for k, v in buf.items()
+            }
+            for p, buf in optimizer.state.items()
+        },
+        GROUPS_KEY: [
+            {
+                "members": [name_of[p] for p in group["params"]],
+                "settings": {
+                    k: _copied(v) for k, v in group.items() if k != "params"
+                },
+            }
+            for group in optimizer.param_groups
+        ],
     }
 
 
-def captured_sources(model: nn.Module, optimizer: torch.optim.Optimizer,
-                     groups: list[dict]) -> list[set[int | None]]:
+def captured_sources(
+    model: nn.Module, optimizer: torch.optim.Optimizer, groups: list[dict]
+) -> list[set[int | None]]:
     """For each of ``optimizer``'s param groups, the indices into ``groups`` (a capture's
     :data:`GROUPS_KEY`) of the captured groups its parameters were members of, ``None`` standing
     for a parameter no captured group held. Membership is read by parameter name; an empty group
     has no source."""
     name_of = {p: n for n, p in model.named_parameters()}
-    source_of = {name: index for index, group in enumerate(groups)
-                 for name in group["members"]}
-    return [{source_of.get(name_of[p]) for p in group["params"]}
-            for group in optimizer.param_groups]
+    source_of = {
+        name: index
+        for index, group in enumerate(groups)
+        for name in group["members"]
+    }
+    return [
+        {source_of.get(name_of[p]) for p in group["params"]}
+        for group in optimizer.param_groups
+    ]
 
 
 def restore_training_state(
-    model: nn.Module, optimizer: torch.optim.Optimizer, state: dict, *, group_settings: bool
+    model: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    state: dict,
+    *,
+    group_settings: bool,
 ) -> None:
     """Load a :func:`capture_training_state` result of ``model`` into it and into ``optimizer``
     through the optimizer's own ``load_state_dict``, from fresh copies, so the capture stays as
@@ -143,26 +182,41 @@ def restore_training_state(
     model.load_state_dict(state[STATE_DICT_KEY])
     params = dict(model.named_parameters())
     packed = optimizer.state_dict()
-    pid_of = {param: pid for group, saved in zip(optimizer.param_groups, packed["param_groups"])
-              for param, pid in zip(group["params"], saved["params"])}
-    missing = sorted(name for group in state[GROUPS_KEY] for name in group["members"]
-                     if params[name] not in pid_of)
+    pid_of = {
+        param: pid
+        for group, saved in zip(optimizer.param_groups, packed["param_groups"])
+        for param, pid in zip(group["params"], saved["params"])
+    }
+    missing = sorted(
+        name
+        for group in state[GROUPS_KEY]
+        for name in group["members"]
+        if params[name] not in pid_of
+    )
     if missing:
         raise ValueError(
             f"the optimizer holds no parameter named {missing}, which the captured optimizer "
             "held; a stage's optimizer must hold every parameter the previous stage trained "
-            "(enforce_monotonic_unfreeze).")
-    packed["state"] = {pid_of[params[name]]: {k: _copied(v) for k, v in buf.items()}
-                       for name, buf in state[OPTIMIZER_STATE_KEY].items()}
+            "(enforce_monotonic_unfreeze)."
+        )
+    packed["state"] = {
+        pid_of[params[name]]: {k: _copied(v) for k, v in buf.items()}
+        for name, buf in state[OPTIMIZER_STATE_KEY].items()
+    }
     if group_settings:
         for index, (saved, sources) in enumerate(
-                zip(packed["param_groups"], captured_sources(model, optimizer, state[GROUPS_KEY]))):
+            zip(
+                packed["param_groups"],
+                captured_sources(model, optimizer, state[GROUPS_KEY]),
+            )
+        ):
             if not sources:
                 continue
             if len(sources) != 1 or None in sources:
                 raise ValueError(
                     f"param group {index}'s members come from captured groups "
                     f"{sorted(map(str, sources))}, not one, so no one setting of it is on "
-                    "record.")
+                    "record."
+                )
             saved.update(_copied(state[GROUPS_KEY][sources.pop()]["settings"]))
     optimizer.load_state_dict(packed)

@@ -24,26 +24,54 @@ def _publish(tmp_path, monkeypatch, **stated) -> dict:
 
     images_dir = tmp_path / "dataset" / "images" / "2026-03-01"
     images_dir.mkdir(parents=True)
-    Image.new("RGB", (160, 120), color=(70, 90, 110)).save(images_dir / "capture_a.png")
-    install(monkeypatch, StubPredictor(width=160, height=120, scores=(0.95,), task="detection",
-                                       in_chans=3))
-    return run_inference(tmp_path, project_checkpoint(tmp_path), images_dir=str(images_dir),
-                         bucket="baseline/2026-03-01", device="cpu", stated=Stated(**stated))
+    Image.new("RGB", (160, 120), color=(70, 90, 110)).save(
+        images_dir / "capture_a.png"
+    )
+    install(
+        monkeypatch,
+        StubPredictor(
+            width=160, height=120, scores=(0.95,), task="detection", in_chans=3
+        ),
+    )
+    return run_inference(
+        tmp_path,
+        project_checkpoint(tmp_path),
+        images_dir=str(images_dir),
+        bucket="baseline/2026-03-01",
+        device="cpu",
+        stated=Stated(**stated),
+    )
 
 
 def test_the_record_the_publication_writes_is_the_record_the_reader_takes_back(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     from tcip_mcp.buckets import read_bucket
 
-    from tests._verified_checkpoint_fixtures import SAMPLE_CROSS_TILE_NMS, SAMPLE_OVERLAP
+    from tests._verified_checkpoint_fixtures import (
+        SAMPLE_CROSS_TILE_NMS,
+        SAMPLE_OVERLAP,
+    )
 
-    result = _publish(tmp_path, monkeypatch, tile=True, tile_size=64, overlap=SAMPLE_OVERLAP,
-                      conf=0.3, cross_tile_nms=SAMPLE_CROSS_TILE_NMS)
+    result = _publish(
+        tmp_path,
+        monkeypatch,
+        tile=True,
+        tile_size=64,
+        overlap=SAMPLE_OVERLAP,
+        conf=0.3,
+        cross_tile_nms=SAMPLE_CROSS_TILE_NMS,
+    )
 
     assert "error" not in result, result
     bucket = read_bucket(result["dataset_root"], result["bucket"])
     assert bucket.execution.record() == result["execution"]
-    assert (bucket.execution.tile_size, bucket.execution.sources["tile_size"]) == (64, "explicit")
-    assert bucket.date == "2026-03-01" and bucket.documents == {"capture_a": "capture_a.png"}
+    assert (
+        bucket.execution.tile_size,
+        bucket.execution.sources["tile_size"],
+    ) == (64, "explicit")
+    assert bucket.date == "2026-03-01" and bucket.documents == {
+        "capture_a": "capture_a.png"
+    }
     assert bucket.producer["checkpoint_sha256"] == result["checkpoint_sha256"]

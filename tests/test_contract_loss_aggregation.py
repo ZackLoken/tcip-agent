@@ -13,7 +13,10 @@ import pytest
 pytest.importorskip("torch")
 import torch  # noqa: E402
 
-from tcip_mcp.pipelines.model_contract import check_model_contract, overfit_check  # noqa: E402
+from tcip_mcp.pipelines.model_contract import (
+    check_model_contract,
+    overfit_check,
+)  # noqa: E402
 
 # What the smokes below synthesize their batch at, the shape a run resolves for itself.
 CLS_DIMS = {"in_chans": 3, "num_classes": 2, "img_size": (64, 64)}
@@ -28,9 +31,11 @@ class _ThreeTermLoss(torch.nn.Module):
 
     def forward(self, images, targets=None):
         if self.training and targets is not None:
-            return {"first": self.scale * 1.0,
-                    "second": self.scale * 10.0,
-                    "third": self.scale * 100.0}
+            return {
+                "first": self.scale * 1.0,
+                "second": self.scale * 10.0,
+                "third": self.scale * 100.0,
+            }
         return {"logits": torch.zeros(2, 1)}
 
 
@@ -43,7 +48,10 @@ class _NonFiniteSecondTerm(torch.nn.Module):
 
     def forward(self, images, targets=None):
         if self.training and targets is not None:
-            return {"first": self.scale * 1.0, "second": torch.tensor(float("nan"))}
+            return {
+                "first": self.scale * 1.0,
+                "second": torch.tensor(float("nan")),
+            }
         return {"logits": torch.zeros(2, 1)}
 
 
@@ -60,8 +68,11 @@ class _UnoptimizedCompanionTerm(torch.nn.Module):
 
     def forward(self, images, targets=None):
         if self.training and targets is not None:
-            primary = self.weight ** 2
-            return {"primary": primary, "companion": 2.0 * (4.0 - primary.detach())}
+            primary = self.weight**2
+            return {
+                "primary": primary,
+                "companion": 2.0 * (4.0 - primary.detach()),
+            }
         return {"logits": torch.zeros(2, 1)}
 
 
@@ -75,29 +86,40 @@ class _TwoOptimizableTerms(torch.nn.Module):
 
     def forward(self, images, targets=None):
         if self.training and targets is not None:
-            return {"a_term": (self.a - 1.0) ** 2, "b_term": 0.5 * (self.b + 1.0) ** 2}
+            return {
+                "a_term": (self.a - 1.0) ** 2,
+                "b_term": 0.5 * (self.b + 1.0) ** 2,
+            }
         return {"logits": torch.zeros(2, 1)}
 
 
 def test_train_loss_is_the_sum_of_every_returned_loss_term():
     """The reported train loss accounts for all three terms (1 + 10 + 100 at scale 1), not the
     first, the largest, or the last of them."""
-    report = check_model_contract(_ThreeTermLoss(), "classification", dims=CLS_DIMS)
+    report = check_model_contract(
+        _ThreeTermLoss(), "classification", dims=CLS_DIMS
+    )
     assert report["ok"], report["issues"]
     assert report["train_loss"] == pytest.approx(111.0)
 
 
 def test_a_non_finite_later_loss_term_fails_the_smoke():
     """A finite first term never covers for a non-finite one behind it."""
-    report = check_model_contract(_NonFiniteSecondTerm(), "classification", dims=CLS_DIMS)
+    report = check_model_contract(
+        _NonFiniteSecondTerm(), "classification", dims=CLS_DIMS
+    )
     assert report["ok"] is False
-    assert any("not finite" in issue for issue in report["issues"]), report["issues"]
+    assert any("not finite" in issue for issue in report["issues"]), report[
+        "issues"
+    ]
 
 
 def test_overfit_check_judges_the_whole_objective_not_the_first_term():
     """A run where the first term improves while the objective as a whole worsens is refused."""
     model = _UnoptimizedCompanionTerm()
-    report = overfit_check(model, "classification", steps=15, dims=CLS_DIMS, seed=0)
+    report = overfit_check(
+        model, "classification", steps=15, dims=CLS_DIMS, seed=0
+    )
     assert report["passed"] is False
     assert "did not decrease" in report["issue"], report["issue"]
     assert report["final"] > report["initial"]
@@ -106,8 +128,13 @@ def test_overfit_check_judges_the_whole_objective_not_the_first_term():
 
 def test_a_multi_term_model_that_optimizes_every_term_passes():
     """The rail admits valid work: several terms are fine as long as their sum falls."""
-    report = overfit_check(_TwoOptimizableTerms(), "classification", steps=25, dims=CLS_DIMS,
-                           seed=0)
+    report = overfit_check(
+        _TwoOptimizableTerms(),
+        "classification",
+        steps=25,
+        dims=CLS_DIMS,
+        seed=0,
+    )
     assert report["passed"], report["issue"]
     assert report["final"] < report["initial"]
     assert len(report["losses"]) == 25

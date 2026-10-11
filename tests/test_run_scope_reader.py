@@ -16,17 +16,28 @@ def _scope(scope: dict) -> ClassScope:
     return ClassScope.of({"scope": scope})
 
 
-def test_the_decoder_reads_back_the_attribute_records_the_writer_wrote() -> None:
-    written = ClassScope("bud", (Attribute("color", "categorical", ("red", "blue")),
-                                 Attribute("grade", "ordinal", ("low", "high"))))
+def test_the_decoder_reads_back_the_attribute_records_the_writer_wrote() -> (
+    None
+):
+    written = ClassScope(
+        "bud",
+        (
+            Attribute("color", "categorical", ("red", "blue")),
+            Attribute("grade", "ordinal", ("low", "high")),
+        ),
+    )
     assert _scope(asdict(written)) == written
 
 
-def test_the_decoder_reads_a_stated_bare_subject_as_attributes_not_yet_read() -> None:
+def test_the_decoder_reads_a_stated_bare_subject_as_attributes_not_yet_read() -> (
+    None
+):
     assert _scope({"subject": "bud"}) == ClassScope("bud", None)
 
 
-def test_the_decoder_reads_an_explicit_empty_scope_as_an_empty_class_space() -> None:
+def test_the_decoder_reads_an_explicit_empty_scope_as_an_empty_class_space() -> (
+    None
+):
     """A mask or table run's admission records the empty scope explicitly."""
     assert _scope(asdict(ClassScope())) == ClassScope()
 

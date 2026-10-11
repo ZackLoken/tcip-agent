@@ -41,31 +41,43 @@ def coco_categories(coco: dict, *, problems: list[str]) -> dict[int, str]:
         cid: Any = c.get("id") if isinstance(c, dict) else None
         name: Any = c.get("name") if isinstance(c, dict) else None
         if not is_coco_id(cid):
-            problems.append(f"category {i} ({c!r}) is not an object with an integer id")
+            problems.append(
+                f"category {i} ({c!r}) is not an object with an integer id"
+            )
         elif cid in out:
-            problems.append(f"category id {cid} is declared twice ({out[cid]!r} and {name!r})")
+            problems.append(
+                f"category id {cid} is declared twice ({out[cid]!r} and {name!r})"
+            )
         else:
             out[cid] = name
     return out
 
 
 def _named_annotation(
-    ann: dict, categories: dict[int, str], decode_rle: Callable[[dict], Any],
+    ann: dict,
+    categories: dict[int, str],
+    decode_rle: Callable[[dict], Any],
 ) -> Annotation:
     """One COCO record as the :class:`Annotation` its ``category_id`` names, or ``ValueError``."""
     cid: Any = ann.get("category_id")
     if not is_coco_id(cid) or cid not in categories:
-        raise ValueError(f"names category_id {cid!r}, which no valid declaration of this "
-                         "document names")
+        raise ValueError(
+            f"names category_id {cid!r}, which no valid declaration of this "
+            "document names"
+        )
     segmentation = ann.get("segmentation")
     if isinstance(segmentation, dict):
         rings = mask_to_polygon_rings(decode_rle(segmentation))
         segmentation = [[c for point in ring for c in point] for ring in rings]
-    return annotation_of_record({**ann, "subject": categories[cid], "segmentation": segmentation})
+    return annotation_of_record(
+        {**ann, "subject": categories[cid], "segmentation": segmentation}
+    )
 
 
 def parse_coco_annotations(
-    coco: dict, *, decode_rle: Callable[[dict], Any],
+    coco: dict,
+    *,
+    decode_rle: Callable[[dict], Any],
 ) -> tuple[dict[int, str], dict[int, list[Annotation]], list[str]]:
     """The document's valid category declarations, every record it holds as a name-based
     :class:`Annotation` keyed by the integer ``image_id`` its record names, and every fault found.
@@ -102,7 +114,9 @@ def parse_coco_annotations(
         image_id: Any = ann.get("image_id")
         identified = is_coco_id(image_id)
         if not identified:
-            problems.append(f"record {i} names image_id {image_id!r}, not an integer image id")
+            problems.append(
+                f"record {i} names image_id {image_id!r}, not an integer image id"
+            )
         try:
             annotation = _named_annotation(ann, categories, decode_rle)
         except ValueError as exc:

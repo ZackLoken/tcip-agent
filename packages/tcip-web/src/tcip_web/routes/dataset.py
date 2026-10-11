@@ -44,7 +44,9 @@ def _label_problem(capture: str, unreadable: list[str]) -> Optional[str]:
     return f"capture {capture}: label document(s) {', '.join(unreadable)} will not read"
 
 
-def _subjects_by_date(root, dates: list[str]) -> tuple[dict[str, list[str]], Optional[str]]:
+def _subjects_by_date(
+    root, dates: list[str]
+) -> tuple[dict[str, list[str]], Optional[str]]:
     """:func:`~tcip_mcp.dataset_layout.capture_subjects` per date, and the first date's
     :func:`_label_problem`."""
     by_date: dict[str, list[str]] = {}
@@ -64,9 +66,13 @@ def get_dataset_tree(dataset_root: str) -> DatasetTree:
     dates = list_dates(root)
     subjects_by_date, label_problem = _subjects_by_date(root, dates)
     return DatasetTree(
-        dataset_root=str(root), dates_with_images=dates, subjects=list_subjects(root),
-        subjects_by_date=subjects_by_date, buckets_by_date=buckets_by_date(root, dates),
-        label_problem=label_problem)
+        dataset_root=str(root),
+        dates_with_images=dates,
+        subjects=list_subjects(root),
+        subjects_by_date=subjects_by_date,
+        buckets_by_date=buckets_by_date(root, dates),
+        label_problem=label_problem,
+    )
 
 
 class SelectionRequest(BaseModel):
@@ -105,8 +111,13 @@ async def select_dataset(req: SelectionRequest) -> dict:
     _selected_this_session = True
     documents = read_bucket(root, req.bucket).documents if req.bucket else {}
     try:
-        selection = selection_for(root, req.subject, req.date, req.bucket,
-                                  prev.current_image_index if same_identity else 0)
+        selection = selection_for(
+            root,
+            req.subject,
+            req.date,
+            req.bucket,
+            prev.current_image_index if same_identity else 0,
+        )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     await store.mutate({"dataset": selection}, project=project)
@@ -116,7 +127,9 @@ async def select_dataset(req: SelectionRequest) -> dict:
         "status": "ok",
         "selection": selection.model_dump(mode="json"),
         "annotations_present": req.subject in found,
-        "predictions_present": bool(set(documents.values()) & set(selection.image_list)),
+        "predictions_present": bool(
+            set(documents.values()) & set(selection.image_list)
+        ),
         "label_problem": _label_problem(req.date, unreadable),
     }
 
@@ -137,6 +150,8 @@ async def set_current_image(req: NavRequest) -> dict:
     index = req.current_image_index
     if n and not (0 <= index < n):
         raise HTTPException(400, f"index {index} out of range for {n} images")
-    await store.mutate({"dataset": dataset.model_copy(update={"current_image_index": index})},
-                       project=project)
+    await store.mutate(
+        {"dataset": dataset.model_copy(update={"current_image_index": index})},
+        project=project,
+    )
     return {"status": "ok", "current_image_index": index}

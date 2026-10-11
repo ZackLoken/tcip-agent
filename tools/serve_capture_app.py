@@ -47,11 +47,15 @@ def _refuse_unsafe_root(root: Path) -> None:
     state."""
     resolved = root.resolve()
     if resolved.is_relative_to(REPO_ROOT):
-        raise SystemExit(f"{root} is under the repository ({REPO_ROOT}); name a root outside it")
+        raise SystemExit(
+            f"{root} is under the repository ({REPO_ROOT}); name a root outside it"
+        )
     current_workspace = os.environ.get("TCIP_WORKSPACE")
     if current_workspace:
         workspace_path = Path(current_workspace).resolve()
-        if resolved.is_relative_to(workspace_path) or workspace_path.is_relative_to(resolved):
+        if resolved.is_relative_to(
+            workspace_path
+        ) or workspace_path.is_relative_to(resolved):
             raise SystemExit(
                 f"{root} and this process's own TCIP_WORKSPACE ({current_workspace}) alias one "
                 "another (one contains the other, or they are the same directory); a harness "
@@ -77,7 +81,9 @@ def build_environ(root: Path, port: int) -> dict[str, str]:
     env["TCIP_WEB_PORT"] = str(port)
     env["PYTHONUNBUFFERED"] = "1"
     existing = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = str(REPO_ROOT) + (os.pathsep + existing if existing else "")
+    env["PYTHONPATH"] = str(REPO_ROOT) + (
+        os.pathsep + existing if existing else ""
+    )
     return env
 
 
@@ -90,14 +96,19 @@ def start(root: Path, port: int) -> None:
     log_path = root / "server.log"
     log = open(log_path, "a", encoding="utf-8")
     proc = subprocess.Popen(
-        [sys.executable, "-m", "tcip_web"], env=env, stdout=log, stderr=subprocess.STDOUT,
+        [sys.executable, "-m", "tcip_web"],
+        env=env,
+        stdout=log,
+        stderr=subprocess.STDOUT,
         cwd=str(root),
     )
     url = f"http://127.0.0.1:{port}/api/projects"
     deadline = time.monotonic() + 120
     while time.monotonic() < deadline:
         if proc.poll() is not None:
-            raise SystemExit(f"server exited early with {proc.returncode}; see {log_path}")
+            raise SystemExit(
+                f"server exited early with {proc.returncode}; see {log_path}"
+            )
         try:
             with urllib.request.urlopen(url, timeout=2) as resp:
                 if resp.status == 200:
@@ -106,7 +117,9 @@ def start(root: Path, port: int) -> None:
             time.sleep(0.5)
     else:
         raise SystemExit("server did not answer in time")
-    info_path.write_text(json.dumps({"pid": proc.pid, "port": port}), encoding="utf-8")
+    info_path.write_text(
+        json.dumps({"pid": proc.pid, "port": port}), encoding="utf-8"
+    )
     print(json.dumps({"pid": proc.pid, "port": port}))
 
 
@@ -123,7 +136,9 @@ def stop(root: Path) -> None:
         raise SystemExit(f"no server_info.json under {root}")
     info = json.loads(info_path.read_text(encoding="utf-8"))
     subprocess.run(
-        ["taskkill", "/PID", str(info["pid"]), "/T", "/F"], check=False, capture_output=True
+        ["taskkill", "/PID", str(info["pid"]), "/T", "/F"],
+        check=False,
+        capture_output=True,
     )
     info_path.unlink()
     print(json.dumps({"stopped": info["pid"]}))
@@ -133,11 +148,15 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
 
-    p_start = sub.add_parser("start", help="launch python -m tcip_web under the harness root")
+    p_start = sub.add_parser(
+        "start", help="launch python -m tcip_web under the harness root"
+    )
     p_start.add_argument("root", type=Path)
     p_start.add_argument("--port", type=int, required=True)
 
-    p_stop = sub.add_parser("stop", help="kill the recorded server and remove its record")
+    p_stop = sub.add_parser(
+        "stop", help="kill the recorded server and remove its record"
+    )
     p_stop.add_argument("root", type=Path)
 
     args = parser.parse_args()

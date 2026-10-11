@@ -32,7 +32,9 @@ _DATASET_REGISTRY_PARTS = ("datasets",)
 
 def dataset_registry_key(project: str | Path) -> Key:
     """The project's record of which datasets it uses, keyed by dataset id."""
-    return Key(DATASET_REGISTRY_STORE, str(Path(project)), _DATASET_REGISTRY_PARTS)
+    return Key(
+        DATASET_REGISTRY_STORE, str(Path(project)), _DATASET_REGISTRY_PARTS
+    )
 
 
 def read_datasets(project: str | Path) -> list[dict]:
@@ -81,7 +83,10 @@ def register_dataset(project: Path, dataset_root: str, crop: str) -> dict:
         crop: The crop this dataset's imagery is of, as ``crops.yml`` names it. Required; the
             expert's fact.
     """
-    from tcip_mcp.dataset_layout import decode_dataset_identity_document, dataset_identity_path
+    from tcip_mcp.dataset_layout import (
+        decode_dataset_identity_document,
+        dataset_identity_path,
+    )
     from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
     from tcip_mcp.project_record import mint_id
     from tcip_mcp.registry_paths import stored_path
@@ -90,7 +95,9 @@ def register_dataset(project: Path, dataset_root: str, crop: str) -> dict:
     if not root.is_dir():
         return {"error": f"dataset_root not found: {dataset_root}"}
     if not crop:
-        return {"error": "crop is required (the expert's fact; never inferred from a path or slug)"}
+        return {
+            "error": "crop is required (the expert's fact; never inferred from a path or slug)"
+        }
 
     ident_path = dataset_identity_path(root)
     fingerprint = dataset_fingerprint(root)
@@ -102,28 +109,38 @@ def register_dataset(project: Path, dataset_root: str, crop: str) -> dict:
             existing: dict = {}
         else:
             try:
-                existing = decode_dataset_identity_document(stored.value, dataset_root=root)
+                existing = decode_dataset_identity_document(
+                    stored.value, dataset_root=root
+                )
             except ValueError as exc:
-                return {"error": f"{exc}; minting a fresh id over it would sever every record "
-                                 "that cites the old one"}
+                return {
+                    "error": f"{exc}; minting a fresh id over it would sever every record "
+                    "that cites the old one"
+                }
         candidate = {
             "crop": crop,
             "id": existing.get("id") or mint_id(),
             "fingerprint": fingerprint,
         }
         try:
-            tcip_store.put_blob(ident_path, encode_record(candidate), expect=stored.version)
+            tcip_store.put_blob(
+                ident_path, encode_record(candidate), expect=stored.version
+            )
         except VersionConflictError:
             continue
         identity = candidate
         break
 
-    upsert_dataset(project, {"id": identity["id"], "path": stored_path(root, project)})
+    upsert_dataset(
+        project, {"id": identity["id"], "path": stored_path(root, project)}
+    )
     return {"dataset_root": str(root), **identity}
 
 
 @tool()
-def initialize_project(project_path: str, display_name: str, site: str) -> dict:
+def initialize_project(
+    project_path: str, display_name: str, site: str
+) -> dict:
     """Create a TCIP project: ``.tcip/`` with its artifacts and models directories, and its record
     holding a freshly minted id, ``display_name`` and ``site``, then one ``project_created`` line
     in its own log.
@@ -150,7 +167,9 @@ def initialize_project(project_path: str, display_name: str, site: str) -> dict:
     tcip = _project_dir(str(project))
     (tcip / "artifacts").mkdir(exist_ok=True)
     (tcip / "models").mkdir(exist_ok=True)
-    record_event_or_raise("project_created", dict(record), actor=None, scope=project)
+    record_event_or_raise(
+        "project_created", dict(record), actor=None, scope=project
+    )
     return {"project_path": str(project), **record}
 
 
@@ -165,8 +184,13 @@ def view_gui_state(project: Path) -> dict:
 
     state = read_gui_snapshot(project)
     if state is None:
-        return {"note": "the GUI has not persisted a selection for this project"}
-    return {**state.model_dump(mode="json"), "current_image": current_image(state.dataset)}
+        return {
+            "note": "the GUI has not persisted a selection for this project"
+        }
+    return {
+        **state.model_dump(mode="json"),
+        "current_image": current_image(state.dataset),
+    }
 
 
 @tool()
@@ -206,7 +230,9 @@ def inspect_project(project: Path) -> dict:
 
     from tcip_store import StoreError
 
-    from tcip_mcp.pipelines.postprocessing.plant_mapping import plant_mapping_names
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        plant_mapping_names,
+    )
 
     try:
         status["plant_mappings"] = plant_mapping_names(project)
@@ -218,7 +244,11 @@ def inspect_project(project: Path) -> dict:
     return status
 
 
-_ACTIVITY_TOOLS = ("report_friction", "write_retrospective", "record_distillation_pass")
+_ACTIVITY_TOOLS = (
+    "report_friction",
+    "write_retrospective",
+    "record_distillation_pass",
+)
 
 
 def _recent_activity(project: Path) -> dict:
@@ -235,8 +265,11 @@ def _recent_activity(project: Path) -> dict:
         lines, _cursor = acts_of(project, _ACTIVITY_TOOLS)
     except ValueError as exc:
         return {"status_unavailable": str(exc)}
-    activity: dict = {"reports_since_last_retrospective": 0, "reports_since_last_distillation": 0,
-                      "retrospectives_since_last_distillation": 0}
+    activity: dict = {
+        "reports_since_last_retrospective": 0,
+        "reports_since_last_distillation": 0,
+        "retrospectives_since_last_distillation": 0,
+    }
     for line in lines:
         if line["tool"] == "record_distillation_pass":
             activity["reports_since_last_distillation"] = 0
@@ -249,13 +282,17 @@ def _recent_activity(project: Path) -> dict:
         else:
             activity["reports_since_last_retrospective"] = 0
             activity["retrospectives_since_last_distillation"] += 1
-            activity["last_retrospective"] = {"project_id": line["arguments"]["project_id"],
-                                              "modified_at": line["timestamp"]}
+            activity["last_retrospective"] = {
+                "project_id": line["arguments"]["project_id"],
+                "modified_at": line["timestamp"],
+            }
         activity["last_activity"] = line["timestamp"]
     return activity
 
 
-def _write_bundle(dest: Path, as_zip: bool, root: Path, members: list[Path]) -> None:
+def _write_bundle(
+    dest: Path, as_zip: bool, root: Path, members: list[Path]
+) -> None:
     """Write ``members`` (each an absolute path under ``root``) into ``dest`` under their paths
     relative to ``root``, as a ZIP when ``as_zip`` and as the identical tree otherwise, each store
     database as the consistent copy :func:`tcip_store.sqlite_backend.copy_database` takes.
@@ -271,8 +308,13 @@ def _write_bundle(dest: Path, as_zip: bool, root: Path, members: list[Path]) -> 
     try:
         with ExitStack() as stack:
             scratch = Path(stack.enter_context(tempfile.TemporaryDirectory()))
-            zf = (stack.enter_context(zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED))
-                  if as_zip else None)
+            zf = (
+                stack.enter_context(
+                    zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED)
+                )
+                if as_zip
+                else None
+            )
             for n, member in enumerate(sorted(members)):
                 source = member
                 if member in databases:
@@ -294,17 +336,27 @@ def _write_bundle(dest: Path, as_zip: bool, root: Path, members: list[Path]) -> 
 
 @audited
 def archive_project(
-    project: Path, output_path: str = "", output_dir: str = "",
+    project: Path,
+    output_path: str = "",
+    output_dir: str = "",
     include_models: bool = False,
 ) -> dict:
     """Export ``project`` as a portable bundle (:func:`write_archive`, on its terms) and record
     the export in the project's log."""
-    return write_archive(project, output_path=output_path, output_dir=output_dir,
-                         include_models=include_models)
+    return write_archive(
+        project,
+        output_path=output_path,
+        output_dir=output_dir,
+        include_models=include_models,
+    )
 
 
 def write_archive(
-    project: Path, *, output_path: str = "", output_dir: str = "", include_models: bool = False,
+    project: Path,
+    *,
+    output_path: str = "",
+    output_dir: str = "",
+    include_models: bool = False,
 ) -> dict:
     """Export ``project``, an established project root
     (:func:`~tcip_mcp.project_record.existing_project`), as a portable bundle: a ZIP file, or,
@@ -332,35 +384,56 @@ def write_archive(
         include_models: Whether to include model checkpoints (can be large).
     """
     if output_path and output_dir:
-        return {"error": "give either output_path (a ZIP file) or output_dir (a directory "
-                         "tree), not both"}
+        return {
+            "error": "give either output_path (a ZIP file) or output_dir (a directory "
+            "tree), not both"
+        }
     if not output_path and not output_dir:
-        return {"error": "give either output_path (a ZIP file) or output_dir (a directory "
-                         "tree) to archive into"}
+        return {
+            "error": "give either output_path (a ZIP file) or output_dir (a directory "
+            "tree) to archive into"
+        }
 
     dest = located(output_path or output_dir, project)
     if dest.is_relative_to(project):
-        return {"error": f"the destination {dest} is inside the project being archived "
-                         f"({project}); choose a destination outside the project"}
-    if dest.exists() and not (output_dir and dest.is_dir() and not any(dest.iterdir())):
-        return {"error": f"the destination {dest} already exists; an archive never writes over "
-                         "or into anything"}
+        return {
+            "error": f"the destination {dest} is inside the project being archived "
+            f"({project}); choose a destination outside the project"
+        }
+    if dest.exists() and not (
+        output_dir and dest.is_dir() and not any(dest.iterdir())
+    ):
+        return {
+            "error": f"the destination {dest} already exists; an archive never writes over "
+            "or into anything"
+        }
 
     from tcip_store.file_backend import is_bookkeeping
 
     from tcip_mcp.model_registry import checkpoint_files
 
     checkpoints = frozenset() if include_models else checkpoint_files(project)
-    files = [p for p in project.rglob("*") if p.is_file() and not is_bookkeeping(p.name)]
+    files = [
+        p
+        for p in project.rglob("*")
+        if p.is_file() and not is_bookkeeping(p.name)
+    ]
     members = [p for p in files if p not in checkpoints]
 
     (dest.parent if output_path else dest).mkdir(parents=True, exist_ok=True)
     _write_bundle(dest, bool(output_path), project, members)
-    size_bytes = (dest.stat().st_size if output_path
-                  else sum(p.stat().st_size for p in dest.rglob("*") if p.is_file()))
-    return {"files_added": len(members), "size_bytes": size_bytes,
-            "include_models": include_models, "checkpoints_excluded": len(files) - len(members),
-            ("output_path" if output_path else "output_dir"): str(dest)}
+    size_bytes = (
+        dest.stat().st_size
+        if output_path
+        else sum(p.stat().st_size for p in dest.rglob("*") if p.is_file())
+    )
+    return {
+        "files_added": len(members),
+        "size_bytes": size_bytes,
+        "include_models": include_models,
+        "checkpoints_excluded": len(files) - len(members),
+        ("output_path" if output_path else "output_dir"): str(dest),
+    }
 
 
 _IMPORTS_DIRNAME = ".imports"
@@ -432,7 +505,9 @@ def _sweep_free_locked_leftovers(imports_root: Path) -> None:
         lock_file_for(entry).unlink(missing_ok=True)
 
 
-def _move_staging_onto_destination(staged: Path, dest: Path, *, timeout_s: float) -> None:
+def _move_staging_onto_destination(
+    staged: Path, dest: Path, *, timeout_s: float
+) -> None:
     """Rename the staged tree onto ``dest``, re-checking emptiness immediately before the rename.
 
     Both the empty-destination removal and the rename itself run under
@@ -443,7 +518,9 @@ def _move_staging_onto_destination(staged: Path, dest: Path, *, timeout_s: float
     def _prepare_and_rename() -> None:
         if dest.exists():
             if any(dest.iterdir()):
-                raise StoreRuntimeError(f"destination {dest} is no longer empty; refusing the move")
+                raise StoreRuntimeError(
+                    f"destination {dest} is no longer empty; refusing the move"
+                )
             dest.rmdir()
         os.rename(str(staged), str(dest))
 
@@ -486,21 +563,32 @@ def import_project(bundle_path: str, destination: str) -> dict:
     from filelock import Timeout as _LockTimeout
 
     from tcip_mcp.audit import record_event_or_raise
-    from tcip_store.file_backend import DEFAULT_LOCK_TIMEOUT_S, lock_file_for, path_lock
+    from tcip_store.file_backend import (
+        DEFAULT_LOCK_TIMEOUT_S,
+        lock_file_for,
+        path_lock,
+    )
 
     try:
-        bp, dest = (located(Path(p).expanduser(), None) for p in (bundle_path, destination))
+        bp, dest = (
+            located(Path(p).expanduser(), None)
+            for p in (bundle_path, destination)
+        )
     except ValueError as exc:
         return {"error": str(exc)}
     if not bp.is_file() and not bp.is_dir():
         return {"error": f"bundle not found: {bundle_path}"}
     if dest.exists():
         if not dest.is_dir():
-            return {"error": f"destination {dest} exists and is not a directory"}
+            return {
+                "error": f"destination {dest} exists and is not a directory"
+            }
         if any(dest.iterdir()):
-            return {"error": f"destination {dest} is not empty; import_project never writes "
-                             "into an existing project (a destination with state merges nothing; "
-                             "that stays operator work)"}
+            return {
+                "error": f"destination {dest} is not empty; import_project never writes "
+                "into an existing project (a destination with state merges nothing; "
+                "that stays operator work)"
+            }
 
     dest.parent.mkdir(parents=True, exist_ok=True)
     imports_root = dest.parent / _IMPORTS_DIRNAME
@@ -518,12 +606,18 @@ def import_project(bundle_path: str, destination: str) -> dict:
                 if "error" in result or not result:
                     shutil.rmtree(staging, ignore_errors=True)
     except _LockTimeout:
-        return {"error": f"could not lock a fresh staging directory at {staging}"}
+        return {
+            "error": f"could not lock a fresh staging directory at {staging}"
+        }
     finally:
         lock_file_for(staging).unlink(missing_ok=True)
     if "error" not in result:
-        record_event_or_raise("import_project", {"bundle_path": bundle_path}, actor=None,
-                              scope=dest)
+        record_event_or_raise(
+            "import_project",
+            {"bundle_path": bundle_path},
+            actor=None,
+            scope=dest,
+        )
     return result
 
 
@@ -541,17 +635,26 @@ def _run_import_into_staging(bp: Path, staging: Path, dest: Path) -> dict:
     except (ValueError, zipfile.BadZipFile) as exc:
         return {"error": f"{bp} is not a readable bundle: {exc}"}
 
-    bookkeeping = sorted(p.relative_to(staging).as_posix() for p in staging.rglob("*")
-                         if p.is_file() and is_bookkeeping(p.name))
+    bookkeeping = sorted(
+        p.relative_to(staging).as_posix()
+        for p in staging.rglob("*")
+        if p.is_file() and is_bookkeeping(p.name)
+    )
     if bookkeeping:
-        return {"error": f"the archive carries the store's own bookkeeping "
-                         f"({', '.join(bookkeeping)}), which a bundle never legitimately holds; "
-                         "refusing the whole import"}
+        return {
+            "error": f"the archive carries the store's own bookkeeping "
+            f"({', '.join(bookkeeping)}), which a bundle never legitimately holds; "
+            "refusing the whole import"
+        }
 
     try:
-        _move_staging_onto_destination(staging, dest, timeout_s=DEFAULT_LOCK_TIMEOUT_S)
+        _move_staging_onto_destination(
+            staging, dest, timeout_s=DEFAULT_LOCK_TIMEOUT_S
+        )
     except (OSError, StoreRuntimeError) as exc:
-        return {"error": f"could not move the staged import onto {dest}: {exc}"}
+        return {
+            "error": f"could not move the staged import onto {dest}: {exc}"
+        }
 
     return {
         "destination": str(dest),
@@ -565,5 +668,8 @@ def _external_dataset_paths(project: Path) -> list[str]:
     """The imported project's own registered dataset entries that stay absolute (external)."""
     from tcip_mcp.registry_paths import is_external_form
 
-    return sorted(str(e["path"]) for e in read_datasets(project)
-                  if is_external_form(str(e["path"])))
+    return sorted(
+        str(e["path"])
+        for e in read_datasets(project)
+        if is_external_form(str(e["path"]))
+    )

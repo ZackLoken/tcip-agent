@@ -26,10 +26,14 @@ TILING = {"enabled": True, "tile_size": 64, "overlap": 0.2, "sliver_frac": 0.5}
 """The tiling every windowed case states; its sliver cutoff stated, since one box derives none."""
 
 
-def _grid(height: int, width: int, channels: int, dtype=np.uint8) -> np.ndarray:
+def _grid(
+    height: int, width: int, channels: int, dtype=np.uint8
+) -> np.ndarray:
     arr = np.zeros((height, width, channels), dtype=dtype)
     for c in range(channels):
-        arr[:, :, c] = (np.add.outer(np.arange(height) * (c + 2), np.arange(width))) % 199
+        arr[:, :, c] = (
+            np.add.outer(np.arange(height) * (c + 2), np.arange(width))
+        ) % 199
     return arr
 
 
@@ -50,8 +54,13 @@ def test_uint8_channel_counts_convert_to_their_pil_mode():
 def test_unfaithful_inputs_return_unchanged():
     from tcip_mcp.pipelines.image_utils import to_pil_if_faithful
 
-    for arr in (_grid(6, 5, 3, dtype=np.uint16), _grid(6, 5, 2), _grid(6, 5, 5),
-                _grid(6, 5, 3).astype(np.float32), np.zeros((6, 5), dtype=np.uint8)):
+    for arr in (
+        _grid(6, 5, 3, dtype=np.uint16),
+        _grid(6, 5, 2),
+        _grid(6, 5, 5),
+        _grid(6, 5, 3).astype(np.float32),
+        np.zeros((6, 5), dtype=np.uint8),
+    ):
         assert to_pil_if_faithful(arr) is arr
     pil = Image.new("RGB", (5, 6))
     assert to_pil_if_faithful(pil) is pil
@@ -71,18 +80,36 @@ def test_four_channel_converts_to_rgba_only_when_the_source_declares_alpha():
 
     arr = _grid(6, 5, 4)
 
-    img = to_pil_if_faithful(arr, band_interpretations=("red", "green", "blue", "alpha"))
+    img = to_pil_if_faithful(
+        arr, band_interpretations=("red", "green", "blue", "alpha")
+    )
     assert isinstance(img, Image.Image) and img.mode == "RGBA"
     assert np.array_equal(np.asarray(img), arr)
 
-    assert to_pil_if_faithful(arr) is arr  # no signal at all (.npy/.npz, a band group)
+    assert (
+        to_pil_if_faithful(arr) is arr
+    )  # no signal at all (.npy/.npz, a band group)
     assert to_pil_if_faithful(arr, band_interpretations=None) is arr
     # a real signal that names the 4th band something other than alpha (a genuinely spectral one,
     # or a file whose color interpretation is simply undeclared)
-    assert to_pil_if_faithful(
-        arr, band_interpretations=("red", "green", "blue", "undefined")) is arr
-    assert to_pil_if_faithful(
-        arr, band_interpretations=("gray", "undefined", "undefined", "undefined")) is arr
+    assert (
+        to_pil_if_faithful(
+            arr, band_interpretations=("red", "green", "blue", "undefined")
+        )
+        is arr
+    )
+    assert (
+        to_pil_if_faithful(
+            arr,
+            band_interpretations=(
+                "gray",
+                "undefined",
+                "undefined",
+                "undefined",
+            ),
+        )
+        is arr
+    )
 
 
 # ── load_image's array-backend return ────────────────────────────────────
@@ -92,7 +119,9 @@ def test_load_image_returns_pil_for_uint8_tiffs(tmp_path: Path):
     import tifffile
 
     rgb = _grid(20, 16, 3)
-    tifffile.imwrite(str(tmp_path / "rgb.tif"), rgb, photometric="rgb", rowsperstrip=8)
+    tifffile.imwrite(
+        str(tmp_path / "rgb.tif"), rgb, photometric="rgb", rowsperstrip=8
+    )
     got = load_image(tmp_path / "rgb.tif", 3)
     assert isinstance(got, Image.Image) and got.mode == "RGB"
     assert np.array_equal(np.asarray(got), rgb)
@@ -104,35 +133,51 @@ def test_load_image_returns_pil_for_uint8_tiffs(tmp_path: Path):
     assert np.array_equal(np.asarray(got), gray)
 
 
-def test_load_image_converts_a_real_alpha_tagged_geotiff_to_rgba(tmp_path: Path):
+def test_load_image_converts_a_real_alpha_tagged_geotiff_to_rgba(
+    tmp_path: Path,
+):
     """A GDAL-served 4-band GeoTIFF whose 4th band the file itself declares alpha (TIFF
     ExtraSamples=2, unassociated alpha) is the real signal load_image now reads through
     raster_source.GdalSource.band_interpretations, not a guess from the channel count."""
     import tifffile
 
     rgba = _grid(20, 16, 4)
-    tifffile.imwrite(str(tmp_path / "rgba.tif"), rgba, photometric="rgb", rowsperstrip=8,
-                     extrasamples=["unassalpha"])
+    tifffile.imwrite(
+        str(tmp_path / "rgba.tif"),
+        rgba,
+        photometric="rgb",
+        rowsperstrip=8,
+        extrasamples=["unassalpha"],
+    )
     got = load_image(tmp_path / "rgba.tif", 4)
     assert isinstance(got, Image.Image) and got.mode == "RGBA"
     assert np.array_equal(np.asarray(got), rgba)
 
 
-def test_load_image_keeps_a_declared_spectral_fourth_band_as_ndarray(tmp_path: Path):
+def test_load_image_keeps_a_declared_spectral_fourth_band_as_ndarray(
+    tmp_path: Path,
+):
     """A 4-band GeoTIFF whose file tags the 4th band ExtraSamples=0 (unspecified, GDAL's
     'undefined' color interpretation) is a genuine 4th channel, never alpha; load_image must not
     guess it into RGBA, where PIL's augmentation chain would silently leave it untouched."""
     import tifffile
 
     ms = _grid(20, 16, 4)
-    tifffile.imwrite(str(tmp_path / "ms.tif"), ms, photometric="rgb", rowsperstrip=8,
-                     extrasamples=["unspecified"])
+    tifffile.imwrite(
+        str(tmp_path / "ms.tif"),
+        ms,
+        photometric="rgb",
+        rowsperstrip=8,
+        extrasamples=["unspecified"],
+    )
     got = load_image(tmp_path / "ms.tif", 4)
     assert isinstance(got, np.ndarray)
     assert np.array_equal(got, ms)
 
 
-def test_load_image_keeps_an_undeclared_fourth_band_npy_as_ndarray(tmp_path: Path):
+def test_load_image_keeps_an_undeclared_fourth_band_npy_as_ndarray(
+    tmp_path: Path,
+):
     """A .npy stack carries no color-interpretation metadata at all: no signal ever exists to
     call its 4th channel alpha, so load_image must never guess it into RGBA."""
     stack = _grid(20, 16, 4)
@@ -142,11 +187,15 @@ def test_load_image_keeps_an_undeclared_fourth_band_npy_as_ndarray(tmp_path: Pat
     assert np.array_equal(got, stack)
 
 
-def test_load_image_keeps_ndarray_where_pil_has_no_faithful_mode(tmp_path: Path):
+def test_load_image_keeps_ndarray_where_pil_has_no_faithful_mode(
+    tmp_path: Path,
+):
     import tifffile
 
     u16 = _grid(20, 16, 3, dtype=np.uint16)
-    tifffile.imwrite(str(tmp_path / "deep.tif"), u16, photometric="rgb", rowsperstrip=8)
+    tifffile.imwrite(
+        str(tmp_path / "deep.tif"), u16, photometric="rgb", rowsperstrip=8
+    )
     got = load_image(tmp_path / "deep.tif", 3)
     assert isinstance(got, np.ndarray) and got.dtype == np.uint16
 
@@ -166,7 +215,9 @@ def _flip_transform():
     return transform
 
 
-def _detection_project(tmp_path: Path, arr: np.ndarray, *, extrasamples: list[str] | None = None):
+def _detection_project(
+    tmp_path: Path, arr: np.ndarray, *, extrasamples: list[str] | None = None
+):
     """One TIFF holding ``arr`` and its label document; its images directory."""
     import tifffile
     from tcip_annotation.state import Annotation, BBox
@@ -180,8 +231,13 @@ def _detection_project(tmp_path: Path, arr: np.ndarray, *, extrasamples: list[st
         kwargs["extrasamples"] = extrasamples
     tifffile.imwrite(str(images_dir / "img0.tif"), arr, **kwargs)
     h, w = arr.shape[:2]
-    label_image(images_dir / "img0.tif", [Annotation(subject="bud", geometry=BBox(2, 2, 10, 10))],
-                w, h, keep_empty=True)
+    label_image(
+        images_dir / "img0.tif",
+        [Annotation(subject="bud", geometry=BBox(2, 2, 10, 10))],
+        w,
+        h,
+        keep_empty=True,
+    )
     return images_dir
 
 
@@ -191,9 +247,16 @@ def test_a_uint8_tiff_trains_augmented_through_detection(tmp_path: Path):
 
     arr = _grid(40, 32, 3)
     images_dir = _detection_project(tmp_path, arr)
-    ds = dataset_over("detection", str(images_dir), subject="bud", transforms=_flip_transform())
+    ds = dataset_over(
+        "detection",
+        str(images_dir),
+        subject="bud",
+        transforms=_flip_transform(),
+    )
     got, _target = ds[0]
-    flipped = torch.from_numpy(arr[:, ::-1].astype(np.float32) / 255.0).permute(2, 0, 1)
+    flipped = torch.from_numpy(
+        arr[:, ::-1].astype(np.float32) / 255.0
+    ).permute(2, 0, 1)
     assert torch.equal(got, flipped)
 
 
@@ -206,11 +269,18 @@ def test_a_uint8_windowed_tile_trains_augmented_through_tiling(tmp_path: Path):
     try:
         arr = _grid(96, 96, 3)
         images_dir = _detection_project(tmp_path, arr)
-        ds = dataset_over("detection", str(images_dir), subject="bud",
-                          transforms=_flip_transform(), tiling=TILING)
+        ds = dataset_over(
+            "detection",
+            str(images_dir),
+            subject="bud",
+            transforms=_flip_transform(),
+            tiling=TILING,
+        )
         got, _target = ds[0]  # tile at (0, 0)
         tile = arr[0:64, 0:64]
-        flipped = torch.from_numpy(tile[:, ::-1].astype(np.float32) / 255.0).permute(2, 0, 1)
+        flipped = torch.from_numpy(
+            tile[:, ::-1].astype(np.float32) / 255.0
+        ).permute(2, 0, 1)
         assert torch.equal(got, flipped)
         assert ds.source_frames[ds.stems[0]]["windowed"] is True
     finally:
@@ -228,19 +298,30 @@ def test_a_declared_alpha_windowed_tile_trains_augmented(tmp_path: Path):
     raster_source.close_source_pool()
     try:
         arr = _grid(96, 96, 4)
-        images_dir = _detection_project(tmp_path, arr, extrasamples=["unassalpha"])
-        ds = dataset_over("detection", str(images_dir), subject="bud",
-                          stated={"num_channels": 4}, transforms=_flip_transform(),
-                          tiling=TILING)
+        images_dir = _detection_project(
+            tmp_path, arr, extrasamples=["unassalpha"]
+        )
+        ds = dataset_over(
+            "detection",
+            str(images_dir),
+            subject="bud",
+            stated={"num_channels": 4},
+            transforms=_flip_transform(),
+            tiling=TILING,
+        )
         got, _target = ds[0]  # tile at (0, 0)
         tile = arr[0:64, 0:64]
-        flipped = torch.from_numpy(tile[:, ::-1].astype(np.float32) / 255.0).permute(2, 0, 1)
+        flipped = torch.from_numpy(
+            tile[:, ::-1].astype(np.float32) / 255.0
+        ).permute(2, 0, 1)
         assert torch.equal(got, flipped)
     finally:
         raster_source.close_source_pool()
 
 
-def test_a_declared_spectral_fourth_band_windowed_tile_trains_unaugmented(tmp_path: Path):
+def test_a_declared_spectral_fourth_band_windowed_tile_trains_unaugmented(
+    tmp_path: Path,
+):
     """A 4-band GeoTIFF whose file declares its 4th band something other than alpha (a genuine
     spectral band) must not be guessed into RGBA: the transform never runs (BaseImageDataset's
     own PIL-only skip, the same path uint16/5-band tiles already take), so the served tile is
@@ -252,13 +333,22 @@ def test_a_declared_spectral_fourth_band_windowed_tile_trains_unaugmented(tmp_pa
     raster_source.close_source_pool()
     try:
         arr = _grid(96, 96, 4)
-        images_dir = _detection_project(tmp_path, arr, extrasamples=["unspecified"])
-        ds = dataset_over("detection", str(images_dir), subject="bud",
-                          stated={"num_channels": 4}, transforms=_flip_transform(),
-                          tiling=TILING)
+        images_dir = _detection_project(
+            tmp_path, arr, extrasamples=["unspecified"]
+        )
+        ds = dataset_over(
+            "detection",
+            str(images_dir),
+            subject="bud",
+            stated={"num_channels": 4},
+            transforms=_flip_transform(),
+            tiling=TILING,
+        )
         got, _target = ds[0]  # tile at (0, 0)
         tile = arr[0:64, 0:64]
-        unflipped = torch.from_numpy(tile.astype(np.float32) / 255.0).permute(2, 0, 1)
+        unflipped = torch.from_numpy(tile.astype(np.float32) / 255.0).permute(
+            2, 0, 1
+        )
         assert torch.equal(got, unflipped)
     finally:
         raster_source.close_source_pool()

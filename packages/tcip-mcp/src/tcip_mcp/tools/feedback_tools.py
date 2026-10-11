@@ -7,7 +7,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from tcip_mcp.pipelines.active_learning import DEFAULT_REVIEW_BUDGET, DEFAULT_SCORER
+from tcip_mcp.pipelines.active_learning import (
+    DEFAULT_REVIEW_BUDGET,
+    DEFAULT_SCORER,
+)
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
 
@@ -18,15 +21,22 @@ def _load_or_refuse(checkpoint_path: Path, project: Path):
     ``None``, or ``None`` and the ``{"error": ...}`` of each refusal that load raises: no file at
     the location, a checkpoint ``project``'s registry names no entry for, or a project record
     that will not read."""
-    from tcip_mcp.model_registry import CheckpointNotFoundError, load_registered_checkpoint
+    from tcip_mcp.model_registry import (
+        CheckpointNotFoundError,
+        load_registered_checkpoint,
+    )
 
     try:
-        return load_registered_checkpoint(checkpoint_path, project=project), None
+        return load_registered_checkpoint(
+            checkpoint_path, project=project
+        ), None
     except (CheckpointNotFoundError, ValueError) as exc:
         return None, {"error": str(exc)}
 
 
-def _reference_stems(checkpoint, images_dir: Path, project: Path) -> set[str] | None:
+def _reference_stems(
+    checkpoint, images_dir: Path, project: Path
+) -> set[str] | None:
     """The reference-side member stems (``selection.REFERENCE_SIDES``) the producing run of
     ``checkpoint`` in ``project`` froze in its partition (``experiments.run_resolution``) whose own
     image sits in ``images_dir``, or ``None`` for a checkpoint no run of this project produced
@@ -41,11 +51,17 @@ def _reference_stems(checkpoint, images_dir: Path, project: Path) -> set[str] | 
     from tcip_mcp.pipelines.data.splits import same_directory
     from tcip_mcp.pipelines.image_utils import stem_of
 
-    partition = run_resolution(checkpoint.experiment_id, project=project).partition
+    partition = run_resolution(
+        checkpoint.experiment_id, project=project
+    ).partition
     if partition["selection"] is None:
         return None
-    return {stem_of(s.source) for s in partition_samples(partition)
-            if s.side in REFERENCE_SIDES and same_directory(Path(s.source).parent, images_dir)}
+    return {
+        stem_of(s.source)
+        for s in partition_samples(partition)
+        if s.side in REFERENCE_SIDES
+        and same_directory(Path(s.source).parent, images_dir)
+    }
 
 
 def _prepare_queue_sources(images_dir: str, subject: str | None):
@@ -61,7 +77,10 @@ def _prepare_queue_sources(images_dir: str, subject: str | None):
     images_path = Path(images_dir)
     if not images_path.is_dir():
         return None, 0, {"error": f"Images dir not found: {images_dir}"}
-    from tcip_mcp.pipelines.image_utils import list_logical_images, source_path_of
+    from tcip_mcp.pipelines.image_utils import (
+        list_logical_images,
+        source_path_of,
+    )
 
     logical = list_logical_images(images_path)
     if not logical:
@@ -72,13 +91,21 @@ def _prepare_queue_sources(images_dir: str, subject: str | None):
     if subject is None:
         return sources, 0, None
 
-    from tcip_annotation.json_io import UnreadableLabelDocumentError, read_document_versioned
+    from tcip_annotation.json_io import (
+        UnreadableLabelDocumentError,
+        read_document_versioned,
+    )
 
     from tcip_mcp.dataset_layout import label_key_of
 
     try:
-        kept = [s for s in sources if not read_document_versioned(
-            label_key_of(source_path_of(s)))[0].finished(subject)]
+        kept = [
+            s
+            for s in sources
+            if not read_document_versioned(label_key_of(source_path_of(s)))[
+                0
+            ].finished(subject)
+        ]
     except (ValueError, UnreadableLabelDocumentError) as exc:
         return None, 0, {"error": str(exc)}
     return kept, len(sources) - len(kept), None
@@ -91,7 +118,9 @@ def _untiled(checkpoint, stated: Any) -> tuple[Any, dict | None]:
     try:
         from tcip_mcp.pipelines.execution import prepare
 
-        return prepare(checkpoint, stated.model_copy(update={"tile": False})), None
+        return prepare(
+            checkpoint, stated.model_copy(update={"tile": False})
+        ), None
     except (ImportError, OSError) as e:
         return None, {"error": f"torch/torchvision unavailable: {e}"}
 
@@ -127,13 +156,25 @@ def prioritize_review_queue(
         subject: The subject whose finished images (marked complete in their label document)
             are skipped; omitted ranks every candidate image.
     """
-    return ranked_review_queue(project, located(checkpoint_path, project),
-                               located(images_dir, project), method=method, budget=budget,
-                               subject=subject)
+    return ranked_review_queue(
+        project,
+        located(checkpoint_path, project),
+        located(images_dir, project),
+        method=method,
+        budget=budget,
+        subject=subject,
+    )
 
 
-def ranked_review_queue(project: Path, checkpoint_path: Path, images_dir: Path, *, method: str,
-                        budget: int, subject: str | None) -> dict:
+def ranked_review_queue(
+    project: Path,
+    checkpoint_path: Path,
+    images_dir: Path,
+    *,
+    method: str,
+    budget: int,
+    subject: str | None,
+) -> dict:
     """The unfinished images under the established location ``images_dir`` ranked by ``method``
     under the registered checkpoint at the established location ``checkpoint_path``, the top
     ``budget`` as ``queue`` (each marked ``reference_member`` for a selection-bound run), or the
@@ -141,7 +182,9 @@ def ranked_review_queue(project: Path, checkpoint_path: Path, images_dir: Path, 
     checkpoint, refusal = _load_or_refuse(checkpoint_path, project)
     if refusal is not None:
         return refusal
-    sources, reviewed_skipped, error = _prepare_queue_sources(str(images_dir), subject)
+    sources, reviewed_skipped, error = _prepare_queue_sources(
+        str(images_dir), subject
+    )
     if error is not None:
         return error
     try:
@@ -150,8 +193,14 @@ def ranked_review_queue(project: Path, checkpoint_path: Path, images_dir: Path, 
         return {"error": str(exc)}
 
     if not sources:
-        return {"method": method, "task": task, "total_candidates": 0,
-                "reviewed_skipped": reviewed_skipped, "selected_count": 0, "queue": []}
+        return {
+            "method": method,
+            "task": task,
+            "total_candidates": 0,
+            "reviewed_skipped": reviewed_skipped,
+            "selected_count": 0,
+            "queue": [],
+        }
 
     from tcip_mcp.pipelines.execution import Stated
 
@@ -163,17 +212,24 @@ def ranked_review_queue(project: Path, checkpoint_path: Path, images_dir: Path, 
     predictor = prep.predictor
     try:
         scorer = resolve_scorer(method, task)
-    except ValueError as e:  # unknown scorer: refuse rather than silently reordering the queue
+    except (
+        ValueError
+    ) as e:  # unknown scorer: refuse rather than silently reordering the queue
         return {"error": str(e)}
 
     from tcip_mcp.pipelines.image_utils import logical_image_name, stem_of
 
     # A scorer answers the candidates it was handed, whatever their type.
-    scored: list[tuple[Any, float]] = list(scorer.score(sources, predictor)[:budget])
+    scored: list[tuple[Any, float]] = list(
+        scorer.score(sources, predictor)[:budget]
+    )
     reference_stems = _reference_stems(checkpoint, images_dir, project)
     queue = []
     for p, s in scored:
-        entry: dict[str, Any] = {"image": logical_image_name(p), "score": round(float(s), 6)}
+        entry: dict[str, Any] = {
+            "image": logical_image_name(p),
+            "score": round(float(s), 6),
+        }
         if reference_stems is not None:
             entry["reference_member"] = stem_of(p) in reference_stems
         queue.append(entry)
@@ -212,24 +268,37 @@ def triage_predictions(
         subject: The subject whose finished images (marked complete in their label document)
             are skipped; omitted triages every candidate image.
     """
-    checkpoint, refusal = _load_or_refuse(located(checkpoint_path, project), project)
+    checkpoint, refusal = _load_or_refuse(
+        located(checkpoint_path, project), project
+    )
     if refusal is not None:
         return refusal
     sources, reviewed_skipped, error = _prepare_queue_sources(
-        str(located(images_dir, project)), subject)
+        str(located(images_dir, project)), subject
+    )
     if error is not None:
         return error
 
-    from tcip_mcp.pipelines.active_learning.selector import review_queue, unscoreable
+    from tcip_mcp.pipelines.active_learning.selector import (
+        review_queue,
+        unscoreable,
+    )
 
     if not sources:
-        return {"total_images": 0, "reviewed_skipped": reviewed_skipped, "needs_review": 0,
-                "review_images": [], "unscoreable_images": []}
+        return {
+            "total_images": 0,
+            "reviewed_skipped": reviewed_skipped,
+            "needs_review": 0,
+            "review_images": [],
+            "unscoreable_images": [],
+        }
     from tcip_mcp.pipelines.execution import ExecutionRefusedError, Stated
     from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
 
     detector = checkpoint.task in DETECTION_TASKS
-    prep, refusal = _untiled(checkpoint, Stated(conf=low if detector else None))
+    prep, refusal = _untiled(
+        checkpoint, Stated(conf=low if detector else None)
+    )
     if refusal is not None:
         return refusal
     try:
@@ -239,7 +308,9 @@ def triage_predictions(
     # A prediction with no confidence signal at all (a regression head's point estimate) is
     # tagged unscoreable, not dropped.
     unscoreable_preds = unscoreable(predictions)
-    all_review = review_queue(predictions, low=low, high=high) + unscoreable_preds
+    all_review = (
+        review_queue(predictions, low=low, high=high) + unscoreable_preds
+    )
     return {
         "total_images": len(predictions),
         "reviewed_skipped": reviewed_skipped,

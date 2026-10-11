@@ -39,13 +39,22 @@ def _grouped(stems):
 _SIDES = {"train": 0.6, "val": 0.2, "calibration": 0.2}
 
 
-def _split(stems, *, counts=None, splits=_SIDES, seed=1, weighted=True, minimums=None):
+def _split(
+    stems, *, counts=None, splits=_SIDES, seed=1, weighted=True, minimums=None
+):
     """The draw over ``stems`` grouped by tile prefix, every member counted (one each unless
     ``counts`` says otherwise), at a minimum of one foreground group per side unless stated."""
     return group_balanced_split(
-        stems, counts=counts if counts is not None else dict.fromkeys(stems, 1),
-        weighted=weighted, group_key_fn=default_group_key, splits=splits, seed=seed,
-        min_foreground_groups=minimums if minimums is not None else dict.fromkeys(splits, 1))
+        stems,
+        counts=counts if counts is not None else dict.fromkeys(stems, 1),
+        weighted=weighted,
+        group_key_fn=default_group_key,
+        splits=splits,
+        seed=seed,
+        min_foreground_groups=minimums
+        if minimums is not None
+        else dict.fromkeys(splits, 1),
+    )
 
 
 def test_group_split_no_group_spans_splits():
@@ -73,7 +82,9 @@ def test_group_split_foreground_stratification():
     bg = [f"bg{g}_0_0" for g in range(4)]
     stems = fg + bg
     counts = {s: (2 if s.startswith("fg") else 0) for s in stems}
-    parts = _split(stems, counts=counts, splits={"train": 0.6, "val": 0.4}, seed=3)
+    parts = _split(
+        stems, counts=counts, splits={"train": 0.6, "val": 0.4}, seed=3
+    )
     assert set(parts) == {"train", "val"}
 
     def has_fg(ss):
@@ -101,39 +112,61 @@ def test_group_split_calibration_side_gets_its_stated_minimum():
     default_parts = _split(stems)
     assert len({default_group_key(s) for s in default_parts["train"]}) == 4
     assert len({default_group_key(s) for s in default_parts["val"]}) == 1
-    assert len({default_group_key(s) for s in default_parts["calibration"]}) == 1
+    assert (
+        len({default_group_key(s) for s in default_parts["calibration"]}) == 1
+    )
 
-    stated_parts = _split(stems, minimums={"train": 1, "val": 1, "calibration": 2})
-    assert len({default_group_key(s) for s in stated_parts["calibration"]}) == 2
+    stated_parts = _split(
+        stems, minimums={"train": 1, "val": 1, "calibration": 2}
+    )
+    assert (
+        len({default_group_key(s) for s in stated_parts["calibration"]}) == 2
+    )
 
 
 def test_refuse_insufficient_foreground_groups_admits_a_sufficient_tree():
-    from tcip_mcp.pipelines.data.splits import refuse_insufficient_foreground_groups
+    from tcip_mcp.pipelines.data.splits import (
+        refuse_insufficient_foreground_groups,
+    )
 
     refuse_insufficient_foreground_groups(
-        4, {"train": 1, "val": 1, "calibration": 2}, remedy="annotate more.")
+        4, {"train": 1, "val": 1, "calibration": 2}, remedy="annotate more."
+    )
 
 
 def test_refuse_insufficient_foreground_groups_names_the_sides_and_the_shortfall():
-    from tcip_mcp.pipelines.data.splits import refuse_insufficient_foreground_groups
+    from tcip_mcp.pipelines.data.splits import (
+        refuse_insufficient_foreground_groups,
+    )
 
     with pytest.raises(ValueError) as exc_info:
         refuse_insufficient_foreground_groups(
-            2, {"train": 1, "val": 1, "calibration": 2}, remedy="annotate more.")
+            2,
+            {"train": 1, "val": 1, "calibration": 2},
+            remedy="annotate more.",
+        )
     message = str(exc_info.value)
-    assert "train=1" in message and "val=1" in message and "calibration=2" in message
+    assert (
+        "train=1" in message
+        and "val=1" in message
+        and "calibration=2" in message
+    )
     assert "2 foreground group" in message
 
 
 def test_refuse_insufficient_foreground_groups_carries_the_callers_own_remedy():
     """The caller states what to add, since what counts as foreground differs by the ground
     truth a draw reads."""
-    from tcip_mcp.pipelines.data.splits import refuse_insufficient_foreground_groups
+    from tcip_mcp.pipelines.data.splits import (
+        refuse_insufficient_foreground_groups,
+    )
 
     with pytest.raises(ValueError) as exc_info:
         refuse_insufficient_foreground_groups(
-            2, {"train": 1, "val": 1, "calibration": 2},
-            remedy="annotate or confirm more foreground groups of this subject.")
+            2,
+            {"train": 1, "val": 1, "calibration": 2},
+            remedy="annotate or confirm more foreground groups of this subject.",
+        )
     message = str(exc_info.value)
     assert "drop a side" not in message
     assert "annotate or confirm more foreground groups" in message
@@ -141,12 +174,17 @@ def test_refuse_insufficient_foreground_groups_carries_the_callers_own_remedy():
 
 def test_group_split_with_no_foreground_balances_by_tile_count():
     stems = _grouped(4)
-    parts = _split(stems, counts=dict.fromkeys(stems, 0), splits={"train": 0.7, "val": 0.3},
-                   seed=5)
+    parts = _split(
+        stems,
+        counts=dict.fromkeys(stems, 0),
+        splits={"train": 0.7, "val": 0.3},
+        seed=5,
+    )
     assert parts["train"] and parts["val"]
 
 
 # --- resolve_group_key_fn ---
+
 
 def test_resolve_group_key_fn_unrecognized_group_by_raises():
     with pytest.raises(ValueError, match="Unknown group_by"):
@@ -155,11 +193,15 @@ def test_resolve_group_key_fn_unrecognized_group_by_raises():
 
 def test_resolve_group_key_fn_group_key_map_missing_stems_raises():
     with pytest.raises(ValueError, match="missing"):
-        resolve_group_key_fn("tile_prefix", ["a", "b"], group_key_map={"a": "g1"})
+        resolve_group_key_fn(
+            "tile_prefix", ["a", "b"], group_key_map={"a": "g1"}
+        )
 
 
 def test_resolve_group_key_fn_group_key_map_used_when_it_covers_every_stem():
-    fn = resolve_group_key_fn("tile_prefix", ["a", "b"], group_key_map={"a": "g1", "b": "g1"})
+    fn = resolve_group_key_fn(
+        "tile_prefix", ["a", "b"], group_key_map={"a": "g1", "b": "g1"}
+    )
     assert fn("a") == fn("b") == "g1"
 
 
@@ -171,13 +213,16 @@ def test_resolve_group_key_fn_named_policy_still_works():
 
 # --- spatial_strip_split ---
 
+
 def _kept_tiles(split, width, height):
     """Every kept tile's rect, tagged with the side whose region contains it, recomputed
     independently of the split's own kept-tile counters."""
     from tcip_mcp.pipelines.raster_source import rect_contains_rect
 
     lattice = slice_lattice(height, width, split.tile_size, split.overlap)
-    by_name: dict[str, list[tuple[int, int, int, int]]] = {name: [] for name in split.regions}
+    by_name: dict[str, list[tuple[int, int, int, int]]] = {
+        name: [] for name in split.regions
+    }
     for box in lattice:
         for name, rects in split.regions.items():
             if any(rect_contains_rect(r, box) for r in rects):
@@ -186,23 +231,31 @@ def _kept_tiles(split, width, height):
 
 
 def test_spatial_strip_split_admits_valid_work():
-    split = spatial_strip_split(4000, 3000, 320, 0.2, fractions=(0.7, 0.3, 0.0), split_names=SIDES)
+    split = spatial_strip_split(
+        4000, 3000, 320, 0.2, fractions=(0.7, 0.3, 0.0), split_names=SIDES
+    )
     assert split.kept_tiles["train"] > 0
     assert split.kept_tiles["val"] > 0
     assert 0.0 < split.realized_fractions["val"] < 1.0
 
 
 def test_spatial_strip_split_accounts_for_every_tile():
-    split = spatial_strip_split(4000, 3000, 320, 0.2, fractions=(0.7, 0.3, 0.0), split_names=SIDES)
-    total = (sum(split.kept_tiles.values())
-             + split.tiles_dropped_past_extent + split.tiles_dropped_outside_regions)
+    split = spatial_strip_split(
+        4000, 3000, 320, 0.2, fractions=(0.7, 0.3, 0.0), split_names=SIDES
+    )
+    total = (
+        sum(split.kept_tiles.values())
+        + split.tiles_dropped_past_extent
+        + split.tiles_dropped_outside_regions
+    )
     assert total == split.total_tiles
 
 
 def test_spatial_strip_split_no_tile_shared_and_buffer_respected():
     width, height = 4000, 3000
     split = spatial_strip_split(
-        width, height, 320, 0.2, fractions=(0.7, 0.3, 0.0), split_names=SIDES)
+        width, height, 320, 0.2, fractions=(0.7, 0.3, 0.0), split_names=SIDES
+    )
     by_name = _kept_tiles(split, width, height)
     train, val = by_name["train"], by_name["val"]
     assert train and val
@@ -226,7 +279,9 @@ def test_center_out_order_ties_resolve_in_declared_order():
     from tcip_mcp.pipelines.data.splits import _center_out_order
 
     forward = _center_out_order([("val", 0.2), ("test", 0.2), ("train", 0.6)])
-    reversed_input = _center_out_order([("test", 0.2), ("val", 0.2), ("train", 0.6)])
+    reversed_input = _center_out_order(
+        [("test", 0.2), ("val", 0.2), ("train", 0.6)]
+    )
 
     assert [name for name, _ in forward] == ["val", "train", "test"]
     assert [name for name, _ in reversed_input] == ["test", "train", "val"]
@@ -238,10 +293,22 @@ def test_spatial_strip_split_tied_shares_place_by_declared_order():
     swaps which cardinal side that name lands on, mirroring the swap in the declared order, and
     the returned split carries no ``seed`` field."""
     # 4160 = 320 + 15 * 256: the lattice ends flush, so no pulled-back slice crowds an edge side.
-    forward = spatial_strip_split(4160, 3000, 320, 0.2, fractions=(0.6, 0.2, 0.2),
-                                   split_names=("train", "val", "test"))
-    swapped = spatial_strip_split(4160, 3000, 320, 0.2, fractions=(0.6, 0.2, 0.2),
-                                   split_names=("train", "test", "val"))
+    forward = spatial_strip_split(
+        4160,
+        3000,
+        320,
+        0.2,
+        fractions=(0.6, 0.2, 0.2),
+        split_names=("train", "val", "test"),
+    )
+    swapped = spatial_strip_split(
+        4160,
+        3000,
+        320,
+        0.2,
+        fractions=(0.6, 0.2, 0.2),
+        split_names=("train", "test", "val"),
+    )
     assert forward.regions["val"] != forward.regions["test"]
     assert forward.regions["val"] == swapped.regions["test"]
     assert forward.regions["test"] == swapped.regions["val"]
@@ -249,40 +316,61 @@ def test_spatial_strip_split_tied_shares_place_by_declared_order():
 
 
 def test_spatial_strip_split_deterministic():
-    a = spatial_strip_split(8000, 6000, 320, 0.2, fractions=(0.7, 0.2, 0.1), split_names=SIDES)
-    b = spatial_strip_split(8000, 6000, 320, 0.2, fractions=(0.7, 0.2, 0.1), split_names=SIDES)
+    a = spatial_strip_split(
+        8000, 6000, 320, 0.2, fractions=(0.7, 0.2, 0.1), split_names=SIDES
+    )
+    b = spatial_strip_split(
+        8000, 6000, 320, 0.2, fractions=(0.7, 0.2, 0.1), split_names=SIDES
+    )
     assert a == b
 
 
 def test_spatial_strip_split_buffer_defaults_to_tile_size():
-    split = spatial_strip_split(4000, 3000, 320, 0.2, fractions=(0.8, 0.2, 0.0), split_names=SIDES)
+    split = spatial_strip_split(
+        4000, 3000, 320, 0.2, fractions=(0.8, 0.2, 0.0), split_names=SIDES
+    )
     assert split.buffer == 320
 
 
 def test_spatial_strip_split_explicit_buffer_below_tile_size_refuses():
     with pytest.raises(ValueError, match="buffer"):
         spatial_strip_split(
-            4000, 3000, 320, 0.2, fractions=(0.8, 0.2, 0.0), split_names=SIDES, buffer=100)
+            4000,
+            3000,
+            320,
+            0.2,
+            fractions=(0.8, 0.2, 0.0),
+            split_names=SIDES,
+            buffer=100,
+        )
 
 
 def test_spatial_strip_split_refuses_when_no_tile_fits_extent():
     with pytest.raises(ValueError, match="no tile fits"):
-        spatial_strip_split(100, 100, 320, 0.2, fractions=(0.8, 0.2, 0.0), split_names=SIDES)
+        spatial_strip_split(
+            100, 100, 320, 0.2, fractions=(0.8, 0.2, 0.0), split_names=SIDES
+        )
 
 
 def test_spatial_strip_split_refuses_when_geometry_is_too_tight():
     # An image barely larger than one tile: nothing survives the buffer margin on a second side.
     with pytest.raises(ValueError, match="no strip layout"):
-        spatial_strip_split(340, 340, 320, 0.2, fractions=(0.8, 0.2, 0.0), split_names=SIDES)
+        spatial_strip_split(
+            340, 340, 320, 0.2, fractions=(0.8, 0.2, 0.0), split_names=SIDES
+        )
 
 
 def test_spatial_strip_split_fractions_must_sum_to_one():
     with pytest.raises(ValueError, match="sum to 1.0"):
-        spatial_strip_split(4000, 3000, 320, 0.2, fractions=(0.7, 0.2, 0.2), split_names=SIDES)
+        spatial_strip_split(
+            4000, 3000, 320, 0.2, fractions=(0.7, 0.2, 0.2), split_names=SIDES
+        )
 
 
 def test_spatial_strip_split_three_way_populates_every_side():
-    split = spatial_strip_split(8000, 6000, 320, 0.2, fractions=(0.7, 0.2, 0.1), split_names=SIDES)
+    split = spatial_strip_split(
+        8000, 6000, 320, 0.2, fractions=(0.7, 0.2, 0.1), split_names=SIDES
+    )
     assert split.kept_tiles["train"] > 0
     assert split.kept_tiles["val"] > 0
     assert split.kept_tiles["holdout"] > 0
@@ -292,7 +380,8 @@ def test_spatial_strip_split_realized_fractions_stay_near_requested():
     # A generous but real tolerance: catches a regression to arbitrary quantization, not
     # merely "nonzero on every side".
     split = spatial_strip_split(
-        16000, 12000, 320, 0.2, fractions=(0.7, 0.2, 0.1), split_names=SIDES)
+        16000, 12000, 320, 0.2, fractions=(0.7, 0.2, 0.1), split_names=SIDES
+    )
     for name, requested in zip(split.split_names, split.requested_fractions):
         assert abs(split.realized_fractions[name] - requested) < 0.05
 
@@ -307,7 +396,9 @@ def test_stem_of_spatial_identity_passes_through_a_non_spatial_string():
     assert stem_of_spatial_identity("plain_stem_0_0") == "plain_stem_0_0"
 
 
-def test_label_document_extent_reads_the_frame_off_the_document_it_is_handed(tmp_path):
+def test_label_document_extent_reads_the_frame_off_the_document_it_is_handed(
+    tmp_path,
+):
     """The extent is the frame the stored document records; a document stating none refuses
     naming where it was read."""
     from tcip_annotation import json_io
@@ -316,18 +407,27 @@ def test_label_document_extent_reads_the_frame_off_the_document_it_is_handed(tmp
     from tests._producer_fixtures import image_label_key, label_image
 
     image = tmp_path / "images" / UNDATED_BUCKET / "mosaic1.png"
-    label_image(image, [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))], 4000, 3000)
+    label_image(
+        image,
+        [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))],
+        4000,
+        3000,
+    )
 
     stored = json_io.read_label_document(image_label_key(image))
     assert label_document_extent(stored, "mosaic1") == (4000, 3000)
     with pytest.raises(ValueError, match="frameless"):
-        label_document_extent(json_io.label_document({"annotations": []}), "frameless")
+        label_document_extent(
+            json_io.label_document({"annotations": []}), "frameless"
+        )
 
 
 # -- scope normalization ---------------------------------------------------------
 
 
-def test_count_label_lines_counts_every_instance_of_the_subject_assessed_or_not(tmp_path):
+def test_count_label_lines_counts_every_instance_of_the_subject_assessed_or_not(
+    tmp_path,
+):
     """Every record of the scope's subject is foreground, whether or not it carries a value for
     each attribute the registry declares; another subject's record is not."""
     from tcip_annotation import json_io
@@ -335,15 +435,42 @@ def test_count_label_lines_counts_every_instance_of_the_subject_assessed_or_not(
     from tcip_mcp import subject_registry as cr
     from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tcip_mcp.pipelines.data.splits import count_label_lines
-    from tests._producer_fixtures import image_label_key, label_image, registry_over
+    from tests._producer_fixtures import (
+        image_label_key,
+        label_image,
+        registry_over,
+    )
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
-    registry_over(tmp_path, cr.SubjectRegistry(subjects=(cr.Subject(name="leaf", attributes=(
-        cr.Attribute("condition", "categorical", ("healthy", "damaged")),)),)))
-    label_image(images_dir / "a.png", [
-        Annotation(subject="leaf", geometry=BBox(1, 1, 5, 5)),
-        Annotation(subject="leaf", geometry=BBox(6, 6, 9, 9), attributes={"condition": "healthy"}),
-        Annotation(subject="bush", geometry=BBox(10, 10, 20, 20))], 32, 32)
+    registry_over(
+        tmp_path,
+        cr.SubjectRegistry(
+            subjects=(
+                cr.Subject(
+                    name="leaf",
+                    attributes=(
+                        cr.Attribute(
+                            "condition", "categorical", ("healthy", "damaged")
+                        ),
+                    ),
+                ),
+            )
+        ),
+    )
+    label_image(
+        images_dir / "a.png",
+        [
+            Annotation(subject="leaf", geometry=BBox(1, 1, 5, 5)),
+            Annotation(
+                subject="leaf",
+                geometry=BBox(6, 6, 9, 9),
+                attributes={"condition": "healthy"},
+            ),
+            Annotation(subject="bush", geometry=BBox(10, 10, 20, 20)),
+        ],
+        32,
+        32,
+    )
     stored = json_io.read_label_document(image_label_key(images_dir / "a.png"))
 
     assert count_label_lines(stored, registry_scope(images_dir, "leaf")) == 2

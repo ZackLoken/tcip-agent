@@ -22,21 +22,45 @@ GOLDEN_DETECTIONS = {
     "recall": 0.5,
     "f1": 0.5,
     "map50": 0.505,
-    "governing_criterion": {"kind": "iou_match", "iou_threshold": 0.5,
-                            "derived_from": "comparability convention", "trait": None},
+    "governing_criterion": {
+        "kind": "iou_match",
+        "iou_threshold": 0.5,
+        "derived_from": "comparability convention",
+        "trait": None,
+    },
     "iou_threshold": 0.5,
     "conf_threshold": 0.5,
     "matches": [[0, 0]],
     "img_w": 640,
     "img_h": 480,
     "detections": [
-        {"subject": "bud", "attributes": {}, "iscrowd": False,
-         "bbox": [288.0, 216.0, 352.0, 264.0], "score": 0.9, "tag": "tp",
-         "gt_idx": 0, "pred_idx": 0},
-        {"subject": "bud", "attributes": {}, "iscrowd": False,
-         "bbox": [496.0, 372.0, 528.0, 396.0], "score": 0.7, "tag": "fp", "pred_idx": 1},
-        {"subject": "bud", "attributes": {}, "iscrowd": False,
-         "bbox": [176.0, 132.0, 208.0, 156.0], "tag": "fn", "gt_idx": 1},
+        {
+            "subject": "bud",
+            "attributes": {},
+            "iscrowd": False,
+            "bbox": [288.0, 216.0, 352.0, 264.0],
+            "score": 0.9,
+            "tag": "tp",
+            "gt_idx": 0,
+            "pred_idx": 0,
+        },
+        {
+            "subject": "bud",
+            "attributes": {},
+            "iscrowd": False,
+            "bbox": [496.0, 372.0, 528.0, 396.0],
+            "score": 0.7,
+            "tag": "fp",
+            "pred_idx": 1,
+        },
+        {
+            "subject": "bud",
+            "attributes": {},
+            "iscrowd": False,
+            "bbox": [176.0, 132.0, 208.0, 156.0],
+            "tag": "fn",
+            "gt_idx": 1,
+        },
     ],
 }
 
@@ -51,8 +75,12 @@ GOLDEN_DATASET = {
     "precision": 0.5,
     "recall": 0.5,
     "f1": 0.5,
-    "governing_criterion": {"kind": "iou_match", "iou_threshold": 0.5,
-                            "derived_from": "comparability convention", "trait": None},
+    "governing_criterion": {
+        "kind": "iou_match",
+        "iou_threshold": 0.5,
+        "derived_from": "comparability convention",
+        "trait": None,
+    },
     "per_image": [
         {"image": "img_001.jpg", "tp": 1, "fp": 1, "fn": 1},
         {"image": "img_002.jpg", "tp": 1, "fp": 1, "fn": 1},
@@ -67,14 +95,23 @@ def test_evaluate_single_image_golden(data_dir: Path):
     from tests.conftest import DATA_DIR_BUCKET
 
     img = data_dir / "images" / "2-11-26" / "img_001.jpg"
-    result = score_predictions(str(img), DATA_DIR_BUCKET, iou_threshold=0.5, conf_threshold=0.5,
-                               detail=True)
+    result = score_predictions(
+        str(img),
+        DATA_DIR_BUCKET,
+        iou_threshold=0.5,
+        conf_threshold=0.5,
+        detail=True,
+    )
     assert result.pop("image") == str(img)
     # The two predictions name the checkpoint that published them; the reference names none.
     produced_by = [d.pop("created_by", None) for d in result["detections"]]
     for d in result["detections"]:
         d.pop("created_at", None)
-    assert [str(p).startswith("model:") for p in produced_by] == [True, True, False]
+    assert [str(p).startswith("model:") for p in produced_by] == [
+        True,
+        True,
+        False,
+    ]
     assert result == GOLDEN_DETECTIONS
 
 
@@ -84,6 +121,8 @@ def test_evaluate_folder_golden(data_dir: Path):
     from tests.conftest import DATA_DIR_BUCKET
 
     images_dir = str(data_dir / "images" / "2-11-26")
-    result = score_predictions(images_dir, DATA_DIR_BUCKET, iou_threshold=0.5, conf_threshold=0.5)
+    result = score_predictions(
+        images_dir, DATA_DIR_BUCKET, iou_threshold=0.5, conf_threshold=0.5
+    )
     assert result.pop("path") == images_dir
     assert result == GOLDEN_DATASET

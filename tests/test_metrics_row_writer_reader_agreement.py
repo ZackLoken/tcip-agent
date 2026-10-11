@@ -9,7 +9,10 @@ instead of passing against a hand-built file.
 from __future__ import annotations
 
 from tests._verified_checkpoint_fixtures import (
-    detection_config, finished_run, log_epoch, opened_run,
+    detection_config,
+    finished_run,
+    log_epoch,
+    opened_run,
 )
 
 
@@ -25,12 +28,19 @@ def _drain(ws) -> list[dict]:
 
 
 def test_logged_rows_reach_the_training_stream_reader_with_their_epoch_and_values(
-    tmp_path, opened_project, client,
+    tmp_path,
+    opened_project,
+    client,
 ):
     run_id = "exp-021-currant-bud-det"
-    finished_run(tmp_path, experiment_id=run_id, rows=[
-        {"epoch": 3, "loss": 0.94, "val_map50": 0.28},
-        {"epoch": 7, "loss": 0.31, "val_map50": 0.66}])
+    finished_run(
+        tmp_path,
+        experiment_id=run_id,
+        rows=[
+            {"epoch": 3, "loss": 0.94, "val_map50": 0.28},
+            {"epoch": 7, "loss": 0.31, "val_map50": 0.66},
+        ],
+    )
 
     with client.websocket_connect(
         f"ws://127.0.0.1/api/training/runs/{run_id}/stream",
@@ -47,7 +57,9 @@ def test_logged_rows_reach_the_training_stream_reader_with_their_epoch_and_value
 
 
 def test_training_stream_serves_a_relaunched_run_by_its_own_minted_id(
-    tmp_path, opened_project, client,
+    tmp_path,
+    opened_project,
+    client,
 ):
     """A relaunch's id is minted fresh and is the one id its directory is addressed by
     everywhere, the stream included: no separate run id to resolve it through."""
@@ -55,7 +67,9 @@ def test_training_stream_serves_a_relaunched_run_by_its_own_minted_id(
 
     parent = finished_run(tmp_path)
     relaunched_id = mint_experiment_id()
-    finished_run(tmp_path, experiment_id=relaunched_id, rows=[{"epoch": 1, "loss": 1.2}])
+    finished_run(
+        tmp_path, experiment_id=relaunched_id, rows=[{"epoch": 1, "loss": 1.2}]
+    )
     assert relaunched_id != parent.name
 
     with client.websocket_connect(
@@ -68,20 +82,32 @@ def test_training_stream_serves_a_relaunched_run_by_its_own_minted_id(
 
 
 def test_stream_drains_a_row_that_lands_between_the_read_and_the_terminal_check(
-    tmp_path, opened_project, client, monkeypatch,
+    tmp_path,
+    opened_project,
+    client,
+    monkeypatch,
 ):
     """A row the run appends as it ends, after the stream's last log read, still reaches the
     browser ahead of the status frame that ends the stream: the run ends between the stream's
     read and its next observation."""
     from tcip_mcp import experiments
-    from tcip_mcp.pipelines.training.envelope import TrainContext, run_training_envelope
+    from tcip_mcp.pipelines.training.envelope import (
+        TrainContext,
+        run_training_envelope,
+    )
     from tcip_mcp.pipelines.training.run_registry import observed_run
     from tests._chain_fixtures import SAVE_BUILT_WEIGHTS
 
     run_id = "exp-023-walnut-shell-det"
-    run_dir = opened_run(tmp_path, detection_config(
-        tmp_path / "data", training_source=SAVE_BUILT_WEIGHTS,
-        fixture_rows=[{"epoch": 2, "loss": 0.2}]), experiment_id=run_id)
+    run_dir = opened_run(
+        tmp_path,
+        detection_config(
+            tmp_path / "data",
+            training_source=SAVE_BUILT_WEIGHTS,
+            fixture_rows=[{"epoch": 2, "loss": 0.2}],
+        ),
+        experiment_id=run_id,
+    )
     log_epoch(run_dir, 1, {"loss": 0.5})
 
     real_observe = experiments.observe
@@ -90,8 +116,12 @@ def test_stream_drains_a_row_that_lands_between_the_read_and_the_terminal_check(
     def finish_then_observe(directory, *args):
         calls["n"] += 1
         if calls["n"] == 2:
-            run_training_envelope(TrainContext(run=observed_run(real_observe(directory)),
-                                               train_loader=None))
+            run_training_envelope(
+                TrainContext(
+                    run=observed_run(real_observe(directory)),
+                    train_loader=None,
+                )
+            )
         return real_observe(directory, *args)
 
     monkeypatch.setattr(experiments, "observe", finish_then_observe)
@@ -108,7 +138,8 @@ def test_stream_drains_a_row_that_lands_between_the_read_and_the_terminal_check(
 
 
 def test_training_stream_serves_no_metric_frames_for_a_run_no_directory_holds(
-    opened_project, client,
+    opened_project,
+    client,
 ):
     """An id no run directory answers for replays nothing and sends only the terminal status
     frame naming the unresolved run."""

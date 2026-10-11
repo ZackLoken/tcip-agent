@@ -25,7 +25,10 @@ def test_uncertainty_scorer_averages_over_heads(tmp_path):
     import torch
     from PIL import Image
 
-    from tcip_mcp.pipelines.active_learning.scorer import UncertaintyScorer, _entropy
+    from tcip_mcp.pipelines.active_learning.scorer import (
+        UncertaintyScorer,
+        _entropy,
+    )
 
     img = tmp_path / "a.png"
     Image.new("RGB", (16, 16)).save(img)
@@ -33,6 +36,13 @@ def test_uncertainty_scorer_averages_over_heads(tmp_path):
     from tests.scorer_models import predictor_for
 
     predictor = predictor_for(tmp_path, "build_two_head", "classification")
-    scored = UncertaintyScorer(task="classification").score([str(img)], predictor)
-    expected = (_entropy(torch.tensor([[2.0, 0.0]])) + _entropy(torch.tensor([[0.0, 0.0]]))) / 2
-    assert scored[0][1] == pytest.approx(expected)  # averaged across both heads, not first-only
+    scored = UncertaintyScorer(task="classification").score(
+        [str(img)], predictor
+    )
+    expected = (
+        _entropy(torch.tensor([[2.0, 0.0]]))
+        + _entropy(torch.tensor([[0.0, 0.0]]))
+    ) / 2
+    assert scored[0][1] == pytest.approx(
+        expected
+    )  # averaged across both heads, not first-only

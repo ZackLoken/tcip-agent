@@ -41,8 +41,18 @@ def test_the_heartbeat_window_decides_running_against_interrupted(tmp_path):
 
 
 def test_listed_runs_read_running_against_interrupted(tmp_path):
-    _beat(opened_run(tmp_path, detection_config(tmp_path / "data"), experiment_id="live"), 0)
-    _beat(opened_run(tmp_path, detection_config(tmp_path / "data"), experiment_id="dead"), 2 * 3600)
+    _beat(
+        opened_run(
+            tmp_path, detection_config(tmp_path / "data"), experiment_id="live"
+        ),
+        0,
+    )
+    _beat(
+        opened_run(
+            tmp_path, detection_config(tmp_path / "data"), experiment_id="dead"
+        ),
+        2 * 3600,
+    )
 
     by_id = _listed(tmp_path)
     assert by_id["live"]["state"] == "running"
@@ -54,15 +64,25 @@ def test_a_listed_row_carries_the_heartbeat_instant(tmp_path):
     'running' row as live needs the heartbeat instant itself, not just the derived state, to
     say how stale that liveness claim already is."""
     instant = _beat(
-        opened_run(tmp_path, detection_config(tmp_path / "data"), experiment_id="beating"), 180)
+        opened_run(
+            tmp_path,
+            detection_config(tmp_path / "data"),
+            experiment_id="beating",
+        ),
+        180,
+    )
 
     by_id = _listed(tmp_path)
     assert by_id["beating"]["state"] == "running"
-    assert by_id["beating"]["heartbeat"] == datetime.fromtimestamp(
-        instant, timezone.utc).isoformat()
+    assert (
+        by_id["beating"]["heartbeat"]
+        == datetime.fromtimestamp(instant, timezone.utc).isoformat()
+    )
 
 
-def test_configured_stale_window_agrees_across_run_list_compare_and_status(tmp_path, monkeypatch):
+def test_configured_stale_window_agrees_across_run_list_compare_and_status(
+    tmp_path, monkeypatch
+):
     """list_experiments, compare_experiments and monitor_training derive "interrupted" the same
     way under a configured heartbeat window, one constant (``experiments.HEARTBEAT_STALE_SECONDS``)
     read by every consumer: a 300s-old heartbeat reads stale under a 30s window even though it
@@ -73,11 +93,20 @@ def test_configured_stale_window_agrees_across_run_list_compare_and_status(tmp_p
 
     monkeypatch.setattr(experiments, "HEARTBEAT_STALE_SECONDS", 30.0)
     _beat(
-        opened_run(tmp_path, detection_config(tmp_path / "data"), experiment_id="exp-window"), 300)
+        opened_run(
+            tmp_path,
+            detection_config(tmp_path / "data"),
+            experiment_id="exp-window",
+        ),
+        300,
+    )
 
     assert _listed(tmp_path)["exp-window"]["state"] == "interrupted"
 
     cmp = compare_tool(["exp-window"], project=tmp_path)
     assert cmp["experiments"][0]["state"] == "interrupted"
 
-    assert monitor_training(tmp_path, "exp-window")["run"]["state"] == "interrupted"
+    assert (
+        monitor_training(tmp_path, "exp-window")["run"]["state"]
+        == "interrupted"
+    )

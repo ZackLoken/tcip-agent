@@ -15,9 +15,7 @@ class _ProbePayload(BaseModel):
     """A JSON body model at module scope, where FastAPI resolves a handler's annotations."""
 
 
-EMPTY_BODY_ROUTES = (
-    "/api/training/runs/does-not-exist/tensorboard",
-)
+EMPTY_BODY_ROUTES = ("/api/training/runs/does-not-exist/tensorboard",)
 """The state-changing routes whose only body is ``EmptyBodyPayload``."""
 
 
@@ -38,7 +36,9 @@ def test_every_state_changing_route_declares_a_json_body_model() -> None:
     """Every state-changing route declares a required JSON body; one taking only path
     parameters, and a form or multipart route, fail this."""
     routes = state_changing_routes(app)
-    assert routes, "no state-changing routes found; the route walk itself is broken"
+    assert routes, (
+        "no state-changing routes found; the route walk itself is broken"
+    )
     undeclared = sorted(
         f"{sorted(r.methods - {'HEAD', 'OPTIONS'})} {r.path}"
         for r in routes
@@ -52,7 +52,9 @@ def test_a_declared_body_model_admits_an_empty_json_object(
 ) -> None:
     """A route that carries no fields of its own accepts the ``{}`` its real caller sends and
     reaches the handler's own outcome: with a project open, an unknown run is a 404."""
-    resp = client.post("/api/training/runs/does-not-exist/tensorboard", json={})
+    resp = client.post(
+        "/api/training/runs/does-not-exist/tensorboard", json={}
+    )
     assert resp.status_code == 404, resp.text
 
 
@@ -78,9 +80,16 @@ def test_a_headerless_json_shaped_body_is_refused(client: TestClient) -> None:
     and fails the body model rather than reaching the handler."""
     for url in EMPTY_BODY_ROUTES:
         request = client.build_request("POST", url, content=b"{}")
-        assert "content-type" not in request.headers, (url, dict(request.headers))
+        assert "content-type" not in request.headers, (
+            url,
+            dict(request.headers),
+        )
         response = client.send(request)
-        assert response.status_code == 422, (url, response.status_code, response.text)
+        assert response.status_code == 422, (
+            url,
+            response.status_code,
+            response.text,
+        )
 
 
 def test_the_guard_rejects_the_shapes_it_exists_to_catch() -> None:
@@ -112,7 +121,9 @@ def test_the_guard_rejects_the_shapes_it_exists_to_catch() -> None:
     def no_body_route() -> dict:
         return {}
 
-    verdicts = {r.path: declares_json_body(r) for r in state_changing_routes(probe)}
+    verdicts = {
+        r.path: declares_json_body(r) for r in state_changing_routes(probe)
+    }
     assert verdicts == {
         "/json": True,
         "/defaulted-json": False,

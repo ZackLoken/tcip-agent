@@ -11,9 +11,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_SRC = REPO_ROOT / "packages" / "tcip-web" / "frontend" / "src"
 """The browser's sources."""
 
-_PERSON_NAMES = json.loads((FRONTEND_SRC / "test" / "personNames.json").read_text(
-    encoding="utf-8"))
-ADMITTED_NAMES: list[tuple[str, str]] = [(s, r) for s, r in _PERSON_NAMES["admitted"]]
+_PERSON_NAMES = json.loads(
+    (FRONTEND_SRC / "test" / "personNames.json").read_text(encoding="utf-8")
+)
+ADMITTED_NAMES: list[tuple[str, str]] = [
+    (s, r) for s, r in _PERSON_NAMES["admitted"]
+]
 """Each name the person rule admits, with the name it records; the browser's tests read the
 same list."""
 REFUSED_NAMES: list[str] = _PERSON_NAMES["refused"]

@@ -20,10 +20,16 @@ from tcip_mcp.pipelines import raster_source
 from tcip_mcp.pipelines.raster_source import Rect, TiffWholeSource, open_raster
 
 
-def _wide_raster(tmp_path: Path, *, width: int = 8192, height: int = 8) -> tuple[Path, np.ndarray]:
+def _wide_raster(
+    tmp_path: Path, *, width: int = 8192, height: int = 8
+) -> tuple[Path, np.ndarray]:
     """A raster whose longest edge is past the pyramid floor, small enough to build in tests."""
     path = tmp_path / "wide.tif"
-    arr = (np.arange(height * width) % 251).astype(np.uint8).reshape(height, width)
+    arr = (
+        (np.arange(height * width) % 251)
+        .astype(np.uint8)
+        .reshape(height, width)
+    )
     tifffile.imwrite(str(path), arr, rowsperstrip=4)
     return path, arr
 
@@ -38,7 +44,9 @@ def test_overview_levels_are_powers_of_two_down_to_the_pyramid_floor() -> None:
     assert overview_levels(1024, 100) == []
 
 
-def test_build_overviews_writes_a_sidecar_gdal_serves_reduced_reads_from(tmp_path: Path) -> None:
+def test_build_overviews_writes_a_sidecar_gdal_serves_reduced_reads_from(
+    tmp_path: Path,
+) -> None:
     path, arr = _wide_raster(tmp_path)
     assert not overview_dims(path)
     assert not sidecar_valid(path)
@@ -55,7 +63,9 @@ def test_build_overviews_writes_a_sidecar_gdal_serves_reduced_reads_from(tmp_pat
     with open_raster(path, 1) as src:
         # The path-holding answer and the open reader's own agree on the levels it serves from.
         assert src.level_dims() == overview_dims(path)
-        region, spec = src.read_region(Rect(0, 0, 8192, 8), target_size=(4096, 4))
+        region, spec = src.read_region(
+            Rect(0, 0, 8192, 8), target_size=(4096, 4)
+        )
     assert region.shape == (4, 4096, 1)
     assert spec.resample == "average"
     blocks = arr.reshape(4, 2, 4096, 2).mean(axis=(1, 3))
@@ -71,8 +81,13 @@ def test_a_raster_the_hint_sends_whole_serves_no_level_off_its_own_pyramid(
     path = tmp_path / "three_row.tif"
     arr = np.zeros((3, 2048, 4), dtype=np.uint8)
     arr[..., 0] = np.arange(2048, dtype=np.uint16).reshape(1, 2048) % 251
-    tifffile.imwrite(str(path), arr, photometric="rgb", extrasamples=["unassalpha"],
-                     rowsperstrip=1)
+    tifffile.imwrite(
+        str(path),
+        arr,
+        photometric="rgb",
+        extrasamples=["unassalpha"],
+        rowsperstrip=1,
+    )
     build_overviews(path)
     assert overview_dims(path) == [(1024, 2)]
 
@@ -85,7 +100,8 @@ def test_a_raster_the_hint_sends_whole_serves_no_level_off_its_own_pyramid(
 
 
 def test_an_open_reader_enumerates_its_levels_without_reopening_the_raster(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An open GDAL reader answers its levels through the handle it holds and one handle per
     level, never by opening the raster itself again."""
@@ -119,7 +135,10 @@ class _InProcessChild:
         sys.argv = ["-c", *argv]
         try:
             with contextlib.redirect_stdout(out):
-                exec(compile(program, "<build child>", "exec"), {"__name__": "__main__"})
+                exec(
+                    compile(program, "<build child>", "exec"),
+                    {"__name__": "__main__"},
+                )
         finally:
             sys.argv = saved
         self.stdout = io.StringIO(out.getvalue())
@@ -134,7 +153,8 @@ class _InProcessChild:
 
 
 def test_a_build_acquires_the_raster_once_across_parent_and_child(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Building a pyramid acquires the raster once in all: one TIFF header and one GDAL open of
     its main dataset plan the levels and write them, whichever process they run in."""
@@ -167,7 +187,8 @@ def test_a_build_acquires_the_raster_once_across_parent_and_child(
 
 
 def test_a_decimated_read_is_served_from_the_pyramid_not_by_decoding_the_base(
-        tmp_path: Path) -> None:
+    tmp_path: Path,
+) -> None:
     """A correct decimated result alone cannot say which store served it: decoding the base and
     averaging gives the same pixels the pyramid holds. Rewriting the base to zeros after the
     build separates the two paths: a decimated read that still returns the original content's
@@ -182,7 +203,9 @@ def test_a_decimated_read_is_served_from_the_pyramid_not_by_decoding_the_base(
 
     with open_raster(path, 1) as src:
         native, _ = src.read_region(Rect(0, 0, 8192, 8))
-        reduced, spec = src.read_region(Rect(0, 0, 8192, 8), target_size=(4096, 4))
+        reduced, spec = src.read_region(
+            Rect(0, 0, 8192, 8), target_size=(4096, 4)
+        )
     assert not native.any()
     assert reduced.shape == (4, 4096, 1)
     assert spec.resample == "average"
@@ -191,7 +214,9 @@ def test_a_decimated_read_is_served_from_the_pyramid_not_by_decoding_the_base(
 
     overview_sidecar(path).unlink()
     with open_raster(path, 1) as src:
-        off_base, _ = src.read_region(Rect(0, 0, 8192, 8), target_size=(4096, 4))
+        off_base, _ = src.read_region(
+            Rect(0, 0, 8192, 8), target_size=(4096, 4)
+        )
     assert not off_base.any()
 
 
@@ -225,7 +250,10 @@ def test_a_partial_sidecar_is_invalid_and_is_rebuilt(tmp_path: Path) -> None:
     # Zero the sidecar's own tile byte counts in place: the structurally complete but
     # never-written state a killed build leaves, which reads back as silent zeros.
     with tifffile.TiffFile(str(partial)) as tif:
-        tag = tif.pages[0].tags.get("TileByteCounts") or tif.pages[0].tags["StripByteCounts"]
+        tag = (
+            tif.pages[0].tags.get("TileByteCounts")
+            or tif.pages[0].tags["StripByteCounts"]
+        )
         offset, nbytes = tag.valueoffset, tag.valuebytecount
     with open(partial, "r+b") as fh:
         fh.seek(offset)
@@ -238,7 +266,9 @@ def test_a_partial_sidecar_is_invalid_and_is_rebuilt(tmp_path: Path) -> None:
     assert sidecar == partial
 
 
-def test_building_overviews_for_a_raster_within_the_pyramid_floor_refuses(tmp_path: Path) -> None:
+def test_building_overviews_for_a_raster_within_the_pyramid_floor_refuses(
+    tmp_path: Path,
+) -> None:
     """An empty level list would clear existing overviews instead of building any, so a raster
     already within the floor is refused, saying there is no level to build."""
     path = tmp_path / "small.tif"

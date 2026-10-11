@@ -28,7 +28,8 @@ pytest.importorskip("torchvision")
 
 from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
 from tcip_mcp.pipelines.data.split_construction import (  # noqa: E402
-    partition_samples, partition_spatial,
+    partition_samples,
+    partition_spatial,
 )
 from tcip_mcp.pipelines.model_contract import DETECTION_TASKS  # noqa: E402
 from tests._producer_fixtures import label_image, train_val, write_image  # noqa: E402
@@ -43,7 +44,9 @@ def _target_geometry(task: str):
     """The geometry one task's loader actually reads: a box for detection, a closed ring for
     instance_seg, whose loader reads polygons only and rasterizes their rings."""
     if task == "instance_seg":
-        return Polygon(rings=[[(10.0, 10.0), (30.0, 10.0), (30.0, 30.0), (10.0, 30.0)]])
+        return Polygon(
+            rings=[[(10.0, 10.0), (30.0, 10.0), (30.0, 30.0), (10.0, 30.0)]]
+        )
     return BBox(10.0, 10.0, 30.0, 30.0)
 
 
@@ -53,8 +56,12 @@ def _labeled(root: Path, stems, *, task: str = "detection") -> Path:
     images_dir = root / "images" / UNDATED_BUCKET
     for stem in stems:
         write_image(images_dir / f"{stem}.png", (IMG, IMG), (70, 90, 60))
-        label_image(images_dir / f"{stem}.png",
-                    [Annotation(subject=SUBJECT, geometry=_target_geometry(task))], IMG, IMG)
+        label_image(
+            images_dir / f"{stem}.png",
+            [Annotation(subject=SUBJECT, geometry=_target_geometry(task))],
+            IMG,
+            IMG,
+        )
     return images_dir
 
 
@@ -71,20 +78,32 @@ def _one_target(ds, task: str) -> None:
         assert int(target["masks"].sum()) > 0
 
 
-def _big_source(root: Path, stem: str, width: int, height: int, *,
-                task: str = "detection") -> Path:
+def _big_source(
+    root: Path, stem: str, width: int, height: int, *, task: str = "detection"
+) -> Path:
     """One source large enough to hold a within-image spatial split, with GT across its extent in
     the geometry ``task``'s own loader reads; the image directory."""
     from PIL import Image
 
     images_dir = root / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (width, height), color=(70, 90, 60)).save(images_dir / f"{stem}.png")
-    squares = [(x, y, x + 20, y + 20)
-               for x in range(20, width - 20, 200) for y in range(20, height - 20, 200)]
-    boxes = [Annotation(subject=SUBJECT, geometry=Polygon(
-        rings=[[(x0, y0), (x1, y0), (x1, y1), (x0, y1)]]) if task == "instance_seg"
-        else BBox(x0, y0, x1, y1)) for x0, y0, x1, y1 in squares]
+    Image.new("RGB", (width, height), color=(70, 90, 60)).save(
+        images_dir / f"{stem}.png"
+    )
+    squares = [
+        (x, y, x + 20, y + 20)
+        for x in range(20, width - 20, 200)
+        for y in range(20, height - 20, 200)
+    ]
+    boxes = [
+        Annotation(
+            subject=SUBJECT,
+            geometry=Polygon(rings=[[(x0, y0), (x1, y0), (x1, y1), (x0, y1)]])
+            if task == "instance_seg"
+            else BBox(x0, y0, x1, y1),
+        )
+        for x0, y0, x1, y1 in squares
+    ]
     label_image(images_dir / f"{stem}.png", boxes, width, height)
     return images_dir
 
@@ -112,17 +131,27 @@ def _recorded(project: Path, task: str, data_cfg: dict, **config) -> dict:
     from tests._chain_fixtures import training_config
     from tests._verified_checkpoint_fixtures import opened_run, unbuilt_source
 
-    run_dir = opened_run(project, training_config(unbuilt_source(task),
-                                                  copy.deepcopy(data_cfg), **config))
+    run_dir = opened_run(
+        project,
+        training_config(
+            unbuilt_source(task), copy.deepcopy(data_cfg), **config
+        ),
+    )
     return run_resolution(run_dir.name, project=project).partition
 
 
 @pytest.mark.parametrize("task", sorted(DETECTION_TASKS))
-def test_the_drawn_route_loaders_name_their_own_samples(tmp_path: Path, task: str):
+def test_the_drawn_route_loaders_name_their_own_samples(
+    tmp_path: Path, task: str
+):
     stems = [f"src{i}_0_0" for i in range(4)]
     images_dir = _labeled(tmp_path / "ds", stems, task=task)
-    data_cfg = {"images_dir": str(images_dir), "scope": {"subject": SUBJECT}, "auto_val": True,
-                "split": {"val_ratio": 0.5, "seed": 1}}
+    data_cfg = {
+        "images_dir": str(images_dir),
+        "scope": {"subject": SUBJECT},
+        "auto_val": True,
+        "split": {"val_ratio": 0.5, "seed": 1},
+    }
 
     train_ds, val_ds, partition, _data = train_val(tmp_path, task, data_cfg)
 
@@ -134,12 +163,22 @@ def test_the_drawn_route_loaders_name_their_own_samples(tmp_path: Path, task: st
 
 
 @pytest.mark.parametrize("task", sorted(DETECTION_TASKS))
-def test_auto_val_off_trains_on_every_admitted_sample_and_records_them(tmp_path: Path, task: str):
+def test_auto_val_off_trains_on_every_admitted_sample_and_records_them(
+    tmp_path: Path, task: str
+):
     stems = ["a_0_0", "b_0_0", "c_0_0"]
     images_dir = _labeled(tmp_path / "ds", stems, task=task)
-    data_cfg = {"images_dir": str(images_dir), "scope": {"subject": SUBJECT}, "auto_val": False}
-    record = _recorded(tmp_path, task, data_cfg,
-                       evaluation=evaluation_block(selection_metric="loss"))
+    data_cfg = {
+        "images_dir": str(images_dir),
+        "scope": {"subject": SUBJECT},
+        "auto_val": False,
+    }
+    record = _recorded(
+        tmp_path,
+        task,
+        data_cfg,
+        evaluation=evaluation_block(selection_metric="loss"),
+    )
 
     train_ds, val_ds, partition, _data = train_val(tmp_path, task, data_cfg)
 
@@ -152,22 +191,36 @@ def test_auto_val_off_trains_on_every_admitted_sample_and_records_them(tmp_path:
 
 
 @pytest.mark.parametrize("task", sorted(DETECTION_TASKS))
-def test_a_starved_draw_refuses_by_the_draws_own_floor(tmp_path: Path, task: str):
+def test_a_starved_draw_refuses_by_the_draws_own_floor(
+    tmp_path: Path, task: str
+):
     """A group policy that collapses every sample into one group leaves no side to hold out, so
     the run refuses naming the floor rather than training without validation."""
     stems = ["a_0_0", "b_0_0"]
     images_dir = _labeled(tmp_path / "ds", stems, task=task)
-    data_cfg = {"images_dir": str(images_dir), "scope": {"subject": SUBJECT}, "auto_val": True,
-                "split": {"val_ratio": 0.5, "seed": 1,
-                          "group_key_map": {f"{UNDATED_BUCKET}/{s}": "one_group"
-                                            for s in stems}}}
+    data_cfg = {
+        "images_dir": str(images_dir),
+        "scope": {"subject": SUBJECT},
+        "auto_val": True,
+        "split": {
+            "val_ratio": 0.5,
+            "seed": 1,
+            "group_key_map": {
+                f"{UNDATED_BUCKET}/{s}": "one_group" for s in stems
+            },
+        },
+    }
 
-    with pytest.raises(ValueError, match="fewer than the 2 the requested sides need"):
+    with pytest.raises(
+        ValueError, match="fewer than the 2 the requested sides need"
+    ):
         train_val(tmp_path, task, data_cfg)
 
 
 @pytest.mark.parametrize("task", sorted(DETECTION_TASKS))
-def test_one_tiled_source_still_splits_spatially_over_its_own_samples(tmp_path: Path, task: str):
+def test_one_tiled_source_still_splits_spatially_over_its_own_samples(
+    tmp_path: Path, task: str
+):
     """The within-image route wraps the producer's own sample, records that one sample as its
     partition, and its region identities still name the bare stem every consumer of the manifest
     joins on, for every task that tiles.
@@ -175,12 +228,21 @@ def test_one_tiled_source_still_splits_spatially_over_its_own_samples(tmp_path: 
     stem = "mosaic"
     images_dir = _big_source(tmp_path / "ds", stem, 4000, 3000, task=task)
     data_cfg = {
-        "images_dir": str(images_dir), "scope": {"subject": SUBJECT},
-        "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": {"val_ratio": 0.25, "holdout_ratio": 0.1, "calibration_ratio": 0, "seed": 1},
+        "images_dir": str(images_dir),
+        "scope": {"subject": SUBJECT},
+        "auto_val": True,
+        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+        "split": {
+            "val_ratio": 0.25,
+            "holdout_ratio": 0.1,
+            "calibration_ratio": 0,
+            "seed": 1,
+        },
     }
 
-    train_ds, val_ds, partition, _resolved = train_val(tmp_path, task, data_cfg)
+    train_ds, val_ds, partition, _resolved = train_val(
+        tmp_path, task, data_cfg
+    )
 
     assert val_ds is not None
     assert [s.member for s in partition_samples(partition)] == [stem]
@@ -189,11 +251,15 @@ def test_one_tiled_source_still_splits_spatially_over_its_own_samples(tmp_path: 
     manifest = partition_spatial(partition)
     assert manifest is not None
     assert manifest.stem == stem
-    assert all(i.startswith(f"{stem}::strip_") for i in manifest.train_identities)
+    assert all(
+        i.startswith(f"{stem}::strip_") for i in manifest.train_identities
+    )
     assert set(manifest.train_identities).isdisjoint(manifest.val_identities)
 
 
-def test_the_train_only_and_drawn_routes_record_one_directory_the_same_way(tmp_path: Path):
+def test_the_train_only_and_drawn_routes_record_one_directory_the_same_way(
+    tmp_path: Path,
+):
     """The same training directory is admitted twice, once by a run training on every admitted
     sample and once by a run that drew its own split over it. The two runs partition it
     differently, which is what each route is for; what they may not do is disagree about which
@@ -203,19 +269,35 @@ def test_the_train_only_and_drawn_routes_record_one_directory_the_same_way(tmp_p
     stems = ["a_0_0", "b_0_0", "c_0_0", "d_0_0"]
     images_dir = _labeled(tmp_path / "train_ds", stems)
 
-    whole_cfg = {"images_dir": str(images_dir), "scope": {"subject": SUBJECT}, "auto_val": False}
-    whole = _recorded(tmp_path, "detection", whole_cfg,
-                      evaluation=evaluation_block(selection_metric="loss"))
+    whole_cfg = {
+        "images_dir": str(images_dir),
+        "scope": {"subject": SUBJECT},
+        "auto_val": False,
+    }
+    whole = _recorded(
+        tmp_path,
+        "detection",
+        whole_cfg,
+        evaluation=evaluation_block(selection_metric="loss"),
+    )
 
-    drawn_cfg = {"images_dir": str(images_dir), "scope": {"subject": SUBJECT}, "auto_val": True,
-                 "split": {"val_ratio": 0.5, "seed": 1}}
+    drawn_cfg = {
+        "images_dir": str(images_dir),
+        "scope": {"subject": SUBJECT},
+        "auto_val": True,
+        "split": {"val_ratio": 0.5, "seed": 1},
+    }
     drawn = _recorded(tmp_path, "detection", drawn_cfg)
 
     def _held(record: dict) -> list[tuple]:
-        return sorted((s.member, s.source, s.ground_truth, s.ground_truth_digest)
-                      for s in partition_samples(record))
+        return sorted(
+            (s.member, s.source, s.ground_truth, s.ground_truth_digest)
+            for s in partition_samples(record)
+        )
 
     assert _held(whole) == _held(drawn)
     assert len(_held(whole)) == len(stems)
     assert all(digest for *_, digest in _held(whole))
-    assert recorded_side(whole, "val") == [] and recorded_side(drawn, "val") != []
+    assert (
+        recorded_side(whole, "val") == [] and recorded_side(drawn, "val") != []
+    )

@@ -31,7 +31,8 @@ def test_the_backend_refuses_to_start_with_no_workspace(monkeypatch):
 
 
 def test_main_publishes_the_port_and_configures_the_backend_on_one_workspace(
-    tmp_path_factory, monkeypatch,
+    tmp_path_factory,
+    monkeypatch,
 ):
     """The port the backend binds is the port a tool process resolves under the same workspace."""
     import tcip_web.__main__ as entry
@@ -41,7 +42,9 @@ def test_main_publishes_the_port_and_configures_the_backend_on_one_workspace(
     elsewhere = tmp_path_factory.mktemp("elsewhere")
     extra = tmp_path_factory.mktemp("extra")
     served: list = []
-    monkeypatch.setattr(entry.uvicorn, "run", lambda *a, **k: served.append(k["port"]))
+    monkeypatch.setattr(
+        entry.uvicorn, "run", lambda *a, **k: served.append(k["port"])
+    )
     monkeypatch.setenv("TCIP_WORKSPACE", str(elsewhere))
     monkeypatch.setenv("TCIP_IMAGE_ROOTS", str(extra))
     monkeypatch.setenv("TCIP_WEB_PORT", "0")

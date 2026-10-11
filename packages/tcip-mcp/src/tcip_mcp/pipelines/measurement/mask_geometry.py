@@ -65,11 +65,15 @@ def _axes_from_points(pts):
     import numpy as np
 
     centroid = pts.mean(axis=0)
-    if pts.shape[0] == 1:  # a single point: no orientation to derive, by convention along x
+    if (
+        pts.shape[0] == 1
+    ):  # a single point: no orientation to derive, by convention along x
         return centroid, 0.0, 0.0, np.array([1.0, 0.0])
     centered = pts - centroid
     cov = np.cov(centered, rowvar=False)
-    evals, evecs = np.linalg.eigh(cov)  # ascending eigenvalues; columns are eigenvectors
+    evals, evecs = np.linalg.eigh(
+        cov
+    )  # ascending eigenvalues; columns are eigenvectors
     major_vec = evecs[:, -1]
     minor_vec = evecs[:, 0]
     if major_vec[0] < 0:  # fix sign so orientation is stable (major_x >= 0)
@@ -91,7 +95,9 @@ def _axes(binary):
 
     ys, xs = np.nonzero(binary)
     pts = np.stack([xs, ys], axis=1).astype(np.float64)
-    if pts.shape[0] == 1:  # a single pixel: 1x1, oriented along x by convention
+    if (
+        pts.shape[0] == 1
+    ):  # a single pixel: 1x1, oriented along x by convention
         return pts.mean(axis=0), 1.0, 1.0, np.array([1.0, 0.0])
     centroid, principal, secondary, major_vec = _axes_from_points(pts)
     return centroid, principal + 1.0, secondary + 1.0, major_vec
@@ -113,7 +119,9 @@ def principal_axis_extent_of_points(points: Any) -> float:
 
     pts = np.asarray(list(points), dtype=np.float64)
     if pts.shape[0] == 0:
-        raise ValueError("principal_axis_extent_of_points needs at least one point")
+        raise ValueError(
+            "principal_axis_extent_of_points needs at least one point"
+        )
     _centroid, principal, _secondary, _major_vec = _axes_from_points(pts)
     return principal
 
@@ -127,10 +135,16 @@ def _attach_physical(result: dict, scale: float, unit: str) -> None:
     result[f"{unit}_per_px"] = s
     result[f"area_{unit}2"] = result["area_px"] * s * s
     result[f"perimeter_{unit}"] = result["perimeter_px"] * s
-    result[f"principal_axis_extent_{unit}"] = result["principal_axis_extent_px"] * s
-    result[f"secondary_axis_extent_{unit}"] = result["secondary_axis_extent_px"] * s
+    result[f"principal_axis_extent_{unit}"] = (
+        result["principal_axis_extent_px"] * s
+    )
+    result[f"secondary_axis_extent_{unit}"] = (
+        result["secondary_axis_extent_px"] * s
+    )
     c = result.get("centroid_px")
-    result[f"centroid_{unit}"] = (c[0] * s, c[1] * s) if c is not None else None
+    result[f"centroid_{unit}"] = (
+        (c[0] * s, c[1] * s) if c is not None else None
+    )
 
 
 # _attach_physical writes "{field}_{unit}[2]" (area squared, everything else linear), the naming
@@ -188,8 +202,13 @@ def unit_from_value_key(key: str) -> tuple[str, str] | None:
     return display, linear_basis
 
 
-def mask_geometry(mask: Any, *, scale: float | None = None, unit: str,
-                  threshold: float = DEFAULT_MASK_BINARIZE_THRESHOLD) -> dict:
+def mask_geometry(
+    mask: Any,
+    *,
+    scale: float | None = None,
+    unit: str,
+    threshold: float = DEFAULT_MASK_BINARIZE_THRESHOLD,
+) -> dict:
     """Dimensional geometry of a single validated 2D mask (``[H, W]`` or ``[1, H, W]``).
 
     ``scale`` is a plain float (per-pixel, in ``unit``).
@@ -197,11 +216,22 @@ def mask_geometry(mask: Any, *, scale: float | None = None, unit: str,
     Returns pixel measurements always, and ``{unit}``-suffixed physical measurements when a scale
     is given::
 
-        {"empty", "area_px", "perimeter_px", "principal_axis_extent_px",
-         "secondary_axis_extent_px", "centroid_px", "angle_deg",
-         # when scale given, e.g. unit="mm":
-         "mm_per_px", "area_mm2", "perimeter_mm", "principal_axis_extent_mm",
-         "secondary_axis_extent_mm", "centroid_mm"}
+        {
+            "empty",
+            "area_px",
+            "perimeter_px",
+            "principal_axis_extent_px",
+            "secondary_axis_extent_px",
+            "centroid_px",
+            "angle_deg",
+            # when scale given, e.g. unit="mm":
+            "mm_per_px",
+            "area_mm2",
+            "perimeter_mm",
+            "principal_axis_extent_mm",
+            "secondary_axis_extent_mm",
+            "centroid_mm",
+        }
 
     The two axis extents are chords of the mask's footprint along its own PCA axes, not anatomical
     spans: see the module docstring before treating one as a trait's length or width.
@@ -217,35 +247,53 @@ def mask_geometry(mask: Any, *, scale: float | None = None, unit: str,
         else:
             raise ValueError(
                 "mask_geometry expects a single 2D mask ([H, W] or [1, H, W]); use "
-                "instance_geometries for an [N, H, W] instance stack")
+                "instance_geometries for an [N, H, W] instance stack"
+            )
     if arr.ndim != 2:
         raise ValueError(f"mask must be 2D (got shape {arr.shape})")
 
     binary = arr.astype(np.float64) >= float(threshold)
     area_px = float(binary.sum())
-    result: dict = {"empty": area_px == 0.0, "area_px": area_px, "perimeter_px": 0.0,
-                    "principal_axis_extent_px": 0.0, "secondary_axis_extent_px": 0.0,
-                    "centroid_px": None, "angle_deg": None}
+    result: dict = {
+        "empty": area_px == 0.0,
+        "area_px": area_px,
+        "perimeter_px": 0.0,
+        "principal_axis_extent_px": 0.0,
+        "secondary_axis_extent_px": 0.0,
+        "centroid_px": None,
+        "angle_deg": None,
+    }
     if area_px > 0.0:
         centroid, principal, secondary, major_vec = _axes(binary)
         result["perimeter_px"] = _perimeter_px(binary)
         result["principal_axis_extent_px"] = principal
         result["secondary_axis_extent_px"] = secondary
         result["centroid_px"] = (float(centroid[0]), float(centroid[1]))
-        result["angle_deg"] = float(np.degrees(np.arctan2(major_vec[1], major_vec[0])))
+        result["angle_deg"] = float(
+            np.degrees(np.arctan2(major_vec[1], major_vec[0]))
+        )
     if scale is not None:
         _attach_physical(result, scale, unit)
     return result
 
 
-def instance_geometries(masks: Any, *, scale: float | None = None, unit: str,
-                        threshold: float = DEFAULT_MASK_BINARIZE_THRESHOLD) -> list[dict]:
+def instance_geometries(
+    masks: Any,
+    *,
+    scale: float | None = None,
+    unit: str,
+    threshold: float = DEFAULT_MASK_BINARIZE_THRESHOLD,
+) -> list[dict]:
     """Per-instance :func:`mask_geometry` over an ``[N, H, W]`` mask stack (or a single
     ``[H, W]``)."""
     arr = _to_numpy(masks)
     if arr.ndim == 2:
         arr = arr[None]
     if arr.ndim != 3:
-        raise ValueError(f"masks must be [N, H, W] or [H, W] (got shape {arr.shape})")
-    return [mask_geometry(arr[i], scale=scale, unit=unit, threshold=threshold)
-            for i in range(arr.shape[0])]
+        raise ValueError(
+            f"masks must be [N, H, W] or [H, W] (got shape {arr.shape})"
+        )
+    return [
+        mask_geometry(arr[i], scale=scale, unit=unit, threshold=threshold)
+        for i in range(arr.shape[0])
+    ]

@@ -37,7 +37,9 @@ MAX_DIM = 500  # sanity bound on client-supplied rows/cols
 # that socket: the client reconnects and repaints from the scrollback replay.
 QUEUE_MAX_CHUNKS = 2048
 
-_EXIT_NOTE = "\r\n\x1b[2m[the agent exited, use Restart in the rail header]\x1b[22m\r\n"
+_EXIT_NOTE = (
+    "\r\n\x1b[2m[the agent exited, use Restart in the rail header]\x1b[22m\r\n"
+)
 
 
 def _offer(queue: asyncio.Queue, data: str) -> None:
@@ -98,8 +100,12 @@ class TerminalStatus(BaseModel):
     providers: list[ProviderStatus]
 
 
-def _record_start(session_id: str, launched: LaunchedProgram, project: Optional[OpenProject],
-                  actor: str) -> None:
+def _record_start(
+    session_id: str,
+    launched: LaunchedProgram,
+    project: Optional[OpenProject],
+    actor: str,
+) -> None:
     """One audit line by ``actor`` in ``project``'s log per launch for it, naming the session id
     and the provider and program it launched; a launch for no project has no log to land in and
     records nothing. A failed append raises ``AuditEntryNotWrittenError``.
@@ -107,9 +113,12 @@ def _record_start(session_id: str, launched: LaunchedProgram, project: Optional[
     from tcip_mcp.audit import record_event_or_raise
 
     if project is not None:
-        record_event_or_raise("agent_terminal_started",
-                              {"session_id": session_id, **launched.model_dump()}, actor=actor,
-                              scope=project.root)
+        record_event_or_raise(
+            "agent_terminal_started",
+            {"session_id": session_id, **launched.model_dump()},
+            actor=actor,
+            scope=project.root,
+        )
 
 
 @dataclass
@@ -147,13 +156,17 @@ class TerminalSession:
         self._scrollback: list[str] = []
         self._scrollback_len = 0
         # ws-id → (queue, that websocket's event loop)
-        self._subs: dict[int, tuple[asyncio.Queue, asyncio.AbstractEventLoop]] = {}
+        self._subs: dict[
+            int, tuple[asyncio.Queue, asyncio.AbstractEventLoop]
+        ] = {}
         self._next_sub = 0
         self._launch = _Launch(gen=0)
 
     # ── lifecycle ───────────────────────────────────────────────────────
 
-    def start(self, rows: int, cols: int, provider: pty_host.Provider, actor: str) -> Optional[str]:
+    def start(
+        self, rows: int, cols: int, provider: pty_host.Provider, actor: str
+    ) -> Optional[str]:
         """Spawn ``provider``'s harness in a PTY for the open project as the current launch by
         ``actor``, or a new one when the current launch already spawned, its ritual built before
         the spawn from the project's record as it reads now. Returns an error reason (a record
@@ -174,28 +187,41 @@ class TerminalSession:
                 return provider.unavailable_reason
             prepared: list[str] = []
             if not command[1]:
-                prepared, problem = pty_host.prepare_launch(command[0][0], provider, launch)
+                prepared, problem = pty_host.prepare_launch(
+                    command[0][0], provider, launch
+                )
                 if problem is not None:
                     return problem
             env = pty_host.spawn_env(self.id)
             argv = pty_host.render_argv(command[0], launch, env)
             program = pty_host.launched_program(argv, command[1])
             launched = LaunchedProgram(
-                provider=provider.id, prepared=prepared,
+                provider=provider.id,
+                prepared=prepared,
                 confinement=None if command[1] else provider.confinement,
-                delivery_unverified=(None if command[1]
-                                     else provider.delivery_unverified(program["version"])),
-                **program)
+                delivery_unverified=(
+                    None
+                    if command[1]
+                    else provider.delivery_unverified(program["version"])
+                ),
+                **program,
+            )
             self._launch.composer_ready = provider.composer_ready
             try:
-                pty = pty_host.spawn_pty(argv, pty_host.terminal_cwd(), rows, cols, env)
+                pty = pty_host.spawn_pty(
+                    argv, pty_host.terminal_cwd(), rows, cols, env
+                )
             except OSError as exc:
                 self._pty = None
                 return f"could not start the agent terminal: {exc}"
             self._pty = pty
             self._launch.ritual = ritual
-            self.launch = TerminalLaunch(session_id=self.id, existing=False, launched=launched,
-                                         ritual=self._launch.ritual)
+            self.launch = TerminalLaunch(
+                session_id=self.id,
+                existing=False,
+                launched=launched,
+                ritual=self._launch.ritual,
+            )
             gen = self._launch.gen
         pty_host.start_reader(
             pty,
@@ -218,13 +244,16 @@ class TerminalSession:
             return reason
         return None
 
-    def restart(self, rows: int, cols: int, provider: pty_host.Provider,
-                actor: str) -> Optional[str]:
+    def restart(
+        self, rows: int, cols: int, provider: pty_host.Provider, actor: str
+    ) -> Optional[str]:
         """Open the next launch, holding the current launch's undelivered requests and every
         request submitted from here on behind its ritual, end the current process and start
         ``provider`` as that launch by ``actor``. Returns an error reason, or None on success."""
         with self._lock:
-            self._launch = _Launch(gen=self._launch.gen + 1, queued=self._launch.queued)
+            self._launch = _Launch(
+                gen=self._launch.gen + 1, queued=self._launch.queued
+            )
         # A survivor here stays attached: start() below would find self._pty alive and report
         # success with no process spawned and no line written.
         if not self.terminate():
@@ -302,10 +331,15 @@ class TerminalSession:
         has written its row's ``composer_ready``; each leaves the launch only once written. Called
         under the lock."""
         launch = self._launch
-        if not (launch.ready and launch.composer_live) or launch.ritual is None:
+        if (
+            not (launch.ready and launch.composer_live)
+            or launch.ritual is None
+        ):
             return
         if not launch.ritual_sent:
-            if not self.write(pty_host.paste("\n\n".join([launch.ritual, *launch.queued]))):
+            if not self.write(
+                pty_host.paste("\n\n".join([launch.ritual, *launch.queued]))
+            ):
                 return
             launch.ritual_sent = True
             launch.queued.clear()
@@ -320,12 +354,17 @@ class TerminalSession:
             seen = launch.tail + data
             launch.ready = pty_host.bracketed_paste(seen, launch.ready)
             launch.composer_live = launch.composer_live or (
-                launch.composer_ready is not None and launch.composer_ready in seen)
+                launch.composer_ready is not None
+                and launch.composer_ready in seen
+            )
             launch.tail = seen[-_TAIL_CHARS:]
             self._deliver()
             self._scrollback.append(data)
             self._scrollback_len += len(data)
-            while self._scrollback_len > SCROLLBACK_MAX_CHARS and len(self._scrollback) > 1:
+            while (
+                self._scrollback_len > SCROLLBACK_MAX_CHARS
+                and len(self._scrollback) > 1
+            ):
                 dropped = self._scrollback.pop(0)
                 self._scrollback_len -= len(dropped)
             dead: list[int] = []
@@ -382,7 +421,9 @@ def shutdown_all() -> None:
     """Kill every live agent terminal and forget the sessions."""
     for s in list(_SESSIONS.values()):
         if not s.terminate():
-            logger.warning("terminal session %s survived shutdown termination", s.id)
+            logger.warning(
+                "terminal session %s survived shutdown termination", s.id
+            )
     _SESSIONS.clear()
 
 
@@ -392,10 +433,16 @@ def shutdown_all() -> None:
 @router.get("/status")
 def get_status() -> TerminalStatus:
     """Every provider row with the reason it cannot launch here."""
-    return TerminalStatus(providers=[
-        ProviderStatus(id=row.id, name=row.name, unavailable_reason=pty_host.launch_problem(row))
-        for row in pty_host.PROVIDERS
-    ])
+    return TerminalStatus(
+        providers=[
+            ProviderStatus(
+                id=row.id,
+                name=row.name,
+                unavailable_reason=pty_host.launch_problem(row),
+            )
+            for row in pty_host.PROVIDERS
+        ]
+    )
 
 
 class TerminalInputFrame(BaseModel):
@@ -433,8 +480,11 @@ def _provider(provider_id: str) -> pty_host.Provider:
     for row in pty_host.PROVIDERS:
         if row.id == provider_id:
             return row
-    raise HTTPException(422, f"no agent provider {provider_id!r}; the provider table lists "
-                             f"{[row.id for row in pty_host.PROVIDERS]}")
+    raise HTTPException(
+        422,
+        f"no agent provider {provider_id!r}; the provider table lists "
+        f"{[row.id for row in pty_host.PROVIDERS]}",
+    )
 
 
 @router.post("/sessions")
@@ -449,7 +499,9 @@ def create_session(req: CreateSessionRequest) -> TerminalLaunch:
                 return s.launch.model_copy(update={"existing": True})
         session_id = "term_" + os.urandom(6).hex()
         session = TerminalSession(session_id)
-        err = session.start(_clamp(req.rows), _clamp(req.cols), provider, person)
+        err = session.start(
+            _clamp(req.rows), _clamp(req.cols), provider, person
+        )
         if err:
             # A survivor of the failed start's own termination attempt stays reachable, so a
             # retry attaches to it instead of spawning a second process beside it.
@@ -468,7 +520,9 @@ def _require(session_id: str) -> TerminalSession:
 
 
 @router.post("/sessions/{session_id}/restart")
-def restart_session(session_id: str, req: CreateSessionRequest) -> TerminalLaunch:
+def restart_session(
+    session_id: str, req: CreateSessionRequest
+) -> TerminalLaunch:
     """End the session's process and launch the requested provider in its place, by the person
     ``req.user`` names."""
     person = actor(req.user)
@@ -480,9 +534,12 @@ def restart_session(session_id: str, req: CreateSessionRequest) -> TerminalLaunc
         for other in _SESSIONS.values():
             if other.id != session_id and other.alive():
                 raise HTTPException(
-                    409, f"another agent session is live ({other.id}); attach to it instead"
+                    409,
+                    f"another agent session is live ({other.id}); attach to it instead",
                 )
-        err = session.restart(_clamp(req.rows), _clamp(req.cols), provider, person)
+        err = session.restart(
+            _clamp(req.rows), _clamp(req.cols), provider, person
+        )
     if err:
         raise HTTPException(503, err)
     return session.launch
@@ -508,7 +565,9 @@ async def _pump(queue: asyncio.Queue, websocket: WebSocket) -> None:
         text = await queue.get()
         if text is None:
             # Overflow sentinel (stalled client): close; the reconnect replay repaints.
-            await websocket.close(code=1013, reason="output backlog dropped; reconnect")
+            await websocket.close(
+                code=1013, reason="output backlog dropped; reconnect"
+            )
             return
         await websocket.send_text(text)
 
@@ -548,7 +607,9 @@ async def terminal_ws(websocket: WebSocket, session_id: str) -> None:
                 except ValidationError:
                     continue
                 try:
-                    session.resize(_clamp(resize_frame.rows), _clamp(resize_frame.cols))
+                    session.resize(
+                        _clamp(resize_frame.rows), _clamp(resize_frame.cols)
+                    )
                 except (TypeError, ValueError):
                     pass
     except WebSocketDisconnect:

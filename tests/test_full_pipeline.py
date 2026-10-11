@@ -14,9 +14,11 @@ from pathlib import Path
 import pytest
 
 from tests._chain_fixtures import BESPOKE_CLASSIFIER
+
 torch = pytest.importorskip("torch")
 
 from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY  # noqa: E402
+
 torchvision = pytest.importorskip("torchvision")
 from torchvision.utils import save_image
 
@@ -28,6 +30,7 @@ from tests._training_values import adamw_optimizer, evaluation_block, schedule  
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def tiny_classification_data(tmp_path):
@@ -52,6 +55,7 @@ def tiny_classification_data(tmp_path):
 # ---------------------------------------------------------------------------
 # Test: full classification pipeline
 # ---------------------------------------------------------------------------
+
 
 class TestFullClassificationPipeline:
     """End-to-end: bespoke builder → train → checkpoint → predict."""
@@ -82,15 +86,27 @@ class TestFullClassificationPipeline:
         assert dataset.num_samples == 12
 
         # --- Step 4: A run the launcher's producer opens, trained 2 epochs by the child ---
-        from tcip_mcp.experiments import METRICS_FILE, epoch_rows, observe, read_rows
+        from tcip_mcp.experiments import (
+            METRICS_FILE,
+            epoch_rows,
+            observe,
+            read_rows,
+        )
         from tests._chain_fixtures import training_config
         from tests._verified_checkpoint_fixtures import worker_run
 
         config = training_config(
-            model_source, {"images_dir": images_dir, "labels_dir": csv_path,
-                           "split": {"seed": 0, "val_ratio": 0.34}},
-            stages=[{"freeze_to": -1}], batch_size=4,
-            optimizer=adamw_optimizer(), scheduler=schedule("cosine", horizon_epochs=2))
+            model_source,
+            {
+                "images_dir": images_dir,
+                "labels_dir": csv_path,
+                "split": {"seed": 0, "val_ratio": 0.34},
+            },
+            stages=[{"freeze_to": -1}],
+            batch_size=4,
+            optimizer=adamw_optimizer(),
+            scheduler=schedule("cosine", horizon_epochs=2),
+        )
         observation = observe(worker_run(tmp_path, config))
 
         assert observation.state == "completed", observation.final
@@ -103,16 +119,22 @@ class TestFullClassificationPipeline:
         assert "train_loss" in rows[0] and "val_loss" in rows[-1]
 
         # Verify checkpoint has required keys
-        ckpt = torch.load(out / "model_best.pt", map_location="cpu", weights_only=False)
+        ckpt = torch.load(
+            out / "model_best.pt", map_location="cpu", weights_only=False
+        )
         assert STATE_DICT_KEY in ckpt
-        assert "model_source" in ckpt[CONFIG_KEY] and "model_source" not in ckpt
+        assert (
+            "model_source" in ckpt[CONFIG_KEY] and "model_source" not in ckpt
+        )
 
         # --- Step 5: Load the checkpoint its completion registered, and run inference ---
         from tcip_mcp.model_registry import load_registered_checkpoint
         from tcip_mcp.pipelines.execution import Stated, prepare
 
         assert observation.checkpoint is not None
-        checkpoint = load_registered_checkpoint(observation.checkpoint["path"], project=tmp_path)
+        checkpoint = load_registered_checkpoint(
+            observation.checkpoint["path"], project=tmp_path
+        )
         p = prepare(checkpoint, Stated(tile=False), device="cpu").runnable()
 
         # Pick some test images
@@ -128,8 +150,9 @@ class TestFullClassificationPipeline:
 # Test: detection pipeline with real bud data
 # ---------------------------------------------------------------------------
 
-SAMPLE_PROJECT = Path(os.environ.get(
-    "TCIP_SAMPLE_PROJECT", str(REPO_ROOT / "data")))
+SAMPLE_PROJECT = Path(
+    os.environ.get("TCIP_SAMPLE_PROJECT", str(REPO_ROOT / "data"))
+)
 """A real dataset to run the detection pipeline against: TCIP_SAMPLE_PROJECT names a project
 root holding subjects.json, images/<date>/ and their label documents; defaults to an in-repo
 <repo>/data sample. The tests below skip when neither is present."""
@@ -144,8 +167,10 @@ def _sample_date() -> str | None:
 
     for date in list_dates(SAMPLE_PROJECT):
         for key in capture_label_keys(SAMPLE_PROJECT, date):
-            if any(a.subject == "bud" and a.geometry is not None
-                   for a in json_io.read_label_document(key).annotations):
+            if any(
+                a.subject == "bud" and a.geometry is not None
+                for a in json_io.read_label_document(key).annotations
+            ):
                 return date
     return None
 
@@ -162,7 +187,9 @@ class TestDetectionPipelineRealData:
 
         # --- Step 1: A bespoke detection model_source at the real images' larger input sizes ---
         model_source = built_detector(min_size=320, max_size=512)
-        model = bespoke_models.build_bespoke_detection(num_classes=1, min_size=320, max_size=512)
+        model = bespoke_models.build_bespoke_detection(
+            num_classes=1, min_size=320, max_size=512
+        )
         assert isinstance(model, bespoke_models.BespokeDetection)
 
         # --- Step 2: Build dataset from the nested-schema labels (name-based, one file per
@@ -181,19 +208,26 @@ class TestDetectionPipelineRealData:
         # somewhere in the set rather than assuming the first sample is annotated.
         img, target = dataset[0]
         assert img.ndim == 3 and img.shape[0] == 3  # [C, H, W]
-        assert target["boxes"].ndim == 2 and target["boxes"].shape[1] == 4  # [N, 4], N may be 0
+        assert (
+            target["boxes"].ndim == 2 and target["boxes"].shape[1] == 4
+        )  # [N, 4], N may be 0
         assert target["labels"].ndim == 1
-        assert any(len(dataset[i][1]["labels"]) > 0 for i in range(min(dataset.num_samples, 8)))
+        assert any(
+            len(dataset[i][1]["labels"]) > 0
+            for i in range(min(dataset.num_samples, 8))
+        )
 
         # --- Step 3: A run the launcher's producer opens over the date, trained 1 epoch ---
         from tcip_mcp.experiments import observe
         from tests._chain_fixtures import training_config
         from tests._verified_checkpoint_fixtures import worker_run
 
-        config = training_config(model_source, {**data, "images_dir": str(images_dir),
-                                                "auto_val": False},
-                                 stages=[{"freeze_to": 0}],
-                                 evaluation=evaluation_block(selection_metric="loss"))
+        config = training_config(
+            model_source,
+            {**data, "images_dir": str(images_dir), "auto_val": False},
+            stages=[{"freeze_to": 0}],
+            evaluation=evaluation_block(selection_metric="loss"),
+        )
         observation = observe(worker_run(tmp_path, config))
 
         assert observation.state == "completed", observation.final
@@ -201,21 +235,30 @@ class TestDetectionPipelineRealData:
         assert (out / "model_best.pt").is_file()
 
         # Verify checkpoint format
-        ckpt = torch.load(out / "model_best.pt", map_location="cpu", weights_only=False)
+        ckpt = torch.load(
+            out / "model_best.pt", map_location="cpu", weights_only=False
+        )
         assert STATE_DICT_KEY in ckpt
-        assert "model_source" in ckpt[CONFIG_KEY] and "model_source" not in ckpt
+        assert (
+            "model_source" in ckpt[CONFIG_KEY] and "model_source" not in ckpt
+        )
 
         # --- Step 4: Load the checkpoint its completion registered, and run inference ---
         from tcip_mcp.model_registry import load_registered_checkpoint
         from tcip_mcp.pipelines.execution import Stated, prepare
 
         assert observation.checkpoint is not None
-        checkpoint = load_registered_checkpoint(observation.checkpoint["path"], project=tmp_path)
-        detector = prepare(checkpoint, Stated(tile=False, conf=0.01), device="cpu").runnable()
+        checkpoint = load_registered_checkpoint(
+            observation.checkpoint["path"], project=tmp_path
+        )
+        detector = prepare(
+            checkpoint, Stated(tile=False, conf=0.01), device="cpu"
+        ).runnable()
 
         img_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
-        test_images = sorted(p for p in images_dir.iterdir()
-                             if p.suffix.lower() in img_exts)[:3]
+        test_images = sorted(
+            p for p in images_dir.iterdir() if p.suffix.lower() in img_exts
+        )[:3]
         assert test_images, "no images on the sample date"
         results = detector.predict([str(p) for p in test_images])
 

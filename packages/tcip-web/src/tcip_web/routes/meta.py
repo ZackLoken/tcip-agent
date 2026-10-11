@@ -26,7 +26,11 @@ def get_reports(limit: int = 50) -> dict[str, Any]:
     documents = report_documents(root)
     reports = [report_row(document) for document in documents[:limit]]
 
-    return {"reports": reports, "count": len(reports), "total_available": len(documents)}
+    return {
+        "reports": reports,
+        "count": len(reports),
+        "total_available": len(documents),
+    }
 
 
 @router.get("/retrospectives")

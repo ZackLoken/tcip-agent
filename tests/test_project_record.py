@@ -57,12 +57,17 @@ def test_create_record_mints_an_id_and_writes_an_absent_record(tmp_path: Path):
 
     record = create_record(tmp_path, "  Valley block ", "north orchard")
 
-    assert record["display_name"] == "Valley block" and record["site"] == "north orchard"
+    assert (
+        record["display_name"] == "Valley block"
+        and record["site"] == "north orchard"
+    )
     assert len(record["id"]) == 12
     assert read_record(tmp_path) == record
 
 
-def test_create_record_answers_the_existing_record_when_offered_it_again(tmp_path: Path):
+def test_create_record_answers_the_existing_record_when_offered_it_again(
+    tmp_path: Path,
+):
     """Creating a project that already records the same name and site keeps its id."""
     from tcip_mcp.project_record import create_record
 
@@ -72,18 +77,26 @@ def test_create_record_answers_the_existing_record_when_offered_it_again(tmp_pat
 
 
 def test_create_record_refuses_a_different_site_naming_both(tmp_path: Path):
-    from tcip_mcp.project_record import SiteConflictError, create_record, read_record
+    from tcip_mcp.project_record import (
+        SiteConflictError,
+        create_record,
+        read_record,
+    )
 
     create_record(tmp_path, "Valley block", "north orchard")
 
     with pytest.raises(SiteConflictError) as raised:
         create_record(tmp_path, "Valley block", "south orchard")
 
-    assert "north orchard" in str(raised.value) and "south orchard" in str(raised.value)
+    assert "north orchard" in str(raised.value) and "south orchard" in str(
+        raised.value
+    )
     assert read_record(tmp_path)["site"] == "north orchard"
 
 
-def test_create_record_refuses_a_different_display_name_naming_rename(tmp_path: Path):
+def test_create_record_refuses_a_different_display_name_naming_rename(
+    tmp_path: Path,
+):
     from tcip_mcp.project_record import create_record, read_record
 
     create_record(tmp_path, "Valley block", "north orchard")
@@ -94,17 +107,28 @@ def test_create_record_refuses_a_different_display_name_naming_rename(tmp_path: 
     assert read_record(tmp_path)["display_name"] == "Valley block"
 
 
-def test_create_record_refuses_a_present_record_missing_a_field(tmp_path: Path):
-    from tcip_mcp.project_record import ProjectRecordInvalidError, create_record, project_record_key
+def test_create_record_refuses_a_present_record_missing_a_field(
+    tmp_path: Path,
+):
+    from tcip_mcp.project_record import (
+        ProjectRecordInvalidError,
+        create_record,
+        project_record_key,
+    )
 
-    ts.replace(project_record_key(tmp_path), {"site": "north orchard"},
-               expect=ts.Version.ABSENT)
+    ts.replace(
+        project_record_key(tmp_path),
+        {"site": "north orchard"},
+        expect=ts.Version.ABSENT,
+    )
 
     with pytest.raises(ProjectRecordInvalidError, match="does not hold an id"):
         create_record(tmp_path, "Valley block", "north orchard")
 
 
-def test_create_record_lets_a_decode_error_through_for_an_undecodable_record(tmp_path: Path):
+def test_create_record_lets_a_decode_error_through_for_an_undecodable_record(
+    tmp_path: Path,
+):
     from tcip_mcp.project_record import create_record, project_record_key
     from tests._record_damage_fixtures import damage_record
 
@@ -118,13 +142,21 @@ def test_create_record_lets_a_decode_error_through_for_an_undecodable_record(tmp
 # ── replace_site: the one deliberate correction ─────────────────────────────────
 
 
-def test_replace_site_corrects_the_site_keeping_the_id_and_display_name(tmp_path: Path):
-    from tcip_mcp.project_record import create_record, read_record, replace_site
+def test_replace_site_corrects_the_site_keeping_the_id_and_display_name(
+    tmp_path: Path,
+):
+    from tcip_mcp.project_record import (
+        create_record,
+        read_record,
+        replace_site,
+    )
 
     record = create_record(tmp_path, "Valley block", "north orchard")
 
     assert replace_site(tmp_path, "south orchard") == {
-        "site": "south orchard", "previous_site": "north orchard"}
+        "site": "south orchard",
+        "previous_site": "north orchard",
+    }
     assert read_record(tmp_path) == {**record, "site": "south orchard"}
 
 
@@ -170,7 +202,11 @@ def test_record_fields_names_the_absent_record(tmp_path: Path):
 
 
 def test_record_fields_names_an_undecodable_record(tmp_path: Path):
-    from tcip_mcp.project_record import create_record, project_record_key, record_fields
+    from tcip_mcp.project_record import (
+        create_record,
+        project_record_key,
+        record_fields,
+    )
     from tests._record_damage_fixtures import damage_record
 
     create_record(tmp_path, "Valley block", "north orchard")

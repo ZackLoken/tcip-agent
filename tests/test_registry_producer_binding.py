@@ -11,14 +11,20 @@ def test_two_runs_each_produce_only_their_own_weights(tmp_path):
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tests._verified_checkpoint_fixtures import finished_run
 
-    first = observe(finished_run(tmp_path, experiment_id="exp-rail11-base")).checkpoint
-    second = observe(finished_run(tmp_path, experiment_id="exp-rail11-next")).checkpoint
+    first = observe(
+        finished_run(tmp_path, experiment_id="exp-rail11-base")
+    ).checkpoint
+    second = observe(
+        finished_run(tmp_path, experiment_id="exp-rail11-next")
+    ).checkpoint
 
     assert first["sha256"] != second["sha256"]
-    assert load_registered_checkpoint(first["path"], project=tmp_path).experiment_id == (
-        "exp-rail11-base")
-    assert load_registered_checkpoint(second["path"], project=tmp_path).experiment_id == (
-        "exp-rail11-next")
+    assert load_registered_checkpoint(
+        first["path"], project=tmp_path
+    ).experiment_id == ("exp-rail11-base")
+    assert load_registered_checkpoint(
+        second["path"], project=tmp_path
+    ).experiment_id == ("exp-rail11-next")
 
 
 def test_a_tag_naming_a_run_never_makes_that_run_a_producer(tmp_path):
@@ -28,16 +34,31 @@ def test_a_tag_naming_a_run_never_makes_that_run_a_producer(tmp_path):
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.tools.model_tools import register_model
     from tests._verified_checkpoint_fixtures import (
-        detection_config, opened_run, produced_checkpoint,
+        detection_config,
+        opened_run,
+        produced_checkpoint,
     )
 
-    opened_run(tmp_path, detection_config(tmp_path / "data"), experiment_id="exp-rail1")
-    forged = produced_checkpoint(tmp_path / "forged.pt", "completed under another root")
-    registered = register_model(name="exp-rail1-forged", checkpoint_path=str(forged),
-                                project=tmp_path, tags=["experiment:exp-rail1"])
+    opened_run(
+        tmp_path,
+        detection_config(tmp_path / "data"),
+        experiment_id="exp-rail1",
+    )
+    forged = produced_checkpoint(
+        tmp_path / "forged.pt", "completed under another root"
+    )
+    registered = register_model(
+        name="exp-rail1-forged",
+        checkpoint_path=str(forged),
+        project=tmp_path,
+        tags=["experiment:exp-rail1"],
+    )
     assert "error" not in registered, registered
 
-    assert load_registered_checkpoint(forged, project=tmp_path).experiment_id is None
+    assert (
+        load_registered_checkpoint(forged, project=tmp_path).experiment_id
+        is None
+    )
 
 
 def test_a_replacements_registry_event_names_the_superseded_entry(tmp_path):
@@ -52,7 +73,9 @@ def test_a_replacements_registry_event_names_the_superseded_entry(tmp_path):
     reg.register_model("m-renamed", str(ckpt))
 
     events = ts.read_log(audit_log_key(tmp_path)).records
-    replace = [e for e in events if "superseded_name" in e.get("arguments", {})]
+    replace = [
+        e for e in events if "superseded_name" in e.get("arguments", {})
+    ]
     assert len(replace) == 1 and replace[0]["tool"] == "model_registered"
     assert replace[0]["arguments"]["superseded_name"] == "m"
     assert replace[0]["arguments"]["superseded_tags"] == ["first"]
@@ -70,7 +93,9 @@ def test_caller_tag_still_round_trips_and_filters(tmp_path):
     assert reg.list_models(tag="nonexistent") == []
 
 
-def test_a_checkpoint_carrying_no_weights_refuses_at_registration_naming_the_field(tmp_path):
+def test_a_checkpoint_carrying_no_weights_refuses_at_registration_naming_the_field(
+    tmp_path,
+):
     """A checkpoint is admitted for the weights it loads: a payload carrying none refuses at
     registration, naming the field, and registers nothing; one carrying weights registers."""
     import pytest
@@ -88,11 +113,15 @@ def test_a_checkpoint_carrying_no_weights_refuses_at_registration_naming_the_fie
         registry.register_model("weightless", str(weightless))
 
     assert registry.list_models() == []
-    registry.register_model("weighted", str(produced_checkpoint(tmp_path / "w.pt", "weights")))
+    registry.register_model(
+        "weighted", str(produced_checkpoint(tmp_path / "w.pt", "weights"))
+    )
     assert [m["name"] for m in registry.list_models()] == ["weighted"]
 
 
-def test_an_indexed_checkpoint_carrying_no_weights_refuses_at_load_naming_the_field(tmp_path):
+def test_an_indexed_checkpoint_carrying_no_weights_refuses_at_load_naming_the_field(
+    tmp_path,
+):
     """The load boundary states the weights rail itself: an index entry naming a weightless
     payload's digest, written past registration, refuses at ``load_registered_checkpoint``
     naming the field, while a registered checkpoint carrying weights loads."""
@@ -103,7 +132,9 @@ def test_an_indexed_checkpoint_carrying_no_weights_refuses_at_load_naming_the_fi
     torch = pytest.importorskip("torch")
     import tcip_store as ts
     from tcip_mcp.model_registry import (
-        ModelRegistry, load_registered_checkpoint, registry_index_key,
+        ModelRegistry,
+        load_registered_checkpoint,
+        registry_index_key,
     )
     from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY
     from tests._verified_checkpoint_fixtures import produced_checkpoint
@@ -114,9 +145,17 @@ def test_an_indexed_checkpoint_carrying_no_weights_refuses_at_load_naming_the_fi
     torch.save({CONFIG_KEY: {}}, weightless)
     key = registry_index_key(tmp_path)
     index = ts.read_versioned(key)
-    entry = {**index.value["entries"][0], "name": "weightless", "checkpoint_path": "weightless.pt",
-             "sha256": hashlib.sha256(weightless.read_bytes()).hexdigest()}
-    ts.replace(key, {"entries": [*index.value["entries"], entry]}, expect=index.version)
+    entry = {
+        **index.value["entries"][0],
+        "name": "weightless",
+        "checkpoint_path": "weightless.pt",
+        "sha256": hashlib.sha256(weightless.read_bytes()).hexdigest(),
+    }
+    ts.replace(
+        key,
+        {"entries": [*index.value["entries"], entry]},
+        expect=index.version,
+    )
 
     assert load_registered_checkpoint(weighted, project=tmp_path).sha256
     with pytest.raises(ValueError, match=STATE_DICT_KEY):

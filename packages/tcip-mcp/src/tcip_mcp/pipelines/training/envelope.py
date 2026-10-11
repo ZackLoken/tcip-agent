@@ -38,12 +38,16 @@ class TrainContext:
     and owns the sinks a training body records metrics, checkpoints and artifacts through.
     """
 
-    run: Any                      # TrainRun
+    run: Any  # TrainRun
     train_loader: Any
     val_loader: Any | None = None
-    spatial: SpatialManifest | None = None   # the within-image split the run's partition records
+    spatial: SpatialManifest | None = (
+        None  # the within-image split the run's partition records
+    )
     resume_from: str = ""
-    epoch_hook: Any = None        # (epoch, metrics) -> None, fired for every epoch row
+    epoch_hook: Any = (
+        None  # (epoch, metrics) -> None, fired for every epoch row
+    )
     _epoch: int = 0
     _tb: Any = None
 
@@ -75,7 +79,9 @@ class TrainContext:
 
         return run_device(self.spec)
 
-    def set_seed(self, seed: int | None = None, deterministic: bool = False) -> None:
+    def set_seed(
+        self, seed: int | None = None, deterministic: bool = False
+    ) -> None:
         from tcip_mcp.pipelines.training.generic_trainer import set_seed
 
         eff = self.seed if seed is None else seed
@@ -87,16 +93,25 @@ class TrainContext:
         """This run's model, built from its validated ``model_source``
         (:func:`~tcip_mcp.pipelines.model_build.build_from_model_source`) at the width and count
         its config records (:func:`~tcip_mcp.pipelines.model_build.recorded_model_dims`)."""
-        from tcip_mcp.pipelines.model_build import build_from_model_source, recorded_model_dims
+        from tcip_mcp.pipelines.model_build import (
+            build_from_model_source,
+            recorded_model_dims,
+        )
 
-        return build_from_model_source(self.spec.model_source, self.run.layout,
-                                       recorded_model_dims(self.spec))
+        return build_from_model_source(
+            self.spec.model_source,
+            self.run.layout,
+            recorded_model_dims(self.spec),
+        )
 
     def _contract_args(self, **overrides: Any) -> dict:
         """What the smoke runs against: the dims this run resolved, or one batch off its own train
         loader when those dims cannot shape a batch (``no_batch_reason``).
         """
-        from tcip_mcp.pipelines.model_build import recorded_model_dims, resolve_contract_dims
+        from tcip_mcp.pipelines.model_build import (
+            recorded_model_dims,
+            resolve_contract_dims,
+        )
         from tcip_mcp.pipelines.model_contract import no_batch_reason
 
         dims = resolve_contract_dims(self.spec, recorded_model_dims(self.spec))
@@ -112,7 +127,9 @@ class TrainContext:
         from tcip_mcp.pipelines.model_contract import check_model_contract
 
         return check_model_contract(
-            model or self.build_model(), self.task, **self._contract_args(**overrides)
+            model or self.build_model(),
+            self.task,
+            **self._contract_args(**overrides),
         )
 
     def overfit_check(self, model: Any = None, **overrides: Any) -> dict:
@@ -121,7 +138,9 @@ class TrainContext:
         from tcip_mcp.pipelines.model_contract import overfit_check
 
         return overfit_check(
-            model or self.build_model(), self.task, **self._contract_args(**overrides)
+            model or self.build_model(),
+            self.task,
+            **self._contract_args(**overrides),
         )
 
     # ---- the default trainer: one optional convenience ----
@@ -130,9 +149,14 @@ class TrainContext:
         selection+early-stop / checkpoint cadence)."""
         from tcip_mcp.pipelines.training.generic_trainer import train
 
-        return train(self.run, self.train_loader, self.val_loader,
-                     epoch_callback=self.log_metrics, batch_callback=self.log_batch,
-                     resume_from=self.resume_from)
+        return train(
+            self.run,
+            self.train_loader,
+            self.val_loader,
+            epoch_callback=self.log_metrics,
+            batch_callback=self.log_batch,
+            resume_from=self.resume_from,
+        )
 
     # ---- craft library passthroughs (compose, don't reinvent) ----
     def build_dataset(self, *, samples: Any, transforms: Any = None) -> Any:
@@ -144,28 +168,41 @@ class TrainContext:
         list refuses naming that sample."""
         from tcip_mcp.pipelines.data.split_construction import run_loader
 
-        return run_loader(self.task, self.spec.data, self.run.layout, self.spatial)(
-            samples=samples, transforms=transforms)
+        return run_loader(
+            self.task, self.spec.data, self.run.layout, self.spatial
+        )(samples=samples, transforms=transforms)
 
-    def tiled_dataset(self, base: Any, *, tile_size: int, overlap: float, **kwargs: Any) -> Any:
+    def tiled_dataset(
+        self, base: Any, *, tile_size: int, overlap: float, **kwargs: Any
+    ) -> Any:
         """Wrap a detection or instance-segmentation dataset in the native-resolution tiler
         (``datasets.TiledDetectionDataset``) at the lattice you compose it at, ``tile_size`` and
         ``overlap``, both required. ``kwargs``: sliver_frac / skip_empty /
         keep_regions / transforms."""
         from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
 
-        return TiledDetectionDataset(base, tile_size=tile_size, overlap=overlap, **kwargs)
+        return TiledDetectionDataset(
+            base, tile_size=tile_size, overlap=overlap, **kwargs
+        )
 
     def task_collate(self) -> Any:
         from tcip_mcp.pipelines.training.collation import task_collate
 
         return task_collate(self.task)
 
-    def build_sampler(self, block: dict, dataset: Any, *, num_workers: int | None = None,
-                      batch_size: int | None = None) -> Any:
+    def build_sampler(
+        self,
+        block: dict,
+        dataset: Any,
+        *,
+        num_workers: int | None = None,
+        batch_size: int | None = None,
+    ) -> Any:
         from tcip_mcp.pipelines.data.samplers import build_sampler
 
-        return build_sampler(block, dataset, num_workers=num_workers, batch_size=batch_size)
+        return build_sampler(
+            block, dataset, num_workers=num_workers, batch_size=batch_size
+        )
 
     def build_augmentation(self, cfg: dict) -> Any:
         from tcip_mcp.pipelines.data.augmentations import build_augmentation
@@ -182,46 +219,72 @@ class TrainContext:
         config, naming its own ``training_source``, states none."""
         value = getattr(self.spec, block)
         if value is None:
-            raise ValueError(f"this run's config states no {block!r} block for the loop to build "
-                             "from; state one beside training_source")
+            raise ValueError(
+                f"this run's config states no {block!r} block for the loop to build "
+                "from; state one beside training_source"
+            )
         return value
 
     def build_optimizer(self, model: Any) -> Any:
         """The optimizer the run's validated ``optimizer`` block names over ``model``, at the
         block's own rates."""
-        from tcip_mcp.pipelines.training.optimizer_factory import build_optimizer
+        from tcip_mcp.pipelines.training.optimizer_factory import (
+            build_optimizer,
+        )
 
         spec = self._stated("optimizer")
-        return build_optimizer(spec, model, backbone_lr=spec.backbone_lr, head_lr=spec.head_lr)
+        return build_optimizer(
+            spec, model, backbone_lr=spec.backbone_lr, head_lr=spec.head_lr
+        )
 
     def build_scheduler(self, optimizer: Any) -> Any:
         """The scheduler the run's validated ``scheduler`` block names, at the block's own
         settings and horizon."""
-        from tcip_mcp.pipelines.training.generic_trainer import _build_scheduler
+        from tcip_mcp.pipelines.training.generic_trainer import (
+            _build_scheduler,
+        )
 
         return _build_scheduler(optimizer, self._stated("scheduler"))
 
-    def apply_stage_freeze(self, model: Any, freeze_to: int, *, prev_trainable: int | None = None,
-                           enforce_monotonic: bool = True) -> int:
+    def apply_stage_freeze(
+        self,
+        model: Any,
+        freeze_to: int,
+        *,
+        prev_trainable: int | None = None,
+        enforce_monotonic: bool = True,
+    ) -> int:
         """Apply a stage's progressive-unfreeze policy (+ the monotonic guard) and return the new
         trainable-param count."""
-        from tcip_mcp.pipelines.training.generic_trainer import apply_stage_freeze
+        from tcip_mcp.pipelines.training.generic_trainer import (
+            apply_stage_freeze,
+        )
 
-        return apply_stage_freeze(model, freeze_to, prev_trainable=prev_trainable,
-                                  enforce_monotonic=enforce_monotonic)
+        return apply_stage_freeze(
+            model,
+            freeze_to,
+            prev_trainable=prev_trainable,
+            enforce_monotonic=enforce_monotonic,
+        )
 
     def compute_lr_scale(self, *args: Any, **kwargs: Any) -> Any:
-        from tcip_mcp.pipelines.training.optimizer_factory import compute_lr_scale
+        from tcip_mcp.pipelines.training.optimizer_factory import (
+            compute_lr_scale,
+        )
 
         return compute_lr_scale(*args, **kwargs)
 
     def capture_training_state(self, *args: Any, **kwargs: Any) -> Any:
-        from tcip_mcp.pipelines.training.optimizer_factory import capture_training_state
+        from tcip_mcp.pipelines.training.optimizer_factory import (
+            capture_training_state,
+        )
 
         return capture_training_state(*args, **kwargs)
 
     def restore_training_state(self, *args: Any, **kwargs: Any) -> Any:
-        from tcip_mcp.pipelines.training.optimizer_factory import restore_training_state
+        from tcip_mcp.pipelines.training.optimizer_factory import (
+            restore_training_state,
+        )
 
         return restore_training_state(*args, **kwargs)
 
@@ -232,8 +295,14 @@ class TrainContext:
         is refused by the call (``TypeError``)."""
         from tcip_mcp.pipelines.training.evaluation import evaluate
 
-        return evaluate(model, self.val_loader if loader is None else loader, self.device,
-                        self.task, **self.run.evaluation_arguments, **kwargs)
+        return evaluate(
+            model,
+            self.val_loader if loader is None else loader,
+            self.device,
+            self.task,
+            **self.run.evaluation_arguments,
+            **kwargs,
+        )
 
     # ---- measurement primitives (compose for dimensional traits) ----
     def mask_geometry(self, *args: Any, **kwargs: Any) -> Any:
@@ -252,16 +321,28 @@ class TrainContext:
         run checked open (``experiments.require_open``). Refuses (``ValueError``) metrics carrying
         a key the log stamps (``experiments.EPOCH_KEY``, ``STEP_KEY``, ``TIMESTAMP_KEY``)."""
         from tcip_mcp.audit import now_iso
-        from tcip_mcp.experiments import EPOCH_KEY, STEP_KEY, TIMESTAMP_KEY, require_open
-        from tcip_mcp.pipelines.training.generic_trainer import _checkpoint_metrics
+        from tcip_mcp.experiments import (
+            EPOCH_KEY,
+            STEP_KEY,
+            TIMESTAMP_KEY,
+            require_open,
+        )
+        from tcip_mcp.pipelines.training.generic_trainer import (
+            _checkpoint_metrics,
+        )
 
         stamped = sorted({EPOCH_KEY, STEP_KEY, TIMESTAMP_KEY} & metrics.keys())
         if stamped:
             raise ValueError(
                 f"the metrics carry {stamped}, which the metrics log stamps on each row itself; "
-                "pass the epoch and step as the sink's own arguments.")
+                "pass the epoch and step as the sink's own arguments."
+            )
         require_open(self.run_dir)
-        return {**_checkpoint_metrics(metrics), **stamps, TIMESTAMP_KEY: now_iso()}
+        return {
+            **_checkpoint_metrics(metrics),
+            **stamps,
+            TIMESTAMP_KEY: now_iso(),
+        }
 
     def _epoch_sink(self, epoch: int, metrics: dict) -> None:
         """Append one epoch's row (:meth:`_metrics_row`, stamped with ``epoch``) to the run's
@@ -285,14 +366,21 @@ class TrainContext:
 
         require_open(self.run_dir)
         if tag not in self.run.saved:
-            raise ValueError(f"run {self.run.id} saved no checkpoint under {tag!r}.")
+            raise ValueError(
+                f"run {self.run.id} saved no checkpoint under {tag!r}."
+            )
         self.run.deliverable = self.run.saved[tag]
 
     def report_objective(self, value: float) -> None:
         """Record ``value`` as a metrics row stamping it the ``selection`` under the run's
         objective, at the last epoch logged (:meth:`_epoch_sink`)."""
-        self._epoch_sink(self._epoch, {"selection": float(value),
-                                       "selection_metric": self.run.objective["selection_metric"]})
+        self._epoch_sink(
+            self._epoch,
+            {
+                "selection": float(value),
+                "selection_metric": self.run.objective["selection_metric"],
+            },
+        )
 
     def _write_scalars(self, metrics: dict, step: int) -> None:
         """Each scalar of ``metrics`` at ``step`` in the run's TensorBoard (:attr:`tb`), tagged by
@@ -314,10 +402,17 @@ class TrainContext:
         """Per-batch sink: one per-batch row at ``step`` within ``epoch`` in the run's own metrics
         log (:meth:`_metrics_row`), never an epoch row, so ``epoch_hook`` does not fire; plus each
         scalar at ``step`` in TensorBoard."""
-        from tcip_mcp.experiments import EPOCH_KEY, METRICS_FILE, STEP_KEY, append_row
+        from tcip_mcp.experiments import (
+            EPOCH_KEY,
+            METRICS_FILE,
+            STEP_KEY,
+            append_row,
+        )
 
-        append_row(self.run_dir / METRICS_FILE,
-                   self._metrics_row(metrics, {EPOCH_KEY: epoch, STEP_KEY: step}))
+        append_row(
+            self.run_dir / METRICS_FILE,
+            self._metrics_row(metrics, {EPOCH_KEY: epoch, STEP_KEY: step}),
+        )
         self._write_scalars(metrics, step)
 
     def save_checkpoint(self, state: dict, tag: str = "checkpoint") -> str:
@@ -345,8 +440,9 @@ class TrainContext:
                 "launch config, the record every publishing door reads this run's scope from, and "
                 "its source snapshot; name a bespoke loop's own field something else."
             )
-        self.run.saved[tag] = write_checkpoint({**state, **stamp},
-                                               checkpoint_path(self.run_dir, tag))
+        self.run.saved[tag] = write_checkpoint(
+            {**state, **stamp}, checkpoint_path(self.run_dir, tag)
+        )
         return str(self.run.saved[tag])
 
     def record_artifact(self, name: str, path: str) -> None:
@@ -361,7 +457,9 @@ class TrainContext:
         destination = self.run_dir / ARTIFACTS_DIR / run_name(name)
         destination.parent.mkdir(exist_ok=True)
         if destination.exists():
-            raise FileExistsError(f"artifact {name!r} is already recorded for run {self.run.id}")
+            raise FileExistsError(
+                f"artifact {name!r} is already recorded for run {self.run.id}"
+            )
         shutil.copyfile(path, destination)
 
     def should_cancel(self) -> bool:
@@ -376,7 +474,9 @@ class TrainContext:
 
             from tcip_mcp.experiments import TENSORBOARD_DIR
 
-            self._tb = SummaryWriter(log_dir=str(self.run_dir / TENSORBOARD_DIR))
+            self._tb = SummaryWriter(
+                log_dir=str(self.run_dir / TENSORBOARD_DIR)
+            )
         return self._tb
 
 
@@ -395,7 +495,9 @@ def dispatch_train_body(ctx: TrainContext) -> None:
             from tcip_mcp.pipelines.model_build import import_source_builder
 
             agent_train = import_source_builder(training_source, run.layout)
-            agent_train(ctx)  # the agent's custom loop drives training through ctx
+            agent_train(
+                ctx
+            )  # the agent's custom loop drives training through ctx
             if run.status not in FINAL_STATES:
                 # A custom loop that never set a final status returned without canceling or
                 # raising.
@@ -407,7 +509,9 @@ def dispatch_train_body(ctx: TrainContext) -> None:
             ctx._tb.close()
 
     if run.deliverable is None:
-        run.deliverable = run.saved.get("model_best") or run.saved.get("model_final")
+        run.deliverable = run.saved.get("model_best") or run.saved.get(
+            "model_final"
+        )
 
 
 def run_training_envelope(ctx: TrainContext) -> None:
@@ -423,8 +527,13 @@ def run_training_envelope(ctx: TrainContext) -> None:
 
     t0 = time.monotonic()
     try:
-        record_event_or_raise("training_run", audit_args, actor=None, status="running",
-                              scope=run.project)
+        record_event_or_raise(
+            "training_run",
+            audit_args,
+            actor=None,
+            status="running",
+            scope=run.project,
+        )
         dispatch_train_body(ctx)
     except Exception as exc:  # noqa: BLE001
         if run.status not in ("failed", "canceled"):
@@ -434,15 +543,29 @@ def run_training_envelope(ctx: TrainContext) -> None:
 
     checkpoint = _settle_run(ctx)
     run.status, run.status_error = close_run(
-        ctx.run_dir, run.project, run.status or "failed", run.status_error or None,
+        ctx.run_dir,
+        run.project,
+        run.status or "failed",
+        run.status_error or None,
         checkpoint=checkpoint,
-        arguments={**audit_args, **stored_number("best_metric", run.best_metric)},
-        duration_ms=round((time.monotonic() - t0) * 1000, 1))
+        arguments={
+            **audit_args,
+            **stored_number("best_metric", run.best_metric),
+        },
+        duration_ms=round((time.monotonic() - t0) * 1000, 1),
+    )
 
 
-def close_run(run_dir: Path, project: Path, state: str, status_error: str | None, *,
-              checkpoint: dict | None, arguments: dict[str, Any],
-              **extra: Any) -> tuple[str, str | None]:
+def close_run(
+    run_dir: Path,
+    project: Path,
+    state: str,
+    status_error: str | None,
+    *,
+    checkpoint: dict | None,
+    arguments: dict[str, Any],
+    **extra: Any,
+) -> tuple[str, str | None]:
     """Append the run's closing ``training_run`` line under ``project``, then write its final
     status once and return the state and ``status_error`` it names. A refused append ends the
     run ``failed`` with no checkpoint, its reason named after ``status_error`` when there is
@@ -451,8 +574,14 @@ def close_run(run_dir: Path, project: Path, state: str, status_error: str | None
     from tcip_mcp.experiments import write_final_status
 
     try:
-        record_event_or_raise("training_run", arguments, actor=None, status=state, scope=project,
-                              **extra)
+        record_event_or_raise(
+            "training_run",
+            arguments,
+            actor=None,
+            status=state,
+            scope=project,
+            **extra,
+        )
     except AuditEntryNotWrittenError as exc:
         state, checkpoint = "failed", None
         status_error = f"{status_error}; {exc}" if status_error else str(exc)
@@ -471,16 +600,23 @@ def _settle_run(ctx: TrainContext) -> dict | None:
 
     run = ctx.run
     if run.wall_clock_exceeded and run.status != "failed":
-        run.status, run.status_error = "failed", "exceeded max_wall_clock_seconds"
+        run.status, run.status_error = (
+            "failed",
+            "exceeded max_wall_clock_seconds",
+        )
     checkpoint = None
     if run.status == "completed" and run.deliverable is None:
         run.status = "failed"
         run.status_error = "training completed but saved no final weights"
     elif run.status == "completed":
         try:
-            checkpoint = {"path": str(run.deliverable),
-                          "sha256": admitted_digest(run.deliverable)}
+            checkpoint = {
+                "path": str(run.deliverable),
+                "sha256": admitted_digest(run.deliverable),
+            }
         except (OSError, ValueError) as exc:
             run.status, run.status_error = (
-                "failed", f"final weights could not be admitted: {exc}")
+                "failed",
+                f"final weights could not be admitted: {exc}",
+            )
     return checkpoint

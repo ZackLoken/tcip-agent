@@ -23,15 +23,21 @@ def test_launch_training_defaults_into_the_projects_experiment_store(
 
     from tcip_mcp.tools import training_tools
     from tests._chain_fixtures import BLOB_BUILDER
-    from tests._producer_fixtures import seed_bud_images, small_detection_config
+    from tests._producer_fixtures import (
+        seed_bud_images,
+        small_detection_config,
+    )
     from tests._verified_checkpoint_fixtures import run_to_end
 
     images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET, n=2)
     monkeypatch.setattr(
-        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
+        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard",
+        lambda *a, **k: {},
+    )
 
     res = training_tools.launch_training(
-        tmp_path, small_detection_config(images_dir, BLOB_BUILDER), actor=None)
+        tmp_path, small_detection_config(images_dir, BLOB_BUILDER), actor=None
+    )
     assert "error" not in res, res
     run_dir = Path(res["output_dir"])
     assert run_dir == tmp_path / ".tcip" / "experiments" / res["experiment_id"]
@@ -39,4 +45,6 @@ def test_launch_training_defaults_into_the_projects_experiment_store(
     # Wait for the subprocess to finish rather than leaking a child that keeps writing into
     # this test's tmp root after the test moves on.
     assert run_to_end(tmp_path, res["experiment_id"])["state"] == "completed"
-    assert (run_dir / "model_best.pt").is_file() or (run_dir / "model_final.pt").is_file()
+    assert (run_dir / "model_best.pt").is_file() or (
+        run_dir / "model_final.pt"
+    ).is_file()

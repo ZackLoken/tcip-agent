@@ -37,8 +37,14 @@ def line_delta(repo: str, target: str) -> dict[str, tuple[int, int]]:
         args = ["git", "diff", "--numstat", target]
     else:
         args = ["git", "show", "--numstat", "--format=", target]
-    out = subprocess.run(args, cwd=repo, capture_output=True, text=True, check=True).stdout
-    totals: dict[str, list[int]] = {"packages": [0, 0], "tests": [0, 0], "other": [0, 0]}
+    out = subprocess.run(
+        args, cwd=repo, capture_output=True, text=True, check=True
+    ).stdout
+    totals: dict[str, list[int]] = {
+        "packages": [0, 0],
+        "tests": [0, 0],
+        "other": [0, 0],
+    }
     for line in out.splitlines():
         parts = line.split("\t")
         if len(parts) != 3 or parts[0] == "-":
@@ -46,7 +52,9 @@ def line_delta(repo: str, target: str) -> dict[str, tuple[int, int]]:
         added, removed, path = int(parts[0]), int(parts[1]), parts[2]
         totals[area_of(path)][0] += added
         totals[area_of(path)][1] += removed
-    return {area: (added, removed) for area, (added, removed) in totals.items()}
+    return {
+        area: (added, removed) for area, (added, removed) in totals.items()
+    }
 
 
 def main() -> int:

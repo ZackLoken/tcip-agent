@@ -34,7 +34,8 @@ def test_archive_project_refuses_a_non_empty_destination(tmp_path):
 
 
 def test_archive_project_refuses_a_zip_destination_inside_the_project_or_already_written(
-    tmp_path, monkeypatch,
+    tmp_path,
+    monkeypatch,
 ):
     """The ZIP form takes the directory form's refusals: a destination inside the project would
     bundle its own truncated self, and a written archive is never written over; a relative path
@@ -55,7 +56,10 @@ def test_archive_project_refuses_a_zip_destination_inside_the_project_or_already
     elsewhere = tmp_path / "cwd"
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
-    assert "inside the project" in archive_project(root, output_path="archive.zip")["error"]
+    assert (
+        "inside the project"
+        in archive_project(root, output_path="archive.zip")["error"]
+    )
     assert "error" not in archive_project(root, output_path="../beside.zip")
     assert (tmp_path / "beside.zip").is_file()
     assert list(elsewhere.iterdir()) == []
@@ -65,7 +69,9 @@ def test_archive_project_refuses_both_output_path_and_output_dir(tmp_path):
     root = one_labeled_capture(tmp_path / "project")
 
     result = archive_project(
-        root, output_path=str(tmp_path / "bundle.zip"), output_dir=str(tmp_path / "bundle"),
+        root,
+        output_path=str(tmp_path / "bundle.zip"),
+        output_dir=str(tmp_path / "bundle"),
     )
 
     assert "error" in result
@@ -95,10 +101,16 @@ def test_archive_project_directory_mode_admits_valid_work(tmp_path):
     assert (dest / "subjects.json").is_file()
 
 
-def test_directory_bundle_round_trip_yields_the_same_records_as_the_zip_round_trip(tmp_path):
+def test_directory_bundle_round_trip_yields_the_same_records_as_the_zip_round_trip(
+    tmp_path,
+):
     """archive_project(output_dir=...) -> import_project recovers a project, its band-group
     manifest and its multi-band-file capture included."""
-    from tcip_mcp.tools.project_tools import initialize_project, inspect_project, register_dataset
+    from tcip_mcp.tools.project_tools import (
+        initialize_project,
+        inspect_project,
+        register_dataset,
+    )
 
     src = tmp_path / "src_project"
     initialize_project(str(src), "Source project", "north orchard")
@@ -122,20 +134,27 @@ def test_directory_bundle_round_trip_yields_the_same_records_as_the_zip_round_tr
     status = inspect_project(dest)
     assert status["display_name"] == "Source project"
     date = "2026-03-04"
-    assert read_label_document(label_key(dest.resolve(), date, "a_1")) == read_label_document(
-        label_key(src.resolve(), date, "a_1"))
-    assert read_label_document(label_key(dest.resolve(), date, "a_1")).annotations
+    assert read_label_document(
+        label_key(dest.resolve(), date, "a_1")
+    ) == read_label_document(label_key(src.resolve(), date, "a_1"))
+    assert read_label_document(
+        label_key(dest.resolve(), date, "a_1")
+    ).annotations
     restored_images = dest / "images" / date
     restored_manifest = restored_images / manifest.name
     assert restored_manifest.is_file()
     assert restored_manifest.read_bytes() == manifest.read_bytes()
-    assert (restored_images / npz_image.name).read_bytes() == npz_image.read_bytes()
+    assert (
+        restored_images / npz_image.name
+    ).read_bytes() == npz_image.read_bytes()
 
     from tcip_mcp.pipelines.image_utils import list_logical_images
 
-    assert sorted(list_logical_images(restored_images)) == sorted(
-        list_logical_images(src / "images" / date)
-    ) == ["a_1", "cap_001", "cap_002"]
+    assert (
+        sorted(list_logical_images(restored_images))
+        == sorted(list_logical_images(src / "images" / date))
+        == ["a_1", "cap_001", "cap_002"]
+    )
 
     from tcip_mcp import subject_registry
 
@@ -145,7 +164,11 @@ def test_directory_bundle_round_trip_yields_the_same_records_as_the_zip_round_tr
     import json
 
     restored_id = json.loads((dest / "dataset.json").read_text())
-    assert restored_id == {"crop": "currant", "id": reg["id"], "fingerprint": reg["fingerprint"]}
+    assert restored_id == {
+        "crop": "currant",
+        "id": reg["id"],
+        "fingerprint": reg["fingerprint"],
+    }
 
 
 def _populate_project(src: Path) -> tuple[Path, Path]:
@@ -163,8 +186,12 @@ def _populate_project(src: Path) -> tuple[Path, Path]:
     images = src / "images" / date
     images.mkdir(parents=True)
     Image.new("RGB", (32, 32)).save(images / "a_1.jpg")
-    label_image(images / "a_1.jpg", [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))],
-                32, 32)
+    label_image(
+        images / "a_1.jpg",
+        [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))],
+        32,
+        32,
+    )
     registry_over(src, SubjectRegistry(subjects=(Subject(name="bud"),)))
 
     # A multispectral capture written one file per band: the manifest beside the bands is what
@@ -177,7 +204,10 @@ def _populate_project(src: Path) -> tuple[Path, Path]:
         Image.new("L", (32, 32)).save(band_file)
         bands[band] = band_file
     manifest = write_band_group_manifest(
-        images, "cap_001", bands, central_wavelength_nm={"green": 560.0, "red": 668.0},
+        images,
+        "cap_001",
+        bands,
+        central_wavelength_nm={"green": 560.0, "red": 668.0},
         source="explicit-manifest",
     )
     # A sensor that writes one multi-band file per capture instead of one file per band.

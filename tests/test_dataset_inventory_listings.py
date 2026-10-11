@@ -33,20 +33,35 @@ def test_only_published_buckets_are_listed_under_the_date_their_record_states(
 
     root = tmp_path
     scope = {"subject": "bud"}
-    json_io.write_label_document(prediction_key(root, "baseline/2026-02-11", "IMG_1"), [],
-                                 120, 90, keep_empty=True)
-    for model, date, stem in (("candidate", "2026-02-11", "IMG_1"),
-                              ("baseline", "2026-03-02", "IMG_2")):
-        published(root, f"{model}/{date}",
-                  [predicted(root / "images" / date / f"{stem}.png", ["bud"])], scope=scope)
+    json_io.write_label_document(
+        prediction_key(root, "baseline/2026-02-11", "IMG_1"),
+        [],
+        120,
+        90,
+        keep_empty=True,
+    )
+    for model, date, stem in (
+        ("candidate", "2026-02-11", "IMG_1"),
+        ("baseline", "2026-03-02", "IMG_2"),
+    ):
+        published(
+            root,
+            f"{model}/{date}",
+            [predicted(root / "images" / date / f"{stem}.png", ["bud"])],
+            scope=scope,
+        )
 
     listed = buckets_by_date(root, ["2026-02-11", "2026-03-02"])
 
     assert {date: sorted(names) for date, names in listed.items()} == {
-        "2026-02-11": ["candidate/2026-02-11"], "2026-03-02": ["baseline/2026-03-02"]}
+        "2026-02-11": ["candidate/2026-02-11"],
+        "2026-03-02": ["baseline/2026-03-02"],
+    }
 
 
-def test_capture_dates_are_the_bucket_directories_not_loose_images(tmp_path: Path) -> None:
+def test_capture_dates_are_the_bucket_directories_not_loose_images(
+    tmp_path: Path,
+) -> None:
     """A date bucket is a directory under ``images/``; an image sitting directly there is not one.
 
     The flat layout (``images/<stem>.<ext>``) is a legitimate non-dated dataset, so a loose image
@@ -65,7 +80,13 @@ def _registry(root: Path) -> None:
     """A registry declaring three subjects in an order that is not alphabetical."""
     registry_over(
         root,
-        SubjectRegistry(subjects=(Subject(name="leaf"), Subject(name="bush"), Subject(name="bud"))),
+        SubjectRegistry(
+            subjects=(
+                Subject(name="leaf"),
+                Subject(name="bush"),
+                Subject(name="bud"),
+            )
+        ),
     )
 
 
@@ -78,7 +99,9 @@ def test_registry_subjects_keep_their_declared_order(tmp_path: Path) -> None:
     assert list_subjects(tmp_path / "no_such_dataset") == []
 
 
-def test_a_registry_that_will_not_decode_is_not_reported_as_no_subjects(tmp_path: Path) -> None:
+def test_a_registry_that_will_not_decode_is_not_reported_as_no_subjects(
+    tmp_path: Path,
+) -> None:
     """Absence and corruption are different answers on the subject registry.
 
     Reading unreadable bytes as an empty registry hands every caller a dataset that declares
@@ -103,11 +126,18 @@ def test_declared_subjects_and_subjects_labeled_on_a_date_are_not_interchangeabl
     """
     root = tmp_path
     _registry(root)
-    json_io.write_label_document(label_key(root, "2026-02-11", "IMG_1"),
-                                 [Annotation(subject="bud", geometry=BBox(1, 2, 7, 19))], 120, 90)
-    json_io.write_label_document(label_key(root, "2026-03-02", "IMG_2"),
-                                 [Annotation(subject="bush", geometry=BBox(3, 4, 40, 11))],
-                                 120, 90)
+    json_io.write_label_document(
+        label_key(root, "2026-02-11", "IMG_1"),
+        [Annotation(subject="bud", geometry=BBox(1, 2, 7, 19))],
+        120,
+        90,
+    )
+    json_io.write_label_document(
+        label_key(root, "2026-03-02", "IMG_2"),
+        [Annotation(subject="bush", geometry=BBox(3, 4, 40, 11))],
+        120,
+        90,
+    )
 
     assert list_subjects(root) == ["leaf", "bush", "bud"]
     assert capture_subjects(root, "2026-02-11")[0] == ["bud"]

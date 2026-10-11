@@ -10,7 +10,9 @@ import tifffile
 # UTM zone 15N: the real projected CRS every default below uses. Central meridian is -93
 # degrees exactly, an independently hand-verifiable reference point (test_orthomosaic_mapping.py).
 UTM_15N_EPSG = 32615
-TIEPOINT_NATIVE_X = 500_000.0  # UTM zone 15N's own false easting = the central meridian
+TIEPOINT_NATIVE_X = (
+    500_000.0  # UTM zone 15N's own false easting = the central meridian
+)
 TIEPOINT_NATIVE_Y = 4_800_000.0
 PIXEL_SCALE = 0.5  # native-CRS units (m) per pixel
 
@@ -33,7 +35,14 @@ def write_geotiff(
     height: int | None = None,
     shape: tuple[int, int, int] = (5, 5, 4),
     pixel_scale: tuple[float, float, float] = (PIXEL_SCALE, PIXEL_SCALE, 0.0),
-    tiepoint: tuple[float, ...] = (0.0, 0.0, 0.0, TIEPOINT_NATIVE_X, TIEPOINT_NATIVE_Y, 0.0),
+    tiepoint: tuple[float, ...] = (
+        0.0,
+        0.0,
+        0.0,
+        TIEPOINT_NATIVE_X,
+        TIEPOINT_NATIVE_Y,
+        0.0,
+    ),
     projected_epsg: int | None = UTM_15N_EPSG,
     model_type: int = 1,
     geokeys: tuple[int, ...] | None = None,
@@ -58,10 +67,16 @@ def write_geotiff(
         shape = (h, w, shape[2])
     arr = (
         np.random.default_rng(0).integers(0, 255, size=shape, dtype=np.uint8)
-        if random else np.zeros(shape, dtype=np.uint8)
+        if random
+        else np.zeros(shape, dtype=np.uint8)
     )
-    keys = geokeys if geokeys is not None else build_geokeys(
-        model_type=model_type, projected_epsg=projected_epsg)
+    keys = (
+        geokeys
+        if geokeys is not None
+        else build_geokeys(
+            model_type=model_type, projected_epsg=projected_epsg
+        )
+    )
     extratags = [
         (33550, "d", 3, pixel_scale, False),
         (33922, "d", len(tiepoint), tiepoint, False),
@@ -70,27 +85,41 @@ def write_geotiff(
     if include_transformation_tag:
         # Presence alone is what the tag read refuses on, regardless of the values it
         # carries; a flat placeholder is exactly as effective as a computed affine here.
-        extratags.append((34264, "d", 16, tuple(1.0 for _ in range(16)), False))
+        extratags.append(
+            (34264, "d", 16, tuple(1.0 for _ in range(16)), False)
+        )
     kwargs: dict = {}
     if shape[-1] > 3:
         kwargs["extrasamples"] = ["unassalpha"] * (shape[-1] - 3)
     if rowsperstrip is not None:
         kwargs["rowsperstrip"] = rowsperstrip
-    tifffile.imwrite(str(path), arr, photometric="rgb", extratags=extratags, **kwargs)
+    tifffile.imwrite(
+        str(path), arr, photometric="rgb", extratags=extratags, **kwargs
+    )
 
 
 def geotransform_of_file(path: Path):
     """The geotransform ``path``'s header states, read through the platform's one header read;
     raises the reason that read refused."""
-    from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import OrthomosaicGeoreference
+    from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
+        OrthomosaicGeoreference,
+    )
     from tcip_mcp.pipelines.raster_source import SourceHeader
 
-    return OrthomosaicGeoreference.of(SourceHeader(path).georeference).transform
+    return OrthomosaicGeoreference.of(
+        SourceHeader(path).georeference
+    ).transform
 
 
 def write_canonical_dataset_raster(
-    dataset_root: Path, *, date: str = "2024-06-01", stem: str = "mosaic",
-    width: int = 64, height: int = 64, crop: str = "chestnut", channels: int = 3,
+    dataset_root: Path,
+    *,
+    date: str = "2024-06-01",
+    stem: str = "mosaic",
+    width: int = 64,
+    height: int = 64,
+    crop: str = "chestnut",
+    channels: int = 3,
 ) -> Path:
     """A georeferenced raster at ``<dataset_root>/images/<date>/<stem>.tif``, its dataset
     registered (``register_dataset``) under ``crop``; the raster's path."""
@@ -98,7 +127,12 @@ def write_canonical_dataset_raster(
 
     raster_path = dataset_root / "images" / date / f"{stem}.tif"
     raster_path.parent.mkdir(parents=True, exist_ok=True)
-    write_geotiff(raster_path, width=width, height=height, shape=(height, width, channels))
+    write_geotiff(
+        raster_path,
+        width=width,
+        height=height,
+        shape=(height, width, channels),
+    )
     result = register_dataset(dataset_root, str(dataset_root), crop=crop)
     assert "error" not in result, result
     return raster_path

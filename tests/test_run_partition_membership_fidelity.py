@@ -17,7 +17,9 @@ import pytest
 pytest.importorskip("torchvision")
 
 
-def _single_source_mosaic(root: Path, width: int = 4000, height: int = 3000) -> tuple[Path, str]:
+def _single_source_mosaic(
+    root: Path, width: int = 4000, height: int = 3000
+) -> tuple[Path, str]:
     """One large detection source with GT spread across its full extent, the shape that resolves
     to the single-source spatial-strip split; its image directory and stem."""
     from PIL import Image
@@ -29,26 +31,43 @@ def _single_source_mosaic(root: Path, width: int = 4000, height: int = 3000) -> 
     images_dir = root / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True, exist_ok=True)
     stem = "mosaic"
-    Image.new("RGB", (width, height), color=(70, 90, 60)).save(images_dir / f"{stem}.png")
-    boxes = [Annotation(subject="bud", geometry=BBox(x, y, x + 20, y + 20))
-             for x in range(20, width - 20, 200) for y in range(20, height - 20, 200)]
+    Image.new("RGB", (width, height), color=(70, 90, 60)).save(
+        images_dir / f"{stem}.png"
+    )
+    boxes = [
+        Annotation(subject="bud", geometry=BBox(x, y, x + 20, y + 20))
+        for x in range(20, width - 20, 200)
+        for y in range(20, height - 20, 200)
+    ]
     label_image(images_dir / f"{stem}.png", boxes, width, height)
     return images_dir, stem
 
 
 def _data_cfg(images_dir: Path, **split) -> dict:
-    cfg = {"val_ratio": 0.25, "holdout_ratio": 0.1, "calibration_ratio": 0, "seed": 1}
+    cfg = {
+        "val_ratio": 0.25,
+        "holdout_ratio": 0.1,
+        "calibration_ratio": 0,
+        "seed": 1,
+    }
     cfg.update(split)
-    return {"images_dir": str(images_dir), "scope": {"subject": "bud"},
-            "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-            "split": cfg}
+    return {
+        "images_dir": str(images_dir),
+        "scope": {"subject": "bud"},
+        "auto_val": True,
+        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+        "split": cfg,
+    }
 
 
 def _persisted_split(project: Path, experiment_id: str, data_cfg: dict):
     """The spatial manifest the run ``experiment_id`` under ``project`` over ``data_cfg``
     resolved and recorded."""
     from tcip_mcp.experiments import run_resolution
-    from tests._verified_checkpoint_fixtures import partition_side, resolved_run
+    from tests._verified_checkpoint_fixtures import (
+        partition_side,
+        resolved_run,
+    )
 
     resolved_run(project, data_cfg, experiment_id=experiment_id)
     resolved = run_resolution(experiment_id, project=project)
@@ -57,7 +76,9 @@ def _persisted_split(project: Path, experiment_id: str, data_cfg: dict):
     return resolved.spatial
 
 
-def test_spatial_split_records_val_membership_from_the_val_side(tmp_path: Path) -> None:
+def test_spatial_split_records_val_membership_from_the_val_side(
+    tmp_path: Path,
+) -> None:
     """The recorded val membership is the validation side's own strip identities. Train and val
     held different regions, so the record must show different, non-overlapping members: a metric
     reconstructed from a manifest claiming both sides held the same units is unreproducible."""
@@ -75,10 +96,14 @@ def test_spatial_split_records_val_membership_from_the_val_side(tmp_path: Path) 
     def _axis_width(region):
         return sum(x1 - x0 for x0, _y0, x1, _y1 in region)
 
-    assert _axis_width(spatial.train_region) > _axis_width(spatial.val_region) > 0
+    assert (
+        _axis_width(spatial.train_region) > _axis_width(spatial.val_region) > 0
+    )
 
 
-def test_persisted_calibration_region_is_reserved_away_from_train(tmp_path: Path) -> None:
+def test_persisted_calibration_region_is_reserved_away_from_train(
+    tmp_path: Path,
+) -> None:
     """A four-way split's reserved calibration band reaches the resolved record as its own geometry,
     disjoint from the train region, and the geometric disjointness check reads a rect drawn from
     what was actually persisted there as clean while still catching one drawn from train."""
@@ -86,7 +111,9 @@ def test_persisted_calibration_region_is_reserved_away_from_train(tmp_path: Path
     from tcip_mcp.pipelines.operating_point import spatial_disjointness
 
     images_dir, _stem = _single_source_mosaic(tmp_path / "ds")
-    data_cfg = _data_cfg(images_dir, val_ratio=0.2, holdout_ratio=0.1, calibration_ratio=0.15)
+    data_cfg = _data_cfg(
+        images_dir, val_ratio=0.2, holdout_ratio=0.1, calibration_ratio=0.15
+    )
 
     spatial = _persisted_split(tmp_path, "exp_reserved_cal", data_cfg)
     cal_region, train_region = spatial.calibration_region, spatial.train_region

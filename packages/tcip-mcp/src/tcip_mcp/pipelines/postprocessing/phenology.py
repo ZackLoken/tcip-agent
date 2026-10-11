@@ -38,7 +38,9 @@ def _milestone_targets(spec) -> dict[str, float]:
     """Milestone crossing fractions from the trait's confirmed semantics, resolved per call. Keyed
     "NNper" to match the CSV column names.
     """
-    return {f"{int(round(f * 100)):02d}per": f for f in spec.milestone_fractions}
+    return {
+        f"{int(round(f * 100)):02d}per": f for f in spec.milestone_fractions
+    }
 
 
 def _milestone_columns(spec) -> list[tuple[str, str]]:
@@ -60,9 +62,13 @@ and the delivery event records the rule a delivery ran under."""
 def milestone_date_columns(spec) -> list[dict[str, str]]:
     """The milestone columns a trait's phenology delivery carries, each as ``{"date", "bound"}``:
     the milestone's date column and the column holding that date's evidentiary bound."""
-    return [{"date": f"{spec.phenology_prefix}_{sfx}_date",
-             "bound": f"{spec.phenology_prefix}_{sfx}_date_bound"}
-            for sfx, _ in _milestone_columns(spec)]
+    return [
+        {
+            "date": f"{spec.phenology_prefix}_{sfx}_date",
+            "bound": f"{spec.phenology_prefix}_{sfx}_date_bound",
+        }
+        for sfx, _ in _milestone_columns(spec)
+    ]
 
 
 def phenology_csv_columns(spec) -> list[str]:
@@ -73,16 +79,29 @@ def phenology_csv_columns(spec) -> list[str]:
 
     columns = milestone_date_columns(spec)
     return [
-        "plant_id", "accession", "n_dates", "n_observed_dates", "n_dates_unclassified",
-        "n_dates_missing_images", "complete",
-        *[c["date"] for c in columns], *[c["bound"] for c in columns],
+        "plant_id",
+        "accession",
+        "n_dates",
+        "n_observed_dates",
+        "n_dates_unclassified",
+        "n_dates_missing_images",
+        "complete",
+        *[c["date"] for c in columns],
+        *[c["bound"] for c in columns],
         *DELIVERY_COLUMNS,
     ]
 
 
 CURVE_MEASUREMENT_COLUMNS = [
-    "plant_id", "accession", "date",
-    "n_images", "n_total", "n_positive", "n_unclassified", "n_missing", "ratio",
+    "plant_id",
+    "accession",
+    "date",
+    "n_images",
+    "n_total",
+    "n_positive",
+    "n_unclassified",
+    "n_missing",
+    "ratio",
 ]
 """The per-(plant, date) columns ``per_plant_series`` produces."""
 
@@ -155,7 +174,9 @@ class Crossing:
     gap_days: int | None = None
 
 
-def crossing_date(series: list[tuple[str, float]], target: float) -> Optional[Crossing]:
+def crossing_date(
+    series: list[tuple[str, float]], target: float
+) -> Optional[Crossing]:
     """Earliest date the fraction curve reaches ``>= target``, with its evidentiary bound.
 
     Linear interpolation between neighboring observed dates when the crossing falls between two
@@ -175,7 +196,11 @@ def crossing_date(series: list[tuple[str, float]], target: float) -> Optional[Cr
             y1, m1, day1 = date_key(d1)
             y2, m2, day2 = date_key(d2)
             gap = (date(y2, m2, day2) - date(y1, m1, day1)).days
-            t = max(0.0, min(1.0, (target - r1) / (r2 - r1))) if r2 != r1 else 1.0
+            t = (
+                max(0.0, min(1.0, (target - r1) / (r2 - r1)))
+                if r2 != r1
+                else 1.0
+            )
             est = date(y1, m1, day1) + timedelta(days=round(t * gap))
             return Crossing(est.isoformat(), "interpolated", gap_days=gap)
     return Crossing(iso(points[-1][0]), "right_censored")
@@ -197,11 +222,16 @@ def plant_milestones(series: list[tuple[str, float]], spec) -> dict:
     The column names (``phenology_prefix`` + each milestone key, plus the majority alias), the
     crossing fractions and the majority mapping come from ``spec``, which is required.
     """
-    crossings = {key: crossing_date(series, frac) for key, frac in _milestone_targets(spec).items()}
+    crossings = {
+        key: crossing_date(series, frac)
+        for key, frac in _milestone_targets(spec).items()
+    }
     out: dict = {}
     # The majority alias is another entry in ``_milestone_columns``, so it carries its crossing's
     # date and bound under the same condition as every other milestone.
-    for (_sfx, key), column in zip(_milestone_columns(spec), milestone_date_columns(spec)):
+    for (_sfx, key), column in zip(
+        _milestone_columns(spec), milestone_date_columns(spec)
+    ):
         crossing = crossings.get(key)
         out[column["date"]] = crossing.date if crossing else None
         out[column["bound"]] = crossing.bound if crossing else None
@@ -212,7 +242,10 @@ def plant_milestones(series: list[tuple[str, float]], spec) -> dict:
 
 
 def count_by_class(
-    document: Key, state: PositiveState | None, *, scope: ClassScope,
+    document: Key,
+    state: PositiveState | None,
+    *,
+    scope: ClassScope,
 ) -> tuple[int, int, int]:
     """``(n_total, n_positive, n_unclassified)`` for one image's prediction ``document``.
 
@@ -226,7 +259,9 @@ def count_by_class(
     """
     from tcip_annotation import json_io
 
-    annotations = json_io.detection_annotations(json_io.read_label_document(document).annotations)
+    annotations = json_io.detection_annotations(
+        json_io.read_label_document(document).annotations
+    )
     total = len(annotations)
     found = scope.state_ids(state)
     if found is None:
@@ -234,13 +269,16 @@ def count_by_class(
     column, wanted = found
     positive = 0
     for i, a in enumerate(annotations):
-        ids = json_io.attribute_ids(a, cast(str, scope.subject), cast(tuple, scope.attributes))
+        ids = json_io.attribute_ids(
+            a, cast(str, scope.subject), cast(tuple, scope.attributes)
+        )
         if ids is None or ids[column] == json_io.UNASSESSED:
             raise json_io.UndeclaredValueError(
                 f"{'/'.join(document.parts)}#{i}: a record of {a.subject!r} with attributes "
                 f"{a.attributes}, "
                 f"where this bucket's every record is of {scope.subject!r} with a value under "
-                f"{cast('PositiveState', state).attribute!r}.")
+                f"{cast('PositiveState', state).attribute!r}."
+            )
         positive += ids[column] == wanted
     return total, positive, 0
 
@@ -253,10 +291,18 @@ class EmptyPopulationError(ValueError):
 
 def measurement_refusals() -> tuple[type[Exception], ...]:
     """The exceptions :func:`per_plant_phenology` refuses a measurement with, each naming why."""
-    from tcip_annotation.json_io import UndeclaredValueError, UnreadableLabelDocumentError
+    from tcip_annotation.json_io import (
+        UndeclaredValueError,
+        UnreadableLabelDocumentError,
+    )
     from tcip_store import StoreError
 
-    return (UnreadableLabelDocumentError, UndeclaredValueError, StoreError, EmptyPopulationError)
+    return (
+        UnreadableLabelDocumentError,
+        UndeclaredValueError,
+        StoreError,
+        EmptyPopulationError,
+    )
 
 
 def population(plants: Sequence[str]) -> list[str]:
@@ -271,7 +317,9 @@ def population(plants: Sequence[str]) -> list[str]:
 
 
 def per_plant_series(
-    mapping: dict[str, list], buckets: dict[str, Bucket], state: PositiveState | None,
+    mapping: dict[str, list],
+    buckets: dict[str, Bucket],
+    state: PositiveState | None,
     plants: list[str],
 ) -> dict[str, dict]:
     """Aggregate the predictions of buckets whose scope declares ``state``'s attribute into a
@@ -293,7 +341,9 @@ def per_plant_series(
     mapping names with no delivered bucket counts every stem it names as missing.
     """
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
-        assignment_is_attributed, attr, stems_delivery_reads,
+        assignment_is_attributed,
+        attr,
+        stems_delivery_reads,
     )
 
     per_plant: dict[str, dict] = {
@@ -302,8 +352,14 @@ def per_plant_series(
     # The mapping's own dates are the coverage reference, so a date it names is never absent.
     for date_str in mapping:
         bucket = buckets.get(date_str)
-        read_stems = stems_delivery_reads(mapping[date_str], bucket) if bucket else set()
-        by_plant: dict[str, list[int]] = {plant_id: [0, 0, 0, 0, 0] for plant_id in plants}
+        read_stems = (
+            stems_delivery_reads(mapping[date_str], bucket)
+            if bucket
+            else set()
+        )
+        by_plant: dict[str, list[int]] = {
+            plant_id: [0, 0, 0, 0, 0] for plant_id in plants
+        }
         for a in mapping[date_str]:
             plant_id = attr(a, "plot_name")
             if not assignment_is_attributed(a) or plant_id not in per_plant:
@@ -317,7 +373,10 @@ def per_plant_series(
                 acc[3] += 1
                 continue
             total, positive, unclassified = count_by_class(
-                prediction_key(bucket.root, bucket.name, str(stem)), state, scope=bucket.scope)
+                prediction_key(bucket.root, bucket.name, str(stem)),
+                state,
+                scope=bucket.scope,
+            )
             acc[0] += total
             acc[1] += positive
             acc[2] += unclassified
@@ -327,7 +386,11 @@ def per_plant_series(
 
 
 def per_plant_phenology(
-    mapping: dict[str, list], buckets: dict[str, Bucket], spec, plants: list[str], *,
+    mapping: dict[str, list],
+    buckets: dict[str, Bucket],
+    spec,
+    plants: list[str],
+    *,
     require_all_dates_complete: bool,
 ) -> dict:
     """Full canonical pipeline: predictions + plant mapping -> per-plant milestones
@@ -348,37 +411,70 @@ def per_plant_phenology(
     rows = []
     any_classified_date = False
     for plant_id, info in per_plant.items():
-        usable_dates = [(d, total, positive)
-                        for (d, total, positive, unclassified, missing, n_images) in info["series"]
-                        if unclassified == 0 and missing == 0 and n_images > 0]
+        usable_dates = [
+            (d, total, positive)
+            for (d, total, positive, unclassified, missing, n_images) in info[
+                "series"
+            ]
+            if unclassified == 0 and missing == 0 and n_images > 0
+        ]
         if usable_dates:
             any_classified_date = True
         # total==0 detected no objects, so it is not an observation of the fraction; kept only when
         # something was detected, a real 0% included.
-        frac_series = [(d, positive / total) for (d, total, positive) in usable_dates if total]
-        complete = len(usable_dates) == len(info["series"]) and len(info["series"]) > 0
+        frac_series = [
+            (d, positive / total)
+            for (d, total, positive) in usable_dates
+            if total
+        ]
+        complete = (
+            len(usable_dates) == len(info["series"])
+            and len(info["series"]) > 0
+        )
         row = {
             "plant_id": plant_id,
             "accession": info["accession"],
             "n_dates": len(info["series"]),
             "n_observed_dates": len(frac_series),
             "n_dates_unclassified": sum(1 for s in info["series"] if s[3] > 0),
-            "n_dates_missing_images": sum(1 for s in info["series"] if s[4] > 0 or s[5] == 0),
+            "n_dates_missing_images": sum(
+                1 for s in info["series"] if s[4] > 0 or s[5] == 0
+            ),
             "complete": complete,
             "series": [
-                {"date": d, "n_total": total, "n_positive": positive,
-                 "n_unclassified": unclassified,
-                 "n_missing": missing, "n_images": n_images,
-                 "ratio": (
-                     positive / total if total and unclassified == 0 and missing == 0 else None
-                 )}
-                for (d, total, positive, unclassified, missing, n_images) in info["series"]
+                {
+                    "date": d,
+                    "n_total": total,
+                    "n_positive": positive,
+                    "n_unclassified": unclassified,
+                    "n_missing": missing,
+                    "n_images": n_images,
+                    "ratio": (
+                        positive / total
+                        if total and unclassified == 0 and missing == 0
+                        else None
+                    ),
+                }
+                for (
+                    d,
+                    total,
+                    positive,
+                    unclassified,
+                    missing,
+                    n_images,
+                ) in info["series"]
             ],
         }
         # An excluded plant goes through the producer with an empty series, so every row has one
         # key set.
-        row.update(plant_milestones(
-            frac_series if complete or not require_all_dates_complete else [], spec))
+        row.update(
+            plant_milestones(
+                frac_series
+                if complete or not require_all_dates_complete
+                else [],
+                spec,
+            )
+        )
         rows.append(row)
     return {"rows": rows, "positive_class_assessed": any_classified_date}
 
@@ -399,27 +495,47 @@ class PhenologyMeasurement:
 
     def curve_rows(self) -> list[dict]:
         """Per-(plant, date) rows: the milestone rows' own series, not a second aggregation."""
-        return [{"plant_id": row["plant_id"], "accession": row["accession"], **point}
-                for row in self.rows for point in row["series"]]
+        return [
+            {
+                "plant_id": row["plant_id"],
+                "accession": row["accession"],
+                **point,
+            }
+            for row in self.rows
+            for point in row["series"]
+        ]
 
     def milestone_rows(self) -> list[dict]:
-        return [{k: v for k, v in row.items() if k != "series"} for row in self.rows]
+        return [
+            {k: v for k, v in row.items() if k != "series"}
+            for row in self.rows
+        ]
 
     def result(self, *, curves: bool) -> Result:
         """The delivered result: the milestone rows, or the curve rows with ``curves``, under
         their columns, with the population, missingness rule and mapping disclosure."""
         from tcip_mcp.delivery import Result
 
-        return Result(curve_csv_columns() if curves else phenology_csv_columns(self.revision.entry),
-                      self.curve_rows() if curves else self.milestone_rows(),
-                      population=self.plants,
-                      require_all_dates_complete=self.require_all_dates_complete,
-                      plant_mapping=self.plant_mapping)
+        return Result(
+            curve_csv_columns()
+            if curves
+            else phenology_csv_columns(self.revision.entry),
+            self.curve_rows() if curves else self.milestone_rows(),
+            population=self.plants,
+            require_all_dates_complete=self.require_all_dates_complete,
+            plant_mapping=self.plant_mapping,
+        )
 
 
 def measure_phenology(
-    project: Path, *, trait: str, mapping_name: str, dataset_root: Path,
-    buckets: Sequence[str], plants: Sequence[str], require_all_dates_complete: bool,
+    project: Path,
+    *,
+    trait: str,
+    mapping_name: str,
+    dataset_root: Path,
+    buckets: Sequence[str],
+    plants: Sequence[str],
+    require_all_dates_complete: bool,
 ) -> PhenologyMeasurement:
     """Measure ``trait``'s phenology over the buckets named ``buckets`` published under
     the established location ``dataset_root``, each at the
@@ -442,27 +558,49 @@ def measure_phenology(
     if registry is None:
         raise ValueError(
             f"{dataset_root} holds no subject registry: register the dataset or write its "
-            "subjects.json, so the trait's positive state can be checked against it.")
-    revision = confirmed_revision(STATE_CROSSING_DATES, project=project, trait=trait,
-                                  registry=registry)
+            "subjects.json, so the trait's positive state can be checked against it."
+        )
+    revision = confirmed_revision(
+        STATE_CROSSING_DATES, project=project, trait=trait, registry=registry
+    )
     wanted = population(plants)
-    dated = by_recorded_date(read_bucket(dataset_root, name) for name in buckets)
-    mapping_build, verified = plant_mapping.resolve_delivery_mapping(project, mapping_name, dated)
-    measured = per_plant_phenology(mapping_build.rows(), dated, revision.entry, wanted,
-                                   require_all_dates_complete=require_all_dates_complete)
+    dated = by_recorded_date(
+        read_bucket(dataset_root, name) for name in buckets
+    )
+    mapping_build, verified = plant_mapping.resolve_delivery_mapping(
+        project, mapping_name, dated
+    )
+    measured = per_plant_phenology(
+        mapping_build.rows(),
+        dated,
+        revision.entry,
+        wanted,
+        require_all_dates_complete=require_all_dates_complete,
+    )
     return PhenologyMeasurement(
-        revision=revision, buckets=dated, rows=measured["rows"],
-        positive_class_assessed=measured["positive_class_assessed"] and any(
+        revision=revision,
+        buckets=dated,
+        rows=measured["rows"],
+        positive_class_assessed=measured["positive_class_assessed"]
+        and any(
             b.scope.state_ids(revision.entry.positive_state) is not None
-            for b in dated.values()),
+            for b in dated.values()
+        ),
         require_all_dates_complete=require_all_dates_complete,
         plant_mapping=mapping_build.delivery_disclosure(verified, list(dated)),
-        plants=wanted)
+        plants=wanted,
+    )
 
 
 def deliver_phenology(
-    project: Path, measurement: PhenologyMeasurement, *, curves: bool, output_path: Path,
-    acknowledgment_id: str | None, door: str, actor: str | None,
+    project: Path,
+    measurement: PhenologyMeasurement,
+    *,
+    curves: bool,
+    output_path: Path,
+    acknowledgment_id: str | None,
+    door: str,
+    actor: str | None,
 ) -> dict[str, Any]:
     """Deliver ``measurement``'s milestone rows, or its per-(plant, date) curve rows with
     ``curves``, as the CSV at ``output_path``, by ``actor``.
@@ -477,11 +615,27 @@ def deliver_phenology(
     from tcip_mcp.traits import STATE_CROSSING_DATES
 
     result = measurement.result(curves=curves)
-    clearance = gate(project, list(measurement.buckets.values()),
-                     delivery_kind=STATE_CROSSING_DATES, revision=measurement.revision,
-                     result=result, acknowledgment_id=acknowledgment_id)
-    delivered = deliver_csv(project, output_path, result, clearance=clearance,
-                            revision=measurement.revision, door=door,
-                            delivery_kind=STATE_CROSSING_DATES, actor=actor)
-    return {**delivered, "n_rows": len(result.rows), "columns": list(result.columns),
-            "require_all_dates_complete": measurement.require_all_dates_complete}
+    clearance = gate(
+        project,
+        list(measurement.buckets.values()),
+        delivery_kind=STATE_CROSSING_DATES,
+        revision=measurement.revision,
+        result=result,
+        acknowledgment_id=acknowledgment_id,
+    )
+    delivered = deliver_csv(
+        project,
+        output_path,
+        result,
+        clearance=clearance,
+        revision=measurement.revision,
+        door=door,
+        delivery_kind=STATE_CROSSING_DATES,
+        actor=actor,
+    )
+    return {
+        **delivered,
+        "n_rows": len(result.rows),
+        "columns": list(result.columns),
+        "require_all_dates_complete": measurement.require_all_dates_complete,
+    }

@@ -34,7 +34,12 @@ from typing import TYPE_CHECKING, Any, BinaryIO, NamedTuple, cast
 from pydantic import BaseModel
 
 from tcip_store import (
-    BadKeyError, DecodeError, decode_value, encode_log_line, encode_record, finite_number,
+    BadKeyError,
+    DecodeError,
+    decode_value,
+    encode_log_line,
+    encode_record,
+    finite_number,
     stored_number,
 )
 from tcip_store.file_backend import is_sharing_violation, retry_while_denied
@@ -42,10 +47,19 @@ from tcip_store.values import NOT_FINITE_SUFFIX
 
 from tcip_mcp.audit import now_iso
 from tcip_mcp.pipelines.data.selection import SAMPLE_PATHS
-from tcip_mcp.registry_paths import PathFields, recorded_paths, runtime_paths, within
+from tcip_mcp.registry_paths import (
+    PathFields,
+    recorded_paths,
+    runtime_paths,
+    within,
+)
 
 if TYPE_CHECKING:
-    from tcip_mcp.pipelines.schemas import DataSpec, SpatialManifest, TrainConfigSchema
+    from tcip_mcp.pipelines.schemas import (
+        DataSpec,
+        SpatialManifest,
+        TrainConfigSchema,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -68,38 +82,56 @@ STEP_KEY = "step"
 never carries it, so it is the row's kind (:func:`partition_rows`)."""
 
 DATA_PATHS: PathFields = (
-    ("images_dir",), ("labels_dir",), ("plant_csv_paths", "[]"), ("split", "selection_dir"))
+    ("images_dir",),
+    ("labels_dir",),
+    ("plant_csv_paths", "[]"),
+    ("split", "selection_dir"),
+)
 """The fields of a run's data section that name where its samples are."""
 
-_DATA_BLOCK_PATHS: PathFields = (*DATA_PATHS, ("dataset_source", "source_files", "[]"))
+_DATA_BLOCK_PATHS: PathFields = (
+    *DATA_PATHS,
+    ("dataset_source", "source_files", "[]"),
+)
 """Every field of a run's data section that names a path: :data:`DATA_PATHS` and the source files
 its dataset builder imports."""
 
-CONFIG_PATHS: PathFields = (("model_source", "source_files", "[]"),
-                            ("model_source", "image_stats_sampling", "windows", "[]", "0"),
-                            *within(("data",), _DATA_BLOCK_PATHS))
+CONFIG_PATHS: PathFields = (
+    ("model_source", "source_files", "[]"),
+    ("model_source", "image_stats_sampling", "windows", "[]", "0"),
+    *within(("data",), _DATA_BLOCK_PATHS),
+)
 """Every field of a run's config that names a path, the one inventory each record's path fields
 derive from."""
 
 _PARAMETER_PATHS: PathFields = tuple(
     (".".join(field[:depth]), *field[depth:])
     for field in CONFIG_PATHS
-    for depth in range(1, (field.index("[]") if "[]" in field else len(field)) + 1))
+    for depth in range(
+        1, (field.index("[]") if "[]" in field else len(field)) + 1
+    )
+)
 """The same fields in a flat map of sweep parameters, whose keys are dotted config paths: each
 field under every key a parameter may name it by, the mapping holding it or the field itself."""
 
-_SPACE_PATHS: PathFields = tuple((name, "choices", "[]", *rest) for name, *rest in _PARAMETER_PATHS)
+_SPACE_PATHS: PathFields = tuple(
+    (name, "choices", "[]", *rest) for name, *rest in _PARAMETER_PATHS
+)
 
 RECORD_PATHS: dict[str, PathFields] = {
     RUN_FILE: (
-        *within(("config",), CONFIG_PATHS), *within(("resolved", "data"), _DATA_BLOCK_PATHS),
+        *within(("config",), CONFIG_PATHS),
+        *within(("resolved", "data"), _DATA_BLOCK_PATHS),
         *within(("resolved", "partition", "samples", "[]"), SAMPLE_PATHS),
         ("resolved", "partition", "selection", "selection_dir"),
-        ("resume_from",), *within(("trial_params",), _PARAMETER_PATHS)),
+        ("resume_from",),
+        *within(("trial_params",), _PARAMETER_PATHS),
+    ),
     SWEEP_FILE: (
         *within(("input", "base_config"), CONFIG_PATHS),
         *within(("input", "baseline_params"), _PARAMETER_PATHS),
-        *within(("input", "param_space"), _SPACE_PATHS)),
+        *within(("input", "param_space"), _SPACE_PATHS),
+    ),
     FINAL_STATUS_FILE: (("checkpoint", "path"),),
 }
 """The fields of each record of a run or sweep directory that name a path, each stored against
@@ -111,7 +143,9 @@ TERMINAL_STATES = frozenset({*FINAL_STATES, "interrupted"})
 """Every state a run or sweep ends in: a final status's, and ``interrupted``, the state a directory
 with no final status reads as once its heartbeat is stale."""
 
-HEARTBEAT_STALE_SECONDS = float(os.environ.get("TCIP_HEARTBEAT_STALE_SECONDS", "600"))
+HEARTBEAT_STALE_SECONDS = float(
+    os.environ.get("TCIP_HEARTBEAT_STALE_SECONDS", "600")
+)
 """How long a directory with no final status reads ``running`` after its last sign of life,
 from ``$TCIP_HEARTBEAT_STALE_SECONDS``."""
 
@@ -151,7 +185,9 @@ def experiment_dir(experiment_id: str, *, project: Path | str) -> Path:
 def find_run(experiment_id: str, *, project: Path | str) -> Path | None:
     """The run directory of ``project`` (:func:`run_dirs`) named ``experiment_id``, a sweep's
     trial included, or ``None``."""
-    return next((d for d in run_dirs(project) if d.name == experiment_id), None)
+    return next(
+        (d for d in run_dirs(project) if d.name == experiment_id), None
+    )
 
 
 def find_sweep(sweep_id: str, *, project: Path | str) -> Path | None:
@@ -161,13 +197,24 @@ def find_sweep(sweep_id: str, *, project: Path | str) -> Path | None:
 
 def named_directory(name: str, *, project: Path | str) -> Path | None:
     """The run, trial or sweep directory of ``project`` named ``name``, or ``None``."""
-    return next((d for d in (*run_dirs(project), *sweep_dirs(project)) if d.name == name), None)
+    return next(
+        (
+            d
+            for d in (*run_dirs(project), *sweep_dirs(project))
+            if d.name == name
+        ),
+        None,
+    )
 
 
 def board_of(directory: Path) -> Path:
     """The TensorBoard log directory of a run or sweep directory: a sweep's own directory, every
     trial's events beneath it, or a run's :data:`TENSORBOARD_DIR`."""
-    return directory if (directory / SWEEP_FILE).is_file() else directory / TENSORBOARD_DIR
+    return (
+        directory
+        if (directory / SWEEP_FILE).is_file()
+        else directory / TENSORBOARD_DIR
+    )
 
 
 def mint_experiment_id(prefix: str = "run") -> str:
@@ -195,7 +242,9 @@ def create_run_directory(directory: Path) -> Path:
     return directory
 
 
-def open_run_directory(run_dir: Path, record: dict, copies: Mapping[str, bytes]) -> None:
+def open_run_directory(
+    run_dir: Path, record: dict, copies: Mapping[str, bytes]
+) -> None:
     """Create the run directory ``run_dir`` (:func:`create_run_directory`) holding its source
     snapshot's ``copies`` laid out (``model_build.lay_out``) and its empty metrics log, then write
     ``record`` as its ``run.json`` once, so a directory holding a launch record holds every file a
@@ -212,13 +261,18 @@ def open_run_directory(run_dir: Path, record: dict, copies: Mapping[str, bytes])
 def write_record(path: Path, value: Any) -> None:
     """Publish the run or sweep record ``value`` at ``path`` once (:func:`write_once`), each path
     :data:`RECORD_PATHS` names for its file stored against the directory's project."""
-    write_once(path, recorded_paths(value, RECORD_PATHS[path.name], project_of_run(path)))
+    write_once(
+        path,
+        recorded_paths(value, RECORD_PATHS[path.name], project_of_run(path)),
+    )
 
 
 def read_run_record(path: Path) -> Any:
     """The run or sweep record at ``path`` (:func:`read_record`), each path :data:`RECORD_PATHS`
     names for its file resolved against the directory's project."""
-    return runtime_paths(read_record(path), RECORD_PATHS[path.name], project_of_run(path))
+    return runtime_paths(
+        read_record(path), RECORD_PATHS[path.name], project_of_run(path)
+    )
 
 
 def publish_once(path: Path, write: Callable[[BinaryIO], object]) -> None:
@@ -249,17 +303,27 @@ def write_once(path: Path, value: Any) -> None:
     publish_once(path, lambda handle: handle.write(data))
 
 
-def write_final_status(directory: Path, state: str, status_error: str | None,
-                       **outcome: Any) -> None:
+def write_final_status(
+    directory: Path, state: str, status_error: str | None, **outcome: Any
+) -> None:
     """Write the final status of the run or sweep at ``directory`` once: ``state``, the instant,
     ``status_error``, the error behind it, and ``outcome``, what it produced (a run's
     ``checkpoint``). Refuses (``ValueError``) a state outside :data:`FINAL_STATES`, and a status
     already written with ``FileExistsError``."""
     if state not in FINAL_STATES:
-        raise ValueError(f"{state!r} is not a final state; a final status names one of "
-                         f"{list(FINAL_STATES)}.")
-    write_record(directory / FINAL_STATUS_FILE,
-                 {"state": state, "ended": now_iso(), "status_error": status_error, **outcome})
+        raise ValueError(
+            f"{state!r} is not a final state; a final status names one of "
+            f"{list(FINAL_STATES)}."
+        )
+    write_record(
+        directory / FINAL_STATUS_FILE,
+        {
+            "state": state,
+            "ended": now_iso(),
+            "status_error": status_error,
+            **outcome,
+        },
+    )
 
 
 def append_row(path: Path, row: dict) -> None:
@@ -282,8 +346,9 @@ def read_record(path: Path) -> Any:
     the deadline; every other ``PermissionError``,
     a missing file (``FileNotFoundError``) and bytes that do not decode (``DecodeError`` naming
     the file) raise at once."""
-    data = retry_while_denied(path.read_bytes, SHARING_RETRY_BUDGET_S,
-                              denied=is_sharing_violation)
+    data = retry_while_denied(
+        path.read_bytes, SHARING_RETRY_BUDGET_S, denied=is_sharing_violation
+    )
     try:
         return decode_value(data)
     except ValueError as exc:
@@ -304,7 +369,9 @@ def read_rows(path: Path, *, after: int = 0) -> tuple[list[dict], int]:
         try:
             rows.append(decode_value(line))
         except ValueError as exc:
-            raise DecodeError(f"{path} holds a row that does not decode: {exc}") from exc
+            raise DecodeError(
+                f"{path} holds a row that does not decode: {exc}"
+            ) from exc
     return rows, after + end
 
 
@@ -327,7 +394,11 @@ def keep_heartbeat(directory: Path) -> threading.Event:
             try:
                 touch_heartbeat(directory)
             except OSError:
-                logger.warning("could not touch the heartbeat of %s", directory, exc_info=True)
+                logger.warning(
+                    "could not touch the heartbeat of %s",
+                    directory,
+                    exc_info=True,
+                )
 
     threading.Thread(target=beat, daemon=True).start()
     return stop
@@ -337,7 +408,11 @@ def last_alive(directory: Path, record_file: str = RUN_FILE) -> float:
     """The latest sign of life of a run or sweep directory, as a POSIX time: its heartbeat's
     modification time, or its launch record's before the heartbeat was first touched."""
     heartbeat = directory / HEARTBEAT_FILE
-    return (heartbeat if heartbeat.exists() else directory / record_file).stat().st_mtime
+    return (
+        (heartbeat if heartbeat.exists() else directory / record_file)
+        .stat()
+        .st_mtime
+    )
 
 
 class RunEndedError(ValueError):
@@ -350,7 +425,8 @@ def require_open(directory: Path) -> None:
     if (directory / FINAL_STATUS_FILE).exists():
         raise RunEndedError(
             f"{directory.name} has ended: its final status is written, so it takes no "
-            "more writes.")
+            "more writes."
+        )
 
 
 def request_cancel(directory: Path) -> str:
@@ -430,7 +506,11 @@ class RunObservation:
         from tcip_mcp.pipelines.schemas import DataSpec
 
         resolved = self.resolution
-        return None if resolved is None else DataSpec.model_validate(resolved["data"])
+        return (
+            None
+            if resolved is None
+            else DataSpec.model_validate(resolved["data"])
+        )
 
     @property
     def sweep(self) -> str | None:
@@ -446,7 +526,9 @@ def observe(directory: Path) -> RunObservation:
     metrics log from the moment it opened; one missing it refuses with
     :class:`IncompleteRunError` naming it. A completed run's checkpoint is read, and refused when
     absent, by whatever loads it: an archive may carry a run without its weights."""
-    record_file = SWEEP_FILE if (directory / SWEEP_FILE).is_file() else RUN_FILE
+    record_file = (
+        SWEEP_FILE if (directory / SWEEP_FILE).is_file() else RUN_FILE
+    )
     record = read_run_record(directory / record_file)
     final_path = directory / FINAL_STATUS_FILE
     final = read_run_record(final_path) if final_path.exists() else None
@@ -454,11 +536,17 @@ def observe(directory: Path) -> RunObservation:
     if final is not None:
         state = final["state"]
     else:
-        state = "running" if time.time() - alive <= HEARTBEAT_STALE_SECONDS else "interrupted"
+        state = (
+            "running"
+            if time.time() - alive <= HEARTBEAT_STALE_SECONDS
+            else "interrupted"
+        )
     observation = RunObservation(directory, record, final, alive, state)
     if record_file == RUN_FILE and not observation.metrics_log.is_file():
-        raise IncompleteRunError(f"run {directory.name} ({state}) is missing "
-                                 f"{observation.metrics_log}.")
+        raise IncompleteRunError(
+            f"run {directory.name} ({state}) is missing "
+            f"{observation.metrics_log}."
+        )
     return observation
 
 
@@ -483,9 +571,17 @@ def sweep_dirs(project: Path | str) -> list[Path]:
 def run_dirs(project: Path | str) -> list[Path]:
     """Every run directory of ``project`` that holds a launch record, each sweep's trials included,
     in name order."""
-    return sorted([*_holding(experiments_dir(project), RUN_FILE),
-                   *(d for sweep in sweep_dirs(project) for d in _holding(sweep, RUN_FILE))],
-                  key=lambda d: d.name)
+    return sorted(
+        [
+            *_holding(experiments_dir(project), RUN_FILE),
+            *(
+                d
+                for sweep in sweep_dirs(project)
+                for d in _holding(sweep, RUN_FILE)
+            ),
+        ],
+        key=lambda d: d.name,
+    )
 
 
 def run_observations(project: Path | str) -> list[RunObservation]:
@@ -498,15 +594,25 @@ def live_run_conflict(project: Path) -> str | None:
     answers with, or ``None``."""
     listing = training_listing(project)
     trials = [trial for sweep in listing.sweeps for trial in sweep.trials]
-    running = [sweep.sweep_id for sweep in listing.sweeps if sweep.state == "running"]
-    running += [row.experiment_id for row in (*listing.runs, *trials) if row.state == "running"]
+    running = [
+        sweep.sweep_id for sweep in listing.sweeps if sweep.state == "running"
+    ]
+    running += [
+        row.experiment_id
+        for row in (*listing.runs, *trials)
+        if row.state == "running"
+    ]
     if not running:
         return None
-    return (f"{running[0]!r} is running; ask the agent to cancel it (cancel_training) or wait for "
-            "it to finish")
+    return (
+        f"{running[0]!r} is running; ask the agent to cancel it (cancel_training) or wait for "
+        "it to finish"
+    )
 
 
-def find_observation(experiment_id: str, *, project: Path | str) -> RunObservation | None:
+def find_observation(
+    experiment_id: str, *, project: Path | str
+) -> RunObservation | None:
     """The run ``experiment_id`` names (:func:`find_run`), observed, or ``None``."""
     run_dir = find_run(experiment_id, project=project)
     return observe(run_dir) if run_dir is not None else None
@@ -522,21 +628,27 @@ class RunResolution(NamedTuple):
     spatial: SpatialManifest | None
 
 
-def run_resolution(experiment_id: str, *, project: Path | str) -> RunResolution:
+def run_resolution(
+    experiment_id: str, *, project: Path | str
+) -> RunResolution:
     """What the run ``experiment_id`` names resolved at launch (:func:`find_observation`).
     Refuses (``ValueError``) an id naming no run directory or one whose input resolved to
     nothing."""
     observation = find_observation(experiment_id, project=project)
     data = observation.resolved_data if observation is not None else None
     if observation is None or observation.resolution is None or data is None:
-        raise ValueError(f"no run directory records what {experiment_id!r} resolved to.")
+        raise ValueError(
+            f"no run directory records what {experiment_id!r} resolved to."
+        )
     from tcip_mcp.pipelines.data.split_construction import partition_spatial
 
     partition = observation.resolution["partition"]
     return RunResolution(data, partition, partition_spatial(partition))
 
 
-def partition_rows(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def partition_rows(
+    rows: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """A run's metrics-log ``rows`` split by kind, each in logged order: its epoch rows, then its
     per-batch rows, those carrying :data:`STEP_KEY`. The one place a row's kind is read."""
     epochs: list[dict[str, Any]] = []
@@ -554,17 +666,24 @@ def epoch_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for row in partition_rows(rows)[0]:
         epoch = json.dumps(row.get(EPOCH_KEY), sort_keys=True, default=str)
         restated = {f"{key}{NOT_FINITE_SUFFIX}" for key in row}
-        earlier = {k: v for k, v in merged.get(epoch, {}).items() if k not in restated}
+        earlier = {
+            k: v for k, v in merged.get(epoch, {}).items() if k not in restated
+        }
         merged[epoch] = {**earlier, **row}
     return list(merged.values())
 
 
-def best_selection(rows: list[dict[str, Any]], objective: dict) -> float | None:
+def best_selection(
+    rows: list[dict[str, Any]], objective: dict
+) -> float | None:
     """The best finite ``selection`` among a run's metrics-log epoch rows
     (:func:`partition_rows`) in the direction of ``objective``, the run's recorded
     ``{"selection_metric", "higher_is_better"}``; ``None`` when no row carries one."""
-    values = [float(row["selection"]) for row in partition_rows(rows)[0]
-              if finite_number(row.get("selection"))]
+    values = [
+        float(row["selection"])
+        for row in partition_rows(rows)[0]
+        if finite_number(row.get("selection"))
+    ]
     if not values:
         return None
     return max(values) if objective["higher_is_better"] else min(values)
@@ -591,8 +710,11 @@ class RunRow(BaseModel):
     launch: dict[str, str | None] | None
 
 
-def run_summary(observation: RunObservation, rows: list[dict[str, Any]],
-                launch: dict[str, str | None] | None) -> RunRow:
+def run_summary(
+    observation: RunObservation,
+    rows: list[dict[str, Any]],
+    launch: dict[str, str | None] | None,
+) -> RunRow:
     """One run's :class:`RunRow` over its metrics-log ``rows`` (:func:`read_rows` of its
     ``metrics_log``, read as :func:`epoch_rows`) and the agent identity its ``launch`` event
     declared (:func:`launch_declarations`, ``None`` for a run no launch event names): its
@@ -600,28 +722,48 @@ def run_summary(observation: RunObservation, rows: list[dict[str, Any]],
     fields, its last logged epoch, and its best selection value under the objective its launch
     resolved (:func:`best_selection`) with that objective's metric name, both ``None`` for a run
     that resolved to nothing."""
-    record, resolution, spec = observation.record, observation.resolution, observation.spec
+    record, resolution, spec = (
+        observation.record,
+        observation.resolution,
+        observation.spec,
+    )
     objective = resolution["objective"] if resolution is not None else None
     rows = epoch_rows(rows)
     return RunRow(
-        experiment_id=observation.directory.name, state=observation.state,
-        created=record["created"], relaunched_from=record["relaunched_from"],
-        sweep=observation.sweep, trial_params=record["trial_params"],
-        builder=spec.model_source.builder, task=spec.model_source.task,
+        experiment_id=observation.directory.name,
+        state=observation.state,
+        created=record["created"],
+        relaunched_from=record["relaunched_from"],
+        sweep=observation.sweep,
+        trial_params=record["trial_params"],
+        builder=spec.model_source.builder,
+        task=spec.model_source.task,
         images_dir=spec.data.images_dir,
         current_epoch=rows[-1].get(EPOCH_KEY) if rows else None,
-        best_metric=best_selection(rows, objective) if objective is not None else None,
-        best_metric_name=objective["selection_metric"] if objective is not None else None,
-        output_dir=str(observation.directory), status_error=observation.status_error,
-        heartbeat=observation.heartbeat, launch=launch,
+        best_metric=best_selection(rows, objective)
+        if objective is not None
+        else None,
+        best_metric_name=objective["selection_metric"]
+        if objective is not None
+        else None,
+        output_dir=str(observation.directory),
+        status_error=observation.status_error,
+        heartbeat=observation.heartbeat,
+        launch=launch,
     )
 
 
 def run_rows(project: Path | str) -> list[RunRow]:
     """Every run of ``project`` (:func:`run_observations`) as its :func:`run_summary` row."""
     launches = launch_declarations(project)
-    return [run_summary(obs, read_rows(obs.metrics_log)[0], launches.get(obs.directory.name))
-            for obs in run_observations(project)]
+    return [
+        run_summary(
+            obs,
+            read_rows(obs.metrics_log)[0],
+            launches.get(obs.directory.name),
+        )
+        for obs in run_observations(project)
+    ]
 
 
 def _completed_with_value(trial: RunRow) -> bool:
@@ -629,7 +771,9 @@ def _completed_with_value(trial: RunRow) -> bool:
     return trial.state == "completed" and trial.best_metric is not None
 
 
-def group_split_draws(trials: list[RunRow], planned_seeds: list[int]) -> list[dict]:
+def group_split_draws(
+    trials: list[RunRow], planned_seeds: list[int]
+) -> list[dict]:
     """Group a sweep's trial rows by the point each draw shares (every param but
     ``hpo.SPLIT_DRAW_SEED_KEY``), each group carrying its ``split_draws`` block.
 
@@ -650,16 +794,24 @@ def group_split_draws(trials: list[RunRow], planned_seeds: list[int]) -> list[di
     planned = set(planned_seeds)
     groups: dict[str, dict] = {}
     for row in trials:
-        point = {k: v for k, v in (row.trial_params or {}).items() if k != SPLIT_DRAW_SEED_KEY}
+        point = {
+            k: v
+            for k, v in (row.trial_params or {}).items()
+            if k != SPLIT_DRAW_SEED_KEY
+        }
         key = json.dumps(point, sort_keys=True, default=str)
-        groups.setdefault(key, {"point": point, "rows": []})["rows"].append(row)
+        groups.setdefault(key, {"point": point, "rows": []})["rows"].append(
+            row
+        )
 
     out: list[dict] = []
     for entry in groups.values():
         rows = entry["rows"]
         complete = [r for r in rows if _completed_with_value(r)]
         values = [float(r.best_metric) for r in complete]
-        seeds = [(r.trial_params or {}).get(SPLIT_DRAW_SEED_KEY) for r in complete]
+        seeds = [
+            (r.trial_params or {}).get(SPLIT_DRAW_SEED_KEY) for r in complete
+        ]
         seeds_complete = sorted(set(seeds), key=lambda s: (s is None, s))
         block = {
             "seeds": seeds,
@@ -672,8 +824,12 @@ def group_split_draws(trials: list[RunRow], planned_seeds: list[int]) -> list[di
             "n_complete": len(values),
             "seeds_complete": seeds_complete,
         }
-        eligible = len(complete) == len(rows) and planned <= set(seeds_complete)
-        out.append({"point": entry["point"], "block": block, "eligible": eligible})
+        eligible = len(complete) == len(rows) and planned <= set(
+            seeds_complete
+        )
+        out.append(
+            {"point": entry["point"], "block": block, "eligible": eligible}
+        )
     return out
 
 
@@ -687,17 +843,32 @@ def sweep_outcome(trials: list[RunRow], sweep: dict) -> dict[str, Any]:
     if sweep["input"]["split_draws"] > 1:
         groups = group_split_draws(trials, sweep["input"]["split_draw_seeds"])
         eligible = [g for g in groups if g["eligible"]]
-        best_group = choose(eligible, key=lambda g: g["block"]["mean"]) if eligible else None
+        best_group = (
+            choose(eligible, key=lambda g: g["block"]["mean"])
+            if eligible
+            else None
+        )
         return {
             "best_params": best_group["point"] if best_group else None,
-            **stored_number("best_value", best_group["block"]["mean"] if best_group else None),
+            **stored_number(
+                "best_value",
+                best_group["block"]["mean"] if best_group else None,
+            ),
             "best_value_spread": best_group["block"] if best_group else None,
             "split_sensitivity": groups,
         }
     done = [t for t in trials if _completed_with_value(t)]
-    best_trial = choose(done, key=lambda t: cast(float, t.best_metric)) if done else None
-    return {"best_params": best_trial.trial_params if best_trial else None,
-            **stored_number("best_value", best_trial.best_metric if best_trial else None)}
+    best_trial = (
+        choose(done, key=lambda t: cast(float, t.best_metric))
+        if done
+        else None
+    )
+    return {
+        "best_params": best_trial.trial_params if best_trial else None,
+        **stored_number(
+            "best_value", best_trial.best_metric if best_trial else None
+        ),
+    }
 
 
 class SweepGroup(BaseModel):
@@ -721,10 +892,15 @@ def read_sweep(directory: Path, rows: list[RunRow]) -> SweepGroup:
     sweep = observe(directory)
     trials = [row for row in rows if row.sweep == directory.name]
     return SweepGroup(
-        sweep_id=directory.name, state=sweep.state, status_error=sweep.status_error,
-        input=sweep.record["input"], objective=sweep.record["objective"],
-        cancel_requested=cancel_requested(directory), heartbeat=sweep.heartbeat,
-        trials=trials, outcome=sweep_outcome(trials, sweep.record),
+        sweep_id=directory.name,
+        state=sweep.state,
+        status_error=sweep.status_error,
+        input=sweep.record["input"],
+        objective=sweep.record["objective"],
+        cancel_requested=cancel_requested(directory),
+        heartbeat=sweep.heartbeat,
+        trials=trials,
+        outcome=sweep_outcome(trials, sweep.record),
     )
 
 
@@ -748,23 +924,35 @@ def training_listing(project: Path | str) -> TrainingListing:
     """``project``'s runs (:func:`run_rows`) launched on their own, and its sweeps
     (:func:`read_sweep`) with their trial rows under them."""
     rows = run_rows(project)
-    return TrainingListing(runs=[row for row in rows if row.sweep is None],
-                           sweeps=[read_sweep(d, rows) for d in sweep_dirs(project)])
+    return TrainingListing(
+        runs=[row for row in rows if row.sweep is None],
+        sweeps=[read_sweep(d, rows) for d in sweep_dirs(project)],
+    )
 
 
-def launch_declarations(project: Path | str) -> dict[str, dict[str, str | None]]:
+def launch_declarations(
+    project: Path | str,
+) -> dict[str, dict[str, str | None]]:
     """The agent identity each run's ``launch_training`` line in ``project``'s audit log carries,
     by the experiment id it names: empty for a launch no agent declared itself to."""
     from tcip_mcp import agent_identity
     from tcip_mcp.audit import acts_of
 
-    return {entry["arguments"]["experiment_id"]:
-            {field: entry[field] for field in agent_identity.RECORD_FIELDS if field in entry}
-            for entry in acts_of(project, ("launch_training",))[0]}
+    return {
+        entry["arguments"]["experiment_id"]: {
+            field: entry[field]
+            for field in agent_identity.RECORD_FIELDS
+            if field in entry
+        }
+        for entry in acts_of(project, ("launch_training",))[0]
+    }
 
 
 def get_experiment(
-    experiment_id: str, *, project: Path | str, metrics_limit: int | None = None,
+    experiment_id: str,
+    *,
+    project: Path | str,
+    metrics_limit: int | None = None,
     metrics_offset: int = 0,
 ) -> dict[str, Any]:
     """One run's directory read whole: its launch record, its final status (``None`` until
@@ -775,7 +963,9 @@ def get_experiment(
     if observation is None:
         return {"error": f"Experiment not found: {experiment_id}"}
     rows = epoch_rows(read_rows(observation.metrics_log)[0])
-    end = (metrics_offset + metrics_limit) if metrics_limit is not None else None
+    end = (
+        (metrics_offset + metrics_limit) if metrics_limit is not None else None
+    )
     return {
         "experiment_id": experiment_id,
         "run": observation.record,
@@ -798,8 +988,12 @@ def _split_summary(observation: RunObservation) -> dict[str, Any]:
     partition = resolved["partition"]
     binding = partition["selection"]
     if binding is not None:
-        return {"case": "bound", "selection_dir": binding["selection_dir"],
-                "seed": partition["seed"], "redraw": binding["redraw"]}
+        return {
+            "case": "bound",
+            "selection_dir": binding["selection_dir"],
+            "seed": partition["seed"],
+            "redraw": binding["redraw"],
+        }
     from tcip_mcp.pipelines.data.split_construction import partition_spatial
 
     if partition_spatial(partition) is not None:
@@ -813,11 +1007,15 @@ def _row_instant(row: dict, experiment_id: str) -> datetime:
     try:
         return datetime.fromisoformat(row[TIMESTAMP_KEY])
     except (KeyError, TypeError, ValueError) as exc:
-        raise ValueError(f"metric row {row} of {experiment_id} carries no decodable timestamp "
-                         f"({exc!r}); the run's metrics log cannot be compared") from exc
+        raise ValueError(
+            f"metric row {row} of {experiment_id} carries no decodable timestamp "
+            f"({exc!r}); the run's metrics log cannot be compared"
+        ) from exc
 
 
-def compare_experiments(experiment_ids: list[str], *, project: Path | str) -> dict[str, Any]:
+def compare_experiments(
+    experiment_ids: list[str], *, project: Path | str
+) -> dict[str, Any]:
     """Side-by-side comparison of training runs.
 
     Per run: ``state``, ``n_epochs``, ``last_logged_metrics`` (the last epoch's row,
@@ -838,13 +1036,21 @@ def compare_experiments(experiment_ids: list[str], *, project: Path | str) -> di
     for eid in experiment_ids:
         observation = find_observation(eid, project=project)
         if observation is None:
-            comparisons.append({"experiment_id": eid, "error": f"Experiment not found: {eid}"})
+            comparisons.append(
+                {"experiment_id": eid, "error": f"Experiment not found: {eid}"}
+            )
             continue
-        run, final, spec = observation.record, observation.final, observation.spec
+        run, final, spec = (
+            observation.record,
+            observation.final,
+            observation.spec,
+        )
         metrics = read_rows(observation.metrics_log)[0]
         epochs = epoch_rows(metrics)
         summary: dict[str, Any] = {
-            "experiment_id": eid, "state": observation.state, "n_epochs": len(epochs),
+            "experiment_id": eid,
+            "state": observation.state,
+            "n_epochs": len(epochs),
         }
         if epochs:
             summary["last_logged_metrics"] = epochs[-1]
@@ -853,32 +1059,59 @@ def compare_experiments(experiment_ids: list[str], *, project: Path | str) -> di
         except ValueError as exc:
             comparisons.append({"experiment_id": eid, "error": str(exc)})
             continue
-        rows_after_end = None if final is None else sum(
-            1 for at in instants if at > datetime.fromisoformat(final["ended"]))
+        rows_after_end = (
+            None
+            if final is None
+            else sum(
+                1
+                for at in instants
+                if at > datetime.fromisoformat(final["ended"])
+            )
+        )
         summary["rows_after_end"] = rows_after_end
         summary["status_error"] = observation.status_error
         entry = run_entry(observation)
-        summary["registry"] = [] if entry is None else [{
-            "name": entry["name"], "registered_at": entry["registered_at"],
-            **entry_facts(entry, project_of_run(observation.directory)),
-        }]
+        summary["registry"] = (
+            []
+            if entry is None
+            else [
+                {
+                    "name": entry["name"],
+                    "registered_at": entry["registered_at"],
+                    **entry_facts(
+                        entry, project_of_run(observation.directory)
+                    ),
+                }
+            ]
+        )
         data = observation.resolved_data
         summary["split"] = _split_summary(observation)
         summary["model"] = spec.model_source.builder
         summary["task"] = spec.model_source.task
-        summary["subject"] = data.recorded_scope.subject if data is not None else None
+        summary["subject"] = (
+            data.recorded_scope.subject if data is not None else None
+        )
         summary["dataset_id"] = run["dataset"]["id"]
         summary["dataset_fingerprint"] = run["dataset"]["fingerprint"]
         comparisons.append(summary)
 
     any_error = any("error" in c for c in comparisons)
-    fps = {c.get("dataset_fingerprint") for c in comparisons if "error" not in c}
-    same_dataset = None if (any_error or not fps or None in fps) else len(fps) == 1
-    return {"experiments": comparisons, "count": len(comparisons),
-            "same_dataset_fingerprint": same_dataset}
+    fps = {
+        c.get("dataset_fingerprint") for c in comparisons if "error" not in c
+    }
+    same_dataset = (
+        None if (any_error or not fps or None in fps) else len(fps) == 1
+    )
+    return {
+        "experiments": comparisons,
+        "count": len(comparisons),
+        "same_dataset_fingerprint": same_dataset,
+    }
 
 
-def get_experiment_lineage(experiment_id: str, *, project: Path | str) -> dict[str, Any]:
+def get_experiment_lineage(
+    experiment_id: str, *, project: Path | str
+) -> dict[str, Any]:
     """A training run's data-to-model chain read off its records: the data section it resolved,
     its dataset identity, the run it was relaunched from and the checkpoint it resumed from, and
     the checkpoint its completion selected. ``{"error": ...}`` for an id naming no training
@@ -887,11 +1120,14 @@ def get_experiment_lineage(experiment_id: str, *, project: Path | str) -> dict[s
     if observation is None:
         return {"error": f"Experiment not found: {experiment_id}"}
     run, data = observation.record, observation.resolved_data
-    return {"experiment_id": experiment_id, "lineage": {
-        "data": data.record() if data is not None else None,
-        "dataset_id": run["dataset"]["id"],
-        "dataset_fingerprint": run["dataset"]["fingerprint"],
-        "relaunched_from": run["relaunched_from"],
-        "resume_from": run["resume_from"],
-        "checkpoint": observation.checkpoint,
-    }}
+    return {
+        "experiment_id": experiment_id,
+        "lineage": {
+            "data": data.record() if data is not None else None,
+            "dataset_id": run["dataset"]["id"],
+            "dataset_fingerprint": run["dataset"]["fingerprint"],
+            "relaunched_from": run["relaunched_from"],
+            "resume_from": run["resume_from"],
+            "checkpoint": observation.checkpoint,
+        },
+    }

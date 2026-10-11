@@ -9,23 +9,39 @@ from typing import Any
 from tcip_mcp.dataset_layout import label_key_of as image_label_key
 
 
-def label_image(image_path, annotations, width: int, height: int, **kwargs: Any):
+def label_image(
+    image_path, annotations, width: int, height: int, **kwargs: Any
+):
     """``annotations`` written as the label document of the image at ``image_path``
     (:func:`~tcip_annotation.json_io.write_label_document` at the image's own key); the new
     version."""
     from tcip_annotation.json_io import write_label_document
 
-    return write_label_document(image_label_key(image_path), annotations, width, height, **kwargs)
+    return write_label_document(
+        image_label_key(image_path), annotations, width, height, **kwargs
+    )
 
 
-def box_annotation(x1: float, y1: float, x2: float, y2: float, *, subject: str = "bud",
-                   score: float | None = None, **attributes: str):
+def box_annotation(
+    x1: float,
+    y1: float,
+    x2: float,
+    y2: float,
+    *,
+    subject: str = "bud",
+    score: float | None = None,
+    **attributes: str,
+):
     """An annotation of ``subject`` boxed at pixel ``(x1, y1, x2, y2)`` carrying ``attributes``;
     a prediction when ``score`` is given."""
     from tcip_annotation.state import Annotation, BBox
 
-    return Annotation(subject=subject, geometry=BBox(x1, y1, x2, y2), score=score,
-                      attributes=dict(attributes))
+    return Annotation(
+        subject=subject,
+        geometry=BBox(x1, y1, x2, y2),
+        score=score,
+        attributes=dict(attributes),
+    )
 
 
 def saved_annotations(image) -> list:
@@ -35,7 +51,11 @@ def saved_annotations(image) -> list:
     return read_label_document(image_label_key(image)).annotations
 
 
-def write_image(path, size: tuple[int, int] = (100, 80), color: tuple[int, int, int] = (0, 0, 0)):
+def write_image(
+    path,
+    size: tuple[int, int] = (100, 80),
+    color: tuple[int, int, int] = (0, 0, 0),
+):
     """A flat ``color`` three-band ``size`` image written at ``path``, its directory made;
     ``path``."""
     from PIL import Image
@@ -50,7 +70,9 @@ def gray_frame(where, size: int = 128, name: str = "img.png") -> str:
     return str(write_image(where / name, (size, size), (120, 120, 120)))
 
 
-def blank_image(root, name: str = "IMG_0001.JPG", size: tuple[int, int] = (100, 80)):
+def blank_image(
+    root, name: str = "IMG_0001.JPG", size: tuple[int, int] = (100, 80)
+):
     """:func:`write_image` of ``name`` in ``root``'s undated capture."""
     from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
@@ -75,7 +97,9 @@ BRIGHT = (230, 230, 230)
 read."""
 
 
-def painted_frame(width: int, height: int, background, extents, mode: str = "RGB"):
+def painted_frame(
+    width: int, height: int, background, extents, mode: str = "RGB"
+):
     """A ``mode`` image of ``width`` by ``height`` in ``background``, each of ``extents`` (a
     half-open pixel box ``(x1, y1, x2, y2)`` beside its color) filled in its color."""
     from PIL import Image, ImageDraw
@@ -87,51 +111,88 @@ def painted_frame(width: int, height: int, background, extents, mode: str = "RGB
     return frame
 
 
-def painted_array(width: int, height: int, extents, *, background=0, mode: str = "L"):
+def painted_array(
+    width: int, height: int, extents, *, background=0, mode: str = "L"
+):
     """The :func:`painted_frame` of ``extents`` as a writable numpy array (``uint8`` in mode
     ``L``, ``float32`` in mode ``F``), ``height`` rows by ``width`` columns."""
     import numpy as np
 
-    return np.array(painted_frame(width, height, background, extents, mode=mode))
+    return np.array(
+        painted_frame(width, height, background, extents, mode=mode)
+    )
 
 
-def labeled_frame(path, annotations, width: int, height: int,
-                  background: tuple[int, int, int], **kwargs: Any):
+def labeled_frame(
+    path,
+    annotations,
+    width: int,
+    height: int,
+    background: tuple[int, int, int],
+    **kwargs: Any,
+):
     """A :func:`painted_frame` of the dim ``background`` written at ``path``, :data:`BRIGHT`
     over the extent of each of ``annotations`` that has one and is no crowd region, and labeled
     with ``annotations`` (:func:`label_image`, ``kwargs`` its own); ``path``."""
     from tcip_annotation.state import Point, bbox_of
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    boxes = [bbox_of(a.geometry) for a in annotations
-             if not isinstance(a.geometry, Point) and not a.iscrowd]
-    painted_frame(width, height, background,
-                  [((b.x1, b.y1, b.x2, b.y2), BRIGHT) for b in boxes]).save(path)
+    boxes = [
+        bbox_of(a.geometry)
+        for a in annotations
+        if not isinstance(a.geometry, Point) and not a.iscrowd
+    ]
+    painted_frame(
+        width,
+        height,
+        background,
+        [((b.x1, b.y1, b.x2, b.y2), BRIGHT) for b in boxes],
+    ).save(path)
     label_image(path, annotations, width, height, **kwargs)
     return path
 
 
-def seed_labeled_images(images_dir, annotations, *, n: int, width: int, height: int):
+def seed_labeled_images(
+    images_dir, annotations, *, n: int, width: int, height: int
+):
     """Make ``images_dir``, a capture of a dataset image tree, and write ``n``
     :func:`labeled_frame` images ``img<i>.png`` of ``width`` by ``height``, each holding
     ``annotations``; ``images_dir``."""
     images_dir.mkdir(parents=True, exist_ok=True)
     for i in range(n):
-        labeled_frame(images_dir / f"img{i}.png", annotations, width, height, (10 * i, 0, 0))
+        labeled_frame(
+            images_dir / f"img{i}.png",
+            annotations,
+            width,
+            height,
+            (10 * i, 0, 0),
+        )
     return images_dir
 
 
-def seed_bud_images(images_dir, *, n: int = 3, size: int = 128,
-                    box: tuple[float, float, float, float] = (10, 10, 40, 40)):
+def seed_bud_images(
+    images_dir,
+    *,
+    n: int = 3,
+    size: int = 128,
+    box: tuple[float, float, float, float] = (10, 10, 40, 40),
+):
     """:func:`seed_labeled_images` of ``n`` square ``size``px images, each holding one ``bud``
     box at ``box``."""
     from tcip_annotation.state import Annotation, BBox
 
-    return seed_labeled_images(images_dir, [Annotation(subject="bud", geometry=BBox(*box))],
-                               n=n, width=size, height=size)
+    return seed_labeled_images(
+        images_dir,
+        [Annotation(subject="bud", geometry=BBox(*box))],
+        n=n,
+        width=size,
+        height=size,
+    )
 
 
-def small_detection_config(images_dir, model_source: dict | None = None) -> dict:
+def small_detection_config(
+    images_dir, model_source: dict | None = None
+) -> dict:
     """A :func:`~tests._chain_fixtures.training_config` of ``model_source`` (by default the
     bespoke torchvision detector,
     :data:`~tests._verified_checkpoint_fixtures.BUILT_DETECTOR`) over ``images_dir``'s ``bud``
@@ -141,8 +202,12 @@ def small_detection_config(images_dir, model_source: dict | None = None) -> dict
 
     return training_config(
         model_source or BUILT_DETECTOR,
-        {"images_dir": str(images_dir), "scope": {"subject": "bud"},
-         "split": {"seed": 0, "val_ratio": 0.15}})
+        {
+            "images_dir": str(images_dir),
+            "scope": {"subject": "bud"},
+            "split": {"seed": 0, "val_ratio": 0.15},
+        },
+    )
 
 
 def registry_over(dataset_root, registry) -> None:
@@ -150,17 +215,33 @@ def registry_over(dataset_root, registry) -> None:
     (:func:`~tcip_mcp.subject_registry.replace_registry`), whatever it held before."""
     from tcip_mcp.subject_registry import replace_registry
 
-    replace_registry(dataset_root, registry, expect=None, allow_removals=True,
-                     allow_type_changes=True, actor=None)
+    replace_registry(
+        dataset_root,
+        registry,
+        expect=None,
+        allow_removals=True,
+        allow_type_changes=True,
+        actor=None,
+    )
 
 
-def mark_complete(image_path, subject: str, *, project, rect=None,
-                  proposals_hidden: bool = False, by: str = "user:tester"):
+def mark_complete(
+    image_path,
+    subject: str,
+    *,
+    project,
+    rect=None,
+    proposals_hidden: bool = False,
+    by: str = "user:tester",
+):
     """``subject`` marked complete over ``rect`` (the whole image when ``None``) on the label
     document of the image at ``image_path`` through the platform's one save door, the document's
     annotations kept as they are; an image with no annotation of ``subject`` reads as a confirmed
     negative. Returns the new version."""
-    from tcip_annotation.json_io import client_annotation, read_document_versioned
+    from tcip_annotation.json_io import (
+        client_annotation,
+        read_document_versioned,
+    )
 
     from tcip_mcp.dataset_layout import Gestures, save_label_document
     from tcip_mcp.pipelines.image_utils import image_path_dimensions
@@ -169,23 +250,44 @@ def mark_complete(image_path, subject: str, *, project, rect=None,
     doc, _version = read_document_versioned(key)
     width, height = image_path_dimensions(image_path)
     return save_label_document(
-        project, key, [client_annotation(a) for a in doc.annotations],
-        width=width, height=height, author=by, actor=by,
-        gestures=Gestures(complete={subject: True}, rect=rect, proposals_hidden=proposals_hidden))
+        project,
+        key,
+        [client_annotation(a) for a in doc.annotations],
+        width=width,
+        height=height,
+        author=by,
+        actor=by,
+        gestures=Gestures(
+            complete={subject: True},
+            rect=rect,
+            proposals_hidden=proposals_hidden,
+        ),
+    )
 
 
 def admit_over(
-    images_dir, ground_truth=None, *, subject: str | None = None,
+    images_dir,
+    ground_truth=None,
+    *,
+    subject: str | None = None,
     members: list[str] | None = None,
 ):
     """The admission over the images of ``images_dir`` and their ground truth (their own label
     documents when ``ground_truth`` is ``None``) under the class space their registry answers for
     ``subject`` (:func:`~tcip_mcp.pipelines.data.label_queries.registry_scope`), refusing an empty
     one by name."""
-    from tcip_mcp.pipelines.data.label_queries import admit, registry_scope, require_admitted
+    from tcip_mcp.pipelines.data.label_queries import (
+        admit,
+        registry_scope,
+        require_admitted,
+    )
 
-    admitted = admit(images_dir, ground_truth, scope=registry_scope(images_dir, subject),
-                     members=members)
+    admitted = admit(
+        images_dir,
+        ground_truth,
+        scope=registry_scope(images_dir, subject),
+        members=members,
+    )
     require_admitted(admitted)
     return admitted
 
@@ -195,21 +297,35 @@ def checkpoint_admission(checkpoint, images_dir, ground_truth=None):
     ``images_dir`` and their ground truth under the class space the checkpoint records."""
     from tcip_mcp.pipelines.data.label_queries import admit
 
-    return admit(images_dir, ground_truth, scope=checkpoint.spec.data.recorded_scope)
+    return admit(
+        images_dir, ground_truth, scope=checkpoint.spec.data.recorded_scope
+    )
 
 
 def samples_over(
-    images_dir, ground_truth=None, *, subject: str | None = None,
+    images_dir,
+    ground_truth=None,
+    *,
+    subject: str | None = None,
     members: list[str] | None = None,
 ):
     """Every admitted member of one place as samples, each on the training side."""
-    return admit_over(images_dir, ground_truth, subject=subject, members=members).every_sample()
+    return admit_over(
+        images_dir, ground_truth, subject=subject, members=members
+    ).every_sample()
 
 
 def run_over(
-    task: str, images_dir, ground_truth=None, *, subject: str | None = None,
-    members: list[str] | None = None, stated: dict[str, Any] | None = None,
-    tiling: dict | None = None, dataset_source: Any = None, transforms: Any = None,
+    task: str,
+    images_dir,
+    ground_truth=None,
+    *,
+    subject: str | None = None,
+    members: list[str] | None = None,
+    stated: dict[str, Any] | None = None,
+    tiling: dict | None = None,
+    dataset_source: Any = None,
+    transforms: Any = None,
 ):
     """A loader for ``task`` over one place holding ground truth and the data section a run over
     it records (its ``scope`` and sizes), both through the producer.
@@ -223,19 +339,43 @@ def run_over(
     what it serves recorded on it (``generic_trainer.effective_data_geometry``). The data section
     is in the form a run's record holds it."""
     from tcip_mcp.pipelines.data.split_construction import (
-        _with_lattice, recorded_datasets, run_sizes,
+        _with_lattice,
+        recorded_datasets,
+        run_sizes,
     )
     from tcip_mcp.pipelines.schemas import DataSpec
-    from tcip_mcp.pipelines.training.generic_trainer import effective_data_geometry
+    from tcip_mcp.pipelines.training.generic_trainer import (
+        effective_data_geometry,
+    )
 
-    admitted = admit_over(images_dir, ground_truth, subject=subject, members=members)
+    admitted = admit_over(
+        images_dir, ground_truth, subject=subject, members=members
+    )
     samples = admitted.every_sample()
-    block = {**(stated or {}), **({} if tiling is None else {"tiling": tiling}),
-             **({} if dataset_source is None else {"dataset_source": dataset_source[0]})}
-    data = _with_lattice(task, run_sizes(task, DataSpec.model_validate(block), admitted.scope,
-                                         samples), samples)
-    dataset, _val = recorded_datasets(task, data, samples, None, transforms,
-                                      dataset_source and dataset_source[1])
+    block = {
+        **(stated or {}),
+        **({} if tiling is None else {"tiling": tiling}),
+        **(
+            {}
+            if dataset_source is None
+            else {"dataset_source": dataset_source[0]}
+        ),
+    }
+    data = _with_lattice(
+        task,
+        run_sizes(
+            task, DataSpec.model_validate(block), admitted.scope, samples
+        ),
+        samples,
+    )
+    dataset, _val = recorded_datasets(
+        task,
+        data,
+        samples,
+        None,
+        transforms,
+        dataset_source and dataset_source[1],
+    )
     return dataset, effective_data_geometry(task, data, dataset).record()
 
 
@@ -244,8 +384,10 @@ def served_regions(dataset: Any) -> list:
     (``datasets.object_region``): the regions a stand-in detection dataset exposes."""
     from tcip_mcp.pipelines.data.datasets import object_region
 
-    return [object_region(target, image.shape[-2] * image.shape[-1])
-            for image, target in (dataset[i] for i in range(len(dataset)))]
+    return [
+        object_region(target, image.shape[-2] * image.shape[-1])
+        for image, target in (dataset[i] for i in range(len(dataset)))
+    ]
 
 
 def staged_layout(project, data: Any):
@@ -256,8 +398,9 @@ def staged_layout(project, data: Any):
     from tests._chain_fixtures import DETECTION_SOURCE, training_config
 
     block = data if isinstance(data, dict) else data.record()
-    return staged_sources(train_config(training_config(DETECTION_SOURCE, block)),
-                          Path(project)).layout
+    return staged_sources(
+        train_config(training_config(DETECTION_SOURCE, block)), Path(project)
+    ).layout
 
 
 def train_val(project, task: str, data_cfg: dict, transforms: Any = None):
@@ -268,7 +411,9 @@ def train_val(project, task: str, data_cfg: dict, transforms: Any = None):
     from tcip_mcp.pipelines.schemas import DataSpec
 
     data = DataSpec.model_validate(data_cfg)
-    return auto_train_val(project, task, data, transforms, staged_layout(project, data_cfg))
+    return auto_train_val(
+        project, task, data, transforms, staged_layout(project, data_cfg)
+    )
 
 
 def dataset_over(task: str, images_dir, ground_truth=None, **kwargs: Any):
@@ -293,4 +438,6 @@ def fake_popen(monkeypatch, captured: list[list[str]]) -> None:
 
     monkeypatch.setattr(subprocess, "Popen", _popen)
     monkeypatch.setattr(
-        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", lambda *a, **k: {})
+        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard",
+        lambda *a, **k: {},
+    )

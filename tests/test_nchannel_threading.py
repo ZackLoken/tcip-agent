@@ -17,25 +17,34 @@ def test_backbone_accepts_in_chans():
 
     from tcip_mcp.pipelines.components.backbones import BackboneWrapper
 
-    _m = timm.create_model("resnet50", pretrained=False, features_only=True,
-                           out_indices=(1, 2, 3, 4), in_chans=4)
+    _m = timm.create_model(
+        "resnet50",
+        pretrained=False,
+        features_only=True,
+        out_indices=(1, 2, 3, 4),
+        in_chans=4,
+    )
     bb = BackboneWrapper(_m, _m.feature_info.channels())
     out = bb(torch.rand(1, 4, 64, 64))
-    assert isinstance(out, dict) and len(out) == 4           # 4 feature stages
+    assert isinstance(out, dict) and len(out) == 4  # 4 feature stages
     assert bb.out_channels == [256, 512, 1024, 2048]
 
 
 def test_compose_and_forward_4_channel_model():
     from tests import bespoke_models
+
     model = bespoke_models.build_bespoke_classifier(num_classes=3, in_chans=4)
     out = model(torch.rand(2, 4, 64, 64))
-    assert isinstance(out, dict) and len(out) > 0            # forward runs on 4 channels
+    assert isinstance(out, dict) and len(out) > 0  # forward runs on 4 channels
 
 
 def test_train_start_channel_guard():
     """A loader handing the model a batch at a width other than the run's recorded one (a bespoke
     dataset composing its own bands) refuses at the first batch; a matching one trains."""
-    from tcip_mcp.pipelines.training.generic_trainer import _validate_input_channels
+    from tcip_mcp.pipelines.training.generic_trainer import (
+        _validate_input_channels,
+    )
+
     with pytest.raises(ValueError, match="channels"):
         _validate_input_channels(4, [(torch.rand(2, 3, 16, 16), {})])
     # matching channel counts -> no error
@@ -50,8 +59,13 @@ def _nchan_adapter(in_chans: int):
     from tcip_mcp.pipelines.components.detectors import BackboneNeckAdapter
     from tcip_mcp.pipelines.components.necks import FPN
 
-    m = timm.create_model("resnet18", pretrained=False, features_only=True,
-                          out_indices=(1, 2, 3, 4), in_chans=in_chans)
+    m = timm.create_model(
+        "resnet18",
+        pretrained=False,
+        features_only=True,
+        out_indices=(1, 2, 3, 4),
+        in_chans=in_chans,
+    )
     bb = BackboneWrapper(m, m.feature_info.channels())
     return BackboneNeckAdapter(bb, FPN(bb.out_channels, 64))
 
@@ -63,15 +77,26 @@ def test_n_channel_detector_builds_and_trains():
 
     adapter = _nchan_adapter(5)
     names = list(adapter(torch.zeros(1, 5, 64, 64)).keys())
-    det = build_detector("faster_rcnn", adapter, num_classes=1, featmap_names=names,
-                         num_levels=len(names), image_mean=[0.4] * 5, image_std=[0.2] * 5)
+    det = build_detector(
+        "faster_rcnn",
+        adapter,
+        num_classes=1,
+        featmap_names=names,
+        num_levels=len(names),
+        image_mean=[0.4] * 5,
+        image_std=[0.2] * 5,
+    )
     assert det.transform.image_mean == [0.4] * 5
 
     det.train()
     losses = det(
         [torch.rand(5, 96, 96)],
-        [{"boxes": torch.tensor([[8.0, 8.0, 48.0, 48.0]]),
-          "labels": torch.ones(1, dtype=torch.long)}],
+        [
+            {
+                "boxes": torch.tensor([[8.0, 8.0, 48.0, 48.0]]),
+                "labels": torch.ones(1, dtype=torch.long),
+            }
+        ],
     )
     assert losses and all(torch.isfinite(v) for v in losses.values())
 
@@ -82,9 +107,16 @@ def test_n_channel_detector_without_stats_is_refused_by_default():
 
     adapter = _nchan_adapter(5)
     names = list(adapter(torch.zeros(1, 5, 64, 64)).keys())
-    with pytest.raises(ValueError, match="needs per-band image_mean and image_std of length 5"):
-        build_detector("faster_rcnn", adapter, num_classes=1, featmap_names=names,
-                       num_levels=len(names))
+    with pytest.raises(
+        ValueError, match="needs per-band image_mean and image_std of length 5"
+    ):
+        build_detector(
+            "faster_rcnn",
+            adapter,
+            num_classes=1,
+            featmap_names=names,
+            num_levels=len(names),
+        )
 
 
 def test_normalization_length_and_channel_count_are_validated():
@@ -94,8 +126,14 @@ def test_normalization_length_and_channel_count_are_validated():
     names = list(adapter(torch.zeros(1, 5, 64, 64)).keys())
     common = {"featmap_names": names, "num_levels": len(names)}
     with pytest.raises(ValueError, match="both must be 5"):
-        build_detector("faster_rcnn", adapter, num_classes=1, **common,
-                       image_mean=[0.4] * 3, image_std=[0.2] * 3)
+        build_detector(
+            "faster_rcnn",
+            adapter,
+            num_classes=1,
+            **common,
+            image_mean=[0.4] * 3,
+            image_std=[0.2] * 3,
+        )
 
 
 def test_explicit_in_chans_wins_over_the_registration_order_probe():
@@ -114,26 +152,41 @@ def test_explicit_in_chans_wins_over_the_registration_order_probe():
     class NeckFirstAdapter(nn.Module):
         def __init__(self, backbone, neck):
             super().__init__()
-            self.neck = neck          # registered first: the probe sees this conv
+            self.neck = neck  # registered first: the probe sees this conv
             self.backbone = backbone
-            self.out_channels = neck.out_channels if isinstance(neck.out_channels, int) \
+            self.out_channels = (
+                neck.out_channels
+                if isinstance(neck.out_channels, int)
                 else neck.out_channels[-1]
+            )
 
         def forward(self, x):
             from collections import OrderedDict
+
             return OrderedDict(sorted(self.neck(self.backbone(x)).items()))
 
     import timm
 
-    m = timm.create_model("resnet18", pretrained=False, features_only=True,
-                          out_indices=(1, 2, 3, 4), in_chans=3)
+    m = timm.create_model(
+        "resnet18",
+        pretrained=False,
+        features_only=True,
+        out_indices=(1, 2, 3, 4),
+        in_chans=3,
+    )
     bb = BackboneWrapper(m, m.feature_info.channels())
     adapter = NeckFirstAdapter(bb, FPN(bb.out_channels, 64))
     names = list(adapter(torch.zeros(1, 3, 64, 64)).keys())
 
     # A plain RGB build must succeed even though the probe reports the neck's width.
-    det = build_detector("faster_rcnn", adapter, num_classes=1, featmap_names=names,
-                         num_levels=len(names), in_chans=3)
+    det = build_detector(
+        "faster_rcnn",
+        adapter,
+        num_classes=1,
+        featmap_names=names,
+        num_levels=len(names),
+        in_chans=3,
+    )
     assert det.transform.image_mean == [0.485, 0.456, 0.406]
 
 
@@ -143,8 +196,13 @@ def test_three_channel_detector_still_uses_torchvision_defaults():
 
     adapter = _nchan_adapter(3)
     names = list(adapter(torch.zeros(1, 3, 64, 64)).keys())
-    det = build_detector("faster_rcnn", adapter, num_classes=1, featmap_names=names,
-                         num_levels=len(names))
+    det = build_detector(
+        "faster_rcnn",
+        adapter,
+        num_classes=1,
+        featmap_names=names,
+        num_levels=len(names),
+    )
     assert det.transform.image_mean == [0.485, 0.456, 0.406]
 
 
@@ -154,16 +212,32 @@ def test_torchvision_constructor_kwargs_forward_but_typos_raise():
     adapter = _nchan_adapter(3)
     names = list(adapter(torch.zeros(1, 3, 64, 64)).keys())
     common = {"featmap_names": names, "num_levels": len(names)}
-    det = build_detector("faster_rcnn", adapter, num_classes=1, **common, box_nms_thresh=0.42)
+    det = build_detector(
+        "faster_rcnn", adapter, num_classes=1, **common, box_nms_thresh=0.42
+    )
     assert det.roi_heads.nms_thresh == 0.42
     with pytest.raises(TypeError, match="box_nms_threshh"):
-        build_detector("faster_rcnn", adapter, num_classes=1, **common, box_nms_threshh=0.42)
+        build_detector(
+            "faster_rcnn",
+            adapter,
+            num_classes=1,
+            **common,
+            box_nms_threshh=0.42,
+        )
 
 
-@pytest.mark.parametrize("dtype,scale", [
-    ("uint8", 255), ("uint16", 65535), ("float32_unit", 1), ("float32_large", 4000),
-])
-def test_band_normalization_stats_matches_the_tensors_the_model_is_fed(tmp_path, dtype, scale):
+@pytest.mark.parametrize(
+    "dtype,scale",
+    [
+        ("uint8", 255),
+        ("uint16", 65535),
+        ("float32_unit", 1),
+        ("float32_large", 4000),
+    ],
+)
+def test_band_normalization_stats_matches_the_tensors_the_model_is_fed(
+    tmp_path, dtype, scale
+):
     """The statistic must be of the tensor the loader yields, not of a scale re-derived here.
 
     `pil_to_tensor` decides [0,1] scaling from dtype. A derivation that decides from pixel values
@@ -187,11 +261,19 @@ def test_band_normalization_stats_matches_the_tensors_the_model_is_fed(tmp_path,
 
     mean, std, paths_read = band_normalization_stats(paths, 5)
     assert sorted(paths_read) == sorted(str(p) for p in paths)
-    actual = torch.stack([pil_to_tensor(load_image(p, 5)) for p in paths])  # [N, C, H, W]
+    actual = torch.stack(
+        [pil_to_tensor(load_image(p, 5)) for p in paths]
+    )  # [N, C, H, W]
     expected_mean = actual.permute(1, 0, 2, 3).reshape(5, -1).mean(dim=1)
-    expected_std = actual.permute(1, 0, 2, 3).reshape(5, -1).std(dim=1, unbiased=False)
-    assert torch.allclose(torch.tensor(mean, dtype=torch.float32), expected_mean, atol=1e-4)
-    assert torch.allclose(torch.tensor(std, dtype=torch.float32), expected_std, atol=1e-4)
+    expected_std = (
+        actual.permute(1, 0, 2, 3).reshape(5, -1).std(dim=1, unbiased=False)
+    )
+    assert torch.allclose(
+        torch.tensor(mean, dtype=torch.float32), expected_mean, atol=1e-4
+    )
+    assert torch.allclose(
+        torch.tensor(std, dtype=torch.float32), expected_std, atol=1e-4
+    )
 
 
 def test_band_normalization_stats_admits_underivable(tmp_path):
@@ -207,12 +289,16 @@ def _strip_tiff_raster(path, *, height=24, width=20, channels=4):
     import numpy as np
     import tifffile
 
-    arr = np.random.default_rng(5).integers(0, 255, size=(height, width, channels), dtype=np.uint8)
+    arr = np.random.default_rng(5).integers(
+        0, 255, size=(height, width, channels), dtype=np.uint8
+    )
     tifffile.imwrite(str(path), arr, rowsperstrip=6)
     return arr
 
 
-def test_sampled_band_normalization_stats_over_full_coverage_match_the_exact_sibling(tmp_path):
+def test_sampled_band_normalization_stats_over_full_coverage_match_the_exact_sibling(
+    tmp_path,
+):
     """Reading every window of the grid is reading every pixel, so the sampled sibling lands on the
     exact sibling's own numbers: the two differ in which pixels they read, never in the arithmetic
     or the [0, 1] unit system they read them into.
@@ -227,14 +313,17 @@ def test_sampled_band_normalization_stats_over_full_coverage_match_the_exact_sib
 
     exact = band_normalization_stats([path], arr.shape[-1])
     sampled = band_normalization_stats_sampled(
-        [path], arr.shape[-1], seed=1, window_size=8, max_windows_per_image=999)
+        [path], arr.shape[-1], seed=1, window_size=8, max_windows_per_image=999
+    )
     assert exact is not None and sampled is not None
     assert sampled.sampling.pixel_fraction == 1.0
     assert sampled.mean == pytest.approx(exact[0], rel=1e-12, abs=1e-12)
     assert sampled.std == pytest.approx(exact[1], rel=1e-12, abs=1e-12)
 
 
-def test_sampled_band_normalization_stats_records_the_windows_it_read(tmp_path):
+def test_sampled_band_normalization_stats_records_the_windows_it_read(
+    tmp_path,
+):
     from tcip_mcp.pipelines.derivations import band_normalization_stats_sampled
 
     path = tmp_path / "mosaic.tif"
@@ -247,7 +336,8 @@ def test_sampled_band_normalization_stats_records_the_windows_it_read(tmp_path):
     assert {label for label, _ in sampled.sampling.windows} == {str(path)}
     covered = sum(r.width * r.height for _, r in sampled.sampling.windows)
     assert sampled.sampling.pixel_fraction == pytest.approx(
-        covered / (arr.shape[0] * arr.shape[1]))
+        covered / (arr.shape[0] * arr.shape[1])
+    )
     assert sampled.sampling.seed == 4
 
     repeat = band_normalization_stats_sampled([path], arr.shape[-1], **kwargs)
@@ -257,8 +347,16 @@ def test_sampled_band_normalization_stats_records_the_windows_it_read(tmp_path):
 def test_sampled_band_normalization_stats_admit_underivable(tmp_path):
     from tcip_mcp.pipelines.derivations import band_normalization_stats_sampled
 
-    assert band_normalization_stats_sampled(
-        [tmp_path / "missing.npy"], 5, seed=1, window_size=8, max_windows_per_image=2) is None
+    assert (
+        band_normalization_stats_sampled(
+            [tmp_path / "missing.npy"],
+            5,
+            seed=1,
+            window_size=8,
+            max_windows_per_image=2,
+        )
+        is None
+    )
 
 
 def test_build_dataset_sets_expected_channels(tmp_path):
@@ -271,33 +369,49 @@ def test_build_dataset_sets_expected_channels(tmp_path):
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True)
     Image.new("RGB", (16, 16)).save(images_dir / "a.png")
-    label_image(images_dir / "a.png",
-                [Annotation(subject="bud", geometry=BBox(6.4, 6.4, 9.6, 9.6))], 16, 16)
+    label_image(
+        images_dir / "a.png",
+        [Annotation(subject="bud", geometry=BBox(6.4, 6.4, 9.6, 9.6))],
+        16,
+        16,
+    )
 
-    ds = dataset_over("detection", str(images_dir), subject="bud", stated={"num_channels": 4})
+    ds = dataset_over(
+        "detection", str(images_dir), subject="bud", stated={"num_channels": 4}
+    )
     assert ds.expected_channels == 4
 
 
-def _classification_data(tmp_path, *, num_channels: int | None) -> tuple[dict, str]:
+def _classification_data(
+    tmp_path, *, num_channels: int | None
+) -> tuple[dict, str]:
     """Four three-band sources under ``tmp_path`` and their label table, as a run's data section
     states them, with ``data.num_channels`` stated when given: the section and one source."""
     import csv
 
     from PIL import Image
 
-    images_dir, csv_path = tmp_path / "images" / UNDATED_BUCKET, tmp_path / "labels.csv"
+    images_dir, csv_path = (
+        tmp_path / "images" / UNDATED_BUCKET,
+        tmp_path / "labels.csv",
+    )
     images_dir.mkdir(parents=True)
     rows = []
     for index in range(4):
-        Image.new("RGB", (32, 32), (40 * index, 90, 120)).save(images_dir / f"img{index}.png")
+        Image.new("RGB", (32, 32), (40 * index, 90, 120)).save(
+            images_dir / f"img{index}.png"
+        )
         rows.append((f"img{index}", index % 2))
     with open(csv_path, "w", newline="") as handle:
         writer = csv.writer(handle)
         writer.writerow(("stem", "label"))
         writer.writerows(rows)
 
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(csv_path),
-                "split": {"group_by": "stem", "val_ratio": 0.5, "seed": 1}}
+    data_cfg = {
+        "images_dir": str(images_dir),
+        "labels_dir": str(csv_path),
+        "split": {"group_by": "stem", "val_ratio": 0.5, "seed": 1},
+    }
     if num_channels is not None:
         data_cfg["num_channels"] = num_channels
     return data_cfg, str(images_dir / "img0.png")
@@ -312,8 +426,12 @@ def _classification_run(tmp_path, *, num_channels: int | None):
 
     data_cfg, image = _classification_data(tmp_path, num_channels=num_channels)
     train_ds, _val_ds, _partition, resolved = auto_train_val(
-        tmp_path, "classification", DataSpec.model_validate(data_cfg), None,
-        staged_layout(tmp_path, {}))
+        tmp_path,
+        "classification",
+        DataSpec.model_validate(data_cfg),
+        None,
+        staged_layout(tmp_path, {}),
+    )
     return resolved.record(), train_ds, image
 
 
@@ -323,41 +441,57 @@ def test_a_checkpoint_reads_images_at_the_width_its_run_recorded(tmp_path):
     channel over three-band sources rather than assuming RGB."""
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.execution import Stated, prepare
-    from tcip_mcp.pipelines.model_build import recorded_model_dims, resolve_contract_dims
+    from tcip_mcp.pipelines.model_build import (
+        recorded_model_dims,
+        resolve_contract_dims,
+    )
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     data_cfg, image = _classification_data(tmp_path, num_channels=1)
-    checkpoint = load_registered_checkpoint(registered_checkpoint(
-        tmp_path, model_source=CLASSIFIER_SOURCE,
-        data=data_cfg), project=tmp_path)
+    checkpoint = load_registered_checkpoint(
+        registered_checkpoint(
+            tmp_path, model_source=CLASSIFIER_SOURCE, data=data_cfg
+        ),
+        project=tmp_path,
+    )
     # The run recorded both: the width it read at and the count its own table carried.
     dims = recorded_model_dims(checkpoint.spec)
     assert dims == {"in_chans": 1, "num_classes": 2}
     assert resolve_contract_dims(checkpoint.spec, dims) == {
-        "in_chans": 1, "num_classes": 2, "img_size": (32, 32)}  # the frame its sources share
+        "in_chans": 1,
+        "num_classes": 2,
+        "img_size": (32, 32),
+    }  # the frame its sources share
 
     p = prepare(checkpoint, Stated(tile=False), device="cpu").runnable()
 
     assert p.predictor.in_chans == 1
-    assert p.predict([image])[0]  # the three-band source reads at the recorded one channel
+    assert p.predict([image])[
+        0
+    ]  # the three-band source reads at the recorded one channel
 
 
-def test_a_run_that_states_no_width_records_the_one_its_sources_carry(tmp_path):
+def test_a_run_that_states_no_width_records_the_one_its_sources_carry(
+    tmp_path,
+):
     """Admits valid work: a run that states nothing records the width its own sources carry, and
     a checkpoint of that run reads at it."""
-    data_cfg, train_ds, _image = _classification_run(tmp_path, num_channels=None)
+    data_cfg, train_ds, _image = _classification_run(
+        tmp_path, num_channels=None
+    )
 
     assert data_cfg["num_channels"] == train_ds.expected_channels == 3
 
     from tcip_mcp.pipelines.model_build import recorded_model_dims
     from tcip_mcp.pipelines.schemas import train_config
 
-    spec = train_config(training_config(
-        CLASSIFIER_SOURCE, data_cfg))
+    spec = train_config(training_config(CLASSIFIER_SOURCE, data_cfg))
     assert recorded_model_dims(spec)["in_chans"] == 3
 
 
-def test_a_source_whose_band_count_cannot_be_read_refuses_rather_than_defaulting(tmp_path):
+def test_a_source_whose_band_count_cannot_be_read_refuses_rather_than_defaulting(
+    tmp_path,
+):
     """A run's input channels are derived from its own sources, so a probe that fails refuses by
     name: a confidently-wrong count sizes the model wrong for every image the run reads."""
     import pytest
@@ -371,8 +505,12 @@ def test_a_source_whose_band_count_cannot_be_read_refuses_rather_than_defaulting
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True)
     Image.new("RGB", (16, 16)).save(images_dir / "a.png")
-    label_image(images_dir / "a.png",
-                [Annotation(subject="bud", geometry=BBox(6.4, 6.4, 9.6, 9.6))], 16, 16)
+    label_image(
+        images_dir / "a.png",
+        [Annotation(subject="bud", geometry=BBox(6.4, 6.4, 9.6, 9.6))],
+        16,
+        16,
+    )
     (images_dir / "a.png").write_bytes(b"not an image")
 
     with pytest.raises(ValueError, match="band count"):

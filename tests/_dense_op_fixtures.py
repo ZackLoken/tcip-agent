@@ -53,10 +53,14 @@ def dense_records(
     a clean fixture into an fp+fn pair. The default (0.0) applies no shift at all; only a caller
     that passes a nonzero value takes on that constraint.
     """
-    miss_pattern = list(miss_pattern) if miss_pattern is not None else [0] * n_images
+    miss_pattern = (
+        list(miss_pattern) if miss_pattern is not None else [0] * n_images
+    )
     fp_pattern = list(fp_pattern) if fp_pattern is not None else [0] * n_images
     if len(miss_pattern) != n_images or len(fp_pattern) != n_images:
-        raise ValueError("miss_pattern/fp_pattern must have exactly n_images entries")
+        raise ValueError(
+            "miss_pattern/fp_pattern must have exactly n_images entries"
+        )
     fp_score = score if fp_score is None else fp_score
 
     cols = int(objects_per_image**0.5) + 2
@@ -69,24 +73,46 @@ def dense_records(
             row, col = divmod(k, cols)
             cx, cy = 50.0 + col * spacing, 50.0 + row * spacing
             # only GT shifts, not the det
-            gt.append({"category_id": 0, "bbox": _box(cx + shift, cy), "iscrowd": 0})
+            gt.append(
+                {"category_id": 0, "bbox": _box(cx + shift, cy), "iscrowd": 0}
+            )
             if k < miss_pattern[i]:
                 continue
             dt.append({"category_id": 0, "bbox": _box(cx, cy), "score": score})
         for j in range(fp_pattern[i]):
             fx, fy = 50.0 + j * spacing, 50.0 + (far_row + i) * spacing
-            dt.append({"category_id": 0, "bbox": _box(fx, fy), "score": fp_score})
-        records.append({"width": width, "height": height, "image_id": f"{id_prefix}_{i}",
-                        "gt": gt, "dt": dt, "count": len(dt), "cap": len(dt) + 1})
+            dt.append(
+                {"category_id": 0, "bbox": _box(fx, fy), "score": fp_score}
+            )
+        records.append(
+            {
+                "width": width,
+                "height": height,
+                "image_id": f"{id_prefix}_{i}",
+                "gt": gt,
+                "dt": dt,
+                "count": len(dt),
+                "cap": len(dt) + 1,
+            }
+        )
     return records
 
 
 def gt_only(boxes: list[tuple[float, float, float, float]]) -> list[dict]:
     """One record holding ``boxes`` as ground truth and nothing else."""
-    return [{"gt": [{"bbox": list(b), "category_id": 0, "iscrowd": 0} for b in boxes]}]
+    return [
+        {
+            "gt": [
+                {"bbox": list(b), "category_id": 0, "iscrowd": 0}
+                for b in boxes
+            ]
+        }
+    ]
 
 
-def ann(cx: float, cy: float, cid: int = 0, score: float | None = None) -> dict:
+def ann(
+    cx: float, cy: float, cid: int = 0, score: float | None = None
+) -> dict:
     """A 20px square annotation of category ``cid`` centered at (``cx``, ``cy``), scored when
     ``score`` is given."""
     a = {"category_id": cid, "bbox": _box(cx, cy), "iscrowd": 0}
@@ -100,12 +126,24 @@ def toy_records(id_prefix: str = "c", *, shift: float = 0.0) -> list[dict]:
     GT, a correct detection at 0.9 and a spurious far one at 0.6; image B has two GT, correct
     detections at 0.9 and 0.3. ``shift`` offsets every GT center by that many px, inside the
     center-match tolerance, leaving the detections in place."""
-    a = {"width": 400, "height": 400, "image_id": f"{id_prefix}_a",
-         "gt": [ann(100 + shift, 100)],
-         "dt": [ann(100, 100, score=0.9), ann(300, 300, score=0.6)], "count": 2, "cap": 3}
-    b = {"width": 400, "height": 400, "image_id": f"{id_prefix}_b",
-         "gt": [ann(100 + shift, 100), ann(200 + shift, 200)],
-         "dt": [ann(100, 100, score=0.9), ann(200, 200, score=0.3)], "count": 2, "cap": 3}
+    a = {
+        "width": 400,
+        "height": 400,
+        "image_id": f"{id_prefix}_a",
+        "gt": [ann(100 + shift, 100)],
+        "dt": [ann(100, 100, score=0.9), ann(300, 300, score=0.6)],
+        "count": 2,
+        "cap": 3,
+    }
+    b = {
+        "width": 400,
+        "height": 400,
+        "image_id": f"{id_prefix}_b",
+        "gt": [ann(100 + shift, 100), ann(200 + shift, 200)],
+        "dt": [ann(100, 100, score=0.9), ann(200, 200, score=0.3)],
+        "count": 2,
+        "cap": 3,
+    }
     return [a, b]
 
 
@@ -114,14 +152,31 @@ def shifted_cal_holdout() -> tuple[list[dict], list[dict]]:
     with one low-conf spurious detection per image, whose count-unbiased pick lands at 0.9."""
     n_images, objects_per_image = 20, 80
     miss, fp = [0] * n_images, [1] * n_images
-    cal = dense_records(n_images=n_images, objects_per_image=objects_per_image, id_prefix="c",
-                        miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05)
-    hold = dense_records(n_images=n_images, objects_per_image=objects_per_image, id_prefix="h",
-                         shift=5.0, miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=0.05)
+    cal = dense_records(
+        n_images=n_images,
+        objects_per_image=objects_per_image,
+        id_prefix="c",
+        miss_pattern=miss,
+        fp_pattern=fp,
+        score=0.9,
+        fp_score=0.05,
+    )
+    hold = dense_records(
+        n_images=n_images,
+        objects_per_image=objects_per_image,
+        id_prefix="h",
+        shift=5.0,
+        miss_pattern=miss,
+        fp_pattern=fp,
+        score=0.9,
+        fp_score=0.05,
+    )
     return cal, hold
 
 
-def good_cal_holdout(*, fp_score: float = 0.05) -> tuple[list[dict], list[dict]]:
+def good_cal_holdout(
+    *, fp_score: float = 0.05
+) -> tuple[list[dict], list[dict]]:
     """A dense calibration/holdout pair: a good detector with one spurious detection per image at
     ``fp_score``, whose count-unbiased pick lands at 0.9 with zero bias on the holdout. The holdout
     lies on its own grid (fewer objects, wider spacing), so no record's content matches
@@ -130,13 +185,29 @@ def good_cal_holdout(*, fp_score: float = 0.05) -> tuple[list[dict], list[dict]]
     objects_per_image = 80
     miss = [0] * n_images
     fp = [1] * n_images
-    cal = dense_records(n_images=n_images, objects_per_image=objects_per_image, id_prefix="c",
-                        miss_pattern=miss, fp_pattern=fp, score=0.9, fp_score=fp_score)
+    cal = dense_records(
+        n_images=n_images,
+        objects_per_image=objects_per_image,
+        id_prefix="c",
+        miss_pattern=miss,
+        fp_pattern=fp,
+        score=0.9,
+        fp_score=fp_score,
+    )
     # 10% fewer objects than calibration's grid, so its geometry hash differs from calibration's.
     hold_objects_per_image = objects_per_image - objects_per_image // 10
     # 5px more spacing than dense_records' own default, which calibration uses unmodified.
-    hold_spacing = inspect.signature(dense_records).parameters["spacing"].default + 5.0
-    hold = dense_records(n_images=n_images, objects_per_image=hold_objects_per_image, id_prefix="h",
-                         spacing=hold_spacing, miss_pattern=miss, fp_pattern=fp, score=0.9,
-                         fp_score=fp_score)
+    hold_spacing = (
+        inspect.signature(dense_records).parameters["spacing"].default + 5.0
+    )
+    hold = dense_records(
+        n_images=n_images,
+        objects_per_image=hold_objects_per_image,
+        id_prefix="h",
+        spacing=hold_spacing,
+        miss_pattern=miss,
+        fp_pattern=fp,
+        score=0.9,
+        fp_score=fp_score,
+    )
     return cal, hold

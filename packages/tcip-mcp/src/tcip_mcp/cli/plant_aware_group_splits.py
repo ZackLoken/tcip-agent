@@ -53,14 +53,18 @@ def derive_plant_group_key_map(
     have been checked.
     """
     from tcip_mcp.pipelines.raster_source import SourceHeader
-    from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import OrthomosaicGeoreference
+    from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
+        OrthomosaicGeoreference,
+    )
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         nearest_plant,
         resolve_nn_tolerance_m,
     )
 
     if not plants:
-        raise ValueError("no plant records to match against (the plant CSV(s) parsed to zero rows)")
+        raise ValueError(
+            "no plant records to match against (the plant CSV(s) parsed to zero rows)"
+        )
 
     tolerance_m = resolve_nn_tolerance_m(plants, nn_tolerance_m)["value"]
 
@@ -73,11 +77,15 @@ def derive_plant_group_key_map(
             georef = OrthomosaicGeoreference.of(header.georeference)
             width, height = header.display_frame
             lat, lon = georef.pixel_to_wgs84(width / 2.0, height / 2.0)
-        except ValueError as exc:  # the header's read refusal or its georeference refusal
+        except (
+            ValueError
+        ) as exc:  # the header's read refusal or its georeference refusal
             failures.append(f"{stem} ({path}): could not georeference - {exc}")
             continue
 
-        index, distance_m = nearest_plant((lat, lon), plants, within_m=tolerance_m)
+        index, distance_m = nearest_plant(
+            (lat, lon), plants, within_m=tolerance_m
+        )
         if index is None:
             failures.append(
                 f"{stem} ({path}): nearest plant is {distance_m:.1f}m away, outside tolerance "
@@ -86,14 +94,18 @@ def derive_plant_group_key_map(
             continue
         plant = plants[index]
         if not plant.plot_name:
-            failures.append(f"{stem} ({path}): the matched plant record has no plot_name")
+            failures.append(
+                f"{stem} ({path}): the matched plant record has no plot_name"
+            )
             continue
 
         group_key_map[stem] = plant.plot_name
 
     if failures:
         preview = "\n  ".join(failures[:20])
-        more = f"\n  (+{len(failures) - 20} more)" if len(failures) > 20 else ""
+        more = (
+            f"\n  (+{len(failures) - 20} more)" if len(failures) > 20 else ""
+        )
         raise ValueError(
             f"{len(failures)} of {len(stem_to_raster)} stem(s) could not be resolved to a "
             f"plant/plot group key:\n  {preview}{more}"
@@ -103,28 +115,64 @@ def derive_plant_group_key_map(
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, prog=prog)
-    parser.add_argument("dataset_root", help="Dataset root (canonical images/ layout).")
-    parser.add_argument("--project", required=True,
-                        help="The project the draw acts on and records its audit line under.")
-    parser.add_argument("--plant-csv", action="append", required=True, dest="plant_csv_paths",
-                         help="Plant-locations CSV (read_plant_csvs schema); repeatable.")
-    parser.add_argument("--val-ratio", type=float, default=DEFAULT_SHARES["val"],
-                         help="Fraction for the validation side; train takes the remainder.")
-    parser.add_argument("--calibration-ratio", type=float, default=DEFAULT_SHARES["calibration"],
-                         help="Fraction an assessment fits its operating point on.")
-    parser.add_argument("--holdout-ratio", type=float, default=DEFAULT_SHARES["holdout"],
-                         help="Fraction an assessment checks its operating point against. A side "
-                              "whose ratio is zero is not drawn.")
-    parser.add_argument("--seed", type=int, required=True,
-                         help="The seed the draw is reproduced by. No default.")
-    parser.add_argument("--tolerance-m", type=float, default=None,
-                         help="Max GPS distance (m) to the nearest plant. Unstated, it derives "
-                              "from the plant grid (plant_mapping.resolve_nn_tolerance_m).")
-    parser.add_argument("--output-path", default=None,
-                         help="Where draw_splits writes the selection.")
-    parser.add_argument("--subject", required=True,
-                         help="The object class draw_splits draws its members for and the "
-                              "confirmed negatives are keyed under.")
+    parser.add_argument(
+        "dataset_root", help="Dataset root (canonical images/ layout)."
+    )
+    parser.add_argument(
+        "--project",
+        required=True,
+        help="The project the draw acts on and records its audit line under.",
+    )
+    parser.add_argument(
+        "--plant-csv",
+        action="append",
+        required=True,
+        dest="plant_csv_paths",
+        help="Plant-locations CSV (read_plant_csvs schema); repeatable.",
+    )
+    parser.add_argument(
+        "--val-ratio",
+        type=float,
+        default=DEFAULT_SHARES["val"],
+        help="Fraction for the validation side; train takes the remainder.",
+    )
+    parser.add_argument(
+        "--calibration-ratio",
+        type=float,
+        default=DEFAULT_SHARES["calibration"],
+        help="Fraction an assessment fits its operating point on.",
+    )
+    parser.add_argument(
+        "--holdout-ratio",
+        type=float,
+        default=DEFAULT_SHARES["holdout"],
+        help="Fraction an assessment checks its operating point against. A side "
+        "whose ratio is zero is not drawn.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        required=True,
+        help="The seed the draw is reproduced by. No default.",
+    )
+    parser.add_argument(
+        "--tolerance-m",
+        type=float,
+        default=None,
+        help="Max GPS distance (m) to the nearest plant. Unstated, it derives "
+        "from the plant grid (plant_mapping.resolve_nn_tolerance_m).",
+    )
+    parser.add_argument(
+        "--output-path",
+        default=None,
+        help="Where draw_splits writes the selection.",
+    )
+    parser.add_argument(
+        "--subject",
+        required=True,
+        help="The object class draw_splits draws its members for and the "
+        "confirmed negatives are keyed under.",
+    )
     args = parser.parse_args(argv)
 
     from tcip_mcp.cli import bound_project
@@ -144,34 +192,54 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
         _root, date, stem = parse_image_path(p)
         stem_to_raster[member_identity(date, stem)] = Path(p)
     if not stem_to_raster:
-        print(f"error: no images found under {args.dataset_root}", file=sys.stderr)
+        print(
+            f"error: no images found under {args.dataset_root}",
+            file=sys.stderr,
+        )
         return 1
 
     plants = read_plant_csvs(located(p, project) for p in args.plant_csv_paths)
     if not plants:
-        print(f"error: {args.plant_csv_paths} parsed to zero plant records", file=sys.stderr)
+        print(
+            f"error: {args.plant_csv_paths} parsed to zero plant records",
+            file=sys.stderr,
+        )
         return 1
 
     try:
         group_key_map = derive_plant_group_key_map(
-            stem_to_raster, plants, nn_tolerance_m=args.tolerance_m,
+            stem_to_raster,
+            plants,
+            nn_tolerance_m=args.tolerance_m,
         )
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
     n_groups = len(set(group_key_map.values()))
-    print(f"Resolved {len(group_key_map)} stem(s) to {n_groups} plant/plot group(s).")
+    print(
+        f"Resolved {len(group_key_map)} stem(s) to {n_groups} plant/plot group(s)."
+    )
 
     result = draw_splits_at(
-        project, dataset_root, seed=args.seed, val_ratio=args.val_ratio,
-        calibration_ratio=args.calibration_ratio, holdout_ratio=args.holdout_ratio,
-        group_by=DEFAULT_GROUP_BY, group_key_map=group_key_map, stratify_foreground=True,
-        output_path=args.output_path and str(located(args.output_path, project)),
-        subject=args.subject, ground_truth=None,
+        project,
+        dataset_root,
+        seed=args.seed,
+        val_ratio=args.val_ratio,
+        calibration_ratio=args.calibration_ratio,
+        holdout_ratio=args.holdout_ratio,
+        group_by=DEFAULT_GROUP_BY,
+        group_key_map=group_key_map,
+        stratify_foreground=True,
+        output_path=args.output_path
+        and str(located(args.output_path, project)),
+        subject=args.subject,
+        ground_truth=None,
     )
     if "error" in result:
-        print(f"error: draw_splits refused: {result['error']}", file=sys.stderr)
+        print(
+            f"error: draw_splits refused: {result['error']}", file=sys.stderr
+        )
         return 1
 
     print(json.dumps(result, indent=2))

@@ -23,21 +23,32 @@ def _config(**keys) -> dict:
     from tests._verified_checkpoint_fixtures import unbuilt_source
 
     source = unbuilt_source("detection")
-    return training_config({**source, "source_files": [*source["source_files"], __file__]}, {},
-                           **keys)
+    return training_config(
+        {**source, "source_files": [*source["source_files"], __file__]},
+        {},
+        **keys,
+    )
 
 
 # ── persist the training run's class space ───────────────────────────
 
 
-def _write_classes_json(dataset_root, subject="bud", attribute=None, values=None):
+def _write_classes_json(
+    dataset_root, subject="bud", attribute=None, values=None
+):
     from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject
     from tests._producer_fixtures import registry_over
 
     attrs = ()
     if attribute:
-        attrs = (Attribute(name=attribute, type="categorical", values=tuple(values)),)
-    registry_over(dataset_root, SubjectRegistry((Subject(subject, attributes=attrs),)))
+        attrs = (
+            Attribute(
+                name=attribute, type="categorical", values=tuple(values)
+            ),
+        )
+    registry_over(
+        dataset_root, SubjectRegistry((Subject(subject, attributes=attrs),))
+    )
 
 
 def _document_dataset(root, subject="bud", attribute=None, values=None):
@@ -53,13 +64,27 @@ def _document_dataset(root, subject="bud", attribute=None, values=None):
     root = Path(root)
     images_dir = root / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True)
-    _write_classes_json(root, subject=subject, attribute=attribute, values=values)
+    _write_classes_json(
+        root, subject=subject, attribute=attribute, values=values
+    )
     attrs = {attribute: values[0]} if attribute else {}
     for stem in ("a", "b"):
-        Image.new("RGB", (32, 32), (10, 20, 30)).save(images_dir / f"{stem}.png")
-        label_image(images_dir / f"{stem}.png",
-                    [Annotation(subject=subject, geometry=BBox(4, 4, 20, 20), attributes=attrs)],
-                    32, 32, keep_empty=True)
+        Image.new("RGB", (32, 32), (10, 20, 30)).save(
+            images_dir / f"{stem}.png"
+        )
+        label_image(
+            images_dir / f"{stem}.png",
+            [
+                Annotation(
+                    subject=subject,
+                    geometry=BBox(4, 4, 20, 20),
+                    attributes=attrs,
+                )
+            ],
+            32,
+            32,
+            keep_empty=True,
+        )
     return images_dir
 
 
@@ -78,32 +103,55 @@ def test_the_class_space_recorded_is_the_one_the_run_admitted(tmp_path):
     with a vocabulary it never trained in."""
     root = tmp_path / "plain"
     images_dir = _document_dataset(root, subject="bud")
-    resolved = _resolved_data(tmp_path, "detection", {
-        "images_dir": str(images_dir), "scope": {"subject": "bud"},
-        "split": {"val_ratio": 0.5, "seed": 1}})
+    resolved = _resolved_data(
+        tmp_path,
+        "detection",
+        {
+            "images_dir": str(images_dir),
+            "scope": {"subject": "bud"},
+            "split": {"val_ratio": 0.5, "seed": 1},
+        },
+    )
 
     assert resolved.recorded_scope == ClassScope("bud", ())
 
-    _write_classes_json(root, subject="bud", attribute="opening", values=["open", "closed"])
+    _write_classes_json(
+        root, subject="bud", attribute="opening", values=["open", "closed"]
+    )
     assert resolved.recorded_scope == ClassScope("bud", ())
 
 
-def test_a_run_over_an_attributed_subject_records_its_attributes_in_declared_order(tmp_path):
+def test_a_run_over_an_attributed_subject_records_its_attributes_in_declared_order(
+    tmp_path,
+):
     """A run's class space is its subject and every attribute the registry declares for it, its
     values in declared order, admitted once."""
     from tcip_mcp.subject_registry import Attribute
 
     images_dir = _document_dataset(
-        tmp_path / "scoped", subject="bud", attribute="opening", values=["closed", "open"])
-    resolved = _resolved_data(tmp_path, "detection", {
-        "images_dir": str(images_dir), "scope": {"subject": "bud"},
-        "split": {"val_ratio": 0.5, "seed": 1}})
+        tmp_path / "scoped",
+        subject="bud",
+        attribute="opening",
+        values=["closed", "open"],
+    )
+    resolved = _resolved_data(
+        tmp_path,
+        "detection",
+        {
+            "images_dir": str(images_dir),
+            "scope": {"subject": "bud"},
+            "split": {"val_ratio": 0.5, "seed": 1},
+        },
+    )
 
     assert resolved.recorded_scope == ClassScope(
-        "bud", (Attribute("opening", "categorical", ("closed", "open")),))
+        "bud", (Attribute("opening", "categorical", ("closed", "open")),)
+    )
 
 
-def test_a_run_whose_ground_truth_carries_its_own_classes_records_the_empty_scope(tmp_path):
+def test_a_run_whose_ground_truth_carries_its_own_classes_records_the_empty_scope(
+    tmp_path,
+):
     """A mask raster scopes no class space and no registry answers for one, so the empty scope is
     stamped and decode falls through to its own derivation rather than to fabricated
     attributes."""
@@ -114,24 +162,37 @@ def test_a_run_whose_ground_truth_carries_its_own_classes_records_the_empty_scop
     images_dir.mkdir(parents=True)
     masks_dir.mkdir(parents=True)
     for stem in ("a", "b"):
-        Image.new("RGB", (32, 32), (10, 20, 30)).save(images_dir / f"{stem}.png")
+        Image.new("RGB", (32, 32), (10, 20, 30)).save(
+            images_dir / f"{stem}.png"
+        )
         Image.new("L", (32, 32), 1).save(masks_dir / f"{stem}.png")
-    resolved = _resolved_data(tmp_path, "semantic_seg", {
-        "images_dir": str(images_dir), "labels_dir": str(masks_dir),
-        "split": {"val_ratio": 0.5, "seed": 1}})
+    resolved = _resolved_data(
+        tmp_path,
+        "semantic_seg",
+        {
+            "images_dir": str(images_dir),
+            "labels_dir": str(masks_dir),
+            "split": {"val_ratio": 0.5, "seed": 1},
+        },
+    )
 
     assert resolved.recorded_scope == ClassScope()
 
 
-def test_the_launch_record_carries_the_resolution_and_the_child_resolves_nothing(tmp_path,
-                                                                                 monkeypatch):
+def test_the_launch_record_carries_the_resolution_and_the_child_resolves_nothing(
+    tmp_path, monkeypatch
+):
     """The launcher resolves a run once and writes what it resolved (data section, partition,
     objective) into its launch record; the child builds its context from that record alone,
     resolving nothing again and writing nothing beside it."""
     from tcip_mcp.experiments import RUN_FILE, observe
     from tcip_mcp.pipelines.data import split_construction as sc
     from tcip_mcp.pipelines.training import subprocess_worker as worker
-    from tests._verified_checkpoint_fixtures import detection_config, opened_run, partition_side
+    from tests._verified_checkpoint_fixtures import (
+        detection_config,
+        opened_run,
+        partition_side,
+    )
 
     run_dir = opened_run(tmp_path, detection_config(tmp_path / "data"))
     launch_bytes = (run_dir / RUN_FILE).read_bytes()
@@ -150,13 +211,16 @@ def test_the_launch_record_carries_the_resolution_and_the_child_resolves_nothing
     assert ctx.run.objective == resolved["objective"]
     assert ctx.spec.data.record() == resolved["data"]
     train_ds = ctx.train_loader.dataset
-    assert sorted({train_ds.sample_of(key).member for key in train_ds.stems}) == partition_side(
-        resolved["partition"], "train")
+    assert sorted(
+        {train_ds.sample_of(key).member for key in train_ds.stems}
+    ) == partition_side(resolved["partition"], "train")
     assert (run_dir / RUN_FILE).read_bytes() == launch_bytes
     assert sorted(p.name for p in run_dir.iterdir()) == files_before
 
 
-def test_launch_training_child_receives_its_own_run_directory(tmp_path, monkeypatch):
+def test_launch_training_child_receives_its_own_run_directory(
+    tmp_path, monkeypatch
+):
     """The child is told only its run directory, whose ``run.json`` the parent wrote before
     spawning it, under the id the launch answers. Mocks subprocess.Popen to capture argv without
     spawning a real child; preflight_config's smoke check still runs for real in this process, so
@@ -166,7 +230,11 @@ def test_launch_training_child_receives_its_own_run_directory(tmp_path, monkeypa
 
     from tcip_mcp.experiments import experiment_dir, observe
     from tcip_mcp.tools import training_tools
-    from tests._producer_fixtures import fake_popen, seed_bud_images, small_detection_config
+    from tests._producer_fixtures import (
+        fake_popen,
+        seed_bud_images,
+        small_detection_config,
+    )
 
     captured_argv: list[list[str]] = []
     fake_popen(monkeypatch, captured_argv)
@@ -175,27 +243,43 @@ def test_launch_training_child_receives_its_own_run_directory(tmp_path, monkeypa
     seed_bud_images(images_dir, n=2, size=32, box=(1, 1, 9, 9))
 
     res = training_tools.launch_training(
-        tmp_path, small_detection_config(images_dir), actor=None)
+        tmp_path, small_detection_config(images_dir), actor=None
+    )
     run_dir = experiment_dir(res["experiment_id"], project=tmp_path)
     children = [argv for argv in captured_argv if "--run-dir" in argv]
-    assert children == [children[0]] and children[0][-2:] == ["--run-dir", str(run_dir)]
-    assert observe(run_dir).record["config"]["data"]["images_dir"] == str(images_dir)
+    assert children == [children[0]] and children[0][-2:] == [
+        "--run-dir",
+        str(run_dir),
+    ]
+    assert observe(run_dir).record["config"]["data"]["images_dir"] == str(
+        images_dir
+    )
 
 
 # ── should_cancel() / the cancellation record ──────────────────────
 
 
-def test_ctx_should_cancel_and_dispatch_classification_honor_the_cancellation(tmp_path):
+def test_ctx_should_cancel_and_dispatch_classification_honor_the_cancellation(
+    tmp_path,
+):
     """A bespoke train(ctx) that calls ctx.should_cancel() (the taught pattern) sees a
     cancellation requested through the run directory's own record, and dispatch_train_body
     classifies the resulting run as 'canceled', not 'completed'."""
     from tcip_mcp.experiments import request_cancel
     from tcip_mcp.pipelines.training.envelope import dispatch_train_body
-    from tests._verified_checkpoint_fixtures import SCOPED_DATA, detection_images
+    from tests._verified_checkpoint_fixtures import (
+        SCOPED_DATA,
+        detection_images,
+    )
     from tests.tiny_trainer_fixtures import run_context
 
-    data = {**detection_images(tmp_path / "ds", SCOPED_DATA["scope"]), **SCOPED_DATA}
-    ctx = run_context(tmp_path, {**_config(training_source=BESPOKE_LOOP), "data": data})
+    data = {
+        **detection_images(tmp_path / "ds", SCOPED_DATA["scope"]),
+        **SCOPED_DATA,
+    }
+    ctx = run_context(
+        tmp_path, {**_config(training_source=BESPOKE_LOOP), "data": data}
+    )
     request_cancel(ctx.run_dir)
 
     assert ctx.should_cancel() is True
@@ -209,7 +293,9 @@ def _bespoke_loop(ctx) -> None:
     ctx.should_cancel(), the exact taught pattern this test is pinning."""
     if ctx.should_cancel():
         return
-    raise AssertionError("should_cancel() did not see the requested cancellation")
+    raise AssertionError(
+        "should_cancel() did not see the requested cancellation"
+    )
 
 
 BESPOKE_LOOP = f"{Path(__file__).stem}:_bespoke_loop"
@@ -223,70 +309,109 @@ def test_run_summary_reads_the_run_directory(tmp_path):
     """A live run's summary names the objective its launch recorded and carries no best while
     no row stamps a ``selection``."""
     from tcip_mcp.experiments import observe, read_rows, run_summary
-    from tests._verified_checkpoint_fixtures import detection_config, log_epoch, opened_run
+    from tests._verified_checkpoint_fixtures import (
+        detection_config,
+        log_epoch,
+        opened_run,
+    )
 
     run_dir = opened_run(tmp_path, detection_config(tmp_path / "data"))
     log_epoch(run_dir, 3, {"loss": 0.1})
 
     observation = observe(run_dir)
-    result = run_summary(observation, read_rows(observation.metrics_log)[0], None).model_dump()
+    result = run_summary(
+        observation, read_rows(observation.metrics_log)[0], None
+    ).model_dump()
     assert result["state"] == "running"
     assert result["current_epoch"] == 3
     assert result["output_dir"] == str(run_dir)
     assert result["best_metric"] is None
-    assert result["best_metric_name"] == (
-        observation.record["resolved"]["objective"]["selection_metric"])
+    assert (
+        result["best_metric_name"]
+        == (observation.record["resolved"]["objective"]["selection_metric"])
+    )
 
 
-@pytest.mark.parametrize("higher_is_better, best", [(True, 0.7), (False, 0.5)],
-                         ids=["higher-is-better", "lower-is-better"])
+@pytest.mark.parametrize(
+    "higher_is_better, best",
+    [(True, 0.7), (False, 0.5)],
+    ids=["higher-is-better", "lower-is-better"],
+)
 def test_the_live_summary_folds_its_rows_in_the_recorded_objectives_direction(
-        tmp_path, higher_is_better, best):
+    tmp_path, higher_is_better, best
+):
     """The live summary's best is folded in the direction the run's launch record states, never
     one the summary looks up from the metric's name: the same rows give the highest under a
     higher-is-better objective and the lowest under a lower-is-better one."""
     from tcip_mcp.experiments import RUN_FILE, observe, read_rows, run_summary
     from tcip_store import decode_value, encode_record
-    from tests._verified_checkpoint_fixtures import detection_config, log_epoch, opened_run
+    from tests._verified_checkpoint_fixtures import (
+        detection_config,
+        log_epoch,
+        opened_run,
+    )
 
     run_dir = opened_run(tmp_path, detection_config(tmp_path / "data"))
     record = decode_value((run_dir / RUN_FILE).read_bytes())
-    record["resolved"]["objective"] = {"selection_metric": "map50",
-                                       "higher_is_better": higher_is_better}
+    record["resolved"]["objective"] = {
+        "selection_metric": "map50",
+        "higher_is_better": higher_is_better,
+    }
     (run_dir / RUN_FILE).write_bytes(encode_record(record))
     log_epoch(run_dir, 1, {"selection": 0.5, "selection_metric": "map50"})
     log_epoch(run_dir, 2, {"selection": 0.7, "selection_metric": "map50"})
-    log_epoch(run_dir, 3, {"selection": float("nan"), "selection_metric": "map50"})
+    log_epoch(
+        run_dir, 3, {"selection": float("nan"), "selection_metric": "map50"}
+    )
 
     observation = observe(run_dir)
-    result = run_summary(observation, read_rows(observation.metrics_log)[0], None).model_dump()
-    assert (result["best_metric_name"], result["best_metric"]) == ("map50", best)
+    result = run_summary(
+        observation, read_rows(observation.metrics_log)[0], None
+    ).model_dump()
+    assert (result["best_metric_name"], result["best_metric"]) == (
+        "map50",
+        best,
+    )
 
 
 def test_run_summary_surfaces_the_wall_clock_failure_the_child_wrote(tmp_path):
     """A run past its deadline stops at its next cancel poll and its own final status names the
     wall clock; no second writer is involved."""
     from tcip_mcp.experiments import observe, run_summary
-    from tests._verified_checkpoint_fixtures import detector_declaring, finished_run
+    from tests._verified_checkpoint_fixtures import (
+        detector_declaring,
+        finished_run,
+    )
 
     run_dir = finished_run(
-        tmp_path, model_source=detector_declaring(__file__), training_source=BESPOKE_LOOP,
-        wall_clock_passed=True)
+        tmp_path,
+        model_source=detector_declaring(__file__),
+        training_source=BESPOKE_LOOP,
+        wall_clock_passed=True,
+    )
 
     result = run_summary(observe(run_dir), [], None).model_dump()
     assert result["state"] == "failed"
     assert result["status_error"] == "exceeded max_wall_clock_seconds"
 
 
-def test_a_canceled_run_reads_canceled_whatever_its_heartbeat(tmp_path, monkeypatch):
+def test_a_canceled_run_reads_canceled_whatever_its_heartbeat(
+    tmp_path, monkeypatch
+):
     """A final status is the answer once written: a canceled run never reads running or
     interrupted, however stale its heartbeat."""
     from tcip_mcp import experiments
-    from tests._verified_checkpoint_fixtures import detector_declaring, finished_run
+    from tests._verified_checkpoint_fixtures import (
+        detector_declaring,
+        finished_run,
+    )
 
     canceled = finished_run(
-        tmp_path, model_source=detector_declaring(__file__), training_source=BESPOKE_LOOP,
-        cancel_requested=True)
+        tmp_path,
+        model_source=detector_declaring(__file__),
+        training_source=BESPOKE_LOOP,
+        cancel_requested=True,
+    )
 
     assert experiments.observe(canceled).state == "canceled"
     monkeypatch.setattr(experiments, "HEARTBEAT_STALE_SECONDS", -1.0)
@@ -298,10 +423,17 @@ def test_a_canceled_run_reads_canceled_whatever_its_heartbeat(tmp_path, monkeypa
 
 def test_monitor_training_reads_the_run_directory(tmp_path, monkeypatch):
     from tcip_mcp.tools.training_tools import monitor_training
-    from tests._verified_checkpoint_fixtures import detection_config, log_epoch, opened_run
+    from tests._verified_checkpoint_fixtures import (
+        detection_config,
+        log_epoch,
+        opened_run,
+    )
 
-    run_dir = opened_run(tmp_path, detection_config(tmp_path / "data"),
-                         experiment_id="run_delegated")
+    run_dir = opened_run(
+        tmp_path,
+        detection_config(tmp_path / "data"),
+        experiment_id="run_delegated",
+    )
     log_epoch(run_dir, 7, {"loss": 0.2})
 
     result = monitor_training(tmp_path, "run_delegated")["run"]
@@ -313,15 +445,27 @@ def test_launched_runs_view_lists_a_run_read_from_its_directory(tmp_path):
     """A run any process launched lists, read straight from its own directory, carrying the
     directory's last epoch and last sign of life."""
     from tcip_mcp.tools.experiment_tools import list_experiments
-    from tests._verified_checkpoint_fixtures import detection_config, log_epoch, opened_run
+    from tests._verified_checkpoint_fixtures import (
+        detection_config,
+        log_epoch,
+        opened_run,
+    )
 
     models = tmp_path / "code" / "my_models.py"
     models.parent.mkdir()
     models.write_text("", encoding="utf-8")
-    run_dir = opened_run(tmp_path, detection_config(
-        tmp_path / "data", model_source={"builder": "my_models:chestnut_burr_det",
-                                         "source_files": [str(models)], "task": "detection"}),
-        experiment_id="exp-no-stamp")
+    run_dir = opened_run(
+        tmp_path,
+        detection_config(
+            tmp_path / "data",
+            model_source={
+                "builder": "my_models:chestnut_burr_det",
+                "source_files": [str(models)],
+                "task": "detection",
+            },
+        ),
+        experiment_id="exp-no-stamp",
+    )
     log_epoch(run_dir, 9, {"loss": 0.1})
 
     by_id = {r["experiment_id"]: r for r in list_experiments(tmp_path)["runs"]}
@@ -348,7 +492,9 @@ def test_gpu_device_pinning_round_robins(monkeypatch):
     monkeypatch.setattr(torch, "cuda", _FakeCuda)
     seen = set()
     for _ in range(4):
-        env = training_tools._child_env_for_launch(train_config(_config(device=None)))
+        env = training_tools._child_env_for_launch(
+            train_config(_config(device=None))
+        )
         seen.add(env["CUDA_VISIBLE_DEVICES"])
     assert seen == {"0", "1"}
 
@@ -370,7 +516,9 @@ def test_gpu_pinning_skipped_when_device_explicit(monkeypatch):
 
     monkeypatch.setattr(torch, "cuda", _FakeCuda)
 
-    env = training_tools._child_env_for_launch(train_config(_config(device="cuda:1")))
+    env = training_tools._child_env_for_launch(
+        train_config(_config(device="cuda:1"))
+    )
     assert "CUDA_VISIBLE_DEVICES" not in env
 
 
@@ -387,14 +535,18 @@ def test_gpu_pinning_noop_with_single_gpu(monkeypatch):
             return 1
 
     monkeypatch.setattr(torch, "cuda", _FakeCuda)
-    env = training_tools._child_env_for_launch(train_config(_config(device=None)))
+    env = training_tools._child_env_for_launch(
+        train_config(_config(device=None))
+    )
     assert "CUDA_VISIBLE_DEVICES" not in env
 
 
 # ── wall-clock timeout ──────────────────────────────────────────────
 
 
-def test_max_wall_clock_seconds_terminates_a_hung_child_one_heartbeat_window_late(monkeypatch):
+def test_max_wall_clock_seconds_terminates_a_hung_child_one_heartbeat_window_late(
+    monkeypatch,
+):
     """A child that has not stopped itself one heartbeat window past its wall clock is hung: the
     watcher terminates it and writes nothing, so its directory reads interrupted."""
     import subprocess
@@ -407,14 +559,17 @@ def test_max_wall_clock_seconds_terminates_a_hung_child_one_heartbeat_window_lat
     monkeypatch.setattr(experiments, "HEARTBEAT_STALE_SECONDS", 0.2)
     proc = subprocess.Popen(
         [sys.executable, "-c", "import time; time.sleep(60)"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     try:
         _watch_wall_clock(proc, 0.2)
         deadline = time.monotonic() + 10
         while proc.poll() is None and time.monotonic() < deadline:
             time.sleep(0.1)
-        assert proc.poll() is not None, "watcher did not terminate the hung process"
+        assert proc.poll() is not None, (
+            "watcher did not terminate the hung process"
+        )
     finally:
         if proc.poll() is None:
             proc.kill()
@@ -424,7 +579,9 @@ def test_max_wall_clock_seconds_terminates_a_hung_child_one_heartbeat_window_lat
 # ── inspect_compute_resources ────────────────────────────────────────────────────────
 
 
-def test_inspect_compute_resources_degrades_without_psutil(tmp_path, monkeypatch):
+def test_inspect_compute_resources_degrades_without_psutil(
+    tmp_path, monkeypatch
+):
     import builtins
 
     real_import = builtins.__import__
@@ -437,6 +594,7 @@ def test_inspect_compute_resources_degrades_without_psutil(tmp_path, monkeypatch
     monkeypatch.setattr(builtins, "__import__", _no_psutil)
 
     from tcip_mcp.tools.training_tools import inspect_compute_resources
+
     result = inspect_compute_resources(tmp_path)
     assert result["cpu"]["percent_used"] is None
     assert result["memory"]["total_bytes"] is None
@@ -445,7 +603,9 @@ def test_inspect_compute_resources_degrades_without_psutil(tmp_path, monkeypatch
     assert "active_training_runs" in result
 
 
-def test_inspect_compute_resources_reports_gpu_free_memory(tmp_path, monkeypatch):
+def test_inspect_compute_resources_reports_gpu_free_memory(
+    tmp_path, monkeypatch
+):
     class _FakeCuda:
         @staticmethod
         def is_available():
@@ -462,8 +622,11 @@ def test_inspect_compute_resources_reports_gpu_free_memory(tmp_path, monkeypatch
     monkeypatch.setattr(torch, "cuda", _FakeCuda)
 
     from tcip_mcp.tools.training_tools import inspect_compute_resources
+
     result = inspect_compute_resources(tmp_path)
-    assert result["gpus"] == [{"index": 0, "free_bytes": 1_000, "total_bytes": 4_000}]
+    assert result["gpus"] == [
+        {"index": 0, "free_bytes": 1_000, "total_bytes": 4_000}
+    ]
 
 
 def test_inspect_compute_resources_counts_a_running_run_directory(tmp_path):
@@ -476,9 +639,16 @@ def test_inspect_compute_resources_counts_a_running_run_directory(tmp_path):
 
     from tests._verified_checkpoint_fixtures import detection_config
 
-    opened_run(tmp_path, detection_config(tmp_path / "data"), experiment_id="run_other_process")
+    opened_run(
+        tmp_path,
+        detection_config(tmp_path / "data"),
+        experiment_id="run_other_process",
+    )
 
-    assert inspect_compute_resources(tmp_path)["active_training_runs"] == baseline + 1
+    assert (
+        inspect_compute_resources(tmp_path)["active_training_runs"]
+        == baseline + 1
+    )
 
 
 # ── HPO resource caps ─────────────────────────────────────────────────────────
@@ -498,8 +668,14 @@ def test_default_trial_resources_derives_fractional_gpu_share(monkeypatch):
 
     monkeypatch.setattr(torch, "cuda", _FakeCuda)
 
-    assert hpo._default_trial_resources(max_concurrent=1) == {"cpu": 1.0, "gpu": 1.0}
-    assert hpo._default_trial_resources(max_concurrent=4) == {"cpu": 1.0, "gpu": 0.5}
+    assert hpo._default_trial_resources(max_concurrent=1) == {
+        "cpu": 1.0,
+        "gpu": 1.0,
+    }
+    assert hpo._default_trial_resources(max_concurrent=4) == {
+        "cpu": 1.0,
+        "gpu": 0.5,
+    }
 
 
 def test_default_trial_resources_no_gpu(monkeypatch):
@@ -515,7 +691,10 @@ def test_default_trial_resources_no_gpu(monkeypatch):
             return 0
 
     monkeypatch.setattr(torch, "cuda", _FakeCuda)
-    assert hpo._default_trial_resources(max_concurrent=1) == {"cpu": 1.0, "gpu": 0.0}
+    assert hpo._default_trial_resources(max_concurrent=1) == {
+        "cpu": 1.0,
+        "gpu": 0.0,
+    }
 
 
 @pytest.mark.ray_cluster
@@ -532,13 +711,17 @@ def test_tune_search_accepts_explicit_resources_per_trial(tmp_path):
         obj,
         param_space={"x": {"type": "uniform", "low": -5.0, "high": 5.0}},
         sweep_dir=tmp_path / "explicit",
-        **tune_arguments(num_samples=4,
-                         resources_per_trial={"cpu": 1.0, "gpu": 0.0}))
+        **tune_arguments(
+            num_samples=4, resources_per_trial={"cpu": 1.0, "gpu": 0.0}
+        ),
+    )
     assert (tmp_path / "explicit").is_dir()
 
 
 @pytest.mark.ray_cluster
-def test_tune_search_runs_despite_deprecated_ray_result_dir_variables(tmp_path, monkeypatch):
+def test_tune_search_runs_despite_deprecated_ray_result_dir_variables(
+    tmp_path, monkeypatch
+):
     """Ray Tune refuses to run while TUNE_RESULT_DIR or RAY_AIR_LOCAL_CACHE_DIR is set anywhere
     in the environment, even though sweep_dir alone decides where trial results land. A
     machine that still carries such a redirect must get a working sweep, stored at the
@@ -559,8 +742,10 @@ def test_tune_search_runs_despite_deprecated_ray_result_dir_variables(tmp_path, 
         obj,
         param_space={"x": {"type": "uniform", "low": -5.0, "high": 5.0}},
         sweep_dir=tmp_path / "sweep_store" / "redirected",
-        **tune_arguments(num_samples=2,
-                         resources_per_trial={"cpu": 1.0, "gpu": 0.0}))
+        **tune_arguments(
+            num_samples=2, resources_per_trial={"cpu": 1.0, "gpu": 0.0}
+        ),
+    )
 
     assert (tmp_path / "sweep_store" / "redirected").is_dir()
     assert os.environ["TUNE_RESULT_DIR"] == machine_scratch

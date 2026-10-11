@@ -48,7 +48,9 @@ def main(argv: list[str] | None = None) -> int:
     command, rest = args[0], args[1:]
     module_name = COMMANDS.get(command)
     if module_name is None:
-        print(f"tcip: unknown command {command!r}\n\n{_usage()}", file=sys.stderr)
+        print(
+            f"tcip: unknown command {command!r}\n\n{_usage()}", file=sys.stderr
+        )
         return 2
     module = importlib.import_module(module_name)
     return module.main(rest, prog=f"tcip {command}")

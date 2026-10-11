@@ -68,8 +68,12 @@ def _label(bucket: Path, *stems: str) -> None:
     from tests._producer_fixtures import label_image
 
     for stem in stems:
-        label_image(bucket / f"{stem}.jpg",
-                    [Annotation(subject=SUBJECT, geometry=BBox(1, 1, 5, 5))], 16, 16)
+        label_image(
+            bucket / f"{stem}.jpg",
+            [Annotation(subject=SUBJECT, geometry=BBox(1, 1, 5, 5))],
+            16,
+            16,
+        )
 
 
 def test_preflight_refuses_a_stem_collision(tmp_path):
@@ -82,11 +86,15 @@ def test_preflight_refuses_a_stem_collision(tmp_path):
     _collide(bucket)
     _label(bucket, "shoot_001")
 
-    cfg = training_config(DETECTION_SOURCE,
-                          {"images_dir": str(bucket), "scope": {"subject": SUBJECT}})
+    cfg = training_config(
+        DETECTION_SOURCE,
+        {"images_dir": str(bucket), "scope": {"subject": SUBJECT}},
+    )
     r = preflight_config(tmp_path, cfg)
     assert r["valid"] is False
-    assert any("shoot_001.jpg" in i and "Shoot_001.png" in i for i in r["issues"]), r["issues"]
+    assert any(
+        "shoot_001.jpg" in i and "Shoot_001.png" in i for i in r["issues"]
+    ), r["issues"]
 
 
 def test_scan_dataset_image_census_refuses_a_stem_collision(tmp_path):
@@ -100,7 +108,9 @@ def test_scan_dataset_image_census_refuses_a_stem_collision(tmp_path):
         _scan_dataset(str(project_root))
 
 
-def test_doctor_script_reports_a_stem_collision_with_no_label_file_instead_of_crashing(tmp_path):
+def test_doctor_script_reports_a_stem_collision_with_no_label_file_instead_of_crashing(
+    tmp_path,
+):
     """A collision with no label record for its stem surfaces as a finding of the doctor's one
     census, not a crashed subprocess."""
     bucket = _ingested_bucket(tmp_path)
@@ -114,7 +124,9 @@ def test_doctor_script_reports_a_stem_collision_with_no_label_file_instead_of_cr
     assert "shoot_001.jpg" in res.stdout and "Shoot_001.png" in res.stdout
 
 
-def test_doctor_script_reports_a_stem_collision_once_not_once_per_check(tmp_path):
+def test_doctor_script_reports_a_stem_collision_once_not_once_per_check(
+    tmp_path,
+):
     """The doctor enumerates ``images/`` once, so a breeder reads about a collision once."""
     bucket = _ingested_bucket(tmp_path)
     _collide(bucket)
@@ -123,7 +135,9 @@ def test_doctor_script_reports_a_stem_collision_once_not_once_per_check(tmp_path
     res = run_tcip("doctor", [str(project_root)])
 
     assert "Traceback" not in res.stderr, res.stderr
-    assert res.stdout.count("name more than one logical image") == 1, res.stdout
+    assert res.stdout.count("name more than one logical image") == 1, (
+        res.stdout
+    )
 
 
 # ── The admitting case: a clean, uncollided bucket lists every image through each routed site ──
@@ -138,14 +152,21 @@ def test_preflight_admits_a_clean_multi_image_bucket(tmp_path):
     bucket = _ingested_bucket_of(tmp_path, ["shoot_001", "shoot_002"])
     _label(bucket, "shoot_001", "shoot_002")
 
-    cfg = training_config(DETECTION_SOURCE,
-                          {"images_dir": str(bucket), "scope": {"subject": SUBJECT},
-                           "split": {"seed": 0, "val_ratio": 0.15}})
+    cfg = training_config(
+        DETECTION_SOURCE,
+        {
+            "images_dir": str(bucket),
+            "scope": {"subject": SUBJECT},
+            "split": {"seed": 0, "val_ratio": 0.15},
+        },
+    )
     r = preflight_config(tmp_path, cfg)
     assert r["issues"] == [], r["issues"]
 
 
-def test_preflight_split_policy_stems_admits_a_clean_multi_image_bucket(tmp_path):
+def test_preflight_split_policy_stems_admits_a_clean_multi_image_bucket(
+    tmp_path,
+):
     """Two uncollided images resolve cleanly through ``resolve_group_key_fn``, proving the
     listing reached both stems rather than raising or silently dropping one."""
     pytest.importorskip("torch")
@@ -154,14 +175,23 @@ def test_preflight_split_policy_stems_admits_a_clean_multi_image_bucket(tmp_path
     bucket = _ingested_bucket_of(tmp_path, ["shoot_001", "shoot_002"])
     _label(bucket, "shoot_001", "shoot_002")
 
-    cfg = training_config(DETECTION_SOURCE,
-                          {"images_dir": str(bucket), "scope": {"subject": SUBJECT},
-                           "split": {"group_by": "stem", "seed": 0, "val_ratio": 0.15}})
+    cfg = training_config(
+        DETECTION_SOURCE,
+        {
+            "images_dir": str(bucket),
+            "scope": {"subject": SUBJECT},
+            "split": {"group_by": "stem", "seed": 0, "val_ratio": 0.15},
+        },
+    )
     r = preflight_config(tmp_path, cfg)
-    assert not any(i.startswith("data.split:") for i in r["issues"]), r["issues"]
+    assert not any(i.startswith("data.split:") for i in r["issues"]), r[
+        "issues"
+    ]
 
 
-def test_calibration_ratio_feasibility_admits_a_clean_multi_image_bucket(tmp_path):
+def test_calibration_ratio_feasibility_admits_a_clean_multi_image_bucket(
+    tmp_path,
+):
     """Both uncollided images are counted: the feasibility issue names the real count (2), the
     direct evidence the admission reached every member rather than one raw-walked file."""
     pytest.importorskip("torch")
@@ -172,9 +202,16 @@ def test_calibration_ratio_feasibility_admits_a_clean_multi_image_bucket(tmp_pat
 
     cfg = training_config(
         DETECTION_SOURCE,
-        {"images_dir": str(bucket), "scope": {"subject": SUBJECT},
-         "tiling": {"enabled": True, "sliver_frac": 0.5},  # stated: two boxes, no spread
-         "split": {"calibration_ratio": 0.2, "val_ratio": 0.15, "seed": 1}})
+        {
+            "images_dir": str(bucket),
+            "scope": {"subject": SUBJECT},
+            "tiling": {
+                "enabled": True,
+                "sliver_frac": 0.5,
+            },  # stated: two boxes, no spread
+            "split": {"calibration_ratio": 0.2, "val_ratio": 0.15, "seed": 1},
+        },
+    )
     r = preflight_config(tmp_path, cfg)
     assert any("2 admitted sources" in i for i in r["issues"]), r["issues"]
 

@@ -62,8 +62,12 @@ class TestBoxRoundtrip:
         """Draw two boxes, save, reload and verify."""
         # Draw boxes (simulating canvas click-drag)
         annotations = [
-            Annotation(subject="bud", geometry=BBox(x1=100, y1=50, x2=250, y2=200)),
-            Annotation(subject="nut", geometry=BBox(x1=400, y1=300, x2=550, y2=420)),
+            Annotation(
+                subject="bud", geometry=BBox(x1=100, y1=50, x2=250, y2=200)
+            ),
+            Annotation(
+                subject="nut", geometry=BBox(x1=400, y1=300, x2=550, y2=420)
+            ),
         ]
 
         read_back = _write(_label(img_dir), annotations)
@@ -78,13 +82,18 @@ class TestBoxRoundtrip:
             assert abs(orig.geometry.y2 - loaded.geometry.y2) < 2
             assert orig.subject == loaded.subject
 
-    def test_five_distinct_subjects_survive_the_round_trip(self, img_dir: Path) -> None:
+    def test_five_distinct_subjects_survive_the_round_trip(
+        self, img_dir: Path
+    ) -> None:
         """Coverage: five box annotations of five distinct subjects, written and read back
         through the same per-image label document, all five subjects and the count surviving the
         round trip."""
         subjects = ["bud", "shoot", "leaf", "nut", "bush"]
         annotations = [
-            Annotation(subject=subj, geometry=BBox(x1=i * 100, y1=10, x2=i * 100 + 80, y2=90))
+            Annotation(
+                subject=subj,
+                geometry=BBox(x1=i * 100, y1=10, x2=i * 100 + 80, y2=90),
+            )
             for i, subj in enumerate(subjects)
         ]
 
@@ -104,40 +113,62 @@ class TestPolygonRoundtrip:
         # Draw a triangle polygon (simulating canvas vertex clicks)
         poly = Polygon(rings=[[(100.0, 50.0), (250.0, 200.0), (50.0, 200.0)]])
 
-        read_back = _write(_label(img_dir), [Annotation(subject="bud", geometry=poly)])
+        read_back = _write(
+            _label(img_dir), [Annotation(subject="bud", geometry=poly)]
+        )
         assert len(read_back) == 1
         assert read_back[0].subject == "bud"
         assert isinstance(read_back[0].geometry, Polygon)
         assert len(read_back[0].geometry.rings[0]) == 3
 
         # Verify coordinates
-        for (ox, oy), (lx, ly) in zip(poly.rings[0], read_back[0].geometry.rings[0]):
+        for (ox, oy), (lx, ly) in zip(
+            poly.rings[0], read_back[0].geometry.rings[0]
+        ):
             assert abs(ox - lx) < 2
             assert abs(oy - ly) < 2
 
     def test_multi_class_polygon(self, img_dir: Path) -> None:
         """Multiple polygons with different subjects."""
         annotations = [
-            Annotation(subject="bud",
-                       geometry=Polygon(rings=[[(10, 10), (100, 10), (100, 100), (10, 100)]])),
-            Annotation(subject="leaf",
-                       geometry=Polygon(rings=[[(200, 200), (300, 200), (300, 300), (200, 300)]])),
+            Annotation(
+                subject="bud",
+                geometry=Polygon(
+                    rings=[[(10, 10), (100, 10), (100, 100), (10, 100)]]
+                ),
+            ),
+            Annotation(
+                subject="leaf",
+                geometry=Polygon(
+                    rings=[[(200, 200), (300, 200), (300, 300), (200, 300)]]
+                ),
+            ),
         ]
 
         read_back = _write(_label(img_dir), annotations)
         assert len(read_back) == 2
         assert {a.subject for a in read_back} == {"bud", "leaf"}
 
-    def test_occlusion_split_prediction_survives_the_round_trip(self, img_dir: Path) -> None:
+    def test_occlusion_split_prediction_survives_the_round_trip(
+        self, img_dir: Path
+    ) -> None:
         """A model-predicted mask the editor overlays can be occlusion-split: one instance, two
         contours. Both rings must come back so the person sees the whole object."""
         rings = [
             [(100.0, 50.0), (150.0, 50.0), (150.0, 200.0), (100.0, 200.0)],
             [(300.0, 60.0), (350.0, 60.0), (350.0, 190.0), (300.0, 190.0)],
         ]
-        read_back = _write(_prediction(img_dir),
-                           [Annotation(subject="bud", geometry=Polygon(rings=rings), score=0.88)])
-        assert len(read_back) == 1  # one instance, not one annotation per contour
+        read_back = _write(
+            _prediction(img_dir),
+            [
+                Annotation(
+                    subject="bud", geometry=Polygon(rings=rings), score=0.88
+                )
+            ],
+        )
+        assert (
+            len(read_back) == 1
+        )  # one instance, not one annotation per contour
         assert read_back[0].geometry.rings == rings
         assert read_back[0].score == 0.88
 
@@ -151,15 +182,23 @@ class TestSingleDocumentSave:
     def test_box_and_polygon_single_document(self, img_dir: Path) -> None:
         """Save a box and a polygon together, verify both survive in one document."""
         annotations = [
-            Annotation(subject="bud", geometry=BBox(x1=50, y1=50, x2=200, y2=150)),
-            Annotation(subject="nut",
-                       geometry=Polygon(rings=[[(300, 100), (400, 100), (400, 200), (300, 200)]])),
+            Annotation(
+                subject="bud", geometry=BBox(x1=50, y1=50, x2=200, y2=150)
+            ),
+            Annotation(
+                subject="nut",
+                geometry=Polygon(
+                    rings=[[(300, 100), (400, 100), (400, 200), (300, 200)]]
+                ),
+            ),
         ]
 
         read_back = _write(_label(img_dir), annotations)
         assert len(read_back) == 2
         box_ann = next(a for a in read_back if isinstance(a.geometry, BBox))
-        poly_ann = next(a for a in read_back if isinstance(a.geometry, Polygon))
+        poly_ann = next(
+            a for a in read_back if isinstance(a.geometry, Polygon)
+        )
         assert box_ann.subject == "bud"
         assert poly_ann.subject == "nut"
 
@@ -172,17 +211,38 @@ class TestPredictionOverlay:
 
     def test_prediction_overlay_pairing(self, img_dir: Path) -> None:
         """Load annotations + proposals, pair them, verify overlay data."""
-        loaded_gt = _write(_label(img_dir), [
-            Annotation(subject="bud", geometry=BBox(x1=100, y1=50, x2=250, y2=200)),
-            Annotation(subject="bud", geometry=BBox(x1=400, y1=300, x2=550, y2=420)),
-        ])
+        loaded_gt = _write(
+            _label(img_dir),
+            [
+                Annotation(
+                    subject="bud", geometry=BBox(x1=100, y1=50, x2=250, y2=200)
+                ),
+                Annotation(
+                    subject="bud",
+                    geometry=BBox(x1=400, y1=300, x2=550, y2=420),
+                ),
+            ],
+        )
         # Predictions: one matching, one FP.
-        loaded_preds = _write(_prediction(img_dir), [
-            Annotation(subject="bud", geometry=BBox(x1=105, y1=55, x2=245, y2=195), score=0.92),
-            Annotation(subject="bud", geometry=BBox(x1=10, y1=10, x2=50, y2=50), score=0.75),
-        ])
+        loaded_preds = _write(
+            _prediction(img_dir),
+            [
+                Annotation(
+                    subject="bud",
+                    geometry=BBox(x1=105, y1=55, x2=245, y2=195),
+                    score=0.92,
+                ),
+                Annotation(
+                    subject="bud",
+                    geometry=BBox(x1=10, y1=10, x2=50, y2=50),
+                    score=0.75,
+                ),
+            ],
+        )
 
-        paired = pair_proposals(loaded_gt, loaded_preds, {"kind": "iou", "iou_threshold": 0.5})
+        paired = pair_proposals(
+            loaded_gt, loaded_preds, {"kind": "iou", "iou_threshold": 0.5}
+        )
 
         # The overlapping proposal confirms the first annotation; the other pairs with nothing.
         assert paired.pairs == [(0, 0)]

@@ -25,7 +25,10 @@ def build_environ(worktree: Path) -> dict[str, str]:
     `src` directories, never appended to whatever the caller's own PYTHONPATH already names.
     """
     env = dict(os.environ)
-    src_dirs = [str((worktree / "packages" / name / "src").resolve()) for name in PACKAGE_SRC_DIRS]
+    src_dirs = [
+        str((worktree / "packages" / name / "src").resolve())
+        for name in PACKAGE_SRC_DIRS
+    ]
     sep = ";" if sys.platform == "win32" else ":"
     env["PYTHONPATH"] = sep.join(src_dirs)
     return env
@@ -36,11 +39,15 @@ def prove_resolution(worktree: Path, env: dict[str, str]) -> Path:
     if it instead resolves to the editable install's real target (another checkout)."""
     proc = subprocess.run(
         [sys.executable, "-c", "import tcip_mcp; print(tcip_mcp.__file__)"],
-        cwd=str(worktree), env=env, capture_output=True, text=True,
+        cwd=str(worktree),
+        env=env,
+        capture_output=True,
+        text=True,
     )
     if proc.returncode != 0:
         raise SystemExit(
-            f"could not import tcip_mcp under the worktree environment: {proc.stderr.strip()}")
+            f"could not import tcip_mcp under the worktree environment: {proc.stderr.strip()}"
+        )
     resolved = Path(proc.stdout.strip()).resolve()
     if not resolved.is_relative_to(worktree.resolve()):
         raise SystemExit(
@@ -55,7 +62,8 @@ def run_ruff(worktree: Path, env: dict[str, str]) -> int:
     print("== ruff check packages tests tools ==")
     return subprocess.run(
         [sys.executable, "-m", "ruff", "check", "packages", "tests", "tools"],
-        cwd=str(worktree), env=env,
+        cwd=str(worktree),
+        env=env,
     ).returncode
 
 
@@ -64,7 +72,9 @@ def run_mypy(worktree: Path, env: dict[str, str]) -> int:
     try:
         print(f"== mypy --cache-dir {cache_dir} ==")
         return subprocess.run(
-            [sys.executable, "-m", "mypy", "--cache-dir", cache_dir], cwd=str(worktree), env=env,
+            [sys.executable, "-m", "mypy", "--cache-dir", cache_dir],
+            cwd=str(worktree),
+            env=env,
         ).returncode
     finally:
         shutil.rmtree(cache_dir, ignore_errors=True)
@@ -73,8 +83,17 @@ def run_mypy(worktree: Path, env: dict[str, str]) -> int:
 def run_pytest(worktree: Path, env: dict[str, str], files: list[str]) -> int:
     print(f"== pytest {' '.join(files)} ==")
     return subprocess.run(
-        [sys.executable, "-m", "pytest", *files, "-p", "no:cacheprovider", "--timeout=300"],
-        cwd=str(worktree), env=env,
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            *files,
+            "-p",
+            "no:cacheprovider",
+            "--timeout=300",
+        ],
+        cwd=str(worktree),
+        env=env,
     ).returncode
 
 

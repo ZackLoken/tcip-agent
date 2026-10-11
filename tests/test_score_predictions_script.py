@@ -28,11 +28,25 @@ def _fixture(tmp_path: Path) -> tuple[Path, str]:
 
     img = tmp_path / "images" / UNDATED_BUCKET / "IMG_0000.jpg"
     write_image(img)
-    label_image(img, [Annotation(subject="bud", geometry=BBox(1, 1, 40, 30))], 100, 80)
-    published(tmp_path, "baseline", [
-        {"image": str(img), "width": 100, "height": 80, "boxes": [[1.0, 1.0, 40.0, 30.0]],
-         "scores": [0.9], "labels": [1], "cap": 2}],
-        scope={"subject": "bud"})
+    label_image(
+        img, [Annotation(subject="bud", geometry=BBox(1, 1, 40, 30))], 100, 80
+    )
+    published(
+        tmp_path,
+        "baseline",
+        [
+            {
+                "image": str(img),
+                "width": 100,
+                "height": 80,
+                "boxes": [[1.0, 1.0, 40.0, 30.0]],
+                "scores": [0.9],
+                "labels": [1],
+                "cap": 2,
+            }
+        ],
+        scope={"subject": "bud"},
+    )
     return img, "baseline"
 
 
@@ -41,8 +55,11 @@ def test_refuses_a_trait_scoped_run_naming_no_project(tmp_path):
     cwd = tmp_path / "operator_cwd"
     cwd.mkdir()
 
-    result = run_tcip("score-predictions",
-                      ["--path", str(img), "--bucket", bucket, "--trait", "bud_count"], cwd=cwd)
+    result = run_tcip(
+        "score-predictions",
+        ["--path", str(img), "--bucket", bucket, "--trait", "bud_count"],
+        cwd=cwd,
+    )
 
     assert result.returncode != 0, result.stdout
     assert "--trait requires --project" in result.stderr
@@ -54,7 +71,9 @@ def test_scores_a_single_image_with_no_project_named(tmp_path):
     cwd = tmp_path / "operator_cwd"
     cwd.mkdir()
 
-    result = run_tcip("score-predictions", ["--path", str(img), "--bucket", bucket], cwd=cwd)
+    result = run_tcip(
+        "score-predictions", ["--path", str(img), "--bucket", bucket], cwd=cwd
+    )
 
     assert result.returncode == 0, result.stderr
     body = json.loads(result.stdout)

@@ -12,14 +12,19 @@ import pytest
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._chain_fixtures import (
-    BESPOKE_DETECTION, BESPOKE_MODELS, SAVE_BUILT_WEIGHTS, training_config,
+    BESPOKE_DETECTION,
+    BESPOKE_MODELS,
+    SAVE_BUILT_WEIGHTS,
+    training_config,
 )
 from tests._training_values import sweep_space
 
 torch = pytest.importorskip("torch")
 
 SCOPED_DATA = {
-    "num_channels": 3, "scope": {"subject": "bud"}, "split": {"seed": 0, "val_ratio": 0.15}
+    "num_channels": 3,
+    "scope": {"subject": "bud"},
+    "split": {"seed": 0, "val_ratio": 0.15},
 }
 """A three-band detection run's data section, stating the one subject it is scoped to and the
 seed its own draw is made at; the admission reads the attributes the registry declares for it."""
@@ -32,20 +37,30 @@ BUILT_DETECTOR: dict[str, Any] = {
 }
 """A tiny detection builder's ``model_source``."""
 
-SAVE_A_SECOND_CHECKPOINT = "bespoke_models:save_built_weights_and_a_second_checkpoint"
+SAVE_A_SECOND_CHECKPOINT = (
+    "bespoke_models:save_built_weights_and_a_second_checkpoint"
+)
 """A ``training_source`` saving the built weights as the deliverable and again beside it."""
 
 
 def built_detector(**builder_kwargs: Any) -> dict:
     """:data:`BUILT_DETECTOR` with ``builder_kwargs`` laid over its own builder keywords."""
-    return {**BUILT_DETECTOR,
-            "builder_kwargs": {**BUILT_DETECTOR["builder_kwargs"], **builder_kwargs}}
+    return {
+        **BUILT_DETECTOR,
+        "builder_kwargs": {
+            **BUILT_DETECTOR["builder_kwargs"],
+            **builder_kwargs,
+        },
+    }
 
 
 def detector_declaring(*files: str) -> dict:
     """:data:`BUILT_DETECTOR` whose ``source_files`` also declare ``files``, the modules of the
     loop a test's run names beside it."""
-    return {**BUILT_DETECTOR, "source_files": [*BUILT_DETECTOR["source_files"], *files]}
+    return {
+        **BUILT_DETECTOR,
+        "source_files": [*BUILT_DETECTOR["source_files"], *files],
+    }
 
 
 ONE_BAND_DETECTOR = built_detector(image_mean=[0.4], image_std=[0.2])
@@ -55,8 +70,15 @@ SQUARE_64_DETECTOR = built_detector(max_size=64)
 """:data:`BUILT_DETECTOR` with its resize bounds both at 64 px."""
 
 
-def detection_images(where: Path, scope: dict, *, n: int = 2, polygons: bool = False,
-                     values: dict[str, str] | None = None, registry: Any = None) -> dict:
+def detection_images(
+    where: Path,
+    scope: dict,
+    *,
+    n: int = 2,
+    polygons: bool = False,
+    values: dict[str, str] | None = None,
+    registry: Any = None,
+) -> dict:
     """A tiny detection dataset rooted at ``where``: ``n`` three-band frames, each label document
     holding one box (``polygons``: one square polygon) of ``scope``'s subject, carrying
     ``values`` as its attribute values, and ``registry`` as the dataset's subject registry when
@@ -67,12 +89,23 @@ def detection_images(where: Path, scope: dict, *, n: int = 2, polygons: bool = F
 
     if registry is not None:
         registry_over(where, registry)
-    geometry = (Polygon([[(8, 8), (24, 8), (24, 24), (8, 24)]]) if polygons
-                else BBox(8, 8, 24, 24))
-    annotation = Annotation(subject=scope["subject"], geometry=geometry,
-                            attributes=dict(values or {}))
-    images_dir = seed_labeled_images(where / "images" / UNDATED_BUCKET, [annotation],
-                                     n=n, width=64, height=48)
+    geometry = (
+        Polygon([[(8, 8), (24, 8), (24, 24), (8, 24)]])
+        if polygons
+        else BBox(8, 8, 24, 24)
+    )
+    annotation = Annotation(
+        subject=scope["subject"],
+        geometry=geometry,
+        attributes=dict(values or {}),
+    )
+    images_dir = seed_labeled_images(
+        where / "images" / UNDATED_BUCKET,
+        [annotation],
+        n=n,
+        width=64,
+        height=48,
+    )
     return {"images_dir": str(images_dir)}
 
 
@@ -92,21 +125,25 @@ def table_images(where: Path, *, n: int = 2) -> dict:
         writer.writerow(("stem", "label"))
         for i in range(n):
             Image.new("RGB", (64, 48), color=(60 + 40 * i, 90, 60)).save(
-                images_dir / f"frame{i}.png")
+                images_dir / f"frame{i}.png"
+            )
             writer.writerow((f"frame{i}", i % 2))
     return {"images_dir": str(images_dir), "labels_dir": str(table)}
 
 
-def detection_config(where: Path, *, model_source: dict = BUILT_DETECTOR,
-                     **config: Any) -> dict:
+def detection_config(
+    where: Path, *, model_source: dict = BUILT_DETECTOR, **config: Any
+) -> dict:
     """A :func:`~tests._chain_fixtures.training_config` of ``model_source`` (by default
     :data:`BUILT_DETECTOR`) over two :func:`detection_images` frames under ``where``, scoped as
     :data:`SCOPED_DATA`, with ``config``'s keys in place of their own."""
     from tests._chain_fixtures import training_config
 
     return training_config(
-        model_source, {**detection_images(where, SCOPED_DATA["scope"]), **SCOPED_DATA},
-        **config)
+        model_source,
+        {**detection_images(where, SCOPED_DATA["scope"]), **SCOPED_DATA},
+        **config,
+    )
 
 
 def fixture_data_dir(root: str | Path, name: str) -> Path:
@@ -117,8 +154,13 @@ def fixture_data_dir(root: str | Path, name: str) -> Path:
     return base.parent / f"{base.name}-data" / name
 
 
-def opened_run(root: str | Path, config: dict, *, experiment_id: str | None = None,
-               **facts: Any) -> Path:
+def opened_run(
+    root: str | Path,
+    config: dict,
+    *,
+    experiment_id: str | None = None,
+    **facts: Any,
+) -> Path:
     """A run directory under the project ``root`` over ``config`` validated, its sources staged
     once (``model_build.staged_sources``), resolved by the launcher's own producer
     (``split_construction.resolve_run``) and opened by its own writer
@@ -130,8 +172,9 @@ def opened_run(root: str | Path, config: dict, *, experiment_id: str | None = No
     from tcip_mcp.pipelines.schemas import train_config
     from tcip_mcp.tools.training_tools import open_run
 
-    run_dir = experiments.experiment_dir(experiment_id or experiments.mint_experiment_id(),
-                                         project=root)
+    run_dir = experiments.experiment_dir(
+        experiment_id or experiments.mint_experiment_id(), project=root
+    )
     spec = train_config(config)
     sources = staged_sources(spec, Path(root))
     resolution = resolve_run(spec, sources.layout, project=Path(root))
@@ -140,11 +183,18 @@ def opened_run(root: str | Path, config: dict, *, experiment_id: str | None = No
 
 
 SWEEP_ARGUMENTS: dict[str, Any] = {
-    "param_space": sweep_space(), "n_trials": 1,
-    "search_alg": "random", "scheduler": {"name": "fifo"},
-    "baseline_params": None, "max_concurrent": 1,
-    "resources_per_trial": None, "split_draws": 1, "split_draw_seeds": None, "search_seed": 0,
-    "trial_budget": None, "relaunched_from": None,
+    "param_space": sweep_space(),
+    "n_trials": 1,
+    "search_alg": "random",
+    "scheduler": {"name": "fifo"},
+    "baseline_params": None,
+    "max_concurrent": 1,
+    "resources_per_trial": None,
+    "split_draws": 1,
+    "split_draw_seeds": None,
+    "search_seed": 0,
+    "trial_budget": None,
+    "relaunched_from": None,
 }
 """A one-trial random sweep over the head learning rate, run to completion; ``open_sweep``'s other
 arguments."""
@@ -157,8 +207,13 @@ def opened_sweep(root: str | Path, base_config: dict, **given: Any) -> Path:
     from tcip_mcp.tools.training_tools import open_sweep
 
     arguments = {**SWEEP_ARGUMENTS, **given}
-    opened = open_sweep(Path(root), base_config, arguments.pop("param_space"), actor=None,
-                        **arguments)
+    opened = open_sweep(
+        Path(root),
+        base_config,
+        arguments.pop("param_space"),
+        actor=None,
+        **arguments,
+    )
     assert isinstance(opened, Path), opened
     return opened
 
@@ -168,7 +223,9 @@ def partition_side(partition: dict, side: str) -> list[str]:
     own partition reader."""
     from tcip_mcp.pipelines.data.split_construction import partition_samples
 
-    return sorted(s.member for s in partition_samples(partition) if s.side == side)
+    return sorted(
+        s.member for s in partition_samples(partition) if s.side == side
+    )
 
 
 def log_epoch(run_dir: Path, epoch: int, metrics: dict) -> None:
@@ -177,7 +234,9 @@ def log_epoch(run_dir: Path, epoch: int, metrics: dict) -> None:
     from tcip_mcp.pipelines.training.envelope import TrainContext
     from tcip_mcp.pipelines.training.run_registry import observed_run
 
-    TrainContext(run=observed_run(observe(run_dir)), train_loader=None)._epoch_sink(epoch, metrics)
+    TrainContext(
+        run=observed_run(observe(run_dir)), train_loader=None
+    )._epoch_sink(epoch, metrics)
 
 
 def finished_run(
@@ -221,45 +280,71 @@ def finished_run(
     stated = data or (dict(SCOPED_DATA) if geometric else {"num_channels": 3})
     if "images_dir" not in stated:
         where = fixture_data_dir(root, run_id)
-        frames = (detection_images(where, stated["scope"], polygons=task == "instance_seg",
-                                   registry=registry)
-                  if geometric else table_images(where))
+        frames = (
+            detection_images(
+                where,
+                stated["scope"],
+                polygons=task == "instance_seg",
+                registry=registry,
+            )
+            if geometric
+            else table_images(where)
+        )
         stated = {**frames, **stated}
     split = stated.get("split") or {}
     if "selection_dir" not in split:
         stated = {**stated, "split": {"seed": 0, "val_ratio": 0.15, **split}}
-    run_config = training_config(model_source, stated, training_source=training_source, **config)
+    run_config = training_config(
+        model_source, stated, training_source=training_source, **config
+    )
     if metrics:
         run_config["fixture_metrics"] = metrics
     if rows:
         run_config["fixture_rows"] = rows
     if seed is not None:
         run_config["seed"] = seed
-    run_dir = opened_run(root, run_config, experiment_id=run_id,
-                         max_wall_clock_seconds=1e-9 if wall_clock_passed else None)
+    run_dir = opened_run(
+        root,
+        run_config,
+        experiment_id=run_id,
+        max_wall_clock_seconds=1e-9 if wall_clock_passed else None,
+    )
     if cancel_requested:
         experiments.request_cancel(run_dir)
     run_directory(run_dir)
     return run_dir
 
 
-def resolved_run(root: str | Path, data: dict, *, task: str = "detection",
-                 experiment_id: str | None = None) -> Path:
+def resolved_run(
+    root: str | Path,
+    data: dict,
+    *,
+    task: str = "detection",
+    experiment_id: str | None = None,
+) -> Path:
     """A run under ``root`` of a ``task`` model (:func:`unbuilt_source`) opened by
     :func:`opened_run` over ``data``, whose launch record holds the data section, partition and
     objective the launcher's producer resolved; no body runs. Returns the run directory."""
-    return opened_run(root, training_config(unbuilt_source(task), data),
-                      experiment_id=experiment_id)
+    return opened_run(
+        root,
+        training_config(unbuilt_source(task), data),
+        experiment_id=experiment_id,
+    )
 
 
 def unbuilt_source(task: str) -> dict:
     """The ``model_source`` of a ``task`` run no body ever builds a model for: the tiny detection
     builder named for a run that only resolves and records."""
-    return {"builder": BESPOKE_DETECTION, "source_files": [BESPOKE_MODELS], "task": task}
+    return {
+        "builder": BESPOKE_DETECTION,
+        "source_files": [BESPOKE_MODELS],
+        "task": task,
+    }
 
 
-def worker_run(root: str | Path, config: dict, *,
-               experiment_id: str | None = None) -> Path:
+def worker_run(
+    root: str | Path, config: dict, *, experiment_id: str | None = None
+) -> Path:
     """A run under ``root`` opened by :func:`opened_run` over ``config`` and run in-process
     through the child's own entry (``subprocess_worker.run_directory``): its loaders built from
     its record, its body run, its final status written. Returns the run directory."""
@@ -270,7 +355,9 @@ def worker_run(root: str | Path, config: dict, *,
     return run_dir
 
 
-def run_to_end(project: str | Path, experiment_id: str, *, seconds: float = 120) -> dict:
+def run_to_end(
+    project: str | Path, experiment_id: str, *, seconds: float = 120
+) -> dict:
     """The row ``monitor_training`` answers for ``experiment_id`` once its state is terminal,
     polled for at most ``seconds``; fails the test naming the last row read otherwise."""
     import time
@@ -285,7 +372,9 @@ def run_to_end(project: str | Path, experiment_id: str, *, seconds: float = 120)
         if row.get("state") in TERMINAL_STATES:
             return row
         time.sleep(0.2)
-    pytest.fail(f"{experiment_id} reached no terminal state within {seconds}s: {row}")
+    pytest.fail(
+        f"{experiment_id} reached no terminal state within {seconds}s: {row}"
+    )
 
 
 def registered_checkpoint(project_root: str | Path, **kwargs: Any) -> str:
@@ -299,12 +388,16 @@ def registered_checkpoint(project_root: str | Path, **kwargs: Any) -> str:
     return checkpoint["path"]
 
 
-def foreign_checkpoint(project_root: str | Path, *, name: str | None = None) -> str:
+def foreign_checkpoint(
+    project_root: str | Path, *, name: str | None = None
+) -> str:
     """A :func:`secondary_checkpoint` of ``project_root`` registered into it under ``name`` (by
     default one naming the run that saved it) through ``register_model``'s explicit mode, so its
     registry entry names no producing run; its path."""
     path = secondary_checkpoint(Path(project_root))
-    register_checkpoint(project_root, path, name=name or f"model-{Path(path).parent.name}")
+    register_checkpoint(
+        project_root, path, name=name or f"model-{Path(path).parent.name}"
+    )
     return path
 
 
@@ -317,7 +410,9 @@ def secondary_checkpoint(project_root: Path, **config: Any) -> str:
     from tcip_mcp.pipelines.training.generic_trainer import checkpoint_path
     from tests.bespoke_models import SECOND_CHECKPOINT_TAG
 
-    run_dir = finished_run(project_root, training_source=SAVE_A_SECOND_CHECKPOINT, **config)
+    run_dir = finished_run(
+        project_root, training_source=SAVE_A_SECOND_CHECKPOINT, **config
+    )
     return str(checkpoint_path(run_dir, SECOND_CHECKPOINT_TAG))
 
 
@@ -336,15 +431,18 @@ def produced_checkpoint(path: Path, content: str) -> Path:
 
     if content not in _PRODUCED:
         with tempfile.TemporaryDirectory() as producer:
-            _PRODUCED[content] = Path(registered_checkpoint(Path(producer) / "project")
-                                      ).read_bytes()
+            _PRODUCED[content] = Path(
+                registered_checkpoint(Path(producer) / "project")
+            ).read_bytes()
             ts.release_root(Path(producer))
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(_PRODUCED[content])
     return path
 
 
-def register_checkpoint(project_root: str | Path, path: str, *, name: str) -> None:
+def register_checkpoint(
+    project_root: str | Path, path: str, *, name: str
+) -> None:
     """Register the checkpoint at ``path`` into ``project_root`` under ``name`` through
     ``register_model``'s explicit mode, asserting it admitted it."""
     from tcip_mcp.tools.model_tools import register_model
@@ -370,8 +468,9 @@ def verified_checkpoint(project_root: str | Path, **kwargs: Any):
     """The registry's own ``VerifiedCheckpoint`` over :func:`project_checkpoint`'s checkpoint."""
     from tcip_mcp.model_registry import load_registered_checkpoint
 
-    return load_registered_checkpoint(project_checkpoint(project_root, **kwargs),
-                                      project=Path(project_root))
+    return load_registered_checkpoint(
+        project_checkpoint(project_root, **kwargs), project=Path(project_root)
+    )
 
 
 SAMPLE_CROSS_TILE_NMS = 0.45
@@ -380,7 +479,10 @@ SAMPLE_CONF = 0.4
 """A sample confidence a test's detector pass states."""
 SAMPLE_OVERLAP = 0.25
 """A sample tile overlap a test's tiled pass states."""
-SAMPLE_DETECTOR_PASS = {"conf": SAMPLE_CONF, "cross_tile_nms": SAMPLE_CROSS_TILE_NMS}
+SAMPLE_DETECTOR_PASS = {
+    "conf": SAMPLE_CONF,
+    "cross_tile_nms": SAMPLE_CROSS_TILE_NMS,
+}
 """The execution values a test's detector pass states, by ``execution.Stated`` field."""
 
 
@@ -389,33 +491,64 @@ def objects_over(boxes: list[list[float]], area: float):
     a crowd region, over ``area`` pixels."""
     from tcip_mcp.pipelines.data.datasets import object_region
 
-    return object_region({"boxes": boxes, "labels": [1] * len(boxes),
-                          "iscrowd": [0] * len(boxes)}, area)
+    return object_region(
+        {
+            "boxes": boxes,
+            "labels": [1] * len(boxes),
+            "iscrowd": [0] * len(boxes),
+        },
+        area,
+    )
 
 
-def tiled_record(*, tile_size: int, overlap: float, conf: float,
-                 tile_resize: tuple[int, int] | None = None,
-                 cross_tile_nms: float = SAMPLE_CROSS_TILE_NMS):
+def tiled_record(
+    *,
+    tile_size: int,
+    overlap: float,
+    conf: float,
+    tile_resize: tuple[int, int] | None = None,
+    cross_tile_nms: float = SAMPLE_CROSS_TILE_NMS,
+):
     """A detector's tiled execution record at ``tile_size``, ``overlap`` and ``tile_resize``
     (each stated), at ``conf``, merging by NMS at the stated ``cross_tile_nms``, its density
     derived from a reference counting a hundred objects in one tile, built by the producer a pass
     builds its own with (``execution.execution_record``)."""
     from types import SimpleNamespace
 
-    from tcip_mcp.pipelines.execution import Reference, Stated, execution_record
+    from tcip_mcp.pipelines.execution import (
+        Reference,
+        Stated,
+        execution_record,
+    )
     from tcip_mcp.pipelines.slicing import TileGeometry
 
     detector = SimpleNamespace(task="detection", path="detector.pt")
-    geometry = TileGeometry(tile_size=tile_size, tile_size_source="explicit", overlap=overlap,
-                            overlap_source="explicit", tile_resize=tile_resize)
-    stated = Stated(conf=conf, postprocess="nms", cross_tile_nms=cross_tile_nms)
-    reference = Reference(regions=[objects_over([[0.0, 0.0, 1.0, 1.0]] * 100,
-                                                tile_size * tile_size)])
+    geometry = TileGeometry(
+        tile_size=tile_size,
+        tile_size_source="explicit",
+        overlap=overlap,
+        overlap_source="explicit",
+        tile_resize=tile_resize,
+    )
+    stated = Stated(
+        conf=conf, postprocess="nms", cross_tile_nms=cross_tile_nms
+    )
+    reference = Reference(
+        regions=[
+            objects_over([[0.0, 0.0, 1.0, 1.0]] * 100, tile_size * tile_size)
+        ]
+    )
     return execution_record(cast(Any, detector), stated, geometry, reference)
 
 
-def predicted_over(project: Path, checkpoint_path: str, images_dir: str, *,
-                   device: str | None = None, **stated: Any):
+def predicted_over(
+    project: Path,
+    checkpoint_path: str,
+    images_dir: str,
+    *,
+    device: str | None = None,
+    **stated: Any,
+):
     """The pass ``run_inference`` prepares for the detector registered at ``checkpoint_path``
     over ``images_dir`` (``execution.prepare`` under the ``stated`` execution values over
     :data:`SAMPLE_DETECTOR_PASS`, its density the checkpoint's own), run without publishing:
@@ -423,9 +556,12 @@ def predicted_over(project: Path, checkpoint_path: str, images_dir: str, *,
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.execution import Stated, prepare
 
-    p = prepare(load_registered_checkpoint(checkpoint_path, project=Path(project)),
-                Stated(**{**SAMPLE_DETECTOR_PASS, **stated}),
-                images_dir=images_dir, device=device).runnable()
+    p = prepare(
+        load_registered_checkpoint(checkpoint_path, project=Path(project)),
+        Stated(**{**SAMPLE_DETECTOR_PASS, **stated}),
+        images_dir=images_dir,
+        device=device,
+    ).runnable()
     return p, [r for path in p.paths for r in p.predict([path])]
 
 
@@ -436,6 +572,12 @@ def completed_checkpoint(run_dir: Path) -> dict | None:
     from tcip_mcp.model_registry import entry_facts, run_entry
 
     entry = run_entry(observe(run_dir))
-    return None if entry is None else {"path": entry["checkpoint_path"],
-                                       "sha256": entry["sha256"],
-                                       **entry_facts(entry, project_of_run(run_dir))}
+    return (
+        None
+        if entry is None
+        else {
+            "path": entry["checkpoint_path"],
+            "sha256": entry["sha256"],
+            **entry_facts(entry, project_of_run(run_dir)),
+        }
+    )

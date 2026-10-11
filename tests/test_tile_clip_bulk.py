@@ -13,7 +13,10 @@ import numpy as np
 
 from tcip_annotation.matching import box_ring, shapely_geometry
 from tcip_annotation.state import BBox
-from tcip_mcp.pipelines.data.datasets import clip_rows_to_tile, slice_candidates
+from tcip_mcp.pipelines.data.datasets import (
+    clip_rows_to_tile,
+    slice_candidates,
+)
 from tcip_mcp.pipelines.slicing import slice_lattice
 
 
@@ -22,7 +25,9 @@ def _clip_reference(boxes, tile_x, tile_y, tile_w, tile_h, min_box_size):
     tile-local xyxy."""
     tx2, ty2 = tile_x + tile_w, tile_y + tile_h
     rows, out = [], []
-    for i, (bx1, by1, bx2, by2) in enumerate(np.asarray(boxes, dtype=np.float64).tolist()):
+    for i, (bx1, by1, bx2, by2) in enumerate(
+        np.asarray(boxes, dtype=np.float64).tolist()
+    ):
         ix1, iy1 = max(bx1, tile_x), max(by1, tile_y)
         ix2, iy2 = min(bx2, tx2), min(by2, ty2)
         iw, ih = ix2 - ix1, iy2 - iy1
@@ -33,7 +38,9 @@ def _clip_reference(boxes, tile_x, tile_y, tile_w, tile_h, min_box_size):
             continue
         rows.append(i)
         out.append([ix1 - tile_x, iy1 - tile_y, ix2 - tile_x, iy2 - tile_y])
-    return np.asarray(out, dtype=np.float32).reshape(-1, 4), np.asarray(rows, dtype=np.int64)
+    return np.asarray(out, dtype=np.float32).reshape(-1, 4), np.asarray(
+        rows, dtype=np.int64
+    )
 
 
 def _clip(boxes, tile, min_box_size, rows=None):
@@ -41,7 +48,9 @@ def _clip(boxes, tile, min_box_size, rows=None):
     boxes = np.asarray(boxes, dtype=np.float64).reshape(-1, 4)
     shapes = [shapely_geometry([box_ring(BBox(*b))]) for b in boxes.tolist()]
     rows = np.arange(len(boxes)) if rows is None else rows
-    kept, kept_rows, _regions = clip_rows_to_tile(shapes, boxes, rows, tile, min_box_size)
+    kept, kept_rows, _regions = clip_rows_to_tile(
+        shapes, boxes, rows, tile, min_box_size
+    )
     return kept, kept_rows
 
 
@@ -57,8 +66,14 @@ _ADVERSARIAL = [
     # fully inside
     np.array([[210.0, 210.0, 230.0, 230.0]]),
     # straddling each of the four tile edges
-    np.array([[180.0, 210.0, 220.0, 230.0], [210.0, 180.0, 230.0, 220.0],
-              [250.0, 210.0, 290.0, 230.0], [210.0, 250.0, 230.0, 290.0]]),
+    np.array(
+        [
+            [180.0, 210.0, 220.0, 230.0],
+            [210.0, 180.0, 230.0, 220.0],
+            [250.0, 210.0, 290.0, 230.0],
+            [210.0, 250.0, 230.0, 290.0],
+        ]
+    ),
     # visible part exactly at the threshold (3x3, char 3.0 with min_box_size 3.0: kept, rule is <)
     np.array([[261.0, 261.0, 290.0, 290.0]]),
     # visible part just under the threshold (2x2, char 2.0: dropped)
@@ -80,8 +95,10 @@ _ADVERSARIAL = [
 
 def test_clip_matches_the_per_box_reference_on_adversarial_geometries():
     for boxes in _ADVERSARIAL:
-        _assert_identical(_clip(boxes, (200, 200, 264, 264), 3.0),
-                          _clip_reference(boxes, 200, 200, 64, 64, 3.0))
+        _assert_identical(
+            _clip(boxes, (200, 200, 264, 264), 3.0),
+            _clip_reference(boxes, 200, 200, 64, 64, 3.0),
+        )
 
 
 def test_clip_matches_the_per_box_reference_on_random_geometries():
@@ -93,9 +110,14 @@ def test_clip_matches_the_per_box_reference_on_random_geometries():
         boxes = np.concatenate([xy, xy + wh], axis=1)
         tile_x, tile_y = int(rng.integers(0, 300)), int(rng.integers(0, 300))
         min_box_size = float(rng.uniform(0, 20))
-        _assert_identical(_clip(boxes, (tile_x, tile_y, tile_x + 128, tile_y + 128),
-                                min_box_size),
-                          _clip_reference(boxes, tile_x, tile_y, 128, 128, min_box_size))
+        _assert_identical(
+            _clip(
+                boxes,
+                (tile_x, tile_y, tile_x + 128, tile_y + 128),
+                min_box_size,
+            ),
+            _clip_reference(boxes, tile_x, tile_y, 128, 128, min_box_size),
+        )
 
 
 def test_a_rectangular_tile_clips_against_its_own_extent():
@@ -122,8 +144,10 @@ def test_the_candidates_clipped_equal_every_row_clipped_over_a_lattice():
         candidates = slice_candidates(boxes, slices)
         assert len(candidates) == len(slices)
         for (tx, ty, x1, y1), rows in zip(slices, candidates):
-            _assert_identical(_clip(boxes, (tx, ty, x1, y1), 6.0, rows),
-                              _clip_reference(boxes, tx, ty, x1 - tx, y1 - ty, 6.0))
+            _assert_identical(
+                _clip(boxes, (tx, ty, x1, y1), 6.0, rows),
+                _clip_reference(boxes, tx, ty, x1 - tx, y1 - ty, 6.0),
+            )
 
 
 def test_each_slice_gets_its_own_candidate_array():
@@ -154,5 +178,7 @@ def test_candidate_cost_scales_with_incidences_not_positions_times_boxes():
     candidates = slice_candidates(boxes, positions)
     elapsed = time.perf_counter() - start
     assert len(candidates) == len(positions)
-    assert sum(len(rows) for rows in candidates) >= n  # every box lands in at least one tile
+    assert (
+        sum(len(rows) for rows in candidates) >= n
+    )  # every box lands in at least one tile
     assert elapsed < 60.0

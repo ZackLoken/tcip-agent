@@ -35,9 +35,13 @@ _ORIENTATION_OPS = {
     2: lambda i: i.transpose(Image.Transpose.FLIP_LEFT_RIGHT),
     3: lambda i: i.rotate(180, expand=True),
     4: lambda i: i.transpose(Image.Transpose.FLIP_TOP_BOTTOM),
-    5: lambda i: i.transpose(Image.Transpose.FLIP_LEFT_RIGHT).rotate(270, expand=True),
+    5: lambda i: i.transpose(Image.Transpose.FLIP_LEFT_RIGHT).rotate(
+        270, expand=True
+    ),
     6: lambda i: i.rotate(270, expand=True),
-    7: lambda i: i.transpose(Image.Transpose.FLIP_LEFT_RIGHT).rotate(90, expand=True),
+    7: lambda i: i.transpose(Image.Transpose.FLIP_LEFT_RIGHT).rotate(
+        90, expand=True
+    ),
     8: lambda i: i.rotate(90, expand=True),
 }
 """The operation each EXIF Orientation tag value names, applied to bring a frame upright."""

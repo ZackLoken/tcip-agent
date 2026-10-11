@@ -19,8 +19,12 @@ class BBox:
     def from_normalized_center(cls, box, img_w: float, img_h: float) -> "BBox":
         """A normalized center-form ``[cx, cy, w, h]`` scaled to an ``img_w`` x ``img_h`` image."""
         cx, cy, w, h = (float(v) for v in box)
-        return cls((cx - w / 2) * img_w, (cy - h / 2) * img_h,
-                   (cx + w / 2) * img_w, (cy + h / 2) * img_h)
+        return cls(
+            (cx - w / 2) * img_w,
+            (cy - h / 2) * img_h,
+            (cx + w / 2) * img_w,
+            (cy + h / 2) * img_h,
+        )
 
 
 def is_ring(ring) -> bool:
@@ -42,7 +46,8 @@ class Polygon:
         if not self.rings or not all(is_ring(ring) for ring in self.rings):
             raise ValueError(
                 f"a polygon needs at least one ring of three or more points; got rings of "
-                f"{[len(ring) for ring in self.rings]} points")
+                f"{[len(ring) for ring in self.rings]} points"
+            )
 
 
 @dataclass
@@ -93,15 +98,24 @@ def object_rows(iscrowd) -> list[bool]:
     return [not bool(flag) for flag in iscrowd]
 
 
-def instances(annotations: list[Annotation], *, crowd: bool = False) -> list[Annotation]:
+def instances(
+    annotations: list[Annotation], *, crowd: bool = False
+) -> list[Annotation]:
     """The annotations that are each one object (:func:`object_rows`): every one but a crowd
     region; with ``crowd``, the crowd regions instead.
     """
-    return [a for a, one in zip(annotations, object_rows([a.iscrowd for a in annotations]))
-            if one is not crowd]
+    return [
+        a
+        for a, one in zip(
+            annotations, object_rows([a.iscrowd for a in annotations])
+        )
+        if one is not crowd
+    ]
 
 
-def box_derivable(geometry: "BBox | Polygon | Point | None") -> TypeGuard[BBox | Polygon]:
+def box_derivable(
+    geometry: "BBox | Polygon | Point | None",
+) -> TypeGuard[BBox | Polygon]:
     """Whether a geometry yields a box: a rect or a polygon, never a point and never nothing."""
     return geometry is not None and not isinstance(geometry, Point)
 
@@ -115,7 +129,9 @@ def is_detection(a: Annotation) -> bool:
 def prediction_score(a: Annotation) -> float:
     """A prediction's confidence, or ``ValueError`` naming a record that states none."""
     if a.score is None:
-        raise ValueError(f"a prediction states its 'score'; this {a.subject!r} record states none")
+        raise ValueError(
+            f"a prediction states its 'score'; this {a.subject!r} record states none"
+        )
     return a.score
 
 

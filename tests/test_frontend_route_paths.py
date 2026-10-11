@@ -20,11 +20,15 @@ from tests._route_walk import route_generator as _generator
 
 GENERATED = FRONTEND_SRC / "api" / "routes.ts"
 PROXY_GENERATED = FRONTEND_SRC / "api" / "devProxy.generated.ts"
-VITE_CONFIG = REPO_ROOT / "packages" / "tcip-web" / "frontend" / "vite.config.ts"
+VITE_CONFIG = (
+    REPO_ROOT / "packages" / "tcip-web" / "frontend" / "vite.config.ts"
+)
 
 _LITERAL_RE = re.compile(r"""["'`](/(?:api|ws)/[^"'`]*)["'`]""")
 _ROUTES_USE_RE = re.compile(r"\bROUTES\.([A-Za-z0-9_]+)")
-_PROXY_ENTRY_RE = re.compile(r'\{\s*path:\s*"([^"]+)",\s*ws:\s*(true|false)\s*\}')
+_PROXY_ENTRY_RE = re.compile(
+    r'\{\s*path:\s*"([^"]+)",\s*ws:\s*(true|false)\s*\}'
+)
 _PROXY_BUILD_RE = re.compile(
     r"Object\.fromEntries\(\s*DEV_PROXY\.map\(\(\s*\{\s*path,\s*ws\s*\}\s*\)\s*=>\s*"
     r"\[\s*path\s*,\s*\{\s*target:\s*BACKEND\s*,\s*changeOrigin:\s*true\s*,\s*ws\s*\}\s*\]\s*\)\s*,?\s*\)",
@@ -33,13 +37,21 @@ _PROXY_BUILD_RE = re.compile(
 
 
 def _frontend_sources(include_tests: bool) -> list[Path]:
-    files = [p for p in FRONTEND_SRC.rglob("*.ts")] + [p for p in FRONTEND_SRC.rglob("*.tsx")]
+    files = [p for p in FRONTEND_SRC.rglob("*.ts")] + [
+        p for p in FRONTEND_SRC.rglob("*.tsx")
+    ]
     if include_tests:
         return sorted(files)
-    return sorted(p for p in files if ".test." not in p.name and "test" not in p.parent.name)
+    return sorted(
+        p
+        for p in files
+        if ".test." not in p.name and "test" not in p.parent.name
+    )
 
 
-def test_the_generated_path_module_is_what_the_registered_routes_produce() -> None:
+def test_the_generated_path_module_is_what_the_registered_routes_produce() -> (
+    None
+):
     """The checked-in module is a projection of the app's routes, not a hand-edited copy.
 
     Regenerating and comparing is the whole guarantee: an added, renamed or re-methoded route that
@@ -60,14 +72,17 @@ def test_no_frontend_module_writes_a_backend_path_of_its_own() -> None:
     test files are left out: a URL written there is the expectation being asserted, not a caller.
     """
     registered_shapes = {
-        re.sub(r"\{[^}]*\}", "{}", path) for _, path, _ in _generator().collect_routes(app)
+        re.sub(r"\{[^}]*\}", "{}", path)
+        for _, path, _ in _generator().collect_routes(app)
     }
 
     offenders: list[str] = []
     for source in _frontend_sources(include_tests=False):
         if source == GENERATED:
             continue
-        for line_no, line in enumerate(source.read_text(encoding="utf-8").splitlines(), 1):
+        for line_no, line in enumerate(
+            source.read_text(encoding="utf-8").splitlines(), 1
+        ):
             for literal in _LITERAL_RE.findall(line):
                 shape = re.sub(r"\$\{[^}]*\}", "{}", literal.split("?")[0])
                 if literal.startswith("/api/") or shape in registered_shapes:
@@ -75,11 +90,14 @@ def test_no_frontend_module_writes_a_backend_path_of_its_own() -> None:
                         f"{source.relative_to(REPO_ROOT).as_posix()}:{line_no} {literal}"
                     )
     assert not offenders, (
-        "these write a backend path instead of using ROUTES:\n" + "\n".join(offenders)
+        "these write a backend path instead of using ROUTES:\n"
+        + "\n".join(offenders)
     )
 
 
-def test_the_generated_proxy_module_is_what_the_registered_routes_produce() -> None:
+def test_the_generated_proxy_module_is_what_the_registered_routes_produce() -> (
+    None
+):
     """The checked-in dev-proxy module is a projection of the app's routes, not a hand-edited
     copy: a socket route added under a new prefix that never reached the module would leave the
     dev server unable to proxy it."""
@@ -93,7 +111,9 @@ def test_the_generated_proxy_module_is_what_the_registered_routes_produce() -> N
 def _proxy_entries_from_generated_module() -> tuple[tuple[str, bool], ...]:
     """The ``DEV_PROXY`` entries as the checked-in generated module actually declares them."""
     text = PROXY_GENERATED.read_text(encoding="utf-8")
-    return tuple((path, ws == "true") for path, ws in _PROXY_ENTRY_RE.findall(text))
+    return tuple(
+        (path, ws == "true") for path, ws in _PROXY_ENTRY_RE.findall(text)
+    )
 
 
 def test_vite_config_builds_its_real_proxy_from_the_generated_module() -> None:
@@ -114,7 +134,9 @@ def test_vite_config_builds_its_real_proxy_from_the_generated_module() -> None:
     )
 
 
-def test_the_real_apis_websocket_routes_make_the_api_prefix_proxy_websockets() -> None:
+def test_the_real_apis_websocket_routes_make_the_api_prefix_proxy_websockets() -> (
+    None
+):
     """Three sockets are mounted under ``/api`` rather than under ``/ws``, so the generated
     ``/api`` entry must itself carry ``ws: true`` or the dev server never proxies them."""
     entries = dict(_generator().collect_proxy_entries(app))
@@ -140,12 +162,16 @@ def test_the_frontend_serving_paths_are_never_proxy_entries() -> None:
     def _list_blocks() -> dict:
         return {}
 
-    prefixes = {path for path, _ws in _generator().collect_proxy_entries(fresh)}
+    prefixes = {
+        path for path, _ws in _generator().collect_proxy_entries(fresh)
+    }
     assert prefixes == {"/api"}
     assert not (prefixes & FRONTEND_SERVING_PATHS)
 
 
-def test_every_path_the_browser_asks_for_is_forwarded_by_the_dev_server() -> None:
+def test_every_path_the_browser_asks_for_is_forwarded_by_the_dev_server() -> (
+    None
+):
     """The paths the frontend references all fall under a prefix the generated dev proxy forwards.
 
     Sockets are the case worth stating: two of them are mounted under the API prefix rather than
@@ -153,26 +179,40 @@ def test_every_path_the_browser_asks_for_is_forwarded_by_the_dev_server() -> Non
     prefixes come from the checked-in proxy module, what the config's own ``server.proxy`` is
     held to build from, rather than only from the generator function that produced it.
     """
-    prefixes = tuple(path for path, _ws in _proxy_entries_from_generated_module())
-    assert prefixes, "no proxied prefixes parsed out of the generated proxy module"
+    prefixes = tuple(
+        path for path, _ws in _proxy_entries_from_generated_module()
+    )
+    assert prefixes, (
+        "no proxied prefixes parsed out of the generated proxy module"
+    )
 
-    by_name = {name: path for name, path, _ in _generator().collect_routes(app)}
+    by_name = {
+        name: path for name, path, _ in _generator().collect_routes(app)
+    }
     referenced = {
         name
         for source in _frontend_sources(include_tests=False)
         if source != GENERATED
         for name in _ROUTES_USE_RE.findall(source.read_text(encoding="utf-8"))
     }
-    assert referenced, "no ROUTES reference found in the frontend, so nothing was checked"
+    assert referenced, (
+        "no ROUTES reference found in the frontend, so nothing was checked"
+    )
     unknown = sorted(name for name in referenced if name not in by_name)
-    assert not unknown, f"the frontend asks for routes the backend does not register: {unknown}"
+    assert not unknown, (
+        f"the frontend asks for routes the backend does not register: {unknown}"
+    )
     unproxied = sorted(
-        f"{name} ({by_name[name]})" for name in referenced if not by_name[name].startswith(prefixes)
+        f"{name} ({by_name[name]})"
+        for name in referenced
+        if not by_name[name].startswith(prefixes)
     )
     assert not unproxied, f"the dev server forwards none of these: {unproxied}"
 
 
-def test_a_route_the_generator_has_not_seen_before_still_reaches_the_browser() -> None:
+def test_a_route_the_generator_has_not_seen_before_still_reaches_the_browser() -> (
+    None
+):
     """A newly registered route is projected without anything being taught about it.
 
     The names carry the method and the path parameters, and a parameter is encoded where it is
@@ -195,7 +235,10 @@ def test_a_route_the_generator_has_not_seen_before_still_reaches_the_browser() -
 
     names = {name: path for name, path, _ in generator.collect_routes(fresh)}
     assert names["getOrchardBlocks"] == "/api/orchard/blocks"
-    assert names["postOrchardBlocksByBlockIdClose"] == "/api/orchard/blocks/{block_id}/close"
+    assert (
+        names["postOrchardBlocksByBlockIdClose"]
+        == "/api/orchard/blocks/{block_id}/close"
+    )
     assert names["socketWsOrchardByBlockId"] == "/ws/orchard/{block_id}"
 
     module = generator.render(fresh)
@@ -206,7 +249,9 @@ def test_a_route_the_generator_has_not_seen_before_still_reaches_the_browser() -
     ) in module
 
 
-def test_two_routes_that_would_share_a_name_are_refused_rather_than_collapsed() -> None:
+def test_two_routes_that_would_share_a_name_are_refused_rather_than_collapsed() -> (
+    None
+):
     """One name cannot stand for two routes: the browser would reach the wrong one silently."""
     generator = _generator()
     clashing = FastAPI()

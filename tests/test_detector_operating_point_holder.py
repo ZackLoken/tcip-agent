@@ -15,7 +15,9 @@ from types import SimpleNamespace
 import pytest
 
 from tests._chain_fixtures import (
-    BARE_NO_KNOB_DETECTOR, BARE_SCORE_THRESH_DETECTOR, BESPOKE_MODELS,
+    BARE_NO_KNOB_DETECTOR,
+    BARE_SCORE_THRESH_DETECTOR,
+    BESPOKE_MODELS,
 )
 
 torch = pytest.importorskip("torch")
@@ -30,18 +32,24 @@ _DIMS = {"in_chans": 3, "num_classes": 1}
 def _built(model_source: dict):
     """The model ``model_source`` builds at :data:`_DIMS`, imported from the staged sources of a
     run config over no data with this repository as its project."""
-    from tcip_mcp.pipelines.model_build import build_from_model_source, staged_sources
+    from tcip_mcp.pipelines.model_build import (
+        build_from_model_source,
+        staged_sources,
+    )
     from tcip_mcp.pipelines.schemas import train_config
     from tests import REPO_ROOT
     from tests._chain_fixtures import training_config
 
     spec = train_config(training_config(model_source, {}))
-    return build_from_model_source(spec.model_source,
-                                   staged_sources(spec, REPO_ROOT).layout, _DIMS)
+    return build_from_model_source(
+        spec.model_source, staged_sources(spec, REPO_ROOT).layout, _DIMS
+    )
 
 
 def test_holder_resolves_to_the_module_itself_with_no_detector():
-    from tcip_mcp.pipelines.operating_point import detector_operating_point_holder
+    from tcip_mcp.pipelines.operating_point import (
+        detector_operating_point_holder,
+    )
 
     model = SimpleNamespace(score_thresh=0.5)
     holder, path = detector_operating_point_holder(model)
@@ -49,7 +57,9 @@ def test_holder_resolves_to_the_module_itself_with_no_detector():
 
 
 def test_holder_resolves_to_detector_roi_heads_for_a_two_stage_wrapper():
-    from tcip_mcp.pipelines.operating_point import detector_operating_point_holder
+    from tcip_mcp.pipelines.operating_point import (
+        detector_operating_point_holder,
+    )
 
     roi_heads = SimpleNamespace(score_thresh=0.5)
     model = SimpleNamespace(detector=SimpleNamespace(roi_heads=roi_heads))
@@ -58,7 +68,9 @@ def test_holder_resolves_to_detector_roi_heads_for_a_two_stage_wrapper():
 
 
 def test_holder_resolves_to_detector_itself_for_a_one_stage_wrapper():
-    from tcip_mcp.pipelines.operating_point import detector_operating_point_holder
+    from tcip_mcp.pipelines.operating_point import (
+        detector_operating_point_holder,
+    )
 
     detector = SimpleNamespace(score_thresh=0.5)
     model = SimpleNamespace(detector=detector)
@@ -67,7 +79,9 @@ def test_holder_resolves_to_detector_itself_for_a_one_stage_wrapper():
 
 
 def test_holder_is_none_when_nothing_exposes_a_knob():
-    from tcip_mcp.pipelines.operating_point import detector_operating_point_holder
+    from tcip_mcp.pipelines.operating_point import (
+        detector_operating_point_holder,
+    )
 
     model = SimpleNamespace(unrelated=1)
     holder, path = detector_operating_point_holder(model)
@@ -85,7 +99,9 @@ def test_holder_refuses_when_the_module_and_its_detectors_roi_heads_both_expose_
     assert hasattr(model.detector.roi_heads, "score_thresh")
     model.score_thresh = 0.5  # restated on the wrapper itself, ambiguous with .detector.roi_heads
 
-    from tcip_mcp.pipelines.operating_point import detector_operating_point_holder
+    from tcip_mcp.pipelines.operating_point import (
+        detector_operating_point_holder,
+    )
 
     with pytest.raises(ValueError, match="more than one location"):
         detector_operating_point_holder(model)
@@ -99,14 +115,22 @@ def test_set_detector_operating_point_sets_each_knob_on_the_holder():
     assert (model.score_thresh, model.detections_per_img) == (0.2, 3)
 
 
-@pytest.mark.parametrize("model", [SimpleNamespace(unrelated=1),
-                                   SimpleNamespace(score_thresh=0.5)],
-                         ids=["no knob", "no cap knob"])
-def test_set_detector_operating_point_refuses_a_knob_the_model_does_not_expose(model):
+@pytest.mark.parametrize(
+    "model",
+    [SimpleNamespace(unrelated=1), SimpleNamespace(score_thresh=0.5)],
+    ids=["no knob", "no cap knob"],
+)
+def test_set_detector_operating_point_refuses_a_knob_the_model_does_not_expose(
+    model,
+):
     from tcip_mcp.pipelines.operating_point import set_detector_operating_point
 
-    with pytest.raises(ValueError, match="exposes no (score_thresh|detections_per_img)"):
-        set_detector_operating_point(model, score_thresh=0.2, detections_per_img=3)
+    with pytest.raises(
+        ValueError, match="exposes no (score_thresh|detections_per_img)"
+    ):
+        set_detector_operating_point(
+            model, score_thresh=0.2, detections_per_img=3
+        )
 
 
 def _checkpoint(tmp_path, builder: str) -> str:
@@ -114,9 +138,17 @@ def _checkpoint(tmp_path, builder: str) -> str:
 
     return registered_checkpoint(
         tmp_path,
-        model_source={"builder": builder, "source_files": [BESPOKE_MODELS], "task": "detection"},
-        data={"tiling": {"enabled": False}, "num_channels": 3,
-              "scope": {"subject": "bud"}})
+        model_source={
+            "builder": builder,
+            "source_files": [BESPOKE_MODELS],
+            "task": "detection",
+        },
+        data={
+            "tiling": {"enabled": False},
+            "num_channels": 3,
+            "scope": {"subject": "bud"},
+        },
+    )
 
 
 def _assessed(tmp_path: Path, builder: str) -> dict:
@@ -135,27 +167,50 @@ def _assessed(tmp_path: Path, builder: str) -> dict:
     images_dir = root / "images" / "2-11-26"
     images_dir.mkdir(parents=True)
     for i, size in enumerate(range(32, 96, 8)):
-        Image.new("RGB", (size, size), (100, 100, 100)).save(images_dir / f"img{i}.png")
+        Image.new("RGB", (size, size), (100, 100, 100)).save(
+            images_dir / f"img{i}.png"
+        )
         box = BBox(size * 0.25, size * 0.25, size * 0.75, size * 0.75)
-        label_image(images_dir / f"img{i}.png", [Annotation(subject="bud", geometry=box)],
-                    size, size)
+        label_image(
+            images_dir / f"img{i}.png",
+            [Annotation(subject="bud", geometry=box)],
+            size,
+            size,
+        )
     selection_dir = tmp_path / "selection"
-    drawn = draw_splits(tmp_path, str(root), output_path=str(selection_dir), subject="bud", seed=2,
-                        val_ratio=0.25, calibration_ratio=0.25,
-                        holdout_ratio=0.25)
+    drawn = draw_splits(
+        tmp_path,
+        str(root),
+        output_path=str(selection_dir),
+        subject="bud",
+        seed=2,
+        val_ratio=0.25,
+        calibration_ratio=0.25,
+        holdout_ratio=0.25,
+    )
     assert "error" not in drawn, drawn
     confirm_count_trait(tmp_path)
-    return assess(tmp_path, _checkpoint(tmp_path, builder), selection_dir, device="cpu",
-                  tile=False)
+    return assess(
+        tmp_path,
+        _checkpoint(tmp_path, builder),
+        selection_dir,
+        device="cpu",
+        tile=False,
+    )
 
 
-def test_a_bespoke_module_exposing_its_own_knobs_is_assessed_at_its_stated_floor(tmp_path):
+def test_a_bespoke_module_exposing_its_own_knobs_is_assessed_at_its_stated_floor(
+    tmp_path,
+):
     """A hand-rolled, non-torchvision module exposing both knobs on itself is assessed at the
     staged floor applied there, and its record names the attribute path it was applied on."""
     record = _assessed(tmp_path, BARE_SCORE_THRESH_DETECTOR)
 
     assert "error" not in record, record
-    assert record["criterion"]["count"]["staged_conf_floor_attribute_path"] == "self"
+    assert (
+        record["criterion"]["count"]["staged_conf_floor_attribute_path"]
+        == "self"
+    )
     assert "conf_censored" not in record["failures"]
 
 

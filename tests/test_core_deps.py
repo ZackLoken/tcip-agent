@@ -12,8 +12,18 @@ import pytest
 
 # Declared (non-optional) tcip-mcp dependencies; see packages/tcip-mcp/pyproject.toml.
 CORE_DEPS = [
-    "mcp", "torch", "torchvision", "timm", "pycocotools",
-    "pydantic", "numpy", "PIL", "shapely", "yaml", "rasterio", "fiona",
+    "mcp",
+    "torch",
+    "torchvision",
+    "timm",
+    "pycocotools",
+    "pydantic",
+    "numpy",
+    "PIL",
+    "shapely",
+    "yaml",
+    "rasterio",
+    "fiona",
 ]
 
 

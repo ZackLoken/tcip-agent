@@ -103,7 +103,11 @@ def extract_tool_name(cell: str) -> str | None:
     if token.startswith("tcip "):
         from tcip_web.cli import COMMANDS
 
-        command = token[len("tcip "):].split(None, 1)[0] if token[len("tcip "):].strip() else ""
+        command = (
+            token[len("tcip ") :].split(None, 1)[0]
+            if token[len("tcip ") :].strip()
+            else ""
+        )
         return None if command in COMMANDS else f"tcip {command}"
     for sep in ("(", " "):
         idx = token.find(sep)
@@ -112,7 +116,9 @@ def extract_tool_name(cell: str) -> str | None:
     return token if _IDENTIFIER.match(token) else None
 
 
-def fabricated_tool_names(surfaces: list[Path] | None = None) -> dict[str, list[str]]:
+def fabricated_tool_names(
+    surfaces: list[Path] | None = None,
+) -> dict[str, list[str]]:
     """Every Tools-table cell naming a tool the registry does not hold, by surface."""
     from tcip_mcp.server import list_registered_tools
 
@@ -138,7 +144,8 @@ def orphan_tool_names(surfaces: list[Path] | None = None) -> list[str]:
     registered = set(list_registered_tools())
     text = "\n".join(
         s.read_text(encoding="utf-8")
-        for s in (surfaces if surfaces is not None else prose_surfaces()))
+        for s in (surfaces if surfaces is not None else prose_surfaces())
+    )
     mentioned = {n for n in registered if f"`{n}`" in text or f"`{n}(" in text}
     return sorted(registered - mentioned - ORPHAN_ALLOW)
 

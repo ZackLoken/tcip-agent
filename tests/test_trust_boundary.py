@@ -17,10 +17,18 @@ from tcip_web.trust_boundary import (
 )
 
 
-def _scope(server: tuple[str, int | None] | None, host: str | None, scheme: str = "http") -> dict:
+def _scope(
+    server: tuple[str, int | None] | None,
+    host: str | None,
+    scheme: str = "http",
+) -> dict:
     headers = [(b"host", host.encode())] if host is not None else []
-    return {"type": "websocket" if scheme in ("ws", "wss") else "http", "scheme": scheme,
-            "server": list(server) if server else None, "headers": headers}
+    return {
+        "type": "websocket" if scheme in ("ws", "wss") else "http",
+        "scheme": scheme,
+        "server": list(server) if server else None,
+        "headers": headers,
+    }
 
 
 def test_the_authority_parser_canonicalises_every_spelling() -> None:
@@ -28,7 +36,15 @@ def test_the_authority_parser_canonicalises_every_spelling() -> None:
     assert canonical_host("[::ffff:127.0.0.1]") == "127.0.0.1"
     assert parse_authority("[::1]:8765", 80) == ("::1", 8765)
     assert parse_authority("192.168.1.23", 80) == ("192.168.1.23", 80)
-    for bad in ("a:b:c", "host:0", "host:abc", "[::1", "host/x", "host?x", "user@host"):
+    for bad in (
+        "a:b:c",
+        "host:0",
+        "host:abc",
+        "[::1",
+        "host/x",
+        "host?x",
+        "user@host",
+    ):
         with pytest.raises(ValueError):
             parse_authority(bad, 80)
 
@@ -41,7 +57,9 @@ def test_an_arrival_is_local_or_not() -> None:
     assert not local_arrival(_scope(("localhost", 80), None))
     for unclassifiable in (("testserver", 80), ("", None), None):
         assert not local_arrival(_scope(unclassifiable, None))
-    assert is_loopback_host("[::ffff:127.0.0.1]") and not is_loopback_host("0.0.0.0")
+    assert is_loopback_host("[::ffff:127.0.0.1]") and not is_loopback_host(
+        "0.0.0.0"
+    )
 
 
 def test_the_host_must_be_the_loopback_host_at_the_arrival_port() -> None:
@@ -60,5 +78,7 @@ def test_a_loopback_origin_at_any_port_is_served_on_a_local_arrival() -> None:
     assert origin_allowed(None, scope)
     assert not origin_allowed("http://evil.example.com", scope)
     assert not origin_allowed("null", scope)
-    assert not origin_allowed("http://attacker.invalid@127.0.0.1:8765/x", scope)
+    assert not origin_allowed(
+        "http://attacker.invalid@127.0.0.1:8765/x", scope
+    )
     assert not origin_allowed("http://192.168.1.23:8765", scope)

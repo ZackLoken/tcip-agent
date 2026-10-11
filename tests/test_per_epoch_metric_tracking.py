@@ -21,15 +21,22 @@ from tests.tiny_trainer_fixtures import (
 
 
 def _scalar_steps(log_dir: Path, tag: str) -> list[int]:
-    from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+    from tensorboard.backend.event_processing.event_accumulator import (
+        EventAccumulator,
+    )
 
     acc = EventAccumulator(str(log_dir), size_guidance={"scalars": 0})
     acc.Reload()
     return [e.step for e in acc.Scalars(tag)]
 
 
-def test_classification_training_writes_train_and_val_scalars_every_epoch(tmp_path):
-    ctx = run_context(tmp_path, classifier_config(3, separable_classifier_data(tmp_path / "ds")))
+def test_classification_training_writes_train_and_val_scalars_every_epoch(
+    tmp_path,
+):
+    ctx = run_context(
+        tmp_path,
+        classifier_config(3, separable_classifier_data(tmp_path / "ds")),
+    )
     run = ctx.default_train()
     ctx.tb.close()
     assert run.status == "completed", run.status_error
@@ -49,17 +56,32 @@ def test_hpo_trial_body_writes_train_and_val_loss_every_epoch(tmp_path):
     from tests._chain_fixtures import training_config
     from tests._producer_fixtures import seed_labeled_images
     from tests._training_values import schedule
-    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR, opened_sweep
+    from tests._verified_checkpoint_fixtures import (
+        BUILT_DETECTOR,
+        opened_sweep,
+    )
 
     images_dir = seed_labeled_images(
         tmp_path / "ds" / "images" / "train",
-        [Annotation(subject="leaf", geometry=BBox(10, 10, 30, 30))], n=2, width=128, height=128)
+        [Annotation(subject="leaf", geometry=BBox(10, 10, 30, 30))],
+        n=2,
+        width=128,
+        height=128,
+    )
     base_config = training_config(
-        BUILT_DETECTOR, {"images_dir": str(images_dir), "scope": {"subject": "leaf"},
-                         "split": {"seed": 0, "val_ratio": 0.15}},
-        stages=[{"freeze_to": -1}], scheduler=schedule("cosine", horizon_epochs=2))
+        BUILT_DETECTOR,
+        {
+            "images_dir": str(images_dir),
+            "scope": {"subject": "leaf"},
+            "split": {"seed": 0, "val_ratio": 0.15},
+        },
+        stages=[{"freeze_to": -1}],
+        scheduler=schedule("cosine", horizon_epochs=2),
+    )
     reported: list[float] = []
-    _run_hpo_trial({}, reported.append, opened_sweep(tmp_path, base_config), "x")
+    _run_hpo_trial(
+        {}, reported.append, opened_sweep(tmp_path, base_config), "x"
+    )
     (trial_dir,) = run_dirs(tmp_path)
 
     # One report per epoch's metrics row, which is the trial's whole result.
@@ -70,17 +92,28 @@ def test_hpo_trial_body_writes_train_and_val_loss_every_epoch(tmp_path):
     assert _scalar_steps(tb_dir, "val_loss") == [1, 2]
 
 
-def test_the_epoch_console_line_carries_validation_metrics_beyond_loss(tmp_path, caplog):
+def test_the_epoch_console_line_carries_validation_metrics_beyond_loss(
+    tmp_path, caplog
+):
     """The one-line-per-epoch summary a breeder or an operator tails must name accuracy and F1,
     not only the loss a plain reader would take for the whole story."""
     import logging
 
-    ctx = run_context(tmp_path, classifier_config(2, separable_classifier_data(tmp_path / "ds")))
-    with caplog.at_level(logging.INFO, logger="tcip_mcp.pipelines.training.generic_trainer"):
+    ctx = run_context(
+        tmp_path,
+        classifier_config(2, separable_classifier_data(tmp_path / "ds")),
+    )
+    with caplog.at_level(
+        logging.INFO, logger="tcip_mcp.pipelines.training.generic_trainer"
+    ):
         run = train(ctx.run, ctx.train_loader, val_loader=ctx.val_loader)
     assert run.status == "completed", run.status_error
 
-    epoch_lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("Epoch")]
+    epoch_lines = [
+        r.getMessage()
+        for r in caplog.records
+        if r.getMessage().startswith("Epoch")
+    ]
     assert len(epoch_lines) == 2
     for line in epoch_lines:
         assert "val_accuracy=" in line

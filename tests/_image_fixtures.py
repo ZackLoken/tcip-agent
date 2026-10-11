@@ -14,8 +14,15 @@ def _deg_to_dms(value: float) -> tuple[float, float, float]:
     return (float(d), float(m), round((m_full - m) * 60, 4))
 
 
-def write_geo_image(path: Path, lat: float, lon: float, when: Any, image: Any = None, *,
-                    omit: tuple[int, ...] = ()) -> None:
+def write_geo_image(
+    path: Path,
+    lat: float,
+    lon: float,
+    when: Any,
+    image: Any = None,
+    *,
+    omit: tuple[int, ...] = (),
+) -> None:
     """A JPEG at ``path`` carrying EXIF DateTimeOriginal ``when`` and GPS ``lat``/``lon``, less
     the GPS tags ``omit`` names (``0x0001`` the latitude's hemisphere, ``0x0003``/``0x0004`` the
     longitude's): the PIL ``image`` given, else a tiny black frame."""
@@ -25,19 +32,27 @@ def write_geo_image(path: Path, lat: float, lon: float, when: Any, image: Any = 
     exif = Image.Exif()
     exif[0x8769] = {0x9003: when.strftime("%Y:%m:%d %H:%M:%S")}
     gps = {
-        0x0001: "N" if lat >= 0 else "S", 0x0002: _deg_to_dms(lat),
-        0x0003: "E" if lon >= 0 else "W", 0x0004: _deg_to_dms(lon),
+        0x0001: "N" if lat >= 0 else "S",
+        0x0002: _deg_to_dms(lat),
+        0x0003: "E" if lon >= 0 else "W",
+        0x0004: _deg_to_dms(lon),
     }
-    exif[0x8825] = {tag: value for tag, value in gps.items() if tag not in omit}
+    exif[0x8825] = {
+        tag: value for tag, value in gps.items() if tag not in omit
+    }
     frame = image if image is not None else Image.new("RGB", (8, 8))
     frame.save(path, exif=exif, quality=100, subsampling=0)
 
 
-def write_noise_image(path: Path, size: int, bright: bool = False, span: float = 0.3) -> None:
+def write_noise_image(
+    path: Path, size: int, bright: bool = False, span: float = 0.3
+) -> None:
     """A ``size`` by ``size`` RGB image of uniform noise at ``path``, its parent created: values
     in [0, ``span``), or offset by 0.7 when ``bright``."""
     import torch
     from torchvision.utils import save_image
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    save_image(torch.rand(3, size, size) * span + (0.7 if bright else 0.0), str(path))
+    save_image(
+        torch.rand(3, size, size) * span + (0.7 if bright else 0.0), str(path)
+    )

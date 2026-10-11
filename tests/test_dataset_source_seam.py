@@ -28,7 +28,15 @@ class _CountingDataset(Dataset):
     a target a detector and a regressor both read. ``rows`` is the builder's own configuration,
     which a direct construction with no producer behind it stands on instead."""
 
-    def __init__(self, *, samples=None, scope=None, rows=None, marker: str = "", **_ignored):
+    def __init__(
+        self,
+        *,
+        samples=None,
+        scope=None,
+        rows=None,
+        marker: str = "",
+        **_ignored,
+    ):
         self.samples = list(samples or [])
         self.scope = scope
         self.rows = list(rows or [])
@@ -39,10 +47,13 @@ class _CountingDataset(Dataset):
 
     def __getitem__(self, idx):
         named = self.samples or self.rows
-        return torch.zeros(3, 8, 8), {"stem": str(named[idx]),
-                                      "boxes": torch.tensor([[0.0, 0.0, 1.0, 1.0]]),
-                                      "labels": torch.tensor([1]), "iscrowd": torch.tensor([0]),
-                                      "values": torch.tensor(0.0)}
+        return torch.zeros(3, 8, 8), {
+            "stem": str(named[idx]),
+            "boxes": torch.tensor([[0.0, 0.0, 1.0, 1.0]]),
+            "labels": torch.tensor([1]),
+            "iscrowd": torch.tensor([0]),
+            "values": torch.tensor(0.0),
+        }
 
     @property
     def regions(self):
@@ -77,9 +88,13 @@ class _PointDataset(Dataset):
         self.samples = list(samples or [])
         self.transforms = transforms
         self.points = [
-            next((float(a.geometry.x), float(a.geometry.y))
-                 for a in json_io.read_label_document(sample.ground_truth).annotations
-                 if isinstance(a.geometry, Point))
+            next(
+                (float(a.geometry.x), float(a.geometry.y))
+                for a in json_io.read_label_document(
+                    sample.ground_truth
+                ).annotations
+                if isinstance(a.geometry, Point)
+            )
             for sample in self.samples
         ]
 
@@ -117,7 +132,9 @@ def _bespoke(stated: dict):
     imports from, this repository as its project (``datasets.BespokeSource``)."""
     from tests._producer_fixtures import staged_layout
 
-    return _source(stated), staged_layout(REPO_ROOT, {"dataset_source": stated})
+    return _source(stated), staged_layout(
+        REPO_ROOT, {"dataset_source": stated}
+    )
 
 
 def _admitted_samples(root: Path):
@@ -126,16 +143,26 @@ def _admitted_samples(root: Path):
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from PIL import Image
 
-    from tests._producer_fixtures import label_image, registry_over, samples_over
+    from tests._producer_fixtures import (
+        label_image,
+        registry_over,
+        samples_over,
+    )
 
     images_dir = root / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True, exist_ok=True)
     registry_over(root, SubjectRegistry(subjects=(Subject(name="leaf"),)))
     for stem in ("s0", "s1"):
-        Image.new("RGB", (16, 16), (40, 60, 80)).save(images_dir / f"{stem}.png")
-        label_image(images_dir / f"{stem}.png",
-                    [Annotation(subject="leaf", geometry=BBox(2, 2, 8, 8))], 16, 16,
-                    keep_empty=True)
+        Image.new("RGB", (16, 16), (40, 60, 80)).save(
+            images_dir / f"{stem}.png"
+        )
+        label_image(
+            images_dir / f"{stem}.png",
+            [Annotation(subject="leaf", geometry=BBox(2, 2, 8, 8))],
+            16,
+            16,
+            keep_empty=True,
+        )
     return samples_over(images_dir, subject="leaf")
 
 
@@ -159,11 +186,20 @@ def _ctx(root: Path, task: str, data: dict):
 
     samples = _admitted_samples(root / "ds")
     config = training_config(
-        {"builder": GT_ANCHOR_DETECTOR, "builder_kwargs": {"gt_boxes_wh": [(10, 10)]},
-         "source_files": [BESPOKE_MODELS], "task": task},
-        {**data, "scope": asdict(_scope()), "auto_val": False,
-         "images_dir": str(root / "ds" / "images" / UNDATED_BUCKET)},
-        evaluation=evaluation_block(selection_metric="loss"))
+        {
+            "builder": GT_ANCHOR_DETECTOR,
+            "builder_kwargs": {"gt_boxes_wh": [(10, 10)]},
+            "source_files": [BESPOKE_MODELS],
+            "task": task,
+        },
+        {
+            **data,
+            "scope": asdict(_scope()),
+            "auto_val": False,
+            "images_dir": str(root / "ds" / "images" / UNDATED_BUCKET),
+        },
+        evaluation=evaluation_block(selection_metric="loss"),
+    )
     return run_context(root, config), samples
 
 
@@ -172,22 +208,34 @@ def _bespoke_ctx(root: Path):
     return _ctx(root, "grape_bunch_count", {"dataset_source": DATASET_SOURCE})
 
 
-def test_a_bodys_platform_loader_reads_at_the_runs_sizes_and_lattice(tmp_path: Path):
+def test_a_bodys_platform_loader_reads_at_the_runs_sizes_and_lattice(
+    tmp_path: Path,
+):
     """On a run whose data block names no ``dataset_source``, a training body's
     ``ctx.build_dataset`` builds the platform's loader over the subset of samples it was handed,
     at the band count and the lattice the run's data block records."""
-    lattice = {"enabled": True, "tile_size": 8, "overlap": 0.25, "sliver_frac": 0.5}
-    ctx, samples = _ctx(tmp_path, "detection", {"num_channels": 3, "tiling": lattice})
+    lattice = {
+        "enabled": True,
+        "tile_size": 8,
+        "overlap": 0.25,
+        "sliver_frac": 0.5,
+    }
+    ctx, samples = _ctx(
+        tmp_path, "detection", {"num_channels": 3, "tiling": lattice}
+    )
 
     tiler = ctx.build_dataset(samples=samples[:1])
 
     assert (tiler.tile_size, tiler.overlap) == (8, 0.25)
     assert tiler.expected_channels == 3
-    assert {tiler.sample_of(k).member for k in tiler.stems} == {samples[0].member}
+    assert {tiler.sample_of(k).member for k in tiler.stems} == {
+        samples[0].member
+    }
 
 
 def test_a_bodys_loader_on_a_bespoke_run_builds_through_its_builder_over_the_subset(
-        tmp_path: Path):
+    tmp_path: Path,
+):
     """On a run whose data block names a ``dataset_source``, a training body's
     ``ctx.build_dataset`` imports that builder from the run's layout and hands it the subset of
     samples it was given and the run's recorded class space; the builder's own configuration
@@ -196,15 +244,24 @@ def test_a_bodys_loader_on_a_bespoke_run_builds_through_its_builder_over_the_sub
     ds = ctx.build_dataset(samples=samples[:1])
 
     assert type(ds).__qualname__ == "_CountingDataset"
-    assert ds.samples == list(samples[:1])   # the subset handed through the door, unchanged
-    assert ds.scope == ctx.spec.data.recorded_scope  # the class space they were admitted under
-    assert ds.rows == ["s0", "s1"]           # the builder's own configuration, from its own kwargs
-    assert ds.marker == "bespoke"            # builder_kwargs applied
+    assert ds.samples == list(
+        samples[:1]
+    )  # the subset handed through the door, unchanged
+    assert (
+        ds.scope == ctx.spec.data.recorded_scope
+    )  # the class space they were admitted under
+    assert ds.rows == [
+        "s0",
+        "s1",
+    ]  # the builder's own configuration, from its own kwargs
+    assert ds.marker == "bespoke"  # builder_kwargs applied
     # The platform states nothing about a dataset it did not build, and reads nothing off it.
     assert not hasattr(ds, "expected_channels")
 
 
-def test_a_bodys_door_takes_the_samples_and_the_augmentation_and_nothing_else(tmp_path: Path):
+def test_a_bodys_door_takes_the_samples_and_the_augmentation_and_nothing_else(
+    tmp_path: Path,
+):
     """``ctx.build_dataset`` takes the samples and the augmentation and refuses every other
     keyword by name, a builder, a class space, a tiling and sizes included: the run's own block
     states each, and a loader given another could answer for a membership, a class space, a
@@ -212,10 +269,16 @@ def test_a_bodys_door_takes_the_samples_and_the_augmentation_and_nothing_else(tm
     from tcip_mcp.pipelines.schemas import TilingSpec
 
     ctx, samples = _bespoke_ctx(tmp_path)
-    for unowned in ({"dataset_source": ctx.spec.data.dataset_source}, {"scope": _scope()},
-                    {"tiling": TilingSpec.model_validate({"enabled": True})},
-                    {"sizes": {"num_channels": 3}}, {"labels_dir": "X:/elsewhere"},
-                    {"stems": ["s0"]}, {"label_format": "coco"}, {"subject": "leaf"}):
+    for unowned in (
+        {"dataset_source": ctx.spec.data.dataset_source},
+        {"scope": _scope()},
+        {"tiling": TilingSpec.model_validate({"enabled": True})},
+        {"sizes": {"num_channels": 3}},
+        {"labels_dir": "X:/elsewhere"},
+        {"stems": ["s0"]},
+        {"label_format": "coco"},
+        {"subject": "leaf"},
+    ):
         with pytest.raises(TypeError) as refused:
             ctx.build_dataset(samples=samples, **unowned)
         assert all(name in str(refused.value) for name in unowned)
@@ -232,11 +295,19 @@ def test_builder_kwargs_may_not_restate_what_the_producer_named():
     from tcip_mcp.pipelines.data.datasets import build_from_dataset_source
 
     for reserved in ("samples", "scope", "task", "transforms"):
-        stated = {"builder": BESPOKE_DS, "builder_kwargs": {reserved: "foreign"},
-                  "source_files": [BESPOKE_DS_FILE]}
+        stated = {
+            "builder": BESPOKE_DS,
+            "builder_kwargs": {reserved: "foreign"},
+            "source_files": [BESPOKE_DS_FILE],
+        }
         with pytest.raises(ValueError, match="restates"):
-            build_from_dataset_source(_bespoke(stated), samples=[], scope=_scope(),
-                                      task="detection", transforms=None)
+            build_from_dataset_source(
+                _bespoke(stated),
+                samples=[],
+                scope=_scope(),
+                task="detection",
+                transforms=None,
+            )
 
 
 def test_known_task_registry_stays_the_default(tmp_path: Path):
@@ -244,8 +315,12 @@ def test_known_task_registry_stays_the_default(tmp_path: Path):
 
     # No dataset_source -> the closed-registry refusal stays the honest signal for a bad name.
     with pytest.raises(ValueError, match="Unknown task"):
-        build_dataset("grape_bunch_count", samples=_admitted_samples(tmp_path / "ds"), sizes={},
-                      scope=_scope())
+        build_dataset(
+            "grape_bunch_count",
+            samples=_admitted_samples(tmp_path / "ds"),
+            sizes={},
+            scope=_scope(),
+        )
 
 
 def test_builder_kwargs_configure_the_builder(tmp_path: Path):
@@ -256,23 +331,37 @@ def test_builder_kwargs_configure_the_builder(tmp_path: Path):
 
     from tcip_mcp.pipelines.data.datasets import build_from_dataset_source
 
-    required = {name for name, p in
-                inspect.signature(build_from_dataset_source).parameters.items()
-                if p.default is inspect.Parameter.empty}
+    required = {
+        name
+        for name, p in inspect.signature(
+            build_from_dataset_source
+        ).parameters.items()
+        if p.default is inspect.Parameter.empty
+    }
     assert required == {"bespoke", "task", "samples", "scope", "transforms"}
 
     samples = _admitted_samples(tmp_path / "ds")
-    stated = {"builder": BESPOKE_DS, "builder_kwargs": {"marker": "pinned"},
-              "source_files": [BESPOKE_DS_FILE]}
-    ds = build_from_dataset_source(_bespoke(stated), task="grape_bunch_count",
-                                   samples=samples, scope=_scope(), transforms=None)
+    stated = {
+        "builder": BESPOKE_DS,
+        "builder_kwargs": {"marker": "pinned"},
+        "source_files": [BESPOKE_DS_FILE],
+    }
+    ds = build_from_dataset_source(
+        _bespoke(stated),
+        task="grape_bunch_count",
+        samples=samples,
+        scope=_scope(),
+        transforms=None,
+    )
     assert ds.marker == "pinned" and ds.samples == list(samples)
 
     with pytest.raises(ValueError, match="builder_kwargs"):
         _source({"builder": BESPOKE_DS, "builder_kwargs": [1, 2]})
 
 
-def test_preflight_requires_the_data_a_bespoke_run_is_still_admitted_from(tmp_path: Path):
+def test_preflight_requires_the_data_a_bespoke_run_is_still_admitted_from(
+    tmp_path: Path,
+):
     """A bespoke builder does not exempt a run from naming its data: the platform's own producer
     admits its samples whatever loads them, so a config naming no place refuses here by naming the
     missing key, the one refusal every route shares."""
@@ -280,10 +369,16 @@ def test_preflight_requires_the_data_a_bespoke_run_is_still_admitted_from(tmp_pa
     from tests._chain_fixtures import training_config
 
     data: dict = {"dataset_source": DATASET_SOURCE}
-    config = training_config({"builder": GT_ANCHOR_DETECTOR,
-                              "builder_kwargs": {"gt_boxes_wh": [(10, 10)]},
-                              "source_files": [BESPOKE_MODELS],
-                              "task": "grape_bunch_count"}, data, batch_size=1)
+    config = training_config(
+        {
+            "builder": GT_ANCHOR_DETECTOR,
+            "builder_kwargs": {"gt_boxes_wh": [(10, 10)]},
+            "source_files": [BESPOKE_MODELS],
+            "task": "grape_bunch_count",
+        },
+        data,
+        batch_size=1,
+    )
     result = preflight_config(tmp_path, config, smoke=False)
     assert not result["valid"]
     assert result["issues"] == ["Missing 'data.images_dir'"]
@@ -292,34 +387,55 @@ def test_preflight_requires_the_data_a_bespoke_run_is_still_admitted_from(tmp_pa
     # actually admits, passes with no issue.
     root = tmp_path / "ds"
     _admitted_samples(root)
-    located_data = {**data, "images_dir": str(root / "images" / UNDATED_BUCKET),
-                    "scope": {"subject": "leaf"}, "split": {"seed": 0, "val_ratio": 0.15}}
-    admitted = preflight_config(tmp_path, {**config, "data": located_data}, smoke=False)
+    located_data = {
+        **data,
+        "images_dir": str(root / "images" / UNDATED_BUCKET),
+        "scope": {"subject": "leaf"},
+        "split": {"seed": 0, "val_ratio": 0.15},
+    }
+    admitted = preflight_config(
+        tmp_path, {**config, "data": located_data}, smoke=False
+    )
     assert admitted["issues"] == [], admitted["issues"]
 
     # A builder no declared file holds is refused naming source_files, over that same place.
     bad_data = {**located_data, "dataset_source": {"builder": "no.such:fn"}}
-    result = preflight_config(tmp_path, {**config, "data": bad_data}, smoke=False)
+    result = preflight_config(
+        tmp_path, {**config, "data": bad_data}, smoke=False
+    )
     assert not result["valid"]
-    assert any(i.startswith("source_files: ") and "no.such" in i for i in result["issues"])
+    assert any(
+        i.startswith("source_files: ") and "no.such" in i
+        for i in result["issues"]
+    )
 
 
-def test_snapshot_copies_the_dataset_builders_module_as_that_module(tmp_path: Path):
+def test_snapshot_copies_the_dataset_builders_module_as_that_module(
+    tmp_path: Path,
+):
     """The dataset builder's module, declared under its ``source_files``, is copied at its path
     under its import root; a dataset builder none of them holds refuses the snapshot by name."""
     from tcip_mcp.pipelines.model_build import snapshot_model_source
     from tcip_mcp.pipelines.schemas import train_config
     from tests._chain_fixtures import training_config
 
-    model_source = {"builder": GT_ANCHOR_DETECTOR, "source_files": [BESPOKE_MODELS],
-                    "task": "detection"}
-    spec = train_config(training_config(model_source, {"dataset_source": DATASET_SOURCE}))
+    model_source = {
+        "builder": GT_ANCHOR_DETECTOR,
+        "source_files": [BESPOKE_MODELS],
+        "task": "detection",
+    }
+    spec = train_config(
+        training_config(model_source, {"dataset_source": DATASET_SOURCE})
+    )
     record, copies = snapshot_model_source(spec, tmp_path)
 
     entry = record["files"][str(Path(BESPOKE_DS_FILE).resolve())]
     assert entry["file"] == "model_src/test_dataset_source_seam.py"
     assert copies[entry["file"]] == Path(__file__).read_bytes()
-    undeclared = train_config(training_config(model_source,
-                                              {"dataset_source": {"builder": BESPOKE_DS}}))
+    undeclared = train_config(
+        training_config(
+            model_source, {"dataset_source": {"builder": BESPOKE_DS}}
+        )
+    )
     with pytest.raises(ValueError, match="test_dataset_source_seam"):
         snapshot_model_source(undeclared, tmp_path)

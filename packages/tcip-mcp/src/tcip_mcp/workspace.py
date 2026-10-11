@@ -34,8 +34,10 @@ def workspace_from_environment() -> Path:
     blank."""
     raw = os.environ.get("TCIP_WORKSPACE", "").strip()
     if not raw:
-        raise ValueError("TCIP_WORKSPACE is unset: set it to the folder whose child directories "
-                         "are the projects this process serves")
+        raise ValueError(
+            "TCIP_WORKSPACE is unset: set it to the folder whose child directories "
+            "are the projects this process serves"
+        )
     root = Path(raw).expanduser()
     root.mkdir(parents=True, exist_ok=True)
     root = root.resolve()
@@ -56,7 +58,11 @@ class BoundProject(NamedTuple):
 def is_valid_name(name: str) -> bool:
     """True if ``name`` is a single, safe path segment."""
     seg = (name or "").strip()
-    return bool(seg) and not any(c in seg for c in ("/", "\\", ":")) and seg not in (".", "..")
+    return (
+        bool(seg)
+        and not any(c in seg for c in ("/", "\\", ":"))
+        and seg not in (".", "..")
+    )
 
 
 # ── the last-opened pointer ──────────────────────────────────────────────────
@@ -87,7 +93,9 @@ def write_last_opened(workspace: Path, project_id: str) -> None:
 
 def project_dirs(workspace: Path) -> list[Path]:
     """Every child directory of the workspace carrying a ``.tcip`` directory, sorted by name."""
-    return sorted(p for p in workspace.iterdir() if p.is_dir() and (p / ".tcip").is_dir())
+    return sorted(
+        p for p in workspace.iterdir() if p.is_dir() and (p / ".tcip").is_dir()
+    )
 
 
 def project_records(workspace: Path) -> list[tuple[Path, dict]]:
@@ -95,10 +103,15 @@ def project_records(workspace: Path) -> list[tuple[Path, dict]]:
     :func:`tcip_mcp.project_record.record_fields` reads them."""
     from tcip_mcp.project_record import record_fields
 
-    return [(project, record_fields(project)) for project in project_dirs(workspace)]
+    return [
+        (project, record_fields(project))
+        for project in project_dirs(workspace)
+    ]
 
 
-def project_by_id(records: Iterable[tuple[Path, dict]], project_id: str) -> tuple[Path, dict]:
+def project_by_id(
+    records: Iterable[tuple[Path, dict]], project_id: str
+) -> tuple[Path, dict]:
     """The project among ``records`` (:func:`project_records`) whose record holds ``project_id``,
     with its fields. Raises ``LookupError`` naming the id when no project holds it, with every
     project whose record would not read and why; and naming both directories when two hold it (a
@@ -111,17 +124,25 @@ def project_by_id(records: Iterable[tuple[Path, dict]], project_id: str) -> tupl
         elif fields["id"] == project_id:
             found.append((project, fields))
     if not found:
-        detail = f"; these projects' records would not read: {'; '.join(unreadable)}" if (
-            unreadable) else ""
-        raise LookupError(f"no project in the workspace has id {project_id!r}{detail}")
+        detail = (
+            f"; these projects' records would not read: {'; '.join(unreadable)}"
+            if (unreadable)
+            else ""
+        )
+        raise LookupError(
+            f"no project in the workspace has id {project_id!r}{detail}"
+        )
     if len(found) > 1:
-        raise LookupError(f"projects {', '.join(str(p) for p, _ in found)} all have id "
-                          f"{project_id!r}; one is a copy, so neither is opened by it")
+        raise LookupError(
+            f"projects {', '.join(str(p) for p, _ in found)} all have id "
+            f"{project_id!r}; one is a copy, so neither is opened by it"
+        )
     return found[0]
 
 
-def remove_project(workspace: Path, project: Path, *, actor: str,
-                   release: Callable[[], None]) -> dict:
+def remove_project(
+    workspace: Path, project: Path, *, actor: str, release: Callable[[], None]
+) -> dict:
     """Archive a workspace project, models included, into the workspace's ``.removed/``, then move
     its directory there, and record one ``project_removed`` line by ``actor`` in the moved
     project's own log.
@@ -147,16 +168,24 @@ def remove_project(workspace: Path, project: Path, *, actor: str,
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     archive_path = removed / f"{project.name}-{stamp}.zip"
     moved_to = removed / f"{project.name}-{stamp}"
-    result = write_archive(project, output_path=str(archive_path), include_models=True)
+    result = write_archive(
+        project, output_path=str(archive_path), include_models=True
+    )
     if "error" in result:
         raise ValueError(result["error"])
     release()
     tcip_store.release_root(project)
     try:
-        retry_while_denied(lambda: os.rename(project, moved_to), RENAME_BUDGET_S)
+        retry_while_denied(
+            lambda: os.rename(project, moved_to), RENAME_BUDGET_S
+        )
     except OSError:
         archive_path.unlink(missing_ok=True)
         raise
-    record_event_or_raise("project_removed", {"archive_path": str(archive_path)}, actor=actor,
-                          scope=moved_to)
+    record_event_or_raise(
+        "project_removed",
+        {"archive_path": str(archive_path)},
+        actor=actor,
+        scope=moved_to,
+    )
     return {"archive_path": str(archive_path), "moved_to": str(moved_to)}

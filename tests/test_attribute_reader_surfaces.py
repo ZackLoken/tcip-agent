@@ -27,8 +27,12 @@ def _scope(tmp_path: Path, *attributes: cr.Attribute) -> ClassScope:
     from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tests._producer_fixtures import registry_over
 
-    registry_over(tmp_path, cr.SubjectRegistry(subjects=(
-        cr.Subject(name=SUBJECT, attributes=attributes),)))
+    registry_over(
+        tmp_path,
+        cr.SubjectRegistry(
+            subjects=(cr.Subject(name=SUBJECT, attributes=attributes),)
+        ),
+    )
     return registry_scope(tmp_path / "images", SUBJECT)
 
 
@@ -47,33 +51,75 @@ def test_count_by_class_under_a_scope_declaring_no_attribute_of_the_state_counts
     whose model classified that attribute assessed the state at all."""
     p = _document(tmp_path)
     json_io.write_label_document(
-        p, [Annotation(subject=SUBJECT, geometry=BBox(1, 1, 3, 3), score=0.9,
-                       attributes={"grade": "high"})], 8, 8)
+        p,
+        [
+            Annotation(
+                subject=SUBJECT,
+                geometry=BBox(1, 1, 3, 3),
+                score=0.9,
+                attributes={"grade": "high"},
+            )
+        ],
+        8,
+        8,
+    )
 
     total, positive, unclassified = phenology.count_by_class(
-        p, PositiveState(attribute="grade", value="high"), scope=_scope(tmp_path, COLOR))
+        p,
+        PositiveState(attribute="grade", value="high"),
+        scope=_scope(tmp_path, COLOR),
+    )
 
     assert (total, positive, unclassified) == (1, 0, 1)
 
 
-def test_count_by_class_reads_the_states_own_attribute_among_several(tmp_path: Path) -> None:
+def test_count_by_class_reads_the_states_own_attribute_among_several(
+    tmp_path: Path,
+) -> None:
     """Under a scope declaring two attributes, the positive state's own attribute decides, never
     the other one; a record carrying no value under it refuses by name."""
     p = _document(tmp_path)
-    json_io.write_label_document(p, [
-        Annotation(subject=SUBJECT, geometry=BBox(1, 1, 3, 3), score=0.9,
-                   attributes={"color": "red", "grade": "high"}),
-        Annotation(subject=SUBJECT, geometry=BBox(4, 4, 6, 6), score=0.9,
-                   attributes={"color": "blue", "grade": "low"}),
-    ], 8, 8)
+    json_io.write_label_document(
+        p,
+        [
+            Annotation(
+                subject=SUBJECT,
+                geometry=BBox(1, 1, 3, 3),
+                score=0.9,
+                attributes={"color": "red", "grade": "high"},
+            ),
+            Annotation(
+                subject=SUBJECT,
+                geometry=BBox(4, 4, 6, 6),
+                score=0.9,
+                attributes={"color": "blue", "grade": "low"},
+            ),
+        ],
+        8,
+        8,
+    )
     scope = _scope(tmp_path, COLOR, GRADE)
 
-    assert phenology.count_by_class(p, PositiveState(attribute="grade", value="high"),
-                                    scope=scope) == (2, 1, 0)
-    json_io.write_label_document(p, [Annotation(subject=SUBJECT, geometry=BBox(1, 1, 3, 3),
-                                                score=0.9, attributes={"color": "red"})], 8, 8)
+    assert phenology.count_by_class(
+        p, PositiveState(attribute="grade", value="high"), scope=scope
+    ) == (2, 1, 0)
+    json_io.write_label_document(
+        p,
+        [
+            Annotation(
+                subject=SUBJECT,
+                geometry=BBox(1, 1, 3, 3),
+                score=0.9,
+                attributes={"color": "red"},
+            )
+        ],
+        8,
+        8,
+    )
     with pytest.raises(json_io.UndeclaredValueError, match="'grade'"):
-        phenology.count_by_class(p, PositiveState(attribute="grade", value="high"), scope=scope)
+        phenology.count_by_class(
+            p, PositiveState(attribute="grade", value="high"), scope=scope
+        )
 
 
 def test_an_undecodable_bucket_record_refuses_by_name_rather_than_reading_as_unclassified(
@@ -92,13 +138,21 @@ def test_an_undecodable_bucket_record_refuses_by_name_rather_than_reading_as_unc
     image = tmp_path / "ds" / "images" / "2026-05-02" / "s1.png"
     image.parent.mkdir(parents=True)
     image.write_bytes(b"")
-    bucket = published(tmp_path, "classifier/2026-05-02", [predicted(image, ["one"])],
-                       scope={"subject": SUBJECT})
+    bucket = published(
+        tmp_path,
+        "classifier/2026-05-02",
+        [predicted(image, ["one"])],
+        scope={"subject": SUBJECT},
+    )
     with sqlite3.connect(database_file(str(bucket.root))) as db:
-        db.execute("update records set value = ? where store = 'prediction_buckets'",
-                   (b"{not json",))
+        db.execute(
+            "update records set value = ? where store = 'prediction_buckets'",
+            (b"{not json",),
+        )
 
-    with pytest.raises(NotABucketError, match=r"prediction_buckets\['classifier/2026-05-02'\]"):
+    with pytest.raises(
+        NotABucketError, match=r"prediction_buckets\['classifier/2026-05-02'\]"
+    ):
         read_bucket(bucket.root, bucket.name)
 
 
@@ -106,14 +160,26 @@ def test_the_coco_reader_keeps_a_records_attribute_values() -> None:
     from tcip_annotation.format_io import parse_coco_annotations
 
     coco = {
-        "images": [{"id": 1, "file_name": "img.jpg", "width": 10, "height": 10}],
+        "images": [
+            {"id": 1, "file_name": "img.jpg", "width": 10, "height": 10}
+        ],
         "categories": [{"id": 0, "name": SUBJECT}],
-        "annotations": [{"id": 1, "image_id": 1, "category_id": 0, "bbox": [1, 1, 4, 4],
-                         "score": 0.9, "attributes": {"color": "blue"}}],
+        "annotations": [
+            {
+                "id": 1,
+                "image_id": 1,
+                "category_id": 0,
+                "bbox": [1, 1, 4, 4],
+                "score": 0.9,
+                "attributes": {"color": "blue"},
+            }
+        ],
     }
 
     (restored,) = parse_coco_annotations(
-        coco, decode_rle=lambda segmentation: pytest.fail("no run-length mask here"))[1][1]
+        coco,
+        decode_rle=lambda segmentation: pytest.fail("no run-length mask here"),
+    )[1][1]
     assert restored.subject == SUBJECT
     assert restored.attributes == {"color": "blue"}
 
@@ -123,10 +189,17 @@ def test_legend_name_shows_the_subject_and_every_attribute_value_in_declared_ord
 ) -> None:
     from tcip_mcp.tools.vision_tools import _legend_name
 
-    pred = Annotation(subject=SUBJECT, geometry=BBox(1, 1, 5, 5), score=0.9,
-                      attributes={"grade": "high", "color": "blue"})
+    pred = Annotation(
+        subject=SUBJECT,
+        geometry=BBox(1, 1, 5, 5),
+        score=0.9,
+        attributes={"grade": "high", "color": "blue"},
+    )
 
-    assert _legend_name(pred, scope=_scope(tmp_path, COLOR, GRADE)) == "object blue high"
+    assert (
+        _legend_name(pred, scope=_scope(tmp_path, COLOR, GRADE))
+        == "object blue high"
+    )
 
 
 def test_legend_name_falls_back_to_the_subject_under_no_scope_or_no_attributes(

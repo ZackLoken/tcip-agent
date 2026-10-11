@@ -26,7 +26,9 @@ class Compose:
     def __init__(self, transforms: list) -> None:
         self.transforms = transforms
 
-    def __call__(self, img: Image.Image, target: dict) -> tuple[torch.Tensor | Image.Image, dict]:
+    def __call__(
+        self, img: Image.Image, target: dict
+    ) -> tuple[torch.Tensor | Image.Image, dict]:
         for t in self.transforms:
             img, target = t(img, target)
         return img, target
@@ -39,7 +41,9 @@ class Compose:
 class ToTensor:
     """Convert PIL Image to tensor (final step)."""
 
-    def __call__(self, img: Image.Image, target: dict) -> tuple[torch.Tensor, dict]:
+    def __call__(
+        self, img: Image.Image, target: dict
+    ) -> tuple[torch.Tensor, dict]:
         return pil_to_tensor(img), target
 
 
@@ -72,7 +76,9 @@ class RandomHorizontalFlip:
     def __init__(self, *, p: float) -> None:
         self.p = p
 
-    def __call__(self, img: Image.Image, target: dict) -> tuple[Image.Image, dict]:
+    def __call__(
+        self, img: Image.Image, target: dict
+    ) -> tuple[Image.Image, dict]:
         if random.random() < self.p:
             img = img.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
             w = img.width
@@ -96,7 +102,9 @@ class RandomVerticalFlip:
     def __init__(self, *, p: float) -> None:
         self.p = p
 
-    def __call__(self, img: Image.Image, target: dict) -> tuple[Image.Image, dict]:
+    def __call__(
+        self, img: Image.Image, target: dict
+    ) -> tuple[Image.Image, dict]:
         if random.random() < self.p:
             img = img.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
             h = img.height
@@ -116,12 +124,16 @@ class ColorJitter:
     """Random brightness, contrast and saturation perturbations, each a factor drawn uniformly
     from ``[1 - value, 1 + value]``; a value of 0 leaves that property unchanged."""
 
-    def __init__(self, *, brightness: float, contrast: float, saturation: float) -> None:
+    def __init__(
+        self, *, brightness: float, contrast: float, saturation: float
+    ) -> None:
         self.brightness = brightness
         self.contrast = contrast
         self.saturation = saturation
 
-    def __call__(self, img: Image.Image, target: dict) -> tuple[Image.Image, dict]:
+    def __call__(
+        self, img: Image.Image, target: dict
+    ) -> tuple[Image.Image, dict]:
         if self.brightness > 0:
             factor = 1.0 + random.uniform(-self.brightness, self.brightness)
             img = ImageEnhance.Brightness(img).enhance(factor)
@@ -137,12 +149,16 @@ class ColorJitter:
 class RandomResizedCrop:
     """Crop a random region and resize to target size. Adjusts boxes and masks accordingly."""
 
-    def __init__(self, *, size: tuple[int, int], min_scale: float, max_scale: float) -> None:
+    def __init__(
+        self, *, size: tuple[int, int], min_scale: float, max_scale: float
+    ) -> None:
         self.size = size
         self.min_scale = min_scale
         self.max_scale = max_scale
 
-    def __call__(self, img: Image.Image, target: dict) -> tuple[Image.Image, dict]:
+    def __call__(
+        self, img: Image.Image, target: dict
+    ) -> tuple[Image.Image, dict]:
         w, h = img.size
         scale = random.uniform(self.min_scale, self.max_scale)
         crop_w = int(w * scale)
@@ -152,11 +168,15 @@ class RandomResizedCrop:
         x2 = x1 + crop_w
         y2 = y1 + crop_h
 
-        img = img.crop((x1, y1, x2, y2)).resize(self.size, Image.Resampling.BILINEAR)
+        img = img.crop((x1, y1, x2, y2)).resize(
+            self.size, Image.Resampling.BILINEAR
+        )
 
         # Crop + nearest-resize masks in lockstep with the image
         if torch.is_tensor(target.get("masks")):
-            target["masks"] = _resize_masks(target["masks"][..., y1:y2, x1:x2], self.size)
+            target["masks"] = _resize_masks(
+                target["masks"][..., y1:y2, x1:x2], self.size
+            )
 
         # Adjust boxes
         if "boxes" in target and len(target["boxes"]) > 0:
@@ -174,7 +194,9 @@ class RandomResizedCrop:
                 boxes[:, 2].clamp_(min=0, max=self.size[0])
                 boxes[:, 3].clamp_(min=0, max=self.size[1])
                 # Filter out degenerate boxes
-                valid = (boxes[:, 2] - boxes[:, 0] > 1) & (boxes[:, 3] - boxes[:, 1] > 1)
+                valid = (boxes[:, 2] - boxes[:, 0] > 1) & (
+                    boxes[:, 3] - boxes[:, 1] > 1
+                )
                 target["boxes"] = boxes
                 _keep_rows(target, valid)
 
@@ -188,7 +210,9 @@ class GaussianBlur:
         self.p = p
         self.radius = radius
 
-    def __call__(self, img: Image.Image, target: dict) -> tuple[Image.Image, dict]:
+    def __call__(
+        self, img: Image.Image, target: dict
+    ) -> tuple[Image.Image, dict]:
         if random.random() < self.p:
             img = img.filter(ImageFilter.GaussianBlur(radius=self.radius))
         return img, target
@@ -200,7 +224,9 @@ class Resize:
     def __init__(self, *, size: tuple[int, int]) -> None:
         self.size = size
 
-    def __call__(self, img: Image.Image, target: dict) -> tuple[Image.Image, dict]:
+    def __call__(
+        self, img: Image.Image, target: dict
+    ) -> tuple[Image.Image, dict]:
         w, h = img.size
         img = img.resize(self.size, Image.Resampling.BILINEAR)
         if "boxes" in target and len(target["boxes"]) > 0:
@@ -232,14 +258,18 @@ class RandomRotation:
         self.degrees = degrees
         self.p = p
 
-    def __call__(self, img: Image.Image, target: dict) -> tuple[Image.Image, dict]:
+    def __call__(
+        self, img: Image.Image, target: dict
+    ) -> tuple[Image.Image, dict]:
         if random.random() >= self.p:
             return img, target
         import math
 
         angle = random.uniform(-self.degrees, self.degrees)
         w, h = img.size
-        out = img.rotate(angle, resample=Image.Resampling.BILINEAR, expand=False)
+        out = img.rotate(
+            angle, resample=Image.Resampling.BILINEAR, expand=False
+        )
 
         boxes = target.get("boxes")
         if isinstance(boxes, torch.Tensor) and len(boxes) > 0:
@@ -262,21 +292,37 @@ class RandomRotation:
             masks = target.get("masks")
             if torch.is_tensor(masks) and masks.ndim == 3 and len(masks):
                 import numpy as np
-                target["masks"] = torch.stack([
-                    torch.tensor(
-                        np.array(Image.fromarray(m.cpu().numpy().astype("uint8")).rotate(
-                            angle, resample=Image.Resampling.NEAREST, expand=False)),
-                        dtype=masks.dtype,
-                    )
-                    for m in masks
-                ])
+
+                target["masks"] = torch.stack(
+                    [
+                        torch.tensor(
+                            np.array(
+                                Image.fromarray(
+                                    m.cpu().numpy().astype("uint8")
+                                ).rotate(
+                                    angle,
+                                    resample=Image.Resampling.NEAREST,
+                                    expand=False,
+                                )
+                            ),
+                            dtype=masks.dtype,
+                        )
+                        for m in masks
+                    ]
+                )
             _keep_rows(target, valid)
         masks = target.get("masks")
         if torch.is_tensor(masks) and masks.ndim == 2:
             import numpy as np
+
             target["masks"] = torch.tensor(
-                np.array(Image.fromarray(masks.cpu().numpy().astype("uint8")).rotate(
-                    angle, resample=Image.Resampling.NEAREST, expand=False)),
+                np.array(
+                    Image.fromarray(
+                        masks.cpu().numpy().astype("uint8")
+                    ).rotate(
+                        angle, resample=Image.Resampling.NEAREST, expand=False
+                    )
+                ),
                 dtype=masks.dtype,
             )
         return out, target
@@ -306,7 +352,11 @@ def recorded_resize(config: dict | None) -> tuple[int, int] | None:
     """
     if not config:
         return None
-    sizes = [t.size for t in build_augmentation(config).transforms if isinstance(t, Resize)]
+    sizes = [
+        t.size
+        for t in build_augmentation(config).transforms
+        if isinstance(t, Resize)
+    ]
     if not sizes:
         return None
     width, height = sizes[-1]
@@ -321,17 +371,24 @@ def build_augmentation(config: dict) -> Compose:
     "resize": {"size": [512, 512]}}``. Refuses (``ValueError``) a ``config`` that is no dict, an
     unknown transform, and by name an entry that is not a dict stating exactly its transform's
     values."""
-    from tcip_mcp.pipelines.model_build import keyword_parameters, resolve_named
+    from tcip_mcp.pipelines.model_build import (
+        keyword_parameters,
+        resolve_named,
+    )
 
     if not isinstance(config, dict):
-        raise ValueError(f"augmentation {config!r} is no dict of transform entries")
+        raise ValueError(
+            f"augmentation {config!r} is no dict of transform entries"
+        )
     transforms: list = []
     for name, params in config.items():
         cls = resolve_named(name, _AUGMENTATION_REGISTRY, kind="augmentation")
         values = keyword_parameters(cls)[0]
         if not isinstance(params, dict) or set(params) != values:
-            raise ValueError(f"augmentation {name!r} states {params!r}; it takes a dict stating "
-                             f"each of {sorted(values)}")
+            raise ValueError(
+                f"augmentation {name!r} states {params!r}; it takes a dict stating "
+                f"each of {sorted(values)}"
+            )
         transforms.append(cls(**params))
     transforms.append(ToTensor())
     return Compose(transforms)

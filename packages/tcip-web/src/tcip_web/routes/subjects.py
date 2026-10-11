@@ -6,10 +6,16 @@ these names; an id is a per-training-run artifact and a color is GUI-local). Sha
 as an example subject::
 
     {
-      "tree":      {"description": "one tree crown"},
-      "<subject>": {"description": "...",
-                    "attributes": {"<attribute>": {"type": "categorical",
-                                                    "values": ["<value1>", "<value2>"]}}}
+        "tree": {"description": "one tree crown"},
+        "<subject>": {
+            "description": "...",
+            "attributes": {
+                "<attribute>": {
+                    "type": "categorical",
+                    "values": ["<value1>", "<value2>"],
+                }
+            },
+        },
     }
 
 Read/written through :mod:`tcip_mcp.subject_registry`. The registry travels with the image set: a
@@ -41,7 +47,11 @@ def load_subjects(dataset_root: str, date: str) -> dict:
     registry is stored and is refused with 409 when one is.
     """
     from tcip_mcp.dataset_layout import capture_subjects
-    from tcip_mcp.subject_registry import RegistryError, read_versioned_registry, registry_to_dict
+    from tcip_mcp.subject_registry import (
+        RegistryError,
+        read_versioned_registry,
+        registry_to_dict,
+    )
 
     root = allowed_path(dataset_root)
     discovered, unreadable = capture_subjects(root, date)
@@ -52,13 +62,21 @@ def load_subjects(dataset_root: str, date: str) -> dict:
     except FileNotFoundError:
         pass
     except (OSError, RegistryError) as exc:
-        raise HTTPException(500, f"could not parse the subject registry: {exc}") from exc
-    return {"subjects": subjects, "discovered": discovered, "version": token,
-            "unreadable": unreadable}
+        raise HTTPException(
+            500, f"could not parse the subject registry: {exc}"
+        ) from exc
+    return {
+        "subjects": subjects,
+        "discovered": discovered,
+        "version": token,
+        "unreadable": unreadable,
+    }
 
 
 class SaveSubjectsPayload(BaseModel):
-    subjects: dict  # the nested registry mapping (subjects -> attributes -> values)
+    subjects: (
+        dict  # the nested registry mapping (subjects -> attributes -> values)
+    )
     dataset_root: str
     # Required: the version load_subjects returned beside the registry this save was built from.
     # None means the registry was absent at load, asserted as Version.ABSENT, never skipped.
@@ -81,7 +99,11 @@ def save_subjects(payload: SaveSubjectsPayload) -> dict:
 
     from tcip_mcp.audit import AuditEntryNotWrittenError
     from tcip_mcp.identity import actor
-    from tcip_mcp.subject_registry import RegistryError, registry_from_request, replace_registry
+    from tcip_mcp.subject_registry import (
+        RegistryError,
+        registry_from_request,
+        replace_registry,
+    )
     from tcip_web.routes.audit_gap import audit_gap_409
 
     person = actor(payload.user)
@@ -90,9 +112,15 @@ def save_subjects(payload: SaveSubjectsPayload) -> dict:
     except RegistryError as exc:
         raise HTTPException(400, f"invalid subject registry: {exc}") from exc
     dataset_root = allowed_path(payload.dataset_root)
-    expect = Version(payload.version) if payload.version is not None else Version.ABSENT
+    expect = (
+        Version(payload.version)
+        if payload.version is not None
+        else Version.ABSENT
+    )
     try:
-        committed = replace_registry(dataset_root, registry, expect=expect, actor=person)
+        committed = replace_registry(
+            dataset_root, registry, expect=expect, actor=person
+        )
     except RegistryError as exc:
         raise HTTPException(400, str(exc)) from exc
     except VersionConflictError as exc:
@@ -100,5 +128,7 @@ def save_subjects(payload: SaveSubjectsPayload) -> dict:
     except AuditEntryNotWrittenError as exc:
         raise audit_gap_409(exc, {"status": "ok", **exc.arguments}) from exc
     except OSError as exc:
-        raise HTTPException(500, f"could not write {dataset_root}'s registry: {exc}") from exc
+        raise HTTPException(
+            500, f"could not write {dataset_root}'s registry: {exc}"
+        ) from exc
     return {"status": "ok", **committed}

@@ -105,7 +105,9 @@ _SUBPROCESS_SCRIPT = textwrap.dedent(
 )
 
 
-def test_a_detached_console_free_sweep_exits_cleanly_and_leaves_no_ray_daemon_behind(tmp_path):
+def test_a_detached_console_free_sweep_exits_cleanly_and_leaves_no_ray_daemon_behind(
+    tmp_path,
+):
     """Asserts the subprocess exits 0 having finished its sweep, and that every process Ray
     started for the sweep, the table daemons the subprocess captured from Ray's node and every
     descendant those daemons spawned (the trial worker, the dashboard agent, the runtime-env
@@ -138,43 +140,77 @@ def test_a_detached_console_free_sweep_exits_cleanly_and_leaves_no_ray_daemon_be
 
     def read_reported_pids() -> tuple[list[int], list[int]]:
         text = output_path.read_text(encoding="utf-8", errors="replace")
-        pid_line = next((line for line in text.splitlines() if line.startswith("PIDS ")), None)
-        descendants_line = next(
-            (line for line in text.splitlines() if line.startswith("DESCENDANTS ")), None
+        pid_line = next(
+            (line for line in text.splitlines() if line.startswith("PIDS ")),
+            None,
         )
-        daemons = [int(t) for t in pid_line.removeprefix("PIDS ").split()] if pid_line else []
+        descendants_line = next(
+            (
+                line
+                for line in text.splitlines()
+                if line.startswith("DESCENDANTS ")
+            ),
+            None,
+        )
+        daemons = (
+            [int(t) for t in pid_line.removeprefix("PIDS ").split()]
+            if pid_line
+            else []
+        )
         descendants = (
-            [int(t) for t in descendants_line.removeprefix("DESCENDANTS ").split()]
-            if descendants_line else []
+            [
+                int(t)
+                for t in descendants_line.removeprefix("DESCENDANTS ").split()
+            ]
+            if descendants_line
+            else []
         )
         return daemons, descendants
 
     try:
         proc.wait(timeout=240)
         output = output_path.read_text(encoding="utf-8", errors="replace")
-        assert proc.returncode == 0, f"detached sweep exited {proc.returncode}:\n{output}"
+        assert proc.returncode == 0, (
+            f"detached sweep exited {proc.returncode}:\n{output}"
+        )
         assert (storage_path / "sweep").is_dir(), output
 
         daemon_pids, descendant_pids = read_reported_pids()
-        assert daemon_pids, "the subprocess never reported the daemon pids it read from Ray's node"
+        assert daemon_pids, (
+            "the subprocess never reported the daemon pids it read from Ray's node"
+        )
 
         deadline = time.monotonic() + 30
-        survivors = [pid for pid in daemon_pids + descendant_pids if psutil.pid_exists(pid)]
+        survivors = [
+            pid
+            for pid in daemon_pids + descendant_pids
+            if psutil.pid_exists(pid)
+        ]
         while survivors and time.monotonic() < deadline:
             time.sleep(1)
-            survivors = [pid for pid in daemon_pids + descendant_pids if psutil.pid_exists(pid)]
+            survivors = [
+                pid
+                for pid in daemon_pids + descendant_pids
+                if psutil.pid_exists(pid)
+            ]
         assert not survivors, (
             f"Ray process(es) {survivors} still running after the detached sweep exited"
         )
     finally:
         if proc.poll() is None:
-            with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
+            with contextlib.suppress(
+                psutil.NoSuchProcess, psutil.AccessDenied
+            ):
                 for child in psutil.Process(proc.pid).children(recursive=True):
-                    with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
+                    with contextlib.suppress(
+                        psutil.NoSuchProcess, psutil.AccessDenied
+                    ):
                         child.kill()
             proc.kill()
             with contextlib.suppress(subprocess.TimeoutExpired):
                 proc.wait(timeout=10)
         for pid in {*read_reported_pids()[0], *read_reported_pids()[1]}:
-            with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
+            with contextlib.suppress(
+                psutil.NoSuchProcess, psutil.AccessDenied
+            ):
                 psutil.Process(pid).kill()

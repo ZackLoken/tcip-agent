@@ -26,7 +26,10 @@ from torch.utils.data import DataLoader
 
 from tcip_store import scalar_number, stored_numbers
 
-from tcip_mcp.pipelines.data.datasets import indexed_sample_keys, instance_targets
+from tcip_mcp.pipelines.data.datasets import (
+    indexed_sample_keys,
+    instance_targets,
+)
 from tcip_mcp.pipelines.model_contract import DETECTION_TASKS, TCIPModel
 from tcip_mcp.pipelines.model_build import (
     CONFIG_KEY,
@@ -84,11 +87,14 @@ def batch_row_ends(n_batches: int) -> set[int]:
 def run_device(spec: TrainConfigSchema) -> torch.device:
     """The device a validated config (``schemas.train_config``) trains on: its ``device``, or
     cuda when available and cpu otherwise."""
-    return torch.device(spec.device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    return torch.device(
+        spec.device or ("cuda" if torch.cuda.is_available() else "cpu")
+    )
 
 
-def _warmup_starts(model, optimizer, captured: list[dict],
-                   target_lrs: list[float]) -> list[float]:
+def _warmup_starts(
+    model, optimizer, captured: list[dict], target_lrs: list[float]
+) -> list[float]:
     """The learning rate each of ``optimizer``'s param groups warms up from at a stage boundary,
     read from ``captured``, the handed-off capture's param groups (its :data:`GROUPS_KEY`),
     through their membership (``optimizer_factory.captured_sources``): the one rate its members'
@@ -97,17 +103,21 @@ def _warmup_starts(model, optimizer, captured: list[dict],
     held and unheld members, or members whose captured groups ran at different rates."""
     starts = []
     for index, (sources, target) in enumerate(
-            zip(captured_sources(model, optimizer, captured), target_lrs)):
+        zip(captured_sources(model, optimizer, captured), target_lrs)
+    ):
         if not sources:
             starts.append(target)
         elif sources == {None}:
             starts.append(0.0)
         else:
-            rates = {captured[i]["settings"]["lr"] for i in sources if i is not None}
+            rates = {
+                captured[i]["settings"]["lr"] for i in sources if i is not None
+            }
             if None in sources or len(rates) != 1:
                 raise ValueError(
                     f"param group {index} has no one rate to warm up from: its members ran at "
-                    f"{sorted(rates)}{' and some were not training' if None in sources else ''}.")
+                    f"{sorted(rates)}{' and some were not training' if None in sources else ''}."
+                )
             starts.append(rates.pop())
     return starts
 
@@ -128,7 +138,9 @@ def set_seed(seed: int, deterministic: bool = False) -> None:
         torch.backends.cudnn.benchmark = False
 
 
-def capture_rng_state(loader_generator: torch.Generator | None) -> dict[str, Any]:
+def capture_rng_state(
+    loader_generator: torch.Generator | None,
+) -> dict[str, Any]:
     """Snapshot every random stream a run draws from: the four set_seed seeds and
     ``loader_generator``, the generator a loader shuffles with (``None`` for a loader that has
     none), restorable with :func:`restore_rng_state`."""
@@ -136,19 +148,26 @@ def capture_rng_state(loader_generator: torch.Generator | None) -> dict[str, Any
         "python_rng_state": random.getstate(),
         "numpy_rng_state": np.random.get_state(),
         "torch_rng_state": torch.get_rng_state(),
-        "cuda_rng_state": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
-        "loader_rng_state": None if loader_generator is None else loader_generator.get_state(),
+        "cuda_rng_state": torch.cuda.get_rng_state_all()
+        if torch.cuda.is_available()
+        else None,
+        "loader_rng_state": None
+        if loader_generator is None
+        else loader_generator.get_state(),
     }
 
 
-def restore_rng_state(state: dict[str, Any], loader_generator: torch.Generator | None) -> None:
+def restore_rng_state(
+    state: dict[str, Any], loader_generator: torch.Generator | None
+) -> None:
     """Restore the streams :func:`capture_rng_state` captured, the loader's into
     ``loader_generator``. Refuses (``ValueError``) a capture and a loader that disagree on whether
     the loader draws from a generator of its own."""
     if (state["loader_rng_state"] is None) != (loader_generator is None):
         raise ValueError(
             "the captured random state and this loader disagree on whether the loader shuffles "
-            "from a generator of its own; resume with a loader built the way the run's was.")
+            "from a generator of its own; resume with a loader built the way the run's was."
+        )
     torch.set_rng_state(state["torch_rng_state"])
     if state["cuda_rng_state"] is not None:
         torch.cuda.set_rng_state_all(state["cuda_rng_state"])
@@ -158,8 +177,9 @@ def restore_rng_state(state: dict[str, Any], loader_generator: torch.Generator |
         loader_generator.set_state(state["loader_rng_state"])
 
 
-def loader_worker_init(worker_id: int, seed: int | None = None,
-                       num_workers: int | None = None) -> None:
+def loader_worker_init(
+    worker_id: int, seed: int | None = None, num_workers: int | None = None
+) -> None:
     """DataLoader worker-process initializer: configures the platform GDAL cache budget at
     ``1 / num_workers`` of it per worker (the whole budget for ``None``), and seeds numpy and
     random per worker when ``seed`` is given."""
@@ -173,13 +193,18 @@ def loader_worker_init(worker_id: int, seed: int | None = None,
         random.seed(worker_seed)
 
 
-def seeded_loader_kwargs(seed: int | None, num_workers: int | None = None) -> dict:
+def seeded_loader_kwargs(
+    seed: int | None, num_workers: int | None = None
+) -> dict:
     """DataLoader kwargs wiring :func:`loader_worker_init` as the ``worker_init_fn`` (scaled by
     ``num_workers`` when given), plus a ``generator`` seeded with ``seed`` when one is given, none
     otherwise."""
     kwargs: dict = {
         "worker_init_fn": functools.partial(
-            loader_worker_init, seed=None if seed is None else int(seed), num_workers=num_workers),
+            loader_worker_init,
+            seed=None if seed is None else int(seed),
+            num_workers=num_workers,
+        ),
     }
     if seed is not None:
         generator = torch.Generator()
@@ -199,8 +224,9 @@ def run_transforms(spec: TrainConfigSchema) -> Any:
     return build_augmentation(augmentation)
 
 
-def run_loaders(run: TrainRun, train_ds: Any, val_ds: Any
-                ) -> tuple[DataLoader, DataLoader | None]:
+def run_loaders(
+    run: TrainRun, train_ds: Any, val_ds: Any
+) -> tuple[DataLoader, DataLoader | None]:
     """``run``'s train loader and, when ``val_ds`` is given, its val loader, collating for the
     task its config names, at the batch size the run reads (``TrainRun.reads``) and its config's
     ``num_workers`` and ``sampler``, seeded from its ``seed``."""
@@ -212,18 +238,43 @@ def run_loaders(run: TrainRun, train_ds: Any, val_ds: Any
     batch_size, num_workers = run.reads.batch_size, spec.num_workers
     loader_kwargs = seeded_loader_kwargs(spec.seed, num_workers=num_workers)
     # Built after the loader context is known: read order depends on the worker regime too.
-    sampler = None if spec.sampler is None else build_sampler(
-        spec.sampler, train_ds, num_workers=num_workers, batch_size=batch_size)
+    sampler = (
+        None
+        if spec.sampler is None
+        else build_sampler(
+            spec.sampler,
+            train_ds,
+            num_workers=num_workers,
+            batch_size=batch_size,
+        )
+    )
     train_loader = DataLoader(
-        train_ds, batch_size=batch_size, shuffle=(sampler is None), sampler=sampler,
-        collate_fn=task_collate(task), num_workers=num_workers, **loader_kwargs)
-    val_loader = None if val_ds is None else DataLoader(
-        val_ds, batch_size=batch_size, shuffle=False, collate_fn=task_collate(task),
-        num_workers=num_workers, **loader_kwargs)
+        train_ds,
+        batch_size=batch_size,
+        shuffle=(sampler is None),
+        sampler=sampler,
+        collate_fn=task_collate(task),
+        num_workers=num_workers,
+        **loader_kwargs,
+    )
+    val_loader = (
+        None
+        if val_ds is None
+        else DataLoader(
+            val_ds,
+            batch_size=batch_size,
+            shuffle=False,
+            collate_fn=task_collate(task),
+            num_workers=num_workers,
+            **loader_kwargs,
+        )
+    )
     return train_loader, val_loader
 
 
-def effective_data_geometry(task: str, data: DataSpec, train_ds: Any) -> DataSpec:
+def effective_data_geometry(
+    task: str, data: DataSpec, train_ds: Any
+) -> DataSpec:
     """The resolved data block ``data`` of a ``task`` run with what ``train_ds`` serves recorded
     on it.
 
@@ -247,7 +298,8 @@ def effective_data_geometry(task: str, data: DataSpec, train_ds: Any) -> DataSpe
                 f"this {task} run's train dataset exposes no regions: a detector's per-frame cap "
                 "scales by the object density of the regions it trains on, so a dataset_source "
                 "builder's dataset exposes regions, a list of derivations.Region, one per frame "
-                "or tile it serves.")
+                "or tile it serves."
+            )
         update["train_object_density"] = derive_object_density(regions)
     untiled = data.tiling is not None and not data.tiling.enabled
     native = _uniform_native_size(train_ds) if untiled else None
@@ -314,9 +366,12 @@ def checkpoint_stamp(run: TrainRun) -> dict:
         for parent in parents:
             node = node.setdefault(parent, {})
         node[leaf] = True
-    return {CONFIG_KEY: recorded_paths(run.spec.record(exclude={"data": paths}), CONFIG_PATHS,
-                                       run.project),
-            SNAPSHOT_KEY: run.layout.snapshot}
+    return {
+        CONFIG_KEY: recorded_paths(
+            run.spec.record(exclude={"data": paths}), CONFIG_PATHS, run.project
+        ),
+        SNAPSHOT_KEY: run.layout.snapshot,
+    }
 
 
 def _checkpoint_metrics(metrics: dict) -> dict:
@@ -356,20 +411,46 @@ class _ResumeState:
     loader_rng_state: Any
 
 
-def _epoch_state(model, optimizer, *, selection: float, stage: int, epoch: int,
-                 metrics: dict) -> dict:
+def _epoch_state(
+    model,
+    optimizer,
+    *,
+    selection: float,
+    stage: int,
+    epoch: int,
+    metrics: dict,
+) -> dict:
     """One epoch's training state (:func:`capture_training_state`) with the selection value,
     stage, epoch and metrics it was taken at: what a stage hands the next and what
     ``model_best.pt`` is written from."""
-    return {**capture_training_state(model, optimizer), "selection": selection, "stage": stage,
-            "epoch": epoch, METRICS_KEY: _checkpoint_metrics(metrics)}
+    return {
+        **capture_training_state(model, optimizer),
+        "selection": selection,
+        "stage": stage,
+        "epoch": epoch,
+        METRICS_KEY: _checkpoint_metrics(metrics),
+    }
 
 
 def _save_checkpoint(
-    path: Path, *, model, optimizer, scheduler, scaler, loader_generator, stamp: dict,
-    stage_idx: int, stage_epoch: int, run: "TrainRun", best: dict | None,
-    stage_best: dict | None, warmup_groups: list[dict] | None,
-    es_best: float, es_counter: int, global_step: int, metrics: dict,
+    path: Path,
+    *,
+    model,
+    optimizer,
+    scheduler,
+    scaler,
+    loader_generator,
+    stamp: dict,
+    stage_idx: int,
+    stage_epoch: int,
+    run: "TrainRun",
+    best: dict | None,
+    stage_best: dict | None,
+    warmup_groups: list[dict] | None,
+    es_best: float,
+    es_counter: int,
+    global_step: int,
+    metrics: dict,
 ) -> None:
     """Write a resumable periodic checkpoint carrying the run's ``stamp``
     (:func:`checkpoint_stamp`), its current training state (:func:`capture_training_state`, the
@@ -378,20 +459,32 @@ def _save_checkpoint(
     state = _ResumeState(
         scheduler_state_dict=scheduler.state_dict(),
         scaler_state_dict=scaler.state_dict() if scaler is not None else None,
-        stage=stage_idx, stage_epoch=stage_epoch, epoch=run.current_epoch,
-        best=best, stage_best=stage_best, warmup_groups=warmup_groups,
-        es_best=es_best, es_counter=es_counter,
-        global_step=global_step, **capture_rng_state(loader_generator),
+        stage=stage_idx,
+        stage_epoch=stage_epoch,
+        epoch=run.current_epoch,
+        best=best,
+        stage_best=stage_best,
+        warmup_groups=warmup_groups,
+        es_best=es_best,
+        es_counter=es_counter,
+        global_step=global_step,
+        **capture_rng_state(loader_generator),
     )
-    write_checkpoint({
-        **capture_training_state(model, optimizer), **vars(state), **stamp,
-        METRICS_KEY: _checkpoint_metrics(metrics),
-    }, path)
+    write_checkpoint(
+        {
+            **capture_training_state(model, optimizer),
+            **vars(state),
+            **stamp,
+            METRICS_KEY: _checkpoint_metrics(metrics),
+        },
+        path,
+    )
 
 
 # ====================================================================
 # Scheduler builder
 # ====================================================================
+
 
 def _build_scheduler(optimizer, spec: SchedulerSpec):
     """The scheduler ``spec.type`` names (``schemas.SCHEDULER_TYPES``) at the settings ``spec``
@@ -407,7 +500,11 @@ def _build_scheduler(optimizer, spec: SchedulerSpec):
         )
     elif isinstance(spec, OneCycleSchedule):
         return torch.optim.lr_scheduler.OneCycleLR(
-            optimizer, max_lr=spec.max_lr, total_steps=spec.horizon_epochs, cycle_momentum=False)
+            optimizer,
+            max_lr=spec.max_lr,
+            total_steps=spec.horizon_epochs,
+            cycle_momentum=False,
+        )
     return torch.optim.lr_scheduler.StepLR(
         optimizer, step_size=spec.step_size, gamma=spec.gamma
     )
@@ -417,9 +514,15 @@ def _build_scheduler(optimizer, spec: SchedulerSpec):
 # Validation
 # ====================================================================
 
+
 @torch.no_grad()
-def _validate(model: TCIPModel, val_loader: DataLoader, device: torch.device, task: str,
-              **keywords: Any) -> dict:
+def _validate(
+    model: TCIPModel,
+    val_loader: DataLoader,
+    device: torch.device,
+    task: str,
+    **keywords: Any,
+) -> dict:
     """``evaluation.evaluate`` of ``model`` over ``val_loader`` at ``keywords``, its own
     keyword arguments, every key prefixed :data:`VAL_METRIC_PREFIX`."""
     metrics = evaluate(model, val_loader, device, task, **keywords)
@@ -439,8 +542,12 @@ def config_trait(spec: TrainConfigSchema, project: Path) -> TraitEntry | None:
 
 
 def resolve_selection_metric(
-    task: str, trait: TraitEntry | None, requested: str | None, *,
-    score_weights: ScoreWeights | None, has_val_loader: bool = True,
+    task: str,
+    trait: TraitEntry | None,
+    requested: str | None,
+    *,
+    score_weights: ScoreWeights | None,
+    has_val_loader: bool = True,
 ) -> str:
     """Resolve the bare metric key (into ``val_metrics``, without the ``val_`` prefix) that drives
     both ``model_best.pt`` and early stopping.
@@ -474,7 +581,8 @@ def resolve_selection_metric(
             "evaluation.selection_metric resolves to 'objective', which blends its terms by "
             "weights this run states nowhere: state evaluation.score_weights "
             f"(schemas.ScoreWeights: {', '.join(ScoreWeights.model_fields)}), or select on "
-            "another metric.")
+            "another metric."
+        )
     if not has_val_loader and resolved != "loss":
         raise ValueError(
             f"evaluation.selection_metric={resolved!r} needs a validation loader to compute, "
@@ -482,10 +590,15 @@ def resolve_selection_metric(
             "one; configure a validation split, or set evaluation.selection_metric='loss'."
         )
     if trait is not None:
-        from tcip_mcp.pipelines.training.evaluation import CENTER_MATCH_COMPARABILITY_KEYS
+        from tcip_mcp.pipelines.training.evaluation import (
+            CENTER_MATCH_COMPARABILITY_KEYS,
+        )
         from tcip_mcp.traits import CENTER_MATCH
 
-        if trait.localization == CENTER_MATCH and resolved in CENTER_MATCH_COMPARABILITY_KEYS:
+        if (
+            trait.localization == CENTER_MATCH
+            and resolved in CENTER_MATCH_COMPARABILITY_KEYS
+        ):
             raise ValueError(
                 f"evaluation.selection_metric={resolved!r} is a comparability-only metric for "
                 f"trait {trait.name!r} (localization=center_match), it does not govern this "
@@ -495,19 +608,29 @@ def resolve_selection_metric(
     return resolved
 
 
-def resolve_objective(spec: TrainConfigSchema, *, project: Path, has_val_loader: bool) -> dict:
+def resolve_objective(
+    spec: TrainConfigSchema, *, project: Path, has_val_loader: bool
+) -> dict:
     """A run's objective: ``selection_metric``, :func:`resolve_selection_metric` over its
     validated config's (``schemas.train_config``) task, ``evaluation`` trait (:func:`config_trait`
     in ``project``) and ``selection_metric``, and ``higher_is_better``, that metric's declared
     direction."""
-    metric = resolve_selection_metric(spec.model_source.task, config_trait(spec, project),
-                                      spec.evaluation.selection_metric,
-                                      score_weights=spec.evaluation.score_weights,
-                                      has_val_loader=has_val_loader)
-    return {"selection_metric": metric, "higher_is_better": HIGHER_IS_BETTER_BY_METRIC[metric]}
+    metric = resolve_selection_metric(
+        spec.model_source.task,
+        config_trait(spec, project),
+        spec.evaluation.selection_metric,
+        score_weights=spec.evaluation.score_weights,
+        has_val_loader=has_val_loader,
+    )
+    return {
+        "selection_metric": metric,
+        "higher_is_better": HIGHER_IS_BETTER_BY_METRIC[metric],
+    }
 
 
-def _selection_value(task: str, val_metrics: dict, avg_loss: float, metric: str) -> float:
+def _selection_value(
+    task: str, val_metrics: dict, avg_loss: float, metric: str
+) -> float:
     """Best-model/early-stopping driver: ``val_metrics[f'{VAL_METRIC_PREFIX}{metric}']``.
 
     Raises when the resolved selection metric is not among this epoch's validation metrics. The one
@@ -529,8 +652,13 @@ def _selection_value(task: str, val_metrics: dict, avg_loss: float, metric: str)
     )
 
 
-def _improves(candidate: float, incumbent: float, *, higher_is_better: bool,
-              min_delta: float = 0.0) -> bool:
+def _improves(
+    candidate: float,
+    incumbent: float,
+    *,
+    higher_is_better: bool,
+    min_delta: float = 0.0,
+) -> bool:
     """Whether ``candidate`` beats ``incumbent`` by more than ``min_delta`` as a selection value,
     in the direction the run's selection metric improves in.
     """
@@ -540,7 +668,10 @@ def _improves(candidate: float, incumbent: float, *, higher_is_better: bool,
 
 
 def apply_stage_freeze(
-    model: TCIPModel, freeze_to: int, *, prev_trainable: int | None = None,
+    model: TCIPModel,
+    freeze_to: int,
+    *,
+    prev_trainable: int | None = None,
     enforce_monotonic: bool = True,
 ) -> int:
     """Apply a stage's progressive-unfreeze policy and return the resulting trainable-param count.
@@ -561,7 +692,11 @@ def apply_stage_freeze(
         model.freeze_backbone(freeze_to)
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    if enforce_monotonic and prev_trainable is not None and trainable < prev_trainable:
+    if (
+        enforce_monotonic
+        and prev_trainable is not None
+        and trainable < prev_trainable
+    ):
         raise RuntimeError(
             f"Non-decreasing unfreeze violated: {trainable} < {prev_trainable} trainable params"
         )
@@ -595,6 +730,7 @@ def _validate_input_channels(expected: int, loader: DataLoader) -> None:
 # ====================================================================
 # Main train loop
 # ====================================================================
+
 
 def train(
     run: TrainRun,
@@ -663,7 +799,7 @@ def train(
     higher_is_better = run.objective["higher_is_better"]
     # The losing-side sentinel for this run's own direction: any real value beats it.
     losing_side = float("-inf") if higher_is_better else float("inf")
-    best: dict | None = None      # the run's best epoch (_epoch_state)
+    best: dict | None = None  # the run's best epoch (_epoch_state)
 
     try:
         # Failable setup lives inside the try so an invalid/unwritable output_dir
@@ -671,10 +807,17 @@ def train(
         spec = run.spec
         reads = run.reads
         # A config naming its own loop reaches here only when that loop asks for this trainer.
-        regime = reads.regime if reads.regime is not None else spec.default_trainer_regime()
+        regime = (
+            reads.regime
+            if reads.regime is not None
+            else spec.default_trainer_regime()
+        )
         stages, optimizer_spec, scheduler_spec, ckpt_every, stop_rule = regime
-        horizon = (scheduler_spec.horizon_epochs if isinstance(scheduler_spec, HorizonSchedule)
-                   else None)
+        horizon = (
+            scheduler_spec.horizon_epochs
+            if isinstance(scheduler_spec, HorizonSchedule)
+            else None
+        )
         out_dir = Path(run.output_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
         stamp = checkpoint_stamp(run)
@@ -708,13 +851,15 @@ def train(
             return stage.gradient_accumulation_steps
 
         first_eff_batch = physical_batch * accumulation(stages[0])
-        prev_trainable = None     # trainable param count of the previous stage
+        prev_trainable = None  # trainable param count of the previous stage
         trait = evaluated["trait"]
         selection_metric = run.objective["selection_metric"]
         loader_generator = getattr(train_loader, "generator", None)
 
         global_step = 0
-        handoff: dict | None = None   # the previous stage's best epoch, the next stage's start
+        handoff: dict | None = (
+            None  # the previous stage's best epoch, the next stage's start
+        )
         diverged = False
         # Consecutive full training passes with zero finite batch losses; reset at every stage
         # boundary and by any epoch with even one finite loss, uniform across loader shapes.
@@ -726,16 +871,24 @@ def train(
         current: dict | None = None
         if resume_from:
             # On CPU: the RNG byte tensors must stay there, and load_state_dict moves the rest.
-            loaded = torch.load(resume_from, map_location="cpu", weights_only=False)
-            names = [*TRAINING_STATE_KEYS, *(f.name for f in fields(_ResumeState))]
+            loaded = torch.load(
+                resume_from, map_location="cpu", weights_only=False
+            )
+            names = [
+                *TRAINING_STATE_KEYS,
+                *(f.name for f in fields(_ResumeState)),
+            ]
             missing = [name for name in names if name not in loaded]
             if missing:
                 raise ValueError(
                     f"Cannot resume from {resume_from}: checkpoint is missing {missing}. Resume "
-                    "from a periodic checkpoint_epoch_*.pt, or start a fresh run.")
+                    "from a periodic checkpoint_epoch_*.pt, or start a fresh run."
+                )
             # The contract's one read: every restore below reads these, never loaded.
             current = {name: loaded[name] for name in TRAINING_STATE_KEYS}
-            ckpt = _ResumeState(**{f.name: loaded[f.name] for f in fields(_ResumeState)})
+            ckpt = _ResumeState(
+                **{f.name: loaded[f.name] for f in fields(_ResumeState)}
+            )
             del loaded
             resume_stage = ckpt.stage
             run.current_epoch = ckpt.epoch
@@ -744,8 +897,13 @@ def train(
             # After the fresh set_seed() above, which also configures cudnn, so the resumed
             # streams overwrite the freshly-seeded ones.
             restore_rng_state(vars(ckpt), loader_generator)
-            logger.info("Resuming from %s at stage %d, stage_epoch %d (global epoch %d)",
-                        resume_from, resume_stage, ckpt.stage_epoch, run.current_epoch)
+            logger.info(
+                "Resuming from %s at stage %d, stage_epoch %d (global epoch %d)",
+                resume_from,
+                resume_stage,
+                ckpt.stage_epoch,
+                run.current_epoch,
+            )
 
         for stage_idx, stage in enumerate(stages):
             if diverged:
@@ -759,7 +917,9 @@ def train(
             # Progressive unfreezing (+ monotonic guard), the shared craft primitive a custom
             # train(ctx) reuses via ctx.apply_stage_freeze.
             trainable = apply_stage_freeze(
-                model, stage.freeze_to, prev_trainable=prev_trainable,
+                model,
+                stage.freeze_to,
+                prev_trainable=prev_trainable,
                 enforce_monotonic=spec.enforce_monotonic_unfreeze,
             )
             prev_trainable = trainable
@@ -769,8 +929,11 @@ def train(
             target_eff_batch = physical_batch * stage_accum
             stage_backbone_lr, stage_head_lr = base_backbone_lr, base_head_lr
             if spec.lr_scaling is not None:
-                mult = compute_lr_scale(target_eff_batch, first_eff_batch,
-                                        spec.lr_scaling.scale_power)
+                mult = compute_lr_scale(
+                    target_eff_batch,
+                    first_eff_batch,
+                    spec.lr_scaling.scale_power,
+                )
                 stage_backbone_lr *= mult
                 stage_head_lr *= mult
                 max_lr = spec.lr_scaling.max_lr
@@ -778,8 +941,12 @@ def train(
                     stage_backbone_lr = min(stage_backbone_lr, max_lr)
                     stage_head_lr = min(stage_head_lr, max_lr)
 
-            optimizer = build_optimizer(optimizer_spec, model, backbone_lr=stage_backbone_lr,
-                                        head_lr=stage_head_lr)
+            optimizer = build_optimizer(
+                optimizer_spec,
+                model,
+                backbone_lr=stage_backbone_lr,
+                head_lr=stage_head_lr,
+            )
 
             target_lrs = [g["lr"] for g in optimizer.param_groups]
             stage_best: dict | None = None
@@ -789,26 +956,45 @@ def train(
                 stage_best, warmup_groups = ckpt.stage_best, ckpt.warmup_groups
                 es_best, es_counter = ckpt.es_best, ckpt.es_counter
             elif handoff is not None:
-                restore_training_state(model, optimizer, handoff, group_settings=False)
+                restore_training_state(
+                    model, optimizer, handoff, group_settings=False
+                )
                 if stage_warmup_epochs:
                     warmup_groups = handoff[GROUPS_KEY]
-                logger.info("Stage %d starts from stage %d's best epoch %d", stage_idx,
-                            handoff["stage"], handoff["epoch"])
-            warmup_starts = (None if warmup_groups is None
-                             else _warmup_starts(model, optimizer, warmup_groups, target_lrs))
+                logger.info(
+                    "Stage %d starts from stage %d's best epoch %d",
+                    stage_idx,
+                    handoff["stage"],
+                    handoff["epoch"],
+                )
+            warmup_starts = (
+                None
+                if warmup_groups is None
+                else _warmup_starts(
+                    model, optimizer, warmup_groups, target_lrs
+                )
+            )
 
             # Inter-stage LR warmup from the handed-off learning rates (default off).
             warmup_n = stage_warmup_epochs if warmup_starts is not None else 0
             scheduler = _build_scheduler(optimizer, scheduler_spec)
-            is_plateau = isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau)
+            is_plateau = isinstance(
+                scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau
+            )
 
             start_epoch = 0
-            if ckpt is not None and current is not None and stage_idx == resume_stage:
+            if (
+                ckpt is not None
+                and current is not None
+                and stage_idx == resume_stage
+            ):
                 start_epoch = ckpt.stage_epoch
                 scheduler.load_state_dict(ckpt.scheduler_state_dict)
                 # After the scheduler's construction, which writes its own settings into every
                 # group: the captured groups carry the scheduled values the run had reached.
-                restore_training_state(model, optimizer, current, group_settings=True)
+                restore_training_state(
+                    model, optimizer, current, group_settings=True
+                )
                 if scaler is not None:
                     scaler.load_state_dict(ckpt.scaler_state_dict)
                 # Restored: past the best epochs it holds, the run keeps no reference to the
@@ -816,10 +1002,16 @@ def train(
                 ckpt = current = None
 
             for epoch in itertools.count(start_epoch):
-                if run.should_cancel() or (horizon is not None and epoch - warmup_n >= horizon):
+                if run.should_cancel() or (
+                    horizon is not None and epoch - warmup_n >= horizon
+                ):
                     break
                 if es_counter >= stop_rule.patience:
-                    logger.info("Stage %d plateaued at epoch %d", stage_idx, run.current_epoch)
+                    logger.info(
+                        "Stage %d plateaued at epoch %d",
+                        stage_idx,
+                        run.current_epoch,
+                    )
                     break
                 run.current_epoch += 1
                 model.train()
@@ -833,8 +1025,9 @@ def train(
                 in_warmup = warmup_starts is not None and epoch < warmup_n
                 if warmup_starts is not None and in_warmup:
                     alpha = (epoch + 1) / warmup_n
-                    for group, start, target in zip(optimizer.param_groups, warmup_starts,
-                                                    target_lrs):
+                    for group, start, target in zip(
+                        optimizer.param_groups, warmup_starts, target_lrs
+                    ):
                         group["lr"] = start + alpha * (target - start)
 
                 n_loader = len(train_loader)
@@ -847,28 +1040,47 @@ def train(
                     if task in DETECTION_TASKS:
                         images, targets = batch
                         images = [img.to(device) for img in images]
-                        targets = instance_targets([
-                            {k: v.to(device) if isinstance(v, torch.Tensor) else v
-                             for k, v in t.items()}
-                            for t in targets
-                        ])
+                        targets = instance_targets(
+                            [
+                                {
+                                    k: v.to(device)
+                                    if isinstance(v, torch.Tensor)
+                                    else v
+                                    for k, v in t.items()
+                                }
+                                for t in targets
+                            ]
+                        )
                     else:
                         images, targets = batch
                         images = images.to(device)
                         targets = {
-                            k: v.to(device) if isinstance(v, torch.Tensor) else v
+                            k: v.to(device)
+                            if isinstance(v, torch.Tensor)
+                            else v
                             for k, v in targets.items()
                         }
 
-                    window = (stage_accum if batch_idx < full_windows_end
-                              else n_loader - full_windows_end)
+                    window = (
+                        stage_accum
+                        if batch_idx < full_windows_end
+                        else n_loader - full_windows_end
+                    )
                     loss: Any
                     with torch.amp.autocast(device.type, enabled=use_amp):
                         loss_dict = model(images, targets)
-                        loss = sum(loss_dict.values()) if isinstance(loss_dict, dict) else loss_dict
+                        loss = (
+                            sum(loss_dict.values())
+                            if isinstance(loss_dict, dict)
+                            else loss_dict
+                        )
                     scaled = loss / window
-                    (scaled if scaler is None else scaler.scale(scaled)).backward()
-                    if (batch_idx + 1) % stage_accum == 0 or (batch_idx + 1) == n_loader:
+                    (
+                        scaled if scaler is None else scaler.scale(scaled)
+                    ).backward()
+                    if (batch_idx + 1) % stage_accum == 0 or (
+                        batch_idx + 1
+                    ) == n_loader:
                         if scaler is None:
                             optimizer.step()
                         else:
@@ -882,16 +1094,25 @@ def train(
                     n_batches += 1
                     global_step += 1
 
-                    row_due = (global_step % spec.log_every_n_batches == 0
-                               if spec.log_every_n_batches else batch_idx + 1 in row_ends)
+                    row_due = (
+                        global_step % spec.log_every_n_batches == 0
+                        if spec.log_every_n_batches
+                        else batch_idx + 1 in row_ends
+                    )
                     if batch_callback is not None and row_due:
-                        batch_callback(global_step, run.current_epoch, {"batch_loss": loss_value})
+                        batch_callback(
+                            global_step,
+                            run.current_epoch,
+                            {"batch_loss": loss_value},
+                        )
 
                     if math.isfinite(loss_value):
                         epoch_had_finite_loss = True
 
                 diverged_epochs = (
-                    diverged_epochs + 1 if n_batches and not epoch_had_finite_loss else 0
+                    diverged_epochs + 1
+                    if n_batches and not epoch_had_finite_loss
+                    else 0
                 )
                 if diverged_epochs >= 2:
                     run.status = "failed"
@@ -908,8 +1129,12 @@ def train(
 
                 val_metrics = {}
                 if val_loader is not None:
-                    val_metrics = _validate(model, val_loader, device, task, **evaluated)
-                sel = _selection_value(task, val_metrics, avg_loss, selection_metric)
+                    val_metrics = _validate(
+                        model, val_loader, device, task, **evaluated
+                    )
+                sel = _selection_value(
+                    task, val_metrics, avg_loss, selection_metric
+                )
 
                 # Suppress the scheduler during warmup epochs.
                 if not in_warmup:
@@ -927,7 +1152,9 @@ def train(
                     "trainable_params": trainable,
                     "selection": round(sel, 6),
                     "selection_metric": selection_metric,
-                    "selection_trait": trait.name if trait is not None else None,
+                    "selection_trait": trait.name
+                    if trait is not None
+                    else None,
                     **val_metrics,
                 }
                 run.metrics_history.append(epoch_metrics)
@@ -936,37 +1163,71 @@ def train(
                     epoch_callback(run.current_epoch, epoch_metrics)
 
                 extra_val_metrics = " ".join(
-                    f"{k}={v:.4f}" for k, v in val_metrics.items()
-                    if k != VAL_LOSS_KEY and scalar_number(v))
+                    f"{k}={v:.4f}"
+                    for k, v in val_metrics.items()
+                    if k != VAL_LOSS_KEY and scalar_number(v)
+                )
                 # A task whose evaluation reports no loss at all carries val_loss=None, which a
                 # float format raises on: say what it is rather than print a 0 nobody measured.
                 val_loss = val_metrics.get(VAL_LOSS_KEY)
-                logger.info("Epoch %d stage %d loss=%.4f val_loss=%s lr=%.2e%s",
-                    run.current_epoch, stage_idx, avg_loss,
-                    f"{val_loss:.4f}" if scalar_number(val_loss) else val_loss, current_lr,
-                    f" {extra_val_metrics}" if extra_val_metrics else "")
+                logger.info(
+                    "Epoch %d stage %d loss=%.4f val_loss=%s lr=%.2e%s",
+                    run.current_epoch,
+                    stage_idx,
+                    avg_loss,
+                    f"{val_loss:.4f}" if scalar_number(val_loss) else val_loss,
+                    current_lr,
+                    f" {extra_val_metrics}" if extra_val_metrics else "",
+                )
 
                 # The run's best epoch is always also its stage's best, so one capture serves both.
-                stage_incumbent = stage_best["selection"] if stage_best else losing_side
-                if _improves(sel, stage_incumbent, higher_is_better=higher_is_better):
-                    stage_best = _epoch_state(model, optimizer, selection=sel, stage=stage_idx,
-                                              epoch=run.current_epoch, metrics=epoch_metrics)
+                stage_incumbent = (
+                    stage_best["selection"] if stage_best else losing_side
+                )
+                if _improves(
+                    sel, stage_incumbent, higher_is_better=higher_is_better
+                ):
+                    stage_best = _epoch_state(
+                        model,
+                        optimizer,
+                        selection=sel,
+                        stage=stage_idx,
+                        epoch=run.current_epoch,
+                        metrics=epoch_metrics,
+                    )
 
                 # The stage's plateau, on the same selection objective.
-                if _improves(sel, es_best, higher_is_better=higher_is_better,
-                             min_delta=stop_rule.min_delta):
+                if _improves(
+                    sel,
+                    es_best,
+                    higher_is_better=higher_is_better,
+                    min_delta=stop_rule.min_delta,
+                ):
                     es_best, es_counter = sel, 0
                 else:
                     es_counter += 1
 
                 if ckpt_every > 0 and run.current_epoch % ckpt_every == 0:
                     _save_checkpoint(
-                        checkpoint_path(out_dir, f"checkpoint_epoch_{run.current_epoch}"),
-                        model=model, optimizer=optimizer, scheduler=scheduler, scaler=scaler,
-                        loader_generator=loader_generator, stamp=stamp, stage_idx=stage_idx,
-                        stage_epoch=epoch + 1, run=run, best=best, stage_best=stage_best,
-                        warmup_groups=warmup_groups, es_best=es_best, es_counter=es_counter,
-                        global_step=global_step, metrics=epoch_metrics,
+                        checkpoint_path(
+                            out_dir, f"checkpoint_epoch_{run.current_epoch}"
+                        ),
+                        model=model,
+                        optimizer=optimizer,
+                        scheduler=scheduler,
+                        scaler=scaler,
+                        loader_generator=loader_generator,
+                        stamp=stamp,
+                        stage_idx=stage_idx,
+                        stage_epoch=epoch + 1,
+                        run=run,
+                        best=best,
+                        stage_best=stage_best,
+                        warmup_groups=warmup_groups,
+                        es_best=es_best,
+                        es_counter=es_counter,
+                        global_step=global_step,
+                        metrics=epoch_metrics,
                     )
 
             canceled = run.should_cancel()
@@ -976,19 +1237,29 @@ def train(
                 raise RuntimeError(
                     f"stage {stage_idx} produced no selectable epoch: its {selection_metric!r} "
                     "never took a value that ranks, so there is no state to start the next stage "
-                    "from or to deliver.")
+                    "from or to deliver."
+                )
             # The run's best before this stage is the best of the stage before it.
             previous, selection = best, stage_best["selection"]
-            if previous is None or _improves(selection, previous["selection"],
-                                             higher_is_better=higher_is_better):
+            if previous is None or _improves(
+                selection,
+                previous["selection"],
+                higher_is_better=higher_is_better,
+            ):
                 best = stage_best
             if canceled:
                 break
             if previous is not None and not _improves(
-                    selection, previous["selection"], higher_is_better=higher_is_better,
-                    min_delta=stop_rule.min_delta):
-                logger.info("Stage %d did not improve on stage %d; the run ends", stage_idx,
-                            previous["stage"])
+                selection,
+                previous["selection"],
+                higher_is_better=higher_is_better,
+                min_delta=stop_rule.min_delta,
+            ):
+                logger.info(
+                    "Stage %d did not improve on stage %d; the run ends",
+                    stage_idx,
+                    previous["stage"],
+                )
                 break
             handoff = stage_best
 
@@ -997,20 +1268,43 @@ def train(
         if not diverged:
             if best is not None:
                 run.saved["model_best"] = write_checkpoint(
-                    {**{key: best[key] for key in (STATE_DICT_KEY, METRICS_KEY, "stage", "epoch")},
-                     **stamp}, checkpoint_path(out_dir, "model_best"))
-            last_epoch_metrics = run.metrics_history[-1] if run.metrics_history else {}
-            run.saved["model_final"] = write_checkpoint({
-                STATE_DICT_KEY: model.state_dict(),
-                **stamp,
-                METRICS_KEY: _checkpoint_metrics(last_epoch_metrics),
-            }, checkpoint_path(out_dir, "model_final"))
+                    {
+                        **{
+                            key: best[key]
+                            for key in (
+                                STATE_DICT_KEY,
+                                METRICS_KEY,
+                                "stage",
+                                "epoch",
+                            )
+                        },
+                        **stamp,
+                    },
+                    checkpoint_path(out_dir, "model_best"),
+                )
+            last_epoch_metrics = (
+                run.metrics_history[-1] if run.metrics_history else {}
+            )
+            run.saved["model_final"] = write_checkpoint(
+                {
+                    STATE_DICT_KEY: model.state_dict(),
+                    **stamp,
+                    METRICS_KEY: _checkpoint_metrics(last_epoch_metrics),
+                },
+                checkpoint_path(out_dir, "model_final"),
+            )
 
         if diverged:
-            logger.info("Training run %s stopped: %s", run.id, run.status_error)
+            logger.info(
+                "Training run %s stopped: %s", run.id, run.status_error
+            )
         elif run.should_cancel():
             run.status = "canceled"
-            logger.info("Training run %s canceled at epoch %d", run.id, run.current_epoch)
+            logger.info(
+                "Training run %s canceled at epoch %d",
+                run.id,
+                run.current_epoch,
+            )
         else:
             run.status = "completed"
 
@@ -1024,6 +1318,8 @@ def train(
 
     finally:
         run.end_time = time.time()
-        run.best_metric = best["selection"] if best is not None else losing_side
+        run.best_metric = (
+            best["selection"] if best is not None else losing_side
+        )
 
     return run

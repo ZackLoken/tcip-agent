@@ -12,7 +12,11 @@ import pytest
 torch = pytest.importorskip("torch")
 
 
-_READ_STORES = ("label_documents", "prediction_documents", "prediction_buckets")
+_READ_STORES = (
+    "label_documents",
+    "prediction_documents",
+    "prediction_buckets",
+)
 """The stores whose records hold ground truth, predictions and the buckets naming them."""
 
 
@@ -37,8 +41,11 @@ def _counting_reads(monkeypatch, files: tuple[str, ...] = ()) -> Counter:
     real_open = builtins.open
 
     def counted_open(file, mode="r", *args, **kwargs):
-        if (isinstance(file, (str, Path)) and mode.startswith("r")
-                and Path(file).suffix in files):
+        if (
+            isinstance(file, (str, Path))
+            and mode.startswith("r")
+            and Path(file).suffix in files
+        ):
             counts[str(Path(file))] += 1
         return real_open(file, mode, *args, **kwargs)
 
@@ -55,16 +62,24 @@ def _consume(*datasets) -> None:
             ds[i]
 
 
-def test_a_drawn_detection_run_reads_each_document_once(tmp_path: Path, monkeypatch):
+def test_a_drawn_detection_run_reads_each_document_once(
+    tmp_path: Path, monkeypatch
+):
     from tests._producer_fixtures import train_val
     from tests.test_training_autoval import _detection_dataset
 
     images_dir, stems = _detection_dataset(tmp_path / "ds")
     counts = _counting_reads(monkeypatch)
 
-    train, val, _partition, _data = train_val(tmp_path, "detection", {
-        "images_dir": str(images_dir), "scope": {"subject": "bud"},
-        "split": {"val_ratio": 0.4, "seed": 1}})
+    train, val, _partition, _data = train_val(
+        tmp_path,
+        "detection",
+        {
+            "images_dir": str(images_dir),
+            "scope": {"subject": "bud"},
+            "split": {"val_ratio": 0.4, "seed": 1},
+        },
+    )
     _consume(train, val)
 
     assert len(counts) == len(stems)
@@ -76,42 +91,61 @@ def test_a_drawn_table_run_reads_its_table_once(tmp_path: Path, monkeypatch):
     from tests.tiny_trainer_fixtures import write_regression_dataset
 
     images_dir, csv_path = write_regression_dataset(
-        tmp_path, intensities=[0.1, 0.3, 0.5, 0.7], values=[0.2, 0.6, 1.0, 1.4])
+        tmp_path, intensities=[0.1, 0.3, 0.5, 0.7], values=[0.2, 0.6, 1.0, 1.4]
+    )
     counts = _counting_reads(monkeypatch, files=(".csv",))
 
-    train, val, _partition, _data = train_val(tmp_path, "regression", {
-        "images_dir": str(images_dir), "labels_dir": str(csv_path),
-        "split": {"val_ratio": 0.5, "seed": 0}})
+    train, val, _partition, _data = train_val(
+        tmp_path,
+        "regression",
+        {
+            "images_dir": str(images_dir),
+            "labels_dir": str(csv_path),
+            "split": {"val_ratio": 0.5, "seed": 0},
+        },
+    )
     _consume(train, val)
 
     assert counts == Counter({str(csv_path): 1})
 
 
-def test_a_written_draw_reads_each_document_once_with_its_fingerprint(tmp_path: Path,
-                                                                     monkeypatch):
+def test_a_written_draw_reads_each_document_once_with_its_fingerprint(
+    tmp_path: Path, monkeypatch
+):
     from tcip_mcp.tools.data_tools import draw_splits
     from tests.test_training_autoval import _detection_dataset
 
     images_dir, stems = _detection_dataset(tmp_path / "ds")
     counts = _counting_reads(monkeypatch)
 
-    result = draw_splits(tmp_path, str(tmp_path / "ds"), seed=1, subject="bud", val_ratio=0.25,
-                         calibration_ratio=0, holdout_ratio=0, group_by="stem",
-                         output_path=str(tmp_path / "selection"))
+    result = draw_splits(
+        tmp_path,
+        str(tmp_path / "ds"),
+        seed=1,
+        subject="bud",
+        val_ratio=0.25,
+        calibration_ratio=0,
+        holdout_ratio=0,
+        group_by="stem",
+        output_path=str(tmp_path / "selection"),
+    )
 
     assert "error" not in result, result
     assert len(counts) == len(stems)
     assert set(counts.values()) == {1}, counts
 
 
-def test_a_recorded_table_changed_under_its_digest_refuses_by_name(tmp_path: Path):
+def test_a_recorded_table_changed_under_its_digest_refuses_by_name(
+    tmp_path: Path,
+):
     from dataclasses import replace
 
     from tcip_mcp.pipelines.data.label_queries import acquired, admit
     from tests.tiny_trainer_fixtures import write_regression_dataset
 
-    images_dir, csv_path = write_regression_dataset(tmp_path, intensities=[0.1, 0.3],
-                                                    values=[0.2, 0.6])
+    images_dir, csv_path = write_regression_dataset(
+        tmp_path, intensities=[0.1, 0.3], values=[0.2, 0.6]
+    )
     admitted = admit(images_dir, str(csv_path)).every_sample()
     recorded = [replace(s, read=None, stored=None) for s in admitted]
     # Admits valid work: a replay of the unchanged table reads what the admission read.
@@ -122,7 +156,9 @@ def test_a_recorded_table_changed_under_its_digest_refuses_by_name(tmp_path: Pat
         acquired(recorded)
 
 
-def test_an_assessment_reads_each_reference_document_once(tmp_path: Path, monkeypatch):
+def test_an_assessment_reads_each_reference_document_once(
+    tmp_path: Path, monkeypatch
+):
     """The assessment measures the snapshot its own re-admission read, at the version that read
     answered: a document emptied before that re-admission refuses as unannotated, and one emptied
     after it is measured as read, from the copy retained at that version."""
@@ -132,20 +168,32 @@ def test_an_assessment_reads_each_reference_document_once(tmp_path: Path, monkey
     from tests._chain_fixtures import IMG, assess, confirm_count_trait
     from tests.test_assessment_guards import _trained
 
-    _images_dir, drawn, selection_dir, checkpoint = _trained(tmp_path, "exp-reads")
+    _images_dir, drawn, selection_dir, checkpoint = _trained(
+        tmp_path, "exp-reads"
+    )
     confirm_count_trait(tmp_path)
-    reference = sorted((s.ground_truth for s in drawn.samples
-                        if s.side in ("calibration", "holdout")), key=str)
+    reference = sorted(
+        (
+            s.ground_truth
+            for s in drawn.samples
+            if s.side in ("calibration", "holdout")
+        ),
+        key=str,
+    )
     readmitted: dict = {}
     real_readmit = label_queries.readmitted_samples
 
     def emptied_after_its_read(samples, scope):
         out = real_readmit(samples, scope)
         readmitted.update((s.ground_truth, s.ground_truth_digest) for s in out)
-        json_io.write_label_document(reference[0], [], IMG, IMG, keep_empty=True)
+        json_io.write_label_document(
+            reference[0], [], IMG, IMG, keep_empty=True
+        )
         return out
 
-    monkeypatch.setattr(label_queries, "readmitted_samples", emptied_after_its_read)
+    monkeypatch.setattr(
+        label_queries, "readmitted_samples", emptied_after_its_read
+    )
     counts = _counting_reads(monkeypatch)
 
     record = assess(tmp_path, checkpoint, selection_dir)
@@ -153,20 +201,29 @@ def test_an_assessment_reads_each_reference_document_once(tmp_path: Path, monkey
     assert "error" not in record, record
     assert {str(key) for key in reference} <= set(counts), counts
     assert set(counts.values()) == {1}, counts
-    retained = read_assessment(tmp_path, record["assessment_id"]).reference.ground_truth
+    retained = read_assessment(
+        tmp_path, record["assessment_id"]
+    ).reference.ground_truth
     assert {f.ground_truth: f.digest for f in retained} == {
-        key: readmitted[key] for key in reference}
+        key: readmitted[key] for key in reference
+    }
     assert json_io.read_label_document(reference[0]).annotations == []
 
 
-def test_a_reference_document_emptied_before_the_assessment_reads_it_refuses(tmp_path: Path):
+def test_a_reference_document_emptied_before_the_assessment_reads_it_refuses(
+    tmp_path: Path,
+):
     from tcip_annotation import json_io
     from tests._chain_fixtures import IMG, assess, confirm_count_trait
     from tests.test_assessment_guards import _trained
 
-    _images_dir, drawn, selection_dir, checkpoint = _trained(tmp_path, "exp-emptied")
+    _images_dir, drawn, selection_dir, checkpoint = _trained(
+        tmp_path, "exp-emptied"
+    )
     confirm_count_trait(tmp_path)
-    emptied = next(s.ground_truth for s in drawn.samples if s.side == "holdout")
+    emptied = next(
+        s.ground_truth for s in drawn.samples if s.side == "holdout"
+    )
     json_io.write_label_document(emptied, [], IMG, IMG, keep_empty=True)
 
     record = assess(tmp_path, checkpoint, selection_dir)
@@ -180,24 +237,39 @@ def test_a_semantic_run_reads_each_mask_once(tmp_path: Path, monkeypatch):
     from tcip_mcp.dataset_layout import UNDATED_BUCKET
     from tests._producer_fixtures import painted_frame, train_val
 
-    images_dir, masks_dir = tmp_path / "images" / UNDATED_BUCKET, tmp_path / "masks"
+    images_dir, masks_dir = (
+        tmp_path / "images" / UNDATED_BUCKET,
+        tmp_path / "masks",
+    )
     images_dir.mkdir(parents=True)
     masks_dir.mkdir()
     for i in range(4):
-        Image.new("RGB", (8, 8), (i * 40, 0, 0)).save(images_dir / f"tree{i}.png")
-        painted_frame(8, 8, 0, [((2, 2, 6, 6), 1)], mode="L").save(masks_dir / f"tree{i}.png")
+        Image.new("RGB", (8, 8), (i * 40, 0, 0)).save(
+            images_dir / f"tree{i}.png"
+        )
+        painted_frame(8, 8, 0, [((2, 2, 6, 6), 1)], mode="L").save(
+            masks_dir / f"tree{i}.png"
+        )
     counts = _counting_reads(monkeypatch, files=(".png",))
 
-    train, val, _partition, _data = train_val(tmp_path, "semantic_seg", {
-        "images_dir": str(images_dir), "labels_dir": str(masks_dir),
-        "split": {"val_ratio": 0.5, "seed": 0}})
+    train, val, _partition, _data = train_val(
+        tmp_path,
+        "semantic_seg",
+        {
+            "images_dir": str(images_dir),
+            "labels_dir": str(masks_dir),
+            "split": {"val_ratio": 0.5, "seed": 0},
+        },
+    )
     _consume(train, val)
 
     masks = {k: n for k, n in counts.items() if Path(k).parent == masks_dir}
     assert len(masks) == 4 and set(masks.values()) == {1}, counts
 
 
-def test_a_freeze_reads_each_document_once_with_its_fingerprint(tmp_path: Path, monkeypatch):
+def test_a_freeze_reads_each_document_once_with_its_fingerprint(
+    tmp_path: Path, monkeypatch
+):
     from tcip_mcp.tools.data_tools import freeze_selection
     from tests.test_freeze_selection import _real_drawn_experiment
     from tests.test_selection_binding import _two_subject_two_date_dataset
@@ -212,10 +284,15 @@ def test_a_freeze_reads_each_document_once_with_its_fingerprint(tmp_path: Path, 
     assert counts and set(counts.values()) == {1}, counts
 
 
-def test_a_physical_scale_assessment_reads_its_references_and_table_once(tmp_path: Path,
-                                                                         monkeypatch):
+def test_a_physical_scale_assessment_reads_its_references_and_table_once(
+    tmp_path: Path, monkeypatch
+):
     from tests import _trait_fixtures as fx
-    from tests.test_physical_scale_assessment import _author_tolerance, _calibrate, _reference
+    from tests.test_physical_scale_assessment import (
+        _author_tolerance,
+        _calibrate,
+        _reference,
+    )
 
     fx.seed_delivery_traits(tmp_path)
     _author_tolerance(tmp_path)
@@ -229,8 +306,9 @@ def test_a_physical_scale_assessment_reads_its_references_and_table_once(tmp_pat
     assert set(counts.values()) == {1}, counts
 
 
-def test_a_reserved_regions_assessment_reads_its_mosaic_document_once(tmp_path: Path,
-                                                                      monkeypatch):
+def test_a_reserved_regions_assessment_reads_its_mosaic_document_once(
+    tmp_path: Path, monkeypatch
+):
     from tests import _trait_fixtures as fx
     from tests.test_block_calibration import _assess, _attested
 
@@ -262,13 +340,30 @@ def _published_frames(root: Path) -> list[Path]:
     for name in ("leaf_a", "leaf_b"):
         frame = images_dir / f"{name}.png"
         Image.new("RGB", (64, 48), color=(90, 110, 70)).save(frame)
-        label_image(frame, [Annotation(subject="leaf", geometry=BBox(8, 8, 24, 24))], 64, 48)
+        label_image(
+            frame,
+            [Annotation(subject="leaf", geometry=BBox(8, 8, 24, 24))],
+            64,
+            48,
+        )
         frames.append(frame)
-    published(root, "published", [
-        {"image": str(frame), "width": 64, "height": 48,
-         "boxes": [[8, 8, 24, 24], [40, 30, 50, 40]],
-         "scores": [0.9, 0.7], "labels": [1, 1], "cap": 3} for frame in frames],
-        scope={"subject": "leaf"})
+    published(
+        root,
+        "published",
+        [
+            {
+                "image": str(frame),
+                "width": 64,
+                "height": 48,
+                "boxes": [[8, 8, 24, 24], [40, 30, 50, 40]],
+                "scores": [0.9, 0.7],
+                "labels": [1, 1],
+                "cap": 3,
+            }
+            for frame in frames
+        ],
+        scope={"subject": "leaf"},
+    )
     return frames
 
 
@@ -307,10 +402,15 @@ def test_an_assessment_resolves_each_image_once(tmp_path: Path, monkeypatch):
     from tests._chain_fixtures import assess, confirm_count_trait
     from tests.test_assessment_guards import _trained
 
-    _images_dir, drawn, selection_dir, checkpoint = _trained(tmp_path, "exp-resolved")
+    _images_dir, drawn, selection_dir, checkpoint = _trained(
+        tmp_path, "exp-resolved"
+    )
     confirm_count_trait(tmp_path)
-    reference = {str(Path(s.source)) for s in drawn.samples
-                 if s.side in ("calibration", "holdout")}
+    reference = {
+        str(Path(s.source))
+        for s in drawn.samples
+        if s.side in ("calibration", "holdout")
+    }
     resolutions = _counting_resolutions(monkeypatch)
 
     record = assess(tmp_path, checkpoint, selection_dir)
@@ -320,26 +420,35 @@ def test_an_assessment_resolves_each_image_once(tmp_path: Path, monkeypatch):
     assert set(resolutions.values()) == {1}, resolutions
 
 
-def test_a_selection_bound_run_resolves_each_image_once(tmp_path: Path, monkeypatch):
+def test_a_selection_bound_run_resolves_each_image_once(
+    tmp_path: Path, monkeypatch
+):
     from tests._producer_fixtures import train_val
     from tests.test_selection_binding import (
-        _draw, _run_data_cfg, _two_subject_two_date_dataset,
+        _draw,
+        _run_data_cfg,
+        _two_subject_two_date_dataset,
     )
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     drawn = _draw(tmp_path, root, tmp_path / "m")
     resolutions = _counting_resolutions(monkeypatch)
 
-    train, val, _partition, _data = train_val(tmp_path, "detection",
-                                              _run_data_cfg(root, tmp_path / "m"))
+    train, val, _partition, _data = train_val(
+        tmp_path, "detection", _run_data_cfg(root, tmp_path / "m")
+    )
     _consume(train, val)
 
-    trained = {str(Path(s.source)) for s in drawn.on("train") + drawn.on("val")}
+    trained = {
+        str(Path(s.source)) for s in drawn.on("train") + drawn.on("val")
+    }
     assert trained <= set(resolutions), resolutions
     assert set(resolutions.values()) == {1}, resolutions
 
 
-def test_a_comparison_render_reads_its_documents_and_bucket_once(tmp_path: Path, monkeypatch):
+def test_a_comparison_render_reads_its_documents_and_bucket_once(
+    tmp_path: Path, monkeypatch
+):
     from tcip_mcp.tools.vision_tools import visualize
 
     from PIL import Image
@@ -357,8 +466,13 @@ def test_a_comparison_render_reads_its_documents_and_bucket_once(tmp_path: Path,
 
     monkeypatch.setattr(Image, "open", counted_open)
 
-    result = visualize(tmp_path, "comparison", str(frame), bucket="published",
-                       conf_threshold=0.0)
+    result = visualize(
+        tmp_path,
+        "comparison",
+        str(frame),
+        bucket="published",
+        conf_threshold=0.0,
+    )
 
     assert "error" not in result, result
     assert (result["tp"], result["fp"], result["fn"]) == (1, 1, 0)
@@ -368,20 +482,26 @@ def test_a_comparison_render_reads_its_documents_and_bucket_once(tmp_path: Path,
     assert len(opened) == 1, opened
 
 
-def test_a_folder_scoring_resolves_its_images_once(tmp_path: Path, monkeypatch):
+def test_a_folder_scoring_resolves_its_images_once(
+    tmp_path: Path, monkeypatch
+):
     from tcip_mcp.tools.annotation_tools import score_predictions
 
     frames = _published_frames(tmp_path)
     scans = _counting_scans(monkeypatch)
 
-    result = score_predictions(str(frames[0].parent), "published", conf_threshold=0.0)
+    result = score_predictions(
+        str(frames[0].parent), "published", conf_threshold=0.0
+    )
 
     assert "error" not in result, result
     assert result["image_count"] == len(frames)
     assert scans == Counter({str(frames[0].parent): 1}), scans
 
 
-def test_a_failure_render_reads_each_document_and_its_bucket_once(tmp_path: Path, monkeypatch):
+def test_a_failure_render_reads_each_document_and_its_bucket_once(
+    tmp_path: Path, monkeypatch
+):
     from tcip_mcp.tools.vision_tools import render_failure_cases
 
     frames = _published_frames(tmp_path)

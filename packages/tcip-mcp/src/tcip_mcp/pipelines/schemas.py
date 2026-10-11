@@ -10,7 +10,12 @@ from pathlib import Path
 from typing import Annotated, Literal, NamedTuple, cast, get_args
 
 from pydantic import (
-    AfterValidator, BaseModel, ConfigDict, Field, ValidationError, ValidationInfo,
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    ValidationInfo,
     model_validator,
 )
 
@@ -66,8 +71,10 @@ class OptimizerSpec(BaseModel):
     @model_validator(mode="after")
     def _momentum_belongs_to_sgd(self) -> OptimizerSpec:
         if (self.name == "sgd") != (self.momentum is not None):
-            raise ValueError(f"optimizer.momentum is stated for sgd and for no other optimizer; "
-                             f"this block names {self.name!r} and momentum {self.momentum!r}.")
+            raise ValueError(
+                f"optimizer.momentum is stated for sgd and for no other optimizer; "
+                f"this block names {self.name!r} and momentum {self.momentum!r}."
+            )
         return self
 
 
@@ -112,13 +119,16 @@ class StepSchedule(BaseModel):
     gamma: float
 
 
-SchedulerSpec = Annotated[CosineSchedule | PlateauSchedule | OneCycleSchedule | StepSchedule,
-                          Field(discriminator="type")]
+SchedulerSpec = Annotated[
+    CosineSchedule | PlateauSchedule | OneCycleSchedule | StepSchedule,
+    Field(discriminator="type"),
+]
 """The learning-rate schedule each stage builds (``generic_trainer._build_scheduler``): its
 ``type`` and that type's own settings, each stated, any other type's refused by name."""
 SCHEDULER_TYPES: tuple[str, ...] = tuple(
     get_args(schedule.model_fields["type"].annotation)[0]
-    for schedule in get_args(get_args(SchedulerSpec)[0]))
+    for schedule in get_args(get_args(SchedulerSpec)[0])
+)
 """The ``scheduler.type`` names ``generic_trainer._build_scheduler`` builds."""
 
 
@@ -281,7 +291,9 @@ class TilingSpec(BaseModel):
     def tiler_options(self, exclude: frozenset[str] = frozenset()) -> dict:
         """The ``TiledDetectionDataset`` keyword arguments this block states, but ``exclude``;
         an option it leaves ``None`` is omitted."""
-        return self.model_dump(exclude_none=True, exclude={"enabled", "buffer", *exclude})
+        return self.model_dump(
+            exclude_none=True, exclude={"enabled", "buffer", *exclude}
+        )
 
 
 def run_tiling(task: str, tiling: TilingSpec | None) -> TilingSpec | None:
@@ -297,7 +309,8 @@ def run_tiling(task: str, tiling: TilingSpec | None) -> TilingSpec | None:
         raise ValueError(
             f"data.tiling is enabled for a run of task {task!r}: only a "
             f"{sorted(DETECTION_TASKS)} run trains and predicts over tiles, its targets clipped "
-            "to each one, so this run would never read the tiling it states. Drop data.tiling.")
+            "to each one, so this run would never read the tiling it states. Drop data.tiling."
+        )
     return tiling
 
 
@@ -307,7 +320,9 @@ class _Recorded(BaseModel):
     def record(self, exclude: dict | None = None) -> dict:
         """This block as a run's record holds it: every key stated or resolved, in JSON form,
         but the fields ``exclude`` names (``BaseModel.model_dump``'s nested form)."""
-        return self.model_dump(mode="json", exclude_unset=True, exclude=exclude)
+        return self.model_dump(
+            mode="json", exclude_unset=True, exclude=exclude
+        )
 
 
 class DataSpec(_Recorded):
@@ -319,7 +334,9 @@ class DataSpec(_Recorded):
     images_dir: ResolvedPath | None = None
     labels_dir: ResolvedPath | None = None
     dataset_source: DatasetSourceSchema | None = None
-    split: SplitSpec = Field(default_factory=lambda: SplitSpec.model_validate({}))
+    split: SplitSpec = Field(
+        default_factory=lambda: SplitSpec.model_validate({})
+    )
     auto_val: bool = True
     scope: ClassScope | None = None
     tiling: TilingSpec | None = None
@@ -333,9 +350,11 @@ class DataSpec(_Recorded):
     @model_validator(mode="after")
     def _no_tiling_beside_a_builder(self) -> DataSpec:
         if self.dataset_source is not None and self.tiling is not None:
-            raise ValueError("data.tiling is stated beside data.dataset_source: the platform tiles "
-                             "no dataset it does not build; a dataset_source builder's training "
-                             "body composes its own tiler (ctx.tiled_dataset). Drop data.tiling.")
+            raise ValueError(
+                "data.tiling is stated beside data.dataset_source: the platform tiles "
+                "no dataset it does not build; a dataset_source builder's training "
+                "body composes its own tiler (ctx.tiled_dataset). Drop data.tiling."
+            )
         return self
 
     @property
@@ -407,7 +426,9 @@ class TrainConfigSchema(_Recorded):
     log_every_n_batches: int | None = Field(None, ge=1)
     """``None``: ``generic_trainer.BATCH_ROWS_PER_EPOCH`` rows an epoch
     (``generic_trainer.batch_row_ends``)."""
-    evaluation: EvaluationSpec = Field(default_factory=lambda: EvaluationSpec.model_validate({}))
+    evaluation: EvaluationSpec = Field(
+        default_factory=lambda: EvaluationSpec.model_validate({})
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -424,10 +445,18 @@ class TrainConfigSchema(_Recorded):
     def default_trainer_regime(self) -> DefaultTrainerRegime:
         """The regime the default trainer runs at. Refuses (``ValueError``) naming every block of
         it this config leaves unstated."""
-        missing = [name for name in DefaultTrainerRegime._fields if getattr(self, name) is None]
+        missing = [
+            name
+            for name in DefaultTrainerRegime._fields
+            if getattr(self, name) is None
+        ]
         if missing:
-            raise ValueError(f"{missing} unstated: the default trainer reads each of them")
-        return DefaultTrainerRegime(*(getattr(self, name) for name in DefaultTrainerRegime._fields))
+            raise ValueError(
+                f"{missing} unstated: the default trainer reads each of them"
+            )
+        return DefaultTrainerRegime(
+            *(getattr(self, name) for name in DefaultTrainerRegime._fields)
+        )
 
     def trainer_reads(self) -> TrainerReads:
         """What training under this config reads, each stated: the loaders' ``batch_size``, a
@@ -445,12 +474,18 @@ class TrainConfigSchema(_Recorded):
             except ValueError as exc:
                 unstated.append(str(exc))
         if self.batch_size is None:
-            unstated.append("batch_size unstated: a run's loaders draw batches of the size its "
-                            "config states, under any trainer")
-        if (self.model_source.task in DETECTION_TASKS
-                and self.evaluation.conf_threshold is None):
-            unstated.append("evaluation.conf_threshold unstated: a detector's validation counts "
-                            "its boxes at a confidence the run states, under any trainer")
+            unstated.append(
+                "batch_size unstated: a run's loaders draw batches of the size its "
+                "config states, under any trainer"
+            )
+        if (
+            self.model_source.task in DETECTION_TASKS
+            and self.evaluation.conf_threshold is None
+        ):
+            unstated.append(
+                "evaluation.conf_threshold unstated: a detector's validation counts "
+                "its boxes at a confidence the run states, under any trainer"
+            )
         regime = None
         if self.training_source is None:
             try:
@@ -459,23 +494,30 @@ class TrainConfigSchema(_Recorded):
                 unstated.append(str(exc))
         if unstated:
             raise ValueError("; ".join(unstated))
-        return TrainerReads(cast(int, self.batch_size), self.evaluation.conf_threshold, regime)
+        return TrainerReads(
+            cast(int, self.batch_size), self.evaluation.conf_threshold, regime
+        )
 
 
-def checked_train_config(config: dict, project: Path | None = None
-                         ) -> tuple[TrainConfigSchema | None, list[str]]:
+def checked_train_config(
+    config: dict, project: Path | None = None
+) -> tuple[TrainConfigSchema | None, list[str]]:
     """``config`` validated once against the schema, its paths located against ``project``
     (:data:`ResolvedPath`; ``None`` admits absolute paths only): the validated config and no
     issues, or ``None`` and one issue string per type or structure error (e.g.
     ``batch_size="big"``, a stage stating ``epochs``, a nested ``training`` section, a missing
     ``model_source.task``, a relative path with no project)."""
     try:
-        return TrainConfigSchema.model_validate(config, context={"project": project}), []
+        return TrainConfigSchema.model_validate(
+            config, context={"project": project}
+        ), []
     except ValidationError as e:
         return None, _issues(e)
 
 
-def train_config(config: dict, project: Path | None = None) -> TrainConfigSchema:
+def train_config(
+    config: dict, project: Path | None = None
+) -> TrainConfigSchema:
     """``config`` validated against the schema (:func:`checked_train_config`). Refuses
     (``ValueError``) naming every issue it reports."""
     spec, issues = checked_train_config(config, project)

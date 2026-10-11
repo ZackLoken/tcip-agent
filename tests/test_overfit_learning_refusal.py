@@ -45,14 +45,23 @@ class _LinearProbe(torch.nn.Module):
     def forward(self, images, targets=None):
         logits = self.fc(images.mean(dim=(2, 3)))
         if self.training and targets is not None:
-            return {"cls_loss": torch.nn.functional.cross_entropy(logits, targets["labels"])}
+            return {
+                "cls_loss": torch.nn.functional.cross_entropy(
+                    logits, targets["labels"]
+                )
+            }
         return {"logits": logits}
 
 
 def test_a_model_whose_loss_never_moves_is_refused():
     """A loss identical at the last step and the first one is no evidence of optimization."""
-    report = overfit_check(_DisconnectedParameter(), "classification", steps=12, dims=CLS_DIMS,
-                           seed=0)
+    report = overfit_check(
+        _DisconnectedParameter(),
+        "classification",
+        steps=12,
+        dims=CLS_DIMS,
+        seed=0,
+    )
     assert report["passed"] is False
     assert report["issue"] is not None
     assert "did not decrease" in report["issue"], report["issue"]
@@ -62,7 +71,9 @@ def test_a_model_whose_loss_never_moves_is_refused():
 
 def test_a_model_that_really_learns_passes():
     """The rail admits valid work: a real learnable path drives the loss down and passes."""
-    report = overfit_check(_LinearProbe(), "classification", steps=25, dims=CLS_DIMS, seed=0)
+    report = overfit_check(
+        _LinearProbe(), "classification", steps=25, dims=CLS_DIMS, seed=0
+    )
     assert report["passed"], report["issue"]
     assert report["issue"] is None
     assert report["final"] < report["initial"]
@@ -80,14 +91,20 @@ class _AllFrozen(torch.nn.Module):
     def forward(self, images, targets=None):
         logits = self.fc(images.mean(dim=(2, 3)))
         if self.training and targets is not None:
-            return {"cls_loss": torch.nn.functional.cross_entropy(logits, targets["labels"])}
+            return {
+                "cls_loss": torch.nn.functional.cross_entropy(
+                    logits, targets["labels"]
+                )
+            }
         return {"logits": logits}
 
 
 def test_an_all_frozen_model_reports_rather_than_raises():
     """Adam raises on an empty parameter list; the check builds it inside its own try, so the
     empty-parameter case reaches the report instead of escaping the function."""
-    report = overfit_check(_AllFrozen(), "classification", steps=5, dims=CLS_DIMS, seed=0)
+    report = overfit_check(
+        _AllFrozen(), "classification", steps=5, dims=CLS_DIMS, seed=0
+    )
     assert report["passed"] is False
     assert "empty parameter list" in report["issue"], report["issue"]
     assert report["losses"] == []

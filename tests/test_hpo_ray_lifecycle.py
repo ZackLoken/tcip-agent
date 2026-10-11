@@ -81,12 +81,18 @@ def _install_fake_ray(monkeypatch, entered: list, release: list) -> ModuleType:
     ray.no_console = False
 
     daemon_process_infos = {
-        process_type: [SimpleNamespace(process=_FakeDaemonProcess(ray, pid=10_000 + i))]
-        for i, process_type in enumerate(("raylet", "gcs_server", "log_monitor", "reaper"))
+        process_type: [
+            SimpleNamespace(process=_FakeDaemonProcess(ray, pid=10_000 + i))
+        ]
+        for i, process_type in enumerate(
+            ("raylet", "gcs_server", "log_monitor", "reaper")
+        )
     }
     ray._private = SimpleNamespace(
         worker=SimpleNamespace(
-            global_worker=SimpleNamespace(node=SimpleNamespace(all_processes=daemon_process_infos))
+            global_worker=SimpleNamespace(
+                node=SimpleNamespace(all_processes=daemon_process_infos)
+            )
         )
     )
 
@@ -153,8 +159,12 @@ def _install_fake_ray(monkeypatch, entered: list, release: list) -> ModuleType:
     tune.search = search
     ray.tune = tune
 
-    for name, module in (("ray", ray), ("ray.tune", tune), ("ray.tune.search", search),
-                         ("ray.tune.search.basic_variant", basic_variant)):
+    for name, module in (
+        ("ray", ray),
+        ("ray.tune", tune),
+        ("ray.tune.search", search),
+        ("ray.tune.search.basic_variant", basic_variant),
+    ):
         monkeypatch.setitem(sys.modules, name, module)
     return ray
 
@@ -164,9 +174,11 @@ def _run_one_search(project) -> None:
     from tests._training_values import sweep_space, tune_arguments
 
     tune_search(
-        objective_fn=lambda config, report: None, param_space=sweep_space(),
+        objective_fn=lambda config, report: None,
+        param_space=sweep_space(),
         sweep_dir=project / ".tcip" / "experiments" / "sweep",
-        **tune_arguments(resources_per_trial={"cpu": 1.0, "gpu": 0.0}))
+        **tune_arguments(resources_per_trial={"cpu": 1.0, "gpu": 0.0}),
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -180,12 +192,17 @@ def _isolated_lifecycle_state(tmp_path, monkeypatch):
     monkeypatch.setattr(hpo, "_external_cluster_warned", False, raising=False)
 
 
-def test_finished_sweep_leaves_a_concurrent_sweep_s_cluster_running(tmp_path, monkeypatch):
+def test_finished_sweep_leaves_a_concurrent_sweep_s_cluster_running(
+    tmp_path, monkeypatch
+):
     entered = [threading.Event(), threading.Event()]
     release = [threading.Event(), threading.Event()]
     ray = _install_fake_ray(monkeypatch, entered, release)
 
-    threads = [threading.Thread(target=_run_one_search, args=(tmp_path,)) for _ in range(2)]
+    threads = [
+        threading.Thread(target=_run_one_search, args=(tmp_path,))
+        for _ in range(2)
+    ]
     threads[0].start()
     assert entered[0].wait(timeout=30)
     threads[1].start()
@@ -196,7 +213,9 @@ def test_finished_sweep_leaves_a_concurrent_sweep_s_cluster_running(tmp_path, mo
     assert not threads[0].is_alive()
 
     assert ray.init_calls == 1, "the second sweep joined the running cluster"
-    assert ray.shutdown_calls == 0, "the second sweep is still inside Tuner.fit"
+    assert ray.shutdown_calls == 0, (
+        "the second sweep is still inside Tuner.fit"
+    )
 
     release[1].set()
     threads[1].join(timeout=30)
@@ -204,7 +223,9 @@ def test_finished_sweep_leaves_a_concurrent_sweep_s_cluster_running(tmp_path, mo
     assert ray.shutdown_calls == 1
 
 
-def test_a_cluster_this_process_did_not_start_is_never_shut_down(tmp_path, monkeypatch):
+def test_a_cluster_this_process_did_not_start_is_never_shut_down(
+    tmp_path, monkeypatch
+):
     entered = [threading.Event()]
     release = [threading.Event()]
     release[0].set()
@@ -236,13 +257,19 @@ def test_ray_init_propagates_this_process_s_import_search_path_to_trial_workers(
 
     env_vars = ray.init_kwargs["runtime_env"]["env_vars"]
     pythonpath_entries = env_vars["PYTHONPATH"].split(os.pathsep)
-    for entry in (p for p in sys.path if p and canonical_path(p) not in _LAYOUT_ROOTS):
+    for entry in (
+        p for p in sys.path if p and canonical_path(p) not in _LAYOUT_ROOTS
+    ):
         assert entry in pythonpath_entries
-    assert not [p for p in pythonpath_entries if canonical_path(p) in _LAYOUT_ROOTS]
+    assert not [
+        p for p in pythonpath_entries if canonical_path(p) in _LAYOUT_ROOTS
+    ]
 
 
 def test_a_concurrent_sweep_warns_when_the_running_cluster_s_import_path_has_gone_stale(
-    monkeypatch, caplog, tmp_path,
+    monkeypatch,
+    caplog,
+    tmp_path,
 ):
     """A cluster this module started keeps the ``PYTHONPATH`` it was handed at ``ray.init``;
     a second sweep entering while that cluster is still up, after ``sys.path`` gained an entry
@@ -259,7 +286,9 @@ def test_a_concurrent_sweep_warns_when_the_running_cluster_s_import_path_has_gon
 
     monkeypatch.syspath_prepend(str(tmp_path / "bespoke_source"))
 
-    with caplog.at_level(logging.WARNING, logger="tcip_mcp.pipelines.training.hpo"):
+    with caplog.at_level(
+        logging.WARNING, logger="tcip_mcp.pipelines.training.hpo"
+    ):
         second = threading.Thread(target=_run_one_search, args=(tmp_path,))
         second.start()
         assert entered[1].wait(timeout=30)
@@ -276,7 +305,9 @@ def test_a_concurrent_sweep_warns_when_the_running_cluster_s_import_path_has_gon
 
 
 def test_a_concurrent_sweep_does_not_warn_when_the_import_path_is_unchanged(
-    tmp_path, monkeypatch, caplog,
+    tmp_path,
+    monkeypatch,
+    caplog,
 ):
     """The companion of the stale-path warning: entering a second sweep against a cluster
     this module started, with the import path unchanged, raises no warning."""
@@ -290,7 +321,9 @@ def test_a_concurrent_sweep_does_not_warn_when_the_import_path_is_unchanged(
     first.start()
     assert entered[0].wait(timeout=30)
 
-    with caplog.at_level(logging.WARNING, logger="tcip_mcp.pipelines.training.hpo"):
+    with caplog.at_level(
+        logging.WARNING, logger="tcip_mcp.pipelines.training.hpo"
+    ):
         second = threading.Thread(target=_run_one_search, args=(tmp_path,))
         second.start()
         assert entered[1].wait(timeout=30)
@@ -306,7 +339,9 @@ def test_a_concurrent_sweep_does_not_warn_when_the_import_path_is_unchanged(
     )
 
 
-def test_sequential_sweeps_each_start_and_stop_their_own_cluster(tmp_path, monkeypatch):
+def test_sequential_sweeps_each_start_and_stop_their_own_cluster(
+    tmp_path, monkeypatch
+):
     entered = [threading.Event(), threading.Event()]
     release = [threading.Event(), threading.Event()]
     for event in release:
@@ -320,7 +355,9 @@ def test_sequential_sweeps_each_start_and_stop_their_own_cluster(tmp_path, monke
     assert ray.shutdown_calls == 2
 
 
-def test_a_console_free_exit_kills_ray_daemons_before_shutdown_signals_them(tmp_path, monkeypatch):
+def test_a_console_free_exit_kills_ray_daemons_before_shutdown_signals_them(
+    tmp_path, monkeypatch
+):
     """Windows' console-signal shutdown path raises ``OSError: [WinError 6] The handle is
     invalid`` on a daemon started without a console; a console-free process must kill every
     daemon itself first so ``ray.shutdown()`` finds each one already dead and never signals
@@ -334,7 +371,9 @@ def test_a_console_free_exit_kills_ray_daemons_before_shutdown_signals_them(tmp_
     release[0].set()
     ray = _install_fake_ray(monkeypatch, entered, release)
     ray.no_console = True
-    monkeypatch.setattr(hpo, "_has_attached_console", lambda: False, raising=False)
+    monkeypatch.setattr(
+        hpo, "_has_attached_console", lambda: False, raising=False
+    )
 
     escaped: BaseException | None = None
     try:
@@ -342,8 +381,12 @@ def test_a_console_free_exit_kills_ray_daemons_before_shutdown_signals_them(tmp_
     except BaseException as exc:
         escaped = exc
 
-    assert escaped is None, f"the sweep's exit raised {escaped!r} instead of completing"
-    for process_infos in ray._private.worker.global_worker.node.all_processes.values():
+    assert escaped is None, (
+        f"the sweep's exit raised {escaped!r} instead of completing"
+    )
+    for (
+        process_infos
+    ) in ray._private.worker.global_worker.node.all_processes.values():
         for process_info in process_infos:
             assert process_info.process.kill_calls == 1
             assert process_info.process.terminate_calls == 0
@@ -363,18 +406,24 @@ def test_a_process_with_a_console_lets_ray_shutdown_signal_its_daemons_directly(
     release[0].set()
     ray = _install_fake_ray(monkeypatch, entered, release)
     ray.no_console = False
-    monkeypatch.setattr(hpo, "_has_attached_console", lambda: True, raising=False)
+    monkeypatch.setattr(
+        hpo, "_has_attached_console", lambda: True, raising=False
+    )
 
     _run_one_search(tmp_path)
 
-    for process_infos in ray._private.worker.global_worker.node.all_processes.values():
+    for (
+        process_infos
+    ) in ray._private.worker.global_worker.node.all_processes.values():
         for process_info in process_infos:
             assert process_info.process.kill_calls == 0
             assert process_info.process.terminate_calls == 1
     assert ray.shutdown_calls == 1
 
 
-def test_a_cluster_this_process_starts_is_sized_to_the_sweep_s_own_request(tmp_path, monkeypatch):
+def test_a_cluster_this_process_starts_is_sized_to_the_sweep_s_own_request(
+    tmp_path, monkeypatch
+):
     """The cluster asks Ray for the sweep's CPUs, every concurrent trial's together, never for
     the host's: three half-CPU trials at once need two whole CPUs, and the default one-CPU,
     one-at-a-time sweep needs one."""
@@ -388,9 +437,13 @@ def test_a_cluster_this_process_starts_is_sized_to_the_sweep_s_own_request(tmp_p
     ray = _install_fake_ray(monkeypatch, entered, release)
 
     tune_search(
-        objective_fn=lambda config, report: None, param_space=sweep_space(),
+        objective_fn=lambda config, report: None,
+        param_space=sweep_space(),
         sweep_dir=tmp_path / ".tcip" / "experiments" / "sweep",
-        **tune_arguments(max_concurrent=3, resources_per_trial={"cpu": 0.5, "gpu": 0.0}))
+        **tune_arguments(
+            max_concurrent=3, resources_per_trial={"cpu": 0.5, "gpu": 0.0}
+        ),
+    )
     assert ray.init_kwargs["num_cpus"] == 2
 
     _run_one_search(tmp_path)

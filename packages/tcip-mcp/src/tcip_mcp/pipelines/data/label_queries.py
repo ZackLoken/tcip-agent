@@ -42,12 +42,16 @@ def registry_scope(images_dir, subject: str | None) -> "ClassScope":
     declared = subject_registry.read_registry(root).subject(subject)
     if declared is None:
         raise subject_registry.RegistryError(
-            f"subject {subject!r} is not in the registry at {root}; declare it there first.")
+            f"subject {subject!r} is not in the registry at {root}; declare it there first."
+        )
     return ClassScope(subject=subject, attributes=declared.attributes)
 
 
-def json_det_targets(annotations: Sequence[Annotation], scope: "ClassScope",
-                     reads: Callable[[Any], bool] = box_derivable) -> dict[str, Any]:
+def json_det_targets(
+    annotations: Sequence[Annotation],
+    scope: "ClassScope",
+    reads: Callable[[Any], bool] = box_derivable,
+) -> dict[str, Any]:
     """One image's detection target from its label document's ``annotations``, read under
     ``scope``, an admitted document class space.
 
@@ -65,7 +69,12 @@ def json_det_targets(annotations: Sequence[Annotation], scope: "ClassScope",
     from tcip_annotation.state import bbox_of
 
     attributes = cast(tuple, scope.attributes)
-    target: dict[str, Any] = {"boxes": [], "labels": [], "iscrowd": [], "geometry": []}
+    target: dict[str, Any] = {
+        "boxes": [],
+        "labels": [],
+        "iscrowd": [],
+        "geometry": [],
+    }
     rows: list[list[int]] = []
     for a in annotations:
         if not reads(a.geometry):
@@ -82,7 +91,9 @@ def json_det_targets(annotations: Sequence[Annotation], scope: "ClassScope",
         target["geometry"].append(geometry)
         rows.append(ids)
     if attributes:
-        target["attributes"] = np.asarray(rows, dtype=np.int64).reshape(-1, len(attributes))
+        target["attributes"] = np.asarray(rows, dtype=np.int64).reshape(
+            -1, len(attributes)
+        )
     return target
 
 
@@ -101,14 +112,16 @@ def ground_truth_shape(ground_truth) -> str:
         if not path.is_file():
             raise ValueError(
                 f"{path} names a ground-truth table that does not exist; name where this run's "
-                "ground truth actually lives.")
+                "ground truth actually lives."
+            )
         return TABLE
     if path.is_dir() and any(is_mask(p) for p in path.iterdir()):
         return MASK
     raise ValueError(
         f"{ground_truth!r} is neither a .csv table nor a directory of <stem>.png masks: a run "
         "names one of those as its ground truth, or names none to read the label documents of "
-        "its own images.")
+        "its own images."
+    )
 
 
 ABSENT = "absent"
@@ -146,13 +159,18 @@ def _table(tables: _Tables, path: str) -> tuple[dict[str, str], Any]:
 
     if path not in tables:
         stored = tcip_store.read_blob_versioned(Path(path), default=None)
-        tables[path] = ({} if stored.version == tcip_store.Version.ABSENT
-                        else parse_ground_truth_table(stored.value, path), stored)
+        tables[path] = (
+            {}
+            if stored.version == tcip_store.Version.ABSENT
+            else parse_ground_truth_table(stored.value, path),
+            stored,
+        )
     return tables[path]
 
 
-def _candidates(shape: str, ground_truth, images_dir, members,
-                tables: _Tables) -> list[Candidate]:
+def _candidates(
+    shape: str, ground_truth, images_dir, members, tables: _Tables
+) -> list[Candidate]:
     """Every candidate one place holding ground truth of ``shape`` offers: ``members`` when named,
     else every image (documents or a mask directory) or every row (a table), an image's label
     document being its own key (:func:`~tcip_mcp.dataset_layout.label_key`). A mask directory
@@ -164,16 +182,29 @@ def _candidates(shape: str, ground_truth, images_dir, members,
     sources = list_logical_images(images_dir)
     if shape == DOCUMENT:
         names = list(members) if members is not None else sorted(sources)
-        return [Candidate(m, sources.get(m),
-                          label_key_of(source_path_of(sources[m])) if m in sources else None)
-                for m in names]
+        return [
+            Candidate(
+                m,
+                sources.get(m),
+                label_key_of(source_path_of(sources[m]))
+                if m in sources
+                else None,
+            )
+            for m in names
+        ]
     if shape == MASK:
         labels_p = Path(ground_truth)
         entries = list(labels_p.iterdir()) if labels_p.is_dir() else []
         masks = {p.stem: str(p) for p in entries if is_mask(p)}
         names = list(members) if members is not None else sorted(sources)
-        unreadable = sorted(p.name for p in entries if p.is_file() and not is_mask(p)
-                            and p.stem in names and p.stem not in masks)
+        unreadable = sorted(
+            p.name
+            for p in entries
+            if p.is_file()
+            and not is_mask(p)
+            and p.stem in names
+            and p.stem not in masks
+        )
         if unreadable:
             raise ValueError(
                 f"{labels_p} holds {unreadable} beside an image of the same stem, and a "
@@ -183,11 +214,20 @@ def _candidates(shape: str, ground_truth, images_dir, members,
         return [Candidate(m, sources.get(m), masks.get(m)) for m in names]
     table, _version = _table(tables, str(ground_truth))
     names = list(members) if members is not None else sorted(table)
-    return [Candidate(k, sources.get(k), str(ground_truth), row_key=k) for k in names]
+    return [
+        Candidate(k, sources.get(k), str(ground_truth), row_key=k)
+        for k in names
+    ]
 
 
-def _acquire(shape: str, ground_truth: "Key | str", row_key: str | None, tables: _Tables, *,
-             version: str | None) -> tuple[Any, Any]:
+def _acquire(
+    shape: str,
+    ground_truth: "Key | str",
+    row_key: str | None,
+    tables: _Tables,
+    *,
+    version: str | None,
+) -> tuple[Any, Any]:
     """The one read of one member's ground truth of ``shape``: what the store answered
     (``tcip_store.Versioned``) and what that decodes to, the label document, the row's value, or
     nothing for a mask; ``(None, None)`` for ground truth that is not there. Each table is read
@@ -197,7 +237,11 @@ def _acquire(shape: str, ground_truth: "Key | str", row_key: str | None, tables:
     ``ValueError``."""
     import tcip_store
 
-    from tcip_annotation.json_io import UnreadableLabelDocumentError, document_at, read_stored
+    from tcip_annotation.json_io import (
+        UnreadableLabelDocumentError,
+        document_at,
+        read_stored,
+    )
     from tcip_mcp.pipelines.data.selection import DOCUMENT, MASK
 
     stored: Any = None
@@ -210,21 +254,34 @@ def _acquire(shape: str, ground_truth: "Key | str", row_key: str | None, tables:
             decoded = document_at(cast(Key, ground_truth), stored)
     elif shape == MASK:
         if is_mask(Path(cast(str, ground_truth))):
-            stored = tcip_store.read_blob_versioned(Path(cast(str, ground_truth)))
+            stored = tcip_store.read_blob_versioned(
+                Path(cast(str, ground_truth))
+            )
     else:
         rows, table = _table(tables, cast(str, ground_truth))
         if holds_row(rows, row_key):
             stored, decoded = table, rows[cast(str, row_key)]
-    if version is not None and (stored is None or stored.version.token != version):
-        at = "is not there" if stored is None else f"is at version {stored.version.token}"
-        refusal = UnreadableLabelDocumentError if shape == DOCUMENT else ValueError
-        raise refusal(f"{ground_truth}{f' row {row_key!r}' if row_key else ''} {at}, not "
-                      f"{version}, the version recorded")
+    if version is not None and (
+        stored is None or stored.version.token != version
+    ):
+        at = (
+            "is not there"
+            if stored is None
+            else f"is at version {stored.version.token}"
+        )
+        refusal = (
+            UnreadableLabelDocumentError if shape == DOCUMENT else ValueError
+        )
+        raise refusal(
+            f"{ground_truth}{f' row {row_key!r}' if row_key else ''} {at}, not "
+            f"{version}, the version recorded"
+        )
     return stored, decoded
 
 
-def _tally(shape: str, candidate: Candidate, scope: "ClassScope",
-           tables: _Tables) -> tuple[str, Any, Any]:
+def _tally(
+    shape: str, candidate: Candidate, scope: "ClassScope", tables: _Tables
+) -> tuple[str, Any, Any]:
     """What one candidate's ground truth reads as, with its one read (:func:`_acquire`): its
     label document's state for ``scope``'s subject, ``complete`` for a mask or a row that is
     there, :data:`ABSENT` (no read) for anything missing."""
@@ -232,16 +289,26 @@ def _tally(shape: str, candidate: Candidate, scope: "ClassScope",
 
     if candidate.source is None or candidate.ground_truth is None:
         return ABSENT, None, None
-    stored, decoded = _acquire(shape, candidate.ground_truth, candidate.row_key, tables,
-                               version=None)
+    stored, decoded = _acquire(
+        shape, candidate.ground_truth, candidate.row_key, tables, version=None
+    )
     if stored is None:
         return ABSENT, None, None
-    return (decoded.state(cast(str, scope.subject)) if shape == DOCUMENT else "complete",
-            stored, decoded)
+    return (
+        decoded.state(cast(str, scope.subject))
+        if shape == DOCUMENT
+        else "complete",
+        stored,
+        decoded,
+    )
 
 
-def _admission(shape: str, candidates: "Sequence[Candidate]", scope: "ClassScope",
-               tables: _Tables) -> tuple[list[Admitted], dict[str, int]]:
+def _admission(
+    shape: str,
+    candidates: "Sequence[Candidate]",
+    scope: "ClassScope",
+    tables: _Tables,
+) -> tuple[list[Admitted], dict[str, int]]:
     """The candidates :func:`admits` admits by their :func:`_tally`, each with its source resolved
     (a grouped capture missing a band refuses) and the version its tally read, and how many were
     tallied each way."""
@@ -252,10 +319,20 @@ def _admission(shape: str, candidates: "Sequence[Candidate]", scope: "ClassScope
     for candidate in candidates:
         tally, stored, read = _tally(shape, candidate, scope, tables)
         if admits(tally):
-            image = refuse_incomplete_band_group(cast("Path | BandGroupRef", candidate.source))
-            records.append(Admitted(candidate.member, image,
-                                    cast("Key | str", candidate.ground_truth),
-                                    stored.version.token, read, stored, candidate.row_key))
+            image = refuse_incomplete_band_group(
+                cast("Path | BandGroupRef", candidate.source)
+            )
+            records.append(
+                Admitted(
+                    candidate.member,
+                    image,
+                    cast("Key | str", candidate.ground_truth),
+                    stored.version.token,
+                    read,
+                    stored,
+                    candidate.row_key,
+                )
+            )
         tallies[tally] = tallies.get(tally, 0) + 1
     return records, tallies
 
@@ -292,7 +369,8 @@ class Admitted:
 
 
 def samples_over(
-    records: "Sequence[Admitted]", assignment: dict[str, str],
+    records: "Sequence[Admitted]",
+    assignment: dict[str, str],
     group_of: "Callable[[str], str]",
 ) -> list["Sample"]:
     """Admitted records as explicit samples, one per record: ``assignment`` maps each member to
@@ -303,10 +381,16 @@ def samples_over(
 
     return [
         Sample(
-            member=record.member, source=record.source, ground_truth=record.ground_truth,
-            row_key=record.row_key, group=group_of(record.member),
-            side=assignment[record.member], ground_truth_digest=record.ground_truth_digest,
-            read=record.read, stored=record.stored, image=record.image,
+            member=record.member,
+            source=record.source,
+            ground_truth=record.ground_truth,
+            row_key=record.row_key,
+            group=group_of(record.member),
+            side=assignment[record.member],
+            ground_truth_digest=record.ground_truth_digest,
+            read=record.read,
+            stored=record.stored,
+            image=record.image,
         )
         for record in sorted(records, key=lambda r: r.member)
         if record.member in assignment
@@ -314,7 +398,8 @@ def samples_over(
 
 
 def foreground_counts(
-    members: "Mapping[str, Sample | Admitted]", scope: "ClassScope",
+    members: "Mapping[str, Sample | Admitted]",
+    scope: "ClassScope",
 ) -> dict[str, int]:
     """Each admitted member's own foreground count, under the key its caller already holds it by.
 
@@ -327,8 +412,11 @@ def foreground_counts(
     from tcip_mcp.pipelines.data.splits import count_label_lines
 
     return {
-        key: (count_label_lines(member.read, scope)
-              if shape_of(member.ground_truth, member.row_key) == DOCUMENT else 1)
+        key: (
+            count_label_lines(member.read, scope)
+            if shape_of(member.ground_truth, member.row_key) == DOCUMENT
+            else 1
+        )
         for key, member in members.items()
     }
 
@@ -372,8 +460,11 @@ def holds_row(table: Mapping[str, str], row_key: str | None) -> bool:
 
 def _refused(tallies: Mapping[str, int]) -> str:
     """The tallies :func:`admits` refuses, as ``name=count`` pairs."""
-    return ", ".join(f"{name}={count}" for name, count in sorted(tallies.items())
-                     if not admits(name))
+    return ", ".join(
+        f"{name}={count}"
+        for name, count in sorted(tallies.items())
+        if not admits(name)
+    )
 
 
 def acquired(samples: "Sequence[Sample]") -> list["Sample"]:
@@ -388,14 +479,21 @@ def acquired(samples: "Sequence[Sample]") -> list["Sample"]:
     def read(s: "Sample") -> "Sample":
         if s.stored is not None:
             return s
-        stored, decoded = _acquire(s.shape, s.ground_truth, s.row_key, tables,
-                                   version=s.ground_truth_digest)
+        stored, decoded = _acquire(
+            s.shape,
+            s.ground_truth,
+            s.row_key,
+            tables,
+            version=s.ground_truth_digest,
+        )
         return replace(s, read=decoded, stored=stored)
 
     return [read(s) for s in samples]
 
 
-def readmitted_samples(samples: "Sequence[Sample]", scope: "ClassScope") -> list["Sample"]:
+def readmitted_samples(
+    samples: "Sequence[Sample]", scope: "ClassScope"
+) -> list["Sample"]:
     """``samples`` re-admitted, each as a :class:`Candidate` through the same evaluation
     :func:`admit` runs under ``scope`` held to its shape (``ClassScope.admitted_for``, so a
     document read under a scope naming no subject refuses by name), each carrying the version
@@ -416,9 +514,21 @@ def readmitted_samples(samples: "Sequence[Sample]", scope: "ClassScope") -> list
     for shape in sorted({s.shape for s in samples}):
         held = [s for s in samples if s.shape == shape]
         records, counts = _admission(
-            shape, [Candidate(s.location, logical.get(s.source), s.ground_truth, s.row_key)
-                    for s in held],
-            scope.admitted_for(shape, "the class space these samples are read under"), tables)
+            shape,
+            [
+                Candidate(
+                    s.location,
+                    logical.get(s.source),
+                    s.ground_truth,
+                    s.row_key,
+                )
+                for s in held
+            ],
+            scope.admitted_for(
+                shape, "the class space these samples are read under"
+            ),
+            tables,
+        )
         admitted.update((r.member, r) for r in records)
         refused += sorted({s.location for s in held} - set(admitted))
         for name, count in counts.items():
@@ -432,10 +542,16 @@ def readmitted_samples(samples: "Sequence[Sample]", scope: "ClassScope") -> list
             "those name, finish the annotation or the mark, or draw the selection again over the "
             "current data."
         )
-    return [replace(s, ground_truth_digest=admitted[s.location].ground_truth_digest,
-                    read=admitted[s.location].read, stored=admitted[s.location].stored,
-                    image=admitted[s.location].image)
-            for s in samples]
+    return [
+        replace(
+            s,
+            ground_truth_digest=admitted[s.location].ground_truth_digest,
+            read=admitted[s.location].read,
+            stored=admitted[s.location].stored,
+            image=admitted[s.location].image,
+        )
+        for s in samples
+    ]
 
 
 def resolved(samples: "Sequence[Sample]") -> list["Sample"]:
@@ -449,7 +565,10 @@ def resolved(samples: "Sequence[Sample]") -> list["Sample"]:
 
     unresolved = [s.source for s in samples if s.image is None]
     images = dict(zip(unresolved, resolve_image_paths(unresolved)))
-    return [s if s.image is not None else replace(s, image=images[s.source]) for s in samples]
+    return [
+        s if s.image is not None else replace(s, image=images[s.source])
+        for s in samples
+    ]
 
 
 def require_admitted(admitted: "Admission") -> None:
@@ -461,15 +580,20 @@ def require_admitted(admitted: "Admission") -> None:
 
     fix = {
         MASK: f"An image needs its <stem>.png mask in {admitted.ground_truth}, since one with "
-              "no mask would train as entirely background. Write the masks, or point "
-              "data.labels_dir at the directory holding them.",
+        "no mask would train as entirely background. Write the masks, or point "
+        "data.labels_dir at the directory holding them.",
         DOCUMENT: "An empty label document is a negative only once a human marks that image "
-                  "Complete; until then it reads as unannotated. Annotate some images, or mark "
-                  "the genuinely-empty ones Complete.",
-    }.get(admitted.shape, f"A row needs an image under {admitted.images_dir}. Fix the row keys, "
-                          "or point data.images_dir at the directory holding those images.")
-    raise ValueError(f"no trainable samples in the {admitted.shape} ground truth over "
-                     f"{admitted.images_dir}: {_refused(admitted.tallies)}. {fix}")
+        "Complete; until then it reads as unannotated. Annotate some images, or mark "
+        "the genuinely-empty ones Complete.",
+    }.get(
+        admitted.shape,
+        f"A row needs an image under {admitted.images_dir}. Fix the row keys, "
+        "or point data.images_dir at the directory holding those images.",
+    )
+    raise ValueError(
+        f"no trainable samples in the {admitted.shape} ground truth over "
+        f"{admitted.images_dir}: {_refused(admitted.tallies)}. {fix}"
+    )
 
 
 @dataclass(frozen=True)
@@ -498,8 +622,9 @@ class Admission:
     scope: "ClassScope"
     date: str
 
-    def samples(self, assignment: dict[str, str],
-                group_of: "Callable[[str], str]") -> list["Sample"]:
+    def samples(
+        self, assignment: dict[str, str], group_of: "Callable[[str], str]"
+    ) -> list["Sample"]:
         """The admitted records this assignment names, as samples on the sides it gives them."""
         return samples_over(self.records, assignment, group_of)
 
@@ -509,12 +634,17 @@ class Admission:
         """
         from tcip_mcp.pipelines.data.splits import recorded_group_key_fn
 
-        return self.samples({record.member: "train" for record in self.records},
-                            recorded_group_key_fn("stem", date=self.date))
+        return self.samples(
+            {record.member: "train" for record in self.records},
+            recorded_group_key_fn("stem", date=self.date),
+        )
 
 
 def admit(
-    images_dir, ground_truth=None, *, scope: "ClassScope | None" = None,
+    images_dir,
+    ground_truth=None,
+    *,
+    scope: "ClassScope | None" = None,
     members: list[str] | None = None,
 ) -> Admission:
     """The membership the images of ``images_dir`` and their ground truth admit, through the
@@ -538,10 +668,21 @@ def admit(
     _root, capture = parse_capture_dir(images_dir)
     shape = ground_truth_shape(ground_truth)
     admitted = (scope or ClassScope()).admitted_for(
-        shape, f"the run over {ground_truth or images_dir}")
+        shape, f"the run over {ground_truth or images_dir}"
+    )
     tables: _Tables = {}
     records, counts = _admission(
-        shape, _candidates(shape, ground_truth, images_dir, members, tables), admitted, tables)
-    return Admission(shape=shape, images_dir=str(images_dir),
-                     ground_truth=None if ground_truth is None else str(ground_truth),
-                     records=records, tallies=counts, scope=admitted, date=capture)
+        shape,
+        _candidates(shape, ground_truth, images_dir, members, tables),
+        admitted,
+        tables,
+    )
+    return Admission(
+        shape=shape,
+        images_dir=str(images_dir),
+        ground_truth=None if ground_truth is None else str(ground_truth),
+        records=records,
+        tallies=counts,
+        scope=admitted,
+        date=capture,
+    )

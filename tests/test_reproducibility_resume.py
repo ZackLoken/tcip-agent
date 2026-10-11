@@ -27,7 +27,10 @@ def test_set_seed_reproducible():
 
 
 def test_set_seed_sets_cudnn_flags():
-    det0, bench0 = torch.backends.cudnn.deterministic, torch.backends.cudnn.benchmark
+    det0, bench0 = (
+        torch.backends.cudnn.deterministic,
+        torch.backends.cudnn.benchmark,
+    )
     try:
         set_seed(1, deterministic=True)
         assert torch.backends.cudnn.deterministic is True
@@ -54,11 +57,14 @@ from tests._training_values import adamw_optimizer, schedule  # noqa: E402
 
 def _classification_data(tmp_path: Path, n: int = 6):
     from PIL import Image
+
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True, exist_ok=True)
     rows = []
     for i in range(n):
-        Image.new("RGB", (32, 32), (40 * (i % 5), 50, 60)).save(images_dir / f"img{i}.png")
+        Image.new("RGB", (32, 32), (40 * (i % 5), 50, 60)).save(
+            images_dir / f"img{i}.png"
+        )
         rows.append((f"img{i}", i % 2))
     csv_path = tmp_path / "labels.csv"
     with open(csv_path, "w", newline="") as f:
@@ -76,8 +82,14 @@ def _cfg(stages, horizon: int = 1, **extra):
     """A classifier config of ``stages``, each ending at its cosine schedule's ``horizon``."""
     from tests._chain_fixtures import training_config
 
-    return training_config(_model_source(), {}, stages=stages, optimizer=adamw_optimizer(),
-                           scheduler=schedule("cosine", horizon_epochs=horizon), **extra)
+    return training_config(
+        _model_source(),
+        {},
+        stages=stages,
+        optimizer=adamw_optimizer(),
+        scheduler=schedule("cosine", horizon_epochs=horizon),
+        **extra,
+    )
 
 
 def _run_dir(project: Path, name: str) -> Path:
@@ -87,7 +99,9 @@ def _run_dir(project: Path, name: str) -> Path:
     return experiment_dir(name, project=project)
 
 
-def _trained(data: tuple[str, str], project: Path, cfg: dict, name: str, **kwargs):
+def _trained(
+    data: tuple[str, str], project: Path, cfg: dict, name: str, **kwargs
+):
     """The run named ``name`` of ``project`` over ``cfg`` and ``data``'s frames and table, opened
     by the launcher's own producer with no validation side and trained through the training
     loader the platform builds for it (``generic_trainer.run_loaders``); ``kwargs`` are
@@ -97,9 +111,22 @@ def _trained(data: tuple[str, str], project: Path, cfg: dict, name: str, **kwarg
     from tests._verified_checkpoint_fixtures import opened_run
 
     images_dir, labels_dir = data
-    run = observed_run(observe(opened_run(project, {**cfg, "data": {
-        "images_dir": images_dir, "labels_dir": labels_dir, "auto_val": False}},
-        experiment_id=name)))
+    run = observed_run(
+        observe(
+            opened_run(
+                project,
+                {
+                    **cfg,
+                    "data": {
+                        "images_dir": images_dir,
+                        "labels_dir": labels_dir,
+                        "auto_val": False,
+                    },
+                },
+                experiment_id=name,
+            )
+        )
+    )
     ds = dataset_over("classification", *data)
     return train(run, run_loaders(run, ds, None)[0], **kwargs)
 
@@ -122,11 +149,10 @@ def test_resume_continues_epochs(tmp_path):
     ckpt = _run_dir(tmp_path, "out") / "checkpoint_epoch_1.pt"
     assert ckpt.is_file()
 
-    run2 = _trained(data, tmp_path, cfg, "out2",
-                    resume_from=str(ckpt))
+    run2 = _trained(data, tmp_path, cfg, "out2", resume_from=str(ckpt))
     assert run2.status == "completed"
-    assert run2.current_epoch == 2          # continued global epoch count
-    assert len(run2.metrics_history) == 1   # only the one remaining epoch
+    assert run2.current_epoch == 2  # continued global epoch count
+    assert len(run2.metrics_history) == 1  # only the one remaining epoch
     assert (_run_dir(tmp_path, "out2") / "model_final.pt").is_file()
 
 
@@ -135,14 +161,15 @@ def test_resume_skips_completed_stage_and_restores_optimizer(tmp_path):
     cfg = _cfg([{"freeze_to": -1}, {"freeze_to": 0}])
 
     _trained(data, tmp_path, cfg, "out")
-    ckpt = _run_dir(tmp_path, "out") / "checkpoint_epoch_1.pt"  # end of stage 0
+    ckpt = (
+        _run_dir(tmp_path, "out") / "checkpoint_epoch_1.pt"
+    )  # end of stage 0
     assert ckpt.is_file()
 
-    run2 = _trained(data, tmp_path, cfg, "out2",
-                    resume_from=str(ckpt))
+    run2 = _trained(data, tmp_path, cfg, "out2", resume_from=str(ckpt))
     assert run2.status == "completed"
-    assert run2.current_stage == 1          # stage 0 skipped, stage 1 ran
-    assert run2.current_epoch == 2          # restored optimizer + ran stage 1's epoch
+    assert run2.current_stage == 1  # stage 0 skipped, stage 1 ran
+    assert run2.current_epoch == 2  # restored optimizer + ran stage 1's epoch
 
 
 def test_resume_restores_rng_state_not_just_reseeds(tmp_path):
@@ -168,14 +195,17 @@ def test_resume_restores_rng_state_not_just_reseeds(tmp_path):
     np.random.seed(999)
     random.seed(999)
 
-    resumed = _trained(data, tmp_path, cfg, "out2",
-                       resume_from=str(ckpt))
-    resumed_epoch2_loss = resumed.metrics_history[0]["train_loss"]  # the one epoch this run ran
+    resumed = _trained(data, tmp_path, cfg, "out2", resume_from=str(ckpt))
+    resumed_epoch2_loss = resumed.metrics_history[0][
+        "train_loss"
+    ]  # the one epoch this run ran
 
     assert resumed_epoch2_loss == pytest.approx(baseline_epoch2_loss)
 
 
-def test_resume_from_a_checkpoint_missing_a_resume_key_refuses_naming_it(tmp_path):
+def test_resume_from_a_checkpoint_missing_a_resume_key_refuses_naming_it(
+    tmp_path,
+):
     """A checkpoint lacking a key the resume reads fails the run naming that key, rather than
     resuming from a guessed default."""
     data = _classification_data(tmp_path)
@@ -187,13 +217,14 @@ def test_resume_from_a_checkpoint_missing_a_resume_key_refuses_naming_it(tmp_pat
     del ckpt["torch_rng_state"]
     torch.save(ckpt, ckpt_path)
 
-    run2 = _trained(data, tmp_path, cfg, "out2",
-                    resume_from=str(ckpt_path))
+    run2 = _trained(data, tmp_path, cfg, "out2", resume_from=str(ckpt_path))
     assert run2.status == "failed"
     assert "torch_rng_state" in run2.status_error
 
 
-def test_resume_from_a_checkpoint_missing_its_scheduler_state_refuses_naming_it(tmp_path):
+def test_resume_from_a_checkpoint_missing_its_scheduler_state_refuses_naming_it(
+    tmp_path,
+):
     data = _classification_data(tmp_path)
     cfg = _cfg([{"freeze_to": -1}], 2)
 
@@ -203,13 +234,14 @@ def test_resume_from_a_checkpoint_missing_its_scheduler_state_refuses_naming_it(
     ckpt.pop("scheduler_state_dict", None)
     torch.save(ckpt, ckpt_path)
 
-    run2 = _trained(data, tmp_path, cfg, "out2",
-                    resume_from=str(ckpt_path))
+    run2 = _trained(data, tmp_path, cfg, "out2", resume_from=str(ckpt_path))
     assert run2.status == "failed"
     assert "scheduler_state_dict" in run2.status_error
 
 
-def test_a_resume_whose_optimizer_restore_raises_fails_the_run(tmp_path, monkeypatch):
+def test_a_resume_whose_optimizer_restore_raises_fails_the_run(
+    tmp_path, monkeypatch
+):
     data = _classification_data(tmp_path)
     cfg = _cfg([{"freeze_to": -1}], 2)
 
@@ -221,8 +253,13 @@ def test_a_resume_whose_optimizer_restore_raises_fails_the_run(tmp_path, monkeyp
         raise ValueError("optimizer state does not fit")
 
     monkeypatch.setattr(trainer, "restore_training_state", _refuse)
-    run2 = _trained(data, tmp_path, cfg, "out2",
-                    resume_from=str(_run_dir(tmp_path, "out") / "checkpoint_epoch_1.pt"))
+    run2 = _trained(
+        data,
+        tmp_path,
+        cfg,
+        "out2",
+        resume_from=str(_run_dir(tmp_path, "out") / "checkpoint_epoch_1.pt"),
+    )
     assert run2.status == "failed"
     assert "optimizer state does not fit" in run2.status_error
 
@@ -233,11 +270,17 @@ def _draws() -> tuple:
 
     import numpy as np
 
-    return (random.random(), float(np.random.rand()), float(torch.rand(1)),
-            float(torch.rand(1, device="cuda")))
+    return (
+        random.random(),
+        float(np.random.rand()),
+        float(torch.rand(1)),
+        float(torch.rand(1, device="cuda")),
+    )
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a CUDA device")
+@pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="needs a CUDA device"
+)
 def test_a_cuda_resume_restores_the_rng_streams(tmp_path, monkeypatch):
     """The streams a CUDA resume continues from are the ones the checkpoint captured: the draws
     taken just after the trainer's restore equal the draws the captured states yield when set
@@ -259,8 +302,7 @@ def test_a_cuda_resume_restores_the_rng_streams(tmp_path, monkeypatch):
         real_restore(state, loader_generator)
 
     monkeypatch.setattr(trainer, "restore_rng_state", _observing_restore)
-    run2 = _trained(data, tmp_path, cfg, "out2",
-                    resume_from=str(ckpt_path))
+    run2 = _trained(data, tmp_path, cfg, "out2", resume_from=str(ckpt_path))
     assert run2.status == "completed", run2.status_error
     assert run2.current_epoch == 2
 
@@ -280,7 +322,9 @@ def test_seeded_loader_kwargs_reproducible_shuffle():
     """The platform's own DataLoader construction sites are seeded: two loaders built
     from the same seed shuffle identically; an unseeded run stays honestly unseeded
     (a worker init fn, but no generator)."""
-    from tcip_mcp.pipelines.training.generic_trainer import seeded_loader_kwargs
+    from tcip_mcp.pipelines.training.generic_trainer import (
+        seeded_loader_kwargs,
+    )
 
     kw1 = seeded_loader_kwargs(42)
     kw2 = seeded_loader_kwargs(42)
@@ -297,7 +341,9 @@ def test_loader_worker_init_fn_is_picklable():
     hand out a picklable init fn."""
     import pickle
 
-    from tcip_mcp.pipelines.training.generic_trainer import seeded_loader_kwargs
+    from tcip_mcp.pipelines.training.generic_trainer import (
+        seeded_loader_kwargs,
+    )
 
     for seed in (42, None):
         fn = seeded_loader_kwargs(seed)["worker_init_fn"]
@@ -309,11 +355,16 @@ def test_loader_worker_init_configures_gdal_cache_and_seeds(monkeypatch):
     the platform budget in the worker; per-worker numpy/random seeding applies only when the
     run is seeded."""
     from tcip_mcp.pipelines import raster_source
-    from tcip_mcp.pipelines.training.generic_trainer import seeded_loader_kwargs
+    from tcip_mcp.pipelines.training.generic_trainer import (
+        seeded_loader_kwargs,
+    )
 
     calls: list[str] = []
-    monkeypatch.setattr(raster_source, "configure_gdal_cache",
-                        lambda share=1.0: calls.append("cache"))
+    monkeypatch.setattr(
+        raster_source,
+        "configure_gdal_cache",
+        lambda share=1.0: calls.append("cache"),
+    )
 
     seeded_loader_kwargs(7)["worker_init_fn"](worker_id=1)
     first = (random.random(), float(np.random.rand()))
@@ -332,11 +383,14 @@ def test_resume_from_non_resumable_checkpoint_fails_loudly(tmp_path):
     cfg = _cfg([{"freeze_to": -1}])
 
     _trained(data, tmp_path, cfg, "out")
-    best = _run_dir(tmp_path, "out") / "model_best.pt"  # weights, no optimizer_state_dict
+    best = (
+        _run_dir(tmp_path, "out") / "model_best.pt"
+    )  # weights, no optimizer_state_dict
     assert best.is_file()
 
-    run2 = _trained(data, tmp_path, cfg, "out2",
-                    resume_from=str(best))
+    run2 = _trained(data, tmp_path, cfg, "out2", resume_from=str(best))
     assert run2.status == "failed"
     assert "resume" in (run2.status_error or "").lower()
-    assert not (_run_dir(tmp_path, "out2") / "model_final.pt").is_file()  # did not silently train
+    assert not (
+        _run_dir(tmp_path, "out2") / "model_final.pt"
+    ).is_file()  # did not silently train

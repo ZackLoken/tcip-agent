@@ -21,6 +21,7 @@ import tifffile
 torch = pytest.importorskip("torch")
 
 from tests._chain_fixtures import BESPOKE_DETECTION  # noqa: E402
+
 pytest.importorskip("torchvision")
 
 TILE = 32
@@ -31,29 +32,47 @@ def _write_group(images_dir: Path, stem: str, fill=(111, 222)) -> None:
 
     band_a = images_dir / f"{stem}_G.tif"
     band_b = images_dir / f"{stem}_R.tif"
-    tifffile.imwrite(str(band_a), np.full((TILE, TILE), fill[0], dtype=np.uint16))
-    tifffile.imwrite(str(band_b), np.full((TILE, TILE), fill[1], dtype=np.uint16))
-    write_band_group_manifest(images_dir, stem, {"Green": band_a, "Red": band_b})
+    tifffile.imwrite(
+        str(band_a), np.full((TILE, TILE), fill[0], dtype=np.uint16)
+    )
+    tifffile.imwrite(
+        str(band_b), np.full((TILE, TILE), fill[1], dtype=np.uint16)
+    )
+    write_band_group_manifest(
+        images_dir, stem, {"Green": band_a, "Red": band_b}
+    )
 
 
 def _detection_checkpoint(tmp_path: Path) -> str:
     """A 2-channel detector a run in ``tmp_path`` completed over grouped captures of its own,
     registered by completing; its path."""
     from tests._chain_fixtures import BESPOKE_MODELS
-    from tests._verified_checkpoint_fixtures import fixture_data_dir, registered_checkpoint
+    from tests._verified_checkpoint_fixtures import (
+        fixture_data_dir,
+        registered_checkpoint,
+    )
 
     model_source = {
         "builder": BESPOKE_DETECTION,
         "builder_kwargs": {
-            "min_size": TILE, "max_size": TILE * 2,
-            "image_mean": [0.5, 0.5], "image_std": [0.25, 0.25],
+            "min_size": TILE,
+            "max_size": TILE * 2,
+            "image_mean": [0.5, 0.5],
+            "image_std": [0.25, 0.25],
         },
         "source_files": [BESPOKE_MODELS],
         "task": "detection",
     }
     images_dir = _grouped_dataset(fixture_data_dir(tmp_path, "grouped"))
-    return registered_checkpoint(tmp_path, model_source=model_source, data={
-        "images_dir": str(images_dir), "num_channels": 2, "scope": {"subject": "bud"}})
+    return registered_checkpoint(
+        tmp_path,
+        model_source=model_source,
+        data={
+            "images_dir": str(images_dir),
+            "num_channels": 2,
+            "scope": {"subject": "bud"},
+        },
+    )
 
 
 def _grouped_dataset(root: Path) -> Path:
@@ -70,13 +89,19 @@ def _grouped_dataset(root: Path) -> Path:
     _write_group(images_dir, "capture_002", fill=(50, 90))
 
     for stem in ("capture_001", "capture_002"):
-        label_image(images_dir / f"{stem}.bandgroup",
-                    [Annotation(subject="bud", geometry=BBox(2, 2, 10, 10))], TILE, TILE,
-                    keep_empty=True)
+        label_image(
+            images_dir / f"{stem}.bandgroup",
+            [Annotation(subject="bud", geometry=BBox(2, 2, 10, 10))],
+            TILE,
+            TILE,
+            keep_empty=True,
+        )
     return images_dir
 
 
-def test_the_assessments_records_over_grouped_samples_decode_each_capture(tmp_path, monkeypatch):
+def test_the_assessments_records_over_grouped_samples_decode_each_capture(
+    tmp_path, monkeypatch
+):
     """Each grouped sample is opened as a ``BandGroupRef`` through the channel-aware stacking.
     The predictor is 2-channel, so it runs at all only if the captures decoded that way."""
     from tcip_mcp.assessment import _records
@@ -89,10 +114,15 @@ def test_the_assessments_records_over_grouped_samples_decode_each_capture(tmp_pa
     from tests._producer_fixtures import samples_over
 
     images_dir = _grouped_dataset(tmp_path)
-    checkpoint = load_registered_checkpoint(_detection_checkpoint(tmp_path), project=tmp_path)
-    p = prepare(checkpoint,
-                Stated(tile=False, conf=0.0, postprocess="nms"),
-                device="cpu", tile_batch_size=8).runnable()
+    checkpoint = load_registered_checkpoint(
+        _detection_checkpoint(tmp_path), project=tmp_path
+    )
+    p = prepare(
+        checkpoint,
+        Stated(tile=False, conf=0.0, postprocess="nms"),
+        device="cpu",
+        tile_batch_size=8,
+    ).runnable()
     samples = samples_over(images_dir, subject="bud")
 
     seen_sources = []
@@ -104,7 +134,9 @@ def test_the_assessments_records_over_grouped_samples_decode_each_capture(tmp_pa
 
     monkeypatch.setattr(raster_source, "open_raster", _spy_open_raster)
 
-    reference = predictor_dataset("detection", samples, p.scope, p.predictor, None)
+    reference = predictor_dataset(
+        "detection", samples, p.scope, p.predictor, None
+    )
     records = _records(p, reference, source_digests(samples), p.execution)
 
     assert len(records) == 2
@@ -122,7 +154,9 @@ def test_run_inference_images_dir_folds_a_grouped_capture(tmp_path):
     _write_group(images_dir, "capture_001")
     ckpt = _detection_checkpoint(tmp_path)
 
-    _pass, results = predicted_over(tmp_path, ckpt, str(images_dir), device="cpu", tile=False)
+    _pass, results = predicted_over(
+        tmp_path, ckpt, str(images_dir), device="cpu", tile=False
+    )
 
     assert len(results) == 1
     assert results[0]["image"].endswith("capture_001.bandgroup")
@@ -136,8 +170,12 @@ def test_predict_batch_rejects_stringified_band_group_refs(tmp_path):
     from tcip_mcp.pipelines.image_utils import list_logical_images
 
     images_dir = _grouped_dataset(tmp_path)
-    checkpoint = load_registered_checkpoint(_detection_checkpoint(tmp_path), project=tmp_path)
-    p = prepare(checkpoint, Stated(tile=False, conf=0.0), device="cpu").runnable()
+    checkpoint = load_registered_checkpoint(
+        _detection_checkpoint(tmp_path), project=tmp_path
+    )
+    p = prepare(
+        checkpoint, Stated(tile=False, conf=0.0), device="cpu"
+    ).runnable()
 
     logical = list_logical_images(images_dir)
     with pytest.raises(ValueError):

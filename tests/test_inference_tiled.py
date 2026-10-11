@@ -22,10 +22,15 @@ def _detection_checkpoint(tmp_path: Path) -> str:
     an MCP tool that resolves the registry itself."""
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    return registered_checkpoint(tmp_path, model_source={
-        "builder": BESPOKE_DETECTION,
-        "builder_kwargs": {"min_size": TILE, "max_size": TILE * 2},
-        "source_files": [BESPOKE_MODELS], "task": "detection"})
+    return registered_checkpoint(
+        tmp_path,
+        model_source={
+            "builder": BESPOKE_DETECTION,
+            "builder_kwargs": {"min_size": TILE, "max_size": TILE * 2},
+            "source_files": [BESPOKE_MODELS],
+            "task": "detection",
+        },
+    )
 
 
 def _tiled_pass(tmp_path: Path, ckpt: str):
@@ -34,15 +39,29 @@ def _tiled_pass(tmp_path: Path, ckpt: str):
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.execution import Stated, prepare
 
-    return prepare(load_registered_checkpoint(ckpt, project=tmp_path), Stated(
-        tile=True, tile_size=TILE, overlap=0.2, postprocess="nms", cross_tile_nms=0.3, conf=0.0),
-        device="cpu").runnable()
+    return prepare(
+        load_registered_checkpoint(ckpt, project=tmp_path),
+        Stated(
+            tile=True,
+            tile_size=TILE,
+            overlap=0.2,
+            postprocess="nms",
+            cross_tile_nms=0.3,
+            conf=0.0,
+        ),
+        device="cpu",
+    ).runnable()
 
 
 def _sliced(p, source, execution=None, **kwargs) -> dict:
     """``predict_sliced`` under the pass's own record, or ``execution`` where one is given."""
-    return p.predictor.predict_sliced(source, execution=execution or p.execution,
-                                      tile_batch_size=8, require_masks=True, **kwargs)
+    return p.predictor.predict_sliced(
+        source,
+        execution=execution or p.execution,
+        tile_batch_size=8,
+        require_masks=True,
+        **kwargs,
+    )
 
 
 def test_predict_sliced_shape_and_bounds(tmp_path):
@@ -50,7 +69,16 @@ def test_predict_sliced_shape_and_bounds(tmp_path):
 
     r = _sliced(p, gray_frame(tmp_path))
 
-    assert {"image", "width", "height", "boxes", "scores", "labels", "count", "cap"} <= set(r)
+    assert {
+        "image",
+        "width",
+        "height",
+        "boxes",
+        "scores",
+        "labels",
+        "count",
+        "cap",
+    } <= set(r)
     assert isinstance(r["count"], int) and r["count"] == len(r["boxes"])
     assert r["tiles"] >= 4  # 128px image at tile 64 -> a 2x2+ lattice
     for b in r["boxes"]:
@@ -65,20 +93,36 @@ def test_predict_sliced_keeps_at_most_the_full_frame_cap(tmp_path):
     p = _tiled_pass(tmp_path, _detection_checkpoint(tmp_path))
     img = gray_frame(tmp_path)
     pixels = 128 * 128
-    uncapped = _sliced(p, img, p.execution.with_value("density", 1.0, "explicit"))
-    assert uncapped["count"] > 1, "the bespoke model must produce more than one raw detection " \
+    uncapped = _sliced(
+        p, img, p.execution.with_value("density", 1.0, "explicit")
+    )
+    assert uncapped["count"] > 1, (
+        "the bespoke model must produce more than one raw detection "
         "for this test to force a real truncation, not merely assert an untested edge"
+    )
 
     outcomes = {}
-    for cap in (uncapped["count"] - 1, uncapped["count"], uncapped["count"] + 1):
-        r = _sliced(p, img, p.execution.with_value("density", (cap - 0.5) / pixels, "explicit"))
+    for cap in (
+        uncapped["count"] - 1,
+        uncapped["count"],
+        uncapped["count"] + 1,
+    ):
+        r = _sliced(
+            p,
+            img,
+            p.execution.with_value(
+                "density", (cap - 0.5) / pixels, "explicit"
+            ),
+        )
         outcomes[cap - uncapped["count"]] = (r["cap"], r["count"])
 
     n = uncapped["count"]
     assert outcomes == {-1: (n - 1, n - 1), 0: (n, n), 1: (n + 1, n)}
 
 
-def test_predict_sliced_whole_decode_refuses_prior_or_progress_by_name(tmp_path):
+def test_predict_sliced_whole_decode_refuses_prior_or_progress_by_name(
+    tmp_path,
+):
     """``prior``/``progress`` only apply to the windowed-reader resume seam; a whole-decode source
     has no resume seam to feed them into, and silently dropping them would let a caller believe a
     whole-decode pass resumed when it quietly started over."""
@@ -93,14 +137,26 @@ def test_predict_sliced_whole_decode_refuses_prior_or_progress_by_name(tmp_path)
 
 
 def test_the_prepared_pass_tiles_when_asked_and_not_otherwise(tmp_path):
-    from tests._verified_checkpoint_fixtures import SAMPLE_OVERLAP, predicted_over
+    from tests._verified_checkpoint_fixtures import (
+        SAMPLE_OVERLAP,
+        predicted_over,
+    )
 
     ckpt = _detection_checkpoint(tmp_path)
     images_dir = str(Path(gray_frame(tmp_path)).parent)
 
-    tiled, tiled_results = predicted_over(tmp_path, ckpt, images_dir, tile=True,
-                                          tile_size=TILE, overlap=SAMPLE_OVERLAP, conf=0.0)
-    whole, whole_results = predicted_over(tmp_path, ckpt, images_dir, tile=False, conf=0.0)
+    tiled, tiled_results = predicted_over(
+        tmp_path,
+        ckpt,
+        images_dir,
+        tile=True,
+        tile_size=TILE,
+        overlap=SAMPLE_OVERLAP,
+        conf=0.0,
+    )
+    whole, whole_results = predicted_over(
+        tmp_path, ckpt, images_dir, tile=False, conf=0.0
+    )
 
     assert tiled.execution.tile_size == TILE and len(tiled_results) == 1
     assert whole.execution.tile_size is None and len(whole_results) == 1
@@ -120,7 +176,9 @@ def test_predict_sliced_whole_decode_channel_mismatch_refuses(tmp_path):
         _sliced(p, str(path))
 
 
-def test_predict_sliced_whole_decode_admits_a_photographic_rgba_file_at_in_chans_3(tmp_path):
+def test_predict_sliced_whole_decode_admits_a_photographic_rgba_file_at_in_chans_3(
+    tmp_path,
+):
     """An ordinary RGBA PNG has no real 4-versus-3 mismatch, since ``load_image``'s own PIL
     conversion coerces it to RGB before the model sees it, the same as the untiled path does."""
     from PIL import Image
@@ -134,23 +192,38 @@ def test_predict_sliced_whole_decode_admits_a_photographic_rgba_file_at_in_chans
     assert result["width"] == 128 and result["height"] == 128
 
 
-def test_the_pass_decodes_through_the_checkpoints_own_recorded_attributes(tmp_path):
+def test_the_pass_decodes_through_the_checkpoints_own_recorded_attributes(
+    tmp_path,
+):
     """A checkpoint whose config records its scope's attributes decodes through them, every
     detection carrying one id per attribute, never an order re-read from a live registry."""
     from tcip_mcp import subject_registry as cr
-    from tests._verified_checkpoint_fixtures import predicted_over, registered_checkpoint
+    from tests._verified_checkpoint_fixtures import (
+        predicted_over,
+        registered_checkpoint,
+    )
 
-    attributes = (cr.Attribute("color", "categorical", ("red", "blue")),
-                  cr.Attribute("grade", "ordinal", ("low", "mid", "high")))
+    attributes = (
+        cr.Attribute("color", "categorical", ("red", "blue")),
+        cr.Attribute("grade", "ordinal", ("low", "mid", "high")),
+    )
     ckpt = registered_checkpoint(
         tmp_path,
-        model_source={"builder": BESPOKE_DETECTION,
-                      "builder_kwargs": {"min_size": TILE, "max_size": TILE * 2},
-                      "source_files": [BESPOKE_MODELS], "task": "detection"},
+        model_source={
+            "builder": BESPOKE_DETECTION,
+            "builder_kwargs": {"min_size": TILE, "max_size": TILE * 2},
+            "source_files": [BESPOKE_MODELS],
+            "task": "detection",
+        },
         data={"num_channels": 3, "scope": {"subject": "bud"}},
-        registry=cr.SubjectRegistry(subjects=(cr.Subject(name="bud", attributes=attributes),)))
+        registry=cr.SubjectRegistry(
+            subjects=(cr.Subject(name="bud", attributes=attributes),)
+        ),
+    )
 
-    p, results = predicted_over(tmp_path, ckpt, str(Path(gray_frame(tmp_path)).parent), conf=0.0)
+    p, results = predicted_over(
+        tmp_path, ckpt, str(Path(gray_frame(tmp_path)).parent), conf=0.0
+    )
 
     assert p.scope.attributes == attributes
     for result in results:

@@ -13,7 +13,8 @@ pytest.importorskip("torch")
 
 
 def test_the_web_and_mcp_deliveries_agree_on_the_majority_column_and_the_revision(
-    tmp_path: Path, client,
+    tmp_path: Path,
+    client,
 ) -> None:
     from tcip_mcp.delivery import read_delivery_events
     from tcip_mcp.operationalization import latest_confirmed
@@ -24,15 +25,26 @@ def test_the_web_and_mcp_deliveries_agree_on_the_majority_column_and_the_revisio
     body = series.body()
     resp = client.post(
         "/api/results/export_csv",
-        json={**body, "payload": "milestones", "filename": "delivery.csv", "user": "breeder"})
+        json={
+            **body,
+            "payload": "milestones",
+            "filename": "delivery.csv",
+            "user": "breeder",
+        },
+    )
     assert resp.status_code == 200, resp.text[:300]
     web_row = next(iter(csv.DictReader(StringIO(resp.text))))
 
     out_csv = tmp_path / "mcp_delivery.csv"
     result = deliver_phenology_milestones(
-        tmp_path, trait=body["trait"], mapping_name=body["mapping_name"], plants=body["plants"],
-        dataset_root=body["dataset_root"], buckets=body["buckets"],
-        output_csv_path=str(out_csv))
+        tmp_path,
+        trait=body["trait"],
+        mapping_name=body["mapping_name"],
+        plants=body["plants"],
+        dataset_root=body["dataset_root"],
+        buckets=body["buckets"],
+        output_csv_path=str(out_csv),
+    )
     assert "error" not in result, result
     with out_csv.open(newline="", encoding="utf-8") as fh:
         mcp_row = next(iter(csv.DictReader(fh)))
@@ -40,6 +52,8 @@ def test_the_web_and_mcp_deliveries_agree_on_the_majority_column_and_the_revisio
     column = f"bud_{latest_confirmed('bud_opening', tmp_path).entry.majority_label}_date"
     assert web_row[column] == mcp_row[column] != ""
     assert web_row["validated"] == mcp_row["validated"] == "True"
-    revisions = {(e.trait_revision, e.trait_revision_sha256)
-                 for e in read_delivery_events(tmp_path)}
+    revisions = {
+        (e.trait_revision, e.trait_revision_sha256)
+        for e in read_delivery_events(tmp_path)
+    }
     assert len(revisions) == 1, revisions

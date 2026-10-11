@@ -31,16 +31,27 @@ def _lopsided_dataset(root: Path) -> Path:
     computed off the wrong collection cannot coincide with the right one.
     """
     images_dir = root / "images" / DATE
-    for stem in ("plotA_0_0", "plotA_0_1", "plotB_0_0", "plotB_0_1", "plotC_0_0"):
+    for stem in (
+        "plotA_0_0",
+        "plotA_0_1",
+        "plotB_0_0",
+        "plotB_0_1",
+        "plotC_0_0",
+    ):
         write_image(images_dir / f"{stem}.jpg", (96, 64))
     for stem in ("plotA_0_0", "plotA_0_1", "plotZ_9_9"):
-        json_io.write_label_document(label_key(root, DATE, stem),
-                                     [Annotation(subject=SUBJECT, geometry=BBox(11, 7, 39, 51))],
-                                     96, 64)
+        json_io.write_label_document(
+            label_key(root, DATE, stem),
+            [Annotation(subject=SUBJECT, geometry=BBox(11, 7, 39, 51))],
+            96,
+            64,
+        )
     return root
 
 
-def test_scan_reports_four_distinct_counts_over_a_lopsided_dataset(tmp_path: Path):
+def test_scan_reports_four_distinct_counts_over_a_lopsided_dataset(
+    tmp_path: Path,
+):
     """image_count, labels_count, paired_images and unlabeled_images each measure their own
     collection: the unlabeled remainder is the images no label pairs with, never the labels
     no image pairs with."""
@@ -54,7 +65,14 @@ def test_scan_reports_four_distinct_counts_over_a_lopsided_dataset(tmp_path: Pat
     assert result["unlabeled_images"] == 3
     assert result["images_sample"] == [
         str((root / "images" / DATE / f"{stem}.jpg").resolve())
-        for stem in ("plotA_0_0", "plotA_0_1", "plotB_0_0", "plotB_0_1", "plotC_0_0")]
+        for stem in (
+            "plotA_0_0",
+            "plotA_0_1",
+            "plotB_0_0",
+            "plotB_0_1",
+            "plotC_0_0",
+        )
+    ]
 
 
 def test_a_buckets_record_is_not_counted_as_a_prediction(tmp_path: Path):
@@ -65,13 +83,29 @@ def test_a_buckets_record_is_not_counted_as_a_prediction(tmp_path: Path):
     from tests._chain_fixtures import published
 
     root = _lopsided_dataset(tmp_path / "ds")
-    published(tmp_path, f"run_a/{DATE}", [
-        {"image": str(root / "images" / DATE / f"{stem}.jpg"), "width": 96, "height": 64,
-         "boxes": [[12.0, 8.0, 40.0, 52.0]], "scores": [0.8], "labels": [1], "cap": 2}
-        for stem in ("plotA_0_0", "plotB_0_0")], scope={"subject": SUBJECT})
+    published(
+        tmp_path,
+        f"run_a/{DATE}",
+        [
+            {
+                "image": str(root / "images" / DATE / f"{stem}.jpg"),
+                "width": 96,
+                "height": 64,
+                "boxes": [[12.0, 8.0, 40.0, 52.0]],
+                "scores": [0.8],
+                "labels": [1],
+                "cap": 2,
+            }
+            for stem in ("plotA_0_0", "plotB_0_0")
+        ],
+        scope={"subject": SUBJECT},
+    )
     json_io.write_label_document(
         prediction_key(root, f"staged/{DATE}", "plotC_0_0"),
-        [Annotation(subject=SUBJECT, geometry=BBox(12, 8, 40, 52), score=0.8)], 96, 64)
+        [Annotation(subject=SUBJECT, geometry=BBox(12, 8, 40, 52), score=0.8)],
+        96,
+        64,
+    )
 
     result = scan_dataset(str(root))
 
@@ -85,10 +119,15 @@ def test_scan_writes_nothing_into_the_dataset(tmp_path: Path):
     root = _lopsided_dataset(tmp_path / "ds")
 
     def state() -> tuple[dict, dict]:
-        files = {str(p.relative_to(root)): p.stat().st_size for p in sorted(root.rglob("*"))
-                 if p.is_file() and ".tcip" not in p.parts}
-        records = {key.parts: ts.read_versioned(key).version
-                   for key in ts.keys(LABEL_DOCUMENTS, str(root))}
+        files = {
+            str(p.relative_to(root)): p.stat().st_size
+            for p in sorted(root.rglob("*"))
+            if p.is_file() and ".tcip" not in p.parts
+        }
+        records = {
+            key.parts: ts.read_versioned(key).version
+            for key in ts.keys(LABEL_DOCUMENTS, str(root))
+        }
         return files, records
 
     before = state()

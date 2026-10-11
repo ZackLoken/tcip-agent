@@ -24,8 +24,12 @@ def _scope(tmp_path: Path, *attributes: cr.Attribute) -> ClassScope:
     from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tests._producer_fixtures import registry_over
 
-    registry_over(tmp_path, cr.SubjectRegistry(subjects=(
-        cr.Subject(name=SUBJECT, attributes=attributes),)))
+    registry_over(
+        tmp_path,
+        cr.SubjectRegistry(
+            subjects=(cr.Subject(name=SUBJECT, attributes=attributes),)
+        ),
+    )
     return registry_scope(tmp_path / "images", SUBJECT)
 
 
@@ -33,9 +37,18 @@ COLOR = cr.Attribute("color", "categorical", ("red", "blue"))
 GRADE = cr.Attribute("grade", "ordinal", ("low", "mid", "high"))
 
 
-def _result(*, boxes, scores, labels, attributes=None, width=100, height=80) -> dict:
-    result = {"image": "img1.jpg", "boxes": boxes, "scores": scores, "labels": labels,
-              "width": width, "height": height, "cap": len(boxes) + 1}
+def _result(
+    *, boxes, scores, labels, attributes=None, width=100, height=80
+) -> dict:
+    result = {
+        "image": "img1.jpg",
+        "boxes": boxes,
+        "scores": scores,
+        "labels": labels,
+        "width": width,
+        "height": height,
+        "cap": len(boxes) + 1,
+    }
     if attributes is not None:
         result["attributes"] = attributes
     return result
@@ -46,12 +59,27 @@ def _decoded(result: dict, scope: ClassScope) -> list:
     return label_document(data).annotations
 
 
-def test_an_attributed_run_writes_every_attributes_value_on_every_box(tmp_path) -> None:
+def test_an_attributed_run_writes_every_attributes_value_on_every_box(
+    tmp_path,
+) -> None:
     scope = _scope(tmp_path, COLOR, GRADE)
-    first, second = _decoded(_result(boxes=[[1, 1, 5, 5], [10, 10, 20, 20]], scores=[0.9, 0.8],
-                                     labels=[1, 1], attributes=[[1, 2], [0, 0]]), scope)
-    assert (first.subject, first.attributes) == (SUBJECT, {"color": "blue", "grade": "high"})
-    assert (second.subject, second.attributes) == (SUBJECT, {"color": "red", "grade": "low"})
+    first, second = _decoded(
+        _result(
+            boxes=[[1, 1, 5, 5], [10, 10, 20, 20]],
+            scores=[0.9, 0.8],
+            labels=[1, 1],
+            attributes=[[1, 2], [0, 0]],
+        ),
+        scope,
+    )
+    assert (first.subject, first.attributes) == (
+        SUBJECT,
+        {"color": "blue", "grade": "high"},
+    )
+    assert (second.subject, second.attributes) == (
+        SUBJECT,
+        {"color": "red", "grade": "low"},
+    )
     assert first.score == 0.9
 
 
@@ -59,33 +87,58 @@ def test_an_empty_scope_publishes_no_name_it_cannot_decode() -> None:
     """A run with no admitted subject has no name to publish a detection under; a raw index
     written as a subject would read as a class no vocabulary declares."""
     with pytest.raises(ValueError, match="records no subject"):
-        encode_predictions(_result(boxes=[[1, 1, 5, 5]], scores=[0.9], labels=[1]),
-                           "model:fixture", scope=ClassScope())
+        encode_predictions(
+            _result(boxes=[[1, 1, 5, 5]], scores=[0.9], labels=[1]),
+            "model:fixture",
+            scope=ClassScope(),
+        )
 
 
-def test_a_detector_run_declaring_no_attributes_writes_the_subject_alone(tmp_path) -> None:
-    (written,) = _decoded(_result(boxes=[[1, 1, 5, 5]], scores=[0.9], labels=[1]),
-                          _scope(tmp_path))
+def test_a_detector_run_declaring_no_attributes_writes_the_subject_alone(
+    tmp_path,
+) -> None:
+    (written,) = _decoded(
+        _result(boxes=[[1, 1, 5, 5]], scores=[0.9], labels=[1]),
+        _scope(tmp_path),
+    )
     assert written.subject == SUBJECT
     assert written.attributes == {}
 
 
 @pytest.mark.parametrize("dropped", ["image", "scores", "labels", "width"])
-def test_a_result_missing_a_field_a_document_holds_refuses_naming_it(tmp_path, dropped):
+def test_a_result_missing_a_field_a_document_holds_refuses_naming_it(
+    tmp_path, dropped
+):
     """No stored value stands in for one the head did not give: a result without its source
     image, scores, labels or frame size encodes nothing, rather than a document of defaults."""
     scope = _scope(tmp_path, COLOR)
-    result = _result(boxes=[[1, 1, 5, 5]], scores=[0.9], labels=[1], attributes=[[0]])
+    result = _result(
+        boxes=[[1, 1, 5, 5]], scores=[0.9], labels=[1], attributes=[[0]]
+    )
     del result[dropped]
 
     with pytest.raises(ValueError, match=f"carries no \\['{dropped}'\\]"):
         encode_predictions(result, "model:fixture", scope=scope)
 
-    assert len(_decoded(_result(boxes=[[1, 1, 5, 5]], scores=[0.9], labels=[1],
-                                attributes=[[0]]), scope)) == 1
+    assert (
+        len(
+            _decoded(
+                _result(
+                    boxes=[[1, 1, 5, 5]],
+                    scores=[0.9],
+                    labels=[1],
+                    attributes=[[0]],
+                ),
+                scope,
+            )
+        )
+        == 1
+    )
 
 
-def test_a_regression_pass_publishes_its_own_output_and_the_document_decodes(tmp_path):
+def test_a_regression_pass_publishes_its_own_output_and_the_document_decodes(
+    tmp_path,
+):
     """A head that returns no boxes publishes what it returned through the one publication, in
     its own document shape, rather than being refused by a detection document's fields."""
     pytest.importorskip("torch")
@@ -98,20 +151,37 @@ def test_a_regression_pass_publishes_its_own_output_and_the_document_decodes(tmp
     from tests._chain_fixtures import BESPOKE_MODELS, BESPOKE_REGRESSOR
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
-    checkpoint = verified_checkpoint(tmp_path, model_source={
-        "builder": BESPOKE_REGRESSOR, "source_files": [BESPOKE_MODELS], "task": "regression"})
+    checkpoint = verified_checkpoint(
+        tmp_path,
+        model_source={
+            "builder": BESPOKE_REGRESSOR,
+            "source_files": [BESPOKE_MODELS],
+            "task": "regression",
+        },
+    )
     images = tmp_path / "ds" / "images" / "2026-01-01"
     images.mkdir(parents=True)
     Image.new("RGB", (32, 32), color=(90, 90, 90)).save(images / "a.png")
     p = prepare(checkpoint, Stated(), images_dir=str(images)).runnable()
 
-    bucket = publish(tmp_path, tmp_path / "ds", "r/2026-01-01",
-                     pass_documents(p, p.predict(p.paths)), producer=checkpoint.producer,
-                     scope=p.scope, execution=p.execution, raster_path=None,
-                     raster_identity=None, assessment_id=None, actor=None)
+    bucket = publish(
+        tmp_path,
+        tmp_path / "ds",
+        "r/2026-01-01",
+        pass_documents(p, p.predict(p.paths)),
+        producer=checkpoint.producer,
+        scope=p.scope,
+        execution=p.execution,
+        raster_path=None,
+        raster_identity=None,
+        assessment_id=None,
+        actor=None,
+    )
 
     document = bucket.document_key("a")
     assert document is not None
     decoded = tcip_store.read(document)
     assert (decoded["task"], decoded["width"]) == ("regression", 32)
-    assert decoded["outputs"] and all(isinstance(v, list) for v in decoded["outputs"].values())
+    assert decoded["outputs"] and all(
+        isinstance(v, list) for v in decoded["outputs"].values()
+    )

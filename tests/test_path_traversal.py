@@ -8,16 +8,19 @@ def test_assert_path_allowed_admits_the_workspace_and_refuses_a_sibling(
     tmp_path, tmp_path_factory: pytest.TempPathFactory
 ):
     from tcip_web.paths import assert_path_allowed
+
     target = tmp_path / "data" / "img.jpg"
     target.parent.mkdir(parents=True)
     target.write_bytes(b"x")
 
-    assert assert_path_allowed(str(target)) == target.resolve()  # under the workspace -> allowed
+    assert (
+        assert_path_allowed(str(target)) == target.resolve()
+    )  # under the workspace -> allowed
 
     outside = tmp_path_factory.mktemp("outside") / "img.jpg"
     outside.write_bytes(b"x")
     with pytest.raises(ValueError):
-        assert_path_allowed(str(outside))                        # a sibling workspace -> refused
+        assert_path_allowed(str(outside))  # a sibling workspace -> refused
 
 
 def test_training_stream_closes_on_run_id_traversal(opened_project, client):
@@ -28,7 +31,9 @@ def test_training_stream_closes_on_run_id_traversal(opened_project, client):
     from starlette.websockets import WebSocketDisconnect
 
     with pytest.raises(WebSocketDisconnect) as ei:
-        with client.websocket_connect("ws://127.0.0.1/api/training/runs/a\\b/stream") as ws:
+        with client.websocket_connect(
+            "ws://127.0.0.1/api/training/runs/a\\b/stream"
+        ) as ws:
             ws.receive_json()
     assert ei.value.code == 1008
     assert "is not a single directory name" in ei.value.reason
@@ -49,9 +54,11 @@ def test_annotate_labels_route_blocks_outside_allowed_root(
     outside = tmp_path_factory.mktemp("outside") / "secret.jpg"
     Image.new("RGB", (8, 8)).save(outside)
 
-    assert load_labels(str(img))["img_width"] == 8       # inside the workspace -> served
+    assert (
+        load_labels(str(img))["img_width"] == 8
+    )  # inside the workspace -> served
     with pytest.raises(HTTPException) as ei:
-        load_labels(str(outside))                         # a sibling workspace -> 403
+        load_labels(str(outside))  # a sibling workspace -> 403
     assert ei.value.status_code == 403
 
 
@@ -71,7 +78,9 @@ def test_images_route_blocks_outside_allowed_root(
     outside = tmp_path_factory.mktemp("outside") / "secret.jpg"
     Image.new("RGB", (8, 8)).save(outside)
 
-    assert get_bands(path=str(img))["band_count"] == 3    # inside the workspace -> served
+    assert (
+        get_bands(path=str(img))["band_count"] == 3
+    )  # inside the workspace -> served
     with pytest.raises(HTTPException) as ei:
-        get_bands(path=str(outside))                       # a sibling workspace -> 403
+        get_bands(path=str(outside))  # a sibling workspace -> 403
     assert ei.value.status_code == 403

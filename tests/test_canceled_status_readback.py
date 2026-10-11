@@ -23,10 +23,16 @@ def test_a_canceled_inference_job_reads_as_canceled(tmp_path, monkeypatch):
     Image.new("RGB", (16, 16)).save(images_dir / "img.jpg")
     ckpt = registered_checkpoint(tmp_path)
 
-    job = inference.InferenceJob(job_id="canceled-job", actor="user:tester", checkpoint_path=ckpt,
-                                 images_dir=str(images_dir), dataset_root=str(tmp_path),
-                                 bucket="out", project=str(tmp_path), stated=Stated(
-                                     tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2))
+    job = inference.InferenceJob(
+        job_id="canceled-job",
+        actor="user:tester",
+        checkpoint_path=ckpt,
+        images_dir=str(images_dir),
+        dataset_root=str(tmp_path),
+        bucket="out",
+        project=str(tmp_path),
+        stated=Stated(tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2),
+    )
     inference._register(job)
     job.cancel_event.set()
     try:
@@ -43,12 +49,20 @@ def _train_stops_on_cancel(ctx):
     request_cancel(ctx.run_dir)
 
 
-def test_a_canceled_training_run_derives_as_canceled_from_its_directory(tmp_path):
+def test_a_canceled_training_run_derives_as_canceled_from_its_directory(
+    tmp_path,
+):
     pytest.importorskip("torch")
     from tcip_mcp.experiments import observe
-    from tests._verified_checkpoint_fixtures import detector_declaring, finished_run
+    from tests._verified_checkpoint_fixtures import (
+        detector_declaring,
+        finished_run,
+    )
 
-    run_dir = finished_run(tmp_path, model_source=detector_declaring(__file__),
-                           training_source=f"{Path(__file__).stem}:_train_stops_on_cancel")
+    run_dir = finished_run(
+        tmp_path,
+        model_source=detector_declaring(__file__),
+        training_source=f"{Path(__file__).stem}:_train_stops_on_cancel",
+    )
 
     assert observe(run_dir).state == "canceled"

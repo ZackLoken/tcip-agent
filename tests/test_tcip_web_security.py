@@ -31,7 +31,10 @@ class _RawHeaderList(list):
 def test_trusted_host_rejects_foreign_host(client: TestClient) -> None:
     # The Host naming the arrival (127.0.0.1) is served; a foreign Host (DNS-rebinding) is not.
     assert client.get("/health").status_code == 200
-    assert client.get("/health", headers={"host": "evil.example.com"}).status_code == 400
+    assert (
+        client.get("/health", headers={"host": "evil.example.com"}).status_code
+        == 400
+    )
 
 
 def test_inference_launch_confines_checkpoint_to_image_roots(
@@ -41,10 +44,16 @@ def test_inference_launch_confines_checkpoint_to_image_roots(
     # torch.load(weights_only=False), an arbitrary-pickle sink.
     outside = tmp_path_factory.mktemp("outside") / "evil.pt"
     outside.write_bytes(b"x")
-    resp = client.post("/api/inference/launch", json={
-        "checkpoint_path": str(outside), "dataset_root": str(tmp_path), "date": "2026-02-11",
-        "bucket": "baseline/2026-02-11", "user": "breeder",
-    })
+    resp = client.post(
+        "/api/inference/launch",
+        json={
+            "checkpoint_path": str(outside),
+            "dataset_root": str(tmp_path),
+            "date": "2026-02-11",
+            "bucket": "baseline/2026-02-11",
+            "user": "breeder",
+        },
+    )
     assert resp.status_code == 403
 
 
@@ -53,11 +62,16 @@ def test_inference_launch_unconfined_for_a_checkpoint_inside_the_workspace(
 ) -> None:
     # With no additive TCIP_IMAGE_ROOTS, a checkpoint under the workspace still clears the guard:
     # a missing checkpoint reaches its own 404, never a 403 from the path check.
-    resp = client.post("/api/inference/launch", json={
-        "checkpoint_path": str(tmp_path / "nope.pt"),
-        "dataset_root": str(tmp_path), "date": "2026-02-11",
-        "bucket": "baseline/2026-02-11", "user": "breeder",
-    })
+    resp = client.post(
+        "/api/inference/launch",
+        json={
+            "checkpoint_path": str(tmp_path / "nope.pt"),
+            "dataset_root": str(tmp_path),
+            "date": "2026-02-11",
+            "bucket": "baseline/2026-02-11",
+            "user": "breeder",
+        },
+    )
     assert resp.status_code == 404
 
 
@@ -69,7 +83,8 @@ def test_ws_state_allows_missing_origin(client: TestClient) -> None:
 
 def test_ws_state_allows_local_origin(client: TestClient) -> None:
     with client.websocket_connect(
-            "ws://127.0.0.1/ws/state", headers={"origin": "http://127.0.0.1:8765"}) as ws:
+        "ws://127.0.0.1/ws/state", headers={"origin": "http://127.0.0.1:8765"}
+    ) as ws:
         assert ws.receive_json()["type"] == "state_snapshot"
 
 
@@ -77,7 +92,9 @@ def test_ws_state_rejects_cross_site_origin(client: TestClient) -> None:
     # A page on another site must not be able to open a state socket and read paths.
     with pytest.raises(WebSocketDisconnect) as closed:
         with client.websocket_connect(
-                "ws://127.0.0.1/ws/state", headers={"origin": "http://evil.example.com"}):
+            "ws://127.0.0.1/ws/state",
+            headers={"origin": "http://evil.example.com"},
+        ):
             pass
     assert closed.value.code == 1008
     assert closed.value.reason == "origin not allowed"
@@ -85,11 +102,16 @@ def test_ws_state_rejects_cross_site_origin(client: TestClient) -> None:
 
 def test_ws_state_rejects_duplicate_origin(client: TestClient) -> None:
     # Two individually permitted origins, so duplication alone is what closes this connect.
-    duplicated = _RawHeaderList([
-        ("origin", "http://127.0.0.1"), ("origin", "http://127.0.0.1:5173"),
-    ])
+    duplicated = _RawHeaderList(
+        [
+            ("origin", "http://127.0.0.1"),
+            ("origin", "http://127.0.0.1:5173"),
+        ]
+    )
     with pytest.raises(WebSocketDisconnect) as closed:
-        with client.websocket_connect("ws://127.0.0.1/ws/state", headers=duplicated):
+        with client.websocket_connect(
+            "ws://127.0.0.1/ws/state", headers=duplicated
+        ):
             pass
     assert closed.value.code == 1008
     assert closed.value.reason == "origin not allowed"
@@ -98,7 +120,9 @@ def test_ws_state_rejects_duplicate_origin(client: TestClient) -> None:
 def test_ws_state_rejects_empty_origin(client: TestClient) -> None:
     # A present but empty Origin header is checked like any other, not read as absent.
     with pytest.raises(WebSocketDisconnect) as closed:
-        with client.websocket_connect("ws://127.0.0.1/ws/state", headers={"origin": ""}):
+        with client.websocket_connect(
+            "ws://127.0.0.1/ws/state", headers={"origin": ""}
+        ):
             pass
     assert closed.value.code == 1008
     assert closed.value.reason == "origin not allowed"
@@ -107,12 +131,15 @@ def test_ws_state_rejects_empty_origin(client: TestClient) -> None:
 def test_ws_panel_rejects_cross_site_origin(client: TestClient) -> None:
     with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect(
-            "ws://127.0.0.1/ws/panel/meta", headers={"origin": "http://evil.example.com"}
+            "ws://127.0.0.1/ws/panel/meta",
+            headers={"origin": "http://evil.example.com"},
         ):
             pass
 
 
-def test_the_boundary_answers_to_the_one_loopback_host_the_servers_bind() -> None:
+def test_the_boundary_answers_to_the_one_loopback_host_the_servers_bind() -> (
+    None
+):
     from tcip_mcp.web_client import LOOPBACK_HOST
     from tcip_web.trust_boundary import is_loopback_host
 
@@ -132,7 +159,9 @@ def test_free_port_finds_free_when_taken() -> None:
         assert got != taken and got > 0
 
 
-def test_ws_inference_stream_rejects_cross_site_origin(client: TestClient) -> None:
+def test_ws_inference_stream_rejects_cross_site_origin(
+    client: TestClient,
+) -> None:
     # The inference progress stream must reject a cross-site opener (it echoes job state).
     with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect(
@@ -142,7 +171,9 @@ def test_ws_inference_stream_rejects_cross_site_origin(client: TestClient) -> No
             pass
 
 
-def test_ws_training_stream_rejects_cross_site_origin(client: TestClient, opened_project) -> None:
+def test_ws_training_stream_rejects_cross_site_origin(
+    client: TestClient, opened_project
+) -> None:
     """A project is open, so the origin, not the absence of one, is what refuses this connect."""
     with pytest.raises(WebSocketDisconnect) as closed:
         with client.websocket_connect(

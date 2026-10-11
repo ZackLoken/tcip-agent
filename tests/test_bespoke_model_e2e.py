@@ -22,7 +22,11 @@ from pathlib import Path
 
 import pytest
 
-from tests._chain_fixtures import GT_ANCHOR_DETECTOR, TRAIN_BESPOKE, training_config
+from tests._chain_fixtures import (
+    GT_ANCHOR_DETECTOR,
+    TRAIN_BESPOKE,
+    training_config,
+)
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
@@ -55,8 +59,17 @@ def _audit_events(root: Path, tool: str = "training_run") -> list[dict]:
 
 
 def test_bespoke_detector_end_to_end(tmp_path: Path):
-    from tcip_mcp.experiments import METRICS_FILE, RUN_FILE, observe, read_record, read_rows
-    from tcip_mcp.model_registry import ModelRegistry, load_registered_checkpoint
+    from tcip_mcp.experiments import (
+        METRICS_FILE,
+        RUN_FILE,
+        observe,
+        read_record,
+        read_rows,
+    )
+    from tcip_mcp.model_registry import (
+        ModelRegistry,
+        load_registered_checkpoint,
+    )
     from tcip_mcp.pipelines.derivations import gt_aspect_ratios
     from dataclasses import asdict
 
@@ -71,9 +84,13 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
         _save_png(images_dir / f"img{i}.png")
         w, h = shapes[i % len(shapes)]
         x1, y1 = 32 - w / 2, 32 - h / 2
-        label_image(images_dir / f"img{i}.png",
-                    [Annotation(subject="bud", geometry=BBox(x1, y1, x1 + w, y1 + h))],
-                    IMG, IMG, keep_empty=True)
+        label_image(
+            images_dir / f"img{i}.png",
+            [Annotation(subject="bud", geometry=BBox(x1, y1, x1 + w, y1 + h))],
+            IMG,
+            IMG,
+            keep_empty=True,
+        )
         gt_wh.append((w, h))
 
     dataset = dataset_over("detection", str(images_dir), subject="bud")
@@ -83,13 +100,27 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     # train_bespoke runs its scheduler's horizon beside the loaders' batch and the blocks
     # ctx.build_optimizer, ctx.build_scheduler and ctx.evaluate read.
     config = training_config(
-        {"builder": GT_ANCHOR_DETECTOR,
-         "builder_kwargs": {"gt_boxes_wh": gt_wh, "min_size": IMG, "max_size": IMG * 2},
-         "task": "detection", "source_files": [src_file]},
-        {"images_dir": str(images_dir), "num_channels": 3,
-         "scope": asdict(dataset.scope), "split": {"seed": 0, "val_ratio": 0.15}},
-        training_source=TRAIN_BESPOKE, scheduler=schedule("cosine", horizon_epochs=2), seed=0,
-        optimizer=adamw_optimizer())
+        {
+            "builder": GT_ANCHOR_DETECTOR,
+            "builder_kwargs": {
+                "gt_boxes_wh": gt_wh,
+                "min_size": IMG,
+                "max_size": IMG * 2,
+            },
+            "task": "detection",
+            "source_files": [src_file],
+        },
+        {
+            "images_dir": str(images_dir),
+            "num_channels": 3,
+            "scope": asdict(dataset.scope),
+            "split": {"seed": 0, "val_ratio": 0.15},
+        },
+        training_source=TRAIN_BESPOKE,
+        scheduler=schedule("cosine", horizon_epochs=2),
+        seed=0,
+        optimizer=adamw_optimizer(),
+    )
     from tests._verified_checkpoint_fixtures import worker_run
 
     out = worker_run(tmp_path, config, experiment_id="expBespoke")
@@ -103,19 +134,39 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     # ---- (a) modifications took effect end to end (rebuilt from the trained checkpoint) ----
     expected_ratios = tuple(gt_aspect_ratios(gt_wh))
     expected_sizes = bespoke_models.gt_anchor_sizes(gt_wh)
-    assert expected_ratios != (0.5, 1.0, 2.0)              # not torchvision's default ratios
-    assert expected_sizes != (32, 64, 128, 256, 512)       # not torchvision's default sizes
+    assert expected_ratios != (
+        0.5,
+        1.0,
+        2.0,
+    )  # not torchvision's default ratios
+    assert expected_sizes != (
+        32,
+        64,
+        128,
+        256,
+        512,
+    )  # not torchvision's default sizes
 
     checkpoint = load_registered_checkpoint(str(ckpt), project=tmp_path)
-    p = prepare(checkpoint, Stated(tile=False, conf=0.0), device="cpu").runnable()
+    p = prepare(
+        checkpoint, Stated(tile=False, conf=0.0), device="cpu"
+    ).runnable()
     predictor = p.predictor
     anchor_gen = predictor.model.detector.rpn.anchor_generator
-    assert anchor_gen.aspect_ratios == (expected_ratios,)   # anchors are the GT-derived ratios
-    assert anchor_gen.sizes == (expected_sizes,)            # anchor sizes are the GT-derived scales
+    assert anchor_gen.aspect_ratios == (
+        expected_ratios,
+    )  # anchors are the GT-derived ratios
+    assert anchor_gen.sizes == (
+        expected_sizes,
+    )  # anchor sizes are the GT-derived scales
     # BN->GN present
-    assert any(isinstance(m, torch.nn.GroupNorm) for m in predictor.model.modules())
-    assert not any(isinstance(m, torch.nn.modules.batchnorm._BatchNorm)
-                   for m in predictor.model.modules())      # no BatchNorm survived the modification
+    assert any(
+        isinstance(m, torch.nn.GroupNorm) for m in predictor.model.modules()
+    )
+    assert not any(
+        isinstance(m, torch.nn.modules.batchnorm._BatchNorm)
+        for m in predictor.model.modules()
+    )  # no BatchNorm survived the modification
 
     # ---- (b) the custom loop's checkpoint names its builder; provenance snapshot present ----
     best = torch.load(ckpt, weights_only=False)
@@ -124,12 +175,15 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     launch = read_record(out / RUN_FILE)
     assert launch["environment"]["torch"]
     assert launch["config"]["training_source"] == TRAIN_BESPOKE
-    [entry] = launch["source"]["files"].values()            # source snapshotted with sha256
+    [entry] = launch["source"][
+        "files"
+    ].values()  # source snapshotted with sha256
     copy = out / entry["file"]
     assert copy.read_bytes() == Path(src_file).read_bytes()
     assert entry["sha256"] == hashlib.sha256(copy.read_bytes()).hexdigest()
-    assert [Path(f).resolve() for f in checkpoint.spec.model_source.source_files] == [
-        copy.resolve()]                                     # the checkpoint binds that copy
+    assert [
+        Path(f).resolve() for f in checkpoint.spec.model_source.source_files
+    ] == [copy.resolve()]  # the checkpoint binds that copy
 
     # ---- (b) the custom loop's metrics + the audit bracket were recorded via ctx/envelope ----
     metric_rows = read_rows(out / METRICS_FILE)[0]
@@ -140,17 +194,26 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     assert events[-1]["arguments"]["experiment_id"] == "expBespoke"
 
     # ---- completion registered the bespoke model into the immutable registry ----
-    [entry] = [m for m in ModelRegistry(str(tmp_path)).list_models()
-               if m["experiment_id"] == "expBespoke"]
+    [entry] = [
+        m
+        for m in ModelRegistry(str(tmp_path)).list_models()
+        if m["experiment_id"] == "expBespoke"
+    ]
     assert entry["sha256"] and len(entry["sha256"]) == 64
 
     # ---- the module actually learns, and its predictor answers a detection record ----
     from tests._chain_fixtures import built_model
 
-    overfit = overfit_check(built_model(config), "detection",
-                            steps=30, lr=5e-3,
-                            dims={"in_chans": 3, "num_classes": 1, "img_size": (64, 64)})
+    overfit = overfit_check(
+        built_model(config),
+        "detection",
+        steps=30,
+        lr=5e-3,
+        dims={"in_chans": 3, "num_classes": 1, "img_size": (64, 64)},
+    )
     assert overfit["passed"], overfit["issue"]
 
     (pred,) = p.predict([str(images_dir / "img0.png")])
-    assert {"boxes", "scores", "labels", "count"} <= set(pred)  # measurable detection output
+    assert {"boxes", "scores", "labels", "count"} <= set(
+        pred
+    )  # measurable detection output

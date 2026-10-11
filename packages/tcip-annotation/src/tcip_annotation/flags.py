@@ -41,11 +41,22 @@ class Flag:
         """Whether nobody has resolved it."""
         return self.resolved_by is None
 
-    def resolved(self, *, by: str, at: str, reply: str = "", removed: bool = False) -> "Flag":
+    def resolved(
+        self, *, by: str, at: str, reply: str = "", removed: bool = False
+    ) -> "Flag":
         """This flag resolved by ``by`` at ``at``; a resolution :func:`decode_flag` would not read
         back refuses (``ValueError``)."""
-        return decode_flag(encode_flag(replace(self, resolved_by=by, resolved_at=at, reply=reply,
-                                               removed=removed)))
+        return decode_flag(
+            encode_flag(
+                replace(
+                    self,
+                    resolved_by=by,
+                    resolved_at=at,
+                    reply=reply,
+                    removed=removed,
+                )
+            )
+        )
 
 
 @dataclass(frozen=True)
@@ -63,9 +74,17 @@ def raised(request: FlagRequest, *, by: str, at: str) -> Flag:
     comment, or a target :func:`decode_flag` would not read back, refuses (``ValueError``)."""
     import uuid
 
-    flag = Flag(id=uuid.uuid4().hex, text=request.text.strip() if isinstance(request.text, str)
-                else request.text, by=by, at=at, point=request.point, subject=request.subject,
-                proposal=request.proposal)
+    flag = Flag(
+        id=uuid.uuid4().hex,
+        text=request.text.strip()
+        if isinstance(request.text, str)
+        else request.text,
+        by=by,
+        at=at,
+        point=request.point,
+        subject=request.subject,
+        proposal=request.proposal,
+    )
     return decode_flag(encode_flag(flag))
 
 
@@ -76,8 +95,11 @@ def flag_key(label_key: Key) -> Key:
 
 def encode_flag(flag: Flag) -> dict:
     """``flag`` as the entry its record stores."""
-    return {**asdict(flag), "point": list(flag.point) if flag.point else None,
-            "proposal": list(flag.proposal) if flag.proposal else None}
+    return {
+        **asdict(flag),
+        "point": list(flag.point) if flag.point else None,
+        "proposal": list(flag.proposal) if flag.proposal else None,
+    }
 
 
 def _is_text(value) -> bool:
@@ -94,31 +116,50 @@ def decode_flag(entry: Mapping) -> Flag:
     try:
         point, proposal = entry["point"], entry["proposal"]
         flag = Flag(
-            id=entry["id"], text=entry["text"], by=entry["by"], at=entry["at"],
-            point=None if point is None else (float(point[0]), float(point[1])),
+            id=entry["id"],
+            text=entry["text"],
+            by=entry["by"],
+            at=entry["at"],
+            point=None
+            if point is None
+            else (float(point[0]), float(point[1])),
             subject=entry["subject"],
             proposal=None if proposal is None else (proposal[0], proposal[1]),
-            resolved_by=entry["resolved_by"], resolved_at=entry["resolved_at"],
-            reply=entry["reply"], removed=entry["removed"])
+            resolved_by=entry["resolved_by"],
+            resolved_at=entry["resolved_at"],
+            reply=entry["reply"],
+            removed=entry["removed"],
+        )
     except (KeyError, TypeError, ValueError, IndexError) as exc:
-        raise ValueError(f"flag entry {dict(entry)!r} does not read: {exc!r}") from exc
+        raise ValueError(
+            f"flag entry {dict(entry)!r} does not read: {exc!r}"
+        ) from exc
     well_formed = (
         all(_is_text(v) for v in (flag.id, flag.text, flag.at))
         and is_person(flag.by)
         and (flag.point is None) == (flag.subject is None)
         and (flag.subject is None or _is_text(flag.subject))
         and not (flag.point is not None and flag.proposal is not None)
-        and (flag.proposal is None or (_is_text(flag.proposal[0])
-                                       and isinstance(flag.proposal[1], int)
-                                       and not isinstance(flag.proposal[1], bool)
-                                       and flag.proposal[1] >= 0))
+        and (
+            flag.proposal is None
+            or (
+                _is_text(flag.proposal[0])
+                and isinstance(flag.proposal[1], int)
+                and not isinstance(flag.proposal[1], bool)
+                and flag.proposal[1] >= 0
+            )
+        )
         and (flag.resolved_by is None) == (flag.resolved_at is None)
         and (flag.resolved_by is None or is_person(flag.resolved_by))
-        and isinstance(flag.reply, str) and isinstance(flag.removed, bool))
+        and isinstance(flag.reply, str)
+        and isinstance(flag.removed, bool)
+    )
     if not well_formed:
-        raise ValueError(f"flag entry {dict(entry)!r} is not a comment by a person "
-                         f"({PERSON_IDENTITY_PREFIX}<name>) at a time on a point with its "
-                         "subject, a proposal or the image, resolved by a person if at all")
+        raise ValueError(
+            f"flag entry {dict(entry)!r} is not a comment by a person "
+            f"({PERSON_IDENTITY_PREFIX}<name>) at a time on a point with its "
+            "subject, a proposal or the image, resolved by a person if at all"
+        )
     return flag
 
 
@@ -145,7 +186,9 @@ def read_flags(key: Key) -> list[Flag]:
     return flags_of(tcip_store.read(key, default=None))
 
 
-def covers(annotation: Annotation, subject: str, point: tuple[float, float]) -> bool:
+def covers(
+    annotation: Annotation, subject: str, point: tuple[float, float]
+) -> bool:
     """Whether ``annotation`` is one of ``subject`` whose geometry holds ``point``: inside or on
     the edge of a box or a polygon's rings, or exactly a placed point's own coordinate."""
     if annotation.subject != subject:
@@ -153,28 +196,42 @@ def covers(annotation: Annotation, subject: str, point: tuple[float, float]) -> 
     x, y = point
     geometry = annotation.geometry
     if isinstance(geometry, BBox):
-        return geometry.x1 <= x <= geometry.x2 and geometry.y1 <= y <= geometry.y2
+        return (
+            geometry.x1 <= x <= geometry.x2 and geometry.y1 <= y <= geometry.y2
+        )
     if isinstance(geometry, Polygon):
         from shapely.geometry import Point as ShapelyPoint
 
         from tcip_annotation.matching import shapely_geometry
 
-        return bool(shapely_geometry(geometry.rings).intersects(ShapelyPoint(x, y)))
+        return bool(
+            shapely_geometry(geometry.rings).intersects(ShapelyPoint(x, y))
+        )
     if isinstance(geometry, Point):
         return (geometry.x, geometry.y) == (x, y)
     return False
 
 
-def resolved_by_removal(flags: list[Flag], before: list[Annotation], after: list[Annotation],
-                        *, by: str, at: str) -> list[Flag]:
+def resolved_by_removal(
+    flags: list[Flag],
+    before: list[Annotation],
+    after: list[Annotation],
+    *,
+    by: str,
+    at: str,
+) -> list[Flag]:
     """``flags`` with each open one resolved as ``removed`` when an annotation of its subject
     held its point in ``before`` and none does in ``after``; every other flag unchanged."""
+
     def removed(flag: Flag) -> bool:
         subject, point = flag.subject, flag.point
         if not flag.open or subject is None or point is None:
             return False
-        return (any(covers(a, subject, point) for a in before)
-                and not any(covers(a, subject, point) for a in after))
+        return any(covers(a, subject, point) for a in before) and not any(
+            covers(a, subject, point) for a in after
+        )
 
-    return [flag.resolved(by=by, at=at, removed=True) if removed(flag) else flag
-            for flag in flags]
+    return [
+        flag.resolved(by=by, at=at, removed=True) if removed(flag) else flag
+        for flag in flags
+    ]

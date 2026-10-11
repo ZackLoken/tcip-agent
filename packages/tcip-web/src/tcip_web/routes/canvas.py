@@ -65,27 +65,33 @@ def push_canvas_state(payload: CanvasStatePayload) -> dict:
     if payload.shapes is not None:
         # Geometry first, meta second: a reader pairing the new meta with the old geometry
         # sees an identity mismatch (stale), never a false match.
-        ts.replace(canvas_geometry_key(root), {
-            "image_path": image_path,
-            "tab": payload.tab,
-            "shapes": payload.shapes,
-            "received_at": now,
-        })
+        ts.replace(
+            canvas_geometry_key(root),
+            {
+                "image_path": image_path,
+                "tab": payload.tab,
+                "shapes": payload.shapes,
+                "received_at": now,
+            },
+        )
 
-    ts.replace(canvas_meta_key(root), {
-        "received_at": now,
-        "tab": payload.tab,
-        "image_path": image_path,
-        "image": payload.image,
-        "img_width": payload.img_width,
-        "img_height": payload.img_height,
-        "viewport": payload.viewport,
-        "mode": payload.mode,
-        "active_subject": payload.active_subject,
-        "cut_armed": payload.cut_armed,
-        "dirty": payload.dirty,
-        "user": person,
-        "classes": payload.classes,
-        "counts": payload.counts,
-    })
+    ts.replace(
+        canvas_meta_key(root),
+        {
+            "received_at": now,
+            "tab": payload.tab,
+            "image_path": image_path,
+            "image": payload.image,
+            "img_width": payload.img_width,
+            "img_height": payload.img_height,
+            "viewport": payload.viewport,
+            "mode": payload.mode,
+            "active_subject": payload.active_subject,
+            "cut_armed": payload.cut_armed,
+            "dirty": payload.dirty,
+            "user": person,
+            "classes": payload.classes,
+            "counts": payload.counts,
+        },
+    )
     return {"status": "ok", "shapes_written": payload.shapes is not None}

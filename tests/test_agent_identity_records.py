@@ -33,7 +33,10 @@ DECLARED = mcp_types.Implementation(name="reviewing-harness", version="1.2.3")
 
 def _body(result: Any) -> dict:
     """The tool's own return value, as the server serialized it."""
-    if isinstance(result.structured_content, dict) and "result" not in result.structured_content:
+    if (
+        isinstance(result.structured_content, dict)
+        and "result" not in result.structured_content
+    ):
         return result.structured_content
     if isinstance(result.structured_content, dict):
         return result.structured_content["result"]
@@ -41,17 +44,23 @@ def _body(result: Any) -> dict:
 
 
 def call_through_handshake(
-    calls: list[tuple[str, dict]], declared: mcp_types.Implementation = DECLARED, *,
+    calls: list[tuple[str, dict]],
+    declared: mcp_types.Implementation = DECLARED,
+    *,
     bound: BoundProject | None,
 ) -> list[dict]:
     """Run the real server in memory for ``bound``, complete a handshake as ``declared``, make
     ``calls`` in order, and hand back each tool's return value."""
-    return [_body(result)
-            for result in results_through_handshake(calls, declared, bound=bound)]
+    return [
+        _body(result)
+        for result in results_through_handshake(calls, declared, bound=bound)
+    ]
 
 
 def results_through_handshake(
-    calls: list[tuple[str, dict]], declared: mcp_types.Implementation = DECLARED, *,
+    calls: list[tuple[str, dict]],
+    declared: mcp_types.Implementation = DECLARED,
+    *,
     bound: BoundProject | None,
 ) -> list[Any]:
     """Run the real server in memory, built for ``bound`` (``None``: for no project), complete a
@@ -60,15 +69,20 @@ def results_through_handshake(
 
     async def run() -> list[Any]:
         bodies: list[Any] = []
-        async with create_client_server_memory_streams() as (client_streams, server_streams):
+        async with create_client_server_memory_streams() as (
+            client_streams,
+            server_streams,
+        ):
             async with anyio.create_task_group() as tg:
                 # The run loop; MCPServer.run is stdio-only.
                 server = build_server(bound)._lowlevel_server
 
                 async def serve() -> None:
                     await server.run(
-                        server_streams[0], server_streams[1],
-                        server.create_initialization_options(), raise_exceptions=True,
+                        server_streams[0],
+                        server_streams[1],
+                        server.create_initialization_options(),
+                        raise_exceptions=True,
                     )
 
                 tg.start_soon(serve)
@@ -85,16 +99,22 @@ def results_through_handshake(
 
 
 def _report_call(detail: str) -> tuple[str, dict]:
-    return ("report_friction", {"category": "unexpected_behavior", "detail": detail})
+    return (
+        "report_friction",
+        {"category": "unexpected_behavior", "detail": detail},
+    )
 
 
 # ── the audit line ───────────────────────────────────────────────────────────
 
 
 def test_an_audited_call_through_a_handshake_records_the_declared_harness_and_a_session(
-    project: Path, bound,
+    project: Path,
+    bound,
 ) -> None:
-    call_through_handshake([_report_call("first"), _report_call("second")], bound=bound)
+    call_through_handshake(
+        [_report_call("first"), _report_call("second")], bound=bound
+    )
 
     rows = audit_rows(project, "report_friction")
     assert [row["arguments"]["detail"] for row in rows] == ["first", "second"]
@@ -116,7 +136,9 @@ def test_the_terminal_session_rides_along_only_when_the_launcher_declared_one(
     assert row["terminal_session"] == "term_abc123"
 
 
-def test_two_handshakes_in_two_runs_mint_two_sessions(project: Path, bound) -> None:
+def test_two_handshakes_in_two_runs_mint_two_sessions(
+    project: Path, bound
+) -> None:
     call_through_handshake([_report_call("run one")], bound=bound)
     call_through_handshake([_report_call("run two")], bound=bound)
 
@@ -139,17 +161,29 @@ def test_a_call_with_no_handshake_records_no_identity(project: Path) -> None:
 
 
 def test_a_trait_proposed_through_a_handshake_is_named_by_its_audit_line(
-    project: Path, bound,
+    project: Path,
+    bound,
 ) -> None:
     """The entry travels as the tool's declared input schema, JSON over the real server; the
     proposal's own audit line names the harness, and the revision carries no copy of it."""
     entry = fx.with_operationalization(
-        fx.COUNT_SPEC, traits.PER_IMAGE_COUNT, measured_subject=fx.COUNT_SUBJECT)
+        fx.COUNT_SPEC,
+        traits.PER_IMAGE_COUNT,
+        measured_subject=fx.COUNT_SUBJECT,
+    )
 
-    (revision,) = call_through_handshake([("propose_trait", {
-        "entry": entry.model_dump(mode="json"),
-        "rationale": "the breeder described the count in their own field-scoring terms",
-    })], bound=bound)
+    (revision,) = call_through_handshake(
+        [
+            (
+                "propose_trait",
+                {
+                    "entry": entry.model_dump(mode="json"),
+                    "rationale": "the breeder described the count in their own field-scoring terms",
+                },
+            )
+        ],
+        bound=bound,
+    )
 
     assert not set(IDENTITY_FIELDS) & set(revision)
     (row,) = audit_rows(project, "propose_trait")
@@ -158,7 +192,10 @@ def test_a_trait_proposed_through_a_handshake_is_named_by_its_audit_line(
     assert row["agent_client_version"] == "1.2.3"
     assert row["agent_session"].startswith("mcp_")
     stored = traits.read_trait(fx.COUNT_TRAIT, project).latest
-    assert stored.entry == entry and stored.entry_sha256 == traits.entry_sha256(entry)
+    assert (
+        stored.entry == entry
+        and stored.entry_sha256 == traits.entry_sha256(entry)
+    )
 
 
 # ── the HTTP push ────────────────────────────────────────────────────────────
@@ -198,11 +235,22 @@ def captured_requests(monkeypatch: pytest.MonkeyPatch, project: Path) -> list:
 
 
 def test_the_push_through_a_handshake_sends_the_identity_as_headers(
-    captured_requests: list, bound,
+    captured_requests: list,
+    bound,
 ) -> None:
-    call_through_handshake([("push_panel_event", {
-        "panel": "meta", "event_type": "identity_probe", "data": {"n": 1},
-    })], bound=bound)
+    call_through_handshake(
+        [
+            (
+                "push_panel_event",
+                {
+                    "panel": "meta",
+                    "event_type": "identity_probe",
+                    "data": {"n": 1},
+                },
+            )
+        ],
+        bound=bound,
+    )
 
     (req,) = captured_requests
     assert json.loads(req.data)["project_id"] == bound.id
@@ -213,7 +261,8 @@ def test_the_push_through_a_handshake_sends_the_identity_as_headers(
 
 
 def test_the_push_with_no_handshake_sends_only_the_content_type(
-    captured_requests: list, bound,
+    captured_requests: list,
+    bound,
 ) -> None:
     from tcip_mcp.web_client import post_panel_event
 

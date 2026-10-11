@@ -85,7 +85,9 @@ def aggregate_per_plant(
 
     from tcip_mcp.pipelines.model_build import resolve_named
 
-    aggregator = resolve_named(strategy, _STRATEGIES, kind="aggregation strategy")
+    aggregator = resolve_named(
+        strategy, _STRATEGIES, kind="aggregation strategy"
+    )
 
     results = []
     for plant_id, items in sorted(groups.items()):
@@ -95,11 +97,18 @@ def aggregate_per_plant(
         summary["observations"] = len(items)
         summary["value_key"] = value_key
         summary["plant_attribution"] = _agreed(
-            items, "plant_attribution", f"aggregate_per_plant, plant {plant_id!r}")
+            items,
+            "plant_attribution",
+            f"aggregate_per_plant, plant {plant_id!r}",
+        )
         sources = {r["source"] for r in items if r.get("source") is not None}
         if sources:
-            summary["plant_id_source"] = sources.pop() if len(sources) == 1 else "mixed"
-        distances = [r["distance_m"] for r in items if r.get("distance_m") is not None]
+            summary["plant_id_source"] = (
+                sources.pop() if len(sources) == 1 else "mixed"
+            )
+        distances = [
+            r["distance_m"] for r in items if r.get("distance_m") is not None
+        ]
         if distances:
             summary["plant_id_distance_m_max"] = max(distances)
         results.append(summary)
@@ -107,7 +116,9 @@ def aggregate_per_plant(
     return results
 
 
-def _agreed(items: list[dict], key: str, where: str, *, required: bool = False) -> Any:
+def _agreed(
+    items: list[dict], key: str, where: str, *, required: bool = False
+) -> Any:
     """The one value every item states for ``key``; ``None`` when every item omits an optional
     ``key``. Refuses (``ValueError`` naming ``where``) when the items disagree or, with
     ``required``, when any omits it."""
@@ -176,7 +187,9 @@ _STRATEGIES = {
 
 
 def _resolve_units(
-    delivered_phenotype: str, results: list[dict], scalar: bool,
+    delivered_phenotype: str,
+    results: list[dict],
+    scalar: bool,
 ) -> tuple[str, str | None, str | None]:
     """``(display_unit, linear_basis, declared_unit)``: the units implied by the aggregated
     values' own value_key, and crops.yml's declared unit for ``delivered_phenotype`` or ``None``.
@@ -193,17 +206,24 @@ def _resolve_units(
     )
     from tcip_mcp.traits import crops_units
 
-    implied_pairs = {p for p in (unit_from_value_key(r.get("value_key", "")) for r in results) if p}
+    implied_pairs = {
+        p
+        for p in (unit_from_value_key(r.get("value_key", "")) for r in results)
+        if p
+    }
     if len(implied_pairs) > 1:
         implied_units = {display for display, _linear_basis in implied_pairs}
         raise ValueError(
             f"results for delivered phenotype {delivered_phenotype!r} imply more than one "
             f"physical unit ({sorted(implied_units)}) across rows, cannot label a single units "
-            "column.")
+            "column."
+        )
     declared = crops_units().get(delivered_phenotype)
     pair = next(iter(implied_pairs), None)
     if pair is None:
-        explicitly_px = any(is_pixel_space_key(r.get("value_key", "")) for r in results)
+        explicitly_px = any(
+            is_pixel_space_key(r.get("value_key", "")) for r in results
+        )
         if scalar and declared is not None and not explicitly_px:
             return declared, declared, declared
         return "", None, declared
@@ -212,15 +232,26 @@ def _resolve_units(
         raise ValueError(
             f"delivered phenotype {delivered_phenotype!r} is declared units={declared!r} in "
             f"crops.yml, but the aggregated values' own key implies {linear_basis!r}; refusing to "
-            "ship a mismatched unit label rather than guessing which one is right.")
+            "ship a mismatched unit label rather than guessing which one is right."
+        )
     return display, linear_basis, declared
 
 
 def deliver_per_plant_aggregate(
-    project: Path, results: list[dict], output_path: str, *, delivered_phenotype: str,
-    delivery_kind: str, buckets: Sequence[Bucket], plants: list[str], crop: str = "",
-    pipeline_version: str = "", door: str, plant_mapping: dict | None = None,
-    scale_assessment_id: str | None = None, acknowledgment_id: str | None = None,
+    project: Path,
+    results: list[dict],
+    output_path: str,
+    *,
+    delivered_phenotype: str,
+    delivery_kind: str,
+    buckets: Sequence[Bucket],
+    plants: list[str],
+    crop: str = "",
+    pipeline_version: str = "",
+    door: str,
+    plant_mapping: dict | None = None,
+    scale_assessment_id: str | None = None,
+    acknowledgment_id: str | None = None,
     actor: str | None,
 ) -> dict:
     """Deliver per-plant aggregated ``results`` (:func:`aggregate_per_plant`'s own output) as a
@@ -249,37 +280,88 @@ def deliver_per_plant_aggregate(
     if sorted(by_plant) != sorted(plants):
         raise ValueError(
             f"the rows cover plants {sorted(by_plant)} and the population is {sorted(plants)}: a "
-            "delivery ships exactly its population, one row each.")
+            "delivery ships exactly its population, one row each."
+        )
     none_valued = [p for p in plants if by_plant[p].get("value") is None]
     if none_valued:
-        raise ValueError(f"plant(s) {none_valued} carry no {delivered_phenotype!r} observation: a "
-                         "missing measurement never ships as an empty cell; leave them out of "
-                         "the population.")
-    attribution = _agreed(results, "plant_attribution", "the delivered rows", required=True)
+        raise ValueError(
+            f"plant(s) {none_valued} carry no {delivered_phenotype!r} observation: a "
+            "missing measurement never ships as an empty cell; leave them out of "
+            "the population."
+        )
+    attribution = _agreed(
+        results, "plant_attribution", "the delivered rows", required=True
+    )
     units, linear_basis, declared = _resolve_units(
-        delivered_phenotype, results, scalar=delivery_kind != PER_PLANT_COUNT_AGGREGATE)
+        delivered_phenotype,
+        results,
+        scalar=delivery_kind != PER_PLANT_COUNT_AGGREGATE,
+    )
     if delivery_kind == PER_PLANT_COUNT_AGGREGATE and declared and not units:
-        raise ValueError(f"delivered phenotype {delivered_phenotype!r} is declared "
-                         f"units={declared!r}, and the rows' value key implies no physical unit.")
-    revision = confirmed_revision(delivery_kind, project=project,
-                                  delivered_phenotype=delivered_phenotype,
-                                  value_keys=[r.get("value_key", "") for r in results])
+        raise ValueError(
+            f"delivered phenotype {delivered_phenotype!r} is declared "
+            f"units={declared!r}, and the rows' value key implies no physical unit."
+        )
+    revision = confirmed_revision(
+        delivery_kind,
+        project=project,
+        delivered_phenotype=delivered_phenotype,
+        value_keys=[r.get("value_key", "") for r in results],
+    )
     result = Result(
-        ["plant_id", "crop", "delivered_phenotype", "value", "units", "value_key", "n_images",
-         "pipeline_version", "plant_id_source", "plant_attribution", "plant_id_distance_m_max",
-         *DELIVERY_COLUMNS],
-        [{"plant_id": plant, "crop": crop, "delivered_phenotype": delivered_phenotype,
-          "value": by_plant[plant]["value"], "units": units,
-          "value_key": by_plant[plant].get("value_key", ""),
-          "n_images": by_plant[plant].get("observations", 0), "pipeline_version": pipeline_version,
-          "plant_id_source": by_plant[plant].get("plant_id_source", ""),
-          "plant_attribution": attribution,
-          "plant_id_distance_m_max": by_plant[plant].get("plant_id_distance_m_max", "")}
-         for plant in plants],
-        population=plants, plant_mapping=plant_mapping)
-    clearance = gate(project, buckets, delivery_kind=delivery_kind, revision=revision,
-                     result=result, acknowledgment_id=acknowledgment_id,
-                     scale_assessment_id=scale_assessment_id, unit=linear_basis)
-    delivered = deliver_csv(project, output_path, result, clearance=clearance, revision=revision,
-                            door=door, delivery_kind=delivery_kind, actor=actor)
+        [
+            "plant_id",
+            "crop",
+            "delivered_phenotype",
+            "value",
+            "units",
+            "value_key",
+            "n_images",
+            "pipeline_version",
+            "plant_id_source",
+            "plant_attribution",
+            "plant_id_distance_m_max",
+            *DELIVERY_COLUMNS,
+        ],
+        [
+            {
+                "plant_id": plant,
+                "crop": crop,
+                "delivered_phenotype": delivered_phenotype,
+                "value": by_plant[plant]["value"],
+                "units": units,
+                "value_key": by_plant[plant].get("value_key", ""),
+                "n_images": by_plant[plant].get("observations", 0),
+                "pipeline_version": pipeline_version,
+                "plant_id_source": by_plant[plant].get("plant_id_source", ""),
+                "plant_attribution": attribution,
+                "plant_id_distance_m_max": by_plant[plant].get(
+                    "plant_id_distance_m_max", ""
+                ),
+            }
+            for plant in plants
+        ],
+        population=plants,
+        plant_mapping=plant_mapping,
+    )
+    clearance = gate(
+        project,
+        buckets,
+        delivery_kind=delivery_kind,
+        revision=revision,
+        result=result,
+        acknowledgment_id=acknowledgment_id,
+        scale_assessment_id=scale_assessment_id,
+        unit=linear_basis,
+    )
+    delivered = deliver_csv(
+        project,
+        output_path,
+        result,
+        clearance=clearance,
+        revision=revision,
+        door=door,
+        delivery_kind=delivery_kind,
+        actor=actor,
+    )
     return {**delivered, "n_plants": len(plants)}

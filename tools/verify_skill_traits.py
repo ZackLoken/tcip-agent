@@ -51,14 +51,36 @@ def load_vocab() -> tuple[set[str], dict[str, set[str]]]:
 # gets added here; the friction is intentional, it forces a human to confirm it isn't a
 # fabricated trait.
 NON_TRAIT_ALLOW = {
-    "plant_mapping", "plant_id", "accession_name", "deliver_phenology_milestones",
-    "build_plant_mapping", "run_inference", "run_matching", "tile_size", "class_id",
+    "plant_mapping",
+    "plant_id",
+    "accession_name",
+    "deliver_phenology_milestones",
+    "build_plant_mapping",
+    "run_inference",
+    "run_matching",
+    "tile_size",
+    "class_id",
     "positive_class_assessed",
-    "catkin_phenology", "plant_mapping.json", "load_annotations",
-    "save_annotations", "in_chans", "num_channels", "num_classes",
-    "det_type", "gt_type", "pred_type", "count_by_class", "per_plant_phenology",
-    "crossing_date", "positive_onset_date", "plant_milestones", "write_phenology_csv",
-    "write_phenology_curve_csv", "boxes_from_polygons", "phenology_tools", "results.py",
+    "catkin_phenology",
+    "plant_mapping.json",
+    "load_annotations",
+    "save_annotations",
+    "in_chans",
+    "num_channels",
+    "num_classes",
+    "det_type",
+    "gt_type",
+    "pred_type",
+    "count_by_class",
+    "per_plant_phenology",
+    "crossing_date",
+    "positive_onset_date",
+    "plant_milestones",
+    "write_phenology_csv",
+    "write_phenology_curve_csv",
+    "boxes_from_polygons",
+    "phenology_tools",
+    "results.py",
     "aggregation.py",
 }
 
@@ -80,12 +102,20 @@ def unknown_trait_tokens(md_text: str, allnames: set[str]) -> list[str]:
     """Backticked snake_case tokens in ``md_text`` that are neither in ``allnames`` nor an
     allow-listed platform token."""
     toks = extract_backtick_snake(md_text)
-    return sorted(t for t in toks if t not in allnames and t not in NON_TRAIT_ALLOW)
+    return sorted(
+        t for t in toks if t not in allnames and t not in NON_TRAIT_ALLOW
+    )
 
 
-def off_crop_tokens(md_text: str, allnames: set[str], crop_names: set[str]) -> list[str]:
+def off_crop_tokens(
+    md_text: str, allnames: set[str], crop_names: set[str]
+) -> list[str]:
     """Names in ``allnames`` that ``md_text`` backticks and ``crop_names`` does not hold."""
-    return sorted(t for t in mentioned_trait_names(md_text, allnames) if t not in crop_names)
+    return sorted(
+        t
+        for t in mentioned_trait_names(md_text, allnames)
+        if t not in crop_names
+    )
 
 
 def main() -> int:
@@ -98,20 +128,28 @@ def main() -> int:
         allnames, by_crop = load_vocab()
         md = Path(skill_path).read_text(encoding="utf-8")
         unknown = unknown_trait_tokens(md, allnames)
-        off_crop = off_crop_tokens(md, allnames, by_crop.get(crop_key, set())) if crop_key else []
+        off_crop = (
+            off_crop_tokens(md, allnames, by_crop.get(crop_key, set()))
+            if crop_key
+            else []
+        )
     except (OSError, ValueError, KeyError, yaml.YAMLError) as e:
         print(f"cannot check {skill_path}: {e}")
         return 2
     print(f"== {skill_path} ==")
     if unknown:
-        print("UNKNOWN (not a crops.yml trait, not an allow-listed platform token): "
-              f"{len(unknown)}")
+        print(
+            "UNKNOWN (not a crops.yml trait, not an allow-listed platform token): "
+            f"{len(unknown)}"
+        )
         for u in unknown:
             print(f"  - {u}")
     else:
         print("OK: no unknown trait tokens")
     if off_crop:
-        print(f"OFF-CROP (real trait, not assigned to {crop_key} in crops.yml): {len(off_crop)}")
+        print(
+            f"OFF-CROP (real trait, not assigned to {crop_key} in crops.yml): {len(off_crop)}"
+        )
         for o in off_crop:
             print(f"  - {o}")
     return 1 if unknown else 0

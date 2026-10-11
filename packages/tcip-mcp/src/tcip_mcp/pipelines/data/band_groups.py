@@ -63,14 +63,18 @@ class _MetadataStrategy:
     group_id_tag: str
     band_id_tag: str
     wavelength_tag: str | None = None
-    identity_checks: tuple[tuple[str, str, float], ...] = field(default_factory=tuple)
+    identity_checks: tuple[tuple[str, str, float], ...] = field(
+        default_factory=tuple
+    )
 
 
 # DJI's multispectral schema is the first instance of the exact-match-shared-group-id class this
 # generalizes to, not the mechanism itself, a new sensor of the same class is a new row here.
 _EMBEDDED_METADATA_STRATEGIES: list[_MetadataStrategy] = [
     _MetadataStrategy(
-        "drone-dji:CaptureUUID", "Camera:BandName", "Camera:CentralWavelength",
+        "drone-dji:CaptureUUID",
+        "Camera:BandName",
+        "Camera:CentralWavelength",
         identity_checks=(
             # Measured on a 16-capture DJI sample: siblings within ~0.0007s and ~3e-7 degrees,
             # captures ~109s apart; engineering bounds between the two, not validated per rig.
@@ -83,7 +87,8 @@ _EMBEDDED_METADATA_STRATEGIES: list[_MetadataStrategy] = [
 
 
 def _identity_disagreement(
-    paths: list[Path], tags_by_path: dict[Path, dict[str, str]],
+    paths: list[Path],
+    tags_by_path: dict[Path, dict[str, str]],
     checks: tuple[tuple[str, str, float], ...],
 ) -> tuple[str | None, bool]:
     """The first identity-check tag that disagrees beyond its tolerance across ``paths`` (or
@@ -94,10 +99,14 @@ def _identity_disagreement(
         raw_values = [tags_by_path[p].get(tag) for p in paths]
         if any(v is None for v in raw_values):
             continue  # this signal isn't recorded for this candidate group; nothing to cross-check
-        values = [v for v in raw_values if v is not None]  # none are, by the check just above
+        values = [
+            v for v in raw_values if v is not None
+        ]  # none are, by the check just above
         try:
             if kind == "timestamp":
-                parsed = [datetime.fromisoformat(v).timestamp() for v in values]
+                parsed = [
+                    datetime.fromisoformat(v).timestamp() for v in values
+                ]
             else:
                 parsed = [float(v) for v in values]
         except ValueError:
@@ -151,7 +160,11 @@ def _read_xmp_tags(path: Path) -> dict[str, str] | None:
             raw = tag.value
     except Exception:  # noqa: BLE001, an unreadable/corrupt file offers no metadata, not a crash
         return None
-    text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw)
+    text = (
+        raw.decode("utf-8", errors="replace")
+        if isinstance(raw, bytes)
+        else str(raw)
+    )
     tags: dict[str, str] = {}
     for m in _ATTR_RE.finditer(text):
         tags.setdefault(m.group(1), m.group(2))
@@ -172,7 +185,8 @@ def _canonical_stem(paths: list[Path]) -> str:
 def _candidate_single_band_files(images_dir: Path) -> list[Path]:
     """Raster files in ``images_dir`` a group could plausibly be built from."""
     return sorted(
-        p for p in images_dir.iterdir()
+        p
+        for p in images_dir.iterdir()
         if p.is_file() and p.suffix.lower() in _METADATA_BEARING_EXTS
     )
 
@@ -215,28 +229,36 @@ def detect_embedded_metadata_groups(
                 continue  # a lone file with a group id is not a sibling group yet
             if strategy.identity_checks:
                 disagreeing_tag, any_checked = _identity_disagreement(
-                    paths, tags_by_path, strategy.identity_checks,
+                    paths,
+                    tags_by_path,
+                    strategy.identity_checks,
                 )
                 if disagreeing_tag is not None:
-                    refused.append({
-                        "group_id": gid, "band": None,
-                        "files": [str(p) for p in sorted(paths)],
-                        "reason": f"files sharing group id {gid!r} disagree on {disagreeing_tag!r} "
-                                  "beyond its tolerance, a shared group id alone is not proof of "
-                                  "one physical capture, refusing rather than splicing unrelated "
-                                  "captures together",
-                    })
+                    refused.append(
+                        {
+                            "group_id": gid,
+                            "band": None,
+                            "files": [str(p) for p in sorted(paths)],
+                            "reason": f"files sharing group id {gid!r} disagree on {disagreeing_tag!r} "
+                            "beyond its tolerance, a shared group id alone is not proof of "
+                            "one physical capture, refusing rather than splicing unrelated "
+                            "captures together",
+                        }
+                    )
                     continue
                 if not any_checked:
-                    refused.append({
-                        "group_id": gid, "band": None,
-                        "files": [str(p) for p in sorted(paths)],
-                        "reason": f"files sharing group id {gid!r} carry none of this strategy's "
-                                  "independent identity signals (every declared check's tag is "
-                                  "missing from at least one file), a shared group id alone is not "
-                                  "proof of one physical capture, and there is no secondary signal "
-                                  "left to confirm it, so refusing rather than guessing",
-                    })
+                    refused.append(
+                        {
+                            "group_id": gid,
+                            "band": None,
+                            "files": [str(p) for p in sorted(paths)],
+                            "reason": f"files sharing group id {gid!r} carry none of this strategy's "
+                            "independent identity signals (every declared check's tag is "
+                            "missing from at least one file), a shared group id alone is not "
+                            "proof of one physical capture, and there is no secondary signal "
+                            "left to confirm it, so refusing rather than guessing",
+                        }
+                    )
                     continue
             bands: dict[str, Path] = {}
             wavelengths: dict[str, float] = {}
@@ -246,11 +268,14 @@ def detect_embedded_metadata_groups(
                 if not band_name:
                     continue
                 if band_name in bands:
-                    refused.append({
-                        "group_id": gid, "band": band_name,
-                        "files": [str(bands[band_name]), str(p)],
-                        "reason": f"two files both claim band {band_name!r} for capture {gid!r}",
-                    })
+                    refused.append(
+                        {
+                            "group_id": gid,
+                            "band": band_name,
+                            "files": [str(bands[band_name]), str(p)],
+                            "reason": f"two files both claim band {band_name!r} for capture {gid!r}",
+                        }
+                    )
                     duplicate = True
                     break
                 bands[band_name] = p
@@ -264,17 +289,22 @@ def detect_embedded_metadata_groups(
             if duplicate or len(bands) < 2:
                 continue
             group_paths = list(bands.values())
-            groups.append({
-                "stem": _canonical_stem(group_paths), "bands": bands,
-                "central_wavelength_nm": wavelengths or None, "source": "embedded-metadata",
-            })
+            groups.append(
+                {
+                    "stem": _canonical_stem(group_paths),
+                    "bands": bands,
+                    "central_wavelength_nm": wavelengths or None,
+                    "source": "embedded-metadata",
+                }
+            )
             grouped_paths.update(group_paths)
 
     return groups, refused
 
 
 def groups_from_explicit_mapping(
-    images_dir: Path, mapping: dict[str, dict[str, str]],
+    images_dir: Path,
+    mapping: dict[str, dict[str, str]],
 ) -> tuple[list[dict], set[str]]:
     """Groups from a caller-supplied ``{group_id: {band_name: filename}}`` sidecar mapping, for a
     sensor with no embedded correlation metadata at all.
@@ -293,10 +323,14 @@ def groups_from_explicit_mapping(
                 bands[band_name] = p
         if len(bands) < 2:
             continue
-        groups.append({
-            "stem": str(group_id), "bands": bands,
-            "central_wavelength_nm": None, "source": "explicit-manifest",
-        })
+        groups.append(
+            {
+                "stem": str(group_id),
+                "bands": bands,
+                "central_wavelength_nm": None,
+                "source": "explicit-manifest",
+            }
+        )
         used.update(p.name for p in bands.values())
     return groups, used
 
@@ -308,22 +342,35 @@ def read_band_group_manifest(manifest_path: Path) -> BandGroupRef:
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
     bands_field = data.get("bands")
     if not isinstance(bands_field, dict) or not bands_field:
-        raise ValueError(f"{manifest_path}: 'bands' must be a non-empty {{name: filename}} mapping")
+        raise ValueError(
+            f"{manifest_path}: 'bands' must be a non-empty {{name: filename}} mapping"
+        )
     directory = manifest_path.parent
-    bands = {str(name): directory / str(filename) for name, filename in bands_field.items()}
+    bands = {
+        str(name): directory / str(filename)
+        for name, filename in bands_field.items()
+    }
     wl_field = data.get("central_wavelength_nm")
     wavelengths = (
-        {str(k): float(v) for k, v in wl_field.items()} if isinstance(wl_field, dict) else None
+        {str(k): float(v) for k, v in wl_field.items()}
+        if isinstance(wl_field, dict)
+        else None
     )
     return BandGroupRef(
-        stem=manifest_path.stem, manifest_path=manifest_path, bands=bands,
+        stem=manifest_path.stem,
+        manifest_path=manifest_path,
+        bands=bands,
         central_wavelength_nm=wavelengths,
     )
 
 
 def write_band_group_manifest(
-    images_dir: Path, stem: str, bands: dict[str, Path], *,
-    central_wavelength_nm: dict[str, float] | None = None, source: str = "embedded-metadata",
+    images_dir: Path,
+    stem: str,
+    bands: dict[str, Path],
+    *,
+    central_wavelength_nm: dict[str, float] | None = None,
+    source: str = "embedded-metadata",
     expect: Version | None = None,
 ) -> Path:
     """Write ``<images_dir>/<stem>.bandgroup`` recording ``bands`` (by filename, not full path,
@@ -333,7 +380,10 @@ def write_band_group_manifest(
     only while none is recorded, and raises ``VersionConflictError`` rather than overwriting one a
     concurrent detection pass just wrote.
     """
-    payload: dict = {"bands": {name: p.name for name, p in bands.items()}, "source": source}
+    payload: dict = {
+        "bands": {name: p.name for name, p in bands.items()},
+        "source": source,
+    }
     if central_wavelength_nm:
         payload["central_wavelength_nm"] = central_wavelength_nm
     path = band_group_manifest_path(images_dir, stem)
@@ -342,7 +392,9 @@ def write_band_group_manifest(
 
 
 def detect_and_write_band_groups(
-    images_dir: str | Path, *, explicit_groups: dict[str, dict[str, str]] | None = None,
+    images_dir: str | Path,
+    *,
+    explicit_groups: dict[str, dict[str, str]] | None = None,
 ) -> dict:
     """Run the band-group detection strategies over ``images_dir`` and write a ``.bandgroup``
     manifest for each newly found group.
@@ -361,7 +413,10 @@ def detect_and_write_band_groups(
 
     Returns ``{"formed": [...], "refused": [...], "manifests": [...]}``.
     """
-    from tcip_mcp.pipelines.image_utils import bucket_logical_identities, stem_collision_key
+    from tcip_mcp.pipelines.image_utils import (
+        bucket_logical_identities,
+        stem_collision_key,
+    )
 
     d = Path(images_dir)
     if not d.is_dir():
@@ -375,11 +430,17 @@ def detect_and_write_band_groups(
             continue
         already_claimed.update(p.name for p in ref.bands.values())
 
-    candidates = [p for p in _candidate_single_band_files(d) if p.name not in already_claimed]
+    candidates = [
+        p
+        for p in _candidate_single_band_files(d)
+        if p.name not in already_claimed
+    ]
 
     explicit_found: list[dict] = []
     if explicit_groups:
-        explicit_found, explicit_used = groups_from_explicit_mapping(d, explicit_groups)
+        explicit_found, explicit_used = groups_from_explicit_mapping(
+            d, explicit_groups
+        )
         candidates = [p for p in candidates if p.name not in explicit_used]
 
     embedded_found, refused = detect_embedded_metadata_groups(candidates)
@@ -393,36 +454,55 @@ def detect_and_write_band_groups(
         key = stem_collision_key(stem)
         own_members = {p.name for p in group["bands"].values()}
         collision = next(
-            (p for p in identities.get(key, [])
-             if not (p.suffix.lower() == MANIFEST_EXT and p.stem == stem)
-             and p.name not in own_members),
+            (
+                p
+                for p in identities.get(key, [])
+                if not (p.suffix.lower() == MANIFEST_EXT and p.stem == stem)
+                and p.name not in own_members
+            ),
             None,
         )
         if collision is not None:
-            refused.append({
-                "group_id": stem, "band": None,
-                "files": sorted(str(p) for p in group["bands"].values()),
-                "reason": f"stem {stem!r} collides with {collision} already in this bucket; "
-                          "writing a manifest here would mint the same ambiguity the ingest door "
-                          "refuses, so this group is refused instead",
-            })
+            refused.append(
+                {
+                    "group_id": stem,
+                    "band": None,
+                    "files": sorted(str(p) for p in group["bands"].values()),
+                    "reason": f"stem {stem!r} collides with {collision} already in this bucket; "
+                    "writing a manifest here would mint the same ambiguity the ingest door "
+                    "refuses, so this group is refused instead",
+                }
+            )
             continue
         try:
             mp = write_band_group_manifest(
-                d, stem, group["bands"],
-                central_wavelength_nm=group.get("central_wavelength_nm"), source=group["source"],
+                d,
+                stem,
+                group["bands"],
+                central_wavelength_nm=group.get("central_wavelength_nm"),
+                source=group["source"],
                 expect=Version.ABSENT,
             )
         except VersionConflictError:
             continue  # idempotent: a recorded fact is not re-inferred, whoever recorded it
-        formed.append({"stem": stem, "bands": sorted(group["bands"]), "source": group["source"]})
+        formed.append(
+            {
+                "stem": stem,
+                "bands": sorted(group["bands"]),
+                "source": group["source"],
+            }
+        )
         manifests.append(str(mp))
         identities[key] = [mp]
         for member_path in group["bands"].values():
             member_key = stem_collision_key(member_path.stem)
             if member_key == key:
                 continue
-            remaining = [p for p in identities.get(member_key, []) if p.name != member_path.name]
+            remaining = [
+                p
+                for p in identities.get(member_key, [])
+                if p.name != member_path.name
+            ]
             if remaining:
                 identities[member_key] = remaining
             else:

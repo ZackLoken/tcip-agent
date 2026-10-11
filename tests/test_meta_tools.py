@@ -134,7 +134,9 @@ def test_concurrent_retrospectives_all_survive(tmp_path: Path):
             did_not_work="b",
         )
 
-    threads = [threading.Thread(target=_call, args=(i,)) for i in range(n_threads)]
+    threads = [
+        threading.Thread(target=_call, args=(i,)) for i in range(n_threads)
+    ]
     for t in threads:
         t.start()
     for t in threads:
@@ -168,11 +170,17 @@ def test_load_retrospectives_returns_empty_when_none_recorded(tmp_path: Path):
 def test_load_retrospectives_returns_recent_first(tmp_path: Path):
     # Each section is stamped from the clock, whose tick is coarser than these calls, so the writes
     # are spaced far enough apart to state three different times rather than one.
-    write_retrospective(tmp_path, project_id="first", task="t", worked="w", did_not_work="d")
+    write_retrospective(
+        tmp_path, project_id="first", task="t", worked="w", did_not_work="d"
+    )
     time.sleep(0.05)
-    write_retrospective(tmp_path, project_id="second", task="t", worked="w", did_not_work="d")
+    write_retrospective(
+        tmp_path, project_id="second", task="t", worked="w", did_not_work="d"
+    )
     time.sleep(0.05)
-    write_retrospective(tmp_path, project_id="third", task="t", worked="w", did_not_work="d")
+    write_retrospective(
+        tmp_path, project_id="third", task="t", worked="w", did_not_work="d"
+    )
 
     result = load_project_memory(tmp_path, "retrospectives", limit=10)
     assert result["count"] == 3
@@ -211,12 +219,16 @@ def test_load_retrospectives_filter_substring(tmp_path: Path):
         did_not_work="d",
     )
 
-    result = load_project_memory(tmp_path, "retrospectives", filter_substring="currant")
+    result = load_project_memory(
+        tmp_path, "retrospectives", filter_substring="currant"
+    )
     assert result["count"] == 1
     assert result["retrospectives"][0]["project_id"] == "currant-efb"
 
     # Filter also matches on content
-    result = load_project_memory(tmp_path, "retrospectives", filter_substring="bur detection")
+    result = load_project_memory(
+        tmp_path, "retrospectives", filter_substring="bur detection"
+    )
     assert result["count"] == 1
     assert result["retrospectives"][0]["project_id"] == "chestnut-bur"
 
@@ -253,8 +265,12 @@ def test_a_report_missing_a_field_its_writer_records_refuses_rather_than_reading
 
     from tcip_mcp.tools.meta_tools import friction_report_key
 
-    ts.replace(friction_report_key(str(tmp_path), "20260304T120000Z_missing_tool_a1b2"),
-               {"timestamp": "2026-03-04T12:00:00+00:00"})
+    ts.replace(
+        friction_report_key(
+            str(tmp_path), "20260304T120000Z_missing_tool_a1b2"
+        ),
+        {"timestamp": "2026-03-04T12:00:00+00:00"},
+    )
 
     with pytest.raises(KeyError, match="category"):
         load_project_memory(tmp_path, "reports")
@@ -265,7 +281,12 @@ def test_a_report_that_is_not_a_json_object_will_not_decode(tmp_path: Path):
 
     from tcip_mcp.tools.meta_tools import friction_report_key
 
-    ts.replace(friction_report_key(str(tmp_path), "20260304T120000Z_missing_tool_a1b2"), "text")
+    ts.replace(
+        friction_report_key(
+            str(tmp_path), "20260304T120000Z_missing_tool_a1b2"
+        ),
+        "text",
+    )
 
     with pytest.raises(ts.DecodeError, match="not a JSON object"):
         read_report(str(tmp_path), "20260304T120000Z_missing_tool_a1b2")
@@ -275,7 +296,9 @@ def test_load_reports_recent_first_and_respects_limit(tmp_path: Path):
     # Each report is stamped from the clock, whose tick is coarser than these calls, so the writes
     # are spaced far enough apart to state four different times rather than one.
     for i in range(4):
-        report_friction(tmp_path, category="unexpected_behavior", detail=f"r{i}")
+        report_friction(
+            tmp_path, category="unexpected_behavior", detail=f"r{i}"
+        )
         time.sleep(0.05)
 
     result = load_project_memory(tmp_path, "reports", limit=2)
@@ -286,10 +309,13 @@ def test_load_reports_recent_first_and_respects_limit(tmp_path: Path):
     assert result["reports"][1]["detail"] == "r2"
 
 
-def test_a_retrospective_stating_no_section_sorts_after_every_dated_one_by_name(tmp_path: Path):
+def test_a_retrospective_stating_no_section_sorts_after_every_dated_one_by_name(
+    tmp_path: Path,
+):
     """A document that states no time is never given one, and lands in one fixed place by name."""
     write_retrospective(
-        tmp_path, project_id="dated", task="t", worked="w", did_not_work="d")
+        tmp_path, project_id="dated", task="t", worked="w", did_not_work="d"
+    )
     for project_id in ("zzz-undated", "aaa-undated"):
         ts.replace(
             retrospective_key(str(tmp_path), project_id),
@@ -300,23 +326,34 @@ def test_a_retrospective_stating_no_section_sorts_after_every_dated_one_by_name(
     result = load_project_memory(tmp_path, "retrospectives", limit=10)
 
     assert [r["project_id"] for r in result["retrospectives"]] == [
-        "dated", "aaa-undated", "zzz-undated"]
+        "dated",
+        "aaa-undated",
+        "zzz-undated",
+    ]
 
 
 def test_load_reports_filters_by_category(tmp_path: Path):
     report_friction(tmp_path, category="missing_tool", detail="a")
     report_friction(tmp_path, category="ambiguous_data", detail="b")
 
-    result = load_project_memory(tmp_path, "reports", category="ambiguous_data")
+    result = load_project_memory(
+        tmp_path, "reports", category="ambiguous_data"
+    )
     assert result["count"] == 1
     assert result["reports"][0]["detail"] == "b"
 
 
 def test_load_reports_filter_substring(tmp_path: Path):
-    report_friction(tmp_path, category="missing_tool", detail="trait profile lookup")
-    report_friction(tmp_path, category="missing_tool", detail="something else entirely")
+    report_friction(
+        tmp_path, category="missing_tool", detail="trait profile lookup"
+    )
+    report_friction(
+        tmp_path, category="missing_tool", detail="something else entirely"
+    )
 
-    result = load_project_memory(tmp_path, "reports", filter_substring="trait profile")
+    result = load_project_memory(
+        tmp_path, "reports", filter_substring="trait profile"
+    )
     assert result["count"] == 1
     assert result["reports"][0]["detail"] == "trait profile lookup"
 
@@ -343,8 +380,15 @@ def test_report_friction_records_user_disagreement(tmp_path: Path):
 
 
 def test_load_reports_roundtrips_user_disagreement(tmp_path: Path):
-    report_friction(tmp_path, category="missing_tool", detail="a", user_disagreement=False)
-    report_friction(tmp_path, category="needs_human_judgment", detail="b", user_disagreement=True)
+    report_friction(
+        tmp_path, category="missing_tool", detail="a", user_disagreement=False
+    )
+    report_friction(
+        tmp_path,
+        category="needs_human_judgment",
+        detail="b",
+        user_disagreement=True,
+    )
 
     result = load_project_memory(tmp_path, "reports", limit=10)
     flags = {r["detail"]: r["user_disagreement"] for r in result["reports"]}
@@ -352,21 +396,29 @@ def test_load_reports_roundtrips_user_disagreement(tmp_path: Path):
     assert flags["b"] is True
 
 
-def test_a_friction_report_counts_toward_the_recent_activity_its_audit_line_records(tmp_path: Path):
+def test_a_friction_report_counts_toward_the_recent_activity_its_audit_line_records(
+    tmp_path: Path,
+):
     report_friction(tmp_path, category="missing_tool", detail="a")
     status = _recent_activity(tmp_path)
     assert status["reports_since_last_retrospective"] == 1
     assert status["reports_since_last_distillation"] == 1
 
 
-def test_a_retrospective_resets_the_report_count_and_is_pointed_at_by_id(tmp_path: Path):
+def test_a_retrospective_resets_the_report_count_and_is_pointed_at_by_id(
+    tmp_path: Path,
+):
     report_friction(tmp_path, category="missing_tool", detail="a")
-    write_retrospective(tmp_path, project_id="p", task="t", worked="w", did_not_work="d")
+    write_retrospective(
+        tmp_path, project_id="p", task="t", worked="w", did_not_work="d"
+    )
 
     status = _recent_activity(tmp_path)
     assert status["reports_since_last_retrospective"] == 0
     assert status["last_retrospective"]["project_id"] == "p"
-    assert "worked" not in json.dumps(status)  # no retrospective text, pointer only
+    assert "worked" not in json.dumps(
+        status
+    )  # no retrospective text, pointer only
 
 
 def test_record_distillation_pass_resets_distillation_counters(tmp_path: Path):
@@ -381,7 +433,9 @@ def test_record_distillation_pass_resets_distillation_counters(tmp_path: Path):
     assert status["last_distillation_at"]
 
 
-def test_record_distillation_pass_never_touches_reports_or_retrospectives(tmp_path: Path):
+def test_record_distillation_pass_never_touches_reports_or_retrospectives(
+    tmp_path: Path,
+):
     # Bookkeeping only: must never write/modify/delete the underlying records it's counting.
     report_friction(tmp_path, category="missing_tool", detail="a")
     before = report_documents(str(tmp_path))

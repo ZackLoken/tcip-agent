@@ -30,7 +30,11 @@ def _mosaic_array(height: int, width: int) -> np.ndarray:
     window served from the wrong block cannot match the right one."""
     rows = np.arange(height, dtype=np.int64)[:, None]
     cols = np.arange(width, dtype=np.int64)[None, :]
-    planes = [(rows * 13 + cols * 7), (rows * 3 + cols * 29), (rows * 41 + cols * 11)]
+    planes = [
+        (rows * 13 + cols * 7),
+        (rows * 3 + cols * 29),
+        (rows * 41 + cols * 11),
+    ]
     return np.stack([(p % 251).astype(np.uint8) for p in planes], axis=-1)
 
 
@@ -53,7 +57,9 @@ def multi_tile_raster(tmp_path_factory) -> tuple[Path, np.ndarray]:
     return path, arr
 
 
-def test_the_fixture_spans_many_internal_tiles_on_both_axes(multi_tile_raster) -> None:
+def test_the_fixture_spans_many_internal_tiles_on_both_axes(
+    multi_tile_raster,
+) -> None:
     """The property every other test in this file rests on: the file really is internally tiled,
     with several tiles across and several down, so a read touches more than one block."""
     path, arr = multi_tile_raster
@@ -71,7 +77,9 @@ def test_a_traversal_whose_windows_straddle_tile_boundaries_reassembles_the_rast
     """A windowed pass over a multi-tile raster, stepped so that no window edge falls on a tile
     edge, returns the same pixels a whole decode of the same file does."""
     path, arr = multi_tile_raster
-    assert _STEP_X % _TILE and _STEP_Y % _TILE, "the pass must not be aligned to the tile grid"
+    assert _STEP_X % _TILE and _STEP_Y % _TILE, (
+        "the pass must not be aligned to the tile grid"
+    )
 
     rows = []
     with open_raster(path, 3) as src:
@@ -79,9 +87,13 @@ def test_a_traversal_whose_windows_straddle_tile_boundaries_reassembles_the_rast
         assert (src.width, src.height) == (_WIDTH, _HEIGHT)
         for y0 in range(0, src.height, _STEP_Y):
             y1 = min(y0 + _STEP_Y, src.height)
-            cols = [src.read_window(y0, y1, x0, min(x0 + _STEP_X, src.width))
-                    for x0 in range(0, src.width, _STEP_X)]
-            assert len(cols) > 2, "each row of the pass must span several windows"
+            cols = [
+                src.read_window(y0, y1, x0, min(x0 + _STEP_X, src.width))
+                for x0 in range(0, src.width, _STEP_X)
+            ]
+            assert len(cols) > 2, (
+                "each row of the pass must span several windows"
+            )
             rows.append(np.concatenate(cols, axis=1))
     assert len(rows) > 2, "the pass must span several rows of windows"
 
@@ -91,7 +103,9 @@ def test_a_traversal_whose_windows_straddle_tile_boundaries_reassembles_the_rast
     assert np.array_equal(assembled, tifffile.imread(str(path)))
 
 
-def test_an_interior_window_of_a_multi_tile_raster_is_its_own_pixels(multi_tile_raster) -> None:
+def test_an_interior_window_of_a_multi_tile_raster_is_its_own_pixels(
+    multi_tile_raster,
+) -> None:
     """One window taken from the middle of the raster, spanning four internal tiles and sharing an
     edge with none of them, is exactly the slice it names."""
     path, arr = multi_tile_raster
@@ -106,11 +120,14 @@ def test_an_interior_window_of_a_multi_tile_raster_is_its_own_pixels(multi_tile_
 
 
 def test_a_worker_share_scales_the_block_cache_budget_it_commits(
-    monkeypatch, restored_gdal_cache,
+    monkeypatch,
+    restored_gdal_cache,
 ) -> None:
     """A process holding one of several peer caches (a DataLoader worker) commits its share of the
     budget, so the peers together commit what one process alone would, never that much each."""
-    monkeypatch.setattr(raster_source, "_memory_budget_bytes", lambda: 8 * 1024 ** 3)
+    monkeypatch.setattr(
+        raster_source, "_memory_budget_bytes", lambda: 8 * 1024**3
+    )
 
     raster_source.configure_gdal_cache()
     whole = raster_source.gdal_cache_bytes()
@@ -122,7 +139,8 @@ def test_a_worker_share_scales_the_block_cache_budget_it_commits(
 
 
 def test_a_host_too_small_to_budget_still_commits_an_unambiguous_byte_count(
-    monkeypatch, restored_gdal_cache,
+    monkeypatch,
+    restored_gdal_cache,
 ) -> None:
     """GDAL reads its cache setting as megabytes below a threshold and as bytes at or above it, so
     even a budget far under that threshold is committed at the floor that keeps it bytes."""
@@ -130,4 +148,7 @@ def test_a_host_too_small_to_budget_still_commits_an_unambiguous_byte_count(
 
     raster_source.configure_gdal_cache()
 
-    assert raster_source.gdal_cache_bytes() >= raster_source._GDAL_CACHEMAX_BYTES_FLOOR
+    assert (
+        raster_source.gdal_cache_bytes()
+        >= raster_source._GDAL_CACHEMAX_BYTES_FLOOR
+    )

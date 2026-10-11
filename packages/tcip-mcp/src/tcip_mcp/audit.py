@@ -47,8 +47,13 @@ class AuditEntryNotWrittenError(RuntimeError):
     committed without reading it back.
     """
 
-    def __init__(self, tool: str, cause: BaseException, *,
-                 arguments: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        tool: str,
+        cause: BaseException,
+        *,
+        arguments: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(
             f"{tool} completed and its audit entry could not be written: {cause}. Whatever the "
             "call changed is committed and unrecorded, so do not retry it blind: repair the "
@@ -65,8 +70,9 @@ def audit_log_key(scope: str | Path) -> Key:
     return Key(AUDIT_LOG_STORE, str(Path(scope).resolve()), _AUDIT_PARTS)
 
 
-def audit_entries(scope: str | Path, *,
-                  after: str | None = None) -> tuple[list[Mapping[str, Any]], str]:
+def audit_entries(
+    scope: str | Path, *, after: str | None = None
+) -> tuple[list[Mapping[str, Any]], str]:
     """Every entry of ``scope``'s log (:func:`audit_entry`'s shape), in the order they landed
     past the cursor ``after``, and the log's cursor. A log carrying undecodable entries raises
     ``ValueError`` naming how many."""
@@ -75,16 +81,21 @@ def audit_entries(scope: str | Path, *,
     key = audit_log_key(scope)
     page = read_log(key, after=after)
     if page.corrupt:
-        raise ValueError(f"the audit log at {key.root} carries {len(page.corrupt)} undecodable "
-                         "entries; repair the log before trusting a read of it")
+        raise ValueError(
+            f"the audit log at {key.root} carries {len(page.corrupt)} undecodable "
+            "entries; repair the log before trusting a read of it"
+        )
     return list(page.records), page.cursor
 
 
-def acts_of(scope: str | Path, tools: tuple[str, ...], *,
-            after: str | None = None) -> tuple[list[Mapping[str, Any]], str]:
+def acts_of(
+    scope: str | Path, tools: tuple[str, ...], *, after: str | None = None
+) -> tuple[list[Mapping[str, Any]], str]:
     """The ``ok`` entries of ``tools`` among :func:`audit_entries`, and the log's cursor."""
     entries, cursor = audit_entries(scope, after=after)
-    return [e for e in entries if e["status"] == "ok" and e["tool"] in tools], cursor
+    return [
+        e for e in entries if e["status"] == "ok" and e["tool"] in tools
+    ], cursor
 
 
 def now_iso() -> str:
@@ -151,7 +162,9 @@ def record_event_or_raise(
     try:
         append(audit_log_key(scope), entry)
     except Exception as exc:
-        raise AuditEntryNotWrittenError(tool, exc, arguments=arguments) from exc
+        raise AuditEntryNotWrittenError(
+            tool, exc, arguments=arguments
+        ) from exc
 
 
 def dataset_scope_of(value: Any) -> Path | None:
@@ -171,7 +184,8 @@ def dataset_scope_of(value: Any) -> Path | None:
     if root is None:
         candidate = Path(value)
         if not candidate.is_dir() or not (
-            (candidate / ".tcip").is_dir() or (candidate / SUBJECTS_FILENAME).is_file()
+            (candidate / ".tcip").is_dir()
+            or (candidate / SUBJECTS_FILENAME).is_file()
         ):
             return None
         root = candidate
@@ -202,6 +216,7 @@ def audited(
     propagates and the failed append is logged. A declared scope that cannot be resolved refuses
     the call.
     """
+
     def decorate(func: Callable) -> Callable:
         sig = inspect.signature(func)
         if "project" not in sig.parameters:
@@ -223,7 +238,9 @@ def audited(
             logged_args: dict[str, Any] = dict(bound.arguments)
             project = logged_args.pop("project")
             logged_args.pop("workspace", None)
-            entry = audit_entry(tool_name, logged_args, logged_args.pop(ACTOR_KEY, None))
+            entry = audit_entry(
+                tool_name, logged_args, logged_args.pop(ACTOR_KEY, None)
+            )
             where = bound.arguments.get(scope_arg) if scope_arg else None
             if scope_arg and where is not None:
                 bound.arguments[scope_arg] = where = located(where, project)
@@ -234,7 +251,10 @@ def audited(
                 # recorded in that dataset's own log rather than the project's.
                 scope = dataset_scope_of(where) if where is not None else None
                 entry["duration_ms"] = round((time.monotonic() - t0) * 1000, 1)
-                append(audit_log_key(scope if scope is not None else project), entry)
+                append(
+                    audit_log_key(scope if scope is not None else project),
+                    entry,
+                )
 
             # One entry per call by construction: the two paths are exclusive, and neither
             # writer sits inside a handler that could run the other.
@@ -247,7 +267,11 @@ def audited(
                     record()
                 except Exception:
                     # The body's exception is the caller's answer; this one never displaces it.
-                    logger.warning("Failed to audit the failed %s call", tool_name, exc_info=True)
+                    logger.warning(
+                        "Failed to audit the failed %s call",
+                        tool_name,
+                        exc_info=True,
+                    )
                 raise
             if isinstance(result, dict) and result.get("error") is not None:
                 return result  # a refusal returned as the error dict every tool returns: no act
@@ -255,8 +279,14 @@ def audited(
             try:
                 record()
             except Exception as exc:
-                logger.warning("Failed to write the audit entry for %s", tool_name, exc_info=True)
-                raise MutationCommittedWithoutAuditLineError(tool_name, exc) from exc
+                logger.warning(
+                    "Failed to write the audit entry for %s",
+                    tool_name,
+                    exc_info=True,
+                )
+                raise MutationCommittedWithoutAuditLineError(
+                    tool_name, exc
+                ) from exc
             return result
 
         return wrapper

@@ -12,7 +12,11 @@ from pathlib import Path
 import pytest
 
 from tests._chain_fixtures import (
-    BESPOKE_CLASSIFIER, BESPOKE_DETECTION, BESPOKE_MODELS, run_config, training_config,
+    BESPOKE_CLASSIFIER,
+    BESPOKE_DETECTION,
+    BESPOKE_MODELS,
+    run_config,
+    training_config,
 )
 from tests._training_values import evaluation_block
 
@@ -20,14 +24,23 @@ SUBJECT = "leaf"
 
 
 def _cfg(images_dir, *, builder_kwargs, image_stats_sampling=None):
-    model_source = {"builder": BESPOKE_DETECTION, "builder_kwargs": builder_kwargs,
-                    "source_files": [BESPOKE_MODELS], "task": "detection"}
+    model_source = {
+        "builder": BESPOKE_DETECTION,
+        "builder_kwargs": builder_kwargs,
+        "source_files": [BESPOKE_MODELS],
+        "task": "detection",
+    }
     if image_stats_sampling is not None:
         model_source["image_stats_sampling"] = image_stats_sampling
     return training_config(
         model_source,
-        {"images_dir": str(images_dir), "scope": {"subject": SUBJECT}, "auto_val": False},
-        evaluation=evaluation_block(selection_metric="loss"))
+        {
+            "images_dir": str(images_dir),
+            "scope": {"subject": SUBJECT},
+            "auto_val": False,
+        },
+        evaluation=evaluation_block(selection_metric="loss"),
+    )
 
 
 def _label(images_dir, *stems, width=16, height=16):
@@ -39,20 +52,29 @@ def _label(images_dir, *stems, width=16, height=16):
     from tests._producer_fixtures import label_image
 
     for stem in stems:
-        label_image(images_dir / stem, [Annotation(subject=SUBJECT, geometry=BBox(1, 1, 5, 5))],
-                    width, height)
+        label_image(
+            images_dir / stem,
+            [Annotation(subject=SUBJECT, geometry=BBox(1, 1, 5, 5))],
+            width,
+            height,
+        )
 
 
 def _derived(paths, num_channels: int = 3) -> tuple[dict, dict]:
     """The ``builder_kwargs`` statistics and their ``image_stats_sampling`` record, both from the
     exact normalization derivation (``derivations.band_normalization_stats``) over ``paths``,
     every one of which it must read, rendered by ``derivations.image_stats_provenance``."""
-    from tcip_mcp.pipelines.derivations import band_normalization_stats, image_stats_provenance
+    from tcip_mcp.pipelines.derivations import (
+        band_normalization_stats,
+        image_stats_provenance,
+    )
 
     result = band_normalization_stats(paths, num_channels)
     assert result is not None and len(result[2]) == len(paths), result
     mean, std, _ = result
-    return {"image_mean": mean, "image_std": std}, image_stats_provenance(result)
+    return {"image_mean": mean, "image_std": std}, image_stats_provenance(
+        result
+    )
 
 
 def test_preflight_refuses_statistics_with_no_provenance(tmp_path):
@@ -61,7 +83,10 @@ def test_preflight_refuses_statistics_with_no_provenance(tmp_path):
 
     imgs = tmp_path / "images" / UNDATED_BUCKET
     imgs.mkdir(parents=True)
-    cfg = _cfg(imgs, builder_kwargs={"image_mean": [0.1, 0.2], "image_std": [0.1, 0.1]})
+    cfg = _cfg(
+        imgs,
+        builder_kwargs={"image_mean": [0.1, 0.2], "image_std": [0.1, 0.1]},
+    )
 
     r = preflight_config(tmp_path, cfg)
     assert r["valid"] is False
@@ -82,7 +107,9 @@ def test_preflight_refuses_a_window_path_outside_images_dir(tmp_path):
     Image.new("RGB", (16, 16)).save(outside)
 
     builder_kwargs, record = _derived([outside])
-    cfg = _cfg(imgs, builder_kwargs=builder_kwargs, image_stats_sampling=record)
+    cfg = _cfg(
+        imgs, builder_kwargs=builder_kwargs, image_stats_sampling=record
+    )
 
     r = preflight_config(tmp_path, cfg)
     assert r["valid"] is False
@@ -103,9 +130,20 @@ def test_preflight_records_not_checked_when_no_membership_resolved(tmp_path):
     Image.new("RGB", (16, 16)).save(image)
     builder_kwargs, record = _derived([image])
     cfg = training_config(
-        {"builder": BESPOKE_DETECTION, "builder_kwargs": builder_kwargs, "task": "detection",
-         "source_files": [BESPOKE_MODELS], "image_stats_sampling": record},
-        {"dataset_source": {"builder": BESPOKE_CLASSIFIER, "source_files": [BESPOKE_MODELS]}})
+        {
+            "builder": BESPOKE_DETECTION,
+            "builder_kwargs": builder_kwargs,
+            "task": "detection",
+            "source_files": [BESPOKE_MODELS],
+            "image_stats_sampling": record,
+        },
+        {
+            "dataset_source": {
+                "builder": BESPOKE_CLASSIFIER,
+                "source_files": [BESPOKE_MODELS],
+            }
+        },
+    )
 
     r = preflight_config(tmp_path, cfg)
     assert r["image_stats_containment"] == "not_checked"
@@ -127,10 +165,14 @@ def test_preflight_admits_the_exact_derivations_own_record(tmp_path):
     _label(imgs, "a")
 
     builder_kwargs, record = _derived([a])
-    cfg = _cfg(imgs, builder_kwargs=builder_kwargs, image_stats_sampling=record)
+    cfg = _cfg(
+        imgs, builder_kwargs=builder_kwargs, image_stats_sampling=record
+    )
 
     r = preflight_config(tmp_path, cfg)
-    assert not any("image_stats_sampling" in i or "outside" in i for i in r["issues"]), r["issues"]
+    assert not any(
+        "image_stats_sampling" in i or "outside" in i for i in r["issues"]
+    ), r["issues"]
     assert r["image_stats_containment"] == "checked"
 
 
@@ -142,7 +184,8 @@ def test_preflight_admits_the_sampled_derivations_own_record(tmp_path):
     from PIL import Image
 
     from tcip_mcp.pipelines.derivations import (
-        band_normalization_stats_sampled, image_stats_provenance,
+        band_normalization_stats_sampled,
+        image_stats_provenance,
     )
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -153,18 +196,27 @@ def test_preflight_admits_the_sampled_derivations_own_record(tmp_path):
     _label(imgs, "a")
 
     result = band_normalization_stats_sampled(
-        [a], 3, seed=1, window_size=8, max_windows_per_image=4)
+        [a], 3, seed=1, window_size=8, max_windows_per_image=4
+    )
     assert result is not None
-    cfg = _cfg(imgs, builder_kwargs={"image_mean": result.mean, "image_std": result.std},
-              image_stats_sampling=image_stats_provenance(
-                  result, window_size=8, max_windows_per_image=4))
+    cfg = _cfg(
+        imgs,
+        builder_kwargs={"image_mean": result.mean, "image_std": result.std},
+        image_stats_sampling=image_stats_provenance(
+            result, window_size=8, max_windows_per_image=4
+        ),
+    )
 
     r = preflight_config(tmp_path, cfg)
-    assert not any("image_stats_sampling" in i or "outside" in i for i in r["issues"]), r["issues"]
+    assert not any(
+        "image_stats_sampling" in i or "outside" in i for i in r["issues"]
+    ), r["issues"]
     assert r["image_stats_containment"] == "checked"
 
 
-def test_preflight_admits_the_exact_derivations_record_over_a_band_group_dataset(tmp_path):
+def test_preflight_admits_the_exact_derivations_record_over_a_band_group_dataset(
+    tmp_path,
+):
     """The exact derivation must label a band-group raster by its manifest path (the same label
     preflight's containment check resolves data.images_dir's own band groups to), not str() of the
     BandGroupRef object itself, which would never match and would refuse every band-group run."""
@@ -185,7 +237,9 @@ def test_preflight_admits_the_exact_derivations_record_over_a_band_group_dataset
     _label(imgs, "cap", width=8, height=8)
 
     builder_kwargs, record = _derived([list_logical_images(imgs)["cap"]], 2)
-    cfg = _cfg(imgs, builder_kwargs=builder_kwargs, image_stats_sampling=record)
+    cfg = _cfg(
+        imgs, builder_kwargs=builder_kwargs, image_stats_sampling=record
+    )
 
     r = preflight_config(tmp_path, cfg)
     assert not any("outside" in i for i in r["issues"]), r["issues"]
@@ -201,25 +255,41 @@ def test_preflight_keeps_every_sample_of_a_two_date_selection(tmp_path):
     from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.tools.training_tools import preflight_config
 
-    from tests.test_selection_binding import DATES, SUBJECT, _two_subject_two_date_dataset
+    from tests.test_selection_binding import (
+        DATES,
+        SUBJECT,
+        _two_subject_two_date_dataset,
+    )
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     from tcip_mcp.tools.data_tools import draw_splits
 
     assert "error" not in draw_splits(
-        tmp_path, str(root), output_path=str(out), subject=SUBJECT, seed=7,
-        val_ratio=0.25, calibration_ratio=0.125, holdout_ratio=0.125), "the draw is the fixture"
+        tmp_path,
+        str(root),
+        output_path=str(out),
+        subject=SUBJECT,
+        seed=7,
+        val_ratio=0.25,
+        calibration_ratio=0.125,
+        holdout_ratio=0.125,
+    ), "the draw is the fixture"
     drawn = read_selection(out, project=tmp_path)
     bound = [s for s in drawn.samples if s.side in ("train", "val")]
     assert len({s.member for s in bound}) < len(bound), (
-        "the fixture must hold one member name on two dates for this to bite")
+        "the fixture must hold one member name on two dates for this to bite"
+    )
     assert {Path(s.source).parent.name for s in bound} == set(DATES)
 
     builder_kwargs, record = _derived([s.source for s in bound])
-    model_source = {"builder": BESPOKE_DETECTION, "builder_kwargs": builder_kwargs,
-                    "source_files": [BESPOKE_MODELS], "task": "detection",
-                    "image_stats_sampling": record}
+    model_source = {
+        "builder": BESPOKE_DETECTION,
+        "builder_kwargs": builder_kwargs,
+        "source_files": [BESPOKE_MODELS],
+        "task": "detection",
+        "image_stats_sampling": record,
+    }
     r = preflight_config(tmp_path, run_config(out, model_source))
 
     assert r["image_stats_containment"] == "checked"
@@ -227,7 +297,9 @@ def test_preflight_keeps_every_sample_of_a_two_date_selection(tmp_path):
     assert r["valid"] is True, r["issues"]
 
 
-def test_preflight_refuses_a_hand_written_dict_naming_the_record_keys(tmp_path):
+def test_preflight_refuses_a_hand_written_dict_naming_the_record_keys(
+    tmp_path,
+):
     """A record shaped by neither derivation, carrying neither 'windows' nor 'pixel_fraction', is
     refused, and the refusal names both keys rather than a generic 'missing provenance'."""
     pytest.importorskip("torch")
@@ -235,13 +307,20 @@ def test_preflight_refuses_a_hand_written_dict_naming_the_record_keys(tmp_path):
 
     imgs = tmp_path / "images" / UNDATED_BUCKET
     imgs.mkdir(parents=True)
-    cfg = _cfg(imgs, builder_kwargs={"image_mean": [0.1, 0.2], "image_std": [0.1, 0.1]},
-              image_stats_sampling={"note": "derived by hand, not through either derivation"})
+    cfg = _cfg(
+        imgs,
+        builder_kwargs={"image_mean": [0.1, 0.2], "image_std": [0.1, 0.1]},
+        image_stats_sampling={
+            "note": "derived by hand, not through either derivation"
+        },
+    )
 
     r = preflight_config(tmp_path, cfg)
     assert r["valid"] is False
     for key in ("windows", "pixel_fraction"):
-        assert any(f"image_stats_sampling.{key}" in i for i in r["issues"]), r["issues"]
+        assert any(f"image_stats_sampling.{key}" in i for i in r["issues"]), r[
+            "issues"
+        ]
 
 
 def test_preflight_refuses_a_record_naming_no_window(tmp_path):
@@ -252,15 +331,20 @@ def test_preflight_refuses_a_record_naming_no_window(tmp_path):
 
     imgs = tmp_path / "images" / UNDATED_BUCKET
     imgs.mkdir(parents=True)
-    cfg = _cfg(imgs, builder_kwargs={"image_mean": [0.1, 0.2], "image_std": [0.1, 0.1]},
-               image_stats_sampling={"windows": [], "pixel_fraction": 1.0})
+    cfg = _cfg(
+        imgs,
+        builder_kwargs={"image_mean": [0.1, 0.2], "image_std": [0.1, 0.1]},
+        image_stats_sampling={"windows": [], "pixel_fraction": 1.0},
+    )
 
     r = preflight_config(tmp_path, cfg)
     assert r["valid"] is False
     assert any("non-empty 'windows'" in i for i in r["issues"]), r["issues"]
 
 
-def test_preflight_reads_the_band_count_over_every_source_the_run_admits(tmp_path):
+def test_preflight_reads_the_band_count_over_every_source_the_run_admits(
+    tmp_path,
+):
     """Preflight reads the run's own sizes the way the run reads them, over every source it
     admits: a second source of another band count is named here, rather than one source being
     probed and the rest trained at its count."""
@@ -274,7 +358,9 @@ def test_preflight_reads_the_band_count_over_every_source_the_run_admits(tmp_pat
     imgs = tmp_path / "images" / UNDATED_BUCKET
     imgs.mkdir(parents=True)
     Image.new("RGB", (16, 16)).save(imgs / "a.png")
-    tifffile.imwrite(str(imgs / "b.tif"), np.zeros((16, 16, 5), dtype=np.uint8))
+    tifffile.imwrite(
+        str(imgs / "b.tif"), np.zeros((16, 16, 5), dtype=np.uint8)
+    )
     _label(imgs, "a", "b")
 
     r = preflight_config(tmp_path, _cfg(imgs, builder_kwargs={}))
@@ -283,7 +369,9 @@ def test_preflight_reads_the_band_count_over_every_source_the_run_admits(tmp_pat
     assert any("different band counts" in i for i in r["issues"]), r["issues"]
 
 
-def test_a_copied_projects_run_reads_its_statistics_windows_from_the_copy(tmp_path):
+def test_a_copied_projects_run_reads_its_statistics_windows_from_the_copy(
+    tmp_path,
+):
     """The images a run's statistics windows name are stored against its project like its data,
     so a copied project's run reads each window's image from the copy."""
     pytest.importorskip("torch")
@@ -302,17 +390,21 @@ def test_a_copied_projects_run_reads_its_statistics_windows_from_the_copy(tmp_pa
     Image.new("RGB", (16, 16)).save(a)
     _label(imgs, "a")
     builder_kwargs, record = _derived([a])
-    run = opened_run(project, _cfg(imgs, builder_kwargs=builder_kwargs,
-                                   image_stats_sampling=record))
+    run = opened_run(
+        project,
+        _cfg(imgs, builder_kwargs=builder_kwargs, image_stats_sampling=record),
+    )
 
     copy = tmp_path / "copy"
     ts.release_root(project)
     shutil.copytree(project, copy)
-    sampling = observe(copy / run.relative_to(project)).record["config"]["model_source"][
-        "image_stats_sampling"]
+    sampling = observe(copy / run.relative_to(project)).record["config"][
+        "model_source"
+    ]["image_stats_sampling"]
 
-    assert [window[0] for window in sampling["windows"]] == [str((copy / a.relative_to(
-        project)).resolve())]
+    assert [window[0] for window in sampling["windows"]] == [
+        str((copy / a.relative_to(project)).resolve())
+    ]
 
 
 def test_preflight_admits_a_three_channel_config_with_no_statistics(tmp_path):

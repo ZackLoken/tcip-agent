@@ -4,11 +4,16 @@ The on-disk registry (``<dataset_root>/subjects.json``) is self-describing and n
 example, with ``tree`` and ``fruit`` as the subjects::
 
     {
-      "tree": {"description": "one tree crown"},
-      "fruit": {"description": "one fruit",
-                "attributes": {
-                  "condition": {"type": "categorical", "values": ["healthy", "diseased"]}
-                }}
+        "tree": {"description": "one tree crown"},
+        "fruit": {
+            "description": "one fruit",
+            "attributes": {
+                "condition": {
+                    "type": "categorical",
+                    "values": ["healthy", "diseased"],
+                }
+            },
+        },
     }
 
 An attribute is an axis a subject's instances carry, ``categorical`` (unordered) or ``ordinal``
@@ -46,7 +51,9 @@ class Attribute:
     def __post_init__(self) -> None:
         if self.type not in ATTR_TYPES:
             raise ValueError(f"type {self.type!r} not in {ATTR_TYPES}")
-        if not self.values or not all(isinstance(v, str) and v for v in self.values):
+        if not self.values or not all(
+            isinstance(v, str) and v for v in self.values
+        ):
             raise ValueError("values must be a non-empty list of names")
         if len(set(self.values)) != len(self.values):
             raise ValueError(f"duplicate values: {list(self.values)}")
@@ -111,33 +118,55 @@ def registry_from_dict(data: object) -> SubjectRegistry:
     subjects: list[Subject] = []
     for sname, sbody in data.items():
         if not isinstance(sbody, dict):
-            raise RegistryError(f"subject {sname!r} must be an object, got {type(sbody).__name__}")
+            raise RegistryError(
+                f"subject {sname!r} must be an object, got {type(sbody).__name__}"
+            )
         attrs: list[Attribute] = []
         raw_attrs = sbody.get("attributes")
-        if raw_attrs is None:  # absent/null attributes -> a detection-only subject (valid)
+        if (
+            raw_attrs is None
+        ):  # absent/null attributes -> a detection-only subject (valid)
             raw_attrs = {}
         # a falsy non-object (false/0/""/[]) is malformed, not "none"
         if not isinstance(raw_attrs, dict):
             raise RegistryError(
-                f"subject {sname!r} 'attributes' must be an object, got {type(raw_attrs).__name__}")
+                f"subject {sname!r} 'attributes' must be an object, got {type(raw_attrs).__name__}"
+            )
         for aname, abody in raw_attrs.items():
             if not isinstance(abody, dict):
-                raise RegistryError(f"attribute {sname}.{aname} must be an object")
+                raise RegistryError(
+                    f"attribute {sname}.{aname} must be an object"
+                )
             values = abody.get("values")
             if not isinstance(values, list):
-                raise RegistryError(f"attribute {sname}.{aname} 'values' must be a list")
+                raise RegistryError(
+                    f"attribute {sname}.{aname} 'values' must be a list"
+                )
             # The value invariant (known type, non-empty, distinct) lives on Attribute, one guard,
             # shared by the parser and any code that constructs an Attribute directly.
             try:
                 # Attribute.__post_init__ is the type gate, so the type is cast here, not checked.
                 attrs.append(
-                    Attribute(name=aname, type=cast(str, abody.get("type")), values=tuple(values)))
+                    Attribute(
+                        name=aname,
+                        type=cast(str, abody.get("type")),
+                        values=tuple(values),
+                    )
+                )
             except ValueError as exc:
-                raise RegistryError(f"attribute {sname}.{aname}: {exc}") from exc
+                raise RegistryError(
+                    f"attribute {sname}.{aname}: {exc}"
+                ) from exc
         description = sbody.get("description")
         if not isinstance(description, str):
-            raise RegistryError(f"subject {sname!r} states no description string")
-        subjects.append(Subject(name=sname, description=description, attributes=tuple(attrs)))
+            raise RegistryError(
+                f"subject {sname!r} states no description string"
+            )
+        subjects.append(
+            Subject(
+                name=sname, description=description, attributes=tuple(attrs)
+            )
+        )
     return SubjectRegistry(subjects=tuple(subjects))
 
 
@@ -145,8 +174,12 @@ def registry_from_request(subjects: object) -> SubjectRegistry:
     """:func:`registry_from_dict` over an authoring request, in which a subject stating no
     ``description`` is one described by nothing yet."""
     if isinstance(subjects, dict):
-        subjects = {name: {"description": "", **body} if isinstance(body, dict) else body
-                    for name, body in subjects.items()}
+        subjects = {
+            name: {"description": "", **body}
+            if isinstance(body, dict)
+            else body
+            for name, body in subjects.items()
+        }
     return registry_from_dict(subjects)
 
 
@@ -158,7 +191,8 @@ def registry_to_dict(registry: SubjectRegistry) -> dict:
         body: dict = {"description": s.description}
         if s.attributes:
             body["attributes"] = {
-                a.name: {"type": a.type, "values": list(a.values)} for a in s.attributes
+                a.name: {"type": a.type, "values": list(a.values)}
+                for a in s.attributes
             }
         out[s.name] = body
     return out
@@ -175,7 +209,9 @@ def _checked_registry_document(data: bytes, *, path: str | Path) -> dict:
         raise RegistryError(f"{path} does not decode as JSON: {exc}") from exc
 
 
-def read_versioned_registry(dataset_root: str | Path) -> tuple[SubjectRegistry, "Version"]:
+def read_versioned_registry(
+    dataset_root: str | Path,
+) -> tuple[SubjectRegistry, "Version"]:
     """Read ``dataset_root``'s subject registry into a :class:`SubjectRegistry`, beside the
     version of the bytes it decoded, both from one read.
 
@@ -200,7 +236,9 @@ def read_registry(dataset_root: str | Path) -> SubjectRegistry:
     return read_versioned_registry(dataset_root)[0]
 
 
-def _dropped_names(outgoing: SubjectRegistry, incoming: SubjectRegistry) -> list[str]:
+def _dropped_names(
+    outgoing: SubjectRegistry, incoming: SubjectRegistry
+) -> list[str]:
     """Every subject, attribute or attribute value ``outgoing`` declares that ``incoming`` does
     not, dotted (``subject``, ``subject.attribute``, ``subject.attribute=value``)."""
     dropped: list[str] = []
@@ -215,14 +253,21 @@ def _dropped_names(outgoing: SubjectRegistry, incoming: SubjectRegistry) -> list
                 dropped.append(f"{s.name}.{a.name}")
                 continue
             dropped.extend(
-                f"{s.name}.{a.name}={v}" for v in a.values if v not in new_a.values
+                f"{s.name}.{a.name}={v}"
+                for v in a.values
+                if v not in new_a.values
             )
     return dropped
 
 
 def replace_registry(
-    dataset_root: str | Path, registry: SubjectRegistry, *, expect: "Version | None",
-    allow_removals: bool = False, allow_type_changes: bool = False, actor: str | None,
+    dataset_root: str | Path,
+    registry: SubjectRegistry,
+    *,
+    expect: "Version | None",
+    allow_removals: bool = False,
+    allow_type_changes: bool = False,
+    actor: str | None,
 ) -> dict:
     """Write ``dataset_root``'s registry, reading what it replaces and refusing a silent drop.
 
@@ -253,14 +298,18 @@ def replace_registry(
     from tcip_mcp.dataset_layout import subjects_path
 
     if not registry.subjects:
-        raise RegistryError("a subject registry write must declare at least one subject")
+        raise RegistryError(
+            "a subject registry write must declare at least one subject"
+        )
 
     path = subjects_path(dataset_root)
     versioned = tcip_store.read_blob_versioned(path, default=None)
     outgoing: SubjectRegistry | None = None
     if versioned.value is not None:
         try:
-            outgoing = registry_from_dict(_checked_registry_document(versioned.value, path=path))
+            outgoing = registry_from_dict(
+                _checked_registry_document(versioned.value, path=path)
+            )
         except ValueError as exc:
             if not allow_removals:
                 raise RegistryError(
@@ -293,13 +342,19 @@ def replace_registry(
                     )
 
     new_version = tcip_store.put_blob(
-        path, tcip_store.encode_record(registry_to_dict(registry)),
+        path,
+        tcip_store.encode_record(registry_to_dict(registry)),
         expect=versioned.version if expect is None else expect,
     )
 
-    committed = {"subjects_path": str(path), "n_subjects": len(registry.subjects),
-                 "version": new_version.token}
-    record_event_or_raise("replace_registry", committed, actor=actor, scope=dataset_root)
+    committed = {
+        "subjects_path": str(path),
+        "n_subjects": len(registry.subjects),
+        "version": new_version.token,
+    }
+    record_event_or_raise(
+        "replace_registry", committed, actor=actor, scope=dataset_root
+    )
     return committed
 
 
@@ -325,25 +380,34 @@ def copy_registry(source: str | Path, destination: str | Path) -> None:
         ) from exc
 
 
-def positive_state_problem(registry: SubjectRegistry, subject_name: str,
-                           state: "PositiveState") -> str | None:
+def positive_state_problem(
+    registry: SubjectRegistry, subject_name: str, state: "PositiveState"
+) -> str | None:
     """Why ``state`` cannot be ``subject_name``'s positive state in ``registry``, or ``None`` when
     that subject declares ``state``'s attribute and the attribute lists ``state``'s value."""
     subject = registry.subject(subject_name)
     if subject is None:
         known = [s.name for s in registry.subjects]
-        return f"no subject {subject_name!r} in the registry (subjects: {known})"
+        return (
+            f"no subject {subject_name!r} in the registry (subjects: {known})"
+        )
     attribute = subject.attribute(state.attribute)
     if attribute is None:
-        return (f"subject {subject_name!r} declares no attribute {state.attribute!r} (it declares "
-                f"{[a.name for a in subject.attributes]})")
+        return (
+            f"subject {subject_name!r} declares no attribute {state.attribute!r} (it declares "
+            f"{[a.name for a in subject.attributes]})"
+        )
     if state.value not in attribute.values:
-        return (f"attribute {state.attribute!r} of {subject_name!r} declares no value "
-                f"{state.value!r} (it declares {list(attribute.values)})")
+        return (
+            f"attribute {state.attribute!r} of {subject_name!r} declares no value "
+            f"{state.value!r} (it declares {list(attribute.values)})"
+        )
     return None
 
 
-def registry_for_dataset_root(dataset_root: str | Path) -> SubjectRegistry | None:
+def registry_for_dataset_root(
+    dataset_root: str | Path,
+) -> SubjectRegistry | None:
     """The registry at ``dataset_root``, or ``None`` when no ``subjects.json`` has been written
     there yet (a dataset with no registry is not corrupt, only unregistered so far)."""
     try:

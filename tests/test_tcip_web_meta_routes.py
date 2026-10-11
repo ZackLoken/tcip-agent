@@ -16,7 +16,9 @@ def test_reports_empty_when_dir_missing(opened_client: TestClient) -> None:
     assert data == {"reports": [], "count": 0, "total_available": 0}
 
 
-def test_reports_surfaces_written_report(opened_client: TestClient, opened_project: Path) -> None:
+def test_reports_surfaces_written_report(
+    opened_client: TestClient, opened_project: Path
+) -> None:
     report_friction(
         opened_project,
         category="ambiguous_data",
@@ -31,13 +33,16 @@ def test_reports_surfaces_written_report(opened_client: TestClient, opened_proje
     assert rep["context"]["crop"] == "currant"
 
 
-def test_retrospectives_empty_when_dir_missing(opened_client: TestClient) -> None:
+def test_retrospectives_empty_when_dir_missing(
+    opened_client: TestClient,
+) -> None:
     data = opened_client.get("/api/meta/retrospectives").json()
     assert data == {"retrospectives": [], "count": 0, "total_available": 0}
 
 
 def test_retrospectives_surfaces_written_retro(
-    opened_client: TestClient, opened_project: Path,
+    opened_client: TestClient,
+    opened_project: Path,
 ) -> None:
     write_retrospective(
         opened_project,
@@ -53,6 +58,8 @@ def test_retrospectives_surfaces_written_retro(
     assert "count fruit clusters" in retro["content"]
 
 
-def test_the_meta_routes_refuse_while_no_project_is_open(client: TestClient) -> None:
+def test_the_meta_routes_refuse_while_no_project_is_open(
+    client: TestClient,
+) -> None:
     assert client.get("/api/meta/reports").status_code == 409
     assert client.get("/api/meta/retrospectives").status_code == 409

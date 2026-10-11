@@ -45,7 +45,9 @@ def test_list_dates_admits_a_literal_and_the_undated_bucket(tmp_path):
     images = tmp_path / "images"
     for name in ("2026-03-02", UNDATED_BUCKET, "plot_14"):
         (images / name).mkdir(parents=True)
-    assert list_dates(tmp_path) == sorted(["2026-03-02", UNDATED_BUCKET, "plot_14"])
+    assert list_dates(tmp_path) == sorted(
+        ["2026-03-02", UNDATED_BUCKET, "plot_14"]
+    )
 
 
 def test_ingest_refuses_a_dot_prefixed_literal_bucket(tmp_path):
@@ -54,6 +56,7 @@ def test_ingest_refuses_a_dot_prefixed_literal_bucket(tmp_path):
     src = tmp_path / "src"
     src.mkdir()
     from PIL import Image
+
     Image.new("RGB", (8, 8)).save(src / "img.jpg")
 
     result = ingest_images(tmp_path / "proj", str(src), date_from=".hidden")
@@ -68,6 +71,7 @@ def test_ingest_admits_a_literal_non_iso_bucket(tmp_path):
     src = tmp_path / "src"
     src.mkdir()
     from PIL import Image
+
     Image.new("RGB", (8, 8)).save(src / "img.jpg")
 
     result = ingest_images(tmp_path / "proj", str(src), date_from="plot_14")
@@ -92,7 +96,9 @@ def test_the_tree_and_the_project_summary_agree_on_dates_over_a_hidden_directory
     (root / "images" / ".hidden").mkdir(parents=True)
     registry_over(root, SubjectRegistry((Subject("leaf"),)))
 
-    tree = client.get("/api/dataset/tree", params={"dataset_root": str(root)}).json()
+    tree = client.get(
+        "/api/dataset/tree", params={"dataset_root": str(root)}
+    ).json()
     picker = _summarize(root, record_fields(root))
 
     assert tree["dates_with_images"] == ["2026-03-02"]
@@ -112,7 +118,9 @@ def test_the_tree_and_the_project_summary_list_only_published_buckets_alike(
     bucket = unassessed_bucket(tmp_path, experiment_id="exp-grammar")
     root = tmp_path / "ds"
 
-    tree = client.get("/api/dataset/tree", params={"dataset_root": str(root)}).json()
+    tree = client.get(
+        "/api/dataset/tree", params={"dataset_root": str(root)}
+    ).json()
     picker = _summarize(root, record_fields(root))
 
     assert tree["buckets_by_date"][DATE] == [bucket.name]

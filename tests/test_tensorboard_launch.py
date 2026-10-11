@@ -17,15 +17,20 @@ import subprocess
 import sys
 
 
-def test_launch_reports_the_failure_when_the_process_exits_immediately(monkeypatch, tmp_path):
+def test_launch_reports_the_failure_when_the_process_exits_immediately(
+    monkeypatch, tmp_path
+):
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
 
     real_popen = subprocess.Popen
 
     def dying_popen(cmd, **kwargs):
         proc = real_popen(
-            [sys.executable, "-c",
-             "import sys; sys.stderr.write('tensorboard is not installed\\n'); sys.exit(3)"],
+            [
+                sys.executable,
+                "-c",
+                "import sys; sys.stderr.write('tensorboard is not installed\\n'); sys.exit(3)",
+            ],
             **kwargs,
         )
         proc.wait(timeout=30)
@@ -49,7 +54,9 @@ def _never_confirms_kill_popen_class(spawned: list):
 
     class _NeverConfirmsKillPopen:
         def __init__(self, *args, **kwargs):
-            self._real = real_popen([sys.executable, "-c", "import time; time.sleep(120)"])
+            self._real = real_popen(
+                [sys.executable, "-c", "import time; time.sleep(120)"]
+            )
             spawned.append(self._real)
             self.pid = self._real.pid
 
@@ -63,7 +70,9 @@ def _never_confirms_kill_popen_class(spawned: list):
             self._real.kill()
 
         def wait(self, timeout=None):
-            raise subprocess.TimeoutExpired(cmd="standin", timeout=timeout or 0)
+            raise subprocess.TimeoutExpired(
+                cmd="standin", timeout=timeout or 0
+            )
 
     return _NeverConfirmsKillPopen
 
@@ -77,13 +86,18 @@ def test_launch_folds_an_unconfirmed_kill_into_the_error_after_a_raising_tie_ass
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
 
     spawned: list[subprocess.Popen] = []
-    monkeypatch.setattr(tb.subprocess, "Popen", _never_confirms_kill_popen_class(spawned))
+    monkeypatch.setattr(
+        tb.subprocess, "Popen", _never_confirms_kill_popen_class(spawned)
+    )
     # _assign_to_win_job exists only on a Windows import of the manager; raising=False installs it
     # on every platform so the forced win32 branch below reaches it there too.
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(
-        tb, "_assign_to_win_job",
-        lambda proc: (_ for _ in ()).throw(RuntimeError("tie assignment failed")),
+        tb,
+        "_assign_to_win_job",
+        lambda proc: (_ for _ in ()).throw(
+            RuntimeError("tie assignment failed")
+        ),
         raising=False,
     )
 
@@ -106,10 +120,14 @@ def test_stop_logs_a_kill_that_never_confirms(monkeypatch, tmp_path, caplog):
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
 
     spawned: list[subprocess.Popen] = []
-    monkeypatch.setattr(tb.subprocess, "Popen", _never_confirms_kill_popen_class(spawned))
+    monkeypatch.setattr(
+        tb.subprocess, "Popen", _never_confirms_kill_popen_class(spawned)
+    )
     # the stand-in carries none of the platform tie's own machinery (no _handle on Windows); the
     # tie itself is not what this test is about.
-    monkeypatch.setattr(tb, "_assign_to_win_job", lambda proc: None, raising=False)
+    monkeypatch.setattr(
+        tb, "_assign_to_win_job", lambda proc: None, raising=False
+    )
 
     try:
         info = tb.launch_tensorboard(str(tmp_path / "unconfirmed-run"))
@@ -117,7 +135,8 @@ def test_stop_logs_a_kill_that_never_confirms(monkeypatch, tmp_path, caplog):
             result = tb.stop_tensorboard(str(tmp_path / "unconfirmed-run"))
         assert result["status"] == "kill_unconfirmed"
         assert any(
-            "unconfirmed-run" in r.getMessage() and str(info["pid"]) in r.getMessage()
+            "unconfirmed-run" in r.getMessage()
+            and str(info["pid"]) in r.getMessage()
             for r in caplog.records
         )
     finally:
@@ -127,14 +146,20 @@ def test_stop_logs_a_kill_that_never_confirms(monkeypatch, tmp_path, caplog):
             proc.wait(timeout=30)
 
 
-def test_exit_sweep_logs_a_kill_that_never_confirms(monkeypatch, tmp_path, caplog):
+def test_exit_sweep_logs_a_kill_that_never_confirms(
+    monkeypatch, tmp_path, caplog
+):
     """``_stop_all_tracked``'s own log line fires on the run its sweep leaves running, not
     only ``stop_tensorboard``'s own line for a caller that reads its return value."""
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
 
     spawned: list[subprocess.Popen] = []
-    monkeypatch.setattr(tb.subprocess, "Popen", _never_confirms_kill_popen_class(spawned))
-    monkeypatch.setattr(tb, "_assign_to_win_job", lambda proc: None, raising=False)
+    monkeypatch.setattr(
+        tb.subprocess, "Popen", _never_confirms_kill_popen_class(spawned)
+    )
+    monkeypatch.setattr(
+        tb, "_assign_to_win_job", lambda proc: None, raising=False
+    )
 
     try:
         info = tb.launch_tensorboard(str(tmp_path / "sweep-unconfirmed-run"))
@@ -153,13 +178,17 @@ def test_exit_sweep_logs_a_kill_that_never_confirms(monkeypatch, tmp_path, caplo
             proc.wait(timeout=30)
 
 
-def test_launch_returns_a_url_for_a_process_that_stays_up(monkeypatch, tmp_path):
+def test_launch_returns_a_url_for_a_process_that_stays_up(
+    monkeypatch, tmp_path
+):
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
 
     real_popen = subprocess.Popen
 
     def living_popen(cmd, **kwargs):
-        return real_popen([sys.executable, "-c", "import time; time.sleep(30)"], **kwargs)
+        return real_popen(
+            [sys.executable, "-c", "import time; time.sleep(30)"], **kwargs
+        )
 
     monkeypatch.setattr(tb.subprocess, "Popen", living_popen)
 
@@ -180,13 +209,20 @@ def test_launch_reports_the_platform_lifetime_tie(monkeypatch, tmp_path):
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
 
     monkeypatch.setattr(
-        tb, "_tensorboard_argv",
-        lambda logdir, port: [sys.executable, "-c", "import time; time.sleep(30)"],
+        tb,
+        "_tensorboard_argv",
+        lambda logdir, port: [
+            sys.executable,
+            "-c",
+            "import time; time.sleep(30)",
+        ],
     )
 
     info = tb.launch_tensorboard(str(tmp_path))
     try:
-        assert info["lifetime_tie"] == ("job" if sys.platform == "win32" else "guardian")
+        assert info["lifetime_tie"] == (
+            "job" if sys.platform == "win32" else "guardian"
+        )
     finally:
         tb.stop_tensorboard(str(tmp_path))
 
@@ -202,8 +238,13 @@ def test_a_board_is_tracked_under_the_one_spelling_the_store_keys_its_directory_
     from tcip_store import canonical_path
 
     monkeypatch.setattr(
-        tb, "_tensorboard_argv",
-        lambda logdir, port: [sys.executable, "-c", "import time; time.sleep(30)"],
+        tb,
+        "_tensorboard_argv",
+        lambda logdir, port: [
+            sys.executable,
+            "-c",
+            "import time; time.sleep(30)",
+        ],
     )
     launched, other = str(tmp_path / "Board"), str(tmp_path / "BOARD")
     one_directory = canonical_path(launched) == canonical_path(other)
@@ -211,7 +252,9 @@ def test_a_board_is_tracked_under_the_one_spelling_the_store_keys_its_directory_
     info = tb.launch_tensorboard(launched)
     try:
         assert (tb.running_url(other) == info["url"]) is one_directory
-        assert (tb.stop_tensorboard(other)["status"] == "stopped") is one_directory
+        assert (
+            tb.stop_tensorboard(other)["status"] == "stopped"
+        ) is one_directory
         assert (tb.running_url(launched) is None) is one_directory
     finally:
         tb.stop_tensorboard(launched)

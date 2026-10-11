@@ -31,7 +31,9 @@ from tcip_web.paths import resolved_path, within
 from tcip_web.state import store
 
 if TYPE_CHECKING:
-    from tcip_mcp.pipelines.postprocessing.phenology import PhenologyMeasurement
+    from tcip_mcp.pipelines.postprocessing.phenology import (
+        PhenologyMeasurement,
+    )
     from tcip_mcp.traits import TraitRecord, TraitRevision
 
 logger = logging.getLogger(__name__)
@@ -66,8 +68,10 @@ def _belonging(root: Path, path: str, admits=within) -> Path:
     resolved = resolved_path(path)
     if not any(admits(resolved, r) for r in roots):
         raise HTTPException(
-            403, f"{path} does not belong to project {root}, whose own roots are the project and "
-                 f"the datasets registered to it ({', '.join(str(r) for r in roots)})")
+            403,
+            f"{path} does not belong to project {root}, whose own roots are the project and "
+            f"the datasets registered to it ({', '.join(str(r) for r in roots)})",
+        )
     return resolved
 
 
@@ -103,15 +107,23 @@ def build_plant_mapping(payload: BuildMappingPayload) -> dict:
     images_root = _belonging(root, payload.images_root)
     try:
         return plant_mapping.build_plant_mapping(
-            root, payload.name, images_root, payload.plant_registry, dates=payload.dates,
-            nn_tolerance_m=payload.nn_tolerance_m, supersede=payload.supersede,
-            actor=person).served()
+            root,
+            payload.name,
+            images_root,
+            payload.plant_registry,
+            dates=payload.dates,
+            nn_tolerance_m=payload.nn_tolerance_m,
+            supersede=payload.supersede,
+            actor=person,
+        ).served()
     except plant_mapping.PlantRegistryNotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc
     except AuditEntryNotWrittenError as exc:
         raise audit_gap_409(exc, None) from exc
-    except (plant_mapping.MappingRebuildError,
-            plant_mapping.UngeoreferencedCaptureError) as exc:
+    except (
+        plant_mapping.MappingRebuildError,
+        plant_mapping.UngeoreferencedCaptureError,
+    ) as exc:
         raise HTTPException(exc.status, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -135,7 +147,9 @@ def load_plant_mapping(payload: LoadMappingPayload) -> dict:
     except (StoreError, ValueError) as exc:
         raise HTTPException(409, str(exc)) from exc
     if build is None:
-        raise HTTPException(404, f"no plant mapping named {payload.name!r} under {root}")
+        raise HTTPException(
+            404, f"no plant mapping named {payload.name!r} under {root}"
+        )
     return build.served()
 
 
@@ -157,7 +171,9 @@ class PhenologyInputs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     mapping_name: str  # a name persisted under the open project's own plant-mapping store
-    dataset_root: str  # the project or a dataset registered to it, the buckets' root
+    dataset_root: (
+        str  # the project or a dataset registered to it, the buckets' root
+    )
     # The name of the published bucket of each delivered date; each stands for its record's date.
     buckets: list[str]
     trait: str
@@ -184,9 +200,14 @@ def _measure(root: Path, payload: PhenologyInputs) -> "PhenologyMeasurement":
     dataset_root = _belonging(root, payload.dataset_root, _is_root)
     try:
         return phenology.measure_phenology(
-            root, trait=payload.trait, mapping_name=payload.mapping_name,
-            dataset_root=dataset_root, buckets=payload.buckets, plants=payload.plants,
-            require_all_dates_complete=payload.require_all_dates_complete)
+            root,
+            trait=payload.trait,
+            mapping_name=payload.mapping_name,
+            dataset_root=dataset_root,
+            buckets=payload.buckets,
+            plants=payload.plants,
+            require_all_dates_complete=payload.require_all_dates_complete,
+        )
     except OperationalizationRefusedError as exc:
         raise HTTPException(400, exc.as_detail()) from exc
     except plant_mapping.MappingDeliveryError as exc:
@@ -216,9 +237,13 @@ def phenology_measurement(payload: PhenologyPayload) -> dict:
     digests: dict[str, str] = {}
     for projection in ("curves", "milestones"):
         try:
-            gate(root, list(measurement.buckets.values()),
-                 delivery_kind=STATE_CROSSING_DATES, revision=measurement.revision,
-                 result=measurement.result(curves=projection == "curves"))
+            gate(
+                root,
+                list(measurement.buckets.values()),
+                delivery_kind=STATE_CROSSING_DATES,
+                revision=measurement.revision,
+                result=measurement.result(curves=projection == "curves"),
+            )
         except OperationalizationRefusedError as exc:
             raise HTTPException(400, exc.as_detail()) from exc
         except DeliveryRefusedError as exc:
@@ -227,16 +252,31 @@ def phenology_measurement(payload: PhenologyPayload) -> dict:
             reason, digests[projection] = str(exc), exc.result_sha256
     disclosure = measurement.plant_mapping
     return {
-        "curves": {"rows": measurement.curve_rows(), "n_plants": len(measurement.rows)},
-        "milestones": {"rows": measurement.milestone_rows(),
-                       "columns": phenology.milestone_date_columns(measurement.revision.entry)},
-        "validated": reason is None, "unvalidated_reason": reason,
+        "curves": {
+            "rows": measurement.curve_rows(),
+            "n_plants": len(measurement.rows),
+        },
+        "milestones": {
+            "rows": measurement.milestone_rows(),
+            "columns": phenology.milestone_date_columns(
+                measurement.revision.entry
+            ),
+        },
+        "validated": reason is None,
+        "unvalidated_reason": reason,
         "result_sha256": digests or None,
         "require_all_dates_complete": measurement.require_all_dates_complete,
         **measurement.revision.ref,
         "positive_class_assessed": measurement.positive_class_assessed,
-        **{key: disclosure[key] for key in ("captures_unverified", "plant_csvs_unverified",
-                                            "dates_delivered", "images_unattributed")},
+        **{
+            key: disclosure[key]
+            for key in (
+                "captures_unverified",
+                "plant_csvs_unverified",
+                "dates_delivered",
+                "images_unattributed",
+            )
+        },
     }
 
 
@@ -253,8 +293,9 @@ class AcknowledgmentPayload(BaseModel):
     result_sha256: str
 
 
-def _recorded_acknowledgment(root: Path, payload, person: str,
-                             request: Request) -> Optional[str]:
+def _recorded_acknowledgment(
+    root: Path, payload, person: str, request: Request
+) -> Optional[str]:
     """Record the acknowledgment ``payload`` carries (:func:`~tcip_mcp.delivery.
     record_acknowledgment`) in the project ``root`` by ``person``, and return its id; ``None``
     when it carries none. A
@@ -270,18 +311,26 @@ def _recorded_acknowledgment(root: Path, payload, person: str,
     from tcip_web.routes.audit_gap import audit_gap_409
 
     if request.headers.get("origin") is None or any(
-            request.headers.get(h) for h in agent_identity.HEADERS.values()):
-        raise HTTPException(403, "an acknowledgment is the breeder's act in the Results tab: a "
-                                 "request from no browser, or from an agent, cannot record one.")
+        request.headers.get(h) for h in agent_identity.HEADERS.values()
+    ):
+        raise HTTPException(
+            403,
+            "an acknowledgment is the breeder's act in the Results tab: a "
+            "request from no browser, or from an agent, cannot record one.",
+        )
     try:
         return record_acknowledgment(
-            root, acknowledged_by=person,
+            root,
+            acknowledged_by=person,
             reason=payload.acknowledgment.reason,
-            result_sha256=payload.acknowledgment.result_sha256).acknowledgment_id
+            result_sha256=payload.acknowledgment.result_sha256,
+        ).acknowledgment_id
     except AuditEntryNotWrittenError as exc:
         raise audit_gap_409(exc, exc.arguments) from exc
     except ValueError as exc:
-        raise HTTPException(400, f"an acknowledgment states why: {exc}") from exc
+        raise HTTPException(
+            400, f"an acknowledgment states why: {exc}"
+        ) from exc
 
 
 class ExportCsvPayload(PhenologyInputs):
@@ -315,23 +364,34 @@ def export_csv(payload: ExportCsvPayload, request: Request) -> Response:
     person = actor(payload.user)
     root = store.held().root
     measurement = _measure(root, payload)
-    acknowledgment_id = _recorded_acknowledgment(root, payload, person, request)
+    acknowledgment_id = _recorded_acknowledgment(
+        root, payload, person, request
+    )
     filename = payload.filename or f"{payload.trait}_{payload.payload}.csv"
     saved_path = root / "results_export" / Path(filename).name
     try:
         phenology.deliver_phenology(
-            root, measurement, curves=payload.payload == "curves",
-            output_path=saved_path, acknowledgment_id=acknowledgment_id,
-            door="results.export_csv", actor=person)
+            root,
+            measurement,
+            curves=payload.payload == "curves",
+            output_path=saved_path,
+            acknowledgment_id=acknowledgment_id,
+            door="results.export_csv",
+            actor=person,
+        )
     except AuditEntryNotWrittenError as exc:
         raise audit_gap_409(exc, {"saved_path": str(saved_path)}) from exc
     except DeliveryRefusedError as exc:
         raise HTTPException(400, exc.as_detail()) from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    headers = {"Content-Disposition": f'attachment; filename="{filename}"',
-               "X-TCIP-Saved-To": str(saved_path)}
-    return Response(content=saved_path.read_bytes(), media_type="text/csv", headers=headers)
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "X-TCIP-Saved-To": str(saved_path),
+    }
+    return Response(
+        content=saved_path.read_bytes(), media_type="text/csv", headers=headers
+    )
 
 
 # ── Count CSV export ────────────────────────────────────────────────────
@@ -376,15 +436,18 @@ class ExportCountCsvPayload(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    delivery: Union[PerImageCountDelivery, OrthomosaicPlantCountsDelivery] = Field(
-        discriminator="kind")
+    delivery: Union[PerImageCountDelivery, OrthomosaicPlantCountsDelivery] = (
+        Field(discriminator="kind")
+    )
     filename: str = Field(min_length=1)
     user: str
     acknowledgment: Optional[AcknowledgmentPayload] = None
 
 
 @router.post("/export_count_csv")
-def export_count_csv(payload: ExportCountCsvPayload, request: Request) -> Response:
+def export_count_csv(
+    payload: ExportCountCsvPayload, request: Request
+) -> Response:
     """Deliver a per-image or per-plant count CSV over a bucket (and, for the per-plant kind, the
     registered plant registry) this route confines to the open project, written to the project's
     ``results_export/`` and returned as the response body.
@@ -412,42 +475,69 @@ def export_count_csv(payload: ExportCountCsvPayload, request: Request) -> Respon
     saved_path = root / "results_export" / Path(payload.filename).name
     delivery = payload.delivery
     dataset_root = _belonging(root, delivery.dataset_root, _is_root)
-    acknowledgment_id = _recorded_acknowledgment(root, payload, person, request)
+    acknowledgment_id = _recorded_acknowledgment(
+        root, payload, person, request
+    )
     try:
         if delivery.kind == "per_image_count":
-            from tcip_mcp.pipelines.postprocessing.export import deliver_per_image_counts_csv
+            from tcip_mcp.pipelines.postprocessing.export import (
+                deliver_per_image_counts_csv,
+            )
 
             result = deliver_per_image_counts_csv(
-                root, dataset_root, delivery.bucket, str(saved_path), trait=delivery.trait,
-                acknowledgment_id=acknowledgment_id, door="results.export_count_csv",
-                actor=person)
+                root,
+                dataset_root,
+                delivery.bucket,
+                str(saved_path),
+                trait=delivery.trait,
+                acknowledgment_id=acknowledgment_id,
+                door="results.export_count_csv",
+                actor=person,
+            )
         else:
             try:
-                registry_record = plant_mapping.load_registry(root, delivery.plant_registry)
+                registry_record = plant_mapping.load_registry(
+                    root, delivery.plant_registry
+                )
             except plant_mapping.PlantRegistryNotFoundError as exc:
                 raise HTTPException(404, str(exc)) from exc
-            from tcip_mcp.tools.orthomosaic_tools import orthomosaic_plant_counts
+            from tcip_mcp.tools.orthomosaic_tools import (
+                orthomosaic_plant_counts,
+            )
 
             result = orthomosaic_plant_counts(
-                root, dataset_root, delivery.bucket, registry_record, saved_path,
-                delivery.delivered_phenotype, delivery.plants, crop=delivery.crop,
+                root,
+                dataset_root,
+                delivery.bucket,
+                registry_record,
+                saved_path,
+                delivery.delivered_phenotype,
+                delivery.plants,
+                crop=delivery.crop,
                 pipeline_version=delivery.pipeline_version,
                 canopy_subject=delivery.canopy_subject,
-                position_error_m=delivery.position_error_m, acknowledgment_id=acknowledgment_id,
-                door="results.export_count_csv", actor=person)
+                position_error_m=delivery.position_error_m,
+                acknowledgment_id=acknowledgment_id,
+                door="results.export_count_csv",
+                actor=person,
+            )
     except AuditEntryNotWrittenError as exc:
         raise audit_gap_409(exc, {"saved_path": str(saved_path)}) from exc
     except (OperationalizationRefusedError, DeliveryRefusedError) as exc:
         raise HTTPException(400, exc.as_detail()) from exc
     except (TraitUnknownError, ValueError) as exc:
-        raise HTTPException(400, {"kind": "delivery", "message": str(exc)}) from exc
+        raise HTTPException(
+            400, {"kind": "delivery", "message": str(exc)}
+        ) from exc
     headers = {
         "Content-Disposition": f'attachment; filename="{Path(payload.filename).name}"',
         "X-TCIP-Saved-To": str(saved_path),
         "X-TCIP-Validated": "true" if result["validated"] else "false",
         "X-TCIP-Acknowledged-By": quote(result["acknowledged_by"] or ""),
     }
-    return Response(content=saved_path.read_bytes(), media_type="text/csv", headers=headers)
+    return Response(
+        content=saved_path.read_bytes(), media_type="text/csv", headers=headers
+    )
 
 
 # ── What has shipped: the delivery-event record, read-only ─────────────
@@ -469,8 +559,12 @@ def list_delivery_events() -> dict:
     """
     from pydantic import ValidationError
     from tcip_mcp.delivery import read_delivery_events
-    from tcip_mcp.pipelines.delivery_events_schema import PlantMappingDisclosure
-    from tcip_mcp.pipelines.postprocessing.plant_mapping import resolved_mapping_key_for_citation
+    from tcip_mcp.pipelines.delivery_events_schema import (
+        PlantMappingDisclosure,
+    )
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        resolved_mapping_key_for_citation,
+    )
 
     from tcip_store import StoreError
 
@@ -484,8 +578,11 @@ def list_delivery_events() -> dict:
         record = event.model_dump(mode="json")
         pm = event.plant_mapping
         if isinstance(pm, PlantMappingDisclosure):
-            record["plant_mapping_resolved_key"] = resolved_mapping_key_for_citation(
-                root, pm.name, pm.record_sha256)
+            record["plant_mapping_resolved_key"] = (
+                resolved_mapping_key_for_citation(
+                    root, pm.name, pm.record_sha256
+                )
+            )
         records.append(record)
     return {"records": records}
 
@@ -495,7 +592,10 @@ def list_delivery_events() -> dict:
 
 def _served_revision(revision: TraitRevision) -> dict:
     """One revision as the trait routes serve it, with its ``confirmed`` state."""
-    return {**revision.model_dump(mode="json"), "confirmed": revision.confirmed}
+    return {
+        **revision.model_dump(mode="json"),
+        "confirmed": revision.confirmed,
+    }
 
 
 def _served(name: str, record: TraitRecord) -> dict:
@@ -506,7 +606,9 @@ def _served(name: str, record: TraitRecord) -> dict:
     return {
         "trait": name,
         "revisions": [_served_revision(r) for r in record.revisions],
-        "latest_confirmed": latest_confirmed.number if latest_confirmed else None,
+        "latest_confirmed": latest_confirmed.number
+        if latest_confirmed
+        else None,
     }
 
 
@@ -530,11 +632,18 @@ def list_traits() -> dict:
         except ValidationError as exc:
             unreadable.append({"trait": name, "reason": str(exc)})
     definitions = crops_definitions()
-    delivered = {p for r in records for rev in r["revisions"] for p in rev["entry"]["delivers"]}
+    delivered = {
+        p
+        for r in records
+        for rev in r["revisions"]
+        for p in rev["entry"]["delivers"]
+    }
     return {
         "traits": records,
         "unreadable": unreadable,
-        "definitions": {p: definitions[p] for p in sorted(delivered) if p in definitions},
+        "definitions": {
+            p: definitions[p] for p in sorted(delivered) if p in definitions
+        },
     }
 
 
@@ -566,17 +675,29 @@ def confirm_trait_revision(payload: ConfirmRevisionPayload) -> dict:
     """
     from tcip_mcp.audit import AuditEntryNotWrittenError
     from tcip_mcp.identity import actor
-    from tcip_mcp.traits import RevisionMovedError, TraitUnknownError, confirm_revision, read_trait
+    from tcip_mcp.traits import (
+        RevisionMovedError,
+        TraitUnknownError,
+        confirm_revision,
+        read_trait,
+    )
 
     person = actor(payload.user)
     root = store.held().root
     audit_warning: Optional[str] = None
     try:
         revision = confirm_revision(
-            root, payload.trait, payload.revision, payload.entry_sha256, actor=person,
-            confirmed=payload.confirmed)
+            root,
+            payload.trait,
+            payload.revision,
+            payload.entry_sha256,
+            actor=person,
+            confirmed=payload.confirmed,
+        )
     except AuditEntryNotWrittenError as e:
-        revision = read_trait(payload.trait, root).revisions[payload.revision - 1]
+        revision = read_trait(payload.trait, root).revisions[
+            payload.revision - 1
+        ]
         audit_warning = str(e)
     except RevisionMovedError as e:
         record = _served(payload.trait, read_trait(payload.trait, root))
@@ -611,4 +732,6 @@ def registered_models(tag: Optional[str] = None) -> RegisteredModels:
     (:func:`~tcip_mcp.tools.model_tools.registered_listing`), each as the browser lists it."""
     from tcip_mcp.tools.model_tools import registered_listing
 
-    return RegisteredModels.model_validate(registered_listing(store.held().root, tag=tag))
+    return RegisteredModels.model_validate(
+        registered_listing(store.held().root, tag=tag)
+    )

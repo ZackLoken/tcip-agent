@@ -19,9 +19,13 @@ from tcip_mcp.project_record import replace_site
 
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0], prog=prog)
+    ap = argparse.ArgumentParser(
+        description=__doc__.splitlines()[0], prog=prog
+    )
     ap.add_argument("project", help="the project directory")
-    ap.add_argument("site", help="the orchard or station this project's plants stand in")
+    ap.add_argument(
+        "site", help="the orchard or station this project's plants stand in"
+    )
     args = ap.parse_args(argv)
     try:
         project = bound_project(args.project)
@@ -29,8 +33,10 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     except (SystemExit, ValueError) as exc:
         print(f"refused: {exc}")
         return 2
-    print(f"written: {project} recorded site {result['previous_site']!r}, now records "
-          f"{result['site']!r}")
+    print(
+        f"written: {project} recorded site {result['previous_site']!r}, now records "
+        f"{result['site']!r}"
+    )
     return 0
 
 

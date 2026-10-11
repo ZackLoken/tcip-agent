@@ -18,7 +18,10 @@ pytest.importorskip("PIL")
 import torch  # noqa: E402
 
 from tcip_mcp.pipelines.components.heads import OrdinalHead  # noqa: E402
-from tcip_mcp.pipelines.model_contract import check_model_contract, overfit_check  # noqa: E402
+from tcip_mcp.pipelines.model_contract import (
+    check_model_contract,
+    overfit_check,
+)  # noqa: E402
 from tcip_mcp.pipelines.training.collation import task_collate  # noqa: E402
 from tests._producer_fixtures import dataset_over, registry_over  # noqa: E402
 
@@ -39,8 +42,13 @@ class _DetectionTargetRecorder(torch.nn.Module):
         if self.training and targets is not None:
             self.seen.append(targets)
             return {"loss": self.scale * 1.0}
-        return [{"boxes": torch.zeros((1, 4)), "scores": torch.ones(1),
-                 "labels": torch.ones(1, dtype=torch.int64)}]
+        return [
+            {
+                "boxes": torch.zeros((1, 4)),
+                "scores": torch.ones(1),
+                "labels": torch.ones(1, dtype=torch.int64),
+            }
+        ]
 
 
 class _OrdinalProbe(torch.nn.Module):
@@ -59,7 +67,10 @@ class _OrdinalProbe(torch.nn.Module):
         out = self.head(images.mean(dim=(2, 3)))
         if self.training and targets is not None:
             self.seen.append(targets)
-            return {f"head0_{k}": v for k, v in self.head.compute_loss(out, targets).items()}
+            return {
+                f"head0_{k}": v
+                for k, v in self.head.compute_loss(out, targets).items()
+            }
         return self.head.decode(out)
 
 
@@ -75,9 +86,13 @@ def _real_detection_item(tmp_path):
     images_dir.mkdir(parents=True)
     registry_over(tmp_path, SubjectRegistry((Subject("bush"), Subject("bud"))))
     Image.new("RGB", (96, 48)).save(images_dir / "a.png")
-    label_image(images_dir / "a.png", [Annotation(subject="bud", geometry=BBox(4, 6, 40, 19))],
-                96, 48)
-    return dataset_over('detection', str(images_dir), subject="bud")[0]
+    label_image(
+        images_dir / "a.png",
+        [Annotation(subject="bud", geometry=BBox(4, 6, 40, 19))],
+        96,
+        48,
+    )
+    return dataset_over("detection", str(images_dir), subject="bud")[0]
 
 
 def _real_detection_target(tmp_path):
@@ -95,7 +110,7 @@ def _real_ordinal_items(tmp_path):
         Image.new("RGB", (96, 48)).save(images_dir / f"{name}.png")
     csv_path = tmp_path / "ranks.csv"
     csv_path.write_text("image_stem,rank\na,0\nb,3\n")
-    dataset = dataset_over('ordinal', str(images_dir), str(csv_path))
+    dataset = dataset_over("ordinal", str(images_dir), str(csv_path))
     return [dataset[0], dataset[1]]
 
 
@@ -106,7 +121,9 @@ def _real_ordinal_target(tmp_path):
 def _synthetic_detection_target():
     recorder = _DetectionTargetRecorder()
     check_model_contract(recorder, "detection", dims=DET_DIMS)
-    assert len(recorder.seen) == 1, "the contract never ran a train-mode forward"
+    assert len(recorder.seen) == 1, (
+        "the contract never ran a train-mode forward"
+    )
     targets = recorder.seen[0]
     assert len(targets) == 1
     return targets[0]
@@ -131,7 +148,9 @@ def test_synthetic_detection_box_covers_a_positive_area_inside_the_frame():
     frame of either orientation."""
     width, height = 96, 48
     recorder = _DetectionTargetRecorder()
-    check_model_contract(recorder, "detection", dims={**DET_DIMS, "img_size": (width, height)})
+    check_model_contract(
+        recorder, "detection", dims={**DET_DIMS, "img_size": (width, height)}
+    )
     boxes = recorder.seen[0][0]["boxes"]
 
     assert boxes.shape == (1, 4)
@@ -142,7 +161,9 @@ def test_synthetic_detection_box_covers_a_positive_area_inside_the_frame():
     assert 0.0 <= y1 and y2 <= height
 
 
-def test_synthetic_detection_target_carries_only_keys_the_real_loader_carries(tmp_path):
+def test_synthetic_detection_target_carries_only_keys_the_real_loader_carries(
+    tmp_path,
+):
     """Every key the synthetic detection target carries is one the real detection loader emits,
     so a model written against the loader's targets can be smoked against this batch."""
     synth = _synthetic_detection_target()
@@ -153,7 +174,9 @@ def test_synthetic_detection_target_carries_only_keys_the_real_loader_carries(tm
     assert set(synth) <= set(real), (sorted(synth), sorted(real))
 
 
-def test_synthetic_ordinal_target_carries_only_keys_the_real_loader_carries(tmp_path):
+def test_synthetic_ordinal_target_carries_only_keys_the_real_loader_carries(
+    tmp_path,
+):
     """Same agreement for ordinal: the synthetic rank target uses the real loader's key."""
     probe = _OrdinalProbe(num_ranks=4)
     check_model_contract(probe, "ordinal", dims=ORD_DIMS)
@@ -168,7 +191,9 @@ def test_synthetic_ordinal_target_carries_only_keys_the_real_loader_carries(tmp_
 def test_an_ordinal_head_consumes_the_synthetic_ordinal_batch():
     """The rail admits valid work: a model built on the real ordinal head passes the contract on
     the synthetic batch, which is only true while that batch carries what the head reads."""
-    report = check_model_contract(_OrdinalProbe(num_ranks=4), "ordinal", dims=ORD_DIMS)
+    report = check_model_contract(
+        _OrdinalProbe(num_ranks=4), "ordinal", dims=ORD_DIMS
+    )
 
     assert report["ok"], report["issues"]
     assert report["train_loss"] is not None
@@ -190,21 +215,29 @@ class _BatchRecorder(torch.nn.Module):
         return {"values": torch.zeros(1)}
 
 
-def test_synthetic_detection_batch_is_assembled_by_the_loader_collate(tmp_path):
+def test_synthetic_detection_batch_is_assembled_by_the_loader_collate(
+    tmp_path,
+):
     """The contract's detection batch is the one the trainer's collate builds over per-sample
     items, so it carries every per-image target key the real loader emits, at the same python
     type, rather than a hand-assembled subset of them that can drift."""
     recorder = _DetectionTargetRecorder()
     check_model_contract(recorder, "detection", dims=DET_DIMS)
-    assert len(recorder.seen) == 1, "the contract never ran a train-mode forward"
+    assert len(recorder.seen) == 1, (
+        "the contract never ran a train-mode forward"
+    )
     synth_target = recorder.seen[0][0]
 
-    real_images, real_targets = task_collate("detection")([_real_detection_item(tmp_path)])
+    real_images, real_targets = task_collate("detection")(
+        [_real_detection_item(tmp_path)]
+    )
 
     assert isinstance(real_images, list)
     assert isinstance(real_targets, list)
     assert set(synth_target) == set(real_targets[0]), (
-        sorted(synth_target), sorted(real_targets[0]))
+        sorted(synth_target),
+        sorted(real_targets[0]),
+    )
     for key, real_value in real_targets[0].items():
         assert type(synth_target[key]) is type(real_value), key
 
@@ -214,14 +247,21 @@ def test_synthetic_ordinal_batch_is_assembled_by_the_loader_collate(tmp_path):
     the loader's dtype and rank, batched along the same axis as the images."""
     recorder = _BatchRecorder()
     check_model_contract(recorder, "ordinal", dims=ORD_DIMS)
-    assert len(recorder.seen) == 1, "the contract never ran a train-mode forward"
+    assert len(recorder.seen) == 1, (
+        "the contract never ran a train-mode forward"
+    )
     synth_images, synth_targets = recorder.seen[0]
 
-    real_images, real_targets = task_collate("ordinal")(_real_ordinal_items(tmp_path))
+    real_images, real_targets = task_collate("ordinal")(
+        _real_ordinal_items(tmp_path)
+    )
 
     assert isinstance(synth_images, torch.Tensor)
     assert synth_images.ndim == real_images.ndim
-    assert set(synth_targets) == set(real_targets), (sorted(synth_targets), sorted(real_targets))
+    assert set(synth_targets) == set(real_targets), (
+        sorted(synth_targets),
+        sorted(real_targets),
+    )
     for key, real_value in real_targets.items():
         assert synth_targets[key].dtype == real_value.dtype, key
         assert synth_targets[key].ndim == real_value.ndim, key
@@ -234,11 +274,14 @@ def test_real_models_still_smoke_green_on_the_collated_batch():
     pytest.importorskip("torchvision")
     from tests import bespoke_models
 
-    detector = bespoke_models.build_bespoke_detection(num_classes=1, min_size=64, max_size=128)
+    detector = bespoke_models.build_bespoke_detection(
+        num_classes=1, min_size=64, max_size=128
+    )
     report = check_model_contract(detector, "detection", dims=DET_DIMS)
     assert report["ok"], report["issues"]
     assert report["eval_output_type"] == "list[dict]"
 
-    learned = overfit_check(_OrdinalProbe(num_ranks=4), "ordinal", steps=20, dims=ORD_DIMS,
-                            seed=0)
+    learned = overfit_check(
+        _OrdinalProbe(num_ranks=4), "ordinal", steps=20, dims=ORD_DIMS, seed=0
+    )
     assert learned["passed"], learned["issue"]

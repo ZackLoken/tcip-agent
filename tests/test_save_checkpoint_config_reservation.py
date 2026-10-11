@@ -11,7 +11,10 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from tcip_mcp.pipelines.model_build import (  # noqa: E402
-    CONFIG_KEY, METRICS_KEY, SNAPSHOT_KEY, STATE_DICT_KEY,
+    CONFIG_KEY,
+    METRICS_KEY,
+    SNAPSHOT_KEY,
+    STATE_DICT_KEY,
 )
 from tcip_mcp.pipelines.training.envelope import TrainContext  # noqa: E402
 
@@ -26,14 +29,18 @@ def _ctx(tmp_path) -> tuple[TrainContext, dict]:
     return ctx, ctx.run.spec.record()
 
 
-def test_save_checkpoint_refuses_a_state_carrying_its_own_config_key(tmp_path) -> None:
+def test_save_checkpoint_refuses_a_state_carrying_its_own_config_key(
+    tmp_path,
+) -> None:
     ctx, launched = _ctx(tmp_path)
 
     with pytest.raises(ValueError, match="reserved for this run's own"):
         ctx.save_checkpoint({STATE_DICT_KEY: {}, CONFIG_KEY: launched})
 
 
-def test_save_checkpoint_writes_the_launch_config_never_the_loops_own(tmp_path) -> None:
+def test_save_checkpoint_writes_the_launch_config_never_the_loops_own(
+    tmp_path,
+) -> None:
     """The checkpoint carries the config the run trains under, its launch config with the
     resolved data section and its source files bound to the run's snapshot, every field but the
     data locations only the run's record keeps, its paths read back against the project."""
@@ -42,18 +49,28 @@ def test_save_checkpoint_writes_the_launch_config_never_the_loops_own(tmp_path) 
 
     ctx, launched = _ctx(tmp_path)
 
-    path = ctx.save_checkpoint({STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.4}})
+    path = ctx.save_checkpoint(
+        {STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.4}}
+    )
 
-    stored = runtime_paths(torch.load(path, weights_only=False)[CONFIG_KEY], CONFIG_PATHS,
-                           tmp_path)
+    stored = runtime_paths(
+        torch.load(path, weights_only=False)[CONFIG_KEY],
+        CONFIG_PATHS,
+        tmp_path,
+    )
     locations = {"images_dir", "labels_dir"}
     assert {k: v for k, v in stored.items() if k != "data"} == {
-        k: v for k, v in launched.items() if k != "data"}
-    assert stored["data"] == {k: v for k, v in launched["data"].items() if k not in locations}
+        k: v for k, v in launched.items() if k != "data"
+    }
+    assert stored["data"] == {
+        k: v for k, v in launched["data"].items() if k not in locations
+    }
     assert "images_dir" in launched["data"]
 
 
-def test_the_default_trainer_and_a_bespoke_loop_stamp_one_checkpoint_config(tmp_path) -> None:
+def test_the_default_trainer_and_a_bespoke_loop_stamp_one_checkpoint_config(
+    tmp_path,
+) -> None:
     """The default trainer and a bespoke loop's ``ctx.save_checkpoint``, over one run the
     launcher's own writer opened, write one stamp: one ``config``, the model's and the dataset
     builder's declared files each this run's own snapshot copy of it, as the run's record names
@@ -63,12 +80,26 @@ def test_the_default_trainer_and_a_bespoke_loop_stamp_one_checkpoint_config(tmp_
     from tcip_mcp.pipelines.training.generic_trainer import train
     from tcip_mcp.registry_paths import _each_path, stored_path
     from tests.test_dataset_source_seam import BESPOKE_DS, BESPOKE_DS_FILE
-    from tests.tiny_trainer_fixtures import opposed_regression_data, regressor_config, run_context
+    from tests.tiny_trainer_fixtures import (
+        opposed_regression_data,
+        regressor_config,
+        run_context,
+    )
 
-    config = regressor_config(seed=3, data={
-        **opposed_regression_data(tmp_path / "ds", [0.1, 0.25, 0.4, 0.55, 0.7, 0.85],
-                                  [0.2, 0.6, 0.9]),
-        "dataset_source": {"builder": BESPOKE_DS, "source_files": [BESPOKE_DS_FILE]}})
+    config = regressor_config(
+        seed=3,
+        data={
+            **opposed_regression_data(
+                tmp_path / "ds",
+                [0.1, 0.25, 0.4, 0.55, 0.7, 0.85],
+                [0.2, 0.6, 0.9],
+            ),
+            "dataset_source": {
+                "builder": BESPOKE_DS,
+                "source_files": [BESPOKE_DS_FILE],
+            },
+        },
+    )
     ctx = run_context(tmp_path, config)
     observation = observe(ctx.run_dir)
     trained = train(ctx.run, ctx.train_loader, val_loader=ctx.val_loader)
@@ -76,9 +107,14 @@ def test_the_default_trainer_and_a_bespoke_loop_stamp_one_checkpoint_config(tmp_
     path = ctx.save_checkpoint({STATE_DICT_KEY: {}}, "model_bespoke")
 
     stamped = {CONFIG_KEY, SNAPSHOT_KEY}
-    by_trainer, by_loop = ({key: value for key, value in torch.load(
-        saved, weights_only=False).items() if key in stamped}
-        for saved in (trained.saved["model_final"], path))
+    by_trainer, by_loop = (
+        {
+            key: value
+            for key, value in torch.load(saved, weights_only=False).items()
+            if key in stamped
+        }
+        for saved in (trained.saved["model_final"], path)
+    )
     assert by_trainer == by_loop
     assert set(by_loop) == stamped
     stored = by_loop[CONFIG_KEY]
@@ -86,13 +122,22 @@ def test_the_default_trainer_and_a_bespoke_loop_stamp_one_checkpoint_config(tmp_
     snapshot = observation.record["source"]["files"]
 
     def copies(declared: list[str]) -> list[str]:
-        return [stored_path(observation.directory / snapshot[stored_path(file, tmp_path)]["file"],
-                            tmp_path) for file in declared]
+        return [
+            stored_path(
+                observation.directory
+                / snapshot[stored_path(file, tmp_path)]["file"],
+                tmp_path,
+            )
+            for file in declared
+        ]
 
     assert config["model_source"]["source_files"]
     assert stored["model_source"]["source_files"] == copies(
-        config["model_source"]["source_files"])
-    assert stored["data"]["dataset_source"]["source_files"] == copies([BESPOKE_DS_FILE])
+        config["model_source"]["source_files"]
+    )
+    assert stored["data"]["dataset_source"]["source_files"] == copies(
+        [BESPOKE_DS_FILE]
+    )
     located: list[str] = []
 
     def found(value: str) -> str:

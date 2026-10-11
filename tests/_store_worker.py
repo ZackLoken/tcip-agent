@@ -61,7 +61,9 @@ class PausingCommitBackend(SqliteBackend):
     is the shape a kill cannot take back and what the crash case is observed failing against.
     """
 
-    def __init__(self, *, pause_marker: Path, pause_s: float, **kwargs) -> None:
+    def __init__(
+        self, *, pause_marker: Path, pause_s: float, **kwargs
+    ) -> None:
         super().__init__(**kwargs)
         self.pause_marker = pause_marker
         self.pause_s = pause_s
@@ -116,7 +118,14 @@ def _cmd_hold_transaction(
 
 
 def _cmd_write_after(
-    root: str, store: str, name: str, mode: str, value: str, ready: str, go: str, result: str
+    root: str,
+    store: str,
+    name: str,
+    mode: str,
+    value: str,
+    ready: str,
+    go: str,
+    result: str,
 ) -> None:
     key = _record(store, root, name)
     expect = ts.read_versioned(key).version if mode == "cas" else None
@@ -131,7 +140,10 @@ def _cmd_write_after(
     except ts.StoreBusyError:
         outcome = "StoreBusyError"
     Path(result).write_text(
-        json.dumps({"outcome": outcome, "waited_s": time.monotonic() - started}), encoding="utf-8"
+        json.dumps(
+            {"outcome": outcome, "waited_s": time.monotonic() - started}
+        ),
+        encoding="utf-8",
     )
 
 
@@ -174,7 +186,9 @@ def _cmd_read_record(root: str, store: str, name: str, result: str) -> None:
 
 def _cmd_count_log(root: str, name: str, result: str) -> None:
     page = ts.read_log(_record(LOG, root, name))
-    Path(result).write_text(json.dumps({"records": len(page.records)}), encoding="utf-8")
+    Path(result).write_text(
+        json.dumps({"records": len(page.records)}), encoding="utf-8"
+    )
 
 
 def _cmd_hold_lock(root: str, name: str, ready: str) -> None:
@@ -186,10 +200,20 @@ def _cmd_hold_lock(root: str, name: str, ready: str) -> None:
 
 
 def _cmd_write_blob_after(
-    root: str, name: str, mode: str, value: str, ready: str, go: str, result: str
+    root: str,
+    name: str,
+    mode: str,
+    value: str,
+    ready: str,
+    go: str,
+    result: str,
 ) -> None:
     path = blob_path(root, name)
-    expect = ts.read_blob_versioned(path, default=b"").version if mode == "cas" else None
+    expect = (
+        ts.read_blob_versioned(path, default=b"").version
+        if mode == "cas"
+        else None
+    )
     Path(ready).write_text("read", encoding="utf-8")
     wait_for(Path(go))
     outcome = "written"
@@ -202,10 +226,14 @@ def _cmd_write_blob_after(
     Path(result).write_text(json.dumps({"outcome": outcome}), encoding="utf-8")
 
 
-def _cmd_pause_before_commit(root: str, first: str, second: str, marker: str, pause_s: str) -> None:
+def _cmd_pause_before_commit(
+    root: str, first: str, second: str, marker: str, pause_s: str
+) -> None:
     """Write both keys through a transaction that pauses once the first row is in it, so a kill
     lands on an open transaction holding uncommitted rows rather than on an empty one."""
-    ts.bind(PausingCommitBackend(pause_marker=Path(marker), pause_s=float(pause_s)))
+    ts.bind(
+        PausingCommitBackend(pause_marker=Path(marker), pause_s=float(pause_s))
+    )
     keys = (_record(LWW, root, first), _record(LWW, root, second))
     with ts.transaction(*keys) as txn:
         for key in keys:

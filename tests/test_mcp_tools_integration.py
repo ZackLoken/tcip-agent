@@ -26,10 +26,23 @@ def _empty_bucket(project: Path, *images: Path) -> str:
     pytest.importorskip("torch")
     from tests._chain_fixtures import published
 
-    return published(project, "m/2024-01-01", [
-        {"image": str(image), "width": 8, "height": 8, "boxes": [], "scores": [], "labels": [],
-         "cap": 1} for image in images],
-        scope={"subject": "bud"}).name
+    return published(
+        project,
+        "m/2024-01-01",
+        [
+            {
+                "image": str(image),
+                "width": 8,
+                "height": 8,
+                "boxes": [],
+                "scores": [],
+                "labels": [],
+                "cap": 1,
+            }
+            for image in images
+        ],
+        scope={"subject": "bud"},
+    ).name
 
 
 # ── Annotation tool integration tests ───────────────────────────────────────
@@ -42,7 +55,9 @@ class TestReadAnnotations:
         result = read_annotations("/nonexistent/image.jpg")
         assert "error" in result
 
-    def test_polygon_is_reported_as_rings_including_every_contour(self, tmp_path):
+    def test_polygon_is_reported_as_rings_including_every_contour(
+        self, tmp_path
+    ):
         """The tool response represents a polygon as ``rings``, all of them.
 
         A stored annotation can be occlusion-split (one instance, several contours), so reporting a
@@ -55,16 +70,30 @@ class TestReadAnnotations:
         images_dir = tmp_path / "images" / UNDATED_BUCKET
         images_dir.mkdir(parents=True)
         Image.new("RGB", (100, 100)).save(images_dir / "a.jpg")
-        label_image(images_dir / "a.jpg", [Annotation(subject="bud", geometry=Polygon([
-            [(10.0, 10.0), (30.0, 10.0), (30.0, 30.0)],
-            [(60.0, 10.0), (80.0, 10.0), (80.0, 30.0)],
-        ]))], 100, 100)
+        label_image(
+            images_dir / "a.jpg",
+            [
+                Annotation(
+                    subject="bud",
+                    geometry=Polygon(
+                        [
+                            [(10.0, 10.0), (30.0, 10.0), (30.0, 30.0)],
+                            [(60.0, 10.0), (80.0, 10.0), (80.0, 30.0)],
+                        ]
+                    ),
+                )
+            ],
+            100,
+            100,
+        )
 
         result = read_annotations(str(images_dir / "a.jpg"))
         (ann,) = result["labels"]["annotations"]
         assert "points" not in ann
-        assert ann["rings"] == [[[10.0, 10.0], [30.0, 10.0], [30.0, 30.0]],
-                                [[60.0, 10.0], [80.0, 10.0], [80.0, 30.0]]]
+        assert ann["rings"] == [
+            [[10.0, 10.0], [30.0, 10.0], [30.0, 30.0]],
+            [[60.0, 10.0], [80.0, 10.0], [80.0, 30.0]],
+        ]
 
 
 # ── Evaluate predictions integration test ───────────────────────────────────
@@ -77,7 +106,9 @@ class TestEvaluatePredictions:
         from tcip_mcp.tools.annotation_tools import score_predictions
 
         img = str(data_dir / "images" / DATE / "img_001.jpg")
-        result = score_predictions(img, DATA_DIR_BUCKET, iou_threshold=0.5, conf_threshold=0.25)
+        result = score_predictions(
+            img, DATA_DIR_BUCKET, iou_threshold=0.5, conf_threshold=0.25
+        )
         assert "error" not in result
         assert result["tp"] >= 0
         assert result["fp"] >= 0
@@ -88,8 +119,9 @@ class TestEvaluatePredictions:
     def test_evaluate_folder(self, data_dir: Path):
         from tcip_mcp.tools.annotation_tools import score_predictions
 
-        result = score_predictions(str(data_dir / "images" / DATE), DATA_DIR_BUCKET,
-                                   iou_threshold=0.5)
+        result = score_predictions(
+            str(data_dir / "images" / DATE), DATA_DIR_BUCKET, iou_threshold=0.5
+        )
         assert result["image_count"] == 3
         assert "precision" in result
         assert "recall" in result
@@ -105,7 +137,9 @@ class TestEvaluatePredictionsDetail:
         from tcip_mcp.tools.annotation_tools import score_predictions
 
         img = str(data_dir / "images" / DATE / "img_001.jpg")
-        result = score_predictions(img, DATA_DIR_BUCKET, iou_threshold=0.5, detail=True)
+        result = score_predictions(
+            img, DATA_DIR_BUCKET, iou_threshold=0.5, detail=True
+        )
         assert "error" not in result
         assert "detections" in result
 
@@ -120,11 +154,15 @@ def _write_empty_label(image: Path, w: int, h: int) -> None:
 
 
 class TestEvaluateFolderEnumeration:
-    def test_a_band_grouped_capture_scores_as_one_logical_image(self, tmp_path: Path):
+    def test_a_band_grouped_capture_scores_as_one_logical_image(
+        self, tmp_path: Path
+    ):
         import numpy as np
         import tifffile
 
-        from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
+        from tcip_mcp.pipelines.data.band_groups import (
+            write_band_group_manifest,
+        )
         from tcip_mcp.tools.annotation_tools import score_predictions
 
         images_dir = tmp_path / "images" / "2024-01-01"
@@ -132,13 +170,17 @@ class TestEvaluateFolderEnumeration:
         band_a, band_b = images_dir / "cap_G.tif", images_dir / "cap_R.tif"
         tifffile.imwrite(str(band_a), np.full((8, 8), 111, dtype=np.uint16))
         tifffile.imwrite(str(band_b), np.full((8, 8), 222, dtype=np.uint16))
-        write_band_group_manifest(images_dir, "cap", {"Green": band_a, "Red": band_b})
+        write_band_group_manifest(
+            images_dir, "cap", {"Green": band_a, "Red": band_b}
+        )
         _write_empty_label(images_dir / "cap.bandgroup", 8, 8)
 
         bucket = _empty_bucket(tmp_path, images_dir / "cap.bandgroup")
         result = score_predictions(str(images_dir), bucket, iou_threshold=0.5)
         assert result["image_count"] == 1
-        assert [row["image"] for row in result["per_image"]] == ["cap.bandgroup"]
+        assert [row["image"] for row in result["per_image"]] == [
+            "cap.bandgroup"
+        ]
 
     def test_an_npz_capture_scores(self, tmp_path: Path):
         import numpy as np
@@ -147,7 +189,10 @@ class TestEvaluateFolderEnumeration:
 
         images_dir = tmp_path / "images" / "2024-01-01"
         images_dir.mkdir(parents=True)
-        np.savez(str(images_dir / "cap.npz"), bands=np.zeros((8, 8, 3), dtype=np.uint16))
+        np.savez(
+            str(images_dir / "cap.npz"),
+            bands=np.zeros((8, 8, 3), dtype=np.uint16),
+        )
         _write_empty_label(images_dir / "cap.npz", 8, 8)
 
         bucket = _empty_bucket(tmp_path, images_dir / "cap.npz")
@@ -155,7 +200,9 @@ class TestEvaluateFolderEnumeration:
         assert result["image_count"] == 1
         assert [row["image"] for row in result["per_image"]] == ["cap.npz"]
 
-    def test_a_folder_nested_inside_the_images_directory_is_not_scored(self, tmp_path: Path):
+    def test_a_folder_nested_inside_the_images_directory_is_not_scored(
+        self, tmp_path: Path
+    ):
         from tcip_mcp.tools.annotation_tools import score_predictions
 
         images_dir = tmp_path / "images" / "2024-01-01"
@@ -166,8 +213,11 @@ class TestEvaluateFolderEnumeration:
         elsewhere.parent.mkdir(parents=True)
         Image.new("RGB", (8, 8)).save(elsewhere)
 
-        result = score_predictions(str(images_dir), _empty_bucket(tmp_path, elsewhere),
-                                   iou_threshold=0.5)
+        result = score_predictions(
+            str(images_dir),
+            _empty_bucket(tmp_path, elsewhere),
+            iou_threshold=0.5,
+        )
         assert result["image_count"] == 0
 
 
@@ -190,7 +240,11 @@ class TestAugmentations:
         config = {
             "horizontal_flip": {"p": 0.5},
             "vertical_flip": {"p": 0.3},
-            "color_jitter": {"brightness": 0.3, "contrast": 0.3, "saturation": 0.0},
+            "color_jitter": {
+                "brightness": 0.3,
+                "contrast": 0.3,
+                "saturation": 0.0,
+            },
             "gaussian_blur": {"p": 0.1, "radius": 2.0},
         }
         transforms = build_augmentation(config)
@@ -220,7 +274,13 @@ class TestAugmentations:
         import torch
         from tcip_mcp.pipelines.data.augmentations import build_augmentation
 
-        config = {"color_jitter": {"brightness": 0.1, "contrast": 0.0, "saturation": 0.0}}
+        config = {
+            "color_jitter": {
+                "brightness": 0.1,
+                "contrast": 0.0,
+                "saturation": 0.0,
+            }
+        }
         transforms = build_augmentation(config)
 
         img = Image.new("RGB", (64, 64), color=(128, 128, 128))
@@ -242,11 +302,17 @@ class TestReadAnnotationsUnknownFormat:
         from tests._producer_fixtures import image_label_key
 
         (tmp_path / "images" / UNDATED_BUCKET).mkdir(parents=True)
-        Image.new("RGB", (32, 32)).save(tmp_path / "images" / UNDATED_BUCKET / "a.jpg")
+        Image.new("RGB", (32, 32)).save(
+            tmp_path / "images" / UNDATED_BUCKET / "a.jpg"
+        )
         # A record of a schema this platform does not read, stored past the writer.
         tcip_store.replace(
-            image_label_key(tmp_path / "images" / UNDATED_BUCKET / "a.jpg"), {"regions": []})
+            image_label_key(tmp_path / "images" / UNDATED_BUCKET / "a.jpg"),
+            {"regions": []},
+        )
 
-        result = read_annotations(str(tmp_path / "images" / UNDATED_BUCKET / "a.jpg"))
+        result = read_annotations(
+            str(tmp_path / "images" / UNDATED_BUCKET / "a.jpg")
+        )
         assert "error" in result
         assert "not the list a label document holds" in result["error"]

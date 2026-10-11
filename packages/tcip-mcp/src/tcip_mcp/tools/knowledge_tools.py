@@ -13,7 +13,9 @@ from tcip_mcp.server import tool
 def _repo_relative_path(document) -> str:
     """A document's path relative to the repository root, for a tool-only client with no
     checkout-relative context of its own to resolve the bare filename against."""
-    return document.path.resolve().relative_to(repo_root_from_here()).as_posix()
+    return (
+        document.path.resolve().relative_to(repo_root_from_here()).as_posix()
+    )
 
 
 def _description() -> str:
@@ -26,7 +28,10 @@ def _description() -> str:
         "Without a name it returns the index of names and descriptions below; with a name "
         "from the lines below it returns that document's content.",
     ]
-    lines += [f"{document.name}: {document.description}" for document in list_documents()]
+    lines += [
+        f"{document.name}: {document.description}"
+        for document in list_documents()
+    ]
     return "\n".join(lines)
 
 
@@ -43,7 +48,11 @@ def serve_domain_knowledge(name: str | None = None) -> dict:
     if not name:
         return {
             "documents": [
-                {"name": d.name, "description": d.description, "path": _repo_relative_path(d)}
+                {
+                    "name": d.name,
+                    "description": d.description,
+                    "path": _repo_relative_path(d),
+                }
                 for d in documents
             ]
         }

@@ -17,7 +17,9 @@ def test_a_dataset_render_leaves_no_audit_line(project: Path) -> None:
     Image.new("RGB", (32, 24), (40, 90, 60)).save(images / "a.png")
     before = audit_rows(project)
 
-    result = visualize(project, source="dataset", path=str(project / "dataset"), n=1)
+    result = visualize(
+        project, source="dataset", path=str(project / "dataset"), n=1
+    )
 
     assert "error" not in result, result
     assert audit_rows(project) == before

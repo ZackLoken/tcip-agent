@@ -24,7 +24,11 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, unquote
 
 if TYPE_CHECKING:
-    from mcp.server.context import CallNext, HandlerResult, ServerRequestContext
+    from mcp.server.context import (
+        CallNext,
+        HandlerResult,
+        ServerRequestContext,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +56,10 @@ class AgentIdentity:
 RECORD_FIELDS = tuple(f.name for f in dataclasses.fields(AgentIdentity))
 """The fields a record gains, in declaration order."""
 
-HEADERS = {field: "X-TCIP-" + "-".join(w.capitalize() for w in field.split("_"))
-           for field in RECORD_FIELDS}
+HEADERS = {
+    field: "X-TCIP-" + "-".join(w.capitalize() for w in field.split("_"))
+    for field in RECORD_FIELDS
+}
 """The header each field travels under on an HTTP push."""
 
 _current: AgentIdentity | None = None
@@ -70,7 +76,9 @@ def begin(client_name: str, client_version: str) -> AgentIdentity:
         logger.warning(
             "a second MCP handshake (%s %s) reached a server already serving %s %s; the identity "
             "of the first connection stands for this run",
-            client_name, client_version, _current.agent_client_name,
+            client_name,
+            client_version,
+            _current.agent_client_name,
             _current.agent_client_version,
         )
         return _current
@@ -99,7 +107,11 @@ def audit_fields() -> dict[str, Any]:
     the identity with ``terminal_session`` present only when one was declared."""
     if _current is None:
         return {}
-    return {key: value for key, value in _current.fields().items() if value is not None}
+    return {
+        key: value
+        for key, value in _current.fields().items()
+        if value is not None
+    }
 
 
 def http_headers() -> dict[str, str]:
@@ -109,7 +121,10 @@ def http_headers() -> dict[str, str]:
     characters, so each value travels percent-encoded (letters, digits and ``-._~`` bare) and the
     backend decodes it; a push never fails on what a harness chose to call itself.
     """
-    return {HEADERS[key]: quote(str(value), safe="") for key, value in audit_fields().items()}
+    return {
+        HEADERS[key]: quote(str(value), safe="")
+        for key, value in audit_fields().items()
+    }
 
 
 def fields_from_headers(headers: Mapping[str, str]) -> dict[str, Any]:
@@ -117,7 +132,8 @@ def fields_from_headers(headers: Mapping[str, str]) -> dict[str, Any]:
     decoded from the percent-encoding :func:`http_headers` applies.
     """
     return {
-        field: unquote(headers.get(header) or "") or None for field, header in HEADERS.items()
+        field: unquote(headers.get(header) or "") or None
+        for field, header in HEADERS.items()
     }
 
 

@@ -43,7 +43,9 @@ def _manifest(partition: dict) -> dict:
     return manifest.model_dump()
 
 
-def _detection_dataset(root: Path, prefixes=("srcA", "srcB", "srcC", "srcD"), tiles=2):
+def _detection_dataset(
+    root: Path, prefixes=("srcA", "srcB", "srcC", "srcD"), tiles=2
+):
     """``tiles`` labeled images per prefix in ``root``'s undated capture; the capture's
     directory and the stems."""
     images_dir = root / "images" / UNDATED_BUCKET
@@ -65,15 +67,22 @@ def test_a_run_naming_a_ground_truth_place_that_does_not_exist_refuses_naming_it
     ``data.labels_dir`` rather than reading as no ground truth."""
     images_dir, _stems = _detection_dataset(tmp_path / "ds")
     (tmp_path / "empty").mkdir()
-    data_cfg: dict = {"images_dir": str(images_dir), "scope": {"subject": "bud"},
-                      "split": {"seed": 1, "val_ratio": 0.15}}
+    data_cfg: dict = {
+        "images_dir": str(images_dir),
+        "scope": {"subject": "bud"},
+        "split": {"seed": 1, "val_ratio": 0.15},
+    }
 
     for place in (tmp_path / "gone", tmp_path / "empty"):
         with pytest.raises(ValueError, match="data.labels_dir"):
-            _train_val(tmp_path, "detection", {**data_cfg, "labels_dir": str(place)})
+            _train_val(
+                tmp_path, "detection", {**data_cfg, "labels_dir": str(place)}
+            )
 
     # Admits valid work: the same config naming no place reads the images' own documents.
-    train_ds, _val_ds, _partition, _data = _train_val(tmp_path, "detection", data_cfg)
+    train_ds, _val_ds, _partition, _data = _train_val(
+        tmp_path, "detection", data_cfg
+    )
     assert train_ds.num_samples
 
 
@@ -85,14 +94,19 @@ def test_auto_train_val_detection_splits(tmp_path: Path):
         "auto_val": True,
         "split": {"val_ratio": 0.4, "seed": 1},
     }
-    train_ds, val_ds, partition, _data = _train_val(tmp_path, "detection", data_cfg)
+    train_ds, val_ds, partition, _data = _train_val(
+        tmp_path, "detection", data_cfg
+    )
     assert val_ds is not None
     assert set(train_ds.stems).isdisjoint(set(val_ds.stems))
     # The loaders index by each sample's own source, so a drawn run and a bound one key alike;
     # the run's recorded partition is what names members as bare stems.
-    assert sorted(Path(s).stem for s in train_ds.stems + val_ds.stems) == sorted(all_stems)
-    assert sorted(recorded_side(partition, "train") + recorded_side(partition, "val")) == \
-        sorted(all_stems)
+    assert sorted(
+        Path(s).stem for s in train_ds.stems + val_ds.stems
+    ) == sorted(all_stems)
+    assert sorted(
+        recorded_side(partition, "train") + recorded_side(partition, "val")
+    ) == sorted(all_stems)
     assert val_ds.transforms is None
 
 
@@ -103,7 +117,11 @@ def test_auto_train_val_malformed_group_by_raises(tmp_path: Path):
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
         "auto_val": True,
-        "split": {"group_by": "not_a_real_grouping_key", "seed": 1, "val_ratio": 0.15},
+        "split": {
+            "group_by": "not_a_real_grouping_key",
+            "seed": 1,
+            "val_ratio": 0.15,
+        },
     }
     with pytest.raises(ValueError):
         _train_val(tmp_path, "detection", data_cfg)
@@ -138,21 +156,32 @@ def test_auto_train_val_ordinal_draws_over_the_tables_own_rows(tmp_path: Path):
         w.writerow(("stem", "rank"))
         w.writerows(rows)
 
-    data_cfg = {"images_dir": str(images_dir), "labels_dir": str(csv_path), "auto_val": True,
-                "split": {"val_ratio": 0.5, "seed": 1}}
-    train_ds, val_ds, partition, _data = _train_val(tmp_path, "ordinal", data_cfg)
+    data_cfg = {
+        "images_dir": str(images_dir),
+        "labels_dir": str(csv_path),
+        "auto_val": True,
+        "split": {"val_ratio": 0.5, "seed": 1},
+    }
+    train_ds, val_ds, partition, _data = _train_val(
+        tmp_path, "ordinal", data_cfg
+    )
 
     assert val_ds is not None
     assert train_ds.num_samples + val_ds.num_samples == 4
     # Each side reads the rows its own samples name, keyed by their own sources.
     assert set(train_ds.stems).isdisjoint(val_ds.stems)
-    assert recorded_side(partition, "train") and recorded_side(partition, "val")
-    assert sorted(recorded_side(partition, "train") + recorded_side(partition, "val")) == \
-        [f"img{i}" for i in range(4)]
+    assert recorded_side(partition, "train") and recorded_side(
+        partition, "val"
+    )
+    assert sorted(
+        recorded_side(partition, "train") + recorded_side(partition, "val")
+    ) == [f"img{i}" for i in range(4)]
     assert {s["ground_truth"] for s in partition["samples"]} == {str(csv_path)}
     by_row = dict(rows)
     for idx, key in enumerate(train_ds.stems):
-        assert train_ds[idx][1]["ranks"] == by_row[train_ds.sample_of(key).member]
+        assert (
+            train_ds[idx][1]["ranks"] == by_row[train_ds.sample_of(key).member]
+        )
 
 
 def test_auto_train_val_single_untiled_source_refuses_validation_and_trains_without_it(
@@ -163,7 +192,11 @@ def test_auto_train_val_single_untiled_source_refuses_validation_and_trains_with
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     _save_png(images_dir / "src_0_0.png")
     label_image(images_dir / "src_0_0.png", _BUD, IMG, IMG)
-    data_cfg = {"images_dir": str(images_dir), "scope": {"subject": "bud"}, "auto_val": True}
+    data_cfg = {
+        "images_dir": str(images_dir),
+        "scope": {"subject": "bud"},
+        "auto_val": True,
+    }
     with pytest.raises(ValueError, match="auto_val=False"):
         _train_val(tmp_path, "detection", data_cfg)
 
@@ -172,8 +205,9 @@ def test_auto_train_val_single_untiled_source_refuses_validation_and_trains_with
     assert val_ds is None and train_ds.num_samples == 1
 
 
-def _big_single_source(root: Path, width: int, height: int, *,
-                       polygons: bool = False) -> tuple[Path, str]:
+def _big_single_source(
+    root: Path, width: int, height: int, *, polygons: bool = False
+) -> tuple[Path, str]:
     """One large source with a scatter of small boxes (``polygons``: squares), real width/height
     in its label document: a single-image dataset large enough to hold a spatial train/val split;
     its image tree and stem."""
@@ -181,12 +215,21 @@ def _big_single_source(root: Path, width: int, height: int, *,
     images_dir.mkdir(parents=True, exist_ok=True)
     stem = "mosaic"
     from torchvision.utils import save_image
-    save_image(torch.rand(3, height, width) * 0.3, str(images_dir / f"{stem}.png"))
+
+    save_image(
+        torch.rand(3, height, width) * 0.3, str(images_dir / f"{stem}.png")
+    )
     boxes = [
-        Annotation(subject="bud", geometry=Polygon(
-            rings=[[(x, y), (x + 20, y), (x + 20, y + 20), (x, y + 20)]]) if polygons
-            else BBox(x, y, x + 20, y + 20))
-        for x in range(20, width - 20, 200) for y in range(20, height - 20, 200)
+        Annotation(
+            subject="bud",
+            geometry=Polygon(
+                rings=[[(x, y), (x + 20, y), (x + 20, y + 20), (x, y + 20)]]
+            )
+            if polygons
+            else BBox(x, y, x + 20, y + 20),
+        )
+        for x in range(20, width - 20, 200)
+        for y in range(20, height - 20, 200)
     ]
     label_image(images_dir / f"{stem}.png", boxes, width, height)
     return images_dir, stem
@@ -197,11 +240,20 @@ def test_auto_train_val_single_source_tiled_spatial_split(tmp_path: Path):
     degrading to no validation, train and val tiles sharing no tile and no strip identity."""
     images_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "scope": {"subject": "bud"},
-        "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": {"val_ratio": 0.25, "holdout_ratio": 0.1, "calibration_ratio": 0, "seed": 1},
+        "images_dir": str(images_dir),
+        "scope": {"subject": "bud"},
+        "auto_val": True,
+        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+        "split": {
+            "val_ratio": 0.25,
+            "holdout_ratio": 0.1,
+            "calibration_ratio": 0,
+            "seed": 1,
+        },
     }
-    train_ds, val_ds, partition, _resolved = _train_val(tmp_path, "detection", data_cfg)
+    train_ds, val_ds, partition, _resolved = _train_val(
+        tmp_path, "detection", data_cfg
+    )
     assert val_ds is not None
     assert train_ds.tile_size == 128 and val_ds.tile_size == 128
     assert train_ds.num_samples > 0 and val_ds.num_samples > 0
@@ -210,25 +262,35 @@ def test_auto_train_val_single_source_tiled_spatial_split(tmp_path: Path):
     assert recorded_side(partition, "train") == [stem]
     manifest = _manifest(partition)
     assert manifest["train_identities"] and manifest["val_identities"]
-    assert set(manifest["train_identities"]).isdisjoint(set(manifest["val_identities"]))
-    assert all(i.startswith(f"{stem}::strip_") for i in manifest["train_identities"])
+    assert set(manifest["train_identities"]).isdisjoint(
+        set(manifest["val_identities"])
+    )
+    assert all(
+        i.startswith(f"{stem}::strip_") for i in manifest["train_identities"]
+    )
     assert manifest["kept_holdout_tiles"] > 0
 
 
-def test_a_single_tiled_source_with_no_val_share_refuses_by_name(tmp_path: Path):
+def test_a_single_tiled_source_with_no_val_share_refuses_by_name(
+    tmp_path: Path,
+):
     """The spatial geometry draws the run's one requested partition: a zero val share refuses as
     every draw refuses it, before any strip is laid."""
     images_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "scope": {"subject": "bud"},
-        "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+        "images_dir": str(images_dir),
+        "scope": {"subject": "bud"},
+        "auto_val": True,
+        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.0, "seed": 1},
     }
     with pytest.raises(ValueError, match="val_ratio above zero"):
         _train_val(tmp_path, "detection", data_cfg)
 
 
-def test_spatial_manifest_tied_val_holdout_fractions_place_by_declared_order(tmp_path: Path):
+def test_spatial_manifest_tied_val_holdout_fractions_place_by_declared_order(
+    tmp_path: Path,
+):
     """``val_ratio == holdout_ratio`` ties their shares in the center-out tie-break, so which
     strip val lands on comes from declared (``split_names``) order alone: ``spatial_single_
     source_split`` fixes that order itself (``("train", "val", "holdout")``), so this pins the
@@ -237,11 +299,20 @@ def test_spatial_manifest_tied_val_holdout_fractions_place_by_declared_order(tmp
     ``seed`` key; the assertion guards that absence alone."""
     images_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "scope": {"subject": "bud"},
-        "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": {"val_ratio": 0.2, "holdout_ratio": 0.2, "calibration_ratio": 0, "seed": 1},
+        "images_dir": str(images_dir),
+        "scope": {"subject": "bud"},
+        "auto_val": True,
+        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+        "split": {
+            "val_ratio": 0.2,
+            "holdout_ratio": 0.2,
+            "calibration_ratio": 0,
+            "seed": 1,
+        },
     }
-    train_ds, val_ds, partition, _resolved = _train_val(tmp_path, "detection", data_cfg)
+    train_ds, val_ds, partition, _resolved = _train_val(
+        tmp_path, "detection", data_cfg
+    )
     assert val_ds is not None
     manifest = _manifest(partition)
     assert manifest["train_region"] == [(1030, 0, 3218, 3000)]
@@ -259,12 +330,20 @@ def test_spatial_manifest_tied_holdout_calibration_fractions_place_by_declared_o
     manifest carries no ``seed`` key; the assertion guards that absence alone."""
     images_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "scope": {"subject": "bud"},
-        "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": {"val_ratio": 0.25, "holdout_ratio": 0.15, "calibration_ratio": 0.15,
-                  "seed": 1},
+        "images_dir": str(images_dir),
+        "scope": {"subject": "bud"},
+        "auto_val": True,
+        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+        "split": {
+            "val_ratio": 0.25,
+            "holdout_ratio": 0.15,
+            "calibration_ratio": 0.15,
+            "seed": 1,
+        },
     }
-    train_ds, val_ds, partition, _resolved = _train_val(tmp_path, "detection", data_cfg)
+    train_ds, val_ds, partition, _resolved = _train_val(
+        tmp_path, "detection", data_cfg
+    )
     assert val_ds is not None
     manifest = _manifest(partition)
     assert manifest["calibration_region"] == [(0, 0, 643, 3000)]
@@ -280,11 +359,20 @@ def test_spatial_manifest_pins_train_val_and_holdout_regions_for_distinct_fracti
     regions are pinned against this exact width, height, tile_size, overlap and fractions."""
     images_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "scope": {"subject": "bud"},
-        "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": {"val_ratio": 0.25, "holdout_ratio": 0.1, "calibration_ratio": 0, "seed": 1},
+        "images_dir": str(images_dir),
+        "scope": {"subject": "bud"},
+        "auto_val": True,
+        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+        "split": {
+            "val_ratio": 0.25,
+            "holdout_ratio": 0.1,
+            "calibration_ratio": 0,
+            "seed": 1,
+        },
     }
-    train_ds, val_ds, partition, _resolved = _train_val(tmp_path, "detection", data_cfg)
+    train_ds, val_ds, partition, _resolved = _train_val(
+        tmp_path, "detection", data_cfg
+    )
     assert val_ds is not None
     manifest = _manifest(partition)
     assert manifest["train_region"] == [(1236, 0, 3630, 3000)]
@@ -298,13 +386,28 @@ def test_spatial_manifest_persists_train_and_val_regions_too(tmp_path: Path):
     for every side, not only the reserved holdout area."""
     images_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "scope": {"subject": "bud"},
-        "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": {"val_ratio": 0.25, "holdout_ratio": 0.1, "calibration_ratio": 0, "seed": 1},
+        "images_dir": str(images_dir),
+        "scope": {"subject": "bud"},
+        "auto_val": True,
+        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+        "split": {
+            "val_ratio": 0.25,
+            "holdout_ratio": 0.1,
+            "calibration_ratio": 0,
+            "seed": 1,
+        },
     }
     manifest = _manifest(_train_val(tmp_path, "detection", data_cfg)[2])
-    assert manifest["train_region"] and manifest["val_region"] and manifest["holdout_region"]
-    for region in (manifest["train_region"], manifest["val_region"], manifest["holdout_region"]):
+    assert (
+        manifest["train_region"]
+        and manifest["val_region"]
+        and manifest["holdout_region"]
+    )
+    for region in (
+        manifest["train_region"],
+        manifest["val_region"],
+        manifest["holdout_region"],
+    ):
         for rect in region:
             assert len(rect) == 4
 
@@ -317,11 +420,21 @@ def test_auto_train_val_single_source_spatial_split_ignores_a_stray_keep_regions
     keep_regions kwarg the spatial split passes explicitly."""
     images_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "scope": {"subject": "bud"},
+        "images_dir": str(images_dir),
+        "scope": {"subject": "bud"},
         "auto_val": True,
-        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2,
-                   "keep_regions": [(0, 0, 100, 100)]},
-        "split": {"val_ratio": 0.25, "holdout_ratio": 0.1, "calibration_ratio": 0, "seed": 1},
+        "tiling": {
+            "enabled": True,
+            "tile_size": 128,
+            "overlap": 0.2,
+            "keep_regions": [(0, 0, 100, 100)],
+        },
+        "split": {
+            "val_ratio": 0.25,
+            "holdout_ratio": 0.1,
+            "calibration_ratio": 0,
+            "seed": 1,
+        },
     }
     train_ds, val_ds, _, _data = _train_val(tmp_path, "detection", data_cfg)
     assert val_ds is not None
@@ -338,63 +451,111 @@ def _two_mosaic_tiles(tmp_path: Path) -> tuple[Path, list[str]]:
     return images_dir, stems
 
 
-def test_auto_train_val_degenerate_grouping_refuses_and_a_stem_grouping_draws(tmp_path: Path):
+def test_auto_train_val_degenerate_grouping_refuses_and_a_stem_grouping_draws(
+    tmp_path: Path,
+):
     """Two stems whose default tile_prefix grouping collapses to one group hold one foreground
     group, short of a train and a val side: the run refuses through the draw's own floor rather
     than regrouping on its own, and the same tree grouped by stem draws both sides."""
     images_dir, stems = _two_mosaic_tiles(tmp_path)
-    data_cfg = {"images_dir": str(images_dir), "scope": {"subject": "bud"}, "auto_val": True,
-                "split": {"val_ratio": 0.5, "seed": 1}}
-    with pytest.raises(ValueError, match="fewer than the 2 the requested sides need"):
+    data_cfg = {
+        "images_dir": str(images_dir),
+        "scope": {"subject": "bud"},
+        "auto_val": True,
+        "split": {"val_ratio": 0.5, "seed": 1},
+    }
+    with pytest.raises(
+        ValueError, match="fewer than the 2 the requested sides need"
+    ):
         _train_val(tmp_path, "detection", data_cfg)
     data_cfg["split"]["group_by"] = "stem"
-    train_ds, val_ds, partition, _data = _train_val(tmp_path, "detection", data_cfg)
+    train_ds, val_ds, partition, _data = _train_val(
+        tmp_path, "detection", data_cfg
+    )
     assert val_ds is not None
     assert set(train_ds.stems).isdisjoint(set(val_ds.stems))
-    assert sorted(Path(s).stem for s in train_ds.stems + val_ds.stems) == sorted(stems)
+    assert sorted(
+        Path(s).stem for s in train_ds.stems + val_ds.stems
+    ) == sorted(stems)
     assert partition["group_by"] == "stem"
 
 
-def test_auto_train_val_explicit_group_key_map_starving_val_refuses(tmp_path: Path):
+def test_auto_train_val_explicit_group_key_map_starving_val_refuses(
+    tmp_path: Path,
+):
     """A caller-supplied group_key_map that starves val is a deliberate leakage policy, not a
     data limitation: the run refuses it rather than discard it for another grouping."""
     images_dir, stems = _two_mosaic_tiles(tmp_path)
-    group_key_map = {f"{UNDATED_BUCKET}/{s}": "one_group_for_everything" for s in stems}
-    data_cfg = {"images_dir": str(images_dir), "scope": {"subject": "bud"}, "auto_val": True,
-                "split": {"val_ratio": 0.5, "seed": 1, "group_key_map": group_key_map}}
-    with pytest.raises(ValueError, match="fewer than the 2 the requested sides need"):
+    group_key_map = {
+        f"{UNDATED_BUCKET}/{s}": "one_group_for_everything" for s in stems
+    }
+    data_cfg = {
+        "images_dir": str(images_dir),
+        "scope": {"subject": "bud"},
+        "auto_val": True,
+        "split": {"val_ratio": 0.5, "seed": 1, "group_key_map": group_key_map},
+    }
+    with pytest.raises(
+        ValueError, match="fewer than the 2 the requested sides need"
+    ):
         _train_val(tmp_path, "detection", data_cfg)
 
 
-def test_a_calibration_ratio_of_zero_reserves_no_calibration_region(tmp_path: Path):
+def test_a_calibration_ratio_of_zero_reserves_no_calibration_region(
+    tmp_path: Path,
+):
     """With calibration_ratio stated at zero, the spatial_manifest carries no calibration_region
     and still holds its train, val and holdout regions."""
     images_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "scope": {"subject": "bud"},
-        "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": {"val_ratio": 0.25, "holdout_ratio": 0.1, "calibration_ratio": 0, "seed": 1},
+        "images_dir": str(images_dir),
+        "scope": {"subject": "bud"},
+        "auto_val": True,
+        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+        "split": {
+            "val_ratio": 0.25,
+            "holdout_ratio": 0.1,
+            "calibration_ratio": 0,
+            "seed": 1,
+        },
     }
-    train_ds, val_ds, partition, _resolved = _train_val(tmp_path, "detection", data_cfg)
+    train_ds, val_ds, partition, _resolved = _train_val(
+        tmp_path, "detection", data_cfg
+    )
     assert val_ds is not None
     manifest = _manifest(partition)
     assert manifest["calibration_region"] == []
     assert manifest["kept_calibration_tiles"] == 0
-    assert manifest["train_region"] and manifest["val_region"] and manifest["holdout_region"]
+    assert (
+        manifest["train_region"]
+        and manifest["val_region"]
+        and manifest["holdout_region"]
+    )
 
 
-def test_a_single_source_spatial_run_builds_its_loaders_at_the_stated_band_count(tmp_path: Path):
+def test_a_single_source_spatial_run_builds_its_loaders_at_the_stated_band_count(
+    tmp_path: Path,
+):
     """The sizes a run's config states reach the one-source spatial route too: a run configured
     for one channel indexes its tile lattice and reads its tiles at one channel, rather than
     probing its own source back to three."""
     images_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "scope": {"subject": "bud"},
-        "auto_val": True, "num_channels": 1,
+        "images_dir": str(images_dir),
+        "scope": {"subject": "bud"},
+        "auto_val": True,
+        "num_channels": 1,
         "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": {"val_ratio": 0.25, "holdout_ratio": 0.1, "calibration_ratio": 0, "seed": 1},
+        "split": {
+            "val_ratio": 0.25,
+            "holdout_ratio": 0.1,
+            "calibration_ratio": 0,
+            "seed": 1,
+        },
     }
-    train_ds, val_ds, partition, resolved = _train_val(tmp_path, "detection", data_cfg)
+    train_ds, val_ds, partition, resolved = _train_val(
+        tmp_path, "detection", data_cfg
+    )
     assert val_ds is not None
     assert recorded_side(partition, "train") == [stem]
     assert partition["spatial"] is not None
@@ -407,26 +568,46 @@ def _within_image_context(tmp_path: Path):
     """The context a within-image split run's body is handed, built from the run's own launch
     record (``subprocess_worker.prepare_run_context``), with its partition and its one stem."""
     from tcip_mcp.experiments import observe
-    from tcip_mcp.pipelines.training.subprocess_worker import prepare_run_context
+    from tcip_mcp.pipelines.training.subprocess_worker import (
+        prepare_run_context,
+    )
     from tests._verified_checkpoint_fixtures import opened_run, unbuilt_source
 
     images_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "scope": {"subject": "bud"}, "auto_val": True,
+        "images_dir": str(images_dir),
+        "scope": {"subject": "bud"},
+        "auto_val": True,
         "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": {"val_ratio": 0.25, "holdout_ratio": 0.1, "calibration_ratio": 0, "seed": 1},
+        "split": {
+            "val_ratio": 0.25,
+            "holdout_ratio": 0.1,
+            "calibration_ratio": 0,
+            "seed": 1,
+        },
     }
-    observation = observe(opened_run(tmp_path, training_config(unbuilt_source("detection"),
-                                                               data_cfg)))
-    return prepare_run_context(observation), observation.resolution["partition"], stem
+    observation = observe(
+        opened_run(
+            tmp_path, training_config(unbuilt_source("detection"), data_cfg)
+        )
+    )
+    return (
+        prepare_run_context(observation),
+        observation.resolution["partition"],
+        stem,
+    )
 
 
 def test_a_bodys_loader_on_a_within_image_split_run_holds_only_train_region_tiles(
-        tmp_path: Path):
+    tmp_path: Path,
+):
     """A training body's loader over a within-image split run's one sample is that sample's train
     view: every tile it serves lies inside the train region the run recorded, so no held-out pixel
     trains."""
-    from tcip_mcp.pipelines.data.split_construction import partition_samples, partition_spatial
+    from tcip_mcp.pipelines.data.split_construction import (
+        partition_samples,
+        partition_spatial,
+    )
     from tcip_mcp.pipelines.raster_source import rect_contains_rect
 
     ctx, partition, _stem = _within_image_context(tmp_path)
@@ -435,18 +616,23 @@ def test_a_bodys_loader_on_a_within_image_split_run_holds_only_train_region_tile
 
     served = ctx.build_dataset(samples=partition_samples(partition))
     assert served.tile_entries
-    assert all(any(rect_contains_rect(r, box) for r in spatial.train_region)
-               for _stem, box in served.tile_entries)
+    assert all(
+        any(rect_contains_rect(r, box) for r in spatial.train_region)
+        for _stem, box in served.tile_entries
+    )
 
 
 def test_a_bodys_loader_on_a_within_image_split_run_refuses_another_sample_naming_its_own(
-        tmp_path: Path):
+    tmp_path: Path,
+):
     """On a within-image split run a body's loader over a sample list that is not the run's one
     sample refuses naming that sample."""
     from tests._producer_fixtures import samples_over, seed_bud_images
 
     ctx, _partition, stem = _within_image_context(tmp_path)
-    other = seed_bud_images(tmp_path / "other" / "images" / UNDATED_BUCKET, n=1)
+    other = seed_bud_images(
+        tmp_path / "other" / "images" / UNDATED_BUCKET, n=1
+    )
     with pytest.raises(ValueError, match=stem):
         ctx.build_dataset(samples=samples_over(other, subject="bud"))
 
@@ -460,12 +646,20 @@ def _multiband_source(images_dir: Path, stem: str, bands: int) -> None:
 
     images_dir.mkdir(parents=True, exist_ok=True)
     band = painted_array(40, 24, [((28, 12, 34, 18), 255)])
-    tifffile.imwrite(str(images_dir / f"{stem}.tif"), np.stack([band] * bands, axis=-1))
-    label_image(images_dir / f"{stem}.tif",
-                [Annotation(subject="bud", geometry=BBox(28, 12, 34, 18))], 40, 24)
+    tifffile.imwrite(
+        str(images_dir / f"{stem}.tif"), np.stack([band] * bands, axis=-1)
+    )
+    label_image(
+        images_dir / f"{stem}.tif",
+        [Annotation(subject="bud", geometry=BBox(28, 12, 34, 18))],
+        40,
+        24,
+    )
 
 
-def test_a_runs_band_count_is_read_over_every_source_and_a_disagreement_refuses(tmp_path: Path):
+def test_a_runs_band_count_is_read_over_every_source_and_a_disagreement_refuses(
+    tmp_path: Path,
+):
     """The band count is one fact per run, read over every source it holds: sources that agree
     size both loaders at the count they carry, whichever side each landed on, and one source of
     another count refuses by name rather than leaving a side to be read at the other's count."""
@@ -475,7 +669,9 @@ def test_a_runs_band_count_is_read_over_every_source_and_a_disagreement_refuses(
     split = {"group_by": "stem", "val_ratio": 0.5, "seed": 1}
     base_cfg = {"images_dir": str(images_dir), "scope": {"subject": "bud"}}
 
-    train_ds, val_ds, _, _data = _train_val(tmp_path, "detection", {**base_cfg, "split": split})
+    train_ds, val_ds, _, _data = _train_val(
+        tmp_path, "detection", {**base_cfg, "split": split}
+    )
     assert val_ds is not None
     assert train_ds.expected_channels == val_ds.expected_channels == 5
 
@@ -504,8 +700,9 @@ def _probe_spy(monkeypatch) -> list[str]:
     return probed
 
 
-def test_a_stated_band_count_reads_every_source_at_it_and_probes_none(tmp_path: Path,
-                                                                      monkeypatch):
+def test_a_stated_band_count_reads_every_source_at_it_and_probes_none(
+    tmp_path: Path, monkeypatch
+):
     """A config that states how to read its sources is taken at its word: a run over an L source
     and an RGB one, stated at one channel, builds both loaders at one channel rather than
     deriving a disagreement it was told how to resolve, and probes no source to do it."""
@@ -515,11 +712,19 @@ def test_a_stated_band_count_reads_every_source_at_it_and_probes_none(tmp_path: 
     images_dir.mkdir(parents=True)
     for stem, mode in (("gray", "L"), ("color", "RGB")):
         Image.new(mode, (40, 24)).save(images_dir / f"{stem}.png")
-        label_image(images_dir / f"{stem}.png",
-                    [Annotation(subject="bud", geometry=BBox(28, 12, 34, 18))], 40, 24)
+        label_image(
+            images_dir / f"{stem}.png",
+            [Annotation(subject="bud", geometry=BBox(28, 12, 34, 18))],
+            40,
+            24,
+        )
     probed = _probe_spy(monkeypatch)
-    data_cfg = {"images_dir": str(images_dir), "scope": {"subject": "bud"}, "num_channels": 1,
-                "split": {"group_by": "stem", "val_ratio": 0.5, "seed": 1}}
+    data_cfg = {
+        "images_dir": str(images_dir),
+        "scope": {"subject": "bud"},
+        "num_channels": 1,
+        "split": {"group_by": "stem", "val_ratio": 0.5, "seed": 1},
+    }
 
     train_ds, val_ds, _, _data = _train_val(tmp_path, "detection", data_cfg)
 
@@ -529,15 +734,20 @@ def test_a_stated_band_count_reads_every_source_at_it_and_probes_none(tmp_path: 
     assert probed == []
 
 
-def test_a_runs_sources_are_probed_once_each_for_the_whole_run(tmp_path: Path, monkeypatch):
+def test_a_runs_sources_are_probed_once_each_for_the_whole_run(
+    tmp_path: Path, monkeypatch
+):
     """The band count is read where the run resolves its sizes and nowhere else: each source is
     probed once for the run, not again inside every loader the run builds."""
     images_dir = tmp_path / "ds" / "images" / UNDATED_BUCKET
     for stem in ("a", "b", "c", "d"):
         _multiband_source(images_dir, stem, 5)
     probed = _probe_spy(monkeypatch)
-    data_cfg = {"images_dir": str(images_dir), "scope": {"subject": "bud"},
-                "split": {"group_by": "stem", "val_ratio": 0.5, "seed": 1}}
+    data_cfg = {
+        "images_dir": str(images_dir),
+        "scope": {"subject": "bud"},
+        "split": {"group_by": "stem", "val_ratio": 0.5, "seed": 1},
+    }
 
     train_ds, val_ds, _, _data = _train_val(tmp_path, "detection", data_cfg)
 
@@ -546,7 +756,9 @@ def test_a_runs_sources_are_probed_once_each_for_the_whole_run(tmp_path: Path, m
     assert len(probed) == len(set(probed)) == 4
 
 
-def test_one_preflight_reads_a_sources_header_once_for_its_sizes(tmp_path: Path, monkeypatch):
+def test_one_preflight_reads_a_sources_header_once_for_its_sizes(
+    tmp_path: Path, monkeypatch
+):
     """Preflight resolves this run's sizes once and every leg that needs them takes that answer:
     the reserved-calibration feasibility probe builds the run's own dataset at the sizes already
     resolved rather than resolving a second time over the same source."""
@@ -556,11 +768,20 @@ def test_one_preflight_reads_a_sources_header_once_for_its_sizes(tmp_path: Path,
     images_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     cfg = training_config(
         BUILT_DETECTOR,
-        {"images_dir": str(images_dir), "scope": {"subject": "bud"},
-         "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-         "split": {"val_ratio": 0.2, "holdout_ratio": 0.1, "calibration_ratio": 0.15,
-                   "seed": 1}},
-        batch_size=1, stages=[{"freeze_to": 0}])
+        {
+            "images_dir": str(images_dir),
+            "scope": {"subject": "bud"},
+            "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+            "split": {
+                "val_ratio": 0.2,
+                "holdout_ratio": 0.1,
+                "calibration_ratio": 0.15,
+                "seed": 1,
+            },
+        },
+        batch_size=1,
+        stages=[{"freeze_to": 0}],
+    )
     probed = _probe_spy(monkeypatch)
 
     result = preflight_config(tmp_path, cfg, smoke=True)
@@ -577,30 +798,48 @@ def test_a_bound_run_records_the_width_it_read_its_sources_at(tmp_path: Path):
     images_dir = tmp_path / "ds" / "images" / UNDATED_BUCKET
     for stem in ("a", "b"):
         _multiband_source(images_dir, stem, 5)
-    data_cfg = {"images_dir": str(images_dir), "scope": {"subject": "bud"},
-                "split": {"group_by": "stem", "val_ratio": 0.5, "seed": 1}}
+    data_cfg = {
+        "images_dir": str(images_dir),
+        "scope": {"subject": "bud"},
+        "split": {"group_by": "stem", "val_ratio": 0.5, "seed": 1},
+    }
 
-    train_ds, _val_ds, _, resolved = _train_val(tmp_path, "detection", data_cfg)
+    train_ds, _val_ds, _, resolved = _train_val(
+        tmp_path, "detection", data_cfg
+    )
 
     assert resolved.num_channels == train_ds.expected_channels == 5
     from tcip_mcp.pipelines.model_build import recorded_model_dims
     from tcip_mcp.pipelines.schemas import train_config
     from tests._verified_checkpoint_fixtures import unbuilt_source
 
-    spec = train_config(training_config(unbuilt_source("detection"), resolved.record()))
+    spec = train_config(
+        training_config(unbuilt_source("detection"), resolved.record())
+    )
     assert recorded_model_dims(spec)["in_chans"] == 5
 
 
-def test_a_calibration_ratio_adds_a_disjoint_calibration_region(tmp_path: Path):
+def test_a_calibration_ratio_adds_a_disjoint_calibration_region(
+    tmp_path: Path,
+):
     """Admits valid work: a reserved calibration region is real, non-empty geometry, disjoint
     from train/val/holdout."""
     images_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "scope": {"subject": "bud"},
-        "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": {"val_ratio": 0.2, "holdout_ratio": 0.1, "calibration_ratio": 0.15, "seed": 1},
+        "images_dir": str(images_dir),
+        "scope": {"subject": "bud"},
+        "auto_val": True,
+        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+        "split": {
+            "val_ratio": 0.2,
+            "holdout_ratio": 0.1,
+            "calibration_ratio": 0.15,
+            "seed": 1,
+        },
     }
-    train_ds, val_ds, partition, _resolved = _train_val(tmp_path, "detection", data_cfg)
+    train_ds, val_ds, partition, _resolved = _train_val(
+        tmp_path, "detection", data_cfg
+    )
     assert val_ds is not None
     manifest = _manifest(partition)
     assert manifest["calibration_region"]
@@ -625,36 +864,54 @@ def test_a_spatial_split_raises_on_unresolvable_extent(tmp_path: Path):
     derived over the dataset the run would build; the same block over a document stating its
     frame draws the split."""
     from tcip_mcp.pipelines.data.split_construction import (
-        _with_lattice, run_shares, run_sizes, spatial_single_source_split,
+        _with_lattice,
+        run_shares,
+        run_sizes,
+        spatial_single_source_split,
     )
     from tcip_mcp.pipelines.schemas import DataSpec, SplitSpec
     from tests._producer_fixtures import admit_over
 
     split = SplitSpec.model_validate(
-        {"val_ratio": 0.2, "holdout_ratio": 0.1, "calibration_ratio": 0.15, "seed": 1})
+        {
+            "val_ratio": 0.2,
+            "holdout_ratio": 0.1,
+            "calibration_ratio": 0.15,
+            "seed": 1,
+        }
+    )
 
     def _drawn(images_dir: Path):
         admitted = admit_over(images_dir, subject="bud")
         samples = admitted.every_sample()
         stated = DataSpec.model_validate(
-            {"tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2}})
-        block = _with_lattice("detection", run_sizes("detection", stated, admitted.scope,
-                                                     samples), samples)
-        return spatial_single_source_split("detection", samples[0], block,
-                                           run_shares(split, spatial=True))
+            {"tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2}}
+        )
+        block = _with_lattice(
+            "detection",
+            run_sizes("detection", stated, admitted.scope, samples),
+            samples,
+        )
+        return spatial_single_source_split(
+            "detection", samples[0], block, run_shares(split, spatial=True)
+        )
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     _save_png(images_dir / "mosaic.png")
     # A readable, annotated document recording no width/height, distinct from an unreadable one.
     label_image(images_dir / "mosaic.png", _BUD, 0, 0)
-    with pytest.raises(ValueError, match="states no positive width and height"):
+    with pytest.raises(
+        ValueError, match="states no positive width and height"
+    ):
         _drawn(images_dir)
 
     framed, _stem = _big_single_source(tmp_path / "framed", 4000, 3000)
     assert _drawn(framed).train_region
 
 
-def test_single_tiled_source_raises_on_an_unreadable_label(tmp_path: Path, caplog):
+def test_single_tiled_source_raises_on_an_unreadable_label(
+    tmp_path: Path, caplog
+):
     """A present, unreadable label document is a categorically different fact than one recording
     no width/height: the run aborts rather than degrading to no validation over a document nobody
     can read."""
@@ -669,8 +926,10 @@ def test_single_tiled_source_raises_on_an_unreadable_label(tmp_path: Path, caplo
     tcip_store.replace(image_label_key(images_dir / "mosaic.png"), [])
 
     data_cfg = {
-        "images_dir": str(images_dir), "scope": {"subject": "bud"},
-        "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+        "images_dir": str(images_dir),
+        "scope": {"subject": "bud"},
+        "auto_val": True,
+        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
         "split": {"val_ratio": 0.2, "seed": 1},
     }
     with pytest.raises(UnreadableLabelDocumentError):
@@ -683,10 +942,16 @@ def test_a_spatial_split_raises_on_infeasible_layout(tmp_path: Path):
     size/tile size, and the refusal names the shares."""
     images_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "scope": {"subject": "bud"},
-        "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": {"val_ratio": 0.33, "holdout_ratio": 0.33, "calibration_ratio": 0.33,
-                  "seed": 1},
+        "images_dir": str(images_dir),
+        "scope": {"subject": "bud"},
+        "auto_val": True,
+        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+        "split": {
+            "val_ratio": 0.33,
+            "holdout_ratio": 0.33,
+            "calibration_ratio": 0.33,
+            "seed": 1,
+        },
     }
     with pytest.raises(ValueError, match="is infeasible at this mosaic size"):
         _train_val(tmp_path, "detection", data_cfg)
@@ -704,16 +969,32 @@ def test_a_spatial_split_raises_on_empty_gt_bearing_side(tmp_path: Path):
     stem = "mosaic"
     width, height = 4000, 300
     from torchvision.utils import save_image
-    save_image(torch.rand(3, height, width) * 0.3, str(images_dir / f"{stem}.png"))
-    boxes = [Annotation(subject="bud", geometry=BBox(x, 20, x + 20, 40))
-             for x in range(1300, 3960, 40)]
+
+    save_image(
+        torch.rand(3, height, width) * 0.3, str(images_dir / f"{stem}.png")
+    )
+    boxes = [
+        Annotation(subject="bud", geometry=BBox(x, 20, x + 20, 40))
+        for x in range(1300, 3960, 40)
+    ]
     label_image(images_dir / f"{stem}.png", boxes, width, height)
 
     data_cfg = {
-        "images_dir": str(images_dir), "scope": {"subject": "bud"},
+        "images_dir": str(images_dir),
+        "scope": {"subject": "bud"},
         "auto_val": True,
-        "tiling": {"enabled": True, "tile_size": 64, "overlap": 0.2, "skip_empty": True},
-        "split": {"val_ratio": 0.2, "holdout_ratio": 0.1, "calibration_ratio": 0.2, "seed": 1},
+        "tiling": {
+            "enabled": True,
+            "tile_size": 64,
+            "overlap": 0.2,
+            "skip_empty": True,
+        },
+        "split": {
+            "val_ratio": 0.2,
+            "holdout_ratio": 0.1,
+            "calibration_ratio": 0.2,
+            "seed": 1,
+        },
     }
     with pytest.raises(ValueError, match="zero kept"):
         _train_val(tmp_path, "detection", data_cfg)
@@ -724,9 +1005,16 @@ def test_a_spatial_split_records_raster_content_identity(tmp_path: Path):
     raster_content_identity in the same spatial_manifest a claim-scope check later reads back."""
     images_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
-        "images_dir": str(images_dir), "scope": {"subject": "bud"},
-        "auto_val": True, "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": {"val_ratio": 0.25, "holdout_ratio": 0.1, "calibration_ratio": 0, "seed": 1},
+        "images_dir": str(images_dir),
+        "scope": {"subject": "bud"},
+        "auto_val": True,
+        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+        "split": {
+            "val_ratio": 0.25,
+            "holdout_ratio": 0.1,
+            "calibration_ratio": 0,
+            "seed": 1,
+        },
     }
     manifest = _manifest(_train_val(tmp_path, "detection", data_cfg)[2])
     identity = manifest["raster_content_identity"]
@@ -738,8 +1026,13 @@ def test_a_spatial_split_records_raster_content_identity(tmp_path: Path):
 def test_train_emits_val_loss_with_autoval(tmp_path: Path):
     from tests._producer_fixtures import seed_labeled_images
 
-    images_dir = seed_labeled_images(tmp_path / "ds" / "images" / UNDATED_BUCKET, _BUD, n=8,
-                                     width=IMG, height=IMG)
+    images_dir = seed_labeled_images(
+        tmp_path / "ds" / "images" / UNDATED_BUCKET,
+        _BUD,
+        n=8,
+        width=IMG,
+        height=IMG,
+    )
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},

@@ -27,7 +27,9 @@ def workspace_dir(tmp_path: Path) -> Path:
     return ws
 
 
-def _make_project(ws: Path, name: str, *, dates=(), subjects=()) -> OpenProject:
+def _make_project(
+    ws: Path, name: str, *, dates=(), subjects=()
+) -> OpenProject:
     """A workspace project made by ``tests._web_fixtures.named_project``, its display name
     ``name``, holding one image per date and the named subjects."""
     from PIL import Image
@@ -44,17 +46,26 @@ def _make_project(ws: Path, name: str, *, dates=(), subjects=()) -> OpenProject:
         from tcip_mcp.subject_registry import SubjectRegistry, Subject
         from tests._producer_fixtures import registry_over
 
-        registry_over(proj, SubjectRegistry(tuple(Subject(s) for s in sorted(subjects))))
+        registry_over(
+            proj, SubjectRegistry(tuple(Subject(s) for s in sorted(subjects)))
+        )
     return made
 
 
 def _listed(client: TestClient) -> dict[str, dict]:
-    return {p["display_name"]: p for p in client.get("/api/projects").json()["projects"]}
+    return {
+        p["display_name"]: p
+        for p in client.get("/api/projects").json()["projects"]
+    }
 
 
 def test_list_projects_lists_workspace_projects(client, workspace_dir):
-    _make_project(workspace_dir, "currant_bud_valley-farm", dates=["2026-02-11"],
-                  subjects=["bud", "bush"])
+    _make_project(
+        workspace_dir,
+        "currant_bud_valley-farm",
+        dates=["2026-02-11"],
+        subjects=["bud", "bush"],
+    )
     _make_project(workspace_dir, "chestnut_burr_site-b", dates=["2026-03-01"])
 
     resp = client.get("/api/projects")
@@ -67,11 +78,15 @@ def test_list_projects_lists_workspace_projects(client, workspace_dir):
     hz = _listed(client)["currant_bud_valley-farm"]
     assert hz["dates"] == ["2026-02-11"]
     assert hz["subjects"] == ["bud", "bush"]  # sorted
-    assert hz["buckets_by_date"] == {"2026-02-11": []}  # no bucket is published
+    assert hz["buckets_by_date"] == {
+        "2026-02-11": []
+    }  # no bucket is published
     assert hz["image_count"] == 1
 
 
-def test_projects_report_per_date_subject_model_availability(client, workspace_dir):
+def test_projects_report_per_date_subject_model_availability(
+    client, workspace_dir
+):
     # bud labeled on 02-11 (+ a bucket published over it); bush labeled on 03-02;
     # 03-24 has images but nothing labeled. One name-based label document per image.
     pytest.importorskip("torch")
@@ -85,14 +100,34 @@ def test_projects_report_per_date_subject_model_availability(client, workspace_d
         dates=["2026-02-11", "2026-03-02", "2026-03-24"],
         subjects=["bud", "bush"],
     ).root
-    label_image(proj / "images" / "2026-02-11" / "img.png",
-                [Annotation(subject="bud", geometry=BBox(1, 1, 7, 7))], 8, 8)
-    label_image(proj / "images" / "2026-03-02" / "img.png",
-                [Annotation(subject="bush", geometry=BBox(2, 2, 6, 6))], 8, 8)
-    published(proj, "baseline/2026-02-11", [
-        {"image": str(proj / "images" / "2026-02-11" / "img.png"), "width": 8, "height": 8,
-         "boxes": [[1.0, 1.0, 7.0, 7.0]], "scores": [0.9], "labels": [1], "cap": 2}],
-        scope={"subject": "bud"})
+    label_image(
+        proj / "images" / "2026-02-11" / "img.png",
+        [Annotation(subject="bud", geometry=BBox(1, 1, 7, 7))],
+        8,
+        8,
+    )
+    label_image(
+        proj / "images" / "2026-03-02" / "img.png",
+        [Annotation(subject="bush", geometry=BBox(2, 2, 6, 6))],
+        8,
+        8,
+    )
+    published(
+        proj,
+        "baseline/2026-02-11",
+        [
+            {
+                "image": str(proj / "images" / "2026-02-11" / "img.png"),
+                "width": 8,
+                "height": 8,
+                "boxes": [[1.0, 1.0, 7.0, 7.0]],
+                "scores": [0.9],
+                "labels": [1],
+                "cap": 2,
+            }
+        ],
+        scope={"subject": "bud"},
+    )
 
     hz = _listed(client)["currant_bud_valley-farm"]
     # Flat lists still list everything present anywhere.
@@ -102,7 +137,10 @@ def test_projects_report_per_date_subject_model_availability(client, workspace_d
     assert hz["subjects_by_date"]["2026-03-02"] == ["bush"]
     assert hz["subjects_by_date"]["2026-03-24"] == []  # images but no labels
     assert hz["buckets_by_date"] == {
-        "2026-02-11": ["baseline/2026-02-11"], "2026-03-02": [], "2026-03-24": []}
+        "2026-02-11": ["baseline/2026-02-11"],
+        "2026-03-02": [],
+        "2026-03-24": [],
+    }
     assert hz["label_problem"] is None
 
 
@@ -115,11 +153,15 @@ def test_projects_report_a_label_problem_and_still_list(client, workspace_dir):
     from tests._record_damage_fixtures import damage_record
 
     proj = _make_project(
-        workspace_dir, "currant_bud_valley-farm",
-        dates=["2026-02-11", "2026-03-02"], subjects=["bud"],
+        workspace_dir,
+        "currant_bud_valley-farm",
+        dates=["2026-02-11", "2026-03-02"],
+        subjects=["bud"],
     ).root
     bad = proj / "images" / "2026-02-11" / "img.png"
-    label_image(bad, [Annotation(subject="bud", geometry=BBox(1, 1, 7, 7))], 8, 8)
+    label_image(
+        bad, [Annotation(subject="bud", geometry=BBox(1, 1, 7, 7))], 8, 8
+    )
     damage_record(image_label_key(bad), b"not json {][")
 
     resp = client.get("/api/projects")
@@ -139,47 +181,73 @@ def test_list_ignores_dirs_without_tcip(client, workspace_dir):
 
 
 def test_list_sorted_by_modified_desc(client, workspace_dir):
-    older = _make_project(workspace_dir, "old_project_site", dates=["2026-02-11"]).root
-    newer = _make_project(workspace_dir, "new_project_site", dates=["2026-03-01"]).root
+    older = _make_project(
+        workspace_dir, "old_project_site", dates=["2026-02-11"]
+    ).root
+    newer = _make_project(
+        workspace_dir, "new_project_site", dates=["2026-03-01"]
+    ).root
     os.utime(older, (1_000_000, 1_000_000))
     os.utime(newer, (2_000_000, 2_000_000))
 
-    order = [p["display_name"] for p in client.get("/api/projects").json()["projects"]]
+    order = [
+        p["display_name"]
+        for p in client.get("/api/projects").json()["projects"]
+    ]
     assert order == ["new_project_site", "old_project_site"]
 
 
-def test_opening_a_project_by_id_marks_it_open_in_the_list(client, workspace_dir):
-    made = _make_project(workspace_dir, "currant_bud_valley-farm", dates=["2026-02-11"])
+def test_opening_a_project_by_id_marks_it_open_in_the_list(
+    client, workspace_dir
+):
+    made = _make_project(
+        workspace_dir, "currant_bud_valley-farm", dates=["2026-02-11"]
+    )
     listed = _listed(client)["currant_bud_valley-farm"]
     assert client.get("/api/projects").json()["open_id"] is None
     assert "is_open" not in listed
 
-    resp = client.post("/api/projects/open", json={"id": made.id, "user": "grower"})
+    resp = client.post(
+        "/api/projects/open", json={"id": made.id, "user": "grower"}
+    )
     assert resp.status_code == 200
-    assert resp.json() == {"id": made.id, "display_name": "currant_bud_valley-farm",
-                           "path": str(made.root.resolve())}
+    assert resp.json() == {
+        "id": made.id,
+        "display_name": "currant_bud_valley-farm",
+        "path": str(made.root.resolve()),
+    }
 
     assert client.get("/api/projects").json()["open_id"] == made.id
 
 
 def test_opening_an_id_no_project_holds_is_404(client, workspace_dir):
     _make_project(workspace_dir, "currant_bud_valley-farm")
-    resp = client.post("/api/projects/open", json={"id": "000000000000", "user": "grower"})
+    resp = client.post(
+        "/api/projects/open", json={"id": "000000000000", "user": "grower"}
+    )
     assert resp.status_code == 404
     assert "000000000000" in resp.json()["detail"]
     assert client.get("/api/projects").json()["open_id"] is None
 
 
-def test_opening_a_project_naming_no_one_is_refused_and_opens_nothing(client, workspace_dir):
-    made = _make_project(workspace_dir, "currant_bud_valley-farm", dates=["2026-02-11"])
+def test_opening_a_project_naming_no_one_is_refused_and_opens_nothing(
+    client, workspace_dir
+):
+    made = _make_project(
+        workspace_dir, "currant_bud_valley-farm", dates=["2026-02-11"]
+    )
 
     for stated in REFUSED_NAMES:
-        resp = client.post("/api/projects/open", json={"id": made.id, "user": stated})
+        resp = client.post(
+            "/api/projects/open", json={"id": made.id, "user": stated}
+        )
         assert resp.status_code == 400
         assert client.get("/api/projects").json()["open_id"] is None
 
 
-def test_list_reports_record_fields_across_four_project_states(client, workspace_dir):
+def test_list_reports_record_fields_across_four_project_states(
+    client, workspace_dir
+):
     """A project with a record, one with ``.tcip`` and nothing else, one whose record is
     undecodable, and one whose record decodes to something else: all four list, each with its
     record's fields or the ``record_problem`` naming why they are absent. The recordless one gets
@@ -203,26 +271,43 @@ def test_list_reports_record_fields_across_four_project_states(client, workspace
     current = tcip_store.read_versioned(key).version
     tcip_store.replace(key, {"not_site": "x"}, expect=current)
 
-    by_path = {p["path"]: p for p in client.get("/api/projects").json()["projects"]}
-    assert set(by_path) == {str(p.resolve()) for p in (recorded, recordless, undecodable, invalid)}
+    by_path = {
+        p["path"]: p for p in client.get("/api/projects").json()["projects"]
+    }
+    assert set(by_path) == {
+        str(p.resolve()) for p in (recorded, recordless, undecodable, invalid)
+    }
 
     good = by_path[str(recorded.resolve())]
     assert (good["display_name"], good["site"], good["record_problem"]) == (
-        "currant_bud_recorded", "north orchard", None)
+        "currant_bud_recorded",
+        "north orchard",
+        None,
+    )
     assert len(good["id"]) == 12
 
     missing = by_path[str(recordless.resolve())]
-    assert (missing["id"], missing["display_name"], missing["site"]) == (None, None, None)
+    assert (missing["id"], missing["display_name"], missing["site"]) == (
+        None,
+        None,
+        None,
+    )
     assert "initialize_project" in missing["record_problem"]
     assert not database_file(str(recordless)).is_file()
 
-    assert "does not decode" in by_path[str(undecodable.resolve())]["record_problem"]
-    assert "does not hold an id, a display name and a site" in (
-        by_path[str(invalid.resolve())]["record_problem"])
+    assert (
+        "does not decode"
+        in by_path[str(undecodable.resolve())]["record_problem"]
+    )
+    assert (
+        "does not hold an id, a display name and a site"
+        in (by_path[str(invalid.resolve())]["record_problem"])
+    )
 
 
 def test_a_last_opened_pointer_naming_a_missing_project_is_named_and_opens_nothing(
-        client, workspace_dir, monkeypatch):
+    client, workspace_dir, monkeypatch
+):
     from tcip_mcp import workspace
 
     _make_project(workspace_dir, "temp_project_site", dates=["2026-02-11"])

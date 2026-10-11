@@ -12,7 +12,11 @@ import pytest
 from tests.hung_test_watchdog import pytest_timeout_set_timer
 from tests.ray_cluster_lock import pytest_configure, pytest_runtest_protocol
 
-__all__ = ["pytest_configure", "pytest_runtest_protocol", "pytest_timeout_set_timer"]
+__all__ = [
+    "pytest_configure",
+    "pytest_runtest_protocol",
+    "pytest_timeout_set_timer",
+]
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -64,8 +68,11 @@ def pytest_collection_modifyitems(config, items):
 
 
 @pytest.fixture
-def tmp_path(tmp_path_factory: pytest.TempPathFactory, request: pytest.FixtureRequest,
-             monkeypatch: pytest.MonkeyPatch) -> Path:
+def tmp_path(
+    tmp_path_factory: pytest.TempPathFactory,
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Path:
     """Each test's ``tmp_path`` is ``<workspace>/project`` inside its own fresh workspace, which
     ``TCIP_WORKSPACE`` names and the web backend is started with, no additive image roots.
 
@@ -75,7 +82,9 @@ def tmp_path(tmp_path_factory: pytest.TempPathFactory, request: pytest.FixtureRe
     from tcip_web.state import store
 
     name = re.sub(r"[\W]", "_", request.node.name)[:30]
-    workspace = (tmp_path_factory.mktemp(name, numbered=True) / "workspace").resolve()
+    workspace = (
+        tmp_path_factory.mktemp(name, numbered=True) / "workspace"
+    ).resolve()
     project = workspace / "project"
     project.mkdir(parents=True)
     monkeypatch.setenv("TCIP_WORKSPACE", str(workspace))
@@ -154,10 +163,16 @@ def tb_launches(monkeypatch) -> list[str]:
         calls.append(logdir)
         from tcip_mcp.web_client import LOOPBACK_HOST
 
-        return {"url": f"http://{LOOPBACK_HOST}:6006", "port": 6006, "pid": 1, "logdir": logdir}
+        return {
+            "url": f"http://{LOOPBACK_HOST}:6006",
+            "port": 6006,
+            "pid": 1,
+            "logdir": logdir,
+        }
 
     monkeypatch.setattr(
-        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard", fake_launch
+        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard",
+        fake_launch,
     )
     return calls
 
@@ -213,15 +228,27 @@ def real_hpo_base_config(tmp_path: Path) -> dict:
     section over two labeled frames of its subject (``_verified_checkpoint_fixtures.
     detection_images``), drawn at seed 0, at the sample regime
     (``_chain_fixtures.training_config``)."""
-    from tests._chain_fixtures import BESPOKE_DETECTION, BESPOKE_MODELS, training_config
+    from tests._chain_fixtures import (
+        BESPOKE_DETECTION,
+        BESPOKE_MODELS,
+        training_config,
+    )
     from tests._verified_checkpoint_fixtures import detection_images
 
     scope = {"subject": DATA_DIR_SUBJECT}
     return training_config(
-        {"builder": BESPOKE_DETECTION, "builder_kwargs": {}, "source_files": [BESPOKE_MODELS],
-         "task": "detection"},
-        {**detection_images(tmp_path / "hpo-data", scope), "scope": scope,
-         "split": {"seed": 0, "val_ratio": 0.15}})
+        {
+            "builder": BESPOKE_DETECTION,
+            "builder_kwargs": {},
+            "source_files": [BESPOKE_MODELS],
+            "task": "detection",
+        },
+        {
+            **detection_images(tmp_path / "hpo-data", scope),
+            "scope": scope,
+            "split": {"seed": 0, "val_ratio": 0.15},
+        },
+    )
 
 
 #: The single detection subject the canonical test dataset declares (``data_dir``).
@@ -250,21 +277,46 @@ def data_dir(tmp_path: Path) -> Path:
     images_dir.mkdir(parents=True)
 
     # One nested registry traveling with the labels: a single detection subject, no attributes.
-    registry_over(tmp_path, SubjectRegistry(subjects=(Subject(name=subject, description="a bud"),)))
+    registry_over(
+        tmp_path,
+        SubjectRegistry(
+            subjects=(Subject(name=subject, description="a bud"),)
+        ),
+    )
 
     for name in ("img_001", "img_002", "img_003"):
-        Image.new("RGB", (640, 480), color=(128, 128, 128)).save(images_dir / f"{name}.jpg")
+        Image.new("RGB", (640, 480), color=(128, 128, 128)).save(
+            images_dir / f"{name}.jpg"
+        )
         # GT: 2 boxes per image (pixel xyxy), by subject name.
-        label_image(images_dir / f"{name}.jpg",
-                    [Annotation(subject=subject, geometry=BBox(288, 216, 352, 264)),
-                     Annotation(subject=subject, geometry=BBox(176, 132, 208, 156))], 640, 480)
+        label_image(
+            images_dir / f"{name}.jpg",
+            [
+                Annotation(subject=subject, geometry=BBox(288, 216, 352, 264)),
+                Annotation(subject=subject, geometry=BBox(176, 132, 208, 156)),
+            ],
+            640,
+            480,
+        )
     # Predictions, published as one bucket: 1 matching (TP) + 1 elsewhere (FP) per image.
     pytest.importorskip("torch")
     from tests._chain_fixtures import published
 
-    published(tmp_path, DATA_DIR_BUCKET, [
-        {"image": str(images_dir / f"{name}.jpg"), "width": 640, "height": 480,
-         "boxes": [[288, 216, 352, 264], [496, 372, 528, 396]], "scores": [0.9, 0.7],
-         "labels": [1, 1], "cap": 3} for name in ("img_001", "img_002", "img_003")],
-        scope={"subject": subject})
+    published(
+        tmp_path,
+        DATA_DIR_BUCKET,
+        [
+            {
+                "image": str(images_dir / f"{name}.jpg"),
+                "width": 640,
+                "height": 480,
+                "boxes": [[288, 216, 352, 264], [496, 372, 528, 396]],
+                "scores": [0.9, 0.7],
+                "labels": [1, 1],
+                "cap": 3,
+            }
+            for name in ("img_001", "img_002", "img_003")
+        ],
+        scope={"subject": subject},
+    )
     return tmp_path

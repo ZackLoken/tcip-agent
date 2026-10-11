@@ -31,9 +31,7 @@ STATE_CHANGING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 an allowed Origin, the same requirement every WebSocket scope carries regardless of method."""
 
 _ORIGIN_REFUSAL_WS = "origin not allowed"
-_ORIGIN_REFUSAL_HTTP = (
-    f"{_ORIGIN_REFUSAL_WS}: a state-changing request from another origin is refused."
-)
+_ORIGIN_REFUSAL_HTTP = f"{_ORIGIN_REFUSAL_WS}: a state-changing request from another origin is refused."
 
 EXPOSURE_REFUSAL = (
     "this connection arrived through a network address: the backend serves this machine only, "
@@ -47,7 +45,12 @@ def canonical_host(host: str) -> str:
     IPv4-mapped IPv6 address unwrapped to its IPv4 form. Raises ``ValueError`` for anything that
     is not a host: empty, whitespace or control characters, userinfo, a backslash."""
     h = host.strip()
-    if not h or any(c.isspace() or ord(c) < 32 for c in h) or "@" in h or "\\" in h:
+    if (
+        not h
+        or any(c.isspace() or ord(c) < 32 for c in h)
+        or "@" in h
+        or "\\" in h
+    ):
         raise ValueError(f"not a host: {host!r}")
     h = h.lower().rstrip(".")
     if h.startswith("[") and h.endswith("]"):
@@ -73,7 +76,7 @@ def parse_authority(value: str, default_port: int | None) -> Authority:
         end = v.find("]")
         if end < 0:
             raise ValueError(f"not an authority: {value!r}")
-        host, rest = v[: end + 1], v[end + 1:]
+        host, rest = v[: end + 1], v[end + 1 :]
         if rest and not rest.startswith(":"):
             raise ValueError(f"not an authority: {value!r}")
         port_text = rest[1:] if rest else ""
@@ -132,7 +135,11 @@ def _request_scheme(scope: Mapping[str, Any]) -> str:
 
 
 def _header_values(scope: Mapping[str, Any], name: bytes) -> list[str]:
-    return [v.decode("latin-1") for k, v in scope.get("headers") or () if k.lower() == name]
+    return [
+        v.decode("latin-1")
+        for k, v in scope.get("headers") or ()
+        if k.lower() == name
+    ]
 
 
 def request_authority(scope: Mapping[str, Any]) -> Authority | None:
@@ -142,7 +149,9 @@ def request_authority(scope: Mapping[str, Any]) -> Authority | None:
     if len(values) != 1:
         return None
     try:
-        return parse_authority(values[0], _DEFAULT_PORTS.get(_request_scheme(scope)))
+        return parse_authority(
+            values[0], _DEFAULT_PORTS.get(_request_scheme(scope))
+        )
     except ValueError:
         return None
 
@@ -153,14 +162,21 @@ def host_allowed(scope: Mapping[str, Any]) -> bool:
     authority = request_authority(scope)
     if at is None or authority is None:
         return False
-    return is_loopback_host(authority[0]) and (at[1] is None or authority[1] == at[1])
+    return is_loopback_host(authority[0]) and (
+        at[1] is None or authority[1] == at[1]
+    )
 
 
 def _parse_origin(origin: str) -> tuple[str, Authority] | None:
     parts = urlsplit(origin.strip())
     if parts.scheme not in ("http", "https", "ws", "wss") or not parts.netloc:
         return None
-    if parts.path not in ("", "/") or parts.query or parts.fragment or "@" in parts.netloc:
+    if (
+        parts.path not in ("", "/")
+        or parts.query
+        or parts.fragment
+        or "@" in parts.netloc
+    ):
         return None
     scheme = _http_scheme(parts.scheme)
     try:
@@ -194,11 +210,15 @@ class TrustBoundaryMiddleware:
     pair.
     """
 
-    def __init__(self, app: Callable[[Scope, Receive, Send], Awaitable[None]]) -> None:
+    def __init__(
+        self, app: Callable[[Scope, Receive, Send], Awaitable[None]]
+    ) -> None:
         self.app = app
         self._logged: set[str] = set()
 
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+    async def __call__(
+        self, scope: Scope, receive: Receive, send: Send
+    ) -> None:
         if scope["type"] not in ("http", "websocket"):
             await self.app(scope, receive, send)
             return
@@ -209,10 +229,15 @@ class TrustBoundaryMiddleware:
         if not host_allowed(scope):
             await _refuse(scope, send, 400, "invalid host header")
             return
-        if scope["type"] == "websocket" or scope.get("method") in STATE_CHANGING_METHODS:
+        if (
+            scope["type"] == "websocket"
+            or scope.get("method") in STATE_CHANGING_METHODS
+        ):
             if not self._origin_ok(scope):
                 detail = (
-                    _ORIGIN_REFUSAL_WS if scope["type"] == "websocket" else _ORIGIN_REFUSAL_HTTP
+                    _ORIGIN_REFUSAL_WS
+                    if scope["type"] == "websocket"
+                    else _ORIGIN_REFUSAL_HTTP
                 )
                 await _refuse(scope, send, 403, detail)
                 return
@@ -236,15 +261,23 @@ class TrustBoundaryMiddleware:
             logger.warning("refused %s: %s", key, EXPOSURE_REFUSAL)
 
 
-async def _refuse(scope: Mapping[str, Any], send: Send, status: int, detail: str) -> None:
+async def _refuse(
+    scope: Mapping[str, Any], send: Send, status: int, detail: str
+) -> None:
     if scope["type"] == "websocket":
-        await send({"type": "websocket.close", "code": 1008, "reason": detail[:120]})
+        await send(
+            {"type": "websocket.close", "code": 1008, "reason": detail[:120]}
+        )
         return
     body = detail.encode("utf-8")
-    await send({
-        "type": "http.response.start",
-        "status": status,
-        "headers": [(b"content-type", b"text/plain; charset=utf-8"),
-                    (b"content-length", str(len(body)).encode("ascii"))],
-    })
+    await send(
+        {
+            "type": "http.response.start",
+            "status": status,
+            "headers": [
+                (b"content-type", b"text/plain; charset=utf-8"),
+                (b"content-length", str(len(body)).encode("ascii")),
+            ],
+        }
+    )
     await send({"type": "http.response.body", "body": body})

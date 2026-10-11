@@ -53,7 +53,9 @@ def _child_alive(pid: int, create_time: float) -> bool:
         return False
 
 
-def _wait_until_dead(pid: int, create_time: float, timeout: float = _DEATH_TIMEOUT) -> bool:
+def _wait_until_dead(
+    pid: int, create_time: float, timeout: float = _DEATH_TIMEOUT
+) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if not _child_alive(pid, create_time):
@@ -62,7 +64,9 @@ def _wait_until_dead(pid: int, create_time: float, timeout: float = _DEATH_TIMEO
     return not _child_alive(pid, create_time)
 
 
-def _force_kill_and_wait(pid: int, create_time: float, timeout: float = _DEATH_TIMEOUT) -> None:
+def _force_kill_and_wait(
+    pid: int, create_time: float, timeout: float = _DEATH_TIMEOUT
+) -> None:
     proc = _same_process(pid, create_time)
     if proc is None:
         return
@@ -73,7 +77,9 @@ def _force_kill_and_wait(pid: int, create_time: float, timeout: float = _DEATH_T
         pass
 
 
-def _kill_and_wait_parent(parent: subprocess.Popen, timeout: float = _DEATH_TIMEOUT) -> None:
+def _kill_and_wait_parent(
+    parent: subprocess.Popen, timeout: float = _DEATH_TIMEOUT
+) -> None:
     if parent.poll() is None:
         parent.kill()
     try:
@@ -93,7 +99,9 @@ def _spawn_parent(tmp_path: Path, mode: str, *flags: str) -> subprocess.Popen:
     )
 
 
-def _read_pids(parent: subprocess.Popen) -> tuple[tuple[int, float], tuple[int, float]]:
+def _read_pids(
+    parent: subprocess.Popen,
+) -> tuple[tuple[int, float], tuple[int, float]]:
     """The pid ``launch_tensorboard`` returned and the TensorBoard stand-in's own pid, each read
     and paired with its creation time immediately as it arrives, since a pid's identity is bound
     to the process alive at the moment its creation time was captured, not to the number itself.
@@ -132,7 +140,9 @@ def test_child_is_gone_within_ten_seconds_of_a_hard_kill(tmp_path):
         parent.stderr.close()
 
 
-def test_child_survives_its_launching_thread_and_dies_within_ten_seconds_of_a_hard_kill(tmp_path):
+def test_child_survives_its_launching_thread_and_dies_within_ten_seconds_of_a_hard_kill(
+    tmp_path,
+):
     parent = _spawn_parent(tmp_path, "sleep", "--thread")
     returned = standin = None
     try:
@@ -175,15 +185,19 @@ def test_child_is_gone_within_ten_seconds_of_a_normal_exit(tmp_path):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="no guardian there")
-def test_stop_ends_a_child_that_ignores_sigterm_before_the_call_returns(monkeypatch, tmp_path):
+def test_stop_ends_a_child_that_ignores_sigterm_before_the_call_returns(
+    monkeypatch, tmp_path
+):
     """A stand-in that ignores SIGTERM is ended by the guardian before ``stop_tensorboard``
     returns."""
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
 
     monkeypatch.setattr(
-        tb, "_tensorboard_argv",
+        tb,
+        "_tensorboard_argv",
         lambda logdir, port: [
-            sys.executable, "-c",
+            sys.executable,
+            "-c",
             "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(120)",
         ],
     )
@@ -194,8 +208,13 @@ def test_stop_ends_a_child_that_ignores_sigterm_before_the_call_returns(monkeypa
         info = tb.launch_tensorboard(str(tmp_path))
         guardian_pid = info.get("pid")
         if guardian_pid is None:
-            raise RuntimeError(f"launch_tensorboard did not return a pid: {info}")
-        guardian_identity = (guardian_pid, psutil.Process(guardian_pid).create_time())
+            raise RuntimeError(
+                f"launch_tensorboard did not return a pid: {info}"
+            )
+        guardian_identity = (
+            guardian_pid,
+            psutil.Process(guardian_pid).create_time(),
+        )
         standin_num = _standin_pid(guardian_pid, guardian_expected=True)
         standin = psutil.Process(standin_num)
         standin_identity = (standin.pid, standin.create_time())
@@ -206,11 +225,16 @@ def test_stop_ends_a_child_that_ignores_sigterm_before_the_call_returns(monkeypa
         # captured before the cleanup below might end the guardian, and only from the guardian
         # launched here, never from a stranger that took its pid.
         descendants: list[tuple[int, float]] = []
-        guardian = _same_process(*guardian_identity) if guardian_identity is not None else None
+        guardian = (
+            _same_process(*guardian_identity)
+            if guardian_identity is not None
+            else None
+        )
         if guardian is not None:
             try:
                 descendants = [
-                    (proc.pid, proc.create_time()) for proc in guardian.children(recursive=True)
+                    (proc.pid, proc.create_time())
+                    for proc in guardian.children(recursive=True)
                 ]
             except psutil.NoSuchProcess:
                 descendants = []
@@ -234,8 +258,15 @@ def _run_guardian(*args: str) -> subprocess.CompletedProcess:
     """Run the guardian's real ``python -m`` entry point with ``args``, so a usage-error
     assertion exercises the actual subprocess boundary rather than ``_parse_args`` alone."""
     return subprocess.run(
-        [sys.executable, "-m", "tcip_mcp.pipelines.training.tensorboard_guardian", *args],
-        capture_output=True, text=True, timeout=30,
+        [
+            sys.executable,
+            "-m",
+            "tcip_mcp.pipelines.training.tensorboard_guardian",
+            *args,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
 
 
@@ -244,7 +275,9 @@ def test_guardian_usage_error_for_a_missing_term_grace():
     message rather than a traceback, run as the real subprocess entry point."""
     from tcip_mcp.pipelines.training import tensorboard_guardian as guardian
 
-    result = _run_guardian("--parent", str(os.getpid()), "--", sys.executable, "-c", "pass")
+    result = _run_guardian(
+        "--parent", str(os.getpid()), "--", sys.executable, "-c", "pass"
+    )
     assert result.returncode == 1
     assert guardian._USAGE in result.stderr
 
@@ -254,7 +287,14 @@ def test_guardian_usage_error_for_a_non_integer_parent():
     from tcip_mcp.pipelines.training import tensorboard_guardian as guardian
 
     result = _run_guardian(
-        "--parent", "x", "--term-grace", "1", "--", sys.executable, "-c", "pass"
+        "--parent",
+        "x",
+        "--term-grace",
+        "1",
+        "--",
+        sys.executable,
+        "-c",
+        "pass",
     )
     assert result.returncode == 1
     assert guardian._USAGE in result.stderr
@@ -265,7 +305,14 @@ def test_guardian_usage_error_for_a_non_numeric_term_grace():
     from tcip_mcp.pipelines.training import tensorboard_guardian as guardian
 
     result = _run_guardian(
-        "--parent", str(os.getpid()), "--term-grace", "x", "--", sys.executable, "-c", "pass"
+        "--parent",
+        str(os.getpid()),
+        "--term-grace",
+        "x",
+        "--",
+        sys.executable,
+        "-c",
+        "pass",
     )
     assert result.returncode == 1
     assert guardian._USAGE in result.stderr
@@ -276,7 +323,14 @@ def test_guardian_usage_error_for_a_negative_term_grace():
     from tcip_mcp.pipelines.training import tensorboard_guardian as guardian
 
     result = _run_guardian(
-        "--parent", str(os.getpid()), "--term-grace", "-1", "--", sys.executable, "-c", "pass"
+        "--parent",
+        str(os.getpid()),
+        "--term-grace",
+        "-1",
+        "--",
+        sys.executable,
+        "-c",
+        "pass",
     )
     assert result.returncode == 1
     assert guardian._USAGE in result.stderr
@@ -289,8 +343,14 @@ def test_guardian_usage_error_for_a_non_finite_term_grace(term_grace):
     from tcip_mcp.pipelines.training import tensorboard_guardian as guardian
 
     result = _run_guardian(
-        "--parent", str(os.getpid()), "--term-grace", term_grace,
-        "--", sys.executable, "-c", "pass",
+        "--parent",
+        str(os.getpid()),
+        "--term-grace",
+        term_grace,
+        "--",
+        sys.executable,
+        "-c",
+        "pass",
     )
     assert result.returncode == 1
     assert guardian._USAGE in result.stderr
@@ -303,7 +363,14 @@ def test_guardian_usage_error_for_a_non_positive_parent(parent_pid):
     from tcip_mcp.pipelines.training import tensorboard_guardian as guardian
 
     result = _run_guardian(
-        "--parent", parent_pid, "--term-grace", "1", "--", sys.executable, "-c", "pass"
+        "--parent",
+        parent_pid,
+        "--term-grace",
+        "1",
+        "--",
+        sys.executable,
+        "-c",
+        "pass",
     )
     assert result.returncode == 1
     assert guardian._USAGE in result.stderr

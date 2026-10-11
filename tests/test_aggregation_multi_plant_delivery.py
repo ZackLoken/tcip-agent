@@ -22,8 +22,9 @@ def _recorded_meaning(tmp_path):
     """Every delivery below ships under a trait whose delivered number has a confirmed meaning."""
     fx.seed_delivery_traits(tmp_path)
     # The count measures what the chain's unassessed bucket detects.
-    fx.seed_confirmed_aggregate(tmp_path, "stem_count", value_keys=["count"],
-                                measured_subject="bud")
+    fx.seed_confirmed_aggregate(
+        tmp_path, "stem_count", value_keys=["count"], measured_subject="bud"
+    )
 
 
 def _by_plant(rows: list[dict]) -> dict[str, dict]:
@@ -49,15 +50,22 @@ def test_each_plants_summary_describes_only_that_plants_records():
         {"image": "b2", "plant_id": "PLANT_B", "count": 20},
         {"image": "c1", "plant_id": "PLANT_C", "count": 7},
     ]
-    out = _by_plant(aggregate_per_plant(results, strategy="count", value_key="count"))
+    out = _by_plant(
+        aggregate_per_plant(results, strategy="count", value_key="count")
+    )
 
     assert out["PLANT_A"]["value"] == 4
     assert out["PLANT_B"]["value"] == 15.0
     assert out["PLANT_C"]["value"] == 7
     assert (out["PLANT_A"]["min_count"], out["PLANT_A"]["max_count"]) == (2, 9)
-    assert (out["PLANT_B"]["min_count"], out["PLANT_B"]["max_count"]) == (10, 20)
+    assert (out["PLANT_B"]["min_count"], out["PLANT_B"]["max_count"]) == (
+        10,
+        20,
+    )
     assert (out["PLANT_C"]["min_count"], out["PLANT_C"]["max_count"]) == (7, 7)
-    assert [out[p]["observations"] for p in ("PLANT_A", "PLANT_B", "PLANT_C")] == [3, 2, 1]
+    assert [
+        out[p]["observations"] for p in ("PLANT_A", "PLANT_B", "PLANT_C")
+    ] == [3, 2, 1]
 
 
 def test_identity_provenance_is_summarized_per_plant_not_across_the_cohort():
@@ -65,16 +73,38 @@ def test_identity_provenance_is_summarized_per_plant_not_across_the_cohort():
     Mixing these across the cohort would report every plant as 'mixed' and give a well-resolved
     plant another plant's worst assignment distance."""
     results = [
-        {"image": "a1", "plant_id": "PLANT_A", "count": 2,
-         "source": "gnss_sequence", "distance_m": 0.4},
-        {"image": "a2", "plant_id": "PLANT_A", "count": 4,
-         "source": "gnss_sequence", "distance_m": 1.9},
-        {"image": "b1", "plant_id": "PLANT_B", "count": 10,
-         "source": "gnss_sequence", "distance_m": 6.5},
-        {"image": "b2", "plant_id": "PLANT_B", "count": 20, "source": "qr_code"},
+        {
+            "image": "a1",
+            "plant_id": "PLANT_A",
+            "count": 2,
+            "source": "gnss_sequence",
+            "distance_m": 0.4,
+        },
+        {
+            "image": "a2",
+            "plant_id": "PLANT_A",
+            "count": 4,
+            "source": "gnss_sequence",
+            "distance_m": 1.9,
+        },
+        {
+            "image": "b1",
+            "plant_id": "PLANT_B",
+            "count": 10,
+            "source": "gnss_sequence",
+            "distance_m": 6.5,
+        },
+        {
+            "image": "b2",
+            "plant_id": "PLANT_B",
+            "count": 20,
+            "source": "qr_code",
+        },
         {"image": "c1", "plant_id": "PLANT_C", "count": 7},
     ]
-    out = _by_plant(aggregate_per_plant(results, strategy="count", value_key="count"))
+    out = _by_plant(
+        aggregate_per_plant(results, strategy="count", value_key="count")
+    )
 
     assert out["PLANT_A"]["plant_id_source"] == "gnss_sequence"
     assert out["PLANT_A"]["plant_id_distance_m_max"] == pytest.approx(1.9)
@@ -92,26 +122,68 @@ def test_delivery_csv_carries_each_plants_own_value_and_image_count(tmp_path):
     from tests._chain_fixtures import deliver_acknowledged
 
     results = [
-        {"image": "a1", "plant_id": "PLANT_A", "count": 2, "plant_attribution": "image",
-         "source": "gnss_sequence", "distance_m": 0.4},
-        {"image": "a2", "plant_id": "PLANT_A", "count": 4, "plant_attribution": "image",
-         "source": "gnss_sequence", "distance_m": 1.9},
-        {"image": "a3", "plant_id": "PLANT_A", "count": 9, "plant_attribution": "image",
-         "source": "gnss_sequence"},
-        {"image": "b1", "plant_id": "PLANT_B", "count": 10, "plant_attribution": "image",
-         "source": "qr_code"},
-        {"image": "b2", "plant_id": "PLANT_B", "count": 20, "plant_attribution": "image",
-         "source": "qr_code"},
-        {"image": "c1", "plant_id": "PLANT_C", "count": 7, "plant_attribution": "image"},
+        {
+            "image": "a1",
+            "plant_id": "PLANT_A",
+            "count": 2,
+            "plant_attribution": "image",
+            "source": "gnss_sequence",
+            "distance_m": 0.4,
+        },
+        {
+            "image": "a2",
+            "plant_id": "PLANT_A",
+            "count": 4,
+            "plant_attribution": "image",
+            "source": "gnss_sequence",
+            "distance_m": 1.9,
+        },
+        {
+            "image": "a3",
+            "plant_id": "PLANT_A",
+            "count": 9,
+            "plant_attribution": "image",
+            "source": "gnss_sequence",
+        },
+        {
+            "image": "b1",
+            "plant_id": "PLANT_B",
+            "count": 10,
+            "plant_attribution": "image",
+            "source": "qr_code",
+        },
+        {
+            "image": "b2",
+            "plant_id": "PLANT_B",
+            "count": 20,
+            "plant_attribution": "image",
+            "source": "qr_code",
+        },
+        {
+            "image": "c1",
+            "plant_id": "PLANT_C",
+            "count": 7,
+            "plant_attribution": "image",
+        },
     ]
-    summaries = aggregate_per_plant(results, strategy="count", value_key="count")
+    summaries = aggregate_per_plant(
+        results, strategy="count", value_key="count"
+    )
 
     out_path = tmp_path / "per_plant.csv"
-    deliver_acknowledged(tmp_path, summaries, out_path, "stem_count",
-                         delivery_kind=PER_PLANT_COUNT_AGGREGATE, crop="currant")
+    deliver_acknowledged(
+        tmp_path,
+        summaries,
+        out_path,
+        "stem_count",
+        delivery_kind=PER_PLANT_COUNT_AGGREGATE,
+        crop="currant",
+    )
     rows = _by_plant(csv_rows(out_path))
 
-    assert [int(rows[p]["n_images"]) for p in ("PLANT_A", "PLANT_B", "PLANT_C")] == [3, 2, 1]
+    assert [
+        int(rows[p]["n_images"]) for p in ("PLANT_A", "PLANT_B", "PLANT_C")
+    ] == [3, 2, 1]
     assert float(rows["PLANT_A"]["value"]) == 4
     assert float(rows["PLANT_B"]["value"]) == 15.0
     assert float(rows["PLANT_C"]["value"]) == 7
@@ -137,7 +209,9 @@ def test_continuous_summary_reports_the_mean_beside_its_own_standard_deviation()
         {"image": "b2", "plant_id": "PLANT_B", "value": 11.0},
         {"image": "b3", "plant_id": "PLANT_B", "value": 30.0},
     ]
-    out = _by_plant(aggregate_per_plant(results, strategy="mean", value_key="value"))
+    out = _by_plant(
+        aggregate_per_plant(results, strategy="mean", value_key="value")
+    )
 
     assert out["PLANT_A"]["value"] == pytest.approx(4.0)
     assert out["PLANT_A"]["std"] == pytest.approx(4.3589, abs=1e-9)
@@ -155,7 +229,9 @@ def test_summed_areas_stay_within_their_own_plant():
         {"image": "a2", "plant_id": "PLANT_A", "area_mm2": 250.0},
         {"image": "b1", "plant_id": "PLANT_B", "area_mm2": 40.0},
     ]
-    out = _by_plant(aggregate_per_plant(results, strategy="sum", value_key="area_mm2"))
+    out = _by_plant(
+        aggregate_per_plant(results, strategy="sum", value_key="area_mm2")
+    )
 
     assert out["PLANT_A"]["value"] == pytest.approx(350.0)
     assert out["PLANT_A"]["n_observations_with_value"] == 2
@@ -173,56 +249,111 @@ def _assessed(project, kind: str, experiment_id: str):
     from tcip_mcp.tools.calibration_tools import assess_checkpoint
     from tcip_mcp.tools.inference_tools import run_inference
     from tests._chain_fixtures import (
-        DATE, SUBJECT, draw_reference_selection, synthetic_capture, train_on,
+        DATE,
+        SUBJECT,
+        draw_reference_selection,
+        synthetic_capture,
+        train_on,
     )
 
-    entry = fx.with_operationalization(fx.COUNT_SPEC, PER_IMAGE_COUNT, measured_subject=SUBJECT)
-    fx.propose_and_confirm(project, fx.with_operationalization(
-        entry, PER_PLANT_COUNT_AGGREGATE, measured_subject=SUBJECT,
-        delivered_phenotypes=("stem_count",), delivered_value_keys=("count",)))
+    entry = fx.with_operationalization(
+        fx.COUNT_SPEC, PER_IMAGE_COUNT, measured_subject=SUBJECT
+    )
+    fx.propose_and_confirm(
+        project,
+        fx.with_operationalization(
+            entry,
+            PER_PLANT_COUNT_AGGREGATE,
+            measured_subject=SUBJECT,
+            delivered_phenotypes=("stem_count",),
+            delivered_value_keys=("count",),
+        ),
+    )
     root = project / "ds"
     images_dir = synthetic_capture(root)
     draw_reference_selection(project, root, project / "selection")
     checkpoint = train_on(project / "selection", project, experiment_id)
-    assessment = assess_checkpoint(project, checkpoint_path=checkpoint, trait=fx.COUNT_TRAIT,
-                                   delivery_kind=kind, selection_dir=str(project / "selection"))
+    assessment = assess_checkpoint(
+        project,
+        checkpoint_path=checkpoint,
+        trait=fx.COUNT_TRAIT,
+        delivery_kind=kind,
+        selection_dir=str(project / "selection"),
+    )
     assert assessment.get("passed") is True, assessment
     bucket = f"{kind}/{DATE}"
-    published = run_inference(project, checkpoint_path=checkpoint, images_dir=str(images_dir),
-                              bucket=bucket, assessment_id=assessment["assessment_id"])
+    published = run_inference(
+        project,
+        checkpoint_path=checkpoint,
+        images_dir=str(images_dir),
+        bucket=bucket,
+        assessment_id=assessment["assessment_id"],
+    )
     assert "error" not in published, published
     return read_bucket(root, bucket)
 
 
-_ROWS = [{"plant_id": "PLANT_A", "value": 4, "observations": 3, "value_key": "count",
-          "plant_attribution": "image"}]
+_ROWS = [
+    {
+        "plant_id": "PLANT_A",
+        "value": 4,
+        "observations": 3,
+        "value_key": "count",
+        "plant_attribution": "image",
+    }
+]
 
 
-def test_a_per_plant_count_assessment_validates_a_per_plant_count_delivery(tmp_path):
+def test_a_per_plant_count_assessment_validates_a_per_plant_count_delivery(
+    tmp_path,
+):
     pytest.importorskip("torch")
-    from tcip_mcp.pipelines.postprocessing.aggregation import deliver_per_plant_aggregate
+    from tcip_mcp.pipelines.postprocessing.aggregation import (
+        deliver_per_plant_aggregate,
+    )
 
     bucket = _assessed(tmp_path, PER_PLANT_COUNT_AGGREGATE, "exp-kind-matched")
     delivered = deliver_per_plant_aggregate(
-        tmp_path, _ROWS, str(tmp_path / "matched.csv"), delivered_phenotype="stem_count",
-        delivery_kind=PER_PLANT_COUNT_AGGREGATE, buckets=[bucket], plants=["PLANT_A"],
-        door="test", actor=None)
+        tmp_path,
+        _ROWS,
+        str(tmp_path / "matched.csv"),
+        delivered_phenotype="stem_count",
+        delivery_kind=PER_PLANT_COUNT_AGGREGATE,
+        buckets=[bucket],
+        plants=["PLANT_A"],
+        door="test",
+        actor=None,
+    )
 
     assert delivered["validated"] is True
 
 
-def test_a_per_image_count_assessment_never_answers_for_a_per_plant_delivery(tmp_path):
+def test_a_per_image_count_assessment_never_answers_for_a_per_plant_delivery(
+    tmp_path,
+):
     """The per-image count the assessment measured is not the per-plant number the delivery ships:
     the gate refuses, naming both kinds, rather than lend one measurement to another."""
     pytest.importorskip("torch")
     from tcip_mcp.delivery import DeliveryRefusedError
-    from tcip_mcp.pipelines.postprocessing.aggregation import deliver_per_plant_aggregate
+    from tcip_mcp.pipelines.postprocessing.aggregation import (
+        deliver_per_plant_aggregate,
+    )
 
     bucket = _assessed(tmp_path, PER_IMAGE_COUNT, "exp-kind-crossed")
-    with pytest.raises(DeliveryRefusedError, match=f"{PER_IMAGE_COUNT} delivery, not a "
-                                              f"{PER_PLANT_COUNT_AGGREGATE} one"):
+    with pytest.raises(
+        DeliveryRefusedError,
+        match=f"{PER_IMAGE_COUNT} delivery, not a "
+        f"{PER_PLANT_COUNT_AGGREGATE} one",
+    ):
         deliver_per_plant_aggregate(
-            tmp_path, _ROWS, str(tmp_path / "crossed.csv"), delivered_phenotype="stem_count",
-            delivery_kind=PER_PLANT_COUNT_AGGREGATE, buckets=[bucket], plants=["PLANT_A"],
-            door="test", actor=None)
+            tmp_path,
+            _ROWS,
+            str(tmp_path / "crossed.csv"),
+            delivered_phenotype="stem_count",
+            delivery_kind=PER_PLANT_COUNT_AGGREGATE,
+            buckets=[bucket],
+            plants=["PLANT_A"],
+            door="test",
+            actor=None,
+        )
     assert not (tmp_path / "crossed.csv").exists()

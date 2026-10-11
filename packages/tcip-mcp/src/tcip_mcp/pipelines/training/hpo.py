@@ -56,8 +56,18 @@ def search_alg_key(search_alg: str) -> str:
 
 _SEARCH_BACKENDS: dict[str, tuple[str, str, str, str]] = {
     "optuna": ("optuna", "ray.tune.search.optuna", "OptunaSearch", "seed"),
-    "hyperopt": ("hyperopt", "ray.tune.search.hyperopt", "HyperOptSearch", "random_state_seed"),
-    "bayesopt": ("bayes_opt", "ray.tune.search.bayesopt", "BayesOptSearch", "random_state"),
+    "hyperopt": (
+        "hyperopt",
+        "ray.tune.search.hyperopt",
+        "HyperOptSearch",
+        "random_state_seed",
+    ),
+    "bayesopt": (
+        "bayes_opt",
+        "ray.tune.search.bayesopt",
+        "BayesOptSearch",
+        "random_state",
+    ),
 }
 """Each offered backend searcher: the backend module it needs (probed with ``find_spec``), the
 Ray wrapper class constructed directly, and that class's own seed keyword. Not offered: nevergrad
@@ -66,8 +76,10 @@ Ray), and zoopt, hpbandster, hebo (abandoned upstreams)."""
 FIFO_SCHEDULER = "fifo"
 """The scheduler that runs every trial to completion and prunes none."""
 _SCHEDULERS = {
-    "asha": "AsyncHyperBandScheduler", "hyperband": "HyperBandScheduler",
-    "pbt": "PopulationBasedTraining", "median": "MedianStoppingRule",
+    "asha": "AsyncHyperBandScheduler",
+    "hyperband": "HyperBandScheduler",
+    "pbt": "PopulationBasedTraining",
+    "median": "MedianStoppingRule",
     FIFO_SCHEDULER: "FIFOScheduler",
 }
 """Each scheduler a sweep can name, and its class in ``ray.tune.schedulers``."""
@@ -83,7 +95,12 @@ point."""
 def available_search_algs() -> list[str]:
     """Search algorithms usable on this machine: natives + backends whose module imports."""
     algs = ["random", "grid"]
-    for name, (module, _wrapper_module, _wrapper_class, _seed_kw) in _SEARCH_BACKENDS.items():
+    for name, (
+        module,
+        _wrapper_module,
+        _wrapper_class,
+        _seed_kw,
+    ) in _SEARCH_BACKENDS.items():
         if find_spec(module) is not None:
             algs.append(name)
     return algs
@@ -100,7 +117,9 @@ measured, on what a grid materializes as a list before Ray expands it into trial
 meant for sampling is refused by name rather than allocated."""
 
 
-def space_axes(param_space: dict, *, grid: bool) -> dict[str, tuple[str, list]]:
+def space_axes(
+    param_space: dict, *, grid: bool
+) -> dict[str, tuple[str, list]]:
     """Each axis of the platform param-space dict as its type and the values it reaches the ends
     of: a ``categorical`` axis's ``choices``, a ``loguniform``/``uniform`` axis's float
     ``low``/``high``, an ``int`` axis's inclusive ``low``/``high``. Each key is a config key or a
@@ -123,30 +142,40 @@ def space_axes(param_space: dict, *, grid: bool) -> dict[str, tuple[str, list]]:
         elif ptype == "int":
             values = [int(spec["low"]), int(spec["high"])]
             if values[0] > values[1]:
-                raise ValueError(f"param_space axis {name!r}: int low {spec['low']} exceeds high "
-                                 f"{spec['high']}")
+                raise ValueError(
+                    f"param_space axis {name!r}: int low {spec['low']} exceeds high "
+                    f"{spec['high']}"
+                )
             if values[0] < drawable.min or values[1] > drawable.max:
                 raise ValueError(
                     f"param_space axis {name!r}: int [{values[0]}, {values[1]}] reaches past "
-                    f"[{drawable.min}, {drawable.max}], the int64 values the sampler draws")
+                    f"[{drawable.min}, {drawable.max}], the int64 values the sampler draws"
+                )
             span = values[1] - values[0] + 1
             if grid and span > GRID_AXIS_LIMIT:
                 raise ValueError(
                     f"param_space axis {name!r}: a grid over int [{values[0]}, {values[1]}] "
                     f"enumerates {span} values, past the {GRID_AXIS_LIMIT} one grid axis may "
-                    "hold; narrow it or sample it under a search_alg other than grid")
+                    "hold; narrow it or sample it under a search_alg other than grid"
+                )
         elif ptype == "categorical":
             values = list(spec["choices"])
             if not values:
-                raise ValueError(f"param_space axis {name!r}: categorical with no choices")
+                raise ValueError(
+                    f"param_space axis {name!r}: categorical with no choices"
+                )
         else:
-            raise ValueError(f"param_space axis {name!r}: unknown param type {ptype!r}")
+            raise ValueError(
+                f"param_space axis {name!r}: unknown param type {ptype!r}"
+            )
         axes[name] = (ptype, values)
     return axes
 
 
 def _to_tune_space(
-    param_space: dict, grid: bool = False, grid_keys: frozenset[str] = frozenset(),
+    param_space: dict,
+    grid: bool = False,
+    grid_keys: frozenset[str] = frozenset(),
 ) -> dict:
     """Convert the platform param-space dict (:func:`space_axes`) into a Ray Tune search space.
     ``grid=True`` enumerates every discrete axis (categorical / int) via ``grid_search``;
@@ -162,16 +191,23 @@ def _to_tune_space(
         elif ptype == "uniform":
             space[name] = tune.uniform(*values)
         elif ptype == "int" and as_grid:
-            space[name] = tune.grid_search(list(range(values[0], values[1] + 1)))
+            space[name] = tune.grid_search(
+                list(range(values[0], values[1] + 1))
+            )
         elif ptype == "int":
             space[name] = tune.randint(values[0], values[1] + 1)
         else:
-            space[name] = tune.grid_search(values) if as_grid else tune.choice(values)
+            space[name] = (
+                tune.grid_search(values) if as_grid else tune.choice(values)
+            )
     return space
 
 
 def build_search_alg(
-    name: str, *, seed: int, points_to_evaluate: list[dict] | None = None,
+    name: str,
+    *,
+    seed: int,
+    points_to_evaluate: list[dict] | None = None,
     constant_grid_search: bool = False,
 ):
     """Build the Ray Tune searcher ``name`` names, constructed with ``seed``.
@@ -188,17 +224,25 @@ def build_search_alg(
     from tcip_mcp.pipelines.model_build import resolve_named
 
     key = search_alg_key(name)
-    backend = resolve_named(key, {**dict.fromkeys(_NATIVE_SEARCH), **_SEARCH_BACKENDS},
-                            kind="search_alg")
+    backend = resolve_named(
+        key,
+        {**dict.fromkeys(_NATIVE_SEARCH), **_SEARCH_BACKENDS},
+        kind="search_alg",
+    )
     points = list(points_to_evaluate) if points_to_evaluate else None
     if backend is None:
         from ray.tune.search.basic_variant import BasicVariantGenerator
 
-        return BasicVariantGenerator(points_to_evaluate=points, random_state=seed,
-                                     constant_grid_search=constant_grid_search)
+        return BasicVariantGenerator(
+            points_to_evaluate=points,
+            random_state=seed,
+            constant_grid_search=constant_grid_search,
+        )
     if constant_grid_search:
-        raise ValueError(f"constant_grid_search is the native sampler's, and search_alg '{key}' "
-                         "is a backend searcher; choose random or grid.")
+        raise ValueError(
+            f"constant_grid_search is the native sampler's, and search_alg '{key}' "
+            "is a backend searcher; choose random or grid."
+        )
     module, wrapper_module, wrapper_class, seed_kw = backend
     if find_spec(module) is None:
         raise ValueError(
@@ -220,16 +264,26 @@ def scheduler_settings(scheduler: dict) -> tuple[type, dict]:
     excepted."""
     from ray.tune import schedulers
 
-    from tcip_mcp.pipelines.model_build import keyword_parameters, resolve_named
+    from tcip_mcp.pipelines.model_build import (
+        keyword_parameters,
+        resolve_named,
+    )
 
     name = scheduler.get("name", "")
-    cls = getattr(schedulers, resolve_named(name, _SCHEDULERS, kind="scheduler"))
+    cls = getattr(
+        schedulers, resolve_named(name, _SCHEDULERS, kind="scheduler")
+    )
     settings = {k: v for k, v in scheduler.items() if k != "name"}
     taken = keyword_parameters(cls)[0] - _SWEEP_SUPPLIED
-    unstated, untaken = sorted(taken - set(settings)), sorted(set(settings) - taken)
+    unstated, untaken = (
+        sorted(taken - set(settings)),
+        sorted(set(settings) - taken),
+    )
     if unstated or untaken:
-        raise ValueError(f"scheduler {name!r} takes {sorted(taken)}: unstated {unstated}, "
-                         f"not taken {untaken}")
+        raise ValueError(
+            f"scheduler {name!r} takes {sorted(taken)}: unstated {unstated}, "
+            f"not taken {untaken}"
+        )
     return cls, settings
 
 
@@ -252,6 +306,7 @@ def _default_trial_resources(max_concurrent: int) -> dict[str, float]:
     """
     try:
         import torch
+
         count = torch.cuda.device_count() if torch.cuda.is_available() else 0
     except Exception:
         count = 0
@@ -277,15 +332,26 @@ def _kill_ray_daemons_before_shutdown(ray: Any) -> None:
 
     private = getattr(ray, "_private", None)
     worker = getattr(private, "worker", None) if private is not None else None
-    global_worker = getattr(worker, "global_worker", None) if worker is not None else None
-    node = getattr(global_worker, "node", None) if global_worker is not None else None
-    all_processes = getattr(node, "all_processes", None) if node is not None else None
+    global_worker = (
+        getattr(worker, "global_worker", None) if worker is not None else None
+    )
+    node = (
+        getattr(global_worker, "node", None)
+        if global_worker is not None
+        else None
+    )
+    all_processes = (
+        getattr(node, "all_processes", None) if node is not None else None
+    )
     if not all_processes:
         return
 
     order = ["raylet", "gcs_server"]
-    order += [process_type for process_type in all_processes if process_type not in order
-              and process_type != "reaper"]
+    order += [
+        process_type
+        for process_type in all_processes
+        if process_type not in order and process_type != "reaper"
+    ]
     order.append("reaper")
 
     for process_type in order:
@@ -295,7 +361,9 @@ def _kill_ray_daemons_before_shutdown(ray: Any) -> None:
                 continue
 
             try:
-                descendants = psutil.Process(process.pid).children(recursive=True)
+                descendants = psutil.Process(process.pid).children(
+                    recursive=True
+                )
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 descendants = []
             for descendant in descendants:
@@ -312,7 +380,9 @@ def _kill_ray_daemons_before_shutdown(ray: Any) -> None:
             except subprocess.TimeoutExpired:
                 logger.warning(
                     "Ray daemon %s (pid %s) did not exit within 1s of being killed; "
-                    "ray.shutdown() will still try to signal it", process_type, process.pid,
+                    "ray.shutdown() will still try to signal it",
+                    process_type,
+                    process.pid,
                 )
 
 
@@ -336,9 +406,14 @@ def _ray_session(ray: Any, num_cpus: int) -> Generator[None]:
             # Only this branch configures Ray; the not-taken branch below leaves an
             # already-initialized cluster's runtime_env alone, whoever started it.
             pythonpath = child_pythonpath()
-            ray.init(num_cpus=num_cpus, include_dashboard=False, log_to_driver=False,
-                     ignore_reinit_error=True, configure_logging=False,
-                     runtime_env={"env_vars": {"PYTHONPATH": pythonpath}})
+            ray.init(
+                num_cpus=num_cpus,
+                include_dashboard=False,
+                log_to_driver=False,
+                ignore_reinit_error=True,
+                configure_logging=False,
+                runtime_env={"env_vars": {"PYTHONPATH": pythonpath}},
+            )
             _ray_started = True
             _ray_runtime_pythonpath = pythonpath
         elif _ray_started:
@@ -395,10 +470,14 @@ def _build_sweep_stopper(sweep_root: Path) -> tuple[Any, Any]:
         def __init__(self) -> None:
             self.live_trial_ids: set[str] = set()
 
-        def on_trial_start(self, iteration: int, trials: list, trial: Any, **info: Any) -> None:
+        def on_trial_start(
+            self, iteration: int, trials: list, trial: Any, **info: Any
+        ) -> None:
             self.live_trial_ids.add(trial.trial_id)
 
-        def on_trial_complete(self, iteration: int, trials: list, trial: Any, **info: Any) -> None:
+        def on_trial_complete(
+            self, iteration: int, trials: list, trial: Any, **info: Any
+        ) -> None:
             self.live_trial_ids.discard(trial.trial_id)
 
         on_trial_error = on_trial_complete
@@ -414,17 +493,27 @@ def _build_sweep_stopper(sweep_root: Path) -> tuple[Any, Any]:
                 return False
             from datetime import datetime, timezone
 
-            from tcip_mcp.experiments import CANCEL_FILE, HEARTBEAT_STALE_SECONDS, read_record
+            from tcip_mcp.experiments import (
+                CANCEL_FILE,
+                HEARTBEAT_STALE_SECONDS,
+                read_record,
+            )
 
-            requested = datetime.fromisoformat(read_record(sweep_root / CANCEL_FILE)["requested"])
+            requested = datetime.fromisoformat(
+                read_record(sweep_root / CANCEL_FILE)["requested"]
+            )
             waited = (datetime.now(timezone.utc) - requested).total_seconds()
-            return waited > HEARTBEAT_STALE_SECONDS or not live_trials.live_trial_ids
+            return (
+                waited > HEARTBEAT_STALE_SECONDS
+                or not live_trials.live_trial_ids
+            )
 
     return _SweepStopper(), live_trials
 
 
-def resolved_draw_seeds(split: SplitSpec, split_draws: int,
-                        stated: list[int] | None) -> list[int] | None:
+def resolved_draw_seeds(
+    split: SplitSpec, split_draws: int, stated: list[int] | None
+) -> list[int] | None:
     """The seeds a sweep over ``split_draws`` draws pairs with every sampled point: ``None`` at
     one draw or below; above one, ``stated`` when given, else the base config's validated
     ``data.split`` section ``split``'s own seed plus the draw index, refused when it states
@@ -439,17 +528,25 @@ def resolved_draw_seeds(split: SplitSpec, split_draws: int,
     return [base_seed + i for i in range(split_draws)]
 
 
-def split_draw_search_space(param_space: dict, draw_seeds: list[int] | None) -> dict:
+def split_draw_search_space(
+    param_space: dict, draw_seeds: list[int] | None
+) -> dict:
     """The search space for ``tune_search`` and :func:`planned_trial_count`: ``param_space``
     itself when ``draw_seeds`` (:func:`resolved_draw_seeds`) is ``None``; otherwise a copy
     carrying :data:`SPLIT_DRAW_SEED_KEY` as a categorical grid axis over them."""
     if draw_seeds is None:
         return param_space
-    return {**param_space, SPLIT_DRAW_SEED_KEY: {"type": "categorical", "choices": draw_seeds}}
+    return {
+        **param_space,
+        SPLIT_DRAW_SEED_KEY: {"type": "categorical", "choices": draw_seeds},
+    }
 
 
 def _search_space_and_points(
-    param_space: dict, search_alg: str, split_draws: int, baseline_params: dict | None,
+    param_space: dict,
+    search_alg: str,
+    split_draws: int,
+    baseline_params: dict | None,
 ) -> tuple[dict, list[dict] | None, str]:
     """The Ray Tune space, warm-start preset points, and the normalized search-algorithm name: the
     platform's own ``param_space`` turned into Ray's own space, gridded over every discrete axis
@@ -457,15 +554,23 @@ def _search_space_and_points(
     when given, filtered to the space's own keys.
     """
     normalized_search_alg = search_alg_key(search_alg)
-    grid_keys = frozenset({SPLIT_DRAW_SEED_KEY}) if split_draws > 1 else frozenset()
-    space = _to_tune_space(param_space, grid=(normalized_search_alg == "grid"),
-                           grid_keys=grid_keys)
+    grid_keys = (
+        frozenset({SPLIT_DRAW_SEED_KEY}) if split_draws > 1 else frozenset()
+    )
+    space = _to_tune_space(
+        param_space,
+        grid=(normalized_search_alg == "grid"),
+        grid_keys=grid_keys,
+    )
     filtered = {k: v for k, v in (baseline_params or {}).items() if k in space}
     return space, [filtered] if filtered else None, normalized_search_alg
 
 
 def planned_trial_count(
-    param_space: dict, num_samples: int, search_alg: str, split_draws: int,
+    param_space: dict,
+    num_samples: int,
+    search_alg: str,
+    split_draws: int,
     baseline_params: dict | None,
 ) -> int:
     """How many trials ``tune_search`` would launch for this sweep, read off the specification
@@ -480,10 +585,13 @@ def planned_trial_count(
     from ray.tune.search.variant_generator import _count_variants
 
     space, points, normalized_search_alg = _search_space_and_points(
-        param_space, search_alg, split_draws, baseline_params)
+        param_space, search_alg, split_draws, baseline_params
+    )
     if normalized_search_alg not in _NATIVE_SEARCH:
         return max(num_samples, 0)
-    return _count_variants({"config": space, "num_samples": num_samples}, points or [])
+    return _count_variants(
+        {"config": space, "num_samples": num_samples}, points or []
+    )
 
 
 def tune_search(
@@ -547,11 +655,16 @@ def tune_search(
     # The normalized name is the helper's third return, read at every branch point below;
     # result["search_alg"] stays the caller's own string.
     space, points, normalized_search_alg = _search_space_and_points(
-        param_space, search_alg, split_draws, baseline_params)
+        param_space, search_alg, split_draws, baseline_params
+    )
     resources = resources_per_trial or _default_trial_resources(max_concurrent)
 
-    searcher = build_search_alg(normalized_search_alg, seed=seed, points_to_evaluate=points,
-                                constant_grid_search=split_draws > 1)
+    searcher = build_search_alg(
+        normalized_search_alg,
+        seed=seed,
+        points_to_evaluate=points,
+        constant_grid_search=split_draws > 1,
+    )
     sched = build_scheduler(scheduler, hyperparam_mutations=space)
 
     # Concurrency: a backend searcher must be wrapped (TuneConfig.max_concurrent_trials is
@@ -561,9 +674,14 @@ def tune_search(
     from ray.tune.search.basic_variant import BasicVariantGenerator
 
     tune_max: int | None = max_concurrent
-    if (isinstance(searcher, Searcher) and not isinstance(searcher, BasicVariantGenerator)
-            and max_concurrent and max_concurrent > 0):
+    if (
+        isinstance(searcher, Searcher)
+        and not isinstance(searcher, BasicVariantGenerator)
+        and max_concurrent
+        and max_concurrent > 0
+    ):
         from ray.tune.search import ConcurrencyLimiter
+
         searcher = ConcurrencyLimiter(searcher, max_concurrent=max_concurrent)
         tune_max = None
 
@@ -576,7 +694,9 @@ def tune_search(
 
     trainable = tune.with_resources(trainable, resources=resources)
     # A trainable with no CPU request gets one CPU from Ray, so the cluster is sized the same way.
-    cluster_cpus = math.ceil(float(resources.get("cpu", 1.0)) * max(max_concurrent, 1))
+    cluster_cpus = math.ceil(
+        float(resources.get("cpu", 1.0)) * max(max_concurrent, 1)
+    )
 
     stopper, live_trials_callback = _build_sweep_stopper(sweep_dir)
     run_kwargs: dict[str, Any] = {
@@ -595,7 +715,9 @@ def tune_search(
             logger.warning(
                 "ignoring %s=%s for this sweep: Ray deprecated the variable and refuses to "
                 "run while it is set; trial results go to storage_path (%s).",
-                var, value, run_kwargs["storage_path"],
+                var,
+                value,
+                run_kwargs["storage_path"],
             )
     try:
         with _ray_session(ray, cluster_cpus):
@@ -603,8 +725,12 @@ def tune_search(
                 trainable,
                 param_space=space,
                 tune_config=tune.TuneConfig(
-                    num_samples=num_samples, search_alg=searcher, scheduler=sched,
-                    max_concurrent_trials=tune_max, metric=metric, mode=mode,
+                    num_samples=num_samples,
+                    search_alg=searcher,
+                    scheduler=sched,
+                    max_concurrent_trials=tune_max,
+                    metric=metric,
+                    mode=mode,
                     reuse_actors=False,
                 ),
                 run_config=tune.RunConfig(**run_kwargs),

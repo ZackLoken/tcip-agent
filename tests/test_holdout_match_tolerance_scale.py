@@ -21,7 +21,9 @@ pytest.importorskip("torch")
 
 from tcip_mcp.pipelines.operating_point import count_criterion  # noqa: E402
 
-ENTRY = fx.with_fields(fx.BUD_OPENING, count_bias_tolerance_frac=0.1, count_error_tolerance=1.0)
+ENTRY = fx.with_fields(
+    fx.BUD_OPENING, count_bias_tolerance_frac=0.1, count_error_tolerance=1.0
+)
 N_IMAGES = 4
 OBJECTS_PER_IMAGE = 6
 TOTAL_OBJECTS = N_IMAGES * OBJECTS_PER_IMAGE
@@ -32,7 +34,9 @@ ones."""
 DET_OFFSET = 30.0
 
 
-def _records(prefix: str, *, size: float, x0: float, det_offset: float) -> list[dict]:
+def _records(
+    prefix: str, *, size: float, x0: float, det_offset: float
+) -> list[dict]:
     """``N_IMAGES`` records whose GT boxes are ``size`` px square, one row per image at ``SPACING``
     px centers, each carrying a detection whose center sits ``det_offset`` px to the right of its
     own GT center.
@@ -46,16 +50,38 @@ def _records(prefix: str, *, size: float, x0: float, det_offset: float) -> list[
         gt, dt = [], []
         for k in range(OBJECTS_PER_IMAGE):
             x = x0 + SPACING * k
-            gt.append({"bbox": [x, y, size, size], "category_id": 1, "iscrowd": 0})
-            dt.append({"bbox": [x + det_offset, y, size, size], "category_id": 1, "score": 0.9})
-        recs.append({"image_id": f"{prefix}{i}", "width": 200000, "height": 2000,
-                     "gt": gt, "dt": dt, "count": len(dt), "cap": len(dt) + 1})
+            gt.append(
+                {"bbox": [x, y, size, size], "category_id": 1, "iscrowd": 0}
+            )
+            dt.append(
+                {
+                    "bbox": [x + det_offset, y, size, size],
+                    "category_id": 1,
+                    "score": 0.9,
+                }
+            )
+        recs.append(
+            {
+                "image_id": f"{prefix}{i}",
+                "width": 200000,
+                "height": 2000,
+                "gt": gt,
+                "dt": dt,
+                "count": len(dt),
+                "cap": len(dt) + 1,
+            }
+        )
     return recs
 
 
 def _criterion(cal, hold, entry=ENTRY):
-    return count_criterion(cal, hold, entry, staged_conf_floor=0.05,
-                           staged_conf_floor_attribute_path=None)
+    return count_criterion(
+        cal,
+        hold,
+        entry,
+        staged_conf_floor=0.05,
+        staged_conf_floor_attribute_path=None,
+    )
 
 
 def test_a_holdout_of_smaller_objects_is_judged_at_its_own_object_scale():
@@ -75,12 +101,16 @@ def test_a_holdout_of_smaller_objects_is_judged_at_its_own_object_scale():
 
     # Calibration's own tolerance is twice the offset, so the same 30 px displacement is a hit
     # there.
-    assert evidence["calibration_curve"]["criterion"]["tolerance"] == pytest.approx(60.0)
+    assert evidence["calibration_curve"]["criterion"][
+        "tolerance"
+    ] == pytest.approx(60.0)
     assert evidence["calibration_at_conf"]["tp"] == TOTAL_OBJECTS
 
     assert hb["tp"] == 0
     assert hb["fp"] == TOTAL_OBJECTS and hb["fn"] == TOTAL_OBJECTS
-    assert hb["count_bias_mean_present"] == pytest.approx(0.0)  # the bias terms cannot see this
+    assert hb["count_bias_mean_present"] == pytest.approx(
+        0.0
+    )  # the bias terms cannot see this
     assert "count_bias_exceeds_tolerance" not in failures
     assert "localization_quality_floor_failed" in failures
 

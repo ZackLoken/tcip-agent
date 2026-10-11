@@ -24,7 +24,9 @@ def _deliver(project: Path, root: Path, bucket: str, out: Path) -> dict:
     from tcip_mcp.tools.inference_tools import deliver_per_image_counts
     from tests import _trait_fixtures as fx
 
-    return deliver_per_image_counts(project, str(root), bucket, str(out), trait=fx.COUNT_TRAIT)
+    return deliver_per_image_counts(
+        project, str(root), bucket, str(out), trait=fx.COUNT_TRAIT
+    )
 
 
 def _edit_record(root: Path, bucket: str, edit) -> None:
@@ -40,35 +42,58 @@ def _edit_record(root: Path, bucket: str, edit) -> None:
     tcip_store.replace(key, record)
 
 
-def test_a_bucket_record_edited_to_another_execution_answers_for_nothing(tmp_path: Path):
+def test_a_bucket_record_edited_to_another_execution_answers_for_nothing(
+    tmp_path: Path,
+):
     """The assessment measured one execution record; a bucket stating another, under the same
     assessment id, was not produced by what the assessment measured."""
     chain = run_the_chain(tmp_path, experiment_id="exp-binding-execution")
-    assert _deliver(tmp_path, chain.root, chain.bucket,
-                    tmp_path / "before.csv")["validated"] is True
+    assert (
+        _deliver(tmp_path, chain.root, chain.bucket, tmp_path / "before.csv")[
+            "validated"
+        ]
+        is True
+    )
 
-    _edit_record(chain.root, chain.bucket, lambda record: record["execution"].update(conf=0.05))
+    _edit_record(
+        chain.root,
+        chain.bucket,
+        lambda record: record["execution"].update(conf=0.05),
+    )
 
     out = tmp_path / "after.csv"
     delivered = _deliver(tmp_path, chain.root, chain.bucket, out)
-    assert "was not produced by the checkpoint and execution record" in delivered["error"]
+    assert (
+        "was not produced by the checkpoint and execution record"
+        in delivered["error"]
+    )
     assert chain.assessment["assessment_id"] in delivered["error"]
     assert not out.exists()
 
 
-def test_a_bucket_record_naming_an_assessment_nobody_ran_answers_for_nothing(tmp_path: Path):
+def test_a_bucket_record_naming_an_assessment_nobody_ran_answers_for_nothing(
+    tmp_path: Path,
+):
     chain = run_the_chain(tmp_path, experiment_id="exp-binding-forged-id")
 
-    _edit_record(chain.root, chain.bucket,
-                 lambda record: record.update(assessment_id="assessment-never-run"))
+    _edit_record(
+        chain.root,
+        chain.bucket,
+        lambda record: record.update(assessment_id="assessment-never-run"),
+    )
 
     out = tmp_path / "counts.csv"
     delivered = _deliver(tmp_path, chain.root, chain.bucket, out)
-    assert "no assessment 'assessment-never-run' is recorded" in delivered["error"]
+    assert (
+        "no assessment 'assessment-never-run' is recorded"
+        in delivered["error"]
+    )
     assert not out.exists()
 
 
-def test_a_capture_outside_the_assessments_reference_answers_for_nothing(tmp_path: Path):
+def test_a_capture_outside_the_assessments_reference_answers_for_nothing(
+    tmp_path: Path,
+):
     """The checkpoint and execution are the assessed ones, but the capture is not among those the
     reference held out, so the assessment says nothing about it."""
     from tcip_mcp.tools.inference_tools import run_inference
@@ -76,9 +101,13 @@ def test_a_capture_outside_the_assessments_reference_answers_for_nothing(tmp_pat
     chain = run_the_chain(tmp_path, experiment_id="exp-binding-coverage")
     other_images = synthetic_capture(chain.root, date="2-25-26")
     bucket = "chain/2-25-26"
-    published = run_inference(tmp_path, checkpoint_path=chain.checkpoint_path,
-                              images_dir=str(other_images), bucket=bucket,
-                              assessment_id=chain.assessment["assessment_id"])
+    published = run_inference(
+        tmp_path,
+        checkpoint_path=chain.checkpoint_path,
+        images_dir=str(other_images),
+        bucket=bucket,
+        assessment_id=chain.assessment["assessment_id"],
+    )
     assert "error" not in published, published
 
     out = tmp_path / "counts.csv"

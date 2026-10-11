@@ -14,9 +14,15 @@ from tcip_mcp.pipelines.data.selection import ClassScope, read_selection
 from tcip_mcp.subject_registry import Attribute
 from tcip_mcp.tools.data_tools import draw_splits
 
-from tests.test_selection_binding import DATES, SUBJECT, _attribute_scoped_dataset
+from tests.test_selection_binding import (
+    DATES,
+    SUBJECT,
+    _attribute_scoped_dataset,
+)
 
-CONDITION = Attribute(name="condition", type="categorical", values=("healthy", "damaged"))
+CONDITION = Attribute(
+    name="condition", type="categorical", values=("healthy", "damaged")
+)
 """The attribute the fixture's registry declares on its subject."""
 
 
@@ -31,20 +37,31 @@ def test_a_scope_the_admission_produced_round_trips_through_the_selection_and_th
 
     root = _attribute_scoped_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    result = draw_splits(tmp_path, str(root), output_path=str(out), subject=SUBJECT,
-                         seed=1, val_ratio=0.25,
-                         calibration_ratio=0.125, holdout_ratio=0.125)
+    result = draw_splits(
+        tmp_path,
+        str(root),
+        output_path=str(out),
+        subject=SUBJECT,
+        seed=1,
+        val_ratio=0.25,
+        calibration_ratio=0.125,
+        holdout_ratio=0.125,
+    )
     assert "error" not in result, result
 
     drawn = read_selection(out, project=tmp_path)
     assert drawn.scope == ClassScope(SUBJECT, (CONDITION,))
     assert result["scope"] == asdict(drawn.scope)
 
-    *_loaders, resolved = train_val(tmp_path, "detection", {"split": {"selection_dir": str(out)}})
+    *_loaders, resolved = train_val(
+        tmp_path, "detection", {"split": {"selection_dir": str(out)}}
+    )
     assert resolved.recorded_scope == drawn.scope
 
 
-REVERSED = Attribute(name="condition", type="categorical", values=("damaged", "healthy"))
+REVERSED = Attribute(
+    name="condition", type="categorical", values=("damaged", "healthy")
+)
 """The reverse of the order the fixture's registry declares ``condition`` in."""
 
 
@@ -59,8 +76,14 @@ def test_a_run_recording_its_attributes_is_admitted_under_them_not_the_registrys
     from tcip_mcp.pipelines.schemas import DataSpec
 
     images_dir = _images_dir(_attribute_scoped_dataset(tmp_path / "ds"))
-    membership = run_membership(DataSpec.model_validate(
-        {"images_dir": images_dir, "scope": asdict(ClassScope(SUBJECT, (REVERSED,)))}))
+    membership = run_membership(
+        DataSpec.model_validate(
+            {
+                "images_dir": images_dir,
+                "scope": asdict(ClassScope(SUBJECT, (REVERSED,))),
+            }
+        )
+    )
 
     assert membership.scope.attributes == (REVERSED,)
 
@@ -76,6 +99,9 @@ def test_a_document_scope_with_no_attributes_read_refuses_and_a_fresh_statement_
     with pytest.raises(ValueError, match="records no attributes"):
         admit(images_dir, scope=ClassScope(SUBJECT))
 
-    fresh = run_membership(DataSpec.model_validate(
-        {"images_dir": images_dir, "scope": {"subject": SUBJECT}}))
+    fresh = run_membership(
+        DataSpec.model_validate(
+            {"images_dir": images_dir, "scope": {"subject": SUBJECT}}
+        )
+    )
     assert fresh.scope.attributes == (CONDITION,)

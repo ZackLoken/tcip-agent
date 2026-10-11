@@ -12,20 +12,35 @@ import pytest
 
 import tcip_store as ts
 from tcip_mcp.pipelines.postprocessing import plant_mapping
-from tcip_mcp.tools.phenology_tools import build_plant_mapping, register_plant_registry
+from tcip_mcp.tools.phenology_tools import (
+    build_plant_mapping,
+    register_plant_registry,
+)
 
 from tests._mapping_fixtures import write_plant_csv
-from tests.test_plant_mapping_binding import POPULATION, PLANTS, _dataset, _init, _write_scene
+from tests.test_plant_mapping_binding import (
+    POPULATION,
+    PLANTS,
+    _dataset,
+    _init,
+    _write_scene,
+)
 
 
-def test_registers_a_csv_and_persists_the_frozen_record(tmp_path: Path) -> None:
+def test_registers_a_csv_and_persists_the_frozen_record(
+    tmp_path: Path,
+) -> None:
     """The recorded shape: per-file {path, sha256, n_plants}, crop, site, registered_at, and a
     digest over the parsed rows; who registered it is the audit line's."""
     csv_path = write_plant_csv(tmp_path / "plants.csv", PLANTS)
 
     res = register_plant_registry(
-        tmp_path, name="valley-plants", csv_paths=[str(csv_path)],
-        crop="currant", site="north orchard")
+        tmp_path,
+        name="valley-plants",
+        csv_paths=[str(csv_path)],
+        crop="currant",
+        site="north orchard",
+    )
 
     assert "error" not in res, res
     assert res["name"] == "valley-plants"
@@ -34,11 +49,13 @@ def test_registers_a_csv_and_persists_the_frozen_record(tmp_path: Path) -> None:
     assert len(res["digest"]) == 64
     from tcip_mcp.registry_paths import stored_path
 
-    assert res["csvs"] == [{
-        "path": stored_path(csv_path, tmp_path),
-        "sha256": hashlib.sha256(csv_path.read_bytes()).hexdigest(),
-        "n_plants": len(PLANTS),
-    }]
+    assert res["csvs"] == [
+        {
+            "path": stored_path(csv_path, tmp_path),
+            "sha256": hashlib.sha256(csv_path.read_bytes()).hexdigest(),
+            "n_plants": len(PLANTS),
+        }
+    ]
 
     stored = plant_mapping.load_registry(tmp_path, "valley-plants")
     assert stored is not None
@@ -47,7 +64,8 @@ def test_registers_a_csv_and_persists_the_frozen_record(tmp_path: Path) -> None:
 
 
 def test_a_registered_csvs_hash_is_of_the_bytes_its_rows_were_parsed_from(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The file is rewritten with more plants between the parse and anything after it: the
     recorded hash and count both answer for the bytes the rows came from."""
@@ -60,8 +78,12 @@ def test_a_registered_csvs_hash_is_of_the_bytes_its_rows_were_parsed_from(
         write_plant_csv(csv_path, PLANTS)
         return rows
 
-    monkeypatch.setattr(plant_mapping, "read_plant_csv_bytes", parse_then_rewrite)
-    csvs, _digest, n_plants = plant_mapping.parse_plant_registry_csvs([csv_path], tmp_path)
+    monkeypatch.setattr(
+        plant_mapping, "read_plant_csv_bytes", parse_then_rewrite
+    )
+    csvs, _digest, n_plants = plant_mapping.parse_plant_registry_csvs(
+        [csv_path], tmp_path
+    )
 
     assert n_plants == csvs[0]["n_plants"] == 1
     assert csvs[0]["sha256"] == hashlib.sha256(parsed_bytes).hexdigest()
@@ -71,7 +93,12 @@ def test_refuses_a_name_outside_name_segment(tmp_path: Path) -> None:
     csv_path = write_plant_csv(tmp_path / "plants.csv", PLANTS)
 
     res = register_plant_registry(
-        tmp_path, name="Not Legal!", csv_paths=[str(csv_path)], crop="currant", site="orchard")
+        tmp_path,
+        name="Not Legal!",
+        csv_paths=[str(csv_path)],
+        crop="currant",
+        site="orchard",
+    )
 
     assert "error" in res
     assert "lowercase" in res["error"]
@@ -79,21 +106,32 @@ def test_refuses_a_name_outside_name_segment(tmp_path: Path) -> None:
 
 def test_refuses_a_missing_file(tmp_path: Path) -> None:
     res = register_plant_registry(
-        tmp_path, name="valley", csv_paths=[str(tmp_path / "missing.csv")],
-        crop="currant", site="orchard")
+        tmp_path,
+        name="valley",
+        csv_paths=[str(tmp_path / "missing.csv")],
+        crop="currant",
+        site="orchard",
+    )
 
     assert "error" in res
     assert "plant CSV" in res["error"]
 
 
-def test_refuses_naming_a_file_that_parses_no_georeferenced_plant(tmp_path: Path) -> None:
+def test_refuses_naming_a_file_that_parses_no_georeferenced_plant(
+    tmp_path: Path,
+) -> None:
     """A per-file check: one good file beside one that parses to nothing still refuses, naming
     only the failing file."""
     good = write_plant_csv(tmp_path / "good.csv", PLANTS)
     bad = write_plant_csv(tmp_path / "bad.csv", [])
 
     res = register_plant_registry(
-        tmp_path, name="valley", csv_paths=[str(good), str(bad)], crop="currant", site="orchard")
+        tmp_path,
+        name="valley",
+        csv_paths=[str(good), str(bad)],
+        crop="currant",
+        site="orchard",
+    )
 
     assert "error" in res
     assert bad.name in res["error"]
@@ -101,15 +139,27 @@ def test_refuses_naming_a_file_that_parses_no_georeferenced_plant(tmp_path: Path
     assert not ts.exists(plant_mapping.plant_registry_key(tmp_path, "valley"))
 
 
-def test_a_second_registration_under_the_same_name_and_content_is_a_no_op(tmp_path: Path) -> None:
+def test_a_second_registration_under_the_same_name_and_content_is_a_no_op(
+    tmp_path: Path,
+) -> None:
     csv_path = write_plant_csv(tmp_path / "plants.csv", PLANTS)
 
     first = register_plant_registry(
-        tmp_path, name="valley", csv_paths=[str(csv_path)], crop="currant", site="orchard")
+        tmp_path,
+        name="valley",
+        csv_paths=[str(csv_path)],
+        crop="currant",
+        site="orchard",
+    )
     assert "error" not in first, first
 
     second = register_plant_registry(
-        tmp_path, name="valley", csv_paths=[str(csv_path)], crop="currant", site="orchard")
+        tmp_path,
+        name="valley",
+        csv_paths=[str(csv_path)],
+        crop="currant",
+        site="orchard",
+    )
 
     assert "error" not in second, second
     assert second["digest"] == first["digest"]
@@ -120,58 +170,94 @@ def test_a_second_registration_under_the_same_name_and_different_plants_refuses(
 ) -> None:
     csv_path = write_plant_csv(tmp_path / "plants.csv", PLANTS)
     other_csv = write_plant_csv(
-        tmp_path / "other.csv", [{"plot": "P9", "accession": "acc-Z", "lat": 1.0, "lon": 1.0}])
+        tmp_path / "other.csv",
+        [{"plot": "P9", "accession": "acc-Z", "lat": 1.0, "lon": 1.0}],
+    )
 
     first = register_plant_registry(
-        tmp_path, name="valley", csv_paths=[str(csv_path)], crop="currant", site="orchard")
+        tmp_path,
+        name="valley",
+        csv_paths=[str(csv_path)],
+        crop="currant",
+        site="orchard",
+    )
     assert "error" not in first, first
 
     conflict = register_plant_registry(
-        tmp_path, name="valley", csv_paths=[str(other_csv)], crop="currant", site="orchard")
+        tmp_path,
+        name="valley",
+        csv_paths=[str(other_csv)],
+        crop="currant",
+        site="orchard",
+    )
 
     assert "error" in conflict
     assert first["digest"] in conflict["error"]
     stored = plant_mapping.load_registry(tmp_path, "valley")
-    assert stored["digest"] == first["digest"], "the taken name's record must not have moved"
+    assert stored["digest"] == first["digest"], (
+        "the taken name's record must not have moved"
+    )
 
 
 def test_build_plant_mapping_reads_a_registered_registry(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Admits valid work: a mapping built by build_plant_mapping over a name
     register_plant_registry minted, through both platform doors."""
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, _ = _write_scene(dataset_root, dates=["2026-02-11"])
+    images_root, plant_csv, _ = _write_scene(
+        dataset_root, dates=["2026-02-11"]
+    )
 
     reg = register_plant_registry(
-        tmp_path, name="valley-plants", csv_paths=[str(plant_csv)], crop="currant", site="orchard")
+        tmp_path,
+        name="valley-plants",
+        csv_paths=[str(plant_csv)],
+        crop="currant",
+        site="orchard",
+    )
     assert "error" not in reg, reg
 
     res = build_plant_mapping(
-        tmp_path, name="valley", images_root=str(images_root), plant_registry="valley-plants")
+        tmp_path,
+        name="valley",
+        images_root=str(images_root),
+        plant_registry="valley-plants",
+    )
 
     assert "error" not in res, res
     build = plant_mapping.load_mapping(tmp_path, "valley")
     assert build is not None
-    assert build.plant_registry == {"name": "valley-plants", "digest": reg["digest"]}
+    assert build.plant_registry == {
+        "name": "valley-plants",
+        "digest": reg["digest"],
+    }
 
 
 def test_build_plant_mapping_refuses_naming_register_plant_registry_when_registry_is_missing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, _, _ = _write_scene(dataset_root, dates=["2026-02-11"])
 
     res = build_plant_mapping(
-        tmp_path, name="valley", images_root=str(images_root), plant_registry="nope")
+        tmp_path,
+        name="valley",
+        images_root=str(images_root),
+        plant_registry="nope",
+    )
 
     assert "error" in res
     assert "register_plant_registry" in res["error"]
 
 
-def _deliver_scene(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str, dict[str, str]]:
+def _deliver_scene(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[str, dict[str, str]]:
     """A real, delivered phenology scene through the platform's own producers, for the registry
     doors below to then interfere with. Returns the registered registry's own name and each
     date's bucket."""
@@ -179,19 +265,31 @@ def _deliver_scene(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str
 
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
-    images_root, plant_csv, preds_by_date = _write_scene(dataset_root, dates=["2026-02-11"])
+    images_root, plant_csv, preds_by_date = _write_scene(
+        dataset_root, dates=["2026-02-11"]
+    )
     reg = register_plant_registry(
-        tmp_path, name="valley-plants", csv_paths=[str(plant_csv)], crop="currant", site="orchard")
+        tmp_path,
+        name="valley-plants",
+        csv_paths=[str(plant_csv)],
+        crop="currant",
+        site="orchard",
+    )
     assert "error" not in reg, reg
     build_res = build_plant_mapping(
-        tmp_path, name="valley", images_root=str(images_root), plant_registry="valley-plants")
+        tmp_path,
+        name="valley",
+        images_root=str(images_root),
+        plant_registry="valley-plants",
+    )
     assert "error" not in build_res, build_res
     _seed_currant_bloom_trait(tmp_path)
     return "valley-plants", preds_by_date
 
 
 def test_the_happy_path_through_the_platforms_own_producers_refuses_at_the_classifier_gate(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Admits valid work: a registered registry that still loads and still hashes to what the
     mapping recorded is admitted by the delivery door, which resolves the mapping, runs the
@@ -204,9 +302,14 @@ def test_the_happy_path_through_the_platforms_own_producers_refuses_at_the_class
     out_csv = tmp_path / "out.csv"
 
     res = deliver_phenology_milestones(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION,
-        dataset_root=str(tmp_path / "ds"), buckets=list(preds_by_date.values()),
-        output_csv_path=str(out_csv))
+        tmp_path,
+        trait="currant_bloom",
+        mapping_name="valley",
+        plants=POPULATION,
+        dataset_root=str(tmp_path / "ds"),
+        buckets=list(preds_by_date.values()),
+        output_csv_path=str(out_csv),
+    )
 
     assert "error" in res, res
     assert "no assessment answers" in res["error"]
@@ -214,7 +317,8 @@ def test_the_happy_path_through_the_platforms_own_producers_refuses_at_the_class
 
 
 def test_a_deleted_registry_refuses_at_delivery_naming_the_registry_and_the_mapping(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A guard: a registry deleted after the mapping was built refuses the delivery by name,
     rather than verifying an empty plant_csvs_unverified list against nothing."""
@@ -226,9 +330,14 @@ def test_a_deleted_registry_refuses_at_delivery_naming_the_registry_and_the_mapp
     out_csv = tmp_path / "out.csv"
 
     res = deliver_phenology_milestones(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION,
-        dataset_root=str(tmp_path / "ds"), buckets=list(preds_by_date.values()),
-        output_csv_path=str(out_csv))
+        tmp_path,
+        trait="currant_bloom",
+        mapping_name="valley",
+        plants=POPULATION,
+        dataset_root=str(tmp_path / "ds"),
+        buckets=list(preds_by_date.values()),
+        output_csv_path=str(out_csv),
+    )
 
     assert "error" in res
     assert registry_name in res["error"]
@@ -237,7 +346,8 @@ def test_a_deleted_registry_refuses_at_delivery_naming_the_registry_and_the_mapp
 
 
 def test_a_registry_digest_mismatch_refuses_at_delivery(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A guard: a registry whose stored digest no longer matches what the mapping was built
     against (a hand-edited or store-corrupted record) refuses rather than verifying against the
@@ -247,13 +357,20 @@ def test_a_registry_digest_mismatch_refuses_at_delivery(
     registry_name, preds_by_date = _deliver_scene(tmp_path, monkeypatch)
     key = plant_mapping.plant_registry_key(tmp_path, registry_name)
     versioned = ts.read_versioned(key)
-    ts.replace(key, {**versioned.value, "digest": "0" * 64}, expect=versioned.version)
+    ts.replace(
+        key, {**versioned.value, "digest": "0" * 64}, expect=versioned.version
+    )
     out_csv = tmp_path / "out.csv"
 
     res = deliver_phenology_milestones(
-        tmp_path, trait="currant_bloom", mapping_name="valley", plants=POPULATION,
-        dataset_root=str(tmp_path / "ds"), buckets=list(preds_by_date.values()),
-        output_csv_path=str(out_csv))
+        tmp_path,
+        trait="currant_bloom",
+        mapping_name="valley",
+        plants=POPULATION,
+        dataset_root=str(tmp_path / "ds"),
+        buckets=list(preds_by_date.values()),
+        output_csv_path=str(out_csv),
+    )
 
     assert "error" in res
     assert registry_name in res["error"]

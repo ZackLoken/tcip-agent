@@ -27,7 +27,9 @@ from tcip_mcp.pipelines.training.evaluation import (
 )
 from tcip_mcp.traits import COUNT_UNBIASED, DETECTION_F1, PRESENCE, TraitEntry
 
-COUNT_OBJECTIVE_PICKERS: dict[str, tuple[Callable[[dict], float | None], str]] = {
+COUNT_OBJECTIVE_PICKERS: dict[
+    str, tuple[Callable[[dict], float | None], str]
+] = {
     COUNT_UNBIASED: (pick_count_unbiased, "count-unbiased count curve"),
     DETECTION_F1: (pick_f1_max, "F1-max count curve"),
     PRESENCE: (pick_f1_max, "F1-max count curve"),
@@ -45,7 +47,9 @@ REGRESSION_CRITERIA: dict[str, Callable[[Any, Any], float | None]] = {
 """The regression skill statistics a caller may assess a continuous prediction by."""
 
 
-def _effective_count_bias_tolerance(tolerance_frac: float, typical_count: float, n: int) -> float:
+def _effective_count_bias_tolerance(
+    tolerance_frac: float, typical_count: float, n: int
+) -> float:
     """The absolute per-image count-bias tolerance one scope (pooled, or one class) is held to:
     ``tolerance_frac`` of the scope's typical per-image count, floored at ``1 / n``, one whole
     miscount spread across the ``n`` samples the scope's evidence rests on; ``0.0`` at ``n == 0``.
@@ -53,15 +57,25 @@ def _effective_count_bias_tolerance(tolerance_frac: float, typical_count: float,
     return max(tolerance_frac * typical_count, 1.0 / n) if n > 0 else 0.0
 
 
-def _bias_equivalence(mean: float, std: float, n: int, *, tolerance_frac: float,
-                      typical_count: float) -> tuple[bool, float]:
+def _bias_equivalence(
+    mean: float,
+    std: float,
+    n: int,
+    *,
+    tolerance_frac: float,
+    typical_count: float,
+) -> tuple[bool, float]:
     """Whether a bias measured over ``n`` present samples is equivalent to zero at the scope's
     tolerance (mean plus one-sided standard error within it), and that tolerance. ``n == 0`` never
     passes."""
-    tolerance = _effective_count_bias_tolerance(tolerance_frac, typical_count, n)
+    tolerance = _effective_count_bias_tolerance(
+        tolerance_frac, typical_count, n
+    )
     if n == 0:
         return False, tolerance
-    return abs(mean) + _EQUIVALENCE_Z * std / math.sqrt(n) <= tolerance, tolerance
+    return abs(mean) + _EQUIVALENCE_Z * std / math.sqrt(
+        n
+    ) <= tolerance, tolerance
 
 
 OPERATING_POINT_ATTRS = ("score_thresh", "detections_per_img")
@@ -78,11 +92,17 @@ def detector_operating_point_holder(model: Any) -> tuple[Any, str | None]:
     Raises ``ValueError``, naming both locations, when more than one candidate exposes a knob.
     """
     det = getattr(model, "detector", None)
-    candidates = ((model, "self"), (getattr(det, "roi_heads", None), "detector.roi_heads"),
-                  (det, "detector"))
-    matches = [(holder, path) for holder, path in candidates
-               if holder is not None
-               and any(hasattr(holder, attr) for attr in OPERATING_POINT_ATTRS)]
+    candidates = (
+        (model, "self"),
+        (getattr(det, "roi_heads", None), "detector.roi_heads"),
+        (det, "detector"),
+    )
+    matches = [
+        (holder, path)
+        for holder, path in candidates
+        if holder is not None
+        and any(hasattr(holder, attr) for attr in OPERATING_POINT_ATTRS)
+    ]
     if len(matches) > 1:
         raise ValueError(
             "this model exposes an operating-point knob at more than one location "
@@ -92,23 +112,29 @@ def detector_operating_point_holder(model: Any) -> tuple[Any, str | None]:
     return matches[0] if matches else (None, None)
 
 
-def set_detector_operating_point(model: Any, *, score_thresh: float,
-                                 detections_per_img: int) -> None:
+def set_detector_operating_point(
+    model: Any, *, score_thresh: float, detections_per_img: int
+) -> None:
     """Set both knobs on the holder :func:`detector_operating_point_holder` resolves, so the
     operating point governs which boxes exist. A knob the model does not expose refuses
     (``ValueError``) naming it and the holder."""
     target, path = detector_operating_point_holder(model)
-    for attr, val in zip(OPERATING_POINT_ATTRS, (score_thresh, detections_per_img), strict=True):
+    for attr, val in zip(
+        OPERATING_POINT_ATTRS, (score_thresh, detections_per_img), strict=True
+    ):
         if not hasattr(target, attr):
             raise ValueError(
                 f"this model exposes no {attr} "
                 f"({f'at its holder {path}' if path else 'and no holder of either knob'}): a "
                 f"detector's operating point is set in the model before its forward, so its "
-                f"holder exposes {attr} and honors it.")
+                f"holder exposes {attr} and honors it."
+            )
         setattr(target, attr, val)
 
 
-def governed_forward(model: Any, inputs: list, caps: list[int], *, conf: float) -> list:
+def governed_forward(
+    model: Any, inputs: list, caps: list[int], *, conf: float
+) -> list:
     """``model``'s output for each of ``inputs``, in input order, each produced under the
     in-model score threshold ``conf`` and its own detection cap of ``caps``, both set in the
     model (:func:`set_detector_operating_point`): one forward per distinct cap, over the inputs it
@@ -116,7 +142,9 @@ def governed_forward(model: Any, inputs: list, caps: list[int], *, conf: float) 
     outputs: list = [None] * len(inputs)
     for cap in sorted(set(caps)):
         at = [i for i, c in enumerate(caps) if c == cap]
-        set_detector_operating_point(model, score_thresh=conf, detections_per_img=cap)
+        set_detector_operating_point(
+            model, score_thresh=conf, detections_per_img=cap
+        )
         for i, output in zip(at, model([inputs[i] for i in at]), strict=True):
             outputs[i] = output
     return outputs
@@ -136,12 +164,20 @@ def _min_dt_score(records: list[dict]) -> float | None:
 def cap_saturated_frac(records: list[dict]) -> float:
     """Fraction of ``records`` whose frame kept as many detections as the cap the collection pass
     gave it; every record states its frame's ``count`` and ``cap``."""
-    return sum(r["count"] == r["cap"] for r in records) / len(records) if records else 0.0
+    return (
+        sum(r["count"] == r["cap"] for r in records) / len(records)
+        if records
+        else 0.0
+    )
 
 
 def count_criterion(
-    cal_records: list[dict], hold_records: list[dict], entry: TraitEntry, *,
-    staged_conf_floor: float, staged_conf_floor_attribute_path: str | None,
+    cal_records: list[dict],
+    hold_records: list[dict],
+    entry: TraitEntry,
+    *,
+    staged_conf_floor: float,
+    staged_conf_floor_attribute_path: str | None,
 ) -> tuple[float, dict, list[str]]:
     """The conf the trait's count objective picks on the calibration side, and the held-out count
     check at that conf: ``(conf, evidence, failures)``.
@@ -162,38 +198,60 @@ def count_criterion(
     objective picks no conf on, refuses (``ValueError``).
     """
     if entry.count_objective not in COUNT_OBJECTIVE_PICKERS:
-        raise ValueError(f"count_objective {entry.count_objective!r} has no registered picker "
-                         f"(registered: {sorted(COUNT_OBJECTIVE_PICKERS)}).")
+        raise ValueError(
+            f"count_objective {entry.count_objective!r} has no registered picker "
+            f"(registered: {sorted(COUNT_OBJECTIVE_PICKERS)})."
+        )
     picker, conf_label = COUNT_OBJECTIVE_PICKERS[entry.count_objective]
     criterion = resolve_match_criterion(entry, cal_records)
     cal_criterion = scaled_to(criterion, cal_records)
     hold_criterion = scaled_to(criterion, hold_records)
-    cal_curve = derive_operating_point_curve(cal_records, criterion=cal_criterion)
+    cal_curve = derive_operating_point_curve(
+        cal_records, criterion=cal_criterion
+    )
     picked = picker(cal_curve)
     if picked is None:
         raise ValueError(
             f"the calibration side's count curve holds no conf the {entry.count_objective} "
             "objective picks: its predictions carry no detection to sweep. Assess a checkpoint "
-            "that detects the subject, over a reference that holds it.")
+            "that detects the subject, over a reference that holds it."
+        )
     conf = float(picked)
-    hb = derive_operating_point_curve(hold_records, criterion=hold_criterion,
-                                      conf_grid=[conf])["curve"][0]
-    cb = derive_operating_point_curve(cal_records, criterion=cal_criterion,
-                                      conf_grid=[conf])["curve"][0]
+    hb = derive_operating_point_curve(
+        hold_records, criterion=hold_criterion, conf_grid=[conf]
+    )["curve"][0]
+    cb = derive_operating_point_curve(
+        cal_records, criterion=cal_criterion, conf_grid=[conf]
+    )["curve"][0]
     tolerance_frac = cast(float, entry.count_bias_tolerance_frac)
     pooled_typical = gt_class_typical_count(hold_records)
     pooled_ok, pooled_tolerance = _bias_equivalence(
-        hb["count_bias_mean_present"], hb["count_bias_std_present"], hb["n_present"],
-        tolerance_frac=tolerance_frac, typical_count=pooled_typical)
+        hb["count_bias_mean_present"],
+        hb["count_bias_std_present"],
+        hb["n_present"],
+        tolerance_frac=tolerance_frac,
+        typical_count=pooled_typical,
+    )
     per_class: dict[str, dict] = {}
     for cid, s in hb["per_class"].items():
         typical = gt_class_typical_count(hold_records, class_id=int(cid))
         ok, tolerance = _bias_equivalence(
-            s["count_bias_mean_present"], s["count_bias_std_present"], s["n_present"],
-            tolerance_frac=tolerance_frac, typical_count=typical)
-        per_class[cid] = {"bias": s["count_bias_mean_present"], "typical_count": typical,
-                          "tolerance": tolerance, "passed": ok, "n_present": s["n_present"]}
-    missing_classes = sorted(classes_with_evidence(cb) - classes_with_evidence(hb))
+            s["count_bias_mean_present"],
+            s["count_bias_std_present"],
+            s["n_present"],
+            tolerance_frac=tolerance_frac,
+            typical_count=typical,
+        )
+        per_class[cid] = {
+            "bias": s["count_bias_mean_present"],
+            "typical_count": typical,
+            "tolerance": tolerance,
+            "passed": ok,
+            "n_present": s["n_present"],
+        }
+    missing_classes = sorted(
+        classes_with_evidence(cb) - classes_with_evidence(hb)
+    )
     floor = cast(float, entry.holdout_match_quality_floor)
     failures: list[str] = []
     if conf <= staged_conf_floor:
@@ -219,17 +277,25 @@ def count_criterion(
 
     observed_min = _min_dt_score(cal_records + hold_records)
     evidence = {
-        "conf": conf, "conf_derived_from": conf_label, "calibration_curve": cal_curve,
-        "f1_max_conf": pick_f1_max(cal_curve), "localization": criterion,
-        "holdout_at_conf": hb, "calibration_at_conf": cb,
-        "pooled_typical_count": pooled_typical, "pooled_count_bias_tolerance": pooled_tolerance,
-        "per_class": per_class, "holdout_missing_classes": missing_classes,
+        "conf": conf,
+        "conf_derived_from": conf_label,
+        "calibration_curve": cal_curve,
+        "f1_max_conf": pick_f1_max(cal_curve),
+        "localization": criterion,
+        "holdout_at_conf": hb,
+        "calibration_at_conf": cb,
+        "pooled_typical_count": pooled_typical,
+        "pooled_count_bias_tolerance": pooled_tolerance,
+        "per_class": per_class,
+        "holdout_missing_classes": missing_classes,
         "equivalence_z": _EQUIVALENCE_Z,
         "staged_conf_floor": staged_conf_floor,
         "staged_conf_floor_attribute_path": staged_conf_floor_attribute_path,
         "observed_min_score": observed_min,
-        "conf_floor_mismatch": (observed_min is not None
-                                and observed_min > staged_conf_floor + 0.05),
+        "conf_floor_mismatch": (
+            observed_min is not None
+            and observed_min > staged_conf_floor + 0.05
+        ),
         "calibration_cap_saturated_frac": cap_saturated_frac(cal_records),
         "holdout_cap_saturated_frac": cap_saturated_frac(hold_records),
     }
@@ -245,7 +311,9 @@ def _classification_kappa(items: list[dict]) -> float | None:
         return None
     true_pos = sum(1 for it in items if it["is_true_positive"])
     pred_pos = sum(1 for it in items if it["is_pred_positive"])
-    agree = sum(1 for it in items if it["is_true_positive"] == it["is_pred_positive"])
+    agree = sum(
+        1 for it in items if it["is_true_positive"] == it["is_pred_positive"]
+    )
     if true_pos in (0, n) or pred_pos in (0, n):
         return None
     po = agree / n
@@ -256,8 +324,9 @@ def _classification_kappa(items: list[dict]) -> float | None:
     return (po - pe) / (1 - pe)
 
 
-def classifier_criterion(cal_items: list[dict], hold_items: list[dict],
-                         entry: TraitEntry) -> tuple[dict, list[str]]:
+def classifier_criterion(
+    cal_items: list[dict], hold_items: list[dict], entry: TraitEntry
+) -> tuple[dict, list[str]]:
     """The held-out agreement of a positive-state call over matched instances:
     ``(evidence, failures)``.
 
@@ -271,16 +340,24 @@ def classifier_criterion(cal_items: list[dict], hold_items: list[dict],
     by_image: dict[str, list[dict]] = {}
     for it in hold_items:
         by_image.setdefault(it["image_id"], []).append(it)
-    biases = [sum(i["is_pred_positive"] for i in its) - sum(i["is_true_positive"] for i in its)
-              for its in by_image.values()
-              if any(i["is_pred_positive"] or i["is_true_positive"] for i in its)]
+    biases = [
+        sum(i["is_pred_positive"] for i in its)
+        - sum(i["is_true_positive"] for i in its)
+        for its in by_image.values()
+        if any(i["is_pred_positive"] or i["is_true_positive"] for i in its)
+    ]
     mean = statistics.fmean(biases) if biases else 0.0
     std = statistics.stdev(biases) if len(biases) > 1 else 0.0
-    typical = mean_of_present_counts(sum(i["is_true_positive"] for i in its)
-                                     for its in by_image.values())
+    typical = mean_of_present_counts(
+        sum(i["is_true_positive"] for i in its) for its in by_image.values()
+    )
     bias_ok, tolerance = _bias_equivalence(
-        mean, std, len(biases), tolerance_frac=cast(float, entry.count_bias_tolerance_frac),
-        typical_count=typical)
+        mean,
+        std,
+        len(biases),
+        tolerance_frac=cast(float, entry.count_bias_tolerance_frac),
+        typical_count=typical,
+    )
     kappa = _classification_kappa(hold_items)
     floor = cast(float, entry.classifier_agreement_floor)
 
@@ -298,16 +375,26 @@ def classifier_criterion(cal_items: list[dict], hold_items: list[dict],
     if kappa is None or kappa <= 0.0 or kappa <= floor:
         failures.append("classifier_agreement_below_floor")
     evidence = {
-        "kappa": kappa, "kappa_floor": floor, "positive_count_bias": mean,
-        "positive_count_bias_std": std, "positive_count_bias_images": len(biases),
-        "typical_positive_count": typical, "positive_count_bias_tolerance": tolerance,
-        "n_calibration": len(cal_items), "n_holdout": len(hold_items),
+        "kappa": kappa,
+        "kappa_floor": floor,
+        "positive_count_bias": mean,
+        "positive_count_bias_std": std,
+        "positive_count_bias_images": len(biases),
+        "typical_positive_count": typical,
+        "positive_count_bias_tolerance": tolerance,
+        "n_calibration": len(cal_items),
+        "n_holdout": len(hold_items),
     }
     return evidence, failures
 
 
-def scalar_criterion(hold_items: list[dict], *, score: Callable[[Any, Any], float | None],
-                     floor: float, criterion: str) -> tuple[dict, list[str]]:
+def scalar_criterion(
+    hold_items: list[dict],
+    *,
+    score: Callable[[Any, Any], float | None],
+    floor: float,
+    criterion: str,
+) -> tuple[dict, list[str]]:
     """A per-image scalar prediction's held-out skill: ``criterion``'s ``score`` over the holdout
     items' ``(predicted, true)`` values must be finite, above zero and above ``floor``.
     ``(evidence, failures)``."""
@@ -326,21 +413,36 @@ def scalar_criterion(hold_items: list[dict], *, score: Callable[[Any, Any], floa
         failures.append("criterion_not_finite")
     elif not (value > 0.0 and value > floor):
         failures.append("criterion_below_floor")
-    evidence = {"criterion": criterion, **stored_number("score", value), "floor": floor,
-                "n_holdout": len(hold_items)}
+    evidence = {
+        "criterion": criterion,
+        **stored_number("score", value),
+        "floor": floor,
+        "n_holdout": len(hold_items),
+    }
     return evidence, failures
 
 
-def spatial_disjointness(spatial: SpatialManifest,
-                         rects: Sequence[tuple[int, int, int, int]]) -> list[str]:
+def spatial_disjointness(
+    spatial: SpatialManifest, rects: Sequence[tuple[int, int, int, int]]
+) -> list[str]:
     """The reference rects (full-mosaic pixel coordinates) not held out from training under a
     within-image split's recorded regions ``spatial``: each rect must lie inside one of its
     ``val_region``/``holdout_region``/``calibration_region`` rects and overlap none of its
     ``train_region`` rects."""
-    from tcip_mcp.pipelines.raster_source import rect_contains_rect, rects_overlap
+    from tcip_mcp.pipelines.raster_source import (
+        rect_contains_rect,
+        rects_overlap,
+    )
 
     train = spatial.train_region
-    held = [*spatial.val_region, *spatial.holdout_region, *spatial.calibration_region]
-    return sorted(str(list(rect)) for rect in rects
-                  if not any(rect_contains_rect(h, rect) for h in held)
-                  or any(rects_overlap(t, rect) for t in train))
+    held = [
+        *spatial.val_region,
+        *spatial.holdout_region,
+        *spatial.calibration_region,
+    ]
+    return sorted(
+        str(list(rect))
+        for rect in rects
+        if not any(rect_contains_rect(h, rect) for h in held)
+        or any(rects_overlap(t, rect) for t in train)
+    )

@@ -24,18 +24,28 @@ DEFAULT_K_CAL = 3
 DEFAULT_K_TEST = 3
 
 
-def reserved_spatial_regions(spatial: SpatialManifest | None) -> SpatialManifest | None:
+def reserved_spatial_regions(
+    spatial: SpatialManifest | None,
+) -> SpatialManifest | None:
     """A run's within-image split ``spatial`` (``experiments.RunResolution.spatial``) when it
     reserved a calibration and a holdout region, else ``None``: a run that drew no within-image
     split, or one that reserved no calibration or no holdout region."""
-    if spatial is None or not spatial.calibration_region or not spatial.holdout_region:
+    if (
+        spatial is None
+        or not spatial.calibration_region
+        or not spatial.holdout_region
+    ):
         return None
     return spatial
 
 
 def band_rects(
-    region_rect: tuple[int, int, int, int], k: int, tile_size: int, overlap: float,
-    buffer_px: int, name_prefix: str,
+    region_rect: tuple[int, int, int, int],
+    k: int,
+    tile_size: int,
+    overlap: float,
+    buffer_px: int,
+    name_prefix: str,
 ) -> dict[str, tuple[int, int, int, int]]:
     """``k`` non-overlapping, buffered bands over ``region_rect``, in full-mosaic coordinates.
 
@@ -50,7 +60,12 @@ def band_rects(
     names = tuple(f"{name_prefix}_{i}" for i in range(k))
     fractions = tuple(1.0 / k for _ in range(k))
     spatial = spatial_strip_split(
-        width, height, tile_size, overlap, fractions=fractions, split_names=names,
+        width,
+        height,
+        tile_size,
+        overlap,
+        fractions=fractions,
+        split_names=names,
         buffer=buffer_px,
     )
     out: dict[str, tuple[int, int, int, int]] = {}
@@ -64,7 +79,9 @@ def band_rects(
     return out
 
 
-def centered_in(boxes: np.ndarray, rect: tuple[int, int, int, int]) -> np.ndarray:
+def centered_in(
+    boxes: np.ndarray, rect: tuple[int, int, int, int]
+) -> np.ndarray:
     """Which of the xyxy ``boxes`` have their center inside the half-open ``rect``."""
     from tcip_annotation.matching import box_centers
 
@@ -74,7 +91,8 @@ def centered_in(boxes: np.ndarray, rect: tuple[int, int, int, int]) -> np.ndarra
 
 
 def select_gt_for_band(
-    gt: dict[str, np.ndarray], band_rect: tuple[int, int, int, int],
+    gt: dict[str, np.ndarray],
+    band_rect: tuple[int, int, int, int],
 ) -> dict[str, np.ndarray]:
     """This band's own GT, the rows of ``gt`` (xyxy ``boxes`` with their ``labels`` and
     ``iscrowd``) :func:`centered_in` ``band_rect``, each box kept at its full extent (never
@@ -91,7 +109,9 @@ def select_gt_for_band(
 
 
 def check_completeness(
-    document: "LabelDocument", where: str, subject: str,
+    document: "LabelDocument",
+    where: str,
+    subject: str,
     rects: dict[str, tuple[int, int, int, int]],
 ) -> None:
     """Refuse by name (:class:`~tcip_mcp.assessment.AssessmentRefusedError`, naming the regions, the
@@ -103,7 +123,9 @@ def check_completeness(
     from tcip_mcp.assessment import AssessmentRefusedError
 
     marks = document.marks.get(subject, [])
-    uncovered = sorted(name for name, rect in rects.items() if not covers(marks, rect))
+    uncovered = sorted(
+        name for name, rect in rects.items() if not covers(marks, rect)
+    )
     if uncovered:
         raise AssessmentRefusedError(
             f"the reserved region(s) {uncovered} are not marked complete for subject {subject!r} "
@@ -112,7 +134,9 @@ def check_completeness(
         )
 
 
-def check_feasibility(gt_counts: dict[str, int], *, side: str, min_present: int = 2) -> None:
+def check_feasibility(
+    gt_counts: dict[str, int], *, side: str, min_present: int = 2
+) -> None:
     """Refuse by name (:class:`~tcip_mcp.assessment.AssessmentRefusedError`) when fewer than
     ``min_present`` bands on this side carry any GT at all."""
     from tcip_mcp.assessment import AssessmentRefusedError
@@ -127,7 +151,9 @@ def check_feasibility(gt_counts: dict[str, int], *, side: str, min_present: int 
         )
 
 
-def density_uniformity_flags(gt_counts: dict[str, int], *, factor: float = 3.0) -> list[str]:
+def density_uniformity_flags(
+    gt_counts: dict[str, int], *, factor: float = 3.0
+) -> list[str]:
     """Band names whose GT count is a stark outlier (more than ``factor``x the median, or less
     than ``1/factor``x it) relative to its siblings: a cheap smoke check for a plausible
     attestation error (a region marked complete after only part of it was actually annotated),
@@ -141,6 +167,7 @@ def density_uniformity_flags(gt_counts: dict[str, int], *, factor: float = 3.0) 
     if median <= 0:
         return []
     return sorted(
-        name for name, c in gt_counts.items()
+        name
+        for name, c in gt_counts.items()
         if c > 0 and (c > factor * median or c < median / factor)
     )

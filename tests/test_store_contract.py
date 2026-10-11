@@ -19,7 +19,11 @@ import tcip_store as ts
 from tcip_annotation import verdicts
 from tcip_mcp import delivery, traits
 from tcip_store.file_backend import DATABASE_FILENAME, database_file
-from tcip_store.sqlite_backend import SqliteBackend, encode_parts, open_verified
+from tcip_store.sqlite_backend import (
+    SqliteBackend,
+    encode_parts,
+    open_verified,
+)
 from tests._store_worker import (
     CAS,
     LOG,
@@ -47,7 +51,9 @@ class Harness:
 
     def connect(self) -> sqlite3.Connection:
         """A connection of this test's own to the root's database, for reaching behind the seam."""
-        return sqlite3.connect(str(database_file(str(self.root))), isolation_level=None)
+        return sqlite3.connect(
+            str(database_file(str(self.root))), isolation_level=None
+        )
 
     def damage_record(self, key: ts.Key, data: bytes) -> None:
         """Put bytes that will not decode behind a record."""
@@ -60,7 +66,9 @@ class Harness:
         finally:
             conn.close()
 
-    def damage_log_entry(self, key: ts.Key, position: int, data: bytes) -> None:
+    def damage_log_entry(
+        self, key: ts.Key, position: int, data: bytes
+    ) -> None:
         """Replace one committed log entry's bytes with bytes that will not decode."""
         conn = self.connect()
         try:
@@ -71,13 +79,17 @@ class Harness:
                     (key.store, encode_parts(key.parts)),
                 )
             ]
-            conn.execute("update log_entries set entry = ? where id = ?", (data, ids[position]))
+            conn.execute(
+                "update log_entries set entry = ? where id = ?",
+                (data, ids[position]),
+            )
         finally:
             conn.close()
 
     def spawn(self, *args: object) -> subprocess.Popen:
         proc = subprocess.Popen(
-            [sys.executable, str(_WORKER), *[str(a) for a in args]], env=_child_env()
+            [sys.executable, str(_WORKER), *[str(a) for a in args]],
+            env=_child_env(),
         )
         self.procs.append(proc)
         return proc
@@ -87,7 +99,9 @@ def _child_env() -> dict[str, str]:
     env = dict(os.environ)
     package_src = str(Path(ts.__file__).resolve().parents[1])
     existing = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = package_src + (os.pathsep + existing if existing else "")
+    env["PYTHONPATH"] = package_src + (
+        os.pathsep + existing if existing else ""
+    )
     return env
 
 
@@ -110,7 +124,9 @@ def store(tmp_path):
 # ── process lifecycle ───────────────────────────────────────────────────────────
 
 
-def test_release_root_releases_that_root_so_it_can_be_renamed_and_keeps_every_other(store):
+def test_release_root_releases_that_root_so_it_can_be_renamed_and_keeps_every_other(
+    store,
+):
     """``release_root`` releases what a read of one root opened, on one thread, so that root can
     be renamed, and leaves another root's handle open."""
     key = store.key(LWW, "before-close")
@@ -134,7 +150,10 @@ def test_release_root_releases_that_root_so_it_can_be_renamed_and_keeps_every_ot
     assert ts.read(moved_key) == {"n": 1}
     if denies_an_open_root:
         with pytest.raises(OSError):
-            os.rename(str(other_root), str(other_root.parent / f"{other_root.name}-moved"))
+            os.rename(
+                str(other_root),
+                str(other_root.parent / f"{other_root.name}-moved"),
+            )
     assert ts.read(other) == {"n": 2}
 
 
@@ -165,7 +184,9 @@ def test_release_root_waits_for_an_operation_in_flight_on_that_root(store):
     releaser = threading.Thread(target=release)
     releaser.start()
     releaser.join(0.5)
-    assert releaser.is_alive(), "the release returned while a transaction on the root was open"
+    assert releaser.is_alive(), (
+        "the release returned while a transaction on the root was open"
+    )
     finish.set()
     worker.join(30)
     releaser.join(30)
@@ -194,7 +215,9 @@ def test_the_first_write_publishes_a_database_already_in_wal(store):
     assert _journal_mode(database_file(str(store.root))) == "wal"
 
 
-def test_an_opener_arriving_beside_another_connection_still_gets_a_usable_database(store):
+def test_an_opener_arriving_beside_another_connection_still_gets_a_usable_database(
+    store,
+):
     """A second connection is open when an opener arrives: since publication already converted
     the journal mode, the opener reads it and proceeds rather than being refused."""
     ts.replace(store.key(LWW, "first"), {"n": 1})
@@ -205,14 +228,19 @@ def test_an_opener_arriving_beside_another_connection_still_gets_a_usable_databa
         bystander.execute("select count(*) from records").fetchone()
         conn = open_verified(db_path, str(store.root), 30.0)
         try:
-            assert str(conn.execute("pragma journal_mode").fetchone()[0]).lower() == "wal"
+            assert (
+                str(conn.execute("pragma journal_mode").fetchone()[0]).lower()
+                == "wal"
+            )
         finally:
             conn.close()
     finally:
         bystander.close()
 
 
-def test_a_refusal_reports_the_wait_it_measured_rather_than_a_configured_timeout(store):
+def test_a_refusal_reports_the_wait_it_measured_rather_than_a_configured_timeout(
+    store,
+):
     """The elapsed value a contention refusal carries is one this layer measured."""
     key = store.key(LWW, "measured")
     with pytest.raises(ts.StoreBusyError) as caught:
@@ -229,7 +257,9 @@ def test_every_connection_commits_at_full_synchronous(store):
         assert conn.execute("pragma synchronous").fetchone()[0] == 2
 
 
-def test_a_read_of_a_root_with_no_database_answers_absence_and_creates_none(store):
+def test_a_read_of_a_root_with_no_database_answers_absence_and_creates_none(
+    store,
+):
     """Reading never creates a database: a root nothing has written answers absence."""
     key = store.key(LWW, "never-written")
 
@@ -292,12 +322,26 @@ def test_a_stale_writer_cannot_clobber_a_committed_transaction(store):
     result = store.root / "result.json"
 
     writer = store.spawn(
-        "write-after", store.root, CAS, "contended", "cas", "outsider",
-        ready_reader, go, result,
+        "write-after",
+        store.root,
+        CAS,
+        "contended",
+        "cas",
+        "outsider",
+        ready_reader,
+        go,
+        result,
     )
     wait_for(ready_reader)
     holder = store.spawn(
-        "hold-transaction", store.root, CAS, "contended", "insider", 1.5, ready_holder)
+        "hold-transaction",
+        store.root,
+        CAS,
+        "contended",
+        "insider",
+        1.5,
+        ready_holder,
+    )
     wait_for(ready_holder)
     go.write_text("go", encoding="utf-8")
 
@@ -319,12 +363,26 @@ def test_an_unconditional_writer_waits_for_a_transaction_and_then_wins(store):
     result = store.root / "result.json"
 
     writer = store.spawn(
-        "write-after", store.root, LWW, "contended", "unconditional", "outsider",
-        ready_writer, go, result,
+        "write-after",
+        store.root,
+        LWW,
+        "contended",
+        "unconditional",
+        "outsider",
+        ready_writer,
+        go,
+        result,
     )
     wait_for(ready_writer)
     holder = store.spawn(
-        "hold-transaction", store.root, LWW, "contended", "insider", 1.5, ready_holder)
+        "hold-transaction",
+        store.root,
+        LWW,
+        "contended",
+        "insider",
+        1.5,
+        ready_holder,
+    )
     wait_for(ready_holder)
     go.write_text("go", encoding="utf-8")
 
@@ -338,21 +396,27 @@ def test_an_unconditional_writer_waits_for_a_transaction_and_then_wins(store):
 
 def test_transactions_serialize_a_read_modify_write_across_processes(store):
     key = store.key(CAS, "counter")
-    workers = [store.spawn("increment", store.root, "counter", 12) for _ in range(4)]
+    workers = [
+        store.spawn("increment", store.root, "counter", 12) for _ in range(4)
+    ]
     for worker in workers:
         assert worker.wait(timeout=120) == 0
 
     assert ts.read(key) == {"n": 48}
 
 
-def test_two_processes_naming_the_same_keys_in_opposite_orders_both_finish(store):
+def test_two_processes_naming_the_same_keys_in_opposite_orders_both_finish(
+    store,
+):
     forward = store.spawn("two-keys", store.root, "alpha", "beta", 25)
     backward = store.spawn("two-keys", store.root, "beta", "alpha", 25)
     assert forward.wait(timeout=60) == 0
     assert backward.wait(timeout=60) == 0
 
 
-def test_two_processes_writing_from_one_version_produce_one_winner_and_one_conflict(store):
+def test_two_processes_writing_from_one_version_produce_one_winner_and_one_conflict(
+    store,
+):
     key = store.key(CAS, "compare-and-set")
     ts.replace(key, {"who": "seed"}, expect=ts.Version.ABSENT)
     go = store.root / "go"
@@ -361,7 +425,15 @@ def test_two_processes_writing_from_one_version_produce_one_winner_and_one_confl
         ready = store.root / f"{name}.ready"
         result = store.root / f"{name}.json"
         proc = store.spawn(
-            "write-after", store.root, CAS, "compare-and-set", "cas", name, ready, go, result
+            "write-after",
+            store.root,
+            CAS,
+            "compare-and-set",
+            "cas",
+            name,
+            ready,
+            go,
+            result,
         )
         wait_for(ready)
         contenders.append((proc, result))
@@ -370,7 +442,9 @@ def test_two_processes_writing_from_one_version_produce_one_winner_and_one_confl
     outcomes = []
     for proc, result in contenders:
         assert proc.wait(timeout=60) == 0
-        outcomes.append(json.loads(result.read_text(encoding="utf-8"))["outcome"])
+        outcomes.append(
+            json.loads(result.read_text(encoding="utf-8"))["outcome"]
+        )
     assert sorted(outcomes) == ["VersionConflictError", "written"]
     assert ts.read(key)["who"] in ("first", "second")
 
@@ -393,7 +467,9 @@ def test_an_identical_rewrite_leaves_a_held_token_valid(store):
     assert ts.replace(key, {"n": 2}, expect=held) != held
 
 
-def test_a_record_delete_from_a_current_token_lands_and_a_stale_one_is_refused(store):
+def test_a_record_delete_from_a_current_token_lands_and_a_stale_one_is_refused(
+    store,
+):
     key = store.key(CAS, "conditional-delete")
     held = ts.replace(key, {"n": 1}, expect=ts.Version.ABSENT)
     moved = ts.replace(key, {"n": 2}, expect=held)
@@ -407,7 +483,9 @@ def test_a_record_delete_from_a_current_token_lands_and_a_stale_one_is_refused(s
     assert ts.read(key, default=None) is None
 
 
-def test_a_crash_mid_transaction_leaves_the_old_records_and_wedges_no_successor(store):
+def test_a_crash_mid_transaction_leaves_the_old_records_and_wedges_no_successor(
+    store,
+):
     """A process killed after its transaction's first write executed, before the commit, leaves
     both records as they were, and the lock it held does not strand the next writer."""
     first = store.key(LWW, "alpha")
@@ -416,7 +494,9 @@ def test_a_crash_mid_transaction_leaves_the_old_records_and_wedges_no_successor(
         txn.write(first, {"who": "old"})
         txn.write(second, {"who": "old"})
     marker = store.root / "staged.marker"
-    proc = store.spawn("pause-before-commit", store.root, "alpha", "beta", marker, 30)
+    proc = store.spawn(
+        "pause-before-commit", store.root, "alpha", "beta", marker, 30
+    )
     wait_for(marker, timeout_s=60)
     proc.kill()
     proc.wait(timeout=30)
@@ -455,16 +535,26 @@ def test_a_transaction_over_a_record_and_a_log_commits_both_or_neither(store):
     assert [entry["i"] for entry in ts.read_log(log).records] == [1, 2]
 
 
-def test_a_verdict_that_will_not_encode_lands_none_of_the_save_s_verdicts(store):
+def test_a_verdict_that_will_not_encode_lands_none_of_the_save_s_verdicts(
+    store,
+):
     """``record_verdicts`` appends a save's verdicts inside the save's one transaction: one that
     will not encode, after another already appended, leaves the shard holding neither."""
     from datetime import datetime, timezone
 
     key = verdicts.verdict_key(store.root, "live", "a_1")
-    good = verdicts.Verdict(proposal=0, action="accepted", by="user:ü",
-                            at="2026-03-04T12:00:00+00:00")
-    unencodable = verdicts.Verdict(proposal=1, action="rejected", by="user:ü",
-                                   at=datetime(2026, 3, 4, tzinfo=timezone.utc))  # type: ignore[arg-type]
+    good = verdicts.Verdict(
+        proposal=0,
+        action="accepted",
+        by="user:ü",
+        at="2026-03-04T12:00:00+00:00",
+    )
+    unencodable = verdicts.Verdict(
+        proposal=1,
+        action="rejected",
+        by="user:ü",
+        at=datetime(2026, 3, 4, tzinfo=timezone.utc),
+    )  # type: ignore[arg-type]
 
     with pytest.raises(ts.StoreError):
         _record_verdicts(key, [good, unencodable])
@@ -480,7 +570,9 @@ def _record_verdicts(key, decided) -> None:
         verdicts.record_verdicts(txn, key, decided)
 
 
-def test_a_module_level_write_inside_a_transaction_is_refused_and_lands_outside_it(store):
+def test_a_module_level_write_inside_a_transaction_is_refused_and_lands_outside_it(
+    store,
+):
     """A write that is not the transaction's own would commit apart from it, so it refuses and
     names the transaction's own operations; the same append outside the transaction lands."""
     record = store.key(LWW, "under-transaction")
@@ -504,7 +596,10 @@ def test_a_module_level_write_inside_a_transaction_is_refused_and_lands_outside_
 
 def test_concurrent_appenders_lose_no_entry_and_interleave_none(store):
     key = store.key(LOG, "audit")
-    workers = [store.spawn("append", store.root, "audit", f"proc{n}", 25) for n in range(3)]
+    workers = [
+        store.spawn("append", store.root, "audit", f"proc{n}", 25)
+        for n in range(3)
+    ]
     for worker in workers:
         assert worker.wait(timeout=120) == 0
 
@@ -512,7 +607,9 @@ def test_concurrent_appenders_lose_no_entry_and_interleave_none(store):
     assert len(page.records) == 75
     assert page.corrupt == ()
     for tag in ("proc0", "proc1", "proc2"):
-        assert sorted(r["i"] for r in page.records if r["tag"] == tag) == list(range(25))
+        assert sorted(r["i"] for r in page.records if r["tag"] == tag) == list(
+            range(25)
+        )
 
 
 def test_an_append_is_readable_by_another_process_once_it_returns(store):
@@ -553,19 +650,28 @@ def test_a_cursor_resumes_with_no_gap_and_no_repeat(store):
         ts.append(key, {"i": i})
     second = ts.read_log(key, after=first.cursor)
     assert [r["i"] for r in second.records] == [3, 4]
-    assert [r["i"] for r in ts.read_log(key, after=second.cursor).records] == []
+    assert [
+        r["i"] for r in ts.read_log(key, after=second.cursor).records
+    ] == []
 
 
-def test_a_cursor_returns_every_entry_once_while_appenders_are_still_writing(store):
+def test_a_cursor_returns_every_entry_once_while_appenders_are_still_writing(
+    store,
+):
     """Reading a log by cursor while two processes append returns every entry exactly once."""
     key = store.key(LOG, "streamed-live")
-    workers = [store.spawn("append", store.root, "streamed-live", f"proc{n}", 20) for n in range(2)]
+    workers = [
+        store.spawn("append", store.root, "streamed-live", f"proc{n}", 20)
+        for n in range(2)
+    ]
 
     seen: list[tuple[str, int]] = []
     cursor = None
     deadline = time.monotonic() + 120
     while len(seen) < 40:
-        assert time.monotonic() < deadline, f"only {len(seen)} of 40 entries arrived"
+        assert time.monotonic() < deadline, (
+            f"only {len(seen)} of 40 entries arrived"
+        )
         page = ts.read_log(key, after=cursor)
         seen.extend((r["tag"], r["i"]) for r in page.records)
         assert page.corrupt == ()
@@ -619,7 +725,9 @@ def test_clear_log_on_a_log_with_no_entries_removes_nothing(store):
     assert ts.read_log(key).records == []
 
 
-def test_a_cursor_taken_before_a_clear_reads_only_what_was_appended_after(store):
+def test_a_cursor_taken_before_a_clear_reads_only_what_was_appended_after(
+    store,
+):
     """Replaying a cursor held across a clear returns exactly the entries appended since it."""
     key = store.key(LOG, "cleared-and-resumed")
     for i in range(3):
@@ -653,7 +761,9 @@ def test_every_operation_refuses_before_a_backend_is_bound(store):
     assert ts.read(key) == {"n": 1}
 
 
-def test_a_key_with_no_root_or_an_empty_store_or_part_refuses_and_a_whole_one_is_admitted(store):
+def test_a_key_with_no_root_or_an_empty_store_or_part_refuses_and_a_whole_one_is_admitted(
+    store,
+):
     with pytest.raises(ts.BadKeyError):
         ts.Key(LWW, "", ("x",))
     with pytest.raises(ts.BadKeyError):
@@ -681,7 +791,9 @@ def test_absence_and_corruption_are_different_answers(store):
         ts.read(key, default={"fallback": True})
 
 
-def test_a_relative_root_is_refused_before_it_resolves_against_a_working_directory(store):
+def test_a_relative_root_is_refused_before_it_resolves_against_a_working_directory(
+    store,
+):
     """The store refuses first and canonicalizes second, or the refusal turns into a guess about
     which directory the process happened to be started in; enumeration refuses alongside."""
     relative_root = "not/an/absolute/root"
@@ -714,7 +826,9 @@ def test_a_key_part_carrying_non_ascii_or_a_separator_round_trips(store):
     assert ts.read(store.key(NESTED, "grüne", "reihe"), default=None) is None
 
 
-def test_a_key_part_carrying_non_ascii_or_a_separator_is_stored_under_one_spelling(store):
+def test_a_key_part_carrying_non_ascii_or_a_separator_is_stored_under_one_spelling(
+    store,
+):
     """A key's parts are stored as ASCII-escaped compact JSON."""
     key = store.key(NESTED, "grüne/reihe", "ü_2")
     ts.replace(key, {"n": 1})
@@ -723,7 +837,9 @@ def test_a_key_part_carrying_non_ascii_or_a_separator_is_stored_under_one_spelli
     try:
         stored = [
             row[0]
-            for row in conn.execute("select parts from records where store = ?", (NESTED,))
+            for row in conn.execute(
+                "select parts from records where store = ?", (NESTED,)
+            )
         ]
     finally:
         conn.close()
@@ -753,7 +869,9 @@ def test_a_committed_record_is_readable_by_another_process(store):
 
     reader = store.spawn("read-record", store.root, LWW, "handed-over", result)
     assert reader.wait(timeout=60) == 0
-    assert json.loads(result.read_text(encoding="utf-8")) == {"value": {"n": 7}}
+    assert json.loads(result.read_text(encoding="utf-8")) == {
+        "value": {"n": 7}
+    }
 
 
 def test_a_transaction_refuses_every_form_that_would_escape_it(store):
@@ -778,7 +896,9 @@ def test_a_transaction_refuses_every_form_that_would_escape_it(store):
     assert ts.read(second) == {"n": 2}
 
 
-def test_a_transaction_refuses_two_roots_and_admits_two_spellings_of_one(store):
+def test_a_transaction_refuses_two_roots_and_admits_two_spellings_of_one(
+    store,
+):
     """One transaction is one root's database, so keys from two roots refuse before anything is
     held; two spellings of one directory are one root."""
     elsewhere = store.root / "elsewhere"
@@ -812,7 +932,11 @@ def test_two_spellings_of_one_root_address_one_database(store):
 
     ts.replace(store.key(LWW, "shared"), {"n": 1})
     assert ts.read(spelled_around) == {"n": 1}
-    ts.replace(spelled_around, {"n": 2}, expect=ts.read_versioned(spelled_around).version)
+    ts.replace(
+        spelled_around,
+        {"n": 2},
+        expect=ts.read_versioned(spelled_around).version,
+    )
     assert ts.read(store.key(LWW, "shared")) == {"n": 2}
 
     slots = list(store.backend._connections)
@@ -827,15 +951,24 @@ def test_two_spellings_of_one_root_address_one_database(store):
 def test_traits_shares_the_state_database_rather_than_gaining_its_own(store):
     """Writing a ``traits`` record beside a ``delivery_events`` record creates exactly one
     database under the project's state root, never a second, nested one."""
-    ts.replace(traits.trait_key(store.root, "bud_opening"), {"revisions": []},
-               expect=ts.Version.ABSENT)
-    ts.replace(delivery.delivery_event_key(store.root, "e1"), {"event_id": "e1"})
+    ts.replace(
+        traits.trait_key(store.root, "bud_opening"),
+        {"revisions": []},
+        expect=ts.Version.ABSENT,
+    )
+    ts.replace(
+        delivery.delivery_event_key(store.root, "e1"), {"event_id": "e1"}
+    )
 
     databases = sorted(store.root.rglob(DATABASE_FILENAME))
-    assert databases == [store.root / ".tcip" / "state" / ".tcip" / DATABASE_FILENAME]
+    assert databases == [
+        store.root / ".tcip" / "state" / ".tcip" / DATABASE_FILENAME
+    ]
 
 
-def test_a_backend_refuses_to_exist_without_cross_process_locking(store, monkeypatch):
+def test_a_backend_refuses_to_exist_without_cross_process_locking(
+    store, monkeypatch
+):
     monkeypatch.setitem(sys.modules, "filelock", None)
     with pytest.raises(ts.BackendUnavailableError) as raised:
         SqliteBackend()
@@ -865,14 +998,23 @@ def test_a_contended_key_is_named_and_released_when_its_holder_dies(store):
     assert ts.read(key) == {"who": "successor"}
 
 
-def test_a_version_read_before_a_transaction_committed_is_refused_afterwards(store):
+def test_a_version_read_before_a_transaction_committed_is_refused_afterwards(
+    store,
+):
     key = store.key(CAS, "moved-under-us")
     ts.replace(key, {"who": "seed"}, expect=ts.Version.ABSENT)
     stale = ts.read_versioned(key).version
     ready = store.root / "holder.ready"
 
     holder = store.spawn(
-        "hold-transaction", store.root, CAS, "moved-under-us", "insider", 0.1, ready)
+        "hold-transaction",
+        store.root,
+        CAS,
+        "moved-under-us",
+        "insider",
+        0.1,
+        ready,
+    )
     assert holder.wait(timeout=60) == 0
 
     with pytest.raises(ts.VersionConflictError) as raised:
@@ -891,7 +1033,9 @@ def test_a_transaction_reads_its_own_write_and_shows_it_to_nobody_else(store):
         assert txn.read(key) == {"n": 2}
         reader = store.spawn("read-record", store.root, LWW, "staged", result)
         assert reader.wait(timeout=60) == 0
-        assert json.loads(result.read_text(encoding="utf-8")) == {"value": {"n": 1}}
+        assert json.loads(result.read_text(encoding="utf-8")) == {
+            "value": {"n": 1}
+        }
 
     assert ts.read(key) == {"n": 2}
 
@@ -903,14 +1047,14 @@ def test_the_record_and_log_spellings_write_the_bytes_this_test_spells_out():
     golden = {"b": {"nested": True}, "a": "ü", "ratio": 0.5, "absent": None}
 
     assert ts.encode_record(golden) == (
-        b'{\n'
+        b"{\n"
         b'  "b": {\n'
         b'    "nested": true\n'
-        b'  },\n'
+        b"  },\n"
         b'  "a": "\xc3\xbc",\n'
         b'  "ratio": 0.5,\n'
         b'  "absent": null\n'
-        b'}\n'
+        b"}\n"
     )
     assert ts.encode_log_line({"epoch": 1, "loss": 0.5, "note": "ü"}) == (
         b'{"epoch": 1, "loss": 0.5, "note": "\xc3\xbc"}'
@@ -919,7 +1063,9 @@ def test_the_record_and_log_spellings_write_the_bytes_this_test_spells_out():
     assert ts.encode_record("a text value") == b'"a text value"\n'
 
 
-def test_a_value_the_spelling_cannot_carry_names_the_store_the_key_and_the_type(store):
+def test_a_value_the_spelling_cannot_carry_names_the_store_the_key_and_the_type(
+    store,
+):
     """The refusal names the store, the key and the value's type; the converted value stores."""
     key = store.key(LWW, "convertible")
     where = Path("a/b")
@@ -935,7 +1081,9 @@ def test_a_value_the_spelling_cannot_carry_names_the_store_the_key_and_the_type(
     assert ts.read(key) == {"where": "a/b"}
 
 
-def test_a_non_finite_number_is_refused_rather_than_written_as_a_word_json_has_no_type_for(store):
+def test_a_non_finite_number_is_refused_rather_than_written_as_a_word_json_has_no_type_for(
+    store,
+):
     """A NaN is refused; its ``stored_number`` form stores."""
     key = store.key(LWW, "measurement")
 
@@ -946,7 +1094,9 @@ def test_a_non_finite_number_is_refused_rather_than_written_as_a_word_json_has_n
     assert ts.read(key) == {"score": None, "score_state": "nan"}
 
 
-def test_a_value_with_a_non_string_key_is_refused_rather_than_merged_with_its_spelling(store):
+def test_a_value_with_a_non_string_key_is_refused_rather_than_merged_with_its_spelling(
+    store,
+):
     """JSON names an object's keys with strings, so ``1`` and ``"1"`` would land as one key and
     one of the two values would vanish; both writers refuse, and the string-keyed value stores."""
     record = store.key(LWW, "keyed")
@@ -967,7 +1117,9 @@ def test_a_value_with_a_non_string_key_is_refused_rather_than_merged_with_its_sp
 # ── one transaction at a time, over records and logs or over files ─────────────
 
 
-def test_a_file_write_inside_a_record_transaction_refuses_and_lands_outside_it(store):
+def test_a_file_write_inside_a_record_transaction_refuses_and_lands_outside_it(
+    store,
+):
     """A file write inside a record transaction would commit apart from it, so it refuses and the
     record transaction rolls back whole; the same write outside lands."""
     record = store.key(LWW, "beside-a-file")
@@ -985,7 +1137,9 @@ def test_a_file_write_inside_a_record_transaction_refuses_and_lands_outside_it(s
     assert path.read_bytes() == b"new"
 
 
-def test_a_file_that_is_not_a_database_at_the_database_s_path_refuses_naming_it(store):
+def test_a_file_that_is_not_a_database_at_the_database_s_path_refuses_naming_it(
+    store,
+):
     """Something else holding the database's name refuses by name before a row is read."""
     path = database_file(str(store.root))
     path.parent.mkdir(parents=True)
@@ -1001,8 +1155,12 @@ def test_enumerating_review_verdicts_answers_identities_that_read_back(store):
     """``keys`` answers the shard's own key, which reads the shard back, though its names carry
     separators."""
     key = verdicts.verdict_key(store.root, "live/2026-03-04", "a/b")
-    decided = verdicts.Verdict(proposal=0, action="accepted", by="user:ü",
-                               at="2026-03-04T12:00:00+00:00")
+    decided = verdicts.Verdict(
+        proposal=0,
+        action="accepted",
+        by="user:ü",
+        at="2026-03-04T12:00:00+00:00",
+    )
     _record_verdicts(key, [decided])
 
     assert ts.keys(verdicts.REVIEW_VERDICTS_STORE, str(store.root)) == [key]
@@ -1014,8 +1172,12 @@ def test_a_cleared_log_enumerates_as_absent(store):
     them is not enumerated at all."""
     kept = verdicts.verdict_key(store.root, "live/2026-03-04", "a")
     cleared = verdicts.verdict_key(store.root, "live/2026-03-04", "b")
-    decided = verdicts.Verdict(proposal=0, action="rejected", by="user:ü",
-                               at="2026-03-04T12:00:00+00:00")
+    decided = verdicts.Verdict(
+        proposal=0,
+        action="rejected",
+        by="user:ü",
+        at="2026-03-04T12:00:00+00:00",
+    )
     _record_verdicts(kept, [decided, decided])
     _record_verdicts(cleared, [decided])
 
@@ -1029,7 +1191,9 @@ def test_a_cleared_log_enumerates_as_absent(store):
 
 def test_a_blob_read_carries_the_token_its_own_bytes_produce(store):
     path = blob_path(store.root, "tokened")
-    assert ts.read_blob_versioned(path, default=b"").version == ts.Version.ABSENT
+    assert (
+        ts.read_blob_versioned(path, default=b"").version == ts.Version.ABSENT
+    )
 
     written = ts.put_blob(path, b"first")
     stored = ts.read_blob_versioned(path)
@@ -1040,7 +1204,9 @@ def test_a_blob_read_carries_the_token_its_own_bytes_produce(store):
     assert "default=" in str(absent.value)
 
 
-def test_a_blob_write_from_a_current_token_lands_and_a_stale_one_is_refused(store):
+def test_a_blob_write_from_a_current_token_lands_and_a_stale_one_is_refused(
+    store,
+):
     path = blob_path(store.root, "compare-and-set")
     held = ts.put_blob(path, b"first", expect=ts.Version.ABSENT)
     moved = ts.put_blob(path, b"second", expect=held)
@@ -1054,7 +1220,9 @@ def test_a_blob_write_from_a_current_token_lands_and_a_stale_one_is_refused(stor
     assert path.read_bytes() == b"fourth"
 
 
-def test_a_create_only_blob_write_refuses_an_existing_blob_and_keeps_its_bytes(store):
+def test_a_create_only_blob_write_refuses_an_existing_blob_and_keeps_its_bytes(
+    store,
+):
     path = blob_path(store.root, "captured-once")
     ts.put_blob(path, b"pristine", expect=ts.Version.ABSENT)
 
@@ -1066,7 +1234,9 @@ def test_a_create_only_blob_write_refuses_an_existing_blob_and_keeps_its_bytes(s
     assert path.read_bytes() == b"unconditional"
 
 
-def test_a_blob_delete_from_a_current_token_lands_and_a_stale_one_is_refused(store):
+def test_a_blob_delete_from_a_current_token_lands_and_a_stale_one_is_refused(
+    store,
+):
     path = blob_path(store.root, "conditional-delete")
     held = ts.put_blob(path, b"first", expect=ts.Version.ABSENT)
     moved = ts.put_blob(path, b"second", expect=held)
@@ -1080,7 +1250,9 @@ def test_a_blob_delete_from_a_current_token_lands_and_a_stale_one_is_refused(sto
     assert not path.exists()
 
 
-def test_two_processes_writing_a_blob_from_one_token_produce_one_winner_and_one_conflict(store):
+def test_two_processes_writing_a_blob_from_one_token_produce_one_winner_and_one_conflict(
+    store,
+):
     path = blob_path(store.root, "contested")
     ts.put_blob(path, b"seed", expect=ts.Version.ABSENT)
     go = store.root / "blob.go"
@@ -1089,7 +1261,14 @@ def test_two_processes_writing_a_blob_from_one_token_produce_one_winner_and_one_
         ready = store.root / f"blob-{name}.ready"
         result = store.root / f"blob-{name}.json"
         proc = store.spawn(
-            "write-blob-after", store.root, "contested", "cas", name, ready, go, result
+            "write-blob-after",
+            store.root,
+            "contested",
+            "cas",
+            name,
+            ready,
+            go,
+            result,
         )
         wait_for(ready)
         contenders.append((proc, result))
@@ -1098,6 +1277,8 @@ def test_two_processes_writing_a_blob_from_one_token_produce_one_winner_and_one_
     outcomes = []
     for proc, result in contenders:
         assert proc.wait(timeout=60) == 0
-        outcomes.append(json.loads(result.read_text(encoding="utf-8"))["outcome"])
+        outcomes.append(
+            json.loads(result.read_text(encoding="utf-8"))["outcome"]
+        )
     assert sorted(outcomes) == ["VersionConflictError", "written"]
     assert path.read_bytes() in (b"first", b"second")

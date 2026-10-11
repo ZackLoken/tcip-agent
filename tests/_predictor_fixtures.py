@@ -17,18 +17,34 @@ class StubPredictor:
     becomes an attribute a caller reads off a predictor (``task``, ``in_chans``). Counts its
     calls, and keeps each execution it ran under and the checkpoint it was built for."""
 
-    def __init__(self, *, width: int = 100, height: int = 100, boxes=(BOX,), scores=(0.9,),
-                 attributes=None, cap: int | None = None, train_tile_size=None,
-                 train_overlap=None, train_native_size=None, train_augmentation=None,
-                 **traits: Any) -> None:
+    def __init__(
+        self,
+        *,
+        width: int = 100,
+        height: int = 100,
+        boxes=(BOX,),
+        scores=(0.9,),
+        attributes=None,
+        cap: int | None = None,
+        train_tile_size=None,
+        train_overlap=None,
+        train_native_size=None,
+        train_augmentation=None,
+        **traits: Any,
+    ) -> None:
         self.train_tile_size = train_tile_size
         self.train_overlap = train_overlap
         self.train_native_size = train_native_size
         self.train_augmentation = train_augmentation
         self.record: dict[str, Any] = {
-            "width": width, "height": height, "boxes": [list(b) for b in boxes],
-            "scores": list(scores), "labels": [1] * len(boxes), "count": len(boxes),
-            "cap": len(boxes) + 1 if cap is None else cap}
+            "width": width,
+            "height": height,
+            "boxes": [list(b) for b in boxes],
+            "scores": list(scores),
+            "labels": [1] * len(boxes),
+            "count": len(boxes),
+            "cap": len(boxes) + 1 if cap is None else cap,
+        }
         if attributes is not None:
             self.record["attributes"] = attributes
         for name, value in traits.items():
@@ -55,6 +71,8 @@ class StubPredictor:
 
 def install(monkeypatch, predictor: StubPredictor) -> StubPredictor:
     """Make ``GenericPredictor`` build ``predictor``; returns it."""
-    monkeypatch.setattr("tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor",
-                        predictor.built)
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.inference.generic_predictor.GenericPredictor",
+        predictor.built,
+    )
     return predictor

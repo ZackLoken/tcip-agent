@@ -15,7 +15,10 @@ AUDIT_ENTRY_NOT_WRITTEN = "audit_entry_not_written"
 
 
 def audit_gap_409(
-    exc: AuditEntryNotWrittenError, committed: Any, *, message: str | None = None,
+    exc: AuditEntryNotWrittenError,
+    committed: Any,
+    *,
+    message: str | None = None,
 ) -> HTTPException:
     """The 409 a route answers with when a mutation it already committed could not be recorded.
 
@@ -24,8 +27,13 @@ def audit_gap_409(
     reaches the state a 200 would have left it in. ``message`` overrides ``str(exc)`` when the
     route must say more than the exception itself does.
     """
-    return HTTPException(409, {
-        "error": AUDIT_ENTRY_NOT_WRITTEN,
-        "message": message if message is not None else str(exc),
-        "committed": jsonable_encoder(committed) if committed is not None else None,
-    })
+    return HTTPException(
+        409,
+        {
+            "error": AUDIT_ENTRY_NOT_WRITTEN,
+            "message": message if message is not None else str(exc),
+            "committed": jsonable_encoder(committed)
+            if committed is not None
+            else None,
+        },
+    )

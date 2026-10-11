@@ -17,7 +17,12 @@ BACKGROUND = (100, 100, 100)
 #: Two disjoint regions of one occlusion-split instance, deliberately different in size and
 #: aspect so a render of only the first is not a scaled version of the pair.
 GT_RING_LEFT = [(20.0, 20.0), (90.0, 20.0), (90.0, 70.0), (20.0, 70.0)]
-GT_RING_RIGHT = [(200.0, 100.0), (300.0, 100.0), (300.0, 160.0), (200.0, 160.0)]
+GT_RING_RIGHT = [
+    (200.0, 100.0),
+    (300.0, 100.0),
+    (300.0, 160.0),
+    (200.0, 160.0),
+]
 GT_INSIDE_LEFT = (55, 45)
 GT_INSIDE_RIGHT = (250, 130)
 
@@ -49,8 +54,14 @@ def split_instance_dataset(tmp_path: Path) -> Path:
     Image.new("RGB", (320, 180), BACKGROUND).save(images / "split.png")
     label_image(
         images / "split.png",
-        [Annotation(subject="leaf", geometry=Polygon(rings=[GT_RING_LEFT, GT_RING_RIGHT]))],
-        320, 180,
+        [
+            Annotation(
+                subject="leaf",
+                geometry=Polygon(rings=[GT_RING_LEFT, GT_RING_RIGHT]),
+            )
+        ],
+        320,
+        180,
     )
     return tmp_path
 
@@ -70,10 +81,13 @@ def test_every_region_of_a_split_annotation_is_drawn_on_the_mask_render(
     from tcip_mcp.tools.vision_tools import visualize
 
     result = visualize(
-        split_instance_dataset, "annotations",
-        str(split_instance_dataset / "images" / UNDATED_BUCKET / "split.png"), task="segment")
+        split_instance_dataset,
+        "annotations",
+        str(split_instance_dataset / "images" / UNDATED_BUCKET / "split.png"),
+        task="segment",
+    )
     assert "error" not in result, result
-    assert result["count"] == 1                     # one instance, drawn as its several regions
+    assert result["count"] == 1  # one instance, drawn as its several regions
 
     px = Image.open(result["image_path"]).convert("RGB")
     assert px.size == (320, 180)
@@ -91,13 +105,34 @@ def test_every_region_of_a_split_prediction_is_drawn_on_the_mask_render(
 
     root = split_instance_dataset
     image = root / "images" / UNDATED_BUCKET / "split.png"
-    published(root, "split-masks", [{
-        "image": str(image), "width": 320, "height": 180,
-        "boxes": [[30.0, 15.0, 305.0, 165.0]], "scores": [0.8], "labels": [1], "cap": 2,
-        "masks": [{"segmentation": [_flat(PRED_RING_LOW), _flat(PRED_RING_HIGH)]}],
-    }], scope={"subject": "leaf"})
+    published(
+        root,
+        "split-masks",
+        [
+            {
+                "image": str(image),
+                "width": 320,
+                "height": 180,
+                "boxes": [[30.0, 15.0, 305.0, 165.0]],
+                "scores": [0.8],
+                "labels": [1],
+                "cap": 2,
+                "masks": [
+                    {
+                        "segmentation": [
+                            _flat(PRED_RING_LOW),
+                            _flat(PRED_RING_HIGH),
+                        ]
+                    }
+                ],
+            }
+        ],
+        scope={"subject": "leaf"},
+    )
 
-    result = visualize(root, "predictions", str(image), task="segment", bucket="split-masks")
+    result = visualize(
+        root, "predictions", str(image), task="segment", bucket="split-masks"
+    )
     assert "error" not in result, result
     assert result["count"] == 1
 
@@ -135,16 +170,32 @@ def mislocalized_prediction_dataset(tmp_path: Path) -> Path:
     images = tmp_path / "images" / UNDATED_BUCKET
     images.mkdir(parents=True)
     Image.new("RGB", (300, 200), BACKGROUND).save(images / "miss.png")
-    label_image(images / "miss.png", [Annotation(subject="bud", geometry=BBox(*GT_BOX))],
-                300, 200)
+    label_image(
+        images / "miss.png",
+        [Annotation(subject="bud", geometry=BBox(*GT_BOX))],
+        300,
+        200,
+    )
 
     pytest.importorskip("torch")
     from tests._chain_fixtures import published
 
-    published(tmp_path, "live", [
-        {"image": str(images / "miss.png"), "width": 300, "height": 200,
-         "boxes": [list(PRED_BOX)], "scores": [0.4], "labels": [1], "cap": 2}],
-        scope={"subject": "bud"})
+    published(
+        tmp_path,
+        "live",
+        [
+            {
+                "image": str(images / "miss.png"),
+                "width": 300,
+                "height": 200,
+                "boxes": [list(PRED_BOX)],
+                "scores": [0.4],
+                "labels": [1],
+                "cap": 2,
+            }
+        ],
+        scope={"subject": "bud"},
+    )
     return tmp_path
 
 
@@ -165,8 +216,8 @@ def test_a_failure_case_draws_ground_truth_from_the_label_document(
     assert len(result["case_images"]) == 1
 
     arr = np.asarray(Image.open(result["case_images"][0]).convert("RGB"))
-    gt_cx, gt_cy = _mask_center(arr, 1)       # green: ground truth
-    pred_cx, pred_cy = _mask_center(arr, 0)   # red: predictions
+    gt_cx, gt_cy = _mask_center(arr, 1)  # green: ground truth
+    pred_cx, pred_cy = _mask_center(arr, 0)  # red: predictions
 
     assert abs(gt_cx - (GT_BOX[0] + GT_BOX[2]) / 2) < 25
     assert abs(gt_cy - (GT_BOX[1] + GT_BOX[3]) / 2) < 25

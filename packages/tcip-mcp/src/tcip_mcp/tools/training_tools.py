@@ -18,7 +18,11 @@ from tcip_mcp.experiments import SWEEP_FILE, SweepGroup, TrainingDetail
 from tcip_mcp.server import tool
 from tcip_mcp.audit import audited, now_iso, record_event_or_raise
 from tcip_mcp.pipelines.data.split_construction import (
-    ResolvedRun, data_dir_issues, resolve_run, selection_compatibility, split_seed,
+    ResolvedRun,
+    data_dir_issues,
+    resolve_run,
+    selection_compatibility,
+    split_seed,
 )
 from tcip_mcp.pipelines.execution import Stated
 from tcip_mcp.pipelines.schemas import TilingSpec, checked_train_config
@@ -38,7 +42,9 @@ _gpu_round_robin = itertools.count()
 _OVERFIT_CHECK_LOCK = threading.Lock()
 
 
-def data_with_selection(data: DataSpec, selection_dir: str, project: Path) -> DataSpec:
+def data_with_selection(
+    data: DataSpec, selection_dir: str, project: Path
+) -> DataSpec:
     """The data block choosing ``selection_dir`` (located against ``project``) over ``data``
     would launch with: ``split`` replaced wholesale by one naming only ``selection_dir``, and the
     stated ``scope`` and ``labels_dir`` dropped, since a bound run reads its scope and each
@@ -46,27 +52,38 @@ def data_with_selection(data: DataSpec, selection_dir: str, project: Path) -> Da
     """
     from tcip_mcp.pipelines import schemas
 
-    kept = data.record(exclude={"scope": True, "labels_dir": True, "split": True})
-    return schemas.DataSpec.model_validate({**kept, "split": {"selection_dir": selection_dir}},
-                                           context={"project": project})
+    kept = data.record(
+        exclude={"scope": True, "labels_dir": True, "split": True}
+    )
+    return schemas.DataSpec.model_validate(
+        {**kept, "split": {"selection_dir": selection_dir}},
+        context={"project": project},
+    )
+
 
 # Lazy imports of heavy dependencies inside tool functions to keep server startup fast.
 
 
-def preflight_config(project: Path, config: dict, smoke: bool = False,
-                     overfit: bool = False) -> dict:
+def preflight_config(
+    project: Path, config: dict, smoke: bool = False, overfit: bool = False
+) -> dict:
     """Validate a training configuration before launching (:func:`_preflight`'s report)."""
-    return _preflight(project, *_admitted(config, {}, project), smoke=smoke, overfit=overfit)[0]
+    return _preflight(
+        project, *_admitted(config, {}, project), smoke=smoke, overfit=overfit
+    )[0]
 
 
-def _admitted(config: dict, point: dict, project: Path
-              ) -> tuple[TrainConfigSchema | None, StagedSources | None, list[str]]:
+def _admitted(
+    config: dict, point: dict, project: Path
+) -> tuple[TrainConfigSchema | None, StagedSources | None, list[str]]:
     """``config`` with ``point`` applied (:func:`_apply_hpo_params`), admitted: validated once
     against ``project`` (``schemas.checked_train_config``) and, when it validates, its structure
     (:func:`_structural_issues`). The spec, ``None`` when it did not validate, its staged
     sources, ``None`` when none were taken, and every issue."""
     try:
-        spec, issues = checked_train_config(_apply_hpo_params(config, point), project)
+        spec, issues = checked_train_config(
+            _apply_hpo_params(config, point), project
+        )
     except ValueError as exc:
         return None, None, [str(exc)]
     if spec is None:
@@ -74,9 +91,15 @@ def _admitted(config: dict, point: dict, project: Path
     return spec, *_structural_issues(spec, project)
 
 
-def _preflight(project: Path, spec: TrainConfigSchema | None, sources: StagedSources | None,
-               issues: list[str], *, smoke: bool,
-               overfit: bool) -> tuple[dict, ResolvedRun | None]:
+def _preflight(
+    project: Path,
+    spec: TrainConfigSchema | None,
+    sources: StagedSources | None,
+    issues: list[str],
+    *,
+    smoke: bool,
+    overfit: bool,
+) -> tuple[dict, ResolvedRun | None]:
     """Check a training configuration its caller admitted once (:func:`_admitted`: ``spec``,
     ``None`` when the schema refused, its staged ``sources``, every import below reading their
     layout, and its ``issues``) before launching a run of ``project``,
@@ -112,7 +135,11 @@ def _preflight(project: Path, spec: TrainConfigSchema | None, sources: StagedSou
     issues = list(issues)
     warnings: list[str] = []
     split = spec.data.split if spec is not None else None
-    if split is not None and split.selection_dir and split.redraw_within_selection:
+    if (
+        split is not None
+        and split.selection_dir
+        and split.redraw_within_selection
+    ):
         warnings.append(
             "data.split.redraw_within_selection=true: this run redraws train and val inside the "
             "selection's own train and val samples at this seed; the selection's calibration side "
@@ -140,8 +167,12 @@ def _preflight(project: Path, spec: TrainConfigSchema | None, sources: StagedSou
     if not issues:
         counts: dict[str, int] = {}
         try:
-            assert spec is not None and sources is not None, "a config with no issue was staged"
-            resolution = resolve_run(spec, sources.layout, project=project, tallies_out=counts)
+            assert spec is not None and sources is not None, (
+                "a config with no issue was staged"
+            )
+            resolution = resolve_run(
+                spec, sources.layout, project=project, tallies_out=counts
+            )
         except Exception as exc:  # noqa: BLE001, whatever stops the resolution stops the launch
             issues.append(str(exc))
         # Trainable-sample coverage, never gating: a run admitting a fraction of its annotated
@@ -152,27 +183,42 @@ def _preflight(project: Path, spec: TrainConfigSchema | None, sources: StagedSou
             warnings.append(
                 f"data: {n_dropped}/{total} candidate images ({n_dropped / total:.0%}) will "
                 f"not train, {dict(sorted(dropped.items()))}. "
-                f"{total - n_dropped} stem(s) admitted.")
+                f"{total - n_dropped} stem(s) admitted."
+            )
 
     result: dict = {"valid": False, "issues": issues, "warnings": warnings}
     if sampling_record is not None and resolution is None:
         result["image_stats_containment"] = "not_checked"
     if resolution is not None:
         from tcip_mcp.pipelines.data.selection import REFERENCE_SIDES
-        from tcip_mcp.pipelines.data.split_construction import partition_samples
+        from tcip_mcp.pipelines.data.split_construction import (
+            partition_samples,
+        )
 
         resolved_split = resolution.data.split
-        known = {str(s.source) for s in partition_samples(resolution.partition)}
-        reserved = sorted(f"{side}_ratio" for side in REFERENCE_SIDES
-                          if getattr(resolved_split, f"{side}_ratio"))
+        known = {
+            str(s.source) for s in partition_samples(resolution.partition)
+        }
+        reserved = sorted(
+            f"{side}_ratio"
+            for side in REFERENCE_SIDES
+            if getattr(resolved_split, f"{side}_ratio")
+        )
         if reserved and resolution.spatial is None:
             issues.append(
                 f"data.split {reserved} have no effect: this run over {len(known)} admitted "
                 "sources did not resolve to the single-source spatial-strip split a reserved "
                 "region is cut from (a run with tiling enabled over one admitted "
-                "source); draw a selection with draw_splits for a reference.")
+                "source); draw a selection with draw_splits for a reference."
+            )
         if sampling_record is not None:
-            bad = sorted({label for label, _ in sampling_record.windows if label not in known})
+            bad = sorted(
+                {
+                    label
+                    for label, _ in sampling_record.windows
+                    if label not in known
+                }
+            )
             result["image_stats_containment"] = "checked"
             if bad:
                 issues.append(
@@ -186,43 +232,65 @@ def _preflight(project: Path, spec: TrainConfigSchema | None, sources: StagedSou
     # config can't build and the contract would just re-report the same failure. Overfit stays a
     # voluntary, non-gating diagnostic (a valid model can fail 20 steps on noise).
     if smoke and not issues:
-        assert resolution is not None and sources is not None, "a config with no issue resolved"
+        assert resolution is not None and sources is not None, (
+            "a config with no issue resolved"
+        )
         try:
             from tcip_mcp.pipelines.model_build import (
-                build_from_model_source, recorded_model_dims, resolve_contract_dims,
+                build_from_model_source,
+                recorded_model_dims,
+                resolve_contract_dims,
             )
             from tcip_mcp.pipelines.model_contract import (
-                check_model_contract, overfit_check, render_overfit_report,
+                check_model_contract,
+                overfit_check,
+                render_overfit_report,
             )
 
-            resolved_spec = resolution.spec.model_copy(update={"data": resolution.data})
+            resolved_spec = resolution.spec.model_copy(
+                update={"data": resolution.data}
+            )
             task = resolved_spec.model_source.task
             built_at = recorded_model_dims(resolved_spec)
             dims = resolve_contract_dims(resolved_spec, built_at)
-            model = build_from_model_source(resolved_spec.model_source, sources.layout, built_at)
+            model = build_from_model_source(
+                resolved_spec.model_source, sources.layout, built_at
+            )
             report = check_model_contract(model, task, dims=dims)
             batch, why_no_batch = None, None
             if report.get("not_smokeable"):
                 # No synthetic batch for this task or this width: smoke against a real batch from
                 # the run's own dataset, the only reference the platform has not guessed at.
-                batch, why_no_batch = _one_real_batch(task, resolution.train_ds)
+                batch, why_no_batch = _one_real_batch(
+                    task, resolution.train_ds
+                )
                 if batch is not None:
-                    report = check_model_contract(model, task, sample_batch=batch)
+                    report = check_model_contract(
+                        model, task, sample_batch=batch
+                    )
             # ``dims`` shape the synthetic batch only, so they describe nothing once a real batch
             # is used, record which reference actually proved the contract.
-            result["smoke"] = {**report, "task": task,
-                               "batch_source": "dataset" if batch is not None else "synthetic",
-                               "dims": None if batch is not None else dims}
+            result["smoke"] = {
+                **report,
+                "task": task,
+                "batch_source": "dataset"
+                if batch is not None
+                else "synthetic",
+                "dims": None if batch is not None else dims,
+            }
             if report.get("not_smokeable"):
                 issues.append(
                     f"model contract: {report['not_smokeable']} Building one from the run's data "
                     f"config failed too ({why_no_batch}), so the measurement boundary is unproven."
                 )
             elif not report["ok"]:
-                issues.extend(f"model contract: {msg}" for msg in report["issues"])
+                issues.extend(
+                    f"model contract: {msg}" for msg in report["issues"]
+                )
             if overfit:
                 from tcip_mcp.pipelines.training.generic_trainer import (
-                    capture_rng_state, restore_rng_state,
+                    capture_rng_state,
+                    restore_rng_state,
                 )
 
                 # Same batch the contract used, otherwise this re-synthesizes and reports a false
@@ -230,10 +298,15 @@ def _preflight(project: Path, spec: TrainConfigSchema | None, sources: StagedSou
                 with _OVERFIT_CHECK_LOCK:
                     rng_state = capture_rng_state(None)
                     try:
-                        raw_report = overfit_check(model, task, sample_batch=batch, dims=dims)
+                        raw_report = overfit_check(
+                            model, task, sample_batch=batch, dims=dims
+                        )
                     except Exception as exc:  # noqa: BLE001, becomes the report's issue only
                         raw_report = {
-                            "passed": False, "losses": [], "initial": None, "final": None,
+                            "passed": False,
+                            "losses": [],
+                            "initial": None,
+                            "final": None,
                             "issue": f"overfit check failed: {exc}",
                         }
                     finally:
@@ -248,8 +321,9 @@ def _preflight(project: Path, spec: TrainConfigSchema | None, sources: StagedSou
     return result, resolution
 
 
-def _structural_issues(spec: TrainConfigSchema, project: Path
-                       ) -> tuple[StagedSources | None, list[str]]:
+def _structural_issues(
+    spec: TrainConfigSchema, project: Path
+) -> tuple[StagedSources | None, list[str]]:
     """The staged sources of the validated config ``spec`` of ``project``
     (``model_build.staged_sources``, ``None`` when they refuse) and what stops it before
     anything reads its data: what training reads left unstated
@@ -258,7 +332,11 @@ def _structural_issues(spec: TrainConfigSchema, project: Path
     or ``data.dataset_source`` builder or a ``training_source`` that does not import from their
     layout, and a ``data`` block that names no locations
     (``split_construction.data_dir_issues``)."""
-    from tcip_mcp.pipelines.model_build import import_source_builder, source_seams, staged_sources
+    from tcip_mcp.pipelines.model_build import (
+        import_source_builder,
+        source_seams,
+        staged_sources,
+    )
 
     issues: list[str] = []
     try:
@@ -268,7 +346,11 @@ def _structural_issues(spec: TrainConfigSchema, project: Path
     try:
         sources = staged_sources(spec, project)
     except (ValueError, OSError) as exc:
-        return None, [*issues, f"source_files: {exc}", *data_dir_issues(spec.data)]
+        return None, [
+            *issues,
+            f"source_files: {exc}",
+            *data_dir_issues(spec.data),
+        ]
     for field, dotted, _files in source_seams(spec):
         try:
             import_source_builder(dotted, sources.layout)
@@ -279,9 +361,15 @@ def _structural_issues(spec: TrainConfigSchema, project: Path
 
 
 def open_run(
-    run_dir: Path, spec: TrainConfigSchema, sources: StagedSources, resolved: dict | None, *,
-    relaunched_from: str | None = None, resume_from: str | None = None,
-    max_wall_clock_seconds: float | None = None, model_contract: dict | None = None,
+    run_dir: Path,
+    spec: TrainConfigSchema,
+    sources: StagedSources,
+    resolved: dict | None,
+    *,
+    relaunched_from: str | None = None,
+    resume_from: str | None = None,
+    max_wall_clock_seconds: float | None = None,
+    model_contract: dict | None = None,
     trial_params: dict | None = None,
 ) -> None:
     """Open the run directory ``run_dir`` (``experiments.open_run_directory``) with its
@@ -296,28 +384,46 @@ def open_run(
     relaunched from and the checkpoint it resumes from, its wall clock, the model contract
     preflight proved, and an HPO trial's sampled point. Refuses an existing directory
     (``experiments.RunDirectoryExistsError``)."""
-    from tcip_mcp.pipelines.data.split_construction import dataset_identity, partition_samples
+    from tcip_mcp.pipelines.data.split_construction import (
+        dataset_identity,
+        partition_samples,
+    )
     from tcip_mcp.pipelines.model_build import capture_env
     from tcip_mcp.pipelines.training.run_registry import seeded
 
     spec = seeded(spec)
     dataset_id, fingerprint = dataset_identity(
-        spec.data, partition_samples(resolved["partition"]) if resolved else ())
-    experiments.open_run_directory(run_dir, {
-        "created": now_iso(), "config": spec.record(), "resolved": resolved,
-        "environment": capture_env(),
-        "dataset": {"id": dataset_id, "fingerprint": fingerprint}, "source": sources.record,
-        "relaunched_from": relaunched_from, "resume_from": resume_from,
-        "max_wall_clock_seconds": max_wall_clock_seconds, "model_contract": model_contract,
-        "trial_params": trial_params,
-    }, sources.copies)
+        spec.data, partition_samples(resolved["partition"]) if resolved else ()
+    )
+    experiments.open_run_directory(
+        run_dir,
+        {
+            "created": now_iso(),
+            "config": spec.record(),
+            "resolved": resolved,
+            "environment": capture_env(),
+            "dataset": {"id": dataset_id, "fingerprint": fingerprint},
+            "source": sources.record,
+            "relaunched_from": relaunched_from,
+            "resume_from": resume_from,
+            "max_wall_clock_seconds": max_wall_clock_seconds,
+            "model_contract": model_contract,
+            "trial_params": trial_params,
+        },
+        sources.copies,
+    )
 
 
 @tool()
 def launch_training(
-    project: Path, config: dict, resume_from: str = "",
-    max_wall_clock_seconds: float | None = None, overfit_check: bool = False,
-    relaunched_from: str | None = None, *, actor: str | None,
+    project: Path,
+    config: dict,
+    resume_from: str = "",
+    max_wall_clock_seconds: float | None = None,
+    overfit_check: bool = False,
+    relaunched_from: str | None = None,
+    *,
+    actor: str | None,
 ) -> dict:
     """Launch a training run by ``actor`` in an isolated subprocess from a bespoke
     ``model_source`` builder.
@@ -357,17 +463,22 @@ def launch_training(
     """
     check_json_value(config, path="config")
     if "experiment_id" in config:
-        return {"error": "launch_training: config.experiment_id is not a setting; the platform "
-                         "mints every run's id and answers it as experiment_id."}
+        return {
+            "error": "launch_training: config.experiment_id is not a setting; the platform "
+            "mints every run's id and answers it as experiment_id."
+        }
     resume = str(located(resume_from, project)) if resume_from else None
     # smoke=True: build the model and run the correctness contract before spawning the training
     # subprocess, so a broken builder returns here instead of wasting a full audited run.
     spec, sources, issues = _admitted(config, {}, project)
-    validation, resolution = _preflight(project, spec, sources, issues, smoke=True,
-                                        overfit=overfit_check)
+    validation, resolution = _preflight(
+        project, spec, sources, issues, smoke=True, overfit=overfit_check
+    )
     if not validation["valid"]:
         return {"error": "Invalid config", "issues": validation["issues"]}
-    assert resolution is not None and sources is not None, "a valid config resolved"
+    assert resolution is not None and sources is not None, (
+        "a valid config resolved"
+    )
 
     # The top-level key, never the smoke sub-report: overfit_check runs beside the contract's
     # build, on the same batch; preflight_config already rendered it for storage.
@@ -387,15 +498,28 @@ def launch_training(
     experiment_id = experiments.mint_experiment_id()
     try:
         run_dir = experiments.experiment_dir(experiment_id, project=project)
-        open_run(run_dir, resolution.spec, sources, resolution.record,
-                 relaunched_from=relaunched_from, resume_from=resume,
-                 max_wall_clock_seconds=max_wall_clock_seconds,
-                 model_contract=model_contract_record)
+        open_run(
+            run_dir,
+            resolution.spec,
+            sources,
+            resolution.record,
+            relaunched_from=relaunched_from,
+            resume_from=resume,
+            max_wall_clock_seconds=max_wall_clock_seconds,
+            model_contract=model_contract_record,
+        )
     except (StoreError, ValueError, OSError) as exc:
         return {"error": f"launch_training: {exc}"}
-    record_event_or_raise("launch_training", {
-        "experiment_id": experiment_id, "relaunched_from": relaunched_from,
-        "resume_from": resume}, actor=actor, scope=project)
+    record_event_or_raise(
+        "launch_training",
+        {
+            "experiment_id": experiment_id,
+            "relaunched_from": relaunched_from,
+            "resume_from": resume,
+        },
+        actor=actor,
+        scope=project,
+    )
 
     proc = _start_worker(run_dir, _child_env_for_launch(resolution.spec))
 
@@ -405,7 +529,10 @@ def launch_training(
     # Keyed by its own log directory (the manager's default), never by the run id.
     tb_info = {}
     try:
-        from tcip_mcp.pipelines.training.tensorboard_manager import launch_tensorboard
+        from tcip_mcp.pipelines.training.tensorboard_manager import (
+            launch_tensorboard,
+        )
+
         tb_info = launch_tensorboard(str(experiments.board_of(run_dir)))
     except Exception:
         pass  # TensorBoard launch is best-effort
@@ -438,6 +565,7 @@ def _child_env_for_launch(spec: TrainConfigSchema) -> dict[str, str]:
 
     try:
         import torch
+
         count = torch.cuda.device_count() if torch.cuda.is_available() else 0
     except Exception:
         count = 0
@@ -450,8 +578,15 @@ def _start_worker(directory: Path, env: dict[str, str]) -> subprocess.Popen:
     """Start ``subprocess_worker`` over the opened run or sweep ``directory`` in its own process
     under ``env``."""
     return subprocess.Popen(
-        [sys.executable, "-m", "tcip_mcp.pipelines.training.subprocess_worker",
-         "--run-dir", str(directory)], env=env)
+        [
+            sys.executable,
+            "-m",
+            "tcip_mcp.pipelines.training.subprocess_worker",
+            "--run-dir",
+            str(directory),
+        ],
+        env=env,
+    )
 
 
 def _watch_wall_clock(proc: subprocess.Popen, timeout_seconds: float) -> None:
@@ -459,16 +594,21 @@ def _watch_wall_clock(proc: subprocess.Popen, timeout_seconds: float) -> None:
     (``experiments.HEARTBEAT_STALE_SECONDS``) past ``timeout_seconds``. The child stops itself at
     its deadline and writes its own final status; a child that did not is hung, and reads
     interrupted."""
+
     def _watch() -> None:
         try:
-            proc.wait(timeout=timeout_seconds + experiments.HEARTBEAT_STALE_SECONDS)
+            proc.wait(
+                timeout=timeout_seconds + experiments.HEARTBEAT_STALE_SECONDS
+            )
         except subprocess.TimeoutExpired:
             proc.terminate()
 
     threading.Thread(target=_watch, daemon=True).start()
 
 
-def training_detail(project: Path, experiment_id: str) -> TrainingDetail | None:
+def training_detail(
+    project: Path, experiment_id: str
+) -> TrainingDetail | None:
     """The run, trial or sweep of ``project`` ``experiment_id`` names
     (``experiments.named_directory``) as its ``experiments.TrainingDetail``, its
     ``tensorboard_url`` the one a TensorBoard this process started serves its board at
@@ -481,12 +621,22 @@ def training_detail(project: Path, experiment_id: str) -> TrainingDetail | None:
     url = running_url(str(experiments.board_of(directory)))
     if (directory / SWEEP_FILE).is_file():
         return TrainingDetail(
-            run=None, tensorboard_url=url,
-            sweep=experiments.read_sweep(directory, experiments.run_rows(project)))
+            run=None,
+            tensorboard_url=url,
+            sweep=experiments.read_sweep(
+                directory, experiments.run_rows(project)
+            ),
+        )
     run = experiments.observe(directory)
-    return TrainingDetail(sweep=None, tensorboard_url=url, run=experiments.run_summary(
-        run, experiments.read_rows(run.metrics_log)[0],
-        experiments.launch_declarations(project).get(run.directory.name)))
+    return TrainingDetail(
+        sweep=None,
+        tensorboard_url=url,
+        run=experiments.run_summary(
+            run,
+            experiments.read_rows(run.metrics_log)[0],
+            experiments.launch_declarations(project).get(run.directory.name),
+        ),
+    )
 
 
 @tool()
@@ -500,7 +650,11 @@ def monitor_training(project: Path, experiment_id: str) -> dict:
             sweep's id from run_hyperparameter_search.
     """
     detail = training_detail(project, experiment_id)
-    return {"error": f"Run not found: {experiment_id}"} if detail is None else detail.model_dump()
+    return (
+        {"error": f"Run not found: {experiment_id}"}
+        if detail is None
+        else detail.model_dump()
+    )
 
 
 def list_split_choices(project: Path, experiment_id: str) -> dict:
@@ -536,7 +690,9 @@ def list_split_choices(project: Path, experiment_id: str) -> dict:
     from tcip_mcp.pipelines.data.selection import read_selection_checked
 
     runs = experiments.run_observations(project)
-    own = next((obs for obs in runs if obs.directory.name == experiment_id), None)
+    own = next(
+        (obs for obs in runs if obs.directory.name == experiment_id), None
+    )
     if own is None:
         return {"error": f"Experiment not found: {experiment_id}"}
     data = own.spec.data
@@ -545,28 +701,41 @@ def list_split_choices(project: Path, experiment_id: str) -> dict:
 
     own_selection = None
     if own_selection_dir:
-        as_recorded = {"case": "bound", "line": "on the partition it bound",
-                       "compatible": True, "reason": None}
-        own_selection, own_error = read_selection_checked(own_selection_dir, project=project)
+        as_recorded = {
+            "case": "bound",
+            "line": "on the partition it bound",
+            "compatible": True,
+            "reason": None,
+        }
+        own_selection, own_error = read_selection_checked(
+            own_selection_dir, project=project
+        )
         if own_selection is None:
             as_recorded["compatible"] = False
             as_recorded["reason"] = own_error or (
                 f"no selection recorded under {own_selection_dir}; run draw_splits first."
             )
         else:
-            own_issues = selection_compatibility(data, own_selection, own_selection_dir)
+            own_issues = selection_compatibility(
+                data, own_selection, own_selection_dir
+            )
             if own_issues:
                 as_recorded["compatible"] = False
                 as_recorded["reason"] = "; ".join(own_issues)
     elif own.resolution is None:
-        as_recorded = {"case": "drawn", "line": "resolved to nothing at its launch",
-                       "compatible": False, "reason": own.status_error}
+        as_recorded = {
+            "case": "drawn",
+            "line": "resolved to nothing at its launch",
+            "compatible": False,
+            "reason": own.status_error,
+        }
     else:
         seed = own.resolution["partition"]["seed"]
         as_recorded = {
             "case": "drawn",
             "line": f"draws its split again with seed {seed} over the labels as they are now",
-            "compatible": True, "reason": None,
+            "compatible": True,
+            "reason": None,
         }
 
     dir_issues = data_dir_issues(data)
@@ -591,7 +760,11 @@ def list_split_choices(project: Path, experiment_id: str) -> dict:
     candidate_dirs: list[str] = []
     seen: set[str] = set()
     for other in runs:
-        binding = other.resolution["partition"]["selection"] if other.resolution else None
+        binding = (
+            other.resolution["partition"]["selection"]
+            if other.resolution
+            else None
+        )
         if other is own or binding is None:
             continue
         candidate = binding["selection_dir"]
@@ -619,24 +792,39 @@ def list_split_choices(project: Path, experiment_id: str) -> dict:
 
     selections: list[dict] = []
     for candidate_dir in candidate_dirs:
-        selection, error_text = read_selection_checked(candidate_dir, project=project)
+        selection, error_text = read_selection_checked(
+            candidate_dir, project=project
+        )
         if selection is None:
             if error_text is None:
                 continue  # nothing recorded there; not a real candidate
-            selections.append({
-                "selection_dir": candidate_dir, "enabled": False, "reason": error_text,
-                "seed": None, "group_by": None, "train": 0, "val": 0, "calibration": 0,
-                "replaced_split_keys": replaced_split_keys,
-            })
+            selections.append(
+                {
+                    "selection_dir": candidate_dir,
+                    "enabled": False,
+                    "reason": error_text,
+                    "seed": None,
+                    "group_by": None,
+                    "train": 0,
+                    "val": 0,
+                    "calibration": 0,
+                    "replaced_split_keys": replaced_split_keys,
+                }
+            )
             continue
-        issues = selection_compatibility(data_with_selection(data, candidate_dir, project),
-                                         selection,
-                                         candidate_dir)
+        issues = selection_compatibility(
+            data_with_selection(data, candidate_dir, project),
+            selection,
+            candidate_dir,
+        )
         counts = selection.counts()
         entry: dict = {
-            "selection_dir": candidate_dir, "seed": selection.seed,
-            "group_by": selection.group_by, "train": counts["train"],
-            "val": counts["val"], "calibration": counts["calibration"],
+            "selection_dir": candidate_dir,
+            "seed": selection.seed,
+            "group_by": selection.group_by,
+            "train": counts["train"],
+            "val": counts["val"],
+            "calibration": counts["calibration"],
             "replaced_split_keys": replaced_split_keys,
         }
         if issues:
@@ -652,7 +840,9 @@ def list_split_choices(project: Path, experiment_id: str) -> dict:
 
 @tool()
 @audited
-def cancel_training(project: Path, experiment_id: str, *, actor: str | None) -> dict:
+def cancel_training(
+    project: Path, experiment_id: str, *, actor: str | None
+) -> dict:
     """Request graceful cancellation of a running training run, a sweep's trial or a whole
     hyperparameter sweep, by ``actor``, named by its id (``experiments.named_directory``).
 
@@ -676,8 +866,11 @@ def cancel_training(project: Path, experiment_id: str, *, actor: str | None) -> 
         experiments.request_cancel(directory)
     except ValueError as exc:
         return {"error": str(exc)}
-    return {"experiment_id": experiment_id, "cancel_requested": True,
-            "state": experiments.observe(directory).state}
+    return {
+        "experiment_id": experiment_id,
+        "cancel_requested": True,
+        "state": experiments.observe(directory).state,
+    }
 
 
 def inspect_compute_resources(project: Path) -> dict:
@@ -693,35 +886,59 @@ def inspect_compute_resources(project: Path) -> dict:
         ``active_training_runs``: count of every training run whose state is ``"running"``
             (``experiments.run_observations``).
     """
-    cpu: dict[str, Any] = {"logical_count": os.cpu_count(), "percent_used": None}
+    cpu: dict[str, Any] = {
+        "logical_count": os.cpu_count(),
+        "percent_used": None,
+    }
     memory: dict[str, Any] = {"total_bytes": None, "available_bytes": None}
     try:
         import psutil
+
         cpu["percent_used"] = psutil.cpu_percent(interval=0.1)
         vm = psutil.virtual_memory()
         memory["total_bytes"] = vm.total
         memory["available_bytes"] = vm.available
     except Exception:
-        logger.info("psutil unavailable or failed; cpu/memory visibility degraded to None",
-                   exc_info=True)
+        logger.info(
+            "psutil unavailable or failed; cpu/memory visibility degraded to None",
+            exc_info=True,
+        )
 
     gpus: list[dict[str, Any]] = []
     try:
         import torch
+
         if torch.cuda.is_available():
             for idx in range(torch.cuda.device_count()):
                 free_b, total_b = torch.cuda.mem_get_info(idx)
-                gpus.append({"index": idx, "free_bytes": free_b, "total_bytes": total_b})
+                gpus.append(
+                    {
+                        "index": idx,
+                        "free_bytes": free_b,
+                        "total_bytes": total_b,
+                    }
+                )
     except Exception:
         logger.info("GPU visibility unavailable", exc_info=True)
 
-    active = sum(1 for obs in experiments.run_observations(project) if obs.state == "running")
+    active = sum(
+        1
+        for obs in experiments.run_observations(project)
+        if obs.state == "running"
+    )
 
-    return {"cpu": cpu, "memory": memory, "gpus": gpus, "active_training_runs": active}
+    return {
+        "cpu": cpu,
+        "memory": memory,
+        "gpus": gpus,
+        "active_training_runs": active,
+    }
 
 
 _CANCEL_BEFORE_START_REASON = "canceled before the sweep's first trial started"
-_CANCEL_DURING_RUN_REASON = "the sweep was canceled by request before it could finish"
+_CANCEL_DURING_RUN_REASON = (
+    "the sweep was canceled by request before it could finish"
+)
 
 
 def open_trial(sweep: Path, trial_id: str, point: dict) -> Path:
@@ -736,20 +953,30 @@ def open_trial(sweep: Path, trial_id: str, point: dict) -> Path:
     any directory is opened."""
     record = experiments.observe(sweep).record
     project = experiments.project_of_run(sweep)
-    spec, sources, issues = _admitted(record["input"]["base_config"], point, project)
+    spec, sources, issues = _admitted(
+        record["input"]["base_config"], point, project
+    )
     if spec is None or sources is None:
-        raise ValueError(f"trial {trial_id}'s config is refused: {'; '.join(issues)}")
+        raise ValueError(
+            f"trial {trial_id}'s config is refused: {'; '.join(issues)}"
+        )
     trial_dir = sweep / f"{sweep.name}_{trial_id}"
     resolved, status_error = None, "; ".join(issues) or None
     if status_error is None:
         try:
-            resolved = resolve_run(spec, sources.layout, project=project,
-                                   objective=record["objective"]).record
+            resolved = resolve_run(
+                spec,
+                sources.layout,
+                project=project,
+                objective=record["objective"],
+            ).record
         except Exception as exc:  # noqa: BLE001, whatever stops the resolution fails the trial
             status_error = str(exc)
     open_run(trial_dir, spec, sources, resolved, trial_params=point)
     if status_error is not None:
-        experiments.write_final_status(trial_dir, "failed", status_error, checkpoint=None)
+        experiments.write_final_status(
+            trial_dir, "failed", status_error, checkpoint=None
+        )
     return trial_dir
 
 
@@ -890,28 +1117,54 @@ def run_hyperparameter_search(
             omit for the derived default (see ``split_draws``).
     """
     opened = open_sweep(
-        project, base_config, param_space, n_trials=n_trials, search_alg=search_alg,
-        scheduler=scheduler, baseline_params=baseline_params, max_concurrent=max_concurrent,
-        resources_per_trial=resources_per_trial, split_draws=split_draws,
-        split_draw_seeds=split_draw_seeds, search_seed=search_seed, trial_budget=trial_budget,
-        relaunched_from=relaunched_from, actor=None)
+        project,
+        base_config,
+        param_space,
+        n_trials=n_trials,
+        search_alg=search_alg,
+        scheduler=scheduler,
+        baseline_params=baseline_params,
+        max_concurrent=max_concurrent,
+        resources_per_trial=resources_per_trial,
+        split_draws=split_draws,
+        split_draw_seeds=split_draw_seeds,
+        search_seed=search_seed,
+        trial_budget=trial_budget,
+        relaunched_from=relaunched_from,
+        actor=None,
+    )
     if isinstance(opened, dict):
         return opened
     group = run_sweep(opened)
     url = None
     if auto_tensorboard and group.state == "completed":
-        from tcip_mcp.pipelines.training.tensorboard_manager import launch_tensorboard
+        from tcip_mcp.pipelines.training.tensorboard_manager import (
+            launch_tensorboard,
+        )
 
         url = launch_tensorboard(str(experiments.board_of(opened))).get("url")
-    return TrainingDetail(run=None, sweep=group, tensorboard_url=url).model_dump()
+    return TrainingDetail(
+        run=None, sweep=group, tensorboard_url=url
+    ).model_dump()
 
 
 def open_sweep(
-    project: Path, base_config: dict, param_space: dict, *, n_trials: int, search_alg: str,
-    scheduler: dict, baseline_params: dict | None,
-    max_concurrent: int, resources_per_trial: dict | None,
-    split_draws: int, split_draw_seeds: list[int] | None,
-    search_seed: int, trial_budget: int | None, relaunched_from: str | None, actor: str | None,
+    project: Path,
+    base_config: dict,
+    param_space: dict,
+    *,
+    n_trials: int,
+    search_alg: str,
+    scheduler: dict,
+    baseline_params: dict | None,
+    max_concurrent: int,
+    resources_per_trial: dict | None,
+    split_draws: int,
+    split_draw_seeds: list[int] | None,
+    search_seed: int,
+    trial_budget: int | None,
+    relaunched_from: str | None,
+    actor: str | None,
 ) -> Path | dict:
     """Check a sweep's arguments: its scheduler block (``hpo.scheduler_settings``), the first
     point :func:`_preflight_points` lists applied to
@@ -930,7 +1183,9 @@ def open_sweep(
     appended). Returns the opened sweep's directory, or the refusal ``{"error", "issues"}`` with
     nothing created."""
     from tcip_mcp.pipelines.training.hpo import (
-        resolved_draw_seeds, scheduler_settings, split_draw_search_space,
+        resolved_draw_seeds,
+        scheduler_settings,
+        split_draw_search_space,
     )
 
     # Both reach a written record: the space into the sweep's input, the base config into every
@@ -938,10 +1193,14 @@ def open_sweep(
     check_json_value(param_space, path="param_space")
     check_json_value(base_config, path="base_config")
 
-    if relaunched_from is not None and experiments.find_sweep(relaunched_from,
-                                                              project=project) is None:
-        return {"error": f"relaunched_from names no sweep of this project: {relaunched_from!r}",
-                "issues": []}
+    if (
+        relaunched_from is not None
+        and experiments.find_sweep(relaunched_from, project=project) is None
+    ):
+        return {
+            "error": f"relaunched_from names no sweep of this project: {relaunched_from!r}",
+            "issues": [],
+        }
 
     argument_refusal = _split_draws_argument_refusal(split_draws)
     if argument_refusal is not None:
@@ -953,16 +1212,27 @@ def open_sweep(
 
     # Below the leg that makes split_draws an integer, so this comparison never meets another
     # type, and computed once so every leg that reads it agrees on whether a bound is read.
-    reads_bound = trial_budget is not None or (split_draws > 1 and relaunched_from is None)
+    reads_bound = trial_budget is not None or (
+        split_draws > 1 and relaunched_from is None
+    )
 
     try:
-        (first_label, first_point), *rest = _preflight_points(param_space, search_alg)
+        (first_label, first_point), *rest = _preflight_points(
+            param_space, search_alg
+        )
     except (KeyError, TypeError, ValueError) as exc:
-        return {"error": f"param_space is not a search space: {exc!r}", "issues": []}
-    first_spec, first_sources, first_issues = _admitted(base_config, first_point, project)
+        return {
+            "error": f"param_space is not a search space: {exc!r}",
+            "issues": [],
+        }
+    first_spec, first_sources, first_issues = _admitted(
+        base_config, first_point, project
+    )
     if first_spec is None:
-        return {"error": f"the sweep's base config fails preflight at {first_label}",
-                "issues": first_issues}
+        return {
+            "error": f"the sweep's base config fails preflight at {first_label}",
+            "issues": first_issues,
+        }
 
     # A bound base_config admitted to split_draws redraws inside its selection from here on.
     data = _data_for_split_draws(first_spec.data, split_draws)
@@ -973,60 +1243,101 @@ def open_sweep(
     # Checked ahead of preflight, so its own reason is what an auto_val refusal reads as, not
     # whatever preflight would have hit first.
     draws_refusal = _split_draws_refusal(
-        first_spec.data, param_space, search_alg, scheduler,
-        split_draws, split_draw_seeds, baseline_params)
+        first_spec.data,
+        param_space,
+        search_alg,
+        scheduler,
+        split_draws,
+        split_draw_seeds,
+        baseline_params,
+    )
     if draws_refusal is not None:
         return {"error": draws_refusal, "issues": []}
 
     seed_axis_refusal = caller_split_seed_refusal(param_space, split_draws)
     if seed_axis_refusal is not None:
-        return {"error": f"{seed_axis_refusal.reason} {seed_axis_refusal.remedy}", "issues": []}
+        return {
+            "error": f"{seed_axis_refusal.reason} {seed_axis_refusal.remedy}",
+            "issues": [],
+        }
 
-    preflight, resolution = _preflight(project, first_spec, first_sources, first_issues,
-                                       smoke=False, overfit=False)
+    preflight, resolution = _preflight(
+        project,
+        first_spec,
+        first_sources,
+        first_issues,
+        smoke=False,
+        overfit=False,
+    )
     if resolution is None or not preflight["valid"]:
-        return {"error": f"the sweep's base config fails preflight at {first_label}",
-                "issues": preflight["issues"]}
+        return {
+            "error": f"the sweep's base config fails preflight at {first_label}",
+            "issues": preflight["issues"],
+        }
     for label, point in rest:
         issues = _admitted(base_config, point, project)[2]
         if issues:
-            return {"error": f"the sweep's base config fails preflight at {label}",
-                    "issues": issues}
+            return {
+                "error": f"the sweep's base config fails preflight at {label}",
+                "issues": issues,
+            }
     spatial_refusal = _spatial_draws_issue(resolution, split_draws)
     if spatial_refusal is not None:
         return {"error": spatial_refusal, "issues": []}
     objective = resolution.objective
 
-    draw_seeds = resolved_draw_seeds(resolution.spec.data.split, split_draws, split_draw_seeds)
+    draw_seeds = resolved_draw_seeds(
+        resolution.spec.data.split, split_draws, split_draw_seeds
+    )
     search_param_space = split_draw_search_space(param_space, draw_seeds)
 
     budget_refusal = _trial_budget_refusal(
-        reads_bound=reads_bound, split_draws=split_draws, n_trials=n_trials,
-        search_alg=search_alg, trial_budget=trial_budget,
-        relaunched_from=relaunched_from, search_param_space=search_param_space,
+        reads_bound=reads_bound,
+        split_draws=split_draws,
+        n_trials=n_trials,
+        search_alg=search_alg,
+        trial_budget=trial_budget,
+        relaunched_from=relaunched_from,
+        search_param_space=search_param_space,
         baseline_params=baseline_params,
     )
     if budget_refusal is not None:
         return {"error": budget_refusal, "issues": []}
 
     try:
-        directory = experiments.create_run_directory(experiments.experiment_dir(
-            experiments.mint_experiment_id("hpo"), project=project))
+        directory = experiments.create_run_directory(
+            experiments.experiment_dir(
+                experiments.mint_experiment_id("hpo"), project=project
+            )
+        )
     except (StoreError, ValueError, OSError) as exc:
         return {"error": str(exc), "issues": []}
-    record = {"created": now_iso(), "objective": objective, "input": {
-        "n_trials": n_trials, "search_alg": search_alg, "scheduler": scheduler,
-        "max_concurrent": max_concurrent, "baseline_params": baseline_params,
-        "resources_per_trial": resources_per_trial,
-        "param_space": param_space, "base_config": base_config,
-        "relaunched_from": relaunched_from, "split_draws": split_draws,
-        "split_draw_seeds": draw_seeds, "search_seed": search_seed,
-        "trial_budget": trial_budget,
-    }}
+    record = {
+        "created": now_iso(),
+        "objective": objective,
+        "input": {
+            "n_trials": n_trials,
+            "search_alg": search_alg,
+            "scheduler": scheduler,
+            "max_concurrent": max_concurrent,
+            "baseline_params": baseline_params,
+            "resources_per_trial": resources_per_trial,
+            "param_space": param_space,
+            "base_config": base_config,
+            "relaunched_from": relaunched_from,
+            "split_draws": split_draws,
+            "split_draw_seeds": draw_seeds,
+            "search_seed": search_seed,
+            "trial_budget": trial_budget,
+        },
+    }
     experiments.write_record(directory / SWEEP_FILE, record)
-    record_event_or_raise("open_sweep", {"sweep_id": directory.name,
-                                         "relaunched_from": relaunched_from},
-                          actor=actor, scope=project)
+    record_event_or_raise(
+        "open_sweep",
+        {"sweep_id": directory.name, "relaunched_from": relaunched_from},
+        actor=actor,
+        scope=project,
+    )
     return directory
 
 
@@ -1036,7 +1347,9 @@ def launch_sweep(project: Path, source: Path, *, actor: str | None) -> dict:
     (:func:`run_sweep`) in its own worker process. Returns ``{"sweep_id", "status": "launched"}``,
     or the refusal dict when that input no longer opens."""
     given = experiments.observe(source).record["input"]
-    opened = open_sweep(project, **{**given, "relaunched_from": source.name}, actor=actor)
+    opened = open_sweep(
+        project, **{**given, "relaunched_from": source.name}, actor=actor
+    )
     if isinstance(opened, dict):
         return opened
     _start_worker(opened, _worker_env())
@@ -1051,7 +1364,10 @@ def run_sweep(directory: Path) -> SweepGroup:
     sweep's group (``experiments.read_sweep``)."""
     import uuid
 
-    from tcip_mcp.pipelines.training.hpo import split_draw_search_space, tune_search
+    from tcip_mcp.pipelines.training.hpo import (
+        split_draw_search_space,
+        tune_search,
+    )
 
     project = experiments.project_of_run(directory)
     record = experiments.observe(directory).record
@@ -1067,12 +1383,15 @@ def run_sweep(directory: Path) -> SweepGroup:
     def objective_fn(config: dict, report) -> None:
         try:
             from ray import tune as _tune
+
             tid = _tune.get_context().get_trial_id()
         except Exception:
             tid = uuid.uuid4().hex[:8]
         _run_hpo_trial(config, report, directory, tid)
 
-    search_param_space = split_draw_search_space(given["param_space"], given["split_draw_seeds"])
+    search_param_space = split_draw_search_space(
+        given["param_space"], given["split_draw_seeds"]
+    )
     stop_heartbeat = experiments.keep_heartbeat(directory)
     try:
         tune_search(
@@ -1143,7 +1462,11 @@ def _data_for_split_draws(data: DataSpec, split_draws: int) -> DataSpec:
     if split_draws <= 1 or not data.split.selection_dir:
         return data
     split = data.split.model_copy(
-        update={"redraw_within_selection": True, "seed": split_seed(data.split)})
+        update={
+            "redraw_within_selection": True,
+            "seed": split_seed(data.split),
+        }
+    )
     return data.model_copy(update={"split": split})
 
 
@@ -1154,18 +1477,28 @@ def _split_draws_argument_refusal(split_draws: object) -> str | None:
     name.
     """
     if not isinstance(split_draws, int):
-        return (f"split_draws={split_draws!r} is not a draw count; pass a whole number of "
-                "partitions to pair.")
+        return (
+            f"split_draws={split_draws!r} is not a draw count; pass a whole number of "
+            "partitions to pair."
+        )
     if split_draws < 1:
-        return (f"split_draws={split_draws} pairs no partition; a sweep pairs at least one, so "
-                "pass 1 (the default, one draw and no spread) or the number of partitions to "
-                "pair.")
+        return (
+            f"split_draws={split_draws} pairs no partition; a sweep pairs at least one, so "
+            "pass 1 (the default, one draw and no spread) or the number of partitions to "
+            "pair."
+        )
     return None
 
 
 def _trial_budget_refusal(
-    *, reads_bound: bool, split_draws: int, n_trials: object, search_alg: str,
-    trial_budget: object, relaunched_from: str | None, search_param_space: dict,
+    *,
+    reads_bound: bool,
+    split_draws: int,
+    n_trials: object,
+    search_alg: str,
+    trial_budget: object,
+    relaunched_from: str | None,
+    search_param_space: dict,
     baseline_params: dict | None,
 ) -> str | None:
     """Whether this call's own trial count fits the bound it must state or check, run only when
@@ -1182,47 +1515,70 @@ def _trial_budget_refusal(
     """
     if not reads_bound:
         return None
-    if not isinstance(n_trials, int) or isinstance(n_trials, bool) or n_trials <= 0:
-        return (f"n_trials={n_trials!r} is not a count of trials; Ray runs a negative count as "
-                "an unbounded sweep and a zero count as none, so pass the number of sampled "
-                "points, a whole number of at least one.")
-    if trial_budget is not None and (
-        not isinstance(trial_budget, int) or isinstance(trial_budget, bool) or trial_budget <= 0
+    if (
+        not isinstance(n_trials, int)
+        or isinstance(n_trials, bool)
+        or n_trials <= 0
     ):
-        return (f"trial_budget={trial_budget!r} is not a count of trials; pass the most trials "
-                "this sweep may launch, a whole number of at least one, or omit it at one draw.")
+        return (
+            f"n_trials={n_trials!r} is not a count of trials; Ray runs a negative count as "
+            "an unbounded sweep and a zero count as none, so pass the number of sampled "
+            "points, a whole number of at least one."
+        )
+    if trial_budget is not None and (
+        not isinstance(trial_budget, int)
+        or isinstance(trial_budget, bool)
+        or trial_budget <= 0
+    ):
+        return (
+            f"trial_budget={trial_budget!r} is not a count of trials; pass the most trials "
+            "this sweep may launch, a whole number of at least one, or omit it at one draw."
+        )
 
     from tcip_mcp.pipelines.training.hpo import planned_trial_count
 
     count = planned_trial_count(
-        search_param_space, n_trials, search_alg, split_draws, baseline_params)
+        search_param_space, n_trials, search_alg, split_draws, baseline_params
+    )
     per_draw = count // split_draws
     baseline = "given" if baseline_params else "none"
-    built = (f"Ray's own variant count over the space this call builds: n_trials={n_trials} "
-             f"sample(s), search_alg={search_alg!r}, baseline {baseline}, {per_draw} per draw")
+    built = (
+        f"Ray's own variant count over the space this call builds: n_trials={n_trials} "
+        f"sample(s), search_alg={search_alg!r}, baseline {baseline}, {per_draw} per draw"
+    )
 
     if split_draws > 1 and trial_budget is None and relaunched_from is None:
-        return (f"split_draws={split_draws} pairs every sampled point with {split_draws} "
-                f"partitions, so this sweep would launch {count} trials ({built}), a total the "
-                f"call never stated; pass trial_budget={count} ({count} admits it as "
-                "configured), or run at split_draws=1.")
+        return (
+            f"split_draws={split_draws} pairs every sampled point with {split_draws} "
+            f"partitions, so this sweep would launch {count} trials ({built}), a total the "
+            f"call never stated; pass trial_budget={count} ({count} admits it as "
+            "configured), or run at split_draws=1."
+        )
     if trial_budget is not None and count > trial_budget:
         if per_draw > trial_budget:
-            return (f"this sweep would launch {count} trials ({built}) against "
-                    f"trial_budget={trial_budget}, which this sweep exceeds at one draw "
-                    f"({per_draw} trials per draw); lower n_trials, narrow the gridded axes, or "
-                    "state a larger trial_budget.")
+            return (
+                f"this sweep would launch {count} trials ({built}) against "
+                f"trial_budget={trial_budget}, which this sweep exceeds at one draw "
+                f"({per_draw} trials per draw); lower n_trials, narrow the gridded axes, or "
+                "state a larger trial_budget."
+            )
         admitted_draws = trial_budget // per_draw
-        return (f"this sweep would launch {count} trials ({built}) against "
-                f"trial_budget={trial_budget}, which admits at most {admitted_draws} draw(s) at "
-                f"these settings; lower split_draws to {admitted_draws}, lower n_trials, narrow "
-                "the gridded axes, or state a larger trial_budget.")
+        return (
+            f"this sweep would launch {count} trials ({built}) against "
+            f"trial_budget={trial_budget}, which admits at most {admitted_draws} draw(s) at "
+            f"these settings; lower split_draws to {admitted_draws}, lower n_trials, narrow "
+            "the gridded axes, or state a larger trial_budget."
+        )
     return None
 
 
 def _split_draws_refusal(
-    data: DataSpec, param_space: dict, search_alg: str,
-    scheduler: dict, split_draws: int, split_draw_seeds: list[int] | None,
+    data: DataSpec,
+    param_space: dict,
+    search_alg: str,
+    scheduler: dict,
+    split_draws: int,
+    split_draw_seeds: list[int] | None,
     baseline_params: dict | None,
 ) -> str | None:
     """Every reason of the paired path's own a sweep refuses ``split_draws`` above 1 for before
@@ -1233,47 +1589,75 @@ def _split_draws_refusal(
     if split_draws <= 1:
         return None
     from tcip_mcp.pipelines.training.hpo import (
-        FIFO_SCHEDULER, SPLIT_DRAW_SEED_KEY, _NATIVE_SEARCH, search_alg_key,
+        FIFO_SCHEDULER,
+        SPLIT_DRAW_SEED_KEY,
+        _NATIVE_SEARCH,
+        search_alg_key,
     )
 
     if not data.split.selection_dir and not data.auto_val:
-        return ("split_draws needs a drawn validation split, and base_config sets "
-                "data.auto_val=False.")
+        return (
+            "split_draws needs a drawn validation split, and base_config sets "
+            "data.auto_val=False."
+        )
     if search_alg_key(search_alg) not in _NATIVE_SEARCH:
         native = sorted(_NATIVE_SEARCH)
-        return (f"split_draws pairs a grid axis through Ray's own BasicVariantGenerator, which "
-                f"only a native search_alg ({native}) builds; search_alg={search_alg!r} does not.")
+        return (
+            f"split_draws pairs a grid axis through Ray's own BasicVariantGenerator, which "
+            f"only a native search_alg ({native}) builds; search_alg={search_alg!r} does not."
+        )
     if scheduler["name"] != FIFO_SCHEDULER:
-        return (f"split_draws makes each draw a blocked comparison, and a pruning scheduler "
-                f"({scheduler['name']!r}) could end one draw before another completes; pass "
-                f"scheduler={{'name': {FIFO_SCHEDULER!r}}} with split_draws.")
+        return (
+            f"split_draws makes each draw a blocked comparison, and a pruning scheduler "
+            f"({scheduler['name']!r}) could end one draw before another completes; pass "
+            f"scheduler={{'name': {FIFO_SCHEDULER!r}}} with split_draws."
+        )
     if split_draw_seeds is not None and len(split_draw_seeds) != split_draws:
-        return (f"split_draw_seeds has {len(split_draw_seeds)} seed(s) but split_draws="
-                f"{split_draws}: one seed per draw.")
-    if split_draw_seeds is not None and len(set(split_draw_seeds)) != len(split_draw_seeds):
-        repeated = sorted({s for s in split_draw_seeds if split_draw_seeds.count(s) > 1})
-        return (f"split_draw_seeds repeats {repeated}: a spread over the same partition drawn "
-                "twice is not a spread, and group_split_draws only counts a point eligible on "
-                "its distinct planned seeds, not on one seed completed twice.")
+        return (
+            f"split_draw_seeds has {len(split_draw_seeds)} seed(s) but split_draws="
+            f"{split_draws}: one seed per draw."
+        )
+    if split_draw_seeds is not None and len(set(split_draw_seeds)) != len(
+        split_draw_seeds
+    ):
+        repeated = sorted(
+            {s for s in split_draw_seeds if split_draw_seeds.count(s) > 1}
+        )
+        return (
+            f"split_draw_seeds repeats {repeated}: a spread over the same partition drawn "
+            "twice is not a spread, and group_split_draws only counts a point eligible on "
+            "its distinct planned seeds, not on one seed completed twice."
+        )
     if baseline_params and SPLIT_DRAW_SEED_KEY in baseline_params:
-        return (f"baseline_params names {SPLIT_DRAW_SEED_KEY!r}: Ray's own "
-                "preset-variant pinning would pin every draw to that one seed instead of "
-                f"pairing the grid; drop {SPLIT_DRAW_SEED_KEY!r} from baseline_params.")
+        return (
+            f"baseline_params names {SPLIT_DRAW_SEED_KEY!r}: Ray's own "
+            "preset-variant pinning would pin every draw to that one seed instead of "
+            f"pairing the grid; drop {SPLIT_DRAW_SEED_KEY!r} from baseline_params."
+        )
     if SPLIT_DRAW_SEED_KEY in param_space:
-        return (f"param_space already sweeps {SPLIT_DRAW_SEED_KEY}, the same axis split_draws "
-                "adds as a paired grid; state the crossing through split_draws/"
-                "split_draw_seeds, not a second data.split.seed axis.")
+        return (
+            f"param_space already sweeps {SPLIT_DRAW_SEED_KEY}, the same axis split_draws "
+            "adds as a paired grid; state the crossing through split_draws/"
+            "split_draw_seeds, not a second data.split.seed axis."
+        )
     other_data_axes = sorted(
-        k for k in param_space if k.startswith("data.") and k != SPLIT_DRAW_SEED_KEY)
+        k
+        for k in param_space
+        if k.startswith("data.") and k != SPLIT_DRAW_SEED_KEY
+    )
     if other_data_axes:
-        return (f"split_draws pairs the identical partition with every sampled point at each "
-                f"draw, and param_space sweeps {other_data_axes} beside it: a data.* axis other "
-                f"than {SPLIT_DRAW_SEED_KEY} changes what a point admits or how it draws, so "
-                "draw k would no longer be the same partition for every point.")
+        return (
+            f"split_draws pairs the identical partition with every sampled point at each "
+            f"draw, and param_space sweeps {other_data_axes} beside it: a data.* axis other "
+            f"than {SPLIT_DRAW_SEED_KEY} changes what a point admits or how it draws, so "
+            "draw k would no longer be the same partition for every point."
+        )
     return None
 
 
-def _spatial_draws_issue(resolution: ResolvedRun, split_draws: int) -> str | None:
+def _spatial_draws_issue(
+    resolution: ResolvedRun, split_draws: int
+) -> str | None:
     """The refusal ``split_draws`` above 1 meets when the sweep's first point, resolved as
     ``resolution``, split one source over its own pixels (its ``spatial`` split), a partition
     no draw of ``data.split.seed`` varies; ``None`` otherwise."""
@@ -1327,7 +1711,9 @@ _SEED_AXIS_REMEDY = (
 )
 
 
-def caller_split_seed_refusal(param_space: dict, split_draws: int) -> SeedAxisRefusal | None:
+def caller_split_seed_refusal(
+    param_space: dict, split_draws: int
+) -> SeedAxisRefusal | None:
     """Whether ``param_space`` names ``data.split.seed`` as its own axis while ``split_draws``
     draws at most one partition: refused whatever the sampler.
     """
@@ -1338,7 +1724,9 @@ def caller_split_seed_refusal(param_space: dict, split_draws: int) -> SeedAxisRe
     return SeedAxisRefusal(reason=_SEED_AXIS_REASON, remedy=_SEED_AXIS_REMEDY)
 
 
-def _preflight_points(param_space: dict, search_alg: str) -> list[tuple[str, dict]]:
+def _preflight_points(
+    param_space: dict, search_alg: str
+) -> list[tuple[str, dict]]:
     """The points a sweep's preflight checks, read through the one reader of the space's shape
     (``hpo.space_axes`` as ``search_alg`` grids it, refusing as it refuses): the corner at every
     axis's first value, plus one variant per categorical choice and one per range end, each
@@ -1351,8 +1739,11 @@ def _preflight_points(param_space: dict, search_alg: str) -> list[tuple[str, dic
     base = {key: values[0] for key, (_kind, values) in axes.items()}
     points: list[tuple[str, dict]] = [("the first sampled point", dict(base))]
     for key, (kind, values) in axes.items():
-        labels = ([f"{key}={v!r}" for v in values] if kind == "categorical"
-                  else [f"{key} low={values[0]!r}", f"{key} high={values[1]!r}"])
+        labels = (
+            [f"{key}={v!r}" for v in values]
+            if kind == "categorical"
+            else [f"{key} low={values[0]!r}", f"{key} high={values[1]!r}"]
+        )
         for label, value in zip(labels, values):
             point = {**base, key: value}
             if all(point != listed for _, listed in points):
@@ -1366,14 +1757,18 @@ def _one_real_batch(task: str, train_ds: Any, n: int = 2):
     try:
         from tcip_mcp.pipelines.training.collation import task_collate
 
-        assert isinstance(train_ds, Sized), "every build_dataset task backend defines __len__"
+        assert isinstance(train_ds, Sized), (
+            "every build_dataset task backend defines __len__"
+        )
         indexable: Any = train_ds
         items = [indexable[i] for i in range(min(n, len(train_ds)))]
         if not items:
             return None, "the dataset built but is empty"
         return task_collate(task)(items), None
     except Exception as exc:  # noqa: BLE001, an unbuildable batch is a caller decision, not a crash
-        logger.info("could not build a real batch to smoke task %r: %s", task, exc)
+        logger.info(
+            "could not build a real batch to smoke task %r: %s", task, exc
+        )
         return None, f"{type(exc).__name__}: {exc}"
 
 
@@ -1441,12 +1836,16 @@ def evaluate_model(
 
     from tcip_mcp.pipelines.training.collation import task_collate
     from tcip_mcp.pipelines.training.eval_runners import (
-        run_full_frame_evaluation, run_test_evaluation,
+        run_full_frame_evaluation,
+        run_test_evaluation,
     )
     from tcip_mcp.pipelines.data.split_construction import predictor_dataset
     from tcip_mcp.pipelines.execution import prepare
 
-    from tcip_mcp.operationalization import OperationalizationRefusedError, latest_confirmed
+    from tcip_mcp.operationalization import (
+        OperationalizationRefusedError,
+        latest_confirmed,
+    )
     from tcip_mcp.traits import TraitUnknownError
 
     try:
@@ -1458,7 +1857,9 @@ def evaluate_model(
     labels_dir = labels_dir and str(located(labels_dir, project))
 
     from tcip_mcp.model_registry import (
-        CheckpointNotFoundError, UnregisteredCheckpointError, load_registered_checkpoint,
+        CheckpointNotFoundError,
+        UnregisteredCheckpointError,
+        load_registered_checkpoint,
     )
 
     run_dir = experiments.find_run(experiment_id_or_ckpt, project=project)
@@ -1467,14 +1868,20 @@ def evaluate_model(
         if run_dir is not None:
             completed = experiments.observe(run_dir).checkpoint
             if completed is None:
-                return {"error": f"run {experiment_id_or_ckpt} has completed no checkpoint"}
+                return {
+                    "error": f"run {experiment_id_or_ckpt} has completed no checkpoint"
+                }
             ckpt = Path(completed["path"])
         else:
             ckpt = located(experiment_id_or_ckpt, project)
         checkpoint = load_registered_checkpoint(ckpt, project=project)
         task = checkpoint.task
         scope = checkpoint.spec.data.recorded_scope
-    except (CheckpointNotFoundError, UnregisteredCheckpointError, ValueError) as exc:
+    except (
+        CheckpointNotFoundError,
+        UnregisteredCheckpointError,
+        ValueError,
+    ) as exc:
         return {"error": str(exc)}
     stated = stated or Stated()
 
@@ -1485,16 +1892,22 @@ def evaluate_model(
         admitted = admit(images_dir, labels_dir, scope=scope)
         require_admitted(admitted)
     except (ValueError, UnreadableLabelDocumentError) as exc:
-        return {"error": f"the ground truth of images_dir={images_dir!r} with "
-                         f"labels_dir={labels_dir!r} admits nothing to evaluate: {exc}"}
+        return {
+            "error": f"the ground truth of images_dir={images_dir!r} with "
+            f"labels_dir={labels_dir!r} admits nothing to evaluate: {exc}"
+        }
 
     from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
 
     if use_tiled_inference and task in DETECTION_TASKS:
         try:
             return run_full_frame_evaluation(
-                checkpoint, admitted, stated=stated, iou_threshold=iou_threshold,
-                trait=trait_entry)
+                checkpoint,
+                admitted,
+                stated=stated,
+                iou_threshold=iou_threshold,
+                trait=trait_entry,
+            )
         except (ValueError, UnreadableLabelDocumentError) as exc:
             return {"error": str(exc)}
 
@@ -1505,13 +1918,17 @@ def evaluate_model(
     # The checkpoint's own untiled pass: the width its predictor reads images at sizes the loader,
     # and its execution record governs the model that scores them.
     try:
-        pass_ = prepare(checkpoint, stated.model_copy(update={"tile": False})).runnable()
+        pass_ = prepare(
+            checkpoint, stated.model_copy(update={"tile": False})
+        ).runnable()
     except ValueError as exc:
         return {"error": str(exc)}
     predictor = pass_.predictor
 
     try:
-        dataset = predictor_dataset(task, admitted.every_sample(), scope, predictor, tiling)
+        dataset = predictor_dataset(
+            task, admitted.every_sample(), scope, predictor, tiling
+        )
     except Exception as exc:  # noqa: BLE001
         return {"error": f"Failed to build dataset: {exc}"}
 
@@ -1519,6 +1936,12 @@ def evaluate_model(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     try:
         return run_test_evaluation(
-            pass_, loader, device, iou_threshold=iou_threshold, tiling=tiling, trait=trait_entry)
+            pass_,
+            loader,
+            device,
+            iou_threshold=iou_threshold,
+            tiling=tiling,
+            trait=trait_entry,
+        )
     except ValueError as exc:
         return {"error": str(exc)}

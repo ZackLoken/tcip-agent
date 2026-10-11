@@ -27,7 +27,9 @@ def tool():
     return _load()
 
 
-def test_the_workspace_and_port_point_under_the_given_root(tool, tmp_path, monkeypatch):
+def test_the_workspace_and_port_point_under_the_given_root(
+    tool, tmp_path, monkeypatch
+):
     """The ambient test rail may itself bind TCIP_WORKSPACE under this very tmp_path; a root this
     test controls directly must not accidentally trip that unrelated refusal."""
     monkeypatch.delenv("TCIP_WORKSPACE", raising=False)
@@ -64,7 +66,9 @@ def test_the_repository_root_itself_is_refused(tool):
         tool.build_environ(tool.REPO_ROOT, 8799)
 
 
-def test_a_root_under_the_callers_own_active_workspace_is_refused(tool, tmp_path, monkeypatch):
+def test_a_root_under_the_callers_own_active_workspace_is_refused(
+    tool, tmp_path, monkeypatch
+):
     active_workspace = tmp_path / "S" / "real-project"
     monkeypatch.setenv("TCIP_WORKSPACE", str(active_workspace))
     root = active_workspace / "harness"
@@ -82,7 +86,9 @@ def test_a_root_outside_both_is_admitted(tool, tmp_path, monkeypatch):
     assert env["TCIP_WORKSPACE"] == str(root / "workspace")
 
 
-def test_a_root_containing_the_callers_own_active_workspace_is_refused(tool, tmp_path, monkeypatch):
+def test_a_root_containing_the_callers_own_active_workspace_is_refused(
+    tool, tmp_path, monkeypatch
+):
     """The old check only refused the root-under-workspace direction; a root that itself
     contains the caller's own active TCIP_WORKSPACE as a subdirectory aliases it just as much."""
     root = tmp_path / "harness"
@@ -93,7 +99,9 @@ def test_a_root_containing_the_callers_own_active_workspace_is_refused(tool, tmp
         tool.build_environ(root, 8799)
 
 
-def test_a_root_that_already_carries_its_own_tcip_state_is_refused(tool, tmp_path, monkeypatch):
+def test_a_root_that_already_carries_its_own_tcip_state_is_refused(
+    tool, tmp_path, monkeypatch
+):
     monkeypatch.delenv("TCIP_WORKSPACE", raising=False)
     root = tmp_path / "harness"
     (root / ".tcip").mkdir(parents=True)
@@ -102,7 +110,9 @@ def test_a_root_that_already_carries_its_own_tcip_state_is_refused(tool, tmp_pat
         tool.build_environ(root, 8799)
 
 
-def test_a_root_whose_child_already_carries_tcip_state_is_refused(tool, tmp_path, monkeypatch):
+def test_a_root_whose_child_already_carries_tcip_state_is_refused(
+    tool, tmp_path, monkeypatch
+):
     monkeypatch.delenv("TCIP_WORKSPACE", raising=False)
     root = tmp_path / "harness"
     (root / "existing_project" / ".tcip").mkdir(parents=True)
@@ -111,7 +121,9 @@ def test_a_root_whose_child_already_carries_tcip_state_is_refused(tool, tmp_path
         tool.build_environ(root, 8799)
 
 
-def test_a_fresh_root_with_no_tcip_workspace_bound_is_admitted(tool, tmp_path, monkeypatch):
+def test_a_fresh_root_with_no_tcip_workspace_bound_is_admitted(
+    tool, tmp_path, monkeypatch
+):
     """A legitimate call still succeeds: a brand-new root, with no TCIP_WORKSPACE bound and no
     .tcip anywhere under it, is not refused."""
     monkeypatch.delenv("TCIP_WORKSPACE", raising=False)
@@ -122,14 +134,18 @@ def test_a_fresh_root_with_no_tcip_workspace_bound_is_admitted(tool, tmp_path, m
     assert env["TCIP_WORKSPACE"] == str(root / "workspace")
 
 
-def test_stop_refuses_outright_on_a_non_windows_host(tool, tmp_path, monkeypatch):
+def test_stop_refuses_outright_on_a_non_windows_host(
+    tool, tmp_path, monkeypatch
+):
     monkeypatch.setattr(tool.sys, "platform", "linux")
 
     with pytest.raises(SystemExit, match="Windows-only"):
         tool.stop(tmp_path)
 
 
-def test_stop_is_not_refused_for_platform_on_windows(tool, tmp_path, monkeypatch):
+def test_stop_is_not_refused_for_platform_on_windows(
+    tool, tmp_path, monkeypatch
+):
     """A legitimate call still succeeds: on a Windows host, stop reaches its real work (the
     missing server_info.json refusal, never the platform refusal)."""
     monkeypatch.setattr(tool.sys, "platform", "win32")

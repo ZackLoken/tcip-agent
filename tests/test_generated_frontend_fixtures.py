@@ -24,17 +24,32 @@ GENERATOR = REPO_ROOT / "tools" / "generate_delivery_fixture.py"
 def _generator():
     """The fixture generator loaded as a module, so the test regenerates the way the tool
     does."""
-    spec = importlib.util.spec_from_file_location("tcip_delivery_fixture_generator", GENERATOR)
+    spec = importlib.util.spec_from_file_location(
+        "tcip_delivery_fixture_generator", GENERATOR
+    )
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-PER_RUN = frozenset({
-    "event_id", "acknowledgment_id", "assessment_id", "dataset_id", "experiment_id",
-    "produced_at", "recorded_at", "built_at", "output_sha256", "result_sha256", "record_sha256",
-    "checkpoint_sha256", "digest"})
+PER_RUN = frozenset(
+    {
+        "event_id",
+        "acknowledgment_id",
+        "assessment_id",
+        "dataset_id",
+        "experiment_id",
+        "produced_at",
+        "recorded_at",
+        "built_at",
+        "output_sha256",
+        "result_sha256",
+        "record_sha256",
+        "checkpoint_sha256",
+        "digest",
+    }
+)
 """The record fields two productions of the same scenes fill differently: minted ids, the
 times things happened, and digests over what carries those or over a file the scene writes in
 the platform's own line endings (a run's weights, a written output, a record holding a time, a
@@ -52,7 +67,9 @@ def _normalized(fixture: dict[str, dict]) -> dict[str, dict]:
     mapping key that is exactly the name
     :func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.archived_mapping_name` gives the
     cited record replaced by that record's placeholder. Every other value is kept as served."""
-    from tcip_mcp.pipelines.postprocessing.plant_mapping import archived_mapping_name
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        archived_mapping_name,
+    )
 
     seen: dict[str, str] = {}
 
@@ -70,11 +87,20 @@ def _normalized(fixture: dict[str, dict]) -> dict[str, dict]:
     out: dict[str, dict] = {}
     for name, record in fixture.items():
         normalized = walk(record)
-        pm, resolved = record["plant_mapping"], record.get("plant_mapping_resolved_key")
-        if (pm is not None and resolved is not None and "record_sha256" in pm
-                and resolved == archived_mapping_name(pm["name"], pm["record_sha256"])):
+        pm, resolved = (
+            record["plant_mapping"],
+            record.get("plant_mapping_resolved_key"),
+        )
+        if (
+            pm is not None
+            and resolved is not None
+            and "record_sha256" in pm
+            and resolved
+            == archived_mapping_name(pm["name"], pm["record_sha256"])
+        ):
             normalized["plant_mapping_resolved_key"] = (
-                f"<archived {pm['name']} at {seen[pm['record_sha256']]}>")
+                f"<archived {pm['name']} at {seen[pm['record_sha256']]}>"
+            )
         out[name] = normalized
     return out
 
@@ -100,14 +126,32 @@ def test_the_comparison_keeps_every_value_a_run_does_not_mint() -> None:
     count = checked["canopy"]["plant_mapping"]["segments_without_plant"]
     digest = checked["archived_mapping"]["plant_mapping"]["record_sha256"]
     broken = [
-        _changed(checked, "canopy", "plant_mapping", "segments_without_plant", count + 99),
-        _changed(checked, "validated", "output_path", "/scratch/elsewhere.csv"),
+        _changed(
+            checked,
+            "canopy",
+            "plant_mapping",
+            "segments_without_plant",
+            count + 99,
+        ),
+        _changed(
+            checked, "validated", "output_path", "/scratch/elsewhere.csv"
+        ),
         _changed(checked, "validated", "event_id", 7),
         _changed(checked, "validated", "output_sha256", 7),
         _changed(checked, "registry", "producer", "experiment_id", None),
-        _changed(checked, "archived_mapping", "producer", "experiment_id", "another-run"),
-        *(_changed(checked, "archived_mapping", "plant_mapping_resolved_key", key)
-          for key in ("valley@", "valley@3", f"valley@{digest}")),
+        _changed(
+            checked,
+            "archived_mapping",
+            "producer",
+            "experiment_id",
+            "another-run",
+        ),
+        *(
+            _changed(
+                checked, "archived_mapping", "plant_mapping_resolved_key", key
+            )
+            for key in ("valley@", "valley@3", f"valley@{digest}")
+        ),
     ]
 
     for fixture in broken:
@@ -125,4 +169,5 @@ def test_the_delivery_fixture_is_what_a_regeneration_serves() -> None:
     checked = json.loads(GENERATED.read_text(encoding="utf-8"))
     assert _normalized(checked) == _normalized(produced), (
         "packages/tcip-web/frontend/src/test/deliveryEvents.json is out of date; "
-        "run python tools/generate_delivery_fixture.py")
+        "run python tools/generate_delivery_fixture.py"
+    )

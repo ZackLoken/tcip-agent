@@ -13,7 +13,9 @@ from tcip_mcp.registry_paths import located
 
 @tool()
 @audited
-def freeze_selection(project: Path, experiment_id: str, output_path: str | None = None) -> dict:
+def freeze_selection(
+    project: Path, experiment_id: str, output_path: str | None = None
+) -> dict:
     """Freeze a finished run's own drawn train/val partition into a selection, so a later run can
     bind to the identical partition instead of drawing its own.
 
@@ -43,7 +45,9 @@ def freeze_selection(project: Path, experiment_id: str, output_path: str | None 
     from tcip_mcp.experiments import run_resolution
     from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
     from tcip_mcp.pipelines.data.selection import (
-        Selection, read_selection_checked, write_selection,
+        Selection,
+        read_selection_checked,
+        write_selection,
     )
     from tcip_annotation.json_io import UnreadableLabelDocumentError
 
@@ -56,51 +60,75 @@ def freeze_selection(project: Path, experiment_id: str, output_path: str | None 
         return {"error": str(exc)}
     partition = resolved.partition
     if resolved.spatial is not None:
-        return {"error": f"{experiment_id!r}'s split is spatial (region identities, not stems): "
-                         "freeze_selection binds a stem-keyed partition, which a spatial split "
-                         "never draws."}
+        return {
+            "error": f"{experiment_id!r}'s split is spatial (region identities, not stems): "
+            "freeze_selection binds a stem-keyed partition, which a spatial split "
+            "never draws."
+        }
     # The run's own class space, so what this selection records is what the checkpoint records.
     scope = resolved.data.recorded_scope
-    samples = [s for s in partition_samples(partition) if s.side in ("train", "val")]
+    samples = [
+        s for s in partition_samples(partition) if s.side in ("train", "val")
+    ]
     n_train = sum(1 for s in samples if s.side == "train")
     n_val = len(samples) - n_train
     if not n_val:
-        return {"error": f"{experiment_id!r} trained without validation (an empty val side): "
-                         "a partition no bind can use."}
+        return {
+            "error": f"{experiment_id!r} trained without validation (an empty val side): "
+            "a partition no bind can use."
+        }
     try:
         samples = acquired(samples)
     except (UnreadableLabelDocumentError, ValueError) as exc:
-        return {"error": f"a member's ground truth changed since {experiment_id!r} trained "
-                         f"({exc}): a selection composed from it would bind a later run to "
-                         "ground truth this run never saw. Freeze a run whose members have not "
-                         "moved, or draw a fresh split over the current data."}
+        return {
+            "error": f"a member's ground truth changed since {experiment_id!r} trained "
+            f"({exc}): a selection composed from it would bind a later run to "
+            "ground truth this run never saw. Freeze a run whose members have not "
+            "moved, or draw a fresh split over the current data."
+        }
 
     a_source = samples[0].source
     dataset_root = dataset_root_of(a_source)
     if dataset_root is None:
-        return {"error": f"this run's own source {a_source!r} does not resolve under a dataset "
-                         "root (dataset_root_of), so the frozen selection has no dataset to "
-                         "record a fingerprint for."}
-    out_dir = (located(output_path, project) if output_path is not None
-               else dataset_root / "splits" / f"frozen-{experiment_id}")
+        return {
+            "error": f"this run's own source {a_source!r} does not resolve under a dataset "
+            "root (dataset_root_of), so the frozen selection has no dataset to "
+            "record a fingerprint for."
+        }
+    out_dir = (
+        located(output_path, project)
+        if output_path is not None
+        else dataset_root / "splits" / f"frozen-{experiment_id}"
+    )
     existing, existing_error = read_selection_checked(out_dir, project=project)
     if existing is not None or existing_error is not None:
-        return {"error": f"a selection already exists at {str(out_dir)!r}: "
-                         f"{existing_error or 'freeze_selection never overwrites one.'}"}
+        return {
+            "error": f"a selection already exists at {str(out_dir)!r}: "
+            f"{existing_error or 'freeze_selection never overwrites one.'}"
+        }
 
     try:
-        write_selection(out_dir, Selection(
-            samples=tuple(samples), scope=scope, seed=partition["seed"],
-            group_by=partition["group_by"],
-            dataset_fingerprint=dataset_fingerprint(dataset_root, samples),
-        ), project=project)
+        write_selection(
+            out_dir,
+            Selection(
+                samples=tuple(samples),
+                scope=scope,
+                seed=partition["seed"],
+                group_by=partition["group_by"],
+                dataset_fingerprint=dataset_fingerprint(dataset_root, samples),
+            ),
+            project=project,
+        )
     except ValueError as exc:
         return {"error": f"{experiment_id!r}'s resolved record: {exc}"}
     return {
-        "selection_dir": str(out_dir), "train": n_train, "val": n_val, "calibration": 0,
+        "selection_dir": str(out_dir),
+        "train": n_train,
+        "val": n_val,
+        "calibration": 0,
         "holdout": 0,
         "note": "the reference sides are empty (a training run's own drawn partition records "
-               "no reference draw): an assessment against this selection refuses by name.",
+        "no reference draw): an assessment against this selection refuses by name.",
     }
 
 
@@ -117,16 +145,31 @@ def _scan_dataset(root: str) -> dict:
     import tcip_store
 
     from tcip_mcp.buckets import buckets_under
-    from tcip_mcp.dataset_layout import LABEL_DOCUMENTS, image_dir, label_key_of, list_dates
-    from tcip_mcp.pipelines.image_utils import list_logical_images, source_path_of
+    from tcip_mcp.dataset_layout import (
+        LABEL_DOCUMENTS,
+        image_dir,
+        label_key_of,
+        list_dates,
+    )
+    from tcip_mcp.pipelines.image_utils import (
+        list_logical_images,
+        source_path_of,
+    )
 
     root_path = Path(root)
-    images = [source_path_of(source) for capture in list_dates(root_path)
-              for source in list_logical_images(image_dir(root_path, capture)).values()]
+    images = [
+        source_path_of(source)
+        for capture in list_dates(root_path)
+        for source in list_logical_images(
+            image_dir(root_path, capture)
+        ).values()
+    ]
     return {
         "images": {image: label_key_of(image) for image in images},
         "labels": tcip_store.keys(LABEL_DOCUMENTS, str(root_path)),
-        "predictions": [key for b in buckets_under(root_path) for key in b.document_keys],
+        "predictions": [
+            key for b in buckets_under(root_path) for key in b.document_keys
+        ],
     }
 
 
@@ -241,17 +284,34 @@ def draw_splits(
             image; the images are the dataset's own ``images/`` tree either way.
     """
     return draw_splits_at(
-        project, str(located(folder_path, project)), seed=seed, val_ratio=val_ratio,
-        calibration_ratio=calibration_ratio, holdout_ratio=holdout_ratio, group_by=group_by,
-        group_key_map=group_key_map, stratify_foreground=stratify_foreground,
-        output_path=output_path and str(located(output_path, project)), subject=subject,
-        ground_truth=ground_truth and str(located(ground_truth, project)))
+        project,
+        str(located(folder_path, project)),
+        seed=seed,
+        val_ratio=val_ratio,
+        calibration_ratio=calibration_ratio,
+        holdout_ratio=holdout_ratio,
+        group_by=group_by,
+        group_key_map=group_key_map,
+        stratify_foreground=stratify_foreground,
+        output_path=output_path and str(located(output_path, project)),
+        subject=subject,
+        ground_truth=ground_truth and str(located(ground_truth, project)),
+    )
 
 
 def draw_splits_at(
-    project: Path, folder_path: str, *, seed: int, val_ratio: float, calibration_ratio: float,
-    holdout_ratio: float, group_by: str, group_key_map: dict[str, str] | None,
-    stratify_foreground: bool, output_path: str | None, subject: str | None,
+    project: Path,
+    folder_path: str,
+    *,
+    seed: int,
+    val_ratio: float,
+    calibration_ratio: float,
+    holdout_ratio: float,
+    group_by: str,
+    group_key_map: dict[str, str] | None,
+    stratify_foreground: bool,
+    output_path: str | None,
+    subject: str | None,
     ground_truth: str | None,
 ) -> dict:
     """The selection drawn over the dataset root ``folder_path`` as :func:`draw_splits` states
@@ -266,75 +326,143 @@ def draw_splits_at(
     from tcip_mcp.dataset_layout import LABEL_DOCUMENTS, image_dir, list_dates
     from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
     from tcip_mcp.pipelines.data.selection import (
-        REFERENCE_SIDES, SIDES, ClassScope, Selection, write_selection,
+        REFERENCE_SIDES,
+        SIDES,
+        ClassScope,
+        Selection,
+        write_selection,
     )
     from tcip_mcp.pipelines.data.split_construction import (
-        admitted_membership, check_shares, draw_sides,
+        admitted_membership,
+        check_shares,
+        draw_sides,
     )
     from tcip_mcp.pipelines.data.splits import foreground_group_count
-    from tcip_mcp.pipelines.image_utils import AmbiguousImageStemError, BandGroupIncompleteError
+    from tcip_mcp.pipelines.image_utils import (
+        AmbiguousImageStemError,
+        BandGroupIncompleteError,
+    )
 
     # Each place holding ground truth: (its name, images directory, ground truth).
     places: list[tuple[str, Path, str | None]]
     if ground_truth is not None:
-        places = [(c, image_dir(folder_path, c), ground_truth) for c in list_dates(folder_path)]
+        places = [
+            (c, image_dir(folder_path, c), ground_truth)
+            for c in list_dates(folder_path)
+        ]
         if not places:
-            return {"error": f"{folder_path} holds no capture under images/ whose images "
-                             f"{ground_truth} could answer for; ingest them with ingest_images."}
+            return {
+                "error": f"{folder_path} holds no capture under images/ whose images "
+                f"{ground_truth} could answer for; ingest them with ingest_images."
+            }
     else:
-        captures = sorted({key.parts[0] for key in tcip_store.keys(LABEL_DOCUMENTS, folder_path)})
+        captures = sorted(
+            {
+                key.parts[0]
+                for key in tcip_store.keys(LABEL_DOCUMENTS, folder_path)
+            }
+        )
         places = [(c, image_dir(folder_path, c), None) for c in captures]
         if not places:
-            return {"error": f"{folder_path} holds no label document for draw_splits to draw a "
-                             "subject-scoped selection from; annotate its images, or convert an "
-                             "external COCO document into label documents with import_coco."}
+            return {
+                "error": f"{folder_path} holds no label document for draw_splits to draw a "
+                "subject-scoped selection from; annotate its images, or convert an "
+                "external COCO document into label documents with import_coco."
+            }
 
     try:
-        ratios = check_shares({"val": val_ratio, "calibration": calibration_ratio,
-                               "holdout": holdout_ratio})
+        ratios = check_shares(
+            {
+                "val": val_ratio,
+                "calibration": calibration_ratio,
+                "holdout": holdout_ratio,
+            }
+        )
         membership = admitted_membership(
-            places, scope=ClassScope(subject=subject), group_by=group_by,
-            group_key_map=group_key_map)
+            places,
+            scope=ClassScope(subject=subject),
+            group_by=group_by,
+            group_key_map=group_key_map,
+        )
         drawn, counted = draw_sides(
-            membership.samples, membership.scope, seed=seed, stratify=stratify_foreground,
-            ratios=ratios)
-    except (UnreadableLabelDocumentError, AmbiguousImageStemError, BandGroupIncompleteError,
-            FileNotFoundError, ValueError, OSError) as exc:
+            membership.samples,
+            membership.scope,
+            seed=seed,
+            stratify=stratify_foreground,
+            ratios=ratios,
+        )
+    except (
+        UnreadableLabelDocumentError,
+        AmbiguousImageStemError,
+        BandGroupIncompleteError,
+        FileNotFoundError,
+        ValueError,
+        OSError,
+    ) as exc:
         return {"error": str(exc)}
 
-    by_side = {side: [key for key, sample in drawn.items() if sample.side == side]
-               for side in SIDES}
+    by_side = {
+        side: [key for key, sample in drawn.items() if sample.side == side]
+        for side in SIDES
+    }
     sizes = {side: len(keys) for side, keys in by_side.items()}
     group_of = {key: sample.group for key, sample in drawn.items()}.__getitem__
     response = {
         "splits": sizes,
         "foreground_annotations": {
-            side: sum(counted[key] for key in keys) for side, keys in by_side.items()},
+            side: sum(counted[key] for key in keys)
+            for side, keys in by_side.items()
+        },
         "total_stems": len(drawn),
         "total_annotations": sum(counted.values()),
         "groups": len({sample.group for sample in drawn.values()}),
         "stratified": stratify_foreground,
-        "seed": seed, "group_by": membership.group_by, "scope": asdict(membership.scope),
+        "seed": seed,
+        "group_by": membership.group_by,
+        "scope": asdict(membership.scope),
         "tallies": membership.tallies,
         "selection_dir": str(output_path) if output_path else None,
         "calibration_foreground_groups": foreground_group_count(
-            [key for side in REFERENCE_SIDES for key in by_side[side]], counted, group_of),
-        "realized_ratios": {side: size / len(drawn) for side, size in sizes.items()},
+            [key for side in REFERENCE_SIDES for key in by_side[side]],
+            counted,
+            group_of,
+        ),
+        "realized_ratios": {
+            side: size / len(drawn) for side, size in sizes.items()
+        },
     }
     if not output_path:
         return response
     from tcip_mcp.audit import record_event_or_raise
 
     try:
-        write_selection(output_path, Selection(
-            samples=tuple(drawn[key] for key in sorted(drawn)), scope=membership.scope, seed=seed,
-            group_by=membership.group_by,
-            dataset_fingerprint=dataset_fingerprint(folder_path, drawn.values()),
-        ), project=project)
+        write_selection(
+            output_path,
+            Selection(
+                samples=tuple(drawn[key] for key in sorted(drawn)),
+                scope=membership.scope,
+                seed=seed,
+                group_by=membership.group_by,
+                dataset_fingerprint=dataset_fingerprint(
+                    folder_path, drawn.values()
+                ),
+            ),
+            project=project,
+        )
     except ValueError as exc:
         return {"error": str(exc)}
-    record_event_or_raise("draw_splits", {
-        "folder_path": folder_path, "output_path": output_path, "seed": seed, "ratios": ratios,
-        "group_by": membership.group_by, "subject": subject, "ground_truth": ground_truth},
-        actor=None, scope=project)
+    record_event_or_raise(
+        "draw_splits",
+        {
+            "folder_path": folder_path,
+            "output_path": output_path,
+            "seed": seed,
+            "ratios": ratios,
+            "group_by": membership.group_by,
+            "subject": subject,
+            "ground_truth": ground_truth,
+        },
+        actor=None,
+        scope=project,
+    )
     return response
