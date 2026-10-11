@@ -123,8 +123,9 @@ Three seams support bespoke work; the platform guarantees integrity around it:
   stating one beside its `dataset_source`. `ctx.build_dataset` takes `samples` and `transforms`
   and nothing else, and builds over the samples you hand it, whole: through the run's builder,
   or through the platform's factory at the run's recorded `sizes` and `tiling`, under the run's
-  `scope` either way. A within-image split's region views are the run's own `ctx.train_loader`
-  and `ctx.val_loader`; `ctx.build_dataset` builds no view of them. `builder_kwargs` configure
+  `scope` either way. On a within-image split run (`ctx.spatial`) it builds the run's one
+  sample's train view, every tile inside the recorded train region, and refuses any other
+  sample list naming that sample, so no held-out pixel trains. `builder_kwargs` configure
   your builder and may not restate
   `samples`, `scope`, `task` or `transforms`; a builder that did would train on membership or a
   class space the run's own record does not describe, so the seam refuses it by name. `scope` is
@@ -165,8 +166,9 @@ Three seams support bespoke work; the platform guarantees integrity around it:
   states the *only* model-side contract, the measurement boundary: your model must train (finite
   gradient loss) and emit inference output the library scorers consume. `launch_training` runs this
   contract for you: `preflight_config(smoke=True)` builds the model and smokes it at the *resolved*
-  dims and img_size, every attribute head included, before the training subprocess spawns, so a broken builder fails the
-  launch, not a wasted run. `ctx.check_contract` / `ctx.overfit_check` are the same proofs on
+  dims and frame (the tile edge, else the frame every untiled source shares), or on one real batch
+  of the run's own dataset when it resolved no frame, every attribute head included, before the
+  training subprocess spawns, so a broken builder fails the launch, not a wasted run. `ctx.check_contract` / `ctx.overfit_check` are the same proofs on
   demand; `launch_training(overfit_check=True)` runs `ctx.overfit_check`'s own diagnostic at
   launch, on the contract's batch, and records the result on the run's `model_contract`, never
   gating (a valid model can fail twenty steps on noise).

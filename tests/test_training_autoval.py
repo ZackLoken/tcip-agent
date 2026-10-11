@@ -401,6 +401,54 @@ def test_a_single_source_spatial_run_builds_its_loaders_at_the_stated_band_count
     assert image.shape[0] == 1
 
 
+def _within_image_context(tmp_path: Path):
+    """The context a within-image split run's body is handed, built from the run's own launch
+    record (``subprocess_worker.prepare_run_context``), with its partition and its one stem."""
+    from tcip_mcp.experiments import observe
+    from tcip_mcp.pipelines.training.subprocess_worker import prepare_run_context
+    from tests._verified_checkpoint_fixtures import opened_run, unbuilt_source
+
+    images_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    data_cfg = {
+        "images_dir": str(images_dir), "scope": {"subject": "bud"}, "auto_val": True,
+        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+        "split": {"val_ratio": 0.25, "holdout_ratio": 0.1, "calibration_ratio": 0, "seed": 1},
+    }
+    observation = observe(opened_run(tmp_path, training_config(unbuilt_source("detection"),
+                                                               data_cfg)))
+    return prepare_run_context(observation), observation.resolution["partition"], stem
+
+
+def test_a_bodys_loader_on_a_within_image_split_run_holds_only_train_region_tiles(
+        tmp_path: Path):
+    """A training body's loader over a within-image split run's one sample is that sample's train
+    view: every tile it serves lies inside the train region the run recorded, so no held-out pixel
+    trains."""
+    from tcip_mcp.pipelines.data.split_construction import partition_samples, partition_spatial
+    from tcip_mcp.pipelines.raster_source import rect_contains_rect
+
+    ctx, partition, _stem = _within_image_context(tmp_path)
+    spatial = partition_spatial(partition)
+    assert spatial is not None
+
+    served = ctx.build_dataset(samples=partition_samples(partition))
+    assert served.tile_entries
+    assert all(any(rect_contains_rect(r, box) for r in spatial.train_region)
+               for _stem, box in served.tile_entries)
+
+
+def test_a_bodys_loader_on_a_within_image_split_run_refuses_another_sample_naming_its_own(
+        tmp_path: Path):
+    """On a within-image split run a body's loader over a sample list that is not the run's one
+    sample refuses naming that sample."""
+    from tests._producer_fixtures import samples_over, seed_bud_images
+
+    ctx, _partition, stem = _within_image_context(tmp_path)
+    other = seed_bud_images(tmp_path / "other" / "images" / UNDATED_BUCKET, n=1)
+    with pytest.raises(ValueError, match=stem):
+        ctx.build_dataset(samples=samples_over(other, subject="bud"))
+
+
 def _multiband_source(images_dir: Path, stem: str, bands: int) -> None:
     """One annotated raster of ``bands`` bands, written the way the multi-band readers expect."""
     import numpy as np
@@ -570,28 +618,37 @@ def test_a_calibration_ratio_adds_a_disjoint_calibration_region(tmp_path: Path):
 
 def test_a_spatial_split_raises_on_unresolvable_extent(tmp_path: Path):
     """No width/height in the label document: the split refuses naming the document and the frame
-    it lacks. The one source is admitted through the producer the run itself admits through, so
-    the split is derived over the dataset the run would build."""
-    from tcip_mcp.pipelines.data.datasets import resolve_sizes
-    from tcip_mcp.pipelines.data.split_construction import run_shares, spatial_single_source_split
+    it lacks, before it reads the lattice. The one source is admitted through the producer the run
+    itself admits through and its block resolved the way the run resolves it, so the split is
+    derived over the dataset the run would build; the same block over a document stating its
+    frame draws the split."""
+    from tcip_mcp.pipelines.data.split_construction import (
+        _with_lattice, run_shares, run_sizes, spatial_single_source_split,
+    )
+    from tcip_mcp.pipelines.schemas import DataSpec, SplitSpec
     from tests._producer_fixtures import admit_over
+
+    split = SplitSpec.model_validate(
+        {"val_ratio": 0.2, "holdout_ratio": 0.1, "calibration_ratio": 0.15, "seed": 1})
+
+    def _drawn(images_dir: Path):
+        admitted = admit_over(images_dir, subject="bud")
+        samples = admitted.every_sample()
+        stated = DataSpec.model_validate(
+            {"tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2}})
+        block = _with_lattice("detection", run_sizes("detection", stated, admitted.scope,
+                                                     samples), samples)
+        return spatial_single_source_split(samples[0], block, run_shares(split, spatial=True))
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     _save_png(images_dir / "mosaic.png")
     # A readable, annotated document recording no width/height, distinct from an unreadable one.
     label_image(images_dir / "mosaic.png", _BUD, 0, 0)
-
-    from tcip_mcp.pipelines.schemas import SplitSpec
-
-    tiling = {"enabled": True, "tile_size": 128, "overlap": 0.2}
-    split = SplitSpec.model_validate(
-        {"val_ratio": 0.2, "holdout_ratio": 0.1, "calibration_ratio": 0.15, "seed": 1})
-    admitted = admit_over(images_dir, subject="bud")
     with pytest.raises(ValueError, match="states no positive width and height"):
-        spatial_single_source_split(
-            admitted.every_sample()[0], admitted.scope, tiling,
-            resolve_sizes("detection", {}, admitted.every_sample()),
-            run_shares(split, spatial=True))
+        _drawn(images_dir)
+
+    framed, _stem = _big_single_source(tmp_path / "framed", 4000, 3000)
+    assert _drawn(framed).train_region
 
 
 def test_single_tiled_source_raises_on_an_unreadable_label(tmp_path: Path, caplog):

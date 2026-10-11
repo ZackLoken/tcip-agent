@@ -21,14 +21,10 @@ from tcip_store import stored_number, stored_numbers
 from tcip_annotation.json_io import xywh
 
 if TYPE_CHECKING:
+    from tcip_mcp.pipelines.schemas import ScoreWeights
     from tcip_mcp.traits import TraitEntry
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_SCORE_WEIGHTS: dict[str, float] = {"loss": 0.45, "f1": 0.35, "map50": 0.20}
-"""Composite-objective weights, each acting on its term as :func:`compute_composite_objective`
-scales it: a caller-owned selection policy, overridable through ``score_weights`` on every eval
-surface; a documented default, no derivation."""
 
 CENTER_MATCH_COMPARABILITY_KEYS: frozenset[str] = frozenset({
     "map50", "map", "iou_precision", "iou_recall", "iou_f1",
@@ -90,17 +86,15 @@ def _reported_metrics(values: dict) -> dict:
 # ====================================================================
 
 def compute_composite_objective(
-    val_loss: float, f1: float, map50: float, score_weights: dict | None = None
+    val_loss: float, f1: float, map50: float, w: ScoreWeights
 ) -> float | None:
     """Lower-is-better selection/tuning score blending loss, F1 and mAP50, or ``None`` when
     the epoch has no useful score.
 
-    ``w["loss"]*loss + w["f1"]*(1-f1)*10 + w["map50"]*(1-map50)*10``, ``w`` the default weights
-    when ``score_weights`` is empty or ``None``. A non-positive or non-finite loss, or both
-    quality terms
-    below 0.01, answers ``None``.
+    ``w.loss*loss + w.f1*(1-f1)*10 + w.map50*(1-map50)*10``, ``w`` the run's stated
+    ``evaluation.score_weights``. A non-positive or non-finite loss, or both quality terms below
+    0.01, answers ``None``.
     """
-    w = score_weights or DEFAULT_SCORE_WEIGHTS
     vl = float(val_loss) if (val_loss is not None and math.isfinite(val_loss)) else float("inf")
     f1v = float(f1) if (f1 is not None and math.isfinite(f1)) else 0.0
     m50 = float(map50) if (map50 is not None and math.isfinite(map50)) else 0.0
@@ -108,7 +102,7 @@ def compute_composite_objective(
         return None
     if f1v < 0.01 and m50 < 0.01:
         return None
-    return w["loss"] * vl + w["f1"] * (1.0 - f1v) * 10 + w["map50"] * (1.0 - m50) * 10
+    return w.loss * vl + w.f1 * (1.0 - f1v) * 10 + w.map50 * (1.0 - m50) * 10
 
 
 def precision_recall_f1(tp: int, fp: int, fn: int) -> dict[str, float]:
@@ -907,21 +901,23 @@ def detection_metrics(per_image: list[dict], *, trait: TraitEntry | None, conf_t
 @torch.no_grad()
 def evaluate(
     model, loader, device, task: str, *, dims: Mapping[str, Any],
-    conf_threshold: float | None, iou_threshold: float = 0.5,
-    score_weights: dict | None = None, trait: TraitEntry | None = None,
+    conf_threshold: float | None, iou_threshold: float,
+    score_weights: ScoreWeights | None, trait: TraitEntry | None = None,
     density: float | None = None,
 ) -> dict:
     """Compute per-task validation/test metrics. Returns bare metric keys. ``conf_threshold`` is
     the confidence a detector's boxes are counted at, read from the run's validated
     ``evaluation.conf_threshold`` or the pass's execution record; ``None`` for any other head.
-    A detector predicts each image under the cap ``density``, required for a detector and
-    ``None`` for any other head, gives its frame (``derivations.detection_cap``, through
-    ``operating_point.governed_forward``), its in-model score threshold as the caller left it.
+    A detector predicts each image at no score floor, every box the cap ``density`` gives its
+    frame admits (``derivations.detection_cap``, through ``operating_point.governed_forward``);
+    ``density`` is required for a detector and ``None`` for any other head.
 
     ``dims`` is what the model was built at (:func:`~tcip_mcp.pipelines.model_build.model_dims`);
     a class or rank count is read from it, never off the half being scored. A detector's metrics
-    are :func:`detection_metrics` (by mask for instance segmentation) beside the composite
-    ``objective``; one whose dims carry ``attributes`` also reports ``attribute_agreement``: per
+    are :func:`detection_metrics` (by mask for instance segmentation) beside, when the run states
+    ``score_weights``, the composite ``objective`` they weight
+    (:func:`compute_composite_objective`); one whose dims carry ``attributes`` also reports
+    ``attribute_agreement``: per
     attribute name, the matched pairs' count and :func:`classification_metrics` over them
     (:func:`attribute_pairs`, under the governing criterion at ``conf_threshold``). ``trait`` is
     the trait's confirmed entry whose criterion governs the count; absent, the IoU convention at
@@ -981,7 +977,7 @@ def evaluate(
             model.eval()
             frames = [(int(img.shape[-1]), int(img.shape[-2])) for img in images]
             caps = [detection_cap(cast(float, density), w * h) for w, h in frames]
-            outputs = governed_forward(model, images, caps, conf=None)
+            outputs = governed_forward(model, images, caps, conf=0.0)
             for (w, h), cap, t, out in zip(frames, caps, targets, outputs, strict=True):
                 per_image.append(records_from_detector(
                     t, out, width=w, height=h, cap=cap, include_masks=is_instance_seg))
@@ -1036,10 +1032,9 @@ def evaluate(
                               iou_threshold=iou_threshold, by_mask=is_instance_seg)
         result.update({k: v for k, v in m.items() if k not in ("tp", "fp", "fn", "matchings")})
         criterion = m["governing_criterion"]
-        result.update(stored_number(
-            "objective",
-            _rounded(compute_composite_objective(loss, m["f1"], m["map50"], score_weights)),
-        ))
+        if score_weights is not None:
+            result.update(stored_number("objective", _rounded(
+                compute_composite_objective(loss, m["f1"], m["map50"], score_weights))))
         if dims.get("attributes"):
             agreement = {}
             for column, attribute in enumerate(dims["attributes"]):

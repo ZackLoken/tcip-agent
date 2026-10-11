@@ -139,11 +139,16 @@ def _spec(task: str, data: dict):
     return train_config(training_config(unbuilt_source(task), data))
 
 
-def test_resolve_contract_dims_prefers_tile_edge_over_default():
-    spec = _spec("detection", {"tiling": {"enabled": True, "tile_size": 512}})
+def test_resolve_contract_dims_reads_the_frame_the_run_resolved():
+    """The smoke frame is the square tile a tiled run resolved, else the frame an untiled run's
+    sources share, and nothing when the run resolved neither."""
+    tiled = _spec("detection", {"tiling": {"enabled": True, "tile_size": 512}})
+    native = _spec("detection", {"tiling": {"enabled": False}, "train_native_size": [96, 64]})
 
-    dims = resolve_contract_dims(spec, {"in_chans": 4, "num_classes": 5})
-    assert dims == {"in_chans": 4, "num_classes": 5, "img_size": 512}
+    assert resolve_contract_dims(tiled, {"in_chans": 4, "num_classes": 5}) == {
+        "in_chans": 4, "num_classes": 5, "img_size": (512, 512)}
+    assert resolve_contract_dims(native, {"in_chans": 3})["img_size"] == (96, 64)
+    assert "img_size" not in resolve_contract_dims(_spec("detection", {}), {"in_chans": 3})
 
 
 def test_model_dims_states_only_what_the_run_holds():
@@ -155,17 +160,18 @@ def test_model_dims_states_only_what_the_run_holds():
     from tcip_mcp.pipelines.model_build import model_dims
 
     scope = ClassScope()
+    frame = {"tiling": {"enabled": False}, "train_native_size": [32, 32]}
 
     with pytest.raises(ValueError, match="data.num_channels"):
         model_dims(scope, {})
     detector = model_dims(scope, {"num_channels": 3})
     assert detector == {"in_chans": 3}
-    assert resolve_contract_dims(_spec("detection", {}), detector) == {
-        "in_chans": 3, "img_size": 224}  # a detector's synthetic box needs no count
+    assert resolve_contract_dims(_spec("detection", frame), detector) == {
+        "in_chans": 3, "img_size": (32, 32)}  # a detector's synthetic box needs no count
     ordinal = model_dims(scope, {"num_channels": 3, "num_ranks": 4})
     assert ordinal == {"in_chans": 3, "num_ranks": 4}
-    assert resolve_contract_dims(_spec("ordinal", {}), ordinal) == {
-        "in_chans": 3, "num_classes": 4, "img_size": 224}
+    assert resolve_contract_dims(_spec("ordinal", frame), ordinal) == {
+        "in_chans": 3, "num_classes": 4, "img_size": (32, 32)}
 
 
 def test_model_dims_hands_the_admitted_subject_and_every_attribute(tmp_path):
@@ -207,7 +213,59 @@ def test_preflight_smoke_blocks_broken_builder(tmp_path, monkeypatch):
     r = preflight_config(tmp_path, cfg, smoke=True)
     assert r["valid"] is False
     assert any("model contract" in i for i in r["issues"])
-    assert r["smoke"]["dims"]["img_size"] == 224  # the untiled fallback edge, resolved
+    assert r["smoke"]["dims"]["img_size"] == (32, 32)  # the frame every source shares
+
+
+def test_preflight_smokes_a_tiled_run_at_the_edge_its_resolution_derived(tmp_path, monkeypatch):
+    """A tiled run stating no tile edge smokes at the edge its own resolution derives from its
+    objects, the one its loaders tile at."""
+    monkeypatch.chdir(tmp_path)
+    from tcip_mcp.pipelines.data.split_construction import resolve_run
+    from tcip_mcp.pipelines.model_build import staged_sources
+    from tcip_mcp.pipelines.schemas import train_config
+    from tcip_mcp.tools.training_tools import preflight_config
+    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
+
+    from tests._producer_fixtures import seed_bud_images
+
+    imgs = seed_bud_images(tmp_path / "ds" / "images" / UNDATED_BUCKET, n=4, size=160,
+                           box=(10, 10, 26, 26))
+    cfg = training_config(
+        BUILT_DETECTOR, {"images_dir": str(imgs), "scope": {"subject": "bud"},
+                         "tiling": {"enabled": True, "sliver_frac": 0.5},
+                         "split": {"seed": 0, "val_ratio": 0.25}},
+        batch_size=1, stages=[{"freeze_to": 0}])
+    spec = train_config(cfg)
+    edge = resolve_run(spec, staged_sources(spec, tmp_path).layout,
+                       project=tmp_path).data.tiling.tile_size
+
+    r = preflight_config(tmp_path, cfg, smoke=True)
+    assert r["valid"] is True, r["issues"]
+    assert r["smoke"]["batch_source"] == "synthetic"
+    assert tuple(r["smoke"]["dims"]["img_size"]) == (edge, edge)
+
+
+def test_preflight_smokes_an_untiled_run_of_mixed_frames_on_a_real_batch(tmp_path, monkeypatch):
+    """An untiled run whose frames share no one size records no native frame, so its smoke runs
+    one real batch off its own dataset rather than a synthetic one at a size no frame has."""
+    monkeypatch.chdir(tmp_path)
+    from PIL import Image
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.tools.training_tools import preflight_config
+    from tests._producer_fixtures import label_image
+    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
+
+    imgs = _admitted_tree(tmp_path)
+    Image.new("RGB", (48, 40)).save(imgs / "e.png")
+    label_image(imgs / "e.png", [Annotation(subject="leaf", geometry=BBox(2, 2, 10, 10))], 48, 40)
+    cfg = training_config(
+        BUILT_DETECTOR, {"images_dir": str(imgs), "scope": {"subject": "leaf"},
+                         "split": {"seed": 0, "val_ratio": 0.15}},
+        batch_size=1, stages=[{"freeze_to": 0}])
+
+    r = preflight_config(tmp_path, cfg, smoke=True)
+    assert r["valid"] is True, r["issues"]
+    assert r["smoke"]["batch_source"] == "dataset" and r["smoke"]["dims"] is None
 
 
 def test_preflight_smoke_passes_valid_builder(tmp_path, monkeypatch):
@@ -389,9 +447,10 @@ def _ctx_for(project, task: str, builder: str, data: dict):
 
 def test_ctx_check_contract_and_overfit_check(tmp_path):
     """The model is built and smoked at what the run recorded: its own width and class count, the
-    sizes its loaders were built at."""
+    sizes its loaders were built at, and the frame its untiled sources share."""
     ctx = _ctx_for(tmp_path, "classification", BESPOKE_CLASSIFIER,
-                   data={"num_channels": 3, "num_classes": 2})
+                   data={"num_channels": 3, "num_classes": 2, "tiling": {"enabled": False},
+                         "train_native_size": [32, 32]})
     report = ctx.check_contract()
     assert report["ok"], report["issues"]
     # overfit is voluntary + non-gating; steps flow through as an override kwarg.

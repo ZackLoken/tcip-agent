@@ -315,18 +315,17 @@ def raster_identity(image: "Path | BandGroupRef") -> dict:
 
 
 def spatial_single_source_split(
-    sample: "Sample", scope: "ClassScope", tiling: TilingSpec,
-    sizes: "Mapping[str, int]", shares: "Mapping[str, float]",
+    sample: "Sample", data: "DataSpec", shares: "Mapping[str, float]",
 ) -> SpatialManifest:
     """Derive the run's requested ``shares`` (:func:`run_shares`: ``train``, ``val``, ``holdout``
     and, when stated, ``calibration``) over one detection source's own tile lattice,
     by disjoint pixel strips (:func:`~tcip_mcp.pipelines.data.splits.spatial_strip_split`), and
     return it as the :class:`~tcip_mcp.pipelines.schemas.SpatialManifest` a run's partition
     records; the reserved regions record only their geometry and kept-tile count. It is drawn at
-    the lattice ``tiling`` states (:func:`_with_lattice` resolved it).
+    the lattice and buffer of the resolved block ``data``'s tiling (:func:`_with_lattice`).
 
-    ``sample`` is the run's own single admitted sample, which every view here is built over
-    (:func:`_spatial_views`). ``sizes`` is what this run resolved (:func:`run_sizes`).
+    ``sample`` is the run's own single admitted sample, which every side's view here is built
+    over (:func:`_block_loader`) at ``data``'s class space and sizes (:func:`run_sizes`).
 
     Raises ``ValueError`` naming which reason fired when the strip layout is infeasible or a side
     keeps no tile after filtering. The label document's frame is read through
@@ -344,6 +343,7 @@ def spatial_single_source_split(
     width, height = label_document_extent(sample.read, f"{stem}'s label document")
     split_names = tuple(side for side in SPATIAL_SIDE_ORDER if side in shares)
 
+    tiling = cast("TilingSpec", data.tiling)
     try:
         spatial = spatial_strip_split(
             width, height, cast(int, tiling.tile_size), cast(float, tiling.overlap),
@@ -358,8 +358,8 @@ def spatial_single_source_split(
 
     # A tile lattice occupying a reserved region (spatial_strip_split's own check) is not proof it
     # carries GT: an all-background region still passes that but skip_empty filters it to 0.
-    views = _spatial_views(_detection_base([sample], scope, sizes), tiling,
-                           {side: spatial.regions[side] for side in split_names}, transforms=None)
+    views = {side: _block_loader("detection", data, samples=[sample], transforms=None,
+                                 region=spatial.regions[side]) for side in split_names}
     train_ds, val_ds = views["train"], views["val"]
     if any(view.num_samples == 0 for view in views.values()):
         raise ValueError(
@@ -401,24 +401,17 @@ def spatial_single_source_split(
     )
 
 
-def _tile_options(tiling: TilingSpec | None) -> dict:
-    """``tiling``'s tile options (``TilingSpec.tiler_options``) without ``keep_regions``, which a
-    spatial split sets per side."""
-    from tcip_mcp.pipelines.data.datasets import stated_tiling
+def _block_loader(task: str, data: "DataSpec", *, samples: "Sequence[Sample]", transforms: Any,
+                  region: list | None = None) -> Any:
+    """The platform's ``task`` loader over ``samples`` at ``transforms`` under the resolved block
+    ``data``'s class space, sizes and tiling, its tiles kept to ``region``'s rects when one is
+    given."""
+    from tcip_mcp.pipelines.data.datasets import build_dataset, stated_sizes
 
-    stated = stated_tiling(tiling)
-    return {} if stated is None else stated.tiler_options(frozenset({"keep_regions"}))
-
-
-def _detection_base(samples: "Sequence[Sample]", scope: "ClassScope",
-                    sizes: "Mapping[str, int]") -> Any:
-    """The untiled detection dataset over ``samples`` at ``scope`` and ``sizes``."""
-    from tcip_mcp.pipelines.data.datasets import DetectionDataset, build_dataset
-
-    base = build_dataset("detection", samples=list(samples), transforms=None, scope=scope,
-                         sizes=sizes)
-    assert isinstance(base, DetectionDataset), "a detection build over samples is one of these"
-    return base
+    tiling = data.tiling if region is None else cast("TilingSpec", data.tiling).model_copy(
+        update={"keep_regions": region})
+    return build_dataset(task, samples=samples, transforms=transforms, scope=data.recorded_scope,
+                         sizes=stated_sizes(data), tiling=tiling)
 
 
 def resolved_tiling(task: str, tiling: TilingSpec | None, samples: "Sequence[Sample]",
@@ -427,18 +420,31 @@ def resolved_tiling(task: str, tiling: TilingSpec | None, samples: "Sequence[Sam
     at: ``{"enabled": False}`` when it does not tile, else ``tiling`` with its edge and overlap,
     the stated ones or the ones ``samples``' objects derive (``derivations.derive_tile_geometry``,
     whose refusals propagate)."""
-    from tcip_mcp.pipelines.data.datasets import run_tiling
+    from tcip_mcp.pipelines.data.datasets import build_dataset, run_tiling
     from tcip_mcp.pipelines.derivations import derive_tile_geometry
     from tcip_mcp.pipelines.schemas import TilingSpec
 
     tiler = run_tiling(task, tiling)
     if tiler is None:
         return TilingSpec.model_validate({"enabled": False})
-    regions = ([] if tiler.tile_size is not None and tiler.overlap is not None else
-               _detection_base(samples, scope, sizes).regions)
+    regions = ([] if tiler.tile_size is not None and tiler.overlap is not None else cast(
+        Any, build_dataset("detection", samples=samples, scope=scope, sizes=sizes)).regions)
     tile_size, overlap = derive_tile_geometry(regions, tile_size=tiler.tile_size,
                                               overlap=tiler.overlap)
     return tiler.model_copy(update={"tile_size": tile_size, "overlap": overlap})
+
+
+def predictor_dataset(task: str, samples: "Sequence[Sample]", scope: "ClassScope",
+                      predictor: Any, tiling: TilingSpec | None) -> Any:
+    """The ``task`` loader over ``samples`` under ``scope`` a predictor scores: at the band count
+    ``predictor`` reads its sources at (``predictor.in_chans``) and the tiling block
+    :func:`resolved_tiling` resolves ``tiling`` to over them, an absent or disabled block
+    untiled. The sizing and the resolution refuse as they do."""
+    from tcip_mcp.pipelines.data.datasets import build_dataset, resolve_sizes
+
+    sizes = resolve_sizes(task, {"num_channels": predictor.in_chans}, samples)
+    return build_dataset(task, samples=samples, scope=scope, sizes=sizes,
+                         tiling=resolved_tiling(task, tiling, samples, scope, sizes))
 
 
 def _with_lattice(task: str, data: "DataSpec", samples: "Sequence[Sample]") -> "DataSpec":
@@ -451,18 +457,6 @@ def _with_lattice(task: str, data: "DataSpec", samples: "Sequence[Sample]") -> "
         return data
     return data.model_copy(update={"tiling": resolved_tiling(
         task, data.tiling, samples, data.recorded_scope, stated_sizes(data))})
-
-
-def _spatial_views(base: Any, tiling: TilingSpec | None, regions: "Mapping[str, list]", *,
-                   transforms) -> dict:
-    """One view per side of ``regions``: the tile lattice ``tiling`` states, under its other
-    options, of the detection dataset ``base`` (:func:`_detection_base`), kept to that side's
-    region, the ``train`` view alone under ``transforms``."""
-    from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
-
-    return {side: TiledDetectionDataset(base, transforms=transforms if side == "train" else None,
-                                        keep_regions=region, **_tile_options(tiling))
-            for side, region in regions.items()}
 
 
 def redrawn_selection(selection: "Selection", selection_dir: str, seed: int) -> "Selection":
@@ -580,7 +574,7 @@ def _drawn_split(task: str, data: "DataSpec", layout: "SourceLayout", *, transfo
         return _sample_loaders(task, _with_lattice(task, resolved, samples), samples, transforms,
                                layout, seed=None, group_by=membership.group_by)
     if len(samples) < 2:
-        from tcip_mcp.pipelines.data.datasets import run_tiling, stated_sizes
+        from tcip_mcp.pipelines.data.datasets import run_tiling
 
         if run_tiling(task, data.tiling) is None:
             raise ValueError(
@@ -590,9 +584,8 @@ def _drawn_split(task: str, data: "DataSpec", layout: "SourceLayout", *, transfo
         # A tiled detection source the platform builds itself holds out disjoint pixel blocks,
         # drawn at the lattice its own objects derive.
         resolved = _with_lattice(task, resolved, samples)
-        manifest = spatial_single_source_split(
-            samples[0], membership.scope, cast("TilingSpec", resolved.tiling),
-            stated_sizes(resolved), run_shares(split, spatial=True))
+        manifest = spatial_single_source_split(samples[0], resolved,
+                                               run_shares(split, spatial=True))
         return _sample_loaders(task, resolved, samples, transforms, layout, seed=None,
                                group_by="stem", spatial=manifest)
 
@@ -749,41 +742,52 @@ def resolve_run(spec: TrainConfigSchema, layout: "SourceLayout", *, project: Pat
     return ResolvedRun(train_ds, val_ds, spec, data, partition, objective)
 
 
-def run_loader(task: str, data: "DataSpec", layout: "SourceLayout") -> Any:
+def run_loader(task: str, data: "DataSpec", layout: "SourceLayout",
+               spatial: SpatialManifest | None = None) -> Any:
     """A callable taking ``samples`` and ``transforms`` that builds a dataset of ``task`` over
     that sample list under the resolved block ``data``'s class space, by the builder its dataset
     source names (imported from the run's ``layout``) or else by the platform's factory at the
-    block's sizes and tiling."""
-    from tcip_mcp.pipelines.data.datasets import (
-        build_dataset, build_from_dataset_source, stated_sizes,
-    )
+    block's sizes and tiling.
+
+    Over a within-image split ``spatial`` (:func:`partition_spatial`) the callable also takes
+    ``side`` (``"train"`` unless named) and builds the run's one sample's tiles kept to that
+    side's recorded region; a sample list that is not that one sample, by member, refuses
+    (``ValueError``) naming it."""
+    from tcip_mcp.pipelines.data.datasets import build_from_dataset_source
 
     if data.dataset_source is not None:
         return partial(build_from_dataset_source, (data.dataset_source, layout), task=task,
                        scope=data.recorded_scope)
-    return partial(build_dataset, task, scope=data.recorded_scope, tiling=data.tiling,
-                   sizes=stated_sizes(data))
+    if spatial is None:
+        return partial(_block_loader, task, data)
+
+    def side_view(*, samples: "Sequence[Sample]", transforms: Any, side: str = "train") -> Any:
+        members = [s.member for s in samples]
+        if members != [spatial.stem]:
+            raise ValueError(
+                f"this run splits the one image {spatial.stem!r} by region, so its loaders are "
+                f"built over that one sample, never over {members}.")
+        return _block_loader(task, data, samples=samples, transforms=transforms,
+                             region=getattr(spatial, f"{side}_region"))
+
+    return side_view
 
 
 def recorded_datasets(task: str, data: "DataSpec", samples: "Sequence[Sample]",
                       spatial: SpatialManifest | None, transforms,
                       layout: "SourceLayout") -> tuple[Any, Any]:
-    """``(train_ds, val_ds)`` built from what a run resolved, resolving nothing again: the train
-    and val ``samples`` of its partition by :func:`run_loader`, or for a within-image split
-    ``spatial`` (:func:`partition_spatial`) its one sample's recorded train and val regions.
+    """``(train_ds, val_ds)`` built from what a run resolved, resolving nothing again, by
+    :func:`run_loader`: the train and val ``samples`` of its partition, or for a within-image
+    split ``spatial`` (:func:`partition_spatial`) its one sample's train and val sides.
     ``val_ds`` is ``None`` for a run whose partition holds no val side. The samples' ground truth
     is read once for both loaders (:func:`~tcip_mcp.pipelines.data.label_queries.acquired`)."""
-    from tcip_mcp.pipelines.data.datasets import stated_sizes
     from tcip_mcp.pipelines.data.label_queries import acquired
 
     samples = acquired(samples)
+    build = run_loader(task, data, layout, spatial)
     if spatial is not None:
-        views = _spatial_views(_detection_base(samples, data.recorded_scope, stated_sizes(data)),
-                               data.tiling,
-                               {"train": spatial.train_region, "val": spatial.val_region},
-                               transforms=transforms)
-        return views["train"], views["val"]
-    build = run_loader(task, data, layout)
+        return (build(samples=samples, transforms=transforms),
+                build(samples=samples, transforms=None, side="val"))
     train = [s for s in samples if s.side == "train"]
     val = [s for s in samples if s.side == "val"]
     return (build(samples=train, transforms=transforms),

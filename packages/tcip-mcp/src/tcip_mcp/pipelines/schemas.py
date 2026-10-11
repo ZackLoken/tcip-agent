@@ -122,6 +122,17 @@ SCHEDULER_TYPES: tuple[str, ...] = tuple(
 """The ``scheduler.type`` names ``generic_trainer._build_scheduler`` builds."""
 
 
+class ScoreWeights(BaseModel):
+    """The composite objective's weight on each of its terms
+    (``evaluation.compute_composite_objective``), each non-negative so a better term never
+    raises the lower-is-better objective."""
+
+    model_config = ConfigDict(extra="forbid")
+    loss: float = Field(ge=0)
+    f1: float = Field(ge=0)
+    map50: float = Field(ge=0)
+
+
 class EvaluationSpec(BaseModel):
     """What a run's validation pass scores against: the confirmed trait it selects for, the
     selection metric (resolved by ``generic_trainer.resolve_selection_metric``), and the
@@ -134,7 +145,7 @@ class EvaluationSpec(BaseModel):
     """The confidence a detector's validation counts boxes at, read through
     :meth:`TrainConfigSchema.trainer_reads`."""
     iou_threshold: float = 0.5
-    score_weights: dict | None = None
+    score_weights: ScoreWeights | None = None
 
 
 class LrScalingSpec(BaseModel):

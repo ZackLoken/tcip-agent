@@ -52,7 +52,7 @@ class TCIPModel(Protocol):
     def __call__(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
-def no_batch_reason(task: str, dims: "Mapping[str, int] | None", sample_batch: Any) -> str | None:
+def no_batch_reason(task: str, dims: "Mapping[str, Any] | None", sample_batch: Any) -> str | None:
     """Why this call can smoke nothing, or ``None`` when it can."""
     if sample_batch is not None:
         return None
@@ -60,7 +60,7 @@ def no_batch_reason(task: str, dims: "Mapping[str, int] | None", sample_batch: A
         return (f"no synthetic batch schema for task {task!r}; pass sample_batch= (an (images, "
                 f"targets) pair from this run's dataset) to smoke it. Schemas exist for "
                 f"{sorted(_SYNTHESIZABLE_TASKS)}.")
-    missing = ("an input width" if dims is None else
+    missing = ("a frame size" if dims is None or dims.get("img_size") is None else
                "a class count" if task in _COUNTED_TASKS and dims.get("num_classes") is None
                else None)
     if missing is not None:
@@ -70,11 +70,11 @@ def no_batch_reason(task: str, dims: "Mapping[str, int] | None", sample_batch: A
     return None
 
 
-def _synth_batch(task: str, *, in_chans: int, img_size: int, device: Any,
+def _synth_batch(task: str, *, in_chans: int, img_size: tuple[int, int], device: Any,
                  num_classes: int | None = None, attributes: Any = ()):
     """A minimal batch in the exact shape ``generic_trainer`` feeds ``model.forward`` for ``task``:
     per-sample ``(image, target)`` items shaped like a dataset's ``__getitem__``, collated with the
-    trainer's own ``task_collate``.
+    trainer's own ``task_collate``, each image ``img_size``, ``(width, height)``.
 
     ``num_classes`` is the run's own count, which only a ``_COUNTED_TASKS`` target reads; a
     detection target carries an ``attributes`` row, each attribute's first value, when the run's
@@ -86,10 +86,11 @@ def _synth_batch(task: str, *, in_chans: int, img_size: int, device: Any,
     from tcip_mcp.pipelines.training.collation import task_collate
 
     collate = task_collate(task)
+    width, height = img_size
 
     if task in DETECTION_TASKS:
-        img = torch.rand(in_chans, img_size, img_size, device=device)
-        box = [img_size * 0.2, img_size * 0.2, img_size * 0.7, img_size * 0.7]
+        img = torch.rand(in_chans, height, width, device=device)
+        box = [width * 0.2, height * 0.2, width * 0.7, height * 0.7]
         # One foreground instance (labels are 1-indexed), through the loaders' own tensor builder.
         tensors = target_tensors({"boxes": [box], "labels": [1], "iscrowd": [False],
                                   **({"attributes": [[0] * len(attributes)]} if attributes
@@ -97,33 +98,32 @@ def _synth_batch(task: str, *, in_chans: int, img_size: int, device: Any,
         target: dict[str, Any] = {k: v.to(device) for k, v in tensors.items()}
         target["image_id"] = 0
         if task == "instance_seg":
-            mask = torch.zeros((1, img_size, img_size), dtype=torch.uint8, device=device)
-            lo, hi = int(img_size * 0.2), int(img_size * 0.7)
-            mask[0, lo:hi, lo:hi] = 1
+            mask = torch.zeros((1, height, width), dtype=torch.uint8, device=device)
+            mask[0, int(height * 0.2):int(height * 0.7), int(width * 0.2):int(width * 0.7)] = 1
             target["masks"] = mask
         return collate([(img, target)])
 
     if task == "regression":
-        return collate([(torch.rand(in_chans, img_size, img_size, device=device),
+        return collate([(torch.rand(in_chans, height, width, device=device),
                          {"values": torch.rand((), device=device)}) for _ in range(2)])
 
     assert num_classes is not None, "a counted task reaches here with its own count"
     items = []
     for _ in range(2):
-        img = torch.rand(in_chans, img_size, img_size, device=device)
+        img = torch.rand(in_chans, height, width, device=device)
         if task == "ordinal":
             # A 0-dim tensor, not a python scalar: the stacking collate rebuilds a scalar on the
             # cpu.
             target = {"ranks": torch.randint(0, num_classes, (), device=device)}
         elif task == "semantic_seg":
-            target = {"masks": torch.randint(0, num_classes, (img_size, img_size), device=device)}
+            target = {"masks": torch.randint(0, num_classes, (height, width), device=device)}
         else:
             target = {"labels": torch.randint(0, num_classes, (), device=device)}
         items.append((img, target))
     return collate(items)
 
 
-def _driving_batch(task: str, dims: "Mapping[str, int] | None", sample_batch: Any,
+def _driving_batch(task: str, dims: "Mapping[str, Any] | None", sample_batch: Any,
                    device: Any) -> tuple[Any, Any]:
     """The ``(images, targets)`` a model is driven with, as the trainer hands it: ``sample_batch``
     when given, else synthesized; a detection task's targets through ``instance_targets``.
@@ -170,7 +170,7 @@ def _forward_loss(model: Any, images: Any, targets: Any):
 
 
 def check_model_contract(
-    model: TCIPModel, task: str, *, dims: "Mapping[str, int] | None" = None,
+    model: TCIPModel, task: str, *, dims: "Mapping[str, Any] | None" = None,
     device: str = "cpu", sample_batch: Any = None,
 ) -> dict:
     """Behavioral smoke test of the measurement boundary. Returns a report; never raises.
@@ -270,7 +270,7 @@ def check_model_contract(
 
 
 def overfit_check(
-    model: TCIPModel, task: str, *, dims: "Mapping[str, int] | None" = None,
+    model: TCIPModel, task: str, *, dims: "Mapping[str, Any] | None" = None,
     steps: int = 20, seed: int = 0, lr: float = 1e-2, device: str = "cpu",
     sample_batch: Any = None,
 ) -> dict:

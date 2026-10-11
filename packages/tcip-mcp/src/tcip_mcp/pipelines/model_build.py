@@ -353,19 +353,17 @@ def build_from_model_source(source: "ModelSourceSchema", layout: SourceLayout,
 def resolve_contract_dims(spec: "TrainConfigSchema", dims: "Mapping[str, Any]") -> dict:
     """The dimensions a synthetic smoke batch of a validated run config is shaped at: the width,
     count and attributes the model is built at (``dims``, :func:`model_dims`, a rank count
-    carried as ``num_classes``) and an ``img_size``.
-
-    ``img_size`` is the tile edge when detection tiling is on (the real training input), else a
-    safe non-tiny fallback that clears typical stride-32 backbones. The count is the one ``dims``
-    states.
+    carried as ``num_classes``) and the ``img_size``, ``(width, height)``, of the frame its
+    resolved data block trains on: the square tile its tiling resolved, else the frame every
+    untiled training source shares (``train_native_size``). A run that resolved neither carries
+    no ``img_size``.
     """
     from tcip_mcp.pipelines.data.datasets import run_tiling
 
     count = dims.get("num_classes", dims.get("num_ranks"))
     tiler = run_tiling(spec.model_source.task, spec.data.tiling)
-    # 224 clears typical stride-32 backbones at 7x7; a tiled run's real tile edge replaces it.
-    img_size = (tiler.tile_size if tiler is not None else None) or 224
-    return {"in_chans": dims["in_chans"], "img_size": img_size,
+    frame = (tiler.tile_size, tiler.tile_size) if tiler is not None else spec.data.train_native_size
+    return {"in_chans": dims["in_chans"], **({} if frame is None else {"img_size": tuple(frame)}),
             **({} if count is None else {"num_classes": count}),
             **({"attributes": dims["attributes"]} if "attributes" in dims else {})}
 

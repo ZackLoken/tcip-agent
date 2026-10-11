@@ -257,7 +257,7 @@ def test_golden_no_operating_point_default_survives_and_each_door_takes_stated_v
     assert ff_sig.parameters["stated"].default is inspect.Parameter.empty
     assert not {"conf_threshold", "cross_tile_nms", "max_dets", "tile_size", "overlap"} & set(
         ff_sig.parameters)
-    assert evaluation_mod.DEFAULT_SCORE_WEIGHTS == {"loss": 0.45, "f1": 0.35, "map50": 0.2}
+    assert not hasattr(evaluation_mod, "DEFAULT_SCORE_WEIGHTS")
 
 
 def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_none(
@@ -287,8 +287,6 @@ def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_n
     from PIL import Image
 
     class _DummyModel:
-        score_thresh, detections_per_img = 0.0, 100
-
         def to(self, device):
             return self
 

@@ -98,11 +98,11 @@ def _preflight(project: Path, spec: TrainConfigSchema | None, sources: StagedSou
 
     Args:
         smoke: When True, actually build the model and run ``check_model_contract`` (a train+eval
-            forward at the run's resolved dims and img_size, every attribute head included). A
-            contract failure is appended
-            to ``issues`` and blocks the launch. For a task the contract has no synthetic batch
-            schema for, one real batch of the resolved train dataset is used instead; if it yields
-            none, that also blocks.
+            forward at the run's resolved dims and frame, every attribute head included). A
+            contract failure is appended to ``issues`` and blocks the launch. For a run that
+            resolved no frame, or a task the contract has no synthetic batch schema for, one real
+            batch of the resolved train dataset is used instead; if it yields none, that also
+            blocks.
         overfit: When True (with ``smoke``), also run the voluntary ``overfit_check`` diagnostic
             and report it under ``overfit_check``, never gating. The stored report is already
             rendered (``model_contract.render_overfit_report``), with non-finite losses rendered.
@@ -1442,8 +1442,7 @@ def evaluate_model(
     from tcip_mcp.pipelines.training.eval_runners import (
         run_full_frame_evaluation, run_test_evaluation,
     )
-    from tcip_mcp.pipelines.data.datasets import build_dataset, resolve_sizes
-    from tcip_mcp.pipelines.data.split_construction import resolved_tiling
+    from tcip_mcp.pipelines.data.split_construction import predictor_dataset
     from tcip_mcp.pipelines.execution import prepare
 
     from tcip_mcp.operationalization import OperationalizationRefusedError, latest_confirmed
@@ -1510,13 +1509,7 @@ def evaluate_model(
     predictor = pass_.predictor
 
     try:
-        measured_samples = admitted.every_sample()
-        # Read at the width the predictor reads at: the model scores these tensors, so a loader
-        # sized off the references instead would hand it images of another shape.
-        sizes = resolve_sizes(task, {"num_channels": predictor.in_chans}, measured_samples)
-        tiling = resolved_tiling(task, tiling, measured_samples, scope, sizes)
-        dataset = build_dataset(task, samples=measured_samples, tiling=tiling, scope=scope,
-                                sizes=sizes)
+        dataset = predictor_dataset(task, admitted.every_sample(), scope, predictor, tiling)
     except Exception as exc:  # noqa: BLE001
         return {"error": f"Failed to build dataset: {exc}"}
 

@@ -92,8 +92,9 @@ def test_set_detector_operating_point_two_stage():
 def test_set_detector_operating_point_one_stage():
     from tcip_mcp.pipelines.operating_point import set_detector_operating_point
     m = _one_stage()
-    set_detector_operating_point(m, score_thresh=0.4)
+    set_detector_operating_point(m, score_thresh=0.4, detections_per_img=300)
     assert m.detector.score_thresh == 0.4 and m.detector.nms_thresh == 0.6
+    assert m.detector.detections_per_img == 300
 
 
 def test_the_object_density_is_its_quantile_over_the_object_bearing_regions():

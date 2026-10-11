@@ -448,16 +448,6 @@ def _count_fit(p: Pass, entry: TraitEntry,
     return evidence, failures, cal_records, hold_records
 
 
-def _reference_dataset(prep: Preparation, samples: list[Sample]) -> Any:
-    """The detection loader over ``samples`` under the prepared pass's scope, at the width its
-    predictor reads at."""
-    from tcip_mcp.pipelines.data.datasets import build_dataset, resolve_sizes
-
-    return build_dataset("detection", tiling=None, samples=samples, scope=prep.scope,
-                         sizes=resolve_sizes("detection",
-                                             {"num_channels": prep.predictor.in_chans}, samples))
-
-
 def _records(p: Pass, ds: Any, digest_of: dict[str, str], execution: Execution) -> list[dict]:
     """One evaluation record per sample of the loader ``ds``, predicted under ``execution``
     (:func:`~tcip_mcp.pipelines.training.evaluation.prediction_record`), the sample's source digest
@@ -478,9 +468,11 @@ def _detection(prep: Preparation, cal: list[Sample], hold: list[Sample], entry: 
     side's loader built once, every fitted value from the calibration side, plus the classifier
     agreement over matched instances for a state-fraction delivery. ``digest_of`` is keyed by each
     sample's location, which reading the retained copies leaves unchanged."""
+    from tcip_mcp.pipelines.data.split_construction import predictor_dataset
     from tcip_mcp.pipelines.execution import Reference
 
-    cal_ds, hold_ds = _reference_dataset(prep, cal), _reference_dataset(prep, hold)
+    cal_ds, hold_ds = (predictor_dataset("detection", side, prep.scope, prep.predictor, None)
+                       for side in (cal, hold))
     p = prep.runnable(Reference(regions=cal_ds.regions))
     evidence, failures, cal_records, hold_records = _count_fit(
         p, entry, lambda execution: (_records(p, cal_ds, digest_of, execution),

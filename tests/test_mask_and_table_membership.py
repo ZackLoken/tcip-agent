@@ -26,6 +26,7 @@ from tcip_mcp.pipelines.data.split_construction import (  # noqa: E402
 from tcip_mcp.pipelines.schemas import DataSpec  # noqa: E402
 from tcip_mcp.tools.data_tools import draw_splits  # noqa: E402
 from tests._producer_fixtures import painted_frame, staged_layout  # noqa: E402
+from tests._training_values import IOU_THRESHOLD  # noqa: E402
 from tests._chain_fixtures import training_config  # noqa: E402
 from tests._verified_checkpoint_fixtures import partition_side, unbuilt_source  # noqa: E402
 
@@ -534,7 +535,8 @@ def test_a_runs_metrics_are_reported_over_the_class_space_it_trains_in(tmp_path:
     model = bespoke_models.build_bespoke_semantic_seg(num_classes=count)
     loader = DataLoader(train_ds, batch_size=1, collate_fn=task_collate("semantic_seg"))
     result = evaluate(model, loader, torch.device("cpu"), "semantic_seg",
-                      dims={"in_chans": 3, "num_classes": count}, conf_threshold=None)
+                      dims={"in_chans": 3, "num_classes": count}, conf_threshold=None,
+                      iou_threshold=IOU_THRESHOLD, score_weights=None)
 
     assert sorted(result["per_class_iou"]) == [0, 1, 2]
 

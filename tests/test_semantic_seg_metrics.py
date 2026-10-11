@@ -21,6 +21,7 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     semantic_seg_metrics,
 )
 from tests._producer_fixtures import dataset_over  # noqa: E402
+from tests._training_values import IOU_THRESHOLD  # noqa: E402
 
 
 # --------------------------------------------------------------------------
@@ -122,7 +123,8 @@ def test_evaluate_semantic_seg_surfaces_miou(tmp_path: Path):
     model = bespoke_models.build_bespoke_semantic_seg(num_classes=2)
 
     result = evaluate(model, loader, torch.device("cpu"), "semantic_seg",
-                      dims={"in_chans": 3, "num_classes": 2}, conf_threshold=None)
+                      dims={"in_chans": 3, "num_classes": 2}, conf_threshold=None,
+                      iou_threshold=IOU_THRESHOLD, score_weights=None)
 
     assert "loss" in result
     for key in ("mIoU", "dice", "pixel_acc", "per_class_iou", "per_class_dice"):

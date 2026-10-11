@@ -79,11 +79,12 @@ def _grouped_dataset(root: Path) -> Path:
 def test_the_assessments_records_over_grouped_samples_decode_each_capture(tmp_path, monkeypatch):
     """Each grouped sample is opened as a ``BandGroupRef`` through the channel-aware stacking.
     The predictor is 2-channel, so it runs at all only if the captures decoded that way."""
-    from tcip_mcp.assessment import _records, _reference_dataset
+    from tcip_mcp.assessment import _records
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines import raster_source
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.data.selection import source_digests
+    from tcip_mcp.pipelines.data.split_construction import predictor_dataset
     from tcip_mcp.pipelines.execution import Stated, prepare
     from tests._producer_fixtures import samples_over
 
@@ -103,7 +104,8 @@ def test_the_assessments_records_over_grouped_samples_decode_each_capture(tmp_pa
 
     monkeypatch.setattr(raster_source, "open_raster", _spy_open_raster)
 
-    records = _records(p, _reference_dataset(p, samples), source_digests(samples), p.execution)
+    reference = predictor_dataset("detection", samples, p.scope, p.predictor, None)
+    records = _records(p, reference, source_digests(samples), p.execution)
 
     assert len(records) == 2
     grouped = [s for s in seen_sources if isinstance(s, BandGroupRef)]

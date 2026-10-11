@@ -26,6 +26,7 @@ from tcip_mcp import subject_registry as cr  # noqa: E402
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 
 from tests._chain_fixtures import ATTRIBUTE, PLANTS, VALUES, attributed_series  # noqa: E402
+from tests._training_values import IOU_THRESHOLD  # noqa: E402
 from tests._verified_checkpoint_fixtures import (  # noqa: E402
     BUILT_DETECTOR, SQUARE_64_DETECTOR,
 )
@@ -354,7 +355,8 @@ def test_evaluate_reports_each_attributes_agreement_over_the_pairs_it_assesses(t
     dims = model_dims(ClassScope.of(data), {"num_channels": 3})
 
     metrics = evaluate(_CallsEveryFrameOnce([1, 2]), [(list(images), list(targets))], "cpu",
-                       "detection", dims=dims, conf_threshold=0.0, density=1.0)
+                       "detection", dims=dims, conf_threshold=0.0, iou_threshold=IOU_THRESHOLD,
+                       score_weights=None, density=1.0)
 
     agreement = metrics["attribute_agreement"]
     assert set(agreement) == {"color", "grade"}

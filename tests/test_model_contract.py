@@ -25,8 +25,8 @@ from tcip_store import check_json_value  # noqa: E402
 from tests import bespoke_models  # noqa: E402
 
 # What the smokes below synthesize their batch at, the shape a run resolves for itself.
-CLS_DIMS = {"in_chans": 3, "num_classes": 2, "img_size": 64}
-DET_DIMS = {"in_chans": 3, "num_classes": 1, "img_size": 64}
+CLS_DIMS = {"in_chans": 3, "num_classes": 2, "img_size": (64, 64)}
+DET_DIMS = {"in_chans": 3, "num_classes": 1, "img_size": (64, 64)}
 
 
 def _bespoke_builder(**kwargs):

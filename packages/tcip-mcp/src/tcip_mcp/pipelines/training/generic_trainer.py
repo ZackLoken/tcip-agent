@@ -16,7 +16,6 @@ import logging
 import math
 import random
 import time
-from collections.abc import Mapping
 from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -35,7 +34,6 @@ from tcip_mcp.pipelines.model_build import (
     SNAPSHOT_KEY,
     STATE_DICT_KEY,
     build_from_model_source,
-    recorded_model_dims,
 )
 from tcip_mcp.pipelines.schemas import (
     CosineSchedule,
@@ -44,6 +42,7 @@ from tcip_mcp.pipelines.schemas import (
     OneCycleSchedule,
     PlateauSchedule,
     SchedulerSpec,
+    ScoreWeights,
     StageSpec,
     TrainConfigSchema,
 )
@@ -419,20 +418,11 @@ def _build_scheduler(optimizer, spec: SchedulerSpec):
 # ====================================================================
 
 @torch.no_grad()
-def _validate(
-    model: TCIPModel, val_loader: DataLoader, device: torch.device, task: str, *,
-    dims: Mapping[str, int], conf_threshold: float | None, iou_threshold: float,
-    score_weights: dict | None, trait: TraitEntry | None, density: float | None,
-) -> dict:
-    """``evaluation.evaluate`` of ``model`` over ``val_loader`` at the given thresholds, each
-    frame capped at the run's object ``density``, and ``trait`` (the confirmed entry whose
-    criterion governs a count trait's detection metrics), every key prefixed
-    :data:`VAL_METRIC_PREFIX`."""
-    metrics = evaluate(
-        model, val_loader, device, task, dims=dims,
-        conf_threshold=conf_threshold, iou_threshold=iou_threshold,
-        score_weights=score_weights, trait=trait, density=density,
-    )
+def _validate(model: TCIPModel, val_loader: DataLoader, device: torch.device, task: str,
+              **keywords: Any) -> dict:
+    """``evaluation.evaluate`` of ``model`` over ``val_loader`` at ``keywords``, its own
+    keyword arguments, every key prefixed :data:`VAL_METRIC_PREFIX`."""
+    metrics = evaluate(model, val_loader, device, task, **keywords)
     return {f"{VAL_METRIC_PREFIX}{k}": v for k, v in metrics.items()}
 
 
@@ -449,7 +439,8 @@ def config_trait(spec: TrainConfigSchema, project: Path) -> TraitEntry | None:
 
 
 def resolve_selection_metric(
-    task: str, trait: TraitEntry | None, requested: str | None, *, has_val_loader: bool = True,
+    task: str, trait: TraitEntry | None, requested: str | None, *,
+    score_weights: ScoreWeights | None, has_val_loader: bool = True,
 ) -> str:
     """Resolve the bare metric key (into ``val_metrics``, without the ``val_`` prefix) that drives
     both ``model_best.pt`` and early stopping.
@@ -461,7 +452,8 @@ def resolve_selection_metric(
         an unstated kind rejects nothing here.
 
     A resolved metric (default or explicit) with no declared ranking direction
-    (``evaluation.HIGHER_IS_BETTER_BY_METRIC``) is rejected.
+    (``evaluation.HIGHER_IS_BETTER_BY_METRIC``) is rejected, and so is ``"objective"`` without
+    the ``score_weights`` (``evaluation.score_weights``) that weight it.
 
     ``has_val_loader``: every metric but ``"loss"`` needs a validation pass, so a run with no
         validation loader can only select on ``"loss"`` (the training loss); anything else,
@@ -477,6 +469,12 @@ def resolve_selection_metric(
             f"and early stopping would have to guess which way it improves. Choose one of "
             f"{sorted(HIGHER_IS_BETTER_BY_METRIC)}."
         )
+    if resolved == "objective" and score_weights is None:
+        raise ValueError(
+            "evaluation.selection_metric resolves to 'objective', which blends its terms by "
+            "weights this run states nowhere: state evaluation.score_weights "
+            f"(schemas.ScoreWeights: {', '.join(ScoreWeights.model_fields)}), or select on "
+            "another metric.")
     if not has_val_loader and resolved != "loss":
         raise ValueError(
             f"evaluation.selection_metric={resolved!r} needs a validation loader to compute, "
@@ -504,6 +502,7 @@ def resolve_objective(spec: TrainConfigSchema, *, project: Path, has_val_loader:
     direction."""
     metric = resolve_selection_metric(spec.model_source.task, config_trait(spec, project),
                                       spec.evaluation.selection_metric,
+                                      score_weights=spec.evaluation.score_weights,
                                       has_val_loader=has_val_loader)
     return {"selection_metric": metric, "higher_is_better": HIGHER_IS_BETTER_BY_METRIC[metric]}
 
@@ -688,7 +687,8 @@ def train(
             set_seed(seed, deterministic=spec.deterministic)
 
         task = spec.model_source.task
-        dims = recorded_model_dims(spec)
+        evaluated = run.evaluation_arguments
+        dims = evaluated["dims"]
         model = build_from_model_source(spec.model_source, run.layout, dims)
         model.to(device)
         _validate_input_channels(dims["in_chans"], train_loader)
@@ -709,7 +709,7 @@ def train(
 
         first_eff_batch = physical_batch * accumulation(stages[0])
         prev_trainable = None     # trainable param count of the previous stage
-        trait = config_trait(spec, run.project)
+        trait = evaluated["trait"]
         selection_metric = run.objective["selection_metric"]
         loader_generator = getattr(train_loader, "generator", None)
 
@@ -908,13 +908,7 @@ def train(
 
                 val_metrics = {}
                 if val_loader is not None:
-                    val_metrics = _validate(
-                        model, val_loader, device, task, dims=dims,
-                        conf_threshold=reads.conf_threshold,
-                        iou_threshold=spec.evaluation.iou_threshold,
-                        score_weights=spec.evaluation.score_weights,
-                        trait=trait, density=spec.data.train_object_density,
-                    )
+                    val_metrics = _validate(model, val_loader, device, task, **evaluated)
                 sel = _selection_value(task, val_metrics, avg_loss, selection_metric)
 
                 # Suppress the scheduler during warmup epochs.

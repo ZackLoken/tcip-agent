@@ -22,8 +22,8 @@ from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
 from tcip_mcp.pipelines.data.label_queries import registry_scope  # noqa: E402
 from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
+from tcip_mcp.pipelines.schemas import ScoreWeights  # noqa: E402
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
-    DEFAULT_SCORE_WEIGHTS,
     classification_metrics,
     compute_composite_objective,
     concordance_correlation_coefficient,
@@ -51,7 +51,11 @@ from tests._image_fixtures import write_noise_image  # noqa: E402
 from tests._producer_fixtures import checkpoint_admission  # noqa: E402
 from tests._dense_op_fixtures import gt_only  # noqa: E402
 from tests import _trait_fixtures as fx  # noqa: E402
-from tests._training_values import VALIDATION_CONF, evaluation_block  # noqa: E402
+from tests._training_values import (  # noqa: E402
+    IOU_THRESHOLD, SCORE_WEIGHTS, VALIDATION_CONF, evaluation_block,
+)
+
+WEIGHTS = ScoreWeights.model_validate(SCORE_WEIGHTS)
 
 # A test naming trait="bud_opening" proposes it in its project (conftest.seed_bud_trait_spec).
 _with_bud_trait = pytest.mark.usefixtures("seed_bud_trait_spec")
@@ -62,19 +66,21 @@ _with_bud_trait = pytest.mark.usefixtures("seed_bud_trait_spec")
 # --------------------------------------------------------------------------
 
 def test_composite_objective_matches_reference():
-    expected = 0.45 * 2.0 + 0.35 * 0.5 * 10 + 0.20 * 0.6 * 10        # 3.85
-    assert compute_composite_objective(2.0, 0.5, 0.4) == pytest.approx(expected, abs=1e-9)
-    assert DEFAULT_SCORE_WEIGHTS == {"loss": 0.45, "f1": 0.35, "map50": 0.20}
+    """The objective weights each term by the weights it is handed."""
+    expected = 0.5 * 2.0 + 0.3 * 0.5 * 10 + 0.2 * 0.6 * 10        # 3.7
+    assert compute_composite_objective(2.0, 0.5, 0.4, WEIGHTS) == pytest.approx(
+        expected, abs=1e-9)
 
 
 def test_composite_objective_has_no_score_for_a_degenerate_epoch():
     """A non-positive or non-finite loss, or both quality terms at zero, is an epoch with no
     useful score: the objective is None, which a metrics row carries as null and the selection
     comparison treats as never improving, never a large number a chart would plot as a value."""
-    assert compute_composite_objective(-1.0, 0.9, 0.9) is None
-    assert compute_composite_objective(2.0, 0.0, 0.0) is None
-    assert compute_composite_objective(float("nan"), float("nan"), float("nan")) is None
-    assert compute_composite_objective(float("inf"), 0.5, 0.5) is None
+    w = WEIGHTS
+    assert compute_composite_objective(-1.0, 0.9, 0.9, w) is None
+    assert compute_composite_objective(2.0, 0.0, 0.0, w) is None
+    assert compute_composite_objective(float("nan"), float("nan"), float("nan"), w) is None
+    assert compute_composite_objective(float("inf"), 0.5, 0.5, w) is None
 
 
 # --------------------------------------------------------------------------
@@ -548,27 +554,31 @@ def test_selection_value_raises_when_the_metric_is_not_among_this_epochs_val_met
 
 
 def test_resolve_selection_metric_defaults():
-    assert resolve_selection_metric("detection", None, None) == "objective"
-    assert resolve_selection_metric("instance_seg", None, None) == "objective"
-    assert resolve_selection_metric("classification", None, None) == "loss"
-    assert resolve_selection_metric("semantic_seg", None, None) == "loss"
+    w = WEIGHTS
+    assert resolve_selection_metric("detection", None, None, score_weights=w) == "objective"
+    assert resolve_selection_metric("instance_seg", None, None, score_weights=w) == "objective"
+    assert resolve_selection_metric("classification", None, None, score_weights=None) == "loss"
+    assert resolve_selection_metric("semantic_seg", None, None, score_weights=None) == "loss"
 
 
 def test_resolve_selection_metric_with_no_val_loader_accepts_only_loss():
-    assert resolve_selection_metric("classification", None, None, has_val_loader=False) == "loss"
+    assert resolve_selection_metric("classification", None, None, score_weights=None,
+                                    has_val_loader=False) == "loss"
     assert resolve_selection_metric(
-        "classification", None, "loss", has_val_loader=False) == "loss"
+        "classification", None, "loss", score_weights=None, has_val_loader=False) == "loss"
     with pytest.raises(ValueError, match="needs a validation loader"):
-        resolve_selection_metric("detection", None, None, has_val_loader=False)
+        resolve_selection_metric("detection", None, None, score_weights=WEIGHTS,
+                                 has_val_loader=False)
     with pytest.raises(ValueError, match="needs a validation loader"):
-        resolve_selection_metric("classification", None, "accuracy", has_val_loader=False)
+        resolve_selection_metric("classification", None, "accuracy", score_weights=None,
+                                 has_val_loader=False)
 
 
 @_with_bud_trait
 def test_resolve_selection_metric_rejects_incoherent_explicit_choice(tmp_path):
     trait = fx.latest("bud_opening", tmp_path)
     with pytest.raises(ValueError, match="comparability-only"):
-        resolve_selection_metric("detection", trait, "map50")
+        resolve_selection_metric("detection", trait, "map50", score_weights=None)
 
 
 @_with_bud_trait
@@ -576,14 +586,59 @@ def test_resolve_selection_metric_allows_coherent_explicit_choice(tmp_path):
     # A legitimate explicit choice must still succeed: a rail must admit valid work, not
     # only reject invalid work.
     trait = fx.latest("bud_opening", tmp_path)
-    assert resolve_selection_metric("detection", trait, "f1") == "f1"
-    assert resolve_selection_metric("detection", trait, "recall") == "recall"
-    assert resolve_selection_metric("detection", None, "map50") == "map50"  # no trait -> no gate
+    assert resolve_selection_metric("detection", trait, "f1", score_weights=None) == "f1"
+    assert resolve_selection_metric("detection", trait, "recall", score_weights=None) == "recall"
+    assert resolve_selection_metric(
+        "detection", None, "map50", score_weights=None) == "map50"  # no trait -> no gate
 
 
 def test_resolve_selection_metric_rejects_a_metric_with_no_declared_direction():
     with pytest.raises(ValueError, match="no declared ranking direction"):
-        resolve_selection_metric("detection", None, "not_a_real_metric")
+        resolve_selection_metric("detection", None, "not_a_real_metric", score_weights=None)
+
+
+def test_a_detector_run_selecting_on_the_objective_refuses_unweighted_and_resolves_weighted(
+        tmp_path):
+    """A detector config selecting on ``objective``, stated or by default, with no
+    ``score_weights`` refuses at its resolution naming the key; the same config stating them
+    resolves to the objective, which its recorded weights weight term by term."""
+    from tcip_mcp.pipelines.schemas import train_config
+    from tcip_mcp.pipelines.training.generic_trainer import resolve_objective
+    from tests._chain_fixtures import training_config
+    from tests._verified_checkpoint_fixtures import unbuilt_source
+
+    unweighted = {"conf_threshold": VALIDATION_CONF}
+    for stated in ({}, {"selection_metric": "objective"}):
+        spec = train_config(training_config(unbuilt_source("detection"), {},
+                                            evaluation={**unweighted, **stated}))
+        with pytest.raises(ValueError, match="evaluation.score_weights"):
+            resolve_objective(spec, project=tmp_path, has_val_loader=True)
+
+    weights = {"loss": 1.0, "f1": 0.0, "map50": 0.0}
+    spec = train_config(training_config(unbuilt_source("detection"), {},
+                                        evaluation=evaluation_block(score_weights=weights)))
+    assert resolve_objective(spec, project=tmp_path, has_val_loader=True)["selection_metric"] == (
+        "objective")
+    assert compute_composite_objective(2.0, 0.5, 0.4, spec.evaluation.score_weights) == 2.0
+
+
+def test_score_weights_missing_a_term_or_stating_another_refuse_at_admission():
+    """A config whose ``score_weights`` omits a term refuses at admission naming each missing
+    one, and one stating a fourth key refuses naming it; the three terms admit as the block."""
+    from tcip_mcp.pipelines.schemas import train_config
+    from tests._chain_fixtures import training_config
+    from tests._verified_checkpoint_fixtures import unbuilt_source
+
+    def admitted(weights: dict):
+        return train_config(training_config(unbuilt_source("detection"), {},
+                                            evaluation=evaluation_block(score_weights=weights)))
+
+    with pytest.raises(ValueError, match=r"(?s)score_weights\.f1.*score_weights\.map50"):
+        admitted({"loss": 1.0})
+    with pytest.raises(ValueError, match=r"score_weights\.recall"):
+        admitted({**SCORE_WEIGHTS, "recall": 0.1})
+    weights = admitted(dict(SCORE_WEIGHTS)).evaluation.score_weights
+    assert weights.model_dump() == SCORE_WEIGHTS
 
 
 # HIGHER_IS_BETTER_BY_METRIC held against what evaluate()/governing_counts really return.
@@ -662,6 +717,8 @@ def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts(tmp_pa
         detector = task in ("detection", "instance_seg")
         result = evaluate(model, loader, device, task, dims={"in_chans": 3, **dims}, trait=trait,
                           conf_threshold=VALIDATION_CONF if detector else None,
+                          iou_threshold=IOU_THRESHOLD,
+                          score_weights=WEIGHTS if detector else None,
                           density=1.0 if detector else None)
         returned.update(result)
 

@@ -131,13 +131,13 @@ def test_contract_dims_take_the_admitted_attributes_without_the_loader_backgroun
     dims = resolve_contract_dims(spec, recorded_model_dims(spec))
 
     assert dims == {"in_chans": 5, "num_classes": 1, "attributes": scope.attributes,
-                    "img_size": 640}
+                    "img_size": (640, 640)}
 
 
 def test_contract_dims_count_only_the_subject_for_a_scope_declaring_no_attributes(tmp_path):
     """An instance_seg scope whose subject declares no attribute trains one class, the subject
     itself, and hands no attributes. The resolved count stays at that one class rather than
-    gaining a background slot."""
+    gaining a background slot; a run resolving no frame carries no smoke frame."""
     dataset_root = tmp_path / "subject_2026"
     images_dir = dataset_root / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True)
@@ -150,7 +150,7 @@ def test_contract_dims_count_only_the_subject_for_a_scope_declaring_no_attribute
 
     dims = resolve_contract_dims(spec, recorded_model_dims(spec))
 
-    assert dims == {"in_chans": 3, "num_classes": 1, "img_size": 224}
+    assert dims == {"in_chans": 3, "num_classes": 1}
 
 
 def test_snapshot_copies_each_dotted_module_at_its_module_path(tmp_path):

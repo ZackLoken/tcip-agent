@@ -24,8 +24,10 @@ from tests._verified_checkpoint_fixtures import (  # noqa: E402
     SAMPLE_DETECTOR_PASS, SCOPED_DATA, project_checkpoint, verified_checkpoint,
 )
 from tcip_mcp.pipelines.training.evaluation import evaluate  # noqa: E402
-from tests._training_values import VALIDATION_CONF  # noqa: E402
+from tcip_mcp.pipelines.schemas import ScoreWeights  # noqa: E402
+from tests._training_values import IOU_THRESHOLD, SCORE_WEIGHTS, VALIDATION_CONF  # noqa: E402
 
+WEIGHTS = ScoreWeights.model_validate(SCORE_WEIGHTS)
 _DIMS = {"in_chans": 3, "num_classes": 1}
 """What a one-subject detector over three-band sources is built at."""
 DETECTOR_PASS = Stated(**SAMPLE_DETECTOR_PASS)
@@ -90,7 +92,8 @@ def test_val_loss_forwards_all_negative_images():
     model = _StubModel(stub)
     loader = [_det_batch([1, 0]), _det_batch([0])]  # mixed batch, then all-negative batch
     evaluate(model, loader, torch.device("cpu"), "detection", dims=_DIMS,
-             conf_threshold=VALIDATION_CONF, density=1.0)
+             conf_threshold=VALIDATION_CONF, iou_threshold=IOU_THRESHOLD, score_weights=WEIGHTS,
+             density=1.0)
     # Both batches forwarded through the detector (full batch incl. negatives), not just foreground.
     assert stub.calls == [(2, 4), (1, 0)]
 
@@ -100,7 +103,8 @@ def test_all_negative_only_loader_is_not_skipped():
     model = _StubModel(stub)
     loader = [_det_batch([0, 0])]  # nothing but negatives
     result = evaluate(model, loader, torch.device("cpu"), "detection", dims=_DIMS,
-                      conf_threshold=VALIDATION_CONF, density=1.0)
+                      conf_threshold=VALIDATION_CONF, iou_threshold=IOU_THRESHOLD,
+                      score_weights=WEIGHTS, density=1.0)
     assert stub.calls == [(2, 0)]  # forwarded, not skipped
     assert result["loss"] == pytest.approx(2.5)  # finite, non-zero: negatives contribute loss
 
@@ -178,7 +182,7 @@ def test_explicit_checkpoint_stays_untiled(tmp_path, monkeypatch):
     evaluate_model(tmp_path, ckpt, str(images_dir), stated=DETECTOR_PASS)
     assert isinstance(captured["ds"], DetectionDataset)
     assert not isinstance(captured["ds"], TiledDetectionDataset)
-    assert captured["tiling"].enabled is False
+    assert captured["tiling"] is None
 
 
 def test_evaluate_model_reads_its_loader_at_the_checkpoints_own_width(tmp_path, monkeypatch):
@@ -229,7 +233,7 @@ def _detections_as_ground_truth(checkpoint, images_dir, *, subject: str, limit: 
                                     recorded_model_dims(checkpoint.spec))
     model.load_state_dict(checkpoint.payload[STATE_DICT_KEY])
     model.eval()
-    set_detector_operating_point(model, score_thresh=0.0)
+    set_detector_operating_point(model, score_thresh=0.0, detections_per_img=limit)
     for image in sorted(Path(images_dir).glob("*.png")):
         tensor = pil_to_tensor(load_image(image, 3))
         with torch.no_grad():
@@ -238,7 +242,7 @@ def _detections_as_ground_truth(checkpoint, images_dir, *, subject: str, limit: 
         label_image(
             image,
             [Annotation(subject=subject, geometry=BBox(*(float(v) for v in box)))
-             for box in boxes[:limit] if box[2] - box[0] > 1 and box[3] - box[1] > 1],
+             for box in boxes if box[2] - box[0] > 1 and box[3] - box[1] > 1],
             w, h)
 
 
@@ -247,11 +251,9 @@ def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatc
 
     The door builds the checkpoint to read the width it measures at, and the runner scores through
     that same module governed by the execution record it reports: a separately built copy of the
-    same checkpoint, set to that record's conf and the cap it gives each frame, answers with the
-    same numbers over the same loader. This checkpoint's builder declares a score floor above
-    what it scores at, so a run that scored at the builder's floor while reporting the record's
-    would report numbers this record does not produce, which the last assertion measures rather
-    than assumes.
+    same checkpoint, counted at that record's conf under the cap it gives each frame, answers with
+    the same numbers over the same loader. Counted at a conf above every score instead it answers
+    otherwise, which the last assertion measures rather than assumes.
     """
     from typing import cast
 
@@ -263,18 +265,15 @@ def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatc
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.execution import Execution
     from tcip_mcp.pipelines.model_build import STATE_DICT_KEY
-    from tcip_mcp.pipelines.operating_point import set_detector_operating_point
     from tcip_mcp.tools.training_tools import evaluate_model
-    from tests._verified_checkpoint_fixtures import built_detector, registered_checkpoint
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True)
     for i in range(2):
         Image.new("RGB", (128, 128), color=(120, 120, 120)).save(images_dir / f"img{i}.png")
-    declares_its_point = built_detector(box_score_thresh=0.6)
-    # This seed's weights score just above 0.5, so the declared floor of 0.6 excludes every
-    # detection and a substituted floor of 0.5 or 0.0 would not.
-    ckpt = registered_checkpoint(tmp_path, model_source=declares_its_point, seed=0)
+    # This seed's weights score just above 0.5, so a count at 0.6 keeps none of its detections.
+    ckpt = registered_checkpoint(tmp_path, seed=0)
     verified = load_registered_checkpoint(ckpt, project=tmp_path)
     _detections_as_ground_truth(verified, images_dir, subject="bud")
 
@@ -312,14 +311,14 @@ def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatc
     kw = recorded["kw"]
     execution = Execution.of(measured["execution"])
 
-    def _independent(score_thresh: float) -> dict:
-        """The evaluation of the independent copy at the in-model ``score_thresh``, each image
-        capped at the record's density."""
-        set_detector_operating_point(independent_model, score_thresh=score_thresh)
+    def _independent(conf: float) -> dict:
+        """The evaluation of the independent copy counted at ``conf``, each image capped at the
+        record's density, its objective weighted by the checkpoint's recorded weights."""
         return evaluate(
             independent_model, recorded["loader"], recorded["device"], recorded["task"],
-            dims=dims, conf_threshold=execution.conf, iou_threshold=kw["iou_threshold"],
-            trait=kw["trait"], density=execution.density)
+            dims=dims, conf_threshold=conf, iou_threshold=kw["iou_threshold"],
+            score_weights=verified.spec.evaluation.score_weights, trait=kw["trait"],
+            density=execution.density)
 
     independent = _independent(cast(float, execution.conf))
     assert independent
@@ -328,10 +327,66 @@ def test_the_scored_model_is_the_one_the_door_already_built(tmp_path, monkeypatc
         assert measured[key] == (pytest.approx(value, rel=1e-4)
                                  if isinstance(value, (int, float)) else value), key
 
-    # What the builder's own floor reports instead, so the equality above is evidence about this
-    # fixture rather than a comparison nothing could separate.
-    floor = declares_its_point["builder_kwargs"]["box_score_thresh"]
-    assert _independent(floor)["map50"] != measured["map50"]
+    # What a count at a conf above every score reports instead, so the equality above is evidence
+    # about this fixture rather than a comparison nothing could separate.
+    assert _independent(0.6)["recall"] != measured["recall"]
+
+
+@pytest.mark.usefixtures("seed_bud_trait_spec")
+def test_the_three_evaluation_loaders_over_one_truth_and_one_predictor_agree(
+        tmp_path, monkeypatch):
+    """The assessment's reference, the full-frame evaluation and the tile-level diagnostic each
+    build their loader over one ground truth for one predictor at the same width and the same
+    untiled block: every factory build each door makes is recorded and the three doors' records
+    are compared with each other. The predictor reads one band of three-band sources, so a door
+    sizing its loader off the sources would disagree."""
+    from PIL import Image
+    from tcip_annotation.state import Annotation, BBox
+
+    import tcip_mcp.pipelines.data.datasets as datasets
+    from tcip_mcp.tools.data_tools import draw_splits
+    from tcip_mcp.tools.training_tools import evaluate_model
+    from tests._chain_fixtures import assess, confirm_count_trait
+    from tests._verified_checkpoint_fixtures import ONE_BAND_DETECTOR, registered_checkpoint
+
+    root = tmp_path / "ds"
+    images_dir = root / "images" / UNDATED_BUCKET
+    images_dir.mkdir(parents=True)
+    for i, size in enumerate(range(48, 112, 8)):
+        Image.new("RGB", (size, size), (100, 100, 100)).save(images_dir / f"img{i}.png")
+        label_image(images_dir / f"img{i}.png",
+                    [Annotation(subject="bud", geometry=BBox(8, 8, 24, 24))], size, size)
+    drawn = draw_splits(tmp_path, str(root), output_path=str(tmp_path / "selection"),
+                        subject="bud", seed=2, val_ratio=0.25, calibration_ratio=0.25,
+                        holdout_ratio=0.25)
+    assert "error" not in drawn, drawn
+    confirm_count_trait(tmp_path)
+    ckpt = registered_checkpoint(tmp_path, model_source=ONE_BAND_DETECTOR,
+                                 data={"num_channels": 1, "scope": {"subject": "bud"}})
+
+    built: list[tuple] = []
+    real = datasets.build_dataset
+
+    def recording(task, **kwargs):
+        built.append((task, dict(kwargs["sizes"]), datasets.stated_tiling(kwargs.get("tiling"))))
+        return real(task, **kwargs)
+
+    monkeypatch.setattr(datasets, "build_dataset", recording)
+    by_door: dict[str, set] = {}
+    for door, act in (
+            ("assessment", lambda: assess(tmp_path, ckpt, tmp_path / "selection", device="cpu",
+                                          tile=False)),
+            ("full_frame", lambda: evaluate_model(tmp_path, ckpt, str(images_dir),
+                                                  stated=DETECTOR_PASS, use_tiled_inference=True)),
+            ("diagnostic", lambda: evaluate_model(tmp_path, ckpt, str(images_dir),
+                                                  stated=DETECTOR_PASS))):
+        built.clear()
+        act()
+        by_door[door] = set(map(repr, built))
+        assert by_door[door], door
+
+    assert by_door["assessment"] == by_door["full_frame"] == by_door["diagnostic"], by_door
+    assert by_door["assessment"] == {repr(("detection", {"num_channels": 1}, None))}
 
 
 def test_explicit_tiling_override_on_checkpoint(tmp_path, monkeypatch):

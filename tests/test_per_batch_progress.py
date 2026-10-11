@@ -66,6 +66,57 @@ def test_a_run_admits_what_its_training_reads_once(tmp_path, monkeypatch):
     assert calls == [1]
 
 
+@pytest.mark.usefixtures("seed_bud_trait_spec")
+def test_a_run_resolves_what_its_evaluation_reads_once(tmp_path, monkeypatch):
+    """Training a run stating a confirmed trait and evaluating it twice read the trait's entry
+    off the registry once."""
+    import tcip_mcp.pipelines.training.generic_trainer as generic_trainer
+
+    calls: list[int] = []
+    real = generic_trainer.config_trait
+
+    def counted(spec, project):
+        calls.append(1)
+        return real(spec, project)
+
+    ctx = _context(tmp_path, [], evaluation={"iou_threshold": 0.6, "trait": "bud_opening"})
+    monkeypatch.setattr(generic_trainer, "config_trait", counted)
+    assert ctx.default_train().status == "completed"
+    model = ctx.build_model()
+    ctx.evaluate(model)
+    ctx.evaluate(model)
+    assert calls == [1]
+
+
+@pytest.mark.usefixtures("seed_bud_trait_spec")
+def test_the_trainers_validation_and_a_bodys_evaluation_hand_evaluate_one_keyword_set(
+        tmp_path, monkeypatch):
+    """Over one run stating its own IoU threshold and a confirmed trait, the trainer's
+    validation and ``ctx.evaluate`` hand ``evaluate`` the same keywords, the trait's entry
+    among them."""
+    import tcip_mcp.pipelines.training.evaluation as evaluation
+    import tcip_mcp.pipelines.training.generic_trainer as generic_trainer
+
+    handed: dict[str, dict] = {}
+    real = evaluation.evaluate
+
+    def recorded(route: str):
+        def evaluate(*args, **kwargs):
+            handed[route] = kwargs
+            return real(*args, **kwargs)
+        return evaluate
+
+    monkeypatch.setattr(generic_trainer, "evaluate", recorded("trainer"))
+    monkeypatch.setattr(evaluation, "evaluate", recorded("body"))
+    ctx = _context(tmp_path, [], evaluation={"iou_threshold": 0.6, "trait": "bud_opening"})
+    assert ctx.default_train().status == "completed"
+    ctx.evaluate(ctx.build_model())
+
+    assert handed["trainer"] == handed["body"]
+    assert handed["body"]["iou_threshold"] == 0.6
+    assert handed["body"]["trait"].name == "bud_opening"
+
+
 def test_the_trainer_logs_a_batch_row_at_the_stated_cadence_and_no_reader_takes_it_for_an_epoch(
         tmp_path):
     hook_calls: list = []

@@ -29,8 +29,9 @@ def prepare_run_context(
     observation: "RunObservation", *, origin: str = "training", epoch_hook: Any = None,
 ) -> "TrainContext":
     """Build the ``TrainContext`` of the observed run from what its launch record resolved,
-    resolving nothing again: its config with the resolved data section, its objective, and its
-    datasets and loaders (:func:`~tcip_mcp.pipelines.data.split_construction.recorded_datasets`).
+    resolving nothing again: its config with the resolved data section, its objective, its
+    within-image split if its partition records one, and its datasets and loaders
+    (:func:`~tcip_mcp.pipelines.data.split_construction.recorded_datasets`).
     ``origin`` and ``epoch_hook`` are the context's own.
     """
     from tcip_mcp.pipelines.data.split_construction import (
@@ -50,9 +51,9 @@ def prepare_run_context(
     spec = run_obj.spec
     task = spec.model_source.task
     partition = cast(dict, observation.resolution)["partition"]
-    train_ds, val_ds = recorded_datasets(
-        task, spec.data, partition_samples(partition), partition_spatial(partition),
-        run_transforms(spec), run_obj.layout)
+    spatial = partition_spatial(partition)
+    train_ds, val_ds = recorded_datasets(task, spec.data, partition_samples(partition), spatial,
+                                         run_transforms(spec), run_obj.layout)
     train_loader, val_loader = run_loaders(run_obj, train_ds, val_ds)
     if val_loader is None and task in DETECTION_TASKS:
         logger.warning(
@@ -61,7 +62,7 @@ def prepare_run_context(
             "auto_val.", task, run_dir.name,
         )
     return TrainContext(
-        run=run_obj, train_loader=train_loader, val_loader=val_loader,
+        run=run_obj, train_loader=train_loader, val_loader=val_loader, spatial=spatial,
         resume_from=run_record["resume_from"] or "", epoch_hook=epoch_hook,
     )
 
