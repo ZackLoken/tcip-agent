@@ -9,15 +9,15 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
 
-from tcip_mcp.experiments import FINAL_STATES
+from tcip_mcp.experiments import FINAL_STATES, FinalState
 
 MAX_JOBS = 100
 
-JOB_STATES = ("pending", "running", *FINAL_STATES)
+JobStatus = Literal["pending", "running", FinalState]
 """Every status a job holds: ``pending`` and ``running``, then the final state it ends in
-(``experiments.FINAL_STATES``)."""
+(``experiments.FinalState``)."""
 
 
 def live(job: Any) -> bool:

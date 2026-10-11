@@ -45,7 +45,7 @@ _PORT_PARTS = ("web_port",)
 
 def backend_port_key(workspace: Path) -> Key:
     """The port the backend serving ``workspace`` bound, as a JSON string."""
-    return Key(BACKEND_PORT_STORE, str(Path(workspace).resolve()), _PORT_PARTS)
+    return Key(BACKEND_PORT_STORE, str(workspace), _PORT_PARTS)
 
 
 GUI_SNAPSHOT_STORE = "gui_snapshot"

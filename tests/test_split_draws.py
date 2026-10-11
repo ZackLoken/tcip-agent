@@ -1824,7 +1824,12 @@ def _outcome(project, real_hpo_base_config, trials) -> dict:
     from tcip_mcp.experiments import observe, sweep_outcome
 
     sweep = _two_draw_sweep(project, real_hpo_base_config)
-    return sweep_outcome(_trial_rows(sweep, trials), observe(sweep).record)
+    observed = observe(sweep)
+    return sweep_outcome(
+        _trial_rows(sweep, trials),
+        observed.record["input"],
+        observed.objective,
+    )
 
 
 def test_a_sweeps_outcome_groups_trials_by_point_and_picks_the_best_by_mean(

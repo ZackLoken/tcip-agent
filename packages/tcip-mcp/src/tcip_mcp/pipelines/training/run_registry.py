@@ -13,7 +13,11 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from tcip_mcp.experiments import RunObservation
     from tcip_mcp.pipelines.model_build import SourceLayout
-    from tcip_mcp.pipelines.schemas import TrainConfigSchema, TrainerReads
+    from tcip_mcp.pipelines.schemas import (
+        Objective,
+        TrainConfigSchema,
+        TrainerReads,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +28,9 @@ class TrainRun:
     # The run's config validated once by its producer (``schemas.train_config``), the one form
     # every reader of the run's settings reads.
     spec: TrainConfigSchema
-    # The run's resolved objective, ``{"selection_metric", "higher_is_better"}``
-    # (``generic_trainer.resolve_objective``), read by the body and never resolved again.
-    objective: dict
+    # The run's resolved objective (``generic_trainer.resolve_objective``), read by the body and
+    # never resolved again.
+    objective: Objective
     # The project the run belongs to, obtained once by the process running it.
     project: Path
     # The laid-out source files every import the run makes reads (``model_build.SourceLayout``).
@@ -118,8 +122,8 @@ def observed_run(
     from tcip_mcp.experiments import project_of_run
     from tcip_mcp.pipelines.model_build import run_layout, snapshot_bound
 
-    resolved, data = observation.resolution, observation.resolved_data
-    assert resolved is not None and data is not None, (
+    data = observation.resolved_data
+    assert data is not None, (
         "a run whose input resolved to nothing ended at its opening"
     )
     spec = snapshot_bound(
@@ -130,7 +134,7 @@ def observed_run(
     return TrainRun(
         id=observation.directory.name,
         spec=spec,
-        objective=resolved["objective"],
+        objective=observation.objective,
         project=project_of_run(observation.directory),
         layout=run_layout(observation.directory, observation.record["source"]),
         output_dir=str(observation.directory),

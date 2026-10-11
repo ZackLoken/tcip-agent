@@ -996,7 +996,7 @@ class OverviewJob:
 
     job_id: str
     path: str
-    status: str = "pending"  # pending | running | completed | failed
+    status: jobstore.JobStatus = "pending"
     bytes_written: int = 0
     error: str | None = None
 

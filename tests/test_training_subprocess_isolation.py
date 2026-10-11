@@ -215,7 +215,7 @@ def test_the_launch_record_carries_the_resolution_and_the_child_resolves_nothing
 
     ctx = worker.prepare_run_context(observe(run_dir))
 
-    assert ctx.run.objective == resolved["objective"]
+    assert ctx.run.objective.model_dump() == resolved["objective"]
     assert ctx.spec.data.record() == resolved["data"]
     train_ds = ctx.train_loader.dataset
     assert sorted(
@@ -337,10 +337,7 @@ def test_run_summary_reads_the_run_directory(tmp_path):
     assert result["current_epoch"] == 3
     assert result["output_dir"] == str(run_dir)
     assert result["best_metric"] is None
-    assert (
-        result["best_metric_name"]
-        == (observation.record["resolved"]["objective"]["selection_metric"])
-    )
+    assert result["best_metric_name"] == observation.objective.selection_metric
 
 
 @pytest.mark.parametrize(

@@ -394,7 +394,7 @@ class TrainContext:
             self._epoch,
             {
                 "selection": float(value),
-                "selection_metric": self.run.objective["selection_metric"],
+                "selection_metric": self.run.objective.selection_metric,
             },
         )
 

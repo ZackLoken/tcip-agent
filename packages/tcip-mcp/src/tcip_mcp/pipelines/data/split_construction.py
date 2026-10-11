@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.model_build import SourceLayout
     from tcip_mcp.pipelines.schemas import (
         DataSpec,
+        Objective,
         SpatialManifest,
         SplitSpec,
         TilingSpec,
@@ -1029,7 +1030,7 @@ class ResolvedRun(NamedTuple):
     spec: TrainConfigSchema
     data: DataSpec
     partition: dict
-    objective: dict
+    objective: Objective
 
     @property
     def spatial(self) -> SpatialManifest | None:
@@ -1044,7 +1045,7 @@ class ResolvedRun(NamedTuple):
         return {
             "data": self.data.record(),
             "partition": self.partition,
-            "objective": self.objective,
+            "objective": self.objective.model_dump(),
         }
 
 
@@ -1053,7 +1054,7 @@ def resolve_run(
     layout: SourceLayout,
     *,
     project: Path,
-    objective: dict | None = None,
+    objective: Objective | None = None,
     tallies_out: dict[str, int] | None = None,
 ) -> ResolvedRun:
     """Resolve the validated config ``spec`` (``schemas.train_config``) once for a run of

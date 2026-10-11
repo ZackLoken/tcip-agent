@@ -52,7 +52,7 @@ def test_the_workspace_is_admitted_and_a_sibling_outside_it_is_refused_with_no_e
     inside.parent.mkdir(parents=True)
     inside.write_bytes(b"x")
     assert assert_path_allowed(str(inside)) == inside.resolve()
-    assert allowed_roots()[0] == tmp_path.parent.resolve()
+    assert allowed_roots()[0] == tmp_path.parent
     with pytest.raises(ValueError, match="outside the allowed roots"):
         assert_path_allowed(str(outside / "leak.jpg"))
 
@@ -118,7 +118,7 @@ def test_a_dataset_registered_as_the_projects_own_tree_contributes_no_relative_r
     roots = allowed_roots()
 
     assert all(root.is_absolute() for root in roots)
-    assert project.resolve() in roots
+    assert project in roots
 
 
 def test_an_imports_staging_tree_is_never_admitted_even_under_the_workspace(
@@ -154,6 +154,19 @@ def test_image_roots_stay_additive_on_top_of_the_derived_set(
     inside = tmp_path / "still-admitted"
     inside.mkdir()
     assert assert_path_allowed(str(inside)) == inside.resolve()
+
+
+def test_a_root_listed_under_two_spellings_is_admitted_once(
+    tmp_path: Path,
+) -> None:
+    """A workspace project also named as an image root through a ``..`` segment is one root."""
+    from tcip_web.paths import allowed_roots
+
+    project = new_project(tmp_path).root
+    (project / "images").mkdir(exist_ok=True)
+    store.configure(store.workspace, (project / "images" / "..",))
+
+    assert sum(root.samefile(project) for root in allowed_roots()) == 1
 
 
 def test_a_path_that_does_not_exist_yet_is_judged_by_its_nearest_existing_ancestor(

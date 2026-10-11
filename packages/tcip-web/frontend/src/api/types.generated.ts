@@ -159,12 +159,17 @@ export interface RunRow {
   launch: Record<string, string | null> | null;
 }
 
+export interface Objective {
+  selection_metric: string;
+  higher_is_better: boolean;
+}
+
 export interface SweepGroup {
   sweep_id: string;
   state: string;
   status_error: string | null;
   input: Record<string, unknown>;
-  objective: Record<string, unknown>;
+  objective: Objective;
   cancel_requested: boolean;
   heartbeat: string;
   trials: RunRow[];

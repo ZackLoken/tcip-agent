@@ -83,11 +83,9 @@ function runRowLabel(run: RunRow): string {
 
 /** What a sweep's trials amount to so far, under the objective its record states. */
 function sweepOutcomeLine(sweep: SweepGroup): string {
-  const selected = sweep.objective.selection_metric;
-  const metric = typeof selected === "string" ? selected : "objective";
   return sweep.outcome.best_params == null
     ? "no completed trial yet"
-    : `best ${metric} ${String(sweep.outcome.best_value)}`;
+    : `best ${sweep.objective.selection_metric} ${String(sweep.outcome.best_value)}`;
 }
 
 const NO_OTHER_PARTITION =

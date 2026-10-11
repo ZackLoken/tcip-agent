@@ -251,6 +251,36 @@ def test_a_scope_resolution_that_raises_refuses_rather_than_filing_the_event_in_
     assert _rows_for(tmp_path, "curate_something") == []
 
 
+def test_two_spellings_of_a_root_reach_one_log_and_a_relative_spelling_refuses(
+    dataset_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A line written under one spelling of a root reads back under another, since the store
+    locates a root's log by its canonical path; a relative spelling names no directory until a
+    working directory is chosen, so the store refuses it rather than reading the process's.
+    """
+    import os
+
+    from tcip_mcp.audit import audit_entries, record_event_or_raise
+
+    record_event_or_raise(
+        "curate_something",
+        {"n": 1},
+        actor=None,
+        scope=dataset_root / "images" / "..",
+    )
+    spellings = [dataset_root]
+    if os.name == "nt":
+        spellings.append(Path(str(dataset_root).upper()))
+    for spelling in spellings:
+        entries, _cursor = audit_entries(spelling)
+        assert [e["tool"] for e in entries] == ["curate_something"]
+
+    monkeypatch.chdir(dataset_root.parent)
+    with pytest.raises(ts.BadKeyError, match="not an absolute path"):
+        audit_entries(Path(dataset_root.name))
+
+
 def test_scope_argument_naming_no_parameter_is_refused_at_decoration() -> None:
     """A rail against a typo that would silently record every call in the project's log."""
     from tcip_mcp.audit import audited

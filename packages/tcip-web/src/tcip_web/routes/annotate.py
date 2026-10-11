@@ -308,7 +308,7 @@ class PriorityQueueJob:
     subject: str | None
     method: str
     budget: int
-    status: str = "pending"  # one of jobstore.JOB_STATES
+    status: jobstore.JobStatus = "pending"
     error: str | None = None
     # [{image, score, reference_member?}], highest first.
     queue: list[dict] = field(default_factory=list)

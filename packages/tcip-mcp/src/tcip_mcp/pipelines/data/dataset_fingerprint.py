@@ -27,7 +27,7 @@ def _labels_term(
     from tcip_mcp.dataset_layout import LABEL_DOCUMENTS
     from tcip_mcp.pipelines.data.selection import ground_truth_digest
 
-    keys = tcip_store.keys(LABEL_DOCUMENTS, str(dataset_root.resolve()))
+    keys = tcip_store.keys(LABEL_DOCUMENTS, str(dataset_root))
     h = hashlib.sha256()
     for key in keys:
         version = (
