@@ -68,8 +68,6 @@ def gt_aspect_ratios(
 
     ratios = [h / w for (w, h) in class_distribution_boxes if w > 0 and h > 0]
     if not ratios:
-        # Underivable: a pinned (0.5, 1, 2) returned as if derived would be indistinguishable from
-        # a real result, so the caller states its own.
         return None
     lo, hi = np.quantile(ratios, 0.1), np.quantile(ratios, 0.9)
     out = sorted({round(float(lo), 2), 1.0, round(float(hi), 2)})
@@ -261,16 +259,11 @@ def derive_object_density(regions: Sequence[Region]) -> float:
     (:func:`detection_cap`): the 0.99 quantile of the densities of the ``regions`` holding at
     least one object, each its object count over its area. The quantile is this method's own
     setting, not measured; a frame denser than it can still exceed its cap. Refuses
-    (``ValueError``) no regions, and regions none of which holds an object, which no frame's cap
-    could rest on.
+    (``ValueError``) regions none of which holds an object, no regions included, which no
+    frame's cap could rest on.
     """
     import numpy as np
 
-    if not regions:
-        raise ValueError(
-            "an object density is derived from counted regions, and none were "
-            "counted."
-        )
     bearing = [len(r.boxes) / r.area for r in regions if len(r.boxes)]
     if not bearing:
         raise ValueError(
@@ -422,10 +415,7 @@ def derive_sliver_frac(char_sizes: Sequence[float]) -> float | None:
     sizes = [s for s in char_sizes if s > 0]
     if len(sizes) < 5:
         return None
-    mean = float(np.mean(sizes))
-    if mean <= 0:
-        return None
-    return float(np.percentile(sizes, 10)) / mean
+    return float(np.percentile(sizes, 10)) / float(np.mean(sizes))
 
 
 def derive_block_scale_px(
