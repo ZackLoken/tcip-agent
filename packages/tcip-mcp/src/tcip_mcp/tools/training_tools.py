@@ -8,15 +8,13 @@ import os
 import subprocess
 import sys
 import threading
+from collections.abc import Sized
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple, Sized
-
-from tcip_store import StoreError, canonical_path, check_json_value
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from tcip_mcp import experiments
-from tcip_mcp.experiments import SWEEP_FILE, SweepGroup, TrainingDetail
-from tcip_mcp.server import tool
 from tcip_mcp.audit import audited, now_iso, record_event_or_raise
+from tcip_mcp.experiments import SWEEP_FILE, SweepGroup, TrainingDetail
 from tcip_mcp.pipelines.data.split_construction import (
     ResolvedRun,
     data_dir_issues,
@@ -27,6 +25,8 @@ from tcip_mcp.pipelines.data.split_construction import (
 from tcip_mcp.pipelines.execution import Stated
 from tcip_mcp.pipelines.schemas import TilingSpec, checked_train_config
 from tcip_mcp.registry_paths import located
+from tcip_mcp.server import tool
+from tcip_store import StoreError, canonical_path, check_json_value
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.model_build import StagedSources
@@ -1589,9 +1589,9 @@ def _split_draws_refusal(
     if split_draws <= 1:
         return None
     from tcip_mcp.pipelines.training.hpo import (
+        _NATIVE_SEARCH,
         FIFO_SCHEDULER,
         SPLIT_DRAW_SEED_KEY,
-        _NATIVE_SEARCH,
         search_alg_key,
     )
 
@@ -1834,17 +1834,16 @@ def evaluate_model(
     import torch
     from torch.utils.data import DataLoader
 
+    from tcip_mcp.operationalization import (
+        OperationalizationRefusedError,
+        latest_confirmed,
+    )
+    from tcip_mcp.pipelines.data.split_construction import predictor_dataset
+    from tcip_mcp.pipelines.execution import prepare
     from tcip_mcp.pipelines.training.collation import task_collate
     from tcip_mcp.pipelines.training.eval_runners import (
         run_full_frame_evaluation,
         run_test_evaluation,
-    )
-    from tcip_mcp.pipelines.data.split_construction import predictor_dataset
-    from tcip_mcp.pipelines.execution import prepare
-
-    from tcip_mcp.operationalization import (
-        OperationalizationRefusedError,
-        latest_confirmed,
     )
     from tcip_mcp.traits import TraitUnknownError
 

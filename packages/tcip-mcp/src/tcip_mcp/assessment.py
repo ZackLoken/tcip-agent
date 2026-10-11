@@ -17,8 +17,6 @@ from operator import methodcaller
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from tcip_store import Key
-
 from tcip_mcp.pipelines.block_calibration import DEFAULT_K_CAL, DEFAULT_K_TEST
 from tcip_mcp.pipelines.data.selection import (
     GROUND_TRUTH_PATHS,
@@ -44,6 +42,7 @@ from tcip_mcp.traits import (
     PER_PLANT_ORDINAL_AGGREGATE,
     STATE_CROSSING_DATES,
 )
+from tcip_store import Key
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.selection import Sample, Selection
@@ -315,7 +314,6 @@ def _retained(
     (:func:`tcip_store.encode_record`); and ``samples`` measuring what was retained: a mask's or a
     table's copy, and a document's record at the retained version (its ``ground_truth_digest``)."""
     import tcip_store
-
     from tcip_mcp.experiments import publish_once
 
     files: dict[Key | str, RetainedFile] = {}
@@ -464,7 +462,6 @@ def _admit_reference(samples: list[Sample], scope: Any) -> list[Sample]:
     refuses a reference that admission would not admit, and one whose label documents only the
     model stands behind (:func:`~tcip_annotation.json_io.require_reference_ground_truth`)."""
     from tcip_annotation.json_io import require_reference_ground_truth
-
     from tcip_mcp.pipelines.data.label_queries import readmitted_samples
 
     admitted = readmitted_samples(samples, scope)
@@ -1110,8 +1107,8 @@ def _band_records(
     import numpy as np
 
     from tcip_mcp.pipelines import block_calibration as blocks
-    from tcip_mcp.pipelines.data.selection import Sample
     from tcip_mcp.pipelines.data.datasets import PER_BOX_KEYS
+    from tcip_mcp.pipelines.data.selection import Sample
     from tcip_mcp.pipelines.raster_source import Rect, _RegionView
     from tcip_mcp.pipelines.slicing import slice_lattice
     from tcip_mcp.pipelines.training.evaluation import (
@@ -1255,7 +1252,6 @@ def assess_physical_scale(
     import statistics
 
     from tcip_annotation.state import polygonal
-
     from tcip_mcp.operationalization import latest_confirmed
     from tcip_mcp.pipelines.data.selection import source_digests
     from tcip_mcp.pipelines.measurement.mask_geometry import (

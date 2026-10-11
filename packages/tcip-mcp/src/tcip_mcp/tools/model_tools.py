@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tcip_mcp.server import tool
 from tcip_mcp.model_registry import ModelRegistry, best_model, verified
+from tcip_mcp.server import tool
 
 
 @tool()
@@ -172,12 +172,11 @@ def ranked_registered_model(
     given, with the direction used, its source and the unverified exclusions; or the error dict
     naming why none ranks: an empty ``metric``, nothing registered, nothing registered by the
     marked experiments, an undeclared direction, every carrier unverified, no carrier."""
-    from tcip_store.values import NOT_FINITE_SUFFIX
-
     from tcip_mcp.pipelines.training.evaluation import (
         HIGHER_IS_BETTER_BY_METRIC,
         VAL_METRIC_PREFIX,
     )
+    from tcip_store.values import NOT_FINITE_SUFFIX
 
     if not metric:
         return {

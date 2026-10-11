@@ -73,6 +73,34 @@ _PRIMITIVE = {
 
 def declared_models() -> list[type[BaseModel]]:
     """The models this script renders, in the order their interfaces are emitted."""
+    from tcip_mcp.experiments import (
+        RunRow,
+        SweepGroup,
+        TrainingDetail,
+        TrainingListing,
+    )
+    from tcip_mcp.pipelines.delivery_events_schema import (
+        Acknowledgment,
+        BucketFinding,
+        CanopySegmentDisclosure,
+        CanopySegmentsDocument,
+        DeliveryEventRecord,
+        MatchTolerance,
+        PlantMappingDisclosure,
+        PlantRegistryDisclosure,
+        PlantRegistryReference,
+        Producer,
+        SegmentTieDisclosure,
+    )
+    from tcip_mcp.pipelines.execution import Stated
+    from tcip_mcp.traits import (
+        Operationalization,
+        PositiveState,
+        TraitEntry,
+        TraitRevision,
+    )
+    from tcip_web.routes.annotate import LaunchPriorityQueuePayload
+    from tcip_web.routes.canvas import CanvasStatePayload
     from tcip_web.routes.images import ServingCell, ViewReads
     from tcip_web.routes.projects import (
         OpenRequest,
@@ -91,28 +119,6 @@ def declared_models() -> list[type[BaseModel]]:
         RegisteredModel,
         RegisteredModels,
     )
-    from tcip_mcp.pipelines.execution import Stated
-    from tcip_mcp.traits import (
-        Operationalization,
-        PositiveState,
-        TraitEntry,
-        TraitRevision,
-    )
-    from tcip_mcp.pipelines.delivery_events_schema import (
-        Acknowledgment,
-        BucketFinding,
-        CanopySegmentDisclosure,
-        CanopySegmentsDocument,
-        DeliveryEventRecord,
-        MatchTolerance,
-        PlantMappingDisclosure,
-        PlantRegistryDisclosure,
-        PlantRegistryReference,
-        Producer,
-        SegmentTieDisclosure,
-    )
-    from tcip_web.routes.annotate import LaunchPriorityQueuePayload
-    from tcip_web.routes.canvas import CanvasStatePayload
     from tcip_web.routes.sessions import (
         ImageEntry,
         ImageEventPayload,
@@ -130,12 +136,6 @@ def declared_models() -> list[type[BaseModel]]:
         TerminalLaunch,
         TerminalResizeFrame,
         TerminalStatus,
-    )
-    from tcip_mcp.experiments import (
-        RunRow,
-        SweepGroup,
-        TrainingDetail,
-        TrainingListing,
     )
     from tcip_web.routes.training import TrainingRowFrame, TrainingStatusFrame
 
@@ -208,10 +208,10 @@ def render_cache_version() -> int:
 
 def string_constants() -> dict[str, str]:
     """Each backend string the frontend matches at runtime, by its constant's name."""
-    from tcip_store.values import NOT_FINITE_SUFFIX
     from tcip_annotation.json_io import PERSON_NAME_RULE
     from tcip_mcp.experiments import EPOCH_KEY, STEP_KEY, TIMESTAMP_KEY
     from tcip_mcp.pipelines.training.evaluation import VAL_METRIC_PREFIX
+    from tcip_store.values import NOT_FINITE_SUFFIX
     from tcip_web.routes.images import IMAGE_ERROR_HEADER, OVERVIEWS_REQUIRED
 
     return {

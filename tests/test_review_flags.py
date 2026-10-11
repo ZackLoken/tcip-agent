@@ -363,7 +363,6 @@ def test_doctor_names_a_flags_record_that_will_not_read_and_passes_one_that_does
     tmp_path: Path,
 ) -> None:
     import tcip_store as ts
-
     from tcip_mcp.cli.doctor import check_state
 
     image = _image(tmp_path)

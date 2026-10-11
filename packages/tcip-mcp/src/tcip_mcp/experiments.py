@@ -33,6 +33,14 @@ from typing import TYPE_CHECKING, Any, BinaryIO, NamedTuple, cast
 
 from pydantic import BaseModel
 
+from tcip_mcp.audit import now_iso
+from tcip_mcp.pipelines.data.selection import SAMPLE_PATHS
+from tcip_mcp.registry_paths import (
+    PathFields,
+    recorded_paths,
+    runtime_paths,
+    within,
+)
 from tcip_store import (
     BadKeyError,
     DecodeError,
@@ -44,15 +52,6 @@ from tcip_store import (
 )
 from tcip_store.file_backend import is_sharing_violation, retry_while_denied
 from tcip_store.values import NOT_FINITE_SUFFIX
-
-from tcip_mcp.audit import now_iso
-from tcip_mcp.pipelines.data.selection import SAMPLE_PATHS
-from tcip_mcp.registry_paths import (
-    PathFields,
-    recorded_paths,
-    runtime_paths,
-    within,
-)
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.schemas import (

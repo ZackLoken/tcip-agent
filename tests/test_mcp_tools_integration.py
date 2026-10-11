@@ -6,15 +6,13 @@ over real images and the canonical per-image label documents.
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 from pathlib import Path
 
 import pytest
 from PIL import Image
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests.conftest import DATA_DIR_BUCKET
-
 
 DATE = "2-11-26"
 """The capture date conftest's ``data_dir`` lays its images and its published bucket under."""
@@ -253,6 +251,7 @@ class TestAugmentations:
 
     def test_augmentation_preserves_detection_target(self):
         import torch
+
         from tcip_mcp.pipelines.data.augmentations import build_augmentation
 
         config = {"horizontal_flip": {"p": 1.0}}  # always flip
@@ -272,6 +271,7 @@ class TestAugmentations:
 
     def test_augmentation_classification(self):
         import torch
+
         from tcip_mcp.pipelines.data.augmentations import build_augmentation
 
         config = {
@@ -295,9 +295,9 @@ class TestReadAnnotationsUnknownFormat:
         """The per-image reader refuses a record of a shape it does not read; read_annotations
         surfaces that as an error dict, matching its own convention and the docs, not an
         uncaught error."""
-        import tcip_store
         from PIL import Image
 
+        import tcip_store
         from tcip_mcp.tools.annotation_tools import read_annotations
         from tests._producer_fixtures import image_label_key
 

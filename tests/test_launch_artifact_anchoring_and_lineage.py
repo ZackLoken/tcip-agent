@@ -50,7 +50,7 @@ def _canonical_dataset(root: Path, date: str = "2-11-26") -> Path:
     from PIL import Image
 
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.subject_registry import SubjectRegistry, Subject
+    from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tests._producer_fixtures import label_image, registry_over
 
     images_dir = root / "images" / date
@@ -223,9 +223,8 @@ def test_launch_with_overfit_check_over_a_diverging_model_proceeds_with_a_json_s
     renders the non-finite losses as null with the state named beside them, so the record this
     launch writes still passes check_json_value on what the diagnostic actually observed."""
     pytest.importorskip("torchvision")
-    from tcip_store import check_json_value
-
     from tcip_mcp.tools import training_tools
+    from tcip_store import check_json_value
 
     project = tmp_path / "project"
     project.mkdir()

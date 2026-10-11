@@ -11,8 +11,10 @@ from PIL import Image
 
 from tcip_mcp.pipelines.pixel_size import resolve_pixel_size as _resolve_header
 from tcip_mcp.pipelines.raster_source import SourceHeader
-from tests._geotiff_fixtures import UTM_15N_EPSG as _UTM_15N_EPSG
-from tests._geotiff_fixtures import write_geotiff as _write_shared_geotiff
+from tests._geotiff_fixtures import (
+    UTM_15N_EPSG as _UTM_15N_EPSG,
+    write_geotiff as _write_shared_geotiff,
+)
 
 
 def _write_geotiff(

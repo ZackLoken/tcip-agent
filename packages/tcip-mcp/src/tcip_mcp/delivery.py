@@ -19,10 +19,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import tcip_store
 from pydantic import TypeAdapter
-from tcip_store import Key, encode_record
 
+import tcip_store
 from tcip_mcp.audit import now_iso, record_event_or_raise
 from tcip_mcp.pipelines.delivery_events_schema import (
     Acknowledgment,
@@ -33,6 +32,7 @@ from tcip_mcp.pipelines.delivery_events_schema import (
 )
 from tcip_mcp.project_paths import project_state_dir
 from tcip_mcp.registry_paths import PathFields, recorded_paths, runtime_paths
+from tcip_store import Key, encode_record
 
 _DISCLOSURE: TypeAdapter[PlantMapping | None] = TypeAdapter(
     PlantMapping | None

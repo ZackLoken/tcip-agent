@@ -48,11 +48,9 @@ def test_classification_training_writes_train_and_val_scalars_every_epoch(
 
 
 def test_hpo_trial_body_writes_train_and_val_loss_every_epoch(tmp_path):
+    from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.experiments import board_of, run_dirs
     from tcip_mcp.tools.training_tools import _run_hpo_trial
-
-    from tcip_annotation.state import Annotation, BBox
-
     from tests._chain_fixtures import training_config
     from tests._producer_fixtures import seed_labeled_images
     from tests._training_values import schedule

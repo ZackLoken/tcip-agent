@@ -5,15 +5,15 @@ Every throughput figure is derived from those entries when they are read."""
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Callable, Literal, Optional, get_args
+from typing import Any, Literal, get_args
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 import tcip_store
-
 from tcip_mcp import audit
 from tcip_mcp.audit import now_iso
 from tcip_mcp.identity import actor
@@ -56,7 +56,7 @@ class ImageEventPayload(ImageEntry):
 
     user: str
     project_id: str
-    started: Optional[str]
+    started: str | None
 
 
 class SessionRef(BaseModel):
@@ -82,7 +82,7 @@ class SessionWrite(BaseModel):
     for every end answer."""
 
     status: Literal["ok", "noop"]
-    session: Optional[SessionPlace]
+    session: SessionPlace | None
 
 
 class SessionSummary(BaseModel):
@@ -92,13 +92,13 @@ class SessionSummary(BaseModel):
 
     user: str
     started: str
-    ended: Optional[str]
+    ended: str | None
     entries: list[ImageEntry]
     images_annotated: int
     total_annotations: int
     total_time_seconds: float
     seconds_by_activity: dict[Activity, float]
-    avg_seconds_per_annotation: Optional[float]
+    avg_seconds_per_annotation: float | None
 
 
 @router.post("/image_event")
@@ -151,7 +151,7 @@ async def image_event(payload: ImageEventPayload) -> SessionWrite:
 
 
 def _land(
-    root: Path, started: Optional[str], entry: dict[str, Any], person: str
+    root: Path, started: str | None, entry: dict[str, Any], person: str
 ) -> SessionWrite:
     """``entry`` appended, in one transaction on ``root``'s stats record, to the session
     ``started`` names, refused (409 naming why) unless it is ``person``'s and unended; with
@@ -237,7 +237,7 @@ def end_session(payload: SessionRef) -> SessionWrite:
     return written
 
 
-def end_sessions(root: Path, started: Optional[str]) -> list[dict[str, Any]]:
+def end_sessions(root: Path, started: str | None) -> list[dict[str, Any]]:
     """Mark ended, in one transaction on ``root``'s stats record, the session ``started`` names,
     or every unended session (each person's) when ``started`` is ``None``; the sessions it ended,
     each as recorded. Raises ``LookupError`` for a ``started`` no session of the project

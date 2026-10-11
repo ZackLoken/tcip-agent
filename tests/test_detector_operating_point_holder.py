@@ -157,8 +157,8 @@ def _assessed(tmp_path: Path, builder: str) -> dict:
     predict for that size, so every image matches and no two collide on content; its record, or
     the door's error."""
     from PIL import Image
-    from tcip_annotation.state import Annotation, BBox
 
+    from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.tools.data_tools import draw_splits
     from tests._chain_fixtures import assess, confirm_count_trait
     from tests._producer_fixtures import label_image

@@ -14,7 +14,6 @@ import threading
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
@@ -48,15 +47,15 @@ class InferenceJob:
     # What the launch stated of the execution record, resolved as run_inference resolves it.
     stated: Stated = field(default_factory=Stated)
     # The assessment whose execution record the pass runs and the bucket names.
-    assessment_id: Optional[str] = None
+    assessment_id: str | None = None
     total: int = 0
     done: int = 0
     status: str = "pending"  # one of jobstore.JOB_STATES
-    error: Optional[str] = None
+    error: str | None = None
     # Detections dropped for a zero-extent box, as the published bucket's record counts them;
     # None until a bucket is published.
-    dropped_boxes: Optional[int] = None
-    thread: Optional[threading.Thread] = field(default=None, repr=False)
+    dropped_boxes: int | None = None
+    thread: threading.Thread | None = field(default=None, repr=False)
     cancel_event: threading.Event = field(
         default_factory=threading.Event, repr=False
     )
@@ -85,7 +84,7 @@ def _register(job: InferenceJob) -> None:
     _registry.register(job.job_id, job)
 
 
-def _get(job_id: str) -> Optional[InferenceJob]:
+def _get(job_id: str) -> InferenceJob | None:
     """A job by id, whichever project it runs for: opening another project must not make an
     in-flight job unreachable for canceling or streaming it."""
     return _registry.get(job_id)
@@ -171,9 +170,8 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
     checkpoint_path = allowed_path(payload.checkpoint_path)
     dataset_root = allowed_path(payload.dataset_root)
 
-    from tcip_store import canonical_path
-
     from tcip_mcp.dataset_layout import image_dir
+    from tcip_store import canonical_path
 
     try:
         images_dir = image_dir(dataset_root, payload.date)

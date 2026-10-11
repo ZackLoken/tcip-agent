@@ -6,15 +6,15 @@ predictor, active learning scorers, and tool imports.
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 import pytest
+
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 torch = pytest.importorskip("torch")
 import torch.nn as nn
+
 from tests._producer_fixtures import dataset_over, run_over  # noqa: E402
 from tests._training_values import adamw_optimizer, sgd_optimizer  # noqa: E402
-
 
 # ====================================================================
 # Data Layer, Datasets & Samplers
@@ -46,7 +46,6 @@ class TestDatasets:
     def test_build_dataset_detection(self, tmp_path):
         """Detection dataset from per-image label documents."""
         from tcip_annotation.state import Annotation, BBox
-
         from tests._producer_fixtures import label_image
 
         imgs = tmp_path / "images" / UNDATED_BUCKET

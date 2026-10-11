@@ -10,9 +10,9 @@ from __future__ import annotations
 import os
 
 import uvicorn
-from tcip_store import bind, replace
 
 from tcip_mcp.web_client import LOOPBACK_HOST, backend_port_key, free_port
+from tcip_store import bind, replace
 
 DEFAULT_PORT = 8765
 """The port asked for when ``TCIP_WEB_PORT`` is unset."""

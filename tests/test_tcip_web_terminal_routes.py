@@ -482,6 +482,7 @@ def test_the_doctor_line_runs_the_console_command_under_the_mcp_servers_interpre
     """The doctor line names the interpreter the launch's MCP server runs, and running
     ``tcip_web.cli`` as a module reaches the ``main`` the ``tcip`` console script names."""
     import runpy
+
     import tomllib
 
     import tcip_web.cli
@@ -1312,9 +1313,7 @@ def test_shutdown_all_logs_a_survivor(
         terminal_routes._SESSIONS.pop(session.id, None)
 
 
-def _wire_stub_spawn(
-    monkeypatch: pytest.MonkeyPatch, stub: "_StubPty"
-) -> None:
+def _wire_stub_spawn(monkeypatch: pytest.MonkeyPatch, stub: _StubPty) -> None:
     from tcip_web import terminal as pty_host
 
     monkeypatch.setattr(pty_host, "spawn_pty", lambda *a, **kw: stub)

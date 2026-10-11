@@ -245,7 +245,7 @@ def _reservoir_take(reservoir, seen: int, values, size: int, rng):
 
 
 def sampled_band_ranges(
-    src: "RasterSource",
+    src: RasterSource,
     *,
     seed: int,
     window_size: int,

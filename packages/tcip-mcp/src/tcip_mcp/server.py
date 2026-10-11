@@ -7,7 +7,8 @@ import argparse
 import functools
 import inspect
 import logging
-from typing import Any, Callable, TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
@@ -41,26 +42,25 @@ def tool(**options: Any) -> Callable[[_Tool], _Tool]:
 
 # Import tool modules to declare their handlers. A tool module that needs torch imports it inside
 # its own functions, so every tool registers whether or not torch is installed.
-import tcip_mcp.tools.data_tools  # noqa: F401, E402
-import tcip_mcp.tools.project_tools  # noqa: F401, E402
-import tcip_mcp.tools.ingest_tools  # noqa: F401, E402
-import tcip_mcp.tools.experiment_tools  # noqa: F401, E402
-import tcip_mcp.tools.meta_tools  # noqa: F401, E402
-import tcip_mcp.tools.knowledge_tools  # noqa: F401, E402
-import tcip_mcp.tools.phenology_tools  # noqa: F401, E402
-import tcip_mcp.tools.trait_tools  # noqa: F401, E402
 import tcip_mcp.tools.annotation_tools  # noqa: F401, E402
-import tcip_mcp.tools.vision_tools  # noqa: F401, E402
-import tcip_mcp.tools.proposal_tools  # noqa: F401, E402
-import tcip_mcp.tools.gui_tools  # noqa: F401, E402
-import tcip_mcp.tools.feedback_tools  # noqa: F401, E402
-import tcip_mcp.tools.training_tools  # noqa: F401, E402
-import tcip_mcp.tools.inference_tools  # noqa: F401, E402
 import tcip_mcp.tools.calibration_tools  # noqa: F401, E402
+import tcip_mcp.tools.data_tools  # noqa: F401, E402
+import tcip_mcp.tools.delivery_tools  # noqa: F401, E402
+import tcip_mcp.tools.experiment_tools  # noqa: F401, E402
+import tcip_mcp.tools.feedback_tools  # noqa: F401, E402
+import tcip_mcp.tools.gui_tools  # noqa: F401, E402
+import tcip_mcp.tools.inference_tools  # noqa: F401, E402
+import tcip_mcp.tools.ingest_tools  # noqa: F401, E402
+import tcip_mcp.tools.knowledge_tools  # noqa: F401, E402
+import tcip_mcp.tools.meta_tools  # noqa: F401, E402
 import tcip_mcp.tools.model_tools  # noqa: F401, E402
 import tcip_mcp.tools.orthomosaic_tools  # noqa: F401, E402
-import tcip_mcp.tools.delivery_tools  # noqa: F401, E402
-
+import tcip_mcp.tools.phenology_tools  # noqa: F401, E402
+import tcip_mcp.tools.project_tools  # noqa: F401, E402
+import tcip_mcp.tools.proposal_tools  # noqa: F401, E402
+import tcip_mcp.tools.training_tools  # noqa: F401, E402
+import tcip_mcp.tools.trait_tools  # noqa: F401, E402
+import tcip_mcp.tools.vision_tools  # noqa: F401, E402
 
 _CONTEXT = ("project", "bound", "actor")
 """The parameters the server supplies and no client states: ``project``, the bound project's

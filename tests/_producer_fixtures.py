@@ -242,7 +242,6 @@ def mark_complete(
         client_annotation,
         read_document_versioned,
     )
-
     from tcip_mcp.dataset_layout import Gestures, save_label_document
     from tcip_mcp.pipelines.image_utils import image_path_dimensions
 

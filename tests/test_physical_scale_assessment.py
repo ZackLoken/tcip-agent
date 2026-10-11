@@ -64,10 +64,10 @@ def _reference(
     from PIL import Image
 
     from tcip_mcp import subject_registry as cr
-    from tests._producer_fixtures import registry_over
     from tcip_mcp.tools.data_tools import draw_splits
     from tcip_mcp.tools.project_tools import register_dataset
     from tcip_mcp.traits import registered_crops
+    from tests._producer_fixtures import registry_over
 
     root = project / "ds"
     images = root / "images" / DATE

@@ -9,8 +9,6 @@ scaling, and a two-stage handoff smoke test. Tiny synthetic data, CPU,
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 import csv
 import math
 from functools import partial
@@ -18,13 +16,18 @@ from pathlib import Path
 
 import pytest
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._chain_fixtures import CLASSIFIER_SOURCE
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 from torch import nn  # noqa: E402
 
-from tcip_mcp.pipelines.training.generic_trainer import train  # noqa: E402
+from tcip_mcp.pipelines.model_build import STATE_DICT_KEY  # noqa: E402
+from tcip_mcp.pipelines.training.generic_trainer import (
+    _warmup_starts,  # noqa: E402
+    train,  # noqa: E402
+)
 from tcip_mcp.pipelines.training.optimizer_factory import (  # noqa: E402
     GROUPS_KEY,
     OPTIMIZER_STATE_KEY,
@@ -33,8 +36,6 @@ from tcip_mcp.pipelines.training.optimizer_factory import (  # noqa: E402
     compute_lr_scale,
     restore_training_state,
 )
-from tcip_mcp.pipelines.training.generic_trainer import _warmup_starts  # noqa: E402
-from tcip_mcp.pipelines.model_build import STATE_DICT_KEY  # noqa: E402
 from tests._image_fixtures import write_noise_image  # noqa: E402
 
 IMG = 64

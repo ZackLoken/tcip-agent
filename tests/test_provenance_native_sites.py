@@ -5,14 +5,12 @@ from __future__ import annotations
 
 from tests._producer_fixtures import blank_image
 
-
 # ── MCP save_annotations: the tool is the producer ───────────────────────────
 
 
 def _records(img) -> list[dict]:
     """The records of ``img``'s label document as stored."""
     import tcip_store
-
     from tests._producer_fixtures import image_label_key
 
     return tcip_store.read(image_label_key(img))["annotations"]

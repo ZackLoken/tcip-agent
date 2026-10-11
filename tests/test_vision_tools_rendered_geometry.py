@@ -3,13 +3,13 @@ failure-case layers."""
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 from pathlib import Path
 
 import numpy as np
 import pytest
 from PIL import Image
+
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 #: Plain gray so a drawn color's dominance over the background is unambiguous in either channel.
 BACKGROUND = (100, 100, 100)
@@ -46,7 +46,6 @@ def split_instance_dataset(tmp_path: Path) -> Path:
     """A dataset whose one image carries a two-region ground-truth mask, each region far from
     the other."""
     from tcip_annotation.state import Annotation, Polygon
-
     from tests._producer_fixtures import label_image
 
     images = tmp_path / "images" / UNDATED_BUCKET
@@ -164,7 +163,6 @@ def _mask_center(arr: np.ndarray, channel: int) -> tuple[float, float]:
 def mislocalized_prediction_dataset(tmp_path: Path) -> Path:
     """One image whose single prediction sits nowhere near its single ground-truth box."""
     from tcip_annotation.state import Annotation, BBox
-
     from tests._producer_fixtures import label_image
 
     images = tmp_path / "images" / UNDATED_BUCKET

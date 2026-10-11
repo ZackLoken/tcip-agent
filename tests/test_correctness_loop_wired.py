@@ -10,10 +10,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 import pytest
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._chain_fixtures import (
     BESPOKE_CLASSIFIER,
     BESPOKE_MODELS,
@@ -24,8 +23,9 @@ from tests._chain_fixtures import (
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
-from tcip_mcp.pipelines.model_build import resolve_contract_dims  # noqa: E402
 from torch.utils.data import Dataset  # noqa: E402
+
+from tcip_mcp.pipelines.model_build import resolve_contract_dims  # noqa: E402
 
 
 def _broken_builder(**kwargs):
@@ -97,8 +97,9 @@ def _admitted_tree(tmp_path):
     for a bespoke run: a builder does not exempt its run from naming the data the producer
     reads."""
     from PIL import Image
+
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.subject_registry import SubjectRegistry, Subject
+    from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tests._producer_fixtures import label_image, registry_over
 
     root = tmp_path / "ds"
@@ -276,9 +277,8 @@ def test_preflight_smokes_a_tiled_run_at_the_edge_its_resolution_derived(
     from tcip_mcp.pipelines.model_build import staged_sources
     from tcip_mcp.pipelines.schemas import train_config
     from tcip_mcp.tools.training_tools import preflight_config
-    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
-
     from tests._producer_fixtures import seed_bud_images
+    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
     imgs = seed_bud_images(
         tmp_path / "ds" / "images" / UNDATED_BUCKET,
@@ -315,6 +315,7 @@ def test_preflight_smokes_an_untiled_run_of_mixed_frames_on_a_real_batch(
     one real batch off its own dataset rather than a synthetic one at a size no frame has."""
     monkeypatch.chdir(tmp_path)
     from PIL import Image
+
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.tools.training_tools import preflight_config
     from tests._producer_fixtures import label_image

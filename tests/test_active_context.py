@@ -64,9 +64,9 @@ def test_view_gui_state_with_no_snapshot_carries_a_note(project):
 
 
 def test_view_gui_state_refuses_a_snapshot_that_does_not_decode(project):
-    import tcip_store
     from pydantic import ValidationError
 
+    import tcip_store
     from tcip_mcp.tools.project_tools import view_gui_state
     from tcip_mcp.web_client import gui_snapshot_key
 

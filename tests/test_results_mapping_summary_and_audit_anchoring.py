@@ -88,7 +88,6 @@ def _capture_fixture(root: Path) -> dict:
     )
     from tcip_mcp.tools.project_tools import register_dataset
     from tcip_mcp.traits import registered_crops
-
     from tests._mapping_fixtures import register_plant_registry_for
     from tests._web_fixtures import open_new_project
 
@@ -216,8 +215,8 @@ def test_the_route_and_the_tool_build_one_mapping_with_one_audit_line_each(
     lines' one ``actor`` key, the route's naming them and the tool's naming no one, and nothing
     else on either line names a person."""
     import json
-    import tcip_store
 
+    import tcip_store
     from tcip_mcp.audit import audit_log_key
     from tcip_mcp.pipelines.postprocessing import plant_mapping
     from tcip_mcp.tools.phenology_tools import build_plant_mapping

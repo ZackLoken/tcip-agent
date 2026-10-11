@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 import pytest
+
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 torch = pytest.importorskip("torch")
 
@@ -36,7 +36,7 @@ def _config(**keys) -> dict:
 def _write_classes_json(
     dataset_root, subject="bud", attribute=None, values=None
 ):
-    from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject
+    from tcip_mcp.subject_registry import Attribute, Subject, SubjectRegistry
     from tests._producer_fixtures import registry_over
 
     attrs = ()

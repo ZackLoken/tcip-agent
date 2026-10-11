@@ -15,8 +15,7 @@ from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key  # noqa: E402
 from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
-from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject  # noqa: E402
-
+from tcip_mcp.subject_registry import Attribute, Subject, SubjectRegistry  # noqa: E402
 from tests._producer_fixtures import (  # noqa: E402
     admit_over,
     box_annotation,

@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 from collections import defaultdict
 
 import pytest
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tcip_mcp.pipelines.data.splits import (
-    default_group_key,
     GROUP_KEY_FNS,
+    default_group_key,
     group_balanced_split,
     label_document_extent,
     resolve_group_key_fn,
@@ -403,7 +402,6 @@ def test_label_document_extent_reads_the_frame_off_the_document_it_is_handed(
     naming where it was read."""
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
-
     from tests._producer_fixtures import image_label_key, label_image
 
     image = tmp_path / "images" / UNDATED_BUCKET / "mosaic1.png"

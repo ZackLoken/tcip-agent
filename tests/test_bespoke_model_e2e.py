@@ -14,14 +14,13 @@ Proves the whole CV-scientist vision at once:
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 import hashlib
 from functools import partial
 from pathlib import Path
 
 import pytest
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._chain_fixtures import (
     GT_ANCHOR_DETECTOR,
     TRAIN_BESPOKE,
@@ -33,17 +32,15 @@ pytest.importorskip("torchvision")
 
 # Component registration side-effects (backbones/necks/heads used by build_dataset + eval).
 import tcip_mcp.pipelines.components.backbones  # noqa: F401,E402
-import tcip_mcp.pipelines.components.necks  # noqa: F401,E402
 import tcip_mcp.pipelines.components.heads  # noqa: F401,E402
-from tests._training_values import adamw_optimizer, schedule  # noqa: E402
 import tcip_mcp.pipelines.components.losses  # noqa: F401,E402
-
-from tcip_mcp.pipelines.model_build import CONFIG_KEY  # noqa: E402
-
-from tests import bespoke_models  # noqa: E402 (the agent-authored bespoke model + train loop)
+import tcip_mcp.pipelines.components.necks  # noqa: F401,E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
+from tcip_mcp.pipelines.model_build import CONFIG_KEY  # noqa: E402
+from tests import bespoke_models  # noqa: E402 (the agent-authored bespoke model + train loop)
 from tests._image_fixtures import write_noise_image  # noqa: E402
 from tests._producer_fixtures import dataset_over, label_image  # noqa: E402
+from tests._training_values import adamw_optimizer, schedule  # noqa: E402
 
 IMG = 64
 
@@ -59,6 +56,8 @@ def _audit_events(root: Path, tool: str = "training_run") -> list[dict]:
 
 
 def test_bespoke_detector_end_to_end(tmp_path: Path):
+    from dataclasses import asdict
+
     from tcip_mcp.experiments import (
         METRICS_FILE,
         RUN_FILE,
@@ -71,8 +70,6 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
         load_registered_checkpoint,
     )
     from tcip_mcp.pipelines.derivations import gt_aspect_ratios
-    from dataclasses import asdict
-
     from tcip_mcp.pipelines.execution import Stated, prepare
     from tcip_mcp.pipelines.model_contract import overfit_check
 

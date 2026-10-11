@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _entropy(logits: "torch.Tensor") -> float:
+def _entropy(logits: torch.Tensor) -> float:
     """Mean softmax entropy of a ``[B, C]`` logits tensor (classification uncertainty)."""
     probs = functional.softmax(logits, dim=-1)
     return -(probs * probs.clamp(min=1e-8).log()).sum(-1).mean().item()

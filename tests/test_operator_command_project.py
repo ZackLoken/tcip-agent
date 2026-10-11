@@ -23,7 +23,6 @@ def test_a_render_command_leaves_no_audit_line_anywhere(tmp_path):
     """A render is a read: the named project's log gains no line, and the operator's cwd and the
     image's directory get no state."""
     import tcip_store as ts
-
     from tcip_mcp.audit import audit_log_key
     from tcip_mcp.tools.project_tools import initialize_project
 

@@ -1,6 +1,7 @@
 """Training-run cancellation (cancel_training; graceful stop)."""
 
 import pytest
+
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._chain_fixtures import CLASSIFIER_SOURCE
 from tests._training_values import schedule
@@ -37,8 +38,8 @@ def test_cancel_before_training_yields_canceled(tmp_path):
     pytest.importorskip("torchvision")
     from PIL import Image
 
-    from tcip_mcp.pipelines.training.generic_trainer import train
     from tcip_mcp.experiments import request_cancel
+    from tcip_mcp.pipelines.training.generic_trainer import train
     from tests._chain_fixtures import training_config
     from tests.tiny_trainer_fixtures import run_context
 

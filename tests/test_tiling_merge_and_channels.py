@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 import numpy as np
+
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._producer_fixtures import dataset_over, label_image, painted_array  # noqa: E402
 
 
@@ -22,6 +22,7 @@ def _multiband_detection_fixture(
     """A non-square multi-band GeoTIFF with a bright patch, and a GT box on that patch; its
     images directory."""
     import tifffile
+
     from tcip_annotation.state import Annotation, BBox
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
@@ -89,8 +90,9 @@ def test_tiled_dataset_refuses_labels_authored_in_a_different_frame(tmp_path):
     frames."""
     import pytest
     import tifffile
-    from tcip_annotation.state import Annotation, BBox
     from PIL import Image
+
+    from tcip_annotation.state import Annotation, BBox
     from tcip_annotation.utils import oriented_size
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
@@ -134,8 +136,8 @@ def test_the_authored_frame_raises_on_a_corrupt_label_rather_than_reading_as_no_
     """The tiled dataset reads each label's authored frame off its stored document, so a present,
     unreadable label raises rather than silently disabling the frame check for that sample."""
     import pytest
-    from tcip_annotation.json_io import UnreadableLabelDocumentError
 
+    from tcip_annotation.json_io import UnreadableLabelDocumentError
     from tests._producer_fixtures import image_label_key
     from tests._record_damage_fixtures import damage_record
 
@@ -176,6 +178,7 @@ def test_ctx_tiled_dataset_inherits_the_band_count(tmp_path):
 def test_tiled_detection_handles_channel_first_rasters(tmp_path):
     """The other common GeoTIFF layout, where the axis-order heuristic is observable."""
     import tifffile
+
     from tcip_annotation.state import Annotation, BBox
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET

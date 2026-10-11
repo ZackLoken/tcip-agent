@@ -20,12 +20,12 @@ Rails pinned here (one section each):
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 import inspect
 from pathlib import Path
 
 import pytest
+
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 torch = pytest.importorskip(
     "torch"
@@ -34,16 +34,17 @@ torch = pytest.importorskip(
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.pipelines.postprocessing import phenology as phenology_mod  # noqa: E402
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
+    derive_operating_point_curve,
     detection_metrics,
     gt_class_avg_size,
     pick_count_unbiased,
     pick_f1_max,
-    derive_operating_point_curve,
+)
+from tests._dense_op_fixtures import (
+    good_cal_holdout,  # noqa: E402
+    toy_records as _sweep_records,  # noqa: E402
 )
 from tests._trait_fixtures import BUD_OPENING  # noqa: E402
-from tests._dense_op_fixtures import good_cal_holdout  # noqa: E402
-from tests._dense_op_fixtures import toy_records as _sweep_records  # noqa: E402
-
 
 # ── 1. conf operating-point sweep + count-unbiased pick + the count criterion ──
 
@@ -318,14 +319,18 @@ def test_golden_no_operating_point_default_survives_and_each_door_takes_stated_v
 ):
     # No module carries an inference operating-point default: each value is stated, derived from
     # a reference the caller holds, or refused, and every door hands its stated values on whole.
-    from tcip_mcp.pipelines import execution as execution_mod
-    from tcip_mcp.pipelines import operating_point as operating_point_mod
+    from tcip_mcp.pipelines import (
+        execution as execution_mod,
+        operating_point as operating_point_mod,
+    )
     from tcip_mcp.pipelines.data import datasets as datasets_mod
     from tcip_mcp.pipelines.inference import (
         generic_predictor as generic_predictor_mod,
     )
-    from tcip_mcp.pipelines.training import eval_runners as runners
-    from tcip_mcp.pipelines.training import evaluation as evaluation_mod
+    from tcip_mcp.pipelines.training import (
+        eval_runners as runners,
+        evaluation as evaluation_mod,
+    )
     from tcip_mcp.tools import training_tools as training_tools_mod
 
     # The operating point carries no shared fallback constant at all: a caller states each value
@@ -393,13 +398,12 @@ def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_n
     from tcip_mcp.pipelines import execution as execution_mod
     from tcip_mcp.pipelines.schemas import TilingSpec
     from tcip_mcp.tools import training_tools as training_tools_mod
+    from tests._producer_fixtures import label_image
     from tests._verified_checkpoint_fixtures import (
         SAMPLE_CONF,
         SAMPLE_DETECTOR_PASS,
         registered_checkpoint,
     )
-
-    from tests._producer_fixtures import label_image
 
     def _dataset(root):
         images_dir = root / "images" / UNDATED_BUCKET

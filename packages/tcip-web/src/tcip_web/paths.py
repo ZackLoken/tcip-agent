@@ -41,7 +41,6 @@ def allowed_roots() -> list[Path]:
     from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets
     from tcip_mcp.workspace import project_dirs
     from tcip_store import DecodeError
-
     from tcip_web.state import store
 
     roots: list[Path] = [store.workspace]

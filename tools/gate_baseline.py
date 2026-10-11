@@ -79,24 +79,24 @@ class Stage:
     key: str
     job: str
     name: str
-    run: "str | None"
+    run: str | None
     cwd: pathlib.Path
-    env: "dict[str, str]"
-    skip_reason: "str | None" = None
+    env: dict[str, str]
+    skip_reason: str | None = None
 
 
-def _load_workflow() -> "dict[str, Any]":
-    loaded: "dict[str, Any]" = yaml.safe_load(
+def _load_workflow() -> dict[str, Any]:
+    loaded: dict[str, Any] = yaml.safe_load(
         CI_WORKFLOW.read_text(encoding="utf-8")
     )
     return loaded
 
 
-def _resolve_text(text: str, leg: "dict[str, Any]") -> str:
+def _resolve_text(text: str, leg: dict[str, Any]) -> str:
     """Substitute ``${{ matrix.<name> }}`` with the leg's own value; refuse by name on any
     other ``${{ ... }}`` expression rather than pass its literal text to a process."""
 
-    def repl(match: "re.Match[str]") -> str:
+    def repl(match: re.Match[str]) -> str:
         key = match.group(1)
         if key not in leg:
             raise UnresolvedExpressionError(
@@ -113,7 +113,7 @@ def _resolve_text(text: str, leg: "dict[str, Any]") -> str:
     return resolved
 
 
-def _matrix_legs(job: "dict[str, Any]") -> "list[dict[str, Any]]":
+def _matrix_legs(job: dict[str, Any]) -> list[dict[str, Any]]:
     matrix = (job.get("strategy") or {}).get("matrix") or {}
     axes = [
         (name, values)
@@ -137,7 +137,7 @@ def _first_effective_line(run_text: str) -> str:
     return ""
 
 
-def _skip_reason(step: "dict[str, Any]") -> "str | None":
+def _skip_reason(step: dict[str, Any]) -> str | None:
     if "uses" in step:
         return f"uses: {step['uses']}"
     first = _first_effective_line(step.get("run", ""))
@@ -147,7 +147,7 @@ def _skip_reason(step: "dict[str, Any]") -> "str | None":
     return None
 
 
-def build_plan() -> "list[Stage]":
+def build_plan() -> list[Stage]:
     """The full stage list, one entry per step per matrix leg, in workflow order.
 
     Building this never touches a subprocess: it is safe to call from a test that wants to
@@ -156,7 +156,7 @@ def build_plan() -> "list[Stage]":
     ``actions/checkout@v4``) never collides.
     """
     jobs = _load_workflow()["jobs"]
-    stages: "list[Stage]" = []
+    stages: list[Stage] = []
     for job_name in PARSED_JOBS:
         job = jobs[job_name]
         job_env_raw = job.get("env") or {}
@@ -202,7 +202,7 @@ def build_plan() -> "list[Stage]":
 _MYPY_PIN_RE = re.compile(r"mypy==([\w.]+)")
 
 
-def mypy_pin() -> "str | None":
+def mypy_pin() -> str | None:
     """The mypy version CI pins, read from the (skipped) install step's own ``run:`` text."""
     for step in _load_workflow()["jobs"]["mypy"]["steps"]:
         match = _MYPY_PIN_RE.search(step.get("run", ""))
@@ -233,7 +233,7 @@ def _resolve_git_bash() -> str:
         raise SystemExit(
             "bash was not found on PATH; this gate runs each step's run: text through bash."
         )
-    candidates: "list[pathlib.Path]" = []
+    candidates: list[pathlib.Path] = []
     try:
         probe = subprocess.run(
             ["git", "--exec-path"],
@@ -306,7 +306,7 @@ def main() -> int:
             parser.error(f"unknown stage keys: {sorted(unknown)}")
         plan = [stage for stage in plan if stage.key in wanted]
 
-    results: "list[dict[str, Any]]" = []
+    results: list[dict[str, Any]] = []
     for stage in plan:
         if stage.skip_reason:
             print(f"{stage.key:<40} skipped: {stage.skip_reason}")

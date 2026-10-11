@@ -86,7 +86,6 @@ def test_registry_derivation_reports_a_document_it_cannot_read(
     registry still derives from the readable documents, and names the unreadable one by stem
     rather than silently deriving nothing from it."""
     from tcip_store import encode_record
-
     from tests._record_damage_fixtures import damage_record
 
     images = tmp_path / "images" / DATE

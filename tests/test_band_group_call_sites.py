@@ -15,6 +15,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import tifffile
+
 from tests._producer_fixtures import dataset_over, label_image, registry_over  # noqa: E402
 
 
@@ -36,8 +37,9 @@ def grouped_dataset(tmp_path: Path) -> Path:
     label document, under the canonical images/ layout ``build_dataset`` reads.
     """
     from PIL import Image
+
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.subject_registry import SubjectRegistry, Subject
+    from tcip_mcp.subject_registry import Subject, SubjectRegistry
 
     root = tmp_path / "proj"
     date = "2026-04-01"
@@ -322,6 +324,7 @@ def test_a_selection_records_a_grouped_capture_by_its_own_manifest_path(
     that path resolves back to the whole group in place: the group's bands are read where they
     were captured, never copied into a side's own directory."""
     from PIL import Image
+
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.data.selection import read_selection

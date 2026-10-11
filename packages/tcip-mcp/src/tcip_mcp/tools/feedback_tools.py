@@ -95,7 +95,6 @@ def _prepare_queue_sources(images_dir: str, subject: str | None):
         UnreadableLabelDocumentError,
         read_document_versioned,
     )
-
     from tcip_mcp.dataset_layout import label_key_of
 
     try:

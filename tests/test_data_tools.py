@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+
 import tcip_store as ts
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
-
-from pathlib import Path
-
 from tcip_mcp.cli import doctor
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
 from tcip_mcp.pipelines.data.label_queries import registry_scope
@@ -20,7 +20,7 @@ from tcip_mcp.pipelines.data.selection import (
     selection_key,
     write_selection,
 )
-from tcip_mcp.tools.data_tools import scan_dataset, draw_splits
+from tcip_mcp.tools.data_tools import draw_splits, scan_dataset
 from tests._producer_fixtures import label_image, registry_over
 
 
@@ -715,7 +715,7 @@ def test_draw_splits_floor_ignores_a_groups_only_annotations_of_another_subject(
     floor of four), the same tree an unscoped counter would have read as four and written."""
     from PIL import Image
 
-    from tcip_mcp.subject_registry import SubjectRegistry, Subject
+    from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tests._producer_fixtures import mark_complete
 
     root = tmp_path / "ds"
@@ -1115,7 +1115,7 @@ def _two_subject_dataset(root: Path) -> Path:
     stem carries both; four ``leaf`` stems clear a leaf-scoped draw's foreground floor."""
     from PIL import Image
 
-    from tcip_mcp.subject_registry import SubjectRegistry, Subject
+    from tcip_mcp.subject_registry import Subject, SubjectRegistry
 
     date = "2-11-26"
     images_dir = root / "images" / date
@@ -1180,7 +1180,7 @@ def _attribute_scoped_dataset(root: Path) -> Path:
     assessed for it, one carries an instance never assessed for it."""
     from PIL import Image
 
-    from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject
+    from tcip_mcp.subject_registry import Attribute, Subject, SubjectRegistry
 
     date = "2-11-26"
     images_dir = root / "images" / date

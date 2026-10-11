@@ -19,11 +19,13 @@ import tcip_store as ts
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
-from tcip_mcp.subject_registry import Attribute, SubjectRegistry, Subject
-from tests._producer_fixtures import label_image, registry_over
-from tcip_mcp.pipelines.data import dataset_fingerprint as fingerprint_mod
-from tcip_mcp.pipelines.data import selection
+from tcip_mcp.pipelines.data import (
+    dataset_fingerprint as fingerprint_mod,
+    selection,
+)
 from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
+from tcip_mcp.subject_registry import Attribute, Subject, SubjectRegistry
+from tests._producer_fixtures import label_image, registry_over
 
 
 def _make_dataset(

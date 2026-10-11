@@ -16,7 +16,6 @@ import pytest
 
 from tcip_mcp.pipelines.measurement import instance_geometries, mask_geometry
 
-
 # ── rectangle: every pixel quantity is exact ─────────────────────────────
 
 

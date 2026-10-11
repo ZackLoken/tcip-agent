@@ -14,9 +14,9 @@ import pytest
 
 from tcip_mcp.subject_registry import (
     Attribute,
-    SubjectRegistry,
     RegistryError,
     Subject,
+    SubjectRegistry,
     positive_state_problem,
     read_registry,
     registry_to_dict,

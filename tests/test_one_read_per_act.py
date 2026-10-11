@@ -329,7 +329,6 @@ def _published_frames(root: Path) -> list[Path]:
     from PIL import Image
 
     from tcip_annotation.state import Annotation, BBox
-
     from tcip_mcp.dataset_layout import UNDATED_BUCKET
     from tests._chain_fixtures import published
     from tests._producer_fixtures import label_image
@@ -449,9 +448,9 @@ def test_a_selection_bound_run_resolves_each_image_once(
 def test_a_comparison_render_reads_its_documents_and_bucket_once(
     tmp_path: Path, monkeypatch
 ):
-    from tcip_mcp.tools.vision_tools import visualize
-
     from PIL import Image
+
+    from tcip_mcp.tools.vision_tools import visualize
 
     frame, _other = _published_frames(tmp_path)
     counts = _counting_reads(monkeypatch)

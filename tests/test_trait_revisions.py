@@ -19,8 +19,7 @@ from tcip_mcp import traits
 from tcip_mcp.audit import audit_log_key
 from tcip_mcp.delivery import read_delivery_events
 from tcip_mcp.operationalization import OperationalizationRefusedError
-from tests import REFUSED_NAMES
-from tests import _trait_fixtures as fx
+from tests import REFUSED_NAMES, _trait_fixtures as fx
 
 TRAITS_ROUTE = "/api/results/traits"
 CONFIRM_ROUTE = "/api/results/traits/confirm"
@@ -41,7 +40,6 @@ def _bucket(root: Path):
     the dataset ``ds``, published on first use (``_chain_fixtures.published``); the bucket."""
     pytest.importorskip("torch")
     import tcip_store
-
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.dataset_layout import bucket_key
     from tests._chain_fixtures import predicted, published
@@ -67,7 +65,6 @@ def _deliver_counts(root: Path, name: str) -> dict:
     from tcip_mcp.pipelines.postprocessing.export import (
         deliver_per_image_counts_csv,
     )
-
     from tests._chain_fixtures import acknowledged
 
     out = root / f"{name}.csv"

@@ -3,12 +3,12 @@ record from the assessment through the bucket published under it."""
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 from pathlib import Path
 
 import numpy as np
 import pytest
+
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 torch = pytest.importorskip("torch")
 
@@ -385,7 +385,6 @@ def test_training_and_inference_slice_one_frame_on_one_lattice(tmp_path):
     """The tiled training dataset's slices and a sliced inference pass's recorded slices over the
     same frame, each read whole off its own route's record."""
     from tcip_annotation.state import Annotation, BBox
-
     from tcip_mcp.pipelines.raster_source import open_raster
     from tests._producer_fixtures import dataset_over, label_image
 
@@ -637,7 +636,6 @@ def _blob_capture(project: Path) -> Path:
     neighbor tail an IoU threshold derives from), ingested as one capture date of the
     dataset ``ds``; its images directory."""
     from tcip_annotation.state import Annotation, BBox
-
     from tcip_mcp.tools.ingest_tools import ingest_images
     from tests._producer_fixtures import label_image
 

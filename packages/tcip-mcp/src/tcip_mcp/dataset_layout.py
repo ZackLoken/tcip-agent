@@ -7,7 +7,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import tcip_store
 from tcip_store import Key, decode_value
@@ -16,7 +16,6 @@ if TYPE_CHECKING:
     from tcip_annotation.flags import FlagRequest
     from tcip_annotation.json_io import LabelDocument
     from tcip_annotation.state import Annotation
-
     from tcip_mcp.buckets import Bucket
 
 #: Geometry kinds a task authors, kept as a selector, not a label-path segment.
@@ -76,7 +75,7 @@ def parse_image_path(image_path: str | Path) -> tuple[Path, str, str]:
     return (*parse_capture_dir(img.parent), img.stem)
 
 
-def capture_of(source: str | Path) -> tuple[Optional[str], Optional[str]]:
+def capture_of(source: str | Path) -> tuple[str | None, str | None]:
     """``(dataset_id, capture)`` of an image source: the identity record's id of the dataset root
     whose image tree holds it (``None`` when the root records none) and its capture; both
     ``None`` for a source that is no image of a capture."""
@@ -128,7 +127,7 @@ def list_dates(dataset_root: str | Path) -> list[str]:
     )
 
 
-def dataset_root_of(path: str | Path) -> Optional[Path]:
+def dataset_root_of(path: str | Path) -> Path | None:
     """The ``<dataset_root>`` a path under ``<dataset_root>/images/`` lives under, or ``None`` if
     it lives under none.
 
@@ -227,14 +226,14 @@ class Gestures:
     (:class:`~tcip_annotation.flags.FlagRequest`); and each open flag it resolves, by id, with
     the reply given."""
 
-    bucket: Optional[str] = None
+    bucket: str | None = None
     accept: frozenset[int] = frozenset()
     reject: frozenset[int] = frozenset()
     confirm: frozenset[int] = frozenset()
     complete: Mapping[str, bool] = field(default_factory=dict)
-    rect: Optional[tuple[float, float, float, float]] = None
+    rect: tuple[float, float, float, float] | None = None
     proposals_hidden: bool = False
-    flag: tuple["FlagRequest", ...] = ()
+    flag: tuple[FlagRequest, ...] = ()
     resolve: Mapping[str, str] = field(default_factory=dict)
 
 
@@ -244,12 +243,11 @@ def label_key_of(image_path: str | Path) -> Key:
     return label_key(*parse_image_path(image_path))
 
 
-def image_proposals(bucket: str, key: Key) -> tuple["Bucket", list]:
+def image_proposals(bucket: str, key: Key) -> tuple[Bucket, list]:
     """The published bucket named ``bucket`` under the root of the label document ``key`` and its
     proposals for that image, in document order; a bucket that names no document for the image
     refuses (``ValueError``)."""
     from tcip_annotation.json_io import read_predictions
-
     from tcip_mcp.buckets import read_bucket
 
     found = read_bucket(key.root, bucket)
@@ -271,7 +269,7 @@ def verdict_key_of(key: Key, bucket: str) -> Key:
 
 def proposal_pairs(
     project: str | Path | None,
-    bucket: "Bucket",
+    bucket: Bucket,
     annotations: list,
     proposals: list,
 ) -> dict[int, int]:
@@ -282,7 +280,6 @@ def proposal_pairs(
     platform's comparability convention. Refuses (``ValueError``) a bucket's assessment with no
     ``project`` to read it from."""
     from tcip_annotation.matching import pair_proposals
-
     from tcip_mcp.assessment import read_assessment
     from tcip_mcp.pipelines.training.evaluation import resolve_match_criterion
 
@@ -303,7 +300,7 @@ def proposal_pairs(
     return {p: g for g, p in m.pairs}
 
 
-def signed_off(annotation: "Annotation", by: str, at: str) -> "Annotation":
+def signed_off(annotation: Annotation, by: str, at: str) -> Annotation:
     """``annotation`` taken responsibility for by the person ``by`` at ``at``: its
     ``accepted_by`` and ``accepted_at``, everything else as it was."""
     return replace(annotation, accepted_by=by, accepted_at=at)
@@ -317,10 +314,10 @@ def save_label_document(
     width: int,
     height: int,
     author: str,
-    actor: Optional[str],
-    expect: Optional[tcip_store.Version] = None,
+    actor: str | None,
+    expect: tcip_store.Version | None = None,
     gestures: Gestures = Gestures(),
-) -> "tuple[tcip_store.Version, LabelDocument, dict[int, int]]":
+) -> tuple[tcip_store.Version, LabelDocument, dict[int, int]]:
     """Write the label document ``key`` names (:func:`label_key_of` an image), the verdicts its
     ``gestures`` decide and the save's one audit line by ``actor``, in one commit under the
     document's dataset root. Returns the document's new version, the document decoded from the
@@ -372,7 +369,6 @@ def save_label_document(
         VerdictAction,
         record_verdicts,
     )
-
     from tcip_mcp.audit import audit_entry, audit_log_key, now_iso
 
     audit = audit_log_key(key.root)

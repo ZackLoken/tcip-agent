@@ -8,12 +8,11 @@ source is snapshotted for provenance.
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 from pathlib import Path
 
 import pytest
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests import REPO_ROOT
 from tests._chain_fixtures import BESPOKE_MODELS, GT_ANCHOR_DETECTOR
 
@@ -139,10 +138,10 @@ def _bespoke(stated: dict):
 
 def _admitted_samples(root: Path):
     """Two samples, admitted the way every run's own membership is."""
-    from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from PIL import Image
 
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tests._producer_fixtures import (
         label_image,
         registry_over,

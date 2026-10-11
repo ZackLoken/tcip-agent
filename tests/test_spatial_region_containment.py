@@ -9,11 +9,11 @@ all: a gap between regions, or coordinates the persisted geometry never covered.
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 from pathlib import Path
 
 import pytest
+
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 pytest.importorskip("torch")
 

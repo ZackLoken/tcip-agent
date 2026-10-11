@@ -287,12 +287,12 @@ def test_a_typed_record_whose_attributes_its_reader_refuses_is_refused_at_write(
                 Annotation(
                     subject="bur",
                     geometry=BBox(1.0, 2.0, 3.0, 4.0),
-                    attributes={"stage": 12},
+                    attributes={"stage": 12},  # type: ignore[dict-item]
                 )
             ],
             100,
             100,
-        )  # type: ignore[dict-item]
+        )
     assert not tcip_store.exists(key)
     write_label_document(
         key,

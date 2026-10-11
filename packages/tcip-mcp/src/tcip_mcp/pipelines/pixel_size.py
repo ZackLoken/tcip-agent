@@ -58,7 +58,7 @@ def meters_per_crs_unit(epsg: int) -> tuple[float | None, str]:
     return crs.axis_info[0].unit_conversion_factor, ""
 
 
-def resolve_pixel_size(header: "SourceHeader") -> tuple[PixelSize | None, str]:
+def resolve_pixel_size(header: SourceHeader) -> tuple[PixelSize | None, str]:
     """``header``'s source's own real-world pixel size from its georeferencing tags alone, as
     ``(pixel_size, reason)``: ``reason`` the empty string on success and the first failing
     condition's clause otherwise, checked in this order:

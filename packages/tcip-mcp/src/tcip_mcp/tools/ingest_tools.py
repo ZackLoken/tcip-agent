@@ -13,7 +13,6 @@ from glob import glob
 from pathlib import Path
 
 import tcip_store
-
 from tcip_mcp import dataset_layout
 from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.data.band_groups import MANIFEST_EXT

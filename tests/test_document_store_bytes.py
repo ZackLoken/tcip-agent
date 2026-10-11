@@ -7,7 +7,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import tcip_store as ts
-
 from tcip_mcp.cli.dump_store import dump_store
 
 SUBJECT = "subject_under_test"
@@ -34,15 +33,15 @@ REGISTRY_BYTES = (
     "    }\n"
     "  }\n"
     "}\n"
-).encode("utf-8")
+).encode()
 
 IDENTITY_BYTES = (
-    "{\n"
-    '  "crop": "crop_under_test",\n'
-    '  "id": "a1b2c3d4e5f6",\n'
-    '  "fingerprint": "9f2c1b0a4d6e8f31"\n'
-    "}\n"
-).encode("utf-8")
+    b"{\n"
+    b'  "crop": "crop_under_test",\n'
+    b'  "id": "a1b2c3d4e5f6",\n'
+    b'  "fingerprint": "9f2c1b0a4d6e8f31"\n'
+    b"}\n"
+)
 
 BAND_FILENAMES = {"Grün": "cap_G.tif", "Red": "cap_R.tif"}
 BAND_WAVELENGTHS = {"Grün": 560.0, "Red": 650.0}
@@ -58,7 +57,7 @@ BAND_GROUP_BYTES = (
     '    "Red": 650.0\n'
     "  }\n"
     "}\n"
-).encode("utf-8")
+).encode()
 
 NOW = "2026-03-04T12:00:00+00:00"
 REPORT_BYTES = (
@@ -71,7 +70,7 @@ REPORT_BYTES = (
     "  },\n"
     '  "user_disagreement": false\n'
     "}\n"
-).encode("utf-8")
+).encode()
 
 RETROSPECTIVE_BYTES = (
     '"# project_under_test\\n\\n## Retrospective: 2026-03-04T12:00:00+00:00\\n\\n'
@@ -81,7 +80,7 @@ RETROSPECTIVE_BYTES = (
     "### Knowledge for future sessions\\n\\n_(none noted)_\\n\\n"
     "### Missing or hard-to-use tools\\n\\n_(none noted)_\\n\\n"
     '### What I would do differently\\n\\n_(none noted)_\\n\\n---\\n"\n'
-).encode("utf-8")
+).encode()
 
 
 def _dumped(project: Path, store: str) -> bytes:

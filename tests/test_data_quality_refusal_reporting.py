@@ -12,7 +12,6 @@ from pathlib import Path
 import tcip_store as ts
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
-
 from tcip_mcp.cli import doctor
 from tcip_mcp.dataset_layout import label_key
 from tests._producer_fixtures import write_image

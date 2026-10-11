@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from tcip_annotation.state import Annotation, BBox
-
 from tcip_mcp.pipelines.execution import Stated
 from tests._training_values import (
     evaluation_block,
@@ -194,7 +193,6 @@ def built_model(config: dict):
         staged_sources,
     )
     from tcip_mcp.pipelines.schemas import train_config
-
     from tests import REPO_ROOT
 
     spec = train_config(config)
@@ -423,12 +421,11 @@ def published(
     from tcip_mcp.pipelines.data.split_construction import raster_identity
     from tcip_mcp.pipelines.execution import prepare
     from tcip_mcp.pipelines.image_utils import resolve_image_path
+    from tcip_store import decode_value, encode_record
     from tests._verified_checkpoint_fixtures import (
         SAMPLE_CONF,
         project_checkpoint,
     )
-
-    from tcip_store import decode_value, encode_record
 
     checkpoint = load_registered_checkpoint(
         project_checkpoint(
@@ -634,10 +631,11 @@ def attributed_series(
     answers for."""
     from datetime import datetime, timedelta
 
+    from tcip_mcp import subject_registry as cr
+    from tcip_mcp.tools.calibration_tools import assess_checkpoint
     from tcip_mcp.tools.data_tools import draw_splits
     from tcip_mcp.tools.inference_tools import run_inference
     from tcip_mcp.tools.ingest_tools import ingest_images
-    from tcip_mcp.tools.calibration_tools import assess_checkpoint
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
     from tcip_mcp.tools.project_tools import register_dataset
     from tcip_mcp.traits import registered_crops
@@ -649,8 +647,6 @@ def attributed_series(
     from tests._producer_fixtures import label_image
     from tests._verified_checkpoint_fixtures import worker_run
     from tests._web_fixtures import open_new_project
-
-    from tcip_mcp import subject_registry as cr
 
     root = project / "ds"
     attributes = attributes or (

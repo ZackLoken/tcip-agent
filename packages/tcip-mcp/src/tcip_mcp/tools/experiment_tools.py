@@ -32,8 +32,10 @@ def get_experiment(
         metrics_limit: Maximum epoch rows to return, view='full' only. None returns all.
         metrics_offset: Epoch row offset to start from, view='full' only.
     """
-    from tcip_mcp.experiments import get_experiment as _get
-    from tcip_mcp.experiments import get_experiment_lineage as _lineage
+    from tcip_mcp.experiments import (
+        get_experiment as _get,
+        get_experiment_lineage as _lineage,
+    )
 
     if view == "lineage":
         if metrics_limit is not None or metrics_offset != 0:

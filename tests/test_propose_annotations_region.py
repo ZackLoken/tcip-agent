@@ -10,13 +10,13 @@ pixels it is handed, so the crop the tool writes is what decides the answer.
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 from pathlib import Path
 
 import numpy as np
 import pytest
 from PIL import Image
+
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 
 class PatchProposer:
@@ -105,11 +105,11 @@ def test_region_crop_carries_no_exif_orientation_tag(
     orientation tag of its own: it is taken from the already-oriented frame, and an engine that
     honored a tag on it would rotate a second time and displace every coordinate."""
     from tcip_mcp.pipelines.raster_source import open_raster
+    from tcip_mcp.pipelines.reference_grid import reference_cells
     from tcip_mcp.tools.proposal_tools import (
         _region_rect_from_cells,
         _write_region_crop,
     )
-    from tcip_mcp.pipelines.reference_grid import reference_cells
 
     with open_raster(exif_rotated_source, 3) as src:
         assert (src.width, src.height) == (UPRIGHT_W, UPRIGHT_H)
@@ -501,6 +501,7 @@ class TestWholeFrameDefaultIsUnaffected:
         """A bespoke engine returns its own dicts, so what a segmenter hands back natively
         (an array, a numpy scalar) is named instead of being staged as a repr of itself."""
         import numpy as np
+
         import tcip_store as ts
         from tcip_mcp.pipelines import proposal
         from tcip_mcp.tools import proposal_tools

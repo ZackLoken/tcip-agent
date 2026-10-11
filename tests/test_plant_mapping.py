@@ -287,7 +287,6 @@ def test_persisting_a_mapping_waits_on_the_lock_its_record_is_written_under(
     writing past a holder of it."""
     from tcip_store import StoreBusyError
     from tcip_store.sqlite_backend import SqliteBackend
-
     from tests._audit_fixtures import held_by_another_writer
 
     build = replace(_one_build(tmp_path), name="again")

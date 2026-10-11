@@ -54,7 +54,7 @@ def cell_fields(cell: Any) -> tuple[str, float, float, float, float]:
 
 
 def grid_to_rect(
-    cell: str, cells: "list[Any]"
+    cell: str, cells: list[Any]
 ) -> tuple[float, float, float, float]:
     """Resolve a grid cell reference (e.g. 'B3') to the named cell's half-open native-pixel rect
     ``(x0, y0, x1, y1)``.

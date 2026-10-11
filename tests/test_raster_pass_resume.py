@@ -19,7 +19,6 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
 import tcip_store  # noqa: E402
-
 from tests.test_orthomosaic_tools import (  # noqa: E402
     TILE,
     _bespoke_detection_checkpoint,

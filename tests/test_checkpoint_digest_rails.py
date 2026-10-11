@@ -71,7 +71,6 @@ def _infer(tmp_path: Path, ckpt: str, bucket: str = "preds") -> dict:
 
 def _published(tmp_path: Path, bucket: str) -> bool:
     import tcip_store
-
     from tcip_mcp.dataset_layout import bucket_key
 
     return tcip_store.exists(bucket_key(tmp_path, bucket))
@@ -389,7 +388,7 @@ def test_two_foreign_registrations_of_one_sha256_resolve_to_one_entry(
 # Rail 5: an unregistered checkpoint is refused without being unpickled.
 
 
-def _touch_marker(marker_path: str) -> "_SideEffectOnUnpickle":
+def _touch_marker(marker_path: str) -> _SideEffectOnUnpickle:
     Path(marker_path).write_text("unpickled", encoding="utf-8")
     return _SideEffectOnUnpickle.__new__(_SideEffectOnUnpickle)
 
@@ -558,7 +557,6 @@ def test_doctor_lists_a_bucket_naming_an_unregistered_digest_and_stays_silent_on
     tmp_path,
 ):
     import tcip_store
-
     from tcip_mcp.cli import doctor as doctor_module
     from tcip_mcp.dataset_layout import bucket_key
 

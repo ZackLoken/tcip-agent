@@ -291,9 +291,8 @@ def _refusing_final_status(
     """Make the next ``times`` reads of any final-status record fail with a ``PermissionError``
     carrying ``winerror`` (by default a Windows sharing violation); the paths refused, in
     order."""
-    from tcip_store.file_backend import SHARING_VIOLATION
-
     from tcip_mcp.experiments import FINAL_STATUS_FILE
+    from tcip_store.file_backend import SHARING_VIOLATION
 
     code = SHARING_VIOLATION if winerror is None else winerror
 
@@ -395,8 +394,8 @@ def test_no_retry_starts_after_the_budget_is_spent(monkeypatch):
 def test_a_completed_run_missing_its_checkpoint_refuses_naming_it(tmp_path):
     """A completed run's checkpoint is read by whatever loads it; with that file gone the load
     refuses naming it rather than answering from anything else."""
-    from tcip_mcp.model_registry import checkpoint_payload
     from tcip_mcp.experiments import observe
+    from tcip_mcp.model_registry import checkpoint_payload
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     checkpoint = Path(

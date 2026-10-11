@@ -81,7 +81,7 @@ def _import_dotted(target: object) -> Any:
 
 def resolve_named(
     name: str,
-    registry: "Mapping[str, Any]",
+    registry: Mapping[str, Any],
     *,
     kind: str,
     register: str | None = None,
@@ -189,7 +189,7 @@ class StagedSources(NamedTuple):
     layout: SourceLayout
 
 
-def staged_sources(spec: "TrainConfigSchema", project: Path) -> StagedSources:
+def staged_sources(spec: TrainConfigSchema, project: Path) -> StagedSources:
     """The :class:`StagedSources` of a run of ``project`` over ``spec``; refuses as
     :func:`snapshot_model_source` does."""
     import dataclasses
@@ -229,7 +229,7 @@ def run_layout(run_dir: Path, source: dict) -> SourceLayout:
 
 
 def owning_run_layout(
-    spec: "TrainConfigSchema", snapshot: str | None, project: Path
+    spec: TrainConfigSchema, snapshot: str | None, project: Path
 ) -> SourceLayout:
     """The layout (:func:`run_layout`) of the run of ``project`` (``experiments.run_dirs``) that
     took the source snapshot whose digest is ``snapshot`` (:attr:`SourceLayout.snapshot`, a
@@ -346,9 +346,7 @@ def child_pythonpath() -> str:
     )
 
 
-def model_dims(
-    scope: "ClassScope", sizes: "Mapping[str, int]"
-) -> dict[str, Any]:
+def model_dims(scope: ClassScope, sizes: Mapping[str, int]) -> dict[str, Any]:
     """The dimensions a run's model is built at, each handed to its builder under its own name.
 
     ``in_chans`` is the band count the run's sources are read at, ``sizes["num_channels"]``
@@ -393,7 +391,7 @@ def model_dims(
     }
 
 
-def recorded_model_dims(spec: "TrainConfigSchema") -> dict[str, Any]:
+def recorded_model_dims(spec: TrainConfigSchema) -> dict[str, Any]:
     """:func:`model_dims` over what a validated run config records on its data block: its
     ``scope`` and its sizes. Refuses by name a run of a built-in loader's task that records no
     count its ground truth derives (``num_ranks`` for an ordinal run)."""
@@ -413,9 +411,9 @@ def recorded_model_dims(spec: "TrainConfigSchema") -> dict[str, Any]:
 
 
 def build_from_model_source(
-    source: "ModelSourceSchema",
+    source: ModelSourceSchema,
     layout: SourceLayout,
-    dims: "Mapping[str, Any]",
+    dims: Mapping[str, Any],
 ) -> Any:
     """Import the builder a validated ``model_source`` (``schemas.TrainConfigSchema``'s) names
     from its run's ``layout`` (:func:`import_source_builder`) and call it with its
@@ -437,7 +435,7 @@ def build_from_model_source(
 
 
 def resolve_contract_dims(
-    spec: "TrainConfigSchema", dims: "Mapping[str, Any]"
+    spec: TrainConfigSchema, dims: Mapping[str, Any]
 ) -> dict:
     """The dimensions a synthetic smoke batch of a validated run config is shaped at: the width,
     count and attributes the model is built at (``dims``, :func:`model_dims`, a rank count
@@ -521,7 +519,7 @@ SNAPSHOT_DIR = "model_src"
 
 
 def source_seams(
-    spec: "TrainConfigSchema",
+    spec: TrainConfigSchema,
 ) -> list[tuple[str, str, list[str] | None]]:
     """Each module a run of ``spec`` imports from its declared files: the config field naming
     it, its dotted name, and the files declared for it (a ``training_source`` is one of the
@@ -551,7 +549,7 @@ def source_seams(
 
 
 def module_plan(
-    spec: "TrainConfigSchema", project: Path
+    spec: TrainConfigSchema, project: Path
 ) -> dict[Path, PurePosixPath]:
     """Where each file a run of ``project`` declares (its :func:`source_seams`' files, once)
     lies under the run's one snapshot import root (:data:`SNAPSHOT_DIR`), which is also the
@@ -611,7 +609,7 @@ def module_plan(
 
 
 def snapshot_model_source(
-    spec: "TrainConfigSchema", project: Path
+    spec: TrainConfigSchema, project: Path
 ) -> tuple[dict, dict[str, bytes]]:
     """The snapshot of the files a run of ``project`` declares, placed by its
     :func:`module_plan` (which refuses as it does): its record, ``{"files": {...}}``, one entry
@@ -637,8 +635,8 @@ def snapshot_model_source(
 
 
 def snapshot_bound(
-    spec: "TrainConfigSchema", source: dict, run_dir: Path
-) -> "TrainConfigSchema":
+    spec: TrainConfigSchema, source: dict, run_dir: Path
+) -> TrainConfigSchema:
     """``spec``, a run's config, with each file it declares (:func:`source_seams`) replaced by
     its copy in ``run_dir``'s snapshot (``source``, :func:`snapshot_model_source`'s record of that
     run, which names each copy by the declared file's stored path), so the run, and every

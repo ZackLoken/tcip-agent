@@ -218,9 +218,8 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     args = ap.parse_args(argv)
 
     if args.workspace:
-        from tcip_store import bind
-
         from tcip_mcp.workspace import workspace_from_environment
+        from tcip_store import bind
 
         bind()
         print(build_workspace_worksheet(workspace_from_environment()))

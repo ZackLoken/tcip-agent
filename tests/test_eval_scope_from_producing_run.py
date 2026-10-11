@@ -8,12 +8,12 @@ object.
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 from dataclasses import asdict
 from pathlib import Path
 
 import pytest
+
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 pytest.importorskip("torchvision")
 
@@ -23,7 +23,7 @@ def _two_subject_dataset(root: Path) -> Path:
     from PIL import Image
 
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.subject_registry import SubjectRegistry, Subject
+    from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tests._producer_fixtures import label_image, registry_over
 
     images_dir = root / "images" / UNDATED_BUCKET
@@ -58,9 +58,9 @@ def test_run_id_evaluation_scopes_ground_truth_to_the_runs_own_subject(
     """The evaluation dataset reads the subject the run's checkpoint records, so the ground truth
     it scores against holds that subject's objects and no others."""
     import tcip_mcp.pipelines.training.eval_runners as runners
+    from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._producer_fixtures import admit_over
-    from tcip_mcp.pipelines.execution import Stated
     from tests._verified_checkpoint_fixtures import (
         SAMPLE_DETECTOR_PASS,
         finished_run,

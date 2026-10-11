@@ -4,11 +4,11 @@ task that trains whole frames is refused at the door rather than recorded unreal
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 from pathlib import Path
 
 import pytest
+
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._chain_fixtures import (  # noqa: E402
     BESPOKE_CLASSIFIER,
     BESPOKE_DETECTION,
@@ -83,9 +83,9 @@ def test_a_detector_dataset_records_its_density_whoever_built_it():
 def _detection_dataset(tmp_path, sizes):
     """A real DetectionDataset over tiny generated images, one per (width, height) in sizes."""
     from PIL import Image
-    from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.subject_registry import SubjectRegistry, Subject
 
+    from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tests._producer_fixtures import label_image
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET

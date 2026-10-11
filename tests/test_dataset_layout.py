@@ -9,11 +9,10 @@ import pytest
 import tcip_store as ts
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox
-
 from tcip_mcp.dataset_layout import (
     UNDATED_BUCKET,
-    label_key,
     capture_subjects,
+    label_key,
     parse_image_path,
 )
 

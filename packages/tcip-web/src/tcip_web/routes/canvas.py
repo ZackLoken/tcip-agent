@@ -14,12 +14,10 @@ but the backend's open one answers 409 and writes nothing.
 
 from __future__ import annotations
 
-from typing import Optional
-
 from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict
-import tcip_store as ts
 
+import tcip_store as ts
 from tcip_mcp.audit import now_iso
 from tcip_mcp.identity import actor
 from tcip_mcp.registry_paths import stored_path
@@ -39,17 +37,17 @@ class CanvasStatePayload(BaseModel):
     image: str
     img_width: int = 0
     img_height: int = 0
-    viewport: Optional[dict] = None  # {x, y, w, h, scale} in image coords
-    mode: Optional[str] = None
-    active_subject: Optional[str] = None
+    viewport: dict | None = None  # {x, y, w, h, scale} in image coords
+    mode: str | None = None
+    active_subject: str | None = None
     # Whether the Annotate cut tool is armed (sticky across a completed cut or a refusal alike).
-    cut_armed: Optional[bool] = None
-    dirty: Optional[bool] = None
+    cut_armed: bool | None = None
+    dirty: bool | None = None
     user: str
     classes: list[dict] = []  # [{name, color}]
-    counts: Optional[dict] = None
+    counts: dict | None = None
     # None = heartbeat (geometry file untouched); a list = full geometry push.
-    shapes: Optional[list[dict]] = None
+    shapes: list[dict] | None = None
 
 
 @router.post("/state")

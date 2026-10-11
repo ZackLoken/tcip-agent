@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import importlib.util
 import re
-from typing import Literal, Optional
+from typing import Literal
 
 import pytest
 from pydantic import BaseModel
@@ -72,7 +72,7 @@ class _NullableStringList(BaseModel):
     """A scratch model whose one field is an array of a nullable union, exercising the mapper's
     array-of-union case independently of any declared coverage model."""
 
-    values: list[Optional[str]]
+    values: list[str | None]
 
 
 class _FreeFormObject(BaseModel):

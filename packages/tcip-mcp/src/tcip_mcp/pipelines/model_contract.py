@@ -56,7 +56,7 @@ class TCIPModel(Protocol):
 
 
 def no_batch_reason(
-    task: str, dims: "Mapping[str, Any] | None", sample_batch: Any
+    task: str, dims: Mapping[str, Any] | None, sample_batch: Any
 ) -> str | None:
     """Why this call can smoke nothing, or ``None`` when it can."""
     if sample_batch is not None:
@@ -176,7 +176,7 @@ def _synth_batch(
 
 
 def _driving_batch(
-    task: str, dims: "Mapping[str, Any] | None", sample_batch: Any, device: Any
+    task: str, dims: Mapping[str, Any] | None, sample_batch: Any, device: Any
 ) -> tuple[Any, Any]:
     """The ``(images, targets)`` a model is driven with, as the trainer hands it: ``sample_batch``
     when given, else synthesized; a detection task's targets through ``instance_targets``.
@@ -235,7 +235,7 @@ def check_model_contract(
     model: TCIPModel,
     task: str,
     *,
-    dims: "Mapping[str, Any] | None" = None,
+    dims: Mapping[str, Any] | None = None,
     device: str = "cpu",
     sample_batch: Any = None,
 ) -> dict:
@@ -360,7 +360,7 @@ def overfit_check(
     model: TCIPModel,
     task: str,
     *,
-    dims: "Mapping[str, Any] | None" = None,
+    dims: Mapping[str, Any] | None = None,
     steps: int = 20,
     seed: int = 0,
     lr: float = 1e-2,

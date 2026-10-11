@@ -24,7 +24,6 @@ import torch  # noqa: E402
 from tcip_annotation.json_io import UNASSESSED  # noqa: E402
 from tcip_mcp import subject_registry as cr  # noqa: E402
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
-
 from tests._chain_fixtures import ATTRIBUTE, PLANTS, VALUES, attributed_series  # noqa: E402
 from tests._training_values import IOU_THRESHOLD  # noqa: E402
 from tests._verified_checkpoint_fixtures import (  # noqa: E402
@@ -48,7 +47,6 @@ def _documents(root: Path, bucket: str) -> dict[str, list[dict]]:
     """Every prediction document of the bucket named ``bucket`` under ``root`` by stem, its
     annotations as written."""
     import tcip_store
-
     from tcip_mcp.buckets import read_bucket
 
     return {
@@ -158,7 +156,6 @@ def test_a_selection_and_the_bucket_a_run_over_it_publishes_carry_one_scope_reco
     records it, and the bucket the run's checkpoint publishes states it. Both written records,
     compared to each other."""
     import tcip_store
-
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.dataset_layout import bucket_key
     from tcip_mcp.pipelines.data.selection import read_selection
@@ -392,8 +389,8 @@ def test_two_tiles_calling_one_object_differently_merge_into_the_higher_scoring_
     pytest.importorskip("sahi")
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.execution import prepare
-    from tests._producer_fixtures import painted_frame
     from tests._chain_fixtures import BESPOKE_MODELS
+    from tests._producer_fixtures import painted_frame
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     ckpt = registered_checkpoint(
@@ -472,7 +469,6 @@ def test_evaluate_reports_each_attributes_agreement_over_the_pairs_it_assesses(
     """Two frames whose one object each assesses ``color`` and only the first assesses ``grade``:
     color agrees over two matched pairs and grade over the one its reference assesses."""
     from tcip_annotation.state import Annotation, BBox
-
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.model_build import model_dims
     from tcip_mcp.pipelines.training.evaluation import evaluate

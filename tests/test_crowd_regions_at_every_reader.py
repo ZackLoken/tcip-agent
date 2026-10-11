@@ -326,12 +326,11 @@ def test_the_object_density_counts_objects_not_crowd_regions(tmp_path: Path):
 
 
 def test_the_object_size_and_spacing_ignore_crowd_regions(tmp_path: Path):
-    from tests import _trait_fixtures as fx
-
     from tcip_mcp.pipelines.training.evaluation import (
         gt_class_avg_size,
         resolve_match_criterion,
     )
+    from tests import _trait_fixtures as fx
 
     trait = fx.propose_and_confirm(tmp_path, fx.COUNT_SPEC).entry
     with_crowd, without = (
@@ -584,8 +583,6 @@ def test_the_derived_spacing_and_cross_tile_nms_ignore_crowd_regions(
 ):
     """An assessment derives its localization spacing and its cross-tile merge threshold from the
     objects of the calibration reference: stacked crowd regions beside them move neither."""
-    from tests import _trait_fixtures as fx
-
     from tcip_mcp.pipelines.derivations import (
         LOCALIZATION_TOLERANCE_DERIVATION,
         derive_cross_tile_nms,
@@ -595,6 +592,7 @@ def test_the_derived_spacing_and_cross_tile_nms_ignore_crowd_regions(
         localization_frac,
         records_from_annotation,
     )
+    from tests import _trait_fixtures as fx
 
     def records(crowd: bool) -> list[dict]:
         out = []

@@ -11,9 +11,10 @@ raster too large to decode whole).
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, Sequence
+from typing import TYPE_CHECKING, ClassVar
 
 if TYPE_CHECKING:
     import pyproj
@@ -64,7 +65,7 @@ class GeoTransform:
     epsg: int
 
 
-def geotransform_of(tags: "tifffile.TiffTags", path: Path) -> GeoTransform:
+def geotransform_of(tags: tifffile.TiffTags, path: Path) -> GeoTransform:
     """The georeferencing one TIFF page's ``tags`` state, ``path`` naming the file in a refusal.
 
     Raises :class:`RotatedRasterError` if a ``ModelTransformationTag`` is present, and
@@ -203,13 +204,13 @@ class OrthomosaicGeoreference:
 
     def __init__(self, transform: GeoTransform):
         self.transform = transform
-        self._to_wgs84: "pyproj.Transformer | None" = None
+        self._to_wgs84: pyproj.Transformer | None = None
 
     @classmethod
     def of(
         cls,
-        georeference: "GeoTransform | GeoreferencingError | None",
-    ) -> "OrthomosaicGeoreference":
+        georeference: GeoTransform | GeoreferencingError | None,
+    ) -> OrthomosaicGeoreference:
         """The georeference a raster's one georeference read answered (an open reader's or a TIFF
         header's ``georeference``). Raises the reason that read refused, or
         :class:`GeoreferencingError` for a raster whose reader reads no GeoTIFF tags."""
@@ -225,7 +226,7 @@ class OrthomosaicGeoreference:
         """(easting, northing) in this raster's own native projected CRS."""
         return pixel_to_native(self.transform, pixel_x, pixel_y)
 
-    def _transformer(self) -> "pyproj.Transformer":
+    def _transformer(self) -> pyproj.Transformer:
         """This raster's native CRS to WGS84, built on first use."""
         import pyproj
 

@@ -22,10 +22,8 @@ from tcip_mcp.audit import audit_log_key
 from tcip_mcp.tools.project_tools import upsert_dataset
 from tcip_web.paths import assert_path_allowed
 from tcip_web.state import store
-
 from tests._producer_fixtures import write_image
-from tests._trait_fixtures import propose, seed_confirmed_crossing
-from tests._trait_fixtures import BUD_OPENING
+from tests._trait_fixtures import BUD_OPENING, propose, seed_confirmed_crossing
 from tests._web_fixtures import new_project, open_new_project
 from tests.test_results_mapping_summary_and_audit_anchoring import (
     _capture_fixture,

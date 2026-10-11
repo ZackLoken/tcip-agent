@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 import tifffile
 
+from tcip_mcp.pipelines import raster_source
 from tcip_mcp.pipelines.overviews import (
     build_overviews,
     overview_dims,
@@ -16,7 +17,6 @@ from tcip_mcp.pipelines.overviews import (
     overview_sidecar,
     sidecar_valid,
 )
-from tcip_mcp.pipelines import raster_source
 from tcip_mcp.pipelines.raster_source import Rect, TiffWholeSource, open_raster
 
 

@@ -10,30 +10,28 @@ Each step asserts filesystem state to prove persistence works.
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 from pathlib import Path
 
 import pytest
 from PIL import Image
 
 from tcip_mcp.cli import doctor
-from tcip_mcp.workspace import BoundProject, workspace_from_environment
-from tcip_mcp.tools.project_tools import (
-    initialize_project,
-    inspect_project,
-    archive_project,
-)
-from tcip_mcp.tools.data_tools import (
-    scan_dataset,
-    draw_splits,
-)
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tcip_mcp.tools.annotation_tools import (
     read_annotations,
     save_annotations,
     score_predictions,
 )
-
+from tcip_mcp.tools.data_tools import (
+    draw_splits,
+    scan_dataset,
+)
+from tcip_mcp.tools.project_tools import (
+    archive_project,
+    initialize_project,
+    inspect_project,
+)
+from tcip_mcp.workspace import BoundProject, workspace_from_environment
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -49,7 +47,7 @@ def project_dir(tmp_path: Path) -> Path:
     images.mkdir(parents=True)
 
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.subject_registry import SubjectRegistry, Subject
+    from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tests._producer_fixtures import label_image, registry_over
 
     registry_over(
@@ -159,7 +157,6 @@ class TestE2EPipeline:
         assert len(save_result["written"]) == 1
 
         from tcip_annotation import json_io
-
         from tests._producer_fixtures import image_label_key
 
         doc = json_io.read_label_document(image_label_key(img_path))
@@ -252,7 +249,6 @@ class TestE2EPipelineEdgeCases:
 
         # 3 images, only 1 label
         from tcip_annotation.state import Annotation, BBox
-
         from tests._producer_fixtures import label_image
 
         for i in range(3):
@@ -276,7 +272,6 @@ class TestE2EPipelineEdgeCases:
         images.mkdir(parents=True)
 
         from tcip_annotation.state import Annotation, BBox
-
         from tests._producer_fixtures import label_image
 
         img = Image.new("RGB", (640, 480))
@@ -299,7 +294,6 @@ class TestE2EPipelineEdgeCases:
     ):
         """save_annotations writes an image's first label document."""
         import tcip_store
-
         from tests._producer_fixtures import image_label_key
 
         images = tmp_path / "images" / UNDATED_BUCKET

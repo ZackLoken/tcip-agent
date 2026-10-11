@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import tcip_store
-
 from tcip_annotation import Annotation
 from tcip_annotation.json_io import (
     UnreadableLabelDocumentError,
@@ -14,9 +13,7 @@ from tcip_annotation.json_io import (
     read_document_versioned,
     read_predictions,
 )
-
 from tcip_annotation.matching import REVIEW_CONF_FLOOR, Matching
-
 from tcip_mcp.buckets import Bucket, read_bucket, source_root
 from tcip_mcp.dataset_layout import label_key_of
 from tcip_mcp.pipelines.image_utils import image_path_dimensions
@@ -376,10 +373,9 @@ def write_subject_registry(
         allow_type_changes: State a same-values attribute type flip (categorical to ordinal or
             back) as deliberate.
     """
-    from tcip_store import VersionConflictError
-
     from tcip_mcp import subject_registry
     from tcip_mcp.audit import AuditEntryNotWrittenError
+    from tcip_store import VersionConflictError
 
     try:
         registry = subject_registry.registry_from_request(subjects)

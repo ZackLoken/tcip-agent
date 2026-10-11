@@ -9,8 +9,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from tcip_mcp import subject_registry as cr
-from tcip_mcp import traits
+from tcip_mcp import subject_registry as cr, traits
 from tcip_mcp.traits import (
     CENTER_MATCH,
     COUNT_UNBIASED,

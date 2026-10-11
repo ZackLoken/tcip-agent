@@ -11,7 +11,6 @@ import numpy as np
 import pytest
 
 from tcip_annotation.matching import xywh_corners
-
 from tcip_mcp.pipelines.derivations import (
     char_sizes,
     derive_block_scale_px,

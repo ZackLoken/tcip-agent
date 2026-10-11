@@ -61,7 +61,6 @@ def test_a_stock_trainer_run_registers_with_trainer_source_and_the_best_epochs_m
     import torch
 
     from tcip_mcp.experiments import observe
-
     from tests.tiny_trainer_fixtures import MEAN_INTENSITY_REGRESSOR
 
     run_dir = _stock_run(
@@ -91,7 +90,6 @@ def test_a_diverged_stock_run_ends_failed_and_registers_nothing(tmp_path):
     """Two full passes with no finite training loss end the run failed with the reason on its
     final status; the verdict leaves no checkpoint on disk and nothing reaches the registry."""
     from tcip_mcp.experiments import observe
-
     from tests.tiny_trainer_fixtures import ALWAYS_DIVERGED_MODEL
 
     run_dir = _stock_run(tmp_path, ALWAYS_DIVERGED_MODEL, 3, "exp-diverged")
@@ -115,7 +113,6 @@ def test_a_completed_run_with_a_diverged_val_metric_registers_it_as_null(
     import torch
 
     from tcip_mcp.experiments import observe
-
     from tests.tiny_trainer_fixtures import NAN_EVAL_REGRESSOR
 
     run_dir = _stock_run(tmp_path, NAN_EVAL_REGRESSOR, 3, "exp-nan-val")

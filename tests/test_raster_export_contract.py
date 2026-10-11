@@ -50,8 +50,8 @@ def test_a_raster_pass_records_the_frame_its_predictions_are_in(tmp_path):
     its bucket records and the prediction document carry one frame."""
     import numpy as np
     import tifffile
-    from tcip_annotation import json_io
 
+    from tcip_annotation import json_io
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.dataset_layout import prediction_key
     from tcip_mcp.pipelines.execution import Stated

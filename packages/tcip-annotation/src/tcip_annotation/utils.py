@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any, cast
 
-from PIL import Image, ExifTags
+from PIL import ExifTags, Image
 
 logger = logging.getLogger(__name__)
 

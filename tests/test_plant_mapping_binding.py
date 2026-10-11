@@ -11,8 +11,8 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
-from datetime import datetime, timedelta
 from collections.abc import Iterable
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -23,7 +23,6 @@ from tcip_mcp.pipelines.postprocessing import plant_mapping
 from tcip_mcp.tools.phenology_tools import build_plant_mapping
 from tcip_mcp.tools.project_tools import register_dataset
 from tcip_mcp.traits import registered_crops
-
 from tests._audit_fixtures import held_by_another_writer
 from tests._image_fixtures import write_geo_image
 from tests._mapping_fixtures import (

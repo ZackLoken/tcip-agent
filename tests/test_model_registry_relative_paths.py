@@ -11,8 +11,8 @@ import zipfile
 from pathlib import Path
 
 import pytest
-import tcip_store as ts
 
+import tcip_store as ts
 from tcip_mcp.model_registry import (
     ModelRegistry,
     read_registry_index,

@@ -10,14 +10,14 @@ import pytest
 import tcip_store
 from tcip_mcp.registry_paths import stored_path
 from tcip_mcp.tools.project_tools import (
-    initialize_project,
-    inspect_project,
+    _external_dataset_paths,
     archive_project,
     import_project,
+    initialize_project,
+    inspect_project,
     read_datasets,
     register_dataset,
     upsert_dataset,
-    _external_dataset_paths,
 )
 from tests._record_damage_fixtures import damage_record
 
@@ -27,7 +27,7 @@ def _make_dataset(root: Path) -> None:
     from PIL import Image
 
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.subject_registry import SubjectRegistry, Subject
+    from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tests._producer_fixtures import label_image, registry_over
 
     image = root / "images" / "2-11-26" / "img_000.jpg"
@@ -220,7 +220,7 @@ def test_export_import_roundtrip(tmp_path: Path):
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp import subject_registry
     from tcip_mcp.dataset_layout import label_key
-    from tcip_mcp.subject_registry import SubjectRegistry, Subject
+    from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tests._producer_fixtures import label_image, registry_over
 
     Image.new("RGB", (64, 64)).save(images / "img_000.jpg")

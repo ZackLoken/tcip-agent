@@ -5,14 +5,13 @@ refused by name where it is read.
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 from pathlib import Path
 
 import pytest
 
 from tcip_annotation import json_io
 from tcip_annotation.state import Annotation, BBox, Polygon
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._producer_fixtures import image_label_key, label_image
 
 SUBJECT = "strig"
@@ -63,7 +62,6 @@ def test_no_reader_stands_in_a_score_for_a_prediction_stating_none(
     tmp_path: Path, reader: str
 ):
     from tcip_annotation.matching import pair_proposals
-
     from tcip_mcp.pipelines.training.evaluation import records_from_annotation
 
     gt = _read_back(

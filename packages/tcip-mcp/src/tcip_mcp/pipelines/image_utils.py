@@ -11,9 +11,9 @@ from PIL import Image
 
 from tcip_mcp.pipelines import raster_source
 from tcip_mcp.pipelines.data.band_groups import (
+    MANIFEST_EXT,
     BandGroupIncompleteError,
     BandGroupRef,
-    MANIFEST_EXT,
     read_band_group_manifest,
 )
 from tcip_mcp.pipelines.raster_source import Rect
@@ -76,7 +76,7 @@ def stem_collision_key(name: str) -> str:
 
 def _scan_identities(
     d: Path,
-) -> dict[str, list[tuple[Path, "BandGroupRef | None"]]]:
+) -> dict[str, list[tuple[Path, BandGroupRef | None]]]:
     """One manifest glob and one ``d.iterdir()`` walk with one extension test, keyed by
     :func:`stem_collision_key`; a key's list holds more than one entry exactly when it is
     ambiguous.
@@ -142,7 +142,7 @@ def logical_image_count(root: str | Path) -> int:
 
 def list_logical_images(
     images_dir: str | Path,
-) -> dict[str, "Path | BandGroupRef"]:
+) -> dict[str, Path | BandGroupRef]:
     """Every logical image in ``images_dir``, by exact stem.
 
     Built from :func:`_scan_identities`: a :class:`BandGroupRef` for a manifest identity, that
@@ -160,15 +160,15 @@ def list_logical_images(
 
 
 def _identity(
-    entries: list[tuple[Path, "BandGroupRef | None"]],
-) -> "Path | BandGroupRef":
+    entries: list[tuple[Path, BandGroupRef | None]],
+) -> Path | BandGroupRef:
     """The logical image one unambiguous :func:`_scan_identities` key holds."""
     path, ref = entries[0]
     return ref if ref is not None else path
 
 
 def _refuse_ambiguous(
-    d: Path, keys: "Iterable[list[tuple[Path, BandGroupRef | None]]]"
+    d: Path, keys: Iterable[list[tuple[Path, BandGroupRef | None]]]
 ) -> None:
     """Refuse (:class:`AmbiguousImageStemError`) the :func:`_scan_identities` keys of ``d`` holding
     more than one identity, naming their paths."""
@@ -186,8 +186,8 @@ def _refuse_ambiguous(
 
 
 def refuse_incomplete_band_group(
-    source: "Path | BandGroupRef",
-) -> "Path | BandGroupRef":
+    source: Path | BandGroupRef,
+) -> Path | BandGroupRef:
     """``source`` itself, refusing a grouped capture whose manifest names a band that is gone."""
     if isinstance(source, BandGroupRef):
         missing = [name for name, p in source.bands.items() if not p.is_file()]
@@ -201,8 +201,8 @@ def refuse_incomplete_band_group(
 
 
 def resolve_image_paths(
-    paths: "Iterable[str | Path]",
-) -> "list[Path | BandGroupRef]":
+    paths: Iterable[str | Path],
+) -> list[Path | BandGroupRef]:
     """The logical image each of ``paths`` names, each directory scanned once
     (:func:`_scan_identities`): a ``.bandgroup`` manifest's grouped capture, a raw image its own
     file.
@@ -217,7 +217,7 @@ def resolve_image_paths(
         for d in {p.parent for p in named_paths}
     }
 
-    def named(path: Path) -> "Path | BandGroupRef":
+    def named(path: Path) -> Path | BandGroupRef:
         entries = scanned[path.parent].get(stem_collision_key(path.stem), [])
         _refuse_ambiguous(path.parent, [entries])
         if not entries or entries[0][0].name != path.name:
@@ -240,7 +240,7 @@ def resolve_image_paths(
     return [named(p) for p in named_paths]
 
 
-def resolve_image_path(image_path: str | Path) -> "Path | BandGroupRef":
+def resolve_image_path(image_path: str | Path) -> Path | BandGroupRef:
     """The logical image ``image_path`` names (:func:`resolve_image_paths`); its refusals
     propagate."""
     return resolve_image_paths([image_path])[0]
@@ -255,7 +255,7 @@ def image_path_dimensions(image_path: str | Path) -> tuple[int, int]:
     ).display_frame
 
 
-def source_path_of(source: "str | Path | BandGroupRef") -> str:
+def source_path_of(source: str | Path | BandGroupRef) -> str:
     """The path this logical image is named by, recorded and displayed: a grouped capture's own
     ``.bandgroup`` manifest, a plain image's own file. The inverse :func:`resolve_image_path`
     reads back."""
@@ -264,7 +264,7 @@ def source_path_of(source: "str | Path | BandGroupRef") -> str:
     )
 
 
-def logical_image_name(source: "Path | BandGroupRef") -> str:
+def logical_image_name(source: Path | BandGroupRef) -> str:
     """The name a by-name reader (a verdict shard, a COCO ``file_name``) resolves this
     logical image under: a :class:`BandGroupRef`'s own ``.bandgroup`` manifest name, since that
     file stands in for the whole grouped capture everywhere a name is matched against a store;
@@ -288,7 +288,7 @@ def logical_images_by_name(images_dir: str | Path) -> dict[str, str]:
     return {name: named[name] for name in sorted(named)}
 
 
-def stem_of(source: "str | Path | BandGroupRef") -> str:
+def stem_of(source: str | Path | BandGroupRef) -> str:
     """The logical image's own stem, whatever concrete type ``source`` is: a
     :class:`BandGroupRef`'s canonical stem, else ``Path(...).stem``.
     """
@@ -333,7 +333,7 @@ def parse_capture_time(raw: object):
 
 
 def image_dimensions(
-    path: "str | Path | BandGroupRef", num_channels: int
+    path: str | Path | BandGroupRef, num_channels: int
 ) -> tuple[int, int]:
     """``(width, height)`` as ``load_image`` will decode it at ``num_channels``
     (:meth:`~tcip_mcp.pipelines.raster_source.SourceHeader.frame_at`)."""
@@ -360,7 +360,7 @@ def pixel_array(img) -> tuple[np.ndarray, tuple[str, ...] | None]:
 
 
 def to_pil_if_faithful(
-    arr, *, band_interpretations: "tuple[str, ...] | None" = None
+    arr, *, band_interpretations: tuple[str, ...] | None = None
 ):
     """An ``[H, W, C]`` uint8 ndarray with 1 or 3 channels as a PIL image (mode L or RGB, a single
     channel squeezed); a 4-channel array only when ``band_interpretations`` (the source's GDAL
@@ -400,7 +400,7 @@ def pil_to_tensor(img) -> torch.Tensor:
     return torch.from_numpy(arr).permute(2, 0, 1).contiguous()
 
 
-def load_image(path: "str | Path | BandGroupRef", num_channels: int):
+def load_image(path: str | Path | BandGroupRef, num_channels: int):
     """Open an image at ``num_channels``, which every caller states.
 
     Returns a ``PIL.Image`` wherever PIL has a faithful mode for the decoded pixels: photographic

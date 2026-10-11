@@ -12,11 +12,9 @@ from pathlib import Path
 from typing import Any
 
 import tcip_store
-from tcip_store import DecodeError, Key, Version, VersionConflictError
-
-from tcip_mcp.server import tool
 from tcip_mcp.audit import audited, now_iso
-
+from tcip_mcp.server import tool
+from tcip_store import DecodeError, Key, Version, VersionConflictError
 
 REPORT_CATEGORIES = {
     "missing_tool",

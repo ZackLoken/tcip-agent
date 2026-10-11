@@ -5,7 +5,8 @@ from __future__ import annotations
 
 import math
 import statistics
-from typing import TYPE_CHECKING, Any, Callable, Sequence, cast
+from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING, Any, cast
 
 from tcip_store import non_finite_state, stored_number
 

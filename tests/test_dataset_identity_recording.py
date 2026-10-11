@@ -25,7 +25,7 @@ def _make_dataset(root: Path, *, shade: int = 0) -> Path:
     from PIL import Image
 
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.subject_registry import SubjectRegistry, Subject
+    from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tests._producer_fixtures import label_image, registry_over
 
     images_dir = root / "images" / "2-11-26"
@@ -118,9 +118,9 @@ def test_compare_experiments_mixed_none_fingerprint_is_unknown_not_same(
 
 
 def test_dataset_identity_helper_registered_vs_bespoke(tmp_path):
-    from tcip_mcp.tools.project_tools import register_dataset
     from tcip_mcp.pipelines.data.split_construction import dataset_identity
     from tcip_mcp.pipelines.schemas import DataSpec
+    from tcip_mcp.tools.project_tools import register_dataset
 
     _make_dataset(tmp_path)
     reg = register_dataset(tmp_path, str(tmp_path), crop="currant")

@@ -4,13 +4,13 @@ name (``KeyError``) rather than being tolerated with a default."""
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-from tests._chain_fixtures import BESPOKE_DETECTION
-
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
+
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tests._chain_fixtures import BESPOKE_DETECTION
 
 
 def test_a_registered_entry_ranks_through_best_model(tmp_path: Path) -> None:
@@ -75,7 +75,6 @@ def test_a_proposed_trait_reads_back_as_the_entry_it_proposed(
     tmp_path: Path,
 ) -> None:
     from tcip_mcp import traits
-
     from tests import _trait_fixtures as fx
 
     proposed = fx.entry("leaf", ("leaf_length",))
@@ -88,11 +87,10 @@ def test_a_trait_record_lacking_an_entry_field_fails_at_the_schema(
     tmp_path: Path,
 ) -> None:
     import pytest
-    import tcip_store as ts
     from pydantic import ValidationError
 
+    import tcip_store as ts
     from tcip_mcp import traits
-
     from tests import _trait_fixtures as fx
 
     fx.propose(tmp_path, fx.entry("fruit", ("leaf_length",)))

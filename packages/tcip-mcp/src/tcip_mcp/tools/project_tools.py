@@ -9,11 +9,10 @@ import zipfile
 from pathlib import Path
 
 import tcip_store
-from tcip_store import Key, VersionConflictError, encode_record
-
-from tcip_mcp.server import tool
 from tcip_mcp.audit import audited
 from tcip_mcp.registry_paths import located
+from tcip_mcp.server import tool
+from tcip_store import Key, VersionConflictError, encode_record
 
 
 def _project_dir(project_path: str) -> Path:
@@ -84,8 +83,8 @@ def register_dataset(project: Path, dataset_root: str, crop: str) -> dict:
             expert's fact.
     """
     from tcip_mcp.dataset_layout import (
-        decode_dataset_identity_document,
         dataset_identity_path,
+        decode_dataset_identity_document,
     )
     from tcip_mcp.pipelines.data.dataset_fingerprint import dataset_fingerprint
     from tcip_mcp.project_record import mint_id
@@ -154,10 +153,9 @@ def initialize_project(
         display_name: The name the project picker shows; renaming later changes only this.
         site: The orchard or station this project's plants stand in, in the breeder's own words.
     """
-    from tcip_store import StoreError
-
     from tcip_mcp.audit import record_event_or_raise
     from tcip_mcp.project_record import create_record
+    from tcip_store import StoreError
 
     try:
         project = located(Path(project_path).expanduser(), None)
@@ -228,11 +226,10 @@ def inspect_project(project: Path) -> dict:
         status["image_count"] = logical_image_count(project)
         status["dates"] = dataset_layout.list_dates(project)
 
-    from tcip_store import StoreError
-
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         plant_mapping_names,
     )
+    from tcip_store import StoreError
 
     try:
         status["plant_mappings"] = plant_mapping_names(project)
@@ -408,9 +405,8 @@ def write_archive(
             "or into anything"
         }
 
-    from tcip_store.file_backend import is_bookkeeping
-
     from tcip_mcp.model_registry import checkpoint_files
+    from tcip_store.file_backend import is_bookkeeping
 
     checkpoints = frozenset() if include_models else checkpoint_files(project)
     files = [
@@ -626,9 +622,8 @@ def _run_import_into_staging(bp: Path, staging: Path, dest: Path) -> dict:
     own bookkeeping, then move. Returns the tool's own response dict, an ``{"error": ...}`` on any
     refusal.
     """
-    from tcip_store.file_backend import DEFAULT_LOCK_TIMEOUT_S, is_bookkeeping
-
     from tcip_mcp.model_registry import registry_checkpoint_disclosures
+    from tcip_store.file_backend import DEFAULT_LOCK_TIMEOUT_S, is_bookkeeping
 
     try:
         files_extracted = _stage_bundle(bp, staging)

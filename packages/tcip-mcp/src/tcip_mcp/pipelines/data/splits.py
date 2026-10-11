@@ -9,9 +9,10 @@ import bisect
 import random
 import re
 from collections import defaultdict
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING
 
 from tcip_store import canonical_path
 
@@ -49,7 +50,7 @@ GROUP_KEY_FNS: dict[str, Callable[[str], str]] = {
 }
 
 
-def count_label_lines(document: "LabelDocument", scope: "ClassScope") -> int:
+def count_label_lines(document: LabelDocument, scope: ClassScope) -> int:
     """How many instances of ``scope``'s subject (of any subject when it names none) one per-image
     label ``document`` carries."""
     from tcip_annotation import json_io
@@ -65,7 +66,7 @@ def count_label_lines(document: "LabelDocument", scope: "ClassScope") -> int:
 
 
 def label_document_extent(
-    document: "LabelDocument", where: str
+    document: LabelDocument, where: str
 ) -> tuple[int, int]:
     """``(width, height)`` one per-image label ``document`` records, the frame its geometry was
     authored against. A document that states no positive width and height refuses

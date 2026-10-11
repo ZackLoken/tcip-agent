@@ -11,18 +11,18 @@ construction and spatially, through the real dataset classes.
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 from pathlib import Path
 
 import numpy as np
 import pytest
 from PIL import Image
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
 pytest.importorskip("torch")
 import torch  # noqa: E402
-from tests._producer_fixtures import dataset_over  # noqa: E402
 
+from tests._producer_fixtures import dataset_over  # noqa: E402
 
 # --------------------------------------------------------------------------
 # Fixture: an Orientation-6 JPEG whose upright frame carries a known red marker,
@@ -50,7 +50,6 @@ def _make_orient6_dataset(
     restores the upright frame, mirroring a real orientation-6 capture.
     """
     from tcip_annotation.state import Annotation, BBox
-
     from tests._producer_fixtures import label_image, painted_frame
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
@@ -75,7 +74,7 @@ def _make_orient6_dataset(
 
 
 def _red_fraction(
-    rchan: "np.ndarray | torch.Tensor", g: "np.ndarray | torch.Tensor"
+    rchan: np.ndarray | torch.Tensor, g: np.ndarray | torch.Tensor
 ) -> float:
     """Fraction of pixels that are strongly red (R high, G low): marker detector, JPEG-robust."""
     r = rchan.numpy() if isinstance(rchan, torch.Tensor) else rchan

@@ -275,7 +275,6 @@ def test_compare_best_route_422s_with_no_registered_checkpoint(
     """A project with no completed run and no foreign registration answers the ranking's own
     refusal as 422, and the asking writes no registry index."""
     import tcip_store
-
     from tcip_mcp.model_registry import registry_index_key
 
     resp = opened_client.post(

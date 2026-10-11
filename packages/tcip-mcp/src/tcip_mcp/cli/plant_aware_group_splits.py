@@ -52,7 +52,6 @@ def derive_plant_group_key_map(
     georeferenced or whose nearest plant falls outside tolerance, with its cause, once all stems
     have been checked.
     """
-    from tcip_mcp.pipelines.raster_source import SourceHeader
     from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
         OrthomosaicGeoreference,
     )
@@ -60,6 +59,7 @@ def derive_plant_group_key_map(
         nearest_plant,
         resolve_nn_tolerance_m,
     )
+    from tcip_mcp.pipelines.raster_source import SourceHeader
 
     if not plants:
         raise ValueError(
@@ -177,10 +177,12 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
 
     from tcip_mcp.cli import bound_project
     from tcip_mcp.dataset_layout import parse_image_path
-    from tcip_mcp.pipelines.data.splits import member_identity
+    from tcip_mcp.pipelines.data.splits import (
+        DEFAULT_GROUP_BY,
+        member_identity,
+    )
     from tcip_mcp.pipelines.postprocessing.plant_mapping import read_plant_csvs
     from tcip_mcp.registry_paths import located
-    from tcip_mcp.pipelines.data.splits import DEFAULT_GROUP_BY
     from tcip_mcp.tools.data_tools import _scan_dataset, draw_splits_at
 
     project = bound_project(args.project)

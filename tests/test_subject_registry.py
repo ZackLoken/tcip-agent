@@ -14,12 +14,12 @@ import pytest
 
 from tcip_mcp.subject_registry import (
     Attribute,
-    SubjectRegistry,
     RegistryError,
     Subject,
+    SubjectRegistry,
     read_registry,
-    registry_from_dict,
     read_versioned_registry,
+    registry_from_dict,
     registry_to_dict,
 )
 from tests._producer_fixtures import registry_over

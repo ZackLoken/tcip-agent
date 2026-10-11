@@ -10,7 +10,7 @@ from pathlib import Path
 from PIL import Image
 
 from tcip_annotation.state import Annotation, BBox
-from tcip_mcp.subject_registry import SubjectRegistry, Subject
+from tcip_mcp.subject_registry import Subject, SubjectRegistry
 from tcip_mcp.tools.project_tools import read_datasets, register_dataset
 from tests._cli_fixtures import run_tcip
 from tests._producer_fixtures import label_image, registry_over
@@ -175,7 +175,6 @@ def test_check_dataset_identity_still_fires_for_a_genuinely_moved_dataset(
     import shutil
 
     import tcip_store
-
     from tests._web_fixtures import new_project
 
     orig = new_project(tmp_path / "orig").root

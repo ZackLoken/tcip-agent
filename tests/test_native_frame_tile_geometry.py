@@ -11,13 +11,13 @@ a doubled one.
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-from tcip_mcp.pipelines.schemas import ModelSourceSchema
-from tests._producer_fixtures import checkpoint_admission
-
 from pathlib import Path
 
 import pytest
+
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.pipelines.schemas import ModelSourceSchema
+from tests._producer_fixtures import checkpoint_admission
 
 pytest.importorskip("torch")
 
@@ -523,8 +523,8 @@ def _native_frame_gt(images_dir: Path) -> None:
     admits-valid-work proof is about from any unrelated matching noise.
     """
     from PIL import Image
-    from tcip_annotation.state import Annotation, BBox
 
+    from tcip_annotation.state import Annotation, BBox
     from tests._producer_fixtures import label_image
 
     Image.new("RGB", (IMAGE, IMAGE), (120, 120, 120)).save(

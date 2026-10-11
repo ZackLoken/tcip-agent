@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import pytest
 
-
 # ── capture_env records code + library fingerprint ────────────────────────────
 
 
@@ -86,14 +85,14 @@ def test_a_payloads_own_experiment_id_names_no_producer(tmp_path):
 
 
 def test_draw_splits_selection_embeds_digests_and_seed(data_dir, tmp_path):
+    # A selection needs at least four foreground groups to clear the floor; the fixture's own
+    # three (img_001..003) need one more, added here rather than in the shared fixture.
+    from PIL import Image
+
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.tools.data_tools import draw_splits
     from tests._producer_fixtures import label_image
-
-    # A selection needs at least four foreground groups to clear the floor; the fixture's own
-    # three (img_001..003) need one more, added here rather than in the shared fixture.
-    from PIL import Image
 
     images_dir = data_dir / "images" / "2-11-26"
     Image.new("RGB", (640, 480), color=(128, 128, 128)).save(
@@ -133,7 +132,6 @@ def test_a_delivery_event_names_its_producer_and_write_time_and_its_rows_repeat_
     """The checkpoint and run behind a delivered count are on the delivery's one event, beside
     the time it was written; every row carries only the delivery columns, never the producer."""
     pytest.importorskip("torch")
-    from tests import csv_rows
     from datetime import datetime
 
     from tcip_mcp.buckets import read_bucket
@@ -141,7 +139,7 @@ def test_a_delivery_event_names_its_producer_and_write_time_and_its_rows_repeat_
     from tcip_mcp.pipelines.postprocessing.export import (
         deliver_per_image_counts_csv,
     )
-    from tests import _trait_fixtures as fx
+    from tests import _trait_fixtures as fx, csv_rows
     from tests._chain_fixtures import acknowledged, predicted, published
 
     fx.seed_delivery_traits(tmp_path)

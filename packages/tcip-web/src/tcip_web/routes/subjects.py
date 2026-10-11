@@ -24,8 +24,6 @@ name-based label is undecodable without it.
 
 from __future__ import annotations
 
-from typing import Optional
-
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -80,7 +78,7 @@ class SaveSubjectsPayload(BaseModel):
     dataset_root: str
     # Required: the version load_subjects returned beside the registry this save was built from.
     # None means the registry was absent at load, asserted as Version.ABSENT, never skipped.
-    version: Optional[str]
+    version: str | None
     user: str
 
 
@@ -95,8 +93,6 @@ def save_subjects(payload: SaveSubjectsPayload) -> dict:
     ``allow_removals``; ``write_subject_registry`` states either. Refuses (409) a stale
     ``version``. A write whose audit line could not follow answers 409.
     """
-    from tcip_store import Version, VersionConflictError
-
     from tcip_mcp.audit import AuditEntryNotWrittenError
     from tcip_mcp.identity import actor
     from tcip_mcp.subject_registry import (
@@ -104,6 +100,7 @@ def save_subjects(payload: SaveSubjectsPayload) -> dict:
         registry_from_request,
         replace_registry,
     )
+    from tcip_store import Version, VersionConflictError
     from tcip_web.routes.audit_gap import audit_gap_409
 
     person = actor(payload.user)

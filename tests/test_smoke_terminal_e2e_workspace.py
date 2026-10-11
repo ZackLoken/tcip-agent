@@ -32,7 +32,6 @@ def test_runs_under_the_given_workspace_never_the_machines_last_opened_project(
     run touches: the run sees the workspace it was given, opens nothing for a row that cannot
     launch, and leaves the live project's log as it was."""
     import tcip_store
-
     from tcip_mcp import workspace
     from tcip_mcp.audit import audit_log_key
     from tcip_web.state import store

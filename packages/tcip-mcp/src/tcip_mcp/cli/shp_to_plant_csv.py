@@ -63,7 +63,6 @@ def convert_shp_to_plant_csv(
         PLANT_CSV_COLUMNS,
         read_plant_shapefile,
     )
-
     from tcip_mcp.registry_paths import located
 
     shp_path, csv_path = located(shp_path, None), located(csv_path, None)

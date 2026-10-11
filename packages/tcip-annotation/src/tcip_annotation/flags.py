@@ -7,10 +7,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, replace
 
-from tcip_store import Key
-
 from tcip_annotation.json_io import PERSON_IDENTITY_PREFIX, is_person
 from tcip_annotation.state import Annotation, BBox, Point, Polygon
+from tcip_store import Key
 
 REVIEW_FLAGS_STORE = "review_flags"
 
@@ -43,7 +42,7 @@ class Flag:
 
     def resolved(
         self, *, by: str, at: str, reply: str = "", removed: bool = False
-    ) -> "Flag":
+    ) -> Flag:
         """This flag resolved by ``by`` at ``at``; a resolution :func:`decode_flag` would not read
         back refuses (``ValueError``)."""
         return decode_flag(

@@ -10,13 +10,13 @@ checkpoint's channel count is one property of the whole dataset, so a 2-band mod
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 from pathlib import Path
 
 import numpy as np
 import pytest
 import tifffile
+
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 torch = pytest.importorskip("torch")
 
@@ -79,7 +79,6 @@ def _grouped_dataset(root: Path) -> Path:
     """Two 2-band grouped captures, each with a ground-truth label document; their images
     directory."""
     from tcip_annotation.state import Annotation, BBox
-
     from tests._producer_fixtures import label_image
 
     images_dir = root / "images" / UNDATED_BUCKET

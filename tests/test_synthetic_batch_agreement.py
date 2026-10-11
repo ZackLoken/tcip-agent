@@ -9,9 +9,9 @@ head consumes.
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 import pytest
+
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 pytest.importorskip("torch")
 pytest.importorskip("PIL")
@@ -78,8 +78,9 @@ def _real_detection_item(tmp_path):
     """One ``(image, target)`` from a real ``DetectionDataset``: a non-square frame, a non-square
     box, and a subject that is not the first one in the registry."""
     from PIL import Image
+
     from tcip_annotation.state import Annotation, BBox
-    from tcip_mcp.subject_registry import SubjectRegistry, Subject
+    from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tests._producer_fixtures import label_image
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET

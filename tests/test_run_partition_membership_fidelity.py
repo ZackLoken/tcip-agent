@@ -8,11 +8,11 @@ read the result back, including through the geometric disjointness check that co
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 from pathlib import Path
 
 import pytest
+
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 pytest.importorskip("torchvision")
 
@@ -25,7 +25,6 @@ def _single_source_mosaic(
     from PIL import Image
 
     from tcip_annotation.state import Annotation, BBox
-
     from tests._producer_fixtures import label_image
 
     images_dir = root / "images" / UNDATED_BUCKET
@@ -107,8 +106,8 @@ def test_persisted_calibration_region_is_reserved_away_from_train(
     """A four-way split's reserved calibration band reaches the resolved record as its own geometry,
     disjoint from the train region, and the geometric disjointness check reads a rect drawn from
     what was actually persisted there as clean while still catching one drawn from train."""
-    from tcip_mcp.pipelines.raster_source import rects_overlap
     from tcip_mcp.pipelines.operating_point import spatial_disjointness
+    from tcip_mcp.pipelines.raster_source import rects_overlap
 
     images_dir, _stem = _single_source_mosaic(tmp_path / "ds")
     data_cfg = _data_cfg(

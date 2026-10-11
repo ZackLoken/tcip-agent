@@ -9,9 +9,8 @@ from pathlib import Path
 from typing import Literal, get_args
 
 import tcip_store
-from tcip_store import Key
-
 from tcip_annotation.json_io import is_person
+from tcip_store import Key
 
 VerdictAction = Literal["accepted", "rejected"]
 VERDICT_ACTIONS: tuple[VerdictAction, ...] = get_args(VerdictAction)

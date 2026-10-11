@@ -78,7 +78,6 @@ def _bind_run(project: Path, out: Path, experiment_id: str) -> Path:
 def _manifest_sha256(out: Path) -> str:
     """The sha256 of the selection record at ``out`` as the store holds it."""
     import tcip_store
-
     from tcip_mcp.pipelines.data.selection import selection_key
 
     return hashlib.sha256(

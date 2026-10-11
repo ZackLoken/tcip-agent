@@ -4,7 +4,8 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Callable, Protocol, cast
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Protocol, cast
 
 import numpy as np
 import torch
@@ -22,11 +23,6 @@ from tcip_mcp.pipelines.execution import (
     DEFAULT_IMAGE_BATCH_SIZE,
     DEFAULT_TILE_BATCH_SIZE,
 )
-from tcip_mcp.pipelines.model_build import (
-    STATE_DICT_KEY,
-    build_from_model_source,
-    recorded_model_dims,
-)
 from tcip_mcp.pipelines.image_utils import (
     BandGroupRef,
     frame_size,
@@ -34,6 +30,11 @@ from tcip_mcp.pipelines.image_utils import (
     pil_to_tensor,
     pixel_array,
     source_path_of,
+)
+from tcip_mcp.pipelines.model_build import (
+    STATE_DICT_KEY,
+    build_from_model_source,
+    recorded_model_dims,
 )
 from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
 
@@ -50,7 +51,7 @@ class WindowedRasterReader(Protocol):
 
     def read_window(
         self, y0: int, y1: int, x0: int, x1: int
-    ) -> "np.ndarray": ...
+    ) -> np.ndarray: ...
 
 
 class GenericPredictor:
@@ -70,7 +71,7 @@ class GenericPredictor:
     """
 
     def __init__(
-        self, checkpoint: "VerifiedCheckpoint", device: str | None = None
+        self, checkpoint: VerifiedCheckpoint, device: str | None = None
     ) -> None:
         from tcip_mcp.pipelines.schemas import run_tiling
 
@@ -169,7 +170,7 @@ class GenericPredictor:
         tile_resize: tuple[int, int] | None,
         band_interpretations: tuple[str, ...] | None,
         collect_masks: bool,
-    ) -> "TcipDetectionModel":
+    ) -> TcipDetectionModel:
         """This predictor wrapped as the SAHI detection model a prediction runs through, each
         input under the cap ``cap_of`` gives it and ``execution``'s conf, masks cut at the
         platform's binarize threshold."""
@@ -227,12 +228,12 @@ class GenericPredictor:
 
     def _detection_record(
         self,
-        predictions: "list[ObjectPrediction]",
+        predictions: list[ObjectPrediction],
         label: str,
         width: int,
         height: int,
         *,
-        model: "TcipDetectionModel",
+        model: TcipDetectionModel,
         cap: int,
     ) -> dict:
         """The platform's detection record from ``ObjectPrediction``s in full-frame pixels, as
@@ -275,7 +276,7 @@ class GenericPredictor:
         require_masks: bool,
         source_label: str = "",
         prior: dict | None = None,
-        progress: "Callable[[int, int, dict], None] | None" = None,
+        progress: Callable[[int, int, dict], None] | None = None,
     ) -> dict:
         """Sliced detection over one source under a tiled ``execution`` record: SAHI's lattice
         (:func:`~tcip_mcp.pipelines.slicing.slice_lattice`) at its tile edge and overlap over the

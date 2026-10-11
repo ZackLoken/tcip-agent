@@ -54,14 +54,16 @@ def deliveries(workspace: Path) -> dict[str, dict]:
     """The served delivery events of the scenes this module names, made in projects created
     under ``workspace``, by fixture name."""
     from fastapi.testclient import TestClient
+
     from tcip_mcp.tools.inference_tools import deliver_per_image_counts
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
     from tcip_web.app import app
     from tcip_web.state import store
-
-    from tests import _trait_fixtures as fx
-    from tests import test_orthomosaic_tools as ortho
-    from tests import test_plant_mapping_binding as binding
+    from tests import (
+        _trait_fixtures as fx,
+        test_orthomosaic_tools as ortho,
+        test_plant_mapping_binding as binding,
+    )
     from tests._chain_fixtures import run_the_chain
     from tests._mapping_fixtures import (
         POSITION_ERROR_M,

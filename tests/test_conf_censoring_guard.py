@@ -15,9 +15,9 @@ torch = pytest.importorskip(
     "torch"
 )  # evaluation.py imports torch at module load
 
+from tcip_mcp.pipelines.operating_point import _min_dt_score, count_criterion  # noqa: E402
 from tests import _trait_fixtures as fx  # noqa: E402
 from tests._dense_op_fixtures import dense_records, good_cal_holdout  # noqa: E402
-from tcip_mcp.pipelines.operating_point import _min_dt_score, count_criterion  # noqa: E402
 
 
 def _criterion(cal, hold, floor):

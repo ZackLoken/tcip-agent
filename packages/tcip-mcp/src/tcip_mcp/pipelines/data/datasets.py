@@ -20,9 +20,6 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
-
-from tcip_mcp.pipelines import raster_source
-from tcip_mcp.pipelines.data.band_groups import BandGroupRef
 from tcip_annotation.json_io import LabelDocument
 from tcip_annotation.state import (
     Polygon,
@@ -30,15 +27,12 @@ from tcip_annotation.state import (
     object_rows,
     polygonal,
 )
-
+from tcip_mcp.pipelines import raster_source
+from tcip_mcp.pipelines.data.band_groups import BandGroupRef
 from tcip_mcp.pipelines.data.label_queries import (
     acquired,
     json_det_targets,
     resolved,
-)
-from tcip_mcp.pipelines.derivations import (
-    Region,
-    num_classes_from_distribution,
 )
 from tcip_mcp.pipelines.data.selection import (
     DOCUMENT,
@@ -48,6 +42,10 @@ from tcip_mcp.pipelines.data.selection import (
     ClassScope,
     Sample,
     refuse_unreadable_samples,
+)
+from tcip_mcp.pipelines.derivations import (
+    Region,
+    num_classes_from_distribution,
 )
 from tcip_mcp.pipelines.image_utils import (
     frame_size,
@@ -110,7 +108,7 @@ class BaseImageDataset(BaseDataset):
 
     ground_truth_shape: str = DOCUMENT
     ground_truth_count: str | None = None
-    reads_geometry: "Callable[[Any], bool] | None" = None
+    reads_geometry: Callable[[Any], bool] | None = None
     reads_description: str = ""
     scope: ClassScope = ClassScope()
     transforms: Any = None
@@ -449,6 +447,7 @@ def clip_rows_to_tile(
     each one's clipped region as a tile-local ``Polygon``, one ring per piece the tile cut.
     """
     import shapely
+
     from tcip_annotation.matching import box_sizes
 
     x0, y0, x1, y1 = tile
@@ -489,7 +488,7 @@ def clip_rows_to_tile(
 
 
 def _validated_keep_regions(
-    keep_regions: "Sequence[tuple[int, int, int, int]] | None",
+    keep_regions: Sequence[tuple[int, int, int, int]] | None,
 ) -> list[tuple[int, int, int, int]] | None:
     """``keep_regions`` as int 4-tuples, or ``None`` when no filter was asked for.
 
@@ -558,14 +557,13 @@ class TiledDetectionDataset(BaseImageDataset):
         transforms: Any = None,
         keep_regions: Sequence[tuple[int, int, int, int]] | None = None,
     ) -> None:
+        from tcip_annotation.matching import geometry_rings, shapely_geometry
         from tcip_mcp.pipelines.derivations import (
             char_sizes,
             derive_sliver_frac,
         )
         from tcip_mcp.pipelines.raster_source import rect_contains_rect
         from tcip_mcp.pipelines.slicing import is_full_slice, slice_lattice
-
-        from tcip_annotation.matching import geometry_rings, shapely_geometry
 
         self._samples = base._samples
         self.expected_channels = base.expected_channels
@@ -863,7 +861,7 @@ class TableDataset(BaseImageDataset):
 
     ground_truth_shape = TABLE
     target_key = ""
-    convert: "staticmethod[[str], Any]" = staticmethod(int)
+    convert: staticmethod[[str], Any] = staticmethod(int)
 
     def __init__(
         self, samples: Sequence[Sample], transforms: Any = None
@@ -1036,7 +1034,7 @@ def stated_sizes(data: DataSpec) -> dict[str, int]:
 
 def resolve_sizes(
     task: str,
-    stated: "Mapping[str, int]",
+    stated: Mapping[str, int],
     samples: Sequence[Sample],
     dataset_source: DatasetSourceSchema | None = None,
 ) -> dict[str, int]:
@@ -1090,7 +1088,7 @@ def build_dataset(
     task: str,
     *,
     samples: Sequence[Sample],
-    sizes: "Mapping[str, int]",
+    sizes: Mapping[str, int],
     scope: ClassScope,
     transforms: Any = None,
     tiling: TilingSpec | None = None,

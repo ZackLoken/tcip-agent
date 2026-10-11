@@ -8,21 +8,19 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import tcip_store as ts
-
 from tcip_mcp.delivery import read_delivery_events
 from tcip_mcp.pipelines.delivery_events_schema import PlantMappingDisclosure
 from tcip_mcp.pipelines.postprocessing import plant_mapping
 from tcip_mcp.tools.phenology_tools import build_plant_mapping
-
 from tests._mapping_fixtures import register_plant_registry_for
 from tests.test_plant_mapping_binding import (
     DATES,
     PLANTS,
     _dataset,
+    _deliver as _deliver_through,
     _init,
     _write_scene,
 )
-from tests.test_plant_mapping_binding import _deliver as _deliver_through
 from tests.test_second_trait_acceptance import _seed_currant_bloom_trait
 
 if TYPE_CHECKING:

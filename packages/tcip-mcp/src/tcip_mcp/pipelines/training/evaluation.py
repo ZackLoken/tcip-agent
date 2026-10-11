@@ -16,9 +16,8 @@ from typing import TYPE_CHECKING, Any, NamedTuple, cast
 import numpy as np
 import torch
 
-from tcip_store import stored_number, stored_numbers
-
 from tcip_annotation.json_io import xywh
+from tcip_store import stored_number, stored_numbers
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.schemas import ScoreWeights
@@ -760,7 +759,6 @@ def gt_records(target: Mapping[str, Any]) -> list[dict]:
     flags read through :func:`~tcip_mcp.pipelines.data.datasets.crowd_of`.
     """
     from tcip_annotation.matching import geometry_rings
-
     from tcip_mcp.pipelines.data.datasets import crowd_of
 
     if not len(target["boxes"]):
@@ -916,7 +914,6 @@ def bucket_reads(
     from pathlib import Path
 
     from tcip_annotation.json_io import read_label_document, read_predictions
-
     from tcip_mcp.dataset_layout import label_key_of
     from tcip_mcp.pipelines.image_utils import source_path_of
 
@@ -964,7 +961,6 @@ def score_bucket(
     the matching that scoring made of it."""
     from tcip_annotation.matching import Matching, merged
     from tcip_annotation.state import polygonal
-
     from tcip_mcp.pipelines.raster_source import SourceHeader
 
     read = [

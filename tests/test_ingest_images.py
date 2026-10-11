@@ -520,8 +520,8 @@ def test_ingest_non_recursive_skips_subfolders(project, tmp_path):
 
 
 def test_ingest_writes_audit_entry(project, tmp_path):
-    import tcip_store as ts
     import tcip_mcp.audit as audit_mod
+    import tcip_store as ts
 
     src = tmp_path / "raw"
     _make_image(src / "a.png")

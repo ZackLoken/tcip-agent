@@ -17,7 +17,6 @@ pytest.importorskip("torchvision")
 
 from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
-
 from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
 from tests import _trait_fixtures as fx  # noqa: E402
 from tests._chain_fixtures import (  # noqa: E402
@@ -343,7 +342,6 @@ def test_the_document_retained_is_the_document_measured(
     """A document emptied after the assessment read it and before it retains it changes neither:
     the bands are measured from the one read, and that read is what the reference keeps."""
     import tcip_store
-
     from tcip_mcp import assessment
     from tcip_mcp.assessment import assessment_dir, read_assessment
 
@@ -423,10 +421,9 @@ def test_a_recorded_mosaic_size_other_than_the_file_refuses_by_name(
     """The run's recorded mosaic dimensions are checked against the raster read now: a manifest
     recorded against a replaced or truncated file refuses rather than scoring a sub-area or
     addressing pixels past the edge."""
-    from tcip_store import encode_record
-
-    from tcip_mcp.experiments import RUN_FILE, experiment_dir, read_record
     from tcip_mcp.assessment import AssessmentRefusedError
+    from tcip_mcp.experiments import RUN_FILE, experiment_dir, read_record
+    from tcip_store import encode_record
 
     exp = _attested(tmp_path)
     run_dir = experiment_dir(exp["experiment_id"], project=tmp_path)

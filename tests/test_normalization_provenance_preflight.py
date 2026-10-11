@@ -5,12 +5,11 @@ window paths do not resolve to one of the run's own admitted sources."""
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 from pathlib import Path
 
 import pytest
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._chain_fixtures import (
     BESPOKE_CLASSIFIER,
     BESPOKE_DETECTION,
@@ -48,7 +47,6 @@ def _label(images_dir, *stems, width=16, height=16):
     these tests point at: the containment check reads the run's own admitted sources, not a
     directory listing."""
     from tcip_annotation.state import Annotation, BBox
-
     from tests._producer_fixtures import label_image
 
     for stem in stems:
@@ -254,7 +252,6 @@ def test_preflight_keeps_every_sample_of_a_two_date_selection(tmp_path):
     pytest.importorskip("torch")
     from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.tools.training_tools import preflight_config
-
     from tests.test_selection_binding import (
         DATES,
         SUBJECT,

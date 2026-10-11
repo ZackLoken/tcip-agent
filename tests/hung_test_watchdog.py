@@ -17,9 +17,9 @@ from __future__ import annotations
 
 import faulthandler
 
-from _pytest.faulthandler import fault_handler_stderr_fd_key
 import pytest
 import pytest_timeout
+from _pytest.faulthandler import fault_handler_stderr_fd_key
 
 
 @pytest.hookimpl

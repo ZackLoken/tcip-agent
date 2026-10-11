@@ -21,12 +21,12 @@ import pytest
 pytest.importorskip("torch")  # evaluation.py imports torch at module load
 
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
+    derive_operating_point_curve,
     detection_metrics,
     governing_counts,
-    derive_operating_point_curve,
     gt_record,
+    prediction_record,  # noqa: E402
 )
-from tcip_mcp.pipelines.training.evaluation import prediction_record  # noqa: E402
 
 CENTER_MATCH_TOLERANCE = 10.0
 

@@ -6,11 +6,11 @@ never under the server process's cwd.
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 from pathlib import Path
 
 import pytest
+
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 
 def test_launch_training_defaults_into_the_projects_experiment_store(

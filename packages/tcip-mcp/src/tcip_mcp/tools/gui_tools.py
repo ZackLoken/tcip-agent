@@ -11,13 +11,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from tcip_annotation import Annotation, BBox
-from tcip_annotation.state import polygonal
 from tcip_annotation.json_io import (
     UnreadableLabelDocumentError,
     read_document_versioned,
     read_label_document,
 )
-
+from tcip_annotation.state import polygonal
 from tcip_mcp.server import tool
 from tcip_mcp.workspace import BoundProject
 
@@ -108,7 +107,6 @@ def focus_human_attention(
         proposal: The index of the proposal, in the bucket's document for the frame, to focus.
     """
     from tcip_annotation.json_io import annotations_hold_subject
-
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.dataset_layout import image_dir, label_key
     from tcip_mcp.registry_paths import located

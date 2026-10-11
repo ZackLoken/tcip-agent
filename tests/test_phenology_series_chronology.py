@@ -188,10 +188,9 @@ def test_positive_detections_are_the_named_value_not_a_fixed_position(
     declared order. An attribute whose positive value sits at id 2 with no record at id 1 counts
     the same as one whose values are all in use.
     """
+    from tcip_mcp.dataset_layout import prediction_key
     from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tests._producer_fixtures import registry_over
-
-    from tcip_mcp.dataset_layout import prediction_key
 
     p = prediction_key(tmp_path, "run/2026-03-05", "img")
     json_io.write_label_document(

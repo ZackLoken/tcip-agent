@@ -19,9 +19,8 @@ import sys
 from pathlib import Path
 
 import tcip_store
-from tcip_store import encode_log_line, encode_record
-
 from tcip_mcp.cli import bound_project
+from tcip_store import encode_log_line, encode_record
 
 _PLAIN = frozenset(string.ascii_lowercase + string.digits + "_-")
 _DEVICE_NAMES = frozenset(
@@ -55,9 +54,8 @@ def dump_store(project: Path, out_dir: Path) -> list[Path]:
     :func:`tcip_store.encode_record` and a log one :func:`tcip_store.encode_log_line` per line, and
     return the files written. Refuses (``ValueError``) an ``out_dir`` inside the project and a log
     holding entries that will not decode."""
-    from tcip_store.file_backend import database_roots
-
     from tcip_mcp.registry_paths import located
+    from tcip_store.file_backend import database_roots
 
     out_dir = located(out_dir, project)
     if out_dir.is_relative_to(project):

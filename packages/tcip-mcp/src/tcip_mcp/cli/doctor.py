@@ -58,7 +58,6 @@ def check_data_quality(
     it could not be taken).
     """
     from tcip_annotation.json_io import LabelDocument
-
     from tcip_mcp.pipelines.data.label_queries import admits
 
     if census is None:
@@ -120,8 +119,6 @@ def check_registry(root: Path, findings: list) -> None:
     that will not open) comes out as a finding, not as a traceback.
     """
     import tcip_store
-    from tcip_store import StoreError
-
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.dataset_layout import PREDICTION_BUCKETS
     from tcip_mcp.model_registry import registered_entries
@@ -130,6 +127,7 @@ def check_registry(root: Path, findings: list) -> None:
         RegistryPathTraversalError,
         resolved_registry_path,
     )
+    from tcip_store import StoreError
 
     try:
         entries = registered_entries(root)
@@ -235,9 +233,8 @@ def check_state(root: Path, findings: list) -> None:
     import tcip_store
     from tcip_annotation.flags import REVIEW_FLAGS_STORE, read_flags
     from tcip_annotation.verdicts import REVIEW_VERDICTS_STORE, read_verdicts
-    from tcip_store import StoreError
-
     from tcip_mcp.buckets import read_bucket
+    from tcip_store import StoreError
 
     for key in tcip_store.keys(REVIEW_FLAGS_STORE, str(root)):
         try:
@@ -273,9 +270,9 @@ def check_traits(root: Path, findings: list) -> None:
     """An error for every trait record the store or its schema refuses to read, and a warning for
     every trait whose latest revision the breeder has not confirmed."""
     from pydantic import ValidationError
-    from tcip_store import StoreError
 
     from tcip_mcp.traits import read_trait, trait_names
+    from tcip_store import StoreError
 
     for name in trait_names(root):
         try:

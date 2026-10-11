@@ -10,8 +10,6 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
-from tcip_store.errors import BadKeyError
-
 from tcip_mcp.experiments import (
     RunRow,
     TrainingDetail,
@@ -19,6 +17,7 @@ from tcip_mcp.experiments import (
     training_listing,
 )
 from tcip_mcp.identity import actor
+from tcip_store.errors import BadKeyError
 from tcip_web.routes._body_common import EmptyBodyPayload, PersonPayload
 from tcip_web.state import NoProjectOpenError, store
 
@@ -208,9 +207,8 @@ def compare_best_route(payload: CompareBestPayload) -> dict:
     stamped metrics, source, the metric ranked by, the direction used and its source, and the
     exclusions.
     """
-    from tcip_store import DecodeError
-
     from tcip_mcp.tools.model_tools import ranked_registered_model
+    from tcip_store import DecodeError
 
     try:
         result = ranked_registered_model(

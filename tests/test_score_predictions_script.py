@@ -7,14 +7,13 @@ resolving a trait's derived localization criterion reads that project's own conf
 
 from __future__ import annotations
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
-
 import json
 from pathlib import Path
 
 import pytest
 
 from tcip_annotation.state import Annotation, BBox
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._cli_fixtures import run_tcip
 from tests._producer_fixtures import write_image
 

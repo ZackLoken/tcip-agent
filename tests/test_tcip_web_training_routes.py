@@ -189,9 +189,8 @@ def test_a_finite_value_logged_after_a_non_finite_one_at_one_epoch_streams_alone
     earlier non-finite state gone with the value it described."""
     import asyncio
 
-    from tcip_store.values import NOT_FINITE_SUFFIX
-
     from tcip_mcp.experiments import write_final_status
+    from tcip_store.values import NOT_FINITE_SUFFIX
     from tcip_web.routes.training import _stream_metrics
     from tests._verified_checkpoint_fixtures import log_epoch
 

@@ -7,18 +7,17 @@ import time
 from pathlib import Path
 
 import tcip_store as ts
-
-from tcip_mcp.tools.project_tools import _recent_activity
 from tcip_mcp.tools.meta_tools import (
-    report_friction,
     load_project_memory,
-    write_retrospective,
     read_report,
     read_retrospective,
     record_distillation_pass,
     report_documents,
+    report_friction,
     retrospective_key,
+    write_retrospective,
 )
+from tcip_mcp.tools.project_tools import _recent_activity
 
 
 def test_report_friction_writes_one_json_document(tmp_path: Path):

@@ -7,8 +7,9 @@ differential LR between backbone and heads.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
-from typing import Any, Callable, cast
+from typing import Any, cast
 
 import torch
 from torch import nn

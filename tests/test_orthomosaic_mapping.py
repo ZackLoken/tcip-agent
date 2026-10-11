@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 import tifffile
 
+from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
     GeoreferencingError,
     GeoTransform,
@@ -18,14 +19,12 @@ from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
     pixel_to_native,
     plants_in_frame,
 )
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tcip_mcp.pipelines.raster_source import open_raster
 from tests._chain_fixtures import (
     BESPOKE_DETECTION,
     BESPOKE_INSTANCE_SEG,
     BESPOKE_MODELS,
 )
-
 from tests._geotiff_fixtures import (
     PIXEL_SCALE,
     TIEPOINT_NATIVE_X,
@@ -35,7 +34,6 @@ from tests._geotiff_fixtures import (
     geotransform_of_file as read_geotransform,
     write_geotiff as _write_geotiff,
 )
-
 
 # ── Pixel -> native affine (including the y-axis flip) ────────────────────
 
@@ -435,7 +433,6 @@ def _raster_checkpoint(
     by completing. The frames are not square, so the run records no frame edge a stated tile
     edge could contradict."""
     from tcip_annotation.state import Annotation, BBox, Polygon
-
     from tests._producer_fixtures import label_image
     from tests._verified_checkpoint_fixtures import (
         fixture_data_dir,

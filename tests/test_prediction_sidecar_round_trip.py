@@ -48,7 +48,6 @@ def test_the_record_the_publication_writes_is_the_record_the_reader_takes_back(
     monkeypatch,
 ):
     from tcip_mcp.buckets import read_bucket
-
     from tests._verified_checkpoint_fixtures import (
         SAMPLE_CROSS_TILE_NMS,
         SAMPLE_OVERLAP,

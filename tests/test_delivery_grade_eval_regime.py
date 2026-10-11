@@ -3,10 +3,10 @@ saturated cap reported, the execution record each run records, and the gate's re
 
 from __future__ import annotations
 
+import pytest
+
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._producer_fixtures import checkpoint_admission, seed_bud_images
-
-import pytest
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("pycocotools")
@@ -296,8 +296,8 @@ def test_the_gate_reads_its_references_at_the_predictors_own_width(
     loader, so references of differing band counts are a measurement it can take."""
     import numpy as np
     import tifffile
-    from tcip_annotation.state import Annotation, BBox
 
+    from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.training.eval_runners import (
         run_full_frame_evaluation,
     )
@@ -377,7 +377,6 @@ def test_the_gate_refuses_documents_whose_geometry_a_detector_cannot_read(
     the subject only as points refuses in that loader's own words rather than scoring every
     image against an empty reference and reporting the number as a delivery metric."""
     from tcip_annotation.state import Annotation, Point
-
     from tcip_mcp.pipelines.training.eval_runners import (
         run_full_frame_evaluation,
     )

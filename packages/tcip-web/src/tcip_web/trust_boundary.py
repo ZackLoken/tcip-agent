@@ -31,7 +31,10 @@ STATE_CHANGING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 an allowed Origin, the same requirement every WebSocket scope carries regardless of method."""
 
 _ORIGIN_REFUSAL_WS = "origin not allowed"
-_ORIGIN_REFUSAL_HTTP = f"{_ORIGIN_REFUSAL_WS}: a state-changing request from another origin is refused."
+_ORIGIN_REFUSAL_HTTP = (
+    f"{_ORIGIN_REFUSAL_WS}: a state-changing request from another origin "
+    "is refused."
+)
 
 EXPOSURE_REFUSAL = (
     "this connection arrived through a network address: the backend serves this machine only, "

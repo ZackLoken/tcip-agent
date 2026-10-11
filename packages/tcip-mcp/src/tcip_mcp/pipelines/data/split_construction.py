@@ -48,7 +48,7 @@ def _selection_conflict_keys() -> tuple[str, ...]:
     )
 
 
-def data_dir_issues(data: "DataSpec") -> list[str]:
+def data_dir_issues(data: DataSpec) -> list[str]:
     """Every objection to the data locations an unbound run's producer reads: ``data.images_dir``
     missing or naming a path that does not exist, and a stated ``data.labels_dir`` that is not a
     mask directory or a table (:func:`~tcip_mcp.pipelines.data.label_queries.ground_truth_shape`).
@@ -70,7 +70,7 @@ def data_dir_issues(data: "DataSpec") -> list[str]:
 
 
 def selection_compatibility(
-    data: "DataSpec", selection: "Selection | None", selection_dir: str
+    data: DataSpec, selection: Selection | None, selection_dir: str
 ) -> list[str]:
     """Every objection binding a run's data block ``data`` to ``selection`` (read at
     ``selection_dir``; ``None`` when it would not read) raises: a drawn split's own key under
@@ -126,18 +126,18 @@ class Membership(NamedTuple):
     read; the class space they were admitted in, the recorded grouping policy and the admissions'
     summed tallies."""
 
-    samples: dict[str, "Sample"]
-    scope: "ClassScope"
+    samples: dict[str, Sample]
+    scope: ClassScope
     group_by: str
     tallies: dict[str, int]
 
 
 def admitted_membership(
-    places: "Sequence[tuple[str, Path | str, str | None]]",
+    places: Sequence[tuple[str, Path | str, str | None]],
     *,
-    scope: "ClassScope",
+    scope: ClassScope,
     group_by: str,
-    group_key_map: "Mapping[str, str] | None",
+    group_key_map: Mapping[str, str] | None,
 ) -> Membership:
     """Admit each place ``(name, images_dir, ground_truth)``, ``ground_truth`` ``None`` for the
     images' own label documents
@@ -214,7 +214,7 @@ def admitted_membership(
     )
 
 
-def run_membership(data: "DataSpec") -> Membership:
+def run_membership(data: DataSpec) -> Membership:
     """:func:`admitted_membership` over a run's data block naming its locations
     (:func:`data_dir_issues`): its one place (``images_dir`` and the ``labels_dir`` a mask or
     table run names), under the ``scope`` it states (the empty one when it states none), grouped
@@ -231,7 +231,7 @@ def run_membership(data: "DataSpec") -> Membership:
     )
 
 
-def check_shares(sides: "Mapping[str, float]") -> dict[str, float]:
+def check_shares(sides: Mapping[str, float]) -> dict[str, float]:
     """``sides``, the share each side but ``train`` is drawn at, with ``train`` the remainder; a
     side stated at zero is not drawn. Refuses (``ValueError``) a side outside the selection's
     sides or ``train`` itself, a share outside ``[0, 1)``, and shares leaving ``train`` nothing."""
@@ -255,7 +255,7 @@ def check_shares(sides: "Mapping[str, float]") -> dict[str, float]:
     return {"train": remainder, **drawn}
 
 
-def run_shares(split: "SplitSpec", *, spatial: bool) -> dict[str, float]:
+def run_shares(split: SplitSpec, *, spatial: bool) -> dict[str, float]:
     """The shares a run drawing its own split states (:func:`check_shares`, ``train`` the
     remainder): ``val`` at ``val_ratio``, and on a within-image spatial split each other side of
     :data:`SPATIAL_SIDE_ORDER` whose ``<side>_ratio`` is stated. A ``val`` share unstated or zero
@@ -274,13 +274,13 @@ def run_shares(split: "SplitSpec", *, spatial: bool) -> dict[str, float]:
 
 
 def draw_sides(
-    samples: "Mapping[str, Sample]",
-    scope: "ClassScope",
+    samples: Mapping[str, Sample],
+    scope: ClassScope,
     *,
-    ratios: "Mapping[str, float]",
+    ratios: Mapping[str, float],
     seed: int,
     stratify: bool,
-) -> tuple[dict[str, "Sample"], dict[str, int]]:
+) -> tuple[dict[str, Sample], dict[str, int]]:
     """The one draw: ``samples``, keyed by member identity, onto every side ``ratios`` names
     (:func:`check_shares`'s answer, ``train`` the remainder), each group (a sample's own
     ``group``) kept whole
@@ -368,7 +368,7 @@ def draw_sides(
     )
 
 
-def split_seed(split: "SplitSpec") -> int:
+def split_seed(split: SplitSpec) -> int:
     """The seed a draw over ``split`` states; one stating none refuses (``ValueError``)."""
     if split.seed is None:
         raise ValueError(
@@ -379,7 +379,7 @@ def split_seed(split: "SplitSpec") -> int:
 
 
 def dataset_identity(
-    data: "DataSpec", samples: "Iterable[Sample]" = ()
+    data: DataSpec, samples: Iterable[Sample] = ()
 ) -> tuple[str | None, str | None]:
     """``(dataset_id, dataset_fingerprint)`` for the run's dataset: the fingerprint recomputed
     over ``samples``, the run's admitted partition (:func:`dataset_fingerprint`), the id from the
@@ -403,7 +403,7 @@ def dataset_identity(
     )
 
 
-def raster_identity(image: "Path | BandGroupRef") -> dict:
+def raster_identity(image: Path | BandGroupRef) -> dict:
     """The logical ``image``'s :func:`~tcip_mcp.pipelines.raster_source.raster_content_identity`
     over its own probed band count, the one a split records its mosaic by. A source that will not
     probe raises."""
@@ -418,9 +418,9 @@ def raster_identity(image: "Path | BandGroupRef") -> dict:
 
 def spatial_single_source_split(
     task: str,
-    sample: "Sample",
-    data: "DataSpec",
-    shares: "Mapping[str, float]",
+    sample: Sample,
+    data: DataSpec,
+    shares: Mapping[str, float],
 ) -> SpatialManifest:
     """Derive the run's requested ``shares`` (:func:`run_shares`: ``train``, ``val``, ``holdout``
     and, when stated, ``calibration``) over one source's own tile lattice,
@@ -540,9 +540,9 @@ def spatial_single_source_split(
 
 def _block_loader(
     task: str,
-    data: "DataSpec",
+    data: DataSpec,
     *,
-    samples: "Sequence[Sample]",
+    samples: Sequence[Sample],
     transforms: Any,
     region: list | None = None,
 ) -> Any:
@@ -571,9 +571,9 @@ def _block_loader(
 def resolved_tiling(
     task: str,
     tiling: TilingSpec | None,
-    samples: "Sequence[Sample]",
-    scope: "ClassScope",
-    sizes: "Mapping[str, int]",
+    samples: Sequence[Sample],
+    scope: ClassScope,
+    sizes: Mapping[str, int],
 ) -> TilingSpec:
     """The tiling block a ``task`` loader over ``samples`` (at ``scope`` and ``sizes``) is built
     at: ``{"enabled": False}`` when it does not tile, else ``tiling`` with its edge and overlap,
@@ -603,8 +603,8 @@ def resolved_tiling(
 
 def predictor_dataset(
     task: str,
-    samples: "Sequence[Sample]",
-    scope: "ClassScope",
+    samples: Sequence[Sample],
+    scope: ClassScope,
     predictor: Any,
     tiling: TilingSpec | None,
 ) -> Any:
@@ -625,8 +625,8 @@ def predictor_dataset(
 
 
 def _with_lattice(
-    task: str, data: "DataSpec", samples: "Sequence[Sample]"
-) -> "DataSpec":
+    task: str, data: DataSpec, samples: Sequence[Sample]
+) -> DataSpec:
     """``data`` with its tiling block resolved over ``samples`` (:func:`resolved_tiling`);
     ``data`` unchanged, its tiling ``None``, for a run whose loaders a bespoke builder makes,
     the platform stating nothing of a dataset it does not build."""
@@ -648,8 +648,8 @@ def _with_lattice(
 
 
 def redrawn_selection(
-    selection: "Selection", selection_dir: str, seed: int
-) -> "Selection":
+    selection: Selection, selection_dir: str, seed: int
+) -> Selection:
     """``selection`` with train and val redrawn fresh over its own train-plus-val samples at
     ``seed`` (:func:`draw_sides`, over each sample's recorded group key, at the val share the
     selection already delivered, stratified), the reference sides untouched. The draw's refusals
@@ -682,7 +682,7 @@ def redrawn_selection(
 
 
 def _partition_record(
-    samples: "Sequence[Sample]",
+    samples: Sequence[Sample],
     *,
     seed: int | None,
     group_by: str,
@@ -709,7 +709,7 @@ def _partition_record(
     }
 
 
-def partition_samples(partition: "Mapping[str, Any]") -> list["Sample"]:
+def partition_samples(partition: Mapping[str, Any]) -> list[Sample]:
     """A resolved partition's samples read back
     (:func:`~tcip_mcp.pipelines.data.selection.read_sample`)."""
     from tcip_mcp.pipelines.data.selection import read_sample
@@ -721,7 +721,7 @@ def partition_samples(partition: "Mapping[str, Any]") -> list["Sample"]:
 
 
 def partition_spatial(
-    partition: "Mapping[str, Any]",
+    partition: Mapping[str, Any],
 ) -> SpatialManifest | None:
     """A resolved partition's within-image split read back, validated; ``None`` for a partition
     that drew none."""
@@ -733,10 +733,10 @@ def partition_spatial(
 
 def run_sizes(
     task: str,
-    data: "DataSpec",
-    scope: "ClassScope",
-    samples: "Sequence[Sample]",
-) -> "DataSpec":
+    data: DataSpec,
+    scope: ClassScope,
+    samples: Sequence[Sample],
+) -> DataSpec:
     """``data`` with what a run resolved over ``samples`` recorded on it: the class space
     ``scope`` it was admitted under, and its sizes
     (:func:`~tcip_mcp.pipelines.data.datasets.resolve_sizes` over the ones ``data`` states), each
@@ -760,10 +760,10 @@ def run_sizes(
 
 def _sample_loaders(
     task: str,
-    data: "DataSpec",
-    recorded: "Sequence[Sample]",
+    data: DataSpec,
+    recorded: Sequence[Sample],
     transforms,
-    layout: "SourceLayout",
+    layout: SourceLayout,
     *,
     seed: int | None,
     group_by: str,
@@ -792,8 +792,8 @@ def _sample_loaders(
 
 def _drawn_split(
     task: str,
-    data: "DataSpec",
-    layout: "SourceLayout",
+    data: DataSpec,
+    layout: SourceLayout,
     *,
     transforms,
     tallies_out: dict[str, int] | None,
@@ -876,9 +876,9 @@ def _drawn_split(
 def auto_train_val(
     project: Path,
     task: str,
-    data: "DataSpec",
+    data: DataSpec,
     transforms,
-    layout: "SourceLayout",
+    layout: SourceLayout,
     *,
     tallies_out: dict[str, int] | None = None,
 ):
@@ -1010,7 +1010,7 @@ class ResolvedRun(NamedTuple):
     train_ds: Any
     val_ds: Any
     spec: TrainConfigSchema
-    data: "DataSpec"
+    data: DataSpec
     partition: dict
     objective: dict
 
@@ -1032,7 +1032,7 @@ class ResolvedRun(NamedTuple):
 
 def resolve_run(
     spec: TrainConfigSchema,
-    layout: "SourceLayout",
+    layout: SourceLayout,
     *,
     project: Path,
     objective: dict | None = None,
@@ -1070,8 +1070,8 @@ def resolve_run(
 
 def run_loader(
     task: str,
-    data: "DataSpec",
-    layout: "SourceLayout",
+    data: DataSpec,
+    layout: SourceLayout,
     spatial: SpatialManifest | None = None,
 ) -> Any:
     """A callable taking ``samples`` and ``transforms`` that builds a dataset of ``task`` over
@@ -1096,7 +1096,7 @@ def run_loader(
         return partial(_block_loader, task, data)
 
     def side_view(
-        *, samples: "Sequence[Sample]", transforms: Any, side: str = "train"
+        *, samples: Sequence[Sample], transforms: Any, side: str = "train"
     ) -> Any:
         members = [s.member for s in samples]
         if members != [spatial.stem]:
@@ -1117,11 +1117,11 @@ def run_loader(
 
 def recorded_datasets(
     task: str,
-    data: "DataSpec",
-    samples: "Sequence[Sample]",
+    data: DataSpec,
+    samples: Sequence[Sample],
     spatial: SpatialManifest | None,
     transforms,
-    layout: "SourceLayout",
+    layout: SourceLayout,
 ) -> tuple[Any, Any]:
     """``(train_ds, val_ds)`` built from what a run resolved, resolving nothing again, by
     :func:`run_loader`: the train and val ``samples`` of its partition, or for a within-image

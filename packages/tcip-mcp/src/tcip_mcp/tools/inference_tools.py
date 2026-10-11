@@ -10,6 +10,9 @@ from contextlib import ExitStack
 from pathlib import Path
 from typing import Any, cast
 
+from tcip_mcp.pipelines.execution import DEFAULT_TILE_BATCH_SIZE, Stated
+from tcip_mcp.registry_paths import located
+from tcip_mcp.server import tool
 from tcip_store import (
     Key,
     Version,
@@ -19,10 +22,6 @@ from tcip_store import (
     encode_record,
     store,
 )
-
-from tcip_mcp.pipelines.execution import DEFAULT_TILE_BATCH_SIZE, Stated
-from tcip_mcp.registry_paths import located
-from tcip_mcp.server import tool
 
 logger = logging.getLogger(__name__)
 

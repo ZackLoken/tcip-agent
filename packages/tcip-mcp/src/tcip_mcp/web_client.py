@@ -8,10 +8,11 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Optional, get_args
+from typing import TYPE_CHECKING, Any, Literal, get_args
+
+from pydantic import BaseModel, ConfigDict, Field
 
 import tcip_store
-from pydantic import BaseModel, ConfigDict, Field
 from tcip_store import Key
 
 if TYPE_CHECKING:
@@ -108,13 +109,13 @@ class DatasetSelection(BaseModel):
 
     model_config = _TRANSPORT
 
-    dataset_root: Optional[str] = None
-    subject: Optional[str] = None
-    date: Optional[str] = None
+    dataset_root: str | None = None
+    subject: str | None = None
+    date: str | None = None
     image_list: list[str] = Field(default_factory=list)
     current_image_index: int = 0
-    images_dir: Optional[str] = None
-    bucket: Optional[str] = None
+    images_dir: str | None = None
+    bucket: str | None = None
 
 
 class ViewState(BaseModel):
@@ -134,7 +135,7 @@ class _GuiFields(BaseModel):
     active_tab: ActiveTab = "annotate"
     view: ViewState = Field(default_factory=ViewState)
     mode: AnnotateMode = "box"
-    active_subject: Optional[str] = None
+    active_subject: str | None = None
 
 
 class GuiState(_GuiFields):
@@ -153,9 +154,9 @@ class _DatasetChoice(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     dataset_root: str
-    subject: Optional[str]
+    subject: str | None
     date: str
-    bucket: Optional[str]
+    bucket: str | None
     current_image_index: int
 
 
@@ -164,7 +165,7 @@ class _PersistedGuiState(_GuiFields):
 
     model_config = ConfigDict(extra="forbid")
 
-    dataset: Optional[_DatasetChoice]
+    dataset: _DatasetChoice | None
 
 
 def require_whole(model: BaseModel, where: str) -> None:
@@ -182,9 +183,9 @@ def require_whole(model: BaseModel, where: str) -> None:
 
 def selection_for(
     dataset_root: Path,
-    subject: Optional[str],
+    subject: str | None,
     date: str,
-    bucket: Optional[str],
+    bucket: str | None,
     current_image_index: int,
 ) -> DatasetSelection:
     """The selection a choice names: the image list of capture ``date`` and the name of the
@@ -212,7 +213,7 @@ def selection_for(
     )
 
 
-def current_image(selection: DatasetSelection) -> Optional[str]:
+def current_image(selection: DatasetSelection) -> str | None:
     """The image the selection's index names, under its images directory, or ``None`` when it
     names none."""
     if selection.images_dir is None or not selection.image_list:
@@ -247,7 +248,7 @@ def write_gui_snapshot(project: Path, state: GuiState) -> None:
     )
 
 
-def read_gui_snapshot(project: Path) -> Optional[GuiState]:
+def read_gui_snapshot(project: Path) -> GuiState | None:
     """``project``'s persisted GUI state, its selection rebuilt through :func:`selection_for`, or
     ``None`` when it has none. A snapshot that does not decode as its whole shape raises
     (``ValidationError``, ``ValueError`` from :func:`require_whole`, or the store's own error), as

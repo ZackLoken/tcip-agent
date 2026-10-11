@@ -19,7 +19,6 @@ from tcip_web.state import (
     ProjectNotOpenError,
     StateStore,
 )
-
 from tests._web_fixtures import named_project
 
 
