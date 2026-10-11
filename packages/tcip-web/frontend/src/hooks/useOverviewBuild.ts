@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { api } from "@/api/client";
+import { api, type OverviewJob } from "@/api/client";
 import { OVERVIEWS_REQUIRED } from "@/api/types.generated";
 
 /** How often the build's progress is read back. Long enough that a minutes-long pyramid build
@@ -68,18 +68,21 @@ export function useOverviewBuild(
     let lastWritten = -1;
     let lastMoved = Date.now();
 
+    const complete = (job: OverviewJob) =>
+      setState((s) => ({
+        building: false,
+        bytesWritten: job.bytes_written,
+        error: null,
+        reloadToken: s.reloadToken + 1,
+      }));
+
     const poll = (jobId: string) => {
       timer = setTimeout(() => {
         void api.images.overviewJob(jobId).then(
           (job) => {
             if (canceled) return;
             if (job.status === "completed") {
-              setState((s) => ({
-                building: false,
-                bytesWritten: job.bytes_written,
-                error: null,
-                reloadToken: s.reloadToken + 1,
-              }));
+              complete(job);
               return;
             }
             if (job.status === "failed") {
@@ -121,12 +124,7 @@ export function useOverviewBuild(
         const job = await api.images.buildOverviews(imagePath);
         if (canceled) return;
         if (job.status === "completed") {
-          setState((s) => ({
-            building: false,
-            bytesWritten: job.bytes_written,
-            error: null,
-            reloadToken: s.reloadToken + 1,
-          }));
+          complete(job);
           return;
         }
         poll(job.job_id);
