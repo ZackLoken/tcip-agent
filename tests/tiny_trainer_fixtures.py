@@ -336,6 +336,16 @@ def opposed_regression_data(root, train_intensities, val_intensities) -> dict:
     )
 
 
+def distinct_intensities(n: int) -> list[float]:
+    """``n`` frame intensities spread evenly inside ``(0, 1)``, no two alike."""
+    return [(i + 1) / (n + 1) for i in range(n)]
+
+
+TRAIN_INTENSITIES = [0.10, 0.25, 0.40, 0.55, 0.70, 0.85]
+VAL_INTENSITIES = [0.15, 0.35, 0.60, 0.90]
+"""Sample frame intensities of a regression run's training and validation sides, the two sets
+apart so no validation frame repeats a training one."""
+
 SEPARABLE_TRAIN = ([0.10, 0.20, 0.30, 0.70, 0.80, 0.90], [0, 0, 0, 1, 1, 1])
 SEPARABLE_VAL = ([0.15, 0.40, 0.60, 0.85], [0, 0, 1, 1])
 """Classification frames labeled 0 below mid-gray and 1 above it, as ``(intensities, labels)``:

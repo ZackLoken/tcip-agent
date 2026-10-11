@@ -29,7 +29,9 @@ from tests._training_values import schedule, stop_rule  # noqa: E402
 from tests.tiny_trainer_fixtures import (  # noqa: E402
     COUNTING_REGRESSOR,
     NAN_EVAL_REGRESSOR,
+    TRAIN_INTENSITIES,
     TWO_RATE_REGRESSOR,
+    VAL_INTENSITIES,
     capture_model,
     drawn_data,
     frames_data,
@@ -37,9 +39,6 @@ from tests.tiny_trainer_fixtures import (  # noqa: E402
     regressor_config,
     run_context,
 )
-
-TRAIN_INTENSITIES = [0.10, 0.25, 0.40, 0.55, 0.70, 0.85]
-VAL_INTENSITIES = [0.15, 0.35, 0.60, 0.90]
 
 
 def _config(stages: list[dict], data: dict | None = None, **extra) -> dict:

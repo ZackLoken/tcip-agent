@@ -16,14 +16,13 @@ from tcip_mcp.pipelines.training.evaluation import evaluate
 from tcip_mcp.pipelines.training.generic_trainer import train
 from tests._training_values import IOU_THRESHOLD
 from tests.tiny_trainer_fixtures import (
+    TRAIN_INTENSITIES,
+    VAL_INTENSITIES,
     capture_model,
     opposed_regression_data,
     regressor_config,
     run_context,
 )
-
-TRAIN_INTENSITIES = [0.10, 0.25, 0.40, 0.55, 0.70, 0.85]
-VAL_INTENSITIES = [0.15, 0.35, 0.60, 0.90]
 
 
 def _context(tmp_path, horizon: int, **overrides):

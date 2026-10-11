@@ -7,7 +7,6 @@ tests that exercise the detection/classification ``_validate`` path end-to-end.
 
 from __future__ import annotations
 
-import csv
 import math
 from functools import partial
 
@@ -1471,19 +1470,19 @@ def test_train_center_match_trait_records_governing_criterion(tmp_path):
 
 
 def test_validate_classification_metrics(tmp_path):
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
-    rows = []
-    for i in range(6):
-        _save_png(images_dir / f"img{i}.png")
-        rows.append((f"img{i}", i % 2))
-    csv_path = tmp_path / "labels.csv"
-    with open(csv_path, "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(("stem", "label"))
-        w.writerows(rows)
-
     from tests._chain_fixtures import BESPOKE_MODELS
+    from tests.tiny_trainer_fixtures import (
+        distinct_intensities,
+        write_regression_dataset,
+    )
 
+    images_dir, csv_path = write_regression_dataset(
+        tmp_path,
+        distinct_intensities(6),
+        [i % 2 for i in range(6)],
+        height=IMG,
+        width=IMG,
+    )
     model_source = {
         "builder": BESPOKE_CLASSIFIER,
         "source_files": [BESPOKE_MODELS],

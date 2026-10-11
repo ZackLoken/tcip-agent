@@ -7,7 +7,6 @@ crashing the run.
 
 from __future__ import annotations
 
-import csv
 from functools import partial
 from pathlib import Path
 
@@ -152,16 +151,12 @@ def test_auto_train_val_ordinal_draws_over_the_tables_own_rows(tmp_path: Path):
     per admitted row and the draw partitions those samples: the run gets a real validation loader
     and a recorded partition, and each loader reads the row its own sample names.
     """
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
-    rows = []
-    for i in range(4):
-        _save_png(images_dir / f"img{i}.png")
-        rows.append((f"img{i}", i % 2))
-    csv_path = tmp_path / "ranks.csv"
-    with open(csv_path, "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(("stem", "rank"))
-        w.writerows(rows)
+    from tests.tiny_trainer_fixtures import write_regression_dataset
+
+    ranks = [i % 2 for i in range(4)]
+    images_dir, csv_path = write_regression_dataset(
+        tmp_path, [0.2, 0.4, 0.6, 0.8], ranks, height=IMG, width=IMG
+    )
 
     data_cfg = {
         "images_dir": str(images_dir),
@@ -184,7 +179,7 @@ def test_auto_train_val_ordinal_draws_over_the_tables_own_rows(tmp_path: Path):
         recorded_side(partition, "train") + recorded_side(partition, "val")
     ) == [f"img{i}" for i in range(4)]
     assert {s["ground_truth"] for s in partition["samples"]} == {str(csv_path)}
-    by_row = dict(rows)
+    by_row = {f"img{i}": rank for i, rank in enumerate(ranks)}
     for idx, key in enumerate(train_ds.stems):
         assert (
             train_ds[idx][1]["ranks"] == by_row[train_ds.sample_of(key).member]

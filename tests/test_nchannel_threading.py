@@ -392,25 +392,11 @@ def _classification_data(
     """Four three-band sources under ``tmp_path`` and their label table, as a run's data section
     states them, with ``data.num_channels`` stated when given: the section and one source.
     """
-    import csv
+    from tests.tiny_trainer_fixtures import write_regression_dataset
 
-    from PIL import Image
-
-    images_dir, csv_path = (
-        tmp_path / "images" / UNDATED_BUCKET,
-        tmp_path / "labels.csv",
+    images_dir, csv_path = write_regression_dataset(
+        tmp_path, [0.1, 0.3, 0.5, 0.7], [0, 1, 0, 1], height=32, width=32
     )
-    images_dir.mkdir(parents=True)
-    rows = []
-    for index in range(4):
-        Image.new("RGB", (32, 32), (40 * index, 90, 120)).save(
-            images_dir / f"img{index}.png"
-        )
-        rows.append((f"img{index}", index % 2))
-    with open(csv_path, "w", newline="") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(("stem", "label"))
-        writer.writerows(rows)
 
     data_cfg = {
         "images_dir": str(images_dir),

@@ -9,14 +9,11 @@ scaling, and a two-stage handoff smoke test. Tiny synthetic data, CPU,
 
 from __future__ import annotations
 
-import csv
 import math
-from functools import partial
 from pathlib import Path
 
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._chain_fixtures import CLASSIFIER_SOURCE
 
 torch = pytest.importorskip("torch")
@@ -36,7 +33,6 @@ from tcip_mcp.pipelines.training.optimizer_factory import (  # noqa: E402
     compute_lr_scale,
     restore_training_state,
 )
-from tests._image_fixtures import write_noise_image  # noqa: E402
 
 IMG = 64
 BASE_BB_LR = 1e-3
@@ -354,8 +350,6 @@ def test_freeze_to_is_per_stage_for_a_wrapped_bespoke_backbone():
 # Integration helpers
 # --------------------------------------------------------------------------
 
-_save_png = partial(write_noise_image, size=IMG)
-
 
 def _trained(tmp_path: Path, stages, n: int = 6, **extra):
     """A classification run of the resnet18 classifier (the freeze and warmup logic here is
@@ -364,18 +358,18 @@ def _trained(tmp_path: Path, stages, n: int = 6, **extra):
     producer and trained over its own loader at its batch size: the run and its directory.
     """
     from tests._chain_fixtures import training_config
-    from tests.tiny_trainer_fixtures import run_context
+    from tests.tiny_trainer_fixtures import (
+        run_context,
+        write_regression_dataset,
+    )
 
-    images_dir = tmp_path / "ds" / "images" / UNDATED_BUCKET
-    rows = []
-    for i in range(n):
-        _save_png(images_dir / f"img{i}.png", bright=(i % 2 == 0))
-        rows.append((f"img{i}", i % 2))
-    csv_path = tmp_path / "ds" / "labels.csv"
-    with open(csv_path, "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(("stem", "label"))
-        w.writerows(rows)
+    images_dir, csv_path = write_regression_dataset(
+        tmp_path / "ds",
+        [0.8 if i % 2 == 0 else 0.2 for i in range(n)],
+        [i % 2 for i in range(n)],
+        height=IMG,
+        width=IMG,
+    )
     config = training_config(
         dict(CLASSIFIER_SOURCE),
         {
