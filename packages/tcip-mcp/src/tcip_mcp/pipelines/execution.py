@@ -406,10 +406,10 @@ def execution_record(
         else TILE_OVERLAP_DERIVATION
     )
 
-    merge = (
-        DEFAULT_POSTPROCESS
+    merge, sources["postprocess"] = (
+        (DEFAULT_POSTPROCESS, "default")
         if stated.postprocess is None
-        else stated.postprocess
+        else (stated.postprocess, "explicit")
     )
     match_metric = cross_tile_merge_of(merge)[1]
     threshold = stated.cross_tile_nms
@@ -442,8 +442,5 @@ def execution_record(
         postprocess=merge,
         cross_tile_nms=float(threshold),
         sahi_version=sahi.__version__,
-        sources={
-            **sources,
-            "postprocess": "explicit" if stated.postprocess else "default",
-        },
+        sources=sources,
     )
