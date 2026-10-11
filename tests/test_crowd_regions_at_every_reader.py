@@ -165,6 +165,30 @@ def test_the_instance_loader_takes_each_polygons_class_from_the_one_target_decis
     assert target["boxes"].tolist() == [[5.0, 5.0, 25.0, 25.0]]
 
 
+def test_a_samplers_class_for_a_frame_is_its_first_object_never_a_crowd_region(
+    tmp_path: Path,
+):
+    """A frame whose first row is a crowd region is weighed by the object after it, and a frame
+    holding only a crowd region carries no class, as the class distribution counts objects only.
+    """
+    from tests._producer_fixtures import dataset_over
+
+    images = tmp_path / "images" / UNDATED_BUCKET
+    crowd = Annotation(subject=SUBJECT, geometry=CROWD, iscrowd=True)
+    for stem, anns in (
+        ("c0", [crowd, Annotation(subject=SUBJECT, geometry=OBJECT)]),
+        ("c1", [crowd]),
+    ):
+        labeled_frame(images / f"{stem}.png", anns, IMG, IMG, (40, 40, 40))
+    loader = dataset_over("detection", images, subject=SUBJECT)
+
+    assert loader.class_distribution == {0: 1}
+    assert {
+        loader.sample_of(key).member: cls
+        for key, cls in zip(loader.stems, loader.sample_classes(), strict=True)
+    } == {"c0": 0, "c1": None}
+
+
 def test_a_crop_keeps_each_rows_crowd_flag_with_its_box(tmp_path: Path):
     from tcip_mcp.pipelines.data.augmentations import RandomResizedCrop
     from tcip_mcp.pipelines.data.datasets import target_tensors
