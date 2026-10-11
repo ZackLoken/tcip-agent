@@ -314,7 +314,7 @@ export function ProjectPicker() {
   }, []);
 
   return (
-    <div className="h-full w-full overflow-auto bg-gradient-to-b from-tcip-bg to-[#181a12] p-6 flex justify-center">
+    <div className="h-full w-full overflow-auto bg-linear-to-b from-tcip-bg to-[#181a12] p-6 flex justify-center">
       <div className="w-full max-w-3xl flex flex-col gap-5">
         <div className="animate-tcip-rise">
           <span className="tcip-eyebrow">Field station</span>
@@ -396,7 +396,7 @@ export function ProjectPicker() {
                     aria-pressed={isSelected}
                     aria-labelledby={`project-name-${index}`}
                     aria-describedby={`project-desc-${index}`}
-                    className="flex flex-col gap-2 w-full text-left cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tcip-accent/70 focus-visible:ring-offset-1 focus-visible:ring-offset-tcip-bg"
+                    className="flex flex-col gap-2 w-full text-left cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-tcip-accent/70 focus-visible:ring-offset-1 focus-visible:ring-offset-tcip-bg"
                     onClick={() => selectCard(p)}
                   >
                     <span

@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath, URL } from "node:url";
 
 // Relative, not the "@" alias: that alias is declared inside this very config and is not
@@ -9,7 +10,7 @@ import { DEV_PROXY, LOOPBACK_HOST } from "./src/api/devProxy.generated";
 const BACKEND = process.env.TCIP_WEB_BACKEND ?? `http://${LOOPBACK_HOST}:8765`;
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),

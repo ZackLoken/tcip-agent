@@ -433,7 +433,7 @@ export function TerminalRail() {
               title="The agent harness this terminal runs; changing it restarts the agent"
               value={row?.id ?? ""}
               onChange={(e) => choose(e.target.value)}
-              className="h-6 max-w-[11rem] rounded border border-tcip-border bg-tcip-panel px-1 text-[11px] text-tcip-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tcip-accent/70"
+              className="h-6 max-w-[11rem] rounded border border-tcip-border bg-tcip-panel px-1 text-[11px] text-tcip-fg focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-tcip-accent/70"
             >
               {table.rows.map((r) => (
                 <option
@@ -468,7 +468,7 @@ export function TerminalRail() {
             onClick={() => void restart(providerRef.current ?? row?.id ?? "")}
             title="Restart the agent (ends its current conversation)"
             aria-label="Restart the agent"
-            className="grid h-6 w-6 place-items-center rounded text-tcip-muted transition-colors hover:bg-tcip-hover hover:text-tcip-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tcip-accent/70"
+            className="grid h-6 w-6 place-items-center rounded text-tcip-muted transition-colors hover:bg-tcip-hover hover:text-tcip-fg focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-tcip-accent/70"
           >
             <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true">
               <path
@@ -490,7 +490,7 @@ export function TerminalRail() {
             onClick={() => setOpen(false)}
             aria-label="Minimize agent terminal"
             title="Minimize (the agent keeps running); reopen from the TCIP Agent button"
-            className="grid h-6 w-6 place-items-center rounded text-tcip-muted transition-colors hover:bg-tcip-hover hover:text-tcip-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-tcip-accent/70"
+            className="grid h-6 w-6 place-items-center rounded text-tcip-muted transition-colors hover:bg-tcip-hover hover:text-tcip-fg focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-tcip-accent/70"
           >
             <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true">
               <path d="M4 11h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />

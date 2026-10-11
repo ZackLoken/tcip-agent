@@ -446,7 +446,7 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
               <button
                 type="button"
                 aria-pressed={rankDirection === true}
-                className={`px-2 py-1 text-[11px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70 ${
+                className={`px-2 py-1 text-[11px] transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70 ${
                   rankDirection === true ? "bg-tcip-accent text-white" : "hover:bg-tcip-hover"
                 }`}
                 onClick={() => onChooseDirection(true)}
@@ -456,7 +456,7 @@ export function RunComparison({ marked }: { marked: MarkedRun[] }) {
               <button
                 type="button"
                 aria-pressed={rankDirection === false}
-                className={`px-2 py-1 text-[11px] border-l border-tcip-border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70 ${
+                className={`px-2 py-1 text-[11px] border-l border-tcip-border transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-tcip-accent/70 ${
                   rankDirection === false ? "bg-tcip-accent text-white" : "hover:bg-tcip-hover"
                 }`}
                 onClick={() => onChooseDirection(false)}
