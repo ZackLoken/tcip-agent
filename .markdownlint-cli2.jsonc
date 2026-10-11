@@ -1,0 +1,25 @@
+{
+  // The Markdown gate over the documents an adopter reads: the root documents, the packages'
+  // and tools' READMEs and CLAUDE.md files, the references index and the GitHub templates.
+  // Generated files (AGENTS.md, the skills under .claude and .agents), the knowledge documents
+  // the generated skills mirror, and the local dev-process notes under docs are outside it.
+  "globs": [
+    "*.md",
+    "!AGENTS.md",
+    "!CLAUDE.local.md",
+    "packages/*/README.md",
+    "packages/*/CLAUDE.md",
+    "tools/README.md",
+    "references/*.md",
+    ".github/**/*.md"
+  ],
+  "ignores": ["node_modules", "docs", ".claude", ".agents"],
+  "config": {
+    "default": true,
+    // 100 columns, where the tree's prose and ruff.toml's gate sit; a table row or a code
+    // line is as long as its content.
+    "MD013": { "line_length": 100, "tables": false, "code_blocks": false },
+    // The tree's tables are written in several pipe styles.
+    "MD060": false
+  }
+}
