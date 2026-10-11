@@ -70,7 +70,7 @@ try {
             $bmp.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
         }
         finally { $bmp.Dispose() }
-        Write-Host "wrote $Path"
+        Write-Output "wrote $Path"
     }
 
     Save-Square -Image $src -Rect $srcRect -Edge $Size -Path (Join-Path $OutDir "si_logo_favicon.png")
