@@ -25,6 +25,7 @@ max-line-length = 100
 
 [lint.isort]
 known-first-party = ["tcip_store", "tcip_annotation", "tcip_mcp", "tcip_web", "tests", "tools"]
+combine-as-imports = true
 
 [lint.per-file-ignores]
 # `name = pytest.importorskip("dep")` legitimately precedes imports in dependency-gated test
