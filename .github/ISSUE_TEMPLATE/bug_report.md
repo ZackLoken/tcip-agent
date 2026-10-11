@@ -26,5 +26,5 @@ What CLAUDE.md, a skill, a docstring, or the code itself led you to expect inste
 
 ## Relevant output
 
-Paste the traceback, refusal message, or audit log lines that show the problem. Redact any
-breeding data (plant ids, imagery, trait values) that should not leave your machine.
+Paste the traceback, refusal message, or audit log lines that show the problem. Redact any breeding
+data (plant ids, imagery, trait values) that should not leave your machine.

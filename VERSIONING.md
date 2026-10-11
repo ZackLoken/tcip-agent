@@ -1,26 +1,26 @@
 # Versioning
 
-The four packages under `packages/` (`tcip-store`, `tcip-annotation`, `tcip-mcp`, `tcip-web`)
-share one version number and move together; they are not released independently. `tcip-mcp`
-depends on `tcip-store` and `tcip-annotation`, and `tcip-web` depends on `tcip-mcp`, inside one
-repository with no compatibility matrix between separately versioned parts. Each
-`pyproject.toml` today reads `0.1.0`.
+The four packages under `packages/` (`tcip-store`, `tcip-annotation`, `tcip-mcp`, `tcip-web`) share
+one version number and move together; they are not released independently. `tcip-mcp` depends on
+`tcip-store` and `tcip-annotation`, and `tcip-web` depends on `tcip-mcp`, inside one repository with
+no compatibility matrix between separately versioned parts. Each `pyproject.toml` today reads
+`0.1.0`.
 
 ## 0.x means no stability promise on surfaces
 
-While the shared version stays below `1.0.0`, any release may change any surface: an MCP tool's
-name or arguments, a web route, a persisted record's shape, a script's CLI. STABILITY.md states
-plainly what an adopter can already rely on regardless of the 0.x number (`tcip-annotation`'s
-declared public API); everything not named there is free to move in a 0.x release.
+While the shared version stays below `1.0.0`, any release may change any surface: an MCP tool's name
+or arguments, a web route, a persisted record's shape, a script's CLI. STABILITY.md states plainly
+what an adopter can already rely on regardless of the 0.x number (`tcip-annotation`'s declared
+public API); everything not named there is free to move in a 0.x release.
 
 ## From 1.0, semantic versioning
 
 Once the shared version reaches `1.0.0`, releases follow semantic versioning
-(https://semver.org/): a breaking change to a stable surface bumps the major version, a
+(<https://semver.org/>): a breaking change to a stable surface bumps the major version, a
 backward-compatible addition bumps the minor version, and a fix bumps the patch version.
 
 ## No release has been tagged yet
 
-There is no tagged release and no release workflow. Both arrive together: the first tag is cut
-once this versioning policy has something real to apply to, and the workflow that cuts a tag and
+There is no tagged release and no release workflow. Both arrive together: the first tag is cut once
+this versioning policy has something real to apply to, and the workflow that cuts a tag and
 publishes a release is built at the same time, not before.

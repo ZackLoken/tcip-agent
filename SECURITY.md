@@ -2,8 +2,8 @@
 
 This document is for an adopter deciding whether TCIP is safe for commercially sensitive breeding
 data. Local-first storage answers where data rests. It does not answer what leaves the machine when
-an agent drives the platform, which is what this document covers. Read the first channel first: it is
-the largest and the least bounded.
+an agent drives the platform, which is what this document covers. Read the first channel first: it
+is the largest and the least bounded.
 
 ## Channel 1: the in-app agent, to the model provider
 
@@ -15,8 +15,8 @@ views becomes model-provider context. Nothing in TCIP bounds, filters, or redact
 context.
 
 Some of this leaves without the agent choosing to read anything. The session-start hook injects the
-active project's name into the first model turn, so project identity reaches the provider on turn one
-by construction.
+active project's name into the first model turn, so project identity reaches the provider on turn
+one by construction.
 
 This is the largest egress channel and the platform does not control it. When you let the agent
 work, the breeding data it reads goes to the model provider, the same as if you pasted that data
@@ -39,12 +39,12 @@ Anthropic by default, and OpenAI plus Google through this developer script.
 
 ## Channel 3: Ray usage statistics, phoning home by default
 
-`run_hyperparameter_search` starts a Ray cluster whose usage-statistics reporter is enabled by default and posts
-periodically to `https://usage-stats.ray.io/`. The payload is machine and cluster metadata, not
-project data. It is the platform's one phone-home, and it is disabled with a single
+`run_hyperparameter_search` starts a Ray cluster whose usage-statistics reporter is enabled by
+default and posts periodically to `https://usage-stats.ray.io/`. The payload is machine and cluster
+metadata, not project data. It is the platform's one phone-home, and it is disabled with a single
 environment variable, `RAY_USAGE_STATS_ENABLED=0`, which the platform does not set for you. An
-adopter running hyperparameter optimization behind a firewall must either allow that host or set that
-variable.
+adopter running hyperparameter optimization behind a firewall must either allow that host or set
+that variable.
 
 ## Channel 4: inbound fetches a firewalled adopter must allow
 
@@ -59,8 +59,8 @@ first model build.
 
 - The platform's own code carries no telemetry vendor, analytics, crash reporter, or update check.
 - The only HTTP client between platform components is the panel push from the MCP tools to the web
-  backend, which defaults to loopback (`127.0.0.1`). Its host is configurable, so repointing it sends
-  those panel events wherever it is pointed.
+  backend, which defaults to loopback (`127.0.0.1`). Its host is configurable, so repointing it
+  sends those panel events wherever it is pointed.
 - The frontend contacts no external host; the GUI's annotation timing is loopback-only.
 - TensorBoard and the Ray dashboard bind loopback; MCP is stdio with no socket.
 - The web package holds no provider SDK, so the GUI runs no direct provider API loop of its own; all
@@ -90,16 +90,16 @@ records which agent harness connected to it (the name and version the client dec
 handshake, such as `claude-code 2.1.238`), a session id it minted itself, and what the declaring
 harness exported about itself to its MCP servers (Claude Code: its own session id and effective
 effort; Codex exports nothing), on every audit line and statement record that process writes and as
-headers on its pushes to the GUI; the model that ran is not recorded, since no harness forwards it; the in-app terminal
-records which executable it launched and passes its own session id down as a correlation any launcher
-could set. None of it authenticates a person: the person at the keyboard stays a name the request
-declared, the breeder's confirmation routes keep taking that name from the body, and nothing refuses
-on any of these values.
+headers on its pushes to the GUI; the model that ran is not recorded, since no harness forwards it;
+the in-app terminal records which executable it launched and passes its own session id down as a
+correlation any launcher could set. None of it authenticates a person: the person at the keyboard
+stays a name the request declared, the breeder's confirmation routes keep taking that name from the
+body, and nothing refuses on any of these values.
 
-The whole no-authentication argument rests on the loopback bind and a single trusted machine. None of
-the egress above is safe to treat as private-by-default once the platform moves off that machine, or
-once the roadmap's centralized or cloud-backed storage lands: the local-first claim that carries the
-trust argument stops being true the day data leaves the disk.
+The whole no-authentication argument rests on the loopback bind and a single trusted machine. None
+of the egress above is safe to treat as private-by-default once the platform moves off that machine,
+or once the roadmap's centralized or cloud-backed storage lands: the local-first claim that carries
+the trust argument stops being true the day data leaves the disk.
 
 ## Reporting a vulnerability
 
@@ -108,17 +108,17 @@ Security tab's Report a vulnerability button). If that is not enabled on this re
 issue titled "security" with no details in the issue body; the maintainer will open a private
 channel with you from there rather than have the details discussed in public.
 
-Include what you would for any bug report plus what makes this one security-relevant: the
-affected component or file, the egress channel or trust boundary involved if one of the above,
-reproduction steps, and what you were able to observe or access as a result.
+Include what you would for any bug report plus what makes this one security-relevant: the affected
+component or file, the egress channel or trust boundary involved if one of the above, reproduction
+steps, and what you were able to observe or access as a result.
 
 There is no bug bounty. Expect acknowledgement within 7 days of the report landing.
 
 ## In one paragraph
 
-When you let the agent drive TCIP, the breeding data it reads is sent to your model provider, the same
-as pasting it into a chat; the platform does not redact or bound this. Your agent's session
-transcripts are written outside every TCIP retention control. Hyperparameter optimization phones home
-to Ray by default unless you set `RAY_USAGE_STATS_ENABLED=0`. The platform itself carries no telemetry
-and makes no other outbound connection beyond fetching dependencies and model weights at install and
-first use.
+When you let the agent drive TCIP, the breeding data it reads is sent to your model provider, the
+same as pasting it into a chat; the platform does not redact or bound this. Your agent's session
+transcripts are written outside every TCIP retention control. Hyperparameter optimization phones
+home to Ray by default unless you set `RAY_USAGE_STATS_ENABLED=0`. The platform itself carries no
+telemetry and makes no other outbound connection beyond fetching dependencies and model weights at
+install and first use.

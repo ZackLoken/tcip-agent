@@ -5,7 +5,7 @@ operating posture, and pipeline/model rules there apply here and aren't restated
 
 ## Layout
 
-```
+```text
 src/tcip_mcp/
   server.py, __main__.py   # MCP entry point; registers all tool modules
   knowledge/      # the canonical domain-knowledge directory (the domain documents plus
@@ -54,25 +54,26 @@ src/tcip_mcp/
 
 Every MCP tool in `tools/` is decorated `@tool()` (`server.tool`); a tool that acts on a project
 takes the project the server was started for as its first parameter: `project`, its directory, or
-`bound`, the whole `workspace.BoundProject` (directory, record id, workspace) when it also names
-the project to the backend. The server supplies only those two and `actor` (`server._CONTEXT`), so
-any other parameter, whatever its name, stays the client's (the knowledge door and the
-project-creation door act on none), and every mutating door leaves exactly one audit line per act, the decorator's or the library's: a tool that changes state is `@audited`
-unless the library function it calls records its own event with facts the decorator cannot carry
-(a digest, what was written), and then it is not decorated. The decorator writes no line for a
-call returning its error dict and an exception line for a call that raises. A read-only tool (a status poll, a listing, a
-document served back) leaves none, so the audit log records mutations and nothing else. `serve_domain_knowledge`'s
-`@tool(description=...)` composes its client-visible description from the knowledge corpus
-at import time rather than leaving it as the bare docstring. A mutating door demoted from tool
-status (run only through its own `tcip` subcommand) keeps `@audited` without registering.
-Run `python tools/list_tools.py` for the current tool list/count; never hardcode a count in a
-doc or comment.
+`bound`, the whole `workspace.BoundProject` (directory, record id, workspace) when it also names the
+project to the backend. The server supplies only those two and `actor` (`server._CONTEXT`), so any
+other parameter, whatever its name, stays the client's (the knowledge door and the project-creation
+door act on none), and every mutating door leaves exactly one audit line per act, the decorator's or
+the library's: a tool that changes state is `@audited` unless the library function it calls records
+its own event with facts the decorator cannot carry (a digest, what was written), and then it is not
+decorated. The decorator writes no line for a call returning its error dict and an exception line
+for a call that raises. A read-only tool (a status poll, a listing, a document served back) leaves
+none, so the audit log records mutations and nothing else. `serve_domain_knowledge`'s
+`@tool(description=...)` composes its client-visible description from the knowledge corpus at import
+time rather than leaving it as the bare docstring. A mutating door demoted from tool status (run
+only through its own `tcip` subcommand) keeps `@audited` without registering. Run
+`python tools/list_tools.py` for the current tool list/count; never hardcode a count in a doc or
+comment.
 
 ## Conventions specific to this package
 
 - `tools/` lazy-imports torch/torchvision and the `pipelines/` modules that carry them, inside
-  function bodies. `pipelines/` itself imports torch at module level; a pipeline module only
-  loads when a tool reaches into it.
+  function bodies. `pipelines/` itself imports torch at module level; a pipeline module only loads
+  when a tool reaches into it.
 - Detectors are built via the plain `build_detector` (+ `_build_faster_rcnn` / `_build_fcos` /
   `_build_retinanet` / `_build_mask_rcnn`); bespoke model code imports these directly. There is no
   model spec or component registry; see the `toolkit-inventory` skill for the full composition
@@ -86,9 +87,9 @@ doc or comment.
   console-command door, or a library function recording its own event through
   `record_event_or_raise`; the record is `audit_log`, one log addressed by `audit.audit_log_key`
   under two kinds of root (a dataset's own, a project's own), held in that root's store database,
-  that other code (including scripts) must not write around. `audit.py` decides where an entry
-  goes and what a failed append means: the decorator raises `MutationCommittedWithoutAuditLineError`.
-  A library write holding its records and its line in one transaction appends the line inside it
-  through `audit_entry`, so neither lands without the other; a door whose line follows a
-  committed write emits through `record_event_or_raise`, which raises `AuditEntryNotWrittenError` on
-  a failed append.
+  that other code (including scripts) must not write around. `audit.py` decides where an entry goes
+  and what a failed append means: the decorator raises `MutationCommittedWithoutAuditLineError`. A
+  library write holding its records and its line in one transaction appends the line inside it
+  through `audit_entry`, so neither lands without the other; a door whose line follows a committed
+  write emits through `record_event_or_raise`, which raises `AuditEntryNotWrittenError` on a failed
+  append.

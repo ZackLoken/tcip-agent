@@ -1,12 +1,12 @@
 # packages/tcip-store
 
 The storage seam: a root's records and logs in one SQLite database, and the files the platform
-writes by path. Bottom of the stack, depending on nothing else in the platform. Loads on top of
-the root `CLAUDE.md`; invariants and operating posture there apply here and aren't restated.
+writes by path. Bottom of the stack, depending on nothing else in the platform. Loads on top of the
+root `CLAUDE.md`; invariants and operating posture there apply here and aren't restated.
 
 ## Layout
 
-```
+```text
 src/tcip_store/
   __init__.py          # the public surface, re-exported
   model.py             # Key, Version, Versioned, LogPage, canonical_path
