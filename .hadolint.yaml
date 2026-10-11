@@ -1,0 +1,6 @@
+# The Dockerfile gate: CI runs hadolint over packages/tcip-web/Dockerfile.
+ignored:
+  # The apt packages and the torch wheel are unpinned as environment.yml leaves them: a pin here
+  # would be a second spelling of that file's choice, and the CPU wheel index moves.
+  - DL3008
+  - DL3013
