@@ -396,8 +396,9 @@ def _checkpoint_metrics(metrics: dict) -> dict:
 
 @dataclass(frozen=True)
 class _ResumeState:
-    """The resume contract beside the training state the checkpoint carries at its top level
-    (:func:`capture_training_state`'s keys): each field one key of the checkpoint.
+    """The resume contract beside the training state and the epoch row the checkpoint carries
+    at its top level (:func:`capture_training_state`'s keys and ``METRICS_KEY``): each field
+    one key of the checkpoint.
 
     ``best`` is the run's best epoch over the stages before the current one and ``stage_best``
     the current stage's, each an :func:`_epoch_state` or ``None``; ``warmup_groups`` are the
@@ -467,8 +468,8 @@ def _save_checkpoint(
 ) -> None:
     """Write a resumable periodic checkpoint carrying the run's ``stamp``
     (:func:`checkpoint_stamp`), its current training state (:func:`capture_training_state`, the
-    same representation a stage's best is held in) and the resume state
-    (:class:`_ResumeState`).
+    same representation a stage's best is held in), the epoch's row (``METRICS_KEY``) and the
+    resume state (:class:`_ResumeState`).
     """
     state = _ResumeState(
         scheduler_state_dict=scheduler.state_dict(),
@@ -809,8 +810,11 @@ def train(
     whole (:func:`_epoch_state`: weights, buffers and optimizer state taken at one moment), with
     a freshly built optimizer at its own learning rates. A stage that ends with no selectable
     epoch fails the run, naming the stage. The run's best epoch is held until the run ends and
-    written once as ``model_best.pt`` beside ``model_final.pt``, the last epoch's weights; a
-    diverged run writes neither. ``run.best_metric`` is the held best epoch's selection value.
+    written once as ``model_best.pt`` beside ``model_final.pt``, the weights the run ended at,
+    carrying the metrics of the epoch row those weights were taken at (an epoch's end, the best
+    epoch a stage started from, or a resumed checkpoint's), and none once a batch ran past that
+    row; a diverged run writes neither. ``run.best_metric`` is the held best epoch's selection
+    value.
     """
     run.status = "running"
     run.start_time = time.time()
@@ -878,7 +882,9 @@ def train(
         handoff: dict | None = (
             None  # the previous stage's best epoch, the next stage's start
         )
-        diverged = False
+        diverged = canceled = False
+        # The stored epoch row describing the weights the model holds, None when none does.
+        final_row: dict | None = None
         # Consecutive full training passes with zero finite batch losses; reset at every stage
         # boundary and by any epoch with even one finite loss, uniform across loader shapes.
         diverged_epochs = 0
@@ -892,10 +898,8 @@ def train(
             loaded = torch.load(
                 resume_from, map_location="cpu", weights_only=False
             )
-            names = [
-                *TRAINING_STATE_KEYS,
-                *(f.name for f in fields(_ResumeState)),
-            ]
+            restored = (*TRAINING_STATE_KEYS, METRICS_KEY)
+            names = [*restored, *(f.name for f in fields(_ResumeState))]
             missing = [name for name in names if name not in loaded]
             if missing:
                 raise ValueError(
@@ -903,7 +907,7 @@ def train(
                     "from a periodic checkpoint_epoch_*.pt, or start a fresh run."
                 )
             # The contract's one read: every restore below reads these, never loaded.
-            current = {name: loaded[name] for name in TRAINING_STATE_KEYS}
+            current = {name: loaded[name] for name in restored}
             ckpt = _ResumeState(
                 **{f.name: loaded[f.name] for f in fields(_ResumeState)}
             )
@@ -977,6 +981,7 @@ def train(
                 restore_training_state(
                     model, optimizer, handoff, group_settings=False
                 )
+                final_row = handoff[METRICS_KEY]
                 if stage_warmup_epochs:
                     warmup_groups = handoff[GROUPS_KEY]
                 logger.info(
@@ -986,7 +991,7 @@ def train(
                     handoff["epoch"],
                 )
             warmup_starts = (
-                None
+                []
                 if warmup_groups is None
                 else _warmup_starts(
                     model, optimizer, warmup_groups, target_lrs
@@ -994,7 +999,7 @@ def train(
             )
 
             # Inter-stage LR warmup from the handed-off learning rates (default off).
-            warmup_n = stage_warmup_epochs if warmup_starts is not None else 0
+            warmup_n = stage_warmup_epochs if warmup_starts else 0
             scheduler = _build_scheduler(optimizer, scheduler_spec)
             is_plateau = isinstance(
                 scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau
@@ -1013,6 +1018,7 @@ def train(
                 restore_training_state(
                     model, optimizer, current, group_settings=True
                 )
+                final_row = current[METRICS_KEY]
                 if scaler is not None:
                     scaler.load_state_dict(ckpt.scaler_state_dict)
                 # Restored: past the best epochs it holds, the run keeps no reference to the
@@ -1020,7 +1026,8 @@ def train(
                 ckpt = current = None
 
             for epoch in itertools.count(start_epoch):
-                if run.should_cancel() or (
+                canceled = run.should_cancel()
+                if canceled or (
                     horizon is not None and epoch - warmup_n >= horizon
                 ):
                     break
@@ -1040,8 +1047,8 @@ def train(
                 optimizer.zero_grad()
 
                 # Per-group linear LR warmup at the stage boundary.
-                in_warmup = warmup_starts is not None and epoch < warmup_n
-                if warmup_starts is not None and in_warmup:
+                in_warmup = epoch < warmup_n
+                if in_warmup:
                     alpha = (epoch + 1) / warmup_n
                     for group, start, target in zip(
                         optimizer.param_groups, warmup_starts, target_lrs
@@ -1053,8 +1060,10 @@ def train(
                 full_windows_end = n_loader - n_loader % stage_accum
                 row_ends = batch_row_ends(n_loader)
                 for batch_idx, batch in enumerate(train_loader):
-                    if run.should_cancel():
+                    canceled = run.should_cancel()
+                    if canceled:
                         break
+                    final_row = None
                     if task in DETECTION_TASKS:
                         images, targets = batch
                         images = [img.to(device) for img in images]
@@ -1140,6 +1149,7 @@ def train(
                         "diverged."
                     )
                     diverged = True
+                if diverged or canceled:
                     break  # skip this epoch's epoch-end block; stop before validation/checkpoints
 
                 avg_loss = epoch_loss / max(n_batches, 1)
@@ -1176,6 +1186,7 @@ def train(
                     **val_metrics,
                 }
                 run.metrics_history.append(epoch_metrics)
+                final_row = _checkpoint_metrics(epoch_metrics)
 
                 if epoch_callback is not None:
                     epoch_callback(run.current_epoch, epoch_metrics)
@@ -1248,7 +1259,6 @@ def train(
                         metrics=epoch_metrics,
                     )
 
-            canceled = run.should_cancel()
             if diverged or (stage_best is None and canceled):
                 break  # stop before starting the next stage
             if stage_best is None:
@@ -1300,23 +1310,21 @@ def train(
                     },
                     checkpoint_path(out_dir, "model_best"),
                 )
-            last_epoch_metrics = (
-                run.metrics_history[-1] if run.metrics_history else {}
-            )
+            final: dict[str, Any] = {
+                STATE_DICT_KEY: model.state_dict(),
+                **stamp,
+            }
+            if final_row is not None:
+                final[METRICS_KEY] = final_row
             run.saved["model_final"] = write_checkpoint(
-                {
-                    STATE_DICT_KEY: model.state_dict(),
-                    **stamp,
-                    METRICS_KEY: _checkpoint_metrics(last_epoch_metrics),
-                },
-                checkpoint_path(out_dir, "model_final"),
+                final, checkpoint_path(out_dir, "model_final")
             )
 
         if diverged:
             logger.info(
                 "Training run %s stopped: %s", run.id, run.status_error
             )
-        elif run.should_cancel():
+        elif canceled:
             run.status = "canceled"
             logger.info(
                 "Training run %s canceled at epoch %d",

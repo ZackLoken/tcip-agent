@@ -18,7 +18,10 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from tcip_mcp.experiments import experiment_dir  # noqa: E402
-from tcip_mcp.pipelines.model_build import STATE_DICT_KEY  # noqa: E402
+from tcip_mcp.pipelines.model_build import (  # noqa: E402
+    METRICS_KEY,
+    STATE_DICT_KEY,
+)
 from tcip_mcp.pipelines.schemas import SCHEDULER_TYPES  # noqa: E402
 from tcip_mcp.pipelines.training import generic_trainer as gt  # noqa: E402
 from tcip_mcp.pipelines.training.generic_trainer import train  # noqa: E402
@@ -512,6 +515,176 @@ def test_a_resume_whose_optimizer_orders_its_groups_differently_warms_up_as_the_
         STATE_DICT_KEY
     ]
     assert all(torch.equal(a[name], b[name]) for name in ("weight", "bias"))
+
+
+def _canceled_at(tmp_path, call: int):
+    """A run over six training frames in batches of two (the second epoch is calls 4, 5 and 6)
+    whose ``call``-th training forward requests its cancellation, saving every epoch: the run
+    and its directory.
+    """
+    name = f"canceled-at-{call}"
+    run_dir = experiment_dir(name, project=tmp_path)
+    config = _config(
+        [{"freeze_to": 0}],
+        horizon=5,
+        batch_size=2,
+        checkpoint_every_n_epochs=1,
+        builder_kwargs={
+            "cancel_at_call": call,
+            "cancel_output_dir": str(run_dir),
+        },
+    )
+
+    def unsplit(root: Path) -> dict:
+        return frames_data(
+            root, TRAIN_INTENSITIES, [2.0 * c for c in TRAIN_INTENSITIES]
+        )
+
+    return _train(tmp_path, config, name, frames=unsplit), run_dir
+
+
+def test_a_cancel_inside_an_epoch_leaves_that_epoch_no_row_best_or_checkpoint(
+    tmp_path,
+):
+    """A cancel requested partway through the second epoch's batches ends the run canceled
+    before that epoch's end: it appends no row, never becomes the best, and writes no
+    checkpoint, while the first epoch's stand. The final weights moved past the first epoch's
+    row, so ``model_final`` carries no metrics.
+    """
+    run, run_dir = _canceled_at(tmp_path, 5)
+
+    assert run.status == "canceled", run.status_error
+    assert run.current_epoch == 2
+    assert len(run.metrics_history) == 1
+    assert (run_dir / "checkpoint_epoch_1.pt").is_file()
+    assert not (run_dir / "checkpoint_epoch_2.pt").exists()
+    best = torch.load(run_dir / "model_best.pt", weights_only=False)
+    assert best["epoch"] == 1
+    final = torch.load(run_dir / "model_final.pt", weights_only=False)
+    assert METRICS_KEY not in final
+
+
+def test_a_cancel_seen_at_an_epoch_top_saves_the_final_weights_with_their_row(
+    tmp_path,
+):
+    """A cancel requested during the second epoch's last batch is seen at the third epoch's top:
+    the second epoch completes, and ``model_final`` carries its row.
+    """
+    run, run_dir = _canceled_at(tmp_path, 6)
+
+    assert run.status == "canceled", run.status_error
+    assert len(run.metrics_history) == 2
+    final = torch.load(run_dir / "model_final.pt", weights_only=False)
+    assert final[METRICS_KEY]["train_loss"] == pytest.approx(
+        run.metrics_history[-1]["train_loss"]
+    )
+
+
+def test_a_cancel_seen_as_a_stage_starts_saves_its_best_epoch_with_that_epoch_row(
+    tmp_path, monkeypatch
+):
+    """A cancel requested once the second stage has started from the first stage's best epoch,
+    whose best is its first epoch and not its last, is seen at that stage's first poll:
+    ``model_final`` holds the best epoch's weights and carries the best epoch's row.
+    """
+    from tcip_mcp.experiments import request_cancel
+
+    name = "canceled-at-a-stage-start"
+    run_dir = experiment_dir(name, project=tmp_path)
+    real_build_scheduler = gt._build_scheduler
+    built: list = []
+
+    def cancel_at_the_second_stage(optimizer, config):
+        built.append(config)
+        if len(built) == 2:
+            request_cancel(run_dir)
+        return real_build_scheduler(optimizer, config)
+
+    monkeypatch.setattr(gt, "_build_scheduler", cancel_at_the_second_stage)
+    run = _train(
+        tmp_path,
+        _config([{"freeze_to": 0}, {"freeze_to": 0}], horizon=3),
+        name,
+    )
+
+    assert run.status == "canceled", run.status_error
+    stage0 = [m["val_loss"] for m in run.metrics_history]
+    assert len(stage0) == 3 and stage0 == sorted(stage0)
+    final = torch.load(run_dir / "model_final.pt", weights_only=False)
+    best = torch.load(run_dir / "model_best.pt", weights_only=False)
+    assert best["epoch"] == 1
+    assert final[METRICS_KEY] == best[METRICS_KEY]
+    assert torch.equal(
+        final[STATE_DICT_KEY]["weight"], best[STATE_DICT_KEY]["weight"]
+    )
+
+
+def test_a_resumed_run_canceled_at_its_first_poll_saves_the_checkpoint_row(
+    tmp_path,
+):
+    """A run resumed from a periodic checkpoint and canceled before its first epoch saves the
+    checkpoint's weights under the checkpoint's own row.
+    """
+    from tcip_mcp.experiments import request_cancel
+
+    config = _config(
+        [{"freeze_to": 0}], horizon=3, checkpoint_every_n_epochs=1
+    )
+    straight = _train(tmp_path, config, "straight")
+    assert straight.status == "completed", straight.status_error
+    checkpoint = (
+        experiment_dir("straight", project=tmp_path) / "checkpoint_epoch_1.pt"
+    )
+
+    ctx = run_context(
+        tmp_path,
+        {**config, "data": _opposed(tmp_path / "resumed-frames")},
+        experiment_id="resumed",
+    )
+    request_cancel(ctx.run_dir)
+    resumed = train(
+        ctx.run,
+        ctx.train_loader,
+        val_loader=ctx.val_loader,
+        resume_from=str(checkpoint),
+    )
+
+    assert resumed.status == "canceled", resumed.status_error
+    assert resumed.metrics_history == []
+    final = torch.load(ctx.run_dir / "model_final.pt", weights_only=False)
+    held = torch.load(checkpoint, weights_only=False)
+    assert final[METRICS_KEY] == held[METRICS_KEY]
+
+
+@pytest.mark.parametrize("warmup_epochs", [0, 2])
+def test_the_scheduler_steps_every_epoch_outside_a_stage_warmup(
+    tmp_path, warmup_epochs
+):
+    """Under a schedule halving the rate each step, each epoch row's rate is the one it trained
+    at: a stage with no warmup halves it every epoch, and a stage warming up for two epochs
+    ramps to its target, holds it through the first epoch after the warmup, then halves.
+    """
+    config = _config(
+        [{"freeze_to": 0}, {"freeze_to": 0}],
+        scheduler=schedule("step", step_size=1, gamma=0.5),
+        early_stopping=stop_rule(3, 1e9),
+        stage_warmup_epochs=warmup_epochs,
+    )
+    run = _train(tmp_path, config, "warmup", frames=_consistent)
+    assert run.status == "completed", run.status_error
+
+    rates = [
+        [m["lr"] for m in run.metrics_history if m["stage"] == stage]
+        for stage in (0, 1)
+    ]
+    target = rates[0][0]
+    halving = [target * 0.5**i for i in range(4)]
+    assert rates[0] == pytest.approx(halving)
+    if warmup_epochs:
+        assert rates[1][0] < target
+        assert rates[1][1:] == pytest.approx([target, target, target * 0.5])
+    else:
+        assert rates[1] == pytest.approx(halving)
 
 
 @pytest.mark.parametrize(
