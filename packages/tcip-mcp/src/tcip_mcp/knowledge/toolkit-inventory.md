@@ -117,9 +117,10 @@ saved by the loop: under `"model_best"`/`"model_final"`, or any tag named with
 
 ## Hyperparameter search: Ray Tune (`pipelines.training.hpo`, `run_hyperparameter_search`)
 
-HPO is a capability, not a fixed algorithm; see the `run_hyperparameter_search` tool's own docstring for the
-search-algorithm/scheduler menu (call `available_search_algs()` / `available_schedulers()` for
-what this machine actually has installed), the sweep's on-disk layout, and its refusal shape.
+HPO is a capability, not a fixed algorithm; `available_search_algs()` / `available_schedulers()`
+list the search algorithms and schedulers this machine has installed, and the
+`run_hyperparameter_search` tool's own docstring states the sweep's on-disk layout and its
+refusal shape.
 An uninstalled pick (an install that skipped the hpo extra) errors clearly, never silently
 swapped for another algorithm: `build_search_alg` raises `ValueError` naming the missing
 backend and what's actually available. One seam the docstring doesn't carry:

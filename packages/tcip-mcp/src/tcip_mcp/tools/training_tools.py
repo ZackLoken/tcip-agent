@@ -435,7 +435,7 @@ def launch_training(
     The run's training body (dataset build, model forward/backward, checkpointing) executes in a
     separate OS process, writing into the run's own directory
     (``<project>/.tcip/experiments/<experiment_id>/``). Use monitor_training to monitor progress
-    and cancel_training to stop a run. The platform itself stops a run only when it is dead (two
+    and cancel_training to stop a run. The platform itself stops a run when it is dead (two
     consecutive full training passes with no finite batch loss) or when its stages end it: its
     last stage ended (on its ``early_stopping`` plateau, or at a horizon-bound schedule's
     horizon), or a stage whose best did not improve by ``min_delta`` on the stage before it, on
@@ -855,10 +855,12 @@ def cancel_training(
     """Request graceful cancellation of a running training run, a sweep's trial or a whole
     hyperparameter sweep, by ``actor``, named by its id (``experiments.named_directory``).
 
-    A run stops at its next batch/epoch boundary, still saves ``model_final.pt`` (so partial
-    progress is recoverable), and writes its final status 'canceled'; a run whose divergence
-    verdict lands first (two consecutive full training passes with no finite batch loss, checked
-    ahead of cancellation at the same boundary) ends 'failed' instead, with no ``model_final.pt``.
+    A run stops at its next batch/epoch boundary, still saves ``model_final.pt``, the weights it
+    stopped at (with no metrics once a batch ran past the epoch row those weights were taken
+    at, since no row describes them), and writes its final status 'canceled'; a run whose
+    divergence verdict lands first (two consecutive full training passes with no finite batch
+    loss, checked ahead of cancellation at the same boundary) ends 'failed' instead, with no
+    ``model_final.pt``.
     A sweep stops each running trial at its next batch boundary and launches no more. The
     returned ``state`` is the one read now, so it may still read 'running'.
 
@@ -1038,12 +1040,9 @@ def run_hyperparameter_search(
 ) -> dict:
     """Run hyperparameter optimization on Ray Tune, training each trial for real.
 
-    The search algorithm and trial scheduler are the caller's choice (call the ``hpo`` module's
-    ``available_search_algs`` / ``available_schedulers`` for the live list):
-      - ``search_alg``: ``random``/``grid`` (native), or a backend, ``optuna``, ``bayesopt``,
-        ``hyperopt``, each constructed with ``search_seed``.
-      - ``scheduler``: ``asha`` (async HyperBand), ``hyperband``, ``pbt``, ``median``, or ``fifo``
-        to run every trial to completion.
+    The search algorithm, constructed with ``search_seed``, and the trial scheduler are the
+    caller's choice; the ``hpo`` module's ``available_search_algs`` and ``available_schedulers``
+    list them.
 
     Trials optimize the objective ``base_config`` resolves to once (its selection metric and the
     direction that metric's declaration says is better), recorded in the sweep's input and in
@@ -1071,8 +1070,9 @@ def run_hyperparameter_search(
         most one partition (:func:`caller_split_seed_refusal`); ``split_draws`` above 1 on an
         unbound, built-in config with tiling on that admits exactly one trainable source
         (:func:`_split_draws_refusal`); a ``split_draws`` that is not an integer, or below 1
-        (:func:`_split_draws_argument_refusal`, checked first); and, on a launch above one draw or
-        any call naming a ``trial_budget``, the bound refusals of :func:`_trial_budget_refusal`. A
+        (:func:`_split_draws_argument_refusal`, checked first); an ``n_trials`` that is not a
+        count, and, on a launch above one draw or any call naming a ``trial_budget``, the bound
+        refusals (:func:`_trial_budget_refusal`). A
         cancel (``cancel_training``) requested before or during the run ends the sweep
         ``{"state": "canceled", ...}``, its final status recording the same.
 
@@ -1083,12 +1083,11 @@ def run_hyperparameter_search(
             dotted path into one (``optimizer.head_lr``). A ``data.split.seed`` axis is refused
             whenever ``split_draws`` draws at most one partition; above 1 it belongs to
             ``split_draws``/``split_draw_seeds``.
-        n_trials: Number of trials; a whole number of at least one on a call that reads a
-            ``trial_budget`` bound.
-        search_alg: Search algorithm, see the list above.
-        scheduler: Trial scheduler, a block naming one of the list above as its ``name`` beside
-            every setting that scheduler's Ray class takes (``hpo.scheduler_settings``), its
-            objective and ``pbt``'s mutations excepted; ``{"name": "fifo"}`` takes none. Refused
+        n_trials: Number of trials; a whole number of at least one.
+        search_alg: Search algorithm, one ``available_search_algs`` lists.
+        scheduler: Trial scheduler, a block naming one ``available_schedulers`` lists as its
+            ``name`` beside every setting that scheduler's Ray class takes
+            (``hpo.scheduler_settings``), its objective and ``pbt``'s mutations excepted. Refused
             naming each setting left unstated or not taken.
         baseline_params: Hyperparameter values to seed the search with, ``None`` for none.
         max_concurrent: Trials to run at once (default 1, safe for single-GPU training).
@@ -1116,8 +1115,7 @@ def run_hyperparameter_search(
             stated), so every trial redraws train and val inside the
             selection's own train-plus-val samples, calibration untouched; refused when those
             samples resolve to fewer than two foreground groups. Otherwise refused when
-            ``data.auto_val`` is off, ``search_alg`` is not a native one
-            (``random``/``grid``/``variant_generator``), ``scheduler`` is not ``fifo``,
+            ``data.auto_val`` is off, ``search_alg`` is not a native one, ``scheduler`` prunes,
             ``split_draw_seeds`` is given at a length other than ``split_draws`` or names the same
             seed twice, ``baseline_params`` names ``data.split.seed``,
             ``param_space`` already sweeps ``data.split.seed`` itself, or ``param_space`` sweeps
@@ -1507,6 +1505,15 @@ def _split_draws_argument_refusal(split_draws: object) -> str | None:
     return None
 
 
+def _trial_count(value: object) -> int | None:
+    """``value`` as a count of trials, a positive ``int`` (a ``bool`` excluded); ``None`` for
+    anything else.
+    """
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    return None
+
+
 def _trial_budget_refusal(
     *,
     reads_bound: bool,
@@ -1518,35 +1525,29 @@ def _trial_budget_refusal(
     search_param_space: dict,
     baseline_params: dict | None,
 ) -> str | None:
-    """Whether this call's own trial count fits the bound it must state or check, run only when
-    ``reads_bound`` says one is read (a launch, never a relaunch, above one draw; or any call
-    naming ``trial_budget``).
+    """Whether this call's ``n_trials`` is a count of trials (:func:`_trial_count`), and
+    whether its trial count fits the bound it must state or check.
 
-    Runs its two argument clauses first (an ``n_trials`` or ``trial_budget`` that is not a positive
-    ``int``, a ``bool`` excluded by name), then counts Ray's own variant count over
-    ``search_param_space`` via :func:`~tcip_mcp.pipelines.training.hpo.planned_trial_count`, then
-    its two bound clauses: a launch above one draw naming no ``trial_budget`` refuses naming the
-    budget Ray's own count would admit; a stated ``trial_budget`` the count exceeds refuses naming
-    the count, the budget, and whether even one draw exceeds it (``count // split_draws`` is one
-    draw's own count). Everything else answers ``None``.
+    The bound is read only when ``reads_bound`` says one is (a launch, never a relaunch, above one
+    draw; or any call naming ``trial_budget``): a ``trial_budget`` that is not a count of trials
+    refuses, then Ray's own variant count over ``search_param_space``
+    (:func:`~tcip_mcp.pipelines.training.hpo.planned_trial_count`) meets its two bound clauses: a
+    launch above one draw naming no ``trial_budget`` refuses naming the budget Ray's own count
+    would admit; a stated ``trial_budget`` the count exceeds refuses naming the count, the budget,
+    and whether even one draw exceeds it (``count // split_draws`` is one draw's own count).
+    Everything else answers ``None``.
     """
-    if not reads_bound:
-        return None
-    if (
-        not isinstance(n_trials, int)
-        or isinstance(n_trials, bool)
-        or n_trials <= 0
-    ):
+    trials = _trial_count(n_trials)
+    if trials is None:
         return (
             f"n_trials={n_trials!r} is not a count of trials; Ray runs a negative count as "
             "an unbounded sweep and a zero count as none, so pass the number of sampled "
             "points, a whole number of at least one."
         )
-    if trial_budget is not None and (
-        not isinstance(trial_budget, int)
-        or isinstance(trial_budget, bool)
-        or trial_budget <= 0
-    ):
+    if not reads_bound:
+        return None
+    budget = None if trial_budget is None else _trial_count(trial_budget)
+    if trial_budget is not None and budget is None:
         return (
             f"trial_budget={trial_budget!r} is not a count of trials; pass the most trials "
             "this sweep may launch, a whole number of at least one, or omit it at one draw."
@@ -1555,34 +1556,34 @@ def _trial_budget_refusal(
     from tcip_mcp.pipelines.training.hpo import planned_trial_count
 
     count = planned_trial_count(
-        search_param_space, n_trials, search_alg, split_draws, baseline_params
+        search_param_space, trials, search_alg, split_draws, baseline_params
     )
     per_draw = count // split_draws
     baseline = "given" if baseline_params else "none"
     built = (
-        f"Ray's own variant count over the space this call builds: n_trials={n_trials} "
+        f"Ray's own variant count over the space this call builds: n_trials={trials} "
         f"sample(s), search_alg={search_alg!r}, baseline {baseline}, {per_draw} per draw"
     )
 
-    if split_draws > 1 and trial_budget is None and relaunched_from is None:
+    if split_draws > 1 and budget is None and relaunched_from is None:
         return (
             f"split_draws={split_draws} pairs every sampled point with {split_draws} "
             f"partitions, so this sweep would launch {count} trials ({built}), a total the "
             f"call never stated; pass trial_budget={count} ({count} admits it as "
             "configured), or run at split_draws=1."
         )
-    if trial_budget is not None and count > trial_budget:
-        if per_draw > trial_budget:
+    if budget is not None and count > budget:
+        if per_draw > budget:
             return (
                 f"this sweep would launch {count} trials ({built}) against "
-                f"trial_budget={trial_budget}, which this sweep exceeds at one draw "
+                f"trial_budget={budget}, which this sweep exceeds at one draw "
                 f"({per_draw} trials per draw); lower n_trials, narrow the gridded axes, or "
                 "state a larger trial_budget."
             )
-        admitted_draws = trial_budget // per_draw
+        admitted_draws = budget // per_draw
         return (
             f"this sweep would launch {count} trials ({built}) against "
-            f"trial_budget={trial_budget}, which admits at most {admitted_draws} draw(s) at "
+            f"trial_budget={budget}, which admits at most {admitted_draws} draw(s) at "
             f"these settings; lower split_draws to {admitted_draws}, lower n_trials, narrow "
             "the gridded axes, or state a larger trial_budget."
         )
@@ -1715,9 +1716,8 @@ _SEED_AXIS_REMEDY = (
     "unbound alike: a config bound to a selection redraws train and val inside the selection's "
     "own train and val samples (the selection must be readable and resolve at least two "
     "foreground groups across them); an unbound config keeps auto_val on; search_alg "
-    "is one the native generator builds (random, grid, variant_generator); scheduler "
-    "prunes nothing (fifo); split_draw_seeds is one per draw and distinct; no "
-    "baseline_params names no seed; no other data.* axis is in param_space; "
+    "is a native search algorithm; the scheduler prunes nothing; split_draw_seeds is one per "
+    "draw and distinct; baseline_params names no seed; no other data.* axis is in param_space; "
     "a trial_budget is stated on a launch that is not a relaunch, and Ray's variant count over "
     "the sweep fits under it; and, for a built-in config with tiling on, more than one "
     "trainable source is admitted under data.images_dir (a single admitted source's own "
@@ -1753,9 +1753,15 @@ def _preflight_points(
     axes away from the corner, and a range's interior, are not among them; each trial's own
     config is admitted when its trial opens.
     """
-    from tcip_mcp.pipelines.training.hpo import search_alg_key, space_axes
+    from tcip_mcp.pipelines.training.hpo import (
+        GRID_SEARCH,
+        search_alg_key,
+        space_axes,
+    )
 
-    axes = space_axes(param_space, grid=search_alg_key(search_alg) == "grid")
+    axes = space_axes(
+        param_space, grid=search_alg_key(search_alg) == GRID_SEARCH
+    )
     base = {key: values[0] for key, (_kind, values) in axes.items()}
     points: list[tuple[str, dict]] = [("the first sampled point", dict(base))]
     for key, (kind, values) in axes.items():

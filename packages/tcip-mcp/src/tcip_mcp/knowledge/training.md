@@ -40,7 +40,9 @@ name (a stage's optimizer that drops one is refused). A
 stage that ends with no selectable epoch (its selection value never ranked, for example a
 non-finite validation metric every epoch) fails the run naming the stage rather than continuing
 from its last weights. `model_best.pt` is the run's best epoch across every stage;
-`model_final.pt` is the last epoch's weights.
+`model_final.pt` is the weights the run ended at, carrying the metrics of the epoch row those
+weights were taken at (an epoch's end, the best epoch a stage started from, or a resumed
+checkpoint's), or none once a batch ran past that row.
 
 ## Early Stopping
 
@@ -278,10 +280,10 @@ run_hyperparameter_search(
   and so does `split_draws` above one with a backend pick.
   Call `hpo.available_search_algs()` for the live list on this box.
 - `scheduler`: a block naming `asha`, `hyperband`, `pbt`, `median`, or `fifo` to run every
-  trial to completion (`{"name": "fifo"}`), beside every setting that scheduler's Ray Tune class
-  takes, the objective and `pbt`'s mutations (the search space) excepted; a setting left
-  unstated or one the class does not take is refused by name (`hpo.scheduler_settings`). Each
-  trial reports once per epoch row carrying its `selection` value, so `time_attr:
+  trial to completion, beside every setting that scheduler's Ray Tune class takes, the objective
+  and `pbt`'s mutations (the search space) excepted; a setting left unstated or one the class
+  does not take is refused by name (`hpo.scheduler_settings`). Each trial reports once per
+  epoch row carrying its `selection` value, so `time_attr:
   "training_iteration"` counts those epochs and `max_t` is the most epochs a trial runs under a
   halving scheduler; every scheduler's `time_attr` is stated like its other settings.
 - `baseline_params` seeds the search with a point you state; `max_concurrent` bounds

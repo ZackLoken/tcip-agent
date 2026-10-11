@@ -163,17 +163,15 @@ def test_run_hyperparameter_search_refuses_a_split_draws_of_another_type_by_dire
 
 
 @pytest.mark.parametrize("value", [0, -1])
-def test_run_hyperparameter_search_refuses_n_trials_not_a_count_when_a_bound_is_read(
+def test_run_hyperparameter_search_refuses_n_trials_not_a_count_above_one_draw(
     tmp_path,
     real_hpo_base_config,
     monkeypatch,
     value,
 ):
-    """Guard. n_trials that is not a positive count refuses at the budget leg on a call that
-    reads a bound (here, a paired launch with no stated trial_budget), the search never reached:
-    a negative n_trials counts zero through Ray's own generator while Tuner.fit runs it
-    unbounded, and a zero n_trials launches nothing, so the bound the leg exists to check would
-    admit exactly what it should refuse without this clause.
+    """Guard. n_trials that is not a positive count refuses on a paired launch with no stated
+    trial_budget, the search never reached: a negative n_trials counts zero through Ray's own
+    generator while Tuner.fit runs it unbounded, and a zero n_trials launches nothing.
     """
     import tcip_mcp.tools.training_tools as tt
 
@@ -197,19 +195,22 @@ def test_run_hyperparameter_search_refuses_n_trials_not_a_count_when_a_bound_is_
 
 
 @pytest.mark.parametrize("value", [0, -1])
-def test_run_hyperparameter_search_admits_n_trials_not_a_count_at_one_draw_with_no_budget(
+def test_run_hyperparameter_search_refuses_n_trials_not_a_count_at_one_draw_with_no_budget(
     tmp_path,
     real_hpo_base_config,
     monkeypatch,
     value,
 ):
-    """Coverage. n_trials=0 or -1 at one draw with no trial_budget reads no bound at all, so the
-    budget leg is never called: the search is reached and n_trials is passed through unread by
-    the door.
+    """Guard. n_trials=0 or -1 at one draw with no trial_budget reads no bound, and still
+    refuses naming the count, the search never reached; the same call at n_trials=1 is admitted
+    (test_run_hyperparameter_search_admits_a_one_draw_launch_with_no_stated_budget).
     """
     import tcip_mcp.tools.training_tools as tt
 
-    captured = _search(monkeypatch)
+    ran = []
+    monkeypatch.setattr(
+        "tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran)
+    )
 
     result = tt.run_hyperparameter_search(
         tmp_path,
@@ -220,8 +221,9 @@ def test_run_hyperparameter_search_admits_n_trials_not_a_count_at_one_draw_with_
         search_seed=0,
     )
 
-    assert "error" not in result, result
-    assert captured["num_samples"] == value
+    assert "error" in result and f"n_trials={value}" in result["error"]
+    assert "is not a count of trials" in result["error"]
+    assert not ran
 
 
 def test_run_hyperparameter_search_refuses_split_draws_above_one_with_no_trial_budget(
@@ -1097,9 +1099,7 @@ def test_run_hyperparameter_search_admits_split_draws_with_explicit_seeds(
     assert captured["param_space"]["data.split.seed"]["choices"] == [7, 99]
 
 
-@pytest.mark.parametrize(
-    "search_alg, budget", [("grid", 6), ("variant_generator", 2)]
-)
+@pytest.mark.parametrize("search_alg, budget", [("grid", 6), ("random", 2)])
 def test_run_hyperparameter_search_admits_split_draws_with_a_native_search_alg(
     tmp_path,
     real_hpo_base_config,
@@ -1107,10 +1107,9 @@ def test_run_hyperparameter_search_admits_split_draws_with_a_native_search_alg(
     search_alg,
     budget,
 ):
-    """Every native search_alg (random, grid, variant_generator) builds the paired
-    BasicVariantGenerator; only a backend searcher is refused. Each budget is Ray's own count
-    over the default space at two draws: three batch_size values under grid, a sampled space
-    under variant_generator.
+    """Every native search_alg builds the paired BasicVariantGenerator; only a backend searcher
+    is refused. Each budget is Ray's own count over the default space at two draws: three
+    batch_size values under grid, a sampled space under random.
     """
     import tcip_mcp.tools.training_tools as tt
 
