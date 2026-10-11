@@ -250,7 +250,8 @@ traits:
   format: numeric
   crops: [currant, elderberry]
 - name: fruit_drop
-  definition: Proportion of ripe fruit that drop to ground (as opposed to being retained on the tree)
+  definition: Proportion of ripe fruit that drop to ground (as opposed to being retained on
+    the tree)
   format: ordinal
   crops: [persimmon]
 - name: fruit_firmness
@@ -303,7 +304,8 @@ traits:
   format: date
   crops: [currant, elderberry]
 - name: fruit_ripe_05per_julian
-  definition: Number of days from January 1st until 5% of the bush's fruit has ripened to eating stage
+  definition: Number of days from January 1st until 5% of the bush's fruit has ripened to
+    eating stage
   format: numeric
   crops: [currant, elderberry]
 - name: fruit_ripe_50per_date
@@ -311,7 +313,8 @@ traits:
   format: date
   crops: [currant, elderberry, persimmon]
 - name: fruit_ripe_50per_julian
-  definition: Number of days from January 1st until 50% of the bush's fruit has ripened to eating stage
+  definition: Number of days from January 1st until 50% of the bush's fruit has ripened to
+    eating stage
   format: numeric
   crops: [currant, elderberry]
 - name: fruit_ripe_95per_date
@@ -319,7 +322,8 @@ traits:
   format: date
   crops: [currant, elderberry]
 - name: fruit_ripe_95per_julian
-  definition: Number of days from January 1st until 95% of the bush's fruit has ripened to eating stage
+  definition: Number of days from January 1st until 95% of the bush's fruit has ripened to
+    eating stage
   format: numeric
   crops: [currant, elderberry]
 - name: fruit_seed_count
