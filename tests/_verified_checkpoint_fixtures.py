@@ -112,25 +112,22 @@ def detection_images(
 
 
 def table_images(where: Path, *, n: int = 2) -> dict:
-    """A tiny table-labeled dataset under ``where``: ``n`` three-band frames and a ``labels.csv``
-    naming each by stem with a class label, alternating 0 and 1. Returns the ``images_dir`` and
-    ``labels_dir`` a data section names it by.
+    """The ``images_dir`` and ``labels_dir`` a data section names a tiny table-labeled dataset
+    under ``where`` by: ``n`` 64x48 frames of distinct intensities, labeled alternately 0 and 1
+    (:func:`~tests.tiny_trainer_fixtures.write_regression_dataset`).
     """
-    import csv
+    from tests.tiny_trainer_fixtures import (
+        distinct_intensities,
+        write_regression_dataset,
+    )
 
-    from PIL import Image
-
-    images_dir = where / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True, exist_ok=True)
-    table = where / "labels.csv"
-    with open(table, "w", newline="", encoding="utf-8") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(("stem", "label"))
-        for i in range(n):
-            Image.new("RGB", (64, 48), color=(60 + 40 * i, 90, 60)).save(
-                images_dir / f"frame{i}.png"
-            )
-            writer.writerow((f"frame{i}", i % 2))
+    images_dir, table = write_regression_dataset(
+        where,
+        distinct_intensities(n),
+        [i % 2 for i in range(n)],
+        height=48,
+        width=64,
+    )
     return {"images_dir": str(images_dir), "labels_dir": str(table)}
 
 

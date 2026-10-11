@@ -11,7 +11,6 @@ from pathlib import Path
 
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._chain_fixtures import BESPOKE_CLASSIFIER
 
 torch = pytest.importorskip("torch")
@@ -19,7 +18,6 @@ torch = pytest.importorskip("torch")
 from tcip_mcp.pipelines.model_build import CONFIG_KEY, STATE_DICT_KEY  # noqa: E402
 
 torchvision = pytest.importorskip("torchvision")
-from torchvision.utils import save_image
 
 from tests import REPO_ROOT, bespoke_models  # noqa: E402
 from tests._producer_fixtures import run_over  # noqa: E402
@@ -32,21 +30,18 @@ from tests._training_values import adamw_optimizer, evaluation_block, schedule  
 
 @pytest.fixture()
 def tiny_classification_data(tmp_path):
-    """A minimal 2-class image classification dataset: images plus their ground-truth table."""
-    images_dir = tmp_path / "cls" / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True)
-    rows = ["stem,label"]
-    for cls_name, cls_idx in [("healthy", 0), ("diseased", 1)]:
-        for i in range(6):
-            if cls_idx == 0:
-                img = torch.rand(3, 64, 64) * 0.3  # dark-ish
-            else:
-                img = torch.rand(3, 64, 64) * 0.3 + 0.7  # bright-ish
-            stem = f"{cls_name}_{i:03d}"
-            save_image(img, str(images_dir / f"{stem}.png"))
-            rows.append(f"{stem},{cls_idx}")
-    csv_path = tmp_path / "cls_labels.csv"
-    csv_path.write_text("\n".join(rows) + "\n", encoding="utf-8", newline="\n")
+    """A minimal 2-class image classification dataset: six dark frames of class 0 and six bright
+    ones of class 1, plus their ground-truth table.
+    """
+    from tests.tiny_trainer_fixtures import write_regression_dataset
+
+    images_dir, csv_path = write_regression_dataset(
+        tmp_path / "cls",
+        [0.05 * i for i in range(6)] + [0.7 + 0.05 * i for i in range(6)],
+        [0] * 6 + [1] * 6,
+        height=64,
+        width=64,
+    )
     return str(images_dir), str(csv_path)
 
 

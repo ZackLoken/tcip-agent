@@ -315,11 +315,8 @@ def test_tiled_dataset_collate_roundtrip(tmp_path):
 
 def test_build_dataset_no_tiling_unchanged(tmp_path):
     pytest.importorskip("torch")
-    import csv
-
-    from PIL import Image
-
     from tcip_mcp.pipelines.data.datasets import DetectionDataset
+    from tests.tiny_trainer_fixtures import write_regression_dataset
 
     images_dir = _det_dataset(tmp_path, n=3, size=64)
     ds = dataset_over("detection", str(images_dir), subject="bud")
@@ -328,17 +325,9 @@ def test_build_dataset_no_tiling_unchanged(tmp_path):
 
     # An enabled tiling handed to a task that trains whole frames refuses by name; untiled, the
     # same samples build the plain classification dataset.
-    cls_dir = tmp_path / "cls" / "images" / UNDATED_BUCKET
-    cls_dir.mkdir(parents=True, exist_ok=True)
-    rows = []
-    for i in range(2):
-        Image.new("RGB", (32, 32), (100, 100, 100)).save(cls_dir / f"c{i}.png")
-        rows.append((f"c{i}", i % 2))
-    csv_path = tmp_path / "labels.csv"
-    with open(csv_path, "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(("stem", "label"))
-        w.writerows(rows)
+    cls_dir, csv_path = write_regression_dataset(
+        tmp_path / "cls", [0.4, 0.4], [0, 1], height=32, width=32
+    )
     with pytest.raises(
         ValueError, match="data.tiling is enabled for a run of task 'classific"
     ):

@@ -16,7 +16,6 @@ per-test timeout.
 
 from __future__ import annotations
 
-import csv
 import math
 from functools import partial
 from pathlib import Path
@@ -38,6 +37,7 @@ from tests._chain_fixtures import (  # noqa: E402
 from tests._image_fixtures import write_noise_image  # noqa: E402
 from tests._producer_fixtures import dataset_over, label_image, run_over  # noqa: E402
 from tests._training_values import adamw_optimizer, evaluation_block  # noqa: E402
+from tests.tiny_trainer_fixtures import write_regression_dataset  # noqa: E402
 
 IMG = 64
 
@@ -198,23 +198,14 @@ def test_semantic_seg_e2e(tmp_path: Path):
     )
 
 
-def _write_csv(
-    path: Path, rows: list[tuple[str, object]], header: tuple[str, str]
-) -> None:
-    with open(path, "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(header)
-        w.writerows(rows)
-
-
 def test_ordinal_e2e(tmp_path: Path):
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
-    rows = []
-    for i in range(6):
-        _save_png(images_dir / f"img{i}.png", bright=(i % 3 == 0))
-        rows.append((f"img{i}", i % 3))  # ranks 0..2
-    csv_path = tmp_path / "ranks.csv"
-    _write_csv(csv_path, rows, ("stem", "rank"))
+    images_dir, csv_path = write_regression_dataset(
+        tmp_path,
+        [0.8 if i % 3 == 0 else 0.2 for i in range(6)],
+        [i % 3 for i in range(6)],
+        height=IMG,
+        width=IMG,
+    )
 
     model_source = _model_source(BESPOKE_ORDINAL, "ordinal")
     _assert_trained(
@@ -232,13 +223,13 @@ def test_ordinal_derives_num_ranks_from_data(tmp_path: Path):
     bound. crops.yml's kernel_pellicle trait is a real 1-7 scale (ranks 0-6, 7 ranks) once
     0-indexed.
     """
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
-    rows = []
-    for rank in range(7):
-        _save_png(images_dir / f"img{rank}.png", bright=(rank >= 4))
-        rows.append((f"img{rank}", rank))
-    csv_path = tmp_path / "ranks.csv"
-    _write_csv(csv_path, rows, ("stem", "rank"))
+    images_dir, csv_path = write_regression_dataset(
+        tmp_path,
+        [0.8 if rank >= 4 else 0.2 for rank in range(7)],
+        list(range(7)),
+        height=IMG,
+        width=IMG,
+    )
 
     _dataset, data = run_over("ordinal", str(images_dir), str(csv_path))
     assert data["num_ranks"] == 7 and data.get("num_classes") is None
@@ -259,13 +250,13 @@ def test_ordinal_num_ranks_stated_raises(tmp_path: Path):
     (here too small, which would train the excess ranks as silent duplicates of the top rank)
     is refused rather than compared.
     """
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
-    rows = []
-    for rank in range(7):
-        _save_png(images_dir / f"img{rank}.png", bright=(rank >= 4))
-        rows.append((f"img{rank}", rank))
-    csv_path = tmp_path / "ranks.csv"
-    _write_csv(csv_path, rows, ("stem", "rank"))
+    images_dir, csv_path = write_regression_dataset(
+        tmp_path,
+        [0.8 if rank >= 4 else 0.2 for rank in range(7)],
+        list(range(7)),
+        height=IMG,
+        width=IMG,
+    )
 
     with pytest.raises(ValueError, match="num_ranks"):
         dataset_over(
@@ -277,13 +268,9 @@ def test_classification_derives_num_classes_from_data(tmp_path: Path):
     """A label range of 4 classes must derive its count from the CSV, never truncate to a
     narrower bound.
     """
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
-    rows = []
-    for label in range(4):
-        _save_png(images_dir / f"img{label}.png", bright=(label >= 2))
-        rows.append((f"img{label}", label))
-    csv_path = tmp_path / "labels.csv"
-    _write_csv(csv_path, rows, ("stem", "label"))
+    images_dir, csv_path = write_regression_dataset(
+        tmp_path, [0.2, 0.2, 0.8, 0.8], [0, 1, 2, 3], height=IMG, width=IMG
+    )
 
     _dataset, data = run_over("classification", str(images_dir), str(csv_path))
     assert data["num_classes"] == 4 and data.get("num_ranks") is None
@@ -291,13 +278,9 @@ def test_classification_derives_num_classes_from_data(tmp_path: Path):
 
 def test_classification_num_classes_stated_raises(tmp_path: Path):
     """A caller-configured num_classes raises: the class count is the CSV's own."""
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
-    rows = []
-    for label in range(4):
-        _save_png(images_dir / f"img{label}.png", bright=(label >= 2))
-        rows.append((f"img{label}", label))
-    csv_path = tmp_path / "labels.csv"
-    _write_csv(csv_path, rows, ("stem", "label"))
+    images_dir, csv_path = write_regression_dataset(
+        tmp_path, [0.2, 0.2, 0.8, 0.8], [0, 1, 2, 3], height=IMG, width=IMG
+    )
 
     with pytest.raises(ValueError, match="num_classes"):
         dataset_over(
@@ -309,13 +292,13 @@ def test_classification_num_classes_stated_raises(tmp_path: Path):
 
 
 def test_regression_e2e(tmp_path: Path):
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
-    rows = []
-    for i in range(6):
-        _save_png(images_dir / f"img{i}.png", bright=(i % 2 == 0))
-        rows.append((f"img{i}", float(i) / 6.0))
-    csv_path = tmp_path / "values.csv"
-    _write_csv(csv_path, rows, ("stem", "value"))
+    images_dir, csv_path = write_regression_dataset(
+        tmp_path,
+        [0.8 if i % 2 == 0 else 0.2 for i in range(6)],
+        [float(i) / 6.0 for i in range(6)],
+        height=IMG,
+        width=IMG,
+    )
 
     model_source = _model_source(BESPOKE_REGRESSOR, "regression")
     _assert_trained(
@@ -332,13 +315,13 @@ def test_ordinal_evaluate_model_e2e(tmp_path: Path, monkeypatch):
     """evaluate_model runs end to end for ordinal over a CSV of ranks and reports its metrics."""
     from tcip_mcp.tools.training_tools import evaluate_model
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
-    rows = []
-    for i in range(6):
-        _save_png(images_dir / f"img{i}.png", bright=(i % 3 == 0))
-        rows.append((f"img{i}", i % 3))
-    csv_path = tmp_path / "ranks.csv"
-    _write_csv(csv_path, rows, ("stem", "rank"))
+    images_dir, csv_path = write_regression_dataset(
+        tmp_path,
+        [0.8 if i % 3 == 0 else 0.2 for i in range(6)],
+        [i % 3 for i in range(6)],
+        height=IMG,
+        width=IMG,
+    )
 
     model_source = _model_source(BESPOKE_ORDINAL, "ordinal")
     observation = _trained(
@@ -361,13 +344,13 @@ def test_regression_evaluate_model_e2e(tmp_path: Path, monkeypatch):
     """evaluate_model runs end to end for regression over a CSV of values."""
     from tcip_mcp.tools.training_tools import evaluate_model
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
-    rows = []
-    for i in range(6):
-        _save_png(images_dir / f"img{i}.png", bright=(i % 2 == 0))
-        rows.append((f"img{i}", float(i) / 6.0))
-    csv_path = tmp_path / "values.csv"
-    _write_csv(csv_path, rows, ("stem", "value"))
+    images_dir, csv_path = write_regression_dataset(
+        tmp_path,
+        [0.8 if i % 2 == 0 else 0.2 for i in range(6)],
+        [float(i) / 6.0 for i in range(6)],
+        height=IMG,
+        width=IMG,
+    )
 
     model_source = _model_source(BESPOKE_REGRESSOR, "regression")
     observation = _trained(

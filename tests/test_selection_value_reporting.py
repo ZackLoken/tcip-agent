@@ -15,6 +15,8 @@ torch = pytest.importorskip("torch")
 from tcip_mcp.pipelines.model_build import METRICS_KEY
 from tcip_mcp.pipelines.training.generic_trainer import train
 from tests.tiny_trainer_fixtures import (
+    TRAIN_INTENSITIES,
+    VAL_INTENSITIES,
     classifier_config,
     frames_data,
     opposed_regression_data,
@@ -22,9 +24,6 @@ from tests.tiny_trainer_fixtures import (
     run_context,
     separable_classifier_data,
 )
-
-TRAIN_INTENSITIES = [0.10, 0.25, 0.40, 0.55, 0.70, 0.85]
-VAL_INTENSITIES = [0.15, 0.35, 0.60, 0.90]
 
 
 def _config(

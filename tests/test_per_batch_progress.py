@@ -21,6 +21,8 @@ from tcip_mcp.experiments import (  # noqa: E402
 )
 from tcip_mcp.pipelines.training.envelope import TrainContext  # noqa: E402
 from tests.tiny_trainer_fixtures import (  # noqa: E402
+    TRAIN_INTENSITIES,
+    VAL_INTENSITIES,
     frames_data,
     opposed_regression_data,
     regressor_config,
@@ -31,10 +33,6 @@ from tests.tiny_trainer_fixtures import (  # noqa: E402
 def batch_rows(rows):
     """The per-batch rows among ``rows`` (``experiments.partition_rows``)."""
     return partition_rows(rows)[1]
-
-
-TRAIN_INTENSITIES = [0.10, 0.25, 0.40, 0.55, 0.70, 0.85]
-VAL_INTENSITIES = [0.15, 0.35, 0.60, 0.90]
 
 
 def _context(

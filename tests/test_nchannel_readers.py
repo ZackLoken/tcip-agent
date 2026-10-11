@@ -6,9 +6,9 @@ import pytest
 torch = pytest.importorskip("torch")
 from PIL import Image  # noqa: E402
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
 from tests._chain_fixtures import CLASSIFIER_SOURCE  # noqa: E402
 from tests._producer_fixtures import dataset_over  # noqa: E402
+from tests.tiny_trainer_fixtures import write_regression_dataset  # noqa: E402
 
 
 def test_pil_to_tensor_grayscale_and_multiband():
@@ -44,14 +44,13 @@ def test_load_image_grayscale_pil_and_npy_multiband(tmp_path):
 
 
 def test_build_dataset_grayscale_yields_one_channel(tmp_path):
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True)
-    Image.new("RGB", (16, 16)).save(images_dir / "a.png")
-    (tmp_path / "labels.csv").write_text("stem,label\na,0\n")
+    images_dir, labels = write_regression_dataset(
+        tmp_path, [0.0], [0], height=16, width=16
+    )
     ds = dataset_over(
         "classification",
         str(images_dir),
-        str(tmp_path / "labels.csv"),
+        str(labels),
         stated={"num_channels": 1},
     )
     img, _ = ds[0]
@@ -64,16 +63,13 @@ def test_grayscale_classification_end_to_end(tmp_path):
     from tests._chain_fixtures import training_config
     from tests.tiny_trainer_fixtures import run_context
 
-    images_dir = tmp_path / "ds" / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True)
-    rows = ["stem,label"]
-    for i in range(4):
-        Image.new("RGB", (32, 32), (30 * i, 40, 50)).save(
-            images_dir / f"img{i}.png"
-        )
-        rows.append(f"img{i},{i % 2}")
-    labels = tmp_path / "ds" / "labels.csv"
-    labels.write_text("\n".join(rows) + "\n")
+    images_dir, labels = write_regression_dataset(
+        tmp_path / "ds",
+        [0.1, 0.3, 0.5, 0.7],
+        [0, 1, 0, 1],
+        height=32,
+        width=32,
+    )
 
     ctx = run_context(
         tmp_path,

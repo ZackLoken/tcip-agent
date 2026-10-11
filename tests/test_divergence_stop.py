@@ -15,6 +15,7 @@ from tcip_mcp.pipelines.training.generic_trainer import train
 from tests.tiny_trainer_fixtures import (
     ALWAYS_DIVERGED_MODEL,
     MEAN_INTENSITY_REGRESSOR,
+    TRAIN_INTENSITIES,
     frames_data,
     regressor_config,
     run_context,
@@ -25,7 +26,6 @@ STEP_COUNTED_BUILDER = (
     "tiny_trainer_fixtures:build_step_counted_divergence_model"
 )
 
-TRAIN_INTENSITIES = [0.10, 0.25, 0.40, 0.55, 0.70, 0.85]
 DIVERGED_PASSES_PHRASE = "2 consecutive full training passes"
 
 

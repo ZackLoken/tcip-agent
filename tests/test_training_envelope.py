@@ -12,7 +12,6 @@ from pathlib import Path
 import pytest
 
 import tcip_store as ts
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 torch = pytest.importorskip("torch")
 
@@ -252,27 +251,18 @@ def test_envelope_explicit_set_final_weights_overrides_convention(tmp_path):
 def test_a_resumed_run_records_its_resume_checkpoint_and_completes(tmp_path):
     """The run resumed from a checkpoint names it in its launch record and completes."""
     pytest.importorskip("torchvision")
-    import csv
-
-    from PIL import Image
-
     from tcip_mcp.experiments import RUN_FILE, read_record
     from tcip_mcp.pipelines.training.generic_trainer import run_loaders, train
     from tcip_mcp.registry_paths import stored_path
+    from tests.tiny_trainer_fixtures import write_regression_dataset
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True, exist_ok=True)
-    rows = []
-    for i in range(6):
-        Image.new("RGB", (32, 32), (40 * (i % 5), 50, 60)).save(
-            images_dir / f"img{i}.png"
-        )
-        rows.append((f"img{i}", i % 2))
-    csv_path = tmp_path / "labels.csv"
-    with open(csv_path, "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(("stem", "label"))
-        w.writerows(rows)
+    images_dir, csv_path = write_regression_dataset(
+        tmp_path,
+        [(i % 5) / 5 for i in range(6)],
+        [i % 2 for i in range(6)],
+        height=32,
+        width=32,
+    )
 
     def build_loader(run):
         """``run``'s training loader over the six frames (``generic_trainer.run_loaders``)."""

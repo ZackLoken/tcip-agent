@@ -604,24 +604,17 @@ def test_preflight_calibration_ratio_wrong_task_flags_issue(tmp_path):
     """A classification run never resolves to the within-image split a calibration region
     reserves from, so the fraction is named as having no effect.
     """
-    from PIL import Image
-
     from tcip_mcp.tools.training_tools import preflight_config
+    from tests.tiny_trainer_fixtures import write_regression_dataset
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True)
-    rows = ["stem,label"]
-    for i in range(4):
-        Image.new("RGB", (32, 32), (20 * i, 30, 40)).save(
-            images_dir / f"img{i}.png"
-        )
-        rows.append(f"img{i},{i % 2}")
-    (tmp_path / "labels.csv").write_text("\n".join(rows) + "\n")
+    images_dir, csv_path = write_regression_dataset(
+        tmp_path, [0.1, 0.3, 0.5, 0.7], [0, 1, 0, 1], height=32, width=32
+    )
     cfg = training_config(
         CLASSIFIER_SOURCE,
         {
             "images_dir": str(images_dir),
-            "labels_dir": str(tmp_path / "labels.csv"),
+            "labels_dir": str(csv_path),
             "split": {"calibration_ratio": 0.15, "val_ratio": 0.15, "seed": 1},
         },
     )

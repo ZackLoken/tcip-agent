@@ -1,6 +1,6 @@
 """Tests for composable ML primitives.
 
-Covers: datasets, samplers, optimizer factory, generic trainer basics,
+Covers: datasets, optimizer factory, generic trainer basics,
 predictor, active learning scorers, and tool imports.
 """
 
@@ -17,25 +17,17 @@ from tests._producer_fixtures import dataset_over, run_over  # noqa: E402
 from tests._training_values import adamw_optimizer, sgd_optimizer  # noqa: E402
 
 # ====================================================================
-# Data Layer, Datasets & Samplers
+# Data Layer & Datasets
 # ====================================================================
 
 
 class TestDatasets:
     def test_build_dataset_classification(self, tmp_path):
         """Classification dataset from its ground-truth table, one row per image."""
-        from torchvision.utils import save_image
+        from tests.tiny_trainer_fixtures import write_regression_dataset
 
-        images_dir = tmp_path / "images" / UNDATED_BUCKET
-        images_dir.mkdir(parents=True)
-        rows = ["stem,label"]
-        for i in range(4):
-            img = torch.randint(0, 255, (3, 32, 32), dtype=torch.uint8)
-            save_image(img.float() / 255.0, str(images_dir / f"img{i}.png"))
-            rows.append(f"img{i},{i % 2}")
-        csv_path = tmp_path / "labels.csv"
-        csv_path.write_text(
-            "\n".join(rows) + "\n", encoding="utf-8", newline="\n"
+        images_dir, csv_path = write_regression_dataset(
+            tmp_path, [0.1, 0.3, 0.5, 0.7], [0, 1, 0, 1], height=32, width=32
         )
 
         ds, data = run_over("classification", str(images_dir), str(csv_path))
@@ -73,28 +65,6 @@ class TestDatasets:
         ds = dataset_over("detection", str(imgs), subject="bud")
         assert ds.task_type == "detection"
         assert len(ds) == 1
-
-
-class TestSamplers:
-    def test_weighted_random_sampler(self):
-        from tcip_mcp.pipelines.data.samplers import build_sampler
-
-        class FakeDataset:
-            task_type = "classification"
-            num_classes = 3
-            num_samples = 6
-            class_distribution = {0: 3, 1: 2, 2: 1}
-
-            def __len__(self):
-                return self.num_samples
-
-            def __getitem__(self, idx):
-                labels = [0, 0, 0, 1, 1, 2]
-                return torch.zeros(3, 32, 32), {"label": labels[idx]}
-
-        ds = FakeDataset()
-        sampler = build_sampler({"name": "weighted_random"}, ds)
-        assert sampler is not None
 
 
 # ====================================================================

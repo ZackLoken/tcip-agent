@@ -610,26 +610,15 @@ def _table_tree(tmp_path) -> tuple[Path, Path]:
     """Four 32 px frames and a table labeling them in three classes, under ``tmp_path``: their
     images directory and the table.
     """
-    import csv
+    from tests.tiny_trainer_fixtures import write_regression_dataset
 
-    from PIL import Image
-
-    imgs, table = (
-        tmp_path / "ds" / "images" / UNDATED_BUCKET,
-        tmp_path / "ds" / "labels.csv",
+    return write_regression_dataset(
+        tmp_path / "ds",
+        [0.1, 0.3, 0.5, 0.7],
+        [0, 1, 2, 0],
+        height=32,
+        width=32,
     )
-    imgs.mkdir(parents=True)
-    rows = []
-    for index in range(4):
-        Image.new("RGB", (32, 32), (40 * index, 90, 120)).save(
-            imgs / f"img{index}.png"
-        )
-        rows.append((f"img{index}", index % 3))
-    with open(table, "w", newline="") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(("stem", "label"))
-        writer.writerows(rows)
-    return imgs, table
 
 
 def _bespoke_classification_data(imgs: Path, table: Path, **sizes) -> dict:

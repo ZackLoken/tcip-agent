@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import csv
 import random
 from pathlib import Path
 
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._chain_fixtures import CLASSIFIER_SOURCE
 
 torch = pytest.importorskip("torch")
@@ -55,21 +53,15 @@ from tests._training_values import adamw_optimizer, schedule  # noqa: E402
 
 
 def _classification_data(tmp_path: Path, n: int = 6):
-    from PIL import Image
+    from tests.tiny_trainer_fixtures import write_regression_dataset
 
-    images_dir = tmp_path / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True, exist_ok=True)
-    rows = []
-    for i in range(n):
-        Image.new("RGB", (32, 32), (40 * (i % 5), 50, 60)).save(
-            images_dir / f"img{i}.png"
-        )
-        rows.append((f"img{i}", i % 2))
-    csv_path = tmp_path / "labels.csv"
-    with open(csv_path, "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(("stem", "label"))
-        w.writerows(rows)
+    images_dir, csv_path = write_regression_dataset(
+        tmp_path,
+        [(i % 5) / 5 for i in range(n)],
+        [i % 2 for i in range(n)],
+        height=32,
+        width=32,
+    )
     return str(images_dir), str(csv_path)
 
 
