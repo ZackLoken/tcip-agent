@@ -50,7 +50,8 @@ DEFAULT_LOCK_TIMEOUT_S = 30.0
 
 def creation_temp_name(destination: str, token: str) -> str:
     """The name a file is built under before it is installed at ``destination``: hidden and
-    temp-suffixed."""
+    temp-suffixed.
+    """
     return f".{destination}.{token}{_TEMP_SUFFIX}"
 
 
@@ -154,7 +155,8 @@ def transition_lock(
     root: str, *, timeout_s: float = DEFAULT_LOCK_TIMEOUT_S
 ) -> Generator[None]:
     """Hold the lock a root's database is created under; creating the root's ``.tcip`` directory
-    is its first act."""
+    is its first act.
+    """
     db_path = database_file(root)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     with path_lock(db_path, timeout_s=timeout_s):
@@ -212,7 +214,8 @@ def _stage_bytes(path: Path, data: bytes) -> str:
 
 def _apply_staged(temp: str, path: Path) -> None:
     """Make one staged temp file the file at ``path`` and flush the rename; a rename that fails
-    removes its staging file."""
+    removes its staging file.
+    """
     try:
         retry_while_denied(
             lambda: os.replace(temp, path), DEFAULT_LOCK_TIMEOUT_S
@@ -243,7 +246,8 @@ def _read_bytes(path: Path) -> bytes | None:
 @contextmanager
 def _locked(path: Path) -> Generator[None]:
     """Hold ``path``'s lock (:func:`path_lock`); ``StoreBusyError`` naming it when the wait runs
-    out."""
+    out.
+    """
     _, timeout_error = _filelock_classes()
     _ensure_parent(path)
     try:
@@ -257,7 +261,8 @@ def require_version(
     entry: Key | str, data: bytes | None, expect: Version
 ) -> None:
     """Refuse (``VersionConflictError`` naming ``entry``) when the stored bytes ``data``,
-    ``None`` for an absent entry, are not the version ``expect`` names."""
+    ``None`` for an absent entry, are not the version ``expect`` names.
+    """
     current = Version.ABSENT if data is None else _version_of(data)
     if current != expect:
         raise VersionConflictError(entry, expect, current)
@@ -271,7 +276,8 @@ def versioned(
 ) -> Versioned:
     """Stored bytes ``data`` as their decoded value (``decode``) and their version, or, for an
     absent entry (``data`` ``None``), ``default`` paired with ``Version.ABSENT``; ``NotFoundError``
-    stating ``absent`` when no default was given."""
+    stating ``absent`` when no default was given.
+    """
     if data is not None:
         return Versioned(decode(data), _version_of(data))
     if default is REQUIRED:
@@ -308,7 +314,8 @@ def put_blob(
 
 def delete_blob(path: Path, *, expect: Version | None = None) -> None:
     """Remove a file under its lock, comparing ``expect`` and refusing inside an open transaction
-    as :func:`put_blob` does; absence is not an error."""
+    as :func:`put_blob` does; absence is not an error.
+    """
     refuse_inside_transaction("delete_blob")
     with _locked(path):
         if expect is not None:
@@ -318,7 +325,8 @@ def delete_blob(path: Path, *, expect: Version | None = None) -> None:
 
 def is_bookkeeping(name: str) -> bool:
     """Whether a filename is the store's own artifact rather than data: a lock file, a temp file or
-    one of the database's WAL sidecars."""
+    one of the database's WAL sidecars.
+    """
     return (
         name in _DATABASE_SIDECARS
         or name.endswith(_LOCK_SUFFIX)
@@ -353,7 +361,8 @@ def retry_while_denied(
     ``PermissionError`` that ``denied`` accepts (by default every one) after a jittered wait
     capped at the time left of ``budget_s`` from the first attempt; the denial is raised instead
     when the clock, read once the wait ends, has reached that deadline, so no attempt starts
-    after it. Any other error raises at once."""
+    after it. Any other error raises at once.
+    """
     deadline = time.monotonic() + budget_s
     while True:
         try:

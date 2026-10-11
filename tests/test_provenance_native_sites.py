@@ -1,5 +1,6 @@
 """Native provenance stamping at the non-web write sites and the read path that carries it back
-out."""
+out.
+"""
 
 from __future__ import annotations
 
@@ -18,7 +19,8 @@ def _records(img) -> list[dict]:
 
 def test_save_annotations_takes_no_producer_and_names_itself(tmp_path, bound):
     """Every saved record carries a producer and its time: the tool's own, which no caller
-    states."""
+    states.
+    """
     import inspect
 
     from tcip_mcp.tools.annotation_tools import save_annotations
@@ -64,7 +66,8 @@ def test_save_annotations_never_reads_provenance_off_a_shape(tmp_path, bound):
 def test_the_read_path_carries_authorship_out_of_the_record():
     """``client_annotation`` is what ``read_annotations`` returns per annotation. Reference
     admissibility turns on created_by and accepted_by, so a read path that dropped them would leave
-    a stamped author knowable only by opening the label file."""
+    a stamped author knowable only by opening the label file.
+    """
     from tcip_annotation.json_io import client_annotation
     from tcip_annotation.state import Annotation, BBox
 
@@ -87,7 +90,8 @@ def test_the_read_path_carries_authorship_out_of_the_record():
 
 def test_the_read_path_omits_provenance_a_record_does_not_carry():
     """An unattributed label reads back unattributed, not with null authorship keys that a reader
-    could mistake for a recorded absence."""
+    could mistake for a recorded absence.
+    """
     from tcip_annotation.json_io import client_annotation
     from tcip_annotation.state import Annotation, BBox
 

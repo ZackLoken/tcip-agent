@@ -1,7 +1,8 @@
 """Per-band statistics in model_source.builder_kwargs must carry a record of which images they
 came from: model_source.image_stats_sampling, beside builder_kwargs rather than inside it.
 preflight_config refuses a config with statistics and no provenance, and refuses provenance whose
-window paths do not resolve to one of the run's own admitted sources."""
+window paths do not resolve to one of the run's own admitted sources.
+"""
 
 from __future__ import annotations
 
@@ -45,7 +46,8 @@ def _cfg(images_dir, *, builder_kwargs, image_stats_sampling=None):
 def _label(images_dir, *stems, width=16, height=16):
     """One label document per stem's image in ``images_dir``, so the producer admits the images
     these tests point at: the containment check reads the run's own admitted sources, not a
-    directory listing."""
+    directory listing.
+    """
     from tcip_annotation.state import Annotation, BBox
     from tests._producer_fixtures import label_image
 
@@ -61,7 +63,8 @@ def _label(images_dir, *stems, width=16, height=16):
 def _derived(paths, num_channels: int = 3) -> tuple[dict, dict]:
     """The ``builder_kwargs`` statistics and their ``image_stats_sampling`` record, both from the
     exact normalization derivation (``derivations.band_normalization_stats``) over ``paths``,
-    every one of which it must read, rendered by ``derivations.image_stats_provenance``."""
+    every one of which it must read, rendered by ``derivations.image_stats_provenance``.
+    """
     from tcip_mcp.pipelines.derivations import (
         band_normalization_stats,
         image_stats_provenance,
@@ -118,7 +121,8 @@ def test_preflight_refuses_a_window_path_outside_images_dir(tmp_path):
 def test_preflight_records_not_checked_when_no_membership_resolved(tmp_path):
     """A config naming no locations resolves no membership, so there are no sources to check the
     window paths against; preflight says so explicitly rather than silently skipping or passing.
-    The missing locations are their own named issues, beside this."""
+    The missing locations are their own named issues, beside this.
+    """
     pytest.importorskip("torch")
     from PIL import Image
 
@@ -150,7 +154,8 @@ def test_preflight_records_not_checked_when_no_membership_resolved(tmp_path):
 
 def test_preflight_admits_the_exact_derivations_own_record(tmp_path):
     """derivations.image_stats_provenance renders the exact sibling's (mean, std, paths_read)
-    tuple over an image the run admits into a record preflight admits as contained."""
+    tuple over an image the run admits into a record preflight admits as contained.
+    """
     pytest.importorskip("torch")
     from PIL import Image
 
@@ -177,7 +182,8 @@ def test_preflight_admits_the_exact_derivations_own_record(tmp_path):
 def test_preflight_admits_the_sampled_derivations_own_record(tmp_path):
     """image_stats_provenance's sampled branch renders SampledNormalizationStats, carrying the
     caller's own window_size/max_windows_per_image beside the seed WindowSampling itself does not
-    keep, into the same record shape the exact sibling renders."""
+    keep, into the same record shape the exact sibling renders.
+    """
     pytest.importorskip("torch")
     from PIL import Image
 
@@ -217,7 +223,8 @@ def test_preflight_admits_the_exact_derivations_record_over_a_band_group_dataset
 ):
     """The exact derivation must label a band-group raster by its manifest path (the same label
     preflight's containment check resolves data.images_dir's own band groups to), not str() of the
-    BandGroupRef object itself, which would never match and would refuse every band-group run."""
+    BandGroupRef object itself, which would never match and would refuse every band-group run.
+    """
     pytest.importorskip("torch")
     import numpy as np
     import tifffile
@@ -248,7 +255,8 @@ def test_preflight_keeps_every_sample_of_a_two_date_selection(tmp_path):
     """A selection spanning two capture dates holds two samples of one name, and a population
     keyed by that name would report a run smaller than the one that trains and one of its own
     training sources as outside it. Every sample the bound run would train on is in the
-    population, so a window over any of them is contained."""
+    population, so a window over any of them is contained.
+    """
     pytest.importorskip("torch")
     from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.tools.training_tools import preflight_config
@@ -298,7 +306,8 @@ def test_preflight_refuses_a_hand_written_dict_naming_the_record_keys(
     tmp_path,
 ):
     """A record shaped by neither derivation, carrying neither 'windows' nor 'pixel_fraction', is
-    refused, and the refusal names both keys rather than a generic 'missing provenance'."""
+    refused, and the refusal names both keys rather than a generic 'missing provenance'.
+    """
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -322,7 +331,8 @@ def test_preflight_refuses_a_hand_written_dict_naming_the_record_keys(
 
 def test_preflight_refuses_a_record_naming_no_window(tmp_path):
     """A record the schema admits but naming no window says no image produced the statistics,
-    so it is refused as missing provenance."""
+    so it is refused as missing provenance.
+    """
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -344,7 +354,8 @@ def test_preflight_reads_the_band_count_over_every_source_the_run_admits(
 ):
     """Preflight reads the run's own sizes the way the run reads them, over every source it
     admits: a second source of another band count is named here, rather than one source being
-    probed and the rest trained at its count."""
+    probed and the rest trained at its count.
+    """
     pytest.importorskip("torch")
     import numpy as np
     import tifffile
@@ -370,7 +381,8 @@ def test_a_copied_projects_run_reads_its_statistics_windows_from_the_copy(
     tmp_path,
 ):
     """The images a run's statistics windows name are stored against its project like its data,
-    so a copied project's run reads each window's image from the copy."""
+    so a copied project's run reads each window's image from the copy.
+    """
     pytest.importorskip("torch")
     import shutil
 

@@ -1,5 +1,6 @@
 """The checked-in files `tools/generate_harness_discovery.py` writes are what the current
-knowledge documents produce."""
+knowledge documents produce.
+"""
 
 from __future__ import annotations
 

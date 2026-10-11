@@ -26,7 +26,8 @@ _FOUND_RE = re.compile(r"^found\.\d{3}$", re.IGNORECASE)
 def _is_noise_dir(name: str, st: os.stat_result) -> bool:
     """A folder the picker should hide: dotfiles and Windows system/hidden folders
     (``$RECYCLE.BIN``, ``System Volume Information``, ``FOUND.000``, or anything carrying
-    the hidden/system attribute: the latter is a no-op on POSIX)."""
+    the hidden/system attribute: the latter is a no-op on POSIX).
+    """
     if name.startswith((".", "$")):
         return True
     if name.lower() == "system volume information" or _FOUND_RE.match(name):

@@ -32,7 +32,8 @@ denies; a process still holding the project's database open is not transient."""
 def workspace_from_environment() -> Path:
     """The workspace root ``TCIP_WORKSPACE`` names (``~`` expanded), created and resolved, its path
     logged. Read once, at a process's entry. Refuses (``ValueError``) a variable that is unset or
-    blank."""
+    blank.
+    """
     raw = os.environ.get("TCIP_WORKSPACE", "").strip()
     if not raw:
         raise ValueError(
@@ -49,7 +50,8 @@ def workspace_from_environment() -> Path:
 class BoundProject(NamedTuple):
     """The project a process was started for: its directory, the id its record held at start
     (:func:`~tcip_mcp.project_record.existing_project`), and the workspace naming the backend
-    that serves it."""
+    that serves it.
+    """
 
     root: Path
     id: str
@@ -74,13 +76,15 @@ _POINTER_PARTS = ("last_opened",)
 
 def last_opened_key(workspace: Path) -> Key:
     """The workspace's last-opened pointer: the id of the project the backend opened last, a JSON
-    string replaced whole on every open."""
+    string replaced whole on every open.
+    """
     return Key(LAST_OPENED_STORE, str(workspace), _POINTER_PARTS)
 
 
 def read_last_opened(workspace: Path) -> str | None:
     """The id the last-opened pointer holds, as stored, or ``None`` when the backend has opened
-    nothing in this workspace yet. A pointer the store cannot read raises the store's own error."""
+    nothing in this workspace yet. A pointer the store cannot read raises the store's own error.
+    """
     return tcip_store.read(last_opened_key(workspace), default=None)
 
 
@@ -101,7 +105,8 @@ def project_dirs(workspace: Path) -> list[Path]:
 
 def project_records(workspace: Path) -> list[tuple[Path, dict]]:
     """Every workspace project (:func:`project_dirs`) with its record's fields as
-    :func:`tcip_mcp.project_record.record_fields` reads them."""
+    :func:`tcip_mcp.project_record.record_fields` reads them.
+    """
     from tcip_mcp.project_record import record_fields
 
     return [
@@ -116,7 +121,8 @@ def project_by_id(
     """The project among ``records`` (:func:`project_records`) whose record holds ``project_id``,
     with its fields. Raises ``LookupError`` naming the id when no project holds it, with every
     project whose record would not read and why; and naming both directories when two hold it (a
-    copied project)."""
+    copied project).
+    """
     found: list[tuple[Path, dict]] = []
     unreadable: list[str] = []
     for project, fields in records:

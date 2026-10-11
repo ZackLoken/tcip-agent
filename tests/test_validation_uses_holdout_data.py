@@ -28,7 +28,8 @@ VAL_INTENSITIES = [0.15, 0.35, 0.60, 0.90]
 
 def _context(tmp_path, horizon: int, **overrides):
     """The context of a regression run over opposed frames under ``tmp_path``, opened by the
-    launcher's own producer."""
+    launcher's own producer.
+    """
     data = opposed_regression_data(
         tmp_path / "ds", TRAIN_INTENSITIES, VAL_INTENSITIES
     )
@@ -46,7 +47,8 @@ def _context(tmp_path, horizon: int, **overrides):
 def test_the_run_a_test_trains_is_the_one_its_directory_records(tmp_path):
     """The context a training test trains holds the run ``observed_run`` reads back from the
     directory the launcher's own producer opened, and loaders over that run's recorded partition,
-    whose validation side holds the validation frames its fixture wrote and no other."""
+    whose validation side holds the validation frames its fixture wrote and no other.
+    """
     from tcip_mcp.experiments import observe
     from tcip_mcp.pipelines.training.run_registry import observed_run
     from tests._verified_checkpoint_fixtures import partition_side
@@ -75,7 +77,8 @@ def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(
     tmp_path, monkeypatch
 ):
     """The ``val_`` metrics an epoch records equal a real evaluation of that epoch's model on the
-    holdout loader, and differ from the same evaluation run over the training loader."""
+    holdout loader, and differ from the same evaluation run over the training loader.
+    """
     models: list = []
     capture_model(monkeypatch, models)
 
@@ -133,7 +136,8 @@ def test_best_checkpoint_and_early_stopping_follow_the_holdout_loader(
     tmp_path, monkeypatch
 ):
     """With holdout loss worsening while training loss improves, the run stops early and keeps the
-    first epoch's checkpoint: both decisions read the holdout loader, not the training one."""
+    first epoch's checkpoint: both decisions read the holdout loader, not the training one.
+    """
     models: list = []
     capture_model(monkeypatch, models)
 

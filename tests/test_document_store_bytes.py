@@ -97,7 +97,8 @@ def test_the_subject_registry_lands_as_the_ordered_json_document_labels_are_deco
     tmp_path,
 ):
     """Written through ``replace_registry``, which encodes with the canonical record codec: the
-    subject and attribute sequences keep their declared order rather than being sorted."""
+    subject and attribute sequences keep their declared order rather than being sorted.
+    """
     from tcip_mcp import subject_registry
     from tcip_mcp.dataset_layout import subjects_path
 
@@ -142,7 +143,8 @@ def test_a_band_group_manifest_lands_as_the_json_the_image_enumerators_parse(
     tmp_path,
 ):
     """A ``.bandgroup`` is itself an enumerated logical image, so its bytes are what the
-    enumerators read; written through ``write_band_group_manifest``."""
+    enumerators read; written through ``write_band_group_manifest``.
+    """
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
 
     images = tmp_path / "images"
@@ -188,7 +190,8 @@ def test_a_retrospective_dumps_as_its_markdown_text_spelled_as_one_json_string(
     monkeypatch,
 ):
     """Written through ``write_retrospective``, its clock held still: the text itself, as one
-    JSON string."""
+    JSON string.
+    """
     from tcip_mcp.tools import meta_tools
 
     monkeypatch.setattr(meta_tools, "now_iso", lambda: NOW)

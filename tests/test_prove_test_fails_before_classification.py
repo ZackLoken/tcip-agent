@@ -42,7 +42,8 @@ def _write(path: Path, text: str) -> None:
 
 def _scratch_repo(tmp_path: Path) -> Path:
     """A git repository holding nothing but the script under test, so it resolves its own
-    ``REPO`` to this scratch tree rather than the real one."""
+    ``REPO`` to this scratch tree rather than the real one.
+    """
     repo = tmp_path / "scratch"
     (repo / "tools").mkdir(parents=True)
     (repo / "tests").mkdir()
@@ -79,7 +80,8 @@ def _run(
 
 def test_a_fixture_shaped_type_error_in_the_test_body_is_refused(tmp_path):
     """A constructor called with a keyword the baseline does not accept raises TypeError at the
-    call site, inside the test file itself: the code under test was never reached."""
+    call site, inside the test file itself: the code under test was never reached.
+    """
     repo = _scratch_repo(tmp_path)
     _write(
         repo / "widgets.py",
@@ -116,7 +118,8 @@ def test_a_fixture_shaped_type_error_in_the_test_body_is_refused(tmp_path):
 
 def test_a_setup_fixture_error_is_refused(tmp_path):
     """A fixture that fails during setup never lets the test body run, so its failure carries the
-    same weight as any other fixture-shaped error: a run to redo, not a guard."""
+    same weight as any other fixture-shaped error: a run to redo, not a guard.
+    """
     repo = _scratch_repo(tmp_path)
     _write(
         repo / "widgets.py",
@@ -160,7 +163,8 @@ def test_an_assertion_failure_guards(tmp_path):
     """The test's own assert failing on the value the baseline actually produced is exactly the
     evidence a guard is built to carry. Admits-valid-work coverage rather than a guard for any
     defect fixed here: a call-phase ``AssertionError`` already scored GUARDS under the
-    classification this file's other cases fix."""
+    classification this file's other cases fix.
+    """
     repo = _scratch_repo(tmp_path)
     _write(repo / "widgets.py", "def double(x):\n    return x\n")
     baseline = _commit_all(repo, "double is a no-op")
@@ -185,7 +189,8 @@ def test_a_value_error_raised_from_code_under_test_guards(tmp_path):
     """An exception the code under test raises itself, uncaught, is the code under test doing
     the wrong thing: behavioral evidence even though the headline is not AssertionError.
     Admits-valid-work coverage rather than a guard for any defect fixed here: a crash frame
-    outside tests/ already scored GUARDS under the classification this file's other cases fix."""
+    outside tests/ already scored GUARDS under the classification this file's other cases fix.
+    """
     repo = _scratch_repo(tmp_path)
     _write(
         repo / "widgets.py",
@@ -224,7 +229,8 @@ def test_a_fixture_calling_package_code_that_raises_is_refused(tmp_path):
     fixture returns, never lets the test body run: fixture-shaped even though the crash frame
     sits in the package's own file, outside tests/, which the crash-frame test alone would read
     as the code under test raising. ``_failure_kind`` reads the failure's phase, so this scores
-    REFUSED, not GUARDS."""
+    REFUSED, not GUARDS.
+    """
     repo = _scratch_repo(tmp_path)
     _write(
         repo / "widgets.py",
@@ -288,7 +294,8 @@ def test_baseline_from_working_tree_captures_tracked_and_untracked_changes_untou
     tmp_path,
 ):
     """A tracked modification and an untracked file both land in the printed snapshot's tree,
-    and the working tree, the index, and the stash list are all unchanged afterward."""
+    and the working tree, the index, and the stash list are all unchanged afterward.
+    """
     repo = _scratch_repo(tmp_path)
     _write(repo / "widgets.py", "def double(x):\n    return x\n")
     _commit_all(repo, "double is a no-op")
@@ -352,7 +359,8 @@ def test_the_two_step_flow_snapshot_then_fix_then_baseline_reports_guards(
     tmp_path,
 ):
     """The honest shape: snapshot before the fix, apply the fix, then run normally with
-    --baseline <the printed hash>, exactly as an operator would."""
+    --baseline <the printed hash>, exactly as an operator would.
+    """
     repo = _scratch_repo(tmp_path)
     _write(repo / "widgets.py", "def double(x):\n    return x\n")
     _commit_all(repo, "double is a no-op")
@@ -381,7 +389,8 @@ def test_a_bare_file_not_found_error_outside_the_assertion_is_refused_not_guards
     """A helper module outside tests/ opens a data file the baseline commit does not carry (the
     tests/ overlay cannot supply it, living as it does outside tests/); the crash frame sits in
     that helper, outside tests/, so the code under test was never reached and this scores
-    REFUSED, never GUARDS."""
+    REFUSED, never GUARDS.
+    """
     repo = _scratch_repo(tmp_path)
     _write(repo / "widgets.py", "def double(x):\n    return x\n")
     _write(
@@ -421,7 +430,8 @@ def test_a_file_not_found_error_at_the_tests_own_assertion_line_guards(
     (never through a helper outside tests/), so at the baseline, before the fix, that read raises
     FileNotFoundError with its crash frame inside the test's own body. That is behavioral
     evidence, not a fixture-shaped discount: the code under test was reached (it ran and simply
-    did not write the file), and the test's own line is what noticed."""
+    did not write the file), and the test's own line is what noticed.
+    """
     repo = _scratch_repo(tmp_path)
     _write(repo / "widgets.py", "def write_summary(path):\n    pass\n")
     baseline = _commit_all(repo, "write_summary is a no-op")
@@ -456,7 +466,8 @@ def test_a_file_not_found_error_at_the_tests_own_assertion_line_guards(
 
 def _load_tool():
     """Import the real module under test by path, for a pure classification-logic check that
-    needs no scratch repository or subprocess of its own."""
+    needs no scratch repository or subprocess of its own.
+    """
     spec = importlib.util.spec_from_file_location(
         "prove_test_fails_before_under_test", SCRIPT
     )
@@ -475,10 +486,11 @@ def _load_tool():
 def test_the_signal_method_timeout_message_is_a_timeout_not_a_behavioral_pass(
     headline,
 ):
-    """guard. Where SIGALRM exists, pytest-timeout raises pytest.fail(PYTEST_FAILURE_MESSAGE), a
+    """Guard. Where SIGALRM exists, pytest-timeout raises pytest.fail(PYTEST_FAILURE_MESSAGE), a
     Failed exception that would otherwise misread as a genuine assertion failure (GUARDS). pytest
     writes that headline both bare and prefixed with the exception class, and the prefixed form is
-    the one a real signal-method run produces, so both must read as a timeout."""
+    the one a real signal-method run produces, so both must read as a timeout.
+    """
     tool = _load_tool()
     entry = {"headline": headline, "phase": "call", "exc_typename": "Failed"}
     assert tool._failure_kind(entry, Path(".")) == "timeout"
@@ -487,14 +499,15 @@ def test_the_signal_method_timeout_message_is_a_timeout_not_a_behavioral_pass(
 def test_a_hung_test_under_per_test_timeout_reports_indeterminate_naming_it(
     tmp_path,
 ):
-    """guard. A hung test scores INDETERMINATE and is named, on either host, rather than a bare
+    """Guard. A hung test scores INDETERMINATE and is named, on either host, rather than a bare
     no-outcome refusal that reads the same as any other crash.
 
     The route differs and the verdict must not. Where SIGALRM is absent pytest-timeout kills the
     process outright and the name comes from the logstart marker the tool writes as each test
     starts; where SIGALRM exists the timeout is raised inside the test as a Failed, and the
     headline's own pattern is what keeps it from reading as the test's own assertion. This
-    asserts the verdict and the name, never the route, so it holds on both."""
+    asserts the verdict and the name, never the route, so it holds on both.
+    """
     repo = _scratch_repo(tmp_path)
     _write(
         repo / "tests" / "test_widgets.py",
@@ -528,7 +541,8 @@ def test_a_key_error_on_a_package_result_guards(tmp_path):
     test was reached and its result found wanting. Admits the call-phase residue rule (nothing
     but the call-signature-mismatch TypeError shape is fixture-shaped in the call phase): a crash
     frame inside tests/ that is neither AssertionError/Failed nor outside tests/ still scores
-    GUARDS rather than falling through to fixture-shaped."""
+    GUARDS rather than falling through to fixture-shaped.
+    """
     repo = _scratch_repo(tmp_path)
     _write(repo / "widgets.py", "def describe():\n    return {'size': 3}\n")
     baseline = _commit_all(repo, "describe carries no color")

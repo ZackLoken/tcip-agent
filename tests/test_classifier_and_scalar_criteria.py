@@ -23,7 +23,8 @@ ENTRY = fx.with_fields(
 
 def _flipped_items(n: int, flips: set[int]) -> list[dict]:
     """``n`` classifier items one per image, the first half true positives, each index in
-    ``flips`` predicted the other way."""
+    ``flips`` predicted the other way.
+    """
     return [
         {
             "image_id": f"i{i}",
@@ -37,7 +38,8 @@ def _flipped_items(n: int, flips: set[int]) -> list[dict]:
 def _classifier_items(prefix, n_images, pos_per_image, *, miscall_images=()):
     """``pos_per_image`` correctly called positives per image and one token negative (so kappa
     stays defined), plus one extra positive-called negative on each of ``miscall_images``: the
-    same absolute miscall whatever the density."""
+    same absolute miscall whatever the density.
+    """
     items = []
     for i in range(n_images):
         image = f"{prefix}{i}"
@@ -69,7 +71,8 @@ def _classifier_items(prefix, n_images, pos_per_image, *, miscall_images=()):
 
 def test_a_single_image_holdout_cannot_pass_on_its_zero_dispersion():
     """One holdout image has no images to vary its bias across, so the dispersion the equivalence
-    test discounts by vanishes; it refuses as too thin rather than passing at the tolerance."""
+    test discounts by vanishes; it refuses as too thin rather than passing at the tolerance.
+    """
     from tcip_mcp.pipelines.operating_point import classifier_criterion
 
     cal = _flipped_items(20, set())
@@ -89,7 +92,8 @@ def test_a_single_image_holdout_cannot_pass_on_its_zero_dispersion():
 
 def test_the_positive_count_bias_is_scoped_to_images_carrying_a_positive():
     """An image with no true and no predicted positive contributes no certain zero to the bias,
-    or forty such images would dilute a real two-per-image over-call toward nothing."""
+    or forty such images would dilute a real two-per-image over-call toward nothing.
+    """
     from tcip_mcp.pipelines.operating_point import classifier_criterion
 
     hold = []
@@ -129,7 +133,8 @@ def test_the_positive_count_bias_is_scoped_to_images_carrying_a_positive():
 
 def test_the_same_miscall_fails_a_sparse_class_and_passes_a_dense_one():
     """The tolerance is a fraction of the typical positive count: one extra positive call on one
-    holdout image of twenty refuses at one positive per image and passes at a hundred and fifty."""
+    holdout image of twenty refuses at one positive per image and passes at a hundred and fifty.
+    """
     from tcip_mcp.pipelines.operating_point import classifier_criterion
 
     entry = fx.with_fields(ENTRY, count_bias_tolerance_frac=0.1)

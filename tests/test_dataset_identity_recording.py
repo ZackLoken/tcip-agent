@@ -21,7 +21,8 @@ SUBJECT = "bud"
 
 def _make_dataset(root: Path, *, shade: int = 0) -> Path:
     """Two labeled images of ``shade`` under one capture date; answers their images
-    directory."""
+    directory.
+    """
     from PIL import Image
 
     from tcip_annotation.state import Annotation, BBox
@@ -84,7 +85,8 @@ def test_compare_experiments_mixed_none_fingerprint_is_unknown_not_same(
 ):
     """One run with a known fingerprint compared against a run over a dataset holding no label
     document (None) must report unknown identity, not a false apples-to-apples True: the two
-    demonstrably did not train on the same (known) data."""
+    demonstrably did not train on the same (known) data.
+    """
     from tests._verified_checkpoint_fixtures import table_images
     from tests.tiny_trainer_fixtures import (
         MEAN_INTENSITY_CLASSIFIER,
@@ -138,7 +140,8 @@ def test_dataset_identity_raises_a_fingerprint_read_failure(
     tmp_path, monkeypatch
 ):
     """A fingerprint read failure (a locked or removed image mid-scan) raises by name rather than
-    reading as a run with no identity: the launch refuses before its directory exists."""
+    reading as a run with no identity: the launch refuses before its directory exists.
+    """
     import tcip_mcp.pipelines.data.dataset_fingerprint as dataset_fingerprint_mod
     from tcip_mcp.pipelines.data.split_construction import dataset_identity
     from tcip_mcp.pipelines.schemas import DataSpec
@@ -165,7 +168,8 @@ def test_a_trial_over_a_data_axis_records_the_dataset_its_own_input_names(
     tmp_path, monkeypatch
 ):
     """A sweep trial whose sampled point names another dataset records that dataset's identity,
-    read off the trial's own input, never the identity of the sweep's base dataset."""
+    read off the trial's own input, never the identity of the sweep's base dataset.
+    """
     pytest.importorskip("torch")
     from tcip_mcp.experiments import RUN_FILE, read_record
     from tcip_mcp.tools.project_tools import register_dataset
@@ -194,7 +198,8 @@ def test_a_launch_records_the_identity_of_the_dataset_it_trains_on(
 ):
     """The launch reads the registered dataset's identity once and writes it into the run's
     launch record before the child starts; the child's resolved partition names the samples
-    beside it."""
+    beside it.
+    """
     import subprocess
 
     pytest.importorskip("torch")

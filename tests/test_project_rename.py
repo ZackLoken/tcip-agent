@@ -28,7 +28,8 @@ def _files(root: Path) -> dict[str, bytes]:
 
 def _held(root: Path, *, but: set[str]) -> dict[tuple, object]:
     """Every record and log the databases under ``root`` hold, read through the seam, but the
-    stores ``but`` names, by root relative to ``root``, store and parts."""
+    stores ``but`` names, by root relative to ``root``, store and parts.
+    """
     from tcip_store.file_backend import database_roots
 
     return {
@@ -154,7 +155,8 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
     """Every in-project path a record holds is spelled relative to the project, so a project
     whose directory moves resolves its resumed run's checkpoint, its completed run's checkpoint,
     its registry entry, a run's data locations and partition, and a published bucket's documents
-    at their new location, and no run record names the directory it left."""
+    at their new location, and no run record names the directory it left.
+    """
     import json
 
     from tcip_mcp.buckets import read_bucket

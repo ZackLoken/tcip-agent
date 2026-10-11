@@ -146,7 +146,8 @@ def test_a_record_naming_no_subject_is_refused_where_an_annotation_is_made(
     tmp_path: Path, subject
 ) -> None:
     """Construction states the subject rule once: a direct constructor refuses, and the decoder,
-    reading through it, refuses the document naming the record."""
+    reading through it, refuses the document naming the record.
+    """
     with pytest.raises(ValueError, match="non-empty string subject"):
         Annotation(subject=subject)  # type: ignore[arg-type]
     key = _key(tmp_path)
@@ -175,7 +176,8 @@ def test_provenance_is_the_stored_records_or_the_actors_never_the_payloads() -> 
     None
 ):
     """A payload's provenance keys are not read: a content the document already stores keeps
-    that record's provenance, and any other is the actor's at the save's time."""
+    that record's provenance, and any other is the actor's at the save's time.
+    """
     from tcip_annotation.json_io import annotation_from_payload, stamped
 
     stored = Annotation(
@@ -241,7 +243,8 @@ def test_a_payload_polygon_that_is_no_shape_refuses_rather_than_reading_as_absen
     geometry,
 ) -> None:
     """A supplied geometry that is empty or too short is a malformed value, refused by the same
-    decoder a stored record passes, never read as a label with no geometry or dropped on write."""
+    decoder a stored record passes, never read as a label with no geometry or dropped on write.
+    """
     from tcip_annotation.json_io import annotation_from_payload
 
     with pytest.raises(ValueError, match="polygon|segmentation|vertex"):
@@ -313,7 +316,8 @@ def test_a_string_score_is_refused_by_the_reference_check(
     tmp_path: Path,
 ) -> None:
     """A supplied score that does not parse once read as no score, so the record passed as ground
-    truth; it now refuses where the numeric one refuses as an unadjudicated prediction."""
+    truth; it now refuses where the numeric one refuses as an unadjudicated prediction.
+    """
     key = _stored(
         tmp_path,
         {
@@ -426,7 +430,8 @@ def test_multi_ring_polygon_round_trip_keeps_every_ring_in_order(
 ) -> None:
     """An occlusion-split instance is one annotation with more than one ring. Every ring must
     survive the write/read round trip, in authored order; a reader that kept only the first would
-    silently shrink the object, and the box derived from it with it."""
+    silently shrink the object, and the box derived from it with it.
+    """
     key = _key(tmp_path, "IMG_multi")
     write_label_document(
         key,
@@ -467,7 +472,8 @@ def test_multi_ring_polygon_round_trip_keeps_every_ring_in_order(
 )
 def test_a_polygon_with_a_ring_that_is_no_shape_cannot_be_made(rings) -> None:
     """A ring that cannot be a shape is refused where the polygon is made, never carried to a
-    writer that would drop it and write back fewer rings than were stated."""
+    writer that would drop it and write back fewer rings than were stated.
+    """
     with pytest.raises(ValueError, match="three or more points"):
         Polygon(rings)
     assert Polygon([LEFT_LOBE, RIGHT_LOBE]).rings == [LEFT_LOBE, RIGHT_LOBE]
@@ -489,7 +495,8 @@ def test_a_bad_ring_beside_good_ones_refuses_the_document_by_record(
     tmp_path: Path, bad_ring
 ) -> None:
     """A supplied ring that is not a ring is a malformed value, never a ring to drop quietly: the
-    document refuses naming the record rather than reading back as fewer rings than it states."""
+    document refuses naming the record rather than reading back as fewer rings than it states.
+    """
     key = _stored(
         tmp_path,
         {
@@ -519,7 +526,8 @@ def test_box_only_record_reads_as_single_bbox_annotation(
     tmp_path: Path,
 ) -> None:
     """A hand-drawn box (no segmentation) still reads as exactly one BBox annotation; the
-    polygon's bbox co-storage must not make an ordinary box record ambiguous or double-counted."""
+    polygon's bbox co-storage must not make an ordinary box record ambiguous or double-counted.
+    """
     key = _key(tmp_path, "IMG_box")
     write_label_document(
         key,
@@ -811,7 +819,8 @@ def test_geometryless_subject_kept_as_image_level_label(
 
 def test_entry_without_subject_raises(tmp_path: Path) -> None:
     """A name-based label is undecodable without a subject: the document raises rather than
-    reading as one record short."""
+    reading as one record short.
+    """
     key = _stored(
         tmp_path,
         {
@@ -847,7 +856,8 @@ def test_a_supplied_malformed_value_refuses_the_document_by_record(
     tmp_path: Path, key_name, value
 ) -> None:
     """A present value that is not what the schema states is never read as absent: an absent
-    geometry, score or attribute is a different fact from a supplied one that did not parse."""
+    geometry, score or attribute is a different fact from a supplied one that did not parse.
+    """
     key = _stored(
         tmp_path,
         {
@@ -902,7 +912,8 @@ def test_a_bad_segmentation_refuses_rather_than_falling_back_to_the_box(
     tmp_path: Path, segmentation
 ) -> None:
     """Geometry precedence runs over the keys present, never over the keys that parsed: a record
-    stating a polygon that does not parse is not read as its box."""
+    stating a polygon that does not parse is not read as its box.
+    """
     key = _stored(
         tmp_path,
         {
@@ -933,7 +944,8 @@ def test_a_box_with_no_extent_refuses_beside_valid_rings(
     tmp_path: Path, bbox
 ) -> None:
     """A supplied box is checked where it is read, whichever geometry wins precedence: valid
-    rings beside it do not make an invalid box readable."""
+    rings beside it do not make an invalid box readable.
+    """
     key = _stored(
         tmp_path,
         {
@@ -955,7 +967,8 @@ def test_a_box_with_no_extent_refuses_beside_valid_rings(
 
 def test_an_absent_key_still_reads_as_absent(tmp_path: Path) -> None:
     """The admitting half: a record with no geometry, score, attributes or crowd flag is an
-    image-level ground-truth label, and a null reads as absent too."""
+    image-level ground-truth label, and a null reads as absent too.
+    """
     key = _stored(
         tmp_path,
         {
@@ -1001,7 +1014,8 @@ def test_the_platforms_own_empty_document_still_reads_empty(
     tmp_path: Path,
 ) -> None:
     """The platform's own shape (what write_label_document(keep_empty=True) writes for a
-    confirmed negative), unlike a null or absent annotations key, keeps reading as empty."""
+    confirmed negative), unlike a null or absent annotations key, keeps reading as empty.
+    """
     key = _stored(tmp_path, {"annotations": []})
 
     assert _read(key) == []
@@ -1031,7 +1045,8 @@ def test_readers_accept_a_document_of_only_valid_records(
 @pytest.mark.parametrize("junk", [1, "x", None, [1, 2]])
 def test_a_non_dict_annotation_record_raises(tmp_path: Path, junk) -> None:
     """A record that is not an object is undecodable the same way a subject-less one is: reading
-    past it as if it weren't there would let a corrupt record read as a smaller label set."""
+    past it as if it weren't there would let a corrupt record read as a smaller label set.
+    """
     key = _stored(tmp_path, {"annotations": [junk]})
 
     with pytest.raises(UnreadableLabelDocumentError):
@@ -1076,7 +1091,8 @@ def test_a_non_finite_score_is_refused_rather_than_written(
     tmp_path: Path,
 ) -> None:
     """A confidence that is no finite number is refused by the writer, never collapsed to a
-    number that would read as one, and nothing lands."""
+    number that would read as one, and nothing lands.
+    """
     key = _key(tmp_path)
 
     with pytest.raises(ValueError, match="not a finite number"):
@@ -1157,7 +1173,8 @@ def test_absence_reads_as_no_document_and_a_stored_null_refuses(
 ) -> None:
     """The editor's read answers no document only where the store holds no record; a present
     record holding ``null`` is a value that does not decode, refused like any other, and a reader
-    requiring a record refuses its absence."""
+    requiring a record refuses its absence.
+    """
     from tcip_annotation.json_io import NO_DOCUMENT, read_document_versioned
 
     key = _key(tmp_path)
@@ -1183,7 +1200,8 @@ def test_absence_reads_as_no_document_and_a_stored_null_refuses(
 def test_attribute_ids_distinguish_unassessed_from_undeclared() -> None:
     """An instance carrying no value for an attribute is unassessed for it and reads the mark in
     that column; a value the attribute does not declare refuses naming both; a record of another
-    subject is no row at all; the encoder reads an id row back into values."""
+    subject is no row at all; the encoder reads an id row back into values.
+    """
     from tcip_mcp.subject_registry import Attribute
 
     attributes = (
@@ -1221,7 +1239,8 @@ def test_attribute_ids_distinguish_unassessed_from_undeclared() -> None:
 def test_whole_image_rating_never_becomes_a_target(tmp_path) -> None:
     """A geometry-less annotation is a whole-image rating, not a detection or segmentation target:
     it has no box to train or match on, so it takes no row, whatever attributes its scope
-    declares."""
+    declares.
+    """
     from tcip_mcp import subject_registry as cr
     from tcip_mcp.pipelines.data.label_queries import (
         json_det_targets,
@@ -1262,7 +1281,8 @@ def test_a_box_that_would_round_to_zero_extent_is_refused_at_write(
 ) -> None:
     """A box with real pre-round extent that collapses to nothing at the document's stored
     2-decimal quantum must never be written: the writer would otherwise hand the reader a
-    document it refuses."""
+    document it refuses.
+    """
     sliver = Annotation(subject="bud", geometry=BBox(1.0, 1.0, 1.003, 1.003))
     with pytest.raises(ValueError):
         write_label_document(_key(tmp_path), [sliver], 10, 10)
@@ -1272,7 +1292,8 @@ def test_a_polygon_that_would_round_to_a_zero_extent_box_is_refused_at_write(
     tmp_path: Path,
 ) -> None:
     """The polygon branch is checked against its rounded, stored box the same as the box branch:
-    a sliver whose derived box collapses to nothing at the stored grid must never be written."""
+    a sliver whose derived box collapses to nothing at the stored grid must never be written.
+    """
     sliver = Annotation(
         subject="bud",
         geometry=Polygon([[(1.0, 1.0), (1.002, 1.0), (1.002, 1.002)]]),
@@ -1286,7 +1307,8 @@ def test_a_polygon_whose_vertices_all_round_to_one_point_is_refused_at_write(
 ) -> None:
     """A polygon's box is checked against the same rounded rings the document stores, not the raw
     ones: vertices that only collapse to one point at the stored 2-decimal grid must never write a
-    bbox claiming extent the stored geometry does not have."""
+    bbox claiming extent the stored geometry does not have.
+    """
     sliver = Annotation(
         subject="bud",
         geometry=Polygon([[(0.996, 0.996), (1.004, 0.996), (1.004, 1.004)]]),
@@ -1309,7 +1331,8 @@ def test_geometry_extent_ok_agrees_with_the_writer_on_a_collapsing_polygon() -> 
     None
 ):
     """The pre-write check a caller uses to drop a degenerate detection before it ever reaches
-    the writer must reach the writer's own verdict, not a looser one: one implementation."""
+    the writer must reach the writer's own verdict, not a looser one: one implementation.
+    """
     from tcip_annotation.json_io import geometry_extent_ok
 
     collapsing = Polygon([[(0.996, 0.996), (1.004, 0.996), (1.004, 1.004)]])

@@ -64,6 +64,7 @@ def aggregate_per_plant(
 
     Returns:
         List of per-plant summary dicts.
+
     """
     groups: dict[str, list[dict]] = defaultdict(list)
     for r in image_results:
@@ -121,7 +122,8 @@ def _agreed(
 ) -> Any:
     """The one value every item states for ``key``; ``None`` when every item omits an optional
     ``key``. Refuses (``ValueError`` naming ``where``) when the items disagree or, with
-    ``required``, when any omits it."""
+    ``required``, when any omits it.
+    """
     values = {r.get(key) for r in items}
     if len(values) > 1 or (required and None in values):
         raise ValueError(

@@ -42,7 +42,8 @@ def spelled(name: str) -> str:
     """``name`` as one path component: every character outside lower-case letters, digits, ``_``
     and ``-`` percent-encoded with upper-case hex, and the first letter of a Windows device name
     too. The spelling is reversible, never ``.`` or ``..``, and no two names' spellings differ by
-    case alone."""
+    case alone.
+    """
     text = "".join(c if c in _PLAIN else _encoded(c) for c in name)
     return _encoded(text[0]) + text[1:] if text in _DEVICE_NAMES else text
 
@@ -53,7 +54,8 @@ def dump_store(project: Path, out_dir: Path) -> list[Path]:
     (:func:`~tcip_mcp.registry_paths.located` against ``project``), a record through
     :func:`tcip_store.encode_record` and a log one :func:`tcip_store.encode_log_line` per line, and
     return the files written. Refuses (``ValueError``) an ``out_dir`` inside the project and a log
-    holding entries that will not decode."""
+    holding entries that will not decode.
+    """
     from tcip_mcp.registry_paths import located
     from tcip_store.file_backend import database_roots
 

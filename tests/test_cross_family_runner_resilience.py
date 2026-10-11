@@ -39,7 +39,8 @@ def test_a_model_id_that_states_its_effort_is_the_effort_whatever_the_flag_said(
     runner,
 ):
     """One invocation naming every family can carry one --effort: a family whose model id
-    carries the effort records the id's own, never refusing and never passing the flag on."""
+    carries the effort records the id's own, never refusing and never passing the flag on.
+    """
     assert (
         runner.effective_effort("antigravity", "gemini-3.1-pro-high", "medium")
         == "high"
@@ -232,7 +233,8 @@ def test_a_prompt_file_with_a_byte_order_mark_reaches_the_harness_without_it(
 
 def test_a_codex_agent_message_stream_yields_the_last_message(runner):
     """Real codex JSONL carries the answer inside item.completed/agent_message events, not
-    at the top level, so the stream fallback must know that shape before it falls further."""
+    at the top level, so the stream fallback must know that shape before it falls further.
+    """
     lines = [
         json.dumps(
             {
@@ -275,7 +277,8 @@ def test_a_codex_agent_message_stream_yields_the_last_message(runner):
 
 def test_an_oversized_raw_stream_is_a_failed_extraction_not_an_answer(runner):
     """A stream past the size bound is dumped nowhere near a real answer; it reads as failed
-    extraction rather than as a 100k-character reply."""
+    extraction rather than as a 100k-character reply.
+    """
     huge = "not json, just noise " * 6000
     assert len(huge.strip()) > runner.MAX_RAW_STREAM_CHARS
     text, source = runner.extract_response("codex", huge, None)
@@ -335,7 +338,8 @@ def test_a_payload_with_only_empty_recognized_keys_reads_as_an_empty_response(
     runner,
 ):
     """The antigravity SUCCESS-with-empty-answer shape: a recognized key is present but blank,
-    so the payload is a genuinely empty answer, not an unknown shape to dump whole."""
+    so the payload is a genuinely empty answer, not an unknown shape to dump whole.
+    """
     stdout = json.dumps(
         {
             "conversation_id": "cadb33f6-6b32-413f-9ddd-0b2c168c573b",
@@ -405,7 +409,8 @@ def test_completely_empty_stdout_does_not_read_as_a_clean_run(
 ):
     """A harness that writes nothing at all falls through extraction to a raw, empty string,
     a response-source name the exit gate never special-cased; the check has to be on the
-    character count itself, not on a list of the names known to produce an empty one."""
+    character count itself, not on a list of the names known to produce an empty one.
+    """
     monkeypatch.setattr(runner.subprocess, "run", _stub_run(""))
     monkeypatch.setattr(
         runner, "harness_version", lambda *a, **k: "stub-version"
@@ -463,7 +468,8 @@ def test_a_whitespace_only_agent_message_stream_is_a_failed_run_not_a_clean_one(
 ):
     """A codex stream whose only captured agent message is whitespace is not an answer:
     response_chars counts the stripped text, so this run must classify as a fault, not a clean
-    zero-content success."""
+    zero-content success.
+    """
     lines = [
         json.dumps(
             {
@@ -527,7 +533,8 @@ def test_a_runs_own_fault_verdict_is_recorded_in_its_meta_json(
     runner, tmp_path, monkeypatch
 ):
     """The record a later reader inspects on its own must already carry why a run failed, not
-    only the aggregate table printed at the end of this process's own stdout."""
+    only the aggregate table printed at the end of this process's own stdout.
+    """
     monkeypatch.setattr(
         runner.subprocess, "run", _stub_run("a real answer from the harness")
     )
@@ -615,7 +622,8 @@ def test_a_dict_payload_with_no_recognized_keys_still_returns_whole_payload(
     runner,
 ):
     """An unknown shape with none of the recognized keys still dumps whole: that recovery
-    path for shapes this runner has not learned yet must stay intact."""
+    path for shapes this runner has not learned yet must stay intact.
+    """
     stdout = json.dumps(
         {"unexpected_field": "some value", "another_field": 42}
     )
@@ -626,7 +634,8 @@ def test_a_dict_payload_with_no_recognized_keys_still_returns_whole_payload(
 
 def test_a_non_string_answer_value_still_dumps_the_whole_payload(runner):
     """A recognized key holding a non-string (a content-block list, a null) is an unknown
-    shape carrying possible data, never a confirmed-empty answer to discard."""
+    shape carrying possible data, never a confirmed-empty answer to discard.
+    """
     stdout = json.dumps(
         {"content": [{"type": "text", "text": "the real answer"}]}
     )
@@ -847,7 +856,8 @@ def test_an_attached_image_reaches_codex_as_a_flag_and_the_other_families_in_the
     """Every family is vision-capable and takes an image its own way: codex through exec -i, each
     flag closed by the next option so the trailing stdin marker survives the variadic option;
     antigravity through an @path in the prompt; Claude Code through a named path its own file
-    reader opens. A run with no image builds exactly as before."""
+    reader opens. A run with no image builds exactly as before.
+    """
     image = tmp_path / "render.png"
     image.write_bytes(b"png")
     condition = runner.CONDITIONS["no-tools"]
@@ -882,7 +892,8 @@ def test_an_attached_image_prefaces_the_prompt_and_is_recorded_in_the_runs_meta(
     runner, tmp_path, monkeypatch
 ):
     """The preface sits ahead of the byte-identical question, the builder receives the resolved
-    paths, and meta.json names the images so a later reader knows what the family saw."""
+    paths, and meta.json names the images so a later reader knows what the family saw.
+    """
     monkeypatch.setattr(runner.subprocess, "run", _stub_run("an answer"))
     monkeypatch.setattr(
         runner, "harness_version", lambda *a, **k: "stub-version"
@@ -928,7 +939,8 @@ def test_a_family_prompt_override_replaces_the_shared_prompt_for_that_family_alo
     runner, tmp_path, monkeypatch
 ):
     """--family-prompt swaps the prompt text for one family and records which file it came
-    from; a family with no override still gets the shared --prompt-file."""
+    from; a family with no override still gets the shared --prompt-file.
+    """
     monkeypatch.setattr(runner.subprocess, "run", _stub_run("an answer"))
     monkeypatch.setattr(
         runner, "harness_version", lambda *a, **k: "stub-version"
@@ -1077,7 +1089,8 @@ def test_a_single_family_rerun_marks_itself_and_leaves_the_others_summary_row_in
     runner, tmp_path, monkeypatch
 ):
     """Re-running one family under a question id already carrying both families' results must
-    not touch the other family's recorded run, and must say of itself that it is a rerun."""
+    not touch the other family's recorded run, and must say of itself that it is a rerun.
+    """
     monkeypatch.setattr(runner.subprocess, "run", _stub_run("an answer"))
     monkeypatch.setattr(
         runner, "harness_version", lambda *a, **k: "stub-version"
@@ -1171,7 +1184,8 @@ def test_a_malformed_prior_summary_loses_only_itself_not_the_current_run(
 ):
     """A summary.json a prior run left mid-write, or otherwise not valid JSON, must not crash the
     merge: the current run's own rows still land, starting from an empty prior set rather than
-    raising out of the merge step."""
+    raising out of the merge step.
+    """
     monkeypatch.setattr(runner.subprocess, "run", _stub_run("an answer"))
     monkeypatch.setattr(
         runner, "harness_version", lambda *a, **k: "stub-version"
@@ -1219,7 +1233,8 @@ def test_a_missing_image_is_refused_before_any_family_launches(
     runner, tmp_path, monkeypatch
 ):
     """A family told to review an image that is not there would answer about nothing; the
-    runner refuses by name instead of launching."""
+    runner refuses by name instead of launching.
+    """
     launched = []
     monkeypatch.setattr(runner, "run_one", lambda *a, **k: launched.append(a))
     monkeypatch.setattr(

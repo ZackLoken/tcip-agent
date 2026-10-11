@@ -50,7 +50,8 @@ def _real_drawn_experiment(
 ) -> dict:
     """Draws a real train/val split over ``root``'s own fixture dataset through the launcher's
     own resolution, recorded in ``experiment_id``'s launch record under ``project``; a run with
-    ``auto_val`` off selects on its training loss. Returns the resolved ``data`` block."""
+    ``auto_val`` off selects on its training loss. Returns the resolved ``data`` block.
+    """
     images_dir = root / "images" / date
     opened_run(
         project,
@@ -75,7 +76,8 @@ def _real_drawn_experiment(
 
 def _damage_resolved(project: Path, experiment_id: str, change) -> None:
     """Rewrite what a run's launch record under ``project`` says it resolved, on disk past its
-    one writer, ``change`` applied to it."""
+    one writer, ``change`` applied to it.
+    """
     from tcip_store import encode_record
 
     path = experiment_dir(experiment_id, project=project) / RUN_FILE
@@ -129,7 +131,8 @@ def test_freeze_selection_names_the_sources_the_run_read_not_the_launch_input(
     """The frozen selection is composed from what the run resolved alone. A launch record whose
     stated config is edited to name another images directory holding identically named files
     changes nothing: freezing a partition against pixels the run never saw would bind a later run
-    to a different dataset."""
+    to a different dataset.
+    """
     from PIL import Image
 
     from tcip_mcp.tools.data_tools import freeze_selection
@@ -166,7 +169,8 @@ def test_freeze_selection_keeps_two_scopes_same_named_members_apart(
     selection carries both: composing the scopes into one map keyed by bare name would drop one
     date's member and bind a later run to half the partition its record describes. The partition
     is composed through the resolution's own partition producer over the run's samples and set
-    into a real run's launch record past its writer."""
+    into a real run's launch record past its writer.
+    """
     from tcip_mcp.pipelines.data.selection import Sample, ground_truth_digest
     from tcip_mcp.pipelines.data.split_construction import _partition_record
     from tcip_mcp.tools.data_tools import freeze_selection
@@ -335,7 +339,8 @@ def test_a_bound_run_freezes_and_a_later_run_rebinds_to_its_membership(
 
 def test_freeze_selection_refuses_a_spatial_split(tmp_path: Path):
     """A within-image spatial split resolves region identities, which its partition records as
-    its ``spatial`` split, and freeze_selection binds only a stem-keyed partition."""
+    its ``spatial`` split, and freeze_selection binds only a stem-keyed partition.
+    """
     from tcip_mcp.tools.data_tools import freeze_selection
     from tests.test_spatial_region_containment import _mosaic_dataset
 
@@ -360,7 +365,8 @@ def test_freeze_selection_refuses_a_member_whose_ground_truth_moved(
 ):
     """The staleness check is per member, against the digest the run's own producer recorded for
     it: a label edited after the run names that member and refuses, since a selection composed
-    from it would bind a later run to ground truth this run never saw."""
+    from it would bind a later run to ground truth this run never saw.
+    """
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.tools.data_tools import freeze_selection
@@ -389,7 +395,8 @@ def test_freeze_selection_reads_a_members_removed_document_as_moved(
 ):
     """The record names the document each member's ground truth was, so a member whose document
     was removed since reads as moved rather than as unchanged: a later bind would otherwise be
-    composed from a document nothing holds."""
+    composed from a document nothing holds.
+    """
     from tcip_mcp.tools.data_tools import freeze_selection
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
@@ -416,7 +423,8 @@ def test_freeze_selection_refuses_a_resolved_scope_missing_its_attributes(
     tmp_path: Path,
 ):
     """A resolved record edited past its writer to drop its scope's attributes composes a
-    selection the selection writer refuses, and the door answers with that refusal."""
+    selection the selection writer refuses, and the door answers with that refusal.
+    """
     from tcip_mcp.tools.data_tools import freeze_selection
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")

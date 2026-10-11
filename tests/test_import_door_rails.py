@@ -114,7 +114,8 @@ def test_extract_zip_refuses_a_sibling_directory_that_shares_stagings_name_as_a_
 ):
     """A string-prefix escape check reads a member resolving to ``<staging.name>extra/`` as
     contained, since that sibling's path literally starts with staging's own path; containment
-    by ``relative_to`` does not."""
+    by ``relative_to`` does not.
+    """
     from tcip_mcp.tools.project_tools import _extract_zip
 
     staging = tmp_path / "abcd1234"
@@ -222,7 +223,8 @@ def test_a_free_locked_leftover_staging_sibling_is_swept_with_its_lock_file(
 def test_dataset_registry_stores_the_relative_dot_after_import(tmp_path):
     """The project's own dataset registers to itself, and that entry's ``path`` survives the
     archive/import round trip as the project-relative ``"."`` rather than an absolute path baked
-    in before the move."""
+    in before the move.
+    """
     from tcip_mcp.tools.project_tools import read_datasets, register_dataset
 
     root = one_labeled_capture(tmp_path / "source")
@@ -242,7 +244,8 @@ def test_dataset_registry_stores_the_relative_dot_after_import(tmp_path):
 
 def test_dataset_registry_travels_with_nothing_rewritten(tmp_path):
     """The accessor resolves the stored "." against wherever the project was actually
-    imported, so nothing about the registry needed rewriting for the move to survive."""
+    imported, so nothing about the registry needed rewriting for the move to survive.
+    """
     from tcip_mcp.tools.project_tools import (
         dataset_entry_path,
         read_datasets,
@@ -285,7 +288,8 @@ def test_an_external_dataset_entry_stays_absolute_and_is_disclosed(tmp_path):
 
 def _annotated_dataset(root: Path, n: int) -> None:
     """``n`` distinct single-tile foreground groups of one subject, enough to clear
-    draw_splits' floor (one group each for train/val, two for calibration)."""
+    draw_splits' floor (one group each for train/val, two for calibration).
+    """
     from PIL import Image
 
     from tcip_annotation.state import Annotation, BBox
@@ -313,7 +317,8 @@ def test_a_splits_root_nested_under_a_nested_dataset_root_archives_and_round_tri
 ):
     """A dataset sits under a project, and draw_splits partitions it in place, landing
     selection.json under the dataset root rather than beside it. The cross-anchor constraint must
-    admit that nesting rather than refusing the whole project."""
+    admit that nesting rather than refusing the whole project.
+    """
     from tcip_mcp.pipelines.data.selection import selection_key
     from tcip_mcp.tools.data_tools import draw_splits
 
@@ -354,7 +359,8 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(
     own real producers; archived, imported into a fresh destination, and read back at once. The
     sweep's trial body is stood in for by
     one that only resolves and opens the trial's run directory through the launcher's own
-    producer and writer."""
+    producer and writer.
+    """
     import tcip_mcp.tools.training_tools as tt
     from tcip_mcp import experiments
     from tcip_mcp.pipelines.data.selection import selection_key

@@ -27,7 +27,8 @@ from tests._producer_fixtures import registry_over
 
 def _prefixed_attributes() -> SubjectRegistry:
     """One subject carrying two attributes whose names share a prefix, the longer declared first,
-    with vocabularies of different size so the two cannot be confused for one another."""
+    with vocabularies of different size so the two cannot be confused for one another.
+    """
     return SubjectRegistry(
         subjects=(
             Subject(
@@ -52,7 +53,8 @@ def _prefixed_attributes() -> SubjectRegistry:
 def _case_variant_subjects() -> SubjectRegistry:
     """Two subject names differing only in case, each with its own attribute vocabulary. The GUI
     accepts a free-text subject name, so a case variant is an ordinary registry state: the two are
-    distinct subjects and each scope must resolve to its own vocabulary."""
+    distinct subjects and each scope must resolve to its own vocabulary.
+    """
     return SubjectRegistry(
         subjects=(
             Subject(
@@ -81,7 +83,8 @@ def _case_variant_subjects() -> SubjectRegistry:
 
 def _scope(tmp_path: Path, registry: SubjectRegistry, subject: str):
     """The class space the admission reads for ``subject`` over a dataset declaring
-    ``registry``."""
+    ``registry``.
+    """
     from tcip_mcp.pipelines.data.label_queries import registry_scope
 
     registry_over(tmp_path, registry)
@@ -91,7 +94,8 @@ def _scope(tmp_path: Path, registry: SubjectRegistry, subject: str):
 def test_attribute_lookup_resolves_the_exactly_named_attribute(tmp_path: Path):
     """With two attributes sharing a prefix, the scope carries both under their own names and a
     positive state resolves to the vocabulary it named, not to whichever declared name happens to
-    start with it."""
+    start with it.
+    """
     reg = _prefixed_attributes()
     scope = _scope(tmp_path, reg, "bud")
     assert [a.name for a in scope.attributes] == ["opening_stage", "opening"]
@@ -112,7 +116,8 @@ def test_attribute_lookup_resolves_the_exactly_named_attribute(tmp_path: Path):
 
 def test_an_attribute_name_that_only_prefixes_a_declared_one_refuses():
     """A truncated attribute name names no declared attribute and must refuse, rather than read
-    the longer attribute's ranks while reporting the name the caller asked for."""
+    the longer attribute's ranks while reporting the name the caller asked for.
+    """
     reg = SubjectRegistry(
         subjects=(
             Subject(
@@ -139,7 +144,8 @@ def test_an_attribute_name_that_only_prefixes_a_declared_one_refuses():
 
 def test_subject_lookup_resolves_the_exactly_named_subject(tmp_path: Path):
     """Subject names are matched verbatim: two names differing only in case are two subjects with
-    their own vocabularies, and a name declared by neither refuses."""
+    their own vocabularies, and a name declared by neither refuses.
+    """
     reg = _case_variant_subjects()
     lower = _scope(tmp_path, reg, "bud")
     upper = _scope(tmp_path, reg, "Bud")
@@ -158,7 +164,8 @@ def test_case_variant_subjects_survive_a_file_roundtrip_as_distinct_subjects(
     tmp_path: Path,
 ):
     """Names are stored and read back verbatim: nothing folds two similar names into one subject,
-    which would merge two label populations into a single scope."""
+    which would merge two label populations into a single scope.
+    """
     reg = _case_variant_subjects()
     path = tmp_path / "subjects.json"
     registry_over(tmp_path, reg)

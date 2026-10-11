@@ -244,7 +244,8 @@ def test_ray_init_propagates_this_process_s_import_search_path_to_trial_workers(
     """A trial worker Ray spawns starts from its own defaults, not this interpreter's
     sys.path; every entry of it reaches the worker, the same guarantee the launch subprocess
     gets, except a layout root an import put there, which no worker inherits: a worker imports
-    from the layout it binds itself."""
+    from the layout it binds itself.
+    """
     from tcip_mcp.pipelines.model_build import _LAYOUT_ROOTS
     from tcip_store import canonical_path
 
@@ -273,7 +274,8 @@ def test_a_concurrent_sweep_warns_when_the_running_cluster_s_import_path_has_gon
 ):
     """A cluster this module started keeps the ``PYTHONPATH`` it was handed at ``ray.init``;
     a second sweep entering while that cluster is still up, after ``sys.path`` gained an entry
-    the first sweep never saw, must be told its trial workers will not see that entry either."""
+    the first sweep never saw, must be told its trial workers will not see that entry either.
+    """
     import logging
 
     entered = [threading.Event(), threading.Event()]
@@ -310,7 +312,8 @@ def test_a_concurrent_sweep_does_not_warn_when_the_import_path_is_unchanged(
     caplog,
 ):
     """The companion of the stale-path warning: entering a second sweep against a cluster
-    this module started, with the import path unchanged, raises no warning."""
+    this module started, with the import path unchanged, raises no warning.
+    """
     import logging
 
     entered = [threading.Event(), threading.Event()]
@@ -398,7 +401,8 @@ def test_a_process_with_a_console_lets_ray_shutdown_signal_its_daemons_directly(
 ):
     """Coverage of the attached-console path: asserts nothing is killed ahead of
     ``ray.shutdown()``, which signals each daemon through the terminate path, and that
-    ``ray.shutdown()`` still ran."""
+    ``ray.shutdown()`` still ran.
+    """
     import tcip_mcp.pipelines.training.hpo as hpo
 
     entered = [threading.Event()]
@@ -426,7 +430,8 @@ def test_a_cluster_this_process_starts_is_sized_to_the_sweep_s_own_request(
 ):
     """The cluster asks Ray for the sweep's CPUs, every concurrent trial's together, never for
     the host's: three half-CPU trials at once need two whole CPUs, and the default one-CPU,
-    one-at-a-time sweep needs one."""
+    one-at-a-time sweep needs one.
+    """
     from tcip_mcp.pipelines.training.hpo import tune_search
     from tests._training_values import sweep_space, tune_arguments
 

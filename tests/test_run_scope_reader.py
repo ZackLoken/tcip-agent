@@ -1,5 +1,6 @@
 """``ClassScope.of`` over a run's recorded class space, the ``scope`` its checkpoint's config
-records on ``data``."""
+records on ``data``.
+"""
 
 from __future__ import annotations
 

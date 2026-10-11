@@ -27,7 +27,8 @@ def registry_scope(images_dir, subject: str | None) -> ClassScope:
     """The class space ``subject`` is read under over the images ``images_dir`` holds: the subject
     with every attribute their dataset's ``subjects.json`` declares for it, none for a dataset
     holding no registry; no subject is the empty class space, reading no registry. A registry not
-    declaring ``subject`` refuses by name."""
+    declaring ``subject`` refuses by name.
+    """
     from tcip_mcp import subject_registry
     from tcip_mcp.dataset_layout import dataset_root_of, subjects_path
     from tcip_mcp.pipelines.data.selection import ClassScope
@@ -130,7 +131,8 @@ ABSENT = "absent"
 
 def admits(tally: str) -> bool:
     """Whether a sample tallied ``tally`` is admitted: its ground truth exists and holds the
-    subject or a person finished it."""
+    subject or a person finished it.
+    """
     return tally not in (ABSENT, "unannotated")
 
 
@@ -138,7 +140,8 @@ def admits(tally: str) -> bool:
 class Candidate:
     """One member as a place holding ground truth or a recorded sample names it: the logical image
     it names (``None`` when no image exists for it), its ground truth (``None`` when the place
-    holds none for it) and its row key when one table answers for many."""
+    holds none for it) and its row key when one table answers for many.
+    """
 
     member: str
     source: Path | BandGroupRef | None
@@ -153,7 +156,8 @@ _Tables = dict[str, tuple[dict[str, str], Any]]
 
 def _table(tables: _Tables, path: str) -> tuple[dict[str, str], Any]:
     """The rows of the table at ``path`` (:func:`parse_ground_truth_table`) and its one read, read
-    once per admission."""
+    once per admission.
+    """
     import tcip_store
 
     if path not in tables:
@@ -173,7 +177,8 @@ def _candidates(
     """Every candidate one place holding ground truth of ``shape`` offers: ``members`` when named,
     else every image (documents or a mask directory) or every row (a table), an image's label
     document being its own key (:func:`~tcip_mcp.dataset_layout.label_key`). A mask directory
-    holding another format beside an image of the same stem, and no ``<stem>.png``, refuses."""
+    holding another format beside an image of the same stem, and no ``<stem>.png``, refuses.
+    """
     from tcip_mcp.dataset_layout import label_key_of
     from tcip_mcp.pipelines.data.selection import DOCUMENT, MASK
     from tcip_mcp.pipelines.image_utils import source_path_of
@@ -233,7 +238,8 @@ def _acquire(
     once per ``tables``. With ``version``, the token a record carries, ground truth that is not
     there or is at any other version refuses naming both, a document as
     :class:`~tcip_annotation.json_io.UnreadableLabelDocumentError` and anything else as
-    ``ValueError``."""
+    ``ValueError``.
+    """
     import tcip_store
     from tcip_annotation.json_io import (
         UnreadableLabelDocumentError,
@@ -282,7 +288,8 @@ def _tally(
 ) -> tuple[str, Any, Any]:
     """What one candidate's ground truth reads as, with its one read (:func:`_acquire`): its
     label document's state for ``scope``'s subject, ``complete`` for a mask or a row that is
-    there, :data:`ABSENT` (no read) for anything missing."""
+    there, :data:`ABSENT` (no read) for anything missing.
+    """
     from tcip_mcp.pipelines.data.selection import DOCUMENT
 
     if candidate.source is None or candidate.ground_truth is None:
@@ -309,7 +316,8 @@ def _admission(
 ) -> tuple[list[Admitted], dict[str, int]]:
     """The candidates :func:`admits` admits by their :func:`_tally`, each with its source resolved
     (a grouped capture missing a band refuses) and the version its tally read, and how many were
-    tallied each way."""
+    tallied each way.
+    """
     from tcip_mcp.pipelines.image_utils import refuse_incomplete_band_group
 
     records: list[Admitted] = []
@@ -360,7 +368,8 @@ class Admitted:
     @property
     def source(self) -> str:
         """The path :attr:`image` is named by: a grouped capture's ``.bandgroup`` manifest, a
-        plain image's own file."""
+        plain image's own file.
+        """
         from tcip_mcp.pipelines.image_utils import source_path_of
 
         return source_path_of(self.image)
@@ -469,7 +478,8 @@ def acquired(samples: Sequence[Sample]) -> list[Sample]:
     """``samples``, each carrying its ``read`` and ``stored``: the read this act's admission
     already made, else one read of its ground truth at the version it records
     (:func:`_acquire` at ``ground_truth_digest``, whose refusals propagate), each table read
-    once."""
+    once.
+    """
     from dataclasses import replace
 
     tables: _Tables = {}
@@ -498,7 +508,8 @@ def readmitted_samples(
     that re-admission read as its ``ground_truth_digest``, what it read as its ``read`` and the
     logical image it resolved as its ``image``. A sample the admission no longer admits refuses
     (``ValueError``) naming which and the tallies that refused them; membership is never
-    changed."""
+    changed.
+    """
     from dataclasses import replace
 
     from tcip_mcp.pipelines.image_utils import resolve_image_paths
@@ -556,7 +567,8 @@ def resolved(samples: Sequence[Sample]) -> list[Sample]:
     """``samples``, each carrying its ``image``: the logical image this act's admission already
     resolved, else one resolution of its recorded ``source``
     (:func:`~tcip_mcp.pipelines.image_utils.resolve_image_paths`, each directory scanned once,
-    whose refusals propagate)."""
+    whose refusals propagate).
+    """
     from dataclasses import replace
 
     from tcip_mcp.pipelines.image_utils import resolve_image_paths
@@ -571,7 +583,8 @@ def resolved(samples: Sequence[Sample]) -> list[Sample]:
 
 def require_admitted(admitted: Admission) -> None:
     """Refuse an empty admission, naming the tallies that refused every candidate and what would
-    fix it for its ground-truth shape."""
+    fix it for its ground-truth shape.
+    """
     if admitted.records:
         return
     from tcip_mcp.pipelines.data.selection import DOCUMENT, MASK

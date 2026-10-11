@@ -26,7 +26,8 @@ logger = logging.getLogger(__name__)
 def _target_class_id(target: dict, class_key: str | None = None) -> int | None:
     """A sample's class id: its target's ``class_key`` value, raw, when one is named, else its
     ``label``, its ``ranks``, or its first detection ``labels`` row shifted from 1-indexed to the
-    0-indexed id ``class_distribution`` keys; ``None`` when none is found."""
+    0-indexed id ``class_distribution`` keys; ``None`` when none is found.
+    """
     if class_key is not None:
         val = target.get(class_key)
     elif "label" in target:
@@ -70,7 +71,8 @@ class ClassBalancedSampler(Sampler):
     ) -> torch.Tensor:
         """Each sample's draw weight: its class's balanced weight
         (:func:`~tcip_mcp.pipelines.components.losses.compute_class_weights`), 1.0 for a sample
-        with no class or one outside ``dist``."""
+        with no class or one outside ``dist``.
+        """
         from tcip_mcp.pipelines.components.losses import compute_class_weights
 
         class_weight = compute_class_weights(dist, normalize=False).tolist()
@@ -168,7 +170,8 @@ class WeightedRandomSampler(Sampler):
 
 def _interleave_lanes(lanes: list[list[int]], batch_size: int) -> list[int]:
     """Interleave per-lane index sequences at ``batch_size`` granularity: one chunk from each
-    lane in rotation, dropping a lane from the rotation once it is exhausted."""
+    lane in rotation, dropping a lane from the rotation once it is exhausted.
+    """
     order: list[int] = []
     positions = [0] * len(lanes)
     active = [i for i, lane in enumerate(lanes) if lane]
@@ -303,7 +306,8 @@ class TileLocalitySampler(Sampler):
 
     def _draw_bands(self) -> list[list[int]]:
         """One epoch's globally shuffled band sequence, drawn from the global RNG (like
-        OverSampler): order varies per epoch and is controlled by set_seed()."""
+        OverSampler): order varies per epoch and is controlled by set_seed().
+        """
         out: list[list[int]] = []
         stems = list(self._bands_by_stem)
         for stem_i in torch.randperm(len(stems)).tolist():
@@ -352,7 +356,8 @@ def sampler_settings(block: dict) -> tuple[type, dict]:
     """The sampler class ``block["name"]`` names and the rest of ``block`` as its own values.
     Refuses (``ValueError``) an unknown name, and by name a value its constructor requires that
     ``block`` leaves unstated, one it states that the constructor does not take, or one of
-    :data:`LOADER_CONTEXT`, which the loader supplies."""
+    :data:`LOADER_CONTEXT`, which the loader supplies.
+    """
     import inspect
 
     from tcip_mcp.pipelines.model_build import resolve_named

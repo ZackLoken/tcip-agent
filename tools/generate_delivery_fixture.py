@@ -38,7 +38,8 @@ SCRATCH_ROOT = "/scratch"
 
 def rebased(value: Any, scratch: Path) -> Any:
     """``value`` with every spelling of the ``scratch`` directory in its strings replaced by
-    :data:`SCRATCH_ROOT`, the one fact that differs with where a run was made."""
+    :data:`SCRATCH_ROOT`, the one fact that differs with where a run was made.
+    """
     if isinstance(value, dict):
         return {k: rebased(v, scratch) for k, v in value.items()}
     if isinstance(value, list):
@@ -52,7 +53,8 @@ def rebased(value: Any, scratch: Path) -> Any:
 
 def deliveries(workspace: Path) -> dict[str, dict]:
     """The served delivery events of the scenes this module names, made in projects created
-    under ``workspace``, by fixture name."""
+    under ``workspace``, by fixture name.
+    """
     from fastapi.testclient import TestClient
 
     from tcip_mcp.tools.inference_tools import deliver_per_image_counts
@@ -223,7 +225,8 @@ def deliveries(workspace: Path) -> dict[str, dict]:
 def produce() -> dict[str, dict]:
     """The fixture's content, made in a scratch workspace (``TCIP_WORKSPACE`` and
     ``TCIP_STATE_ROOT`` pointed into it, and the working directory moved to it, while the scenes
-    run), :func:`rebased`."""
+    run), :func:`rebased`.
+    """
     import tcip_store
 
     sys.path.insert(0, str(_REPO_ROOT))

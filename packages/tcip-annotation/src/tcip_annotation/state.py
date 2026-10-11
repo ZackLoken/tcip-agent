@@ -94,7 +94,8 @@ class Annotation:
 
 def object_rows(iscrowd) -> list[bool]:
     """For each of the crowd flags ``iscrowd`` (a list, an array or a tensor, one per row),
-    whether its row is one object rather than a crowd region."""
+    whether its row is one object rather than a crowd region.
+    """
     return [not bool(flag) for flag in iscrowd]
 
 
@@ -122,7 +123,8 @@ def box_derivable(
 
 def is_detection(a: Annotation) -> bool:
     """Whether ``a`` is one detected object: one object (:func:`instances`) with a box or region
-    (:func:`box_derivable`). The one selection every match and detection count reads."""
+    (:func:`box_derivable`). The one selection every match and detection count reads.
+    """
     return bool(instances([a])) and box_derivable(a.geometry)
 
 

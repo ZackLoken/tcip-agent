@@ -114,7 +114,8 @@ class ClassificationHead(BaseHead):
 class OrdinalHead(BaseHead):
     """Ordinal classification via CORN (conditional ordinal regression): K-1 binary classifiers
     where classifier k predicts P(Y > k | Y > k-1), trained by
-    :func:`~tcip_mcp.pipelines.components.losses.corn_loss`."""
+    :func:`~tcip_mcp.pipelines.components.losses.corn_loss`.
+    """
 
     task_type = "ordinal"
     target_key = "ranks"
@@ -224,7 +225,8 @@ class RegressionHead(BaseHead):
 
 class SemanticSegHead(BaseHead):
     """Pixel-wise semantic segmentation (DeepLab-style), trained by cross-entropy and
-    multi-class Dice over the softmax; ``class_weights`` applies to the cross-entropy term."""
+    multi-class Dice over the softmax; ``class_weights`` applies to the cross-entropy term.
+    """
 
     task_type = "semantic_seg"
 

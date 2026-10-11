@@ -1,5 +1,6 @@
 """``push_panel_event`` posting to the backend, which broadcasts to subscribed WebSocket clients,
-and the output shapes of the tools that push."""
+and the output shapes of the tools that push.
+"""
 
 from __future__ import annotations
 
@@ -78,7 +79,8 @@ class TestPostPanelEventRoute:
         self, opened_client: TestClient, project_id: str
     ) -> None:
         """A subscriber connected to a panel receives events pushed after it joined, in the
-        order they were posted."""
+        order they were posted.
+        """
         with opened_client.websocket_connect(
             "ws://127.0.0.1/ws/panel/training"
         ) as ws:
@@ -107,7 +109,8 @@ class TestPostPanelEventRoute:
         self, opened_client: TestClient, project_id: str
     ) -> None:
         """A browser that connects after events landed receives them on connect, in the order
-        they were posted."""
+        they were posted.
+        """
         panel = "results"
         opened_client.post(
             "/api/events/results",
@@ -142,7 +145,8 @@ class TestPostPanelEventRoute:
         tmp_path: Path,
     ) -> None:
         """Replay is of the open project's own events: after another project opens, a late
-        subscriber is replayed nothing the first project's session retained."""
+        subscriber is replayed nothing the first project's session retained.
+        """
         from tcip_web.state import store
         from tests._web_fixtures import open_new_project
 
@@ -167,7 +171,8 @@ class TestPostPanelEventRoute:
     ) -> None:
         """The receiver admits the project an event names before retaining it: an event for
         another project answers 409 naming the open one and is retained nowhere, and the same
-        event naming the open project is retained."""
+        event naming the open project is retained.
+        """
         from tcip_web.state import store
         from tests._web_fixtures import named_project
 
@@ -199,7 +204,8 @@ class TestPostPanelEventRoute:
         self, opened_client: TestClient, project_id: str
     ) -> None:
         """An annotate_focus event carrying a mode and an active_subject writes both into the
-        advisory state, alongside the tab it lands on."""
+        advisory state, alongside the tab it lands on.
+        """
         resp = opened_client.post(
             "/api/events/app",
             json={
@@ -242,7 +248,8 @@ class TestPostPanelEventRoute:
         monkeypatch,
     ) -> None:
         """A focus the backend refuses carries the channel's reason and the project it has open,
-        beside the frame it would have landed on."""
+        beside the frame it would have landed on.
+        """
         from tcip_mcp import web_client
         from tcip_mcp.tools.gui_tools import focus_human_attention
         from tests._web_fixtures import bound_to
@@ -277,7 +284,8 @@ class TestPostPanelEventRoute:
         monkeypatch,
     ) -> None:
         """The event ``focus_human_attention`` posts, delivered to the backend, sets the
-        advisory state it names."""
+        advisory state it names.
+        """
         from tcip_mcp import web_client
         from tcip_mcp.tools.gui_tools import focus_human_attention
         from tests._web_fixtures import bound_to
@@ -365,7 +373,8 @@ class TestPortDiscovery:
         self, tmp_path: Path, monkeypatch
     ) -> None:
         """No record means no backend serves the workspace; a requested port in the environment
-        is not where one listens."""
+        is not where one listens.
+        """
         from tcip_mcp.web_client import NoBackendPortError, resolve_web_port
 
         monkeypatch.setenv("TCIP_WEB_PORT", "12345")
@@ -444,7 +453,8 @@ class TestTrainingToolOutputSchema:
         monkeypatch,
     ) -> None:
         """The identifier a launch answers is the registered run, and its output directory is
-        that run's own."""
+        that run's own.
+        """
         pytest.importorskip("torchvision")
         monkeypatch.chdir(tmp_path)
 
@@ -495,7 +505,8 @@ class TestTrainingToolOutputSchema:
         tmp_path: Path,
     ) -> None:
         """A status read names the run it describes and that run's own progress; an identifier
-        naming no run is refused."""
+        naming no run is refused.
+        """
         from tcip_mcp.tools import training_tools
         from tests._verified_checkpoint_fixtures import (
             detection_config,
@@ -571,7 +582,8 @@ class TestInferenceToolOutputSchema:
         tmp_path: Path,
     ) -> None:
         """A prediction bucket holds one document per image the pass saw, keyed by its stem and
-        holding its own detections, an image with none included, and its record names each."""
+        holding its own detections, an image with none included, and its record names each.
+        """
         pytest.importorskip("torch")
         from tcip_annotation import json_io
         from tests._chain_fixtures import published
@@ -659,7 +671,8 @@ def test_post_panel_event_returns_the_backends_response_body(
     opened, monkeypatch
 ):
     """``post_panel_event`` against a served backend answers with the backend's response body,
-    and with the backend's own none-open refusal once the project is closed."""
+    and with the backend's own none-open refusal once the project is closed.
+    """
     import asyncio
     import socket
     import threading

@@ -17,7 +17,8 @@ def test_launch_training_defaults_into_the_projects_experiment_store(
     tmp_path: Path, monkeypatch
 ) -> None:
     """A run's weights and logs land in its own directory under the project's experiments
-    directory, never in the launching process's cwd."""
+    directory, never in the launching process's cwd.
+    """
     pytest.importorskip("torchvision")
     monkeypatch.chdir(tmp_path)
 

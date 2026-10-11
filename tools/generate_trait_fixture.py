@@ -73,7 +73,8 @@ _FIXED_TIME = "1970-01-01T00:00:00+00:00"
 
 def normalized(served: dict[str, dict]) -> dict[str, dict]:
     """``served`` with each revision's set timestamps replaced by ``_FIXED_TIME``, the facts that
-    differ between two otherwise identical runs."""
+    differ between two otherwise identical runs.
+    """
     out = json.loads(json.dumps(served))
     for listing in out.values():
         for trait in listing["traits"]:
@@ -87,7 +88,8 @@ def normalized(served: dict[str, dict]) -> dict[str, dict]:
 def listings(workspace: Path) -> dict[str, dict]:
     """Propose and confirm the fixture traits in projects created under ``workspace``, the
     workspace the web backend is started with here, serving the listing at each stage,
-    :func:`normalized`."""
+    :func:`normalized`.
+    """
     from fastapi.testclient import TestClient
 
     from tcip_mcp import traits

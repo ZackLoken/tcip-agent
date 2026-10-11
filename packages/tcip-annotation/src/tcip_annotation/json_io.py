@@ -82,7 +82,8 @@ class UnreadableLabelDocumentError(Exception):
 def safe_score(x) -> float:
     """A confidence as it is stored: rounded to four places. A non-finite one (NaN or infinity)
     refuses (``ValueError``) naming it: no stored number stands in for a score the model did not
-    give."""
+    give.
+    """
     v = float(x)
     if not math.isfinite(v):
         raise ValueError(
@@ -108,7 +109,8 @@ def _numbers(value, key: str, count: int | None = None) -> list[float]:
 
 def _polygon_of(segmentation) -> Polygon:
     """A ``segmentation``'s flat ``x, y`` rings as a :class:`Polygon`, which refuses a ring too
-    short to be a shape, or ``ValueError`` naming what the value is instead."""
+    short to be a shape, or ``ValueError`` naming what the value is instead.
+    """
     if not isinstance(segmentation, list):
         raise ValueError(
             f"segmentation {segmentation!r} is not a list of rings"
@@ -229,7 +231,8 @@ def stamped(
 ) -> list[Annotation]:
     """``contents`` with their provenance: each one whose stored content (:func:`stored_content`)
     equals a not yet claimed record of ``stored`` takes that record's provenance, and every other
-    one is authored by ``author`` at ``now`` with no sign-off."""
+    one is authored by ``author`` at ``now`` with no sign-off.
+    """
     unclaimed: dict[str, list[Annotation]] = {}
     for record in stored:
         unclaimed.setdefault(_content_key(record), []).append(record)
@@ -386,14 +389,16 @@ class CompletionMark:
 
 def canonical_digest(value) -> str:
     """The platform's content digest of a JSON value: sha256 over its compact serialization, in
-    the value's own key order, first sixteen hex digits."""
+    the value's own key order, first sixteen hex digits.
+    """
     canonical = json.dumps(value, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
 def subject_digest(annotations: Iterable[Annotation], subject: str) -> str:
     """The :func:`canonical_digest` of ``subject``'s annotations as stored, provenance aside, in
-    an order independent of the order they were drawn in."""
+    an order independent of the order they were drawn in.
+    """
     return canonical_digest(
         sorted(_content_key(a) for a in annotations if a.subject == subject)
     )
@@ -418,7 +423,8 @@ def completion_marks(
     """The live completion marks a parsed document holds, by subject: the ones whose digest still
     names that subject's ``annotations``. Raises :class:`UnreadableLabelDocumentError` naming the
     subject and index of a mark that is not a rect of four numbers, a person (:func:`is_person`), a
-    time, a digest and a ``proposals_hidden`` flag."""
+    time, a digest and a ``proposals_hidden`` flag.
+    """
     raw = data.get(COMPLETION_KEY) or {}
     if not isinstance(raw, dict):
         raise UnreadableLabelDocumentError(
@@ -472,7 +478,8 @@ def covers(
     marks: Iterable[CompletionMark], rect: tuple[float, float, float, float]
 ) -> bool:
     """Whether the union of ``marks``' rects covers the half-open pixel ``rect`` ``(x0, y0, x1,
-    y1)``, every point of it."""
+    y1)``, every point of it.
+    """
     boxes = [(x, y, x + w, y + h) for x, y, w, h in (m.rect for m in marks)]
     x0, y0, x1, y1 = rect
     xs = sorted(
@@ -496,7 +503,8 @@ class LabelDocument:
     """One image's label document as read: its annotations, its ``width`` and ``height``
     (``None`` for a document that states none), each subject's live completion marks, and the
     detection ``cap`` the pass that predicted a prediction document kept its frame to (``None``
-    for a document no pass predicted)."""
+    for a document no pass predicted).
+    """
 
     annotations: list[Annotation]
     width: int | None
@@ -516,7 +524,8 @@ class LabelDocument:
 
     def state(self, subject: str) -> SubjectState:
         """What this document says about ``subject``: :meth:`finished` or not, holding it by
-        :func:`annotations_hold_subject` or not."""
+        :func:`annotations_hold_subject` or not.
+        """
         return _STATE_OF[
             self.finished(subject),
             annotations_hold_subject(self.annotations, subject),
@@ -527,13 +536,15 @@ def annotations_hold_subject(
     annotations: Iterable[Annotation], subject: str
 ) -> bool:
     """Whether any of ``annotations`` names ``subject``, geometry or not: an image-level record
-    counts."""
+    counts.
+    """
     return any(a.subject == subject for a in annotations)
 
 
 def label_document(data: dict) -> LabelDocument:
     """A stored per-image document as a :class:`LabelDocument`; refuses as
-    :func:`_annotations_of` and :func:`completion_marks` do."""
+    :func:`_annotations_of` and :func:`completion_marks` do.
+    """
     annotations = _annotations_of(data)
     return LabelDocument(
         annotations=annotations,
@@ -556,7 +567,8 @@ NO_DOCUMENT = LabelDocument(
 def document_at(key: Key, stored: tcip_store.Versioned) -> LabelDocument:
     """``stored``, what the store answered for ``key``, as a :class:`LabelDocument`:
     :data:`NO_DOCUMENT` at ``Version.ABSENT``, else its value decoded, a value
-    :func:`label_document` refuses raising :class:`UnreadableLabelDocumentError` naming ``key``."""
+    :func:`label_document` refuses raising :class:`UnreadableLabelDocumentError` naming ``key``.
+    """
     if stored.version == Version.ABSENT:
         return NO_DOCUMENT
     try:
@@ -571,7 +583,8 @@ def read_stored(key: Key, **default: Any) -> tcip_store.Versioned:
     """The store's read of ``key`` (:func:`tcip_store.read_versioned`, ``default`` passed
     through); a record that does not decode, and an absent one read with no default
     (``NotFoundError``), raise :class:`UnreadableLabelDocumentError` with the store's own
-    message."""
+    message.
+    """
     try:
         return tcip_store.read_versioned(key, **default)
     except (tcip_store.DecodeError, tcip_store.NotFoundError) as exc:
@@ -581,7 +594,8 @@ def read_stored(key: Key, **default: Any) -> tcip_store.Versioned:
 def read_document_versioned(key: Key) -> tuple[LabelDocument, Version]:
     """The editor's read: the document ``key`` names (:func:`document_at`, :data:`NO_DOCUMENT`
     where the store holds none) and the version it was read at. A record that does not decode
-    raises :class:`UnreadableLabelDocumentError` naming it."""
+    raises :class:`UnreadableLabelDocumentError` naming it.
+    """
     stored = read_stored(key, default=None)
     return document_at(key, stored), stored.version
 
@@ -589,7 +603,8 @@ def read_document_versioned(key: Key) -> tuple[LabelDocument, Version]:
 def read_label_document(key: Key, version: str | None = None) -> LabelDocument:
     """The document ``key`` names, read through the store's required read, at ``version`` (a
     version token) when one is given. No record, another version, or a record that does not
-    decode raises :class:`UnreadableLabelDocumentError` naming it."""
+    decode raises :class:`UnreadableLabelDocumentError` naming it.
+    """
     stored = read_stored(key)
     if version is not None and stored.version.token != version:
         raise UnreadableLabelDocumentError(
@@ -646,7 +661,8 @@ doors refuse on."""
 
 def person_name(text: str) -> str | None:
     """The name ``text`` states under :data:`PERSON_NAME_RULE`, without the prefix; ``None`` when
-    it names no one."""
+    it names no one.
+    """
     match = re.match(PERSON_NAME_RULE, text)
     return None if match is None else match.group(1)
 
@@ -654,7 +670,8 @@ def person_name(text: str) -> str | None:
 def is_person(identity: object) -> bool:
     """Whether ``identity`` is a person's recorded identity: a string holding
     :data:`PERSON_IDENTITY_PREFIX` followed by the name :data:`PERSON_NAME_RULE` captures from it,
-    with nothing else around them."""
+    with nothing else around them.
+    """
     if not isinstance(identity, str):
         return False
     name = person_name(identity)
@@ -676,7 +693,8 @@ def is_unadjudicated_prediction(a: Annotation) -> bool:
 
 def is_unadjudicated_agent_authorship(a: Annotation) -> bool:
     """True when ``a`` names a producer that is not a person and no reviewer has signed off on it:
-    its :func:`authorship_of` is ``"tool"``."""
+    its :func:`authorship_of` is ``"tool"``.
+    """
     return authorship_of(a) == "tool"
 
 
@@ -846,7 +864,8 @@ def stored_content(a: Annotation) -> dict:
 
 def _held_provenance(a: Annotation) -> dict:
     """The provenance fields ``a`` holds, under the schema's own key names; a field it does not
-    hold is absent, never ``None``."""
+    hold is absent, never ``None``.
+    """
     return {k: getattr(a, k) for k in _PROV_KEYS if getattr(a, k) is not None}
 
 
@@ -956,7 +975,8 @@ UNASSESSED = -1
 
 class AttributeRecord(Protocol):
     """An attribute as a scope declares it: its ``name`` and its ``values`` in declared order, a
-    value's id being its position there."""
+    value's id being its position there.
+    """
 
     @property
     def name(self) -> str: ...
@@ -975,7 +995,8 @@ def attribute_ids(
     """The id of ``a``'s value under each of ``attributes``, in their order, :data:`UNASSESSED`
     where ``a`` carries no value for one; ``None`` for a record of a subject other than
     ``subject``. Refuses (:class:`UndeclaredValueError`) a value its attribute does not declare,
-    naming both."""
+    naming both.
+    """
     if a.subject != subject:
         return None
     row = []
@@ -996,7 +1017,8 @@ def attribute_values(
     ids: Iterable[int], attributes: Iterable[AttributeRecord]
 ) -> dict[str, str]:
     """``{name: value}`` for each of ``attributes`` the id row ``ids`` assesses, the inverse of
-    :func:`attribute_ids`."""
+    :func:`attribute_ids`.
+    """
     return {
         attribute.name: attribute.values[int(i)]
         for attribute, i in zip(attributes, ids, strict=True)

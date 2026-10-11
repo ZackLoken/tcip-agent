@@ -19,7 +19,8 @@ pytest.importorskip("torch")
 def test_the_csv_row_count_equals_the_population(tmp_path: Path) -> None:
     """The mapping names PLANT_A and PLANT_B; a population of PLANT_A and a plant the mapping
     never covers delivers exactly those two rows, in that order, and never PLANT_B; the uncovered
-    plant is imaged on none of the delivered dates, so it is incomplete on every one."""
+    plant is imaged on none of the delivered dates, so it is incomplete on every one.
+    """
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
     from tests._chain_fixtures import attributed_series
 
@@ -90,7 +91,8 @@ def test_the_web_route_delivers_the_population_it_was_given(
 
 def test_differing_checkpoints_across_dates_refuse(tmp_path: Path) -> None:
     """Two dates published by two checkpoints are two producers: the tool refuses naming each
-    bucket's producer and writes nothing, while the same dates from one producer deliver."""
+    bucket's producer and writes nothing, while the same dates from one producer deliver.
+    """
     from tcip_mcp.experiments import observe
     from tcip_mcp.tools.inference_tools import run_inference
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones

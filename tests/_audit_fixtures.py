@@ -1,5 +1,6 @@
 """Audit lines read back through the store seam, the shape a line may take, a fault injected
-into the log's append, and a record's lock held by another writer."""
+into the log's append, and a record's lock held by another writer.
+"""
 
 from __future__ import annotations
 
@@ -36,7 +37,8 @@ def refuse_audit_appends(
     landing: int = 0,
 ) -> None:
     """Let the first ``landing`` audit appends land, then raise ``error`` (by default a
-    ``RuntimeError`` naming an unwritable log) from every later one."""
+    ``RuntimeError`` naming an unwritable log) from every later one.
+    """
     import tcip_mcp.audit as audit_module
 
     real_append = audit_module.append

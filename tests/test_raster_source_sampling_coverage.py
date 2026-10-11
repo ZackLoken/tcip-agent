@@ -43,7 +43,8 @@ def test_a_sample_that_takes_every_grid_cell_claims_the_whole_raster(
 ) -> None:
     """A window budget at or above the grid's own cell count reads every pixel exactly once, so
     the recorded coverage is the whole raster even though the grid's edge cells are short and
-    none of them is square."""
+    none of them is square.
+    """
     height, width, window_size = 20, 30, 16
     path = tmp_path / "content.npy"
     np.save(str(path), _content_array(height, width))
@@ -64,7 +65,8 @@ def test_a_partial_sample_claims_only_the_share_of_pixels_it_read(
     tmp_path: Path,
 ) -> None:
     """A raster whose grid is three equal cells, two of them sampled, records two thirds: the
-    coverage claim tracks the sampled area, not the window edge it was cut on."""
+    coverage claim tracks the sampled area, not the window edge it was cut on.
+    """
     height, width, window_size = 12, 48, 16
     path = tmp_path / "content.npy"
     np.save(str(path), _content_array(height, width))
@@ -84,7 +86,8 @@ def test_a_taller_than_wide_sample_claims_the_same_share_as_its_transpose(
 ) -> None:
     """Two rasters of the same pixel count sampled over the same grid geometry, one standing and
     one lying down, make the same coverage claim: the share is an area, so it cannot depend on
-    which of a window's two edges is the long one."""
+    which of a window's two edges is the long one.
+    """
     window_size = 16
     tall_path, wide_path = tmp_path / "tall.npy", tmp_path / "wide.npy"
     np.save(str(tall_path), _content_array(48, 12))

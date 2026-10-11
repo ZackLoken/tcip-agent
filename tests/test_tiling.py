@@ -53,7 +53,8 @@ def test_a_row_is_clipped_once_and_carries_the_bounds_of_what_the_tile_shows():
     to tile-local; one crossing the edge with a 14 px visible part is kept and one with a 9 px
     sliver is dropped; one not meeting the tile is gone. A polygon's box is the bounds of its
     clipped region, never its bounding box cut at the tile, and its geometry is that region,
-    tile-local."""
+    tile-local.
+    """
     tile = (200, 200, 264, 264)
     boxes, rows, regions = _clipped(
         [
@@ -106,7 +107,8 @@ def test_a_dataset_too_sparse_to_derive_its_sliver_cutoff_refuses_naming_the_fie
 ):
     """No fraction stands in for a cutoff the ground truth cannot derive: one box per image over
     two images measures no size spread, so an unstated cutoff refuses naming what to state, and
-    the same dataset with the field stated tiles."""
+    the same dataset with the field stated tiles.
+    """
     pytest.importorskip("torch")
 
     images_dir = _det_dataset(tmp_path, n=2)
@@ -160,7 +162,8 @@ def test_detection_and_instance_seg_tiles_of_one_frame_agree(tmp_path):
     two agree on every tile's rect, boxes and labels, every instance mask is the untiled
     instance-segmentation loader's frame mask over its tile's rect up to the rasterizer's
     rounding at the region's edge, and every box is the bounds of its mask's pixels, so a box
-    cut from the unclipped region, or a mask cut at another offset than its box, disagrees."""
+    cut from the unclipped region, or a mask cut at another offset than its box, disagrees.
+    """
     torch = pytest.importorskip("torch")
     from PIL import Image
     from shapely.geometry import Point as ShapelyPoint
@@ -419,7 +422,8 @@ def test_keep_regions_two_views_share_one_base_and_partition_disjointly(
     tmp_path,
 ):
     """The mechanism a spatial train/val split uses: two TiledDetectionDataset instances over one
-    shared base, complementary keep_regions, no tile common to both."""
+    shared base, complementary keep_regions, no tile common to both.
+    """
     pytest.importorskip("torch")
     from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
 

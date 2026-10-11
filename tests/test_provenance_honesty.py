@@ -2,7 +2,8 @@
 
 A label naming a derivation no function computes is the failure this catches. Every entry in
 DERIVATION_IMPLEMENTATIONS maps to an importable callable or is explicitly marked as a
-non-derivation ("caller-input"/"placeholder")."""
+non-derivation ("caller-input"/"placeholder").
+"""
 
 from __future__ import annotations
 

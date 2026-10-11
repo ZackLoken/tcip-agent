@@ -22,7 +22,8 @@ from tcip_mcp.pipelines.slicing import slice_lattice
 
 def _clip_reference(boxes, tile_x, tile_y, tile_w, tile_h, min_box_size):
     """One box at a time: intersect, drop empty, drop clipped slivers; the rows kept and their
-    tile-local xyxy."""
+    tile-local xyxy.
+    """
     tx2, ty2 = tile_x + tile_w, tile_y + tile_h
     rows, out = [], []
     for i, (bx1, by1, bx2, by2) in enumerate(
@@ -123,7 +124,8 @@ def test_clip_matches_the_per_box_reference_on_random_geometries():
 def test_a_rectangular_tile_clips_against_its_own_extent():
     """A box's visible part is a 54x40 sliver against a 64-wide square tile (dropped at
     min_box_size=100), but the same box sits entirely inside a 300-wide tile at the same origin,
-    unclipped and kept regardless of size."""
+    unclipped and kept regardless of size.
+    """
     boxes = np.array([[210.0, 210.0, 350.0, 250.0]])
     square = _clip(boxes, (200, 200, 264, 264), 100.0)
     rect = _clip(boxes, (200, 200, 500, 264), 100.0)
@@ -152,7 +154,8 @@ def test_the_candidates_clipped_equal_every_row_clipped_over_a_lattice():
 
 def test_each_slice_gets_its_own_candidate_array():
     """Empty slices must not share one mutable array: a caller mutating one slice's candidates
-    must never see the change in another's."""
+    must never see the change in another's.
+    """
     slices = [(0, 0, 64, 64), (100, 0, 164, 64), (0, 100, 64, 164)]
     candidates = slice_candidates(np.array([[10.0, 10.0, 20.0, 20.0]]), slices)
     empties = [rows for rows in candidates if len(rows) == 0]
@@ -164,7 +167,8 @@ def test_each_slice_gets_its_own_candidate_array():
 
 def test_candidate_cost_scales_with_incidences_not_positions_times_boxes():
     """A generous wall-clock rail on a large geometry: the cost must follow the box-slice
-    incidences, so a dense lattice over many small boxes finishes in seconds."""
+    incidences, so a dense lattice over many small boxes finishes in seconds.
+    """
     rng = np.random.default_rng(5)
     width = height = 56_000
     tile_size = 224

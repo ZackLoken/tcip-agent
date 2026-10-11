@@ -1,5 +1,6 @@
 """The integer geometry a display read is sized and planned with (``display_bounds``), and its
-agreement with the geometry the raster reader admits (``raster_source``)."""
+agreement with the geometry the raster reader admits (``raster_source``).
+"""
 
 from __future__ import annotations
 
@@ -63,7 +64,8 @@ def test_with_no_level_fitting_the_plan_reads_the_coarsest_within_the_cap():
 
 def test_an_edge_limited_plan_names_the_coarser_level_it_comes_off():
     """A one-row output far below the fitting level's resolution reads the coarsest level still
-    holding it, not the finer one whose window fit."""
+    holding it, not the finer one whose window fit.
+    """
     plan = plan_read(
         Rect(0, 0, 5000, 64),
         5000,
@@ -93,7 +95,8 @@ def test_a_crop_is_planned_on_the_window_the_reader_opens(
 ):
     """A one-pixel-wide crop's window on every level is one pixel wide, never a fraction of one,
     and an offset crop's window takes its origin rounded down and its end up, so the plan picks
-    the level a reader can open within the cap and names it."""
+    the level a reader can open within the cap and names it.
+    """
     from tcip_mcp.pipelines.raster_source import level_window
 
     plan = plan_read(rect, 2048, 2048, LEVELS, max_pixels)

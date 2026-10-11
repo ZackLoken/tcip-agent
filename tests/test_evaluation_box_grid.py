@@ -38,7 +38,8 @@ def _detector_pass(gt_boxes, pred_boxes):
 
 def test_a_prediction_off_the_stored_grid_is_put_on_it_before_scoring():
     """A raw detector coordinate carries more precision than any stored box it will be matched
-    against, so it is quantized to the stored grid rather than compared across two grids."""
+    against, so it is quantized to the stored grid rather than compared across two grids.
+    """
     from tcip_mcp.pipelines.training.evaluation import records_from_detector
 
     target, output = _detector_pass([ON_GRID_BOX], [SUB_QUANTUM_BOX])
@@ -51,7 +52,8 @@ def test_a_prediction_off_the_stored_grid_is_put_on_it_before_scoring():
 
 def test_ground_truth_already_on_the_stored_grid_is_unchanged():
     """The shared derivation must be an identity for the side that defines the grid, or it would be
-    moving ground truth to meet the predictions instead of the other way round."""
+    moving ground truth to meet the predictions instead of the other way round.
+    """
     from tcip_mcp.pipelines.training.evaluation import records_from_detector
 
     target, output = _detector_pass([ON_GRID_BOX], [])
@@ -97,7 +99,8 @@ def test_scoring_labels_read_back_from_disk_is_unaffected_by_the_shared_grid(
     tmp_path,
 ):
     """Ordinary work must still pass: stored labels scored against predictions that reproduce them
-    match exactly, with no metric moved by putting both sides through the same derivation."""
+    match exactly, with no metric moved by putting both sides through the same derivation.
+    """
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key

@@ -14,7 +14,8 @@ from tests._cli_fixtures import run_tcip
 def _fixture_config(root: Path) -> Path:
     """A valid config: a builder the operator's own process imports (never called, since no
     --smoke is passed here) over two labeled frames of the subject its scope names
-    (``_verified_checkpoint_fixtures.detection_images``)."""
+    (``_verified_checkpoint_fixtures.detection_images``).
+    """
     from tests._chain_fixtures import training_config
     from tests._verified_checkpoint_fixtures import (
         BUILT_DETECTOR,

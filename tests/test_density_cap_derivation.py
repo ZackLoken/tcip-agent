@@ -36,7 +36,8 @@ def _cap(counts: list[int]) -> float:
 
 def test_the_density_admits_the_crowded_decile_of_a_skewed_count_distribution():
     """Ninety ordinary scenes at 100 objects and ten crowded ones at 1000: a frame's cap has to
-    clear the crowded ones, which sit ten times above the bulk of the distribution."""
+    clear the crowded ones, which sit ten times above the bulk of the distribution.
+    """
     counts = [100] * 90 + [1000] * 10
 
     assert _cap(counts) == pytest.approx(1000)
@@ -45,14 +46,16 @@ def test_the_density_admits_the_crowded_decile_of_a_skewed_count_distribution():
 def test_the_density_on_a_uniform_count_distribution_is_unchanged_by_the_tail_rule():
     """The companion obligation: reading the tail must not inflate the density for an ordinary
     reference whose images all carry about the same number of objects; no floor raises a sparse
-    one."""
+    one.
+    """
     assert _cap([100] * 100) == pytest.approx(100)
     assert _cap([2] * 20) == pytest.approx(2)
 
 
 def test_the_density_reaches_toward_the_densest_image_of_a_skewed_reference():
     """Nine sparse images (5 objects each) and one crowded one (300): the density is the 0.99
-    quantile of the ten, most of the way toward the crowded image and short of it."""
+    quantile of the ten, most of the way toward the crowded image and short of it.
+    """
     counts = [5] * 9 + [300]
 
     assert _cap(counts) == pytest.approx(5 + 0.91 * 295)

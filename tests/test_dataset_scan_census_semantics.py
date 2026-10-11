@@ -53,7 +53,8 @@ def test_scan_reports_four_distinct_counts_over_a_lopsided_dataset(
 ):
     """image_count, labels_count, paired_images and unlabeled_images each measure their own
     collection: the unlabeled remainder is the images no label pairs with, never the labels
-    no image pairs with."""
+    no image pairs with.
+    """
     root = _lopsided_dataset(tmp_path / "ds")
 
     result = scan_dataset(str(root))
@@ -76,7 +77,8 @@ def test_scan_reports_four_distinct_counts_over_a_lopsided_dataset(
 
 def test_a_buckets_record_is_not_counted_as_a_prediction(tmp_path: Path):
     """A published bucket holds its per-image documents beside its own record; only the
-    documents are predictions, and documents in no bucket are none."""
+    documents are predictions, and documents in no bucket are none.
+    """
     pytest.importorskip("torch")
     from tcip_mcp.dataset_layout import bucket_key, prediction_key
     from tests._chain_fixtures import published
@@ -114,7 +116,8 @@ def test_a_buckets_record_is_not_counted_as_a_prediction(tmp_path: Path):
 
 def test_scan_writes_nothing_into_the_dataset(tmp_path: Path):
     """The census is a read of the dataset, so its files outside the store and every label
-    record are identical afterwards."""
+    record are identical afterwards.
+    """
     root = _lopsided_dataset(tmp_path / "ds")
 
     def state() -> tuple[dict, dict]:

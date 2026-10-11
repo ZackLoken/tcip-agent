@@ -1,6 +1,7 @@
 """Per-plant aggregation: a record carries an explicit ``plant_id_key`` value or one
 ``plant_id_fn`` resolves, the assignment rows' ``source``/``distance_m`` pass through, the units
-column comes from ``crops.yml``, and each strategy (count, mean, mode, sum) aggregates."""
+column comes from ``crops.yml``, and each strategy (count, mean, mode, sum) aggregates.
+"""
 
 from __future__ import annotations
 
@@ -44,7 +45,8 @@ def _recorded_meaning(tmp_path):
 
 def _identity_fn(image_name: str) -> str:
     """A trivial plant_id_fn for tests that don't care about grouping specifics: every image maps
-    to a plant_id equal to its own stem-derived group key."""
+    to a plant_id equal to its own stem-derived group key.
+    """
     return image_name.rsplit("_", 1)[0]
 
 
@@ -91,7 +93,8 @@ def test_missing_plant_id_and_no_fn_raises():
 
 def test_missing_image_key_and_no_plant_id_raises():
     """A record with no image key and no plant id raises like any other unresolved-identity
-    record."""
+    record.
+    """
     results = [{"count": 1}]
     with pytest.raises(ValueError, match="plant_id_fn|build_plant_mapping"):
         aggregate_per_plant(results, strategy="count", value_key="count")
@@ -100,7 +103,8 @@ def test_missing_image_key_and_no_plant_id_raises():
 def test_plant_id_fn_returning_none_raises_not_groups_under_none():
     """build_plant_mapping's own plant_id_fn can legitimately return None for an unmapped image
     (plot_name=None, source='unmapped'). That must raise cleanly here, not silently group under a
-    None key and crash later when aggregate_per_plant sorts groups against a real string key."""
+    None key and crash later when aggregate_per_plant sorts groups against a real string key.
+    """
 
     def sometimes_none(image_name: str) -> str | None:
         return None if "unmapped" in image_name else "PLANT_001"
@@ -120,7 +124,8 @@ def test_plant_id_fn_returning_none_raises_not_groups_under_none():
 
 def test_empty_string_plant_id_value_raises():
     """A membership test alone (`plant_id_key in r`) would pass for an empty-string value: the
-    check must be on the value, not just presence of the key."""
+    check must be on the value, not just presence of the key.
+    """
     results = [{"image": "x", "plant_id": "", "count": 1}]
     with pytest.raises(ValueError, match="plant_id_fn|build_plant_mapping"):
         aggregate_per_plant(results, strategy="count", value_key="count")
@@ -161,7 +166,8 @@ def _mapped_rows(project, *assigned: tuple[str, float]) -> list[dict]:
     """Per-image count rows carrying the assignment rows ``MappingBuild.rows`` produces for a
     mapping built through the platform's own producers (``map_captures``, one capture of each of
     its two plots), each produced assignment restated with one ``(source, distance_m)`` of
-    ``assigned`` and counted toward one plant."""
+    ``assigned`` and counted toward one plant.
+    """
     from dataclasses import replace
 
     from tcip_mcp.pipelines.postprocessing.plant_mapping import load_mapping
@@ -269,7 +275,8 @@ def test_unknown_strategy_raises():
 
 def test_the_per_plant_delivery_names_its_phenotype_in_the_crop_vocabulary_sense():
     """The vocabulary-sense parameter is delivered_phenotype; trait_name (the registry sense the
-    rest of the trait-facing surface keeps) is no valid keyword here."""
+    rest of the trait-facing surface keeps) is no valid keyword here.
+    """
     import inspect
 
     params = inspect.signature(deliver_per_plant_aggregate).parameters
@@ -342,7 +349,8 @@ def test_a_dimensional_value_key_labels_its_units_squared_for_an_area(
 ):
     """A dimensional value_key (mask_geometry-style, area_mm2) labels the units column mm2,
     derived from the key that produced the number, never a caller-asserted string. Squared, not the
-    bare linear unit: an area labeled "mm" understates its own dimensionality."""
+    bare linear unit: an area labeled "mm" understates its own dimensionality.
+    """
     results = [
         {
             "plant_id": "PLANT_001",
@@ -368,7 +376,8 @@ def test_a_count_delivery_of_a_dimensional_value_refuses_without_a_physical_scal
     tmp_path,
 ):
     """A detector delivery in a physical unit names the scale assessment that answers for the
-    unit, or the gate refuses it outright, before any acknowledgment could clear it."""
+    unit, or the gate refuses it outright, before any acknowledgment could clear it.
+    """
     fx.seed_confirmed_aggregate(
         tmp_path,
         "plant_surface_area",
@@ -391,7 +400,8 @@ def test_a_count_delivery_of_a_dimensional_value_refuses_without_a_physical_scal
 
 def test_a_delivery_refuses_a_unit_mismatched_against_crops_yml(tmp_path):
     """A trait crops.yml declares in one unit must not ship under a different unit implied by the
-    aggregated values' own key: that's the exact failure mode this column exists to prevent."""
+    aggregated values' own key: that's the exact failure mode this column exists to prevent.
+    """
     from tcip_mcp.traits import crops_units
 
     units = crops_units()
@@ -428,7 +438,8 @@ def test_a_delivery_refuses_a_unit_mismatched_against_crops_yml(tmp_path):
 def test_a_delivery_never_labels_a_pixel_value_with_crops_yml_units(tmp_path):
     """A px-suffixed value_key does not inherit crops.yml's declared physical unit: the units
     column is blank, not the declared unit, whenever the value's own key implies no physical
-    unit."""
+    unit.
+    """
     from tcip_mcp.traits import crops_units
 
     assert crops_units()["bark_thickness"] == "mm"
@@ -458,7 +469,8 @@ def test_a_delivery_never_labels_a_pixel_value_with_crops_yml_units(tmp_path):
 
 def test_units_never_fall_back_with_no_value_key_at_all():
     """A results list with no value_key resolves no unit: crops.yml's declared unit is not
-    inherited when nothing names the quantity it would describe."""
+    inherited when nothing names the quantity it would describe.
+    """
     from tcip_mcp.pipelines.postprocessing.aggregation import _resolve_units
     from tcip_mcp.traits import crops_units
 
@@ -473,7 +485,8 @@ def test_units_never_fall_back_with_no_value_key_at_all():
 def test_unit_from_value_key_never_fabricates_from_an_unrelated_key(value_key):
     """Only a trailing token that is one of crops.yml's own declared units (or a
     mechanically-squared form of one) may imply a unit: 'id'/'total'/'fraction'/'open' are none
-    of those, regardless of what precedes them."""
+    of those, regardless of what precedes them.
+    """
     from tcip_mcp.pipelines.measurement.mask_geometry import (
         unit_from_value_key,
     )
@@ -486,7 +499,8 @@ def test_unit_from_value_key_is_vocabulary_driven_not_a_field_name_whitelist():
     mask_geometry field names, so a bespoke agent-composed measurement (arc length, a landmark
     distance, anything outside mask_geometry) is still recognized when its value_key is a sensible
     '{name}_{unit}'. Any key ending in one of crops.yml's declared units (or its squared form) is
-    recognized, regardless of what module produced it."""
+    recognized, regardless of what module produced it.
+    """
     from tcip_mcp.pipelines.measurement.mask_geometry import (
         unit_from_value_key,
     )
@@ -508,7 +522,8 @@ def test_unit_from_value_key_refuses_an_area_key_missing_its_squared_suffix():
     """A value_key that names 'area' but whose trailing unit isn't squared (area_mm instead of
     area_mm2) is a real dimensional-mismatch bug in the producing code, not a case to guess
     through. An area is length^2, and silently labeling it with a bare linear unit is exactly the
-    kind of wrong number this function exists to prevent from shipping quietly."""
+    kind of wrong number this function exists to prevent from shipping quietly.
+    """
     from tcip_mcp.pipelines.measurement.mask_geometry import (
         unit_from_value_key,
     )
@@ -524,7 +539,8 @@ def test_unit_from_value_key_refuses_an_area_key_missing_its_squared_suffix():
 def test_resolve_units_squares_area_but_cross_checks_the_linear_declared_unit():
     """area_mm2 must resolve to units='mm2' in the CSV, but crops.yml's cross-check declares only
     the linear unit ('mm'), so the cross-check itself must still compare against that linear unit.
-    Comparing 'mm2' to 'mm' directly would never match."""
+    Comparing 'mm2' to 'mm' directly would never match.
+    """
     from tcip_mcp.pipelines.postprocessing.aggregation import _resolve_units
 
     results = [
@@ -571,7 +587,8 @@ def test_resolve_units_recognizes_a_bespoke_non_mask_geometry_value_key():
     """The generalized vocabulary win end to end: a trait the agent measured with its own bespoke
     code (a caliper-style diameter, never mask_geometry's field names) still gets a real units
     column instead of shipping blank, as long as it names itself '{name}_{unit}' in a
-    crops.yml-real unit."""
+    crops.yml-real unit.
+    """
     from tcip_mcp.pipelines.postprocessing.aggregation import _resolve_units
 
     results = [
@@ -591,7 +608,8 @@ def test_resolve_units_recognizes_a_bespoke_non_mask_geometry_value_key():
 
 def test_resolve_units_propagates_the_area_squared_mismatch_refusal():
     """The refusal in unit_from_value_key must reach the delivery's own caller, not be swallowed: a
-    delivery CSV must never ship silently mislabeled because of a naming bug upstream."""
+    delivery CSV must never ship silently mislabeled because of a naming bug upstream.
+    """
     from tcip_mcp.pipelines.postprocessing.aggregation import _resolve_units
 
     results = [

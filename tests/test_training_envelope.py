@@ -43,7 +43,8 @@ def _audit_events(root, tool="training_run"):
 
 def _context(tmp_path, config: dict, **kwargs) -> tuple[TrainContext, Path]:
     """A context over a run directory the launcher's own writer opened over ``config``, its run
-    training under the data section the launch resolved, as the child's own entry trains it."""
+    training under the data section the launch resolved, as the child's own entry trains it.
+    """
     from tcip_mcp.experiments import observe
     from tcip_mcp.pipelines.training.run_registry import observed_run
     from tests._verified_checkpoint_fixtures import opened_run
@@ -58,7 +59,8 @@ def _context(tmp_path, config: dict, **kwargs) -> tuple[TrainContext, Path]:
 
 def _bespoke(tmp_path, body: str) -> dict:
     """A detector run over two frames of its own whose training body is ``body`` of this
-    module."""
+    module.
+    """
     return detection_config(
         tmp_path / "data",
         model_source=detector_declaring(__file__),
@@ -138,7 +140,8 @@ def test_a_run_whose_closing_audit_line_is_refused_ends_failed_naming_it(
 ):
     """The body completes and saves its deliverable; the closing ``training_run`` append is
     refused, so the final status reads ``failed`` naming the unwritten line, names no checkpoint,
-    and the log holds the opening line alone."""
+    and the log holds the opening line alone.
+    """
     _refuse_the_closing_audit_line(monkeypatch)
     ctx, run_dir = _context(tmp_path, _bespoke(tmp_path, "_agent_train"))
     run_training_envelope(ctx)
@@ -160,7 +163,8 @@ def test_a_failed_run_whose_closing_audit_line_is_refused_names_both_causes(
     monkeypatch,
 ):
     """The body fails and the closing append is refused: the final status names the body's
-    error and the unwritten line, neither hiding the other."""
+    error and the unwritten line, neither hiding the other.
+    """
     _refuse_the_closing_audit_line(monkeypatch)
     ctx, run_dir = _context(
         tmp_path, _bespoke(tmp_path, "_agent_train_raises")
@@ -175,7 +179,8 @@ def test_a_failed_run_whose_closing_audit_line_is_refused_names_both_causes(
 
 def _agent_train_default_tag_no_override(ctx):
     """Saves under the default tag ("checkpoint"), not model_best/model_final, and never
-    calls set_final_weights. A loop like this produces no discoverable deliverable."""
+    calls set_final_weights. A loop like this produces no discoverable deliverable.
+    """
     ctx.save_checkpoint({STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.4}})
 
 
@@ -183,7 +188,8 @@ def test_envelope_default_tag_with_no_override_fails_run_and_completes_nothing(
     tmp_path,
 ):
     """A phantom deliverable (no discoverable weights) fails the run rather than completing with
-    a nonexistent path."""
+    a nonexistent path.
+    """
     ctx, run_dir = _context(
         tmp_path, _bespoke(tmp_path, "_agent_train_default_tag_no_override")
     )
@@ -198,7 +204,8 @@ def test_envelope_default_tag_with_no_override_fails_run_and_completes_nothing(
 
 def _agent_train_declares_a_path_it_never_wrote(ctx):
     """Declares its deliverable through set_final_weights under a tag this loop never saved, the
-    file under that name written behind the context's back."""
+    file under that name written behind the context's back.
+    """
     (ctx.run_dir / "never_written.pt").write_bytes(b"")
     ctx.set_final_weights("never_written")
 
@@ -207,7 +214,8 @@ def test_envelope_declared_deliverable_never_written_fails_run_and_completes_not
     tmp_path,
 ):
     """A declared tag this run's own saves never wrote ends the run failed rather than completing
-    with a file the run did not save, naming the tag."""
+    with a file the run did not save, naming the tag.
+    """
     ctx, run_dir = _context(
         tmp_path,
         _bespoke(tmp_path, "_agent_train_declares_a_path_it_never_wrote"),
@@ -309,7 +317,8 @@ def test_report_objective_records_a_selection_row_that_reaches_the_epoch_hook(
     tmp_path,
 ):
     """A bespoke body's reported objective is one metrics row stamping it the ``selection`` under
-    the run's objective, at the last epoch logged, and fires the epoch hook like any row."""
+    the run's objective, at the last epoch logged, and fires the epoch hook like any row.
+    """
     from tcip_mcp.experiments import METRICS_FILE, read_rows
 
     seen: list = []
@@ -335,7 +344,8 @@ def test_ctx_evaluate_counts_at_the_runs_validated_conf_and_takes_none_of_its_ow
     tmp_path, monkeypatch
 ):
     """A bespoke body's evaluation counts a detector's boxes at the conf its run's validated
-    evaluation block states; a caller naming another conf is refused by the call itself."""
+    evaluation block states; a caller naming another conf is refused by the call itself.
+    """
     import tcip_mcp.pipelines.training.evaluation as evaluation
     from tests._training_values import VALIDATION_CONF
 

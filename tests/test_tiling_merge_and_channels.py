@@ -10,7 +10,8 @@ from tests._producer_fixtures import dataset_over, label_image, painted_array  #
 
 def _patched(width=40, height=24, bands=5, patch=(28, 12)) -> np.ndarray:
     """A black ``height`` by ``width`` array of ``bands`` bands, bright in every band over the
-    6 px square at ``patch``."""
+    6 px square at ``patch``.
+    """
     px, py = patch
     band = painted_array(width, height, [((px, py, px + 6, py + 6), 255)])
     return np.stack([band] * bands, axis=-1)
@@ -20,7 +21,8 @@ def _multiband_detection_fixture(
     tmp_path, width=40, height=24, bands=5, patch=(28, 12)
 ):
     """A non-square multi-band GeoTIFF with a bright patch, and a GT box on that patch; its
-    images directory."""
+    images directory.
+    """
     import tifffile
 
     from tcip_annotation.state import Annotation, BBox
@@ -87,7 +89,8 @@ def test_tiled_detection_reads_multiband_and_keeps_boxes_on_their_pixels(
 def test_tiled_dataset_refuses_labels_authored_in_a_different_frame(tmp_path):
     """A label document authored in a frame other than the one the raster decodes in (here
     the 5x40 PIL reports for a 40x24x5 TIFF) is refused by the tiled dataset, naming both
-    frames."""
+    frames.
+    """
     import pytest
     import tifffile
     from PIL import Image
@@ -134,7 +137,8 @@ def test_the_authored_frame_raises_on_a_corrupt_label_rather_than_reading_as_no_
     tmp_path,
 ):
     """The tiled dataset reads each label's authored frame off its stored document, so a present,
-    unreadable label raises rather than silently disabling the frame check for that sample."""
+    unreadable label raises rather than silently disabling the frame check for that sample.
+    """
     import pytest
 
     from tcip_annotation.json_io import UnreadableLabelDocumentError

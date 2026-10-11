@@ -58,7 +58,8 @@ def _currant_bloom_body(tmp_path: Path) -> dict:
     """A registered dataset of geolocated captures over two dates, one unassessed bucket per date
     whose scope declares the positive state's attribute, the mapping over them,
     and ``currant_bloom`` confirmed, with ``tmp_path`` open in the
-    web backend; the request body a phenology door takes."""
+    web backend; the request body a phenology door takes.
+    """
     import asyncio
 
     from tcip_mcp.tools.phenology_tools import build_plant_mapping

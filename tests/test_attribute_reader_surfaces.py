@@ -23,7 +23,8 @@ GRADE = cr.Attribute("grade", "ordinal", ("low", "high"))
 
 def _scope(tmp_path: Path, *attributes: cr.Attribute) -> ClassScope:
     """The class space the admission reads for :data:`SUBJECT` over a dataset declaring
-    ``attributes`` on it."""
+    ``attributes`` on it.
+    """
     from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tests._producer_fixtures import registry_over
 
@@ -48,7 +49,8 @@ def test_count_by_class_under_a_scope_declaring_no_attribute_of_the_state_counts
 ) -> None:
     """A bucket whose scope declares no attribute the positive state names never counts a
     positive, even where a record happens to carry that attribute's name and value: only a bucket
-    whose model classified that attribute assessed the state at all."""
+    whose model classified that attribute assessed the state at all.
+    """
     p = _document(tmp_path)
     json_io.write_label_document(
         p,
@@ -77,7 +79,8 @@ def test_count_by_class_reads_the_states_own_attribute_among_several(
     tmp_path: Path,
 ) -> None:
     """Under a scope declaring two attributes, the positive state's own attribute decides, never
-    the other one; a record carrying no value under it refuses by name."""
+    the other one; a record carrying no value under it refuses by name.
+    """
     p = _document(tmp_path)
     json_io.write_label_document(
         p,
@@ -126,7 +129,8 @@ def test_an_undecodable_bucket_record_refuses_by_name_rather_than_reading_as_unc
     tmp_path: Path,
 ) -> None:
     """A published bucket whose record no longer decodes has no scope to read its documents
-    under: reading it refuses naming the record."""
+    under: reading it refuses naming the record.
+    """
     pytest.importorskip("torch")
     import sqlite3
 

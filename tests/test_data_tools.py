@@ -62,7 +62,8 @@ def test_scan_dataset_counts_only_the_documents_a_published_bucket_names(
     tmp_path: Path,
 ):
     """A prediction document no bucket record names is no bucket's, so the census counts only
-    the documents a published bucket's record names."""
+    the documents a published bucket's record names.
+    """
     pytest.importorskip("torch")
     from tcip_mcp.dataset_layout import prediction_key
     from tests._chain_fixtures import predicted, published
@@ -90,7 +91,8 @@ def _add_extra_bud_groups(data_dir: Path, count: int) -> None:
     """Adds ``count`` more single-tile foreground groups under ``data_dir``'s own date, for its
     own subject, without touching the shared ``data_dir`` fixture other tests depend on: a
     manifest write needs at least four foreground groups to clear ``draw_splits``' floor, one
-    more than the fixture's own three."""
+    more than the fixture's own three.
+    """
     from PIL import Image
 
     images_dir = data_dir / "images" / "2-11-26"
@@ -147,7 +149,8 @@ LEAF_DATE = "2-11-26"
 
 def _leaf_scene(root: Path, n: int = 6) -> Path:
     """``n`` captures of one date, the ``i``-th label holding ``i + 1`` leaves and ``5 * (n - i)``
-    buds, so a count scoped to the leaf and one over every record disagree."""
+    buds, so a count scoped to the leaf and one over every record disagree.
+    """
     from PIL import Image
 
     images = root / "images" / LEAF_DATE
@@ -176,7 +179,8 @@ def test_a_draw_without_stratification_reports_the_counted_annotations(
     tmp_path: Path,
 ):
     """Turning the balancing off changes how the draw sides its members, never what it counts:
-    every side's foreground is the subject's own annotations it holds."""
+    every side's foreground is the subject's own annotations it holds.
+    """
     root = _leaf_scene(tmp_path / "ds")
     result = draw_splits(
         tmp_path, str(root), seed=1, subject="leaf", stratify_foreground=False
@@ -193,7 +197,8 @@ def test_a_draw_without_stratification_reports_the_counted_annotations(
 def test_draw_splits_and_a_runs_own_draw_side_the_same_members(tmp_path: Path):
     """``draw_splits`` and a run's own train/val draw over the same ground truth, seed, policy
     and val share answer the same sides: the tool's per-side sizes and foreground equal what the
-    run's partition holds, its foreground recounted here from each member's own leaves."""
+    run's partition holds, its foreground recounted here from each member's own leaves.
+    """
     pytest.importorskip("torch")
     from tests._producer_fixtures import train_val
 
@@ -234,7 +239,8 @@ def test_every_draw_refuses_a_tree_short_of_its_floor_the_same_way(
 ):
     """``draw_splits`` and a run's own draw hold one floor: two captures mapped into one group
     are one foreground group, short of a train and a val side, and both refuse with that floor's
-    words rather than one of them training without validation."""
+    words rather than one of them training without validation.
+    """
     pytest.importorskip("torch")
     from tests._producer_fixtures import train_val
 
@@ -268,7 +274,8 @@ def test_draw_splits_stats_only_admits_a_nonzero_calibration_ratio(
     data_dir: Path,
 ):
     """A stats-only call (no output_path) draws a calibration side beside a holdout stated at
-    zero, which it does not draw."""
+    zero, which it does not draw.
+    """
     result = draw_splits(
         data_dir,
         str(data_dir),
@@ -285,7 +292,8 @@ def test_draw_splits_stats_only_admits_a_nonzero_calibration_ratio(
 
 def _spoil(data_dir: Path, stem: str) -> None:
     """The label document of the fixture's image ``stem`` replaced, past its writer, by a record
-    that is not a label document."""
+    that is not a label document.
+    """
     ts.replace(label_key(data_dir, "2-11-26", stem), ["not", "a", "document"])
 
 
@@ -293,7 +301,8 @@ def test_draw_splits_reports_an_unreadable_label_by_name(
     data_dir: Path, tmp_path: Path
 ):
     """A present, unreadable label among the candidates is an error naming the document, never a
-    raise through the tool boundary."""
+    raise through the tool boundary.
+    """
     _spoil(data_dir, "img_001")
 
     result = draw_splits(
@@ -317,7 +326,8 @@ def test_draw_splits_reports_an_unreadable_label_sorted_last(
 ):
     """A corrupt label reached last in sort order is caught by the same per-stem admission read
     as the first-sorted case above, regardless of where in the candidate order it falls, and
-    answers the same error dict, never a raw raise."""
+    answers the same error dict, never a raw raise.
+    """
     _spoil(data_dir, "img_003")
 
     result = draw_splits(
@@ -341,7 +351,8 @@ def test_draw_splits_writes_nothing_when_a_marked_document_will_not_read(
 ):
     """An unreadable label on an image a human marked complete refuses the whole draw and leaves
     no selection behind: a partial record would claim a partition nobody drew, and the mark cannot
-    be read from a document that will not parse."""
+    be read from a document that will not parse.
+    """
     from tcip_mcp.dataset_layout import image_dir
     from tests._producer_fixtures import mark_complete
 
@@ -371,7 +382,8 @@ def test_draw_splits_stats_only_reports_an_unreadable_first_sorted_label(
     data_dir: Path,
 ):
     """A stats-only call (no output_path) draws through the same admission a written one does, so
-    an unreadable first-sorted candidate is an error naming it."""
+    an unreadable first-sorted candidate is an error naming it.
+    """
     _spoil(data_dir, "img_001")
 
     result = draw_splits(data_dir, str(data_dir), seed=1, subject="bud")
@@ -384,7 +396,8 @@ def test_draw_splits_stats_only_reports_an_unreadable_label_during_stratificatio
     data_dir: Path,
 ):
     """A stats-only call still reads every stem's label, so a corrupt label reached after a
-    readable first candidate is an error naming the document, not a raw raise."""
+    readable first candidate is an error naming the document, not a raw raise.
+    """
     _spoil(data_dir, "img_003")
 
     result = draw_splits(data_dir, str(data_dir), seed=1, subject="bud")
@@ -398,7 +411,8 @@ def test_draw_splits_manifest_answers_an_ambiguous_image_stem_as_an_error(
 ):
     """A raw file colliding with a band group's own canonical stem is an error naming the
     directory, never a raise through the tool boundary, the same contract the unreadable-label
-    cases above state."""
+    cases above state.
+    """
     import numpy as np
 
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
@@ -440,7 +454,8 @@ def test_draw_splits_stats_only_answers_an_ambiguous_image_stem_as_an_error(
     tmp_path: Path,
 ):
     """A stats-only call (no output_path) answers the identical stem collision a selection-writing
-    call reports as an error, never a raw raise: both draw through the one admission."""
+    call reports as an error, never a raw raise: both draw through the one admission.
+    """
     import numpy as np
 
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
@@ -473,7 +488,8 @@ def test_scan_dataset_answers_an_ambiguous_image_stem_as_an_error(
     tmp_path: Path,
 ):
     """``scan_dataset`` answers the same stem collision as an error rather than letting
-    ``AmbiguousImageStemError`` escape uncaught through the tool boundary."""
+    ``AmbiguousImageStemError`` escape uncaught through the tool boundary.
+    """
     import numpy as np
 
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
@@ -498,7 +514,8 @@ def test_scan_dataset_answers_an_ambiguous_image_stem_as_an_error(
 
 def _add_extra_leaf_groups(images_dir: Path, count: int) -> None:
     """Adds ``count`` more plain single-tile foreground groups (subject ``leaf``) beside a
-    band-group fixture, so a manifest write over it clears the four-foreground-group floor."""
+    band-group fixture, so a manifest write over it clears the four-foreground-group floor.
+    """
     from PIL import Image
 
     letters = "BCDEFGH"
@@ -519,7 +536,8 @@ def test_draw_splits_refuses_an_incomplete_band_group_before_writing(
     tmp_path: Path,
 ):
     """A band group whose manifest names a missing sibling is refused before the selection is
-    written, never a raise through the tool after it lands."""
+    written, never a raise through the tool after it lands.
+    """
     import numpy as np
 
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
@@ -642,7 +660,8 @@ def test_draw_splits_floor_refuses_before_any_write_regardless_of_stratify_foreg
 ):
     """The foreground floor is over the draw's own subject-scoped counter on every selection
     draw, whether or not stratify_foreground toggles the balancing pass: a tree with only three
-    foreground groups refuses before anything is written, with stratify_foreground off."""
+    foreground groups refuses before anything is written, with stratify_foreground off.
+    """
     root = _multi_source_dataset(
         tmp_path / "ds", prefixes=("srcA", "srcB", "srcC")
     )
@@ -667,7 +686,8 @@ def test_draw_splits_floor_refuses_before_any_write_regardless_of_stratify_foreg
 
 def test_draw_splits_answers_one_draw_whether_or_not_it_writes(tmp_path: Path):
     """A zero ratio draws no side of that name and a negative one refuses, with or without
-    ``output_path``: what is drawn never depends on whether it is written."""
+    ``output_path``: what is drawn never depends on whether it is written.
+    """
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     ratios = {
@@ -712,7 +732,8 @@ def test_draw_splits_floor_ignores_a_groups_only_annotations_of_another_subject(
     """A confirmed-negative-for-the-draws-subject group whose label file happens to carry
     another subject's annotation is not this draw's foreground: the subject-scoped counter
     reads it as zero, so three real ``leaf`` groups plus one such group still refuse (below the
-    floor of four), the same tree an unscoped counter would have read as four and written."""
+    floor of four), the same tree an unscoped counter would have read as four and written.
+    """
     from PIL import Image
 
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
@@ -772,7 +793,8 @@ def _leaf_dataset_with_negatives(
     root: Path, date: str, n_foreground: int, n_negative: int
 ) -> None:
     """``n_foreground`` single-tile ``leaf`` groups plus ``n_negative`` confirmed-negative
-    images, all under one capture date."""
+    images, all under one capture date.
+    """
     from PIL import Image
 
     from tests._producer_fixtures import mark_complete
@@ -805,7 +827,8 @@ def test_draw_splits_calibration_side_holds_real_foreground_regardless_of_strati
     """The minimum-foreground pass sees the draw's subject-scoped foreground counts on every
     selection draw, not only when stratify_foreground also balances by them: the calibration
     side's stated minimum of two foreground groups is met with real foreground even with
-    balancing off, across every seed."""
+    balancing off, across every seed.
+    """
     root = tmp_path / "ds"
     date = "2-11-26"
     _leaf_dataset_with_negatives(root, date, n_foreground=4, n_negative=6)
@@ -963,7 +986,8 @@ def test_draw_splits_groups_tiles_together(tmp_path: Path):
 
 def test_draw_splits_group_key_map_never_straddles(tmp_path: Path):
     """An agent-derived group_key_map (5 samples, 4 groups) is honored: the two same-group
-    samples never land in different splits."""
+    samples never land in different splits.
+    """
     root = _multi_source_dataset(
         tmp_path / "ds", prefixes=("x", "y", "z", "w", "v"), tiles=1
     )
@@ -1001,7 +1025,8 @@ def test_draw_splits_unrecognized_group_by_refuses_without_writing(
     tmp_path: Path,
 ):
     """An unrecognized ``group_by`` must refuse loudly and write nothing, never fall back to
-    ``GROUP_KEY_FNS.get(group_by, default_group_key)`` and mis-group a dataset silently."""
+    ``GROUP_KEY_FNS.get(group_by, default_group_key)`` and mis-group a dataset silently.
+    """
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     result = draw_splits(
@@ -1023,7 +1048,8 @@ def test_draw_splits_refuses_to_write_a_selection_with_no_subject(
     tmp_path: Path,
 ):
     """A selection with no subject would be a partition of images, not of a run's admissible
-    samples; draw_splits refuses to write one rather than guessing what a run would admit."""
+    samples; draw_splits refuses to write one rather than guessing what a run would admit.
+    """
     root = _multi_source_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     result = draw_splits(
@@ -1042,7 +1068,8 @@ def test_draw_splits_refuses_to_write_a_selection_with_no_subject(
 def _two_date_collision_dataset(root: Path, subject: str) -> Path:
     """One stem name, ``shared``, present under two capture dates with different content, plus
     one more distinct stem per date so a selection drawn over this tree clears the foreground
-    floor: a record keyed by bare stem could only ever hold one of the two ``shared`` images."""
+    floor: a record keyed by bare stem could only ever hold one of the two ``shared`` images.
+    """
     from PIL import Image
 
     for date, box_x in (("2-11-26", 4), ("2-12-01", 40)):
@@ -1077,7 +1104,8 @@ def _two_date_collision_dataset(root: Path, subject: str) -> Path:
 def test_two_dates_sharing_a_filename_stay_distinct_samples(tmp_path: Path):
     """The two ``shared`` images are two samples, each naming its own source and label under its
     own capture date, and each reads back as distinct pixels: a selection carries no bare-stem
-    identity a second date could collide with."""
+    identity a second date could collide with.
+    """
     root = _two_date_collision_dataset(tmp_path / "ds", subject="leaf")
     out = tmp_path / "m"
     result = draw_splits(
@@ -1112,7 +1140,8 @@ def test_two_dates_sharing_a_filename_stay_distinct_samples(tmp_path: Path):
 
 def _two_subject_dataset(root: Path) -> Path:
     """Six stems on one date: four carry ``leaf``, two carry the unrelated subject ``bud``, no
-    stem carries both; four ``leaf`` stems clear a leaf-scoped draw's foreground floor."""
+    stem carries both; four ``leaf`` stems clear a leaf-scoped draw's foreground floor.
+    """
     from PIL import Image
 
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
@@ -1177,7 +1206,8 @@ def test_draw_splits_holds_only_the_named_subjects_admitted_samples(
 
 def _attribute_scoped_dataset(root: Path) -> Path:
     """Five stems on one date, one subject declaring ``condition``: four have their instance
-    assessed for it, one carries an instance never assessed for it."""
+    assessed for it, one carries an instance never assessed for it.
+    """
     from PIL import Image
 
     from tcip_mcp.subject_registry import Attribute, Subject, SubjectRegistry
@@ -1267,7 +1297,8 @@ def test_draw_splits_nothing_admitted_names_the_searched_images(
     tmp_path: Path,
 ):
     """A capture whose only label document names an image that is gone admits nothing: the
-    refusal names the images directory it searched, and nothing is written."""
+    refusal names the images directory it searched, and nothing is written.
+    """
     root = tmp_path / "ds"
     (root / "images" / "2-11-26").mkdir(parents=True)
     json_io.write_label_document(
@@ -1351,7 +1382,8 @@ def test_draw_splits_holds_no_sample_for_a_date_that_admits_nothing(
     tmp_path: Path,
 ):
     """A capture whose only label document names no image anywhere contributes no sample, so a
-    selection never carries a member whose pixels are gone."""
+    selection never carries a member whose pixels are gone.
+    """
     from PIL import Image
 
     root = tmp_path / "ds"
@@ -1394,7 +1426,8 @@ def test_draw_splits_holds_no_sample_for_a_date_that_admits_nothing(
 
 def _write_one_sample_selection(root: Path, out: Path) -> None:
     """A one-sample selection of the project ``root`` written under ``out``, its source and
-    label document under ``root``."""
+    label document under ``root``.
+    """
     write_selection(
         out,
         Selection(
@@ -1417,7 +1450,8 @@ def _write_one_sample_selection(root: Path, out: Path) -> None:
 
 def test_read_selection_admits_the_writers_own_record(tmp_path: Path):
     """The reader accepts exactly what the writer wrote, through the platform's own producer,
-    each path stored under the project and read back where it lies."""
+    each path stored under the project and read back where it lies.
+    """
     out = tmp_path / "m"
     _write_one_sample_selection(tmp_path, out)
 
@@ -1446,7 +1480,8 @@ def test_read_selection_refuses_a_sample_missing_its_own_ground_truth(
     tmp_path: Path,
 ):
     """A sample naming no ground truth binds nothing: a selection's samples each name their own
-    rather than sharing a directory the reader could reconstruct one from."""
+    rather than sharing a directory the reader could reconstruct one from.
+    """
     out = tmp_path / "m"
     _write_one_sample_selection(tmp_path, out)
     document = ts.read(selection_key(out))
@@ -1484,7 +1519,8 @@ def test_read_selection_refuses_one_source_on_two_sides(tmp_path: Path):
 
 def test_read_selection_refuses_one_group_on_two_sides(tmp_path: Path):
     """Crops of one parent, or captures of one subject, share a group key: splitting them across
-    sides leaks one side into the other, so the reader refuses the partition outright."""
+    sides leaks one side into the other, so the reader refuses the partition outright.
+    """
     out = tmp_path / "m"
     _write_one_sample_selection(tmp_path, out)
     document = ts.read(selection_key(out))

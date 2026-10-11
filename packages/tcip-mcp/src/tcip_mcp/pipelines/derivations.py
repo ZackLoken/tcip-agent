@@ -19,7 +19,8 @@ if TYPE_CHECKING:
 def probe_channels(image_path: str | Path | BandGroupRef) -> int:
     """Band count of a raster read from disk, as its own header states it
     (:attr:`~tcip_mcp.pipelines.raster_source.SourceHeader.channels`): a grouped capture's
-    one band per member."""
+    one band per member.
+    """
     from tcip_mcp.pipelines.raster_source import SourceHeader
 
     return SourceHeader(image_path).channels
@@ -124,7 +125,8 @@ def _validate_char_sizes(
     char_sizes: Sequence[float], *, fn_name: str
 ) -> list[float]:
     """Validate and normalize ``char_sizes`` into concrete floats, or raise ``ValueError`` naming
-    exactly what was wrong, the same contract as ``_validate_gt_boxes_per_image``."""
+    exactly what was wrong, the same contract as ``_validate_gt_boxes_per_image``.
+    """
     if not isinstance(char_sizes, Sequence) or isinstance(
         char_sizes, (str, bytes)
     ):
@@ -144,7 +146,8 @@ def _validate_char_sizes(
 
 def _neighbor_max_ious(boxes: np.ndarray) -> list[float]:
     """Each box's max IoU with any other box in the same region (xyxy px); fewer than 2 boxes ->
-    []."""
+    [].
+    """
     import numpy as np
 
     from tcip_annotation.matching import iou_matrix
@@ -158,7 +161,8 @@ def _neighbor_max_ious(boxes: np.ndarray) -> list[float]:
 
 def _neighbor_min_center_distances(boxes: np.ndarray) -> list[float]:
     """Each box's distance to its nearest same-image neighbor's center (xyxy px); fewer than 2
-    boxes -> []."""
+    boxes -> [].
+    """
     import numpy as np
 
     from tcip_annotation.matching import box_centers
@@ -228,7 +232,8 @@ def derive_localization_tolerance_frac(
 @dataclass(frozen=True)
 class Region:
     """One counted region of ground truth: the objects in it (crowd regions excluded), ``boxes``
-    in xyxy pixels beside their 1-indexed ``labels``, and its pixel ``area``."""
+    in xyxy pixels beside their 1-indexed ``labels``, and its pixel ``area``.
+    """
 
     boxes: np.ndarray
     labels: np.ndarray
@@ -237,7 +242,8 @@ class Region:
 
 def char_sizes(boxes: Iterable[np.ndarray]) -> list[float]:
     """The positive characteristic sizes (:func:`~tcip_annotation.matching.box_sizes`) of every
-    xyxy box of every array of ``boxes``."""
+    xyxy box of every array of ``boxes``.
+    """
     from tcip_annotation.matching import box_sizes
 
     return [s for arr in boxes for s in box_sizes(arr).tolist() if s > 0]
@@ -256,7 +262,8 @@ def derive_object_density(regions: Sequence[Region]) -> float:
     least one object, each its object count over its area. The quantile is this method's own
     setting, not measured; a frame denser than it can still exceed its cap. Refuses
     (``ValueError``) no regions, and regions none of which holds an object, which no frame's cap
-    could rest on."""
+    could rest on.
+    """
     import numpy as np
 
     if not regions:
@@ -275,7 +282,8 @@ def derive_object_density(regions: Sequence[Region]) -> float:
 
 def detection_cap(density: float, pixels: float) -> int:
     """The most detections a frame of ``pixels`` keeps at ``density``: ``ceil(density x
-    pixels)``."""
+    pixels)``.
+    """
     import math
 
     return math.ceil(density * pixels)
@@ -303,7 +311,8 @@ def derive_tile_geometry(
     least the extent (:data:`TILE_OVERLAP_DERIVATION`, ``slicing.overlap_ratio``), so an object no
     longer than the extent lies whole in some tile. The percentile and the five are this method's
     own settings, not measured. Refuses (``ValueError``) a value to derive from regions holding no
-    object, and an extent at or past the edge, which no overlap fits."""
+    object, and an extent at or past the edge, which no overlap fits.
+    """
     import math
 
     import numpy as np
@@ -561,7 +570,8 @@ class _BandMoments:
 
     def add(self, tensor_pixels) -> bool:
         """Accumulate one ``[C, H, W]`` float64 block; returns whether it was accepted (its band
-        count disagreeing with this accumulator's means the pixels are not the same bands)."""
+        count disagreeing with this accumulator's means the pixels are not the same bands).
+        """
         if tensor_pixels.shape[0] != self.num_channels:
             return False
         flat = tensor_pixels.reshape(self.num_channels, -1)
@@ -756,7 +766,8 @@ _CURVE_IMPLEMENTATION = (
 
 def _derivation_implementations() -> dict[str, object]:
     """Every registered derivation label mapped to its implementation, the count-objective ones
-    read from the picker registry (``operating_point.COUNT_OBJECTIVE_PICKERS``) when called."""
+    read from the picker registry (``operating_point.COUNT_OBJECTIVE_PICKERS``) when called.
+    """
     from tcip_mcp.pipelines.operating_point import COUNT_OBJECTIVE_PICKERS
 
     return {

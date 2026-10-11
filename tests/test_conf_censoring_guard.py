@@ -52,7 +52,8 @@ def test_a_reference_collected_at_a_real_floor_passes():
 
 def test_a_conf_picked_at_or_below_the_collection_floor_is_censored():
     """The floor sits at the picked conf, so the sweep could not have seen anything below it: the
-    criterion fails even though the holdout bias is zero."""
+    criterion fails even though the holdout bias is zero.
+    """
     _conf, evidence, failures = _criterion(
         *good_cal_holdout(fp_score=0.05), 0.95
     )
@@ -63,7 +64,8 @@ def test_a_conf_picked_at_or_below_the_collection_floor_is_censored():
 
 def test_a_floor_far_below_every_observed_score_is_reported_and_never_fails():
     """The stated 0.01 floor, and detections that never go below 0.5: the gap is reported beside
-    the criterion for a person to notice, and a pick genuinely above the floor still passes."""
+    the criterion for a person to notice, and a pick genuinely above the floor still passes.
+    """
     _conf, evidence, failures = _criterion(
         *good_cal_holdout(fp_score=0.5), 0.01
     )

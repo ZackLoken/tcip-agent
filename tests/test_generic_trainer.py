@@ -1,5 +1,6 @@
 """generic_trainer unit tests: minted-id uniqueness, seed defaulting, terminal
-status on setup failure, and atomic checkpoint writes."""
+status on setup failure, and atomic checkpoint writes.
+"""
 
 import threading
 
@@ -75,7 +76,8 @@ def test_seeded_drawn_seeds_are_independent():
 
 def _context(tmp_path, **stated):
     """The context of a one-epoch regression run over two frames and no validation side, with
-    ``stated``'s config keys, opened by the launcher's own producer."""
+    ``stated``'s config keys, opened by the launcher's own producer.
+    """
     from tests.tiny_trainer_fixtures import (
         frames_data,
         regressor_config,

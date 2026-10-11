@@ -68,7 +68,8 @@ def test_the_class_count_is_derived_from_the_masks_the_run_was_handed(
 ) -> None:
     """The head is sized for the classes this run's own masks hold, never a pinned two: masks
     reaching id 2 derive three, and a caller stating any count, the derived one included, refuses
-    by name: the count is the masks' own, never an input compared against them."""
+    by name: the count is the masks' own, never an input compared against them.
+    """
     images_dir, masks_dir = _dataset(tmp_path)
     painted_frame(
         8, 8, 0, [((0, 0, 4, 4), 1), ((4, 4, 8, 8), 2)], mode="L"
@@ -91,7 +92,8 @@ def test_the_class_count_and_a_served_sample_read_one_mask_the_same_way(
     tmp_path, monkeypatch
 ):
     """Both the run's class count and the sample the loader serves come through one mask read:
-    two reads of the same file could disagree about what it holds."""
+    two reads of the same file could disagree about what it holds.
+    """
     from tcip_mcp.pipelines.data.datasets import BaseImageDataset
 
     images_dir, masks_dir = _dataset(tmp_path)

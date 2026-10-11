@@ -86,7 +86,8 @@ def compute_lr_scale(
     effective_batch: int, reference_batch: int, power: float
 ) -> float:
     """The LR multiplier ``(effective_batch / reference_batch) ** power``. Both batches are
-    positive counts the caller states or derives."""
+    positive counts the caller states or derives.
+    """
     return (effective_batch / reference_batch) ** power
 
 
@@ -98,7 +99,8 @@ TRAINING_STATE_KEYS = (STATE_DICT_KEY, OPTIMIZER_STATE_KEY, GROUPS_KEY)
 
 def _copied(value: Any) -> Any:
     """An independent copy of one optimizer-state value: a tensor cloned, anything else deep
-    copied."""
+    copied.
+    """
     return (
         value.detach().clone() if torch.is_tensor(value) else deepcopy(value)
     )
@@ -116,7 +118,8 @@ def capture_training_state(
     ``{"members": [parameter names], "settings": {every key but params}}``, its settings (its
     learning rate and whatever else a scheduler or a bespoke ``get_param_groups`` sets) copied
     as they are. :func:`restore_training_state` puts it back. Refuses (``KeyError``)
-    an optimizer holding a parameter that is not one of ``model``'s named parameters."""
+    an optimizer holding a parameter that is not one of ``model``'s named parameters.
+    """
     name_of: dict[torch.Tensor, str] = {
         p: n for n, p in model.named_parameters()
     }
@@ -149,7 +152,8 @@ def captured_sources(
     """For each of ``optimizer``'s param groups, the indices into ``groups`` (a capture's
     :data:`GROUPS_KEY`) of the captured groups its parameters were members of, ``None`` standing
     for a parameter no captured group held. Membership is read by parameter name; an empty group
-    has no source."""
+    has no source.
+    """
     name_of = {p: n for n, p in model.named_parameters()}
     source_of = {
         name: index
@@ -179,7 +183,8 @@ def restore_training_state(
     stage; without it the groups keep the settings they were built with, a new stage's own.
     Refuses (``ValueError``) a capture with a member ``optimizer`` does not hold, and with
     ``group_settings`` a non-empty group whose members did not all come from one captured
-    group."""
+    group.
+    """
     model.load_state_dict(state[STATE_DICT_KEY])
     params = dict(model.named_parameters())
     packed = optimizer.state_dict()

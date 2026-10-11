@@ -25,7 +25,8 @@ PRODUCER = "model:m_best@c9f632ba98b2"  # the shape a publication stamps on ever
 
 def _documents(root: Path, stems, annotations) -> list[Annotation]:
     """One label document per stem holding ``annotations(stem)``; every annotation they hold,
-    read back."""
+    read back.
+    """
     from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
 
     held = []

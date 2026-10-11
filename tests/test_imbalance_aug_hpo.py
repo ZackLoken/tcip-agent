@@ -42,7 +42,8 @@ def test_class_weights_are_sized_by_the_one_class_count_derivation(
 ):
     """A weight vector and a run's loaders are sized by one rule: the weigher asks the platform's
     own derivation for the count a distribution implies, so a distribution whose top id is above
-    its own length weights every class the ground truth reaches rather than only those present."""
+    its own length weights every class the ground truth reaches rather than only those present.
+    """
     from tcip_mcp.pipelines import derivations
     from tcip_mcp.pipelines.components import losses
 
@@ -205,8 +206,9 @@ value its transform takes."""
 
 
 def test_build_augmentation_builds_each_transform_at_the_values_its_entry_states():
-    """guard. Every entry of the dict form builds its transform, in the config's order, holding
-    exactly the values the entry states, the chain ending in ToTensor."""
+    """Guard. Every entry of the dict form builds its transform, in the config's order, holding
+    exactly the values the entry states, the chain ending in ToTensor.
+    """
     chain = build_augmentation(EVERY_TRANSFORM).transforms
 
     assert [vars(t) for t in chain[:-1]] == list(EVERY_TRANSFORM.values())
@@ -242,9 +244,10 @@ def test_build_augmentation_builds_each_transform_at_the_values_its_entry_states
 def test_build_augmentation_refuses_an_entry_not_stating_its_values_by_name(
     config, named
 ):
-    """guard. A shorthand (True, a number, a list), a preset name, a value the transform does not
+    """Guard. A shorthand (True, a number, a list), a preset name, a value the transform does not
     take (hue) and a value it takes left unstated each refuse naming the entry, and an unknown
-    transform refuses by its name: nothing in the chain is a value the config did not state."""
+    transform refuses by its name: nothing in the chain is a value the config did not state.
+    """
     with pytest.raises(ValueError, match=named):
         build_augmentation(config)
 
@@ -457,7 +460,8 @@ def test_tune_search_normalizes_search_alg_case_before_deciding_grid(
     """tune_search reads a normalized local, not the caller's own casing, at the point it
     decides whether _to_tune_space builds a grid space: search_alg="Grid" (the agent's own
     casing, not this module's lower-cased spelling) still reaches the grid branch. Stopped
-    right after _to_tune_space records its own grid keyword, before Ray is ever touched."""
+    right after _to_tune_space records its own grid keyword, before Ray is ever touched.
+    """
     pytest.importorskip("ray")
     import tcip_mcp.pipelines.training.hpo as hpo
 
@@ -515,8 +519,9 @@ HYPERBAND_SCHEDULER = {
 
 
 def test_build_scheduler_builds_each_scheduler_at_the_settings_its_block_states():
-    """guard. Each scheduler is Ray's own class built at its block's settings, max_t among them
-    (never Ray's default cap), pbt mutating over the space it is handed, fifo pruning nothing."""
+    """Guard. Each scheduler is Ray's own class built at its block's settings, max_t among them
+    (never Ray's default cap), pbt mutating over the space it is handed, fifo pruning nothing.
+    """
     pytest.importorskip("ray")
     from ray import tune
     from ray.tune.schedulers import (
@@ -585,9 +590,10 @@ def test_build_scheduler_builds_each_scheduler_at_the_settings_its_block_states(
 def test_scheduler_settings_refuses_a_setting_unstated_or_not_taken_by_name(
     scheduler, named
 ):
-    """guard. A setting its scheduler's Ray class takes and the block leaves unstated (so Ray
+    """Guard. A setting its scheduler's Ray class takes and the block leaves unstated (so Ray
     would supply it), and one the class does not take (so Ray would drop it), each refuse by
-    name, as does a name no scheduler carries."""
+    name, as does a name no scheduler carries.
+    """
     pytest.importorskip("ray")
     import re
 
@@ -632,7 +638,8 @@ def test_the_native_sampler_draws_the_sweep_seed_s_points(tmp_path):
 def test_every_backend_searcher_retains_the_sweep_seed():
     """Each real backend searcher holds the stated seed where its own sampler reads it: optuna's
     ``_seed``, hyperopt's ``rstate`` (a ``RandomState`` drawing what one seeded with the same
-    value draws), bayesopt's ``_random_state``."""
+    value draws), bayesopt's ``_random_state``.
+    """
     pytest.importorskip("ray")
     import numpy as np
 
@@ -705,7 +712,8 @@ def test_available_search_algs_lists_natives_and_installed_backends():
 def test_tune_search_evaluates_its_baseline_and_optimizes(tmp_path):
     """End-to-end Ray Tune: a real sweep runs every trial and evaluates the baseline point.
     Uses a pure-math objective, each trial writing the point it trained, so no training is
-    needed."""
+    needed.
+    """
     pytest.importorskip("ray")
     import json
     import uuid
@@ -735,10 +743,11 @@ def test_tune_search_evaluates_its_baseline_and_optimizes(tmp_path):
 
 
 def test_run_hyperparameter_search_exposes_agent_search_choices_not_pinned():
-    """guard. run_hyperparameter_search takes the trial count, the search algorithm and the
+    """Guard. run_hyperparameter_search takes the trial count, the search algorithm and the
     scheduler block as required arguments with no default; it takes no ``pruner``,
     ``direction`` or separate halving setting, and the search space is the caller's to state, no
-    default space or default baseline shipping beside it."""
+    default space or default baseline shipping beside it.
+    """
     import inspect
 
     from tcip_mcp.pipelines.training import hpo

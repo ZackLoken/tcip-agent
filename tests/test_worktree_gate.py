@@ -1,5 +1,6 @@
 """tools/worktree_gate.py's environment builder and its refusal before any gate runs when
-tcip_mcp does not resolve inside the given worktree. No real gate (ruff/mypy/pytest) runs here."""
+tcip_mcp does not resolve inside the given worktree. No real gate (ruff/mypy/pytest) runs here.
+"""
 
 from __future__ import annotations
 

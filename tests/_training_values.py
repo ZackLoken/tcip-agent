@@ -1,7 +1,8 @@
 """The sample blocks a test config states, since the platform ships no default for any of them:
 the optimizer, schedule, stop rule and evaluation blocks ``_chain_fixtures.training_config``
 builds its run from (and a test states over it as an override), and a sample search space and
-search."""
+search.
+"""
 
 SCHEDULE_SETTINGS = {
     "cosine": {"eta_min": 1e-6, "horizon_epochs": 3},
@@ -14,14 +15,16 @@ SCHEDULE_SETTINGS = {
 
 def schedule(kind: str, **stated) -> dict:
     """A ``scheduler`` block of type ``kind`` stating its own sample settings
-    (:data:`SCHEDULE_SETTINGS`), with ``stated`` over them."""
+    (:data:`SCHEDULE_SETTINGS`), with ``stated`` over them.
+    """
     return {"type": kind, **SCHEDULE_SETTINGS[kind], **stated}
 
 
 def stop_rule(patience: int = 50, min_delta: float = 0.0) -> dict:
     """An ``early_stopping`` block; the default patience sits past the horizons
     :data:`SCHEDULE_SETTINGS` states, so a sample stage under a horizon-bound schedule ends at
-    its horizon unless the test states a longer one."""
+    its horizon unless the test states a longer one.
+    """
     return {"patience": patience, "min_delta": min_delta}
 
 
@@ -60,7 +63,8 @@ SCORE_WEIGHTS = {"loss": 0.5, "f1": 0.3, "map50": 0.2}
 
 def evaluation_block(**stated) -> dict:
     """An ``evaluation`` block at :data:`VALIDATION_CONF` weighting its objective by
-    :data:`SCORE_WEIGHTS`, with ``stated`` over it."""
+    :data:`SCORE_WEIGHTS`, with ``stated`` over it.
+    """
     return {
         "conf_threshold": VALIDATION_CONF,
         "score_weights": dict(SCORE_WEIGHTS),
@@ -82,13 +86,15 @@ def fifo_scheduler() -> dict:
 
 def fifo_search() -> dict:
     """A sweep's sample ``search_alg`` and ``scheduler``: random sampling, every trial run to
-    completion."""
+    completion.
+    """
     return {"search_alg": "random", "scheduler": fifo_scheduler()}
 
 
 def asha_scheduler(**stated) -> dict:
     """A sample ``asha`` trial ``scheduler`` block stating every setting its Ray class takes,
-    with ``stated`` over them."""
+    with ``stated`` over them.
+    """
     return {
         "name": "asha",
         "time_attr": "training_iteration",
@@ -104,7 +110,8 @@ def asha_scheduler(**stated) -> dict:
 def tune_arguments(**stated) -> dict:
     """``hpo.tune_search``'s arguments for a sample one-trial random search scheduling nothing
     and seeking the lowest ``objective``, with ``stated`` over them; ``objective_fn``,
-    ``param_space`` and ``sweep_dir`` are the caller's own."""
+    ``param_space`` and ``sweep_dir`` are the caller's own.
+    """
     return {
         "metric": "objective",
         "mode": "min",

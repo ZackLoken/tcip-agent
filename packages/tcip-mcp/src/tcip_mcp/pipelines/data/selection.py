@@ -59,7 +59,8 @@ SHAPE_DESCRIPTIONS = {
 def shape_of(ground_truth: Key | str, row_key: str | None) -> str:
     """Which of :data:`GROUND_TRUTH_SHAPES` a sample's ground truth is, read off the value itself:
     a key is a label document, a row key or a ``.csv`` path one row of a table, and any other path
-    a mask raster of its own. Reads no disk."""
+    a mask raster of its own. Reads no disk.
+    """
     if isinstance(ground_truth, Key):
         return DOCUMENT
     if row_key is not None or Path(ground_truth).suffix.lower() == ".csv":
@@ -118,7 +119,8 @@ class Sample:
     @property
     def shape(self) -> str:
         """Which of :data:`GROUND_TRUTH_SHAPES` this sample's ground truth is
-        (:func:`shape_of`)."""
+        (:func:`shape_of`).
+        """
         return shape_of(self.ground_truth, self.row_key)
 
 
@@ -160,7 +162,8 @@ class ClassScope:
     @staticmethod
     def recorded(scope: ClassScope | None) -> ClassScope:
         """``scope``, the class space a record carries; a record carrying none refuses
-        (``ValueError``) by name."""
+        (``ValueError``) by name.
+        """
         if scope is None:
             raise ValueError(
                 "this record carries no scope: the class space its ground truth was admitted "
@@ -173,7 +176,8 @@ class ClassScope:
         """``(column, value id)`` of ``state`` under this class space: its attribute's position
         among the declared attributes and its value's among that attribute's values. ``None`` for
         no state, a space naming no subject, or one whose attributes do not list ``state``; a
-        subject's space whose attributes were never read refuses (:meth:`admitted_for`)."""
+        subject's space whose attributes were never read refuses (:meth:`admitted_for`).
+        """
         if state is None or self.subject is None:
             return None
         attributes = cast(
@@ -245,7 +249,8 @@ class Selection:
 def source_digests(samples: Iterable[Sample]) -> dict[str, str]:
     """Each sample's pixel digest, by its location: sha256 over its source file's bytes (each band
     file of a grouped capture, in band order), each source read once, and its rect when it is a
-    region. Two samples with one digest are the same image whatever their files are named."""
+    region. Two samples with one digest are the same image whatever their files are named.
+    """
     import hashlib
 
     from tcip_mcp.pipelines.data.label_queries import resolved
@@ -328,7 +333,8 @@ _SELECTION_PARTS = ("selection",)
 
 def selection_key(selection_dir: str | Path) -> Key:
     """The selection recorded under ``selection_dir``, wherever the caller asked the draw to be
-    written, once and whole at the end of the draw that produced it."""
+    written, once and whole at the end of the draw that produced it.
+    """
     return Key(SELECTION_STORE, str(Path(selection_dir)), _SELECTION_PARTS)
 
 
@@ -348,7 +354,8 @@ SELECTION_PATHS: PathFields = within(("samples", "[]"), SAMPLE_PATHS)
 
 def ground_truth_record(ground_truth: Key | str) -> str | dict[str, str]:
     """How a record stores one sample's ground truth, the one :func:`ground_truth_of` reads back:
-    a label document's key as its ``root``, ``capture`` and ``stem``, a path as itself."""
+    a label document's key as its ``root``, ``capture`` and ``stem``, a path as itself.
+    """
     if isinstance(ground_truth, Key):
         capture, stem = ground_truth.parts
         return {"root": ground_truth.root, "capture": capture, "stem": stem}
@@ -397,7 +404,8 @@ def read_sample(raw: Any, position: int, where: str) -> Sample:
     """One sample document read back as a :class:`Sample`, refusing by name (naming
     ``position`` in the record at ``where``) a non-mapping, a sample missing
     ``member``/``source``/``ground_truth``/``group``/``side``, a side outside :data:`SIDES`, and
-    a malformed ``rect``."""
+    a malformed ``rect``.
+    """
     if not isinstance(raw, dict):
         raise ValueError(
             f"sample {position} of the record at {where} is a {type(raw).__name__}, not a mapping."
@@ -483,7 +491,8 @@ def stored_selection_document(
     selection: Selection, project: str | Path
 ) -> dict[str, Any]:
     """The document a selection of ``project`` is stored as: :func:`selection_document` with its
-    paths stored against ``project`` (:data:`SELECTION_PATHS`)."""
+    paths stored against ``project`` (:data:`SELECTION_PATHS`).
+    """
     return recorded_paths(
         selection_document(selection), SELECTION_PATHS, project
     )
@@ -529,7 +538,8 @@ def read_selection_checked(
     project: str | Path,
 ) -> tuple[Selection | None, str | None]:
     """:func:`read_selection` answering ``(selection, None)``, ``(None, None)`` for an absence, or
-    ``(None, text)`` for a record that exists and is refused."""
+    ``(None, text)`` for a record that exists and is refused.
+    """
     try:
         document = _read_selection_document(selection_dir, project)
         if document is None:
@@ -561,7 +571,8 @@ def ground_truth_digest(ground_truth: Key | str) -> str:
     """The sha256 of one ground truth's stored bytes, the store's version token: a label document
     record's (:func:`tcip_store.read_versioned`) or a file's
     (:func:`tcip_store.read_blob_versioned`). One that is absent raises ``tcip_store.NotFoundError``
-    naming it."""
+    naming it.
+    """
     if isinstance(ground_truth, Key):
         return tcip_store.read_versioned(ground_truth).version.token
     return tcip_store.read_blob_versioned(Path(ground_truth)).version.token
@@ -569,7 +580,8 @@ def ground_truth_digest(ground_truth: Key | str) -> str:
 
 def moved_ground_truth(recorded: Mapping[Key | str, str]) -> list[Key | str]:
     """The ground truths among ``recorded`` (each to the digest recorded for it) that no longer
-    digest to it, one gone since among them, in ``recorded``'s order."""
+    digest to it, one gone since among them, in ``recorded``'s order.
+    """
 
     def moved(ground_truth: Key | str, digest: str) -> bool:
         try:
@@ -582,7 +594,8 @@ def moved_ground_truth(recorded: Mapping[Key | str, str]) -> list[Key | str]:
 
 def selection_digest(selection: Selection, project: str | Path) -> str:
     """sha256 over the document a selection of ``project`` is stored as
-    (:func:`stored_selection_document`)."""
+    (:func:`stored_selection_document`).
+    """
     import hashlib
 
     return hashlib.sha256(

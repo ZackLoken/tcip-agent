@@ -100,7 +100,8 @@ class SubjectRegistry:
 
 class RegistryError(ValueError):
     """A registry that cannot be read as a valid subject registry, or a scope it does not
-    contain."""
+    contain.
+    """
 
 
 def registry_from_dict(data: object) -> SubjectRegistry:
@@ -171,7 +172,8 @@ def registry_from_dict(data: object) -> SubjectRegistry:
 
 def registry_from_request(subjects: object) -> SubjectRegistry:
     """:func:`registry_from_dict` over an authoring request, in which a subject stating no
-    ``description`` is one described by nothing yet."""
+    ``description`` is one described by nothing yet.
+    """
     if isinstance(subjects, dict):
         subjects = {
             name: {"description": "", **body}
@@ -184,7 +186,8 @@ def registry_from_request(subjects: object) -> SubjectRegistry:
 
 def registry_to_dict(registry: SubjectRegistry) -> dict:
     """Serialize a :class:`SubjectRegistry` back to the nested mapping (inverse of
-    :func:`registry_from_dict`; an empty description is still written)."""
+    :func:`registry_from_dict`; an empty description is still written).
+    """
     out: dict[str, dict] = {}
     for s in registry.subjects:
         body: dict = {"description": s.description}
@@ -199,7 +202,8 @@ def registry_to_dict(registry: SubjectRegistry) -> dict:
 
 def _checked_registry_document(data: bytes, *, path: str | Path) -> dict:
     """The stored registry's decoded document. Raises :class:`RegistryError` for bytes that do
-    not decode as JSON."""
+    not decode as JSON.
+    """
     import tcip_store
 
     try:
@@ -238,7 +242,8 @@ def _dropped_names(
     outgoing: SubjectRegistry, incoming: SubjectRegistry
 ) -> list[str]:
     """Every subject, attribute or attribute value ``outgoing`` declares that ``incoming`` does
-    not, dotted (``subject``, ``subject.attribute``, ``subject.attribute=value``)."""
+    not, dotted (``subject``, ``subject.attribute``, ``subject.attribute=value``).
+    """
     dropped: list[str] = []
     for s in outgoing.subjects:
         new_s = incoming.subject(s.name)
@@ -380,7 +385,8 @@ def positive_state_problem(
     registry: SubjectRegistry, subject_name: str, state: PositiveState
 ) -> str | None:
     """Why ``state`` cannot be ``subject_name``'s positive state in ``registry``, or ``None`` when
-    that subject declares ``state``'s attribute and the attribute lists ``state``'s value."""
+    that subject declares ``state``'s attribute and the attribute lists ``state``'s value.
+    """
     subject = registry.subject(subject_name)
     if subject is None:
         known = [s.name for s in registry.subjects]
@@ -405,7 +411,8 @@ def registry_for_dataset_root(
     dataset_root: str | Path,
 ) -> SubjectRegistry | None:
     """The registry at ``dataset_root``, or ``None`` when no ``subjects.json`` has been written
-    there yet (a dataset with no registry is not corrupt, only unregistered so far)."""
+    there yet (a dataset with no registry is not corrupt, only unregistered so far).
+    """
     try:
         return read_registry(dataset_root)
     except FileNotFoundError:

@@ -58,7 +58,8 @@ def _init(tmp_path: Path) -> OpenProject:
 
 def _dataset(tmp_path: Path, name: str = "ds") -> Path:
     """A dataset root registered in ``tmp_path`` whose own subject registry declares the second
-    trait's positive state, the registry a phenology delivery binds against."""
+    trait's positive state, the registry a phenology delivery binds against.
+    """
     from tests._producer_fixtures import registry_over
 
     root = tmp_path / name
@@ -75,7 +76,8 @@ def _publish(project: Path, bucket: str, images: list[Path]) -> str:
     """One bucket named ``bucket`` holding an open flower on each of ``images``, published under
     ``project`` (``_chain_fixtures.published``) from a checkpoint whose scope declares the bloom
     state, unassessed: these rails are about the mapping's own binding, not the assessment
-    gate; its name."""
+    gate; its name.
+    """
     from tests._chain_fixtures import published
 
     results = [
@@ -108,7 +110,8 @@ def _deliver(
 ) -> dict:
     """``deliver_phenology_milestones``'s measurement and delivery through the library, shipped
     under a breeder's acknowledgment (these rails are the mapping's, never the assessment
-    gate's); a refusal answers ``{"error": ...}`` the way the tool's does."""
+    gate's); a refusal answers ``{"error": ...}`` the way the tool's does.
+    """
     from tcip_mcp.pipelines.postprocessing import phenology
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         MappingDeliveryError,
@@ -469,7 +472,8 @@ def test_an_unread_captures_bytes_going_bad_is_disclosed_never_opened(
 ) -> None:
     """A recorded, mapped capture this delivery's own buckets carry no
     document for is unread: corrupting its bytes afterward must surface only as this capture's
-    own disclosure, never a readability refusal, since an unread capture is never opened."""
+    own disclosure, never a readability refusal, since an unread capture is never opened.
+    """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(
@@ -513,7 +517,8 @@ def test_an_unread_captures_bytes_changing_in_place_does_not_refuse_delivery(
 ) -> None:
     """The same unread capture as above, but changed to a different, still-readable image rather
     than garbage: the whole-date identity this would have flipped is never recomputed either,
-    since this delivery does not read every capture of the date."""
+    since this delivery does not read every capture of the date.
+    """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(
@@ -559,7 +564,8 @@ def test_a_non_delivered_mapping_date_is_never_walked(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A mapped date this delivery's own buckets omit is disclosed as a bare
-    date and never enumerated: a capture corrupted under it changes nothing about the delivery."""
+    date and never enumerated: a capture corrupted under it changes nothing about the delivery.
+    """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root)
@@ -647,7 +653,8 @@ def test_full_coverage_still_catches_an_in_place_exif_timestamp_change(
 ) -> None:
     """With every mapped capture's prediction present, an in-place EXIF timestamp change at the
     same GPS position is caught by the whole-date identity recompute, not the moved-position
-    check, since the position itself never moved."""
+    check, since the position itself never moved.
+    """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(
@@ -692,7 +699,8 @@ def test_an_unmapped_raster_does_not_block_the_whole_date_digest_from_catching_a
 ) -> None:
     """An unmapped raster capture beside two fully-read mapped plants does not block the
     whole-date recompute: the trigger is every mapped capture read, so an in-place EXIF
-    timestamp change on a mapped capture still refuses even with the raster never read."""
+    timestamp change on a mapped capture still refuses even with the raster never read.
+    """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(
@@ -739,7 +747,8 @@ def test_an_unmapped_raster_beside_a_full_mapped_read_delivers_with_nothing_disc
 ) -> None:
     """The admitting side of the same scene: nothing changed on disk, both plants' predictions are
     present, and the raster is verified only through the whole-date digest, so it is not also
-    listed among the unverified captures."""
+    listed among the unverified captures.
+    """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(
@@ -859,7 +868,8 @@ def test_a_capture_unreadable_at_build_is_never_read_so_replacing_it_only_disclo
     (``stems_delivery_reads`` requires a truthy ``plot_name``): replacing it with a readable,
     geotagged image later is never examined for a readability flip at all, coverage of that dead
     path rather than a guard, and under a partial read (another mapped plant's prediction absent)
-    it surfaces only as this capture's own disclosure."""
+    it surfaces only as this capture's own disclosure.
+    """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     # Both dates, not just DATES[0]: DATES[1] stays fully intact so the classifier is still
@@ -914,7 +924,8 @@ def test_a_receipt_that_cannot_be_written_fails_persist_mapping_and_the_record_s
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``persist_mapping`` raises when its receipt cannot be written under a held audit lock,
-    and the record it wrote stays refused by ``load_mapping``."""
+    and the record it wrote stays refused by ``load_mapping``.
+    """
     from tcip_mcp.audit import AuditEntryNotWrittenError, audit_log_key
     from tcip_store.sqlite_backend import SqliteBackend
 
@@ -987,7 +998,8 @@ def _cite_mapping(
     preds_by_date: dict[str, str],
 ) -> None:
     """A real delivery through the mapping under ``name`` (:func:`_deliver`), whose event cites
-    it."""
+    it.
+    """
     _seed_currant_bloom_trait(tmp_path)
     res = _deliver(
         tmp_path,
@@ -1008,7 +1020,8 @@ def test_a_supersede_whose_receipt_fails_answers_409_and_the_archive_still_loads
 ) -> None:
     """A rebuild that supersedes a cited mapping moves the old record to its archive name, then
     writes the new record and its one receipt. When that receipt is refused the door answers 409
-    with ``committed`` null, and the archived record still loads on its own build's receipt."""
+    with ``committed`` null, and the archived record still loads on its own build's receipt.
+    """
     from tcip_web.state import store
 
     project = _init(tmp_path)
@@ -1072,7 +1085,8 @@ def test_a_delivery_made_from_another_directory_names_the_projects_dataset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The mapping stores its dataset root relative to the project, and the delivery that cites
-    it records that root against the project too, whatever directory the process works in."""
+    it records that root against the project too, whatever directory the process works in.
+    """
     project = tmp_path / "project"
     _init(project)
     dataset_root = _dataset(project)
@@ -1194,7 +1208,8 @@ def test_the_delivery_events_plant_mapping_block_carries_the_tolerance_dict(
 ) -> None:
     """Coverage: the disclosure a phenology delivery records carries the mapping's own
     ``nn_tolerance_m``, so a delivered milestone states the radius its identities were matched
-    under."""
+    under.
+    """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(dataset_root)
@@ -1275,7 +1290,8 @@ def test_a_read_capture_whose_plants_own_csv_is_missing_discloses_rather_than_re
 ) -> None:
     """One plant's verified CSV must not answer for another plant's missing one: a read capture
     whose recorded plant sits in the unreachable CSV did not move, and the delivery proceeds with
-    that CSV in plant_csvs_unverified rather than refusing as if the capture had moved."""
+    that CSV in plant_csvs_unverified rather than refusing as if the capture had moved.
+    """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, _plant_csv, preds_by_date = _write_scene(
@@ -1324,7 +1340,8 @@ def test_a_moved_capture_whose_own_csv_is_missing_is_disclosed_under_a_partial_r
     """Three plants, one CSV each: one plant's capture moves on disk and that plant's own CSV is
     deleted, while a partial read (a third plant's prediction absent) means the delivery cannot
     fall back on the whole-date digest either. The moved capture is disclosed as unverified rather
-    than refused as moved, since its own plant's CSV cannot answer for whether it moved."""
+    than refused as moved, since its own plant's CSV cannot answer for whether it moved.
+    """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     plants3 = PLANTS + [
@@ -1500,7 +1517,8 @@ def test_two_projects_mapping_one_dataset_under_the_same_name_each_deliver_throu
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Two projects mapping one registered dataset under the same mapping name each build and
-    deliver through their own record, never the other's."""
+    deliver through their own record, never the other's.
+    """
     proj_a, proj_b = tmp_path / "proj_a", tmp_path / "proj_b"
     for proj in (proj_a, proj_b):
         named_project(proj, proj.name)
@@ -1717,7 +1735,8 @@ def test_build_mapping_persists_and_reads_back_capture_digests(
     stem, and a recompute over the captures on disk agrees with it entry by entry. The receipt
     still verifies over the record: load_mapping would refuse before returning anything if
     record_sha256, computed at persist over the whole record, disagreed with the receipt written
-    for it."""
+    for it.
+    """
     from tcip_mcp.pipelines.image_utils import list_logical_images
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         _read_date_stamps,
@@ -1785,7 +1804,8 @@ def test_a_band_group_manifest_rewritten_in_place_refuses_the_delivery_naming_th
 ) -> None:
     """The band group's own membership is unchanged (the same two files, the same stem), so the
     added/missing-stem checks never fire; only the whole-date digest recompute catches a
-    manifest rewritten in place, and names the band group's own manifest."""
+    manifest rewritten in place, and names the band group's own manifest.
+    """
     from tcip_mcp.pipelines.data.band_groups import (
         band_group_manifest_path,
         detect_and_write_band_groups,
@@ -1991,7 +2011,8 @@ def test_two_spellings_of_one_project_share_one_receipt_scan(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The receipt memo is keyed by the store's one spelling of the project, so a load under a
-    second spelling of the same directory is a memo hit and reads the log no further."""
+    second spelling of the same directory is a memo hit and reads the log no further.
+    """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, _ = _write_scene(dataset_root)
@@ -2026,7 +2047,8 @@ def test_a_build_leaves_one_row_its_receipt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The door's one line is the library's receipt, which carries the record digest a decorator
-    line could not: every row the call adds to the log is counted, and there is one."""
+    line could not: every row the call adds to the log is counted, and there is one.
+    """
     from tcip_mcp.audit import audit_log_key
 
     _init(tmp_path)

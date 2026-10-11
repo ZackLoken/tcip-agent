@@ -133,7 +133,8 @@ def test_derive_localization_tolerance_frac_tight_spacing_stays_tighter_than_loo
 
 def test_derive_localization_tolerance_frac_refuses_a_zero_spacing_percentile_only():
     """The refusal is the selected spacing percentile at zero: boxes all sharing one center
-    refuse, and one coincident pair among thirty spaced boxes leaves the percentile positive."""
+    refuse, and one coincident pair among thirty spaced boxes leaves the percentile positive.
+    """
     stacked = [[(0, 0, 20, 20), (0, 0, 20, 20), (0, 0, 20, 20)]]
     with pytest.raises(ValueError, match="spacing is 0 px"):
         derive_localization_tolerance_frac(stacked)
@@ -200,7 +201,8 @@ def _label_percentile(label: str) -> float:
 
 def test_the_localization_tolerance_is_the_method_its_label_names():
     """The criterion's tolerance and label, as an assessment resolves them, agree: half the
-    labeled percentile of a spread of nearest-neighbor spacings over the characteristic size."""
+    labeled percentile of a spread of nearest-neighbor spacings over the characteristic size.
+    """
     pytest.importorskip("torch")
     from tcip_mcp.pipelines.training.evaluation import localization_frac
 
@@ -218,7 +220,8 @@ def test_the_localization_tolerance_is_the_method_its_label_names():
 
 def test_the_sliver_cutoff_is_the_method_its_label_names():
     """The registered label's percentile over the mean is the cutoff derived from a spread of
-    characteristic sizes."""
+    characteristic sizes.
+    """
     from tcip_mcp.pipelines.derivations import (
         _STATIC_DERIVATION_IMPLEMENTATIONS,
     )
@@ -262,7 +265,8 @@ def test_derive_iou_match_threshold_answers_the_modeled_value_at_either_end(
     size, jitter_px, margin
 ):
     """No cutoff stands over the model: a large box, an exact repeat and a near-disjoint one each
-    answer the modeled IoU less the margin."""
+    answer the modeled IoU less the margin.
+    """
     expected = (size - jitter_px) / (size + jitter_px) - margin
     assert derive_iou_match_threshold(
         [[(0, 0, size, size)]], jitter_px=jitter_px, margin=margin
@@ -398,7 +402,8 @@ def test_derive_block_scale_px_reads_the_rasters_header_once(
     tmp_path, monkeypatch
 ):
     """The refusal of an unreadable raster and the pixel size the plant pitch converts through
-    come off one header read."""
+    come off one header read.
+    """
     from tcip_mcp.pipelines import raster_source
     from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
     from tests._geotiff_fixtures import write_geotiff
@@ -431,7 +436,8 @@ def test_derive_block_scale_px_converts_a_foot_unit_raster_through_its_crs(
     tmp_path,
 ):
     """A raster in US survey feet (EPSG 2264) converts the plant-pitch meters through the CRS's
-    own unit conversion factor, not a naive meter-blind pixel-scale division."""
+    own unit conversion factor, not a naive meter-blind pixel-scale division.
+    """
     from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
     from tests._geotiff_fixtures import write_geotiff
 
@@ -465,7 +471,8 @@ def test_derive_block_scale_px_photographic_raster_path_refuses_named(
     tmp_path,
 ):
     """A ``raster_path`` that is not a raster file at all (a photographic plot image) is refused
-    by name rather than silently downgraded to the GT-object-spacing fallback."""
+    by name rather than silently downgraded to the GT-object-spacing fallback.
+    """
     from PIL import Image
 
     from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
@@ -492,7 +499,8 @@ def test_derive_block_scale_px_anisotropic_raster_falls_back_to_gt_spacing(
 ):
     """A raster whose axes carry differing pixel scales has no single pixel size to convert the
     plant pitch through, so the derivation falls back to GT-object-spacing rather than average
-    the two axes."""
+    the two axes.
+    """
     from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
     from tests._geotiff_fixtures import write_geotiff
 
@@ -546,7 +554,8 @@ def test_derive_block_scale_px_unprojected_raster_falls_back_to_gt_spacing(
 
 def test_derive_block_scale_px_truncated_raster_refuses_named(tmp_path):
     """A raster_path with a raster suffix that cannot be opened at all (truncated/corrupt) is a
-    file-level problem, refused by name rather than falling back to GT-object-spacing."""
+    file-level problem, refused by name rather than falling back to GT-object-spacing.
+    """
     from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
 
     plants = [
@@ -568,9 +577,10 @@ def test_derive_block_scale_px_truncated_raster_refuses_named(tmp_path):
 def test_derive_block_scale_px_npy_raster_refuses_named_for_no_georeference(
     tmp_path,
 ):
-    """guard. An .npy array container is a raster by suffix but carries no georeferencing tags at
+    """Guard. An .npy array container is a raster by suffix but carries no georeferencing tags at
     all; it is refused by name, distinct from the truncated-file words above, rather than tried
-    through the header's georeference read."""
+    through the header's georeference read.
+    """
     from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
 
     plants = [

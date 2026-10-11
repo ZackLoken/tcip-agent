@@ -1,5 +1,6 @@
 """run_inference publishes a bucket once: one prediction document per image and the bucket's
-record under the images' dataset root, in one commit, never over a bucket that exists."""
+record under the images' dataset root, in one commit, never over a bucket that exists.
+"""
 
 from __future__ import annotations
 
@@ -88,7 +89,8 @@ def test_a_second_run_into_a_published_bucket_refuses_and_leaves_it(
     tmp_path, monkeypatch
 ):
     """A bucket is published once: a second run naming the same bucket refuses, leaving the first
-    bucket's documents and record as they were, and a new bucket admits the same run."""
+    bucket's documents and record as they were, and a new bucket admits the same run.
+    """
     from tcip_mcp.dataset_layout import PREDICTION_DOCUMENTS
     from tcip_mcp.tools.inference_tools import run_inference
 
@@ -166,7 +168,8 @@ def test_an_images_dir_that_is_no_capture_refuses_naming_it(
     tmp_path, monkeypatch, where
 ):
     """A pass over images publishes its capture, so a directory that is no capture
-    (``<root>/images/<capture>``) refuses at the door naming it, before any prediction."""
+    (``<root>/images/<capture>``) refuses at the door naming it, before any prediction.
+    """
     from tcip_mcp.tools.inference_tools import run_inference
 
     images_dir = _images(tmp_path.joinpath(*where))
@@ -186,7 +189,8 @@ def test_an_images_dir_that_is_no_capture_refuses_naming_it(
 
 def test_a_raster_outside_a_capture_is_admitted(tmp_path, monkeypatch):
     """A raster is the one source published outside a capture: one under the image tree but in no
-    capture directory reaches the pass."""
+    capture directory reaches the pass.
+    """
     import numpy as np
     import tifffile
 

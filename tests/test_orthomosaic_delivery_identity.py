@@ -71,7 +71,8 @@ def _delivered(tmp_path: Path, bucket: str, raster_path: Path) -> dict:
 
 def test_a_raster_whose_tiepoint_moved_since_publication_refuses(tmp_path):
     """Identical pixels at a moved tiepoint resolve every detection onto a different plant, so the
-    raster is refused rather than silently believed: the content half alone cannot see this."""
+    raster is refused rather than silently believed: the content half alone cannot see this.
+    """
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
     bucket = _produced_bucket(tmp_path, raster_path)
@@ -128,7 +129,8 @@ def test_the_raster_it_was_produced_on_passes_the_identity_check_and_meets_the_g
     tmp_path,
 ):
     """The producer's own recorded identity admits the unchanged raster; this bucket was never
-    assessed and this door takes no acknowledgment, so the refusal named is the gate's."""
+    assessed and this door takes no acknowledgment, so the refusal named is the gate's.
+    """
     from tcip_mcp.buckets import read_bucket
 
     raster_path = _raster(tmp_path)

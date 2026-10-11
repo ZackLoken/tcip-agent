@@ -18,7 +18,8 @@ from PIL import Image
 def _write_group(images_dir: Path, stem: str, base=(111, 222, 333)) -> None:
     """Each band gets a distinct base level plus a horizontal gradient (never a flat fill): a
     constant array makes min==max, so a min-max stretch would flatten every channel to black and
-    a channel reorder would be indistinguishable from the original."""
+    a channel reorder would be indistinguishable from the original.
+    """
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
 
     gradient = np.linspace(0, 500, 24, dtype=np.uint16)
@@ -96,7 +97,8 @@ def test_serve_image_plain_photo_unaffected_by_new_params(
     client: TestClient, grouped_dataset: Path
 ):
     """The band params spelled at their defaults serve the plain photo exactly as omitting them
-    does."""
+    does.
+    """
     plain = grouped_dataset / "images" / "2026-05-01" / "plain_002.jpg"
     baseline = client.get("/api/images", params=_view(plain))
     with_defaults = client.get(
@@ -111,7 +113,8 @@ def test_serve_image_refuses_a_band_members_own_path_naming_its_manifest(
     client: TestClient, grouped_dataset: Path
 ):
     """A band of a grouped capture is no image of its own at the serve door either: its path
-    answers 404 naming the manifest, never a single-band render."""
+    answers 404 naming the manifest, never a single-band render.
+    """
     member = grouped_dataset / "images" / "2026-05-01" / "cap_001_NIR.tif"
     resp = client.get("/api/images", params=_view(member))
     assert resp.status_code == 404
@@ -218,7 +221,8 @@ def test_get_bands_endpoint_never_decodes_pixels_for_a_plain_rgb_photo(
 ):
     """/api/images/bands must not do a full pixel decode for ordinary RGB, only for genuine
     multi-band sources. Spy on the raster factory itself (every decode route opens a source
-    through it) and assert nothing opens one for a plain 3-band photo."""
+    through it) and assert nothing opens one for a plain 3-band photo.
+    """
     from tcip_mcp.pipelines import raster_source
 
     called = []
@@ -256,7 +260,8 @@ def test_inference_worker_predicts_on_the_correctly_decoded_grouped_capture(
     monkeypatch,
 ):
     """A grouped capture in images_dir reaches the web door's predictor decoded through the
-    channel-aware loader, never as a stringified BandGroupRef."""
+    channel-aware loader, never as a stringified BandGroupRef.
+    """
     pytest.importorskip("torch")
 
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
@@ -277,7 +282,8 @@ def test_inference_worker_predicts_on_the_correctly_decoded_grouped_capture(
 
     class ObservingPredictor(StubPredictor):
         """The stub's empty prediction, named by each source's display path as the real predictor
-        names it, recording every source it is handed."""
+        names it, recording every source it is handed.
+        """
 
         def predict_batch(self, paths, execution=None, **kw):
             seen.extend(paths)

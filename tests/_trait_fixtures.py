@@ -1,7 +1,8 @@
 """Trait entries a test needs, proposed with ``traits.propose_trait`` and confirmed with
 ``traits.confirm_revision``: a crossing trait delivering bloom dates, a count trait delivering a
 stem count, the vocabulary phenotypes the aggregate deliveries ship under, and ``bud_opening``,
-whose name is not the ``bud`` subject it measures."""
+whose name is not the ``bud`` subject it measures.
+"""
 
 from __future__ import annotations
 
@@ -20,7 +21,8 @@ from tcip_mcp.traits import (
 
 def entry(name: str, delivers: Sequence[str], **fields: Any) -> TraitEntry:
     """A complete fixture entry: ``fields`` over an entry that authors nothing beyond its name and
-    what it delivers."""
+    what it delivers.
+    """
     return TraitEntry.model_validate(
         {
             "name": name,
@@ -104,7 +106,8 @@ IOU_MARGIN = 0.05
 
 def with_floors(base: TraitEntry) -> TraitEntry:
     """``base`` with each criterion field it leaves unauthored filled from :data:`_FLOORS`, so an
-    operationalization proposed on it states every field its kind rests on."""
+    operationalization proposed on it states every field its kind rests on.
+    """
     return with_fields(
         base,
         **{
@@ -188,7 +191,8 @@ def confirm_bare(
     project_root: Path, name: str, **fields: Any
 ) -> TraitRevision:
     """Confirm a minimal trait delivering one dimension at ``project_root``, stating nothing
-    beyond ``fields``."""
+    beyond ``fields``.
+    """
     return propose_and_confirm(
         project_root, entry(name, ("leaf_length",), **fields)
     )
@@ -232,7 +236,8 @@ def seed_positive_class(
 ) -> cr.SubjectRegistry:
     """Ensure the project's subject registry declares ``state``'s attribute on ``subject_name``,
     listing ``state``'s value, adding the subject, the attribute and the value on first mention and
-    leaving an existing declaration alone; returns the registry as stored."""
+    leaving an existing declaration alone; returns the registry as stored.
+    """
     from tests._producer_fixtures import registry_over
 
     registry = (
@@ -267,7 +272,8 @@ def seed_confirmed_crossing(
     """Confirm a revision of ``trait`` (already proposed at this root) stating a crossing
     operationalization, declaring its positive state for the measured subject in the project's
     own subject registry first. ``fields`` override the operationalization's defaults: the
-    measured subject is the trait's own name and the phenotypes are everything it delivers."""
+    measured subject is the trait's own name and the phenotypes are everything it delivers.
+    """
     base = with_floors(latest(trait, project_root))
     stated = {
         "statement": f"the date each plant reached the state {trait} scores in the field",
@@ -289,7 +295,8 @@ def seed_confirmed_count(
     project_root: Path, *, measured_subject: str = COUNT_SUBJECT, **fields: Any
 ) -> TraitRevision:
     """Confirm the count trait at this root with a per-image-count operationalization measuring
-    ``measured_subject``, the subject the delivery's buckets recorded detecting."""
+    ``measured_subject``, the subject the delivery's buckets recorded detecting.
+    """
     return propose_and_confirm(
         project_root,
         with_operationalization(
@@ -318,7 +325,8 @@ def seed_confirmed_aggregate(
     **fields: Any,
 ) -> TraitRevision:
     """Confirm a revision of the trait delivering ``delivered_phenotype`` stating the aggregate
-    operationalization ``delivery_kind``, covering that phenotype and ``value_keys``."""
+    operationalization ``delivery_kind``, covering that phenotype and ``value_keys``.
+    """
     (trait,) = [
         name
         for name in traits.trait_names(project_root)

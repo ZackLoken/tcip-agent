@@ -13,7 +13,8 @@ def _opened(
     project, experiment_id: str, *, data_dir=None, split: dict | None = None
 ):
     """A detector run, over two frames of its own (or those under ``data_dir``) and stating
-    ``split``, resolved and opened by the launcher's own producer and writer."""
+    ``split``, resolved and opened by the launcher's own producer and writer.
+    """
     from tests._verified_checkpoint_fixtures import (
         detection_config,
         fixture_data_dir,
@@ -32,7 +33,8 @@ def _opened(
 
 def _bound(experiment_id: str, tmp_path, **split):
     """A run bound to a selection ``draw_splits`` drew at seed 7, its ``data.split`` beside the
-    binding being ``split``."""
+    binding being ``split``.
+    """
     from tests._chain_fixtures import training_config
     from tests._verified_checkpoint_fixtures import opened_run, unbuilt_source
     from tests.test_selection_binding import (
@@ -70,7 +72,8 @@ def test_same_dataset_fingerprint_is_none_not_true_when_one_id_is_an_error(
     tmp_path,
 ):
     """An error entry is never dropped from the fingerprint judgment: two matching fingerprints
-    beside one missing run do not compare as the same data."""
+    beside one missing run do not compare as the same data.
+    """
     from tcip_mcp.experiments import compare_experiments
     from tests._verified_checkpoint_fixtures import opened_run
     from tests.test_dataset_identity_recording import _config, _make_dataset
@@ -94,7 +97,8 @@ def test_compare_experiments_reports_task_and_subject_from_the_runs_records(
     tmp_path,
 ):
     """The task is read off the launch record, the subject off the data section the run
-    resolved."""
+    resolved.
+    """
     _opened(tmp_path, "exp-task-subject")
 
     (c,) = _compared(tmp_path, "exp-task-subject")
@@ -104,7 +108,8 @@ def test_compare_experiments_reports_task_and_subject_from_the_runs_records(
 def test_registry_lists_the_checkpoint_this_run_completed(tmp_path):
     """Admits valid work, through the platform's own producer: a completed run's own checkpoint
     shows up in its own registry column, reduced to name/metrics/metrics_source/completion
-    time; a run with no completed checkpoint lists none."""
+    time; a run with no completed checkpoint lists none.
+    """
     from tests._verified_checkpoint_fixtures import finished_run
 
     finished_run(
@@ -136,7 +141,8 @@ def test_split_reports_a_bound_selection_directory(tmp_path):
 
 def test_split_reports_a_redrawn_bound_selection_distinctly(tmp_path):
     """A run bound to a selection and one that redrew inside that same selection must never
-    compare as the same data."""
+    compare as the same data.
+    """
     _bound("exp-bound-plain", tmp_path)
     _bound("exp-bound-redrawn", tmp_path, redraw_within_selection=True, seed=7)
 
@@ -158,7 +164,8 @@ def test_split_reports_a_drawn_seed_with_no_binding(tmp_path):
 def test_status_error_names_a_diverged_run_reason(tmp_path):
     """Admits valid work through the platform's own producer: run_training_envelope over the
     divergence fixture's always-diverged builder writes the final status's own error, which
-    compare_experiments surfaces as status_error; a run with no final status carries none."""
+    compare_experiments surfaces as status_error; a run with no final status carries none.
+    """
     from tcip_mcp.experiments import observe
     from tests.test_lifecycle_wiring import _stock_run
     from tests.tiny_trainer_fixtures import ALWAYS_DIVERGED_MODEL
@@ -224,7 +231,8 @@ def test_rank_registered_models_names_the_marked_set_when_the_filter_empties_a_n
     tmp_path,
 ):
     """The registry is not empty; the filter just names no marked experiment in it. That is a
-    distinct fact from an empty registry and needs its own text."""
+    distinct fact from an empty registry and needs its own text.
+    """
     from tcip_mcp.tools.model_tools import rank_registered_models
 
     _register(tmp_path, "exp-other", 0.7)
@@ -273,7 +281,8 @@ def test_compare_best_route_422s_with_no_registered_checkpoint(
     opened_client: TestClient, tmp_path
 ):
     """A project with no completed run and no foreign registration answers the ranking's own
-    refusal as 422, and the asking writes no registry index."""
+    refusal as 422, and the asking writes no registry index.
+    """
     import tcip_store
     from tcip_mcp.model_registry import registry_index_key
 
@@ -293,7 +302,8 @@ def test_compare_best_route_409s_when_the_index_will_not_decode(
     opened_client: TestClient, monkeypatch
 ):
     """A corrupt index is not a project with no models: the route answers 409, not the 404 an
-    absent index answers."""
+    absent index answers.
+    """
     import tcip_mcp.model_registry as model_registry
     from tcip_store import DecodeError
 

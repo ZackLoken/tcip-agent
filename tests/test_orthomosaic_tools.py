@@ -1,5 +1,6 @@
 """The orthomosaic tools: tiled inference over a whole raster published as one bucket, then
-per-plant delivery from that bucket plus a registered plant registry."""
+per-plant delivery from that bucket plus a registered plant registry.
+"""
 
 from __future__ import annotations
 
@@ -69,7 +70,8 @@ def _write_geo_raster(
     content, so it works for both the header's georeference read and a tiling inference pass.
 
     ``tiepoint_x``/``seed`` vary the two halves independently, so a caller can write a
-    pixel-identical copy at a moved tiepoint, or different content at the same one."""
+    pixel-identical copy at a moved tiepoint, or different content at the same one.
+    """
     rng = np.random.default_rng(seed)
     arr = rng.integers(0, 255, size=(height, width, channels), dtype=np.uint8)
     extratags = [
@@ -94,7 +96,8 @@ def _bespoke_detection_checkpoint(
     tmp_path: Path, *, in_chans: int = 3, tile_size: int = TILE
 ) -> str:
     """The checkpoint an untiled bespoke detection run under ``tmp_path`` completed over frames
-    of its own, registered in that project's model registry by completing."""
+    of its own, registered in that project's model registry by completing.
+    """
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     return registered_checkpoint(
@@ -139,7 +142,8 @@ def _plants_csv_at(
     tmp_path: Path, raster_path: Path, rows: list[tuple[str, float, float]]
 ) -> Path:
     """A registry CSV naming ``rows`` (plot_name, pixel_x, pixel_y) each projected to WGS84
-    through this raster's own georeferencing."""
+    through this raster's own georeferencing.
+    """
     entries = []
     for i, (name, px, py) in enumerate(rows):
         lat, lon = _pixel_to_wgs84(raster_path, px, py)
@@ -176,7 +180,8 @@ _GRID = ["plot0", "plot1", "plot2", "plot3"]
 
 def _raster(project: Path) -> Path:
     """Where the raster of a test that needs no registered dataset sits: the undated capture of
-    ``project``'s dataset ``ds``."""
+    ``project``'s dataset ``ds``.
+    """
     from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
     return project / "ds" / "images" / UNDATED_BUCKET / "mosaic.tif"
@@ -190,7 +195,8 @@ def _raster_bucket(
     name: str = "preds",
 ):
     """A whole-raster bucket ``<name>/2026-01-01`` published over ``raster_path`` holding one
-    detection per box, through the platform's own publication (``_chain_fixtures.published``)."""
+    detection per box, through the platform's own publication (``_chain_fixtures.published``).
+    """
     from tests._chain_fixtures import published
 
     height, width = tifffile.imread(str(raster_path)).shape[:2]
@@ -216,7 +222,8 @@ def _deliver(
     project: Path, bucket, registry: str, plants: list[str], **kwargs
 ) -> dict:
     """``orthomosaic_plant_counts`` shipped under a breeder's acknowledgment (these buckets are
-    unassessed), a refusal answering ``{"error": ...}``."""
+    unassessed), a refusal answering ``{"error": ...}``.
+    """
     from tcip_mcp.delivery import DeliveryRefusedError
     from tcip_mcp.operationalization import OperationalizationRefusedError
     from tcip_mcp.pipelines.postprocessing.plant_mapping import load_registry
@@ -263,7 +270,8 @@ def test_run_inference_over_a_raster_publishes_one_document_and_the_raster_it_ra
     tmp_path,
 ):
     """An explicit tile_size runs the pass; the bucket holds one document for the whole raster and
-    a record naming the raster, its content identity and the execution record."""
+    a record naming the raster, its content identity and the execution record.
+    """
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.tools.inference_tools import run_inference
 
@@ -366,7 +374,8 @@ def test_a_raster_pass_with_no_basis_for_its_tile_edge_refuses_before_writing(
     tmp_path,
 ):
     """No persisted training geometry and no explicit tile_size: an always-tiled pass has no edge
-    to tile at, so it refuses unconditionally, never crashing mid-pass."""
+    to tile at, so it refuses unconditionally, never crashing mid-pass.
+    """
     from tcip_mcp.tools.inference_tools import run_inference
 
     raster_path = _raster(tmp_path)
@@ -419,7 +428,8 @@ def test_detections_are_counted_to_their_nearest_plant_at_detection_granularity(
     tmp_path,
 ):
     """Two detections near plot0, one near plot2, none near plot1 or plot3: every population plant
-    gets a row, an explicit zero included, attributed per detection."""
+    gets a row, an explicit zero included, attributed per detection.
+    """
     from tcip_mcp.delivery import read_delivery_events
 
     raster_path = _raster(tmp_path)
@@ -462,7 +472,8 @@ def test_a_delivery_reads_the_rasters_georeferencing_once(
     tmp_path, monkeypatch
 ):
     """The identity check and the pixel-to-world mapping read the raster's georeferencing tags
-    through one header read: the reader the check opened carries what the mapping needs."""
+    through one header read: the reader the check opened carries what the mapping needs.
+    """
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
     bucket = _raster_bucket(tmp_path, raster_path, [(8.0, 8.0, 12.0, 12.0)])
@@ -512,7 +523,8 @@ def test_a_raster_whose_georeferencing_cannot_be_read_refuses_cleanly(
     tmp_path,
 ):
     """A ModelTransformationTag raster refuses through the georeference reader, not as an
-    uncaught exception."""
+    uncaught exception.
+    """
     raster_path = _raster(tmp_path)
     rng = np.random.default_rng(0)
     arr = rng.integers(0, 255, size=(64, 64, 3), dtype=np.uint8)
@@ -568,7 +580,8 @@ def test_the_delivery_event_discloses_the_registry_raster_and_tolerance_it_match
 ):
     """A whole-raster frame carries no walked mapping, so the event names the registry it read,
     the raster identity, the tolerance and its source, and this delivery's unattributed count; a
-    stated tolerance is recorded as stated rather than as the grid-pitch derivation."""
+    stated tolerance is recorded as stated rather than as the grid-pitch derivation.
+    """
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.delivery import read_delivery_events
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
@@ -665,7 +678,8 @@ def test_a_plant_outside_the_raster_is_named_and_an_edge_detection_is_not_given_
 ):
     """A registry plant outside the raster's own frame is named on the delivery, never counted,
     and a detection at the raster's edge nearer to it than to any in-frame plant stays
-    unattributed; naming the outside plant in the population refuses, naming why."""
+    unattributed; naming the outside plant in the population refuses, naming why.
+    """
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)  # 64x64
     bucket = _raster_bucket(
@@ -733,7 +747,8 @@ def test_a_registry_naming_a_plant_twice_or_not_at_all_refuses(
 
 def _canopy_setup(tmp_path, boxes) -> tuple:
     """A raster in a registered dataset and its bucket, for the canopy regime's own
-    dataset-binding check."""
+    dataset-binding check.
+    """
     from tests._geotiff_fixtures import write_canonical_dataset_raster
 
     dataset_root = tmp_path / "ds"
@@ -754,7 +769,8 @@ def _write_canopy_document(
     subject: str = "canopy",
 ) -> None:
     """A hand-traced canopy boundary document, ``raster_path``'s own label document, one
-    rectangle per ``boxes`` entry, under a person's identity."""
+    rectangle per ``boxes`` entry, under a person's identity.
+    """
     from tcip_annotation.state import Annotation, Polygon
     from tests._producer_fixtures import label_image
 
@@ -858,7 +874,8 @@ def test_a_plant_within_the_position_error_is_disclosed_as_such_and_its_segment_
 ):
     """A plant half a meter inside its segment's boundary, under a 1 m position error, leaves its
     segment untied: the delivery names it within the position error, counts its segment as one
-    holding a plant, and names why the detection inside that segment went unattributed."""
+    holding a plant, and names why the detection inside that segment went unattributed.
+    """
     from tcip_mcp.delivery import read_delivery_events
 
     _root, raster_path, bucket = _canopy_setup(

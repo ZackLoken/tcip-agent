@@ -1,5 +1,6 @@
 """Tiled inference: GenericPredictor.predict_sliced under a tiled execution record, and the pass
-run_inference prepares at tile=True."""
+run_inference prepares at tile=True.
+"""
 
 from __future__ import annotations
 
@@ -19,7 +20,8 @@ TILE = 64
 def _detection_checkpoint(tmp_path: Path) -> str:
     """Write a bespoke detection checkpoint and register it against ``tmp_path`` as the project
     root, so a caller can load it through ``load_registered_checkpoint`` or hand its bare path to
-    an MCP tool that resolves the registry itself."""
+    an MCP tool that resolves the registry itself.
+    """
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     return registered_checkpoint(
@@ -35,7 +37,8 @@ def _detection_checkpoint(tmp_path: Path) -> str:
 
 def _tiled_pass(tmp_path: Path, ckpt: str):
     """The tiled pass ``ckpt`` runs at tile 64, overlap 0.2, NMS at 0.3, conf 0 and the
-    checkpoint's own density."""
+    checkpoint's own density.
+    """
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.execution import Stated, prepare
 
@@ -89,7 +92,8 @@ def test_predict_sliced_shape_and_bounds(tmp_path):
 def test_predict_sliced_keeps_at_most_the_full_frame_cap(tmp_path):
     """The post-merge cap, the density times the frame's pixels, truncates a dense result and is
     written on the record beside the count kept, which reaches it exactly when the frame held at
-    least that many detections."""
+    least that many detections.
+    """
     p = _tiled_pass(tmp_path, _detection_checkpoint(tmp_path))
     img = gray_frame(tmp_path)
     pixels = 128 * 128
@@ -125,7 +129,8 @@ def test_predict_sliced_whole_decode_refuses_prior_or_progress_by_name(
 ):
     """``prior``/``progress`` only apply to the windowed-reader resume seam; a whole-decode source
     has no resume seam to feed them into, and silently dropping them would let a caller believe a
-    whole-decode pass resumed when it quietly started over."""
+    whole-decode pass resumed when it quietly started over.
+    """
     p = _tiled_pass(tmp_path, _detection_checkpoint(tmp_path))
     img = gray_frame(tmp_path)
     empty_prior = {"slices": [], "predictions": []}
@@ -165,7 +170,8 @@ def test_the_prepared_pass_tiles_when_asked_and_not_otherwise(tmp_path):
 def test_predict_sliced_whole_decode_channel_mismatch_refuses(tmp_path):
     """The channel-count refusal on the whole-decode path is built on the file's own probed band
     count, never on ``load_image``'s coerced output: a real 5-band ``.npy`` file against a
-    3-channel predictor raises before any slice is read."""
+    3-channel predictor raises before any slice is read.
+    """
     import numpy as np
 
     p = _tiled_pass(tmp_path, _detection_checkpoint(tmp_path))
@@ -180,7 +186,8 @@ def test_predict_sliced_whole_decode_admits_a_photographic_rgba_file_at_in_chans
     tmp_path,
 ):
     """An ordinary RGBA PNG has no real 4-versus-3 mismatch, since ``load_image``'s own PIL
-    conversion coerces it to RGB before the model sees it, the same as the untiled path does."""
+    conversion coerces it to RGB before the model sees it, the same as the untiled path does.
+    """
     from PIL import Image
 
     p = _tiled_pass(tmp_path, _detection_checkpoint(tmp_path))
@@ -196,7 +203,8 @@ def test_the_pass_decodes_through_the_checkpoints_own_recorded_attributes(
     tmp_path,
 ):
     """A checkpoint whose config records its scope's attributes decodes through them, every
-    detection carrying one id per attribute, never an order re-read from a live registry."""
+    detection carrying one id per attribute, never an order re-read from a live registry.
+    """
     from tcip_mcp import subject_registry as cr
     from tests._verified_checkpoint_fixtures import (
         predicted_over,

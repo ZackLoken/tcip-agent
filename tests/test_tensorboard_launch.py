@@ -49,7 +49,8 @@ def test_launch_reports_the_failure_when_the_process_exits_immediately(
 def _never_confirms_kill_popen_class(spawned: list):
     """A ``Popen`` stand-in class whose own ``wait`` always raises ``TimeoutExpired``: it starts
     a real sleeping process so ``kill()`` has something to act on, appends that real process to
-    ``spawned`` for the caller to clean up, but never itself reports the kill confirmed."""
+    ``spawned`` for the caller to clean up, but never itself reports the kill confirmed.
+    """
     real_popen = subprocess.Popen
 
     class _NeverConfirmsKillPopen:
@@ -82,7 +83,8 @@ def test_launch_folds_an_unconfirmed_kill_into_the_error_after_a_raising_tie_ass
 ):
     """The launch-failure path's own post-kill wait is caught the same way the stop path's is:
     a tie-assignment failure whose child will not confirm its kill still returns the existing
-    error shape, naming the pid, instead of letting TimeoutExpired escape."""
+    error shape, naming the pid, instead of letting TimeoutExpired escape.
+    """
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
 
     spawned: list[subprocess.Popen] = []
@@ -116,7 +118,8 @@ def test_launch_folds_an_unconfirmed_kill_into_the_error_after_a_raising_tie_ass
 
 def test_stop_logs_a_kill_that_never_confirms(monkeypatch, tmp_path, caplog):
     """``kill_unconfirmed`` is logged (the run id and pid), not only returned, since the exit
-    sweep discards the return value and a still-running TensorBoard needs to be visible."""
+    sweep discards the return value and a still-running TensorBoard needs to be visible.
+    """
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
 
     spawned: list[subprocess.Popen] = []
@@ -150,7 +153,8 @@ def test_exit_sweep_logs_a_kill_that_never_confirms(
     monkeypatch, tmp_path, caplog
 ):
     """``_stop_all_tracked``'s own log line fires on the run its sweep leaves running, not
-    only ``stop_tensorboard``'s own line for a caller that reads its return value."""
+    only ``stop_tensorboard``'s own line for a caller that reads its return value.
+    """
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
 
     spawned: list[subprocess.Popen] = []
@@ -205,7 +209,8 @@ def test_launch_returns_a_url_for_a_process_that_stays_up(
 
 def test_launch_reports_the_platform_lifetime_tie(monkeypatch, tmp_path):
     """lifetime_tie names the mechanism a normal launch actually got, through the argv seam
-    with a sleeping stand-in rather than a real TensorBoard install."""
+    with a sleeping stand-in rather than a real TensorBoard install.
+    """
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
 
     monkeypatch.setattr(
@@ -233,7 +238,8 @@ def test_a_board_is_tracked_under_the_one_spelling_the_store_keys_its_directory_
     """A board launched under one spelling of a log directory that does not exist yet is found
     and stopped under any spelling ``canonical_path`` equates with it, and only those: a case
     variant of the missing tail on a platform whose case rule folds case, a second directory on
-    one that does not."""
+    one that does not.
+    """
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
     from tcip_store import canonical_path
 

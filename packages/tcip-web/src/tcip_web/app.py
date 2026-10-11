@@ -1,5 +1,6 @@
 """FastAPI application: the GUI state snapshot and its WebSocket, the panel-event hub, the built
-frontend and the health probe; every domain route is mounted from ``tcip_web.routes``."""
+frontend and the health probe; every domain route is mounted from ``tcip_web.routes``.
+"""
 
 from __future__ import annotations
 
@@ -32,7 +33,8 @@ logger = logging.getLogger(__name__)
 async def _lifespan(_app: FastAPI):
     """Open the project the last-opened pointer of the workspace the backend was configured with
     names, size GDAL's block cache and warm the agent terminal, before the app serves. Refuses a
-    backend configured with no workspace (``StateStore.workspace``)."""
+    backend configured with no workspace (``StateStore.workspace``).
+    """
     from tcip_web.routes.projects import open_last_opened
 
     await open_last_opened()
@@ -96,7 +98,8 @@ async def _bad_request_handler(
     _request: Request, exc: Exception
 ) -> JSONResponse:
     """An invalid GUI mutation, a directory read as a bucket it is not, or an act naming no
-    person: 400 with the reason."""
+    person: 400 with the reason.
+    """
     return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 
@@ -118,7 +121,8 @@ async def _project_not_open_handler(
     _request: Request, exc: ProjectNotOpenError
 ) -> JSONResponse:
     """A request built for a project the backend does not have open answers 409 naming the one it
-    has open."""
+    has open.
+    """
     return JSONResponse(
         status_code=409,
         content={
@@ -139,7 +143,8 @@ def state_snapshot_message(
     state: dict[str, Any], version: int
 ) -> dict[str, Any]:
     """The state-snapshot envelope: state, version, the open project (``{id, path}``, or null
-    when none is open) and this process's epoch."""
+    when none is open) and this process's epoch.
+    """
     opened = _gui_store.opened
     return {
         "type": "state_snapshot",
@@ -192,7 +197,8 @@ async def set_active_tab(payload: ActiveTabPayload) -> dict:
 async def state_ws(websocket: WebSocket) -> None:
     """Push live GuiState snapshots to the browser; replays the current snapshot on connect.
     One-directional: the client never sends a payload over this socket, and an inbound frame,
-    if one ever arrived, is read and discarded, only to detect disconnect."""
+    if one ever arrived, is read and discarded, only to detect disconnect.
+    """
     await websocket.accept()
     _state_watchers.add(websocket)
     try:

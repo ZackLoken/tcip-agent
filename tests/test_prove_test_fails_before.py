@@ -77,7 +77,8 @@ def test_a_path_outside_tests_is_refused_by_name():
 def test_a_relative_and_absolute_dotdot_path_outside_tests_are_both_refused():
     """A relative spelling that reads as inside tests/ before its ".." segments collapse
     (tests/../tools/x.py) must refuse the same way its absolute spelling does, not be
-    materialized as if it were a real tests/ path."""
+    materialized as if it were a real tests/ path.
+    """
     relative = "tests/../tools/prove_test_fails_before.py"
     absolute = str(
         REPO_ROOT / "tests" / ".." / "tools" / "prove_test_fails_before.py"

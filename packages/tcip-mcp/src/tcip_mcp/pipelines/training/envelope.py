@@ -64,7 +64,8 @@ class TrainContext:
     @property
     def spec(self) -> TrainConfigSchema:
         """The run's validated config (``TrainRun.spec``); a bespoke loop's own keys are its
-        ``model_extra``."""
+        ``model_extra``.
+        """
         return self.run.spec
 
     @property
@@ -92,7 +93,8 @@ class TrainContext:
     def build_model(self) -> Any:
         """This run's model, built from its validated ``model_source``
         (:func:`~tcip_mcp.pipelines.model_build.build_from_model_source`) at the width and count
-        its config records (:func:`~tcip_mcp.pipelines.model_build.recorded_model_dims`)."""
+        its config records (:func:`~tcip_mcp.pipelines.model_build.recorded_model_dims`).
+        """
         from tcip_mcp.pipelines.model_build import (
             build_from_model_source,
             recorded_model_dims,
@@ -123,7 +125,8 @@ class TrainContext:
 
     def check_contract(self, model: Any = None, **overrides: Any) -> dict:
         """Run the measurement-boundary contract on ``model`` (built if omitted) at the run's
-        resolved dims, so a hand-rolled ``train(ctx)`` can self-prove before the full loop."""
+        resolved dims, so a hand-rolled ``train(ctx)`` can self-prove before the full loop.
+        """
         from tcip_mcp.pipelines.model_contract import check_model_contract
 
         return check_model_contract(
@@ -134,7 +137,8 @@ class TrainContext:
 
     def overfit_check(self, model: Any = None, **overrides: Any) -> dict:
         """Voluntary diagnostic: drive a few steps on one tiny batch and confirm the loss falls,
-        the cheap proof a from-scratch model actually learns. Non-gating."""
+        the cheap proof a from-scratch model actually learns. Non-gating.
+        """
         from tcip_mcp.pipelines.model_contract import overfit_check
 
         return overfit_check(
@@ -146,7 +150,8 @@ class TrainContext:
     # ---- the default trainer: one optional convenience ----
     def default_train(self) -> Any:
         """Run the default policy (progressive unfreeze / differential-LR / AMP+accum /
-        selection+early-stop / checkpoint cadence)."""
+        selection+early-stop / checkpoint cadence).
+        """
         from tcip_mcp.pipelines.training.generic_trainer import train
 
         return train(
@@ -165,7 +170,8 @@ class TrainContext:
         names, or else by the platform's factory at the block's sizes and tiling, under the
         block's class space. On a within-image split run (:attr:`spatial`) it is the run's one
         sample's train view, its tiles inside the recorded train region, and any other sample
-        list refuses naming that sample."""
+        list refuses naming that sample.
+        """
         from tcip_mcp.pipelines.data.split_construction import run_loader
 
         return run_loader(
@@ -178,7 +184,8 @@ class TrainContext:
         """Wrap a detection or instance-segmentation dataset in the native-resolution tiler
         (``datasets.TiledDetectionDataset``) at the lattice you compose it at, ``tile_size`` and
         ``overlap``, both required. ``kwargs``: sliver_frac / skip_empty /
-        keep_regions / transforms."""
+        keep_regions / transforms.
+        """
         from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
 
         return TiledDetectionDataset(
@@ -216,7 +223,8 @@ class TrainContext:
 
     def _stated(self, block: str) -> Any:
         """The run's validated ``block``; refuses (``ValueError``) naming it when the run's
-        config, naming its own ``training_source``, states none."""
+        config, naming its own ``training_source``, states none.
+        """
         value = getattr(self.spec, block)
         if value is None:
             raise ValueError(
@@ -227,7 +235,8 @@ class TrainContext:
 
     def build_optimizer(self, model: Any) -> Any:
         """The optimizer the run's validated ``optimizer`` block names over ``model``, at the
-        block's own rates."""
+        block's own rates.
+        """
         from tcip_mcp.pipelines.training.optimizer_factory import (
             build_optimizer,
         )
@@ -239,7 +248,8 @@ class TrainContext:
 
     def build_scheduler(self, optimizer: Any) -> Any:
         """The scheduler the run's validated ``scheduler`` block names, at the block's own
-        settings and horizon."""
+        settings and horizon.
+        """
         from tcip_mcp.pipelines.training.generic_trainer import (
             _build_scheduler,
         )
@@ -255,7 +265,8 @@ class TrainContext:
         enforce_monotonic: bool = True,
     ) -> int:
         """Apply a stage's progressive-unfreeze policy (+ the monotonic guard) and return the new
-        trainable-param count."""
+        trainable-param count.
+        """
         from tcip_mcp.pipelines.training.generic_trainer import (
             apply_stage_freeze,
         )
@@ -292,7 +303,8 @@ class TrainContext:
         """``evaluation.evaluate`` of ``model`` over ``loader`` (the run's validation loader when
         omitted) at the keywords the run resolved once (``TrainRun.evaluation_arguments``);
         ``kwargs`` are ``evaluate``'s other keywords, and one naming a keyword the run supplies
-        is refused by the call (``TypeError``)."""
+        is refused by the call (``TypeError``).
+        """
         from tcip_mcp.pipelines.training.evaluation import evaluate
 
         return evaluate(
@@ -319,7 +331,8 @@ class TrainContext:
     def _metrics_row(self, metrics: dict, stamps: dict) -> dict:
         """``metrics`` in their stored form with ``stamps`` and the instant laid over them, the
         run checked open (``experiments.require_open``). Refuses (``ValueError``) metrics carrying
-        a key the log stamps (``experiments.EPOCH_KEY``, ``STEP_KEY``, ``TIMESTAMP_KEY``)."""
+        a key the log stamps (``experiments.EPOCH_KEY``, ``STEP_KEY``, ``TIMESTAMP_KEY``).
+        """
         from tcip_mcp.audit import now_iso
         from tcip_mcp.experiments import (
             EPOCH_KEY,
@@ -348,7 +361,8 @@ class TrainContext:
         """Append one epoch's row (:meth:`_metrics_row`, stamped with ``epoch``) to the run's
         ``metrics.jsonl``, after firing ``epoch_hook`` if attached with the metrics the body
         produced, so a diverged loss keeps comparing as the worst one. A row JSON cannot hold
-        raises, naming the field."""
+        raises, naming the field.
+        """
         from tcip_mcp.experiments import EPOCH_KEY, METRICS_FILE, append_row
 
         row = self._metrics_row(metrics, {EPOCH_KEY: epoch})
@@ -361,7 +375,8 @@ class TrainContext:
         """Declare the checkpoint this body saved under ``tag`` (:meth:`save_checkpoint`) the
         run's deliverable. Unset, the run's ``model_best`` or else ``model_final`` is the one
         declared once the body returns. Refuses (``ValueError``) a tag this body saved nothing
-        under."""
+        under.
+        """
         from tcip_mcp.experiments import require_open
 
         require_open(self.run_dir)
@@ -373,7 +388,8 @@ class TrainContext:
 
     def report_objective(self, value: float) -> None:
         """Record ``value`` as a metrics row stamping it the ``selection`` under the run's
-        objective, at the last epoch logged (:meth:`_epoch_sink`)."""
+        objective, at the last epoch logged (:meth:`_epoch_sink`).
+        """
         self._epoch_sink(
             self._epoch,
             {
@@ -384,7 +400,8 @@ class TrainContext:
 
     def _write_scalars(self, metrics: dict, step: int) -> None:
         """Each scalar of ``metrics`` at ``step`` in the run's TensorBoard (:attr:`tb`), tagged by
-        its key."""
+        its key.
+        """
         from tcip_store import scalar_number
 
         for k, v in metrics.items():
@@ -394,14 +411,16 @@ class TrainContext:
 
     def log_metrics(self, epoch: int, metrics: dict) -> None:
         """Epoch metric sink: one epoch row in the run's own metrics log plus each scalar at
-        ``epoch`` in TensorBoard."""
+        ``epoch`` in TensorBoard.
+        """
         self._epoch_sink(epoch, metrics)
         self._write_scalars(metrics, epoch)
 
     def log_batch(self, step: int, epoch: int, metrics: dict) -> None:
         """Per-batch sink: one per-batch row at ``step`` within ``epoch`` in the run's own metrics
         log (:meth:`_metrics_row`), never an epoch row, so ``epoch_hook`` does not fire; plus each
-        scalar at ``step`` in TensorBoard."""
+        scalar at ``step`` in TensorBoard.
+        """
         from tcip_mcp.experiments import (
             EPOCH_KEY,
             METRICS_FILE,
@@ -468,7 +487,8 @@ class TrainContext:
     @property
     def tb(self) -> Any:
         """The run's one TensorBoard writer, over its ``tensorboard`` directory, opened on first
-        use and closed by the envelope once the body returns."""
+        use and closed by the envelope once the body returns.
+        """
         if self._tb is None:
             from torch.utils.tensorboard import SummaryWriter
 
@@ -569,7 +589,8 @@ def close_run(
     """Append the run's closing ``training_run`` line under ``project``, then write its final
     status once and return the state and ``status_error`` it names. A refused append ends the
     run ``failed`` with no checkpoint, its reason named after ``status_error`` when there is
-    one."""
+    one.
+    """
     from tcip_mcp.audit import AuditEntryNotWrittenError, record_event_or_raise
     from tcip_mcp.experiments import write_final_status
 

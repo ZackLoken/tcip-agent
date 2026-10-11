@@ -1,5 +1,6 @@
 """The verdict shard: the log of a person's decisions on a prediction bucket's proposals for one
-image, each entry read through :func:`decode_verdict` alone."""
+image, each entry read through :func:`decode_verdict` alone.
+"""
 
 from __future__ import annotations
 
@@ -20,7 +21,8 @@ VERDICT_ACTIONS: tuple[VerdictAction, ...] = get_args(VerdictAction)
 class Verdict:
     """One decision: ``proposal`` is the record's index in the bucket's document for the image,
     ``action`` what the person decided, ``by`` who (the label record's own spelling) and ``at``
-    when."""
+    when.
+    """
 
     proposal: int
     action: VerdictAction
@@ -37,7 +39,8 @@ def decode_verdict(entry: Mapping) -> Verdict:
     """One stored entry as a :class:`Verdict`, or ``ValueError`` naming the entry when a key is
     missing, the proposal is not an index, the action is not one of :data:`VERDICT_ACTIONS`, the
     person is not a person's recorded identity (:func:`~tcip_annotation.json_io.is_person`) or
-    the time is not a string."""
+    the time is not a string.
+    """
     try:
         proposal, action, by, at = (
             entry["proposal"],
@@ -70,7 +73,8 @@ REVIEW_VERDICTS_STORE = "review_verdicts"
 
 def verdict_key(dataset_root: str | Path, bucket: str, stem: str) -> Key:
     """The verdict shard of the image of stem ``stem`` under the prediction bucket named
-    ``bucket``, under the dataset root the bucket and the image's label document belong to."""
+    ``bucket``, under the dataset root the bucket and the image's label document belong to.
+    """
     return Key(REVIEW_VERDICTS_STORE, str(dataset_root), (bucket, stem))
 
 
@@ -78,7 +82,8 @@ def record_verdicts(
     txn: tcip_store.Txn, key: Key, verdicts: list[Verdict]
 ) -> None:
     """Append ``verdicts`` to the shard ``key`` names inside ``txn``, each through
-    :func:`encode_verdict`, so they commit with whatever else the transaction writes."""
+    :func:`encode_verdict`, so they commit with whatever else the transaction writes.
+    """
     for verdict in verdicts:
         txn.append(key, encode_verdict(verdict))
 
@@ -86,7 +91,8 @@ def record_verdicts(
 def read_verdicts(key: Key) -> list[Verdict]:
     """Every verdict the shard ``key`` names holds, oldest first, each through
     :func:`decode_verdict`; an absent shard holds none. Entries that will not decode refuse
-    (``ValueError``) naming their positions."""
+    (``ValueError``) naming their positions.
+    """
     page = tcip_store.read_log(key)
     if page.corrupt:
         raise ValueError(

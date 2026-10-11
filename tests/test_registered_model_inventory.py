@@ -33,7 +33,8 @@ def test_registered_models_are_recorded_in_the_index_not_copied_into_the_registr
 ) -> None:
     """Registration leaves each checkpoint under its own run directory and records it in the
     index. The registry directory holds the index alone, so counting checkpoint files there
-    counts nothing and the index is the only source of a project's registered-model inventory."""
+    counts nothing and the index is the only source of a project's registered-model inventory.
+    """
     root = tmp_path / "proj"
     reg = ModelRegistry(str(root))
     for name, content in _RUNS.items():
@@ -62,7 +63,8 @@ def test_registering_a_checkpoint_again_supersedes_its_earlier_entry(
     """A checkpoint registered again, under its old name or another, replaces that checkpoint's
     one entry; two different checkpoints are two entries whatever they are named. The inventory
     keeps one entry per checkpoint, so a reader counting registered models never counts one
-    checkpoint twice."""
+    checkpoint twice.
+    """
     root = tmp_path / "proj"
     root.mkdir()
     reg = ModelRegistry(str(root))

@@ -1,6 +1,7 @@
 """run_hyperparameter_search records a sweep as its own directory: its input written once before the
 first trial, a heartbeat while it runs, one run directory per trial, and a final status. The Ray
-Tune search itself is faked so the test doesn't init Ray or train."""
+Tune search itself is faked so the test doesn't init Ray or train.
+"""
 
 from __future__ import annotations
 
@@ -22,7 +23,8 @@ from tests._training_values import (
 
 def _stub_search(monkeypatch, *, during=None) -> dict:
     """Replace Ray Tune's search with one that calls ``during(**kw)``; returns the keywords it
-    was last called with."""
+    was last called with.
+    """
     captured: dict = {}
 
     def fake_search(**kw):
@@ -66,7 +68,8 @@ def test_run_hyperparameter_search_resolves_direction_from_the_top_level_evaluat
     tmp_path, real_hpo_base_config, monkeypatch
 ):
     """The sweep's mode comes from the config's one ``evaluation`` block, the same one the
-    trainer trains on; a nested ``training`` placement is refused at the door by name."""
+    trainer trains on; a nested ``training`` placement is refused at the door by name.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     cfg = dict(real_hpo_base_config)
@@ -106,7 +109,8 @@ def test_a_sweep_is_on_disk_while_it_runs_and_its_trials_are_its_own_run_directo
     tmp_path, real_hpo_base_config, monkeypatch
 ):
     """A sweep is on disk from the moment it starts, with its trials under its own directory:
-    an agent-launched sweep has no other way to be seen while it runs."""
+    an agent-launched sweep has no other way to be seen while it runs.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     observed: dict = {}
@@ -183,7 +187,8 @@ def test_run_hyperparameter_search_refuses_before_minting_when_the_base_config_f
     tmp_path, monkeypatch
 ):
     """An unimportable builder refuses at the door, making no sweep directory, rather than
-    failing in every trial."""
+    failing in every trial.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     captured = _stub_search(monkeypatch)
@@ -208,7 +213,8 @@ def test_run_hyperparameter_search_checks_a_swept_placeholder_axis_at_its_resolv
     tmp_path, real_hpo_base_config, monkeypatch
 ):
     """A param_space sampling the builder itself resolves a real one before the door checks it,
-    so a base config carrying only a placeholder there is not refused for that reason."""
+    so a base config carrying only a placeholder there is not refused for that reason.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     _stub_search(monkeypatch)
@@ -334,8 +340,9 @@ def test_run_hyperparameter_search_refuses_an_unstated_search_setting_by_name(
     monkeypatch,
     unstated,
 ):
-    """guard. The trial count, the search algorithm and the scheduler block have no default:
-    a call leaving one unstated refuses naming it, and no search runs."""
+    """Guard. The trial count, the search algorithm and the scheduler block have no default:
+    a call leaving one unstated refuses naming it, and no search runs.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     captured = _stub_search(monkeypatch)
@@ -375,8 +382,9 @@ def test_run_hyperparameter_search_refuses_a_scheduler_setting_unstated_or_not_t
     scheduler,
     named,
 ):
-    """guard. A scheduler block leaving a setting of its Ray class unstated, or stating one the
-    class does not take, refuses at the door naming it, before anything is minted."""
+    """Guard. A scheduler block leaving a setting of its Ray class unstated, or stating one the
+    class does not take, refuses at the door naming it, before anything is minted.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     captured = _stub_search(monkeypatch)
@@ -400,9 +408,10 @@ def test_a_sweeps_recorded_scheduler_is_the_one_ray_tunes_under(
     real_hpo_base_config,
     monkeypatch,
 ):
-    """guard. The scheduler block a sweep states is recorded whole on its input, and Ray's own
+    """Guard. The scheduler block a sweep states is recorded whole on its input, and Ray's own
     TuneConfig receives the scheduler built from that record: an ASHA scheduler capped at the
-    stated max_t, never at Ray's default."""
+    stated max_t, never at Ray's default.
+    """
     import contextlib
 
     pytest.importorskip("ray")

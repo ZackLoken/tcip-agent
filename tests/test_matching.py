@@ -1,5 +1,6 @@
 """Tests for matching.py: the one matcher's pairs under a stated criterion, and its geometry
-helpers."""
+helpers.
+"""
 
 from __future__ import annotations
 
@@ -79,7 +80,8 @@ def test_point_in_polygon_hits_a_ring_that_is_not_the_first():
 
 def test_a_multi_ring_instance_pairs_by_the_box_spanning_every_ring():
     """The matcher compares an instance by the box over all its rings, so a proposal that found
-    one lobe of a two-lobe instance overlaps only part of it."""
+    one lobe of a two-lobe instance overlaps only part of it.
+    """
     gt = [Annotation(subject="bud", geometry=Polygon([LOBE_A, LOBE_B]))]
     exact = [
         Annotation(
@@ -167,7 +169,8 @@ def test_the_criterion_limit_is_inclusive_and_a_lower_overlap_pairs_nothing():
 
 def test_an_unpaired_detection_centered_in_a_crowd_region_is_ignored():
     """COCO's crowd rule as evaluation states it: a detection left unpaired whose center lies in
-    a crowd region's box is neither true nor false."""
+    a crowd region's box is neither true nor false.
+    """
     gt = [
         {"bbox": [0.0, 0.0, 50.0, 50.0], "iscrowd": True},
         {"bbox": [100.0, 100.0, 20.0, 20.0], "iscrowd": False},

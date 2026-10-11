@@ -42,7 +42,8 @@ metric that type compares over (intersection over union, or over the smaller box
 def cross_tile_merge_of(name: str) -> tuple[str, str]:
     """The SAHI postprocess type and match metric the cross-tile merge ``name`` runs
     (:data:`CROSS_TILE_MERGES`); a name it does not hold refuses (``ValueError``) naming the
-    ones it does."""
+    ones it does.
+    """
     from tcip_mcp.pipelines.model_build import resolve_named
 
     return resolve_named(name, CROSS_TILE_MERGES, kind="cross-tile merge")
@@ -51,7 +52,8 @@ def cross_tile_merge_of(name: str) -> tuple[str, str]:
 class ExecutionRefusedError(ValueError):
     """A pass that cannot run as stated: a tile edge the checkpoint contradicts, a pass with no
     basis for its scale or its density, or a stated value that differs from the record being
-    restored."""
+    restored.
+    """
 
 
 @dataclass(frozen=True)
@@ -136,7 +138,8 @@ class Execution:
 class Stated(BaseModel):
     """What a caller states of an execution record, every field ``None`` when unstated: whether
     the pass is tiled, its tile edge and overlap, the cross-tile merge and its threshold, and the
-    confidence threshold."""
+    confidence threshold.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -168,7 +171,8 @@ class Reference:
     """The ground truth a caller holding a calibration reference supplies a pass's unstated
     values from: its ``regions`` (``derivations.Region``, each its objects and its pixel area),
     the basis of the density, the cross-tile merge threshold and a tile geometry the checkpoint
-    does not record."""
+    does not record.
+    """
 
     regions: list[Region]
 
@@ -176,7 +180,8 @@ class Reference:
 @dataclass
 class Pass:
     """A predictor built from a verified checkpoint and running under one complete execution
-    record, the images it runs over and the class scope its labels decode under."""
+    record, the images it runs over and the class scope its labels decode under.
+    """
 
     checkpoint: VerifiedCheckpoint
     predictor: GenericPredictor
@@ -189,7 +194,8 @@ class Pass:
         self, sources: list[Any], execution: Execution | None = None
     ) -> list[dict]:
         """One result per source under the pass's own execution record, or under ``execution``
-        where one is given."""
+        where one is given.
+        """
         return self.predictor.predict_batch(
             sources,
             execution=execution or self.execution,
@@ -203,7 +209,8 @@ class Preparation:
     class scope its labels decode under, the tile geometry stated or recorded for a tiled pass
     (``None`` untiled; a value neither states left for :func:`execution_record`), what the caller
     stated, the record being restored where one is, and the images the
-    pass runs over. :meth:`runnable` constructs the pass."""
+    pass runs over. :meth:`runnable` constructs the pass.
+    """
 
     checkpoint: VerifiedCheckpoint
     predictor: GenericPredictor
@@ -216,7 +223,8 @@ class Preparation:
 
     def runnable(self, reference: Reference | None = None) -> Pass:
         """The pass under the restored record, or under the record :func:`execution_record`
-        resolves from what was stated and ``reference``."""
+        resolves from what was stated and ``reference``.
+        """
         execution = (
             self.restored
             if self.restored is not None
@@ -249,7 +257,8 @@ def prepare(
     as stated, else as the checkpoint trained; its tile edge and overlap are the stated ones,
     else the checkpoint's own recorded geometry (:func:`~tcip_mcp.pipelines.slicing.
     resolve_tile_geometry`), else left for :func:`execution_record` to derive, a stated edge the
-    checkpoint's geometry contradicts refusing."""
+    checkpoint's geometry contradicts refusing.
+    """
     import sahi
 
     from tcip_mcp.pipelines.image_utils import list_logical_images
@@ -320,7 +329,8 @@ def execution_record(
     threshold ``reference``'s regions derive (``derivations.derive_cross_tile_nms``). Every
     value left with no statement and no basis
     refuses (:class:`ExecutionRefusedError`) naming it, and a conf stated for a head that is no
-    detector refuses too."""
+    detector refuses too.
+    """
     import sahi
 
     from tcip_mcp.pipelines.derivations import (

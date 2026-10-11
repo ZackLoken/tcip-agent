@@ -26,7 +26,8 @@ def test_a_routable_arrival_is_refused_whatever_the_environment_holds(
 ) -> None:
     """No setting serves a network client: a routable arrival is refused over HTTP and
     WebSocket with every variable an exposure mode once read set, while a loopback request with a
-    matching Origin is served."""
+    matching Origin is served.
+    """
     monkeypatch.setenv("TCIP_WEB_ALLOW_INSECURE", "1")
     monkeypatch.setenv("TCIP_WEB_ADVERTISED_HOSTS", "192.168.1.23:8765")
     lan = TestClient(app, base_url=LAN)
@@ -131,7 +132,8 @@ def test_the_lifespan_runs_with_no_arrival_to_classify() -> None:
 
 async def _accepting_ws_app(scope, receive, send) -> None:
     """A minimal ASGI app with no origin check of its own, so wrapping it in the
-    middleware isolates the middleware's own Origin enforcement from any route."""
+    middleware isolates the middleware's own Origin enforcement from any route.
+    """
     await send({"type": "websocket.accept"})
     await send({"type": "websocket.send", "text": "hello"})
 

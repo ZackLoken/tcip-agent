@@ -53,6 +53,7 @@ def register_plant_registry(
     any file that parsed no georeferenced, named plant or is not UTF-8 text, and naming a name
     conflict's two digests or a name outside ``NAME_SEGMENT``. This does not require a project
     record.
+
     """
     from tcip_mcp.pipelines.postprocessing import plant_mapping
 
@@ -131,6 +132,7 @@ def build_plant_mapping(
 
     Returns the build as ``MappingBuild.served`` states it, never the full per-image mapping (that
     lives in the persisted record).
+
     """
     from tcip_mcp.audit import AuditEntryNotWrittenError
     from tcip_mcp.pipelines.postprocessing import plant_mapping
@@ -195,6 +197,7 @@ def deliver_phenology_milestones(
             ``phenology.REQUIRE_ALL_DATES_COMPLETE``; recorded on the delivery
             event.
         acknowledgment_id: A breeder's recorded acknowledgment of this unvalidated result.
+
     """
     from tcip_mcp.delivery import DeliveryRefusedError
     from tcip_mcp.operationalization import OperationalizationRefusedError

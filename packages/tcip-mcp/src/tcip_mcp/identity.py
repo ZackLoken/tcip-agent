@@ -16,7 +16,8 @@ class NoActorError(ValueError):
 def actor(name: str) -> str:
     """A person's recorded identity, ``user:<name>``, idempotent, from the ``name`` a request
     states, with or without the prefix (:func:`~tcip_annotation.json_io.person_name`). Refuses
-    (:class:`NoActorError`) when ``name`` names no person."""
+    (:class:`NoActorError`) when ``name`` names no person.
+    """
     person = person_name(name)
     if person is None:
         raise NoActorError(

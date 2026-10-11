@@ -1,5 +1,6 @@
 """Detector builders: plain ``build_detector`` / ``_build_*`` factories, imported
-directly by bespoke model code (no registry)."""
+directly by bespoke model code (no registry).
+"""
 
 import pytest
 
@@ -45,7 +46,8 @@ def test_build_detector_unknown_name_raises():
 class _LinearPatchBackbone(nn.Module):
     """A patch-embedding stem with no convolution in it: unfold the image into patches and project
     them linearly, the shape a transformer-style backbone takes. Its band count lives in the fan-in
-    of a linear layer, which is why reading the first registered ``Conv2d`` cannot recover it."""
+    of a linear layer, which is why reading the first registered ``Conv2d`` cannot recover it.
+    """
 
     def __init__(
         self, in_chans: int, out_channels: int, patch: int = 8
@@ -98,7 +100,8 @@ def _unprobable_adapter(in_chans: int, out_channels: int = 32):
 def test_a_detector_whose_band_count_cannot_be_read_refuses_rather_than_assuming_rgb():
     """With no in_chans stated and no conv to read one from, torchvision would normalize with
     3-element ImageNet statistics over bands nobody has confirmed are RGB. The build refuses by
-    name instead."""
+    name instead.
+    """
     from tcip_mcp.pipelines.components.detectors import build_detector
 
     with pytest.raises(ValueError, match="cannot tell how many bands"):
@@ -118,7 +121,8 @@ def test_a_detector_over_that_backbone_builds_from_its_datasets_own_band_statist
 ):
     """The rail admits valid work: per-band statistics derived from the run's own admitted sources
     build the same detector and reach its transform at the bands they describe, and a caller that
-    states the width builds on torchvision's own three-band default."""
+    states the width builds on torchvision's own three-band default.
+    """
     import numpy as np
     import tifffile
 

@@ -40,7 +40,8 @@ def test_a_drawn_reference_selection_records_each_samples_ground_truth_digest(
 ):
     """The fact the edited-reference refusal rests on: a selection records, per sample, the
     digest of the ground truth the draw held out, so a reader can say that document moved since
-    without re-reading the draw."""
+    without re-reading the draw.
+    """
     root = tmp_path / "ds"
     synthetic_capture(root)
     selection = draw_reference_selection(
@@ -58,7 +59,8 @@ def test_the_draw_and_the_delivery_check_digest_a_ground_truth_the_same_way(
     tmp_path: Path,
 ):
     """The digest the draw records for each sample's ground truth is the one the delivery-time
-    check recomputes for an untouched reference."""
+    check recomputes for an untouched reference.
+    """
     from tcip_mcp.pipelines.data.selection import ground_truth_digest
 
     root = tmp_path / "ds"
@@ -78,7 +80,8 @@ def test_the_tiny_detector_trains_and_finds_one_object_per_frame(
     tmp_path: Path,
 ):
     """The model the chain rests on: a real training pass, and predictions stable enough that a
-    count measured over them is a fact about the chain rather than about a fit."""
+    count measured over them is a fact about the chain rather than about a fit.
+    """
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.execution import prepare
 
@@ -110,7 +113,8 @@ def test_a_reference_document_edited_after_its_read_is_never_measured(
 ):
     """The loaders measure each reference document as the assessment's one read answered it, the
     version it retained: an edit landing after that read is never measured, and the record names
-    the version read, not the edit."""
+    the version read, not the edit.
+    """
     from tcip_mcp import assessment as assessment_mod
     from tcip_mcp.pipelines.data.selection import ground_truth_digest
     from tests._chain_fixtures import assess, confirm_count_trait
@@ -151,7 +155,8 @@ def test_a_frame_assessments_reference_derives_the_density_that_governs_its_pass
     """An assessment over frames states no cap: its calibration frames' own objects derive the
     density its record carries, over the one the checkpoint recorded of its training frames,
     which here is half of it: every calibration frame holds a second object no training frame
-    holds."""
+    holds.
+    """
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.pipelines.derivations import OBJECT_DENSITY_DERIVATION
@@ -195,7 +200,8 @@ def test_the_assessment_passes_and_the_bucket_published_under_it_names_it(
 ):
     """Assess and publish: the assessment fits the operating point on the selection's calibration
     side, measures the count over its holdout side and passes; the bucket published under it runs
-    its execution record and names it, and no training run is opened for it."""
+    its execution record and names it, and no training run is opened for it.
+    """
     from tcip_mcp.assessment import read_assessment
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.experiments import run_rows

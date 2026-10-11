@@ -91,7 +91,8 @@ def test_propose_annotations_records_in_the_dataset_named_by_the_image_it_ran_ag
 ) -> None:
     """A proposal run is scoped like its sibling ``stage_proposals``: to the dataset the image
     belongs to, not the project's log, driven through a dotted ``module:factory`` engine so the
-    test needs no torch."""
+    test needs no torch.
+    """
     from tcip_mcp.tools.proposal_tools import propose_annotations
 
     image = dataset_root / "images" / CAPTURE_DATE / "IMG_0001.JPG"
@@ -109,7 +110,8 @@ def test_propose_annotations_staging_nothing_leaves_no_audit_line(
     project: Path, tmp_path: Path
 ) -> None:
     """A location that resolves to no dataset is never guessed into one: the call still succeeds,
-    stages nothing, and so records no act in any log."""
+    stages nothing, and so records no act in any log.
+    """
     from tcip_mcp.tools.proposal_tools import propose_annotations
 
     loose = tmp_path / "loose"
@@ -131,7 +133,8 @@ def test_unscoped_mutating_tool_records_in_the_project_log_with_the_entry_shape(
     project: Path, dataset_root: Path
 ) -> None:
     """A mutating tool that declares no scope records in the project's log, and its row grows no
-    new field."""
+    new field.
+    """
     from tcip_mcp.tools.meta_tools import report_friction
 
     report_friction(project, "unexpected_behavior", "a project event")
@@ -153,7 +156,8 @@ def test_a_label_write_of_an_image_under_no_dataset_refuses_and_records_nothing(
     project: Path, bound, tmp_path: Path
 ) -> None:
     """An image under no dataset image tree has no label document to write: the save refuses
-    rather than guessing a dataset for it, and no log receives a line."""
+    rather than guessing a dataset for it, and no log receives a line.
+    """
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     loose = tmp_path / "loose"
@@ -192,7 +196,8 @@ def test_relative_scope_argument_resolves_against_the_project_not_the_process_cw
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A relative dataset location is read against the project the call acts on; a same-named
-    directory under the process cwd stands in for the wrong answer."""
+    directory under the process cwd stands in for the wrong answer.
+    """
     from tcip_mcp.audit import audited
 
     @audited(scope_arg="output_dir")
@@ -222,7 +227,8 @@ def test_a_scope_resolution_that_raises_refuses_rather_than_filing_the_event_in_
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A declared dataset event whose destination cannot be worked out is not rerouted: an entry
-    filed in the project's log on a resolver failure is one nobody tracing that dataset finds."""
+    filed in the project's log on a resolver failure is one nobody tracing that dataset finds.
+    """
     from tcip_mcp.audit import audited
 
     def _raises(value: object) -> Path:

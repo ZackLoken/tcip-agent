@@ -53,7 +53,8 @@ class CanvasStatePayload(BaseModel):
 @router.post("/state")
 def push_canvas_state(payload: CanvasStatePayload) -> dict:
     """Store the pushed canvas for the open project, stamped with the instant it arrived; a push
-    stating a ``user`` that names no one is refused before anything is written."""
+    stating a ``user`` that names no one is refused before anything is written.
+    """
     person = actor(payload.user)
     project = store.admit(payload.project_id)
     root = str(project.root)

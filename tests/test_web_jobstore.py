@@ -34,7 +34,8 @@ def test_evict_terminal_caps_and_keeps_running():
 
 def test_evict_terminal_drops_the_oldest_terminal_jobs_whichever_root_they_belong_to():
     """The whole dict is trimmed to max_jobs, oldest terminal job of any root first, so a lone
-    recent job from a different root survives while older ones are still there to go."""
+    recent job from a different root survives while older ones are still there to go.
+    """
     from tcip_web.jobstore import evict_terminal
 
     jobs = {f"a{i}": J("completed", "root-a") for i in range(5)}
@@ -48,7 +49,8 @@ def test_evict_terminal_drops_the_oldest_terminal_jobs_whichever_root_they_belon
 def test_evict_terminal_bounds_the_whole_dict_across_roots():
     """The whole dict stays bounded at max_jobs even as more roots register their own jobs,
     not just each root's own share: a root that has stopped receiving launches is trimmed too,
-    the leak this helper exists to close."""
+    the leak this helper exists to close.
+    """
     from tcip_web.jobstore import evict_terminal
 
     jobs: dict[str, J] = {}
@@ -65,7 +67,8 @@ def test_evict_terminal_bounds_the_whole_dict_across_roots():
 
 def test_job_registry_registers_gets_lists_by_root_and_finds_or_registers():
     """The one dict-plus-lock registry every route adopts: a job registered under a root is got
-    by id from any root, listed only under its own, and found again rather than made twice."""
+    by id from any root, listed only under its own, and found again rather than made twice.
+    """
     from tcip_web.jobstore import JobRegistry
 
     registry = JobRegistry()
@@ -149,7 +152,8 @@ def test_inference_cancel_reaches_a_job_launched_for_a_previously_open_project(
     opened_project,
 ):
     """Canceling a run one launched is legitimate work: opening another project must not make
-    the job invisible to cancel or stream, only to the list route."""
+    the job invisible to cancel or stream, only to the list route.
+    """
     from fastapi import HTTPException
 
     from tcip_web.routes._body_common import PersonPayload
@@ -197,7 +201,8 @@ def test_priority_queue_by_id_reaches_a_job_launched_for_a_previously_open_proje
     opened_project,
 ):
     """Answering a ranked queue one launched is legitimate work, the same contract inference
-    already holds: opening another project must not make the job invisible by id."""
+    already holds: opening another project must not make the job invisible by id.
+    """
     from fastapi import HTTPException
 
     from tcip_web.routes.annotate import (

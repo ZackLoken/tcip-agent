@@ -64,7 +64,8 @@ class StateStore:
     """Holds the workspace the backend serves, its open project and that project's live
     :class:`GuiState` as one value (:class:`Held`), which every change made for the project
     persists before it is broadcast; a change made while no project is open is held and
-    persisted nowhere."""
+    persisted nowhere.
+    """
 
     def __init__(self) -> None:
         self._now = Held(None, GuiState())
@@ -81,13 +82,15 @@ class StateStore:
         self, workspace: Path, image_roots: tuple[Path, ...]
     ) -> None:
         """Set the workspace this backend serves and the additive image roots it admits, each
-        resolved once where the backend starts."""
+        resolved once where the backend starts.
+        """
         self._workspace, self._image_roots = workspace, image_roots
 
     @property
     def workspace(self) -> Path:
         """The workspace this backend serves; raises ``RuntimeError`` when it started without
-        one."""
+        one.
+        """
         if self._workspace is None:
             raise RuntimeError(
                 "the backend was started without a workspace; start it through "
@@ -103,7 +106,8 @@ class StateStore:
     @property
     def opened(self) -> OpenProject | None:
         """The open project, its directory and id together, or ``None`` when none is open: one
-        value, so a reader that wants both reads them in one step."""
+        value, so a reader that wants both reads them in one step.
+        """
         return self._now.project
 
     def held(self) -> OpenProject:
@@ -113,7 +117,8 @@ class StateStore:
     def held_state(self) -> tuple[OpenProject, GuiState]:
         """The open project and its GUI state, read as one value, so a reader that wants both
         never pairs one project's identity with another's state; raises
-        :class:`NoProjectOpenError` when none is open."""
+        :class:`NoProjectOpenError` when none is open.
+        """
         now = self._now
         if now.project is None:
             raise NoProjectOpenError(
@@ -124,7 +129,8 @@ class StateStore:
     def admit(self, project_id: str) -> OpenProject:
         """The open project (:meth:`held`), when ``project_id`` names it; raises
         :class:`ProjectNotOpenError` naming the open project's id when another is open, and
-        what :meth:`held` raises when none is."""
+        what :meth:`held` raises when none is.
+        """
         opened = self.held()
         if project_id != opened.id:
             raise ProjectNotOpenError(opened.id)
@@ -133,7 +139,8 @@ class StateStore:
     async def open_project(self, project: OpenProject) -> None:
         """Make ``project`` the open project (:meth:`_switch`), holding its persisted state (a
         fresh state when it has none). Raises what :func:`tcip_mcp.web_client.read_gui_snapshot`
-        raises, leaving the open project unchanged."""
+        raises, leaving the open project unchanged.
+        """
         state = (
             await asyncio.to_thread(read_gui_snapshot, project.root)
             or GuiState()
@@ -143,7 +150,8 @@ class StateStore:
     async def close_project(self, project_id: str) -> None:
         """Depart from the open project (:meth:`_switch`) when ``project_id`` names it
         (:meth:`admit`), the comparison and the close one step under the lock; a no-op when it
-        does not, or none is open."""
+        does not, or none is open.
+        """
         await self._switch(None, GuiState(), closing=project_id)
 
     async def _switch(
@@ -158,7 +166,8 @@ class StateStore:
         returned, publish ``following`` with ``state`` as one value, its retained events cleared,
         and notify subscribers; a departure that raises publishes nothing. The departure's
         ``session_ended`` lines (:func:`tcip_web.routes.sessions.record_ended`) follow the
-        publication, and a line that cannot be written raises then."""
+        publication, and a line that cannot be written raises then.
+        """
         from tcip_web.routes.sessions import end_sessions, record_ended
 
         async with self._lock:
@@ -182,7 +191,8 @@ class StateStore:
     async def admitted(self, project_id: str, act: Callable[[Path], T]) -> T:
         """``act`` run on a worker thread with the open project's directory, ``project_id``
         admitted against it (:meth:`admit`, raising what it raises) and the act done under the
-        lock, so no switch publishes between the admission and the act."""
+        lock, so no switch publishes between the admission and the act.
+        """
         async with self._lock:
             root = self.admit(project_id).root
             return await asyncio.to_thread(act, root)
@@ -190,7 +200,8 @@ class StateStore:
     def retain_event(self, panel: str, event: dict[str, Any]) -> None:
         """Keep ``event``, admitted for the open project by its caller in the same synchronous
         step, for :meth:`retained_events`; a switch publishes its project and clears the
-        retained events in one synchronous step too, so the event is never kept for another."""
+        retained events in one synchronous step too, so the event is never kept for another.
+        """
         self._retained[panel].append(event)
 
     def retained_events(self, panel: str) -> list[dict[str, Any]]:
@@ -201,7 +212,8 @@ class StateStore:
         self, project: OpenProject | None, state: GuiState
     ) -> None:
         """Hold ``project`` with ``state`` as the next version, the retained events cleared when
-        the project changes, and notify every subscriber of it; called under the lock."""
+        the project changes, and notify every subscriber of it; called under the lock.
+        """
         if project != self._now.project:
             self._retained.clear()
         self._now = Held(project, state)

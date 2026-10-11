@@ -1,6 +1,7 @@
 """What a run's train dataset serves (its object density, its native frame) lands in the
 persisted config, a run's tiling block is the one its resolution wrote, and a tiling stated on a
-task that trains whole frames is refused at the door rather than recorded unrealized."""
+task that trains whole frames is refused at the door rather than recorded unrealized.
+"""
 
 from __future__ import annotations
 
@@ -39,7 +40,8 @@ class _OpaqueStub:
 
 def _geometry(data_cfg: dict, train_ds, task: str = "detection"):
     """``data_cfg`` validated as a ``task`` run's data block with what ``train_ds`` serves
-    recorded on it (``generic_trainer.effective_data_geometry``)."""
+    recorded on it (``generic_trainer.effective_data_geometry``).
+    """
     from tcip_mcp.pipelines.schemas import DataSpec
     from tcip_mcp.pipelines.training.generic_trainer import (
         effective_data_geometry,
@@ -52,7 +54,8 @@ def _geometry(data_cfg: dict, train_ds, task: str = "detection"):
 
 def test_stamp_tiled_run_records_its_tiles_density_and_leaves_the_lattice_it_was_given():
     """The lattice a tiled run serves is the one its resolution wrote into ``data.tiling``; the
-    stamp adds the density over the tiles and nothing else."""
+    stamp adds the density over the tiles and nothing else.
+    """
     tiling = {"enabled": True, "tile_size": 96, "overlap": 0.25}
     stamped = _geometry({"tiling": tiling}, _TiledStub())
 
@@ -64,7 +67,8 @@ def test_stamp_tiled_run_records_its_tiles_density_and_leaves_the_lattice_it_was
 def test_a_detector_dataset_records_its_density_whoever_built_it():
     """A bespoke builder's detector dataset exposing regions records their density as a
     platform-built one does; a detector dataset exposing none refuses naming the interface, and
-    another head's records none."""
+    another head's records none.
+    """
     bespoke = {"dataset_source": {"builder": "my_module:build_ds"}}
 
     assert _geometry(
@@ -104,7 +108,8 @@ def _detection_dataset(tmp_path, sizes):
 
 def test_stamp_untiled_uniform_frames_record_train_native_size(tmp_path):
     """An untiled run records the shared native frame as [width, height], and the object
-    density counted over those frames."""
+    density counted over those frames.
+    """
     stamped = _geometry(
         {"tiling": {"enabled": False}},
         _detection_dataset(tmp_path, [(64, 48), (64, 48)]),
@@ -116,7 +121,8 @@ def test_stamp_untiled_uniform_frames_record_train_native_size(tmp_path):
 
 def test_stamp_untiled_mixed_frames_record_nothing(tmp_path):
     """Mixed source sizes have no single native frame; stamping any one of them would be a
-    guess, so no train_native_size is written."""
+    guess, so no train_native_size is written.
+    """
     stamped = _geometry(
         {"tiling": {"enabled": False}},
         _detection_dataset(tmp_path, [(64, 48), (32, 32)]),
@@ -130,7 +136,8 @@ def test_stamp_untiled_mixed_frames_record_nothing(tmp_path):
 
 def _base_config(tiling, project: Path, *, task: str = "detection"):
     """A ``task`` run's config over frames of its own under ``project`` (a detection run's
-    labeled by documents, a classification run's by a table), stating ``tiling``."""
+    labeled by documents, a classification run's by a table), stating ``tiling``.
+    """
     from tests._chain_fixtures import BESPOKE_MODELS, CLASSIFIER_SOURCE
     from tests._verified_checkpoint_fixtures import (
         SCOPED_DATA,
@@ -178,7 +185,8 @@ def test_a_tiling_stated_on_a_task_that_trains_whole_frames_refuses_at_the_door(
 ):
     """A run whose task trains whole frames stating an enabled ``data.tiling`` is refused when
     its config is validated, naming the task and ``data.tiling``, never trained untiled with the
-    statement ignored."""
+    statement ignored.
+    """
     from tcip_mcp.pipelines.schemas import train_config
     from tests._chain_fixtures import BESPOKE_MODELS
 
@@ -196,7 +204,8 @@ def test_a_tiling_stated_on_a_task_that_trains_whole_frames_refuses_at_the_door(
 def test_an_untiled_runs_resolved_record_carries_the_disabled_block(tmp_path):
     """A classification run stating no tiling opens through the launcher's own producer, and the
     record it resolved, validated again as every reader validates it, carries the disabled
-    block."""
+    block.
+    """
     from tcip_mcp.experiments import observe
     from tcip_mcp.pipelines.training.run_registry import observed_run
     from tests._verified_checkpoint_fixtures import opened_run
@@ -212,7 +221,8 @@ def test_an_untiled_runs_resolved_record_carries_the_disabled_block(tmp_path):
 
 def _trial(tmp_path, base_config):
     """One HPO trial of a sweep over ``base_config``, opened by the sweep's own trial producer;
-    its run directory."""
+    its run directory.
+    """
     from tcip_mcp.tools.training_tools import open_trial
     from tests._verified_checkpoint_fixtures import opened_sweep
 
@@ -224,7 +234,8 @@ def _trial(tmp_path, base_config):
 def test_a_sweep_over_a_tiling_its_task_never_reads_opens_nothing(tmp_path):
     """A sweep whose classification base config states an enabled tiling is refused by name before
     any directory opens; the same base config stating none opens a trial whose resolved record
-    carries the disabled block."""
+    carries the disabled block.
+    """
     from tcip_mcp import experiments
     from tcip_mcp.tools.training_tools import open_sweep
     from tests._verified_checkpoint_fixtures import SWEEP_ARGUMENTS
@@ -258,7 +269,8 @@ def test_an_hpo_trials_resolved_record_carries_the_effective_tile_geometry(
     tmp_path,
 ):
     """A tiled trial records the tile edge its config stated and the overlap its resolution
-    derived where the config stated none."""
+    derived where the config stated none.
+    """
     trial_dir = _trial(
         tmp_path,
         _base_config(

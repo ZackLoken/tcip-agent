@@ -1,5 +1,6 @@
 """Reference-grid geometry: partition and overlap semantics, derived tile sizes, naming,
-and the serializable geometry dict every consumer echoes."""
+and the serializable geometry dict every consumer echoes.
+"""
 
 from __future__ import annotations
 
@@ -46,8 +47,9 @@ class TestReferenceCells:
                 ), f"cells overlap: {a} and {b}"
 
     def test_unclamped_overlap_steps_origins_and_keeps_full_size_rects(self):
-        """overlap > 0 under clamp=False steps origins by the overlapped stride while they lie
-        in the frame, and every rect keeps the full cell edge, past the extent at the far side."""
+        """Overlap > 0 under clamp=False steps origins by the overlapped stride while they lie
+        in the frame, and every rect keeps the full cell edge, past the extent at the far side.
+        """
         width, height, tile, overlap = 500, 300, 224, 0.2
         cells = reference_cells(width, height, tile, overlap)
         assert sorted({(c.x0, c.y0) for c in cells}) == [
@@ -64,7 +66,8 @@ class TestReferenceCells:
     def test_clamped_overlapping_cells_cover_the_whole_frame(self):
         """Origins step while they lie inside the frame, so a stride that does not divide the
         frame still places a last origin before the far edge: 200px at 100 and 0.2 steps 0, 80,
-        160, and the clamped cells reach 200 on both axes."""
+        160, and the clamped cells reach 200 on both axes.
+        """
         cells = reference_cells(200, 200, 100, 0.2, clamp=True)
 
         assert (
@@ -123,7 +126,8 @@ class TestDerivations:
 
     def test_mosaic_scale_geometry(self):
         """The orthomosaic-sized numeric case: 141130 x 239921 under that display derives tile
-        1920, a 74 x 125 serving grid."""
+        1920, a 74 x 125 serving grid.
+        """
         tile = derive_serving_tile_size(141130, 239921, CAP)
         assert tile == 1920
         geometry = grid_geometry(141130, 239921, tile)
@@ -141,7 +145,8 @@ class TestDerivations:
     def test_pointing_grain_is_fixed_in_render_space(self):
         """Images at or past the artifact bound share one pointing grain: the cell count
         along the long edge is a function of the render, not of native size, so the
-        mosaic's overlay and an ordinary photo's read at the same label density."""
+        mosaic's overlay and an ordinary photo's read at the same label density.
+        """
         import math
 
         from tcip_mcp.pipelines.reference_grid import POINTING_LEGIBLE_EDGE
@@ -154,12 +159,14 @@ class TestDerivations:
 
     def test_pointing_tile_numeric_case_inside_the_artifact_bound(self):
         """An image inside the artifact bound renders at native scale, so the grain is
-        chosen against its own long edge: 640 splits into 14 cells of edge 46."""
+        chosen against its own long edge: 640 splits into 14 cells of edge 46.
+        """
         assert derive_pointing_tile_size(640, 480) == 46
 
     def test_serving_tile_is_a_fixed_derivation_of_the_extent(self):
         """Hardcoded expected values, not a self-comparison, so a shared-code-path regression
-        would actually be caught."""
+        would actually be caught.
+        """
         assert derive_serving_tile_size(141130, 239921, CAP) == 1920
         assert derive_serving_tile_size(4000, 3000, CAP) == 1334
         assert derive_serving_tile_size(5000, 64, CAP) == 5000
@@ -168,7 +175,8 @@ class TestDerivations:
 
     def test_an_encodings_edge_limit_bounds_the_tile_edge(self):
         """A one-pixel level within the cap but longer than the encoding's edge limit splits
-        into cells that limit admits; the same level with no limit stays one cell."""
+        into cells that limit admits; the same level with no limit stays one cell.
+        """
         assert derive_serving_tile_size(1, 100_000, 100_000, 65_500) == 50_000
         assert derive_serving_tile_size(100_000, 1, 100_000, 65_500) == 50_000
         assert derive_serving_tile_size(1, 100_000, 100_000) == 100_000

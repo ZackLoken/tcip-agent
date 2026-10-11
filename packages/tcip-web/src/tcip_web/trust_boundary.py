@@ -46,7 +46,8 @@ EXPOSURE_REFUSAL = (
 def canonical_host(host: str) -> str:
     """The canonical spelling of a host: lower-cased, no trailing dot, IPv6 unbracketed, an
     IPv4-mapped IPv6 address unwrapped to its IPv4 form. Raises ``ValueError`` for anything that
-    is not a host: empty, whitespace or control characters, userinfo, a backslash."""
+    is not a host: empty, whitespace or control characters, userinfo, a backslash.
+    """
     h = host.strip()
     if (
         not h
@@ -101,7 +102,8 @@ def parse_authority(value: str, default_port: int | None) -> Authority:
 
 def is_loopback_host(host: str) -> bool:
     """True if ``host``, canonically spelled, is the one loopback host every server here binds
-    (:data:`~tcip_mcp.web_client.LOOPBACK_HOST`); a malformed host is not."""
+    (:data:`~tcip_mcp.web_client.LOOPBACK_HOST`); a malformed host is not.
+    """
     from tcip_mcp.web_client import LOOPBACK_HOST
 
     try:
@@ -120,7 +122,8 @@ def arrival(scope: Mapping[str, Any]) -> tuple[str, int | None] | None:
 
 def local_arrival(scope: Mapping[str, Any]) -> bool:
     """True when the connection arrived through this machine: the loopback host, or a UNIX socket
-    path."""
+    path.
+    """
     at = arrival(scope)
     if at is None:
         return False
@@ -147,7 +150,8 @@ def _header_values(scope: Mapping[str, Any], name: bytes) -> list[str]:
 
 def request_authority(scope: Mapping[str, Any]) -> Authority | None:
     """The Host header as a canonical authority, or None when it is absent, duplicated or
-    malformed."""
+    malformed.
+    """
     values = _header_values(scope, b"host")
     if len(values) != 1:
         return None

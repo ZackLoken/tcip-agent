@@ -36,7 +36,8 @@ def _bespoke_builder(**kwargs):
 
 def _source(builder: str):
     """``builder``'s classification ``model_source`` declaring this module, validated in a run
-    config over no data, and the layout its admission stages (``model_build.staged_sources``)."""
+    config over no data, and the layout its admission stages (``model_build.staged_sources``).
+    """
     from tcip_mcp.pipelines.model_build import staged_sources
     from tcip_mcp.pipelines.schemas import train_config
     from tests import REPO_ROOT
@@ -103,7 +104,8 @@ def test_check_model_contract_classification_ok():
 def test_check_model_contract_records_per_parameter_gradient_magnitudes():
     """A model whose parameters all took zero gradient must read as what it is: the presence
     conjunct only asks whether a .grad exists, not what it is, so the report also states each
-    named parameter's gradient norm rather than gating the report on presence alone."""
+    named parameter's gradient norm rather than gating the report on presence alone.
+    """
     model = bespoke_models.build_bespoke_classifier(num_classes=2)
     report = check_model_contract(model, "classification", dims=CLS_DIMS)
     assert report["ok"], report["issues"]
@@ -121,7 +123,8 @@ def test_check_model_contract_gradient_norm_survives_a_float32_overflow():
     the elementwise finiteness gate passes, but summing their squares in the gradient's own
     float32 dtype overflows: ``torch.tensor([2e38, 2e38]).norm()`` is ``inf`` even though every
     element is finite. The recorded magnitude must be computed at higher precision so the report
-    stays the JSON-encodable value ``check_json_value`` needs downstream, never an ``inf``."""
+    stays the JSON-encodable value ``check_json_value`` needs downstream, never an ``inf``.
+    """
     import torch.nn as nn
 
     class _NearOverflowGradient(nn.Module):
@@ -172,7 +175,8 @@ def test_check_model_contract_accepts_a_ragged_nested_eval_output():
     """A bespoke non-detection task may legitimately return a per-image ragged list of tensors (or
     a nested dict of them) rather than one flat top-level tensor, e.g. a variable number of
     per-instance predictions per image. The eval-output check must see the tensor wherever it is
-    nested, not only at the top level of the dict."""
+    nested, not only at the top level of the dict.
+    """
     import torch.nn as nn
 
     class _Ragged(nn.Module):
@@ -236,7 +240,8 @@ def test_render_overfit_report_passes_through_a_finite_report():
 
 def test_render_overfit_report_keeps_a_diverging_models_state():
     """A diverging model's raw report can carry nan, which check_json_value refuses. The
-    rendered form keeps the state as a named companion field instead of losing it."""
+    rendered form keeps the state as a named companion field instead of losing it.
+    """
     from tcip_mcp.pipelines.model_contract import render_overfit_report
 
     raw = {

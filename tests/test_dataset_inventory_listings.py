@@ -1,6 +1,7 @@
 """What the resolver reports a dataset contains: capture-date buckets, the published prediction
 buckets of each date, and the difference between the subjects a registry declares and the
-subjects a date's labels hold."""
+subjects a date's labels hold.
+"""
 
 from __future__ import annotations
 
@@ -26,7 +27,8 @@ def test_only_published_buckets_are_listed_under_the_date_their_record_states(
     tmp_path: Path,
 ) -> None:
     """A prediction document no bucket record names (a half-written or staged one) is no bucket:
-    listing it would offer the breeder a model with nothing published behind it."""
+    listing it would offer the breeder a model with nothing published behind it.
+    """
     pytest.importorskip("torch")
     from tcip_mcp.buckets import buckets_by_date
     from tests._chain_fixtures import predicted, published
@@ -92,7 +94,8 @@ def _registry(root: Path) -> None:
 
 def test_registry_subjects_keep_their_declared_order(tmp_path: Path) -> None:
     """``list_subjects`` reports the registry's declared order, which is the order class ids are
-    assigned in; re-ordering it would reindex a training run's classes against its labels."""
+    assigned in; re-ordering it would reindex a training run's classes against its labels.
+    """
     root = tmp_path
     _registry(root)
     assert list_subjects(root) == ["leaf", "bush", "bud"]

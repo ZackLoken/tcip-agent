@@ -61,7 +61,8 @@ def _resize_masks(masks: torch.Tensor, size: tuple[int, int]) -> torch.Tensor:
 
 def _keep_rows(target: dict, valid: torch.Tensor) -> None:
     """Keep the rows ``valid`` marks in every per-box tensor of ``target``
-    (:data:`~tcip_mcp.pipelines.data.datasets.PER_BOX_KEYS`)."""
+    (:data:`~tcip_mcp.pipelines.data.datasets.PER_BOX_KEYS`).
+    """
     from tcip_mcp.pipelines.data.datasets import PER_BOX_KEYS
 
     for key in PER_BOX_KEYS:
@@ -122,7 +123,8 @@ class RandomVerticalFlip:
 
 class ColorJitter:
     """Random brightness, contrast and saturation perturbations, each a factor drawn uniformly
-    from ``[1 - value, 1 + value]``; a value of 0 leaves that property unchanged."""
+    from ``[1 - value, 1 + value]``; a value of 0 leaves that property unchanged.
+    """
 
     def __init__(
         self, *, brightness: float, contrast: float, saturation: float
@@ -370,7 +372,8 @@ def build_augmentation(config: dict) -> Compose:
     every value that transform's constructor takes, e.g. ``{"horizontal_flip": {"p": 0.5},
     "resize": {"size": [512, 512]}}``. Refuses (``ValueError``) a ``config`` that is no dict, an
     unknown transform, and by name an entry that is not a dict stating exactly its transform's
-    values."""
+    values.
+    """
     from tcip_mcp.pipelines.model_build import (
         keyword_parameters,
         resolve_named,

@@ -52,7 +52,8 @@ GROUP_KEY_FNS: dict[str, Callable[[str], str]] = {
 
 def count_label_lines(document: LabelDocument, scope: ClassScope) -> int:
     """How many instances of ``scope``'s subject (of any subject when it names none) one per-image
-    label ``document`` carries."""
+    label ``document`` carries.
+    """
     from tcip_annotation import json_io
     from tcip_annotation.state import instances
 
@@ -238,7 +239,8 @@ def refuse_insufficient_foreground_groups(
 
 def member_identity(capture: str, stem: str) -> str:
     """A draw's member identity for one image, ``<capture>/<stem>``, the key an agent-supplied
-    ``group_key_map`` names it by."""
+    ``group_key_map`` names it by.
+    """
     return f"{capture}/{stem}"
 
 
@@ -246,7 +248,8 @@ def recorded_group_by(
     group_by: str, group_key_map: Mapping[str, str] | None
 ) -> str:
     """The grouping policy a draw records: ``"explicit_map"`` when a group key map overrides
-    ``group_by``, else ``group_by`` itself."""
+    ``group_by``, else ``group_by`` itself.
+    """
     return "explicit_map" if group_key_map else group_by
 
 
@@ -312,14 +315,16 @@ _SPATIAL_IDENTITY_SEP = "::"
 def spatial_strip_identity(stem: str, region_label: str) -> str:
     """A spatial split's per-region membership identity for one tile's source stem, ``region_label``
     naming the contiguous pixel-space strip the tile fell into (e.g. ``"strip_x_2"``);
-    :func:`stem_of_spatial_identity` parses it back."""
+    :func:`stem_of_spatial_identity` parses it back.
+    """
     return f"{stem}{_SPATIAL_IDENTITY_SEP}{region_label}"
 
 
 def stem_of_spatial_identity(identity: str) -> str:
     """The bare stem inside a :func:`spatial_strip_identity` string, for a leak check that only
     cares which source image a split member came from, not which region. An identity with no
-    separator (not one this module produced) is returned unchanged."""
+    separator (not one this module produced) is returned unchanged.
+    """
     idx = identity.rfind(_SPATIAL_IDENTITY_SEP)
     return identity[:idx] if idx != -1 else identity
 
@@ -371,7 +376,8 @@ class SpatialStripSplit:
         self, stem: str, box: tuple[int, int, int, int]
     ) -> str | None:
         """The region identity for the lattice slice ``box`` of ``stem``, or ``None`` when it
-        falls in a dropped gap."""
+        falls in a dropped gap.
+        """
         idx = _region_index(self.region_bounds, self.axis, box)
         if idx is None:
             return None
@@ -384,7 +390,8 @@ def _region_index(
     box: tuple[int, int, int, int],
 ) -> int | None:
     """Index into ``region_bounds`` of the region the slice ``box`` lies wholly inside along
-    ``axis``, or ``None`` when it falls in a dropped gap (a buffer band or past the extent)."""
+    ``axis``, or ``None`` when it falls in a dropped gap (a buffer band or past the extent).
+    """
     lo, hi = (box[0], box[2]) if axis == "x" else (box[1], box[3])
     idx = bisect.bisect_right([start for _, start, _ in region_bounds], lo) - 1
     if idx < 0:

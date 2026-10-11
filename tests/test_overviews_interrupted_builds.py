@@ -28,7 +28,8 @@ def _deep_pyramid_raster(
     tmp_path: Path, *, width: int = 32768, height: int = 8
 ) -> Path:
     """A raster wide enough to need several decimation levels, so its sidecar holds one page per
-    level rather than the single page a two-level pyramid would."""
+    level rather than the single page a two-level pyramid would.
+    """
     path = tmp_path / "deep.tif"
     arr = (np.arange(height * width, dtype=np.int64) % 251).astype(np.uint8)
     tifffile.imwrite(str(path), arr.reshape(height, width), rowsperstrip=8)
@@ -37,7 +38,8 @@ def _deep_pyramid_raster(
 
 def _growing_raster(tmp_path: Path) -> Path:
     """A raster whose pyramid takes long enough to build that the parent polls the sidecar's size
-    many times while it grows."""
+    many times while it grows.
+    """
     path = tmp_path / "growing.tif"
     arr = (np.arange(1024 * 32768, dtype=np.int64) % 251).astype(np.uint8)
     tifffile.imwrite(str(path), arr.reshape(1024, 32768), rowsperstrip=8)
@@ -58,7 +60,8 @@ def _zero_byte_counts(
     sidecar: Path, page_index: int, first: int, last: int
 ) -> None:
     """Zero the byte counts of tiles ``[first, last)`` on one pyramid level, the on-disk state a
-    build leaves for tiles it never reached."""
+    build leaves for tiles it never reached.
+    """
     with tifffile.TiffFile(str(sidecar)) as tif:
         page = tif.pages[page_index]
         tag = page.tags.get("TileByteCounts") or page.tags["StripByteCounts"]
@@ -75,7 +78,8 @@ def test_a_sidecar_whose_tiles_are_only_partly_written_is_invalid_and_is_rebuilt
 ) -> None:
     """A build killed partway leaves written tiles beside unwritten ones. The written half is no
     evidence the pyramid is usable: the unwritten tiles read back as zeros, so the sidecar is
-    invalid and the next build replaces it rather than refusing as if it were sound."""
+    invalid and the next build replaces it rather than refusing as if it were sound.
+    """
     path = _deep_pyramid_raster(tmp_path)
     sidecar = build_overviews(path)
     assert sidecar_valid(path)
@@ -106,7 +110,8 @@ def test_a_sidecar_is_invalid_when_a_deeper_pyramid_level_is_unwritten(
 ) -> None:
     """Validity covers every decimation level, not just the first. A build that wrote the coarsest
     level and stopped leaves the deeper ones empty, and a display-scale read served from one of
-    those levels returns zeros."""
+    those levels returns zeros.
+    """
     path = _deep_pyramid_raster(tmp_path)
     sidecar = build_overviews(path)
     assert _page_count(sidecar) >= 3, (
@@ -132,7 +137,8 @@ def test_reported_progress_is_the_sidecar_bytes_on_disk_and_ends_at_the_finished
 ) -> None:
     """A watcher is handed what the build knows, the sidecar's bytes on disk, and nothing it
     estimates. Every value reported while the build runs is at most the sidecar's size when the
-    watcher reads it, and the last is the finished sidecar's size."""
+    watcher reads it, and the last is the finished sidecar's size.
+    """
     monkeypatch.setattr(overviews_module, "_BUILD_POLL_SECONDS", 0.01)
     path = _growing_raster(tmp_path)
     sidecar = overview_sidecar(path)
@@ -167,7 +173,8 @@ def test_canceling_a_build_that_has_started_writing_deletes_the_sidecar(
 ) -> None:
     """Canceling once tiles are on disk must take the half-written sidecar with it. Left behind,
     it opens as a structurally complete pyramid whose unreached tiles read back as zeros, and the
-    next open serves those zeros instead of rebuilding."""
+    next open serves those zeros instead of rebuilding.
+    """
     monkeypatch.setattr(overviews_module, "_BUILD_POLL_SECONDS", 0.01)
     path = _growing_raster(tmp_path)
     sidecar = overview_sidecar(path)
@@ -194,7 +201,8 @@ def test_a_deep_pyramid_carries_one_level_per_decimation_step(
     tmp_path: Path,
 ) -> None:
     """A raster far above the pyramid floor gets a level per power-of-2 step down to it, and the
-    sidecar holds a page for each, halving in both dimensions, rounded up, as it goes."""
+    sidecar holds a page for each, halving in both dimensions, rounded up, as it goes.
+    """
     path = _deep_pyramid_raster(tmp_path)
     levels = overview_levels(32768, 8)
     assert levels == [2, 4, 8, 16, 32]

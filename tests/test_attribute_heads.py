@@ -45,7 +45,8 @@ OPENING = cr.Attribute(ATTRIBUTE, "ordinal", VALUES)
 
 def _documents(root: Path, bucket: str) -> dict[str, list[dict]]:
     """Every prediction document of the bucket named ``bucket`` under ``root`` by stem, its
-    annotations as written."""
+    annotations as written.
+    """
     import tcip_store
     from tcip_mcp.buckets import read_bucket
 
@@ -58,7 +59,8 @@ def _documents(root: Path, bucket: str) -> dict[str, list[dict]]:
 def _frames(where: Path, values: dict[str, str]) -> str:
     """Two :func:`~tests._verified_checkpoint_fixtures.detection_images` frames of
     :data:`SUBJECT` under :data:`REGISTRY`, each object carrying ``values``; the images
-    directory."""
+    directory.
+    """
     from tests._verified_checkpoint_fixtures import detection_images
 
     return detection_images(
@@ -75,7 +77,8 @@ def test_two_attributes_train_two_heads_publish_both_values_and_deliver(
     """A registry declaring an ordinal and a categorical attribute on one subject: the drawn
     selection's scope carries both, the tiny detector trains a head for each, every box of every
     published document carries a value of each, the crossing trait on the ordinal attribute is
-    assessed over the selection and its milestones deliver."""
+    assessed over the selection and its milestones deliver.
+    """
     from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.pipelines.postprocessing.phenology import (
         deliver_phenology,
@@ -154,7 +157,8 @@ def test_a_selection_and_the_bucket_a_run_over_it_publishes_carry_one_scope_reco
 ):
     """The draw writes the scope its samples were admitted under; the run over the selection
     records it, and the bucket the run's checkpoint publishes states it. Both written records,
-    compared to each other."""
+    compared to each other.
+    """
     import tcip_store
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.dataset_layout import bucket_key
@@ -183,7 +187,8 @@ def test_a_scope_with_no_attribute_builds_the_plain_detector_and_writes_no_attri
     tmp_path: Path,
 ):
     """A subject its registry declares no attribute for builds the torchvision detector
-    ``build_detector`` returns, and its records and documents carry no attribute."""
+    ``build_detector`` returns, and its records and documents carry no attribute.
+    """
     from PIL import Image
     from torchvision.models.detection import FasterRCNN
 
@@ -225,7 +230,8 @@ def test_a_document_scope_whose_attributes_were_never_read_sizes_no_model(
 ):
     """A run config naming a subject but recording no attributes was never admitted, so its
     model's head sizes are unknown: the dims refuse by the admission's own sentence rather than
-    sizing a detector with no heads. The same subject read through the admission sizes one."""
+    sizing a detector with no heads. The same subject read through the admission sizes one.
+    """
     from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tcip_mcp.pipelines.model_build import recorded_model_dims
     from tcip_mcp.pipelines.schemas import train_config
@@ -259,7 +265,8 @@ def test_an_instance_unassessed_for_one_attribute_trains_that_head_on_nothing_an
 ):
     """Every object assesses ``grade`` and none assesses ``color``: both frames are admitted, the
     color column reads unassessed, the color head's loss is masked to nothing and the grade head
-    trains."""
+    trains.
+    """
     from tests._chain_fixtures import built_model, training_config
     from tests._producer_fixtures import run_over
 
@@ -295,7 +302,8 @@ def test_an_instance_unassessed_for_one_attribute_trains_that_head_on_nothing_an
 def test_each_builtin_detector_carries_one_head_per_attribute(name: str):
     """Around each built-in detector, the attribute module trains one masked loss per attribute
     beside the detector's own losses, writes ``attributes`` boxes by attributes in eval, and leaves
-    the operating-point knobs at exactly one holder."""
+    the operating-point knobs at exactly one holder.
+    """
     from tcip_mcp.pipelines.operating_point import (
         detector_operating_point_holder,
     )
@@ -339,7 +347,8 @@ def test_the_tiler_carries_exactly_the_per_box_keys_the_loader_names(
 ):
     """The tiler's index holds the per-box values ``PER_BOX_KEYS`` names and no list of its own:
     ``attributes`` rides in step with each tile's boxes while the key is named there, and is
-    absent once it is not."""
+    absent once it is not.
+    """
     from tcip_mcp.pipelines.data import datasets
     from tests._producer_fixtures import dataset_over
 
@@ -385,7 +394,8 @@ def test_two_tiles_calling_one_object_differently_merge_into_the_higher_scoring_
 ):
     """An object the second column's tile holds whole and the first column's tile cuts at its
     edge: the whole call covers more of its tile and scores higher, and the merge, over the one
-    subject, keeps one box carrying the whole call's value."""
+    subject, keeps one box carrying the whole call's value.
+    """
     pytest.importorskip("sahi")
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.execution import prepare
@@ -441,7 +451,8 @@ def test_two_tiles_calling_one_object_differently_merge_into_the_higher_scoring_
 class _CallsEveryFrameOnce(torch.nn.Module):
     """One call per frame at the box :func:`~tests._verified_checkpoint_fixtures.
     detection_images` draws, carrying ``ids`` as its attribute ids, scored 0.9: one box, so
-    within any cap of the ``detections_per_img`` it exposes beside ``score_thresh``."""
+    within any cap of the ``detections_per_img`` it exposes beside ``score_thresh``.
+    """
 
     def __init__(self, ids: list[int]) -> None:
         super().__init__()
@@ -467,7 +478,8 @@ def test_evaluate_reports_each_attributes_agreement_over_the_pairs_it_assesses(
     tmp_path: Path,
 ):
     """Two frames whose one object each assesses ``color`` and only the first assesses ``grade``:
-    color agrees over two matched pairs and grade over the one its reference assesses."""
+    color agrees over two matched pairs and grade over the one its reference assesses.
+    """
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.model_build import model_dims

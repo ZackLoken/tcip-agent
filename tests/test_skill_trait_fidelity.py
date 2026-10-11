@@ -80,7 +80,8 @@ def test_backtick_regex_catches_no_underscore_and_mixed_case_names() -> None:
     `ploidy`, ...) and mixed-case segments (`fruit_juice_TA`, `fruit_juice_pH`) never match,
     invisible to both checks. That's deliberate, to avoid flooding on bare code identifiers, so
     single-word names stay a fabrication-detection blind spot by design; the membership-search
-    check below is what actually catches them for the off-crop case."""
+    check below is what actually catches them for the off-crop case.
+    """
     text = "See `fruit_juice_TA` and `fruit_juice_pH` and `plant_height` here."
     toks = guardrail.extract_backtick_snake(text)
     assert "fruit_juice_TA" in toks
@@ -94,7 +95,8 @@ def test_backtick_regex_catches_no_underscore_and_mixed_case_names() -> None:
 
 def test_mentioned_trait_names_finds_single_word_traits() -> None:
     """`mentioned_trait_names` is membership search, not regex extraction: it finds `dbh` even
-    though `extract_backtick_snake` (the fabrication-check regex) structurally cannot."""
+    though `extract_backtick_snake` (the fabrication-check regex) structurally cannot.
+    """
     allnames, _ = guardrail.load_vocab()
     found = guardrail.mentioned_trait_names(
         "Measure `dbh` on the standing tree.", allnames
@@ -107,7 +109,8 @@ def test_the_guardrail_checks_the_vocabulary_the_registry_itself_loads(
 ) -> None:
     """One read of the controlled vocabulary serves both the runtime registry and this check.
     Two reads can disagree, and the disagreement shows up as a skill passing a check the platform
-    would fail on the same name, so the vocabulary the guardrail sees is the registry's."""
+    would fail on the same name, so the vocabulary the guardrail sees is the registry's.
+    """
     from tcip_mcp import traits
 
     monkeypatch.setattr(
@@ -126,7 +129,8 @@ def test_the_guardrail_checks_the_vocabulary_the_registry_itself_loads(
 
 def test_a_readable_vocabulary_is_checked() -> None:
     """The real controlled vocabulary loads, carries its crop assignments, and a clean skill comes
-    back clean."""
+    back clean.
+    """
     allnames, by_crop = guardrail.load_vocab()
     assert "dbh" in allnames
     assert by_crop["hazelnut"]
@@ -140,7 +144,8 @@ def test_a_readable_vocabulary_is_checked() -> None:
 
 def test_off_crop_tokens_catches_single_word_mis_assignment() -> None:
     """A single-word real trait referenced on the wrong crop's skill is caught by
-    `off_crop_tokens`. `dbh` is a real crops.yml trait not assigned to currant."""
+    `off_crop_tokens`. `dbh` is a real crops.yml trait not assigned to currant.
+    """
     allnames, by_crop = guardrail.load_vocab()
     assert "dbh" in allnames
     assert "dbh" not in by_crop.get("currant", set())

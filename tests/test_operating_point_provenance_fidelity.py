@@ -53,7 +53,8 @@ def _records(
 def test_every_conf_label_the_registered_pickers_can_record_has_a_registered_implementation():
     """The conf label is built at runtime from whichever picker ran; drive every registered count
     objective and check the labels those runs produced against the derivation registry, which
-    exists so no data-sounding provenance string names a derivation nothing implements."""
+    exists so no data-sounding provenance string names a derivation nothing implements.
+    """
     from tcip_mcp.pipelines.derivations import DERIVATION_IMPLEMENTATIONS
     from tcip_mcp.pipelines.operating_point import COUNT_OBJECTIVE_PICKERS
 
@@ -77,7 +78,8 @@ def test_every_conf_label_the_registered_pickers_can_record_has_a_registered_imp
 
 def test_a_floor_mismatch_across_the_reference_is_surfaced_and_never_fails_it():
     """The reference's lowest observed score sits right at the floor it was collected at only on
-    the holdout; the mismatch reads over both sides and is evidence, never a failure."""
+    the holdout; the mismatch reads over both sides and is evidence, never a failure.
+    """
     cal = _records("c", 0.0)
     hold = _records("h", 100000.0)
     hold[0]["dt"].append(

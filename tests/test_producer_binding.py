@@ -31,7 +31,8 @@ def _deliver(project: Path, root: Path, bucket: str, out: Path) -> dict:
 
 def _edit_record(root: Path, bucket: str, edit) -> None:
     """Rewrite ``bucket``'s record through ``edit`` past the publication, the way a hand edit
-    after publication reaches it."""
+    after publication reaches it.
+    """
     import tcip_store
     from tcip_mcp.dataset_layout import bucket_key
 
@@ -45,7 +46,8 @@ def test_a_bucket_record_edited_to_another_execution_answers_for_nothing(
     tmp_path: Path,
 ):
     """The assessment measured one execution record; a bucket stating another, under the same
-    assessment id, was not produced by what the assessment measured."""
+    assessment id, was not produced by what the assessment measured.
+    """
     chain = run_the_chain(tmp_path, experiment_id="exp-binding-execution")
     assert (
         _deliver(tmp_path, chain.root, chain.bucket, tmp_path / "before.csv")[
@@ -94,7 +96,8 @@ def test_a_capture_outside_the_assessments_reference_answers_for_nothing(
     tmp_path: Path,
 ):
     """The checkpoint and execution are the assessed ones, but the capture is not among those the
-    reference held out, so the assessment says nothing about it."""
+    reference held out, so the assessment says nothing about it.
+    """
     from tcip_mcp.tools.inference_tools import run_inference
 
     chain = run_the_chain(tmp_path, experiment_id="exp-binding-coverage")

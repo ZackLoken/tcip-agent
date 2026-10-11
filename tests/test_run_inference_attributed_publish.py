@@ -25,7 +25,8 @@ GRADE = cr.Attribute("grade", "ordinal", ("low", "mid", "high"))
 
 def _checkpoint(tmp_path: Path, *attributes: cr.Attribute) -> str:
     """The checkpoint a run of ``tmp_path`` registered by completing, its dataset declaring
-    ``attributes`` on :data:`SUBJECT`."""
+    ``attributes`` on :data:`SUBJECT`.
+    """
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     return registered_checkpoint(
@@ -48,7 +49,8 @@ def _attributed_predictor() -> StubPredictor:
 
 def _published(tmp_path: Path, checkpoint: str, images_dir: Path):
     """``run_inference`` over ``images_dir`` into the bucket ``out/2026-01-01``; the bucket and
-    the records of its one document."""
+    the records of its one document.
+    """
     import tcip_store
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.tools.inference_tools import run_inference

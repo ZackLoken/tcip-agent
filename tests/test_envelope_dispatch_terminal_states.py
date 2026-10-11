@@ -40,7 +40,8 @@ def _start(
     tmp_path, body_name, *, deadline: float | None = None
 ) -> tuple[TrainContext, Path]:
     """Run the body ``body_name`` of this module through the envelope, over a run directory the
-    launcher's own writer opened."""
+    launcher's own writer opened.
+    """
     from tcip_mcp.experiments import observe
     from tcip_mcp.pipelines.training.run_registry import observed_run
     from tests._verified_checkpoint_fixtures import (
@@ -117,7 +118,8 @@ def test_completed_metrics_source_is_training_source_for_a_bespoke_loop(
 ):
     """``save_checkpoint``'s own contract: a ``metrics`` key in the saved state becomes the
     completed checkpoint's metrics with ``metrics_source='training_source'``, since the platform
-    wrote what the loop chose into the artifact and never measured it itself."""
+    wrote what the loop chose into the artifact and never measured it itself.
+    """
     _, run_dir = _start(tmp_path, "_train_saves_best_then_final")
 
     checkpoint = _completed(run_dir)
@@ -142,7 +144,8 @@ def test_a_deliverable_the_verified_reader_refuses_ends_the_run_failed(
     tmp_path,
 ):
     """Completion names only a checkpoint the verified reader admits: a declared deliverable
-    whose payload it refuses ends the run failed, and its final status names no checkpoint."""
+    whose payload it refuses ends the run failed, and its final status names no checkpoint.
+    """
     ctx, run_dir = _start(tmp_path, "_train_leaves_an_undecodable_deliverable")
 
     final = observe(run_dir).final
@@ -231,7 +234,8 @@ def test_a_run_past_its_wall_clock_ends_failed_naming_it_with_no_checkpoint(
     tmp_path,
 ):
     """The wall clock is the run's own fact: a body that returned normally past its deadline
-    ends failed naming the limit, and its weights are never the completed checkpoint."""
+    ends failed naming the limit, and its weights are never the completed checkpoint.
+    """
     ctx, run_dir = _start(
         tmp_path,
         "_train_finishes_past_the_wall_clock",

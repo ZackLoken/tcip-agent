@@ -33,7 +33,8 @@ MANIFEST_EXT = ".bandgroup"
 
 def band_group_manifest_path(images_dir: str | Path, stem: str) -> Path:
     """Where ``stem``'s manifest lives: beside the sibling files it names, itself an enumerated
-    logical image of that directory."""
+    logical image of that directory.
+    """
     return Path(images_dir, f"{stem}{MANIFEST_EXT}")
 
 
@@ -176,7 +177,8 @@ def _read_xmp_tags(path: Path) -> dict[str, str] | None:
 def _canonical_stem(paths: list[Path]) -> str:
     """The group's own stem, the sibling filenames' common prefix, trimmed of a trailing
     separator (``DJI_..._0001_MS_G`` / ``..._NIR`` / ``..._R`` / ``..._RE`` -> ``DJI_..._0001_MS``).
-    No physical rename happens; this is only the manifest's own filename stem."""
+    No physical rename happens; this is only the manifest's own filename stem.
+    """
     stems = [p.stem for p in paths]
     prefix = os.path.commonprefix(stems)
     return prefix.rstrip("_-") or stems[0]

@@ -1,5 +1,6 @@
 """The external COCO document's reader: category naming, image grouping, the one decoder, and
-every fault returned together rather than the first one raised."""
+every fault returned together rather than the first one raised.
+"""
 
 import json
 
@@ -83,7 +84,8 @@ def test_a_crowd_record_reads_with_its_flag():
 
 def test_parse_coco_refuses_a_document_without_the_coco_shape():
     """A per-image document handed to the COCO reader is refused by name rather than read as a
-    document holding no annotations."""
+    document holding no annotations.
+    """
     with pytest.raises(ValueError, match="not a dataset-level COCO document"):
         _parse({"image": "a", "annotations": []})
 
@@ -108,7 +110,8 @@ def test_a_record_naming_no_valid_category_is_a_fault_by_index(category_id):
 )
 def test_a_record_with_no_integer_image_id_is_a_fault_by_index(image_id):
     """A missing identity never associates under ``None``, and a coercible one never under the
-    integer it would coerce to."""
+    integer it would coerce to.
+    """
     coco = _sample_coco_detect()
     coco["annotations"][0]["image_id"] = image_id
     _, by_image, problems = _parse(coco)
@@ -194,7 +197,8 @@ def test_parse_coco_decodes_every_record_through_the_per_image_decoder(
     key, value, fault
 ):
     """The per-image decoder's own terms decide a record, a supplied malformed value refused by
-    record index exactly as a per-image document's record would be."""
+    record index exactly as a per-image document's record would be.
+    """
     coco = _sample_coco_detect()
     coco["annotations"][1][key] = value
     _, by_image, problems = _parse(coco)
@@ -208,7 +212,8 @@ def test_parse_coco_decodes_every_record_through_the_per_image_decoder(
 
 def test_parse_coco_annotations_keeps_an_empty_string_accepted_by():
     """An empty-string provenance value is kept, not dropped: the per-image reader keeps it (is
-    not None, never a truthiness test), and the COCO records go through that reader."""
+    not None, never a truthiness test), and the COCO records go through that reader.
+    """
     coco = _sample_coco_detect()
     coco["annotations"][0]["accepted_by"] = ""
     parsed = _parse(coco)[1][1]

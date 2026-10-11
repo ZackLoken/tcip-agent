@@ -20,7 +20,8 @@ DATE = "2-11-26"
 
 def _empty_bucket(project: Path, *images: Path) -> str:
     """A bucket ``m/2024-01-01`` that predicted nothing on each of ``images`` (8 by 8 px), under
-    their dataset root; its name."""
+    their dataset root; its name.
+    """
     pytest.importorskip("torch")
     from tests._chain_fixtures import published
 
@@ -294,7 +295,8 @@ class TestReadAnnotationsUnknownFormat:
     def test_unrecognized_store_returns_error_not_raise(self, tmp_path):
         """The per-image reader refuses a record of a shape it does not read; read_annotations
         surfaces that as an error dict, matching its own convention and the docs, not an
-        uncaught error."""
+        uncaught error.
+        """
         from PIL import Image
 
         import tcip_store

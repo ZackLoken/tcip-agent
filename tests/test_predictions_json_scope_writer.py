@@ -20,7 +20,8 @@ SUBJECT = "object"
 
 def _scope(tmp_path: Path, *attributes: cr.Attribute) -> ClassScope:
     """The class space the admission reads for :data:`SUBJECT` over a dataset declaring
-    ``attributes`` on it."""
+    ``attributes`` on it.
+    """
     from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tests._producer_fixtures import registry_over
 
@@ -85,7 +86,8 @@ def test_an_attributed_run_writes_every_attributes_value_on_every_box(
 
 def test_an_empty_scope_publishes_no_name_it_cannot_decode() -> None:
     """A run with no admitted subject has no name to publish a detection under; a raw index
-    written as a subject would read as a class no vocabulary declares."""
+    written as a subject would read as a class no vocabulary declares.
+    """
     with pytest.raises(ValueError, match="records no subject"):
         encode_predictions(
             _result(boxes=[[1, 1, 5, 5]], scores=[0.9], labels=[1]),
@@ -110,7 +112,8 @@ def test_a_result_missing_a_field_a_document_holds_refuses_naming_it(
     tmp_path, dropped
 ):
     """No stored value stands in for one the head did not give: a result without its source
-    image, scores, labels or frame size encodes nothing, rather than a document of defaults."""
+    image, scores, labels or frame size encodes nothing, rather than a document of defaults.
+    """
     scope = _scope(tmp_path, COLOR)
     result = _result(
         boxes=[[1, 1, 5, 5]], scores=[0.9], labels=[1], attributes=[[0]]
@@ -140,7 +143,8 @@ def test_a_regression_pass_publishes_its_own_output_and_the_document_decodes(
     tmp_path,
 ):
     """A head that returns no boxes publishes what it returned through the one publication, in
-    its own document shape, rather than being refused by a detection document's fields."""
+    its own document shape, rather than being refused by a detection document's fields.
+    """
     pytest.importorskip("torch")
     from PIL import Image
 

@@ -1,6 +1,7 @@
 """The embedded agent terminal over the platform's real PTY backend, driven by the fake agent
 ``tests/fake_terminal_app.py`` through ``TCIP_TERMINAL_CMD`` or standing as a provider row's
-executable."""
+executable.
+"""
 
 from __future__ import annotations
 
@@ -34,7 +35,7 @@ INTERPRETER = pty_host.backend_interpreter()
 
 
 def _doctor_entry(interpreter: str, project: Path) -> str:
-    """agy's allow entry for the doctor line of ``interpreter`` and ``project``."""
+    """Agy's allow entry for the doctor line of ``interpreter`` and ``project``."""
     return pty_host._command_entry(
         pty_host.doctor_command(interpreter, project)
     )
@@ -65,7 +66,8 @@ def _read_until(ws, needle: str, tries: int = 200) -> str:
 
 def _rows_with(monkeypatch, **changes: str) -> tuple[pty_host.Provider, ...]:
     """Every provider row with ``changes`` applied, installed as the table; the override is
-    cleared so the rows themselves launch."""
+    cleared so the rows themselves launch.
+    """
     monkeypatch.delenv("TCIP_TERMINAL_CMD", raising=False)
     rows = tuple(
         dataclasses.replace(row, **changes) for row in pty_host.PROVIDERS
@@ -76,7 +78,8 @@ def _rows_with(monkeypatch, **changes: str) -> tuple[pty_host.Provider, ...]:
 
 def _fake_executable(directory: Path) -> Path:
     """An executable file running the fake program with the arguments it is given, so the fake
-    can stand as a provider row's executable."""
+    can stand as a provider row's executable.
+    """
     directory.mkdir()
     if pty_host.os.name == "nt":
         wrapper = directory / "fake_agent.cmd"
@@ -95,7 +98,8 @@ def _fake_executable(directory: Path) -> Path:
 
 def _ritual_doctor_line(ritual: str) -> str:
     """The doctor step ``ritual`` names: what follows its last step's ``, then`` up to its
-    closing friction sentence."""
+    closing friction sentence.
+    """
     return ritual.removesuffix(f". {pty_host._RITUAL_FRICTION}").split(
         ", then ", 1
     )[1]
@@ -202,7 +206,8 @@ def test_prewarm_runs_without_raising():
 
 def test_the_agent_runs_at_the_repo_root(tmp_path, monkeypatch):
     """The spawned agent's cwd is the repo root itself, not the package directory this module
-    happens to live in, and does not depend on how the web process was started."""
+    happens to live in, and does not depend on how the web process was started.
+    """
     monkeypatch.delenv(pty_host.TERMINAL_CWD_ENV, raising=False)
     from_install_dir = Path(pty_host.terminal_cwd())
     monkeypatch.chdir(tmp_path)
@@ -215,7 +220,8 @@ def test_winpty_terminate_polls_isalive_rather_than_trusting_taskkills_return(
     monkeypatch,
 ):
     """``_WinPty.terminate`` polls ``isalive()`` after taskkill returns, within
-    ``TERMINATE_WAIT_S``."""
+    ``TERMINATE_WAIT_S``.
+    """
 
     class _StubProc:
         pid = 4242
@@ -270,7 +276,8 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
     row renders, with no placeholder left in them, after the row's preparation ran with it, and
     the launch's record and audit line carry that argv. The settings file Claude's row is handed
     holds the shipped lists plus, under both shells, each read-only console command under both
-    invocations and the ritual's doctor line; the shipped file names no console command."""
+    invocations and the ritual's doctor line; the shipped file names no console command.
+    """
     from tcip_mcp.server import list_registered_tools
 
     monkeypatch.setattr(
@@ -480,7 +487,8 @@ def test_the_doctor_line_runs_the_console_command_under_the_mcp_servers_interpre
     monkeypatch,
 ):
     """The doctor line names the interpreter the launch's MCP server runs, and running
-    ``tcip_web.cli`` as a module reaches the ``main`` the ``tcip`` console script names."""
+    ``tcip_web.cli`` as a module reaches the ``main`` the ``tcip`` console script names.
+    """
     import runpy
 
     import tomllib
@@ -516,7 +524,8 @@ def test_the_doctor_allowance_is_the_rituals_own_line_and_nothing_else(opened):
     """One renderer spells the ritual's doctor step, and agy's entry admits exactly that line
     (its regex evaluated under Python's ``re``): not the line with anything after it, not
     another project's, not an unquoted spelling. The stale-entry recognizer matches what the
-    renderer writes and nothing it refuses."""
+    renderer writes and nothing it refuses.
+    """
     opened_project = opened.root
     line = pty_host.doctor_command(INTERPRETER, opened_project)
     head = f"{INTERPRETER} -m tcip_web.cli doctor"
@@ -602,7 +611,8 @@ def test_the_ritual_agys_entry_and_claudes_settings_name_one_doctor_line(
     """The ritual's doctor step, the command agy's regex entry admits and the command Claude's
     added doctor entries name are one string, each read from its consumer's own output over the
     launch's one :func:`project_launch`; when the step cannot be spelled, the ritual says so
-    naming why, agy's preparation fails naming it, and Claude's settings add no doctor entry."""
+    naming why, agy's preparation fails naming it, and Claude's settings add no doctor entry.
+    """
     monkeypatch.setattr(pty_host, "backend_interpreter", lambda: interpreter)
     launch = pty_host.project_launch(opened)
     ritual = pty_host.session_ritual(launch)
@@ -724,7 +734,8 @@ def test_a_doctor_line_argument_holding_a_refused_character_is_refused_by_name(
     refusal, the ritual then says the step cannot be spelled, on one line, and the Antigravity
     preparation fails naming it, instead of rendering a line a shell could read as anything but
     the one literal command on one line. The paths are POSIX ones, so a backslash is a path
-    character and not a separator."""
+    character and not a separator.
+    """
     from pathlib import PurePosixPath
 
     project = PurePosixPath(
@@ -798,7 +809,8 @@ def test_the_codex_overrides_name_the_one_server_and_forward_the_spawn_environme
     opened,
 ):
     """Each rendered ``-c`` override parses as TOML, and together they state the server
-    :func:`mcp_server` produces, every variable of the launch's environment forwarded to it."""
+    :func:`mcp_server` produces, every variable of the launch's environment forwarded to it.
+    """
     import tomllib
 
     env = pty_host.spawn_env("term_test")
@@ -852,7 +864,8 @@ def _echoes(scrollback: str) -> list[str]:
 @pytest.fixture
 def pastes_after(monkeypatch):
     """The fake agent turns bracketed paste on one second after it starts and writes the composer
-    sequence of the row it stands in for."""
+    sequence of the row it stands in for.
+    """
     monkeypatch.setenv("FAKE_TERMINAL_PASTE_AFTER_S", "1")
     monkeypatch.setenv(
         "FAKE_TERMINAL_COMPOSER_READY", pty_host.PROVIDERS[0].composer_ready
@@ -887,7 +900,8 @@ def test_the_ritual_then_a_submitted_request_reach_the_agent_once_it_turns_paste
 
 def test_the_ritual_and_the_requests_staged_before_paste_is_on_go_as_one_paste():
     """The ritual and every request queued by the time the agent turns bracketed paste on are
-    written as one paste; a request submitted afterwards is its own paste."""
+    written as one paste; a request submitted afterwards is its own paste.
+    """
     writes: list[str] = []
 
     class _Pty:
@@ -1038,7 +1052,8 @@ def test_the_ritual_is_pasted_at_the_read_where_the_harness_composer_goes_live(
 ):
     """Fed the reads its harness wrote at startup, a launch of ``row`` pastes nothing before the
     read at which that harness's composer was observed live and pastes the ritual at that read,
-    even though bracketed paste turned on earlier."""
+    even though bracketed paste turned on earlier.
+    """
     reads = _STARTUP_READS[row.id]
     live_at = _COMPOSER_LIVE_AT[row.id]
     first_paste_on = next(
@@ -1066,7 +1081,8 @@ def test_a_launch_names_the_versions_when_its_harness_is_not_the_recorded_one(
     row,
 ):
     """Delivery rests on the recorded sequence without a note for the recorded version, and a
-    note naming both versions for any other version or none."""
+    note naming both versions for any other version or none.
+    """
     assert row.delivery_unverified(row.composer_ready_version) is None
     note = row.delivery_unverified("9.9.9")
     assert (
@@ -1140,7 +1156,8 @@ def test_resize_does_not_crash_stream(client):
 
 def test_a_resize_that_raises_does_not_end_the_stream(client, monkeypatch):
     """A resize failure at the session boundary (a ``ValueError``/``TypeError``, whatever its
-    source) must be swallowed there rather than ending the websocket loop."""
+    source) must be swallowed there rather than ending the websocket loop.
+    """
     sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
         "session_id"
     ]
@@ -1258,7 +1275,8 @@ def test_restart_on_a_survivor_answers_an_error_without_calling_start(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A survivor of ``terminate()`` must never reach ``start()``: that call would find
-    ``self._pty`` alive again and report success with nothing actually spawned."""
+    ``self._pty`` alive again and report success with nothing actually spawned.
+    """
     from tcip_web.routes.terminal import TerminalSession
 
     session = TerminalSession("term_restart_survivor")
@@ -1347,7 +1365,8 @@ def test_create_session_registers_a_survivor_and_answers_503(
 ) -> None:
     """``_record_start``'s audit line fails after the process spawned; the spawned process
     survives its own termination attempt, so the session must stay reachable rather than
-    orphaning a live process no later request can attach to."""
+    orphaning a live process no later request can attach to.
+    """
     stub = _StubPty(survives=True)
     _wire_stub_spawn(monkeypatch, stub)
     _refuse_record_start(monkeypatch)
@@ -1390,7 +1409,8 @@ def test_restart_session_answers_503_after_the_process_dies_cleanly(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A relaunch whose audit line fails after a clean termination answers 503 with none of the
-    survivor wording."""
+    survivor wording.
+    """
     healthy_stub = _StubPty(survives=False)
     _wire_stub_spawn(monkeypatch, healthy_stub)
     sid = client.post("/api/terminal/sessions", json=LAUNCH).json()[
@@ -1525,7 +1545,8 @@ def test_the_resolved_command_decides_whether_its_version_is_probed(
 
 def _versioned_executable(directory: Path, version_file: Path) -> Path:
     """An executable that prints ``version_file``'s text for ``--version`` and otherwise runs the
-    fake program, standing as a harness whose installed version can change in place."""
+    fake program, standing as a harness whose installed version can change in place.
+    """
     directory.mkdir()
     if pty_host.os.name == "nt":
         wrapper = directory / "versioned_agent.cmd"
@@ -1552,7 +1573,8 @@ def test_a_harness_updated_in_place_is_seen_at_its_next_launch_without_a_backend
     opened_project,
 ):
     """The second launch of the same executable reports the version it declares then, and the
-    launch and its audit line carry why delivery to that version is unverified."""
+    launch and its audit line carry why delivery to that version is unverified.
+    """
     version_file = tmp_path / "version.txt"
     row = pty_host.PROVIDERS[0]
     version_file.write_text(
@@ -1633,7 +1655,8 @@ def test_create_session_answers_503_and_terminates_the_process_when_the_start_li
     opened_project,
 ):
     """A spawn whose own launch line fails to append must not leave an orphaned, untracked
-    process: the PTY is terminated and, once it is gone, no session is registered as live."""
+    process: the PTY is terminated and, once it is gone, no session is registered as live.
+    """
     import tcip_mcp.audit as audit_module
 
     def _refuse_append(*args: object, **kwargs: object) -> None:
@@ -1696,7 +1719,8 @@ def test_a_launch_after_a_rename_of_the_open_project_names_its_new_name(
     client, opened
 ):
     """The ritual reads the project's record when the launch prepares, so a rename made while
-    the project is open is the name the next launch states."""
+    the project is open is the name the next launch states.
+    """
     renamed = client.post(
         "/api/projects/rename",
         json={

@@ -40,6 +40,7 @@ def freeze_selection(
             ``<dataset_root>/splits/frozen-<experiment_id>``, resolved from the run's own recorded
             sources through ``dataset_root_of``; refused when that does not resolve (a source
             outside the canonical ``<dataset_root>/images/...`` layout).
+
     """
     from tcip_annotation.json_io import UnreadableLabelDocumentError
     from tcip_mcp.dataset_layout import dataset_root_of
@@ -178,6 +179,7 @@ def scan_dataset(folder_path: str) -> dict:
     Args:
         folder_path: Path to the dataset root directory
             (:func:`~tcip_mcp.registry_paths.located` with no project, so absolute).
+
     """
     from tcip_mcp.pipelines.image_utils import AmbiguousImageStemError
 
@@ -280,6 +282,7 @@ def draw_splits(
         ground_truth: A dataset's ground truth that is not its label documents, named
             explicitly: a directory of ``<stem>.png`` masks, or a ``.csv`` table of one row per
             image; the images are the dataset's own ``images/`` tree either way.
+
     """
     return draw_splits_at(
         project,
@@ -314,7 +317,8 @@ def draw_splits_at(
 ) -> dict:
     """The selection drawn over the dataset root ``folder_path`` as :func:`draw_splits` states
     it, written at ``output_path`` and read against ``ground_truth``, each a location already
-    established (absolute)."""
+    established (absolute).
+    """
     if not Path(folder_path).is_dir():
         return {"error": f"Directory not found: {folder_path}"}
 

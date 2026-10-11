@@ -69,14 +69,16 @@ _PATHS: PathFields = (
 class AssessmentRefusedError(ValueError):
     """An assessment that cannot run as asked: a selection without both reference sides, a
     checkpoint whose head does not produce what the delivered kind measures, or a reference the
-    criterion cannot read."""
+    criterion cannot read.
+    """
 
 
 @dataclass(frozen=True)
 class RetainedFile:
     """One reference ground truth: the label document's key or the file's path it was read at,
     its :func:`~tcip_mcp.pipelines.data.selection.ground_truth_digest` when retained, and its copy
-    under the assessment's ``reference/``."""
+    under the assessment's ``reference/``.
+    """
 
     ground_truth: Key | str
     digest: str
@@ -86,7 +88,8 @@ class RetainedFile:
 @dataclass(frozen=True)
 class ReferenceSample:
     """One reference sample: its side, member, source, source digest, group, ground truth, the row
-    its table names it by and the region of its source it is."""
+    its table names it by and the region of its source it is.
+    """
 
     side: str
     member: str
@@ -101,7 +104,8 @@ class ReferenceSample:
 @dataclass(frozen=True)
 class Reference:
     """What an assessment measured: the selection it came from, or the mosaic's
-    ``raster_identity``, the captures it spans, each retained ground-truth file and every sample."""
+    ``raster_identity``, the captures it spans, each retained ground-truth file and every sample.
+    """
 
     selection_dir: str | None
     raster_identity: dict | None
@@ -117,7 +121,8 @@ class Reference:
         raster_identity: dict | None,
     ) -> bool:
         """Whether this reference spans a capture: the same mosaic for a raster, one of its
-        captures for per-image predictions."""
+        captures for per-image predictions.
+        """
         if raster_identity is not None:
             return self.raster_identity == raster_identity
         return (dataset_id, date) in self.captures
@@ -127,7 +132,8 @@ class Reference:
         digests to the digest recorded for it, by its stored spelling, then each reference source
         whose pixels no longer digest to the source digest recorded for its sample
         (:func:`~tcip_mcp.pipelines.data.selection.source_digests`), or a source file gone, by
-        its path."""
+        its path.
+        """
         from tcip_mcp.pipelines.data.selection import (
             Sample,
             moved_ground_truth,
@@ -175,7 +181,8 @@ class Assessment:
     and ``execution`` are ``None`` for a physical-scale assessment. ``disjointness`` and
     ``criterion`` are the evidence the failures were read from, ``scale`` the scale a
     physical-scale assessment derived. ``revision`` is the trait revision it was judged under, as
-    :attr:`~tcip_mcp.traits.TraitRevision.ref` names it."""
+    :attr:`~tcip_mcp.traits.TraitRevision.ref` names it.
+    """
 
     assessment_id: str
     delivery_kind: str | None
@@ -199,7 +206,8 @@ def assessment_dir(project: Path | str, assessment_id: str) -> Path:
 
 def read_assessment(project: Path | str, assessment_id: str) -> Assessment:
     """Assessment ``assessment_id`` of ``project``, its paths resolved against the project. An id
-    naming no finished assessment refuses (``ValueError``) naming it."""
+    naming no finished assessment refuses (``ValueError``) naming it.
+    """
     from tcip_mcp.experiments import read_record
 
     path = assessment_dir(project, assessment_id) / ASSESSMENT_FILE
@@ -241,7 +249,8 @@ def read_assessment(project: Path | str, assessment_id: str) -> Assessment:
 
 def _open_run(project: Path) -> Path:
     """A fresh assessment's directory, named for its id, created once, with its empty reference
-    folder."""
+    folder.
+    """
     from tcip_mcp.experiments import create_run_directory, mint_experiment_id
 
     run_dir = create_run_directory(
@@ -258,7 +267,8 @@ def _finish(
     record: dict[str, Any],
 ) -> Assessment:
     """Write ``record``, judged under ``revision``, as the run's ``assessment.json`` once, then
-    its one audit line, ``assessment_recorded``; return it as read back."""
+    its one audit line, ``assessment_recorded``; return it as read back.
+    """
     from tcip_mcp.audit import record_event_or_raise
     from tcip_mcp.experiments import write_once
 
@@ -291,7 +301,8 @@ def _reference_reads(
     """What the store answered (``Versioned``) for each distinct ground truth of the admitted
     ``samples``, their admission's own read (``stored``), and for each file of ``extra``, read
     once here; an ``extra`` file that is not there refuses (:class:`AssessmentRefusedError`)
-    with the store's own ``NotFoundError`` message."""
+    with the store's own ``NotFoundError`` message.
+    """
     import tcip_store
 
     reads: dict[Key | str, Any] = {s.ground_truth: s.stored for s in samples}
@@ -312,7 +323,8 @@ def _retained(
     """Each of ``reads`` (:func:`_reference_reads`) copied once into the run's reference folder
     before anything is measured, a label document as its stored record
     (:func:`tcip_store.encode_record`); and ``samples`` measuring what was retained: a mask's or a
-    table's copy, and a document's record at the retained version (its ``ground_truth_digest``)."""
+    table's copy, and a document's record at the retained version (its ``ground_truth_digest``).
+    """
     import tcip_store
     from tcip_mcp.experiments import publish_once
 
@@ -354,7 +366,8 @@ def _reference_record(
 ) -> dict[str, Any]:
     """The one reference record every assessment stores: where the reference came from, the
     captures its samples span, every retained file, and each sample's side, member, source, source
-    digest (``digest_of``), group, ground truth, row key and region."""
+    digest (``digest_of``), group, ground truth, row key and region.
+    """
     from tcip_mcp.dataset_layout import capture_of
 
     captures = sorted({capture_of(s.source) for s in samples}, key=str)
@@ -389,7 +402,8 @@ def _reference_sides(
     project: Path, selection_dir: str
 ) -> tuple[Selection, list[Sample], list[Sample]]:
     """The selection at ``selection_dir`` and its calibration and holdout sides; a selection
-    holding either side empty refuses (:class:`AssessmentRefusedError`)."""
+    holding either side empty refuses (:class:`AssessmentRefusedError`).
+    """
     from tcip_mcp.pipelines.data.selection import (
         REFERENCE_SIDES,
         read_selection,
@@ -425,7 +439,8 @@ def _prepared(
     registered checkpoint at ``checkpoint_path`` (``registry_paths.located`` against ``project``)
     readied for a pass under ``stated``, a detector's at the staged conf
     floor the count fit collects at (``operating_point.STAGED_CONF_FLOOR``). A checkpoint whose
-    head does not produce what the kind measures refuses (:class:`AssessmentRefusedError`)."""
+    head does not produce what the kind measures refuses (:class:`AssessmentRefusedError`).
+    """
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.operationalization import confirmed_revision
     from tcip_mcp.pipelines.execution import prepare
@@ -460,7 +475,8 @@ def _admit_reference(samples: list[Sample], scope: Any) -> list[Sample]:
     """``samples`` as the platform's own admission re-admits them under ``scope``
     (:func:`~tcip_mcp.pipelines.data.label_queries.readmitted_samples`), each carrying its read;
     refuses a reference that admission would not admit, and one whose label documents only the
-    model stands behind (:func:`~tcip_annotation.json_io.require_reference_ground_truth`)."""
+    model stands behind (:func:`~tcip_annotation.json_io.require_reference_ground_truth`).
+    """
     from tcip_annotation.json_io import require_reference_ground_truth
     from tcip_mcp.pipelines.data.label_queries import readmitted_samples
 
@@ -480,7 +496,8 @@ def _run_sides(
     project: Path, experiment_id: str | None
 ) -> dict[str, list[Sample]] | None:
     """The producing run's ``train`` and ``val`` samples, or ``None`` when no run of ``project``
-    produced the checkpoint, so no training membership is known."""
+    produced the checkpoint, so no training membership is known.
+    """
     if experiment_id is None:
         return None
     from tcip_mcp.experiments import run_resolution
@@ -503,7 +520,8 @@ def _disjointness(
     """Whether the reference is held out: its calibration and holdout sides share no source digest
     (``digest_of``), and neither shares a group key or a source digest with any of the producing
     ``run``'s sides. ``(evidence, failures)``; ``run`` ``None`` is a run whose membership is
-    unknown, a failure of its own, and ``{}`` a reference no model is measured against."""
+    unknown, a failure of its own, and ``{}`` a reference no model is measured against.
+    """
     from tcip_mcp.pipelines.data.selection import source_digests
 
     evidence: dict[str, Any] = {
@@ -639,7 +657,8 @@ def _count_fit(
     predicts under the pass's record, which :func:`_prepared` stated at the staged conf floor, and
     the conf the count objective fits there
     (:func:`~tcip_mcp.pipelines.operating_point.count_criterion`) written into the pass's record.
-    ``(evidence, failures, calibration records, holdout records)``."""
+    ``(evidence, failures, calibration records, holdout records)``.
+    """
     from tcip_mcp.pipelines.operating_point import (
         STAGED_CONF_FLOOR,
         count_criterion,
@@ -666,7 +685,8 @@ def _records(
 ) -> list[dict]:
     """One evaluation record per sample of the loader ``ds``, predicted under ``execution``
     (:func:`~tcip_mcp.pipelines.training.evaluation.prediction_record`), the sample's source digest
-    as its ``image_id``."""
+    as its ``image_id``.
+    """
     from tcip_mcp.pipelines.training.evaluation import (
         gt_records,
         result_record,
@@ -700,7 +720,8 @@ def _detection(
     criterion over the reference (:func:`_count_fit`), each
     side's loader built once, every fitted value from the calibration side, plus the classifier
     agreement over matched instances for a state-fraction delivery. ``digest_of`` is keyed by each
-    sample's location, which reading the retained copies leaves unchanged."""
+    sample's location, which reading the retained copies leaves unchanged.
+    """
     from tcip_mcp.pipelines.data.split_construction import predictor_dataset
     from tcip_mcp.pipelines.execution import Reference
 
@@ -754,7 +775,8 @@ def _classification_items(
     to one detection at ``conf`` (:func:`~tcip_mcp.pipelines.training.evaluation.attribute_pairs`
     under the trait's localization ``criterion``): whether the reference's and the model's value
     id of that attribute is the positive state's (:meth:`~tcip_mcp.pipelines.data.selection.
-    ClassScope.state_ids`)."""
+    ClassScope.state_ids`).
+    """
     from tcip_mcp.pipelines.training.evaluation import attribute_pairs
 
     column, positive = cast(tuple, scope.state_ids(entry.positive_state))
@@ -777,7 +799,8 @@ def _scalar(
     against its table row (:func:`~tcip_mcp.pipelines.data.datasets.table_values`). A pass that
     returns other than one prediction per sample, and a prediction carrying no output, refuse by
     name; a regression delivery is scored by the revision's own ``regression_criterion``, one the
-    platform does not register refusing by name."""
+    platform does not register refusing by name.
+    """
     from tcip_mcp.pipelines.data.datasets import table_values
     from tcip_mcp.pipelines.operating_point import (
         REGRESSION_CRITERIA,
@@ -1103,7 +1126,8 @@ def _band_records(
     side (clipped to the mosaic) by the overlap its lattice states between neighbors, the frame
     that forward ran on, keeping the detections and the ground truth centered in the band
     itself, in that frame's coordinates, the band as the record's scored ``region``, the band
-    sample's source digest as its ``image_id``."""
+    sample's source digest as its ``image_id``.
+    """
     import numpy as np
 
     from tcip_mcp.pipelines import block_calibration as blocks
@@ -1175,7 +1199,8 @@ def _read_reference_csv(
     """``stem -> {"physical_extent": float, "unit": str}`` from the bytes ``data`` of the
     breeder's reference CSV at ``csv_path``, its ``image_stem``, ``physical_extent`` and ``unit``
     columns read by name. A missing column, a short row, a non-numeric or non-positive extent and
-    a repeated stem each refuse naming the line."""
+    a repeated stem each refuse naming the line.
+    """
     import csv
     import io
 

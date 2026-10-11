@@ -60,7 +60,8 @@ def _reference(
 ) -> tuple[Path, Path]:
     """``n`` reference frames of one 100 px bar each in a registered dataset, their breeder CSV
     (each physical extent ``extents_mm[i]``, else the fixed scale's), and a selection drawn over
-    them; ``(selection_dir, reference_csv)``."""
+    them; ``(selection_dir, reference_csv)``.
+    """
     from PIL import Image
 
     from tcip_mcp import subject_registry as cr
@@ -157,7 +158,8 @@ def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(
     tmp_path,
 ):
     """A passing scale assessment covering the delivered capture answers for an mm2 area: the
-    delivery names it, and the same delivery with no scale named refuses."""
+    delivery names it, and the same delivery with no scale named refuses.
+    """
     pytest.importorskip("torch")
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.delivery import read_delivery_events
@@ -247,7 +249,8 @@ def test_a_box_reference_refuses_rather_than_reading_a_projected_extent(
     tmp_path,
 ):
     """A box's long side is the object's projected extent, orientation-dependent: the
-    assessment refuses it outright."""
+    assessment refuses it outright.
+    """
     _author_tolerance(tmp_path)
     selection, csv_path = _reference(tmp_path)
     for image in (tmp_path / "ds" / "images" / DATE).glob("*.png"):
@@ -357,7 +360,8 @@ def test_a_holdout_image_identical_to_a_calibration_image_fails_disjointness(
     tmp_path,
 ):
     """The scale is checked on images it was not derived from: a holdout frame byte for byte a
-    calibration frame shares its source digest, and the assessment fails naming it."""
+    calibration frame shares its source digest, and the assessment fails naming it.
+    """
     from tcip_mcp.pipelines.data.selection import read_selection
 
     _author_tolerance(tmp_path)
@@ -419,7 +423,8 @@ def test_a_malformed_reference_csv_refuses_naming_its_line(
 def test_the_scale_is_measured_from_the_retained_table(tmp_path, monkeypatch):
     """The breeder's table is read once, that read is retained, and the scale is measured from
     the retained copy: a table that changes as the assessment opens is measured as it was read
-    and retained, and a change after the assessment is a moved reference."""
+    and retained, and a change after the assessment is a moved reference.
+    """
     from tcip_mcp import assessment as module
     from tcip_mcp.assessment import assessment_dir, read_assessment
 

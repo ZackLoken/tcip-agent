@@ -108,7 +108,8 @@ def test_orientation6_fixture_is_real(tmp_path: Path) -> None:
 
 def test_load_image_frame_matches_image_dimensions(tmp_path: Path) -> None:
     """Both readers share one orientation-tag read, so this guards the axis-swap rule
-    each applies from it, not whether the tag read itself agrees."""
+    each applies from it, not whether the tag read itself agrees.
+    """
     from tcip_mcp.pipelines.image_utils import image_dimensions, load_image
 
     images_dir, _ = _make_orient6_dataset(tmp_path)
@@ -123,7 +124,8 @@ def test_the_header_frame_and_the_decoded_frame_agree_at_every_orientation(
     orientation: int,
 ) -> None:
     """The size read off a photograph's header and the frame its decode serves are one
-    orientation rule, at each of the eight EXIF orientations."""
+    orientation rule, at each of the eight EXIF orientations.
+    """
     from tcip_annotation.utils import oriented_size
     from tcip_mcp.pipelines.raster_source import PhotographicSource
 

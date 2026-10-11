@@ -85,7 +85,8 @@ def build_linear(**_: Any) -> torch.nn.Module:
 
 def predictor_for(tmp_path: Path, builder: str, task: str) -> Any:
     """The predictor a scorer reads, built from ``scorer_models:<builder>`` through the
-    platform's own checkpoint registration, load and ``GenericPredictor``."""
+    platform's own checkpoint registration, load and ``GenericPredictor``.
+    """
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
     from tests import REPO_ROOT

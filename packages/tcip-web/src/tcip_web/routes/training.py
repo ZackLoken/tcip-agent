@@ -28,7 +28,8 @@ router = APIRouter(prefix="/api/training", tags=["training"])
 
 def _refused(result: dict) -> HTTPException:
     """A tool's error dict ``result`` as a 422 whose detail carries its fields, the ``error``
-    reason named ``message``."""
+    reason named ``message``.
+    """
     return HTTPException(
         422, {("message" if k == "error" else k): v for k, v in result.items()}
     )
@@ -39,7 +40,8 @@ def list_split_choices_route(experiment_id: str) -> dict:
     """Every choice the "Data" control offers a relaunch of the run ``experiment_id`` names: the
     data section its launch stated, and every selection directory this project's own bound runs
     or the dataset's own splits directory hold, compatibility-checked as the launch itself would
-    check them."""
+    check them.
+    """
     from tcip_mcp.tools.training_tools import list_split_choices
 
     result = list_split_choices(store.held().root, experiment_id)
@@ -120,7 +122,8 @@ def list_runs_route() -> TrainingListing:
 @router.get("/runs/{experiment_id}")
 def get_run(experiment_id: str) -> TrainingDetail:
     """One run, trial or sweep of the open project (``training_tools.training_detail``), 404 for
-    an id naming none."""
+    an id naming none.
+    """
     from tcip_mcp.tools.training_tools import training_detail
 
     detail = training_detail(store.held().root, experiment_id)
@@ -166,7 +169,8 @@ def launch_run_tensorboard(
 @router.post("/runs/{experiment_id}/cancel")
 def cancel_run_route(experiment_id: str, payload: PersonPayload) -> dict:
     """Request graceful cancellation of the run, trial or sweep ``experiment_id`` names
-    (``cancel_training``), by the person ``user`` names; its refusal answers 404."""
+    (``cancel_training``), by the person ``user`` names; its refusal answers 404.
+    """
     from tcip_mcp.tools.training_tools import cancel_training
 
     result = cancel_training(
@@ -252,7 +256,8 @@ def metric_directions_route() -> dict:
 class TrainingRowFrame(BaseModel):
     """One metrics row, by its kind (``experiments.partition_rows``): ``metric`` an epoch's whole
     row (``experiments.epoch_rows``), pushed each time a row of that epoch is appended, ``batch``
-    the latest per-batch row a read of the run's log found."""
+    the latest per-batch row a read of the run's log found.
+    """
 
     type: Literal["metric", "batch"]
     experiment_id: str
@@ -261,7 +266,8 @@ class TrainingRowFrame(BaseModel):
 
 class TrainingStatusFrame(BaseModel):
     """The terminal frame: ``status`` carries the run's row for a run this process can still
-    identify, ``error`` is set instead when it cannot."""
+    identify, ``error`` is set instead when it cannot.
+    """
 
     type: Literal["status"]
     experiment_id: str
@@ -354,7 +360,8 @@ async def _stream_metrics(
 @router.websocket("/runs/{experiment_id}/stream")
 async def training_stream_ws(websocket: WebSocket, experiment_id: str) -> None:
     """Tail ``experiment_id``'s metrics log, a run of the open project, and push new rows to the
-    browser; closes with 1008 while no project is open."""
+    browser; closes with 1008 while no project is open.
+    """
     try:
         project = store.held().root
     except NoProjectOpenError as exc:

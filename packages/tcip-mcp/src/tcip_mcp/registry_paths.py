@@ -120,7 +120,8 @@ class RegistryPathEmptyError(ValueError):
 
 class RegistryPathTraversalError(ValueError):
     """A registry entry's relative path carries a ``..`` segment: the entries-mapping convention
-    is that relative means internal, so this was never a legitimate spelling to resolve."""
+    is that relative means internal, so this was never a legitimate spelling to resolve.
+    """
 
 
 def resolved_registry_path(root: str | Path, stored: str) -> Path:
@@ -186,7 +187,8 @@ def _each_path(
 
 def recorded_paths(record: Any, fields: PathFields, root: str | Path) -> Any:
     """A copy of ``record`` with each path ``fields`` names as :func:`stored_path` stores it
-    against ``root``. An absent or ``None`` field stays as it is."""
+    against ``root``. An absent or ``None`` field stays as it is.
+    """
     for field in fields:
         record = _each_path(
             record, field, lambda path: stored_path(path, root)
@@ -196,7 +198,8 @@ def recorded_paths(record: Any, fields: PathFields, root: str | Path) -> Any:
 
 def runtime_paths(record: Any, fields: PathFields, root: str | Path) -> Any:
     """A copy of ``record``, written by :func:`recorded_paths`, with each path ``fields`` names
-    resolved against ``root`` (:func:`resolved_registry_path`)."""
+    resolved against ``root`` (:func:`resolved_registry_path`).
+    """
     for field in fields:
         record = _each_path(
             record,

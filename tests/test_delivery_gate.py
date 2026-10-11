@@ -130,7 +130,8 @@ def test_an_acknowledged_delivery_ships_stamped_unvalidated_with_the_act_on_its_
 
 def test_an_acknowledgment_given_for_another_result_refuses(tmp_path):
     """An acknowledgment binds the one result it was given for: an act recorded against another
-    result's digest ships nothing, and the refusal names the result this delivery computed."""
+    result's digest ships nothing, and the refusal names the result this delivery computed.
+    """
     from tests._chain_fixtures import predicted
 
     bucket = _bucket(
@@ -161,7 +162,8 @@ def test_an_acknowledgment_binds_the_rows_and_refuses_once_a_document_changes(
     tmp_path,
 ):
     """An act recorded for six detections never ships twelve: the bucket, its producer and the
-    gate's finding are the same after the document changes, and the rows it would write are not."""
+    gate's finding are the same after the document changes, and the rows it would write are not.
+    """
     import tcip_store
     from tcip_annotation import json_io
     from tcip_mcp.audit import audit_log_key
@@ -202,7 +204,8 @@ def test_an_mcp_door_executes_a_recorded_acknowledgment_and_never_originates_one
     tmp_path,
 ):
     """The agent's door takes a recorded act by its id and nothing a caller could compose an act
-    from: a name and a reason are no parameters of it, and an id nothing recorded refuses."""
+    from: a name and a reason are no parameters of it, and an id nothing recorded refuses.
+    """
     import inspect
 
     from tcip_mcp.tools.inference_tools import deliver_per_image_counts
@@ -299,7 +302,8 @@ def test_a_zero_extent_box_is_counted_by_neither_the_document_nor_the_delivery(
     tmp_path,
 ):
     """A box that collapses to zero width is never a detection: the published document drops it,
-    the bucket records the drop, and the delivered row counts and averages the one survivor."""
+    the bucket records the drop, and the delivered row counts and averages the one survivor.
+    """
     bucket = _bucket(
         tmp_path,
         [
@@ -327,7 +331,8 @@ def test_a_non_finite_score_refuses_the_publication_so_no_average_ever_reads_it(
     tmp_path,
 ):
     """No stored number stands in for a score the model did not give: the publication refuses
-    naming it, and no bucket a delivery could average over is ever recorded."""
+    naming it, and no bucket a delivery could average over is ever recorded.
+    """
     import tcip_store
     from tcip_mcp.dataset_layout import bucket_key
 
@@ -354,7 +359,8 @@ def test_a_delivery_over_no_bucket_refuses_and_carries_no_result_to_acknowledge(
     tmp_path,
 ):
     """Nothing states what a bucketless delivery's numbers were measured from, so no
-    acknowledgment can ship one; every other case here delivers over one bucket and clears."""
+    acknowledgment can ship one; every other case here delivers over one bucket and clears.
+    """
     from tcip_mcp.delivery import Result, gate
     from tcip_mcp.traits import PER_IMAGE_COUNT
 
@@ -376,7 +382,8 @@ def test_a_per_plant_count_over_a_bucket_counting_another_subject_refuses(
 ):
     """The bucket-against-measured-subject check is the gate's, so a per-plant count meets it as
     a per-image count does: a bucket of another subject refuses, one of the measured subject
-    ships."""
+    ships.
+    """
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.operationalization import OperationalizationRefusedError
     from tcip_mcp.traits import PER_PLANT_COUNT_AGGREGATE

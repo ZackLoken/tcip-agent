@@ -51,7 +51,8 @@ def _bud_bush() -> SubjectRegistry:
 
 def test_a_stored_subject_stating_no_description_refuses_and_a_request_s_states_an_empty_one():
     """A stored subject carries the description its writer wrote, so one without it refuses
-    rather than reading as described by nothing; an authoring request may leave it out."""
+    rather than reading as described by nothing; an authoring request may leave it out.
+    """
     from tcip_mcp.subject_registry import registry_from_request
 
     with pytest.raises(RegistryError, match="description"):
@@ -80,7 +81,8 @@ def test_dict_and_file_roundtrip_preserve_the_registry(tmp_path):
 
 def _scope(tmp_path, registry, subject):
     """The class space the admission reads for ``subject`` over a dataset declaring
-    ``registry``."""
+    ``registry``.
+    """
     from tcip_mcp.pipelines.data.label_queries import registry_scope
 
     registry_over(tmp_path, registry)
@@ -298,7 +300,8 @@ def test_copy_registry_refuses_when_the_destination_already_holds_one(
     tmp_path,
 ):
     """A materialization or split re-run must not replace a destination registry silently: the
-    first copy is create-only, and a second copy attempt over the same destination refuses."""
+    first copy is create-only, and a second copy attempt over the same destination refuses.
+    """
     from tcip_mcp.subject_registry import copy_registry
 
     source, destination = tmp_path / "source", tmp_path / "destination"
@@ -318,7 +321,8 @@ def test_copy_registry_refuses_when_the_destination_already_holds_one(
 
 def _leaf_bush() -> SubjectRegistry:
     """A generic two-subject registry (a subject declaring no attribute, one declaring one), for the
-    registry-write tests below."""
+    registry-write tests below.
+    """
     return SubjectRegistry(
         subjects=(
             Subject(name="bush", description="one plant crown"),
@@ -676,7 +680,8 @@ def test_replace_registry_admits_a_values_only_growth_and_a_same_type_resave(
     tmp_path,
 ):
     """The type-flip refusal never fires over a growth or a re-save that restates the same
-    type."""
+    type.
+    """
     from tcip_mcp.subject_registry import replace_registry
     from tcip_store import Version
 

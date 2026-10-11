@@ -1,5 +1,6 @@
 """The raster-georeferencing-to-meters-per-pixel resolver: what it accepts, what it refuses, and
-the short clause it names a refusal by (never a filesystem path)."""
+the short clause it names a refusal by (never a filesystem path).
+"""
 
 from __future__ import annotations
 
@@ -26,7 +27,8 @@ def _write_geotiff(
     include_transformation_tag: bool = False,
 ) -> None:
     """A striped GeoTIFF written the way tests/test_orthomosaic_mapping.py's own fixtures are,
-    through the shared writer every GeoTIFF-fixture-needing suite calls."""
+    through the shared writer every GeoTIFF-fixture-needing suite calls.
+    """
     _write_shared_geotiff(
         path,
         width=5,
@@ -90,7 +92,8 @@ class TestRasterPixelSize:
     ):
         """Distinct from the projected-model-type-but-geographic-CRS case below: here
         GTModelTypeGeoKey itself names the geographic model type (2), so the header's
-        georeference read refuses before this module ever reaches pyproj."""
+        georeference read refuses before this module ever reaches pyproj.
+        """
         path = tmp_path / "geographic_model_type.tif"
         _write_geotiff(path, model_type=2)
         assert _refused(path) == "its georeferencing tags are incomplete"
@@ -110,7 +113,8 @@ class TestRasterPixelSize:
     ):
         """The raster's own GTModelTypeGeoKey says Projected (the tag read admits it), but the
         EPSG it names resolves to a geographic CRS: a disagreement this module's own is_projected
-        check catches, distinct from the tag read's own model-type refusal."""
+        check catches, distinct from the tag read's own model-type refusal.
+        """
         path = tmp_path / "geo.tif"
         _write_geotiff(path, projected_epsg=4326)
         assert _refused(path) == "its georeferencing is not projected"

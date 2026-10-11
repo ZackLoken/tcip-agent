@@ -121,7 +121,8 @@ def test_the_tool_resolves_the_project_roots_own_registry_when_unambiguous(
 
 def test_a_count_entry_needs_no_registry(tmp_path: Path) -> None:
     """Only a crossing operationalization is checked against a registry; a project with none
-    still takes a count entry."""
+    still takes a count entry.
+    """
     result = propose_trait(
         tmp_path,
         fx.with_operationalization(fx.COUNT_SPEC, PER_IMAGE_COUNT),
@@ -241,7 +242,8 @@ def test_a_crossing_delivery_reads_the_registry_of_its_buckets_dataset_root(
 ) -> None:
     """deliver_phenology_milestones resolves its registry from the dataset root its buckets are
     published under, not from the project root: a registry written there is what a crossing
-    delivery's positive-class check reads."""
+    delivery's positive-class check reads.
+    """
     pytest.importorskip("torch")
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
     from tests._chain_fixtures import (

@@ -1,5 +1,6 @@
 """Vision tools: render annotations and predictions to an image under the project's
-``.tcip/artifacts/viz/`` and return its path."""
+``.tcip/artifacts/viz/`` and return its path.
+"""
 
 from __future__ import annotations
 
@@ -127,7 +128,8 @@ def _display_of(
     region: tuple[float, float, float, float] | None = None,
 ) -> DisplayRead:
     """:func:`_read_for_display` of the source ``header`` describes, opened once at the image
-    route's count (:meth:`~tcip_mcp.pipelines.raster_source.SourceHeader.open_at_route_count`)."""
+    route's count (:meth:`~tcip_mcp.pipelines.raster_source.SourceHeader.open_at_route_count`).
+    """
     with header.open_at_route_count() as raster:
         return _read_for_display(raster, max_edge=max_edge, region=region)
 
@@ -270,6 +272,7 @@ def visualize(
         bucket: The name of the bucket, published under the image's dataset root, whose document
             for the image is rendered (source='predictions' and 'comparison', where it is
             required).
+
     """
     path = str(located(path, project))
     if source == "annotations":
@@ -324,7 +327,8 @@ def _viz_annotations(
 ) -> dict:
     """Render ground-truth annotations on the logical image ``image_path`` names
     (:func:`~tcip_mcp.pipelines.image_utils.resolve_image_path`, whose refusals answer as an
-    error), read from its own label document."""
+    error), read from its own label document.
+    """
     img = Path(image_path)
     if not img.is_file():
         return {"error": f"Image not found: {image_path}"}
@@ -587,6 +591,7 @@ def get_worst_predictions(bucket: Bucket, top_k: int = 8) -> dict:
     Args:
         bucket: The published bucket whose recorded documents are ranked.
         top_k: Number of worst images to return.
+
     """
     return _ranked(bucket, top_k)[0]
 
@@ -595,7 +600,8 @@ def _ranked(bucket: Bucket, top_k: int) -> tuple[dict, dict[str, tuple]]:
     """The ``top_k`` worst-scoring images of ``bucket`` by the count-mismatch and confidence
     heuristic (its capture, the ranked stems with their scores, how many were scored and the
     capture's labeled stems the bucket holds no document for), beside the read the ranking was
-    made over: each stem's source, ground truth and predictions."""
+    made over: each stem's source, ground truth and predictions.
+    """
     from tcip_annotation.json_io import detection_annotations
     from tcip_mcp.dataset_layout import capture_label_keys, image_dir
     from tcip_mcp.pipelines.image_utils import (
@@ -683,6 +689,7 @@ def render_failure_cases(
         task: 'detect' or 'segment'.
         top_k: Number of worst cases to render.
         class_names: Comma-separated class names.
+
     """
     from tcip_mcp.buckets import read_bucket
 
@@ -845,7 +852,8 @@ def _viz_dataset_sample(
 
 def _received_at(document: dict, name: str) -> datetime:
     """The instant the backend received the canvas document ``name``. Refuses (``ValueError``) a
-    document that carries none."""
+    document that carries none.
+    """
     if "received_at" not in document:
         raise ValueError(f"the canvas document {name} carries no received_at")
     return datetime.fromisoformat(document["received_at"])
@@ -876,6 +884,7 @@ def capture_live_canvas(
         crop_to_viewport: Render only the region the human currently sees (their zoom/pan). Pass
             False for the full frame with the same overlays.
         max_edge: Downscale the rendered output to at most this edge (px).
+
     """
     import time as _time
 
@@ -1048,6 +1057,7 @@ def overlay_reference_grid(
             ``project``).
         tile_size: Cell edge in native pixels; omitted derives a legible default.
         overlap: Cell overlap as a fraction of tile_size, training tiling's semantics.
+
     """
     from tcip_mcp.pipelines.image_utils import resolve_image_path
     from tcip_mcp.pipelines.reference_grid import (

@@ -50,7 +50,8 @@ def registry_index_key(project_path: str | Path) -> Key:
 def read_registry_index(project_path: str | Path) -> list[dict]:
     """Every foreign checkpoint the project has registered, in registration order. A project that
     has registered nothing reads as an empty list; an index that does not decode raises
-    ``DecodeError``."""
+    ``DecodeError``.
+    """
     return tcip_store.read(
         registry_index_key(project_path), default={"entries": []}
     )["entries"]
@@ -59,7 +60,8 @@ def read_registry_index(project_path: str | Path) -> list[dict]:
 def _checkpoint_entry_file(project_path: Path, raw: str) -> Path | None:
     """The existing file under ``project_path`` a registry ``checkpoint_path`` (``raw``, as stored)
     resolves to, or ``None``: an entry naming another tree, a relative one with nothing at it, or
-    one that does not resolve at all."""
+    one that does not resolve at all.
+    """
     try:
         resolved = resolved_registry_path(project_path, raw).resolve()
     except (RegistryPathEmptyError, RegistryPathTraversalError):
@@ -75,7 +77,8 @@ def checkpoint_files(root: Path) -> frozenset[Path]:
     """Every checkpoint file under the established project root ``root``: each file in
     ``.tcip/models``, each file a registry entry names under the project, and each ``.pt`` file a
     run directory (``experiments.run_dirs``, a sweep's trials included) holds beside its run
-    record."""
+    record.
+    """
     from tcip_mcp.experiments import run_dirs
 
     found = {p for p in (root / ".tcip" / "models").glob("*") if p.is_file()}
@@ -96,7 +99,8 @@ def registry_checkpoint_disclosures(root: Path) -> dict[str, list]:
     outside its tree: ``checkpoint_paths_unresolved``, every stored path that is not a
     designed-external claim (:func:`~tcip_mcp.registry_paths.is_external_form`) and names no file
     under the project, as stored; ``external_checkpoints``, every designed-external path with
-    whether it exists."""
+    whether it exists.
+    """
     stored = sorted(e["checkpoint_path"] for e in read_registry_index(root))
     return {
         "checkpoint_paths_unresolved": [
@@ -115,7 +119,8 @@ def registry_checkpoint_disclosures(root: Path) -> dict[str, list]:
 
 def run_entry(observation: RunObservation) -> dict | None:
     """The registry entry a completed training run's final status stands for, named by the run's
-    id and carrying it as ``experiment_id``, or ``None`` for a run that has not completed."""
+    id and carrying it as ``experiment_id``, or ``None`` for a run that has not completed.
+    """
     checkpoint = observation.checkpoint
     if checkpoint is None:
         return None
@@ -136,7 +141,8 @@ def registered_entries(project_path: str | Path) -> list[dict]:
     """Every checkpoint the project can load, one entry per sha256, its one owner: the completed
     training run whose final status names those bytes (:func:`run_entry`), else the foreign
     entry of the index registering them, with ``experiment_id`` ``None``. Runs' entries come
-    first, in completion order."""
+    first, in completion order.
+    """
     from tcip_mcp.experiments import run_observations
 
     runs = sorted(
@@ -165,7 +171,8 @@ def entry_facts(entry: dict, project: Path) -> dict:
     A run's metrics are the ones its payload carries, sourced ``"trainer"``, or
     ``"training_source"`` when the payload's config (:attr:`VerifiedCheckpoint.spec`) names a
     bespoke loop; a foreign entry's are the ones its registration stated, sourced ``"caller"``.
-    No metrics carry no source."""
+    No metrics carry no source.
+    """
     from tcip_mcp.pipelines.model_build import METRICS_KEY
 
     checkpoint = VerifiedCheckpoint(
@@ -230,7 +237,8 @@ class VerifiedCheckpoint:
     @property
     def producer(self) -> dict[str, str | None]:
         """The producer every record of this checkpoint's output names: its sha256 and the run
-        behind it."""
+        behind it.
+        """
         return {
             "checkpoint_sha256": self.sha256,
             "experiment_id": self.experiment_id,
@@ -244,7 +252,8 @@ class VerifiedCheckpoint:
         a config stating its ``model_source`` and ``data`` validates with no training regime.
         A source file it declares (``model_build.source_seams``') that does not exist refuses
         (``ValueError``) naming it and how to carry the run whole, before anything is
-        imported."""
+        imported.
+        """
         from tcip_mcp.experiments import CONFIG_PATHS
         from tcip_mcp.pipelines.model_build import CONFIG_KEY, source_seams
         from tcip_mcp.pipelines.schemas import train_config
@@ -274,7 +283,8 @@ class VerifiedCheckpoint:
         """The run snapshot the checkpoint's model imports from, the one its payload's
         ``SNAPSHOT_KEY`` digest names, as the record of the run of :attr:`project` that took it
         states it (``model_build.owning_run_layout``, which refuses a config declaring no file, or
-        a snapshot and files no run of :attr:`project` took)."""
+        a snapshot and files no run of :attr:`project` took).
+        """
         from tcip_mcp.pipelines.model_build import (
             SNAPSHOT_KEY,
             owning_run_layout,
@@ -287,7 +297,8 @@ class VerifiedCheckpoint:
     @property
     def task(self) -> str:
         """The task the checkpoint's model is for, its validated config's ``model_source.task``;
-        raises ``ValueError`` for a config that does not validate."""
+        raises ``ValueError`` for a config that does not validate.
+        """
         return self.spec.model_source.task
 
 
@@ -297,7 +308,8 @@ class CheckpointNotFoundError(FileNotFoundError):
 
 class UnregisteredCheckpointError(ValueError):
     """A checkpoint no completed run and no registry entry names, or one whose payload cannot be
-    trusted to unpickle under ``weights_only=True``."""
+    trusted to unpickle under ``weights_only=True``.
+    """
 
 
 def _load_verified_payload(data: bytes, *, source: str) -> dict:
@@ -340,7 +352,8 @@ def _load_verified_payload(data: bytes, *, source: str) -> dict:
 def admitted_digest(checkpoint_path: str | Path) -> str:
     """The sha256 of the checkpoint file at ``checkpoint_path``, read once, returned only once the
     verified reader (:func:`_load_verified_payload`) admits the payload of those same bytes; its
-    refusals raise, and an unreadable file raises ``OSError``."""
+    refusals raise, and an unreadable file raises ``OSError``.
+    """
     data = Path(checkpoint_path).read_bytes()
     digest = _sha256_of_bytes(data)
     _load_verified_payload(data, source=f"{checkpoint_path} (sha256 {digest})")
@@ -350,7 +363,8 @@ def admitted_digest(checkpoint_path: str | Path) -> str:
 def checkpoint_payload(checkpoint_path: str | Path, sha256: str) -> dict:
     """The payload of the checkpoint at ``checkpoint_path`` (:func:`_load_verified_payload`), read
     only once its bytes are the ones ``sha256`` names. Bytes hashing otherwise raise
-    :class:`UnregisteredCheckpointError` naming both digests."""
+    :class:`UnregisteredCheckpointError` naming both digests.
+    """
     data = Path(checkpoint_path).read_bytes()
     digest = _sha256_of_bytes(data)
     if digest != sha256:
@@ -421,7 +435,8 @@ def _audit_entry_write(
     project_path: str, superseded: dict | None, entry: dict
 ) -> None:
     """Emit ``model_registered`` in the project's log for a written ``entry``, naming the entry of
-    the same sha256 it superseded. A failed append raises ``AuditEntryNotWrittenError``."""
+    the same sha256 it superseded. A failed append raises ``AuditEntryNotWrittenError``.
+    """
     from tcip_mcp.audit import record_event_or_raise
 
     replaced = (
@@ -459,7 +474,8 @@ def _resolve_entry_checkpoint(project_path: str, entry: dict) -> dict:
 
 class ModelRegistry:
     """A project's registered checkpoints (:func:`registered_entries`), each read at the call that
-    asks, and the explicit-mode door that registers a foreign one."""
+    asks, and the explicit-mode door that registers a foreign one.
+    """
 
     def __init__(self, project_path: str) -> None:
         self._project_path = project_path
@@ -494,6 +510,7 @@ class ModelRegistry:
             ValueError: the checkpoint's payload is one the verified reader refuses.
             AuditEntryNotWrittenError: the write committed but its own audit line could not be
                 appended.
+
         """
         ckpt = located(checkpoint_path, self._project_path)
         if not ckpt.is_file():
@@ -556,7 +573,8 @@ def best_model(
 ) -> dict | None:
     """The one of ``models`` (:meth:`ModelRegistry.list_models`'s entries) with the best finite
     value for ``metric_key`` in the stated direction, or ``None`` when none carries it. Only a
-    :func:`verified` entry is ranked unless ``include_unverified``."""
+    :func:`verified` entry is ranked unless ``include_unverified``.
+    """
     best = None
     best_val: float | None = None
     for m in models:

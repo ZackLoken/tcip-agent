@@ -84,7 +84,8 @@ def test_the_instance_loader_builds_its_target_from_the_polygons_it_reads(
     tmp_path: Path,
 ):
     """The instance loader's target comes from the one target builder, over the geometry the
-    loader declares it reads: a box beside the polygon is no instance and no mask."""
+    loader declares it reads: a box beside the polygon is no instance and no mask.
+    """
     from PIL import Image
 
     from tests._producer_fixtures import dataset_over
@@ -114,7 +115,8 @@ def test_the_completion_digest_reads_a_box_on_the_writers_own_grid(
     tmp_path: Path,
 ):
     """The digest hashes each annotation as the label writer stores it, so a box off the stored
-    grid digests the same before it is written as after it is read back."""
+    grid digests the same before it is written as after it is read back.
+    """
     anns = [
         Annotation(subject=SUBJECT, geometry=BBox(0.005, 10.0, 10.004, 20.0))
     ]

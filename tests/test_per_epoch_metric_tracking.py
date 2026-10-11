@@ -94,7 +94,8 @@ def test_the_epoch_console_line_carries_validation_metrics_beyond_loss(
     tmp_path, caplog
 ):
     """The one-line-per-epoch summary a breeder or an operator tails must name accuracy and F1,
-    not only the loss a plain reader would take for the whole story."""
+    not only the loss a plain reader would take for the whole story.
+    """
     import logging
 
     ctx = run_context(

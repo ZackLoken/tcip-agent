@@ -46,7 +46,8 @@ def test_origin_without_a_parseable_host_is_not_local() -> None:
 
 def test_local_browser_and_non_browser_clients_are_still_admitted() -> None:
     """Loopback pages, and only a client that sends no Origin at all (never an empty one),
-    keep working."""
+    keep working.
+    """
     assert origin_allowed("http://127.0.0.1:8765", LOCAL_ARRIVAL)
     assert origin_allowed("http://127.0.0.1:5173", LOCAL_ARRIVAL)
     assert origin_allowed(None, LOCAL_ARRIVAL)
@@ -177,7 +178,8 @@ def test_a_removed_holding_directory_is_excluded_like_imports(
     tmp_path,
 ) -> None:
     """``.removed`` sits directly under the workspace, itself an allowed root, so the exclusion
-    has to be by name: nothing else keeps a moved-project archive out of a guarded route."""
+    has to be by name: nothing else keeps a moved-project archive out of a guarded route.
+    """
     ws = (tmp_path / "ws").resolve()
     ws.mkdir()
     store.configure(ws, ())

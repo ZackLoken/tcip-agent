@@ -38,7 +38,8 @@ _QUOTED_RE = re.compile(r'"([^"]+)"')
 
 def _generator():
     """The type-module generator loaded as a module, so the test regenerates the same way CI
-    does."""
+    does.
+    """
     spec = importlib.util.spec_from_file_location(
         "tcip_frontend_type_generator", GENERATOR
     )
@@ -53,7 +54,8 @@ def test_the_generated_types_module_is_what_the_declared_models_produce() -> (
 ):
     """The checked-in module is a projection of the declared models' JSON schema, not a
     hand-edited copy: a field renamed, added or retyped on a model that never reached the module
-    would leave the browser reading a shape the backend no longer sends."""
+    would leave the browser reading a shape the backend no longer sends.
+    """
     generated = _generator().render()
     assert GENERATED.read_text(encoding="utf-8") == generated, (
         "packages/tcip-web/frontend/src/api/types.generated.ts is out of date; "
@@ -63,28 +65,32 @@ def test_the_generated_types_module_is_what_the_declared_models_produce() -> (
 
 class _OneMemberLiteral(BaseModel):
     """A scratch model whose one field is a single-value ``Literal``, which pydantic's own JSON
-    schema renders as ``const`` rather than ``enum``."""
+    schema renders as ``const`` rather than ``enum``.
+    """
 
     kind: Literal["only"]
 
 
 class _NullableStringList(BaseModel):
     """A scratch model whose one field is an array of a nullable union, exercising the mapper's
-    array-of-union case independently of any declared coverage model."""
+    array-of-union case independently of any declared coverage model.
+    """
 
     values: list[str | None]
 
 
 class _FreeFormObject(BaseModel):
     """A scratch model whose one field is a bare ``dict``, the free-form object shape a
-    discriminated frame carries beside its ``Literal`` type field."""
+    discriminated frame carries beside its ``Literal`` type field.
+    """
 
     payload: dict
 
 
 def test_a_one_member_literal_renders_its_own_value_as_the_type() -> None:
     """A ``const`` schema is a single-member ``Literal``: its own value is the type TypeScript
-    narrows a discriminated union on, so it renders rather than dropping the literal."""
+    narrows a discriminated union on, so it renders rather than dropping the literal.
+    """
     generator = _generator()
     schema = _OneMemberLiteral.model_json_schema()
     assert (
@@ -108,7 +114,8 @@ def test_a_union_used_as_an_array_item_is_parenthesized() -> None:
 
 def test_a_free_form_object_renders_as_a_record_of_unknown() -> None:
     """A bare ``dict`` field carries no fixed property set, so it maps to ``Record<string,
-    unknown>`` rather than refusing or dropping to an untyped ``object``."""
+    unknown>`` rather than refusing or dropping to an untyped ``object``.
+    """
     generator = _generator()
     schema = _FreeFormObject.model_json_schema()
     assert (
@@ -124,7 +131,8 @@ def test_reordering_platform_panel_events_does_not_change_a_named_constants_valu
 ):
     """Each named ``PANEL_EVENT_*`` constant is read off its own module attribute, never off
     ``PLATFORM_PANEL_EVENTS``'s position, so a consumer importing one by name is unaffected by
-    how that tuple is ordered."""
+    how that tuple is ordered.
+    """
     from tcip_mcp import web_client
 
     generator = _generator()
@@ -140,7 +148,8 @@ def test_reordering_platform_panel_events_does_not_change_a_named_constants_valu
 
 def test_an_object_with_its_own_fixed_property_set_still_refuses() -> None:
     """The free-form-object case must not swallow a plain fixed-shape object schema that arrives
-    outside a ``$ref``: that shape is still not one the mapper covers."""
+    outside a ``$ref``: that shape is still not one the mapper covers.
+    """
     generator = _generator()
     schema = {"type": "object", "properties": {"a": {"type": "string"}}}
     with pytest.raises(SystemExit):
@@ -160,7 +169,8 @@ def test_no_other_frontend_module_declares_an_interface_with_a_generated_field_s
 ):
     """One declaration per generated shape, so the backend has one browser-side counterpart to
     stay equal to. A second interface naming the same fields is what drifts: the module that was
-    updated keeps working and the one that was not reads a key the models no longer emit."""
+    updated keeps working and the one that was not reads a key the models no longer emit.
+    """
     generated_sets = [s for s in _generated_field_sets() if s]
     assert generated_sets, "no interfaces parsed out of the generated module"
 
@@ -190,7 +200,8 @@ def test_no_other_frontend_module_declares_an_interface_with_a_generated_field_s
 
 def _generated_vocabularies() -> list[set[str]]:
     """Every vocabulary the generator emits: each generated field's literal union, each runtime
-    constant, and each literal alias."""
+    constant, and each literal alias.
+    """
     text = GENERATED.read_text(encoding="utf-8")
     generator = _generator()
     return (
@@ -206,7 +217,8 @@ def _generated_vocabularies() -> list[set[str]]:
 def test_no_frontend_module_hand_declares_a_generated_vocabulary() -> None:
     """A bare ``type X = "a" | "b" | ...;`` alias parses as neither an interface nor an object
     type, so the field-set check above never sees it: this catches one whose members exactly
-    match a vocabulary the generator emits."""
+    match a vocabulary the generator emits.
+    """
     generated_sets = [s for s in _generated_vocabularies() if len(s) > 1]
     assert generated_sets, "no vocabularies read from the generator"
 

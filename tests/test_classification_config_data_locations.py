@@ -25,7 +25,8 @@ def test_a_classification_config_launches_with_images_and_csv_only(
 ) -> None:
     """The batch the loader trains on comes from ``images_dir`` and ``csv_path``
     (``ClassificationDataset``), so a config naming only those launches through the platform's
-    own launcher, trains in the worker process and completes."""
+    own launcher, trains in the worker process and completes.
+    """
     import os
 
     from tcip_mcp.tools.training_tools import launch_training

@@ -15,7 +15,8 @@ class StubPredictor:
     given and the frame ``cap`` as stated (one above the count unless given). It states the
     recorded training geometry a predictor exposes (none unless given), and every other keyword
     becomes an attribute a caller reads off a predictor (``task``, ``in_chans``). Counts its
-    calls, and keeps each execution it ran under and the checkpoint it was built for."""
+    calls, and keeps each execution it ran under and the checkpoint it was built for.
+    """
 
     def __init__(
         self,

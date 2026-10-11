@@ -45,6 +45,7 @@ def read_annotations(image_path: str, bucket: str | None = None) -> dict:
         image_path: Absolute path to the image file (:func:`~tcip_mcp.registry_paths.located`
             with no project).
         bucket: The name of the published bucket whose document for this image to read, if any.
+
     """
     try:
         img = located(image_path, None)
@@ -105,6 +106,7 @@ def save_annotations(
     payload that does not parse; a removed annotation an open flag sits on, since a tool names
     no person and the person resolves the flag first). A stored document that does not decode
     raises ``UnreadableLabelDocumentError`` through this door.
+
     """
     from tcip_mcp.dataset_layout import save_label_document
     from tcip_mcp.web_client import (
@@ -159,7 +161,8 @@ def _detection_breakdown(
 ) -> list[dict]:
     """Per-detection records from the one matcher's matching ``m``: each projected as every read
     door projects one (:func:`~tcip_annotation.json_io.client_annotation`), tagged ``tp`` for a
-    pair, ``fp`` for an unpaired detection and ``fn`` for a missed object, with its indices."""
+    pair, ``fp`` for an unpaired detection and ``fn`` for a missed object, with its indices.
+    """
     return (
         [
             {
@@ -202,7 +205,8 @@ def _evaluate_image(
     ``[gt_idx, pred_idx]`` pairs the one matcher draws per subject over the predictions at or above
     ``conf_threshold`` under the scoring's criterion, ordered by prediction index, the same
     matching its TP/FP/FN count. An image the bucket's record names no document for refuses
-    (``ValueError``): it was not predicted, so there is nothing to score."""
+    (``ValueError``): it was not predicted, so there is nothing to score.
+    """
     from tcip_mcp.pipelines.image_utils import resolve_image_path
     from tcip_mcp.pipelines.training.evaluation import score_bucket
 
@@ -330,6 +334,7 @@ def score_predictions(
         trait: The trait's confirmed entry; when set, its own localization criterion governs the
             reported TP/FP/FN count; map50 stays a labeled comparability metric. Absent -> the IoU
             convention governs.
+
     """
     try:
         p = located(path, project)
@@ -372,6 +377,7 @@ def write_subject_registry(
             deliberate removal/repair.
         allow_type_changes: State a same-values attribute type flip (categorical to ordinal or
             back) as deliberate.
+
     """
     from tcip_mcp import subject_registry
     from tcip_mcp.audit import AuditEntryNotWrittenError

@@ -45,7 +45,8 @@ def _write_group(images_dir: Path, stem: str, fill=(111, 222)) -> None:
 
 def _detection_checkpoint(tmp_path: Path) -> str:
     """A 2-channel detector a run in ``tmp_path`` completed over grouped captures of its own,
-    registered by completing; its path."""
+    registered by completing; its path.
+    """
     from tests._chain_fixtures import BESPOKE_MODELS
     from tests._verified_checkpoint_fixtures import (
         fixture_data_dir,
@@ -77,7 +78,8 @@ def _detection_checkpoint(tmp_path: Path) -> str:
 
 def _grouped_dataset(root: Path) -> Path:
     """Two 2-band grouped captures, each with a ground-truth label document; their images
-    directory."""
+    directory.
+    """
     from tcip_annotation.state import Annotation, BBox
     from tests._producer_fixtures import label_image
 
@@ -102,7 +104,8 @@ def test_the_assessments_records_over_grouped_samples_decode_each_capture(
     tmp_path, monkeypatch
 ):
     """Each grouped sample is opened as a ``BandGroupRef`` through the channel-aware stacking.
-    The predictor is 2-channel, so it runs at all only if the captures decoded that way."""
+    The predictor is 2-channel, so it runs at all only if the captures decoded that way.
+    """
     from tcip_mcp.assessment import _records
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines import raster_source
@@ -145,7 +148,8 @@ def test_the_assessments_records_over_grouped_samples_decode_each_capture(
 
 def test_run_inference_images_dir_folds_a_grouped_capture(tmp_path):
     """A grouped capture's sibling band files fold into one logical image rather than each
-    enumerating as its own."""
+    enumerating as its own.
+    """
     from tests._verified_checkpoint_fixtures import predicted_over
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
@@ -163,7 +167,8 @@ def test_run_inference_images_dir_folds_a_grouped_capture(tmp_path):
 
 def test_predict_batch_rejects_stringified_band_group_refs(tmp_path):
     """Stringifying a ``BandGroupRef`` before calling ``predict_batch``, instead of passing the
-    raw reference, raises."""
+    raw reference, raises.
+    """
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.execution import Stated, prepare
     from tcip_mcp.pipelines.image_utils import list_logical_images

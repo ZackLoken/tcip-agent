@@ -25,7 +25,8 @@ class _CountingDataset(Dataset):
     """A trivially-bespoke dataset: one item per sample the producer named, echoing the context it
     was built with, each a black 8 px frame holding one object named by its stem and valued zero,
     a target a detector and a regressor both read. ``rows`` is the builder's own configuration,
-    which a direct construction with no producer behind it stands on instead."""
+    which a direct construction with no producer behind it stands on instead.
+    """
 
     def __init__(
         self,
@@ -78,7 +79,8 @@ there."""
 class _PointDataset(Dataset):
     """A bespoke keypoint dataset over the samples the producer named: each item is one sample's
     own image and the point coordinates its own label document records, which is ground truth no
-    built-in loader reads."""
+    built-in loader reads.
+    """
 
     def __init__(self, *, samples=None, transforms=None, **_ignored):
         from tcip_annotation import json_io
@@ -128,7 +130,8 @@ def _source(stated: dict):
 
 def _bespoke(stated: dict):
     """``stated`` validated as a run's ``data.dataset_source`` with the layout a run declaring it
-    imports from, this repository as its project (``datasets.BespokeSource``)."""
+    imports from, this repository as its project (``datasets.BespokeSource``).
+    """
     from tests._producer_fixtures import staged_layout
 
     return _source(stated), staged_layout(
@@ -167,7 +170,8 @@ def _admitted_samples(root: Path):
 
 def _scope():
     """The class space :func:`_admitted_samples` admits its samples under, a registry declaring
-    no attribute on its subject."""
+    no attribute on its subject.
+    """
     from tcip_mcp.pipelines.data.label_queries import registry_scope
 
     return registry_scope(Path(__file__).parent, "leaf")
@@ -176,7 +180,8 @@ def _scope():
 def _ctx(root: Path, task: str, data: dict):
     """A training body's context over a run of ``root`` of ``task``, opened by the launcher's own
     producer, whose data block states ``data`` beside the place :func:`_admitted_samples` admits
-    there and the class space it admits under, training on every sample; and those samples."""
+    there and the class space it admits under, training on every sample; and those samples.
+    """
     from dataclasses import asdict
 
     from tests._chain_fixtures import training_config
@@ -212,7 +217,8 @@ def test_a_bodys_platform_loader_reads_at_the_runs_sizes_and_lattice(
 ):
     """On a run whose data block names no ``dataset_source``, a training body's
     ``ctx.build_dataset`` builds the platform's loader over the subset of samples it was handed,
-    at the band count and the lattice the run's data block records."""
+    at the band count and the lattice the run's data block records.
+    """
     lattice = {
         "enabled": True,
         "tile_size": 8,
@@ -238,7 +244,8 @@ def test_a_bodys_loader_on_a_bespoke_run_builds_through_its_builder_over_the_sub
     """On a run whose data block names a ``dataset_source``, a training body's
     ``ctx.build_dataset`` imports that builder from the run's layout and hands it the subset of
     samples it was given and the run's recorded class space; the builder's own configuration
-    rides in ``builder_kwargs``."""
+    rides in ``builder_kwargs``.
+    """
     ctx, samples = _bespoke_ctx(tmp_path)
     ds = ctx.build_dataset(samples=samples[:1])
 
@@ -264,7 +271,8 @@ def test_a_bodys_door_takes_the_samples_and_the_augmentation_and_nothing_else(
     """``ctx.build_dataset`` takes the samples and the augmentation and refuses every other
     keyword by name, a builder, a class space, a tiling and sizes included: the run's own block
     states each, and a loader given another could answer for a membership, a class space, a
-    format or a lattice this run's record does not state."""
+    format or a lattice this run's record does not state.
+    """
     from tcip_mcp.pipelines.schemas import TilingSpec
 
     ctx, samples = _bespoke_ctx(tmp_path)
@@ -290,7 +298,8 @@ def test_a_bodys_door_takes_the_samples_and_the_augmentation_and_nothing_else(
 def test_builder_kwargs_may_not_restate_what_the_producer_named():
     """``samples`` and ``scope`` are the producer's, and ``task``/``transforms`` the run's: a
     builder given a second value for one of them would build over membership or a class space the
-    run's own record does not describe, so the seam refuses it by name."""
+    run's own record does not describe, so the seam refuses it by name.
+    """
     from tcip_mcp.pipelines.data.datasets import build_from_dataset_source
 
     for reserved in ("samples", "scope", "task", "transforms"):
@@ -325,7 +334,8 @@ def test_known_task_registry_stays_the_default(tmp_path: Path):
 def test_builder_kwargs_configure_the_builder(tmp_path: Path):
     """The builder's own configuration is its ``builder_kwargs`` and nothing else: the lowest
     boundary requires the dataset source with the layout it imports from, the task, the samples,
-    the scope and the transforms."""
+    the scope and the transforms.
+    """
     import inspect
 
     from tcip_mcp.pipelines.data.datasets import build_from_dataset_source
@@ -363,7 +373,8 @@ def test_preflight_requires_the_data_a_bespoke_run_is_still_admitted_from(
 ):
     """A bespoke builder does not exempt a run from naming its data: the platform's own producer
     admits its samples whatever loads them, so a config naming no place refuses here by naming the
-    missing key, the one refusal every route shares."""
+    missing key, the one refusal every route shares.
+    """
     from tcip_mcp.tools.training_tools import preflight_config
     from tests._chain_fixtures import training_config
 
@@ -413,7 +424,8 @@ def test_snapshot_copies_the_dataset_builders_module_as_that_module(
     tmp_path: Path,
 ):
     """The dataset builder's module, declared under its ``source_files``, is copied at its path
-    under its import root; a dataset builder none of them holds refuses the snapshot by name."""
+    under its import root; a dataset builder none of them holds refuses the snapshot by name.
+    """
     from tcip_mcp.pipelines.model_build import snapshot_model_source
     from tcip_mcp.pipelines.schemas import train_config
     from tests._chain_fixtures import training_config

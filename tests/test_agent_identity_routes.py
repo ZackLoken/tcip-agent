@@ -30,7 +30,8 @@ def _post_and_capture_broadcast(
     headers: dict | None = None,
 ) -> tuple[Any, dict]:
     """Post a panel event for the open project, whose id is ``project_id``, while subscribed to
-    its live broadcast, returning the HTTP response and what the broadcast carried."""
+    its live broadcast, returning the HTTP response and what the broadcast carried.
+    """
     from tcip_web.state import store
 
     with client.websocket_connect("ws://127.0.0.1/ws/panel/meta") as ws:

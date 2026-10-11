@@ -14,7 +14,8 @@ torch = pytest.importorskip("torch")
 
 def _publish(tmp_path, monkeypatch, **stated) -> dict:
     """``run_inference`` over one dated capture of the dataset ``dataset``, its predictor
-    stubbed."""
+    stubbed.
+    """
     from PIL import Image
 
     from tcip_mcp.pipelines.execution import Stated

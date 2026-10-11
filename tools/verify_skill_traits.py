@@ -100,7 +100,8 @@ def mentioned_trait_names(md_text: str, names: set[str]) -> set[str]:
 
 def unknown_trait_tokens(md_text: str, allnames: set[str]) -> list[str]:
     """Backticked snake_case tokens in ``md_text`` that are neither in ``allnames`` nor an
-    allow-listed platform token."""
+    allow-listed platform token.
+    """
     toks = extract_backtick_snake(md_text)
     return sorted(
         t for t in toks if t not in allnames and t not in NON_TRAIT_ALLOW

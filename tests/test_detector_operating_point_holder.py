@@ -31,7 +31,8 @@ _DIMS = {"in_chans": 3, "num_classes": 1}
 
 def _built(model_source: dict):
     """The model ``model_source`` builds at :data:`_DIMS`, imported from the staged sources of a
-    run config over no data with this repository as its project."""
+    run config over no data with this repository as its project.
+    """
     from tcip_mcp.pipelines.model_build import (
         build_from_model_source,
         staged_sources,
@@ -91,7 +92,8 @@ def test_holder_is_none_when_nothing_exposes_a_knob():
 def test_holder_refuses_when_the_module_and_its_detectors_roi_heads_both_expose_a_knob():
     """An ambiguous module, ambiguous in the same shape a real bespoke wrapper could build: a
     torchvision two-stage detector under ``.detector`` (whose ``roi_heads`` already exposes the
-    knob) plus a knob restated on the wrapper itself. The platform must not silently pick one."""
+    knob) plus a knob restated on the wrapper itself. The platform must not silently pick one.
+    """
     from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
     model = _built(BUILT_DETECTOR)
@@ -155,7 +157,8 @@ def _assessed(tmp_path: Path, builder: str) -> dict:
     """The assessment of ``builder``'s checkpoint over a drawn selection of images, each its own
     size, labeled at exactly the box ``BareScoreThreshDetector``/``BareNoKnobDetector`` always
     predict for that size, so every image matches and no two collide on content; its record, or
-    the door's error."""
+    the door's error.
+    """
     from PIL import Image
 
     from tcip_annotation.state import Annotation, BBox
@@ -203,7 +206,8 @@ def test_a_bespoke_module_exposing_its_own_knobs_is_assessed_at_its_stated_floor
     tmp_path,
 ):
     """A hand-rolled, non-torchvision module exposing both knobs on itself is assessed at the
-    staged floor applied there, and its record names the attribute path it was applied on."""
+    staged floor applied there, and its record names the attribute path it was applied on.
+    """
     record = _assessed(tmp_path, BARE_SCORE_THRESH_DETECTOR)
 
     assert "error" not in record, record

@@ -25,7 +25,8 @@ def write_geo_image(
 ) -> None:
     """A JPEG at ``path`` carrying EXIF DateTimeOriginal ``when`` and GPS ``lat``/``lon``, less
     the GPS tags ``omit`` names (``0x0001`` the latitude's hemisphere, ``0x0003``/``0x0004`` the
-    longitude's): the PIL ``image`` given, else a tiny black frame."""
+    longitude's): the PIL ``image`` given, else a tiny black frame.
+    """
     from PIL import Image
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -48,7 +49,8 @@ def write_noise_image(
     path: Path, size: int, bright: bool = False, span: float = 0.3
 ) -> None:
     """A ``size`` by ``size`` RGB image of uniform noise at ``path``, its parent created: values
-    in [0, ``span``), or offset by 0.7 when ``bright``."""
+    in [0, ``span``), or offset by 0.7 when ``bright``.
+    """
     import torch
     from torchvision.utils import save_image
 

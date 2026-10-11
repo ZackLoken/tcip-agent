@@ -52,7 +52,8 @@ def test_the_identity_fields_are_declared_once_and_carry_no_harness_export(
 ) -> None:
     """The record's fields are the identity's own attributes, and the field tuple, the header map
     and the projection derive from them; a harness exporting its session and effort to the
-    server it spawns lands on none of them."""
+    server it spawns lands on none of them.
+    """
     import dataclasses
 
     monkeypatch.setenv(
@@ -157,7 +158,8 @@ def test_a_caller_cannot_hand_an_audit_line_another_identity(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The identity is applied after a caller's extra facts, so ``record_event_or_raise(...,
-    agent_session=...)`` records the handshake's session, not the caller's."""
+    agent_session=...)`` records the handshake's session, not the caller's.
+    """
     import tcip_mcp.audit as audit_module
     import tcip_store as ts
 
@@ -204,7 +206,8 @@ def test_a_caller_cannot_supply_an_identity_key_the_handshake_left_absent(
 ) -> None:
     """The identity keys are reserved even where the handshake set nothing: with no handshake a
     forged session does not land, and under a launch that declared no terminal session a forged
-    terminal_session does not land either."""
+    terminal_session does not land either.
+    """
     import tcip_mcp.audit as audit_module
     from tests._audit_fixtures import audit_rows
 
@@ -232,7 +235,8 @@ def test_the_declaration_is_taken_on_the_first_message_that_carries_it_whatever_
     None
 ):
     """A client that sends a request before notifications/initialized (the SDK serves one) still
-    gets its declaration recorded on that first request."""
+    gets its declaration recorded on that first request.
+    """
     import types
 
     info = types.SimpleNamespace(name="antigravity-like", version="1.1.17")

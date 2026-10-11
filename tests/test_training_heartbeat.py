@@ -1,7 +1,8 @@
 """A run directory with no final status reads as 'running' while its heartbeat is fresh (still
 training in another process, e.g. the MCP agent) and only 'interrupted' once the heartbeat goes
 stale. Prevents the GUI mislabeling an agent-launched run as dead and inviting a duplicate
-launch."""
+launch.
+"""
 
 import os
 import time
@@ -12,7 +13,8 @@ from tests._verified_checkpoint_fixtures import detection_config, opened_run
 
 def _beat(run_dir, seconds_ago: float) -> float:
     """Touch ``run_dir``'s heartbeat through its own writer, then age it ``seconds_ago``; the
-    instant it now reads."""
+    instant it now reads.
+    """
     from tcip_mcp.experiments import HEARTBEAT_FILE, touch_heartbeat
 
     touch_heartbeat(run_dir)
@@ -62,7 +64,8 @@ def test_listed_runs_read_running_against_interrupted(tmp_path):
 def test_a_listed_row_carries_the_heartbeat_instant(tmp_path):
     """No process id is recorded anywhere a listed row could check, so a client showing a
     'running' row as live needs the heartbeat instant itself, not just the derived state, to
-    say how stale that liveness claim already is."""
+    say how stale that liveness claim already is.
+    """
     instant = _beat(
         opened_run(
             tmp_path,
@@ -86,7 +89,8 @@ def test_configured_stale_window_agrees_across_run_list_compare_and_status(
     """list_experiments, compare_experiments and monitor_training derive "interrupted" the same
     way under a configured heartbeat window, one constant (``experiments.HEARTBEAT_STALE_SECONDS``)
     read by every consumer: a 300s-old heartbeat reads stale under a 30s window even though it
-    would read fresh under the 600s default."""
+    would read fresh under the 600s default.
+    """
     from tcip_mcp import experiments
     from tcip_mcp.experiments import compare_experiments as compare_tool
     from tcip_mcp.tools.training_tools import monitor_training

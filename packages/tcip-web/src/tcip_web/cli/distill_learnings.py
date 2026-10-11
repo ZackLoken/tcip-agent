@@ -51,7 +51,8 @@ def _themes(
     text: str, top: int = 12, min_count: int = 2
 ) -> list[tuple[str, int]]:
     """The ``top`` most frequent of ``text``'s terms, each mentioned at least ``min_count``
-    times."""
+    times.
+    """
     return _ranked(Counter(_terms(text)), top, min_count)
 
 
@@ -61,7 +62,8 @@ def _cross_project_themes(
     min_projects: int = 2,
 ) -> list[tuple[str, int]]:
     """The ``top`` terms present in at least ``min_projects`` of the projects' term sets, counted
-    once per project."""
+    once per project.
+    """
     counts: Counter[str] = Counter()
     for tokens in per_project_tokens.values():
         counts.update(tokens)
@@ -70,7 +72,8 @@ def _cross_project_themes(
 
 def build_workspace_worksheet(workspace: Path) -> str:
     """The cross-project Markdown worksheet for every project under ``workspace``; writes
-    nothing."""
+    nothing.
+    """
     from tcip_mcp.workspace import project_dirs
 
     lines: list[str] = [
@@ -127,7 +130,8 @@ def build_workspace_worksheet(workspace: Path) -> str:
 def _gather(project: Path) -> tuple[list[dict], list, str]:
     """``project``'s friction reports as :func:`~tcip_mcp.tools.meta_tools.report_row` lists
     them, its retrospectives (latest stated section first), and the free text of the decoded
-    reports and the retrospectives joined."""
+    reports and the retrospectives joined.
+    """
     from tcip_mcp.tools.meta_tools import (
         report_documents,
         report_row,
@@ -149,7 +153,8 @@ def _gather(project: Path) -> tuple[list[dict], list, str]:
 
 def _report_line(report: dict, width: int) -> str:
     """One report as a bullet: its category and its detail, or ``malformed`` and the reason it
-    will not decode, on one line cut to ``width``."""
+    will not decode, on one line cut to ``width``.
+    """
     if "malformed" in report:
         return f"- [malformed] {report['malformed'].replace(chr(10), ' ')[:width]}"
     return f"- [{report['category']}] {report['detail'].replace(chr(10), ' ')[:width]}"

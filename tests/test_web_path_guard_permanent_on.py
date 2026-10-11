@@ -62,7 +62,8 @@ def test_a_workspace_project_reached_through_a_link_is_admitted_as_itself(
     outside: Path,
 ) -> None:
     """A project the workspace lists through a junction or symlink resolves elsewhere and must
-    still be admitted, or the front door would list a project no route can open."""
+    still be admitted, or the front door would list a project no route can open.
+    """
     real = new_project(outside / "linked-project").root
     link = tmp_path.parent / "linked"
     try:
@@ -105,7 +106,8 @@ def test_a_dataset_registered_as_the_projects_own_tree_contributes_no_relative_r
     """register_dataset stores "." for a project's own dataset; allowed_roots must resolve that
     entry against the project root rather than pass the bare "." into the allow-set, where a
     same-file comparison against an unresolved "." would silently admit whatever directory the
-    server process happens to be running from."""
+    server process happens to be running from.
+    """
     from tcip_mcp.tools.project_tools import register_dataset
     from tcip_web.paths import allowed_roots
 
@@ -124,7 +126,8 @@ def test_an_imports_staging_tree_is_never_admitted_even_under_the_workspace(
 ) -> None:
     """The import door stages a half-extracted project under ``<workspace>/.imports/<uuid>/``,
     which sits under the workspace, an allowed root; a route resolving into it while the import
-    is in flight still refuses."""
+    is in flight still refuses.
+    """
     workspace = tmp_path.parent
     staged = workspace / ".imports" / "run-1" / "images" / "a.jpg"
     staged.parent.mkdir(parents=True)
@@ -285,7 +288,8 @@ def test_the_proposals_route_confines_the_image_whose_bucket_it_reads(
 
 def _series(project: Path) -> Series:
     """An assessed attributed series under ``project`` (``_chain_fixtures.attributed_series``),
-    left open in the web backend."""
+    left open in the web backend.
+    """
     pytest.importorskip("torch")
     from tests._chain_fixtures import attributed_series
 
@@ -317,7 +321,8 @@ def test_a_delivery_from_another_projects_evidence_is_refused_by_name(
     tmp_path: Path,
 ) -> None:
     """Project B, open and fully set up, is handed project A's mapping and predictions: both inside
-    the managed allow-set, neither belonging to B. No export and no audit line lands in B."""
+    the managed allow-set, neither belonging to B. No export and no audit line lands in B.
+    """
     body = _series(tmp_path).body()
     b = new_project(tmp_path.parent / "b").root
     propose(b, BUD_OPENING)
@@ -351,7 +356,8 @@ def test_a_delivery_from_a_dataset_registered_to_the_open_project_is_admitted(
 ) -> None:
     """Evidence living outside the workspace entirely, registered to the project, passes the
     belonging rail. The measurement then judges the relocated buckets on its own terms, so the
-    proof here is that neither the belonging refusal nor the allow-set refusal answers."""
+    proof here is that neither the belonging refusal nor the allow-set refusal answers.
+    """
     import shutil
 
     body = _series(tmp_path).body()

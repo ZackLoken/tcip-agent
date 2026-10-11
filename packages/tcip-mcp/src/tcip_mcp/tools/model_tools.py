@@ -28,6 +28,7 @@ def register_model(
         checkpoint_path: Path to the .pt checkpoint; its config is the one its payload carries.
         metrics: Evaluation metrics.
         tags: Tags for filtering.
+
     """
     registry = ModelRegistry(str(project))
     return registry.register_model(
@@ -116,6 +117,7 @@ def rank_registered_models(
             the marked set. ``None`` (the default) covers the whole registry. With ``metric=""``, a
             narrowing that leaves nothing returns an empty listing rather than refusing.
         tag: Optional tag filter, applied to both the listing and the ranking.
+
     """
     if not metric:
         return registered_listing(
@@ -148,7 +150,8 @@ def registered_listing(
 ) -> dict:
     """``{"models", "count", "available_metrics"}`` over the project's registered models under
     ``tag``, narrowed to ``experiment_ids`` when given; an empty registry or narrowing lists
-    nothing."""
+    nothing.
+    """
     models = _narrowed(
         ModelRegistry(str(project)).list_models(tag), experiment_ids
     )
@@ -171,7 +174,8 @@ def ranked_registered_model(
     """The registered model ``metric`` ranks best under ``tag``, among ``experiment_ids`` when
     given, with the direction used, its source and the unverified exclusions; or the error dict
     naming why none ranks: an empty ``metric``, nothing registered, nothing registered by the
-    marked experiments, an undeclared direction, every carrier unverified, no carrier."""
+    marked experiments, an undeclared direction, every carrier unverified, no carrier.
+    """
     from tcip_mcp.pipelines.training.evaluation import (
         HIGHER_IS_BETTER_BY_METRIC,
         VAL_METRIC_PREFIX,

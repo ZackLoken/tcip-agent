@@ -39,7 +39,8 @@ from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS  # noqa: E4
 
 def _trained(project: Path, experiment_id: str):
     """A capture, its drawn selection and a checkpoint trained on the selection's train side;
-    ``(images_dir, selection, selection_dir, checkpoint_path)``."""
+    ``(images_dir, selection, selection_dir, checkpoint_path)``.
+    """
     root = project / "ds"
     images_dir = synthetic_capture(root)
     selection_dir = project / "selection"
@@ -56,7 +57,8 @@ def _add_frame(
     images_dir: Path, stem: str, *, like: str, same_pixels: bool
 ) -> None:
     """Add frame ``stem`` labelled exactly as frame ``like``: its image a byte copy of ``like``'s
-    when ``same_pixels``, else a frame of its own (another shade) holding the same box."""
+    when ``same_pixels``, else a frame of its own (another shade) holding the same box.
+    """
     from tests._producer_fixtures import (
         image_label_key,
         label_image,
@@ -88,7 +90,8 @@ def _resided(
 ) -> Path:
     """A reference selection of its own: the drawn selection's calibration and holdout sides with
     the added frames ``extra`` (member to side) joined to them, sided and grouped by the admission's
-    own sample producer under the draw's own policy; its dir."""
+    own sample producer under the draw's own policy; its dir.
+    """
     from tcip_mcp.pipelines.data.label_queries import admit
     from tcip_mcp.pipelines.data.selection import (
         REFERENCE_SIDES,
@@ -129,7 +132,8 @@ def test_a_distinct_image_holding_a_training_frames_boxes_is_a_legitimate_refere
     tmp_path,
 ):
     """Two different images can carry identical boxes: the second is not the first, so a reference
-    holding it is held out. Identity is the image's content, never the geometry drawn on it."""
+    holding it is held out. Identity is the image's content, never the geometry drawn on it.
+    """
     images_dir, drawn, _sel, checkpoint = _trained(tmp_path, "exp-twin")
     confirm_count_trait(tmp_path)
     like = _a_train_member(drawn)
@@ -157,7 +161,8 @@ def test_a_training_image_copied_under_a_new_name_into_the_reference_fails_disjo
     tmp_path,
 ):
     """A byte copy of a training frame under another name is the same image: the reference holding
-    it shares its content with training, whatever it is called or grouped under."""
+    it shares its content with training, whatever it is called or grouped under.
+    """
     images_dir, drawn, _sel, checkpoint = _trained(tmp_path, "exp-dup")
     confirm_count_trait(tmp_path)
     like = _a_train_member(drawn)
@@ -185,7 +190,8 @@ def test_a_reference_frame_in_a_training_group_fails_even_when_its_pixels_are_it
     tmp_path,
 ):
     """A tile of a training source is not held out from it: a reference frame grouped with a
-    training frame fails on the group alone, its own pixels notwithstanding."""
+    training frame fails on the group alone, its own pixels notwithstanding.
+    """
     images_dir, drawn, _sel, checkpoint = _trained(tmp_path, "exp-group")
     confirm_count_trait(tmp_path)
     like = _a_train_member(drawn)
@@ -215,7 +221,8 @@ def test_a_reference_frame_in_a_training_group_fails_even_when_its_pixels_are_it
 
 def test_a_mosaic_reference_band_is_held_out_only_inside_a_non_training_region():
     """Against a within-image split's recorded regions, a reference rect is held out when it lies
-    wholly inside one non-training region; one straddling the training boundary is not."""
+    wholly inside one non-training region; one straddling the training boundary is not.
+    """
     from tcip_mcp.pipelines.operating_point import spatial_disjointness
     from tcip_mcp.pipelines.schemas import SpatialManifest
 
@@ -268,7 +275,8 @@ def test_an_accurate_reference_passes_the_count_criterion():
 
 def test_a_known_count_bias_fails_the_outcome_tolerance_with_no_dispersion_at_all():
     """Every held-out image over-counts by the same ten objects: the bias is certain, its spread
-    zero, and the count is still wrong."""
+    zero, and the count is still wrong.
+    """
     from tcip_mcp.pipelines.operating_point import count_criterion
 
     cal, _ = good_cal_holdout()
@@ -306,7 +314,8 @@ def test_an_agreeing_classifier_passes_the_classifier_criterion():
 
 def test_compensating_classification_errors_cannot_validate_through_pooled_counts():
     """Each image's two positives called negative and two negatives called positive: its positive
-    count is exactly right, and every call is wrong."""
+    count is exactly right, and every call is wrong.
+    """
     from tcip_mcp.pipelines.operating_point import classifier_criterion
 
     calls = [(True, False), (True, False), (False, True), (False, True)]
@@ -324,7 +333,8 @@ def test_an_unauthored_tolerance_refuses_the_revision_with_the_breeders_question
     tmp_path,
 ):
     """No default stands in for a tolerance the criterion compares against: a count revision that
-    leaves one unauthored is refused when proposed, asking the breeder, and none is recorded."""
+    leaves one unauthored is refused when proposed, asking the breeder, and none is recorded.
+    """
     from tcip_mcp.traits import QUESTIONS, UnauthoredFieldError, trait_names
 
     with pytest.raises(UnauthoredFieldError) as refused:
@@ -340,7 +350,8 @@ def test_an_iou_match_operationalization_is_proposed_only_with_its_jitter_and_ma
 ):
     """The fields an IoU match compares by are part of the criterion a count operationalization
     rests on: a proposal selecting ``iou_match`` without them is refused asking the breeder, and
-    one stating them is recorded."""
+    one stating them is recorded.
+    """
     from tcip_mcp.traits import (
         IOU_MATCH,
         QUESTIONS,
@@ -417,7 +428,8 @@ def test_a_delivery_under_another_revision_than_the_assessments_refuses_naming_b
 
 def test_one_producer_clears_the_gate_and_a_series_of_two_refuses(tmp_path):
     """Two checkpoints over the same capture are two measurements: a delivery naming buckets from
-    both refuses outright, naming each, while either one alone clears."""
+    both refuses outright, naming each, while either one alone clears.
+    """
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.delivery import DeliveryRefusedError, Result, gate
     from tcip_mcp.operationalization import latest_confirmed
@@ -462,7 +474,8 @@ def test_an_assessment_whose_retained_reference_is_gone_answers_for_nothing(
     tmp_path,
 ):
     """An assessment whose retained reference copies are removed reads as a changed reference,
-    so the gate refuses the bucket it validated."""
+    so the gate refuses the bucket it validated.
+    """
     from tcip_mcp.assessment import REFERENCE_DIR, assessment_dir
     from tcip_mcp.delivery import DeliveryRefusedError, Result, gate
     from tcip_mcp.operationalization import latest_confirmed
@@ -487,7 +500,8 @@ def test_a_reference_source_edited_after_the_assessment_answers_for_nothing(
     tmp_path,
 ):
     """The pixels an assessment measured are part of its reference: a source image edited after
-    it refuses the bucket it validated, naming the image, which cleared before the edit."""
+    it refuses the bucket it validated, naming the image, which cleared before the edit.
+    """
     from PIL import Image
 
     from tcip_mcp.assessment import read_assessment

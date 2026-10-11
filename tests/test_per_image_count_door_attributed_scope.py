@@ -1,5 +1,6 @@
 """A bucket whose scope declares attributes delivers the object count of its own recorded subject,
-never a count per attribute value."""
+never a count per attribute value.
+"""
 
 from __future__ import annotations
 

@@ -1,6 +1,7 @@
 """The editor's gestures through the one label save: what each writes into the label document,
 the verdict shard and the completion marks, and what the admission, the queue and the editor's
-own listing read back from it."""
+own listing read back from it.
+"""
 
 from __future__ import annotations
 
@@ -68,7 +69,8 @@ def _as_loaded(root: Path, image: Path) -> list[dict]:
 
 def _bucket(root: Path, image: Path) -> str:
     """A proposal bucket for ``image`` holding one ``bud`` box over :data:`BOX`, staged through
-    the platform's own door; its name."""
+    the platform's own door; its name.
+    """
     from tcip_mcp.tools.proposal_tools import stage_proposals
 
     x1, y1, x2, y2 = BOX
@@ -205,7 +207,8 @@ def test_accepting_a_model_proposal_carries_no_attribute_value_into_the_document
     tmp_path: Path,
 ) -> None:
     """An accepted proposal pairing no annotation joins ground truth with its geometry and subject
-    alone: every attribute the model called is left unassessed for the person to fill in."""
+    alone: every attribute the model called is left unassessed for the person to fill in.
+    """
     pytest.importorskip("torch")
     from tcip_mcp import subject_registry as cr
     from tests._chain_fixtures import predicted, published
@@ -280,7 +283,8 @@ def test_a_decision_or_a_completion_mark_by_no_person_does_not_read(
     tmp_path: Path,
 ) -> None:
     """A verdict's and a completion mark's ``by`` name a person; one naming a producer that is no
-    person refuses as the record it is read from."""
+    person refuses as the record it is read from.
+    """
     from dataclasses import replace
 
     from tcip_annotation.verdicts import decode_verdict, encode_verdict
@@ -494,7 +498,8 @@ def test_an_accepted_proposal_answers_the_annotation_it_resolved_to(
 ) -> None:
     """An accepted proposal that pairs with a submitted annotation signs that annotation off and
     appends nothing; one that pairs with none is appended. The answer names each one's annotation,
-    whatever else the save carries."""
+    whatever else the save carries.
+    """
     image = _image(tmp_path)
     bucket = _bucket(tmp_path, image)
     drawn = {"subject": "leaf", "bbox": [5.0, 5.0, 15.0, 15.0]}
@@ -551,7 +556,8 @@ def test_the_save_answers_the_document_it_stored(
     tmp_path: Path, client
 ) -> None:
     """What the save writes is what it answers: rounded geometry and only the completion marks
-    that still name the subject's annotations, the same answer a load gives."""
+    that still name the subject's annotations, the same answer a load gives.
+    """
     from tests._web_fixtures import open_new_project
 
     root = open_new_project(tmp_path / "proj").root
@@ -743,7 +749,8 @@ def test_a_staged_bucket_serves_no_operating_point_and_says_why(
     tmp_path: Path, client
 ) -> None:
     """A bucket staged under no assessment has no conf a review may accept at: the route says
-    so beside the proposals rather than deciding admission for each of them."""
+    so beside the proposals rather than deciding admission for each of them.
+    """
     from tests._web_fixtures import open_new_project
 
     root = open_new_project(tmp_path / "proj").root
@@ -764,7 +771,8 @@ def test_the_loaded_annotations_carry_the_index_a_pairing_names(
 ) -> None:
     """Each loaded annotation states its document index, the index a proposal's ``paired``
     refers to, so the editor pairs by the server's enumeration and never by position in a
-    list it re-split by geometry."""
+    list it re-split by geometry.
+    """
     from tests._web_fixtures import open_new_project
 
     root = open_new_project(tmp_path / "proj").root
@@ -848,7 +856,8 @@ def test_a_negative_is_an_empty_subject_and_a_mark_at_every_reader(
     tmp_path: Path, client
 ) -> None:
     """The admission that trains, the review queue and the editor's own listing each read an
-    empty document as nothing until a person marks it, and as a negative once they have."""
+    empty document as nothing until a person marks it, and as a negative once they have.
+    """
     from tcip_mcp.pipelines.data.label_queries import admit, registry_scope
     from tcip_mcp.tools.feedback_tools import _prepare_queue_sources
     from tests._web_fixtures import open_new_project
@@ -947,7 +956,8 @@ def test_the_assessment_count_and_the_editor_pairing_agree_under_a_crowd_region(
 ) -> None:
     """The assessment's governing count and the editor's proposal pairing, each over the same
     annotations and a bucket published under no assessment, a crowd region among them, agree on
-    what pairs."""
+    what pairs.
+    """
     from tcip_mcp.dataset_layout import image_proposals, proposal_pairs
     from tcip_mcp.pipelines.training.evaluation import resolve_match_criterion
     from tcip_mcp.tools.proposal_tools import stage_proposals
@@ -1010,7 +1020,8 @@ def test_the_editor_pairs_a_bucket_under_its_assessments_center_match(
 ) -> None:
     """A bucket published under a center-match assessment pairs in the editor as that
     assessment counts: an annotation shifted off its proposal by under the assessment's
-    tolerance, but by more than the comparability IoU admits, pairs and counts alike."""
+    tolerance, but by more than the comparability IoU admits, pairs and counts alike.
+    """
     pytest.importorskip("torch")
     from tcip_mcp.assessment import read_assessment
     from tcip_mcp.dataset_layout import image_proposals, proposal_pairs

@@ -35,7 +35,8 @@ def _project(ws: Path, directory: str, display_name: str) -> OpenProject:
 
 def test_removal_archives_moves_and_records_one_line(client, tmp_path):
     """The removal's whole trace in the project's log is one ``project_removed`` line: the
-    archive it writes records nothing of its own."""
+    archive it writes records nothing of its own.
+    """
     ws = tmp_path.parent
     made = _project(ws, "valley_block", "Valley block")
     before = len(audit_rows(made.root))
@@ -88,7 +89,8 @@ def test_an_archive_that_refuses_leaves_the_project_where_it_was_and_still_open(
     monkeypatch,
 ):
     """The archive is written before anything lets go of the project or moves it, so a refused
-    archive leaves the directory, the open project and the log exactly as they were."""
+    archive leaves the directory, the open project and the log exactly as they were.
+    """
     from tcip_mcp.tools import project_tools
 
     ws = tmp_path.parent

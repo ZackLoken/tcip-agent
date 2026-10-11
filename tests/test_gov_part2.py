@@ -80,7 +80,8 @@ def test_the_worksheet_lists_a_report_that_will_not_decode_as_malformed(
     tmp_path,
 ):
     """A stored report that is not a JSON object is listed as malformed beside the decoded one,
-    and the worksheet still builds."""
+    and the worksheet still builds.
+    """
     import tcip_store as ts
     from tcip_mcp.tools.meta_tools import friction_report_key
 
@@ -180,7 +181,8 @@ def test_build_workspace_worksheet_ignores_non_project_dirs(tmp_path):
 
 def test_workspace_mode_never_writes_anything(tmp_path):
     """A workspace worksheet leaves every file under a project's ``.tcip`` but the store's own
-    bookkeeping unchanged."""
+    bookkeeping unchanged.
+    """
     from tcip_store.file_backend import is_bookkeeping
 
     distill = _load_distill()

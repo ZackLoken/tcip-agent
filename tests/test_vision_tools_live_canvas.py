@@ -71,7 +71,8 @@ def _push_state(
     shapes: list[dict] | None = None,
 ) -> None:
     """Write the two documents the GUI pushes for the project ``tmp_path``: the meta heartbeat
-    and the geometry blob, the image named relative to the project as the push route stores it."""
+    and the geometry blob, the image named relative to the project as the push route stores it.
+    """
     import tcip_store
     from tcip_mcp.registry_paths import stored_path
     from tcip_mcp.web_client import canvas_geometry_key, canvas_meta_key
@@ -185,7 +186,8 @@ def test_a_capture_the_gui_answered_reports_the_state_as_live(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A GUI that pushes fresh state in response to the ping is reported as live: the refresh
-    round trip has to admit the answered case, not only flag the unanswered one."""
+    round trip has to admit the answered case, not only flag the unanswered one.
+    """
     from tcip_mcp import web_client
     from tcip_mcp.tools.vision_tools import capture_live_canvas
 
@@ -216,7 +218,8 @@ def test_a_canvas_record_without_its_arrival_instant_is_refused_by_name(
     bound,
 ) -> None:
     """No producer writes a canvas record without ``received_at``, so its age is unknown, never
-    zero: the capture refuses rather than describing it as live."""
+    zero: the capture refuses rather than describing it as live.
+    """
     import tcip_store
     from tcip_mcp.tools.vision_tools import capture_live_canvas
     from tcip_mcp.web_client import canvas_meta_key

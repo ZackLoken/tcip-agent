@@ -62,7 +62,8 @@ def test_training_stream_serves_a_relaunched_run_by_its_own_minted_id(
     client,
 ):
     """A relaunch's id is minted fresh and is the one id its directory is addressed by
-    everywhere, the stream included: no separate run id to resolve it through."""
+    everywhere, the stream included: no separate run id to resolve it through.
+    """
     from tcip_mcp.experiments import mint_experiment_id
 
     parent = finished_run(tmp_path)
@@ -89,7 +90,8 @@ def test_stream_drains_a_row_that_lands_between_the_read_and_the_terminal_check(
 ):
     """A row the run appends as it ends, after the stream's last log read, still reaches the
     browser ahead of the status frame that ends the stream: the run ends between the stream's
-    read and its next observation."""
+    read and its next observation.
+    """
     from tcip_mcp import experiments
     from tcip_mcp.pipelines.training.envelope import (
         TrainContext,
@@ -142,7 +144,8 @@ def test_training_stream_serves_no_metric_frames_for_a_run_no_directory_holds(
     client,
 ):
     """An id no run directory answers for replays nothing and sends only the terminal status
-    frame naming the unresolved run."""
+    frame naming the unresolved run.
+    """
     with client.websocket_connect(
         "ws://127.0.0.1/api/training/runs/never-launched/stream",
     ) as ws:

@@ -56,7 +56,8 @@ def build_recording_detector(
 
 def _read_back(root: Path, stem: str, anns: list) -> list:
     """``anns`` written as the label document of the image ``stem`` under ``root`` and read back
-    through the platform's own reader."""
+    through the platform's own reader.
+    """
     key = label_key(root, UNDATED_BUCKET, stem)
     json_io.write_label_document(key, anns, IMG, IMG)
     return json_io.read_label_document(key).annotations
@@ -64,7 +65,8 @@ def _read_back(root: Path, stem: str, anns: list) -> list:
 
 def _labeled(root: Path, stems=("c0", "c1"), crowd=True) -> Path:
     """Frames each holding one bright bur and, when ``crowd``, one region of unseparated burs;
-    their images directory."""
+    their images directory.
+    """
     images = root / "images" / UNDATED_BUCKET
     for stem in stems:
         anns = [Annotation(subject=SUBJECT, geometry=OBJECT)]
@@ -84,7 +86,8 @@ def _detection_loader(root: Path, task: str = "detection"):
 
 def test_crowd_of_refuses_a_target_stating_no_flag_and_reads_the_producers_own():
     """Whether a row is a crowd region is its producer's to state: a target the platform's own
-    producer built answers its flags, one stating none refuses rather than reading as no crowd."""
+    producer built answers its flags, one stating none refuses rather than reading as no crowd.
+    """
     from tcip_mcp.pipelines.data.datasets import crowd_of
     from tcip_mcp.pipelines.data.label_queries import json_det_targets
     from tcip_mcp.pipelines.data.selection import ClassScope
@@ -133,7 +136,8 @@ def test_the_instance_loader_takes_each_polygons_class_from_the_one_target_decis
     tmp_path: Path,
 ):
     """Another subject's polygon beside the run's own is no instance of the run: the loader's
-    subject decision is ``attribute_ids``', the one every target reader makes."""
+    subject decision is ``attribute_ids``', the one every target reader makes.
+    """
     from tests._producer_fixtures import dataset_over
 
     images = tmp_path / "images" / UNDATED_BUCKET
@@ -193,7 +197,8 @@ def test_the_trainer_and_the_validation_loss_hand_the_heads_objects_only(
     tmp_path: Path, monkeypatch
 ):
     """Both hand-offs to a model's training forward, the training step and the validation loss,
-    withhold every crowd row the loader keeps."""
+    withhold every crowd row the loader keeps.
+    """
     from tcip_mcp.pipelines.training.generic_trainer import train
     from tests._chain_fixtures import training_config
     from tests.tiny_trainer_fixtures import capture_model, run_context
@@ -260,7 +265,8 @@ def test_the_completion_digest_changes_with_the_crowd_flag(tmp_path: Path):
 
 def _records(tmp_path: Path, crowd: bool, n_crowd: int = 120) -> list[dict]:
     """Two images' evaluation records, each one bur and, when ``crowd``, many large crowd
-    regions, written and read back through the label document."""
+    regions, written and read back through the label document.
+    """
     from tcip_mcp.pipelines.training.evaluation import records_from_annotation
 
     records = []
@@ -293,7 +299,8 @@ def _records(tmp_path: Path, crowd: bool, n_crowd: int = 120) -> list[dict]:
 
 def test_the_object_density_counts_objects_not_crowd_regions(tmp_path: Path):
     """The density derives from each frame's object count, which a crowd region beside the
-    objects leaves unchanged."""
+    objects leaves unchanged.
+    """
     from tcip_mcp.pipelines.derivations import derive_object_density
     from tests._producer_fixtures import dataset_over, seed_labeled_images
 
@@ -393,7 +400,8 @@ def test_the_editors_pairing_never_pairs_with_or_as_a_crowd_region(
 ):
     """A predicted crowd region is no proposal to pair; a ground-truth crowd region is nothing to
     confirm; a proposal inside one pairs with nothing; every index still addresses the caller's
-    own lists."""
+    own lists.
+    """
     from tcip_annotation.matching import pair_proposals
 
     inside = BBox(60.0, 60.0, 80.0, 80.0)
@@ -434,7 +442,8 @@ CENTER = {"kind": "center_match", "tolerance": 5.0}
 
 def _center_records(tmp_path: Path) -> list[dict]:
     """Nine images holding a crowd region alone with a detection inside it, and one image whose
-    one object nothing detected, each written and read back through the label document."""
+    one object nothing detected, each written and read back through the label document.
+    """
     from tcip_mcp.pipelines.training.evaluation import records_from_annotation
 
     name_id = {SUBJECT: 1}
@@ -519,7 +528,8 @@ def test_the_worst_predictions_triage_counts_objects_not_crowd_regions(
     tmp_path: Path,
 ):
     """Both sides of the triage's count are objects: a crowd region beside the one matching
-    detection is no surplus, and a reference holding crowd regions alone is no missed image."""
+    detection is no surplus, and a reference holding crowd regions alone is no missed image.
+    """
     pytest.importorskip("torch")
     from tcip_mcp.tools.vision_tools import get_worst_predictions
     from tests._chain_fixtures import published
@@ -582,7 +592,8 @@ def test_the_derived_spacing_and_cross_tile_nms_ignore_crowd_regions(
     tmp_path: Path,
 ):
     """An assessment derives its localization spacing and its cross-tile merge threshold from the
-    objects of the calibration reference: stacked crowd regions beside them move neither."""
+    objects of the calibration reference: stacked crowd regions beside them move neither.
+    """
     from tcip_mcp.pipelines.derivations import (
         LOCALIZATION_TOLERANCE_DERIVATION,
         derive_cross_tile_nms,

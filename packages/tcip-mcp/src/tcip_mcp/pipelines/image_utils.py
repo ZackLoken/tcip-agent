@@ -70,7 +70,8 @@ IMAGE_EXTS = {
 def stem_collision_key(name: str) -> str:
     """The fold that decides whether two stems name one logical identity: ``str.lower()``, so a
     pair differing only by Unicode normalization, or by a casefold-but-not-``lower()`` difference,
-    is two keys."""
+    is two keys.
+    """
     return name.lower()
 
 
@@ -128,7 +129,8 @@ def bucket_logical_identities(images_dir: str | Path) -> dict[str, list[Path]]:
 
 def logical_image_count(root: str | Path) -> int:
     """How many logical images every capture under the dataset root ``root`` holds
-    (:func:`bucket_logical_identities`, each identity of an ambiguous stem counted)."""
+    (:func:`bucket_logical_identities`, each identity of an ambiguous stem counted).
+    """
     from tcip_mcp import dataset_layout
 
     return sum(
@@ -171,7 +173,8 @@ def _refuse_ambiguous(
     d: Path, keys: Iterable[list[tuple[Path, BandGroupRef | None]]]
 ) -> None:
     """Refuse (:class:`AmbiguousImageStemError`) the :func:`_scan_identities` keys of ``d`` holding
-    more than one identity, naming their paths."""
+    more than one identity, naming their paths.
+    """
     names = sorted(
         str(path)
         for entries in keys
@@ -242,14 +245,16 @@ def resolve_image_paths(
 
 def resolve_image_path(image_path: str | Path) -> Path | BandGroupRef:
     """The logical image ``image_path`` names (:func:`resolve_image_paths`); its refusals
-    propagate."""
+    propagate.
+    """
     return resolve_image_paths([image_path])[0]
 
 
 def image_path_dimensions(image_path: str | Path) -> tuple[int, int]:
     """:attr:`~tcip_mcp.pipelines.raster_source.SourceHeader.display_frame` of the logical image
     ``image_path`` names (:func:`resolve_image_path`, a grouped capture folded into its one
-    frame). Its refusals propagate."""
+    frame). Its refusals propagate.
+    """
     return raster_source.SourceHeader(
         resolve_image_path(image_path)
     ).display_frame
@@ -258,7 +263,8 @@ def image_path_dimensions(image_path: str | Path) -> tuple[int, int]:
 def source_path_of(source: str | Path | BandGroupRef) -> str:
     """The path this logical image is named by, recorded and displayed: a grouped capture's own
     ``.bandgroup`` manifest, a plain image's own file. The inverse :func:`resolve_image_path`
-    reads back."""
+    reads back.
+    """
     return str(
         source.manifest_path if isinstance(source, BandGroupRef) else source
     )
@@ -280,7 +286,8 @@ def logical_image_name(source: Path | BandGroupRef) -> str:
 def logical_images_by_name(images_dir: str | Path) -> dict[str, str]:
     """Every logical image in ``images_dir`` (:func:`list_logical_images`), its
     :func:`logical_image_name` to its exact stem, in name order. Raises what
-    :func:`list_logical_images` raises."""
+    :func:`list_logical_images` raises.
+    """
     named = {
         logical_image_name(src): stem
         for stem, src in list_logical_images(images_dir).items()
@@ -313,14 +320,16 @@ _DT_ORIGINAL_TAG = 0x9003
 def exif_capture_time(exif) -> object | None:
     """The raw DateTimeOriginal an image's ``exif`` (``Image.getexif()``) carries: from the Exif
     sub-IFD where a camera nests it, else from the top level where a fresh ``PIL.Image.Exif``
-    writes it; ``None`` when it carries none."""
+    writes it; ``None`` when it carries none.
+    """
     raw = exif.get_ifd(_EXIF_IFD_TAG).get(_DT_ORIGINAL_TAG)
     return exif.get(_DT_ORIGINAL_TAG) if raw is None else raw
 
 
 def parse_capture_time(raw: object):
     """A capture-time value in any of :data:`CAPTURE_TIME_FORMATS` as a ``datetime``; ``None``
-    when none fits."""
+    when none fits.
+    """
     from datetime import datetime
 
     text = str(raw).strip()
@@ -336,7 +345,8 @@ def image_dimensions(
     path: str | Path | BandGroupRef, num_channels: int
 ) -> tuple[int, int]:
     """``(width, height)`` as ``load_image`` will decode it at ``num_channels``
-    (:meth:`~tcip_mcp.pipelines.raster_source.SourceHeader.frame_at`)."""
+    (:meth:`~tcip_mcp.pipelines.raster_source.SourceHeader.frame_at`).
+    """
     return raster_source.SourceHeader(path).frame_at(num_channels)
 
 
@@ -350,7 +360,8 @@ def frame_size(img) -> tuple[int, int]:
 def pixel_array(img) -> tuple[np.ndarray, tuple[str, ...] | None]:
     """A decoded image (:func:`load_image`'s return) as the ``[H, W, C]`` array slices are cut
     from, with the band interpretations that let :func:`to_pil_if_faithful` rebuild a slice's PIL
-    mode: a PIL ``RGBA`` image names its 4th band alpha, anything else names none."""
+    mode: a PIL ``RGBA`` image names its 4th band alpha, anything else names none.
+    """
     interpretations = (
         ("red", "green", "blue", "alpha")
         if isinstance(img, Image.Image) and img.mode == "RGBA"

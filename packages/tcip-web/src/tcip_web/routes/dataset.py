@@ -1,6 +1,7 @@
 """Dataset routes: what a dataset root holds (its dates and subjects, through
 :mod:`tcip_mcp.dataset_layout`, and its published buckets, through :mod:`tcip_mcp.buckets`), the
-``GuiState.dataset`` selection, and the current image position within it."""
+``GuiState.dataset`` selection, and the current image position within it.
+"""
 
 from __future__ import annotations
 
@@ -46,7 +47,8 @@ def _subjects_by_date(
     root, dates: list[str]
 ) -> tuple[dict[str, list[str]], str | None]:
     """:func:`~tcip_mcp.dataset_layout.capture_subjects` per date, and the first date's
-    :func:`_label_problem`."""
+    :func:`_label_problem`.
+    """
     by_date: dict[str, list[str]] = {}
     problem: str | None = None
     for d in dates:
@@ -88,7 +90,8 @@ async def select_dataset(req: SelectionRequest) -> dict:
     Answers 409 while no project is open, and 400 for a bucket name no bucket is published
     under, a ``date`` that is no capture name or a capture holding two images of one stem.
     Whether the (subject, date) has labels and the bucket a document for these images is
-    advisory, never a refusal: a brand-new annotation on an unlabeled date starts empty."""
+    advisory, never a refusal: a brand-new annotation on an unlabeled date starts empty.
+    """
     from tcip_mcp.buckets import read_bucket
 
     project, held = store.held_state()
@@ -141,7 +144,8 @@ async def set_current_image(req: NavRequest) -> dict:
     """Persist the browser's current image position into ``GuiState.dataset``: the open project
     and its selection read as one value (:meth:`~tcip_web.state.StateStore.held_state`), the
     index replaced, held once :meth:`~tcip_web.state.StateStore.mutate` admits that project
-    under the lock."""
+    under the lock.
+    """
     project, held = store.held_state()
     dataset = held.dataset
     n = len(dataset.image_list)

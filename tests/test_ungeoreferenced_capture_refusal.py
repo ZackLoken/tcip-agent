@@ -67,7 +67,8 @@ def test_build_plant_mapping_refuses_when_every_capture_carries_no_position(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A build over captures none of which carry a position this door reads refuses rather than
-    persisting a mapping with ``n_mapped == 0``."""
+    persisting a mapping with ``n_mapped == 0``.
+    """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root = dataset_root / "images"
@@ -92,7 +93,8 @@ def test_build_plant_mapping_names_the_unreadable_capture_before_the_position_cl
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A capture PIL cannot open at all is named as unreadable, not folded into the no-position
-    sentence as if it had been opened and found blank."""
+    sentence as if it had been opened and found blank.
+    """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root = dataset_root / "images"
@@ -152,7 +154,8 @@ def test_build_route_refuses_a_selected_date_with_no_captures_never_persisting_a
 ) -> None:
     """A selected date with no captures at all refuses in the shared builder, so both the build
     door and this route refuse it the same way rather than the route persisting an empty
-    mapping."""
+    mapping.
+    """
     from tcip_web.state import store
 
     project = _init(tmp_path)
@@ -193,7 +196,8 @@ def _persist_synthetic_mapping(
     """A hand-composed ``MappingBuild``, persisted through the platform's own ``persist_mapping``,
     for a delivery scenario ``build_mapping`` itself would refuse to construct (no positioned
     capture, or every capture beyond the match distance): the delivery-time refusal is what these
-    tests pin, not the build-time one, so the record is built directly."""
+    tests pin, not the build-time one, so the record is built directly.
+    """
     from tcip_mcp.dataset_layout import require_dataset_identity
     from tcip_mcp.registry_paths import stored_path
 
@@ -483,7 +487,8 @@ def test_a_blank_plant_name_is_unattributed_by_the_one_predicate(
 
 def _republished(dataset_root: Path, date: str) -> dict[str, str]:
     """Every image now under ``date`` published as a fresh bucket of that date, for a scene whose
-    capture set grew after :func:`_write_scene` published it."""
+    capture set grew after :func:`_write_scene` published it.
+    """
     images = sorted((dataset_root / "images" / date).glob("*.jpg"))
     return {date: _publish(dataset_root.parent, f"all/{date}", images)}
 
@@ -492,7 +497,8 @@ def _delivered_disclosure(
     project: Path, dataset_root: Path, preds_by_date: dict[str, str]
 ) -> dict:
     """Deliver ``preds_by_date`` through ``valley`` for both plants; the event's plant-mapping
-    disclosure."""
+    disclosure.
+    """
     res = _deliver(
         project,
         trait="currant_bloom",
@@ -516,7 +522,8 @@ def test_a_partly_positioned_scene_builds_and_delivers_with_the_count_disclosed(
 ) -> None:
     """Two images positioned, one not: both doors build, ``summary()`` reports one unattributed
     per date and in total, the load route returns the same summary, and the delivery event
-    discloses one unattributed image over the delivered date."""
+    discloses one unattributed image over the delivered date.
+    """
     from tcip_web.state import store
 
     project = _init(tmp_path)
@@ -556,7 +563,8 @@ def test_a_delivery_naming_one_of_two_mapping_dates_carries_the_delivered_scope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A mapping covering two dates, one delivered: the disclosed count is scoped to the
-    delivered date alone, never the mapping's full span."""
+    delivered date alone, never the mapping's full span.
+    """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     dates = ["2026-02-11", "2026-02-25"]
@@ -590,7 +598,8 @@ def test_a_date_recorded_with_no_capture_still_delivers_beside_an_attributed_one
     """The no-capture-at-all refusal fires only when nothing across the delivered dates
     attributes: a mapping recording one date with no capture at all beside a fully attributed
     one still delivers the attributed date's bucket. A bucket of no documents states no capture
-    date, so no delivery names the empty date itself."""
+    date, so no delivery names the empty date itself.
+    """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(
@@ -673,7 +682,8 @@ def test_a_capture_at_the_origin_is_admitted_as_positioned(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``(0.0, 0.0)`` is a real GPS position (off the coast of west Africa), never treated as
-    the absence of one: the build's own position check is ``is not None``, not truthiness."""
+    the absence of one: the build's own position check is ``is not None``, not truthiness.
+    """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root = dataset_root / "images"

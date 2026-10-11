@@ -36,7 +36,8 @@ def build_environ(worktree: Path) -> dict[str, str]:
 
 def prove_resolution(worktree: Path, env: dict[str, str]) -> Path:
     """Confirm `tcip_mcp` resolves inside `worktree` under `env`, refusing before any gate runs
-    if it instead resolves to the editable install's real target (another checkout)."""
+    if it instead resolves to the editable install's real target (another checkout).
+    """
     proc = subprocess.run(
         [sys.executable, "-c", "import tcip_mcp; print(tcip_mcp.__file__)"],
         cwd=str(worktree),

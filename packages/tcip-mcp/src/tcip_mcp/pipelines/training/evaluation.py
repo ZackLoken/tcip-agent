@@ -137,7 +137,8 @@ _AP_RECALL_POINTS = 101
 
 def iou_criterion(iou_threshold: float, *, by_mask: bool) -> dict:
     """The matcher's IoU criterion at ``iou_threshold``: over each record's ``rings`` for a mask
-    match (``by_mask``), else over its box."""
+    match (``by_mask``), else over its box.
+    """
     return {
         "kind": "mask_iou_match" if by_mask else "iou_match",
         "iou_threshold": float(iou_threshold),
@@ -154,7 +155,8 @@ def matched(
 ) -> list[dict[int, Any]]:
     """Each per-image record's class-by-class matching under ``criterion`` at ``conf``
     (:func:`~tcip_annotation.matching.class_matchings`, indices into the record's ``gt`` and
-    ``dt``), each taken from ``held`` where the same inputs were already matched."""
+    ``dt``), each taken from ``held`` where the same inputs were already matched.
+    """
     from tcip_annotation.matching import class_matchings
 
     return [
@@ -177,7 +179,8 @@ def average_precision(
     under ``criterion`` (:func:`matched`, every detection), averaged over the classes the ground
     truth's objects carry: per class, detections ranked by score across images, one a crowd
     region ignores counting neither way, precision made monotone from the right and read at
-    :data:`_AP_RECALL_POINTS` recall points. ``0.0`` for a reference holding no object."""
+    :data:`_AP_RECALL_POINTS` recall points. ``0.0`` for a reference holding no object.
+    """
     images = list(zip(per_image, matched(per_image, criterion, held=held)))
     per_class = []
     for cid in sorted(
@@ -244,7 +247,8 @@ def gt_class_avg_size(
     per_image: list[dict], class_id: int | None = None
 ) -> float:
     """Average characteristic size (:func:`~tcip_annotation.matching.box_sizes`) of the ground
-    truth's objects of ``class_id``, every class for ``None``; ``0.0`` for none."""
+    truth's objects of ``class_id``, every class for ``None``; ``0.0`` for none.
+    """
     from tcip_annotation.matching import box_sizes, xywh_corners
 
     boxes = [
@@ -265,7 +269,8 @@ def gt_class_typical_count(
     per_image: list[dict], class_id: int | None = None
 ) -> float:
     """Mean ground-truth count of ``class_id`` (all classes pooled when ``None``) over the images
-    holding any, independent of detections and confidence; ``0.0`` when no image holds one."""
+    holding any, independent of detections and confidence; ``0.0`` when no image holds one.
+    """
     counts = [len(gt_objects(rec, class_id=class_id)) for rec in per_image]
     return mean_of_present_counts(counts)
 
@@ -276,7 +281,8 @@ def localization_frac(
     """The center-match tolerance, as a fraction of the average object size, and its source: the
     ground truth's own nearest-neighbor spacing (``boxes_per_image`` one list of xywh boxes per
     image), else, when no two same-class objects sit close enough to derive it, the trait
-    revision's stated ``localization_tolerance_frac``."""
+    revision's stated ``localization_tolerance_frac``.
+    """
     from tcip_mcp.pipelines import derivations
 
     frac = derivations.derive_localization_tolerance_frac(boxes_per_image)
@@ -366,7 +372,8 @@ def scaled_to(
     criterion: dict, per_image: list[dict], class_id: int | None = None
 ) -> dict:
     """``criterion`` as it applies to ``per_image``: a center match's tolerance scaled to that
-    reference's own average object size; an IoU match unchanged."""
+    reference's own average object size; an IoU match unchanged.
+    """
     if criterion["kind"] != "center_match":
         return criterion
     return {
@@ -401,7 +408,8 @@ def governing_counts(
     class_id: int | None = None,
 ) -> dict:
     """tp/fp/fn/precision/recall/f1 of ``per_image`` matched under ``criterion`` at
-    ``conf_threshold`` (:func:`counted`), for ``class_id`` or every class."""
+    ``conf_threshold`` (:func:`counted`), for ``class_id`` or every class.
+    """
     return counted(
         matched(per_image, criterion, conf=conf_threshold), criterion, class_id
     )
@@ -413,7 +421,8 @@ def counted(
     class_id: int | None = None,
 ) -> dict:
     """tp/fp/fn/precision/recall/f1 from the per-image matchings ``by_image`` under
-    ``criterion``, for ``class_id`` or every class."""
+    ``criterion``, for ``class_id`` or every class.
+    """
     m = _count_stats(by_image, class_id)
     return {
         "tp": int(m["tp"]),
@@ -430,7 +439,8 @@ def attribute_pairs(
     """``(image_id, reference id, predicted id)`` under attribute ``column`` for each reference
     object matched to one detection of its class scoring at least ``conf``, distance first, under
     ``criterion`` scaled to ``per_image`` (:func:`matched`). A reference object unassessed for
-    that attribute contributes no pair."""
+    that attribute contributes no pair.
+    """
     from tcip_annotation.json_io import UNASSESSED
 
     pairs = []
@@ -586,7 +596,8 @@ def derive_operating_point_curve(
 
 def worst_class_count_bias(entry: dict) -> float:
     """The largest |mean per-image count bias| over the classes in one curve entry, the class this
-    conf serves worst; the pooled bias for an entry over no class."""
+    conf serves worst; the pooled bias for an entry over no class.
+    """
     return max(
         (abs(s["count_bias_mean"]) for s in entry["per_class"].values()),
         default=abs(entry["count_bias_mean"]),
@@ -596,7 +607,8 @@ def worst_class_count_bias(entry: dict) -> float:
 def pick_count_unbiased(sweep: dict) -> float:
     """The conf that minimizes the worst per-class |mean per-image count bias| (tie-break: lower
     pooled |bias|, higher F1, lower |error|, higher conf): the count-trait operating point, where
-    the model's totals match GT totals."""
+    the model's totals match GT totals.
+    """
     best = min(
         sweep["curve"],
         key=lambda c: (
@@ -629,7 +641,8 @@ def pick_f1_max(sweep: dict) -> float:
 
 def _mask_rings(mask: Any, threshold: float | None) -> list:
     """A binary (``threshold`` ``None``) or soft mask's regions as rings
-    (:func:`~tcip_annotation.mask_contours.mask_to_polygon_rings`), for a mask match."""
+    (:func:`~tcip_annotation.mask_contours.mask_to_polygon_rings`), for a mask match.
+    """
     from tcip_annotation.mask_contours import mask_to_polygon_rings
 
     m = (
@@ -642,7 +655,8 @@ def _mask_rings(mask: Any, threshold: float | None) -> list:
 
 def gt_record(bbox: list[float], category_id: int, crowd: Any) -> dict:
     """One ground-truth evaluation record: its class, its ``[x, y, w, h]`` box and its crowd flag.
-    The one shape every ground-truth record is built in."""
+    The one shape every ground-truth record is built in.
+    """
     return {
         "category_id": int(category_id),
         "bbox": bbox,
@@ -652,7 +666,8 @@ def gt_record(bbox: list[float], category_id: int, crowd: Any) -> dict:
 
 def dt_record(bbox: list[float], category_id: Any, score: Any) -> dict:
     """One detection's evaluation record: its ``[x, y, w, h]`` box as given, its class and its
-    score. The one shape every detection record is built in, whatever coordinates it is on."""
+    score. The one shape every detection record is built in, whatever coordinates it is on.
+    """
     return {
         "category_id": int(category_id),
         "bbox": bbox,
@@ -674,7 +689,8 @@ def _rows(values: Any) -> list:
 
 def _with_attributes(records: list[dict], values: Any) -> list[dict]:
     """``records``, each carrying its row of ``values`` (one id per attribute) under
-    ``attributes``; unchanged when ``values`` is ``None``."""
+    ``attributes``; unchanged when ``values`` is ``None``.
+    """
     if values is not None:
         for record, row in zip(records, _rows(values), strict=True):
             record["attributes"] = [int(v) for v in row]
@@ -692,7 +708,8 @@ def result_record(
     forward, corner ``boxes``, ``scores``, ``labels``, and ``attributes`` and ``masks`` where it
     carries them) and its ground-truth records ``gt`` as the :func:`prediction_record` they make,
     each mask's polygons as its detection's ``rings``. Boxes, scores, labels and masks differing
-    in length refuse (``ValueError``)."""
+    in length refuse (``ValueError``).
+    """
     dt = _with_attributes(
         [
             detection_record(box, label, score)
@@ -738,7 +755,8 @@ def prediction_record(
     ``image_id`` and ``region`` when given: the detection records ``dt`` and ground-truth records
     ``gt`` of a ``width`` x ``height`` frame whose forward kept ``count`` detections under ``cap``
     (``None`` where no forward capped it); ``region`` is the part of that frame,
-    ``(x0, y0, x1, y1)``, its detections and ground truth were kept to and are scored over."""
+    ``(x0, y0, x1, y1)``, its detections and ground truth were kept to and are scored over.
+    """
     return {
         "width": int(width),
         "height": int(height),
@@ -795,7 +813,8 @@ def records_from_detector(
     ``include_masks`` (instance segmentation) every ground-truth and detection record also
     carries its mask's ``rings``, the predicted masks cut at the platform's binarize threshold
     (:func:`~tcip_mcp.pipelines.measurement.mask_geometry.resolve_binarize_threshold`), for a mask
-    match."""
+    match.
+    """
     gt = gt_records(target)
     record = result_record(
         {
@@ -832,7 +851,8 @@ def records_from_detector(
 def subject_category_ids(annotations) -> dict[str, int]:
     """Each box-derivable annotation's subject mapped to a 1-indexed COCO category id (background
     0, like detector labels), in first-seen order; a geometry-less label and a ``Point`` mint
-    none."""
+    none.
+    """
     from tcip_annotation.state import box_derivable
 
     names: list[str] = []
@@ -860,7 +880,8 @@ def records_from_annotation(
     to the one category id it has in every image scored together
     (:func:`subject_category_ids`), this image's own map when ``None``. A geometry-less annotation
     and a :class:`~tcip_annotation.state.Point` contribute no record: neither has a region to
-    score."""
+    score.
+    """
     from tcip_annotation.matching import match_record
     from tcip_annotation.state import (
         box_derivable,
@@ -910,7 +931,8 @@ def bucket_reads(
     bucket's record names a document for it, that prediction document
     (:func:`~tcip_annotation.json_io.read_predictions`, ``None`` where it names none), each read
     once. An image with no label document refuses
-    (:class:`~tcip_annotation.json_io.UnreadableLabelDocumentError`)."""
+    (:class:`~tcip_annotation.json_io.UnreadableLabelDocumentError`).
+    """
     from pathlib import Path
 
     from tcip_annotation.json_io import read_label_document, read_predictions
@@ -937,7 +959,8 @@ class ScoredImage(NamedTuple):
     opening the image through it), its ground truth, the bucket's predictions for it (``None``
     where the bucket names no document for it, which leaves it out of every aggregate), and its
     governing matching, indices into ``gt`` and ``preds`` (every object missed where
-    unpredicted)."""
+    unpredicted).
+    """
 
     header: Any
     gt: list
@@ -958,7 +981,8 @@ def score_bucket(
     predicted images' records, one subject-to-id map across every image, by mask when any
     annotation is a polygon, under the criterion that governs (``trait``'s own when given, the IoU
     convention at ``iou_threshold`` otherwise), and each image as a :class:`ScoredImage` carrying
-    the matching that scoring made of it."""
+    the matching that scoring made of it.
+    """
     from tcip_annotation.matching import Matching, merged
     from tcip_annotation.state import polygonal
     from tcip_mcp.pipelines.raster_source import SourceHeader
@@ -1259,7 +1283,8 @@ def detection_metrics(
     beside them as ``iou_precision``/``iou_recall``/``iou_f1`` and ``map50_role`` labels the
     convention's numbers comparability only. ``matchings`` holds each image's governing
     matching (:func:`matched`), the one the counts sum; every matching is made once per distinct
-    criterion and detection set."""
+    criterion and detection set.
+    """
     criterion = resolve_match_criterion(
         trait, per_image, iou_threshold=iou_threshold, by_mask=by_mask
     )

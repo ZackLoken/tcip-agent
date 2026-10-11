@@ -1,5 +1,6 @@
 """Inference MCP tools: running a checkpoint and publishing its predictions as a bucket, and
-delivering a bucket's per-image counts."""
+delivering a bucket's per-image counts.
+"""
 
 from __future__ import annotations
 
@@ -58,7 +59,8 @@ def infer(
     the error dict naming a refusal. ``progress`` is called with ``(done, total)`` images once the
     pass is prepared and after each image, and ``canceled`` asked before each image: once it
     answers true the pass stops at that image boundary and publishes the documents predicted, or
-    publishes nothing when it predicted none."""
+    publishes nothing when it predicted none.
+    """
     from tcip_mcp.assessment import read_assessment
     from tcip_mcp.buckets import pass_documents, publish, source_root
     from tcip_mcp.dataset_layout import bucket_key, parse_capture_dir
@@ -257,7 +259,8 @@ def _image_results(
     canceled: Callable[[], bool] | None,
 ):
     """The pass's prediction per image, one image at a time, reporting each and stopping at the
-    image boundary a cancel is first seen at."""
+    image boundary a cancel is first seen at.
+    """
     total = len(p.paths)
     if progress is not None:
         progress(0, total)
@@ -327,6 +330,7 @@ def run_inference(
             the project records, under the execution record that progress recorded; a stated
             value it records differently refuses by name, and so does a different checkpoint,
             raster, assessment, tile batch size or mask choice.
+
     """
     return infer(
         project,
@@ -348,7 +352,8 @@ def run_inference(
 def _progress_key(project: Path, root: Path, bucket: str, segment: str) -> Key:
     """One raster pass's progress record toward the bucket ``bucket`` under the dataset ``root``,
     kept under ``project``: the identity (``segment="identity"``) or one flushed tile batch
-    (``segment=f"batch-{index:06d}"``)."""
+    (``segment=f"batch-{index:06d}"``).
+    """
     return Key(
         RASTER_PASS_PROGRESS_STORE,
         str(project),
@@ -358,7 +363,8 @@ def _progress_key(project: Path, root: Path, bucket: str, segment: str) -> Key:
 
 def _progress_keys(project: Path, root: Path, bucket: str) -> list[Key]:
     """Every progress record a raster pass toward ``bucket`` under ``root`` left under
-    ``project``."""
+    ``project``.
+    """
     return store.keys(
         RASTER_PASS_PROGRESS_STORE,
         str(project),
@@ -380,7 +386,8 @@ def _raster_pass(
 ) -> dict:
     """The one tiled pass over the open raster ``reader`` (``label`` naming it): its identity
     recorded first on a fresh pass, each flushed tile batch recorded as it lands, the batches
-    already recorded fed back in on a resumed one."""
+    already recorded fed back in on a resumed one.
+    """
     prior: dict[str, list] | None = None
     if resumed:
         indexed = sorted(
@@ -422,7 +429,8 @@ def _clear_raster_pass_progress(
     project: Path, root: Path, bucket: str
 ) -> None:
     """Delete every progress record a raster pass toward ``bucket`` under ``root`` left, in one
-    transaction: a published pass has nothing left to resume."""
+    transaction: a published pass has nothing left to resume.
+    """
     keys = _progress_keys(project, root, bucket)
     if not keys:
         return
@@ -457,6 +465,7 @@ def deliver_per_image_counts(
         output_path: The CSV to write.
         trait: The trait whose confirmed per-image-count operationalization this rests on.
         acknowledgment_id: A breeder's recorded acknowledgment of this unvalidated result.
+
     """
     from tcip_mcp.delivery import DeliveryRefusedError
     from tcip_mcp.operationalization import OperationalizationRefusedError

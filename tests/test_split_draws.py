@@ -1,6 +1,7 @@
 """Split sensitivity as a sweep factor: split_draws pairs data.split.seed as a grid axis with
 every sampled point through Ray's own BasicVariantGenerator(constant_grid_search=True), and the
-sweep's outcome groups the trials by point and picks the best by mean over each point's draws."""
+sweep's outcome groups the trials by point and picks the best by mean over each point's draws.
+"""
 
 from __future__ import annotations
 
@@ -26,7 +27,8 @@ THREE_CHOICE_SPACE = {
 
 def _never_search(ran: list):
     """A ``tune_search`` stand-in that records it ran, for a refusal test to assert on: a
-    refused sweep must never reach the search at all."""
+    refused sweep must never reach the search at all.
+    """
 
     def fake_search(**kw):
         ran.append(1)
@@ -36,7 +38,8 @@ def _never_search(ran: list):
 
 def _search(monkeypatch) -> dict:
     """Replace ``tune_search`` with a search that records the keywords it ran with into the
-    returned dict and runs no trial."""
+    returned dict and runs no trial.
+    """
     captured: dict = {}
 
     def fake_search(**kw):
@@ -52,7 +55,8 @@ def test_real_hpo_base_config_is_admitted_by_preflight(
     tmp_path, real_hpo_base_config
 ):
     """Holds the fixture's own claim: preflight_config, the sweep door's own admissibility
-    check, reports the fixture valid with no issues."""
+    check, reports the fixture valid with no issues.
+    """
     from tcip_mcp.tools.training_tools import preflight_config
 
     result = preflight_config(tmp_path, real_hpo_base_config)
@@ -72,9 +76,10 @@ def test_run_hyperparameter_search_refuses_split_draws_below_one(
     monkeypatch,
     value,
 ):
-    """guard. split_draws at or below one (zero, a negative int, or the bool False, which reads
+    """Guard. split_draws at or below one (zero, a negative int, or the bool False, which reads
     as the integer it names) refuses by name at the door's own argument leg, before the search is
-    ever reached, with no seed axis in play to confuse the reason."""
+    ever reached, with no seed axis in play to confuse the reason.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     ran = []
@@ -101,8 +106,9 @@ def test_run_hyperparameter_search_refuses_a_non_integer_split_draws_by_direct_c
     real_hpo_base_config,
     monkeypatch,
 ):
-    """coverage. A fractional split_draws (reachable by a direct Python call alone, since the MCP
-    boundary rejects it) refuses as not a draw count rather than raising out of range(2.5)."""
+    """Coverage. A fractional split_draws (reachable by a direct Python call alone, since the MCP
+    boundary rejects it) refuses as not a draw count rather than raising out of range(2.5).
+    """
     import tcip_mcp.tools.training_tools as tt
 
     ran = []
@@ -131,9 +137,10 @@ def test_run_hyperparameter_search_refuses_a_split_draws_of_another_type_by_dire
     monkeypatch,
     value,
 ):
-    """guard. A split_draws of a type that does not order against an integer (reachable by a
+    """Guard. A split_draws of a type that does not order against an integer (reachable by a
     direct Python call alone) refuses as not a draw count, rather than raising TypeError out of
-    the audited door where the comparison deciding whether a bound is read would meet it."""
+    the audited door where the comparison deciding whether a bound is read would meet it.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     ran = []
@@ -162,11 +169,12 @@ def test_run_hyperparameter_search_refuses_n_trials_not_a_count_when_a_bound_is_
     monkeypatch,
     value,
 ):
-    """guard. n_trials that is not a positive count refuses at the budget leg on a call that
+    """Guard. n_trials that is not a positive count refuses at the budget leg on a call that
     reads a bound (here, a paired launch with no stated trial_budget), the search never reached:
     a negative n_trials counts zero through Ray's own generator while Tuner.fit runs it
     unbounded, and a zero n_trials launches nothing, so the bound the leg exists to check would
-    admit exactly what it should refuse without this clause."""
+    admit exactly what it should refuse without this clause.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     ran = []
@@ -195,9 +203,10 @@ def test_run_hyperparameter_search_admits_n_trials_not_a_count_at_one_draw_with_
     monkeypatch,
     value,
 ):
-    """coverage. n_trials=0 or -1 at one draw with no trial_budget reads no bound at all, so the
+    """Coverage. n_trials=0 or -1 at one draw with no trial_budget reads no bound at all, so the
     budget leg is never called: the search is reached and n_trials is passed through unread by
-    the door."""
+    the door.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     captured = _search(monkeypatch)
@@ -220,9 +229,10 @@ def test_run_hyperparameter_search_refuses_split_draws_above_one_with_no_trial_b
     real_hpo_base_config,
     monkeypatch,
 ):
-    """guard. A launch (never a relaunch) above one draw that states no trial_budget refuses
+    """Guard. A launch (never a relaunch) above one draw that states no trial_budget refuses
     naming the budget Ray's own variant count over the built space would admit, the search never
-    reached: the paired grid multiplies a total the call never stated."""
+    reached: the paired grid multiplies a total the call never stated.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     ran = []
@@ -252,8 +262,9 @@ def test_run_hyperparameter_search_refuses_a_trial_budget_not_a_count(
     monkeypatch,
     value,
 ):
-    """coverage. trial_budget that is not a positive int (a bool included, by name) refuses as
-    not a count of trials, at one draw where the keyword is new."""
+    """Coverage. trial_budget that is not a positive int (a bool included, by name) refuses as
+    not a count of trials, at one draw where the keyword is new.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     ran = []
@@ -283,7 +294,8 @@ def test_run_hyperparameter_search_refuses_split_draws_when_a_bound_selection_wo
     monkeypatch,
 ):
     """A selection whose train-plus-val members hold one foreground group refuses the sweep
-    before minting, through the first point's own resolution."""
+    before minting, through the first point's own resolution.
+    """
     import tcip_mcp.tools.training_tools as tt
     from tests.test_selection_binding import one_foreground_group_selection
 
@@ -514,7 +526,8 @@ def test_tune_search_refuses_split_draws_without_the_axis_in_param_space(
 ):
     """tune_search itself, called directly (not through run_hyperparameter_search's own
     axis-adding), raises rather than pairing nothing: a caller building the space by hand must
-    include the axis."""
+    include the axis.
+    """
     from tcip_mcp.pipelines.training.hpo import tune_search
 
     with pytest.raises(ValueError, match="data.split.seed"):
@@ -581,7 +594,8 @@ def test_run_hyperparameter_search_refuses_a_caller_split_seed_axis_at_one_draw(
 ):
     """A caller-supplied data.split.seed axis with split_draws at 1 (unset) refuses whatever
     the sampler and however the axis is typed; tune_search must never be reached, and the error
-    dict carries the remedy."""
+    dict carries the remedy.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     ran = []
@@ -611,9 +625,10 @@ def test_run_hyperparameter_search_refuses_split_draws_zero_before_the_seed_axis
     real_hpo_base_config,
     monkeypatch,
 ):
-    """guard. The door's own argument leg refuses split_draws=0 by name before the seed-axis leg
+    """Guard. The door's own argument leg refuses split_draws=0 by name before the seed-axis leg
     ever runs: a caller-supplied data.split.seed axis at split_draws=0 hears the below-one
-    reason, never the seed-axis one, since the argument leg runs first for every call."""
+    reason, never the seed-axis one, since the argument leg runs first for every call.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     ran = []
@@ -642,7 +657,8 @@ def test_caller_split_seed_refusal_tolerates_an_infinite_split_draws_value():
     """A JSON Infinity literal decodes to float("inf") through the store's own plain
     json.loads even though its encode refuses to write one, so a manifest of unknown
     provenance can carry it; int(float("inf")) raises OverflowError. It is unreadable as a draw
-    count and refuses nothing, the same tolerance an unreadable string already has."""
+    count and refuses nothing, the same tolerance an unreadable string already has.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     assert (
@@ -661,7 +677,8 @@ def test_run_hyperparameter_search_refuses_repeated_split_draw_seeds(
 ):
     """split_draw_seeds naming the same seed twice is not a spread over distinct partitions,
     and could read complete and eligible on one seed twice against group_split_draws's own
-    rule; refused by the repeated value's own name."""
+    rule; refused by the repeated value's own name.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     ran = []
@@ -690,7 +707,8 @@ def test_run_hyperparameter_search_admits_distinct_split_draw_seeds_beside_the_r
     monkeypatch,
 ):
     """The same call with distinct seeds is admitted, in the same module as the repeated-seed
-    refusal above, so the refusal is proven to reject only the repeat, not the pair."""
+    refusal above, so the refusal is proven to reject only the repeat, not the pair.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     _search(monkeypatch)
@@ -716,7 +734,8 @@ def test_run_hyperparameter_search_admits_the_paired_path_with_a_param_space_bes
     monkeypatch,
 ):
     """split_draws=2 with distinct split_draw_seeds admits a param_space naming no data.* axis,
-    the seed axis added beside it."""
+    the seed axis added beside it.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     captured = _search(monkeypatch)
@@ -743,7 +762,8 @@ def test_run_hyperparameter_search_admits_a_space_naming_no_seed_axis_at_one_dra
     monkeypatch,
 ):
     """A space naming no data.split.seed axis is admitted at split_draws=1 (unset),
-    tune_search is reached, and the space passes through unaltered."""
+    tune_search is reached, and the space passes through unaltered.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     captured = _search(monkeypatch)
@@ -769,7 +789,8 @@ def test_run_hyperparameter_search_reports_the_seed_axis_refusal_over_a_prefligh
 ):
     """A call that trips both this refusal and preflight (an unimportable builder here) answers
     this refusal: caller_split_seed_refusal is checked before preflight runs, and every branch
-    ahead of that call is total, so the insertion point is always reached first."""
+    ahead of that call is total, so the insertion point is always reached first.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     ran = []
@@ -808,7 +829,8 @@ def test_the_seed_axis_refusal_answers_before_a_later_points_schema_error(
     monkeypatch,
 ):
     """A later point the schema refuses (a batch size of 0) is checked after the sweep-level
-    refusals, so a caller-supplied seed axis answers first."""
+    refusals, so a caller-supplied seed axis answers first.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     ran = []
@@ -852,7 +874,8 @@ def test_run_hyperparameter_search_admits_split_draws_bound_to_a_selection_and_s
     """A base_config bound to a selection is no longer refused: run_hyperparameter_search sets
     data.split.redraw_within_selection on its own copy, so every trial redraws train and val
     inside the selection's own members instead of its one recorded partition, and the recorded
-    sweep manifest's own base_config carries the claim."""
+    sweep manifest's own base_config carries the claim.
+    """
     import tcip_mcp.tools.training_tools as tt
     from tcip_mcp.tools.data_tools import draw_splits
     from tests.test_selection_binding import (
@@ -908,7 +931,8 @@ def test_a_bound_sweep_reads_and_redraws_its_selection_once_on_opening(
     tmp_path, monkeypatch
 ):
     """The first point's resolution is the one read and the one redraw of a bound sweep's
-    selection before its directory is opened."""
+    selection before its directory is opened.
+    """
     import tcip_mcp.pipelines.data.selection as selection_mod
     import tcip_mcp.pipelines.data.split_construction as split_mod
     import tcip_mcp.tools.training_tools as tt
@@ -971,7 +995,8 @@ def test_run_hyperparameter_search_admits_split_draws_bound_with_auto_val_false(
     tmp_path, monkeypatch
 ):
     """A bound base_config does not read auto_val (the selection branch binds ahead of it), so
-    auto_val=False no longer refuses it the way it refuses a drawn config."""
+    auto_val=False no longer refuses it the way it refuses a drawn config.
+    """
     import tcip_mcp.tools.training_tools as tt
     from tcip_mcp.tools.data_tools import draw_splits
     from tests.test_selection_binding import (
@@ -1016,7 +1041,8 @@ def test_run_hyperparameter_search_admits_split_draws_and_derives_seeds_from_the
     monkeypatch,
 ):
     """The default draw seeds are the base config's own data.split.seed plus the draw index, and
-    the space Ray actually searches carries the paired grid axis."""
+    the space Ray actually searches carries the paired grid axis.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     captured = _search(monkeypatch)
@@ -1084,7 +1110,8 @@ def test_run_hyperparameter_search_admits_split_draws_with_a_native_search_alg(
     """Every native search_alg (random, grid, variant_generator) builds the paired
     BasicVariantGenerator; only a backend searcher is refused. Each budget is Ray's own count
     over the default space at two draws: three batch_size values under grid, a sampled space
-    under variant_generator."""
+    under variant_generator.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     captured = _search(monkeypatch)
@@ -1143,7 +1170,8 @@ def test_run_hyperparameter_search_admits_split_draws_with_explicit_auto_val_tru
     monkeypatch,
 ):
     """data.auto_val=True explicitly stated (not merely defaulted) admits the same as omitting
-    it."""
+    it.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     cfg = dict(real_hpo_base_config)
@@ -1171,7 +1199,8 @@ def test_run_hyperparameter_search_admits_split_draws_with_a_baseline_not_naming
     monkeypatch,
 ):
     """baseline_params is only refused when it names data.split.seed itself; a baseline over
-    the ordinary space stays admitted."""
+    the ordinary space stays admitted.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     captured = _search(monkeypatch)
@@ -1198,7 +1227,8 @@ def test_run_hyperparameter_search_admits_a_bare_seed_axis_beside_split_draws(
     monkeypatch,
 ):
     """The bare 'seed' axis (the run seed) is a different key from data.split.seed and stays
-    admitted beside the draws."""
+    admitted beside the draws.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     captured = _search(monkeypatch)
@@ -1227,10 +1257,11 @@ def test_run_hyperparameter_search_refuses_a_budget_that_admits_fewer_than_every
     real_hpo_base_config,
     monkeypatch,
 ):
-    """coverage. A stated trial_budget the count exceeds, but not at one draw, refuses
+    """Coverage. A stated trial_budget the count exceeds, but not at one draw, refuses
     naming the count, the budget and how many draws it admits: Ray's own count over the sample
     space at n_trials=4, split_draws=3, random is 12 (4 per draw), which trial_budget=10 does
-    not fit whole, admitting 2 draws."""
+    not fit whole, admitting 2 draws.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     ran = []
@@ -1260,9 +1291,10 @@ def test_run_hyperparameter_search_refuses_a_budget_at_the_quotient_boundary(
     real_hpo_base_config,
     monkeypatch,
 ):
-    """coverage. Ray's own count over a three-choice space at n_trials=2, split_draws=3, grid
+    """Coverage. Ray's own count over a three-choice space at n_trials=2, split_draws=3, grid
     is 18 (6 per draw); trial_budget=6 is not above the per-draw count, so this is the quotient
-    branch (1 admitted draw), never the exceeds-at-one-draw branch."""
+    branch (1 admitted draw), never the exceeds-at-one-draw branch.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     ran = []
@@ -1294,9 +1326,10 @@ def test_run_hyperparameter_search_refuses_a_budget_a_single_draw_already_exceed
     real_hpo_base_config,
     monkeypatch,
 ):
-    """coverage. Ray's own count over a three-choice space at n_trials=2, split_draws=2, grid
+    """Coverage. Ray's own count over a three-choice space at n_trials=2, split_draws=2, grid
     is 12 (6 per draw); trial_budget=5 is below even one draw's own count, so the sweep exceeds
-    the budget at one draw, the exceeds branch, never a positive admitted-draws quotient."""
+    the budget at one draw, the exceeds branch, never a positive admitted-draws quotient.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     ran = []
@@ -1330,8 +1363,9 @@ def test_run_hyperparameter_search_admits_a_budget_the_count_fits_and_records_it
     real_hpo_base_config,
     monkeypatch,
 ):
-    """coverage. n_trials=2, split_draws=3, random over the sample space counts 6, which
-    trial_budget=6 admits exactly; the manifest records trial_budget verbatim."""
+    """Coverage. n_trials=2, split_draws=3, random over the sample space counts 6, which
+    trial_budget=6 admits exactly; the manifest records trial_budget verbatim.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     _search(monkeypatch)
@@ -1358,9 +1392,10 @@ def test_run_hyperparameter_search_refuses_a_one_draw_launch_a_stated_budget_exc
     real_hpo_base_config,
     monkeypatch,
 ):
-    """coverage. At one draw a caller need state nothing new, but a stated trial_budget is
+    """Coverage. At one draw a caller need state nothing new, but a stated trial_budget is
     still checked: n_trials=5 over the sample space (random, the default alg) counts 5, which
-    trial_budget=3 does not admit, the exceeds branch since split_draws is 1."""
+    trial_budget=3 does not admit, the exceeds branch since split_draws is 1.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     ran = []
@@ -1389,8 +1424,9 @@ def test_run_hyperparameter_search_admits_a_one_draw_launch_with_no_stated_budge
     real_hpo_base_config,
     monkeypatch,
 ):
-    """coverage. One draw with no trial_budget reads no bound at all: the manifest still
-    gains the key, null, so a relaunch has something to read back."""
+    """Coverage. One draw with no trial_budget reads no bound at all: the manifest still
+    gains the key, null, so a relaunch has something to read back.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     _search(monkeypatch)
@@ -1415,8 +1451,9 @@ def test_run_hyperparameter_search_relaunch_with_no_budget_replays_as_recorded(
     real_hpo_base_config,
     monkeypatch,
 ):
-    """coverage. A relaunch (relaunched_from given) with no trial_budget reads no bound at
-    all, whatever split_draws says: the door counts nothing and the search is reached."""
+    """Coverage. A relaunch (relaunched_from given) with no trial_budget reads no bound at
+    all, whatever split_draws says: the door counts nothing and the search is reached.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     source = opened_sweep(tmp_path, real_hpo_base_config).name
@@ -1442,8 +1479,9 @@ def test_run_hyperparameter_search_relaunch_with_a_budget_is_still_checked(
     real_hpo_base_config,
     monkeypatch,
 ):
-    """coverage. A relaunch that does name a trial_budget is checked exactly as a launch is:
-    the count (2, one draw's worth times two draws under random) exceeds trial_budget=1."""
+    """Coverage. A relaunch that does name a trial_budget is checked exactly as a launch is:
+    the count (2, one draw's worth times two draws under random) exceeds trial_budget=1.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     source = opened_sweep(tmp_path, real_hpo_base_config).name
@@ -1477,8 +1515,9 @@ def test_run_hyperparameter_search_refuses_a_categorical_with_no_choices_before_
     split_draws,
     trial_budget,
 ):
-    """coverage. A param_space naming a categorical axis with no choices key is not a search
-    space, whether or not a bound is read: the sweep refuses it before minting."""
+    """Coverage. A param_space naming a categorical axis with no choices key is not a search
+    space, whether or not a bound is read: the sweep refuses it before minting.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     ran = []
@@ -1508,8 +1547,9 @@ def test_run_hyperparameter_search_refuses_an_inverted_int_bound_before_minting(
     monkeypatch,
     search_alg,
 ):
-    """coverage. An int axis whose low exceeds high names no value to train, gridded or
-    sampled: the sweep refuses it by name before minting."""
+    """Coverage. An int axis whose low exceeds high names no value to train, gridded or
+    sampled: the sweep refuses it by name before minting.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     ran = []
@@ -1536,7 +1576,8 @@ def test_run_hyperparameter_search_refuses_an_inverted_int_bound_before_minting(
 
 def test_a_sampled_int_axis_over_a_large_range_is_drawn_from_its_bounds():
     """A sampled int axis is drawn from its bounds and never enumerated: the space the sweep
-    builds draws a value from a million-wide range."""
+    builds draws a value from a million-wide range.
+    """
     from tcip_mcp.pipelines.training.hpo import _to_tune_space
 
     drawn = _to_tune_space({"x": {"type": "int", "low": 0, "high": 10**6}})[
@@ -1549,7 +1590,8 @@ def test_a_sampled_int_axis_over_a_large_range_is_drawn_from_its_bounds():
 @pytest.mark.parametrize("end", [-(2**63), 2**63 - 1])
 def test_a_sampled_int_axis_reaches_each_end_of_the_int64_values(end):
     """Both ends of the int64 values the sampler draws are admitted and drawn through the real
-    space: an axis holding only that end draws it, and one past it refuses naming the axis."""
+    space: an axis holding only that end draws it, and one past it refuses naming the axis.
+    """
     from tcip_mcp.pipelines.training.hpo import _to_tune_space
 
     assert (
@@ -1607,7 +1649,8 @@ def test_run_hyperparameter_search_refuses_a_grid_axis_past_its_bound_by_name(
 ):
     """A gridded int axis of a million values, past the one bound a grid axis may enumerate,
     refuses before minting, naming the axis, its bounds and its span, whether or not a trial
-    budget is read."""
+    budget is read.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     ran: list = []
@@ -1640,8 +1683,9 @@ def test_run_hyperparameter_search_counts_an_empty_param_space_at_one_draw_as_it
     real_hpo_base_config,
     monkeypatch,
 ):
-    """coverage. An empty param_space at one draw is counted as it is, no space substituted:
-    n_trials=2 under grid counts 2, which trial_budget=1 does not admit."""
+    """Coverage. An empty param_space at one draw is counted as it is, no space substituted:
+    n_trials=2 under grid counts 2, which trial_budget=1 does not admit.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     ran = []
@@ -1670,9 +1714,10 @@ def test_run_hyperparameter_search_an_empty_param_space_above_one_draw_counts_th
     real_hpo_base_config,
     monkeypatch,
 ):
-    """coverage. Above one draw, an empty param_space runs the seed axis alone (the fact
+    """Coverage. Above one draw, an empty param_space runs the seed axis alone (the fact
     stated in The fact): at n_trials=1, split_draws=2, grid,
-    the count is 2 (one per draw), so trial_budget=1 refuses it and trial_budget=2 admits it."""
+    the count is 2 (one per draw), so trial_budget=1 refuses it and trial_budget=2 admits it.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     ran = []
@@ -1725,7 +1770,8 @@ def _trial_rows(
     """Each ``(lr, seed, value)`` trial opened under ``sweep`` by its own producer
     (``training_tools.open_trial``), ``value`` logged as its ``selection`` through the envelope's
     own sink and the trial ended ``completed``, or ``failed`` with nothing logged when ``value``
-    is ``None``; the rows the project's listing reads for them, in that order."""
+    is ``None``; the rows the project's listing reads for them, in that order.
+    """
     from tcip_mcp.experiments import (
         project_of_run,
         run_rows,
@@ -1757,7 +1803,8 @@ def _trial_rows(
 
 def _two_draw_sweep(project, real_hpo_base_config):
     """A two-draw sweep over ``real_hpo_base_config`` opened by its own writer (``open_sweep``):
-    its objective is lower=better and its seeds are 42 and 43. Returns its directory."""
+    its objective is lower=better and its seeds are 42 and 43. Returns its directory.
+    """
     from tests._verified_checkpoint_fixtures import opened_sweep
 
     return opened_sweep(
@@ -1786,7 +1833,8 @@ def test_a_sweeps_outcome_groups_trials_by_point_and_picks_the_best_by_mean(
     real_hpo_base_config,
 ):
     """Two points, two draws each; real_hpo_base_config's own metric is lower=better, so the
-    point with the lower mean wins, and every point keeps its own block."""
+    point with the lower mean wins, and every point keeps its own block.
+    """
     outcome = _outcome(
         tmp_path,
         real_hpo_base_config,
@@ -1843,7 +1891,8 @@ def test_a_sweeps_outcome_never_picks_a_repeated_point_that_never_completed_ever
     while the point's other planned seed fails. A count of complete trials alone would call
     that eligible on a mean over one seed twice, and its low value (0.5) would beat the fully
     completed point (0.85) under this fixture's lower-is-better metric; grouping by the planned
-    seeds themselves keeps it ineligible."""
+    seeds themselves keeps it ineligible.
+    """
     outcome = _outcome(
         tmp_path,
         real_hpo_base_config,
@@ -1882,7 +1931,8 @@ def test_group_split_draws_with_no_planned_seeds_groups_a_sweep_without_the_axis
 ):
     """Trials with no data.split.seed axis at all (a sweep that never asked for draws) still
     group cleanly with planned_seeds=[]: one trivially-complete block per distinct point, and a
-    point whose trial failed is not eligible."""
+    point whose trial failed is not eligible.
+    """
     from tcip_mcp.experiments import group_split_draws
     from tests._verified_checkpoint_fixtures import opened_sweep
 
@@ -1912,7 +1962,8 @@ def test_group_split_draws_ineligible_when_a_repeated_point_never_completes_ever
     """A point Ray sampled twice under the same seed (grid search repeats every point per
     sample; a categorical-only random space collides) with its other planned seed failing:
     two complete values reach the split count, but only one of the two planned seeds ever
-    completed, so the point is not eligible on a mean over that one seed twice."""
+    completed, so the point is not eligible on a mean over that one seed twice.
+    """
     from tcip_mcp.experiments import group_split_draws
 
     trials = _trial_rows(
@@ -1940,7 +1991,8 @@ def test_tune_search_split_draws_end_to_end_pairs_every_point_with_every_seed(
 ):
     """A real Ray sweep over a trivial objective: split_draws=2 pairs the seed grid with every
     sampled point, so each of the two sampled lr points trains once per seed, each trial marking
-    the point it was handed in a file of its own."""
+    the point it was handed in a file of its own.
+    """
     pytest.importorskip("ray")
 
     from tcip_mcp.pipelines.training.hpo import tune_search
@@ -1981,7 +2033,8 @@ def test_tune_search_split_draws_end_to_end_pairs_every_point_with_every_seed(
 def _one_source_tiled_cfg(images_dir) -> dict:
     """A base config wrapping a one-source tiled mosaic, the shape ``auto_train_val`` takes
     into ``spatial_single_source_split`` when tiling is on and fewer than two stems are
-    admitted, given a ``model_source`` block the way ``real_hpo_base_config`` gives its own."""
+    admitted, given a ``model_source`` block the way ``real_hpo_base_config`` gives its own.
+    """
     return training_config(
         DETECTION_SOURCE,
         {
@@ -2009,7 +2062,8 @@ def test_run_hyperparameter_search_refuses_split_draws_over_a_single_source_spat
     """One admitted source under a built-in config of a task that tiles, with tiling on, resolves
     to a split over its own pixels, whose partition no draw of data.split.seed varies:
     split_draws above 1 refuses, naming the one admitted source and its split, and never reaches
-    the search."""
+    the search.
+    """
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
     import tcip_mcp.tools.training_tools as tt
@@ -2048,7 +2102,8 @@ def test_run_hyperparameter_search_admits_a_single_source_spatial_config_at_one_
     monkeypatch,
 ):
     """The identical single-source config that refuses above 1 is admitted at split_draws=1,
-    since split_draws governs nothing there."""
+    since split_draws governs nothing there.
+    """
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
     import tcip_mcp.tools.training_tools as tt
@@ -2079,7 +2134,8 @@ def test_run_hyperparameter_search_admits_split_draws_over_a_two_source_tiled_co
     monkeypatch,
 ):
     """An unbound, built-in detection config with tiling on that admits two or more sources
-    resolves to a drawn split, so split_draws above 1 mints the sweep."""
+    resolves to a drawn split, so split_draws above 1 mints the sweep.
+    """
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
     import tcip_mcp.tools.training_tools as tt
@@ -2110,7 +2166,8 @@ def test_split_draws_over_one_bespoke_source_refuse_the_validation_they_cannot_d
 ):
     """A bespoke dataset_source never takes the spatial-strip route, so one admitted source
     leaves nothing to hold a validation side out of: the sweep refuses naming
-    ``auto_val=False`` rather than training each draw without validation."""
+    ``auto_val=False`` rather than training each draw without validation.
+    """
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
     import tcip_mcp.tools.training_tools as tt
@@ -2153,7 +2210,8 @@ def test_run_hyperparameter_search_reads_an_earlier_legs_reason_before_this_one(
 ):
     """A config an earlier leg already refuses (here, ``data.auto_val`` off) reads
     that leg's own reason, never the spatial split's: that leg reads the first point's
-    resolution, which a config an earlier leg rejected never reaches."""
+    resolution, which a config an earlier leg rejected never reaches.
+    """
     import tcip_mcp.tools.training_tools as tt
 
     ran = []

@@ -246,7 +246,8 @@ def tuple_constants() -> dict[str, tuple[str, ...]]:
 
 def platform_panel_event_constants() -> list[tuple[str, str]]:
     """Each named panel-event constant ``tcip_mcp.web_client`` declares (``PANEL_EVENT_*``), in
-    the module's own declaration order."""
+    the module's own declaration order.
+    """
     from tcip_mcp import web_client
 
     return [

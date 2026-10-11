@@ -1,5 +1,6 @@
 """What the vision tools draw, read off the rendered pixels: per-ring mask coverage and the
-failure-case layers."""
+failure-case layers.
+"""
 
 from __future__ import annotations
 
@@ -44,7 +45,8 @@ def _red_over_gray(px: Image.Image, xy: tuple[int, int]) -> int:
 @pytest.fixture
 def split_instance_dataset(tmp_path: Path) -> Path:
     """A dataset whose one image carries a two-region ground-truth mask, each region far from
-    the other."""
+    the other.
+    """
     from tcip_annotation.state import Annotation, Polygon
     from tests._producer_fixtures import label_image
 

@@ -1,5 +1,6 @@
 """``evaluate_model`` and the full-frame runner: the density each regime caps its frames at, a
-saturated cap reported, the execution record each run records, and the gate's refusals."""
+saturated cap reported, the execution record each run records, and the gate's refusals.
+"""
 
 from __future__ import annotations
 
@@ -30,7 +31,8 @@ def test_gating_path_runs_at_the_density_the_evaluated_reference_derives(
     tmp_path,
 ):
     """The door's own full-frame pass, run to the runner's own answer: its density is the one the
-    evaluated reference's frames derive, never one the caller states or the checkpoint's."""
+    evaluated reference's frames derive, never one the caller states or the checkpoint's.
+    """
     from tcip_mcp.pipelines.derivations import OBJECT_DENSITY_DERIVATION
     from tcip_mcp.tools.training_tools import evaluate_model
 
@@ -56,7 +58,8 @@ def test_gating_path_runs_at_the_density_the_evaluated_reference_derives(
 def _detector(monkeypatch, *, in_chans: int = 3, **answer) -> StubPredictor:
     """Make every predictor the evaluation builds one three-band (or ``in_chans``-band) detector
     trained at 100px tiles answering ``answer`` (:class:`StubPredictor`'s), on a 128px frame
-    holding nothing unless ``answer`` says otherwise; the detector."""
+    holding nothing unless ``answer`` says otherwise; the detector.
+    """
     return install(
         monkeypatch,
         StubPredictor(
@@ -77,7 +80,8 @@ def _detector(monkeypatch, *, in_chans: int = 3, **answer) -> StubPredictor:
 
 def _captured_execution(monkeypatch) -> dict:
     """Stand in for the diagnostic runner, recording under ``"execution"`` the execution record
-    of the pass it is handed."""
+    of the pass it is handed.
+    """
     import tcip_mcp.pipelines.training.eval_runners as runners
 
     captured: dict = {}
@@ -94,7 +98,8 @@ def test_diagnostic_path_runs_at_the_checkpoints_own_density(
     tmp_path, monkeypatch
 ):
     """The diagnostic regime holds no reference pass: its record carries the density the
-    checkpoint recorded of its training frames."""
+    checkpoint recorded of its training frames.
+    """
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.tools.training_tools import evaluate_model
 
@@ -120,7 +125,8 @@ def test_bare_checkpoint_path_reuses_its_own_stamped_tiling_and_subject(
     tmp_path, monkeypatch
 ):
     """A checkpoint path (not a run id) carries its own stamped config["data"]: evaluate_model
-    reads its tiling and its class space from it, the one record either comes from."""
+    reads its tiling and its class space from it, the one record either comes from.
+    """
     import tcip_mcp.pipelines.training.eval_runners as runners
     from tcip_mcp.tools.training_tools import evaluate_model
 
@@ -169,7 +175,8 @@ def test_bare_checkpoint_path_reuses_its_own_stamped_tiling_and_subject(
 def test_gate_translates_geometry_refusal_to_error_dict(tmp_path, monkeypatch):
     """evaluate_model is an @mcp.tool() surface that returns {"error": ...} for every other
     failure: a bare raise from run_full_frame_evaluation would surface as an MCP exception
-    instead, inconsistent with the rest of this tool's contract."""
+    instead, inconsistent with the rest of this tool's contract.
+    """
     import tcip_mcp.pipelines.training.eval_runners as runners
     from tcip_mcp.tools.training_tools import evaluate_model
 
@@ -193,7 +200,8 @@ def test_gate_translates_geometry_refusal_to_error_dict(tmp_path, monkeypatch):
 
 def test_gate_translates_unreadable_label_to_error_dict(tmp_path, monkeypatch):
     """A present, unreadable label document raised out of run_full_frame_evaluation is this
-    tool's own {"error": ...} shape too, not a raise through the MCP boundary."""
+    tool's own {"error": ...} shape too, not a raise through the MCP boundary.
+    """
     import tcip_mcp.pipelines.training.eval_runners as runners
     from tcip_annotation.json_io import UnreadableLabelDocumentError
     from tcip_mcp.tools.training_tools import evaluate_model
@@ -221,7 +229,8 @@ def test_both_regimes_refuse_a_stray_labels_dir_by_name(
     tmp_path, use_tiled_inference
 ):
     """A labels_dir holding no document for the images is refused naming it on either regime,
-    never dropped by one of them in favor of the images' own documents."""
+    never dropped by one of them in favor of the images' own documents.
+    """
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
@@ -249,7 +258,8 @@ def test_a_frame_that_hits_its_cap_is_reported_saturated(
 ):
     """A cap that actually binds on real detections must be visible in the result, not silently
     assumed safe: a frame whose count reaches the cap the pass gave it counts toward the
-    saturated fraction."""
+    saturated fraction.
+    """
     from tcip_mcp.pipelines.training.eval_runners import (
         run_full_frame_evaluation,
     )
@@ -293,7 +303,8 @@ def test_the_gate_reads_its_references_at_the_predictors_own_width(
 ):
     """The delivery gate builds its loader at the width the predictor reads at, and never derives
     one: this gate scores source paths through the predictor and reads only targets off the
-    loader, so references of differing band counts are a measurement it can take."""
+    loader, so references of differing band counts are a measurement it can take.
+    """
     import numpy as np
     import tifffile
 
@@ -337,7 +348,8 @@ def test_run_full_frame_evaluation_records_merge_and_execution(
 ):
     """The runner's record carries the execution record the pass ran under: its conf and merge
     threshold each the stated one, recorded ``explicit``, the merge threshold the one the
-    predictor merged at."""
+    predictor merged at.
+    """
     from tcip_mcp.pipelines.training.eval_runners import (
         run_full_frame_evaluation,
     )
@@ -375,7 +387,8 @@ def test_the_gate_refuses_documents_whose_geometry_a_detector_cannot_read(
 ):
     """The delivery gate measures over the loader a run would build, so ground truth carrying
     the subject only as points refuses in that loader's own words rather than scoring every
-    image against an empty reference and reporting the number as a delivery metric."""
+    image against an empty reference and reporting the number as a delivery metric.
+    """
     from tcip_annotation.state import Annotation, Point
     from tcip_mcp.pipelines.training.eval_runners import (
         run_full_frame_evaluation,
@@ -416,7 +429,8 @@ def test_the_gate_refuses_an_images_tree_with_no_ground_truth(
 ):
     """A measurement is against a reference: with no label document there is nothing to score
     against, so the gate refuses by name rather than scoring every image against empty ground
-    truth and reporting a perfect-looking miss rate."""
+    truth and reporting a perfect-looking miss rate.
+    """
     from tcip_mcp.pipelines.training.eval_runners import (
         run_full_frame_evaluation,
     )

@@ -24,7 +24,8 @@ from tcip_mcp.registry_paths import is_external_form
 def _checkpoint(path: Path, content: str) -> None:
     """A checkpoint at ``path`` a run completed under a root of its own
     (``_verified_checkpoint_fixtures.produced_checkpoint``), its bytes distinct per
-    ``content``."""
+    ``content``.
+    """
     pytest.importorskip("torch")
     from tests._verified_checkpoint_fixtures import produced_checkpoint
 
@@ -94,7 +95,8 @@ def test_dataset_and_checkpoint_spellers_agree_on_the_same_geometry(
 ):
     """One containment core: a checkpoint and a dataset both sitting under the same project
     root are recorded relative by their own registries, and both sitting on a genuinely
-    separate tree are recorded absolute, the two registries' records agreeing with each other."""
+    separate tree are recorded absolute, the two registries' records agreeing with each other.
+    """
     from tcip_mcp.tools.project_tools import read_datasets, register_dataset
 
     project = tmp_path / "proj"
@@ -195,7 +197,8 @@ def test_a_completed_runs_registry_entry_answers_its_checkpoint_resolved_absolut
     tmp_path: Path,
 ):
     """A run's final status stores its checkpoint relative to the project; the registry's
-    listing of that run answers the path resolved absolute."""
+    listing of that run answers the path resolved absolute.
+    """
     from tcip_mcp.experiments import experiment_dir
     from tcip_mcp.tools.project_tools import initialize_project
     from tests._verified_checkpoint_fixtures import finished_run
@@ -362,7 +365,8 @@ def test_a_symlink_to_a_checkpoint_outside_root_stores_the_resolved_external_loc
 ):
     """Spelling is decided on the resolved target, never the name given: a symlink under the
     project root pointing at a file genuinely outside it stores that external, resolved
-    location, not a relative spelling of the link's own in-tree name."""
+    location, not a relative spelling of the link's own in-tree name.
+    """
     project = tmp_path / "proj"
     real_dir = tmp_path / "real_weights"
     real_dir.mkdir()
@@ -388,7 +392,8 @@ def test_a_symlink_to_a_checkpoint_under_root_stores_the_resolved_internal_locat
     tmp_path: Path,
 ):
     """The same rule the other direction: a symlink whose resolved target sits under the
-    project root stores that target's own project-relative spelling, not the link's."""
+    project root stores that target's own project-relative spelling, not the link's.
+    """
     project = tmp_path / "proj"
     real_dir = project / "weights_home"
     real_dir.mkdir(parents=True)
@@ -416,7 +421,8 @@ def test_a_relative_root_still_answers_an_absolute_response(
     """A relative root: the resolver's own root argument, not just the entry's stored path,
     must still answer absolute. The registry key itself refuses a relative project root
     (``require_absolute_root``), so this is the resolver's own contract, exercised directly
-    rather than through the full ``ModelRegistry`` stack."""
+    rather than through the full ``ModelRegistry`` stack.
+    """
     from tcip_mcp.registry_paths import resolved_registry_path
 
     monkeypatch.chdir(tmp_path)

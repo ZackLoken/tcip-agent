@@ -76,7 +76,8 @@ def test_scale_unit_is_the_callers_fact_never_assumed_to_be_mm():
 
 def test_no_gsd_parameter_survives_anywhere_in_the_module():
     """The naming trap is gone: no callable in the module still accepts a ``gsd``/``mm_per_px``
-    knob."""
+    knob.
+    """
     import importlib
     import inspect
 

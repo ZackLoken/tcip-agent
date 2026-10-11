@@ -222,7 +222,8 @@ def git_output(*args: str) -> str:
 
 def _is_test_side(path: str) -> bool:
     """Paths the tool overlays from the current tree, so a diff in them is not the change
-    under test."""
+    under test.
+    """
     return path.replace("\\", "/").startswith(f"{TEST_TREE}/")
 
 
@@ -280,7 +281,8 @@ def _changed_source_files(
     baseline: str, declared: list[str], test_rev: str | None
 ) -> tuple[list[str], str]:
     """The source-side files that differ between the baseline and the tree the test comes from,
-    and how they were found; a ``declared`` path counts only when it differs too."""
+    and how they were found; a ``declared`` path counts only when it differs too.
+    """
     if test_rev:
         tracked = git_output(
             "diff", "--name-only", baseline, test_rev, "--"
@@ -364,7 +366,8 @@ def _snapshot_via_temporary_index(head: str, index_path: Path) -> str | None:
 
 def _snapshot_via_stash_create() -> str | None:
     """The fallback when the temporary-index form fails here: covers tracked changes only, and
-    touches neither the tree, the index, nor the stash list, same as the form it falls back from."""
+    touches neither the tree, the index, nor the stash list, same as the form it falls back from.
+    """
     out = subprocess.run(
         [
             "git",
@@ -411,7 +414,8 @@ def materialize(rev: str, dest: Path) -> None:
 
 def _overlay_test_tree(dest: Path, test_rev: str | None) -> int:
     """Copy the whole test tree, from ``test_rev`` or the working tree, into ``dest``; the number
-    of files copied."""
+    of files copied.
+    """
     if test_rev:
         archive = subprocess.run(
             ["git", "archive", test_rev, "--", TEST_TREE],
@@ -500,7 +504,8 @@ def prove_tree_imports(
 
 def install_outcome_plugin(tree: Path) -> None:
     """Drop the outcome-recording plugin into a materialized tree, on the path pytest will
-    import."""
+    import.
+    """
     (tree / f"{PLUGIN_MODULE}.py").write_text(PLUGIN_SOURCE, encoding="utf-8")
 
 
@@ -514,7 +519,8 @@ def run_capturing_outcome(
     per_test_timeout: float | None = None,
 ):
     """Run pytest in `tree` and return its process plus what it observed, or None if it
-    reported none."""
+    reported none.
+    """
     # The child session keeps its temporary root inside this run's own tree: pytest deletes all
     # but the last few roots under the shared one, including another session's, at every start.
     cmd = [
@@ -571,7 +577,8 @@ def _is_unreached(headline: str, crash_path: str | None, tree: Path) -> bool:
     error: a missing module or import always counts. A missing file counts only when its crash
     frame sits outside ``tests/`` (:func:`_crash_outside_test_tree`); a test's own assertion
     reading back a file the fixed code under test was supposed to write raises ``FileNotFoundError``
-    at the test's own line, and that is behavioral evidence, never a fixture-shaped discount."""
+    at the test's own line, and that is behavioral evidence, never a fixture-shaped discount.
+    """
     if headline.startswith(("ModuleNotFoundError", "ImportError")):
         return True
     if headline.startswith("FileNotFoundError"):

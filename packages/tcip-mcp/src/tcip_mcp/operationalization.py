@@ -1,5 +1,6 @@
 """A trait's latest confirmed revision, the one every measurement and delivery reads, and the check
-of whether its operationalization binds what a delivery door is about to write."""
+of whether its operationalization binds what a delivery door is about to write.
+"""
 
 from __future__ import annotations
 
@@ -22,7 +23,8 @@ from tcip_mcp.traits import (
 
 class OperationalizationRefusedError(ValueError):
     """The trait has no confirmed revision, or its confirmed revision does not state or bind what
-    a delivery is about to write."""
+    a delivery is about to write.
+    """
 
     def as_detail(self) -> dict[str, Any]:
         """The structured refusal body a web door raises."""
@@ -32,7 +34,8 @@ class OperationalizationRefusedError(ValueError):
 def latest_confirmed(trait: str, project: str | Path) -> TraitRevision:
     """``trait``'s latest confirmed revision. Refuses
     (:class:`OperationalizationRefusedError`) naming the trait when none of its revisions is
-    confirmed; an unknown trait raises ``TraitUnknownError``."""
+    confirmed; an unknown trait raises ``TraitUnknownError``.
+    """
     record = read_trait(trait, project)
     if record.latest_confirmed is None:
         raise OperationalizationRefusedError(
@@ -93,7 +96,8 @@ def bind(
     operationalization does not bind: a delivered phenotype it does not cover, a row value key
     outside its set or missing, a bucket (``buckets``: name to the subject its detections are of)
     not counting its measured subject, or, with ``registry`` given, a positive state the delivered
-    dataset's registry no longer declares."""
+    dataset's registry no longer declares.
+    """
     entry = revision.entry
     stated = entry.operationalizations[delivery_kind]
 
@@ -152,7 +156,8 @@ def _revision_delivering(
 ) -> TraitRevision:
     """The latest confirmed revision of the one trait whose latest confirmed revision delivers
     ``delivered_phenotype``; refuses (:class:`OperationalizationRefusedError`) naming the phenotype,
-    the confirmed traits delivering it and the traits proposing it when not exactly one does."""
+    the confirmed traits delivering it and the traits proposing it when not exactly one does.
+    """
     confirmed: list[TraitRevision] = []
     proposed: list[str] = []
     for name in trait_names(project):

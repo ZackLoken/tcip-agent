@@ -82,7 +82,8 @@ def test_composite_objective_matches_reference():
 def test_composite_objective_has_no_score_for_a_degenerate_epoch():
     """A non-positive or non-finite loss, or both quality terms at zero, is an epoch with no
     useful score: the objective is None, which a metrics row carries as null and the selection
-    comparison treats as never improving, never a large number a chart would plot as a value."""
+    comparison treats as never improving, never a large number a chart would plot as a value.
+    """
     w = WEIGHTS
     assert compute_composite_objective(-1.0, 0.9, 0.9, w) is None
     assert compute_composite_objective(2.0, 0.0, 0.0, w) is None
@@ -209,7 +210,8 @@ def test_detection_mask_path():
 
 def test_a_mask_match_counts_by_region_where_the_box_match_would_not():
     """An L-shaped object whose box a detection's box covers exactly, but whose region the
-    detection's region overlaps under half: matched by box, missed by mask."""
+    detection's region overlaps under half: matched by box, missed by mask.
+    """
     l_shape = [
         (0.0, 0.0),
         (40.0, 0.0),
@@ -321,7 +323,8 @@ CENTER_10 = {"kind": "center_match", "tolerance": 10.0}
 
 def _points(centers: list[tuple[float, float]]) -> list[dict]:
     """Each center as the matcher's record of a zero-extent xywh box, so a center match reads its
-    distance exactly."""
+    distance exactly.
+    """
     return [{"bbox": [x, y, 0.0, 0.0]} for x, y in centers]
 
 
@@ -361,7 +364,8 @@ def test_golden_operating_point_pickers():
 def test_match_pairs_score_first_and_distance_first_disagree_on_cardinality():
     """Two ground truths, one detection within tolerance of both: score-first (walking
     detections in the given, score-descending order) claims one pair; distance-first (every
-    pair sorted by distance ascending) claims two. Exact pairs, not just counts."""
+    pair sorted by distance ascending) claims two. Exact pairs, not just counts.
+    """
     gt = _points([(0.0, 0.0), (10.0, 0.0)])
     dt = _points(
         [(4.0, 0.0), (0.0, 0.0)]
@@ -389,7 +393,8 @@ def test_match_pairs_score_first_tie_keeps_the_last_index():
 def test_match_pairs_distance_first_tie_breaks_by_gt_then_detection_index():
     """Coverage: distance-first breaks a tied distance by (gt index, detection index)
     ascending, so a fully degenerate 2x2 assigns each detection to the ground truth sharing
-    its own index rather than crossing them."""
+    its own index rather than crossing them.
+    """
     pairs = match_pairs(
         _points([(0.0, 0.0), (0.0, 0.0)]),
         _points([(5.0, 0.0), (5.0, 0.0)]),
@@ -401,7 +406,8 @@ def test_match_pairs_distance_first_tie_breaks_by_gt_then_detection_index():
 
 def test_match_pairs_under_an_iou_criterion_matches_by_overlap():
     """The same matcher under an IoU criterion: a detection overlapping its ground truth past the
-    threshold pairs, one beside it does not, however near its center sits."""
+    threshold pairs, one beside it does not, however near its center sits.
+    """
     gt = [{"bbox": [0.0, 0.0, 10.0, 10.0]}, {"bbox": [100.0, 0.0, 10.0, 10.0]}]
     dt = [{"bbox": [1.0, 0.0, 10.0, 10.0]}, {"bbox": [106.0, 0.0, 10.0, 10.0]}]
     pairs = match_pairs(
@@ -415,7 +421,8 @@ def test_match_pairs_under_an_iou_criterion_matches_by_overlap():
 
 def test_match_pairs_refuses_an_unknown_policy_by_name():
     """Coverage: a policy outside the two stated ones refuses rather than falling through to
-    either, so a typo never silently picks a matching rule."""
+    either, so a typo never silently picks a matching rule.
+    """
     with pytest.raises(ValueError, match="policy"):
         match_pairs(
             _points([(0.0, 0.0)]),
@@ -428,7 +435,8 @@ def test_match_pairs_refuses_an_unknown_policy_by_name():
 def test_dt_score_refuses_a_record_without_a_score_or_with_none_by_name():
     """Coverage: the one confidence accessor the governing count reads through refuses a record
     with no score field, and one whose score is None, each naming the record; the curve's score
-    grid reads through the same accessor, so neither reaches a bare KeyError or TypeError."""
+    grid reads through the same accessor, so neither reaches a bare KeyError or TypeError.
+    """
     from tcip_mcp.pipelines.training.evaluation import (
         _dt_score,
         derive_operating_point_curve,
@@ -456,7 +464,8 @@ def test_dt_score_refuses_a_record_without_a_score_or_with_none_by_name():
 
 def test_resolve_match_criterion_refuses_an_unauthored_localization_asking_the_breeder():
     """No localization is derived from the boxes in hand: a revision that states none refuses,
-    naming the field and the breeder's question, whatever the ground truth would suggest."""
+    naming the field and the breeder's question, whatever the ground truth would suggest.
+    """
     from tcip_mcp.traits import UnauthoredFieldError
 
     small_boxes = [(0, 0, 20, 20), (100, 0, 20, 20)]
@@ -484,7 +493,8 @@ def test_resolve_match_criterion_reads_the_stated_kind_as_is():
 
 def test_resolve_match_criterion_scales_a_center_match_to_the_reference():
     """A center match carries its tolerance as a fraction of the average object size and the
-    tolerance that fraction is on this reference."""
+    tolerance that fraction is on this reference.
+    """
     trait = fx.entry("leaf", ("leaf_length",), localization="center_match")
     result = resolve_match_criterion(
         trait, gt_only([(0, 0, 20, 20), (500, 0, 20, 20)])
@@ -503,7 +513,8 @@ def test_resolve_match_criterion_no_trait_is_iou_comparability_convention():
 
 def test_resolve_match_criterion_iou_match_derives_a_real_threshold_not_pinned_0_5():
     """iou_match's threshold must be genuinely derived from the GT in hand
-    (derive_iou_match_threshold), not pinned to 0.5."""
+    (derive_iou_match_threshold), not pinned to 0.5.
+    """
     from tcip_mcp.pipelines.derivations import IOU_MATCH_DERIVATION
 
     trait = fx.entry(
@@ -523,7 +534,8 @@ def test_resolve_match_criterion_iou_match_derives_a_real_threshold_not_pinned_0
 
 def test_resolve_match_criterion_iou_match_refuses_an_unauthored_jitter_or_margin():
     """The jitter and margin the IoU derivation models are the trait's to author; nothing stands
-    in for an unauthored one."""
+    in for an unauthored one.
+    """
     from tcip_mcp.traits import UnauthoredFieldError
 
     trait = fx.entry("leaf", ("leaf_length",), localization="iou_match")
@@ -666,7 +678,8 @@ def test_quadratic_weighted_kappa_hand_computed():
 def test_quadratic_weighted_kappa_reads_a_fractional_prediction_at_its_nearest_rank():
     """A head that emits continuous rank estimates is scored at the rank each estimate is nearest
     to, so predictions that all round onto the true ranks are perfect agreement. Reading 1.6 as
-    rank 1 would report a disagreement the model does not have."""
+    rank 1 would report a disagreement the model does not have.
+    """
     fractional = torch.tensor([0.4, 1.6, 2.4, 2.6])
     gt = torch.tensor([0, 2, 2, 3])
     assert quadratic_weighted_kappa(fractional, gt, 4) == pytest.approx(1.0)
@@ -675,7 +688,8 @@ def test_quadratic_weighted_kappa_reads_a_fractional_prediction_at_its_nearest_r
 def test_quadratic_weighted_kappa_scores_a_single_rank_guess_at_chance():
     """Chance correction comes from the scored set's own rank marginals, so a predictor that
     always guesses the majority rank scores 0 however skewed that majority is: here it is exactly
-    right on 7 of 10 items and still says nothing beyond the marginals."""
+    right on 7 of 10 items and still says nothing beyond the marginals.
+    """
     gt = torch.tensor([0, 0, 0, 0, 0, 0, 0, 3, 3, 3])
     always_majority = torch.zeros(10)
     assert int((always_majority == gt).sum()) == 7
@@ -899,7 +913,8 @@ def test_a_detector_run_selecting_on_the_objective_refuses_unweighted_and_resolv
 ):
     """A detector config selecting on ``objective``, stated or by default, with no
     ``score_weights`` refuses at its resolution naming the key; the same config stating them
-    resolves to the objective, which its recorded weights weight term by term."""
+    resolves to the objective, which its recorded weights weight term by term.
+    """
     from tcip_mcp.pipelines.schemas import train_config
     from tcip_mcp.pipelines.training.generic_trainer import resolve_objective
     from tests._chain_fixtures import training_config
@@ -938,7 +953,8 @@ def test_a_detector_run_selecting_on_the_objective_refuses_unweighted_and_resolv
 
 def test_score_weights_missing_a_term_or_stating_another_refuse_at_admission():
     """A config whose ``score_weights`` omits a term refuses at admission naming each missing
-    one, and one stating a fourth key refuses naming it; the three terms admit as the block."""
+    one, and one stating a fourth key refuses naming it; the three terms admit as the block.
+    """
     from tcip_mcp.pipelines.schemas import train_config
     from tests._chain_fixtures import training_config
     from tests._verified_checkpoint_fixtures import unbuilt_source
@@ -988,7 +1004,8 @@ def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts(
 ):
     """The declaration is exactly the numeric keys these two producers return: nothing declared
     that neither ever produces, nothing either produces that the declaration leaves unaccounted
-    for (declared, or named in the not-a-ranking list below, or a ``_state`` companion)."""
+    for (declared, or named in the not-a-ranking list below, or a ``_state`` companion).
+    """
     pytest.importorskip("torchvision")
     from tcip_mcp.pipelines.model_contract import _SYNTHESIZABLE_TASKS
     from tcip_mcp.pipelines.training.evaluation import (
@@ -1135,7 +1152,8 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(
 ):
     """run_test_evaluation and run_full_frame_evaluation compose through one shared
     evaluation_result: both regimes' results carry the same common identity keys by name and
-    presence, and the test regime carries none of the full-frame regime's fields."""
+    presence, and the test regime carries none of the full-frame regime's fields.
+    """
     from PIL import Image
 
     import tcip_mcp.pipelines.training.evaluation as evaluation
@@ -1237,7 +1255,8 @@ def test_a_full_frame_evaluation_merges_at_the_threshold_its_ground_truth_derive
     tmp_path, monkeypatch, boxes, derives
 ):
     """An unstated merge threshold is the one the evaluated reference's ground truth derives;
-    where that ground truth derives none, the evaluation refuses naming ``cross_tile_nms``."""
+    where that ground truth derives none, the evaluation refuses naming ``cross_tile_nms``.
+    """
     from PIL import Image
 
     from tcip_annotation.state import Annotation, BBox
@@ -1335,7 +1354,8 @@ _save_png = partial(write_noise_image, size=IMG)
 
 def _four_bud_images(tmp_path):
     """Four noise images in ``tmp_path``'s undated capture, each labeled with one centered
-    ``bud`` box."""
+    ``bud`` box.
+    """
     from tcip_annotation.state import Annotation, BBox
     from tests._producer_fixtures import label_image
 
@@ -1353,7 +1373,8 @@ def _four_bud_images(tmp_path):
 
 def _stored(tmp_path, annotations, size: int = 100):
     """``annotations`` written as the label document of a ``size``-pixel image ``a`` under
-    ``tmp_path`` and read back."""
+    ``tmp_path`` and read back.
+    """
     from tcip_annotation import json_io
     from tcip_mcp.dataset_layout import label_key
 
@@ -1364,7 +1385,8 @@ def _stored(tmp_path, annotations, size: int = 100):
 
 def _context(tmp_path, model_source, data: dict, **overrides):
     """The context of a run of ``model_source`` over the data block ``data`` drawing a quarter of
-    its frames onto its validation side, opened by the launcher's own producer."""
+    its frames onto its validation side, opened by the launcher's own producer.
+    """
     from tests._chain_fixtures import training_config
     from tests.tiny_trainer_fixtures import run_context
 
@@ -1421,7 +1443,8 @@ def test_train_center_match_trait_records_governing_criterion(tmp_path):
     """Threading `trait` into _validate surfaces val_governing_criterion (a dict) and
     val_map50_role (a str) in val_metrics; the TensorBoard scalar loop must skip these
     non-numeric values rather than crash `add_scalar` on them. An untrained BespokeDetection never
-    scores here, so the run then fails as having no selectable epoch, after the row is logged."""
+    scores here, so the run then fails as having no selectable epoch, after the row is logged.
+    """
     from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
     ctx = _context(
@@ -1506,7 +1529,8 @@ _CROWD = [50.0, 50.0, 40.0, 40.0]
 
 def _crowd_records() -> list[dict]:
     """One image whose object a detection matches and whose crowd region holds another
-    detection, and one image holding only a crowd region no detection matches."""
+    detection, and one image holding only a crowd region no detection matches.
+    """
     from tcip_mcp.pipelines.training.evaluation import gt_record
 
     return [
@@ -1551,7 +1575,8 @@ def test_a_targets_records_are_one_shape_on_the_stored_grid_whatever_the_target_
     tmp_path,
 ):
     """The loader's own target, as lists, as an array and as tensors, becomes the same evaluation
-    records, each box on the stored two-decimal grid: every reader of a target reads it here."""
+    records, each box on the stored two-decimal grid: every reader of a target reads it here.
+    """
     import numpy as np
 
     from tcip_annotation.state import Annotation, BBox
@@ -1625,7 +1650,8 @@ def test_a_ground_truth_record_is_one_shape_from_a_target_and_from_its_annotatio
 ):
     """The loader's target route and the annotation route build a document's ground truth as
     the same records, its box, crowd flag and region stated alike, so the scorer fills nothing
-    in."""
+    in.
+    """
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.data.label_queries import json_det_targets
     from tcip_mcp.pipelines.training.evaluation import (
@@ -1664,7 +1690,8 @@ def test_a_ground_truth_record_is_one_shape_from_a_target_and_from_its_annotatio
 
 def test_a_detectors_record_reads_both_sides_on_the_stored_grid(tmp_path):
     """The training-time evaluation scores the box the document holds, never the loader's
-    float32 corners, and each detection on the grid its ground truth is stored on."""
+    float32 corners, and each detection on the grid its ground truth is stored on.
+    """
     torch = pytest.importorskip("torch")
 
     from tcip_annotation.state import Annotation, BBox
@@ -1716,7 +1743,8 @@ def test_a_detection_outside_a_reference_with_no_object_is_a_false_positive(
 ):
     """A reference holding no object, crowd regions alone or nothing, is still evaluated: a
     detection outside every crowd region is one false positive, by the IoU convention and by the
-    center match alike, never hidden by a zero-object shortcut."""
+    center match alike, never hidden by a zero-object shortcut.
+    """
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.training.evaluation import governing_counts
 

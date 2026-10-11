@@ -38,7 +38,8 @@ class StageSpec(BaseModel):
     """One progressive-unfreeze step: the trainer reads ``freeze_to`` and the stage's own
     ``gradient_accumulation_steps``, while the learning rate comes from the top-level
     ``optimizer`` block, never per stage. Any other key, a per-stage ``lr`` or ``epochs``
-    included, is refused by name."""
+    included, is refused by name.
+    """
 
     model_config = ConfigDict(extra="forbid")
     freeze_to: int = 0
@@ -49,7 +50,8 @@ class StageSpec(BaseModel):
 class EarlyStoppingSpec(BaseModel):
     """The stop rule that ends a stage and the run: a stage ends once its selection value has not
     improved by ``min_delta`` for ``patience`` epochs, and the run ends with the stage whose best
-    does not improve by ``min_delta`` on the best of the stage before it."""
+    does not improve by ``min_delta`` on the best of the stage before it.
+    """
 
     model_config = ConfigDict(extra="forbid")
     patience: int = Field(ge=1)
@@ -59,7 +61,8 @@ class EarlyStoppingSpec(BaseModel):
 class OptimizerSpec(BaseModel):
     """The optimizer every stage builds (``optimizer_factory.build_optimizer``): its family and
     its tuned settings required (both rates, the weight decay, and ``momentum`` for ``sgd`` and
-    for no other optimizer)."""
+    for no other optimizer).
+    """
 
     model_config = ConfigDict(extra="forbid")
     name: str
@@ -80,7 +83,8 @@ class OptimizerSpec(BaseModel):
 
 class HorizonSchedule(BaseModel):
     """A schedule built over its own ``horizon_epochs`` scheduled epochs, the most a stage under
-    it runs past its warmup."""
+    it runs past its warmup.
+    """
 
     model_config = ConfigDict(extra="forbid")
     horizon_epochs: int = Field(ge=1)
@@ -95,7 +99,8 @@ class CosineSchedule(HorizonSchedule):
 
 class PlateauSchedule(BaseModel):
     """The rate times ``factor`` once the validation loss has not improved for ``patience``
-    epochs."""
+    epochs.
+    """
 
     model_config = ConfigDict(extra="forbid")
     type: Literal["plateau"]
@@ -135,7 +140,8 @@ SCHEDULER_TYPES: tuple[str, ...] = tuple(
 class ScoreWeights(BaseModel):
     """The composite objective's weight on each of its terms
     (``evaluation.compute_composite_objective``), each non-negative so a better term never
-    raises the lower-is-better objective."""
+    raises the lower-is-better objective.
+    """
 
     model_config = ConfigDict(extra="forbid")
     loss: float = Field(ge=0)
@@ -146,7 +152,8 @@ class ScoreWeights(BaseModel):
 class EvaluationSpec(BaseModel):
     """What a run's validation pass scores against: the confirmed trait it selects for, the
     selection metric (resolved by ``generic_trainer.resolve_selection_metric``), and the
-    thresholds and score weights the validation pass applies."""
+    thresholds and score weights the validation pass applies.
+    """
 
     model_config = ConfigDict(extra="forbid")
     trait: str | None = None
@@ -160,7 +167,8 @@ class EvaluationSpec(BaseModel):
 
 class LrScalingSpec(BaseModel):
     """Effective-batch LR scaling: each stage's learning rates times ``(its effective batch / the
-    first stage's) ** scale_power``, capped at ``max_lr`` when one is stated."""
+    first stage's) ** scale_power``, capped at ``max_lr`` when one is stated.
+    """
 
     model_config = ConfigDict(extra="forbid")
     scale_power: float
@@ -198,7 +206,8 @@ class ImageStatsSampling(BaseModel):
 
 class ModelSourceSchema(BaseModel):
     """The importable-builder reference and the task its model is for; a key outside these
-    fields refuses by name."""
+    fields refuses by name.
+    """
 
     model_config = ConfigDict(extra="forbid")
     builder: str = Field(min_length=1)
@@ -220,7 +229,8 @@ class DatasetSourceSchema(BaseModel):
 
 class SplitSpec(BaseModel):
     """``data.split``: a bound selection (``selection_dir``, ``redraw_within_selection``), or the
-    parameters a run drawing its own split states."""
+    parameters a run drawing its own split states.
+    """
 
     model_config = ConfigDict(extra="forbid")
     selection_dir: ResolvedPath | None = None
@@ -247,7 +257,8 @@ class SpatialManifest(BaseModel):
     (``split_construction.spatial_single_source_split``), recorded in its resolved partition:
     each side's half-open pixel regions, the region identities its train and val tiles carry,
     the buffer it was drawn at (the lattice is the run's ``data.tiling``), what it requested and
-    realized, and the raster it was drawn over (``split_construction.raster_identity``)."""
+    realized, and the raster it was drawn over (``split_construction.raster_identity``).
+    """
 
     model_config = ConfigDict(extra="forbid")
     stem: str
@@ -277,7 +288,8 @@ class TilingSpec(BaseModel):
     """``data.tiling``: whether a run tiles its loader (:func:`run_tiling`), the
     ``datasets.TiledDetectionDataset`` options it states (an unstated edge and overlap derived,
     every other unstated option the tiler's default), and a within-image spatial split's
-    ``buffer``. A key outside these fields refuses by name."""
+    ``buffer``. A key outside these fields refuses by name.
+    """
 
     model_config = ConfigDict(extra="forbid")
     enabled: bool = True
@@ -290,7 +302,8 @@ class TilingSpec(BaseModel):
 
     def tiler_options(self, exclude: frozenset[str] = frozenset()) -> dict:
         """The ``TiledDetectionDataset`` keyword arguments this block states, but ``exclude``;
-        an option it leaves ``None`` is omitted."""
+        an option it leaves ``None`` is omitted.
+        """
         return self.model_dump(
             exclude_none=True, exclude={"enabled", "buffer", *exclude}
         )
@@ -300,7 +313,8 @@ def run_tiling(task: str, tiling: TilingSpec | None) -> TilingSpec | None:
     """The tiling a run of ``task`` builds its loaders at: ``tiling`` when it is stated and
     enabled, ``None`` otherwise. A task outside ``model_contract.DETECTION_TASKS`` trains whole
     frames, so an enabled ``tiling`` for one refuses (``ValueError``) naming the task and
-    ``data.tiling``."""
+    ``data.tiling``.
+    """
     from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
 
     if tiling is None or not tiling.enabled:
@@ -319,7 +333,8 @@ class _Recorded(BaseModel):
 
     def record(self, exclude: dict | None = None) -> dict:
         """This block as a run's record holds it: every key stated or resolved, in JSON form,
-        but the fields ``exclude`` names (``BaseModel.model_dump``'s nested form)."""
+        but the fields ``exclude`` names (``BaseModel.model_dump``'s nested form).
+        """
         return self.model_dump(
             mode="json", exclude_unset=True, exclude=exclude
         )
@@ -328,7 +343,8 @@ class _Recorded(BaseModel):
 class DataSpec(_Recorded):
     """``data``: where a run's samples are and how they split, and what its resolution records
     beside them (``scope``, the sizes, the stamped geometry and object density). A key outside
-    these fields refuses by name, and so does a ``tiling`` beside a ``dataset_source``."""
+    these fields refuses by name, and so does a ``tiling`` beside a ``dataset_source``.
+    """
 
     model_config = ConfigDict(extra="forbid")
     images_dir: ResolvedPath | None = None
@@ -360,7 +376,8 @@ class DataSpec(_Recorded):
     @property
     def recorded_scope(self) -> ClassScope:
         """The class space this block records (``ClassScope.recorded``, which refuses a block
-        recording none)."""
+        recording none).
+        """
         return ClassScope.recorded(self.scope)
 
 
@@ -384,7 +401,8 @@ class DefaultTrainerRegime(NamedTuple):
 class TrainerReads(NamedTuple):
     """What training under a config reads (:meth:`TrainConfigSchema.trainer_reads`): the loaders'
     batch size, the config's ``evaluation.conf_threshold`` (stated for a detector), and the
-    default trainer's regime (``None`` for a config naming its own ``training_source``)."""
+    default trainer's regime (``None`` for a config naming its own ``training_source``).
+    """
 
     batch_size: int
     conf_threshold: float | None
@@ -395,7 +413,8 @@ class TrainConfigSchema(_Recorded):
     """The one training config shape: trainer keys at the top level, no nested section; a key
     outside these fields is a bespoke loop's own and is kept as stated. It requires
     ``model_source`` and ``data`` alone; what training reads besides is
-    :meth:`trainer_reads`."""
+    :meth:`trainer_reads`.
+    """
 
     model_config = ConfigDict(extra="allow", protected_namespaces=())
     model_source: ModelSourceSchema
@@ -444,7 +463,8 @@ class TrainConfigSchema(_Recorded):
 
     def default_trainer_regime(self) -> DefaultTrainerRegime:
         """The regime the default trainer runs at. Refuses (``ValueError``) naming every block of
-        it this config leaves unstated."""
+        it this config leaves unstated.
+        """
         missing = [
             name
             for name in DefaultTrainerRegime._fields
@@ -463,7 +483,8 @@ class TrainConfigSchema(_Recorded):
         detector's ``evaluation.conf_threshold``, and, when the config names no
         ``training_source``, the default trainer's regime (:meth:`default_trainer_regime`).
         Refuses (``ValueError``) naming every one of them the config leaves unstated, and a
-        ``sampler`` block its sampler refuses (``samplers.sampler_settings``)."""
+        ``sampler`` block its sampler refuses (``samplers.sampler_settings``).
+        """
         from tcip_mcp.pipelines.data.samplers import sampler_settings
         from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
 
@@ -506,7 +527,8 @@ def checked_train_config(
     (:data:`ResolvedPath`; ``None`` admits absolute paths only): the validated config and no
     issues, or ``None`` and one issue string per type or structure error (e.g.
     ``batch_size="big"``, a stage stating ``epochs``, a nested ``training`` section, a missing
-    ``model_source.task``, a relative path with no project)."""
+    ``model_source.task``, a relative path with no project).
+    """
     try:
         return TrainConfigSchema.model_validate(
             config, context={"project": project}
@@ -519,7 +541,8 @@ def train_config(
     config: dict, project: Path | None = None
 ) -> TrainConfigSchema:
     """``config`` validated against the schema (:func:`checked_train_config`). Refuses
-    (``ValueError``) naming every issue it reports."""
+    (``ValueError``) naming every issue it reports.
+    """
     spec, issues = checked_train_config(config, project)
     if spec is None:
         raise ValueError(f"invalid training config: {'; '.join(issues)}")

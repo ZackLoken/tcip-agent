@@ -1,5 +1,6 @@
 """Label documents written and loaders built through the platform's own producers
-(``label_queries.admit``, ``write_label_document``, the one label save)."""
+(``label_queries.admit``, ``write_label_document``, the one label save).
+"""
 
 from __future__ import annotations
 
@@ -14,7 +15,8 @@ def label_image(
 ):
     """``annotations`` written as the label document of the image at ``image_path``
     (:func:`~tcip_annotation.json_io.write_label_document` at the image's own key); the new
-    version."""
+    version.
+    """
     from tcip_annotation.json_io import write_label_document
 
     return write_label_document(
@@ -33,7 +35,8 @@ def box_annotation(
     **attributes: str,
 ):
     """An annotation of ``subject`` boxed at pixel ``(x1, y1, x2, y2)`` carrying ``attributes``;
-    a prediction when ``score`` is given."""
+    a prediction when ``score`` is given.
+    """
     from tcip_annotation.state import Annotation, BBox
 
     return Annotation(
@@ -57,7 +60,8 @@ def write_image(
     color: tuple[int, int, int] = (0, 0, 0),
 ):
     """A flat ``color`` three-band ``size`` image written at ``path``, its directory made;
-    ``path``."""
+    ``path``.
+    """
     from PIL import Image
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -81,7 +85,8 @@ def blank_image(
 
 def one_labeled_capture(root):
     """``root`` holding one image in its ``2026-03-04`` capture with an empty label document over
-    it, and the subject registry that decodes it; ``root``."""
+    it, and the subject registry that decodes it; ``root``.
+    """
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
 
     image = root / "images" / "2026-03-04" / "a_1.jpg"
@@ -101,7 +106,8 @@ def painted_frame(
     width: int, height: int, background, extents, mode: str = "RGB"
 ):
     """A ``mode`` image of ``width`` by ``height`` in ``background``, each of ``extents`` (a
-    half-open pixel box ``(x1, y1, x2, y2)`` beside its color) filled in its color."""
+    half-open pixel box ``(x1, y1, x2, y2)`` beside its color) filled in its color.
+    """
     from PIL import Image, ImageDraw
 
     frame = Image.new(mode, (width, height), background)
@@ -115,7 +121,8 @@ def painted_array(
     width: int, height: int, extents, *, background=0, mode: str = "L"
 ):
     """The :func:`painted_frame` of ``extents`` as a writable numpy array (``uint8`` in mode
-    ``L``, ``float32`` in mode ``F``), ``height`` rows by ``width`` columns."""
+    ``L``, ``float32`` in mode ``F``), ``height`` rows by ``width`` columns.
+    """
     import numpy as np
 
     return np.array(
@@ -133,7 +140,8 @@ def labeled_frame(
 ):
     """A :func:`painted_frame` of the dim ``background`` written at ``path``, :data:`BRIGHT`
     over the extent of each of ``annotations`` that has one and is no crowd region, and labeled
-    with ``annotations`` (:func:`label_image`, ``kwargs`` its own); ``path``."""
+    with ``annotations`` (:func:`label_image`, ``kwargs`` its own); ``path``.
+    """
     from tcip_annotation.state import Point, bbox_of
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -157,7 +165,8 @@ def seed_labeled_images(
 ):
     """Make ``images_dir``, a capture of a dataset image tree, and write ``n``
     :func:`labeled_frame` images ``img<i>.png`` of ``width`` by ``height``, each holding
-    ``annotations``; ``images_dir``."""
+    ``annotations``; ``images_dir``.
+    """
     images_dir.mkdir(parents=True, exist_ok=True)
     for i in range(n):
         labeled_frame(
@@ -178,7 +187,8 @@ def seed_bud_images(
     box: tuple[float, float, float, float] = (10, 10, 40, 40),
 ):
     """:func:`seed_labeled_images` of ``n`` square ``size``px images, each holding one ``bud``
-    box at ``box``."""
+    box at ``box``.
+    """
     from tcip_annotation.state import Annotation, BBox
 
     return seed_labeled_images(
@@ -196,7 +206,8 @@ def small_detection_config(
     """A :func:`~tests._chain_fixtures.training_config` of ``model_source`` (by default the
     bespoke torchvision detector,
     :data:`~tests._verified_checkpoint_fixtures.BUILT_DETECTOR`) over ``images_dir``'s ``bud``
-    boxes, drawing its split at seed 0."""
+    boxes, drawing its split at seed 0.
+    """
     from tests._chain_fixtures import training_config
     from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
@@ -212,7 +223,8 @@ def small_detection_config(
 
 def registry_over(dataset_root, registry) -> None:
     """``dataset_root``'s subject registry replaced by ``registry`` through the platform's own save
-    (:func:`~tcip_mcp.subject_registry.replace_registry`), whatever it held before."""
+    (:func:`~tcip_mcp.subject_registry.replace_registry`), whatever it held before.
+    """
     from tcip_mcp.subject_registry import replace_registry
 
     replace_registry(
@@ -237,7 +249,8 @@ def mark_complete(
     """``subject`` marked complete over ``rect`` (the whole image when ``None``) on the label
     document of the image at ``image_path`` through the platform's one save door, the document's
     annotations kept as they are; an image with no annotation of ``subject`` reads as a confirmed
-    negative. Returns the new version."""
+    negative. Returns the new version.
+    """
     from tcip_annotation.json_io import (
         client_annotation,
         read_document_versioned,
@@ -274,7 +287,8 @@ def admit_over(
     """The admission over the images of ``images_dir`` and their ground truth (their own label
     documents when ``ground_truth`` is ``None``) under the class space their registry answers for
     ``subject`` (:func:`~tcip_mcp.pipelines.data.label_queries.registry_scope`), refusing an empty
-    one by name."""
+    one by name.
+    """
     from tcip_mcp.pipelines.data.label_queries import (
         admit,
         registry_scope,
@@ -293,7 +307,8 @@ def admit_over(
 
 def checkpoint_admission(checkpoint, images_dir, ground_truth=None):
     """The admission ``evaluate_model`` measures ``checkpoint`` over: the images of
-    ``images_dir`` and their ground truth under the class space the checkpoint records."""
+    ``images_dir`` and their ground truth under the class space the checkpoint records.
+    """
     from tcip_mcp.pipelines.data.label_queries import admit
 
     return admit(
@@ -336,7 +351,8 @@ def run_over(
     tiling block through ``split_construction._with_lattice``, the loader built from that block
     at ``transforms`` as a run's training side is (``split_construction.recorded_datasets``), and
     what it serves recorded on it (``generic_trainer.effective_data_geometry``). The data section
-    is in the form a run's record holds it."""
+    is in the form a run's record holds it.
+    """
     from tcip_mcp.pipelines.data.split_construction import (
         _with_lattice,
         recorded_datasets,
@@ -380,7 +396,8 @@ def run_over(
 
 def served_regions(dataset: Any) -> list:
     """Each item ``dataset`` serves, its target's objects over its image's pixels
-    (``datasets.object_region``): the regions a stand-in detection dataset exposes."""
+    (``datasets.object_region``): the regions a stand-in detection dataset exposes.
+    """
     from tcip_mcp.pipelines.data.datasets import object_region
 
     return [
@@ -391,7 +408,8 @@ def served_regions(dataset: Any) -> list:
 
 def staged_layout(project, data: Any):
     """The layout a run of ``project`` of the bespoke detector over the data block ``data`` (a
-    dict, or a ``DataSpec``) imports from at its admission (``model_build.staged_sources``)."""
+    dict, or a ``DataSpec``) imports from at its admission (``model_build.staged_sources``).
+    """
     from tcip_mcp.pipelines.model_build import staged_sources
     from tcip_mcp.pipelines.schemas import train_config
     from tests._chain_fixtures import DETECTION_SOURCE, training_config
@@ -405,7 +423,8 @@ def staged_layout(project, data: Any):
 def train_val(project, task: str, data_cfg: dict, transforms: Any = None):
     """``split_construction.auto_train_val`` for a ``task`` run of ``project`` over ``data_cfg``
     validated as a run's data block, a dataset builder it declares imported from
-    :func:`staged_layout`: ``(train_ds, val_ds, partition, resolved)``."""
+    :func:`staged_layout`: ``(train_ds, val_ds, partition, resolved)``.
+    """
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
     from tcip_mcp.pipelines.schemas import DataSpec
 
@@ -423,7 +442,8 @@ def dataset_over(task: str, images_dir, ground_truth=None, **kwargs: Any):
 def fake_popen(monkeypatch, captured: list[list[str]]) -> None:
     """Replace ``subprocess.Popen`` with one recording each argv into ``captured`` and starting
     nothing, and ``launch_tensorboard`` with one starting no TensorBoard, so a launch door is
-    driven through its own records without a child process."""
+    driven through its own records without a child process.
+    """
     import subprocess
 
     import tcip_mcp.tools.training_tools  # noqa: F401  # imported before Popen is replaced

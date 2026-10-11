@@ -36,7 +36,8 @@ SPATIAL_SIDE_ORDER = ("train", "val", "holdout", "calibration")
 
 def _selection_conflict_keys() -> tuple[str, ...]:
     """The ``data.split`` keys a drawn split states and a bound selection records instead, each
-    side's share stated as ``<side>_ratio``."""
+    side's share stated as ``<side>_ratio``.
+    """
     from tcip_mcp.pipelines.data.selection import SIDES
 
     return (
@@ -52,7 +53,8 @@ def data_dir_issues(data: DataSpec) -> list[str]:
     """Every objection to the data locations an unbound run's producer reads: ``data.images_dir``
     missing or naming a path that does not exist, and a stated ``data.labels_dir`` that is not a
     mask directory or a table (:func:`~tcip_mcp.pipelines.data.label_queries.ground_truth_shape`).
-    Empty for a config bound to a selection (:func:`selection_compatibility`)."""
+    Empty for a config bound to a selection (:func:`selection_compatibility`).
+    """
     from tcip_mcp.pipelines.data.label_queries import ground_truth_shape
 
     if data.split.selection_dir:
@@ -124,7 +126,8 @@ class Membership(NamedTuple):
     """Every member the places of one draw admit, keyed by its identity (``<capture>/<stem>``),
     each a sample on the ``train`` side under its group key and carrying the digest its admission
     read; the class space they were admitted in, the recorded grouping policy and the admissions'
-    summed tallies."""
+    summed tallies.
+    """
 
     samples: dict[str, Sample]
     scope: ClassScope
@@ -218,7 +221,8 @@ def run_membership(data: DataSpec) -> Membership:
     """:func:`admitted_membership` over a run's data block naming its locations
     (:func:`data_dir_issues`): its one place (``images_dir`` and the ``labels_dir`` a mask or
     table run names), under the ``scope`` it states (the empty one when it states none), grouped
-    by its ``split`` section's policy."""
+    by its ``split`` section's policy.
+    """
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.data.splits import DEFAULT_GROUP_BY
 
@@ -234,7 +238,8 @@ def run_membership(data: DataSpec) -> Membership:
 def check_shares(sides: Mapping[str, float]) -> dict[str, float]:
     """``sides``, the share each side but ``train`` is drawn at, with ``train`` the remainder; a
     side stated at zero is not drawn. Refuses (``ValueError``) a side outside the selection's
-    sides or ``train`` itself, a share outside ``[0, 1)``, and shares leaving ``train`` nothing."""
+    sides or ``train`` itself, a share outside ``[0, 1)``, and shares leaving ``train`` nothing.
+    """
     import math
 
     from tcip_mcp.pipelines.data.selection import SIDES
@@ -259,7 +264,8 @@ def run_shares(split: SplitSpec, *, spatial: bool) -> dict[str, float]:
     """The shares a run drawing its own split states (:func:`check_shares`, ``train`` the
     remainder): ``val`` at ``val_ratio``, and on a within-image spatial split each other side of
     :data:`SPATIAL_SIDE_ORDER` whose ``<side>_ratio`` is stated. A ``val`` share unstated or zero
-    refuses, since the run draws its own validation side."""
+    refuses, since the run draws its own validation side.
+    """
     sides = SPATIAL_SIDE_ORDER[1:] if spatial else ("val",)
     stated = {side: getattr(split, f"{side}_ratio") for side in sides}
     shares = check_shares(
@@ -406,7 +412,8 @@ def dataset_identity(
 def raster_identity(image: Path | BandGroupRef) -> dict:
     """The logical ``image``'s :func:`~tcip_mcp.pipelines.raster_source.raster_content_identity`
     over its own probed band count, the one a split records its mosaic by. A source that will not
-    probe raises."""
+    probe raises.
+    """
     import dataclasses
 
     from tcip_mcp.pipelines.raster_source import SourceHeader, content_identity
@@ -548,7 +555,8 @@ def _block_loader(
 ) -> Any:
     """The platform's ``task`` loader over ``samples`` at ``transforms`` under the resolved block
     ``data``'s class space, sizes and tiling, its tiles kept to ``region``'s rects when one is
-    given."""
+    given.
+    """
     from tcip_mcp.pipelines.data.datasets import build_dataset, stated_sizes
 
     tiling = (
@@ -578,7 +586,8 @@ def resolved_tiling(
     """The tiling block a ``task`` loader over ``samples`` (at ``scope`` and ``sizes``) is built
     at: ``{"enabled": False}`` when it does not tile, else ``tiling`` with its edge and overlap,
     the stated ones or the ones ``samples``' objects derive (``derivations.derive_tile_geometry``,
-    whose refusals propagate)."""
+    whose refusals propagate).
+    """
     from tcip_mcp.pipelines.data.datasets import build_dataset
     from tcip_mcp.pipelines.derivations import derive_tile_geometry
     from tcip_mcp.pipelines.schemas import TilingSpec, run_tiling
@@ -611,7 +620,8 @@ def predictor_dataset(
     """The ``task`` loader over ``samples`` under ``scope`` a predictor scores: at the band count
     ``predictor`` reads its sources at (``predictor.in_chans``) and the tiling block
     :func:`resolved_tiling` resolves ``tiling`` to over them, an absent or disabled block
-    untiled. The sizing and the resolution refuse as they do."""
+    untiled. The sizing and the resolution refuse as they do.
+    """
     from tcip_mcp.pipelines.data.datasets import build_dataset, resolve_sizes
 
     sizes = resolve_sizes(task, {"num_channels": predictor.in_chans}, samples)
@@ -629,7 +639,8 @@ def _with_lattice(
 ) -> DataSpec:
     """``data`` with its tiling block resolved over ``samples`` (:func:`resolved_tiling`);
     ``data`` unchanged, its tiling ``None``, for a run whose loaders a bespoke builder makes,
-    the platform stating nothing of a dataset it does not build."""
+    the platform stating nothing of a dataset it does not build.
+    """
     from tcip_mcp.pipelines.data.datasets import stated_sizes
 
     if data.dataset_source is not None:
@@ -695,7 +706,8 @@ def _partition_record(
     (:func:`~tcip_mcp.pipelines.data.selection.sample_document`), with the ground-truth digest it
     carries, ``selection``, the selection a bound run bound (its directory, its digest and
     whether the run redrew inside it), ``None`` for a run that drew its own, and ``spatial``, a
-    within-image split's regions (:func:`spatial_single_source_split`), ``None`` otherwise."""
+    within-image split's regions (:func:`spatial_single_source_split`), ``None`` otherwise.
+    """
     from tcip_mcp.pipelines.data.selection import sample_document
 
     return {
@@ -711,7 +723,8 @@ def _partition_record(
 
 def partition_samples(partition: Mapping[str, Any]) -> list[Sample]:
     """A resolved partition's samples read back
-    (:func:`~tcip_mcp.pipelines.data.selection.read_sample`)."""
+    (:func:`~tcip_mcp.pipelines.data.selection.read_sample`).
+    """
     from tcip_mcp.pipelines.data.selection import read_sample
 
     return [
@@ -724,7 +737,8 @@ def partition_spatial(
     partition: Mapping[str, Any],
 ) -> SpatialManifest | None:
     """A resolved partition's within-image split read back, validated; ``None`` for a partition
-    that drew none."""
+    that drew none.
+    """
     from tcip_mcp.pipelines.schemas import SpatialManifest
 
     spatial = partition["spatial"]
@@ -740,7 +754,8 @@ def run_sizes(
     """``data`` with what a run resolved over ``samples`` recorded on it: the class space
     ``scope`` it was admitted under, and its sizes
     (:func:`~tcip_mcp.pipelines.data.datasets.resolve_sizes` over the ones ``data`` states), each
-    by its own name."""
+    by its own name.
+    """
     from tcip_mcp.pipelines.data.datasets import (
         SIZE_NAMES,
         resolve_sizes,
@@ -775,7 +790,8 @@ def _sample_loaders(
     within-image run's ``spatial`` split) and :func:`recorded_datasets` over it, the resolved
     block ``data`` (its tiling already resolved, :func:`_with_lattice`) and the run's ``layout``.
     ``recorded`` is the membership the partition holds: the two sides for a drawn run, and the
-    selection's held-out samples besides for a bound one."""
+    selection's held-out samples besides for a bound one.
+    """
     partition = _partition_record(
         recorded,
         seed=seed,
@@ -1005,7 +1021,8 @@ def auto_train_val(
 class ResolvedRun(NamedTuple):
     """A run resolved once, at launch: the datasets built at it, ``spec``, the validated launch
     config it was resolved from, and ``data``, ``partition`` and ``objective``, what it
-    resolved."""
+    resolved.
+    """
 
     train_ds: Any
     val_ds: Any
@@ -1022,7 +1039,8 @@ class ResolvedRun(NamedTuple):
     @property
     def record(self) -> dict:
         """What the run's ``run.json`` holds of this resolution: ``data`` as it records itself,
-        ``partition`` and ``objective``."""
+        ``partition`` and ``objective``.
+        """
         return {
             "data": self.data.record(),
             "partition": self.partition,
@@ -1044,7 +1062,8 @@ def resolve_run(
     (:func:`~tcip_mcp.pipelines.training.generic_trainer.effective_data_geometry`), and its
     objective (:func:`~tcip_mcp.pipelines.training.generic_trainer.resolve_objective` for a run
     with or without a val side), or ``objective`` as given, a sweep's own for its trials.
-    ``tallies_out`` is :func:`auto_train_val`'s. Every refusal of the resolution raises."""
+    ``tallies_out`` is :func:`auto_train_val`'s. Every refusal of the resolution raises.
+    """
     from tcip_mcp.pipelines.training.generic_trainer import (
         effective_data_geometry,
         resolve_objective,
@@ -1082,7 +1101,8 @@ def run_loader(
     Over a within-image split ``spatial`` (:func:`partition_spatial`) the callable also takes
     ``side`` (``"train"`` unless named) and builds the run's one sample's tiles kept to that
     side's recorded region; a sample list that is not that one sample, by member, refuses
-    (``ValueError``) naming it."""
+    (``ValueError``) naming it.
+    """
     from tcip_mcp.pipelines.data.datasets import build_from_dataset_source
 
     if data.dataset_source is not None:
@@ -1127,7 +1147,8 @@ def recorded_datasets(
     :func:`run_loader`: the train and val ``samples`` of its partition, or for a within-image
     split ``spatial`` (:func:`partition_spatial`) its one sample's train and val sides.
     ``val_ds`` is ``None`` for a run whose partition holds no val side. The samples' ground truth
-    is read once for both loaders (:func:`~tcip_mcp.pipelines.data.label_queries.acquired`)."""
+    is read once for both loaders (:func:`~tcip_mcp.pipelines.data.label_queries.acquired`).
+    """
     from tcip_mcp.pipelines.data.label_queries import acquired
 
     samples = acquired(samples)

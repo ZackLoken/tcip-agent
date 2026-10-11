@@ -25,7 +25,8 @@ def test_subject_names_differing_only_by_case_stay_distinct(
     client: TestClient, tmp_path: Path
 ) -> None:
     """Nothing case-folds a subject name on the way in, so a name typed a second way is stored as
-    its own subject with its own description rather than silently absorbed into the first."""
+    its own subject with its own description rather than silently absorbed into the first.
+    """
     save = client.post(
         "/api/subjects/save",
         json={
@@ -58,7 +59,8 @@ def test_registry_derived_from_labels_keeps_each_name_exactly_as_labeled(
     client: TestClient, tmp_path: Path
 ) -> None:
     """With no saved registry, the discovered names are the ones a readable label document
-    actually carries, each unchanged."""
+    actually carries, each unchanged.
+    """
     label_image(
         tmp_path / "images" / DATE / "IMG_A.jpg",
         [
@@ -84,7 +86,8 @@ def test_registry_derivation_reports_a_document_it_cannot_read(
 ) -> None:
     """A record whose subject name is empty makes its own document unreadable: the draft
     registry still derives from the readable documents, and names the unreadable one by stem
-    rather than silently deriving nothing from it."""
+    rather than silently deriving nothing from it.
+    """
     from tcip_store import encode_record
     from tests._record_damage_fixtures import damage_record
 
@@ -120,7 +123,8 @@ def test_a_new_subject_is_addable_alongside_the_saved_ones(
     client: TestClient, tmp_path: Path
 ) -> None:
     """Authoring a subject stays open: a later save adds the new name and updates the existing one
-    in place, leaving one entry per name rather than a duplicate."""
+    in place, leaving one entry per name rather than a duplicate.
+    """
     first = client.post(
         "/api/subjects/save",
         json={

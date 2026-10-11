@@ -11,7 +11,8 @@ torch = pytest.importorskip("torch")
 
 def test_cancel_training_reaches_the_runs_own_poll(tmp_path):
     """A cancel requested by id is the one record the run's own poll reads; an id naming no run
-    refuses."""
+    refuses.
+    """
     from tcip_mcp.experiments import observe
     from tcip_mcp.pipelines.training.run_registry import observed_run
     from tcip_mcp.tools.training_tools import cancel_training

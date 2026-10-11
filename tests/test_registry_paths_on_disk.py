@@ -11,7 +11,8 @@ def test_archive_then_import_lands_a_registry_naming_the_restored_files(
     tmp_path: Path,
 ):
     """The real archive and import round trip: a foreign entry stays relative and the restored
-    run's own entry names the checkpoint under the destination."""
+    run's own entry names the checkpoint under the destination.
+    """
     from tcip_mcp.model_registry import ModelRegistry, read_registry_index
     from tcip_mcp.tools.model_tools import register_model
     from tcip_mcp.tools.project_tools import (

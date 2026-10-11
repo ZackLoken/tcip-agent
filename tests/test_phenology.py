@@ -39,7 +39,8 @@ def _registry(*attributes: cr.Attribute) -> cr.SubjectRegistry:
 
 def _scope(root: Path, *attributes: cr.Attribute) -> ClassScope:
     """The class space the admission reads for ``bud`` over a dataset at ``root`` declaring
-    ``attributes`` on it."""
+    ``attributes`` on it.
+    """
     from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tests._producer_fixtures import registry_over
 
@@ -66,7 +67,8 @@ def _bucket(
     """A bucket published for ``date`` holding one document per stem of ``documents``, each
     detection carrying its value under :data:`OPENING`, from a checkpoint whose scope declares it,
     or none from one whose scope declares no attribute (``_chain_fixtures.published``). With no
-    stem named it holds one image of no stem a test maps, since a publication holds a document."""
+    stem named it holds one image of no stem a test maps, since a publication holds a document.
+    """
     pytest.importorskip("torch")
     from tests._chain_fixtures import predicted, published
 
@@ -218,7 +220,8 @@ def test_milestone_date_columns_is_proper_subset_of_full_columns():
 def test_every_milestone_bound_and_the_observed_date_count_are_delivered_columns():
     """``plant_milestones`` emits a bound beside each milestone date and each row carries
     ``n_observed_dates``; the writer's ``extrasaction="ignore"`` would drop any the schema did not
-    name, and a left-censored crossing would then ship indistinguishable from a measured one."""
+    name, and a left-censored crossing would then ship indistinguishable from a measured one.
+    """
     cols = phenology.phenology_csv_columns(BUD_OPENING)
     ms = phenology.plant_milestones(
         [("2024-05-01", 0.0), ("2024-05-09", 1.0)], BUD_OPENING
@@ -459,7 +462,8 @@ def test_a_plant_the_mapping_captured_on_no_image_of_a_date_is_incomplete_on_it(
 ):
     """Every plant has a point on every mapped date: a plant captured on the first date only
     carries an imageless second date, counted against its completeness, so under the rule its
-    milestones are withheld rather than computed from the date it happened to be seen on."""
+    milestones are withheld rather than computed from the date it happened to be seen on.
+    """
     buckets = {
         "2024-05-01": _bucket(
             tmp_path, "2024-05-01", {"P1_a": ["open"], "P2_a": ["open"]}
@@ -658,7 +662,8 @@ def test_per_plant_series_excludes_unattributed_assignments_from_coverage(
 ):
     """An assignment with no ``plot_name`` (an image the plant-mapping step could not assign) is
     dropped from every plant's coverage; how often that happens is disclosed once, at delivery
-    scope, by ``plant_mapping.MappingBuild.unattributed``, never recomputed here."""
+    scope, by ``plant_mapping.MappingBuild.unattributed``, never recomputed here.
+    """
     buckets = {
         "2026-02-11": _bucket(tmp_path, "2026-02-11", {"P1_a": ["open"]})
     }
@@ -679,7 +684,8 @@ def test_per_plant_phenology_excludes_unattributed_assignments_from_rows(
 ):
     """``per_plant_phenology`` never emits a row for an unattributed assignment, and carries no
     unattributed count of its own: that disclosure is ``plant_mapping.MappingBuild.unattributed``'s,
-    at delivery scope, not a per-call return value."""
+    at delivery scope, not a per-call return value.
+    """
     buckets = {
         "2026-02-11": _bucket(tmp_path, "2026-02-11", {"P1_a": ["open"]})
     }

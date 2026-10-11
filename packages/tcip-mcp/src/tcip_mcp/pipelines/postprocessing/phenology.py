@@ -60,7 +60,8 @@ and the delivery event records the rule a delivery ran under."""
 
 def milestone_date_columns(spec) -> list[dict[str, str]]:
     """The milestone columns a trait's phenology delivery carries, each as ``{"date", "bound"}``:
-    the milestone's date column and the column holding that date's evidentiary bound."""
+    the milestone's date column and the column holding that date's evidentiary bound.
+    """
     return [
         {
             "date": f"{spec.phenology_prefix}_{sfx}_date",
@@ -73,7 +74,8 @@ def milestone_date_columns(spec) -> list[dict[str, str]]:
 def phenology_csv_columns(spec) -> list[str]:
     """The delivered per-plant phenology CSV schema for one trait, derived from its ``TraitEntry``:
     the plant, its coverage, each milestone date and its evidentiary bound, then the delivery
-    columns every delivered CSV carries."""
+    columns every delivered CSV carries.
+    """
     from tcip_mcp.delivery import DELIVERY_COLUMNS
 
     columns = milestone_date_columns(spec)
@@ -107,7 +109,8 @@ CURVE_MEASUREMENT_COLUMNS = [
 
 def curve_csv_columns() -> list[str]:
     """The delivered per-(plant, date) curve CSV schema: the counts the fraction is built from,
-    then the delivery columns every delivered CSV carries."""
+    then the delivery columns every delivered CSV carries.
+    """
     from tcip_mcp.delivery import DELIVERY_COLUMNS
 
     return [*CURVE_MEASUREMENT_COLUMNS, *DELIVERY_COLUMNS]
@@ -207,7 +210,8 @@ def crossing_date(
 
 def positive_onset_date(series: list[tuple[str, float]]) -> str | None:
     """First date any positive-state observation appears (fraction > 0), chronologically.
-    ``None`` if never."""
+    ``None`` if never.
+    """
     for d, r in _real_points(series):
         if r > 0:
             return iso(d)
@@ -482,7 +486,8 @@ def per_plant_phenology(
 class PhenologyMeasurement:
     """One trait's per-plant phenology over a plant mapping and its delivered buckets: the
     confirmed revision it is measured under, the buckets by date, the rows, the missingness rule
-    they were computed under, and the mapping's delivery disclosure."""
+    they were computed under, and the mapping's delivery disclosure.
+    """
 
     revision: TraitRevision
     buckets: dict[str, Bucket]
@@ -512,7 +517,8 @@ class PhenologyMeasurement:
 
     def result(self, *, curves: bool) -> Result:
         """The delivered result: the milestone rows, or the curve rows with ``curves``, under
-        their columns, with the population, missingness rule and mapping disclosure."""
+        their columns, with the population, missingness rule and mapping disclosure.
+        """
         from tcip_mcp.delivery import Result
 
         return Result(

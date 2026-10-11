@@ -35,7 +35,8 @@ from tests._chain_fixtures import deliver_milestones
 @pytest.fixture
 def project(tmp_path: Path) -> Path:
     """A project whose crossing and count traits are proposed and confirmed with no
-    operationalization, and whose registry declares the crossing trait's positive class."""
+    operationalization, and whose registry declares the crossing trait's positive class.
+    """
     root = tmp_path / "project"
     fx.propose_and_confirm(root, fx.CROSSING_SPEC)
     fx.propose_and_confirm(root, fx.COUNT_SPEC)
@@ -329,7 +330,8 @@ def _rows(text: str) -> list[dict]:
 
 def test_unconfirmed_crossing_door_refuses(tmp_path: Path):
     """An entry nobody confirmed is the agent's own definition, so the tool door refuses on it and
-    writes nothing."""
+    writes nothing.
+    """
     body = _series(tmp_path)
     _withdraw(tmp_path, "bud_opening")
     out_csv = tmp_path / "delivered.csv"
@@ -346,7 +348,8 @@ def test_both_web_doors_refuse_identically_and_an_acknowledgment_does_not_clear_
     tmp_path: Path,
 ):
     """One check, one refusal body: a curve the breeder sees is never one Download refuses, and
-    acknowledging an unvalidated measurement says nothing about whether one was defined."""
+    acknowledging an unvalidated measurement says nothing about whether one was defined.
+    """
     body = _series(tmp_path)
     _withdraw(tmp_path, "bud_opening")
 
@@ -394,7 +397,8 @@ def test_the_tool_and_the_web_export_write_the_same_rows(
     client: TestClient, tmp_path: Path
 ):
     """The two doors onto the one delivery write the same rows, the web door's saved file
-    included, apart from each delivery's own event id."""
+    included, apart from each delivery's own event id.
+    """
     from tcip_mcp.operationalization import latest_confirmed
     from tcip_mcp.pipelines.postprocessing.phenology import (
         phenology_csv_columns,
@@ -430,7 +434,8 @@ def test_a_changed_majority_crossing_ships_only_once_confirmed_and_then_needs_as
     """The majority crossing is part of the entry: changing it proposes a revision, and the
     delivery keeps shipping the confirmed crossing until the breeder confirms the change; the
     assessment behind the buckets was judged under the old revision, so the confirmed change
-    refuses until the checkpoint is assessed under it."""
+    refuses until the checkpoint is assessed under it.
+    """
     body = _series(tmp_path)
     shipped = traits.read_trait("bud_opening", tmp_path).latest.entry
     changed = fx.propose(
@@ -452,7 +457,8 @@ def test_an_assessment_answers_for_its_own_revision_never_a_later_one_of_equal_c
 ):
     """A revision is named by its number and its content together: re-proposing the identical
     entry and confirming it makes a second revision whose content hash equals the first's, and
-    the assessment judged under the first still answers for no delivery under the second."""
+    the assessment judged under the first still answers for no delivery under the second.
+    """
     body = _series(tmp_path)
     first = traits.read_trait("bud_opening", tmp_path).latest_confirmed
     assert first is not None
@@ -531,7 +537,8 @@ def test_the_count_tool_hands_back_no_counts_when_it_refuses(
     delivery_root: Path, tmp_path: Path
 ):
     """A count delivery whose trait states no count refuses before reading the bucket's
-    documents, and returns the refusal alone, never numbers."""
+    documents, and returns the refusal alone, never numbers.
+    """
     pytest.importorskip("torch")
     from tcip_mcp.tools.inference_tools import deliver_per_image_counts
     from tests._chain_fixtures import predicted, published
@@ -561,7 +568,8 @@ def test_a_phenotype_no_confirmed_trait_delivers_refuses_and_names_the_proposing
     tmp_path: Path,
 ):
     """A trait that delivers the phenotype only in a revision nobody confirmed is named in the
-    refusal."""
+    refusal.
+    """
     fx.propose(tmp_path, fx.entry("nut", ("cluster_nut_count",)))
 
     with pytest.raises(OperationalizationRefusedError) as excinfo:
@@ -603,7 +611,8 @@ def test_a_revision_states_each_aggregate_kind_it_delivers(
     delivery_root: Path, tmp_path: Path
 ):
     """One trait, two aggregate shapes: a revision stating only the ordinal one admits ordinal and
-    refuses count; the revision that adds count, once confirmed, admits both."""
+    refuses count; the revision that adds count, once confirmed, admits both.
+    """
     fx.seed_confirmed_aggregate(
         tmp_path,
         "astringency",

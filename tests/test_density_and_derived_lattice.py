@@ -2,7 +2,8 @@
 density the checkpoint recorded of its training regions where no reference stands behind the pass,
 every forward, prediction and validation alike, run under it; and a tile lattice nobody stated or
 recorded is the one the ground truth's object sides derive, the same one for the tiler, the
-spatial split and the pass."""
+spatial split and the pass.
+"""
 
 from __future__ import annotations
 
@@ -33,7 +34,8 @@ THIS_FILE = str(REPO_ROOT / "tests" / "test_density_and_derived_lattice.py")
 
 def build_regions_ds(*, samples, scope, transforms=None, **_ignored):
     """A ``dataset_source`` builder's detection dataset over ``samples``: the platform's own
-    three-band loader, exposing its ``regions``."""
+    three-band loader, exposing its ``regions``.
+    """
     from tcip_mcp.pipelines.data.datasets import build_dataset
 
     return build_dataset(
@@ -70,7 +72,8 @@ COMPOSED_LATTICE = (32, 0.25)
 def compose_tiles(ctx) -> None:
     """A training body tiling its own training loader's dataset at :data:`COMPOSED_LATTICE`
     (``ctx.tiled_dataset``), logging the lattice its tiler serves, validating the model as built
-    over those tiles (``ctx.evaluate``) and saving it."""
+    over those tiles (``ctx.evaluate``) and saving it.
+    """
     from torch.utils.data import DataLoader
 
     from tcip_mcp.pipelines.model_build import STATE_DICT_KEY
@@ -116,7 +119,8 @@ def test_a_pass_with_no_reference_caps_each_frame_at_the_checkpoints_density_tim
 ):
     """Two frames of different sizes in one pass: each runs its forward under, and its row
     carries, the cap its own pixels give the density the checkpoint recorded, so the caps stand in
-    the ratio of the frames' areas and neither row keeps more than its own."""
+    the ratio of the frames' areas and neither row keeps more than its own.
+    """
     from PIL import Image
 
     from tcip_mcp.pipelines.derivations import detection_cap
@@ -150,7 +154,8 @@ def test_a_pass_with_no_reference_caps_each_frame_at_the_checkpoints_density_tim
 
 def _without_density(project: Path):
     """A checkpoint no run produced: the bytes of :func:`project_checkpoint`'s with the density
-    its config records removed, registered in explicit mode; loaded through the registry."""
+    its config records removed, registered in explicit mode; loaded through the registry.
+    """
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.model_build import CONFIG_KEY
     from tests._verified_checkpoint_fixtures import (
@@ -173,7 +178,8 @@ def test_a_checkpoint_recording_no_density_refuses_a_detector_pass_naming_the_pr
 ):
     """A detector checkpoint no run of the platform produced records no density of its training
     regions: a pass with no reference refuses naming the door that records one, and the
-    platform-built detector beside it predicts."""
+    platform-built detector beside it predicts.
+    """
     from PIL import Image
 
     from tcip_mcp.pipelines.execution import prepare
@@ -198,7 +204,8 @@ def test_a_checkpoint_recording_no_density_refuses_a_detector_pass_naming_the_pr
 
 def _mosaic(root: Path) -> Path:
     """One mosaic under ``root``'s undated capture holding two rows of 100 x 4 px buds; its images
-    directory."""
+    directory.
+    """
     import numpy as np
     import tifffile
 
@@ -231,7 +238,8 @@ def _mosaic(root: Path) -> Path:
 def _resolved(project: Path, data: dict, monkeypatch) -> tuple:
     """``(run, lattice derivations)``: the run a detection config over ``data`` resolves under
     ``project`` (``split_construction.resolve_run``), and how many times its resolution called
-    ``derivations.derive_tile_geometry``."""
+    ``derivations.derive_tile_geometry``.
+    """
     import tcip_mcp.pipelines.derivations as derivations
     from tcip_mcp.pipelines.data.split_construction import resolve_run
     from tcip_mcp.pipelines.model_build import staged_sources
@@ -262,7 +270,8 @@ def test_the_tiler_the_spatial_split_and_the_pass_derive_one_lattice_from_one_gr
     run's resolution recorded and drew its spatial split at, the one its tiler serves, and the one
     a tiled pass over a checkpoint recording none ran at under that mosaic as its reference, all
     the lattice the mosaic's objects derive, resolved once for the run, in some tile of which
-    every object lies whole."""
+    every object lies whole.
+    """
     from tcip_mcp.pipelines.derivations import derive_tile_geometry
     from tcip_mcp.pipelines.slicing import slice_lattice
     from tcip_mcp.pipelines.training.eval_runners import (
@@ -328,7 +337,8 @@ def test_a_drawn_tiled_run_resolves_its_lattice_once(
     tmp_path: Path, monkeypatch
 ):
     """A tiled run drawing train and val over several frames resolves its lattice once, before
-    its loaders are built, and its tiler serves that one."""
+    its loaders are built, and its tiler serves that one.
+    """
     from tests._producer_fixtures import seed_bud_images
 
     images_dir = seed_bud_images(
@@ -357,7 +367,8 @@ def test_an_object_as_long_as_the_derived_overlap_lies_whole_in_a_tile_at_a_stat
 ):
     """A frame holding one 29 px object, at a stated 100 px edge: the lattice its run resolves
     overlaps neighbors by at least the object's length, so its tiler holds it whole in some
-    tile."""
+    tile.
+    """
     from tcip_mcp.pipelines.slicing import slice_lattice
     from tests._producer_fixtures import label_image, run_over, write_image
 
@@ -396,7 +407,8 @@ def test_a_tiled_pass_with_nothing_stated_recorded_or_referenced_refuses_naming_
 ):
     """A checkpoint that trained untiled on frames of no square edge records no lattice: a tiled
     pass stating none of it and holding no reference refuses naming what supplies it, never a
-    fallback lattice; stated whole, the same pass runs."""
+    fallback lattice; stated whole, the same pass runs.
+    """
     from tests._producer_fixtures import gray_frame
     from tests._verified_checkpoint_fixtures import (
         SAMPLE_OVERLAP,
@@ -432,7 +444,8 @@ def test_validation_runs_every_frame_under_the_cap_its_density_gives_it(
 ):
     """The trainer's validation predicts each frame under the cap the run's density gives it, so
     a frame whose cap is one keeps one detection though the same detector under a cap of two
-    keeps more than one."""
+    keeps more than one.
+    """
     import tcip_mcp.pipelines.training.evaluation as evaluation
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
@@ -487,7 +500,8 @@ def test_validation_keeps_every_box_the_cap_admits_whatever_the_builders_own_flo
 ):
     """The trainer's validation predicts at no score floor: a built detector holding a score
     threshold above every score it gives, as a builder's own threshold would, still reports in
-    each frame's row every box the frame's cap admits."""
+    each frame's row every box the frame's cap admits.
+    """
     import tcip_mcp.pipelines.training.evaluation as evaluation
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.derivations import detection_cap
@@ -550,7 +564,8 @@ def test_validation_keeps_every_box_the_cap_admits_whatever_the_builders_own_flo
 
 def _frames_config(project: Path, name: str, **data) -> dict:
     """A one-epoch run of the built detector over four labeled frames of its own, drawing a
-    validation side and selecting on its loss, ``data``'s keys beside its data section's own."""
+    validation side and selecting on its loss, ``data``'s keys beside its data section's own.
+    """
     from tests._chain_fixtures import training_config
     from tests._training_values import evaluation_block
     from tests._verified_checkpoint_fixtures import (
@@ -578,7 +593,8 @@ def test_the_density_the_trainer_validates_under_is_the_one_its_checkpoint_recor
     tmp_path: Path, monkeypatch
 ):
     """A run's validation is handed the density its own resolution recorded, the one its
-    checkpoint carries."""
+    checkpoint carries.
+    """
     import tcip_mcp.pipelines.training.generic_trainer as trainer
     from tcip_mcp.experiments import observe
     from tcip_mcp.model_registry import load_registered_checkpoint
@@ -608,7 +624,8 @@ def test_a_bespoke_detection_dataset_exposing_regions_records_its_density_and_va
 ):
     """A run whose loaders a ``dataset_source`` builder makes records the density of the regions
     its dataset exposes and validates under it; a builder's dataset exposing none refuses naming
-    the interface."""
+    the interface.
+    """
     import tcip_mcp.pipelines.training.generic_trainer as trainer
     from tcip_mcp.experiments import observe
     from tcip_mcp.model_registry import load_registered_checkpoint
@@ -663,7 +680,8 @@ def test_a_bespoke_body_tiles_at_the_lattice_it_states_and_validates_over_its_ti
 ):
     """A run whose loaders a ``dataset_source`` builder makes records no lattice; its training
     body composes the tiler at the pair it states, the tiler serves that pair, and the run
-    validates over those tiles and completes."""
+    validates over those tiles and completes.
+    """
     from tcip_mcp.experiments import observe, read_rows
     from tests._verified_checkpoint_fixtures import worker_run
 
@@ -699,7 +717,8 @@ def test_a_tiling_stated_beside_a_builder_refuses_at_admission_naming_both(
     tmp_path: Path,
 ):
     """A config stating ``data.tiling`` beside a ``dataset_source`` refuses at the door naming
-    both, before any run opens; the same config without the tiling opens."""
+    both, before any run opens; the same config without the tiling opens.
+    """
     from tests._verified_checkpoint_fixtures import opened_run
 
     source = {
@@ -729,7 +748,8 @@ def test_an_enabled_tiling_without_its_lattice_refuses_naming_its_resolver(
     tmp_path: Path,
 ):
     """A tiling block reaching the factory enabled with no edge or overlap refuses naming both
-    and the resolver that states them, and the same block resolved builds its tiler."""
+    and the resolver that states them, and the same block resolved builds its tiler.
+    """
     from tcip_mcp.pipelines.data.datasets import build_dataset
     from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tcip_mcp.pipelines.data.split_construction import resolved_tiling
@@ -775,7 +795,8 @@ def test_a_stand_in_datasets_density_is_the_one_its_served_objects_give(
     built: str,
 ):
     """A stand-in detection dataset's regions are read off the objects it serves, so the density
-    a run records of it counts exactly those."""
+    a run records of it counts exactly those.
+    """
     from tcip_mcp.pipelines.derivations import derive_object_density
     from tests.test_dataset_source_seam import build_bespoke_ds
     from tests.test_selection_binding import build_recording_dataset
@@ -796,7 +817,8 @@ def test_a_bespoke_detector_under_cap_one_keeps_one_through_validation_and_a_pas
     tmp_path: Path, monkeypatch
 ):
     """A producer-built bespoke detector over frames holding two objects each keeps one under a
-    cap of one, in a pass and in the trainer's validation alike, though ungoverned it finds two."""
+    cap of one, in a pass and in the trainer's validation alike, though ungoverned it finds two.
+    """
     import tcip_mcp.pipelines.training.evaluation as evaluation
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.data.selection import ClassScope
@@ -878,7 +900,8 @@ def test_an_operating_point_knob_stated_to_the_builder_refuses_by_name(
     knob: str,
 ):
     """The cap and the score threshold are set at every forward: a detector builder handed
-    either refuses naming it, and the same call without it builds at its other keywords."""
+    either refuses naming it, and the same call without it builds at its other keywords.
+    """
     from tests.bespoke_models import build_bespoke_detection
 
     with pytest.raises(ValueError, match=knob):
@@ -896,7 +919,8 @@ def test_a_restored_record_missing_its_overlap_or_density_refuses_and_a_complete
 ):
     """A stored detector's tiled execution record states its whole lattice and its conf beside
     its density or restores nothing: one missing its overlap or its density refuses naming it,
-    and the complete record restores and predicts."""
+    and the complete record restores and predicts.
+    """
     from tcip_mcp.pipelines.execution import Execution, prepare
     from tests._producer_fixtures import gray_frame
     from tests._verified_checkpoint_fixtures import (
@@ -938,7 +962,8 @@ def test_the_published_cap_reaches_the_row_scoring_its_bucket(
 ):
     """The cap a frame was predicted under, published on its document, is the cap on the row
     scoring that bucket against the frame's ground truth; a proposal bucket's row carries none,
-    no forward having capped it."""
+    no forward having capped it.
+    """
     import tcip_mcp.pipelines.training.evaluation as evaluation
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.pipelines.derivations import detection_cap

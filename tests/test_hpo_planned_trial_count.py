@@ -3,7 +3,8 @@ against: Ray's own variant count over the identical specification _search_space_
 prepares for tune_search, so the two can never diverge, and no Ray session is started. The last
 section drains the searcher tune_search itself builds to exhaustion and checks that
 planned_trial_count's answer is the number of trials it really yields, the property the door's
-bound rests on."""
+bound rests on.
+"""
 
 from __future__ import annotations
 
@@ -51,17 +52,19 @@ def _paired_space(draws: int, param_space: dict = SPACE) -> dict:
 
 @pytest.mark.parametrize("draws, expected", [(1, 5), (2, 10), (3, 15)])
 def test_planned_trial_count_random_over_the_sample_space(draws, expected):
-    """random over the sample space, no baseline: n_trials draws per point, times the seed
+    """Random over the sample space, no baseline: n_trials draws per point, times the seed
     draws paired above one (the seed axis is a grid factor of every sample whether or not the
-    sweep's own search_alg is random)."""
+    sweep's own search_alg is random).
+    """
     space = SPACE if draws == 1 else _paired_space(draws)
     assert planned_trial_count(space, 5, "random", draws, None) == expected
 
 
 @pytest.mark.parametrize("draws, expected", [(1, 15), (2, 30), (3, 45)])
 def test_planned_trial_count_grid_over_the_sample_space(draws, expected):
-    """grid over the sample space, no baseline: n_trials times the three batch_size choices,
-    times the draws."""
+    """Grid over the sample space, no baseline: n_trials times the three batch_size choices,
+    times the draws.
+    """
     space = SPACE if draws == 1 else _paired_space(draws)
     assert planned_trial_count(space, 5, "grid", draws, None) == expected
 
@@ -69,40 +72,46 @@ def test_planned_trial_count_grid_over_the_sample_space(draws, expected):
 @pytest.mark.parametrize("draws, expected", [(1, 13), (2, 26), (3, 39)])
 def test_planned_trial_count_grid_with_a_baseline(draws, expected):
     """A baseline pins batch_size to one sample per draw and leaves the other n_trials-1 samples
-    to yield three each."""
+    to yield three each.
+    """
     space = SPACE if draws == 1 else _paired_space(draws)
     assert planned_trial_count(space, 5, "grid", draws, BASELINE) == expected
 
 
 def test_planned_trial_count_random_at_two_draws_with_a_baseline():
     """The baseline never names the seed axis, so its own sample still yields every draw:
-    random's count is unmoved by it."""
+    random's count is unmoved by it.
+    """
     space = _paired_space(2)
     assert planned_trial_count(space, 5, "random", 2, BASELINE) == 10
 
 
 def test_planned_trial_count_a_uniform_axis_under_grid_contributes_one():
     """A continuous axis (loguniform/uniform) stays sampled even under grid, so it contributes a
-    factor of one to the grid count: the total is exactly num_samples."""
+    factor of one to the grid count: the total is exactly num_samples.
+    """
     space = {"x": {"type": "uniform", "low": 0.0, "high": 1.0}}
     assert planned_trial_count(space, 3, "grid", 1, None) == 3
 
 
 def test_planned_trial_count_normalizes_the_search_alg_name():
     """search_alg='Grid' (a recorded value this family has met before) is normalized the same
-    way tune_search's own case-insensitive read does, in the one shared helper."""
+    way tune_search's own case-insensitive read does, in the one shared helper.
+    """
     assert planned_trial_count(SPACE, 5, "Grid", 1, None) == 15
 
 
 def test_planned_trial_count_over_an_empty_param_space_at_one_draw():
     """An empty param_space is counted as it is, no space substituted for it: num_samples
-    trials of the one point it holds."""
+    trials of the one point it holds.
+    """
     assert planned_trial_count({}, 2, "grid", 1, None) == 2
 
 
 def test_planned_trial_count_over_an_empty_param_space_run_through_split_draw_search_space():
     """Above one draw, an empty param_space run through split_draw_search_space first carries
-    only the paired seed axis: the paired sweep runs the seed axis alone."""
+    only the paired seed axis: the paired sweep runs the seed axis alone.
+    """
     space = _paired_space(2, {})
     assert space == {
         "data.split.seed": {"type": "categorical", "choices": [42, 43]}
@@ -114,7 +123,8 @@ def test_planned_trial_count_over_a_backend_search_alg_name():
     """A backend name (bayesopt) at one draw over a sampled space counts n_trials: the
     generator's own count, never a claim about how many points the backend searcher itself would
     draw (build_search_alg's own refusal of an uninstalled backend lives inside tune_search, not
-    here)."""
+    here).
+    """
     space = {
         "optimizer.head_lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2}
     }
@@ -125,7 +135,8 @@ def test_planned_trial_count_num_samples_negative_one_counts_zero():
     """Ray's own generator counts a negative num_samples as zero rather than negative or
     unbounded, the fact the door's n_trials argument clause rests on: Tuner.fit() itself would
     convert -1 to an unbounded sweep, so the bound must refuse it by name rather than trust this
-    count to catch it."""
+    count to catch it.
+    """
     assert planned_trial_count(SPACE, -1, "random", 1, None) == 0
     assert planned_trial_count(SPACE, -1, "grid", 1, None) == 0
 
@@ -135,7 +146,8 @@ def test_planned_trial_count_num_samples_negative_one_counts_zero():
 
 def test_planned_trial_count_raises_on_a_categorical_with_no_choices():
     """A categorical spec naming no choices key fails space_axes's own subscript read
-    (KeyError), before any generator is built."""
+    (KeyError), before any generator is built.
+    """
     with pytest.raises(KeyError):
         planned_trial_count({"x": {"type": "categorical"}}, 2, "grid", 1, None)
 
@@ -145,7 +157,8 @@ def test_planned_trial_count_raises_on_an_int_axis_whose_low_exceeds_high(
     search_alg,
 ):
     """An int axis with low above high names no value to train, gridded or sampled:
-    space_axes refuses it by name, before anything is counted."""
+    space_axes refuses it by name, before anything is counted.
+    """
     space = {"batch_size": {"type": "int", "low": 8, "high": 2}}
     with pytest.raises(ValueError, match="'batch_size'.*exceeds high"):
         planned_trial_count(space, 2, search_alg, 1, None)
@@ -165,7 +178,8 @@ def test_planned_trial_count_raises_on_a_categorical_with_an_empty_choice_list()
 def test_planned_trial_count_counts_a_large_sampled_int_span_and_refuses_it_gridded():
     """A sampled int axis is never enumerated, so its count is the samples drawn; gridded, an
     axis past the bound a grid axis may enumerate refuses by name before anything is
-    enumerated."""
+    enumerated.
+    """
     space = {"x": {"type": "int", "low": 0, "high": 10**6}}
     assert planned_trial_count(space, 2, "random", 1, None) == 2
     with pytest.raises(ValueError, match="'x'.*past the"):
@@ -191,7 +205,8 @@ def test_tune_search_and_planned_trial_count_share_one_search_space_derivation(
 ):
     """Both tune_search and planned_trial_count call _search_space_and_points, never a second
     derivation that could disagree with the first: patched to record its own arguments and raise
-    before either function does anything Ray-heavy, each call records the identical arguments."""
+    before either function does anything Ray-heavy, each call records the identical arguments.
+    """
     import tcip_mcp.pipelines.training.hpo as hpo
 
     calls: list[tuple] = []
@@ -221,7 +236,8 @@ def test_tune_search_and_planned_trial_count_share_one_search_space_derivation(
 
 def test_split_draw_search_space_at_one_draw_returns_param_space_itself():
     """At split_draws of one or below no seeds resolve, and split_draw_search_space is then a
-    no-op: the same object back."""
+    no-op: the same object back.
+    """
     space = {
         "optimizer.head_lr": {"type": "loguniform", "low": 1e-4, "high": 1e-2}
     }
@@ -234,7 +250,8 @@ def test_planned_trial_count_leaves_nothing_under_home_or_the_project_root(
     tmp_path, monkeypatch
 ):
     """planned_trial_count builds no searcher and no experiment, so a monkeypatched home
-    directory and project root both stay empty after a real count."""
+    directory and project root both stay empty after a real count.
+    """
     home = tmp_path / "home"
     home.mkdir()
     project_root = tmp_path / "project"
@@ -262,7 +279,8 @@ def _trials_ray_yields(
     storage_path,
 ) -> tuple[int, int]:
     """Build the searcher tune_search launches for this sweep and drain it, returning the number
-    of trials next_trial() actually yielded and the total_samples tally read back afterwards."""
+    of trials next_trial() actually yielded and the total_samples tally read back afterwards.
+    """
     from ray.tune.experiment import Experiment
 
     from tcip_mcp.pipelines.training.hpo import build_search_alg
@@ -308,7 +326,8 @@ def test_planned_trial_count_equals_the_trials_the_generator_yields(
 ):
     """Coverage that the tally the door reads is the launched count, not merely a number the same
     function computes twice: a separately built generator is drained to exhaustion, and the trials
-    it yielded, its own total_samples, and planned_trial_count's answer are all one number."""
+    it yielded, its own total_samples, and planned_trial_count's answer are all one number.
+    """
     param_space = SPACE if draws == 1 else _paired_space(draws)
 
     yielded, tally = _trials_ray_yields(
@@ -326,7 +345,8 @@ def test_planned_trial_count_equals_the_trials_the_generator_yields(
 def test_the_counted_total_divides_evenly_into_the_per_draw_count(draws):
     """Coverage of the invariant the budget refusal's per-draw arithmetic rests on: the seed axis
     is a grid factor of every sample, so the counted total is an exact multiple of split_draws and
-    the count // split_draws the refusal reports is at least one, never a floor to zero."""
+    the count // split_draws the refusal reports is at least one, never a floor to zero.
+    """
     space = _paired_space(draws)
 
     for search_alg in ("random", "grid"):

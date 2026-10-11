@@ -33,7 +33,8 @@ bucket records it with its source beside every mask it cut."""
 
 def resolve_binarize_threshold(value: float | None = None) -> dict:
     """The mask-binarization threshold, ``{"value", "source"}``: a stated ``value`` (``explicit``),
-    else :data:`DEFAULT_MASK_BINARIZE_THRESHOLD` (``default``)."""
+    else :data:`DEFAULT_MASK_BINARIZE_THRESHOLD` (``default``).
+    """
     if value is None:
         return {"value": DEFAULT_MASK_BINARIZE_THRESHOLD, "source": "default"}
     return {"value": float(value), "source": "explicit"}
@@ -50,7 +51,8 @@ def _to_numpy(mask: Any):
 
 def _perimeter_px(binary) -> float:
     """4-connected boundary length: sum over foreground pixels of edges facing
-    background/outside."""
+    background/outside.
+    """
     import numpy as np
 
     b = binary.astype(np.int64)
@@ -61,7 +63,8 @@ def _perimeter_px(binary) -> float:
 
 def _axes_from_points(pts):
     """PCA over a raw ``(x, y)`` point cloud -> ``(centroid_xy, principal, secondary,
-    major_unit_vector)``, continuous chord spans with no pixel-inclusive correction."""
+    major_unit_vector)``, continuous chord spans with no pixel-inclusive correction.
+    """
     import numpy as np
 
     centroid = pts.mean(axis=0)
@@ -130,7 +133,8 @@ def _attach_physical(result: dict, scale: float, unit: str) -> None:
     """Add ``{unit}``-suffixed physical fields from a linear per-pixel scale in that unit (area
     scales by the square). The unit is real data the caller states, never assumed: a scale in cm/px
     passed with ``unit="cm"`` produces ``area_cm2``/``principal_axis_extent_cm``/etc, not a
-    silently-wrong ``_mm`` label."""
+    silently-wrong ``_mm`` label.
+    """
     s = float(scale)
     result[f"{unit}_per_px"] = s
     result[f"area_{unit}2"] = result["area_px"] * s * s
@@ -164,7 +168,8 @@ def _known_units() -> set[str]:
 
 def is_pixel_space_key(key: str) -> bool:
     """Whether ``key`` explicitly names pixel space: a trailing ``_px``, or the bare key
-    ``"px"``."""
+    ``"px"``.
+    """
     return key.rpartition("_")[2] == "px"
 
 
@@ -285,7 +290,8 @@ def instance_geometries(
     threshold: float = DEFAULT_MASK_BINARIZE_THRESHOLD,
 ) -> list[dict]:
     """Per-instance :func:`mask_geometry` over an ``[N, H, W]`` mask stack (or a single
-    ``[H, W]``)."""
+    ``[H, W]``).
+    """
     arr = _to_numpy(masks)
     if arr.ndim == 2:
         arr = arr[None]

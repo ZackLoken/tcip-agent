@@ -119,7 +119,8 @@ def test_region_scoped_mask_rings_are_staged_at_their_full_frame_location(
 ) -> None:
     """The mask a breeder confirms covers the object, not the crop-local coordinates the engine
     saw. The region rect starts well inside the frame on both axes, so an untranslated ring
-    lands somewhere else entirely."""
+    lands somewhere else entirely.
+    """
     from tcip_annotation import json_io
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.dataset_layout import parse_image_path
@@ -153,7 +154,8 @@ def test_region_scoped_bbox_and_mask_rings_describe_the_same_place(
     tmp_path: Path,
 ) -> None:
     """The bbox the tool reports and the rings it caches are two views of one candidate: both
-    are read as full-frame, so they must not be translated by different origins."""
+    are read as full-frame, so they must not be translated by different origins.
+    """
     import tcip_store as ts
     from tcip_mcp.tools.proposal_tools import _staging_key_for
 

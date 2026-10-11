@@ -19,7 +19,8 @@ def _checkpoint(project: Path, **kwargs) -> Path:
 
 def _one_image(project: Path, *stems: str) -> Path:
     """A 100px image per stem (``img`` by default) in ``project``'s undated capture; the capture's
-    directory."""
+    directory.
+    """
     from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
     from tests._producer_fixtures import write_image
 
@@ -168,7 +169,8 @@ def test_web_worker_prefers_the_checkpoints_own_recorded_scope(
     tmp_path, monkeypatch
 ):
     """The GUI inference worker decodes through the checkpoint's own recorded scope, never an
-    order re-read from a live registry: no subjects.json exists over the images at all."""
+    order re-read from a live registry: no subjects.json exists over the images at all.
+    """
     pytest.importorskip("fastapi")
     from tcip_mcp import subject_registry as cr
     from tcip_mcp.buckets import read_bucket
@@ -213,7 +215,8 @@ def test_web_worker_runs_tiled_instance_seg_without_forcing_untiled(
     tmp_path, monkeypatch
 ):
     """An instance_seg checkpoint launched with the GUI's tile checkbox checked runs tiled as
-    requested, its stated merge threshold recorded as stated."""
+    requested, its stated merge threshold recorded as stated.
+    """
     pytest.importorskip("fastapi")
     from tcip_mcp.buckets import read_bucket
     from tcip_web.routes.inference import _worker
@@ -258,7 +261,8 @@ def test_web_worker_runs_a_native_frame_tile_scale_and_forwards_its_recorded_res
     """A checkpoint whose only geometry is its own uniform untiled training frame does justify a
     tile edge, so this door runs rather than refusing: the record names that basis and the
     prediction call runs at the resolved tile edge plus the checkpoint's recorded train-time
-    resize."""
+    resize.
+    """
     pytest.importorskip("fastapi")
     from tcip_web.routes.inference import _worker
 
@@ -307,7 +311,8 @@ def test_web_worker_stamps_the_stated_conf_explicit_and_the_checkpoints_density(
     tmp_path, monkeypatch
 ):
     """A caller-stated conf is recorded 'explicit', the same distinction tile/tile_size already
-    carry, and the density no caller states is the checkpoint's own recorded one."""
+    carry, and the density no caller states is the checkpoint's own recorded one.
+    """
     from tcip_web.routes.inference import _worker
     from tests._verified_checkpoint_fixtures import SAMPLE_CONF
 
@@ -335,7 +340,8 @@ def test_web_worker_fails_a_job_stating_no_conf_naming_it(
     tmp_path, monkeypatch
 ):
     """A job stating no conf has no basis for one: the worker's pass refuses naming it, and the
-    job fails with that refusal rather than running at a value nobody stated."""
+    job fails with that refusal rather than running at a value nobody stated.
+    """
     from tcip_web.routes.inference import _worker
 
     images_dir = _one_image(tmp_path)
@@ -361,7 +367,8 @@ def test_web_worker_dropped_boxes_agree_with_the_published_document_on_a_degener
 ):
     """A box that collapses to zero width is dropped when the prediction document is encoded, so
     the job's own dropped-box counter and the published document must agree: one of the model's
-    two raw detections dropped, exactly one kept, never the model's raw output count."""
+    two raw detections dropped, exactly one kept, never the model's raw output count.
+    """
     pytest.importorskip("fastapi")
     from tcip_web.routes.inference import _worker
 
@@ -401,7 +408,8 @@ def test_web_worker_fails_the_job_on_a_stem_collision(tmp_path):
     """The worker's pass enumerates through ``image_utils.list_logical_images``, the same
     enumeration every reader shares: a capture already holding two logical identities under one
     case-folded stem fails the job with the refusal's own message, through the worker's own
-    ``except Exception`` handler, rather than crashing the worker thread."""
+    ``except Exception`` handler, rather than crashing the worker thread.
+    """
     from tcip_web.routes.inference import _worker
 
     images_dir = _one_image(tmp_path, "foo")

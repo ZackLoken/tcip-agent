@@ -30,7 +30,8 @@ def test_runs_under_the_given_workspace_never_the_machines_last_opened_project(
 ):
     """A live workspace whose last-opened pointer names a real project must not decide what this
     run touches: the run sees the workspace it was given, opens nothing for a row that cannot
-    launch, and leaves the live project's log as it was."""
+    launch, and leaves the live project's log as it was.
+    """
     import tcip_store
     from tcip_mcp import workspace
     from tcip_mcp.audit import audit_log_key
@@ -67,7 +68,8 @@ def test_the_signal_is_a_friction_report_of_the_open_project_carrying_the_token(
 ):
     """``reported`` answers only while ``report_friction`` has recorded, in the open project,
     exactly one report whose detail carries the token, of the requested category: the token
-    anywhere else, a report of another category, or a second call is not it."""
+    anywhere else, a report of another category, or a second call is not it.
+    """
     from tcip_mcp.tools.meta_tools import report_friction
 
     mod = _load()

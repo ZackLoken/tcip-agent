@@ -15,7 +15,8 @@ def named_project(path: Path, display_name: str) -> OpenProject:
     """Make ``path`` a project named ``display_name`` through the platform's own creation door
     (``initialize_project``), its record holding an id, that name and a site; the project as
     the backend's open takes it. Refuses (by assertion) when ``path`` already records another
-    name or site."""
+    name or site.
+    """
     from tcip_mcp.tools.project_tools import initialize_project
     from tcip_web.state import OpenProject
 
@@ -26,7 +27,8 @@ def named_project(path: Path, display_name: str) -> OpenProject:
 
 def bound_to(project: OpenProject) -> BoundProject:
     """``project`` as an MCP server started for it binds it, under the workspace this process
-    names (``TCIP_WORKSPACE``)."""
+    names (``TCIP_WORKSPACE``).
+    """
     from tcip_mcp.workspace import BoundProject, workspace_from_environment
 
     return BoundProject(project.root, project.id, workspace_from_environment())
@@ -55,7 +57,8 @@ def acknowledged_post(
 ):
     """Post ``body`` to ``url`` as ``user`` ships an unvalidated result from the screen: refused
     first, then posted again from the browser acknowledging, for ``reason``, the result the
-    refusal names; the second response."""
+    refusal names; the second response.
+    """
     body = {**body, "user": user}
     refused = client.post(url, json=body)
     assert refused.status_code == 400, refused.text

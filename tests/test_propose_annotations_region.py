@@ -21,7 +21,8 @@ from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 class PatchProposer:
     """Reports the red patch in whatever pixels it is handed, so the crop is what decides the
-    answer."""
+    answer.
+    """
 
     def propose(self, image_path, **params):
         arr = np.asarray(Image.open(image_path).convert("RGB"))
@@ -81,7 +82,8 @@ def test_fixture_rotation_is_actually_reversed_by_exif_orientation(
 ) -> None:
     """Sanity check on the fixture itself: opening the raw file and applying
     ``auto_orient_image`` must reproduce the upright frame this test's expectations are stated in
-    terms of, or the rest of this module is testing nothing real."""
+    terms of, or the rest of this module is testing nothing real.
+    """
     from tcip_annotation.utils import auto_orient_image
 
     with Image.open(exif_rotated_source) as im:
@@ -103,7 +105,8 @@ def test_region_crop_carries_no_exif_orientation_tag(
 ) -> None:
     """The crop `propose_annotations` writes for the engine to read must carry no EXIF
     orientation tag of its own: it is taken from the already-oriented frame, and an engine that
-    honored a tag on it would rotate a second time and displace every coordinate."""
+    honored a tag on it would rotate a second time and displace every coordinate.
+    """
     from tcip_mcp.pipelines.raster_source import open_raster
     from tcip_mcp.pipelines.reference_grid import reference_cells
     from tcip_mcp.tools.proposal_tools import (
@@ -209,7 +212,8 @@ def _region_cells() -> list:
 
 class TestRegionCellNamesResolveThroughTheOneLookup:
     """A region's cell names resolve through the one cell-name lookup
-    (``tcip_annotation.grid.grid_to_rect``): every accepted cell shape, every refused reference."""
+    (``tcip_annotation.grid.grid_to_rect``): every accepted cell shape, every refused reference.
+    """
 
     def test_named_cells_bound_their_combined_rect(self) -> None:
         from tcip_mcp.tools.proposal_tools import _region_rect_from_cells
@@ -253,7 +257,8 @@ def _write_rgb_band_group(
     images_dir: Path, stem: str, frame: np.ndarray
 ) -> Path:
     """A ``.bandgroup`` capture whose three sibling single-band TIFFs hold ``frame``'s R, G and B
-    planes, the manifest declaring them in that order."""
+    planes, the manifest declaring them in that order.
+    """
     import tifffile
 
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
@@ -268,7 +273,8 @@ def _write_rgb_band_group(
 
 class TestRegionFrameIsTheResolvedImageSources:
     """The region path measures and crops the logical image the enumeration primitive resolves,
-    the one every other reference-grid consumer measures."""
+    the one every other reference-grid consumer measures.
+    """
 
     def test_a_grouped_capture_crops_its_own_stacked_frame(
         self,
@@ -277,7 +283,8 @@ class TestRegionFrameIsTheResolvedImageSources:
     ) -> None:
         """A ``.bandgroup`` manifest names a capture whose pixels live in sibling files, so the
         region's cells and its crop both come from the stacked frame, never from the manifest file
-        read as if it were a photograph."""
+        read as if it were a photograph.
+        """
         from tcip_mcp.pipelines import proposal
         from tcip_mcp.tools.proposal_tools import propose_annotations
 
@@ -307,7 +314,8 @@ class TestRegionFrameIsTheResolvedImageSources:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A crop reaches the engine as an RGB image file, so a source that has no such frame is
-        told what it reads as instead of reaching the writer as an unwritable array."""
+        told what it reads as instead of reaching the writer as an unwritable array.
+        """
         import tifffile
 
         from tcip_mcp.pipelines import proposal
@@ -354,7 +362,8 @@ class TestRegionFrameIsTheResolvedImageSources:
     ) -> None:
         """An RGB TIFF one pixel high and far wider than it has bands: its cells are measured in
         the frame its header's axes describe, the crop is read in that same frame, and the engine
-        receives an RGB crop of the named cell."""
+        receives an RGB crop of the named cell.
+        """
         import tifffile
 
         from tcip_mcp.pipelines import proposal
@@ -405,7 +414,8 @@ class TestRegionFrameIsTheResolvedImageSources:
 
 class TestWholeFrameDefaultIsUnaffected:
     """``grid_cells=None`` (the default) takes the whole-frame path: the offset step never
-    runs."""
+    runs.
+    """
 
     def test_offset_helper_is_never_called_without_grid_cells(
         self,
@@ -499,7 +509,8 @@ class TestWholeFrameDefaultIsUnaffected:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A bespoke engine returns its own dicts, so what a segmenter hands back natively
-        (an array, a numpy scalar) is named instead of being staged as a repr of itself."""
+        (an array, a numpy scalar) is named instead of being staged as a repr of itself.
+        """
         import numpy as np
 
         import tcip_store as ts
@@ -547,7 +558,8 @@ class TestWholeFrameDefaultIsUnaffected:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """An engine's rings are held to the polygon rule where they arrive, so a ring too short
-        to be a shape is named then, never drawn on the overlay and refused later at staging."""
+        to be a shape is named then, never drawn on the overlay and refused later at staging.
+        """
         import tcip_store as ts
         from tcip_mcp.pipelines import proposal
         from tcip_mcp.tools import proposal_tools
@@ -632,7 +644,8 @@ class TestWholeFrameDefaultIsUnaffected:
         tmp_path: Path,
     ) -> None:
         """A candidate stating no confidence is refused by name where it arrives and is not
-        staged."""
+        staged.
+        """
         import tcip_store as ts
         from tcip_mcp.pipelines.proposal import register_proposal_engine
         from tcip_mcp.tools import proposal_tools

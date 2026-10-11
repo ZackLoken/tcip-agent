@@ -230,7 +230,8 @@ def _cmd_pause_before_commit(
     root: str, first: str, second: str, marker: str, pause_s: str
 ) -> None:
     """Write both keys through a transaction that pauses once the first row is in it, so a kill
-    lands on an open transaction holding uncommitted rows rather than on an empty one."""
+    lands on an open transaction holding uncommitted rows rather than on an empty one.
+    """
     ts.bind(
         PausingCommitBackend(pause_marker=Path(marker), pause_s=float(pause_s))
     )

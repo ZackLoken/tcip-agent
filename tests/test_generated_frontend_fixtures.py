@@ -23,7 +23,8 @@ GENERATOR = REPO_ROOT / "tools" / "generate_delivery_fixture.py"
 
 def _generator():
     """The fixture generator loaded as a module, so the test regenerates the way the tool
-    does."""
+    does.
+    """
     spec = importlib.util.spec_from_file_location(
         "tcip_delivery_fixture_generator", GENERATOR
     )
@@ -66,7 +67,8 @@ def _normalized(fixture: dict[str, dict]) -> dict[str, dict]:
     other type is kept as served, each float rounded to :data:`FLOAT_PLACES`, and an archived
     mapping key that is exactly the name
     :func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.archived_mapping_name` gives the
-    cited record replaced by that record's placeholder. Every other value is kept as served."""
+    cited record replaced by that record's placeholder. Every other value is kept as served.
+    """
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         archived_mapping_name,
     )
@@ -107,7 +109,8 @@ def _normalized(fixture: dict[str, dict]) -> dict[str, dict]:
 
 def _changed(fixture: dict, name: str, *path_and_value: Any) -> dict:
     """A copy of ``fixture`` with the value at ``path`` under record ``name`` set to the last
-    argument."""
+    argument.
+    """
     *path, value = path_and_value
     out = copy.deepcopy(fixture)
     target = out[name]
@@ -121,7 +124,8 @@ def test_the_comparison_keeps_every_value_a_run_does_not_mint() -> None:
     """A served fact the frontend asserts (a disclosure count, an output path) changing, a
     minted value changing its type or going absent, two records sharing a minted value no longer
     sharing it, and an archived mapping key that is not the archive's own name each break the
-    comparison; a minted id changing its value does not."""
+    comparison; a minted id changing its value does not.
+    """
     checked = json.loads(GENERATED.read_text(encoding="utf-8"))
     count = checked["canopy"]["plant_mapping"]["segments_without_plant"]
     digest = checked["archived_mapping"]["plant_mapping"]["record_sha256"]
@@ -163,7 +167,8 @@ def test_the_comparison_keeps_every_value_a_run_does_not_mint() -> None:
 def test_the_delivery_fixture_is_what_a_regeneration_serves() -> None:
     """The checked-in fixture is each record the scenes' deliveries serve, value for value but
     for the minted strings :func:`_normalized` replaces: a record field added, renamed or given
-    another type, or a scene that no longer delivers what it did, fails this."""
+    another type, or a scene that no longer delivers what it did, fails this.
+    """
     pytest.importorskip("torch")
     produced = _generator().produce()
     checked = json.loads(GENERATED.read_text(encoding="utf-8"))

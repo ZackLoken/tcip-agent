@@ -1,5 +1,6 @@
 """Center-match count-unbiased operating-point sweep, the in-model operating-point seam, the
-detection cap, and the cross-tile merge threshold a tiled pass derives."""
+detection cap, and the cross-tile merge threshold a tiled pass derives.
+"""
 
 from __future__ import annotations
 
@@ -151,7 +152,8 @@ def test_the_object_density_is_its_quantile_over_the_object_bearing_regions():
     """The 0.99 quantile of the objects per pixel of the counted regions holding an object, with
     no floor and no multiplier over it: a sparse reference whose one object-bearing region sits
     among empty ones derives that region's density, and a reference with no object-bearing region
-    refuses naming them."""
+    refuses naming them.
+    """
     from tcip_mcp.pipelines.derivations import derive_object_density
     from tests._verified_checkpoint_fixtures import objects_over
 
@@ -233,7 +235,8 @@ def test_no_overlapping_ground_truth_derives_no_merge_threshold():
 
 def _tiled_pass(tmp_path, records, **stated):
     """The tiled pass of a verified checkpoint at the sample conf, made runnable from
-    ``records``' ground truth."""
+    ``records``' ground truth.
+    """
     from tcip_mcp.pipelines.execution import Reference, Stated, prepare
     from tests._verified_checkpoint_fixtures import (
         SAMPLE_CONF,
@@ -262,7 +265,8 @@ def test_a_tiled_passs_derived_merge_threshold_is_the_method_its_label_names(
     tmp_path,
 ):
     """Over a spread of neighbor overlaps, the threshold a tiled pass records is the labeled
-    percentile of the tail plus the labeled margin."""
+    percentile of the tail plus the labeled margin.
+    """
     import re
 
     import numpy as np

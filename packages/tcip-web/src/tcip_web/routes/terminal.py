@@ -66,7 +66,8 @@ class LaunchedProgram(BaseModel):
     arguments), why delivery to it rests on a
     composer sequence recorded on another version (``None`` when the versions agree, and for an
     override), and the steps the row's preparation took before the launch, empty when it has
-    none."""
+    none.
+    """
 
     provider: str
     argv: list[str]
@@ -78,7 +79,8 @@ class LaunchedProgram(BaseModel):
 
 class TerminalLaunch(BaseModel):
     """A started session: its id, whether it was already running when asked for, what it
-    launched, and the session-start ritual that launch was given."""
+    launched, and the session-start ritual that launch was given.
+    """
 
     session_id: str
     existing: bool
@@ -128,7 +130,8 @@ class _Launch:
     whether the agent has bracketed paste on, the sequence one version of its row's harness was
     recorded writing when its composer appeared and whether the agent has written it, the
     requests waiting behind the ritual, and the output tail an escape sequence split across reads
-    continues from."""
+    continues from.
+    """
 
     gen: int
     ritual: str | None = None
@@ -170,7 +173,8 @@ class TerminalSession:
         """Spawn ``provider``'s harness in a PTY for the open project as the current launch by
         ``actor``, or a new one when the current launch already spawned, its ritual built before
         the spawn from the project's record as it reads now. Returns an error reason (a record
-        that will not read names why), or None on success."""
+        that will not read names why), or None on success.
+        """
         with self._lock:
             if self._pty is not None and self._pty.isalive():
                 return None
@@ -249,7 +253,8 @@ class TerminalSession:
     ) -> str | None:
         """Open the next launch, holding the current launch's undelivered requests and every
         request submitted from here on behind its ritual, end the current process and start
-        ``provider`` as that launch by ``actor``. Returns an error reason, or None on success."""
+        ``provider`` as that launch by ``actor``. Returns an error reason, or None on success.
+        """
         with self._lock:
             self._launch = _Launch(
                 gen=self._launch.gen + 1, queued=self._launch.queued
@@ -329,7 +334,8 @@ class TerminalSession:
         """Paste the current launch's ritual together with every request queued by then as one
         message, then each later request on its own, once its agent has bracketed paste on and
         has written its row's ``composer_ready``; each leaves the launch only once written. Called
-        under the lock."""
+        under the lock.
+        """
         launch = self._launch
         if (
             not (launch.ready and launch.composer_live)
@@ -462,7 +468,8 @@ class TerminalResizeFrame(BaseModel):
 
 class CreateSessionRequest(BaseModel):
     """A launch: the id of the :data:`~tcip_web.terminal.PROVIDERS` row to run, the terminal
-    dimensions and the person launching it."""
+    dimensions and the person launching it.
+    """
 
     provider: str
     rows: int = pty_host.DEFAULT_ROWS
@@ -476,7 +483,8 @@ def _clamp(v: int) -> int:
 
 def _provider(provider_id: str) -> pty_host.Provider:
     """The table row whose id is exactly ``provider_id``; refuses with 422 naming the ids the
-    table lists."""
+    table lists.
+    """
     for row in pty_host.PROVIDERS:
         if row.id == provider_id:
             return row
@@ -490,7 +498,8 @@ def _provider(provider_id: str) -> pty_host.Provider:
 @router.post("/sessions")
 def create_session(req: CreateSessionRequest) -> TerminalLaunch:
     """Return the live session (attach semantics, like tmux) or spawn a fresh one running the
-    requested provider by the person ``req.user`` names."""
+    requested provider by the person ``req.user`` names.
+    """
     person = actor(req.user)
     provider = _provider(req.provider)
     with _SESSIONS_LOCK:
@@ -524,7 +533,8 @@ def restart_session(
     session_id: str, req: CreateSessionRequest
 ) -> TerminalLaunch:
     """End the session's process and launch the requested provider in its place, by the person
-    ``req.user`` names."""
+    ``req.user`` names.
+    """
     person = actor(req.user)
     session = _require(session_id)
     provider = _provider(req.provider)
@@ -554,7 +564,8 @@ class SubmitRequest(BaseModel):
 @router.post("/sessions/{session_id}/submit")
 def submit_to_session(session_id: str, req: SubmitRequest) -> dict:
     """Queue ``req.text`` for the session's current launch (see :meth:`TerminalSession.submit`);
-    404 for an unknown session."""
+    404 for an unknown session.
+    """
     _require(session_id).submit(req.text)
     return {}
 

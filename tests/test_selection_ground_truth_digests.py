@@ -31,7 +31,8 @@ _save_png = partial(write_image, size=(IMG, IMG))
 
 def _dataset(root: Path, stems=_STEMS) -> Path:
     """Two capture dates, eight stems each, enough groups that a three-way draw leaves both
-    train and val non-empty for either date."""
+    train and val non-empty for either date.
+    """
     for date in DATES:
         images_dir = root / "images" / date
         for stem in stems:
@@ -65,7 +66,8 @@ def _draw(project: Path, root: Path, out: Path, *, seed: int = 2):
 
 def _bind_run(project: Path, out: Path, experiment_id: str) -> Path:
     """A run of ``project`` bound to the selection at ``out``, its data resolved and recorded by
-    the launcher's own producer, so no training body runs. Returns the run directory."""
+    the launcher's own producer, so no training body runs. Returns the run directory.
+    """
     from tests._verified_checkpoint_fixtures import resolved_run
 
     return resolved_run(
@@ -108,7 +110,8 @@ def test_a_withdrawn_ground_truth_refuses_its_digest_by_name(
     tmp_path: Path,
 ) -> None:
     """A document that is gone has no digest: the read refuses naming it rather than answering
-    a stand-in value a comparison could mistake for a recorded one."""
+    a stand-in value a comparison could mistake for a recorded one.
+    """
     from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
     from tcip_mcp.pipelines.data.selection import ground_truth_digest
 
@@ -123,7 +126,8 @@ def test_the_run_binding_records_the_selection_digest_once_never_on_a_sample(
 ) -> None:
     """``selection_digest`` is the sha256 over ``encode_record`` of the selection's own
     document as the store holds it, and the run's resolved partition carries that value once in
-    its binding block, never on a sample."""
+    its binding block, never on a sample.
+    """
     from tcip_mcp.experiments import run_resolution
     from tcip_mcp.pipelines.data.selection import (
         read_selection,
@@ -152,7 +156,8 @@ def test_a_document_emptied_after_its_admission_never_trains_as_empty(
     tmp_path: Path, monkeypatch
 ) -> None:
     """The loaders train the document the admission read, at the version its sample records: one
-    emptied between that read and the loaders is never trained as an image with nothing on it."""
+    emptied between that read and the loaders is never trained as an image with nothing on it.
+    """
     from tcip_mcp.pipelines.data import label_queries
     from tcip_mcp.pipelines.data.selection import ground_truth_digest
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
@@ -194,7 +199,8 @@ def test_the_partition_alone_carries_the_per_sample_digests(
     tmp_path: Path,
 ) -> None:
     """The per-sample digests and groups ride only in the run's resolved partition: the data
-    section recorded beside it (the one every checkpoint embeds) never gains them."""
+    section recorded beside it (the one every checkpoint embeds) never gains them.
+    """
     from tcip_mcp.experiments import run_resolution
 
     root = _dataset(tmp_path / "ds")

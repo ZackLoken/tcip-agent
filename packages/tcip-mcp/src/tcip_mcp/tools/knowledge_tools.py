@@ -12,7 +12,8 @@ from tcip_mcp.server import tool
 
 def _repo_relative_path(document) -> str:
     """A document's path relative to the repository root, for a tool-only client with no
-    checkout-relative context of its own to resolve the bare filename against."""
+    checkout-relative context of its own to resolve the bare filename against.
+    """
     return (
         document.path.resolve().relative_to(repo_root_from_here()).as_posix()
     )
@@ -21,7 +22,8 @@ def _repo_relative_path(document) -> str:
 def _description() -> str:
     """A lead sentence naming what the tool is, a sentence stating its two call forms, then one
     ``name: description`` line per knowledge document, so the tool's own description is the
-    selection index."""
+    selection index.
+    """
     lines = [
         "The platform's domain knowledge: the same documents every skill-bearing harness sees "
         "as skills.",
@@ -43,6 +45,7 @@ def serve_domain_knowledge(name: str | None = None) -> dict:
     Args:
         name: One document's name, from this tool's own description. Omitted or empty returns the
             index (every document's name and description) instead of a document's content.
+
     """
     documents = list_documents()
     if not name:

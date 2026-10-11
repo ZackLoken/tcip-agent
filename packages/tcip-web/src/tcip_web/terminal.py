@@ -69,7 +69,8 @@ class PreparationFailedError(Exception):
 class ProjectLaunch:
     """A launch for an open project: the project, and its ritual's doctor step as
     :func:`project_launch` spelled it once, the line or the reason it cannot be spelled, exactly
-    one of the two set."""
+    one of the two set.
+    """
 
     project: OpenProject
     doctor_line: str | None
@@ -90,7 +91,8 @@ class Provider:
     :data:`CODEX_MCP_ARG` is rendered by :func:`render_argv`, the output sequence the harness
     version ``composer_ready_version`` names (its ``--version`` line) was recorded writing when
     its composer appeared, what the harness's own enforcement restricts under those arguments
-    and leaves open, and the preparation the launch runs first, ``None`` for none."""
+    and leaves open, and the preparation the launch runs first, ``None`` for none.
+    """
 
     id: str
     name: str
@@ -112,7 +114,8 @@ class Provider:
     def delivery_unverified(self, version: str | None) -> str | None:
         """Why delivery to a launch declaring ``version`` rests on an unrecorded sequence, naming
         both versions, or ``None`` when ``version`` is the one ``composer_ready`` was recorded
-        on."""
+        on.
+        """
         if version == self.composer_ready_version:
             return None
         return (
@@ -138,7 +141,8 @@ def backend_interpreter() -> str:
 
 def mcp_server(launch: ProjectLaunch | None) -> McpServer:
     """:func:`backend_interpreter` running ``tcip_mcp`` for the directory of ``launch``'s
-    project, for no project when ``launch`` is ``None``."""
+    project, for no project when ``launch`` is ``None``.
+    """
     project = ("--project", launch.project.root.as_posix()) if launch else ()
     return McpServer(backend_interpreter(), ("-m", "tcip_mcp", *project))
 
@@ -148,7 +152,8 @@ def codex_mcp_overrides(
 ) -> list[str]:
     """:func:`mcp_server` for ``launch`` as Codex's ``tcip`` server in ``-c key=value``
     overrides, each value TOML (a JSON string or array of strings is valid TOML), forwarding the
-    variables ``env_names`` names to the server and approving its tools without asking."""
+    variables ``env_names`` names to the server and approving its tools without asking.
+    """
     server = mcp_server(launch)
     settings = {
         "command": server.command,
@@ -166,7 +171,8 @@ def codex_mcp_overrides(
 def run_to_completion(argv: list[str], step: str) -> str:
     """Run ``argv`` to completion, stdin closed and time bounded, and return it as one command
     line; raises :class:`PreparationFailedError` naming ``step`` when it cannot start, times
-    out or exits non-zero, with the tail of what it printed."""
+    out or exits non-zero, with the tail of what it printed.
+    """
     try:
         done = subprocess.run(
             argv,
@@ -219,7 +225,8 @@ _REGEX_LITERAL_ESCAPES = frozenset(".^$*+?()[]{}|\\")
 
 def _regex_literal(text: str) -> str:
     """``text`` as a regular expression matching exactly it, a backslash before each of the
-    metacharacters RE2, JavaScript and Python share."""
+    metacharacters RE2, JavaScript and Python share.
+    """
     return "".join(
         f"\\{c}" if c in _REGEX_LITERAL_ESCAPES else c for c in text
     )
@@ -229,7 +236,8 @@ def doctor_command(interpreter: str, project: PurePath) -> str:
     """The one spelling of the ritual's doctor step for ``project``: :data:`_DOCTOR_LINE` of
     ``interpreter``, unquoted, and the project's path, forward-slashed, in double quotes. Raises
     ``ValueError`` naming the argument when one is empty or holds a character
-    :data:`_DOCTOR_ARGUMENTS` refuses it, naming those characters."""
+    :data:`_DOCTOR_ARGUMENTS` refuses it, naming those characters.
+    """
     values = (interpreter, project.as_posix())
     for (name, refused, blank), value in zip(_DOCTOR_ARGUMENTS, values):
         held = sorted(
@@ -245,7 +253,8 @@ def doctor_command(interpreter: str, project: PurePath) -> str:
 
 def project_launch(project: OpenProject | None) -> ProjectLaunch | None:
     """The launch for ``project``, ``None`` for no project, its doctor step spelled once:
-    :func:`doctor_command` of :func:`backend_interpreter`, or the refusal it raises."""
+    :func:`doctor_command` of :func:`backend_interpreter`, or the refusal it raises.
+    """
     if project is None:
         return None
     try:
@@ -257,15 +266,17 @@ def project_launch(project: OpenProject | None) -> ProjectLaunch | None:
 
 
 def _command_entry(line: str) -> str:
-    """agy's allow entry for exactly the command ``line``, in the regex form agy's settings
-    spell a command with arguments: the line between anchors as :func:`_regex_literal`."""
+    """Agy's allow entry for exactly the command ``line``, in the regex form agy's settings
+    spell a command with arguments: the line between anchors as :func:`_regex_literal`.
+    """
     return f"command(regex:^{_regex_literal(line)}$)"
 
 
 def _entry_argument(refused: frozenset[str], blank: bool) -> str:
     """A regular expression matching, as :func:`_regex_literal` writes it, an argument of one or
     more characters outside ``refused`` and, when ``blank``, not whitespace (``\\s``, the
-    characters ``str.isspace`` admits)."""
+    characters ``str.isspace`` admits).
+    """
     bare = re.escape("".join(sorted(refused | _REGEX_LITERAL_ESCAPES))) + (
         "\\s" if blank else ""
     )
@@ -294,7 +305,8 @@ def allow_tcip_tools(settings: Path, doctor_line: str | None) -> str:
     :func:`_command_entry` of ``doctor_line`` to the ``permissions.allow`` list of the
     Antigravity settings file ``settings``, dropping every other doctor entry and keeping
     everything else in it, and return one line saying how many were added and dropped; raises
-    :class:`PreparationFailedError` when the file does not parse as a JSON object."""
+    :class:`PreparationFailedError` when the file does not parse as a JSON object.
+    """
     from tcip_mcp.server import list_registered_tools
 
     try:
@@ -337,7 +349,8 @@ def prepare_antigravity(
     """Antigravity's launch preparation: register :func:`mcp_server` for ``launch`` as its
     ``tcip`` server through ``agy mcp add``, and allow every tcip tool and the launch's doctor
     line in its settings file; a doctor step that could not be spelled fails the preparation
-    naming why."""
+    naming why.
+    """
     server = mcp_server(launch)
     add = run_to_completion(
         [executable, "mcp", "add", "tcip", "--", server.command, *server.args],
@@ -435,7 +448,8 @@ def resolve_terminal_command(
     """The command that launches ``provider`` and whether it is the ``TCIP_TERMINAL_CMD``
     override: the override's argv when one is set, else the row's executable resolved on ``PATH``
     followed by its arguments with their placeholders unrendered (see :func:`render_argv`).
-    ``None`` when the executable is not on ``PATH``."""
+    ``None`` when the executable is not on ``PATH``.
+    """
     override = _override_argv()
     if override is not None:
         return override, True
@@ -454,7 +468,8 @@ def _write_launch_file(name: str, body: dict) -> Path:
 
 def write_mcp_config(launch: ProjectLaunch | None) -> Path:
     """Write :func:`mcp_server` for ``launch`` as a JSON MCP configuration and return its
-    path."""
+    path.
+    """
     server = mcp_server(launch)
     return _write_launch_file(
         "tcip.mcp.json",
@@ -481,7 +496,8 @@ def write_claude_settings(launch: ProjectLaunch | None) -> Path:
     """Write :data:`CLAUDE_SETTINGS` with a ``Bash(<line>)`` and a ``PowerShell(<line>)`` entry
     added to its allow list for each of :data:`READ_ONLY_CONSOLE_COMMANDS` under each of
     :data:`_CONSOLE_INVOCATIONS`, with any arguments, and for the launch's doctor line when it
-    spelled one, and return its path."""
+    spelled one, and return its path.
+    """
     body = json.loads(CLAUDE_SETTINGS.read_text(encoding="utf-8"))
     lines = [
         f"{invocation} {command}:*"
@@ -505,7 +521,8 @@ def render_argv(
     :data:`MCP_CONFIG_ARG` by a configuration :func:`write_mcp_config` writes, each
     :data:`CLAUDE_SETTINGS_ARG` by the settings :func:`write_claude_settings` writes, and each
     :data:`CODEX_MCP_ARG` by :func:`codex_mcp_overrides` forwarding every variable of ``env``,
-    the environment the launch spawns with, each for ``launch``."""
+    the environment the launch spawns with, each for ``launch``.
+    """
     values = {
         WORKSPACE_ARG: lambda: [str(store.workspace)],
         MCP_CONFIG_ARG: lambda: [str(write_mcp_config(launch))],
@@ -524,7 +541,8 @@ def prepare_launch(
 ) -> tuple[list[str], str | None]:
     """Run ``provider.prepare`` with the resolved ``executable`` and ``launch``: the steps it
     took (empty for a row with no preparation) and the reason it failed, ``None`` when it
-    succeeded, prefixed with the row's name."""
+    succeeded, prefixed with the row's name.
+    """
     if provider.prepare is None:
         return [], None
     try:
@@ -547,7 +565,8 @@ def bracketed_paste(output: str, enabled: bool) -> bool:
 
 def paste(text: str) -> str:
     """``text`` as the agent's input: a bracketed paste followed by Enter, each line break inside
-    it sent as the carriage return a terminal sends for a pasted newline."""
+    it sent as the carriage return a terminal sends for a pasted newline.
+    """
     return (
         f"\x1b[200~{text.replace('\r\n', '\n').replace('\n', '\r')}\x1b[201~\r"
     )
@@ -565,7 +584,8 @@ def session_ritual(launch: ProjectLaunch | None) -> str:
     project's record holds now and the ritual to run first, its doctor step the launch's doctor
     line or the refusal naming why it cannot be spelled, or what a session with no project can do
     when ``launch`` is ``None``. Raises what :func:`tcip_mcp.project_record.existing_project`
-    raises for a record that will not read."""
+    raises for a record that will not read.
+    """
     from tcip_mcp.project_record import existing_project
 
     if launch is None:
@@ -597,7 +617,8 @@ def launched_program(argv: list[str], override: bool) -> dict:
     """``{"argv", "version"}`` for ``argv``: the argv itself, and what its executable, the first
     element, declares to ``--version`` (probed at every call, so a harness updated in place is
     seen at its next launch; stdin closed, time bounded), ``None`` for an ``override`` or an
-    executable that does not answer cleanly."""
+    executable that does not answer cleanly.
+    """
     executable = argv[0]
     if override:
         return {"argv": argv, "version": None}
@@ -647,7 +668,8 @@ def prewarm() -> None:
 
 def launch_problem(provider: Provider) -> str | None:
     """Why ``provider`` cannot launch here (no PTY backend, or its executable is not on
-    ``PATH``), or ``None`` when it can."""
+    ``PATH``), or ``None`` when it can.
+    """
     if os.name == "nt":
         try:
             import winpty  # noqa: F401
@@ -826,7 +848,8 @@ def spawn_pty(
     argv: list[str], cwd: str, rows: int, cols: int, env: dict[str, str]
 ):
     """Spawn ``argv`` attached to a platform PTY under ``env`` (see :func:`spawn_env`). Raises
-    ``OSError`` on failure."""
+    ``OSError`` on failure.
+    """
     if os.name == "nt":
         return _WinPty(argv, cwd, rows, cols, env)
     return _PosixPty(argv, cwd, rows, cols, env)

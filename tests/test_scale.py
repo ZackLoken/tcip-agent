@@ -96,7 +96,8 @@ def test_get_experiment_metrics_pagination(tmp_path):
 
 def test_get_experiment_reads_the_rows_of_one_epoch_as_one(tmp_path):
     """A bespoke loop logging train and val as separate rows under one epoch reads as one epoch
-    whose row carries both."""
+    whose row carries both.
+    """
     from tcip_mcp.experiments import get_experiment
     from tests._verified_checkpoint_fixtures import (
         detection_config,
