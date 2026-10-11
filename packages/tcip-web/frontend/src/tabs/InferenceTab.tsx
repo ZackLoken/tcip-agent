@@ -390,7 +390,7 @@ export function InferenceTab() {
           )
         )}
 
-        <label className="tcip-label mb-1">Capture dates</label>
+        <div className="tcip-label mb-1">Capture dates</div>
         {datesError && (
           <div className="text-[11px] text-tcip-fp mb-1">
             {datesError}{" "}
@@ -479,7 +479,7 @@ export function InferenceTab() {
         <button
           ref={launchButtonRef}
           className="tcip-btn-primary w-full"
-          onClick={onLaunch}
+          onClick={() => void onLaunch()}
           disabled={launching || !modelPath || !bucketName || selectedDates.length === 0}
         >
           ▶&nbsp;&nbsp;Launch inference
@@ -558,7 +558,10 @@ export function InferenceTab() {
                         Watch
                       </button>
                       {CANCELLABLE.has(j.status) && (
-                        <button className="tcip-btn text-[11px]" onClick={() => onCancel(j.job_id)}>
+                        <button
+                          className="tcip-btn text-[11px]"
+                          onClick={() => void onCancel(j.job_id)}
+                        >
                           Cancel
                         </button>
                       )}

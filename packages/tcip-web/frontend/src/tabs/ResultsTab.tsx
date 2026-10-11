@@ -519,13 +519,17 @@ export function ResultsTab() {
       {traitError && <div className="tcip-panel p-3 text-[11px] text-tcip-fp">{traitError}</div>}
       {unreadableTraits.length > 0 && (
         <SetupTabNote>
-          These traits' records will not read: {unreadableTraits.map((u) => u.trait).join(", ")}.
+          These traits&apos; records will not read:{" "}
+          {unreadableTraits.map((u) => u.trait).join(", ")}.
         </SetupTabNote>
       )}
       {availableTraits.length > 1 && (
         <div className="tcip-panel p-3 flex items-center gap-2">
-          <label className="tcip-label">Trait</label>
+          <label className="tcip-label" htmlFor="results-trait">
+            Trait
+          </label>
           <select
+            id="results-trait"
             className="tcip-input w-auto"
             value={trait}
             onChange={(e) => setTrait(e.target.value)}
@@ -560,8 +564,11 @@ export function ResultsTab() {
         </p>
         <div className="grid grid-cols-[1fr_1fr] gap-3">
           <div className="flex flex-col gap-2">
-            <label className="tcip-label">Kind</label>
+            <label className="tcip-label" htmlFor="count-kind">
+              Kind
+            </label>
             <select
+              id="count-kind"
               className="tcip-select"
               value={countKind}
               onChange={(e) => {
@@ -575,8 +582,11 @@ export function ResultsTab() {
               <option value="orthomosaic_plant_counts">Per-plant count (orthomosaic)</option>
             </select>
 
-            <label className="tcip-label">Prediction bucket</label>
+            <label className="tcip-label" htmlFor="count-bucket">
+              Prediction bucket
+            </label>
             <select
+              id="count-bucket"
               className="tcip-select"
               value={countBucket}
               onChange={(e) => setCountBucket(e.target.value)}
@@ -593,8 +603,11 @@ export function ResultsTab() {
 
             {countKind === "per_image_count" ? (
               <>
-                <label className="tcip-label">Trait</label>
+                <label className="tcip-label" htmlFor="count-trait">
+                  Trait
+                </label>
                 <select
+                  id="count-trait"
                   className="tcip-select"
                   value={countTrait}
                   onChange={(e) => setCountTrait(e.target.value)}
@@ -619,14 +632,20 @@ export function ResultsTab() {
                   onChange={(e) => setPlantsText(e.target.value)}
                   placeholder={"PLOT-01\nPLOT-02"}
                 />
-                <label className="tcip-label">Plant registry (registered by name)</label>
+                <label className="tcip-label" htmlFor="count-plant-registry">
+                  Plant registry (registered by name)
+                </label>
                 <input
+                  id="count-plant-registry"
                   className="tcip-input"
                   value={countPlantRegistry}
                   onChange={(e) => setCountPlantRegistry(e.target.value)}
                 />
-                <label className="tcip-label">Delivered phenotype</label>
+                <label className="tcip-label" htmlFor="count-delivered-phenotype">
+                  Delivered phenotype
+                </label>
                 <input
+                  id="count-delivered-phenotype"
                   className="tcip-input"
                   value={countDeliveredPhenotype}
                   onChange={(e) => setCountDeliveredPhenotype(e.target.value)}
@@ -666,8 +685,11 @@ export function ResultsTab() {
               </>
             )}
 
-            <label className="tcip-label">Filename</label>
+            <label className="tcip-label" htmlFor="count-filename">
+              Filename
+            </label>
             <input
+              id="count-filename"
               className="tcip-input"
               value={countFilename}
               onChange={(e) => setCountFilename(e.target.value)}
@@ -723,8 +745,8 @@ export function ResultsTab() {
         <div className="tcip-panel p-4 flex flex-col gap-2">
           <div className="tcip-heading">Nothing to compute here for {trait}</div>
           <p className="text-[11px] text-tcip-muted">
-            This trait's confirmed revision declares no milestone fractions, so there are no curves
-            or milestones to compute for it.
+            This trait&apos;s confirmed revision declares no milestone fractions, so there are no
+            curves or milestones to compute for it.
           </p>
           <button
             className="tcip-btn-primary text-[11px] self-start"
@@ -741,7 +763,7 @@ export function ResultsTab() {
             <div className="tcip-heading mb-3">Per-plant phenology curves</div>
             <div className="grid grid-cols-[1fr_180px] gap-3">
               <div className="flex flex-col gap-1">
-                <label className="tcip-label">Predictions by date</label>
+                <div className="tcip-label">Predictions by date</div>
                 {datesError && (
                   <div className="text-[11px] text-tcip-fp mb-1">
                     {datesError}{" "}
@@ -827,14 +849,14 @@ export function ResultsTab() {
                   title="The plant ids this measurement delivers, one row each; the mapping's own plot list is not the population"
                 />
                 <p className="text-[11px] text-tcip-muted">
-                  The positive-state fraction is the share of a plant's detected objects that are in
-                  the trait's positive state. That state is a value of one attribute the assessed
-                  model calls on every detection, not a bbox measurement; the predictions' scope
-                  must declare that attribute.
+                  The positive-state fraction is the share of a plant&apos;s detected objects that
+                  are in the trait&apos;s positive state. That state is a value of one attribute the
+                  assessed model calls on every detection, not a bbox measurement; the
+                  predictions&apos; scope must declare that attribute.
                 </p>
                 {positiveClassUnassessed && (
                   <div className="text-[11px] text-tcip-fp border border-tcip-fp/40 rounded p-2">
-                    These predictions carry no value of the positive state's attribute, so the
+                    These predictions carry no value of the positive state&apos;s attribute, so the
                     curves below are not a valid phenology measurement and CSV export is disabled.
                     Publish predictions from a model whose scope declares that attribute first.
                   </div>

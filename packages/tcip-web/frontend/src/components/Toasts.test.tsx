@@ -55,7 +55,9 @@ describe("Toasts channel replacement", () => {
       act(() => useStore.getState().pushToast("First refusal", "error", "cut"));
       const firstId = useStore.getState().toasts[0].id;
 
-      act(() => vi.advanceTimersByTime(4000));
+      act(() => {
+        vi.advanceTimersByTime(4000);
+      });
       act(() => useStore.getState().pushToast("Second refusal", "error", "cut"));
 
       const toasts = useStore.getState().toasts;
@@ -65,9 +67,13 @@ describe("Toasts channel replacement", () => {
 
       // The replaced toast's own timer restarted: it survives past the first toast's original
       // six-second deadline, dismissing only six seconds after the replacement landed.
-      act(() => vi.advanceTimersByTime(4000));
+      act(() => {
+        vi.advanceTimersByTime(4000);
+      });
       expect(useStore.getState().toasts).toHaveLength(1);
-      act(() => vi.advanceTimersByTime(2001));
+      act(() => {
+        vi.advanceTimersByTime(2001);
+      });
       expect(useStore.getState().toasts).toHaveLength(0);
     } finally {
       vi.useRealTimers();

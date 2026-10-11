@@ -17,8 +17,8 @@ function stubFetch(status: number, body: unknown = {}) {
     vi.fn().mockResolvedValue({
       ok: status >= 200 && status < 300,
       status,
-      json: async () => body,
-      text: async () => JSON.stringify(body),
+      json: () => Promise.resolve(body),
+      text: () => Promise.resolve(JSON.stringify(body)),
     }),
   );
 }

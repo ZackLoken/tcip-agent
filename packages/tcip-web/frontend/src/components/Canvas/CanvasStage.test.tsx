@@ -37,6 +37,7 @@ vi.mock("react-konva", async () => {
       return (
         <div
           data-testid="k-stage"
+          role="presentation"
           onWheel={forward(props.onWheel)}
           onMouseDown={forward(props.onMouseDown)}
           onMouseMove={forward(props.onMouseMove)}
@@ -90,9 +91,7 @@ function makeLoaded(over: Partial<LoadedImage> = {}): LoadedImage {
 async function resolveLoad(url: string, result: LoadedImage) {
   const entry = loader.pending.find((p) => p.url === url);
   expect(entry, `no pending load for ${url}`).toBeDefined();
-  await act(async () => {
-    entry!.resolve(result);
-  });
+  await act(() => Promise.resolve(entry!.resolve(result)));
 }
 
 /** The display pixel count of the 1920x1080 screen src/test/setup.ts installs. */

@@ -75,13 +75,13 @@ export function HelpOverlay({ activeTab }: HelpOverlayProps) {
   if (!open) return null;
   return (
     <div
+      role="presentation"
       className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
-      onClick={() => setOpen(false)}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) setOpen(false);
+      }}
     >
-      <div
-        className="tcip-panel p-5 w-[520px] max-w-[90vw] max-h-[80vh] overflow-auto flex flex-col gap-4"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="tcip-panel p-5 w-[520px] max-w-[90vw] max-h-[80vh] overflow-auto flex flex-col gap-4">
         <div className="flex items-center justify-between">
           <div className="text-[13px] font-semibold">Keyboard & mouse reference</div>
           <button className="tcip-btn text-[11px]" onClick={() => setOpen(false)}>

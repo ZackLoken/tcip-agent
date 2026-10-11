@@ -22,8 +22,10 @@ import { useStore } from "@/store";
 function valueText(value: unknown): string {
   if (value === null || value === undefined) return UNSET_GLYPH;
   if (Array.isArray(value)) return value.length > 0 ? value.join(", ") : "none";
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return JSON.stringify(value);
 }
 
 function revisionStateText(revision: TraitRevision): string {
@@ -256,17 +258,17 @@ export function TraitRevisionPanel() {
 
   return (
     <div className="tcip-panel p-4">
-      <div className="tcip-heading mb-1">What each trait's delivered numbers mean</div>
+      <div className="tcip-heading mb-1">What each trait&apos;s delivered numbers mean</div>
       <p className="mb-3 text-[11px] text-tcip-muted">
-        The agent proposes each trait's entry, from what it measures to what each delivered number
-        means, as a numbered revision. A delivery reads the latest revision you confirmed. Read the
-        revision shown, then confirm it or send the agent a correction. A confirmation you gave
-        stands until you withdraw it.
+        The agent proposes each trait&apos;s entry, from what it measures to what each delivered
+        number means, as a numbered revision. A delivery reads the latest revision you confirmed.
+        Read the revision shown, then confirm it or send the agent a correction. A confirmation you
+        gave stands until you withdraw it.
       </p>
       {loadError && <div className="mb-3 text-[11px] text-tcip-fp">{loadError}</div>}
       {listing && listing.unreadable.length > 0 && (
         <div className="mb-3 text-[11px] text-tcip-fp">
-          <div>These traits' records will not read:</div>
+          <div>These traits&apos; records will not read:</div>
           <ul className="mt-1 list-disc pl-4">
             {listing.unreadable.map((u) => (
               <li key={u.trait}>

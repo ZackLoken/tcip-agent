@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { api, type ProjectSummary } from "@/api/client";
+import { GUI_STATE_DEFAULTS, type SessionWrite } from "@/api/types.generated";
 import { openWithDefaults, startOpen } from "@/lib/openProject";
 import { useStore } from "@/store";
 
@@ -9,10 +11,6 @@ vi.mock("@/api/client", () => ({
     dataset: { select: vi.fn() },
   },
 }));
-
-import { api } from "@/api/client";
-import type { ProjectSummary } from "@/api/client";
-import type { SessionWrite } from "@/api/types.generated";
 
 function project(overrides: Partial<ProjectSummary> & { id: string }): ProjectSummary & {
   id: string;
@@ -37,15 +35,12 @@ function project(overrides: Partial<ProjectSummary> & { id: string }): ProjectSu
 beforeEach(() => {
   vi.mocked(api.dataset.select).mockResolvedValue({
     status: "ok",
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    selection: { image_list: [], current_image_index: 0 } as any,
+    selection: GUI_STATE_DEFAULTS.dataset,
   });
   useStore.getState().setUser("grower");
-  vi.mocked(api.projects.open).mockImplementation(async ({ id }) => ({
-    id,
-    display_name: `Project ${id}`,
-    path: `/ws/${id}`,
-  }));
+  vi.mocked(api.projects.open).mockImplementation(({ id }) =>
+    Promise.resolve({ id, display_name: `Project ${id}`, path: `/ws/${id}` }),
+  );
 });
 afterEach(() => vi.clearAllMocks());
 
@@ -106,13 +101,16 @@ describe("a switch this page starts", () => {
   it("posts the closed visit of the project it leaves before asking to open the next", async () => {
     const { sessionsApi } = await import("@/api/sessions");
     const order: string[] = [];
-    vi.spyOn(sessionsApi, "imageEvent").mockImplementation(async (c) => {
+    vi.spyOn(sessionsApi, "imageEvent").mockImplementation((c) => {
       order.push(`visit ${c.project_id} ${c.started}`);
-      return { status: "ok", session: { started: c.started ?? "s1", ended: false } };
+      return Promise.resolve({
+        status: "ok",
+        session: { started: c.started ?? "s1", ended: false },
+      });
     });
-    vi.mocked(api.projects.open).mockImplementation(async ({ id }) => {
+    vi.mocked(api.projects.open).mockImplementation(({ id }) => {
       order.push(`open ${id}`);
-      return { id, display_name: `Project ${id}`, path: `/ws/${id}` };
+      return Promise.resolve({ id, display_name: `Project ${id}`, path: `/ws/${id}` });
     });
     useStore.setState({
       openProject: { id: "valley", path: "/ws/valley" },
@@ -145,8 +143,8 @@ describe("a switch this page starts", () => {
     expect(useStore.getState().sessionTracking).toMatchObject({
       currentImageName: "a.jpg",
       annotationsAddedDelta: 1,
-      imageEnterTimeMs: expect.any(Number),
     });
+    expect(typeof useStore.getState().sessionTracking?.imageEnterTimeMs).toBe("number");
     useStore.setState({ heldContributions: [], unconfirmedContributions: [] });
   });
 
@@ -176,8 +174,7 @@ describe("startOpen", () => {
   it("pushes a toast naming the label document when the selection carries a label_problem", async () => {
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      selection: { image_list: [], current_image_index: 0 } as any,
+      selection: GUI_STATE_DEFAULTS.dataset,
       label_problem: "label_documents['2026-02-11', 'IMG_0000'] under C:/data: is a list",
     });
     const pushToast = vi.spyOn(useStore.getState(), "pushToast");

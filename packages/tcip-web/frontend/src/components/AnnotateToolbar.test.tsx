@@ -226,9 +226,7 @@ describe("AnnotateToolbar subject authoring", () => {
     renderToolbar();
 
     openSubjectMenu();
-    await act(async () => {
-      fireEvent.click(screen.getByText("+ New subject"));
-    });
+    await act(() => Promise.resolve(fireEvent.click(screen.getByText("+ New subject"))));
 
     expect(Object.keys(useStore.getState().registry.subjects)).toEqual(["leaf", "husk"]);
     expect(useStore.getState().gui.active_subject).toBe("husk");
@@ -252,9 +250,7 @@ describe("AnnotateToolbar subject authoring", () => {
     renderToolbar();
 
     openSubjectMenu();
-    await act(async () => {
-      fireEvent.click(screen.getByText("+ New subject"));
-    });
+    await act(() => Promise.resolve(fireEvent.click(screen.getByText("+ New subject"))));
 
     expect(useStore.getState().registry.subjects).toEqual({ leaf: leafDef, husk: {} });
     expect(useStore.getState().gui.active_subject).toBe("leaf");
@@ -274,16 +270,12 @@ describe("AnnotateToolbar subject authoring", () => {
     renderToolbar();
 
     openSubjectMenu();
-    await act(async () => {
-      fireEvent.click(screen.getByText("+ New subject"));
-    });
+    await act(() => Promise.resolve(fireEvent.click(screen.getByText("+ New subject"))));
     expect(Object.keys(useStore.getState().registry.subjects)).toEqual(["leaf"]);
 
     promptSpy.mockReturnValue("   ");
     openSubjectMenu();
-    await act(async () => {
-      fireEvent.click(screen.getByText("+ New subject"));
-    });
+    await act(() => Promise.resolve(fireEvent.click(screen.getByText("+ New subject"))));
 
     expect(Object.keys(useStore.getState().registry.subjects)).toEqual(["leaf"]);
     expect(useStore.getState().gui.active_subject).toBeNull();
@@ -303,9 +295,7 @@ describe("AnnotateToolbar subject authoring", () => {
     renderToolbar();
 
     openSubjectMenu();
-    await act(async () => {
-      fireEvent.click(screen.getByText("+ New subject"));
-    });
+    await act(() => Promise.resolve(fireEvent.click(screen.getByText("+ New subject"))));
 
     expect(saveSpy.mock.calls[0][2]).toBe("v1");
     expect(useStore.getState().registry.version).toBe("v2");
@@ -325,9 +315,7 @@ describe("AnnotateToolbar subject authoring", () => {
     renderToolbar();
 
     openSubjectMenu();
-    await act(async () => {
-      fireEvent.click(screen.getByText("+ New subject"));
-    });
+    await act(() => Promise.resolve(fireEvent.click(screen.getByText("+ New subject"))));
 
     // The refused optimistic add is discarded in favor of what the server actually holds.
     expect(useStore.getState().registry.subjects).toEqual({ leaf: {} });
@@ -352,9 +340,7 @@ describe("AnnotateToolbar subject authoring", () => {
 
     // "leaf" is already active, so the pill reads its name rather than the default placeholder.
     fireEvent.click(screen.getByRole("button", { name: /leaf|select subject/ }));
-    await act(async () => {
-      fireEvent.click(screen.getByText("+ New subject"));
-    });
+    await act(() => Promise.resolve(fireEvent.click(screen.getByText("+ New subject"))));
 
     // "husk" was set optimistically as active; the refusal must not leave it active.
     expect(useStore.getState().gui.active_subject).toBe("leaf");
@@ -385,9 +371,7 @@ describe("AnnotateToolbar subject authoring", () => {
 
     // "leaf" is already active, so the pill reads its name rather than the default placeholder.
     fireEvent.click(screen.getByRole("button", { name: /leaf|select subject/ }));
-    await act(async () => {
-      fireEvent.click(screen.getByText("+ New subject"));
-    });
+    await act(() => Promise.resolve(fireEvent.click(screen.getByText("+ New subject"))));
 
     // The committed body is adopted as though the save had answered 200, and the optimistic
     // active subject is kept rather than reverted (unlike an ordinary refusal above).

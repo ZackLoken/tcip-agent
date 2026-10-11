@@ -530,12 +530,13 @@ describe("ResultsTab meaning refusals", () => {
         ok: false,
         status: 400,
         statusText: "Bad Request",
-        json: async () => ({
-          detail: {
-            kind: "operationalization",
-            message: "stated but not confirmed by the breeder",
-          },
-        }),
+        json: () =>
+          Promise.resolve({
+            detail: {
+              kind: "operationalization",
+              message: "stated but not confirmed by the breeder",
+            },
+          }),
       }),
     );
 

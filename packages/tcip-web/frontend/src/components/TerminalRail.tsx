@@ -413,12 +413,17 @@ export function TerminalRail() {
       {/* Drag the left edge to resize; width persists. */}
       <div
         onMouseDown={startResize}
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize agent terminal"
-        title="Drag to resize"
+        role="presentation"
         className="absolute left-0 top-0 bottom-0 -ml-1 w-1.5 z-10 cursor-col-resize hover:bg-tcip-accent/40"
-      />
+      >
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize agent terminal"
+          title="Drag to resize"
+          className="h-full w-full"
+        />
+      </div>
       <div className="h-9 shrink-0 flex items-center justify-between px-3 border-b border-tcip-border bg-tcip-panel">
         <div className="flex items-center gap-2">
           <span className="tcip-eyebrow">TCIP Agent</span>

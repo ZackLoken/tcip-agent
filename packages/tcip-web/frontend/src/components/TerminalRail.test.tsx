@@ -377,7 +377,7 @@ describe("TerminalRail", () => {
       await waitFor(() => expect(submitted()).toHaveLength(1));
       expect(useStore.getState().pendingTerminalMessages).toEqual(["after reopen"]);
 
-      await act(async () => answer.resolve({}));
+      await act(() => Promise.resolve(answer.resolve({})));
       expect(useStore.getState().pendingTerminalMessages).toEqual([]);
     });
 
@@ -392,7 +392,7 @@ describe("TerminalRail", () => {
       await act(async () => {});
       expect(submitted()).toEqual([]);
 
-      await act(async () => answer.resolve(LAUNCH));
+      await act(() => Promise.resolve(answer.resolve(LAUNCH)));
       await waitFor(() => expect(submitted()).toEqual([["t1", "after restart"]]));
     });
 
@@ -408,9 +408,9 @@ describe("TerminalRail", () => {
       act(() => useStore.getState().sendToAgentTerminal("tab request"));
       await waitFor(() => expect(terminalApi.createSession).toHaveBeenCalledTimes(2));
 
-      await act(async () => first.resolve(LAUNCH));
+      await act(() => Promise.resolve(first.resolve(LAUNCH)));
       expect(submitted()).toEqual([]);
-      await act(async () => second.resolve({ ...LAUNCH, existing: true }));
+      await act(() => Promise.resolve(second.resolve({ ...LAUNCH, existing: true })));
       await waitFor(() => expect(submitted()).toEqual([["t1", "tab request"]]));
     });
   });

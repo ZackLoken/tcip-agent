@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { api, type ProjectSummary } from "@/api/client";
 import { GUI_STATE_DEFAULTS } from "@/api/types.generated";
 import { ProjectPicker } from "@/components/ProjectPicker";
 import { startOpen } from "@/lib/openProject";
@@ -22,9 +23,6 @@ vi.mock("@/api/client", () => {
     },
   };
 });
-
-import { api } from "@/api/client";
-import type { ProjectSummary } from "@/api/client";
 
 const PROJECTS: ProjectSummary[] = [
   {
@@ -248,12 +246,10 @@ describe("ProjectPicker", () => {
       const reject = pendingOpen();
       await startOpeningValley();
 
-      await act(async () => reject(new Error("valley refused")));
+      await act(() => Promise.resolve(reject(new Error("valley refused"))));
 
-      expect(useStore.getState().openError).toEqual({
-        projectId: "a1b2c3d4e5f6",
-        message: expect.stringContaining("valley refused"),
-      });
+      expect(useStore.getState().openError?.projectId).toBe("a1b2c3d4e5f6");
+      expect(useStore.getState().openError?.message).toContain("valley refused");
       expect(await screen.findByText(/valley refused/)).toBeInTheDocument();
       expect(useStore.getState().opening).toBeNull();
     });
@@ -263,7 +259,7 @@ describe("ProjectPicker", () => {
       await startOpeningValley();
       fireEvent.click(screen.getByText("Hill farm"));
 
-      await act(async () => reject(new Error("valley refused")));
+      await act(() => Promise.resolve(reject(new Error("valley refused"))));
 
       expect(useStore.getState().openError).toBeNull();
       expect(screen.queryByText(/valley refused/)).not.toBeInTheDocument();
@@ -279,7 +275,7 @@ describe("ProjectPicker", () => {
           .mergeSnapshot(GUI_STATE_DEFAULTS, 1, { id: "b1b2c3d4e5f6", path: "/ws/hill" }, "e1"),
       );
 
-      await act(async () => reject(new Error("valley refused")));
+      await act(() => Promise.resolve(reject(new Error("valley refused"))));
 
       expect(useStore.getState().openError).toBeNull();
     });
@@ -308,7 +304,7 @@ describe("ProjectPicker", () => {
       await waitFor(() => expect(api.dataset.select).toHaveBeenCalled());
       fireEvent.click(screen.getByText("Hill farm"));
 
-      await act(async () => release());
+      await act(() => Promise.resolve(release()));
 
       expect(useStore.getState().openProject).toBeNull();
       expect(useStore.getState().opening).toBeNull();
@@ -331,7 +327,7 @@ describe("ProjectPicker", () => {
           .mergeSnapshot(GUI_STATE_DEFAULTS, 1, { id: "b1b2c3d4e5f6", path: "/ws/hill" }, "e1"),
       );
 
-      await act(async () => release());
+      await act(() => Promise.resolve(release()));
 
       expect(useStore.getState().openProject).toEqual({ id: "b1b2c3d4e5f6", path: "/ws/hill" });
     });
@@ -354,7 +350,7 @@ describe("ProjectPicker", () => {
       merge({ id: "a1b2c3d4e5f6", path: "/ws/valley" }, 1);
       merge(hill, 2);
 
-      await act(async () => release());
+      await act(() => Promise.resolve(release()));
 
       expect(useStore.getState().openProject).toEqual(hill);
     });
@@ -374,7 +370,7 @@ describe("ProjectPicker", () => {
           .mergeSnapshot(GUI_STATE_DEFAULTS, 1, { id: "b1b2c3d4e5f6", path: "/ws/hill" }, "e1"),
       );
 
-      await act(async () => answer());
+      await act(() => Promise.resolve(answer()));
 
       expect(api.dataset.select).not.toHaveBeenCalled();
     });
@@ -402,7 +398,7 @@ describe("ProjectPicker", () => {
       );
 
       expect(useStore.getState().opening?.projectId).toBe("a1b2c3d4e5f6");
-      await act(async () => release());
+      await act(() => Promise.resolve(release()));
 
       expect(useStore.getState().opening).toBeNull();
       expect(useStore.getState().openProject).toEqual({ id: "a1b2c3d4e5f6", path: "/ws/valley" });
@@ -418,18 +414,16 @@ describe("ProjectPicker", () => {
       );
       vi.mocked(api.projects.open).mockResolvedValue(VALLEY_OPENED);
       render(<ProjectPicker />);
-      expect(useStore.getState().opening).toEqual({
-        requestId: expect.any(Number),
-        projectId: null,
-        accepted: null,
-      });
+      const opening = useStore.getState().opening;
+      expect(typeof opening?.requestId).toBe("number");
+      expect(opening).toEqual({ requestId: opening?.requestId, projectId: null, accepted: null });
       act(() =>
         useStore
           .getState()
           .mergeSnapshot(GUI_STATE_DEFAULTS, 1, { id: "b1b2c3d4e5f6", path: "/ws/hill" }, "e1"),
       );
 
-      await act(async () => list());
+      await act(() => Promise.resolve(list()));
 
       expect(api.projects.open).not.toHaveBeenCalled();
       expect(useStore.getState().openChoice.projectId).toBeNull();
@@ -454,7 +448,7 @@ describe("ProjectPicker", () => {
       act(() => useStore.getState().mergeSnapshot(GUI_STATE_DEFAULTS, 2, null, "e1"));
       expect(useStore.getState().openProject).toBeNull();
 
-      await act(async () => list());
+      await act(() => Promise.resolve(list()));
 
       expect(api.projects.open).not.toHaveBeenCalled();
       expect(useStore.getState().openChoice.projectId).toBeNull();
@@ -475,7 +469,7 @@ describe("ProjectPicker", () => {
       act(() => useStore.getState().mergeSnapshot(GUI_STATE_DEFAULTS, 1, null, "e1"));
       expect(useStore.getState().wsVersion).toBe(1);
 
-      await act(async () => list());
+      await act(() => Promise.resolve(list()));
 
       expect(api.projects.open).not.toHaveBeenCalled();
       expect(useStore.getState().openChoice.projectId).toBeNull();
@@ -499,7 +493,7 @@ describe("ProjectPicker", () => {
       );
       expect(useStore.getState().opening?.projectId).toBeNull();
 
-      await act(async () => list());
+      await act(() => Promise.resolve(list()));
 
       await waitFor(() => expect(useStore.getState().gui.dataset.dataset_root).toBe("/ws/valley"));
       expect(useStore.getState().openChoice.projectId).toBe("a1b2c3d4e5f6");
@@ -519,7 +513,7 @@ describe("ProjectPicker", () => {
 
       cleanup();
       expect(useStore.getState().opening).toBeNull();
-      await act(async () => list());
+      await act(() => Promise.resolve(list()));
 
       expect(api.projects.open).not.toHaveBeenCalled();
     });
@@ -539,7 +533,7 @@ describe("ProjectPicker", () => {
         </StrictMode>,
       );
 
-      await act(async () => list());
+      await act(() => Promise.resolve(list()));
 
       await waitFor(() => expect(useStore.getState().gui.dataset.dataset_root).toBe("/ws/valley"));
       expect(api.projects.open).toHaveBeenCalledTimes(1);
@@ -560,7 +554,7 @@ describe("ProjectPicker", () => {
 
       cleanup();
       expect(useStore.getState().opening?.projectId).toBe("a1b2c3d4e5f6");
-      await act(async () => answer());
+      await act(() => Promise.resolve(answer()));
 
       await waitFor(() =>
         expect(useStore.getState().openProject).toEqual({ id: "a1b2c3d4e5f6", path: "/ws/valley" }),
@@ -588,7 +582,7 @@ describe("ProjectPicker", () => {
       const second = useStore.getState().opening?.requestId;
       expect(second).not.toBe(first);
 
-      await act(async () => rejectFirst(new Error("first refused")));
+      await act(() => Promise.resolve(rejectFirst(new Error("first refused"))));
 
       expect(useStore.getState().opening).toEqual({
         requestId: second,

@@ -224,7 +224,7 @@ export function MetaTab() {
           </table>
         ) : (
           <div className="text-[11px] text-tcip-muted">
-            No annotation sessions yet; they're recorded automatically while you annotate.
+            No annotation sessions yet; they&apos;re recorded automatically while you annotate.
           </div>
         )}
       </CollapsibleSection>

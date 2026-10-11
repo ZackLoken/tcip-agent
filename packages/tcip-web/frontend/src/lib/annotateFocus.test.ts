@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { api } from "@/api/client";
+import type { DatasetSelection } from "@/api/types.generated";
 import { applyAnnotateFocus } from "@/lib/annotateFocus";
 import { useStore } from "@/store";
 
 vi.mock("@/api/client", () => ({
-  api: { dataset: { select: vi.fn(), nav: vi.fn(async () => ({ status: "ok" })) } },
+  api: { dataset: { select: vi.fn(), nav: vi.fn(() => Promise.resolve({ status: "ok" })) } },
 }));
-
-import { api } from "@/api/client";
 
 const PROJECT = { id: "a1b2c3d4e5f6", path: "/ws/proj" };
 
@@ -21,9 +21,11 @@ function seedDataset(partial: Record<string, unknown>) {
   useStore.setState({ openProject: PROJECT });
 }
 
-function selection(over: Record<string, unknown>) {
+function selection(over: Partial<DatasetSelection>): DatasetSelection {
   return {
     dataset_root: "/ws/proj",
+    subject: null,
+    date: null,
     image_list: [],
     current_image_index: 0, // backend always resets to 0
     images_dir: null,
@@ -44,8 +46,7 @@ describe("applyAnnotateFocus", () => {
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
       selection: selection({ subject: "bush", date: "2026-03-02" }),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any);
+    });
 
     await applyAnnotateFocus({
       dataset_root: "/ws/proj",
@@ -74,8 +75,7 @@ describe("applyAnnotateFocus", () => {
     const newIdentity = selection({ subject: "bush", date: "2026-03-02" });
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      selection: newIdentity as any,
+      selection: newIdentity,
     });
 
     await applyAnnotateFocus({
@@ -88,13 +88,14 @@ describe("applyAnnotateFocus", () => {
 
     // Emulate the backend's /select broadcast landing after the local setters: same identity
     // now, so mergeSnapshot must keep the local (focus) index, not reset to 0.
-    useStore.getState().mergeSnapshot(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      { dataset: { ...newIdentity, current_image_index: 0 } } as any,
-      999,
-      PROJECT,
-      null,
-    );
+    useStore
+      .getState()
+      .mergeSnapshot(
+        { ...useStore.getState().gui, dataset: { ...newIdentity, current_image_index: 0 } },
+        999,
+        PROJECT,
+        null,
+      );
     expect(useStore.getState().gui.dataset.current_image_index).toBe(47);
   });
 
@@ -126,8 +127,7 @@ describe("applyAnnotateFocus", () => {
     vi.mocked(api.dataset.select).mockResolvedValue({
       status: "ok",
       selection: selection({ subject: "bush", date: "2026-03-02", bucket: "m1/2026-03-02" }),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any);
+    });
 
     await applyAnnotateFocus({
       dataset_root: "/ws/proj",
@@ -150,8 +150,7 @@ describe("applyAnnotateFocus", () => {
       status: "ok",
       selection: selection({ subject: "subject_a", date: "2026-02-11" }),
       label_problem: "label_documents['2026-02-11', 'IMG_0000'] under /ws/proj: is a list",
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any);
+    });
 
     await applyAnnotateFocus({
       dataset_root: "/ws/proj",

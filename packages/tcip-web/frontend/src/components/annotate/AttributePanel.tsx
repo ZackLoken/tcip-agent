@@ -202,7 +202,6 @@ export function AttributePanel({ focused }: { focused: ReviewItem | null }) {
           {addingAttribute && (
             <div className="mt-1.5 space-y-1.5 border-t border-tcip-border pt-1.5">
               <input
-                autoFocus
                 className="tcip-input w-full text-[11px]"
                 placeholder="attribute name"
                 value={attrName}

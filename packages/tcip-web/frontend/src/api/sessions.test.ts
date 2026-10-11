@@ -23,7 +23,7 @@ describe("sessionsApi.endAsPageLeaves", () => {
     expect(body.type).toBe("application/json");
     const text = await new Promise<string>((resolve) => {
       const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
+      reader.onload = () => resolve(reader.result as string);
       reader.readAsText(body);
     });
     expect(text).toBe(JSON.stringify(REF));

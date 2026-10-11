@@ -70,7 +70,6 @@ export function AttributeEditors({
           {addingValueFor === name && (
             <div className="mt-1 flex items-center gap-1.5 pl-[5.5rem]">
               <input
-                autoFocus
                 className="tcip-input flex-1 text-[11px]"
                 placeholder="new value name"
                 value={valueDraft}

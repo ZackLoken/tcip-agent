@@ -4,20 +4,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api, type ProjectSummary } from "@/api/client";
 import { sessionsApi } from "@/api/sessions";
 import { GUI_STATE_DEFAULTS } from "@/api/types.generated";
-import { stateSocket } from "@/api/ws";
 import App from "@/App";
 import { useActiveTabSync } from "@/hooks/useActiveTabSync";
 import { useStore } from "@/store";
 
 // App's own socket/tab-sync effects reach the network; only the tab/panel wiring is under
 // test here, so both are stubbed rather than left to hit a backend that isn't running.
-vi.mock("@/api/ws", () => ({
-  stateSocket: {
-    connect: vi.fn(),
-    close: vi.fn(),
-    subscribePanel: vi.fn(() => () => {}),
-  },
+const stateSocket = vi.hoisted(() => ({
+  connect: vi.fn(),
+  close: vi.fn(),
+  subscribePanel: vi.fn(() => () => {}),
 }));
+vi.mock("@/api/ws", () => ({ stateSocket }));
 vi.mock("@/hooks/useActiveTabSync", () => ({ useActiveTabSync: vi.fn() }));
 // App statically imports the Annotate tab (not code-split), which pulls in Konva; jsdom has no
 // canvas backend, so the Konva module itself is stubbed the same way AnnotateTab's own tests do.
@@ -103,8 +101,8 @@ beforeEach(() => {
   useStore.setState(initialStoreState, true);
   useStore.getState().setUser("grower");
   listProjects(null);
-  vi.mocked(stateSocket.connect).mockClear();
-  vi.mocked(stateSocket.subscribePanel).mockClear();
+  stateSocket.connect.mockClear();
+  stateSocket.subscribePanel.mockClear();
   vi.mocked(useActiveTabSync).mockClear();
 });
 
@@ -247,7 +245,7 @@ describe("App admission through the picker", () => {
         .mergeSnapshot(GUI_STATE_DEFAULTS, 1, { id: "a1b2c3d4e5f6", path: "/ws/valley" }, "e1"),
     );
 
-    await act(async () => reject(new Error("selection failed")));
+    await act(() => Promise.resolve(reject(new Error("selection failed"))));
 
     expect(useStore.getState().toasts.map((t) => t.message)).toContainEqual(
       expect.stringContaining("selection failed"),

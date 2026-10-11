@@ -9,7 +9,7 @@ function stubFetch(status: number, body: unknown) {
     vi.fn().mockResolvedValue({
       ok: status >= 200 && status < 300,
       status,
-      json: async () => body,
+      json: () => Promise.resolve(body),
     }),
   );
 }
@@ -81,7 +81,7 @@ describe("inferenceApi.cancel", () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ job_id: "j1", status: "running", cancel_requested: true }),
+      json: () => Promise.resolve({ job_id: "j1", status: "running", cancel_requested: true }),
     });
     vi.stubGlobal("fetch", fetchMock);
 

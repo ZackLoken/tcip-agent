@@ -104,10 +104,11 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
       <div className="tcip-heading mb-3">Plant mapping</div>
       <div className="grid grid-cols-[1fr_1fr] gap-3">
         <div className="flex flex-col gap-1">
-          <label className="tcip-label">
+          <label className="tcip-label" htmlFor="plant-mapping-name">
             Mapping name (pick one already built under this project, or type a new one)
           </label>
           <input
+            id="plant-mapping-name"
             className="tcip-input"
             value={mappingName}
             onChange={(e) => {
@@ -129,10 +130,11 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
               <option key={name} value={name} />
             ))}
           </datalist>
-          <label className="tcip-label mt-1">
+          <label className="tcip-label mt-1" htmlFor="plant-registry-name">
             Plant registry name (registered via register_plant_registry)
           </label>
           <input
+            id="plant-registry-name"
             className="tcip-input"
             value={plantRegistry}
             onChange={(e) => setPlantRegistry(e.target.value)}
@@ -148,8 +150,11 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
           </label>
         </div>
         <div className="flex flex-col gap-2">
-          <label className="tcip-label">Match tolerance (m)</label>
+          <label className="tcip-label" htmlFor="plant-mapping-tolerance">
+            Match tolerance (m)
+          </label>
           <input
+            id="plant-mapping-tolerance"
             className="tcip-input"
             type="number"
             step="1"
@@ -162,7 +167,7 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
           />
           <button
             className="tcip-btn-primary"
-            onClick={buildMapping}
+            onClick={() => void buildMapping()}
             disabled={building || !datasetRoot}
           >
             {building ? "Building…" : "Build + save mapping"}
