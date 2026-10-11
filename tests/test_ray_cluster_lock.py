@@ -8,11 +8,9 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
-import sys
 import textwrap
 
-from tests import REPO_ROOT
+from tests import child_basetemp, child_pytest
 
 TWO_MARKED_TESTS = textwrap.dedent(
     """
@@ -48,35 +46,18 @@ def test_two_marked_tests_on_two_workers_run_one_after_the_other(tmp_path):
     test_file.write_text(TWO_MARKED_TESTS, encoding="utf-8")
     intervals_dir = tmp_path / "intervals"
     intervals_dir.mkdir()
-    # The child's root and temporary root sit inside this test's own: an unpinned root is the
-    # common ancestor of the repository and the shared temp root, whose siblings collection lists.
-    basetemp = tmp_path / "child-basetemp"
-    proc = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            str(test_file),
-            "-n",
-            "2",
-            "-p",
-            "no:cacheprovider",
-            "-p",
-            "tests.ray_cluster_lock",
-            "--basetemp",
-            str(basetemp),
-            "--rootdir",
-            str(tmp_path),
-            "-q",
-        ],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
+    proc = child_pytest(
+        tmp_path,
+        test_file,
+        "-n",
+        "2",
+        "-p",
+        "tests.ray_cluster_lock",
         timeout=120,
         env={**os.environ, "INTERVALS_DIR": str(intervals_dir)},
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert basetemp.is_dir(), proc.stdout + proc.stderr
+    assert child_basetemp(tmp_path).is_dir(), proc.stdout + proc.stderr
     rows = [
         json.loads(path.read_text())
         for path in sorted(intervals_dir.glob("*.json"))
