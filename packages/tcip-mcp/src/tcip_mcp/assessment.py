@@ -726,7 +726,9 @@ def _detection(
     from tcip_mcp.pipelines.execution import Reference
 
     cal_ds, hold_ds = (
-        predictor_dataset("detection", side, prep.scope, prep.predictor, None)
+        predictor_dataset(
+            prep.predictor.task, side, prep.scope, prep.predictor, None
+        )
         for side in (cal, hold)
     )
     p = prep.runnable(Reference(regions=cal_ds.regions))
