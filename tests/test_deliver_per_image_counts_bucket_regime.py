@@ -58,7 +58,8 @@ def _bucket(project: Path, scope: dict = SCOPE, **published_kw) -> str:
 
 def test_a_name_no_bucket_record_answers_for_refuses(tmp_path):
     """A name no bucket is published under is refused, never counted: nothing states whose
-    predictions they would be."""
+    predictions they would be.
+    """
     res = _deliver(tmp_path, tmp_path / "ds", "nothing/2026-01-01")
 
     assert "no bucket 'nothing/2026-01-01' is published" in res["error"]
@@ -92,7 +93,8 @@ def test_a_bucket_counting_another_subject_refuses_and_its_own_subject_is_admitt
 ):
     """The measured-subject check reads the bucket's recorded subject: a bucket counting another
     subject refuses before the gate, while the confirmed subject's bucket reaches the gate (and,
-    unassessed, refuses there instead)."""
+    unassessed, refuses there instead).
+    """
     other = _bucket(tmp_path, {"subject": "leaf"})
     own = _bucket(tmp_path)
 
@@ -136,7 +138,8 @@ def test_reading_a_published_bucket_to_a_delivered_csv_imports_no_torch(
     tmp_path,
 ):
     """Delivering from a bucket needs no GPU, no predictor and no checkpoint: the delivery runs in
-    a subprocess with torch blocked from importing at all."""
+    a subprocess with torch blocked from importing at all.
+    """
     from tests._chain_fixtures import run_the_chain
 
     chain = run_the_chain(tmp_path, experiment_id="exp-no-torch")

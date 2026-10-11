@@ -1,7 +1,8 @@
 """The audit log: one append-only store under a dataset root or a project root
 (:func:`audit_log_key`). :func:`audited` records a decorated door's calls (timestamp, tool name,
 arguments, status and duration); :func:`record_event_or_raise` records for code that is not a
-door."""
+door.
+"""
 
 from __future__ import annotations
 
@@ -66,7 +67,8 @@ class AuditEntryNotWrittenError(RuntimeError):
 def audit_log_key(scope: str | Path) -> Key:
     """The audit log one event belongs in: the one under ``scope``, the root the event's subject
     hangs off (a dataset root when the event changed a record that travels with the data, the
-    project root otherwise)."""
+    project root otherwise).
+    """
     return Key(AUDIT_LOG_STORE, str(Path(scope).resolve()), _AUDIT_PARTS)
 
 
@@ -75,7 +77,8 @@ def audit_entries(
 ) -> tuple[list[Mapping[str, Any]], str]:
     """Every entry of ``scope``'s log (:func:`audit_entry`'s shape), in the order they landed
     past the cursor ``after``, and the log's cursor. A log carrying undecodable entries raises
-    ``ValueError`` naming how many."""
+    ``ValueError`` naming how many.
+    """
     from tcip_store import read_log
 
     key = audit_log_key(scope)

@@ -42,7 +42,8 @@ def _write_geotiff(
 ) -> None:
     """A ``shape`` GeoTIFF whose pixel (0, 0) sits at real-world ``(native_x, native_y)`` in UTM
     15N; ``planar`` stores its bands separately, so its first page is band-first and not the
-    frame."""
+    frame.
+    """
     arr = np.zeros(shape, dtype=np.uint8)
     if planar:
         arr = np.moveaxis(arr, -1, 0)
@@ -69,7 +70,8 @@ def _center_latlon(
     native_x: float, native_y: float, shape: tuple[int, int, int] = SHAPE
 ) -> tuple[float, float]:
     """The (lat, lon) the center pixel of a ``shape`` GeoTIFF at this tiepoint resolves to,
-    computed through pyproj so a fixture plant sits exactly at the raster's own center."""
+    computed through pyproj so a fixture plant sits exactly at the raster's own center.
+    """
     import pyproj
 
     height, width, _ = shape
@@ -116,7 +118,8 @@ def two_plant_csv(tmp_path: Path) -> Path:
 @pytest.fixture
 def four_plant_csv(tmp_path: Path) -> Path:
     """Four plants, so a manifest write over their capture dates clears the foreground floor
-    (one each for train/val, two for calibration) while still exercising group cohesion."""
+    (one each for train/val, two for calibration) while still exercising group cohesion.
+    """
     return write_plant_csv(
         tmp_path / "plants4.csv",
         [
@@ -159,7 +162,8 @@ def test_same_plant_two_capture_dates_share_one_group_key(
     """The actual value this script exists for: two differently-named stems (different capture
     dates) of the same physical plant must land under the identical group key, so a split can
     never put one date's photo of a plant in train and another date's photo of the same plant in
-    val/test."""
+    val/test.
+    """
     date1 = tmp_path / "p1_2026-02-01.tif"
     date2 = tmp_path / "p1_2026-03-01.tif"
     other = tmp_path / "p2_2026-02-01.tif"
@@ -183,7 +187,8 @@ def test_same_plant_two_capture_dates_share_one_group_key(
 def test_a_planar_raster_is_located_by_its_own_frame(tmp_path: Path) -> None:
     """A wide planar GeoTIFF's center is measured in the frame its header describes, not in its
     band-first first page: the plant at its true center is found, and no plant stands where a
-    page-shaped reading would put the center."""
+    page-shaped reading would put the center.
+    """
     wide = (4, 40, 3)
     raster = tmp_path / "wide_planar.tif"
     _write_geotiff(raster, *P1_TIEPOINT, shape=wide, planar=True)
@@ -230,7 +235,8 @@ def test_a_malformed_tiff_is_named_and_does_not_kill_the_whole_batch(
     two_plant_csv: Path,
 ) -> None:
     """A malformed file beside a good stem is named in the refusal as the one failing stem; the
-    good stem is still resolved rather than lost to an exception escaping the batch."""
+    good stem is still resolved rather than lost to an exception escaping the batch.
+    """
     good = tmp_path / "good.tif"
     _write_geotiff(good, *P1_TIEPOINT)
     malformed = tmp_path / "malformed.tif"
@@ -387,7 +393,8 @@ def test_the_command_locates_its_dataset_root_once(
     monkeypatch,
 ) -> None:
     """The dataset root arrives once for the whole command: the census and the draw read the
-    location the command established, and no step locates it again."""
+    location the command established, and no step locates it again.
+    """
     import tcip_mcp.registry_paths as registry_paths
     import tcip_mcp.tools.data_tools as data_tools
 
@@ -425,7 +432,8 @@ def test_the_cli_and_the_tool_draw_one_selection_at_the_default_shares(
     four_plant_csv: Path,
 ) -> None:
     """Stated only a seed, the CLI and ``draw_splits`` draw at the one set of default shares: the
-    two selections place every member on the same side, all four sides drawn."""
+    two selections place every member on the same side, all four sides drawn.
+    """
     from tcip_mcp.dataset_layout import parse_image_path
     from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.pipelines.data.splits import member_identity
@@ -485,7 +493,8 @@ def test_main_cli_without_a_seed_refuses(
     tmp_path: Path, project: Path, four_plant_csv: Path
 ) -> None:
     """The seed has no default: omitting --seed refuses via argparse before anything is
-    written."""
+    written.
+    """
     dataset_root = _four_plant_dataset(tmp_path)
     out_dir = tmp_path / "cli_defaults_out"
 

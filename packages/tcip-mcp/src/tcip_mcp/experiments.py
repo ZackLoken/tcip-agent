@@ -151,13 +151,15 @@ from ``$TCIP_HEARTBEAT_STALE_SECONDS``."""
 
 def experiments_dir(project: Path | str) -> Path:
     """The directory every run and sweep directory of ``project`` sits in, the one place a name
-    is reserved (:func:`create_run_directory`)."""
+    is reserved (:func:`create_run_directory`).
+    """
     return Path(project) / EXPERIMENTS_DIR
 
 
 def project_of_run(run_dir: Path) -> Path:
     """The project a run directory, a sweep directory or a sweep's trial directory lies under:
-    the parent of the ``.tcip`` directory on its path. Refuses a directory under no ``.tcip``."""
+    the parent of the ``.tcip`` directory on its path. Refuses a directory under no ``.tcip``.
+    """
     for parent in Path(run_dir).parents:
         if parent.name == ".tcip":
             return parent.parent
@@ -166,7 +168,8 @@ def project_of_run(run_dir: Path) -> Path:
 
 def run_name(name: str) -> str:
     """``name`` once it is known to be one directory name. A separator, a drive, an empty name or
-    a dot name refuses with ``BadKeyError``."""
+    a dot name refuses with ``BadKeyError``.
+    """
     if not name or name in (".", "..") or PureWindowsPath(name).name != name:
         raise BadKeyError(
             f"{name!r} is not a single directory name: a name carrying a separator, a drive or a "
@@ -177,13 +180,15 @@ def run_name(name: str) -> str:
 
 def experiment_dir(experiment_id: str, *, project: Path | str) -> Path:
     """The directory of the run or sweep ``experiment_id`` names. Refuses an id that is not a
-    single directory name (:func:`run_name`)."""
+    single directory name (:func:`run_name`).
+    """
     return experiments_dir(project) / run_name(experiment_id)
 
 
 def find_run(experiment_id: str, *, project: Path | str) -> Path | None:
     """The run directory of ``project`` (:func:`run_dirs`) named ``experiment_id``, a sweep's
-    trial included, or ``None``."""
+    trial included, or ``None``.
+    """
     return next(
         (d for d in run_dirs(project) if d.name == experiment_id), None
     )
@@ -208,7 +213,8 @@ def named_directory(name: str, *, project: Path | str) -> Path | None:
 
 def board_of(directory: Path) -> Path:
     """The TensorBoard log directory of a run or sweep directory: a sweep's own directory, every
-    trial's events beneath it, or a run's :data:`TENSORBOARD_DIR`."""
+    trial's events beneath it, or a run's :data:`TENSORBOARD_DIR`.
+    """
     return (
         directory
         if (directory / SWEEP_FILE).is_file()
@@ -230,7 +236,8 @@ class RunDirectoryExistsError(FileExistsError):
 
 def create_run_directory(directory: Path) -> Path:
     """Create ``directory`` and its parents, refusing with :class:`RunDirectoryExistsError` one that
-    already exists: runs and sweeps share one parent, so this creation is the name's reservation."""
+    already exists: runs and sweeps share one parent, so this creation is the name's reservation.
+    """
     try:
         directory.mkdir(parents=True, exist_ok=False)
     except FileExistsError:
@@ -248,7 +255,8 @@ def open_run_directory(
     snapshot's ``copies`` laid out (``model_build.lay_out``) and its empty metrics log, then write
     ``record`` as its ``run.json`` once, so a directory holding a launch record holds every file a
     reader of a live run reads. Everything that can refuse is composed before the directory
-    exists."""
+    exists.
+    """
     from tcip_mcp.pipelines.model_build import lay_out
 
     create_run_directory(run_dir)
@@ -259,7 +267,8 @@ def open_run_directory(
 
 def write_record(path: Path, value: Any) -> None:
     """Publish the run or sweep record ``value`` at ``path`` once (:func:`write_once`), each path
-    :data:`RECORD_PATHS` names for its file stored against the directory's project."""
+    :data:`RECORD_PATHS` names for its file stored against the directory's project.
+    """
     write_once(
         path,
         recorded_paths(value, RECORD_PATHS[path.name], project_of_run(path)),
@@ -268,7 +277,8 @@ def write_record(path: Path, value: Any) -> None:
 
 def read_run_record(path: Path) -> Any:
     """The run or sweep record at ``path`` (:func:`read_record`), each path :data:`RECORD_PATHS`
-    names for its file resolved against the directory's project."""
+    names for its file resolved against the directory's project.
+    """
     return runtime_paths(
         read_record(path), RECORD_PATHS[path.name], project_of_run(path)
     )
@@ -278,7 +288,8 @@ def publish_once(path: Path, write: Callable[[BinaryIO], object]) -> None:
     """Write a file's whole content through ``write`` into a staging file beside ``path``, then
     publish it under ``path`` without replacing anything, so a file under its final name is always
     whole. A name already published refuses with ``FileExistsError``; a write that fails publishes
-    nothing."""
+    nothing.
+    """
     staging = path.with_name(f".{path.name}.{uuid.uuid4().hex}.staging")
     try:
         with open(staging, "xb") as handle:
@@ -297,7 +308,8 @@ def publish_once(path: Path, write: Callable[[BinaryIO], object]) -> None:
 def write_once(path: Path, value: Any) -> None:
     """Publish ``value`` as the JSON record at ``path`` (:func:`publish_once`). Refuses a value
     JSON cannot hold before anything is created, and a path already written with
-    ``FileExistsError``."""
+    ``FileExistsError``.
+    """
     data = encode_record(value)
     publish_once(path, lambda handle: handle.write(data))
 
@@ -308,7 +320,8 @@ def write_final_status(
     """Write the final status of the run or sweep at ``directory`` once: ``state``, the instant,
     ``status_error``, the error behind it, and ``outcome``, what it produced (a run's
     ``checkpoint``). Refuses (``ValueError``) a state outside :data:`FINAL_STATES`, and a status
-    already written with ``FileExistsError``."""
+    already written with ``FileExistsError``.
+    """
     if state not in FINAL_STATES:
         raise ValueError(
             f"{state!r} is not a final state; a final status names one of "
@@ -327,7 +340,8 @@ def write_final_status(
 
 def append_row(path: Path, row: dict) -> None:
     """Append ``row`` as one line of the JSON log at ``path``, refusing a row JSON cannot hold
-    and (``FileNotFoundError``) a log its directory was not opened with."""
+    and (``FileNotFoundError``) a log its directory was not opened with.
+    """
     line = encode_log_line(row) + b"\n"
     with open(path, "r+b") as handle:
         handle.seek(0, os.SEEK_END)
@@ -344,7 +358,8 @@ def read_record(path: Path) -> Any:
     :data:`SHARING_RETRY_BUDGET_S` is unspent and raised once it is, no read starting after
     the deadline; every other ``PermissionError``,
     a missing file (``FileNotFoundError``) and bytes that do not decode (``DecodeError`` naming
-    the file) raise at once."""
+    the file) raise at once.
+    """
     data = retry_while_denied(
         path.read_bytes, SHARING_RETRY_BUDGET_S, denied=is_sharing_violation
     )
@@ -358,7 +373,8 @@ def read_rows(path: Path, *, after: int = 0) -> tuple[list[dict], int]:
     """Every complete row of the JSON log at ``path`` past byte offset ``after``, and the offset
     past the last complete one. A line still being appended is left for the next read. A log that
     does not exist raises ``FileNotFoundError``; a complete line that does not decode raises
-    ``DecodeError`` naming the file."""
+    ``DecodeError`` naming the file.
+    """
     with open(path, "rb") as handle:
         handle.seek(after)
         data = handle.read()
@@ -384,7 +400,8 @@ def touch_heartbeat(directory: Path) -> None:
 
 def keep_heartbeat(directory: Path) -> threading.Event:
     """Touch ``directory``'s heartbeat now and every tenth of :data:`HEARTBEAT_STALE_SECONDS` on a
-    daemon thread until the returned event is set."""
+    daemon thread until the returned event is set.
+    """
     stop = threading.Event()
     touch_heartbeat(directory)
 
@@ -405,7 +422,8 @@ def keep_heartbeat(directory: Path) -> threading.Event:
 
 def last_alive(directory: Path, record_file: str = RUN_FILE) -> float:
     """The latest sign of life of a run or sweep directory, as a POSIX time: its heartbeat's
-    modification time, or its launch record's before the heartbeat was first touched."""
+    modification time, or its launch record's before the heartbeat was first touched.
+    """
     heartbeat = directory / HEARTBEAT_FILE
     return (
         (heartbeat if heartbeat.exists() else directory / record_file)
@@ -420,7 +438,8 @@ class RunEndedError(ValueError):
 
 def require_open(directory: Path) -> None:
     """Refuse (:class:`RunEndedError`) the run or sweep at ``directory`` once its final status is
-    written: from then on it takes no write."""
+    written: from then on it takes no write.
+    """
     if (directory / FINAL_STATUS_FILE).exists():
         raise RunEndedError(
             f"{directory.name} has ended: its final status is written, so it takes no "
@@ -431,7 +450,8 @@ def require_open(directory: Path) -> None:
 def request_cancel(directory: Path) -> str:
     """Record a cancellation request of the run or sweep at ``directory`` and return the time of
     its first one: a later request leaves that record as written. Refuses a directory that has
-    ended (:func:`require_open`)."""
+    ended (:func:`require_open`).
+    """
     require_open(directory)
     try:
         write_once(directory / CANCEL_FILE, {"requested": now_iso()})
@@ -452,7 +472,8 @@ def cancel_requested(directory: Path) -> bool:
 class RunObservation:
     """One run or sweep directory read once: its launch record, its final status (``None`` while
     it has not ended), its latest sign of life as a POSIX time (:func:`last_alive`), and the state
-    those derive."""
+    those derive.
+    """
 
     directory: Path
     record: dict
@@ -468,7 +489,8 @@ class RunObservation:
     @property
     def checkpoint(self) -> dict | None:
         """The checkpoint a completed training run's final status selects, or ``None`` for a run
-        that has not completed."""
+        that has not completed.
+        """
         if self.final is None or self.state != "completed":
             return None
         return self.final["checkpoint"]
@@ -487,13 +509,15 @@ class RunObservation:
     def resolution(self) -> dict | None:
         """What a run's input resolved to at launch (its ``data``, ``partition`` and
         ``objective``), ``None`` for a sweep trial whose sampled point was refused at its
-        admission or failed to resolve."""
+        admission or failed to resolve.
+        """
         return self.record["resolved"]
 
     @cached_property
     def spec(self) -> TrainConfigSchema:
         """A run's launch ``config`` validated once (``schemas.train_config``, which refuses an
-        invalid one)."""
+        invalid one).
+        """
         from tcip_mcp.pipelines.schemas import train_config
 
         return train_config(self.record["config"])
@@ -501,7 +525,8 @@ class RunObservation:
     @cached_property
     def resolved_data(self) -> DataSpec | None:
         """The data block a run's launch resolved (:attr:`resolution`'s), validated once;
-        ``None`` for a run that resolved to nothing."""
+        ``None`` for a run that resolved to nothing.
+        """
         from tcip_mcp.pipelines.schemas import DataSpec
 
         resolved = self.resolution
@@ -524,7 +549,8 @@ def observe(directory: Path) -> RunObservation:
     of life is within :data:`HEARTBEAT_STALE_SECONDS`, else ``interrupted``. A run holds its
     metrics log from the moment it opened; one missing it refuses with
     :class:`IncompleteRunError` naming it. A completed run's checkpoint is read, and refused when
-    absent, by whatever loads it: an archive may carry a run without its weights."""
+    absent, by whatever loads it: an archive may carry a run without its weights.
+    """
     record_file = (
         SWEEP_FILE if (directory / SWEEP_FILE).is_file() else RUN_FILE
     )
@@ -569,7 +595,8 @@ def sweep_dirs(project: Path | str) -> list[Path]:
 
 def run_dirs(project: Path | str) -> list[Path]:
     """Every run directory of ``project`` that holds a launch record, each sweep's trials included,
-    in name order."""
+    in name order.
+    """
     return sorted(
         [
             *_holding(experiments_dir(project), RUN_FILE),
@@ -590,7 +617,8 @@ def run_observations(project: Path | str) -> list[RunObservation]:
 
 def live_run_conflict(project: Path) -> str | None:
     """The refusal a run, trial or sweep of ``project`` (:func:`training_listing`) still running
-    answers with, or ``None``."""
+    answers with, or ``None``.
+    """
     listing = training_listing(project)
     trials = [trial for sweep in listing.sweeps for trial in sweep.trials]
     running = [
@@ -620,7 +648,8 @@ def find_observation(
 class RunResolution(NamedTuple):
     """What a run resolved at launch: its data block (``RunObservation.resolved_data``), its
     ``partition`` and the within-image split that partition records
-    (``split_construction.partition_spatial``)."""
+    (``split_construction.partition_spatial``).
+    """
 
     data: DataSpec
     partition: dict
@@ -632,7 +661,8 @@ def run_resolution(
 ) -> RunResolution:
     """What the run ``experiment_id`` names resolved at launch (:func:`find_observation`).
     Refuses (``ValueError``) an id naming no run directory or one whose input resolved to
-    nothing."""
+    nothing.
+    """
     observation = find_observation(experiment_id, project=project)
     data = observation.resolved_data if observation is not None else None
     if observation is None or observation.resolution is None or data is None:
@@ -649,7 +679,8 @@ def partition_rows(
     rows: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """A run's metrics-log ``rows`` split by kind, each in logged order: its epoch rows, then its
-    per-batch rows, those carrying :data:`STEP_KEY`. The one place a row's kind is read."""
+    per-batch rows, those carrying :data:`STEP_KEY`. The one place a row's kind is read.
+    """
     epochs: list[dict[str, Any]] = []
     batches: list[dict[str, Any]] = []
     for row in rows:
@@ -660,7 +691,8 @@ def partition_rows(
 def epoch_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """A run's metrics-log ``rows`` as one row per epoch, in the order each epoch was first
     logged: the epoch rows (:func:`partition_rows`) of one epoch merged, a later row's keys laid
-    over the earlier's, a metric and its non-finite state companion as one value."""
+    over the earlier's, a metric and its non-finite state companion as one value.
+    """
     merged: dict[str, dict[str, Any]] = {}
     for row in partition_rows(rows)[0]:
         epoch = json.dumps(row.get(EPOCH_KEY), sort_keys=True, default=str)
@@ -677,7 +709,8 @@ def best_selection(
 ) -> float | None:
     """The best finite ``selection`` among a run's metrics-log epoch rows
     (:func:`partition_rows`) in the direction of ``objective``, the run's recorded
-    ``{"selection_metric", "higher_is_better"}``; ``None`` when no row carries one."""
+    ``{"selection_metric", "higher_is_better"}``; ``None`` when no row carries one.
+    """
     values = [
         float(row["selection"])
         for row in partition_rows(rows)[0]
@@ -720,7 +753,8 @@ def run_summary(
     record's own
     fields, its last logged epoch, and its best selection value under the objective its launch
     resolved (:func:`best_selection`) with that objective's metric name, both ``None`` for a run
-    that resolved to nothing."""
+    that resolved to nothing.
+    """
     record, resolution, spec = (
         observation.record,
         observation.resolution,
@@ -837,7 +871,8 @@ def sweep_outcome(trials: list[RunRow], sweep: dict) -> dict[str, Any]:
     ``best_params`` and ``best_value`` over its completed trials in the objective's direction;
     above one draw, the best point by mean over its draws (:func:`group_split_draws`), with
     ``best_value_spread`` and every point's ``split_sensitivity``. ``best_params`` is ``None``
-    when no trial or point qualifies."""
+    when no trial or point qualifies.
+    """
     choose = max if sweep["objective"]["higher_is_better"] else min
     if sweep["input"]["split_draws"] > 1:
         groups = group_split_draws(trials, sweep["input"]["split_draw_seeds"])
@@ -872,7 +907,8 @@ def sweep_outcome(trials: list[RunRow], sweep: dict) -> dict[str, Any]:
 
 class SweepGroup(BaseModel):
     """One sweep as every listing and monitor shows it: its record's own fields, its trial rows
-    and what they amount to."""
+    and what they amount to.
+    """
 
     sweep_id: str
     state: str
@@ -887,7 +923,8 @@ class SweepGroup(BaseModel):
 
 def read_sweep(directory: Path, rows: list[RunRow]) -> SweepGroup:
     """The sweep at ``directory`` as its :class:`SweepGroup`, its trials the ``rows`` of the
-    project's runs (:func:`run_rows`) it holds, and their outcome (:func:`sweep_outcome`)."""
+    project's runs (:func:`run_rows`) it holds, and their outcome (:func:`sweep_outcome`).
+    """
     sweep = observe(directory)
     trials = [row for row in rows if row.sweep == directory.name]
     return SweepGroup(
@@ -905,7 +942,8 @@ def read_sweep(directory: Path, rows: list[RunRow]) -> SweepGroup:
 
 class TrainingDetail(BaseModel):
     """One run, trial or sweep: a run's row or a sweep's group, the other ``None``, and the URL a
-    TensorBoard serves its board at, ``None`` while none does."""
+    TensorBoard serves its board at, ``None`` while none does.
+    """
 
     run: RunRow | None
     sweep: SweepGroup | None
@@ -921,7 +959,8 @@ class TrainingListing(BaseModel):
 
 def training_listing(project: Path | str) -> TrainingListing:
     """``project``'s runs (:func:`run_rows`) launched on their own, and its sweeps
-    (:func:`read_sweep`) with their trial rows under them."""
+    (:func:`read_sweep`) with their trial rows under them.
+    """
     rows = run_rows(project)
     return TrainingListing(
         runs=[row for row in rows if row.sweep is None],
@@ -933,7 +972,8 @@ def launch_declarations(
     project: Path | str,
 ) -> dict[str, dict[str, str | None]]:
     """The agent identity each run's ``launch_training`` line in ``project``'s audit log carries,
-    by the experiment id it names: empty for a launch no agent declared itself to."""
+    by the experiment id it names: empty for a launch no agent declared itself to.
+    """
     from tcip_mcp import agent_identity
     from tcip_mcp.audit import acts_of
 
@@ -957,7 +997,8 @@ def get_experiment(
     """One run's directory read whole: its launch record, its final status (``None`` until
     written), its state, and its metrics as one row per epoch (:func:`epoch_rows`) paginated by
     ``metrics_offset`` and ``metrics_limit``, ``n_epochs`` the number paged over.
-    ``{"error": ...}`` for an id naming no run."""
+    ``{"error": ...}`` for an id naming no run.
+    """
     observation = find_observation(experiment_id, project=project)
     if observation is None:
         return {"error": f"Experiment not found: {experiment_id}"}
@@ -980,7 +1021,8 @@ def _split_summary(observation: RunObservation) -> dict[str, Any]:
     """The partition column of a comparison of the observed run: ``{"case": "bound",
     "selection_dir", "seed", "redraw"}`` for a run bound to a selection, ``{"case": "spatial"}``
     for a within-image split, ``{"case": "drawn", "seed"}`` for a drawn one, and ``{"case":
-    "none"}`` for a run that resolved to nothing."""
+    "none"}`` for a run that resolved to nothing.
+    """
     resolved, data = observation.resolution, observation.resolved_data
     if resolved is None or data is None:
         return {"case": "none"}
@@ -1002,7 +1044,8 @@ def _split_summary(observation: RunObservation) -> dict[str, Any]:
 
 def _row_instant(row: dict, experiment_id: str) -> datetime:
     """A metric row's own ``timestamp`` as an instant. Refuses (``ValueError``) a row whose
-    timestamp is absent or does not decode, naming the row and the run."""
+    timestamp is absent or does not decode, naming the row and the run.
+    """
     try:
         return datetime.fromisoformat(row[TIMESTAMP_KEY])
     except (KeyError, TypeError, ValueError) as exc:
@@ -1114,7 +1157,8 @@ def get_experiment_lineage(
     """A training run's data-to-model chain read off its records: the data section it resolved,
     its dataset identity, the run it was relaunched from and the checkpoint it resumed from, and
     the checkpoint its completion selected. ``{"error": ...}`` for an id naming no training
-    run."""
+    run.
+    """
     observation = find_observation(experiment_id, project=project)
     if observation is None:
         return {"error": f"Experiment not found: {experiment_id}"}

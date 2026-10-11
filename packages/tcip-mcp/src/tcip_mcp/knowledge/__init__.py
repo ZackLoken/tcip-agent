@@ -19,7 +19,8 @@ _NAME_SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*$")
 @dataclasses.dataclass(frozen=True)
 class DocumentInfo:
     """One knowledge document's selection metadata: enough to choose it without reading its
-    body."""
+    body.
+    """
 
     name: str
     description: str

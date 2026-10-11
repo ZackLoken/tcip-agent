@@ -22,7 +22,8 @@ def write_plant_csv(
 ) -> Path:
     """A plant-locations CSV at ``path``, one row per entry of ``plants``: its ``plot``,
     ``accession``, ``lat`` and ``lon`` under the registry's column names, then each ``extra``
-    column it carries under that name. Returns ``path``."""
+    column it carries under that name. Returns ``path``.
+    """
     with path.open("w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(
@@ -81,7 +82,8 @@ def map_captures(
 ) -> dict[str, list[Path]]:
     """Register ``dataset_root`` in ``project``, write one geolocated capture of each of
     :data:`PLOTS` on each of ``dates`` under its ``images/``, and map them under ``name``
-    (``register_plant_registry`` then ``build_plant_mapping``); each date's captures."""
+    (``register_plant_registry`` then ``build_plant_mapping``); each date's captures.
+    """
     from datetime import datetime, timedelta
 
     from tcip_mcp.tools.phenology_tools import build_plant_mapping

@@ -257,7 +257,8 @@ class RasterSource(Protocol):
 class _ClosableSource:
     """Close-once and context-manager plumbing shared by the backends; each releases whatever it
     holds open in ``_release``. ``georeference`` is the outcome of a TIFF backend's one
-    georeference read (:func:`tiff_header`), ``None`` for a backend that reads no TIFF tags."""
+    georeference read (:func:`tiff_header`), ``None`` for a backend that reads no TIFF tags.
+    """
 
     closed = False
     georeference: GeoTransform | GeoreferencingError | None = None
@@ -273,7 +274,8 @@ class _ClosableSource:
     def level_dims(self) -> list[tuple[int, int]]:
         """The ``(width, height)`` of each reduced-resolution level this reader serves a planned
         read or a level tile from, finest first: none, for every backend that holds its pixels
-        decoded; :class:`GdalSource` answers its overview levels."""
+        decoded; :class:`GdalSource` answers its overview levels.
+        """
         return []
 
     def read_region(
@@ -296,7 +298,8 @@ class _ClosableSource:
 
 def _check_region(rect: Rect, height: int, width: int) -> None:
     """Raise ``ValueError`` unless ``rect`` is a non-empty region inside a ``height`` x ``width``
-    raster."""
+    raster.
+    """
     if not (0 <= rect.y0 < rect.y1 <= height) or not (
         0 <= rect.x0 < rect.x1 <= width
     ):
@@ -349,7 +352,8 @@ class _RegionView:
 def scaled_size(width: int, height: int, scale: Fraction) -> tuple[int, int]:
     """The ``(width, height)`` a ``width`` x ``height`` rect is read at under one ``scale``: each
     edge times the scale, rounded down, and at least one pixel. The one integer geometry a
-    resampled read's size is admitted by."""
+    resampled read's size is admitted by.
+    """
     return max(1, math.floor(width * scale)), max(
         1, math.floor(height * scale)
     )
@@ -361,7 +365,8 @@ def level_window(
     """``rect`` of a ``width`` x ``height`` raster mapped onto a level of ``level_w`` x
     ``level_h`` pixels: its origin rounded down and its exclusive end rounded up, so the window
     covers every level pixel the rect touches. The one window geometry a level read opens and a
-    read plan is decided on."""
+    read plan is decided on.
+    """
     return Rect(
         rect.x0 * level_w // width,
         rect.y0 * level_h // height,
@@ -395,7 +400,8 @@ def _check_target_size(
 
 def _area_downsample(region: np.ndarray, out_w: int, out_h: int) -> np.ndarray:
     """``region`` resampled to ``out_h`` x ``out_w`` rows x cols by pixel-area averaging: cv2's
-    ``INTER_AREA``, the one area resampler used for every backend that resamples in memory."""
+    ``INTER_AREA``, the one area resampler used for every backend that resamples in memory.
+    """
     import cv2
 
     return hwc_array(
@@ -410,7 +416,8 @@ def _serve_region(
     target_size: tuple[int, int] | None,
 ) -> tuple[np.ndarray, ReadSpec]:
     """The read tail every in-memory backend shares: the native copy as-is, or area-downsampled to
-    an aspect-preserving ``target_size``."""
+    an aspect-preserving ``target_size``.
+    """
     if target_size is None:
         return region, ReadSpec(backend)
     out_w, out_h = _check_target_size(rect, target_size)
@@ -445,7 +452,8 @@ class _TiffHeader:
     ``(256, 3)`` uint8 lookup (``None`` for any other image), and the outcome of reading its
     georeferencing tags
     (:func:`~tcip_mcp.pipelines.postprocessing.orthomosaic_mapping.geotransform_of`): the
-    geotransform, or the exception naming why the tags state none."""
+    geotransform, or the exception naming why the tags state none.
+    """
 
     path: Path
     shape: tuple[int, ...]
@@ -458,7 +466,8 @@ class _TiffHeader:
 def _palette_lut(colormap: np.ndarray) -> np.ndarray:
     """A TIFF ``ColorMap`` tag's 16-bit entries as the ``(256, 3)`` uint8 lookup they encode, the
     high byte of each entry. Raises ``ValueError`` for a tag that does not hold three rows of the
-    256 entries a uint8 index addresses."""
+    256 entries a uint8 index addresses.
+    """
     raw = np.asarray(colormap)
     if raw.shape != (3, 256):
         raise ValueError(
@@ -471,7 +480,8 @@ def tiff_header(tif: TiffFile) -> _TiffHeader:
     """The first-series header of the open TIFF ``tif``, at the path its file handle names, read
     without a pixel decode. Raises ``ValueError`` naming the file when tifffile cannot read it,
     and for a palette image this module cannot expand: one that is not uint8, carries no
-    ``ColorMap`` tag, or carries one that holds no RGB palette."""
+    ``ColorMap`` tag, or carries one that holds no RGB palette.
+    """
     import tifffile
 
     from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
@@ -541,7 +551,8 @@ class _Layout:
     it serves: ``decoded`` is its 3-D shape once a 2-D array gains its trailing axis, ``order``
     the axis order that lays it out channel-last, and ``stacked`` the TIFF fact that its series'
     axes describe no single frame (the multi-page files tifffile writes; never true of a numpy
-    container)."""
+    container).
+    """
 
     decoded: tuple[int, int, int]
     order: tuple[int, int, int]
@@ -570,7 +581,8 @@ def _array_layout(
     its container states a ``planar`` sample axis, when :func:`channel_first_reinterpreted` says
     so at ``num_channels``, or, for a ``stacked`` TIFF series with no hint, when its leading axis
     is the smaller outer one. Raises ``ValueError`` naming ``path`` and the shape for an array of
-    any other number of dimensions."""
+    any other number of dimensions.
+    """
     if len(shape) not in (2, 3):
         raise ValueError(
             f"'{path}' decodes to an array shaped {tuple(shape)}, which is not a "
@@ -594,7 +606,8 @@ def _array_layout(
 def _layout(header: _TiffHeader, num_channels: int | None) -> _Layout:
     """The :class:`_Layout` the TIFF ``header`` describes serves at ``num_channels``: its decode,
     a palette image's indices expanded to three bands, laid out by :func:`_array_layout` with
-    the facts only its axes state (a planar ``SYX`` series, a stacked one)."""
+    the facts only its axes state (a planar ``SYX`` series, a stacked one).
+    """
     palette = header.palette_lut is not None
     shape = (*header.shape, 3) if palette else header.shape
     return _array_layout(
@@ -608,13 +621,15 @@ def _layout(header: _TiffHeader, num_channels: int | None) -> _Layout:
 
 class _ArraySource(_ClosableSource):
     """A backend whose pixels are one already-decoded array held in memory, laid out ``[H, W, C]``
-    in the frame its :class:`_Layout` describes; regions are copied out of it."""
+    in the frame its :class:`_Layout` describes; regions are copied out of it.
+    """
 
     _backend = "array"
 
     def __init__(self, decoded: np.ndarray, layout: _Layout):
         """``decoded`` is the array as decoded, taken as ``layout``'s decoded shape and laid out by
-        its axis order."""
+        its axis order.
+        """
         array = np.transpose(np.reshape(decoded, layout.decoded), layout.order)
         self._array: np.ndarray | None = array
         self.height = int(array.shape[0])
@@ -656,7 +671,8 @@ class PhotographicSource(_ClosableSource):
 
     def __init__(self, opened: PILImage, num_channels: int):
         """``opened`` is the photograph as ``PIL.Image.open`` answered it, its pixels not yet
-        decoded; it is decoded here and closed."""
+        decoded; it is decoded here and closed.
+        """
         from tcip_annotation.utils import auto_orient_image
 
         self.image = auto_orient_image(opened).convert(
@@ -671,7 +687,8 @@ class PhotographicSource(_ClosableSource):
     @property
     def resident_bytes(self) -> int:
         """The peak this source can hold, stated before any read: the PIL frame plus the ndarray
-        copy :meth:`read_region` materializes from it on first use."""
+        copy :meth:`read_region` materializes from it on first use.
+        """
         return int(
             2
             * self.width
@@ -696,13 +713,15 @@ class PhotographicSource(_ClosableSource):
 class TiffWholeSource(_ArraySource):
     """A TIFF decoded whole in the frame its header describes: the stacked multi-page files
     GDAL's first-IFD reading misreads, the shapes a whole decode reinterprets channel-first, and a
-    readable TIFF GDAL cannot open; every other TIFF is :class:`GdalSource`'s."""
+    readable TIFF GDAL cannot open; every other TIFF is :class:`GdalSource`'s.
+    """
 
     _backend = "tiff_whole"
 
     def __init__(self, source: SourceHeader, layout: _Layout):
         """Decodes the TIFF ``source`` already holds open, a palette image expanded through its
-        table, laid out in the frame ``layout`` describes."""
+        table, laid out in the frame ``layout`` describes.
+        """
         header = source.tiff
         self.georeference = header.georeference
         arr = np.asarray(source.tiff_file.asarray())
@@ -713,7 +732,8 @@ class TiffWholeSource(_ArraySource):
 
 class NpySource(_ArraySource):
     """A ``.npy`` array as :class:`SourceHeader` memory-mapped it, so a region read touches only
-    the pages it covers. An array container carries no georeference."""
+    the pages it covers. An array container carries no georeference.
+    """
 
     _backend = "npy"
 
@@ -857,7 +877,8 @@ class GdalSource(_ClosableSource):
         self, level: int, rect: Rect
     ) -> tuple[np.ndarray, ReadSpec]:
         """``rect`` in the pixel grid of overview level ``level`` (1 the finest), read at that
-        level's own resolution."""
+        level's own resolution.
+        """
         ds = self._level_dataset(level - 1)
         _check_region(rect, int(ds.height), int(ds.width))
         pixels, _resample = self._read_window(ds, rect, None)
@@ -867,7 +888,8 @@ class GdalSource(_ClosableSource):
         self, ds, window: Rect, out: tuple[int, int] | None
     ) -> tuple[np.ndarray, str | None]:
         """``window`` of dataset ``ds`` as ``[H, W, C]``, area-averaged to ``out`` when given (a
-        palette raster's indices expanded first, never averaged), and the resampling used."""
+        palette raster's indices expanded first, never averaged), and the resampling used.
+        """
         from rasterio.enums import Resampling
         from rasterio.windows import Window
 
@@ -897,7 +919,8 @@ class GdalSource(_ClosableSource):
         """The ``(width, height)`` of each reduced-resolution level GDAL serves this raster at,
         finest first, each read off the level's own dataset (:meth:`_level_dataset`): internal
         overviews, or an external sidecar
-        :func:`~tcip_mcp.pipelines.overviews.sidecar_valid` confirms; none otherwise."""
+        :func:`~tcip_mcp.pipelines.overviews.sidecar_valid` confirms; none otherwise.
+        """
         from tcip_mcp.pipelines.overviews import (
             overview_sidecar,
             sidecar_valid,
@@ -927,7 +950,8 @@ class GdalSource(_ClosableSource):
 
 def _memory_budget_bytes() -> int:
     """The decoded-pixel bytes this module lets itself hold: a fraction of the host's total
-    physical RAM, read once per process."""
+    physical RAM, read once per process.
+    """
     global _total_ram_bytes
     if _total_ram_bytes is None:
         import psutil
@@ -938,7 +962,8 @@ def _memory_budget_bytes() -> int:
 
 def _pool_budget_bytes() -> int:
     """The pooled registry's budget: what the memory budget leaves after GDAL's block-cache
-    share."""
+    share.
+    """
     return int(_memory_budget_bytes() * (1.0 - _GDAL_CACHE_SHARE))
 
 
@@ -954,7 +979,8 @@ class SourceHeader:
 
     ``kind`` is ``"group"`` (a band group, or the ``.bandgroup`` manifest standing in for it),
     ``"photo"`` (any other extension outside :data:`ARRAY_CONTAINER_EXTS`, decoded whole through
-    PIL), or an array container's extension cut to ``"tif"``, ``"npy"`` or ``"npz"``."""
+    PIL), or an array container's extension cut to ``"tif"``, ``"npy"`` or ``"npz"``.
+    """
 
     def __init__(self, source: str | Path | BandGroupRef):
         self.source = (
@@ -973,7 +999,8 @@ class SourceHeader:
     def path(self) -> Path:
         """The file :attr:`source` names
         (:func:`~tcip_mcp.pipelines.image_utils.source_path_of`): a band group's manifest, any
-        other source's own file."""
+        other source's own file.
+        """
         from tcip_mcp.pipelines.image_utils import source_path_of
 
         return Path(source_path_of(self.source))
@@ -981,7 +1008,8 @@ class SourceHeader:
     @cached_property
     def tiff_file(self) -> TiffFile:
         """The TIFF opened through tifffile, held until this record is collected. Raises
-        ``ValueError`` naming the file when tifffile cannot open it."""
+        ``ValueError`` naming the file when tifffile cannot open it.
+        """
         import tifffile
 
         try:
@@ -996,7 +1024,8 @@ class SourceHeader:
     @cached_property
     def tiff(self) -> _TiffHeader:
         """The TIFF header read off :attr:`tiff_file` (:func:`tiff_header`, whose refusals
-        propagate)."""
+        propagate).
+        """
         return tiff_header(self.tiff_file)
 
     @cached_property
@@ -1010,7 +1039,8 @@ class SourceHeader:
     @cached_property
     def _photo_image(self) -> PILImage:
         """The photograph as ``PIL.Image.open`` answers it, its pixels not decoded; closed by the
-        reader that decodes it, or when this header is collected, whichever comes first."""
+        reader that decodes it, or when this header is collected, whichever comes first.
+        """
         from PIL import Image
 
         image = Image.open(self.path)
@@ -1029,7 +1059,8 @@ class SourceHeader:
     @cached_property
     def group(self) -> BandGroupRef:
         """The band group: the one given, or the one its manifest names (whose refusals
-        propagate)."""
+        propagate).
+        """
         assert self.kind == "group", "only a band group's header names one"
         if isinstance(self.source, BandGroupRef):
             return self.source
@@ -1039,7 +1070,8 @@ class SourceHeader:
     def members(self) -> list[SourceHeader]:
         """A band group's members' headers, in the manifest's declared band order: each one band
         laid out as it is opened, at one band (:meth:`_layout_at`), what a member of a band group
-        is. Raises ``ValueError`` naming a member that holds another count read that way."""
+        is. Raises ``ValueError`` naming a member that holds another count read that way.
+        """
         members = [SourceHeader(p) for p in self.group.bands.values()]
         for name, member in zip(self.group.bands, members):
             bands = member._layout_at(1)[2]
@@ -1061,20 +1093,23 @@ class SourceHeader:
         """The count a plain (non-composited) image-route read opens the source at: three for
         every photograph, whatever its own bands, since a plain serve decodes a grayscale,
         grayscale-with-alpha or palette frame through PIL's RGB expansion; :attr:`channels`
-        otherwise."""
+        otherwise.
+        """
         return 3 if self.kind == "photo" else self.channels
 
     @property
     def display_frame(self) -> tuple[int, int]:
         """``(width, height)`` the image route serves the source in (:meth:`frame_at` at
         :attr:`route_channels`): the frame a viewer draws and annotation coordinates are measured
-        in."""
+        in.
+        """
         return self.frame_at(self.route_channels)
 
     @property
     def georeference(self) -> GeoTransform | GeoreferencingError | None:
         """A TIFF's georeference read outcome (:class:`_TiffHeader`); ``None`` for a source that
-        carries no TIFF tags."""
+        carries no TIFF tags.
+        """
         return self.tiff.georeference if self.kind == "tif" else None
 
     def _layout_at(self, num_channels: int | None) -> tuple[int, int, int]:
@@ -1082,7 +1117,8 @@ class SourceHeader:
         (``None``: no hint), from what this record acquired: a TIFF's header (:func:`_layout`,
         no pixel decode), a numpy array's shape (:func:`_array_layout`; a ``.npy`` memory-mapped,
         a ``.npz``'s array loaded), a photograph's PIL header (never re-laid out), a band group's
-        first member at one band and one band per member. Raises what those layouts raise."""
+        first member at one band and one band per member. Raises what those layouts raise.
+        """
         if self.kind == "group":
             height, width, _one = self.members[0]._layout_at(1)
             return height, width, len(self.members)
@@ -1095,7 +1131,8 @@ class SourceHeader:
 
     def frame_at(self, num_channels: int) -> tuple[int, int]:
         """``(width, height)`` as the source is served at ``num_channels`` (:meth:`_layout_at`).
-        Raises what :meth:`open` raises for a count the source cannot be served at."""
+        Raises what :meth:`open` raises for a count the source cannot be served at.
+        """
         if self.kind == "photo":
             self._refuse_unless_photographic(num_channels)
         height, width, _bands = self._layout_at(num_channels)
@@ -1103,7 +1140,8 @@ class SourceHeader:
 
     def _refuse_unless_photographic(self, num_channels: int) -> None:
         """Refuse a photograph at a count PIL has no mode for, naming the containers that carry
-        band data."""
+        band data.
+        """
         if num_channels not in _PIL_MODES:
             raise ValueError(
                 f"Cannot load a {num_channels}-channel image from '{self.path.suffix}'. "
@@ -1118,7 +1156,8 @@ class SourceHeader:
         says the whole decode serves it (its axes describe no single frame, as GDAL's first-IFD
         read of a stacked multi-page file would misread, or the frame to serve at
         ``num_channels`` is not the one its axes describe), GDAL cannot open it, or the frame GDAL
-        opens is not that one. Every other kind decodes whole."""
+        opens is not that one. Every other kind decodes whole.
+        """
         if self.kind == "npy":
             return NpySource(
                 self.array,
@@ -1141,7 +1180,8 @@ class SourceHeader:
     def gdal(self) -> GdalSource:
         """The TIFF opened through GDAL as it sits on disk, whatever count it is served at: the
         reader of its physical overview pyramid, whether or not a read at some count would
-        decode it whole. Raises ``ValueError`` where GDAL cannot open it."""
+        decode it whole. Raises ``ValueError`` where GDAL cannot open it.
+        """
         return GdalSource(self.tiff)
 
     def open(self, num_channels: int) -> RasterSource:
@@ -1150,7 +1190,8 @@ class SourceHeader:
         a photograph decodes in, which axis order a numpy/TIFF array carries) and is never
         checked against the file. A photograph at a count PIL has no mode for raises
         ``ValueError`` naming the containers that carry band data; a photograph's record opens
-        once."""
+        once.
+        """
         reader = self.windowed(num_channels)
         if reader is not None:
             return reader
@@ -1168,7 +1209,8 @@ class SourceHeader:
 
     def open_at_route_count(self) -> RasterSource:
         """:meth:`open` at :attr:`route_channels`, the count a plain image-route read opens the
-        source at."""
+        source at.
+        """
         return self.open(self.route_channels)
 
 
@@ -1176,7 +1218,8 @@ def open_raster(
     source: str | Path | BandGroupRef, num_channels: int
 ) -> RasterSource:
     """:meth:`SourceHeader.open` of ``source`` at ``num_channels``: a 5-band GeoTIFF opened at 3
-    still reads as 5 bands."""
+    still reads as 5 bands.
+    """
     return SourceHeader(source).open(num_channels)
 
 
@@ -1189,7 +1232,8 @@ _POOL_BYTES = 0
 
 def file_version(path: Path) -> tuple[str, int, int]:
     """A file's path, modification time and size, read off the filesystem without opening it.
-    Raises ``FileNotFoundError`` for a path no file is at."""
+    Raises ``FileNotFoundError`` for a path no file is at.
+    """
     st = path.stat()
     return str(path), int(st.st_mtime_ns), int(st.st_size)
 
@@ -1198,7 +1242,8 @@ def source_version(header: SourceHeader) -> tuple:
     """The version on disk of the source ``header`` describes (:func:`file_version`): its
     file's; a band group's manifest's beside each band's name and its member file's, since the
     manifest can be rewritten to name another file and a member can be rewritten under an
-    untouched manifest."""
+    untouched manifest.
+    """
     if header.kind == "group":
         members = tuple(
             (name, *file_version(p)) for name, p in header.group.bands.items()
@@ -1394,7 +1439,8 @@ def open_as_recorded(
 
 def content_identity(src: RasterSource) -> RasterIdentity:
     """:func:`raster_content_identity` of the open raster ``src`` under the platform's own
-    sampling budget."""
+    sampling budget.
+    """
     return raster_content_identity(
         src,
         seed=CONTENT_IDENTITY_SEED,

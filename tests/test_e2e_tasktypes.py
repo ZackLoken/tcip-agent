@@ -79,7 +79,8 @@ def _trained(
 ):
     """The observation of a run of ``tmp_path`` over :func:`_train_config` at ``batch_size``,
     opened by the launcher's own producer over the places ``data`` names with no validation side
-    and trained to its end by the child's own entry."""
+    and trained to its end by the child's own entry.
+    """
     from tcip_mcp.experiments import observe
     from tests._verified_checkpoint_fixtures import worker_run
 
@@ -229,7 +230,8 @@ def test_ordinal_e2e(tmp_path: Path):
 def test_ordinal_derives_num_ranks_from_data(tmp_path: Path):
     """A rank scale of 7 ranks must derive its count from the CSV, never truncate to a narrower
     bound. crops.yml's kernel_pellicle trait is a real 1-7 scale (ranks 0-6, 7 ranks) once
-    0-indexed."""
+    0-indexed.
+    """
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     rows = []
     for rank in range(7):
@@ -255,7 +257,8 @@ def test_ordinal_derives_num_ranks_from_data(tmp_path: Path):
 def test_ordinal_num_ranks_stated_raises(tmp_path: Path):
     """A caller-configured num_ranks raises: the rank count is the CSV's own, so a stated one
     (here too small, which would train the excess ranks as silent duplicates of the top rank)
-    is refused rather than compared."""
+    is refused rather than compared.
+    """
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     rows = []
     for rank in range(7):
@@ -272,7 +275,8 @@ def test_ordinal_num_ranks_stated_raises(tmp_path: Path):
 
 def test_classification_derives_num_classes_from_data(tmp_path: Path):
     """A label range of 4 classes must derive its count from the CSV, never truncate to a
-    narrower bound."""
+    narrower bound.
+    """
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     rows = []
     for label in range(4):

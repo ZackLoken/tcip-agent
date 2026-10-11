@@ -20,7 +20,8 @@ from tcip_mcp.traits import Text
 
 class MatchTolerance(BaseModel):
     """A plant mapping's resolved match radius (meters) and the branch of
-    ``plant_mapping.resolve_nn_tolerance_m`` that produced it."""
+    ``plant_mapping.resolve_nn_tolerance_m`` that produced it.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -83,7 +84,8 @@ class PlantRegistryDisclosure(BaseModel):
 
 class CanopySegmentsDocument(BaseModel):
     """The label document a canopy-segment delivery read its boundaries from, named by its capture
-    and stem under the delivered bucket's dataset root and by the version it was read at."""
+    and stem under the delivered bucket's dataset root and by the version it was read at.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -97,7 +99,8 @@ class CanopySegmentsDocument(BaseModel):
 class SegmentTieDisclosure(BaseModel):
     """One resolved segment-to-plant tie: the attribution claim itself, and the derived margin
     (:class:`~tcip_mcp.pipelines.postprocessing.segment_attribution.TiedSegment.clearance_m``) a
-    displaced registry position would have to exceed to leave this segment."""
+    displaced registry position would have to exceed to leave this segment.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -143,7 +146,8 @@ class CanopySegmentDisclosure(BaseModel):
 
 class Producer(BaseModel):
     """The one checkpoint and run behind every delivered bucket
-    (:attr:`~tcip_mcp.model_registry.VerifiedCheckpoint.producer`)."""
+    (:attr:`~tcip_mcp.model_registry.VerifiedCheckpoint.producer`).
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -153,7 +157,8 @@ class Producer(BaseModel):
 
 class BucketFinding(BaseModel):
     """What the gate found for one delivered bucket, named by its dataset root and its name:
-    validated when no reason refuses it."""
+    validated when no reason refuses it.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -168,7 +173,8 @@ class BucketFinding(BaseModel):
 class Acknowledgment(BaseModel):
     """The breeder's recorded act of shipping one unvalidated result: its id, who did it and why
     (both required non-empty; a blank one refuses, ``ValueError``), the digest of the result it was
-    given for, and when it was recorded."""
+    given for, and when it was recorded.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -187,7 +193,8 @@ PlantMapping = (
 
 class DeliveryEventRecord(BaseModel):
     """The stored per-delivery record: what shipped, under which trait revision and kind, from
-    which producer, what the gate found per bucket, and the acknowledgment it shipped under."""
+    which producer, what the gate found per bucket, and the acknowledgment it shipped under.
+    """
 
     model_config = ConfigDict(extra="forbid")
 

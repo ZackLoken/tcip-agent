@@ -100,7 +100,8 @@ def test_a_point_alongside_a_box_and_a_polygon_all_survive_one_document(
 
 def _scope(root: Path, *values: str):
     """The class space ``bud`` is read under over a dataset at ``root`` declaring ``opening``
-    over ``values`` on it, or no attribute for no values."""
+    over ``values`` on it, or no attribute for no values.
+    """
     from tcip_mcp import subject_registry as cr
     from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tests._producer_fixtures import registry_over
@@ -151,7 +152,8 @@ def test_a_point_only_document_carries_the_subject_and_the_detection_loader_refu
     """Admission asks whether the document carries the subject at all, so a point-only document
     does: it is real ground truth, not an empty image. Which geometries answer for a measurement
     is the selected loader's own fact, so the detection loader refuses that sample by name rather
-    than training it as a zero-object negative no human confirmed."""
+    than training it as a zero-object negative no human confirmed.
+    """
     from tests._producer_fixtures import dataset_over
 
     images = tmp_path / "images" / UNDATED_BUCKET
@@ -426,7 +428,8 @@ def test_save_annotations_tool_keeps_points_and_point_distinct(
     tmp_path: Path, bound
 ) -> None:
     """``points`` is a polygon contour and ``point`` is one location: one spelling must not serve
-    both, or a point and a one-vertex polygon become indistinguishable on disk."""
+    both, or a point and a one-vertex polygon become indistinguishable on disk.
+    """
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     img = blank_image(tmp_path)

@@ -131,6 +131,7 @@ def render_detections(
         class_names: Mapping from class_id to display name.
         output_path: Where to save.
         line_width: Box outline width in pixels.
+
     """
     class_names = class_names or {}
 
@@ -178,6 +179,7 @@ def render_segmentations(
         class_names: Mapping from class_id to display name.
         output_path: Where to save.
         alpha: Fill transparency (0=transparent, 1=opaque).
+
     """
     class_names = class_names or {}
 
@@ -227,6 +229,7 @@ def render_comparison(
             order they were built from the same lists.
         class_names: Mapping from class_id to display name.
         output_path: Where to save.
+
     """
     class_names = class_names or {}
 
@@ -293,6 +296,7 @@ def render_grid(
         cols: Number of columns in the grid.
         cell_size: Size of each cell (images resized to fit).
         output_path: Where to save.
+
     """
     n = len(image_paths)
     if n == 0:
@@ -365,8 +369,8 @@ def render_candidates(
 
     Returns:
         Output path to the rendered image.
-    """
 
+    """
     orig_w, orig_h = native_size
     img = _rgb_frame(image)
     rw, rh = img.size
@@ -446,6 +450,7 @@ def render_grid_overlay(
 
     Returns:
         Output path to the rendered image.
+
     """
     from tcip_annotation.grid import cell_fields
 
@@ -498,7 +503,8 @@ def render_grid_overlay(
 
 def _hex_rgb(color: str) -> tuple[int, int, int]:
     """``#RRGGBB`` (or ``#RGB``) as an RGB tuple; anything else refuses (``ValueError``) naming
-    it."""
+    it.
+    """
     from PIL import ImageColor
 
     if not (
@@ -534,7 +540,8 @@ def _dashed_segment(
 def _dash_pixels(dash, stroke: int) -> tuple[float, float] | None:
     """A shape's ``[on, off]`` dash, given in stroke widths, as pixel lengths at ``stroke`` pixels;
     None for a solid stroke (no pattern given). A pattern that is not two numbers with a positive
-    ``on`` and a non-negative ``off`` refuses (``ValueError``), an empty one included."""
+    ``on`` and a non-negative ``off`` refuses (``ValueError``), an empty one included.
+    """
     if dash is None:
         return None
     if (
@@ -564,7 +571,8 @@ _MIN_VERTICES = {"polygon": 2, "polyline": 1}
 
 class _CanvasShape(NamedTuple):
     """One pushed canvas shape as decoded: its record, its points in output pixels, its color,
-    whether its outline closes and its dash as pixel lengths (None for a solid stroke)."""
+    whether its outline closes and its dash as pixel lengths (None for a solid stroke).
+    """
 
     spec: dict
     pts: list[tuple[float, float]]

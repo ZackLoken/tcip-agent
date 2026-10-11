@@ -1,5 +1,6 @@
 """An external dataset-level COCO document, converted into the dataset's per-image label
-documents."""
+documents.
+"""
 
 from __future__ import annotations
 
@@ -30,7 +31,8 @@ def _read_coco(document: Path) -> tuple[dict, str]:
     """The external COCO file's parsed object and the digest of the one read of its bytes
     (:func:`tcip_store.read_blob_versioned`'s version). A file that is absent, not UTF-8 (a
     leading byte-order mark accepted), not JSON or not an object refuses (``ValueError``) naming
-    it."""
+    it.
+    """
     import json
 
     import tcip_store

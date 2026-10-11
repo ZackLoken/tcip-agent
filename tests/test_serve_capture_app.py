@@ -1,5 +1,6 @@
 """tools/serve_capture_app.py's environment builder: the scratch variables it sets, and the
-roots it refuses before setting anything. No server is started here."""
+roots it refuses before setting anything. No server is started here.
+"""
 
 from __future__ import annotations
 
@@ -31,7 +32,8 @@ def test_the_workspace_and_port_point_under_the_given_root(
     tool, tmp_path, monkeypatch
 ):
     """The ambient test rail may itself bind TCIP_WORKSPACE under this very tmp_path; a root this
-    test controls directly must not accidentally trip that unrelated refusal."""
+    test controls directly must not accidentally trip that unrelated refusal.
+    """
     monkeypatch.delenv("TCIP_WORKSPACE", raising=False)
     root = tmp_path / "harness"
     env = tool.build_environ(root, 8799)
@@ -43,7 +45,8 @@ def test_the_workspace_and_port_point_under_the_given_root(
 
 def test_pythonpath_carries_the_repository_root(tool, tmp_path, monkeypatch):
     """A seeded run's subprocess imports a fixture module (a tiny trainer, say) by dotted name
-    against the repository, the same way the day-3 harness's own environment did."""
+    against the repository, the same way the day-3 harness's own environment did.
+    """
     monkeypatch.delenv("TCIP_WORKSPACE", raising=False)
     monkeypatch.setenv("PYTHONPATH", str(tmp_path / "existing"))
     root = tmp_path / "harness"
@@ -90,7 +93,8 @@ def test_a_root_containing_the_callers_own_active_workspace_is_refused(
     tool, tmp_path, monkeypatch
 ):
     """The old check only refused the root-under-workspace direction; a root that itself
-    contains the caller's own active TCIP_WORKSPACE as a subdirectory aliases it just as much."""
+    contains the caller's own active TCIP_WORKSPACE as a subdirectory aliases it just as much.
+    """
     root = tmp_path / "harness"
     active_workspace = root / "nested" / "real-project"
     monkeypatch.setenv("TCIP_WORKSPACE", str(active_workspace))
@@ -125,7 +129,8 @@ def test_a_fresh_root_with_no_tcip_workspace_bound_is_admitted(
     tool, tmp_path, monkeypatch
 ):
     """A legitimate call still succeeds: a brand-new root, with no TCIP_WORKSPACE bound and no
-    .tcip anywhere under it, is not refused."""
+    .tcip anywhere under it, is not refused.
+    """
     monkeypatch.delenv("TCIP_WORKSPACE", raising=False)
     root = tmp_path / "harness"
 
@@ -147,7 +152,8 @@ def test_stop_is_not_refused_for_platform_on_windows(
     tool, tmp_path, monkeypatch
 ):
     """A legitimate call still succeeds: on a Windows host, stop reaches its real work (the
-    missing server_info.json refusal, never the platform refusal)."""
+    missing server_info.json refusal, never the platform refusal).
+    """
     monkeypatch.setattr(tool.sys, "platform", "win32")
 
     with pytest.raises(SystemExit, match="no server_info.json"):

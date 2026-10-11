@@ -26,7 +26,8 @@ def _label(root: Path, stem: str, annotations: list[Annotation]) -> None:
 
 def _unreadable(root: Path, stem: str) -> None:
     """A label document of image ``stem`` of capture :data:`DATE` whose bytes no longer
-    decode."""
+    decode.
+    """
     from tests._record_damage_fixtures import damage_record
 
     _label(root, stem, [box_annotation(1, 1, 2, 2)])
@@ -40,7 +41,8 @@ def test_a_missing_registry_answers_discovery_never_a_registry(
     client: TestClient, tmp_path: Path
 ) -> None:
     """With no registry stored, the load answers no registry and the names the labels hold as
-    discovery, never a registry made of those names."""
+    discovery, never a registry made of those names.
+    """
     _label(tmp_path, "IMG_A", [box_annotation(50, 50, 60, 60)])
 
     resp = client.get(
@@ -127,7 +129,8 @@ def test_save_refuses_dropping_a_declared_subject(
     client: TestClient, tmp_path: Path
 ) -> None:
     """A stale browser posting a subset of the stored registry is refused by name, not silently
-    written: the additive-only toolbar makes a drop arriving here a sign of staleness."""
+    written: the additive-only toolbar makes a drop arriving here a sign of staleness.
+    """
     first = client.post(
         "/api/subjects/save",
         json={
@@ -161,7 +164,8 @@ def test_load_returns_the_version_and_save_round_trips_it(
     client: TestClient, tmp_path: Path
 ) -> None:
     """The toolbar carries the version it loaded back into its next save, the shape that lets a
-    stale browser be told apart from a caller with nothing to assert."""
+    stale browser be told apart from a caller with nothing to assert.
+    """
     save = client.post(
         "/api/subjects/save",
         json={
@@ -196,7 +200,8 @@ def test_save_refuses_a_stale_version(
     client: TestClient, tmp_path: Path
 ) -> None:
     """A save carrying a version the store has moved past since is refused with 409, naming the
-    conflict, rather than silently overwriting a registry the browser never saw."""
+    conflict, rather than silently overwriting a registry the browser never saw.
+    """
     client.post(
         "/api/subjects/save",
         json={
@@ -240,7 +245,8 @@ def test_save_with_a_null_version_refuses_over_a_registry_written_meanwhile(
     client: TestClient, tmp_path: Path
 ) -> None:
     """A null version names an absent registry, not an unconditional write: a browser that never
-    loaded a registry still refuses when an agent has written one in the meantime."""
+    loaded a registry still refuses when an agent has written one in the meantime.
+    """
     from tcip_mcp.subject_registry import read_registry
     from tcip_mcp.tools.annotation_tools import write_subject_registry
 
@@ -272,7 +278,8 @@ def test_save_with_a_null_version_succeeds_over_a_still_absent_registry(
     client: TestClient, tmp_path: Path
 ) -> None:
     """A null version asserts the registry is still absent; over an actually absent one the write
-    lands rather than being treated as unconditional."""
+    lands rather than being treated as unconditional.
+    """
     resp = client.post(
         "/api/subjects/save",
         json={
@@ -289,7 +296,8 @@ def test_save_refuses_a_same_values_attribute_type_flip(
     client: TestClient, tmp_path: Path
 ) -> None:
     """The route passes neither allow_removals nor allow_type_changes, so a type flip has no door
-    here at all, in either direction: only a values-only growth or a same-type re-save lands."""
+    here at all, in either direction: only a values-only growth or a same-type re-save lands.
+    """
     first = client.post(
         "/api/subjects/save",
         json={
@@ -383,7 +391,8 @@ def test_save_refuses_malformed_registry(
     client: TestClient, tmp_path: Path
 ) -> None:
     """A malformed registry (here: an attribute with no ``values``) is refused, not silently
-    written: a bad registry would assign ids over garbage."""
+    written: a bad registry would assign ids over garbage.
+    """
     r = client.post(
         "/api/subjects/save",
         json={
@@ -465,7 +474,8 @@ def test_load_reports_an_unreadable_label_beside_a_saved_registry(
 ) -> None:
     """A saved subjects.json answers the subject list, but a corrupt label document of the
     capture is still worth surfacing: the registry load must not stop scanning for unreadable
-    documents just because a registry was found."""
+    documents just because a registry was found.
+    """
     _label(tmp_path, "IMG_A", [box_annotation(50, 50, 60, 60)])
     _unreadable(tmp_path, "IMG_B")
 
@@ -492,7 +502,8 @@ def test_load_derived_subjects_follow_a_label_write(
     client: TestClient, tmp_path: Path
 ) -> None:
     """Discovery answers the documents as they are stored now, never a scan from before a
-    write."""
+    write.
+    """
     _label(tmp_path, "IMG_A", [box_annotation(50, 50, 60, 60)])
 
     params = {"dataset_root": str(tmp_path), "date": DATE}
@@ -534,7 +545,8 @@ def test_load_subjects_confines_the_dataset_root_before_scanning_it(
     monkeypatch,
 ) -> None:
     """The guard runs before the scan: a refused dataset root's documents are never read, so a
-    request naming one outside the allowed roots costs nothing beyond the 403 it returns."""
+    request naming one outside the allowed roots costs nothing beyond the 403 it returns.
+    """
     import tcip_annotation.json_io as json_io
 
     outside = tmp_path_factory.mktemp("outside")
@@ -575,7 +587,8 @@ def test_a_registry_save_leaves_one_library_line_through_either_door(
 ) -> None:
     """The route and the tool both save through ``replace_registry``, which writes the act's one
     line into the dataset's own log: the same registry saved through each leaves exactly one line
-    apiece, the same facts recorded, and nothing in the project's log."""
+    apiece, the same facts recorded, and nothing in the project's log.
+    """
     from tcip_mcp.tools.annotation_tools import write_subject_registry
 
     subjects = {"bud": {"description": "a bud"}}
@@ -633,7 +646,8 @@ def test_a_registry_save_answers_and_audits_the_location_it_wrote(
     client: TestClient, opened_project: Path
 ) -> None:
     """The save is keyed by the dataset root it names: the answer, the audit line and the stored
-    registry all name the one location the write landed at."""
+    registry all name the one location the write landed at.
+    """
     from tcip_mcp.dataset_layout import subjects_path
     from tcip_mcp.subject_registry import read_registry
 
@@ -667,7 +681,8 @@ def test_a_registry_load_answers_content_and_version_from_one_read(
 ) -> None:
     """A save landing just after the load reads the registry cannot pair the old content with the
     new version: the load's version is the one its content was read at, so posting it back
-    refuses as stale."""
+    refuses as stale.
+    """
     import tcip_store
     from tcip_mcp.tools.annotation_tools import write_subject_registry
 
@@ -726,7 +741,8 @@ def test_save_subjects_answers_409_with_the_committed_body_on_a_lost_audit_line(
     """The registry write already committed; a lost audit line answers the gap, not a 200. An
     identical resave changes nothing but the version token, so the refused-append pass's
     ``committed`` is compared field by field (version excepted) against the first pass's real
-    200 body."""
+    200 body.
+    """
     import tcip_mcp.audit as audit_module
 
     healthy = client.post(

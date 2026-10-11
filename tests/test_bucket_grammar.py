@@ -85,7 +85,8 @@ def test_the_tree_and_the_project_summary_agree_on_dates_over_a_hidden_directory
     client: TestClient, tmp_path: Path
 ) -> None:
     """The tree route and the project-picker summary both derive dates from the layout's one
-    grammar, so a hidden directory under ``images/`` is invisible to both alike."""
+    grammar, so a hidden directory under ``images/`` is invisible to both alike.
+    """
     from tcip_mcp.project_record import record_fields
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tcip_web.routes.projects import _summarize
@@ -109,7 +110,8 @@ def test_the_tree_and_the_project_summary_list_only_published_buckets_alike(
     client: TestClient, tmp_path: Path
 ) -> None:
     """Both read a bucket off its own record: a published bucket lists by name under the date its
-    record states."""
+    record states.
+    """
     pytest.importorskip("torch")
     from tcip_mcp.project_record import record_fields
     from tcip_web.routes.projects import _summarize

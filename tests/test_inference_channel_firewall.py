@@ -53,7 +53,8 @@ def test_a_source_with_no_coercion_is_refused_at_the_models_own_band_count(
     tmp_path,
 ):
     """A five-band raster under a three-channel checkpoint has no safe coercion, so the read
-    refuses by name instead of truncating the bands the model trained on."""
+    refuses by name instead of truncating the bands the model trained on.
+    """
     from tests._verified_checkpoint_fixtures import SAMPLE_OVERLAP
 
     images_dir = tmp_path / "images"
@@ -72,7 +73,8 @@ def test_a_source_with_no_coercion_is_refused_at_the_models_own_band_count(
 
 def test_a_photographic_source_the_model_reads_is_predicted(tmp_path):
     """The legitimate case: an RGB capture under a one-channel checkpoint is converted by the
-    loader itself, so the pass predicts it."""
+    loader itself, so the pass predicts it.
+    """
     from tcip_mcp.pipelines.derivations import band_normalization_stats
 
     images_dir = tmp_path / "images"

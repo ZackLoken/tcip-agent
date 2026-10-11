@@ -104,7 +104,8 @@ def _trained(
     """The run named ``name`` of ``project`` over ``cfg`` and ``data``'s frames and table, opened
     by the launcher's own producer with no validation side and trained through the training
     loader the platform builds for it (``generic_trainer.run_loaders``); ``kwargs`` are
-    ``train``'s."""
+    ``train``'s.
+    """
     from tcip_mcp.experiments import observe
     from tcip_mcp.pipelines.training.run_registry import observed_run
     from tests._verified_checkpoint_fixtures import opened_run
@@ -176,7 +177,8 @@ def test_resume_restores_rng_state_not_just_reseeds(tmp_path):
     epoch's loss must match the straight-through run's epoch at the same point, even if the
     global RNG is deliberately corrupted between save and resume. The run's loader shuffles
     from a generator of its own seeded from the run's config, whose position the checkpoint
-    captures beside the global streams."""
+    captures beside the global streams.
+    """
     data = _classification_data(tmp_path)
     cfg = _cfg([{"freeze_to": -1}], 2, seed=11)
 
@@ -206,7 +208,8 @@ def test_resume_from_a_checkpoint_missing_a_resume_key_refuses_naming_it(
     tmp_path,
 ):
     """A checkpoint lacking a key the resume reads fails the run naming that key, rather than
-    resuming from a guessed default."""
+    resuming from a guessed default.
+    """
     data = _classification_data(tmp_path)
     cfg = _cfg([{"freeze_to": -1}], 2)
 
@@ -283,7 +286,8 @@ def _draws() -> tuple:
 def test_a_cuda_resume_restores_the_rng_streams(tmp_path, monkeypatch):
     """The streams a CUDA resume continues from are the ones the checkpoint captured: the draws
     taken just after the trainer's restore equal the draws the captured states yield when set
-    through the four RNG APIs directly, independent of the restore under test."""
+    through the four RNG APIs directly, independent of the restore under test.
+    """
     import tcip_mcp.pipelines.training.generic_trainer as trainer
 
     data = _classification_data(tmp_path)
@@ -320,7 +324,8 @@ def test_a_cuda_resume_restores_the_rng_streams(tmp_path, monkeypatch):
 def test_seeded_loader_kwargs_reproducible_shuffle():
     """The platform's own DataLoader construction sites are seeded: two loaders built
     from the same seed shuffle identically; an unseeded run stays honestly unseeded
-    (a worker init fn, but no generator)."""
+    (a worker init fn, but no generator).
+    """
     from tcip_mcp.pipelines.training.generic_trainer import (
         seeded_loader_kwargs,
     )
@@ -337,7 +342,8 @@ def test_seeded_loader_kwargs_reproducible_shuffle():
 def test_loader_worker_init_fn_is_picklable():
     """Windows spawn pickles worker_init_fn to every DataLoader worker, so a closure here
     breaks every num_workers > 0 run on this platform. Seeded and unseeded runs alike must
-    hand out a picklable init fn."""
+    hand out a picklable init fn.
+    """
     import pickle
 
     from tcip_mcp.pipelines.training.generic_trainer import (
@@ -352,7 +358,8 @@ def test_loader_worker_init_fn_is_picklable():
 def test_loader_worker_init_configures_gdal_cache_and_seeds(monkeypatch):
     """Every spawned worker starts on GDAL's stock cache default, so the init fn must apply
     the platform budget in the worker; per-worker numpy/random seeding applies only when the
-    run is seeded."""
+    run is seeded.
+    """
     from tcip_mcp.pipelines import raster_source
     from tcip_mcp.pipelines.training.generic_trainer import (
         seeded_loader_kwargs,

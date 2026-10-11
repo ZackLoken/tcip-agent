@@ -32,7 +32,8 @@ logger = logging.getLogger(__name__)
 @dataclass
 class _Launched:
     """A TensorBoard child this process tracks: its port, the URL it serves at, output capture
-    and lifetime tie."""
+    and lifetime tie.
+    """
 
     proc: subprocess.Popen
     port: int

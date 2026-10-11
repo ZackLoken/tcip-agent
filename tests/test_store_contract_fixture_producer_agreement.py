@@ -1,5 +1,6 @@
 """Records the platform's producers write, checked against a golden of their shape or against
-the shape their readers require."""
+the shape their readers require.
+"""
 
 from __future__ import annotations
 
@@ -110,7 +111,8 @@ def test_a_selection_record_carries_each_sample_s_own_source_label_group_and_sid
 ):
     """A selection's record, as ``draw_splits`` writes it over real images and their label
     documents, is its sample list: each entry names its own source and label rather than a
-    shared root, with no per-date members block or bare id list."""
+    shared root, with no per-date members block or bare id list.
+    """
     import tcip_store as ts
     from tcip_mcp.pipelines.data import selection
     from tcip_mcp.tools.data_tools import draw_splits
@@ -150,7 +152,8 @@ def test_the_delivery_events_golden_carries_every_key_a_delivery_records(
 ):
     """A real phenology delivery through a plant mapping, every record of it made by the
     platform's own producers, leaves an event whose keys are exactly the golden's: at the event,
-    its bucket finding, its producer and its plant mapping's disclosure."""
+    its bucket finding, its producer and its plant mapping's disclosure.
+    """
     import pytest
 
     pytest.importorskip("torch")
@@ -196,7 +199,8 @@ def test_the_traits_golden_carries_every_field_the_proposing_and_confirming_prod
 ):
     """The record ``propose_trait`` and ``confirm_revision`` leave on the store carries exactly
     the golden's keys, at the record, the revision, the entry and the operationalization, so a
-    field added to the schema is caught here."""
+    field added to the schema is caught here.
+    """
     import tcip_store as ts
     from tcip_mcp import traits
     from tests import _trait_fixtures as fx

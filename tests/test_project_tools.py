@@ -336,7 +336,8 @@ def test_external_dataset_paths_names_an_external_registry_entry(
 def test_archive_project_includes_bespoke_model_source(tmp_path: Path):
     """A bespoke run's snapshotted .py source (model_src/, written by snapshot_model_source) must
     travel with the archive, or a published/archived project bundles the provenance manifest
-    without the code it describes and can't rerun its own pipeline from the archive alone."""
+    without the code it describes and can't rerun its own pipeline from the archive alone.
+    """
     src = tmp_path / "src_project"
     _initialized(src)
 
@@ -390,7 +391,8 @@ def test_archive_project_includes_a_registered_run_checkpoint_outside_tcip_model
     """A completed run's checkpoint sits in its own run directory,
     ``.tcip/experiments/<experiment_id>/model_final.pt``, not under ``.tcip/models/``.
     ``include_models=True`` must bundle it there too, or a breeder who trusts the flag gets an
-    archive with no model in it at all."""
+    archive with no model in it at all.
+    """
     from tests._verified_checkpoint_fixtures import finished_run
 
     src = tmp_path / "src_project"
@@ -416,7 +418,8 @@ def test_import_project_admits_a_bundle_holding_a_registered_run_checkpoint(
 ):
     """archive_project(include_models=True) bundles a completed run's checkpoint from its run
     directory, and import_project admits it: the restored run's final status still names it,
-    and the registry the restored project reads lists it."""
+    and the registry the restored project reads lists it.
+    """
     from tcip_mcp.experiments import experiment_dir, observe
     from tcip_mcp.model_registry import ModelRegistry
     from tests._verified_checkpoint_fixtures import finished_run
@@ -460,7 +463,8 @@ def test_import_project_admits_a_registered_checkpoint_with_no_disclosure(
     round trip with nothing to disclose: the writer already spelled it relative to the
     registry's scope root, so the moved tree's registry still resolves under it. The stored
     entry itself stays relative; the resolved response is absolute; weights load by digest
-    either way, since loading never reads the stored path."""
+    either way, since loading never reads the stored path.
+    """
     from tcip_mcp.model_registry import (
         ModelRegistry,
         read_registry_index,
@@ -507,7 +511,8 @@ def test_import_project_keeps_a_relative_entry_relative_when_the_archive_carries
     (``include_models=False``) must come back still relative and disclosed as unresolved: the
     staging conform's no-match fallback must never write the entry's own staging directory's
     absolute path over it, which would misfile an internal-but-absent entry as designed-external
-    and leave a path into a directory the door is about to delete permanently in the registry."""
+    and leave a path into a directory the door is about to delete permanently in the registry.
+    """
     from tcip_mcp.model_registry import read_registry_index, registry_index_key
 
     src = tmp_path / "src_project"
@@ -539,7 +544,8 @@ def test_import_project_discloses_a_designed_external_checkpoint_separately_from
     """A registry entry that is a genuine designed-external claim (outside the project tree
     entirely) must appear in ``external_checkpoints``, never counted toward
     ``checkpoint_paths_unresolved``, which names only an entry expected to resolve under the
-    tree that does not."""
+    tree that does not.
+    """
     from tcip_mcp.model_registry import ModelRegistry
     from tests._verified_checkpoint_fixtures import produced_checkpoint
 
@@ -578,7 +584,8 @@ def test_archive_project_bundles_a_registered_tcip_models_checkpoint_once(
     tmp_path: Path,
 ):
     """A checkpoint sitting under .tcip/models/ that is also a registry entry is one file to
-    the two checkpoint arms that recognize it; it lands in the bundle once."""
+    the two checkpoint arms that recognize it; it lands in the bundle once.
+    """
     from tcip_mcp.model_registry import ModelRegistry, checkpoint_files
     from tests._verified_checkpoint_fixtures import produced_checkpoint
 
@@ -607,7 +614,8 @@ def test_a_checkpoint_registered_from_anywhere_in_the_project_travels_only_with_
 ):
     """A checkpoint registered from a directory of the project's own, neither ``.tcip/models``
     nor a run's, is a checkpoint: ``include_models=False`` leaves it out and counts it, and
-    ``include_models=True`` carries it."""
+    ``include_models=True`` carries it.
+    """
     import zipfile
 
     from tcip_mcp.model_registry import ModelRegistry
@@ -639,7 +647,8 @@ def test_a_checkpoint_registered_from_anywhere_in_the_project_travels_only_with_
 def test_archive_project_admits_a_symlink_spelled_project(tmp_path: Path):
     """A project reached through a symlink and established once (``existing_project``) archives
     rather than raising ValueError out of the door: the established root serves both
-    member.relative_to and the include_models comparison."""
+    member.relative_to and the include_models comparison.
+    """
     from tcip_mcp.project_record import existing_project
     from tests._web_fixtures import new_project
 
@@ -683,7 +692,8 @@ class _BarrierId(str):
 def test_concurrent_registrations_both_survive_in_the_registry(tmp_path: Path):
     """Two writers adding different datasets at once both land. Each reads the whole list,
     drops one entry and writes the list back, so a pair that is not serialized writes lists
-    assembled before the other's entry existed and one dataset's identity disappears."""
+    assembled before the other's entry existed and one dataset's identity disappears.
+    """
     project = tmp_path / "proj"
     project.mkdir()
     _BarrierId.barrier = threading.Barrier(2, timeout=1.0)
@@ -716,7 +726,8 @@ def test_an_undecodable_dataset_registry_refuses_and_an_absent_one_reads_empty(
     tmp_path: Path,
 ):
     """A registry read as empty would make the next registration write a one-entry list and drop
-    every other dataset identity the project had recorded, so corruption is not absence here."""
+    every other dataset identity the project had recorded, so corruption is not absence here.
+    """
     from tcip_mcp.tools.project_tools import dataset_registry_key
 
     project = tmp_path / "proj"
@@ -778,7 +789,8 @@ def test_an_undecodable_identity_document_refuses_rather_than_minting_a_fresh_id
     tmp_path: Path,
 ):
     """Minting a new id over an identity that will not decode severs every experiment, split and
-    delivered number citing the old one, so the tool refuses and names the document."""
+    delivered number citing the old one, so the tool refuses and names the document.
+    """
     src = tmp_path / "proj"
     _make_dataset(src)
     truncated = b'{"id": "known_id"'
@@ -795,7 +807,8 @@ def test_an_undecodable_identity_document_refuses_rather_than_minting_a_fresh_id
 
 def test_initializing_twice_leaves_what_the_first_run_created(tmp_path: Path):
     """A second creation with the same display name and site keeps the record's id and touches
-    nothing the first run created."""
+    nothing the first run created.
+    """
     first = _initialized(tmp_path)
     (tmp_path / ".tcip" / "artifacts" / "kept.txt").write_text(
         "kept", encoding="utf-8"
@@ -860,7 +873,8 @@ def test_initialize_project_refuses_an_empty_site_leaving_nothing_on_disk(
     tmp_path: Path,
 ):
     """A refused site is validated before anything is created: the destination is left exactly
-    as it was, not half-scaffolded."""
+    as it was, not half-scaffolded.
+    """
     dest = tmp_path / "fresh_project"
 
     result = initialize_project(str(dest), "Test project", "   ")
@@ -884,7 +898,8 @@ def test_initialize_project_refuses_a_relative_path_and_scaffolds_nothing(
     tmp_path: Path, monkeypatch
 ):
     """A door that holds no project has no root to read a relative project_path against: it
-    refuses naming the absolute spelling, and nothing is scaffolded under the process's cwd."""
+    refuses naming the absolute spelling, and nothing is scaffolded under the process's cwd.
+    """
     monkeypatch.chdir(tmp_path)
 
     result = initialize_project(
@@ -933,7 +948,8 @@ def test_initialize_project_records_on_a_directory_that_gained_tcip_with_no_crea
     """The reachable state a store write with no door leaves (``report_friction`` on a bare
     directory): ``initialize_project`` on it afterward records the project the same way it would
     on a truly fresh directory, since the writer's create-only write does not distinguish the
-    two."""
+    two.
+    """
     from tcip_mcp.tools.meta_tools import report_friction
 
     report_friction(tmp_path, category="missing_tool", detail="a")
@@ -948,7 +964,8 @@ def test_inspect_project_reports_the_record_fields_across_project_states(
     tmp_path: Path,
 ):
     """A path with no record carries the absent-record problem text; a project with a record
-    carries its fields and no problem."""
+    carries its fields and no problem.
+    """
     from tcip_mcp.tools.meta_tools import report_friction
 
     bare = tmp_path / "no_tcip"
@@ -988,7 +1005,8 @@ def test_inspect_project_reports_an_invalid_record(tmp_path: Path):
 def test_archive_and_import_carry_the_project_record(tmp_path: Path):
     """initialize_project -> archive_project -> import_project round-trips a project's record,
     its id included, inside the database the archive copies, with no operator step between the
-    two doors."""
+    two doors.
+    """
     src = tmp_path / "src_project"
     record = _initialized(src)
 
@@ -1019,7 +1037,8 @@ def test_an_archive_of_an_open_database_carries_every_record_and_entry_it_holds(
 ):
     """The project's database is open, its latest commits still in its write-ahead log, when the
     archive runs; the imported project's dump holds every record the source's did, byte for
-    byte, and every log entry, the import's own line after them."""
+    byte, and every log entry, the import's own line after them.
+    """
     from tcip_mcp.cli.dump_store import dump_store
     from tcip_mcp.tools.meta_tools import report_friction, write_retrospective
 

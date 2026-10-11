@@ -1,5 +1,6 @@
 """Trait entries: what the schema and a proposal admit, how the calibration path reads an entry,
-and the positive state a bucket's scope classifies."""
+and the positive state a bucket's scope classifies.
+"""
 
 from __future__ import annotations
 
@@ -73,7 +74,8 @@ def test_a_proposal_off_the_vocabulary_refuses_and_appends_nothing(
     refusal: str,
 ):
     """The anti-fabrication anchor: a proposal whose ``delivers`` is empty or leaves crops.yml
-    refuses by name, and no revision is appended."""
+    refuses by name, and no revision is appended.
+    """
     with pytest.raises(ValueError, match=refusal):
         propose(tmp_path, entry("leaf", delivers))
     assert "leaf" not in trait_names(tmp_path)
@@ -81,7 +83,8 @@ def test_a_proposal_off_the_vocabulary_refuses_and_appends_nothing(
 
 def test_count_objective_is_not_a_closed_vocabulary_and_unset_stays_empty():
     """A trait may name any objective an agent has implemented and registered a picker for;
-    admission accepts it, and an unset one stays honestly empty rather than defaulted."""
+    admission accepts it, and an unset one stays honestly empty rather than defaulted.
+    """
     from tcip_mcp.pipelines.operating_point import COUNT_OBJECTIVE_PICKERS
 
     assert (
@@ -108,7 +111,8 @@ def test_an_unset_count_objective_refuses_the_proposal_asking_the_breeder(
 ):
     """No platform default stands in for the objective a count is fitted under: a count
     operationalization proposed without one refuses asking the breeder, and a stated one is
-    admitted."""
+    admitted.
+    """
     from tests._trait_fixtures import with_operationalization
 
     floors = {
@@ -180,7 +184,8 @@ def test_a_measurement_reader_refuses_a_trait_with_no_confirmed_revision_by_name
     tmp_path: Path,
 ):
     """A measurement reads the latest confirmed revision: an entry proposed and never confirmed
-    refuses by name, and a later unconfirmed proposal never changes what the confirmed one says."""
+    refuses by name, and a later unconfirmed proposal never changes what the confirmed one says.
+    """
     from tcip_mcp.operationalization import OperationalizationRefusedError
 
     propose(
@@ -209,7 +214,8 @@ def test_a_proposal_made_while_another_holds_the_record_lands_as_the_next_revisi
     monkeypatch: pytest.MonkeyPatch,
 ):
     """Two proposals at once both land: one started while the other has read the record waits
-    for it and appends after it rather than overwriting it."""
+    for it and appends after it rather than overwriting it.
+    """
     import threading
 
     real_clock = traits.now_iso
@@ -276,7 +282,8 @@ GRADE = cr.Attribute("grade", "ordinal", ("low", "high"))
 
 def _crossing(**state: str) -> TraitEntry:
     """:data:`BUD_OPENING` stating ``state`` as its positive state and a crossing
-    operationalization over ``bud``, every field that kind rests on authored."""
+    operationalization over ``bud``, every field that kind rests on authored.
+    """
     from tests._trait_fixtures import with_fields, with_operationalization
 
     return with_operationalization(
@@ -298,7 +305,8 @@ def test_a_positive_state_its_registry_does_not_declare_refuses_at_proposal(
 ):
     """The positive state names its attribute and its value as one fact, each held to the
     registry: a value the attribute does not list refuses, an attribute the subject does not
-    declare refuses, and a value of the subject's second attribute is admitted."""
+    declare refuses, and a value of the subject's second attribute is admitted.
+    """
     from tests._producer_fixtures import registry_over
 
     registry_over(
@@ -337,7 +345,8 @@ def _bucket(
     """Each of ``images`` (by default one frame ``P1.png`` of capture ``date`` of the dataset
     ``ds``) holding one ``bud`` detection carrying the last value of each of ``attributes``,
     published as the bucket ``run/<date>`` from a checkpoint whose scope declares them
-    (``_chain_fixtures.published``); the bucket."""
+    (``_chain_fixtures.published``); the bucket.
+    """
     pytest.importorskip("torch")
     from tests._chain_fixtures import published
 
@@ -395,7 +404,8 @@ def test_the_positive_state_resolves_by_name_from_the_buckets_own_scope(
 def _deliver_series(tmp_path: Path, *, attributed: bool) -> dict:
     """Two dated buckets over two mapped plots, whose scope declares the positive state's
     attribute (``attributed``) or no attribute, delivered through the mapping over them under a
-    breeder's acknowledgment; a refusal answers ``{"error": ...}``."""
+    breeder's acknowledgment; a refusal answers ``{"error": ...}``.
+    """
     from tests._chain_fixtures import acknowledged
     from tests._mapping_fixtures import PLOTS, map_captures
     from tests._trait_fixtures import seed_positive_class

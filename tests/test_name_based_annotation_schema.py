@@ -221,7 +221,8 @@ def test_save_annotations_refuses_missing_subject(tmp_path, bound):
 
 def test_save_annotations_prefers_points_over_bbox(tmp_path, bound):
     """save_annotations prefers points over bbox (aligned with the web converters), so a payload
-    carrying both geometries writes the polygon, never collapsing it to a box-only record."""
+    carrying both geometries writes the polygon, never collapsing it to a box-only record.
+    """
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     image = _write_image(tmp_path / "images" / UNDATED_BUCKET, "img_001")
@@ -265,7 +266,8 @@ def test_save_annotations_refuses_a_polygon_that_is_no_shape(
     tmp_path, bound, geometry
 ):
     """A supplied polygon that is empty or too short is a malformed value, refused by name before
-    anything is written, never read as no geometry nor saved and then dropped on write."""
+    anything is written, never read as no geometry nor saved and then dropped on write.
+    """
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     image = _write_image(tmp_path / "images" / UNDATED_BUCKET, "img_001")
@@ -280,7 +282,8 @@ def test_save_annotations_refuses_a_polygon_that_is_no_shape(
 
 def test_save_annotations_accepts_rings(tmp_path, bound):
     """An occlusion-split instance in either ring-vertex shape (``{x, y}`` mappings or ``[x, y]``
-    pairs) saves with its geometry through the write door."""
+    pairs) saves with its geometry through the write door.
+    """
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     image = _write_image(tmp_path / "images" / UNDATED_BUCKET, "img_001")
@@ -359,7 +362,8 @@ def test_geometryless_only_image_is_refused_by_the_loader_that_reads_no_target_f
     tmp_path,
 ):
     """Never trained as a fabricated zero-object negative: admission asks whether the document
-    carries the subject, and the loader owns which geometries answer for its measurement."""
+    carries the subject, and the loader owns which geometries answer for its measurement.
+    """
     from tcip_mcp.pipelines.data.label_queries import admit
 
     _write_registry(tmp_path, Subject(name="bud"))
@@ -420,7 +424,8 @@ def test_records_from_annotation_honors_a_global_name_id():
 def test_uppercase_extension_image_still_yields_boxes(tmp_path):
     """The detection loader matches images by their real on-disk name, not a case-normalized one:
     real drone frames use an uppercase .JPG, and a fabricated ".jpg" match would silently yield
-    zero boxes."""
+    zero boxes.
+    """
     _write_registry(tmp_path, Subject(name="bud"))
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     write_image(images_dir / "IMG_1.JPG", (640, 480))

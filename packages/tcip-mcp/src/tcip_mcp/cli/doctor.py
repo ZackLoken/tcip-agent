@@ -25,7 +25,8 @@ def _named(key) -> str:
 def _census(root: Path, findings: list) -> dict | None:
     """The dataset census (``data_tools._scan_dataset``) with ``label_reads``, each label key's
     document or the ``UnreadableLabelDocumentError`` it raised; ``None`` with an error finding for
-    an ``images/`` stem collision or an unreadable ``.bandgroup`` manifest."""
+    an ``images/`` stem collision or an unreadable ``.bandgroup`` manifest.
+    """
     from tcip_annotation.json_io import (
         UnreadableLabelDocumentError,
         read_label_document,
@@ -229,7 +230,8 @@ def check_state(root: Path, findings: list) -> None:
     (:func:`~tcip_annotation.verdicts.read_verdicts`), every one naming an image its bucket's
     record names no document for (:func:`~tcip_mcp.buckets.read_bucket`), and every flags record
     that will not read (:func:`~tcip_annotation.flags.read_flags`), which the editor refuses to
-    load its image over."""
+    load its image over.
+    """
     import tcip_store
     from tcip_annotation.flags import REVIEW_FLAGS_STORE, read_flags
     from tcip_annotation.verdicts import REVIEW_VERDICTS_STORE, read_verdicts
@@ -268,7 +270,8 @@ def check_state(root: Path, findings: list) -> None:
 
 def check_traits(root: Path, findings: list) -> None:
     """An error for every trait record the store or its schema refuses to read, and a warning for
-    every trait whose latest revision the breeder has not confirmed."""
+    every trait whose latest revision the breeder has not confirmed.
+    """
     from pydantic import ValidationError
 
     from tcip_mcp.traits import read_trait, trait_names
@@ -293,7 +296,8 @@ def check_traits(root: Path, findings: list) -> None:
 
 def check_project_record(root: Path, findings: list) -> None:
     """An error for a project record that is absent, damaged, or on a root the store refuses to
-    read."""
+    read.
+    """
     from tcip_mcp.project_record import record_fields
 
     problem = record_fields(root)["record_problem"]

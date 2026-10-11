@@ -1,6 +1,7 @@
 """Tiled inference over the ``sahi`` library: the tile geometry a pass runs at, the slice lattice,
 a platform checkpoint wrapped as a SAHI detection model, and the one cross-tile merge every tiled
-path runs."""
+path runs.
+"""
 
 from __future__ import annotations
 
@@ -30,7 +31,8 @@ logger = logging.getLogger(__name__)
 def _native_ratio_tile_size(train_native_size: Any) -> int | None:
     """The tile edge a checkpoint's own uniform untiled training frame justifies: the frame's edge
     when every training frame shared one square size (``train_native_size``, stamped ``[width,
-    height]``), else ``None``."""
+    height]``), else ``None``.
+    """
     if (
         not isinstance(train_native_size, (list, tuple))
         or len(train_native_size) != 2
@@ -143,7 +145,8 @@ def packed_category(
 ) -> int:
     """One detection's label and attribute ids as the one integer a SAHI category carries: mixed
     radix, the first attribute's id least significant, each attribute's radix its value count
-    ``sizes``, the label most significant; the label alone for no attributes."""
+    ``sizes``, the label most significant; the label alone for no attributes.
+    """
     packed = int(label)
     for value, size in zip(reversed(ids), reversed(sizes), strict=True):
         packed = packed * size + int(value)
@@ -171,7 +174,8 @@ def slice_lattice(
     x ``width`` frame at ``tile_size`` and ``overlap``, every slice parameter stated and automatic
     slice sizing off. A slice past the far edge is pulled back to end at it, so no slice is padded
     and none exceeds the frame; a frame shorter than ``tile_size`` on an axis gets slices that
-    short on it."""
+    short on it.
+    """
     return [
         (int(x0), int(y0), int(x1), int(y1))
         for x0, y0, x1, y1 in get_slice_bboxes(
@@ -189,13 +193,15 @@ def slice_lattice(
 def overlap_ratio(tile_size: int, pixels: int) -> float:
     """The ``overlap`` under which :func:`slice_lattice` lays neighboring ``tile_size`` slices
     overlapping by at least ``pixels`` (a slice snapped back to the frame's far edge overlaps
-    more), SAHI truncating ``overlap x tile_size`` to whole pixels."""
+    more), SAHI truncating ``overlap x tile_size`` to whole pixels.
+    """
     return (pixels + 0.5) / tile_size
 
 
 def is_full_slice(box: tuple[int, int, int, int], tile_size: int) -> bool:
     """Whether a lattice slice spans the whole ``tile_size`` on both axes, which it does unless
-    the frame is shorter than the tile on that axis."""
+    the frame is shorter than the tile on that axis.
+    """
     x0, y0, x1, y1 = box
     return x1 - x0 == tile_size and y1 - y0 == tile_size
 
@@ -205,7 +211,8 @@ def prediction_rows(
 ) -> list[dict]:
     """Full-frame predictions as plain rows (xyxy ``bbox``, ``category_id`` the label, the
     ``attributes`` ids :func:`unpacked_category` reads off the category under the value counts
-    ``sizes``, ``score``, ``segmentation`` polygons or ``None``)."""
+    ``sizes``, ``score``, ``segmentation`` polygons or ``None``).
+    """
     rows = []
     for p in predictions:
         label, ids = unpacked_category(p.category.id, sizes)
@@ -245,7 +252,8 @@ def cross_tile_merge(execution: Execution) -> PostprocessPredictions:
     class-agnostic over the one subject so two slices' calls of one object merge whatever
     their attribute values (a merged box keeps the category of the member SAHI keeps, the
     higher-scoring), on SAHI's numpy backend, so the merge leaves the process environment as it
-    found it."""
+    found it.
+    """
     # SAHI's torchvision backend picks its device by writing CUDA_VISIBLE_DEVICES for the process.
     set_postprocess_backend("numpy")
     assert execution.postprocess is not None, "a tiled record names its merge"

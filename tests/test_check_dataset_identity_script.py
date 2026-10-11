@@ -1,5 +1,6 @@
 """Tests for tcip check-dataset-identity's outcomes: OK, CHANGED, NEVER-RECORDED, and the identity
-read at the path the project's registry holds: MOVED and GONE."""
+read at the path the project's registry holds: MOVED and GONE.
+"""
 
 from __future__ import annotations
 
@@ -81,7 +82,8 @@ def test_a_never_recorded_fingerprint_is_its_own_outcome(tmp_path):
 
 def test_the_same_identity_at_another_path_is_reported_moved(tmp_path):
     """The identity read at the registered path is the one the checked copy carries, so the
-    dataset the registry names now also lives here."""
+    dataset the registry names now also lives here.
+    """
     project, root, result = _registered(tmp_path)
     copy = tmp_path / "copied"
     ts.release_root(root)
@@ -98,7 +100,8 @@ def test_the_same_identity_at_another_path_is_reported_moved(tmp_path):
 
 def test_a_registered_path_holding_no_identity_is_reported_gone(tmp_path):
     """The registered path is read, not compared: a dataset moved away leaves nothing readable
-    there, which is its own outcome."""
+    there, which is its own outcome.
+    """
     project, root, result = _registered(tmp_path)
     moved = tmp_path / "moved"
     ts.release_root(root)

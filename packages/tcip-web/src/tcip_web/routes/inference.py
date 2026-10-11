@@ -86,7 +86,8 @@ def _register(job: InferenceJob) -> None:
 
 def _get(job_id: str) -> InferenceJob | None:
     """A job by id, whichever project it runs for: opening another project must not make an
-    in-flight job unreachable for canceling or streaming it."""
+    in-flight job unreachable for canceling or streaming it.
+    """
     return _registry.get(job_id)
 
 
@@ -163,7 +164,8 @@ class LaunchInferencePayload(BaseModel):
 @router.post("/launch")
 def launch_inference(payload: LaunchInferencePayload) -> dict:
     """Launch a pass over the dataset's images on a background thread, by the person ``user``
-    names, who publishes its bucket."""
+    names, who publishes its bucket.
+    """
     person = actor(payload.user)
     project = store.held().root
     # A caller must not name a file outside the allowed roots, registered checkpoint or not.
@@ -242,7 +244,8 @@ def list_jobs() -> dict:
 def cancel_job(job_id: str, payload: PersonPayload) -> dict:
     """Request graceful cancellation by the person ``user`` names; the worker stops at the next
     image boundary and the request leaves one ``inference_canceled`` line in the job's project.
-    Refuses (404) an unknown job, and answers 409 when the line cannot follow the request."""
+    Refuses (404) an unknown job, and answers 409 when the line cannot follow the request.
+    """
     from tcip_mcp.audit import AuditEntryNotWrittenError, record_event_or_raise
     from tcip_web.routes.audit_gap import audit_gap_409
 

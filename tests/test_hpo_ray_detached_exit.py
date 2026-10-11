@@ -1,6 +1,7 @@
 """A real Ray cluster's exit from a console-free process: ``tune_search`` inside a subprocess
 created with ``DETACHED_PROCESS`` returns normally, and every daemon Ray started, and every process
-those daemons spawned, is gone afterward."""
+those daemons spawned, is gone afterward.
+"""
 
 from __future__ import annotations
 
@@ -111,7 +112,8 @@ def test_a_detached_console_free_sweep_exits_cleanly_and_leaves_no_ray_daemon_be
     """Asserts the subprocess exits 0 having finished its sweep, and that every process Ray
     started for the sweep, the table daemons the subprocess captured from Ray's node and every
     descendant those daemons spawned (the trial worker, the dashboard agent, the runtime-env
-    agent), is gone once the subprocess exits."""
+    agent), is gone once the subprocess exits.
+    """
     import psutil
 
     script_path = tmp_path / "run_detached_sweep.py"

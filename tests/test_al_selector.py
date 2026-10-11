@@ -38,7 +38,8 @@ def _ordinal_pred(image: str, rank: int, conf: float) -> dict:
 
 def _reg_pred(image: str, value: float) -> dict:
     """A _format_other-shaped regression prediction: RegressionHead.decode emits only "values",
-    no confidence-bearing key, deliberately (a point estimate has no distributional output)."""
+    no confidence-bearing key, deliberately (a point estimate has no distributional output).
+    """
     return {
         "image": image,
         "width": 640,
@@ -123,7 +124,8 @@ class TestUnscoreable:
     def test_regression_prediction_has_no_confidence_signal(self):
         """A regression prediction can't be partitioned by review_queue at all (it silently
         excludes it, unchanged); unscoreable() is what catches that it needs explicit routing
-        instead of vanishing."""
+        instead of vanishing.
+        """
         pred = _reg_pred("val.png", 0.42)
         assert review_queue([pred], low=0.0, high=1.0) == []
         assert unscoreable([pred]) == [pred]
@@ -136,7 +138,8 @@ class TestUnscoreable:
     def test_detection_negative_is_not_unscoreable(self):
         """scores=[] (zero boxes found) is a complete, unambiguous signal, not an architecture
         gap; it must stay excluded from unscoreable the same way review_queue already excludes
-        it, checked by key presence, not truthiness."""
+        it, checked by key presence, not truthiness.
+        """
         assert unscoreable([{"image": "neg.png", "scores": []}]) == []
 
     def test_detection_and_classification_and_ordinal_are_not_unscoreable(

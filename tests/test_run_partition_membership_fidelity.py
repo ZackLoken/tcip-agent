@@ -21,7 +21,8 @@ def _single_source_mosaic(
     root: Path, width: int = 4000, height: int = 3000
 ) -> tuple[Path, str]:
     """One large detection source with GT spread across its full extent, the shape that resolves
-    to the single-source spatial-strip split; its image directory and stem."""
+    to the single-source spatial-strip split; its image directory and stem.
+    """
     from PIL import Image
 
     from tcip_annotation.state import Annotation, BBox
@@ -61,7 +62,8 @@ def _data_cfg(images_dir: Path, **split) -> dict:
 
 def _persisted_split(project: Path, experiment_id: str, data_cfg: dict):
     """The spatial manifest the run ``experiment_id`` under ``project`` over ``data_cfg``
-    resolved and recorded."""
+    resolved and recorded.
+    """
     from tcip_mcp.experiments import run_resolution
     from tests._verified_checkpoint_fixtures import (
         partition_side,
@@ -80,7 +82,8 @@ def test_spatial_split_records_val_membership_from_the_val_side(
 ) -> None:
     """The recorded val membership is the validation side's own strip identities. Train and val
     held different regions, so the record must show different, non-overlapping members: a metric
-    reconstructed from a manifest claiming both sides held the same units is unreproducible."""
+    reconstructed from a manifest claiming both sides held the same units is unreproducible.
+    """
     images_dir, _ = _single_source_mosaic(tmp_path / "ds")
     data_cfg = _data_cfg(images_dir)
 
@@ -105,7 +108,8 @@ def test_persisted_calibration_region_is_reserved_away_from_train(
 ) -> None:
     """A four-way split's reserved calibration band reaches the resolved record as its own geometry,
     disjoint from the train region, and the geometric disjointness check reads a rect drawn from
-    what was actually persisted there as clean while still catching one drawn from train."""
+    what was actually persisted there as clean while still catching one drawn from train.
+    """
     from tcip_mcp.pipelines.operating_point import spatial_disjointness
     from tcip_mcp.pipelines.raster_source import rects_overlap
 

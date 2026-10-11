@@ -1,7 +1,8 @@
 """A parent process that launches a TensorBoard stand-in through the manager and prints, on one
 line, the pid ``launch_tensorboard`` returned and the stand-in's own pid; then sleeps until killed
 or exits, by its ``mode`` argument. ``--no-tie`` disables the platform lifetime tie before the
-launch; ``--thread`` launches from a background thread that has finished before the pids print."""
+launch; ``--thread`` launches from a background thread that has finished before the pids print.
+"""
 
 from __future__ import annotations
 

@@ -61,7 +61,8 @@ def auto_orient_image(img: Image.Image) -> Image.Image:
 def oriented_size(img: Image.Image) -> tuple[int, int]:
     """``(width, height)`` of the opened image ``img`` once its EXIF orientation is applied, from
     its header alone, no pixel decode: the tag's operation (:data:`_ORIENTATION_OPS`) applied to a
-    two-pixel probe says whether the axes swap."""
+    two-pixel probe says whether the axes swap.
+    """
     w, h = img.size
     op = _ORIENTATION_OPS.get(_read_orientation_tag(img) or 1)
     swaps = op is not None and op(Image.new("L", (2, 1))).size == (1, 2)

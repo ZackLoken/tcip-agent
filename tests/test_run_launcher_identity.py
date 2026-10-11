@@ -47,7 +47,8 @@ def test_a_launch_no_agent_declared_itself_to_shows_an_empty_declaration(
     tmp_path, monkeypatch
 ):
     """A launch outside an MCP handshake leaves its launch event carrying no identity, and that
-    is what the run's row shows: the fact available, never a guess about who."""
+    is what the run's row shows: the fact available, never a guess about who.
+    """
     from tcip_mcp.tools import training_tools
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
@@ -69,7 +70,8 @@ def test_a_launch_inside_an_mcp_handshake_shows_the_agents_declaration_from_its_
     monkeypatch,
 ):
     """A launch made while an MCP handshake is in force shows the connected agent's identity,
-    read off the launch event that names the run, never off the run's own record."""
+    read off the launch event that names the run, never off the run's own record.
+    """
     monkeypatch.delenv("TCIP_TERMINAL_SESSION", raising=False)
     from tcip_mcp import agent_identity
     from tcip_mcp.tools import training_tools
@@ -98,7 +100,8 @@ def test_launch_refuses_when_the_launch_record_cannot_be_written(
     tmp_path, monkeypatch
 ):
     """A launch record that cannot be written refuses the launch by name before the subprocess,
-    and leaves no directory that reads as a run."""
+    and leaves no directory that reads as a run.
+    """
     from tcip_mcp import experiments as experiments_mod
     from tcip_mcp.experiments import run_dirs
     from tcip_mcp.tools import training_tools
@@ -128,7 +131,8 @@ def test_launch_refuses_when_the_launch_record_cannot_be_written(
 
 def test_a_launch_records_the_seed_it_draws(tmp_path, monkeypatch):
     """No seed in the caller's config: the launch draws one onto the config its ``run.json``
-    records, the one record the child trains from."""
+    records, the one record the child trains from.
+    """
     from tcip_mcp.tools import training_tools
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
@@ -149,7 +153,8 @@ def test_a_spawn_failure_leaves_a_directory_that_reads_interrupted(
     tmp_path, monkeypatch
 ):
     """A Popen failure after the launch record propagates out of launch_training, and the one
-    directory it opened reads interrupted once its heartbeat window has passed."""
+    directory it opened reads interrupted once its heartbeat window has passed.
+    """
     import subprocess
 
     from tcip_mcp import experiments as experiments_mod

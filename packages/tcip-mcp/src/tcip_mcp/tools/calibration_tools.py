@@ -1,5 +1,6 @@
 """Assessment tools: assess a checkpoint against a held-out reference, against a mosaic's own
-reserved regions, and a physical scale against a breeder's reference measurements."""
+reserved regions, and a physical scale against a breeder's reference measurements.
+"""
 
 from __future__ import annotations
 
@@ -32,7 +33,8 @@ def _refusals() -> tuple[type[Exception], ...]:
 
 def _answer(assessment: Assessment) -> dict[str, Any]:
     """An assessment as a door answers it: everything but the reference's sample list, which stays
-    in ``assessment.json``, counted instead."""
+    in ``assessment.json``, counted instead.
+    """
     answer = asdict(assessment)
     samples = answer["reference"].pop("samples")
     return {
@@ -78,6 +80,7 @@ def assess_checkpoint(
         stated: Execution values to state rather than derive (``execution.Stated``), as
             ``run_inference`` takes them.
         device: cuda / cpu (auto if omitted).
+
     """
     from tcip_mcp.assessment import assess
 
@@ -125,6 +128,7 @@ def assess_reserved_regions(
         stated: Execution values to state rather than derive (``execution.Stated``); the pass is
             always tiled.
         device: cuda / cpu (auto if omitted).
+
     """
     from tcip_mcp.assessment import assess_reserved_regions as assess
 
@@ -169,6 +173,7 @@ def calibrate_physical_scale(
         reference_csv: The breeder's physical-measurement CSV.
         unit: The linear length unit every reference is in.
         reference_subject: The subject the reference object is annotated as.
+
     """
     from tcip_mcp.assessment import assess_physical_scale
 

@@ -55,7 +55,8 @@ class TrainRun:
     @cached_property
     def reads(self) -> TrainerReads:
         """What training this run reads, its spec admitted once (``trainer_reads``, which
-        refuses naming whatever is unstated)."""
+        refuses naming whatever is unstated).
+        """
         return self.spec.trainer_reads()
 
     @cached_property
@@ -64,7 +65,8 @@ class TrainRun:
         config records (``model_build.recorded_model_dims``), the confidence it reads
         (:attr:`reads`), its stated ``evaluation.iou_threshold`` and ``score_weights``, the
         confirmed trait its config selects for (``generic_trainer.config_trait``, read from
-        :attr:`project`), and its data block's ``train_object_density``."""
+        :attr:`project`), and its data block's ``train_object_density``.
+        """
         from tcip_mcp.pipelines.model_build import recorded_model_dims
         from tcip_mcp.pipelines.training.generic_trainer import config_trait
 
@@ -111,7 +113,8 @@ def observed_run(
     resolved (``RunObservation.resolved_data``) laid over it and its source files bound to the
     run's own snapshot (``model_build.snapshot_bound``), which it imports from as the record
     states it (``model_build.run_layout``), toward the objective that resolution carries. A run
-    whose input resolved to nothing ended at its opening and has none."""
+    whose input resolved to nothing ended at its opening and has none.
+    """
     from tcip_mcp.experiments import project_of_run
     from tcip_mcp.pipelines.model_build import run_layout, snapshot_bound
 
@@ -137,7 +140,8 @@ def observed_run(
 
 def seeded(spec: TrainConfigSchema) -> TrainConfigSchema:
     """``spec``, or when it states no ``seed`` a copy carrying one drawn from OS entropy, so no
-    run starts unseeded."""
+    run starts unseeded.
+    """
     if spec.seed is not None:
         return spec
     seed = random.SystemRandom().randrange(2**31)

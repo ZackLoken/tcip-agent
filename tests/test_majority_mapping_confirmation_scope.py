@@ -1,5 +1,6 @@
 """Each trait's phenology delivery carries its own majority-crossing column, named from its own
-prefix and label and computed at the crossing its entry states."""
+prefix and label and computed at the crossing its entry states.
+"""
 
 from __future__ import annotations
 
@@ -40,8 +41,9 @@ SERIES = [
 
 
 def test_each_trait_carries_its_own_majority_crossing_column():
-    """bud's majority date is its 95% crossing, pistillate's its 50%: each delivery carries its own
-    prefix and label, equal to the crossing its entry names, and no column of the other's."""
+    """Bud's majority date is its 95% crossing, pistillate's its 50%: each delivery carries its own
+    prefix and label, equal to the crossing its entry names, and no column of the other's.
+    """
     bud = plant_milestones(SERIES, BUD)
     pistillate = plant_milestones(SERIES, PISTILLATE)
 

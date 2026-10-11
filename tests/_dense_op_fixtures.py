@@ -114,7 +114,8 @@ def ann(
     cx: float, cy: float, cid: int = 0, score: float | None = None
 ) -> dict:
     """A 20px square annotation of category ``cid`` centered at (``cx``, ``cy``), scored when
-    ``score`` is given."""
+    ``score`` is given.
+    """
     a = {"category_id": cid, "bbox": _box(cx, cy), "iscrowd": 0}
     if score is not None:
         a["score"] = score
@@ -125,7 +126,8 @@ def toy_records(id_prefix: str = "c", *, shift: float = 0.0) -> list[dict]:
     """Two 400x400 records whose count-unbiased conf is 0.6 and F1-max conf 0.9: image A has one
     GT, a correct detection at 0.9 and a spurious far one at 0.6; image B has two GT, correct
     detections at 0.9 and 0.3. ``shift`` offsets every GT center by that many px, inside the
-    center-match tolerance, leaving the detections in place."""
+    center-match tolerance, leaving the detections in place.
+    """
     a = {
         "width": 400,
         "height": 400,
@@ -149,7 +151,8 @@ def toy_records(id_prefix: str = "c", *, shift: float = 0.0) -> list[dict]:
 
 def shifted_cal_holdout() -> tuple[list[dict], list[dict]]:
     """A dense calibration/holdout pair on one grid, the holdout's GT shifted 5px: a good detector
-    with one low-conf spurious detection per image, whose count-unbiased pick lands at 0.9."""
+    with one low-conf spurious detection per image, whose count-unbiased pick lands at 0.9.
+    """
     n_images, objects_per_image = 20, 80
     miss, fp = [0] * n_images, [1] * n_images
     cal = dense_records(
@@ -180,7 +183,8 @@ def good_cal_holdout(
     """A dense calibration/holdout pair: a good detector with one spurious detection per image at
     ``fp_score``, whose count-unbiased pick lands at 0.9 with zero bias on the holdout. The holdout
     lies on its own grid (fewer objects, wider spacing), so no record's content matches
-    calibration's."""
+    calibration's.
+    """
     n_images = 20
     objects_per_image = 80
     miss = [0] * n_images

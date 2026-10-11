@@ -1,5 +1,6 @@
 """Encoding a pass's predictions as per-image documents, and delivering a bucket's per-image
-counts."""
+counts.
+"""
 
 from __future__ import annotations
 
@@ -16,7 +17,8 @@ logger = logging.getLogger(__name__)
 
 def _clip(value: float, upper: float | None) -> float:
     """Clamp ``value`` into ``[0, upper]``; ``upper=None`` (no known image extent) leaves it
-    as-is."""
+    as-is.
+    """
     if upper is None:
         return value
     return max(0.0, min(float(value), float(upper)))
@@ -150,7 +152,8 @@ def encode_head_output(result: dict, *, task: str) -> tuple[dict, int]:
     """A classification, ordinal, regression or semantic segmentation result encoded as its
     document: the source image's ``width`` and ``height``, the head's ``task`` and every output the
     head returned under ``outputs``, as returned; no detection is ever dropped. A result carrying
-    no output refuses (``ValueError``)."""
+    no output refuses (``ValueError``).
+    """
     outputs = {
         k: v
         for k, v in result.items()

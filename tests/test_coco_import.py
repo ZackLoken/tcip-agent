@@ -36,7 +36,8 @@ RING = [30.0, 30.0, 50.0, 30.0, 50.0, 54.0, 30.0, 54.0]
 def _dataset(tmp_path: Path, stems=STEMS) -> OpenProject:
     """A project (``tests._web_fixtures.named_project``) holding images brought in through
     ``ingest_images`` under one capture bucket, and a registry declaring the subject, written
-    through its own door."""
+    through its own door.
+    """
     from PIL import Image
 
     from tcip_mcp.tools.annotation_tools import write_subject_registry
@@ -175,7 +176,8 @@ def test_an_imported_documents_images_train_with_the_boxes_it_stated(
 ):
     """A detection loader over the imported documents reads back the box and the polygon's
     extent the COCO document stated; the image it gave no annotation gets no document, so it is
-    not admitted as a negative."""
+    not admitted as a negative.
+    """
     pytest.importorskip("torch")
 
     root = _dataset(tmp_path).root
@@ -196,7 +198,8 @@ def test_images_sitting_flat_under_images_are_no_capture_to_import_into(
     tmp_path: Path,
 ):
     """Images placed by hand in the flat ``images/`` root are no capture: the import refuses
-    naming the capture it was given, and writes nothing."""
+    naming the capture it was given, and writes nothing.
+    """
     from PIL import Image
 
     from tcip_mcp.dataset_layout import UNDATED_BUCKET
@@ -230,7 +233,8 @@ def test_an_imported_documents_images_train_with_the_polygons_it_stated(
     tmp_path: Path,
 ):
     """An instance_seg loader over the imported documents rasterizes exactly the polygon the COCO
-    document stated for each image."""
+    document stated for each image.
+    """
     pytest.importorskip("torch")
     import numpy as np
     from PIL import Image, ImageDraw
@@ -289,7 +293,8 @@ def test_the_import_leaves_one_row_with_the_documents_path_and_digest(
 ):
     """Every row the import leaves in the dataset's log is counted, and there is one: the
     library's import event. The digest is recomputed here from the document's bytes by the stated
-    convention, ``sha256(bytes)``, never through the code under test."""
+    convention, ``sha256(bytes)``, never through the code under test.
+    """
     import hashlib
 
     root = _dataset(tmp_path).root
@@ -317,7 +322,8 @@ def test_the_digest_names_the_bytes_the_labels_came_from(
     tmp_path: Path, monkeypatch
 ):
     """The document is read once: replacing it while the import writes leaves the event's digest
-    the one of the bytes the labels were decoded from, never of a second read."""
+    the one of the bytes the labels were decoded from, never of a second read.
+    """
     import hashlib
 
     root = _dataset(tmp_path).root
@@ -345,7 +351,8 @@ def test_the_digest_names_the_bytes_the_labels_came_from(
 
 def test_every_declared_category_must_be_registered(tmp_path: Path):
     """A category the document declares but no record uses is still a declaration the registry
-    must be able to name, and the import refuses on it by name, writing nothing."""
+    must be able to name, and the import refuses on it by name, writing nothing.
+    """
     root = _dataset(tmp_path).root
     document = _document(
         tmp_path / "external.json",
@@ -366,7 +373,8 @@ def test_a_category_name_no_subject_can_carry_is_refused_by_the_registry(
     tmp_path: Path, name
 ):
     """A declared name is the subject its records take, so the registry answers for it: one no
-    subject can carry is named in the import's refusal, whatever its shape."""
+    subject can carry is named in the import's refusal, whatever its shape.
+    """
     root = _dataset(tmp_path).root
     document = _document(
         tmp_path / "external.json",
@@ -407,7 +415,8 @@ def test_an_ordinary_image_is_named_by_its_own_file_name(
     tmp_path: Path, file_name: str
 ):
     """Only a ``.bandgroup`` capture is tied by stem; an ordinary image the document names by
-    another file name is not the dataset's image of that stem."""
+    another file name is not the dataset's image of that stem.
+    """
     root = _dataset(tmp_path).root
     images = [
         {"id": 1, "file_name": "tree_01.png", "width": IMG, "height": IMG},
@@ -450,7 +459,8 @@ def test_an_existing_per_image_document_refuses_the_whole_import(
 
 def test_an_unannotated_images_faults_still_refuse_the_import(tmp_path: Path):
     """Validation is over every listed image, not only the annotated ones: the unannotated third
-    image's wrong frame refuses by name, and the document a person saved on it is kept."""
+    image's wrong frame refuses by name, and the document a person saved on it is kept.
+    """
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     made = _dataset(tmp_path)
@@ -485,7 +495,8 @@ def test_an_unannotated_images_existing_document_is_kept_and_admits_the_import(
     tmp_path: Path,
 ):
     """An image the document gives no annotation writes nothing, so a person's document on it
-    stands beside the import's own documents."""
+    stands beside the import's own documents.
+    """
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     made = _dataset(tmp_path)
@@ -529,7 +540,8 @@ def test_a_frame_the_image_does_not_have_refuses_the_whole_import(
 
 def test_a_repeated_image_reports_every_fault_it_carries(tmp_path: Path):
     """A second record naming the same capture, stated at another frame, is reported as both
-    faults: naming one does not stop the pass from asking the rest."""
+    faults: naming one does not stop the pass from asking the rest.
+    """
     root = _dataset(tmp_path).root
     images = [
         {"id": 1, "file_name": "tree_01.png", "width": IMG, "height": IMG},
@@ -582,7 +594,8 @@ def test_image_and_category_ids_listed_twice_refuse_by_name(tmp_path: Path):
 
 def test_a_record_the_writer_refuses_writes_nothing(tmp_path: Path):
     """Every image is encoded by the writer's one encoder before the first write, so a box the
-    stored grid collapses on the second image leaves the first image unwritten too."""
+    stored grid collapses on the second image leaves the first image unwritten too.
+    """
     root = _dataset(tmp_path).root
     annotations = [
         {"id": 1, "image_id": 1, "category_id": 7, "bbox": BOX},
@@ -604,7 +617,8 @@ def test_a_record_the_writer_refuses_writes_nothing(tmp_path: Path):
 
 def _label_placed_before_the_writes(monkeypatch, key, annotations) -> None:
     """A person's label landing on the document ``key`` names after the validation pass and
-    before the import's transaction opens."""
+    before the import's transaction opens.
+    """
     real_transaction = ts.transaction
 
     def interleaved(*keys, **kwargs):
@@ -623,7 +637,8 @@ def test_an_import_whose_second_document_conflicts_leaves_no_document_written(
 ):
     """The import's writes commit as one unit: a person's label landing on the second document
     between the validation pass and the writes refuses the whole import, the label is kept, the
-    first document is never written, and no event is left."""
+    first document is never written, and no event is left.
+    """
     from tcip_mcp.pipelines.data.coco_import import import_coco_document
 
     root = _dataset(tmp_path).root
@@ -651,7 +666,8 @@ def test_a_pass_whose_document_fails_to_encode_publishes_nothing(
     tmp_path: Path, monkeypatch
 ):
     """A failure encoding the second document of a pass leaves no document, no bucket record and
-    no publication line: the publication commits whole or not at all."""
+    no publication line: the publication commits whole or not at all.
+    """
     pytest.importorskip("torch")
     import tcip_mcp.pipelines.postprocessing.export as export
     import tcip_mcp.tools.inference_tools as itools
@@ -700,7 +716,8 @@ def test_an_import_that_committed_no_document_leaves_no_event(
 ):
     """An act that committed nothing leaves no line: a valid document whose images carry no
     annotation writes nothing, and one whose first document was claimed has written nothing
-    either."""
+    either.
+    """
     from tcip_mcp.pipelines.data.coco_import import import_coco_document
 
     root = _dataset(tmp_path).root
@@ -756,7 +773,8 @@ def test_an_annotation_naming_no_listed_image_refuses_the_whole_import(
 )
 def test_a_date_that_names_no_capture_refuses(tmp_path: Path, date: str):
     """A date names the capture the images sit in; a name that is no bucket of the dataset, well
-    formed or not, has nothing to import into."""
+    formed or not, has nothing to import into.
+    """
     from tcip_mcp.tools.ingest_tools import import_coco
 
     root = _dataset(tmp_path).root
@@ -803,7 +821,8 @@ def test_a_band_grouped_capture_resolves_by_the_stem_the_document_names(
     tmp_path: Path,
 ):
     """An external document names a grouped capture by one of its own file names; the import ties
-    it by stem to the ``.bandgroup`` manifest, and the written document is the capture's own."""
+    it by stem to the ``.bandgroup`` manifest, and the written document is the capture's own.
+    """
     import numpy as np
     import tifffile
 
@@ -864,7 +883,8 @@ def test_a_crowd_region_imports_and_reaches_training_and_evaluation_as_one(
 ):
     """The crowd flag the document stated is written, read back, carried on the detection
     loader's target under ``iscrowd``, and carried onto the evaluation ground truth both builders
-    form; the built-in heads are handed the target with the crowd row removed."""
+    form; the built-in heads are handed the target with the crowd row removed.
+    """
     torch = pytest.importorskip("torch")
     from tcip_mcp.pipelines.data.datasets import (
         TiledDetectionDataset,
@@ -994,7 +1014,8 @@ def test_a_run_length_mask_that_yields_no_ring_refuses_by_record(
 
 def test_every_fault_the_document_carries_is_reported_together(tmp_path: Path):
     """A duplicate category, an unmapped category, a wrong frame and a missing image are each
-    independent of the others, and one refusal names all four."""
+    independent of the others, and one refusal names all four.
+    """
     root = _dataset(tmp_path).root
     images = [
         {"id": 1, "file_name": "tree_01.png", "width": IMG * 2, "height": IMG},

@@ -1,6 +1,7 @@
 """The storage seam's contract, through the ``store`` fixture. Isolation cases run across real OS
 processes, and also against a weakened backend (``TCIP_STORE_CONTRACT_IGNORES_EXPECT=1``, or
-``TCIP_STORE_CONTRACT_COMMITS_EACH_WRITE=1`` for the crash case) where they fail."""
+``TCIP_STORE_CONTRACT_COMMITS_EACH_WRITE=1`` for the crash case) where they fail.
+"""
 
 from __future__ import annotations
 
@@ -128,7 +129,8 @@ def test_release_root_releases_that_root_so_it_can_be_renamed_and_keeps_every_ot
     store,
 ):
     """``release_root`` releases what a read of one root opened, on one thread, so that root can
-    be renamed, and leaves another root's handle open."""
+    be renamed, and leaves another root's handle open.
+    """
     key = store.key(LWW, "before-close")
     other_root = store.root.parent / f"{store.root.name}-other"
     other_root.mkdir()
@@ -159,7 +161,8 @@ def test_release_root_releases_that_root_so_it_can_be_renamed_and_keeps_every_ot
 
 def test_release_root_waits_for_an_operation_in_flight_on_that_root(store):
     """A release issued while another thread is inside a transaction on the root returns only
-    once that transaction has committed, and the commit lands."""
+    once that transaction has committed, and the commit lands.
+    """
     import threading
 
     key = store.key(LWW, "in-flight")
@@ -208,7 +211,8 @@ def _journal_mode(db: Path) -> str:
 
 def test_the_first_write_publishes_a_database_already_in_wal(store):
     """The installed file is converted while the transition lock still excludes every other
-    opener, so it is in WAL before anything opens it for use."""
+    opener, so it is in WAL before anything opens it for use.
+    """
     ts.replace(store.key(LWW, "first"), {"n": 1})
     ts.release_root(store.root)
 
@@ -219,7 +223,8 @@ def test_an_opener_arriving_beside_another_connection_still_gets_a_usable_databa
     store,
 ):
     """A second connection is open when an opener arrives: since publication already converted
-    the journal mode, the opener reads it and proceeds rather than being refused."""
+    the journal mode, the opener reads it and proceeds rather than being refused.
+    """
     ts.replace(store.key(LWW, "first"), {"n": 1})
     ts.release_root(store.root)
     db_path = database_file(str(store.root))
@@ -487,7 +492,8 @@ def test_a_crash_mid_transaction_leaves_the_old_records_and_wedges_no_successor(
     store,
 ):
     """A process killed after its transaction's first write executed, before the commit, leaves
-    both records as they were, and the lock it held does not strand the next writer."""
+    both records as they were, and the lock it held does not strand the next writer.
+    """
     first = store.key(LWW, "alpha")
     second = store.key(LWW, "beta")
     with ts.transaction(first, second) as txn:
@@ -514,7 +520,8 @@ def test_a_crash_mid_transaction_leaves_the_old_records_and_wedges_no_successor(
 
 def test_a_transaction_over_a_record_and_a_log_commits_both_or_neither(store):
     """A raise inside the body leaves the record and the log as they were; a clean exit lands
-    the write and every append together."""
+    the write and every append together.
+    """
     record = store.key(LWW, "decided")
     log = store.key(LOG, "decisions")
     ts.replace(record, {"n": 0})
@@ -539,7 +546,8 @@ def test_a_verdict_that_will_not_encode_lands_none_of_the_save_s_verdicts(
     store,
 ):
     """``record_verdicts`` appends a save's verdicts inside the save's one transaction: one that
-    will not encode, after another already appended, leaves the shard holding neither."""
+    will not encode, after another already appended, leaves the shard holding neither.
+    """
     from datetime import datetime, timezone
 
     key = verdicts.verdict_key(store.root, "live", "a_1")
@@ -574,7 +582,8 @@ def test_a_module_level_write_inside_a_transaction_is_refused_and_lands_outside_
     store,
 ):
     """A write that is not the transaction's own would commit apart from it, so it refuses and
-    names the transaction's own operations; the same append outside the transaction lands."""
+    names the transaction's own operations; the same append outside the transaction lands.
+    """
     record = store.key(LWW, "under-transaction")
     log = store.key(LOG, "appended-to")
 
@@ -777,7 +786,8 @@ def test_a_key_with_no_root_or_an_empty_store_or_part_refuses_and_a_whole_one_is
 
 def test_absence_and_corruption_are_different_answers(store):
     """A record that will not decode raises ``DecodeError`` whatever ``default`` says; an absent
-    one answers the default."""
+    one answers the default.
+    """
     key = store.key(LWW, "sometimes-there")
     with pytest.raises(ts.NotFoundError) as raised:
         ts.read(key)
@@ -795,7 +805,8 @@ def test_a_relative_root_is_refused_before_it_resolves_against_a_working_directo
     store,
 ):
     """The store refuses first and canonicalizes second, or the refusal turns into a guess about
-    which directory the process happened to be started in; enumeration refuses alongside."""
+    which directory the process happened to be started in; enumeration refuses alongside.
+    """
     relative_root = "not/an/absolute/root"
     relative = ts.Key(LWW, relative_root, ("x",))
 
@@ -900,7 +911,8 @@ def test_a_transaction_refuses_two_roots_and_admits_two_spellings_of_one(
     store,
 ):
     """One transaction is one root's database, so keys from two roots refuse before anything is
-    held; two spellings of one directory are one root."""
+    held; two spellings of one directory are one root.
+    """
     elsewhere = store.root / "elsewhere"
     elsewhere.mkdir()
     here = store.key(LWW, "here")
@@ -950,7 +962,8 @@ def test_two_spellings_of_one_root_address_one_database(store):
 
 def test_traits_shares_the_state_database_rather_than_gaining_its_own(store):
     """Writing a ``traits`` record beside a ``delivery_events`` record creates exactly one
-    database under the project's state root, never a second, nested one."""
+    database under the project's state root, never a second, nested one.
+    """
     ts.replace(
         traits.trait_key(store.root, "bud_opening"),
         {"revisions": []},
@@ -1098,7 +1111,8 @@ def test_a_value_with_a_non_string_key_is_refused_rather_than_merged_with_its_sp
     store,
 ):
     """JSON names an object's keys with strings, so ``1`` and ``"1"`` would land as one key and
-    one of the two values would vanish; both writers refuse, and the string-keyed value stores."""
+    one of the two values would vanish; both writers refuse, and the string-keyed value stores.
+    """
     record = store.key(LWW, "keyed")
     log = store.key(LOG, "keyed")
     mixed: dict = {1: "number", "1": "string"}
@@ -1121,7 +1135,8 @@ def test_a_file_write_inside_a_record_transaction_refuses_and_lands_outside_it(
     store,
 ):
     """A file write inside a record transaction would commit apart from it, so it refuses and the
-    record transaction rolls back whole; the same write outside lands."""
+    record transaction rolls back whole; the same write outside lands.
+    """
     record = store.key(LWW, "beside-a-file")
     path = blob_path(store.root, "beside-a-record")
     ts.replace(record, {"n": 0})
@@ -1153,7 +1168,8 @@ def test_a_file_that_is_not_a_database_at_the_database_s_path_refuses_naming_it(
 
 def test_enumerating_review_verdicts_answers_identities_that_read_back(store):
     """``keys`` answers the shard's own key, which reads the shard back, though its names carry
-    separators."""
+    separators.
+    """
     key = verdicts.verdict_key(store.root, "live/2026-03-04", "a/b")
     decided = verdicts.Verdict(
         proposal=0,
@@ -1169,7 +1185,8 @@ def test_enumerating_review_verdicts_answers_identities_that_read_back(store):
 
 def test_a_cleared_log_enumerates_as_absent(store):
     """A log that holds entries is enumerated once, however many it holds, and one cleared of
-    them is not enumerated at all."""
+    them is not enumerated at all.
+    """
     kept = verdicts.verdict_key(store.root, "live/2026-03-04", "a")
     cleared = verdicts.verdict_key(store.root, "live/2026-03-04", "b")
     decided = verdicts.Verdict(

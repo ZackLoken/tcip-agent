@@ -1,5 +1,6 @@
 """Experiment-tool coverage (list / compare / lineage), each run a directory the launcher's own
-writer opened under the test's project."""
+writer opened under the test's project.
+"""
 
 
 def _opened(
@@ -10,7 +11,8 @@ def _opened(
 ):
     """A run of ``project`` of a detector built by ``builder``, declared in a ``my_models.py`` of
     its own, over its own two frames, opened by the launcher's own writer; ``facts`` are
-    ``open_run``'s other keywords."""
+    ``open_run``'s other keywords.
+    """
     from tests._verified_checkpoint_fixtures import (
         detection_config,
         fixture_data_dir,
@@ -83,7 +85,8 @@ def test_a_completed_runs_lineage_names_the_checkpoint_its_final_status_names(
 
 def test_get_experiment_tool_pages_epoch_rows_bounded_by_n_epochs(tmp_path):
     """The MCP tool accepts metrics_limit/metrics_offset under view='full', paging the epoch
-    rows ``n_epochs`` counts."""
+    rows ``n_epochs`` counts.
+    """
     from tcip_mcp.tools.experiment_tools import get_experiment
     from tests._verified_checkpoint_fixtures import log_epoch
 
@@ -105,7 +108,8 @@ def test_get_experiment_tool_lineage_view_admits_defaults_refuses_pagination(
     tmp_path,
 ):
     """A rail must admit valid work: the ordinary view='lineage' call (no pagination args)
-    still succeeds; a non-default pagination arg under that view is refused as meaningless."""
+    still succeeds; a non-default pagination arg under that view is refused as meaningless.
+    """
     from tcip_mcp.tools.experiment_tools import get_experiment
 
     _opened(tmp_path, "exp-lineage")
@@ -125,7 +129,8 @@ def test_compare_experiments_reports_the_last_row_and_rows_logged_after_the_end(
     tmp_path,
 ):
     """The final status is written once; a row an outside writer appends later with a later
-    instant is counted, never hidden, and a completed run's own rows are not."""
+    instant is counted, never hidden, and a completed run's own rows are not.
+    """
     from tcip_mcp.experiments import (
         METRICS_FILE,
         append_row,
@@ -155,7 +160,8 @@ def test_compare_experiments_stale_heartbeat_compares_interrupted(
     tmp_path, monkeypatch
 ):
     """A run with no final status reads running while its heartbeat is fresh, with no
-    rows-after-end count since it has not ended, and interrupted once it goes stale."""
+    rows-after-end count since it has not ended, and interrupted once it goes stale.
+    """
     from tcip_mcp import experiments
     from tcip_mcp.experiments import compare_experiments
 
@@ -179,7 +185,8 @@ def test_compare_experiments_rows_after_end_compares_instants_across_offsets(
     """rows_after_end parses each row's timestamp (and the final status's ``ended``) as an
     instant and compares strictly-after, so a row stamped in a different UTC offset, or a bare
     "Z", still compares on the instant it actually names rather than on its ISO text; a row
-    whose timestamp does not decode refuses the run's comparison, naming the row."""
+    whose timestamp does not decode refuses the run's comparison, naming the row.
+    """
     from datetime import datetime, timedelta, timezone
 
     from tcip_mcp.experiments import (

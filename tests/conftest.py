@@ -33,7 +33,8 @@ def _pin_torch_single_thread():
 @pytest.fixture(autouse=True)
 def _bind_storage_backend():
     """Bind the storage backend before every test, the way a process entry point does, and close
-    it after the test."""
+    it after the test.
+    """
     import tcip_store
 
     backend = tcip_store.bind()
@@ -97,13 +98,15 @@ def tmp_path(
 def _own_workspace(tmp_path: Path) -> None:
     """Give every test its own workspace, whether or not it names ``tmp_path``, so a record kept
     under the workspace root (the backend's port, the last-opened pointer) never reaches the next
-    test."""
+    test.
+    """
 
 
 @pytest.fixture
 def made(tmp_path: Path):
     """``tmp_path`` made a project through the platform's own creation door
-    (``tests._web_fixtures.new_project``)."""
+    (``tests._web_fixtures.new_project``).
+    """
     from tests._web_fixtures import new_project
 
     return new_project(tmp_path)
@@ -126,7 +129,8 @@ def bound(made):
 @pytest.fixture
 def opened(tmp_path: Path):
     """``tmp_path`` made a project and open in the web backend, the way the picker's open
-    leaves it (``tests._web_fixtures.open_new_project``)."""
+    leaves it (``tests._web_fixtures.open_new_project``).
+    """
     from tests._web_fixtures import open_new_project
 
     return open_new_project(tmp_path)
@@ -215,7 +219,8 @@ def seed_bud_operationalization(tmp_path: Path, seed_bud_trait_spec):
 def confirmed_count_aggregate(tmp_path: Path) -> None:
     """Confirm, in this test's ``tmp_path`` project, every delivery trait of
     ``tests/_trait_fixtures`` and the per-plant aggregate meaning of the one delivering
-    ``stem_count``."""
+    ``stem_count``.
+    """
     from tests import _trait_fixtures as fx
 
     fx.seed_delivery_traits(tmp_path)
@@ -227,7 +232,8 @@ def real_hpo_base_config(tmp_path: Path) -> dict:
     """A base config the sweep door's own preflight admits: an importable builder and a data
     section over two labeled frames of its subject (``_verified_checkpoint_fixtures.
     detection_images``), drawn at seed 0, at the sample regime
-    (``_chain_fixtures.training_config``)."""
+    (``_chain_fixtures.training_config``).
+    """
     from tests._chain_fixtures import (
         BESPOKE_DETECTION,
         BESPOKE_MODELS,

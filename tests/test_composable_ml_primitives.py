@@ -104,7 +104,8 @@ class TestSamplers:
 
 def _built(block: dict, model):
     """The optimizer ``block`` (validated through ``schemas.OptimizerSpec``) builds over
-    ``model`` at its own rates."""
+    ``model`` at its own rates.
+    """
     from tcip_mcp.pipelines.schemas import OptimizerSpec
     from tcip_mcp.pipelines.training.optimizer_factory import build_optimizer
 
@@ -147,7 +148,7 @@ class TestOptimizerFactory:
         assert "sgd" in _OPTIMIZER_BUILDERS
 
     def test_lamb_raises_when_torch_optimizer_missing(self):
-        """lamb must never silently fall back to AdamW when torch_optimizer isn't installed."""
+        """Lamb must never silently fall back to AdamW when torch_optimizer isn't installed."""
         from importlib.util import find_spec
 
         if find_spec("torch_optimizer") is not None:

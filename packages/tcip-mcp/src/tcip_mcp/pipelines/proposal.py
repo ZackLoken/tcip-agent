@@ -38,7 +38,8 @@ def register_proposal_engine(name: str, engine: Proposer) -> None:
 def resolve_proposer(engine: str) -> Proposer:
     """The engine registered under ``engine``, else the one a dotted ``module:factory`` names,
     instantiated when the imported target is callable
-    (:func:`~tcip_mcp.pipelines.model_build.resolve_named`, whose refusals propagate)."""
+    (:func:`~tcip_mcp.pipelines.model_build.resolve_named`, whose refusals propagate).
+    """
     from tcip_mcp.pipelines.model_build import resolve_named
 
     target = resolve_named(

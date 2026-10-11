@@ -96,7 +96,8 @@ def test_audited_positional_binding_fills_unstated_defaults(tmp_path):
 
 def test_audited_call_that_does_not_bind_raises_before_the_body_runs(tmp_path):
     """A call-site bug (wrong arity) raises the binding's own TypeError: without a bound
-    ``project`` there is no log to record it in, and the body never runs."""
+    ``project`` there is no log to record it in, and the body never runs.
+    """
     from tcip_mcp.audit import audited
 
     ran: list[int] = []
@@ -212,7 +213,8 @@ def _ckpt(project: Path, name: str, content: bytes) -> str:
 def test_a_first_registration_and_a_replacement_each_leave_one_row(tmp_path):
     """The same bytes registered again under another name replace their one entry, the row
     naming the name it superseded; other bytes under the first name are an entry of their
-    own."""
+    own.
+    """
     from tcip_mcp.model_registry import ModelRegistry
 
     reg = ModelRegistry(str(tmp_path))
@@ -243,7 +245,8 @@ def test_a_first_registration_and_a_replacement_each_leave_one_row(tmp_path):
 
 def test_the_register_model_door_leaves_only_the_registrys_own_rows(tmp_path):
     """Through the door: one row per registry write that changed content, the registry's,
-    and none for the door on top of it or for an idempotent re-registration."""
+    and none for the door on top of it or for an idempotent re-registration.
+    """
     from tcip_mcp.tools.model_tools import register_model
 
     first = _ckpt(tmp_path, "a.pt", b"first")
@@ -295,7 +298,8 @@ def test_the_same_weights_under_new_tags_change_the_entry_and_leave_one_row(
     tmp_path,
 ):
     """A write is decided by the entry it would store, never by the weights' digest alone:
-    the same checkpoint re-registered under new tags changes the entry and leaves its line."""
+    the same checkpoint re-registered under new tags changes the entry and leaves its line.
+    """
     from tcip_mcp.model_registry import ModelRegistry
 
     reg = ModelRegistry(str(tmp_path))
@@ -315,7 +319,8 @@ def test_replace_raises_and_stays_committed_when_its_audit_line_fails(
 ):
     """The transaction has already replaced the entry by the time the audit line is
     attempted, so a failed append must not be swallowed: the caller is told through
-    AuditEntryNotWrittenError, and the registry keeps the replace regardless."""
+    AuditEntryNotWrittenError, and the registry keeps the replace regardless.
+    """
     import tcip_mcp.audit as audit_mod
     from tcip_mcp.model_registry import ModelRegistry
 

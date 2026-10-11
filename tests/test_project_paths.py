@@ -18,7 +18,8 @@ def test_repo_root_climbs_past_a_package_level_claude_md(
     tmp_path: Path, monkeypatch
 ) -> None:
     """A package subdir with its own CLAUDE.md must not stop the climb before the true repo
-    root's .mcp.json."""
+    root's .mcp.json.
+    """
     root = tmp_path / "repo"
     pkg_src = root / "packages" / "pkg" / "src" / "pkg_module"
     pkg_src.mkdir(parents=True)

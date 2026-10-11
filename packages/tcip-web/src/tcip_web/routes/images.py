@@ -41,7 +41,8 @@ router = APIRouter(prefix="/api/images", tags=["images"])
 class ServingCell(BaseModel):
     """One read of a view: its name, the level it is read off (0 native, ``i`` the ``i``-th
     overview level), its half-open rect in that level's own pixel grid, and the native-pixel
-    rect it covers (``nx0``..``ny1``), where a viewer places it."""
+    rect it covers (``nx0``..``ny1``), where a viewer places it.
+    """
 
     name: str
     level: int
@@ -58,7 +59,8 @@ class ServingCell(BaseModel):
 class ViewReads(BaseModel):
     """The reads one view of a raster is served by: the native region-serving cells it intersects,
     the tiles of the overview level its display read is planned off, or one display read of the
-    view where the raster has no level to tile."""
+    view where the raster has no level to tile.
+    """
 
     reads: list[ServingCell]
 
@@ -72,7 +74,8 @@ the cache key's inputs or the served headers' shape changes."""
 class _Encoding:
     """How one kind of serve is encoded: a PIL format, its save options, and the longest edge the
     codec accepts (``None`` where none was found). The cache-file suffix and the media type are
-    the format's own name."""
+    the format's own name.
+    """
 
     pil_format: str
     options: dict
@@ -111,7 +114,8 @@ def display_cap(
     ),
 ) -> int:
     """The area cap one display-bound read for the requesting display is held to: that display's
-    own device-pixel count."""
+    own device-pixel count.
+    """
     return display_pixels
 
 
@@ -215,7 +219,8 @@ _stats_lock = threading.Lock()
 
 def _render_cache_dir() -> Path:
     """This machine's render cache, under the system temp directory: a cache of any served image,
-    whichever project or root it lies under."""
+    whichever project or root it lies under.
+    """
     base = Path(tempfile.gettempdir()) / "tcip-img-cache"
     base.mkdir(parents=True, exist_ok=True)
     return base
@@ -235,7 +240,8 @@ def _note_cache_write(cache_dir: Path, nbytes: int) -> None:
 def _evict_lru(cache_dir: Path) -> None:
     """Drop least recently used rendered variants until the cache fits its byte budget,
     each with the headers stored beside it. Walks the directory only when writes since
-    the last accounting could have crossed the budget."""
+    the last accounting could have crossed the budget.
+    """
     try:
         budget = _cache_byte_budget(cache_dir)
         key = str(cache_dir)
@@ -437,7 +443,8 @@ def _overview_stats(raster, dims: list[tuple[int, int]]):
     from one reduced read of ``raster``'s whole frame, planned within
     ``overviews.PYRAMID_FLOOR_EDGE`` on each edge over the overview levels ``dims``: the same
     display primitives the sampled path reads, over pixels an overview level served instead of
-    over native windows."""
+    over native windows.
+    """
     from tcip_mcp.pipelines.band_stats import band_ranges, clip_bounds
     from tcip_mcp.pipelines.overviews import PYRAMID_FLOOR_EDGE
     from tcip_mcp.pipelines.raster_source import Rect
@@ -461,7 +468,8 @@ def _source_identity(header) -> tuple:
     everything cached about it here, read off the filesystem without opening the raster: its
     version (:func:`~tcip_mcp.pipelines.raster_source.source_version`) and, for a TIFF, its
     overview sidecar's (:func:`~tcip_mcp.pipelines.raster_source.file_version`; ``None`` when it
-    has none), since a pyramid appearing changes which pixels a read of it returns."""
+    has none), since a pyramid appearing changes which pixels a read of it returns.
+    """
     from tcip_mcp.pipelines import raster_source
     from tcip_mcp.pipelines.overviews import overview_sidecar
 
@@ -479,7 +487,8 @@ def _memo(
 ) -> _V:
     """What ``cache`` holds under ``key``; on a miss, ``compute()``'s answer, stored there with
     the :data:`_STATS_CACHE_MAX` most recently used kept. A concurrent miss on the same key
-    computes twice and stores the same value."""
+    computes twice and stores the same value.
+    """
     with _stats_lock:
         hit = cache.get(key)
         if hit is not None:
@@ -553,7 +562,8 @@ def _sampled_bounds(
     """The ``(low, high)`` pair per selected band a region render stretches between, in the same
     order as ``idxs``: the clip cut points for ``percent_clip``, the sampled range otherwise
     (``none`` reads both ends, as the sampled minimum and maximum a float raster's divisor comes
-    from, and an integer raster ignores the pair for its dtype ceiling)."""
+    from, and an integer raster ignores the pair for its dtype ceiling).
+    """
     if stretch == "percent_clip":
         return [stats.clip_bounds[i] for i in idxs]
     return [(stats.ranges[i].minimum, stats.ranges[i].maximum) for i in idxs]
@@ -1061,7 +1071,8 @@ def build_image_overviews(payload: OverviewBuildPayload) -> dict:
 @router.get("/overviews/status")
 def get_overview_job(job_id: str = Query(...)) -> dict:
     """An overview build's status and the bytes its sidecar holds as last reported: 0 until the
-    build reports, and a build refused over an existing pyramid reports none."""
+    build reports, and a build refused over an existing pyramid reports none.
+    """
     job = _overview_registry.get(job_id)
     if job is None:
         raise HTTPException(404, f"job not found: {job_id}")

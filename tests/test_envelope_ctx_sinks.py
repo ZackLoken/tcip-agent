@@ -77,7 +77,8 @@ def test_epoch_signal_reaches_the_trial_hook(tmp_path):
 
 def test_the_sink_is_the_one_stamp_of_a_rows_epoch_and_instant(tmp_path):
     """Metrics carrying the epoch or the instant refuse naming the key and write nothing; the
-    same metrics without it record the epoch the sink was handed."""
+    same metrics without it record the epoch the sink was handed.
+    """
     from tcip_mcp.experiments import EPOCH_KEY, TIMESTAMP_KEY
 
     ctx, run_dir = _context(tmp_path)
@@ -108,7 +109,8 @@ def test_a_diverged_metric_is_logged_as_null_beside_the_state_that_names_it(
     tmp_path,
 ):
     """A diverged loss is real information the run has to record, and NaN is not JSON: the
-    row keeps the epoch, states the value is absent, and says why."""
+    row keeps the epoch, states the value is absent, and says why.
+    """
     ctx, run_dir = _context(tmp_path)
 
     ctx.log_metrics(2, {"val_loss": float("nan"), "map50": 0.0})
@@ -122,7 +124,8 @@ def test_a_diverged_metric_still_reaches_the_pruning_hook_as_the_number_it_was(
     tmp_path,
 ):
     """The stored row cannot carry a non-finite value, but a pruner compares numbers, so the
-    hook sees what the training body produced rather than the record's representation."""
+    hook sees what the training body produced rather than the record's representation.
+    """
     seen: list[dict] = []
     ctx, _ = _context(
         tmp_path, epoch_hook=lambda epoch, metrics: seen.append(dict(metrics))
@@ -177,7 +180,8 @@ def test_checkpoint_lands_under_the_tag_it_was_asked_for(tmp_path):
 
 def test_a_checkpoint_name_written_twice_refuses_and_keeps_the_first(tmp_path):
     """A checkpoint is written once: a second save under one tag refuses and the file under that
-    name stays the bytes the first save published."""
+    name stays the bytes the first save published.
+    """
     ctx, run_dir = _context(tmp_path)
     ctx.save_checkpoint(
         {STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.2}}, "model_best"
@@ -226,7 +230,8 @@ def test_checkpoint_stamping_leaves_the_callers_state_untouched(tmp_path):
 
 def test_record_artifact_copies_the_file_into_the_run(tmp_path):
     """An artifact is a file in the run's own directory and never the run's deliverable, and a
-    second recording under one name refuses."""
+    second recording under one name refuses.
+    """
     ctx, run_dir = _context(tmp_path)
     source = tmp_path / "stderr.txt"
     source.write_text("trace")

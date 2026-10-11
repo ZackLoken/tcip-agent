@@ -1,6 +1,7 @@
 """A run's and a sweep's binding to a named selection (``data.split.selection_dir``):
 ``auto_train_val``'s branch that binds a run to one, the redraw inside a bound selection, the
-refusals a launch raises, and what the run's own partition record carries."""
+refusals a launch raises, and what the run's own partition record carries.
+"""
 
 from __future__ import annotations
 
@@ -54,7 +55,8 @@ def _two_subject_two_date_dataset(root: Path) -> Path:
     """Two capture dates, six stems each: every stem carries ``leaf`` (twelve foreground groups,
     clearing a leaf-scoped draw's floor), and four of the six also carry the unrelated ``bud``
     (eight foreground groups, clearing a bud-scoped draw's floor too), so a selection drawn for
-    either subject binds to a real, differently-sized draw over the identical tree."""
+    either subject binds to a real, differently-sized draw over the identical tree.
+    """
     registry_over(
         root,
         SubjectRegistry(
@@ -91,7 +93,8 @@ def test_every_sample_groups_each_member_the_way_the_stem_policy_records_it(
 ):
     """On a dated tree the ``stem`` policy's group key names the capture date, so a member
     standing alone in its group carries the key a draw would record for it, never the bare name
-    another date's same-named image shares."""
+    another date's same-named image shares.
+    """
     from tcip_mcp.pipelines.data.label_queries import admit, registry_scope
     from tcip_mcp.pipelines.data.splits import recorded_group_key_fn
 
@@ -110,7 +113,8 @@ def test_every_sample_groups_each_member_the_way_the_stem_policy_records_it(
 
 def _attribute_scoped_dataset(root: Path) -> Path:
     """One date, five stems of a subject declaring ``condition``: four have their instance
-    assessed for it, the fifth carries an instance never assessed for it."""
+    assessed for it, the fifth carries an instance never assessed for it.
+    """
     registry_over(
         root,
         SubjectRegistry(
@@ -156,7 +160,8 @@ def _attribute_scoped_dataset(root: Path) -> Path:
 
 def _dataset_with_a_confirmed_negative(root: Path) -> Path:
     """One date, four annotated stems (clearing a draw's foreground floor) plus a fifth stem
-    whose label document is empty, for a caller to confirm negative."""
+    whose label document is empty, for a caller to confirm negative.
+    """
     registry_over(root, SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
     images_dir = root / "images" / DATES[0]
     for stem in ("a", "b", "c", "d"):
@@ -171,7 +176,8 @@ def _dataset_with_a_confirmed_negative(root: Path) -> Path:
 
 def _tiled_dataset(root: Path) -> Path:
     """Four parents, three crops each, named ``<parent>_<x>_<y>`` so the default tile-prefix
-    grouping puts every crop of one parent in one group."""
+    grouping puts every crop of one parent in one group.
+    """
     registry_over(root, SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
     images_dir = root / "images" / DATES[0]
     for parent in ("srcA", "srcB", "srcC", "srcD"):
@@ -187,7 +193,8 @@ def _tiled_dataset(root: Path) -> Path:
 class _RecordingDataset(Dataset):
     """A bespoke dataset standing in for an agent's own builder: it records the samples, the class
     space and any data location the seam handed it, so a test can state what a run actually
-    threads through and what it does not."""
+    threads through and what it does not.
+    """
 
     def __init__(self, samples, scope, directories) -> None:
         self.seen_samples = list(samples)
@@ -216,7 +223,8 @@ def build_recording_dataset(
     samples=None, scope=None, **kwargs
 ) -> _RecordingDataset:
     """The ``dataset_source`` builder the bespoke-seam tests register through the seam's dotted
-    escape. Records every data-location key it was handed, so a test can state that none was."""
+    escape. Records every data-location key it was handed, so a test can state that none was.
+    """
     located = {
         k: v
         for k, v in kwargs.items()
@@ -263,8 +271,8 @@ def _run_data_cfg(root: Path, selection_dir: Path, **overrides) -> dict:
 def test_auto_train_val_binds_the_selections_own_partition(tmp_path: Path):
     """The loaders hold exactly the samples the selection recorded on each side, read by their
     own paths: nothing is rediscovered from a directory, both capture dates reach the samples the
-    loaders will actually read, and the calibration side builds neither loader."""
-
+    loaders will actually read, and the calibration side builds neither loader.
+    """
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(tmp_path, root, out)
@@ -327,7 +335,8 @@ def test_a_multi_date_selection_trains_without_copying_anything(
 ):
     """One selection spanning two capture dates trains through the worker: the run's resolved
     partition names members of both captures, the checkpoint carries the selection's class map,
-    and no file outside a ``.tcip`` state tree was copied, moved or rewritten."""
+    and no file outside a ``.tcip`` state tree was copied, moved or rewritten.
+    """
     from tcip_mcp.experiments import run_resolution
     from tests._verified_checkpoint_fixtures import opened_run
 
@@ -373,7 +382,8 @@ def test_a_bound_run_keeps_its_selections_attributes_when_the_registry_is_reorde
     """The registry's declared order changes between the draw and the run. The checkpoint must
     still speak the vocabulary its samples were admitted under: an order re-read from the live
     registry here would stamp ids the model never trained in, which is a wrong value rather than
-    a missing one."""
+    a missing one.
+    """
     from tcip_mcp.pipelines.training.subprocess_worker import run_directory
     from tests._verified_checkpoint_fixtures import opened_run
 
@@ -425,8 +435,8 @@ def test_a_scope_stated_beside_a_selection_refuses_the_bound_run(
     """The selection records the class space its samples were admitted under; a data section
     stating one beside it refuses by name, the selection's own included (a stated scope is a
     second spelling, never compared against the record), and one stating none trains in the
-    selection's."""
-
+    selection's.
+    """
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(tmp_path, root, out)
@@ -448,7 +458,8 @@ def test_a_ground_truth_place_stated_beside_a_selection_refuses_the_bound_run(
     tmp_path: Path,
 ):
     """Each sample names its own ground truth, so a data section naming ``labels_dir`` beside the
-    selection refuses by name, an existing directory or not, at the run and at the preflight."""
+    selection refuses by name, an existing directory or not, at the run and at the preflight.
+    """
     from tcip_mcp.tools.training_tools import preflight_config
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
@@ -471,8 +482,8 @@ def test_a_selected_label_emptied_since_the_draw_refuses_the_run(
 ):
     """A label that held the subject at draw time is emptied with nobody confirming that image
     negative. Training it would put a real object's pixels in the background class, so the bind
-    refuses by name rather than reading the empty document as a negative."""
-
+    refuses by name rather than reading the empty document as a negative.
+    """
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(tmp_path, root, out)
@@ -489,7 +500,8 @@ def test_a_selected_label_a_human_confirmed_negative_still_trains(
     tmp_path: Path,
 ):
     """The admitting half of that rail: the same emptied label, this time with a human marking
-    the image negative for this subject, is a real negative and the run binds."""
+    the image negative for this subject, is a real negative and the run binds.
+    """
     from tests._producer_fixtures import mark_complete
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
@@ -516,7 +528,8 @@ def test_a_bound_run_admits_when_an_unselected_images_stem_turns_ambiguous(
     """The recheck reads each sample's own two recorded paths, not a listing of the directory the
     sample happens to sit in. An image nobody selected picking up a second file under one stem
     makes that directory unlistable, and a recheck that listed it would refuse a selection whose
-    every sample still names one real file."""
+    every sample still names one real file.
+    """
     from PIL import Image
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
@@ -620,7 +633,8 @@ def test_a_sample_naming_a_row_of_its_ground_truth_refuses_the_geometry_loaders(
 def test_crops_of_one_parent_cannot_cross_sides(tmp_path: Path):
     """Every crop of one parent image shares a group key, and the reader refuses a selection
     whose group keys straddle two sides, so a run bound to one can never train on one crop of a
-    parent and validate on another."""
+    parent and validate on another.
+    """
     from tcip_mcp.pipelines.data.selection import (
         as_selection,
         selection_document,
@@ -661,7 +675,8 @@ def test_auto_train_val_admits_a_confirmed_negative_the_draw_admitted(
 ):
     """A stem whose label document is empty and whose image a human marked negative was admitted
     at the draw, so the bound run trains on it; the loader reads it as a zero-object sample rather
-    than re-deciding what a negative is."""
+    than re-deciding what a negative is.
+    """
     from tests._producer_fixtures import mark_complete
 
     root = _dataset_with_a_confirmed_negative(tmp_path / "ds")
@@ -685,7 +700,8 @@ def test_auto_train_val_admits_a_confirmed_negative_the_draw_admitted(
 
 def test_an_unconfirmed_empty_label_never_reaches_a_bound_run(tmp_path: Path):
     """The negative invariant holds at the draw, so it holds at the bind: an empty label document
-    nobody confirmed is admitted by nothing and appears in no selection."""
+    nobody confirmed is admitted by nothing and appears in no selection.
+    """
     root = _dataset_with_a_confirmed_negative(tmp_path / "ds")
     out = tmp_path / "m"
 
@@ -699,8 +715,8 @@ def test_a_bound_run_reads_attribute_ids_from_the_selections_own_scope(
 ):
     """The selection records the attributes its admission read, and the loaders read them: an
     edited registry cannot relabel a bound run's targets, and the unassessed stem trains with its
-    row marked rather than being held out."""
-
+    row marked rather than being held out.
+    """
     root = _attribute_scoped_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(tmp_path, root, out)
@@ -720,8 +736,8 @@ def test_a_bound_run_reads_attribute_ids_from_the_selections_own_scope(
 
 def test_a_bound_run_threads_a_bespoke_dataset_source(tmp_path: Path):
     """The bespoke seam stays reachable from a selection-bound run: the agent's own builder
-    receives the selection's samples and the scope it was drawn under."""
-
+    receives the selection's samples and the scope it was drawn under.
+    """
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(tmp_path, root, out)
@@ -752,7 +768,6 @@ def test_an_unbound_bespoke_run_is_handed_the_same_samples_a_bound_one_is(
     Run for a task with a built-in loader and for one without: a task with no built-in loader is
     not a task with no producer, so both routes name its samples the same way too.
     """
-
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(tmp_path, root, out)
@@ -829,7 +844,8 @@ def test_the_preflight_smoke_batch_is_the_batch_the_bound_run_trains(
     """The batch a preflight smokes comes off the run's own training loader, resolved once the
     way the launch records it. A bound config names no directories at all, and re-admitting one
     here would smoke a batch holding the validation and calibration members the run never trains
-    on, which is not the batch whose measurement boundary the contract proves."""
+    on, which is not the batch whose measurement boundary the contract proves.
+    """
     from tcip_mcp.pipelines.data.split_construction import resolve_run
     from tcip_mcp.pipelines.model_build import staged_sources
     from tcip_mcp.pipelines.schemas import train_config
@@ -939,7 +955,8 @@ def test_auto_train_val_selection_refuses_a_task_reading_another_ground_truth(
 ):
     """What decides whether a task can bind a selection is the ground truth its samples name, not
     the task's name: a selection of per-image label documents refuses a semantic segmentation run,
-    whose loader reads a mask raster, and names the ground truth that loader does read."""
+    whose loader reads a mask raster, and names the ground truth that loader does read.
+    """
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(tmp_path, root, out)
@@ -954,7 +971,8 @@ def test_auto_train_val_binding_failure_raises_rather_than_degrading(
     tmp_path: Path,
 ):
     """A sample whose image has moved since the draw refuses at the bind, naming it; it never
-    degrades into a run that trains on whatever is left with no validation."""
+    degrades into a run that trains on whatever is left with no validation.
+    """
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(tmp_path, root, out)
@@ -1037,7 +1055,8 @@ def test_a_redraw_refuses_a_starved_pool_through_the_draws_own_floor(
 ):
     """A redraw is the one draw over a selection's own train-plus-val members: fewer than two
     foreground groups among them refuses with the floor every draw states, naming the selection
-    and the redraw's remedy. A selection whose members do hold two is admitted."""
+    and the redraw's remedy. A selection whose members do hold two is admitted.
+    """
     from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.pipelines.data.split_construction import redrawn_selection
 
@@ -1070,7 +1089,8 @@ def test_the_explicit_draw_the_runs_own_draw_and_the_redraw_agree_member_for_mem
     """One membership and one draw: ``draw_splits`` over a dated tree, a run drawing its own
     train and val over that date's directories and a redraw of the written selection at the same
     seed place every member on the same side. The stems sort differently by identity than by
-    location, so a draw that depended on how its members are keyed would part them."""
+    location, so a draw that depended on how its members are keyed would part them.
+    """
     from tcip_mcp.pipelines.data.split_construction import redrawn_selection
 
     root = tmp_path / "ds"
@@ -1115,7 +1135,8 @@ def test_the_explicit_draw_the_runs_own_draw_and_the_redraw_agree_member_for_mem
 
 def one_foreground_group_selection(tmp_path: Path) -> tuple[Path, Path]:
     """A dataset plus a selection over it whose train-and-val members hold one foreground group:
-    the val side's only group is a confirmed negative. Returns ``(root, selection_dir)``."""
+    the val side's only group is a confirmed negative. Returns ``(root, selection_dir)``.
+    """
     from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tcip_mcp.pipelines.data.selection import (
         Sample,
@@ -1170,7 +1191,8 @@ def test_preflight_flags_a_redraw_whose_members_hold_one_foreground_group(
 ):
     """A train and a val side are always two distinct groups (the reader refuses one group on
     both), so the case left is a side whose only group carries no foreground at all: a confirmed
-    negative. Preflight names it before Start rather than letting every trial draw it again."""
+    negative. Preflight names it before Start rather than letting every trial draw it again.
+    """
     from tcip_mcp.tools.training_tools import preflight_config
 
     root, out = one_foreground_group_selection(tmp_path)
@@ -1278,7 +1300,8 @@ def test_a_bound_detection_run_stating_no_metric_selects_by_the_composite_object
 ):
     """The chain's detector trained over a drawn selection with no selection metric stated:
     the completed run's record resolves the detection default, the composite objective, and
-    every epoch it logged ranks on a finite objective above zero rather than on its loss."""
+    every epoch it logged ranks on a finite objective above zero rather than on its loss.
+    """
     import math
 
     from tcip_mcp.experiments import epoch_rows, observe, read_rows
@@ -1310,7 +1333,8 @@ def test_a_bound_detection_run_stating_no_metric_selects_by_the_composite_object
 
 def test_a_run_that_draws_its_own_split_records_no_binding(tmp_path: Path):
     """A run over the same tree that names no selection draws a partition of its own, and its
-    resolved partition names no selection it bound."""
+    resolved partition names no selection it bound.
+    """
     from tcip_mcp.experiments import RUN_FILE, read_record
     from tests._verified_checkpoint_fixtures import resolved_run
 

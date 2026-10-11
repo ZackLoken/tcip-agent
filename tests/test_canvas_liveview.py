@@ -115,7 +115,8 @@ def test_a_push_naming_another_project_is_answered_as_a_mismatch_and_writes_noth
     tmp_path,
 ):
     """The backend compares the project a push names with the one it has open: a push built for
-    another project answers 409 naming the open one, and nothing lands under either."""
+    another project answers 409 naming the open one, and nothing lands under either.
+    """
     other = _other_project(tmp_path)
 
     r = client.post(
@@ -158,7 +159,8 @@ def test_a_push_naming_no_one_is_refused_before_anything_is_written(
     client, opened, opened_project
 ):
     """A push must name its person: a name naming no one is refused before the geometry or the
-    meta document is written."""
+    meta document is written.
+    """
     for name in REFUSED_NAMES:
         r = client.post(
             "/api/canvas/state",
@@ -201,7 +203,8 @@ def test_a_push_naming_a_project_root_refuses_as_an_unknown_field(
     client, opened, opened_project
 ):
     """The write destination is the open project, never anything the client names: a body that
-    names a root refuses outright (extra='forbid') rather than being silently ignored."""
+    names a root refuses outright (extra='forbid') rather than being silently ignored.
+    """
     body = _payload(opened.id, A_IMG, shapes=SHAPES)
     r = client.post(
         "/api/canvas/state", json={**body, "project_root": str(opened_project)}
@@ -212,7 +215,8 @@ def test_a_push_naming_a_project_root_refuses_as_an_unknown_field(
 def test_cut_armed_flag_rides_the_meta_push(client, opened, opened_project):
     """A client fact like dirty or mode: the completed-cut and refusal cases both leave the flag
     set but clear the mirrored pending segment, so the meta document has to carry the flag itself
-    for the mirror to read as armed rather than disarmed."""
+    for the mirror to read as armed rather than disarmed.
+    """
     r = client.post(
         "/api/canvas/state",
         json=_payload(opened.id, A_IMG, shapes=SHAPES, cut_armed=True),
@@ -333,7 +337,8 @@ def _red_over_green(rendered: Image.Image, xy: tuple[int, int]) -> int:
 
 def test_render_places_a_shape_at_its_offset_inside_a_cropped_region(tmp_path):
     """A shape's native coordinate lands where the crop origin puts it, not where it sat in the
-    full frame: the placement the viewport read replaced the renderer's own crop with."""
+    full frame: the placement the viewport read replaced the renderer's own crop with.
+    """
     from tcip_annotation.viz import render_canvas_state
 
     img = _make_image(tmp_path)
@@ -443,7 +448,8 @@ def test_render_draws_the_focused_shape_with_a_halo_under_its_own_stroke(
     tmp_path,
 ):
     """The GUI's focus is a halo, never a recolor: a focused shape reaches the agent's view with a
-    wider white stroke beneath its own color, and an unfocused one with nothing around it."""
+    wider white stroke beneath its own color, and an unfocused one with nothing around it.
+    """
     from tcip_annotation.viz import render_canvas_state
 
     img = _make_image(tmp_path)
@@ -520,7 +526,8 @@ def test_render_lays_a_dash_down_in_stroke_widths_at_the_renders_own_stroke(
     tmp_path,
 ):
     """The two-pixel stroke of a 1400-pixel frame makes [1, 3] two pixels on, six off: a render
-    that left the pattern unscaled would be one on, three off and light the gap's pixels."""
+    that left the pattern unscaled would be one on, three off and light the gap's pixels.
+    """
     dashed = _wide_render(tmp_path, TOOL_POLYGON, dashed=True)
     solid = _wide_render(tmp_path, TOOL_POLYGON, dashed=False)
     rows = range(49, 52)
@@ -534,7 +541,8 @@ def test_render_lays_a_dash_down_in_stroke_widths_at_the_renders_own_stroke(
 
 def test_render_dashes_a_points_ticks_as_it_does_any_outline(tmp_path):
     """A tool's point reaches the agent dotted, as the browser draws it: the tick above the core
-    has its one dash near the core and a gap beyond, where a solid tick would still be drawn."""
+    has its one dash near the core and a gap beyond, where a solid tick would still be drawn.
+    """
     dashed = _wide_render(tmp_path, TOOL_POINT, dashed=True)
     solid = _wide_render(tmp_path, TOOL_POINT, dashed=False)
     assert _red_in_rows(dashed, 700, range(90, 91)) > 40
@@ -659,7 +667,8 @@ def test_render_refuses_a_dash_that_is_not_a_pattern_naming_the_shape(
 )
 def test_render_refuses_a_malformed_shape_naming_it(tmp_path, bad):
     """A shape the canvas push could not have drawn refuses naming its index, never renders a
-    canvas the human is not seeing; the well-formed shapes beside it admit."""
+    canvas the human is not seeing; the well-formed shapes beside it admit.
+    """
     from tcip_annotation.viz import render_canvas_state
 
     img = _make_image(tmp_path)
@@ -695,7 +704,8 @@ def _write_state(
     cut_armed: bool | None = None,
 ) -> None:
     """The two documents the push route writes, in the shape it writes them: the image path
-    spelled against the project the way the route stores it."""
+    spelled against the project the way the route stores it.
+    """
     from tcip_mcp.audit import now_iso
     from tcip_mcp.registry_paths import stored_path
 
@@ -763,7 +773,8 @@ def test_capture_live_canvas_renders_pushed_state(project, bound):
 def test_capture_live_canvas_names_the_armed_cut(project, bound):
     """The mirror's armed state must be readable beside the mode it names, not just implied by
     the pending-segment polyline (which a completed cut or a refusal both clear while the flag
-    stays set)."""
+    stays set).
+    """
     img = _make_image(project)
     _write_state(project, img, cut_armed=True)
 
@@ -777,7 +788,8 @@ def test_capture_live_canvas_renders_exactly_the_viewport_region(
     project, bound
 ):
     """The tool reads the visible rectangle and renders that, so the artifact is the region the
-    human sees rather than the whole frame."""
+    human sees rather than the whole frame.
+    """
     img = _make_image(project)
     _write_state(project, img)
     live = tcip_store.read(canvas_meta_key(str(project)))
@@ -808,7 +820,8 @@ def test_capture_live_canvas_reads_a_multiband_raster_without_writing_a_preview(
     project, bound
 ):
     """A raster PIL has no true-color mode for is composited in memory for the render: the capture
-    path writes no throwaway preview file beside the artifact."""
+    path writes no throwaway preview file beside the artifact.
+    """
     import numpy as np
     import tifffile
 

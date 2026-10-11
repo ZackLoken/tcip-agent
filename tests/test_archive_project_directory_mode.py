@@ -39,7 +39,8 @@ def test_archive_project_refuses_a_zip_destination_inside_the_project_or_already
 ):
     """The ZIP form takes the directory form's refusals: a destination inside the project would
     bundle its own truncated self, and a written archive is never written over; a relative path
-    names a location under the project, never under wherever the process runs."""
+    names a location under the project, never under wherever the process runs.
+    """
     root = one_labeled_capture(tmp_path / "project")
     outside = tmp_path / "bundle.zip"
 
@@ -105,7 +106,8 @@ def test_directory_bundle_round_trip_yields_the_same_records_as_the_zip_round_tr
     tmp_path,
 ):
     """archive_project(output_dir=...) -> import_project recovers a project, its band-group
-    manifest and its multi-band-file capture included."""
+    manifest and its multi-band-file capture included.
+    """
     from tcip_mcp.tools.project_tools import (
         initialize_project,
         inspect_project,

@@ -259,7 +259,8 @@ def test_a_report_missing_a_field_its_writer_records_refuses_rather_than_reading
     tmp_path: Path,
 ):
     """A stored report holding its time alone is not answered with an empty category, detail
-    and context and a false disagreement; the listing refuses naming the missing field."""
+    and context and a false disagreement; the listing refuses naming the missing field.
+    """
     import pytest
 
     from tcip_mcp.tools.meta_tools import friction_report_key

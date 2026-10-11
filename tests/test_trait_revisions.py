@@ -37,7 +37,8 @@ def _count_entry(**fields) -> traits.TraitEntry:
 
 def _bucket(root: Path):
     """``root``'s one unassessed bucket ``counts/2026-02-11`` of three detections on one frame of
-    the dataset ``ds``, published on first use (``_chain_fixtures.published``); the bucket."""
+    the dataset ``ds``, published on first use (``_chain_fixtures.published``); the bucket.
+    """
     pytest.importorskip("torch")
     import tcip_store
     from tcip_mcp.buckets import read_bucket
@@ -168,7 +169,8 @@ def test_one_confirmation_covers_every_delivery_kind_the_revision_states(
     tmp_path: Path,
 ) -> None:
     """Spec fields and the operationalization text of every kind are one entry and one
-    confirmation: confirming revision 1 makes each kind it states deliverable."""
+    confirmation: confirming revision 1 makes each kind it states deliverable.
+    """
     from tests._chain_fixtures import deliver_acknowledged
 
     both = fx.with_operationalization(
@@ -359,7 +361,8 @@ def test_a_proposal_is_admitted_once_and_a_stored_record_decodes_without_the_voc
 ) -> None:
     """The vocabulary is read once per proposal, by its admission; reading a stored record never
     reads it, so a crops.yml that no longer names a phenotype leaves a confirmed revision
-    readable and deliverable."""
+    readable and deliverable.
+    """
     confirmed = fx.propose_and_confirm(tmp_path, _count_entry())
     real = traits._crops_traits
     reads: list[int] = []
@@ -385,7 +388,8 @@ def test_a_proposal_is_admitted_once_and_a_stored_record_decodes_without_the_voc
 
 def test_the_entry_hash_covers_every_field_and_ignores_sequence_type() -> None:
     """A field the confirmation authorizes and the hash misses would let an entry change under a
-    click the breeder gave to other text."""
+    click the breeder gave to other text.
+    """
     entry = _count_entry()
     baseline = traits.entry_sha256(entry)
     dumped = entry.model_dump()
@@ -570,7 +574,8 @@ def test_the_confirmation_writes_its_own_audit_line_after_its_record(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The library confirmation records itself, whoever calls it, and the record is already
-    written when its audit line is appended."""
+    written when its audit line is appended.
+    """
     import tcip_mcp.audit as audit_module
 
     revision = fx.propose(tmp_path, _count_entry())

@@ -128,7 +128,8 @@ def test_golden_pick_count_unbiased_and_f1_max():
 
 def test_golden_count_criterion_over_a_dense_distinct_reference():
     """The count criterion needs a dense, realistic reference: a sparse 2-image fixture's
-    per-image variance trips the equivalence test, a correct refusal."""
+    per-image variance trips the equivalence test, a correct refusal.
+    """
     from tcip_mcp.pipelines.derivations import derive_object_density
     from tcip_mcp.pipelines.operating_point import count_criterion
     from tcip_mcp.pipelines.training.evaluation import gt_objects
@@ -283,7 +284,8 @@ def test_golden_execution_record_of_an_untiled_pass_runs_at_what_it_states(
 ):
     """Every value a pass runs under is recorded with where it came from: an untiled detector
     pass runs at the conf it states, sourced ``explicit``, and the density its checkpoint
-    recorded, sourced ``derived``, and stating no conf refuses."""
+    recorded, sourced ``derived``, and stating no conf refuses.
+    """
     from tcip_mcp.pipelines.execution import (
         ExecutionRefusedError,
         Stated,
@@ -392,7 +394,8 @@ def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_n
 ):
     """Each of the three regimes, constructed genuinely (a tiling block for the tile-level run,
     nothing for the single pass, use_tiled_inference=True for the full frame), runs at the conf
-    the caller states, recorded ``explicit``, and refuses naming ``conf`` when none is stated."""
+    the caller states, recorded ``explicit``, and refuses naming ``conf`` when none is stated.
+    """
     import tcip_mcp.pipelines.inference.generic_predictor as predictor_mod
     import tcip_mcp.pipelines.training.evaluation as evaluation
     from tcip_mcp.pipelines import execution as execution_mod
@@ -508,7 +511,8 @@ def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_n
 
 def _iou_records():
     """Discriminating fixture: an exact match, a 2px-shifted match (IoU~0.68 -> hit@0.5, miss@0.75),
-    a spurious FP, and a whole image of GT with no predictions (FN)."""
+    a spurious FP, and a whole image of GT with no predictions (FN).
+    """
     from tcip_mcp.pipelines.training.evaluation import gt_record
 
     def gt(x, y, w, h, cid=1):

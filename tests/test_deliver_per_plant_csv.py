@@ -24,7 +24,8 @@ def _scene(
     tmp_path: Path, plants: dict[str, tuple[float, float]]
 ) -> tuple[Path, Path, str]:
     """A registered dataset of one geolocated image per plant on one date and a plant CSV
-    naming them; ``(dataset root, plant csv, date)``."""
+    naming them; ``(dataset root, plant csv, date)``.
+    """
     from tcip_mcp.tools.project_tools import (
         initialize_project,
         register_dataset,
@@ -92,7 +93,8 @@ def _bucket(
 ) -> str:
     """A bucket named ``<name>/<date>`` under ``dataset_root`` holding ``counts[stem]``
     detections on each image ``images/<date>/<stem>.jpg``, published under ``project``; its
-    name."""
+    name.
+    """
     from tests._chain_fixtures import published
 
     results = [
@@ -155,7 +157,8 @@ def test_a_verified_mapping_over_an_unassessed_bucket_reaches_the_gate_and_refus
     """The whole producer chain: a mapping built over a registered registry, a published bucket
     and records from ``aggregate_per_plant``. The mapping verifies and every delivered plant is
     one it assigned, so the delivery reaches the one gate; the bucket was published under no
-    assessment and this door takes no acknowledgment, so it refuses there, writing nothing."""
+    assessment and this door takes no acknowledgment, so it refuses there, writing nothing.
+    """
     dataset_root, date = _mapped(tmp_path, TWO_PLANTS)
     bucket = _bucket(
         tmp_path, dataset_root, date, {"P1": 2, "P2": 1}, name="run"
@@ -177,7 +180,8 @@ def test_a_verified_mapping_over_an_unassessed_bucket_reaches_the_gate_and_refus
 
 def test_an_unknown_plant_mapping_refuses_by_name(tmp_path):
     """A stated ``plant_mapping`` is a claim the data must positively carry: naming one with no
-    stored record refuses by name, before the writer ever runs."""
+    stored record refuses by name, before the writer ever runs.
+    """
     dataset_root, date = _mapped(tmp_path, nn_tolerance_m=10.0)
     bucket = _bucket(tmp_path, dataset_root, date, {"P1": 1})
 
@@ -255,7 +259,8 @@ def test_a_mapping_with_no_capture_at_all_for_a_delivered_date_refuses(
     tmp_path, monkeypatch
 ):
     """A mapping recorded with no capture at all for a delivered date refuses on the record's own
-    evidence."""
+    evidence.
+    """
     from tests.test_plant_mapping_binding import PLANTS
     from tests.test_ungeoreferenced_capture_refusal import (
         DATE,
@@ -296,7 +301,8 @@ def test_a_delivered_plant_the_mapping_never_assigned_refuses_by_name(
     tmp_path,
 ):
     """This door's one added claim: every delivered plant must be one the named mapping assigned
-    on the delivered dates."""
+    on the delivered dates.
+    """
     dataset_root, date = _mapped(tmp_path, nn_tolerance_m=10.0)
     bucket = _bucket(tmp_path, dataset_root, date, {"P1": 1})
 
@@ -315,7 +321,8 @@ def test_a_delivered_plant_the_mapping_never_assigned_refuses_by_name(
 
 def test_a_capture_added_since_the_mapping_was_built_refuses(tmp_path):
     """A capture the mapping's own assignments do not name means the mapping does not cover what
-    is on disk now."""
+    is on disk now.
+    """
     from tests._image_fixtures import write_geo_image
 
     dataset_root, date = _mapped(tmp_path, nn_tolerance_m=10.0)

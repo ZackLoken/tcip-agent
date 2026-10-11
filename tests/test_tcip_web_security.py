@@ -1,5 +1,6 @@
 """The route-level face of the trust boundary: Host check, WS Origin check, path confinement
-on the launch and stream routes."""
+on the launch and stream routes.
+"""
 
 from __future__ import annotations
 

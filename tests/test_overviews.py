@@ -1,5 +1,6 @@
 """Overview pyramids: building the external .ovr sidecar, validating it header-only, and the
-reduced-resolution reads GDAL serves from it."""
+reduced-resolution reads GDAL serves from it.
+"""
 
 from __future__ import annotations
 
@@ -36,7 +37,8 @@ def _wide_raster(
 
 def test_overview_levels_are_powers_of_two_down_to_the_pyramid_floor() -> None:
     """The deepest level is the first whose longest edge, in GDAL's rounded-up whole pixels, is at
-    most the floor: 1025 pixels halve to 513, not 512.5."""
+    most the floor: 1025 pixels halve to 513, not 512.5.
+    """
     assert overview_levels(239921, 141130) == [2, 4, 8, 16, 32, 64, 128, 256]
     assert overview_levels(8192, 8) == [2, 4, 8]
     assert overview_levels(1025, 3) == [2]
@@ -77,7 +79,8 @@ def test_a_raster_the_hint_sends_whole_serves_no_level_off_its_own_pyramid(
 ) -> None:
     """A pyramid is a GDAL reader's to serve from: a TIFF the caller's hint reinterprets, so the
     whole decode serves it, answers no level, and its acquisition hands back no reader to ask,
-    even though its sidecar holds levels."""
+    even though its sidecar holds levels.
+    """
     path = tmp_path / "three_row.tif"
     arr = np.zeros((3, 2048, 4), dtype=np.uint8)
     arr[..., 0] = np.arange(2048, dtype=np.uint16).reshape(1, 2048) % 251
@@ -104,7 +107,8 @@ def test_an_open_reader_enumerates_its_levels_without_reopening_the_raster(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An open GDAL reader answers its levels through the handle it holds and one handle per
-    level, never by opening the raster itself again."""
+    level, never by opening the raster itself again.
+    """
     path, _arr = _wide_raster(tmp_path)
     build_overviews(path)
     opened: list[int | None] = []
@@ -122,7 +126,8 @@ def test_an_open_reader_enumerates_its_levels_without_reopening_the_raster(
 
 class _InProcessChild:
     """A stand-in for the build's child process that runs the unchanged child program in this
-    process, so what it opens is counted beside what the parent opens."""
+    process, so what it opens is counted beside what the parent opens.
+    """
 
     def __init__(self, args: list, **_kwargs) -> None:
         import contextlib
@@ -157,7 +162,8 @@ def test_a_build_acquires_the_raster_once_across_parent_and_child(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Building a pyramid acquires the raster once in all: one TIFF header and one GDAL open of
-    its main dataset plan the levels and write them, whichever process they run in."""
+    its main dataset plan the levels and write them, whichever process they run in.
+    """
     import rasterio
 
     from tcip_mcp.pipelines import overviews
@@ -193,7 +199,8 @@ def test_a_decimated_read_is_served_from_the_pyramid_not_by_decoding_the_base(
     averaging gives the same pixels the pyramid holds. Rewriting the base to zeros after the
     build separates the two paths: a decimated read that still returns the original content's
     block averages was served from the sidecar, the native read returning zeros proves the base
-    really changed, and deleting the sidecar flips the same decimated read onto the base."""
+    really changed, and deleting the sidecar flips the same decimated read onto the base.
+    """
     path, arr = _wide_raster(tmp_path)
     build_overviews(path)
 
@@ -229,7 +236,8 @@ def test_build_refuses_to_rebuild_over_a_valid_sidecar(tmp_path: Path) -> None:
 
 def test_a_canceled_build_deletes_the_sidecar(tmp_path: Path) -> None:
     """An interrupted build must not leave a sidecar behind: its unwritten tiles would read back
-    as silent zeros on the next open."""
+    as silent zeros on the next open.
+    """
     path, _ = _wide_raster(tmp_path)
     with pytest.raises(RuntimeError):
         build_overviews(path, progress_cb=lambda _written: False)
@@ -240,7 +248,8 @@ def test_a_canceled_build_deletes_the_sidecar(tmp_path: Path) -> None:
 def test_a_partial_sidecar_is_invalid_and_is_rebuilt(tmp_path: Path) -> None:
     """A build interrupted outside this module's own cleanup (a crash, a kill) leaves a
     structurally complete sidecar whose unwritten tiles have zero-length byte counts; it must
-    read as invalid, and a new build must replace it rather than trust or refuse it."""
+    read as invalid, and a new build must replace it rather than trust or refuse it.
+    """
     path, _ = _wide_raster(tmp_path)
     build_overviews(path)
     partial = overview_sidecar(path)
@@ -270,7 +279,8 @@ def test_building_overviews_for_a_raster_within_the_pyramid_floor_refuses(
     tmp_path: Path,
 ) -> None:
     """An empty level list would clear existing overviews instead of building any, so a raster
-    already within the floor is refused, saying there is no level to build."""
+    already within the floor is refused, saying there is no level to build.
+    """
     path = tmp_path / "small.tif"
     tifffile.imwrite(str(path), np.zeros((32, 32), dtype=np.uint8))
     with pytest.raises(ValueError, match="no overview level"):

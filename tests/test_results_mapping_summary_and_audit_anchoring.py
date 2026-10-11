@@ -112,7 +112,8 @@ def test_build_reports_image_count_mapped_count_and_mean_distance_as_three_answe
 ) -> None:
     """A date's summary keeps the three quantities apart. The fixture's first date makes them three
     different numbers (four images, two plants resolved, three GPS distances recorded), so a summary
-    that reused one of them for another would read wrong rather than merely coincide."""
+    that reused one of them for another would read wrong rather than merely coincide.
+    """
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         NEAREST_MATCH_FACTOR,
         load_mapping_rows,
@@ -173,7 +174,8 @@ def test_build_without_a_stated_tolerance_derives_it_from_the_plot_grid_pitch(
 ) -> None:
     """A payload naming no ``nn_tolerance_m`` derives the match radius from the plot's own grid
     pitch, the same as the tool's own default; a route that pinned a numeric default instead
-    would always land on ``stated``/``stated_capped``, never ``grid_pitch``."""
+    would always land on ``stated``/``stated_capped``, never ``grid_pitch``.
+    """
     from tcip_mcp.pipelines.postprocessing import plant_mapping
 
     payload = _capture_fixture(tmp_path)
@@ -191,7 +193,8 @@ def test_build_response_carries_the_persisted_record_own_tolerance_dict(
 ) -> None:
     """The response's ``nn_tolerance_m`` equals the persisted record's own value: this cannot
     prove the route never recomputes it, only that whatever it answers agrees with what
-    ``persist_mapping`` actually wrote."""
+    ``persist_mapping`` actually wrote.
+    """
     from tcip_mcp.pipelines.postprocessing import plant_mapping
 
     payload = _capture_fixture(tmp_path)
@@ -213,7 +216,8 @@ def test_the_route_and_the_tool_build_one_mapping_with_one_audit_line_each(
     and the build's own clock are set aside, and each build leaves exactly one line in the open
     project's log, the receipt naming the record it wrote. The person who made the act is the
     lines' one ``actor`` key, the route's naming them and the tool's naming no one, and nothing
-    else on either line names a person."""
+    else on either line names a person.
+    """
     import json
 
     import tcip_store
@@ -277,7 +281,8 @@ def test_a_mapping_or_registry_name_outside_the_segment_rule_refuses_at_its_key(
 ) -> None:
     """The key producers refuse a name outside the segment rule, so every door that names a
     mapping or a registry refuses it the same way and writes nothing; a legal name and an
-    archived one still key."""
+    archived one still key.
+    """
     from tcip_mcp.pipelines.postprocessing import plant_mapping
     from tcip_mcp.tools.phenology_tools import (
         build_plant_mapping,
@@ -321,7 +326,8 @@ def test_every_phenology_door_refuses_a_mapping_name_that_names_no_mapping(
 ) -> None:
     """With assessed prediction buckets, a mapping that does not cover them is refused by name at
     every door: one built over only the first date refuses the date it does not cover, and a
-    name never built refuses as absent."""
+    name never built refuses as absent.
+    """
     pytest.importorskip("torch")
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
     from tests._chain_fixtures import attributed_series

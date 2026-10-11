@@ -98,7 +98,8 @@ LOCALIZATION_FIELDS: dict[str, tuple[str, ...]] = {
 def criterion_fields(entry: TraitEntry, kind: str) -> tuple[str, ...]:
     """The spec fields an operationalization of ``kind`` rests on for ``entry``: the kind's own
     (:data:`CONSTITUTING_FIELDS`) and, where it rests on ``localization``, the fields the
-    selected localization compares by (:data:`LOCALIZATION_FIELDS`)."""
+    selected localization compares by (:data:`LOCALIZATION_FIELDS`).
+    """
     fields = CONSTITUTING_FIELDS[kind]
     if "localization" not in fields:
         return fields
@@ -154,8 +155,9 @@ def registered_crops() -> set[str]:
 
 
 def crops_units() -> dict[str, str]:
-    """trait name -> crops.yml's declared physical unit, for every trait that declares one; a
-    count or ordinal trait with no physical unit is absent from this mapping."""
+    """Trait name -> crops.yml's declared physical unit, for every trait that declares one; a
+    count or ordinal trait with no physical unit is absent from this mapping.
+    """
     return {
         t["name"]: t["units"]
         for t in _crops_traits()
@@ -174,7 +176,7 @@ def crops_length_units() -> set[str]:
 
 
 def crops_definitions() -> dict[str, str]:
-    """trait name -> crops.yml's declared definition, for every trait that carries one."""
+    """Trait name -> crops.yml's declared definition, for every trait that carries one."""
     return {
         t["name"]: t["definition"]
         for t in _crops_traits()
@@ -208,7 +210,8 @@ class Operationalization(BaseModel):
 
 class PositiveState(BaseModel):
     """The state a fraction counts: one attribute of the measured subject, and its value that is
-    positive."""
+    positive.
+    """
 
     model_config = ConfigDict(
         extra="forbid", frozen=True, use_attribute_docstrings=True
@@ -226,7 +229,8 @@ class PositiveState(BaseModel):
 class TraitEntry(BaseModel):
     """One trait's complete entry: its spec fields and its operationalization per delivery kind.
     Every field is required; a field not yet decided is stated as empty or null. A proposal is
-    checked by :func:`check_proposed_entry`."""
+    checked by :func:`check_proposed_entry`.
+    """
 
     model_config = ConfigDict(
         extra="forbid", frozen=True, use_attribute_docstrings=True
@@ -357,7 +361,8 @@ class UnauthoredFieldError(ValueError):
 
 def authored(entry: TraitEntry, names: tuple[str, ...]) -> None:
     """Refuse (:class:`UnauthoredFieldError`) ``entry`` when any of the spec fields ``names`` is
-    unauthored, naming each field and asking the breeder its question."""
+    unauthored, naming each field and asking the breeder its question.
+    """
     missing = [n for n in names if getattr(entry, n) in (None, "", ())]
     if missing:
         questions = " ".join(f"{n}: {QUESTIONS[n]}" for n in missing)
@@ -373,7 +378,8 @@ def check_proposed_entry(entry: TraitEntry) -> None:
     anything outside crops.yml, or an operationalization that leaves a spec field its kind rests
     on (:func:`criterion_fields`) unauthored (:func:`authored`, asking the breeder), covers a
     phenotype the entry does not deliver, or names phenotypes or value keys where its kind
-    carries none (or none where it carries them)."""
+    carries none (or none where it carries them).
+    """
     vocab = {t["name"] for t in _crops_traits()}
     off_vocab = [d for d in entry.delivers if d not in vocab]
     if not entry.delivers or off_vocab:
@@ -427,7 +433,8 @@ def entry_sha256(entry: TraitEntry) -> str:
 class TraitRevision(BaseModel):
     """One proposed entry, as appended: its number, the entry, the entry's content hash, why it
     was proposed, and the breeder's confirmation or withdrawal once made. Who proposed it is the
-    ``propose_trait`` audit line's identity."""
+    ``propose_trait`` audit line's identity.
+    """
 
     model_config = ConfigDict(
         extra="forbid", frozen=True, use_attribute_docstrings=True
@@ -456,7 +463,8 @@ class TraitRevision(BaseModel):
     @property
     def ref(self) -> dict[str, Any]:
         """This revision as every record and delivered file names it: the trait, the revision
-        number and the entry's content hash."""
+        number and the entry's content hash.
+        """
         return {
             "trait": self.entry.name,
             "trait_revision": self.number,
@@ -479,7 +487,8 @@ class TraitRecord(BaseModel):
     @property
     def latest_confirmed(self) -> TraitRevision | None:
         """The highest-numbered revision the breeder confirmed and has not withdrawn, or
-        ``None``."""
+        ``None``.
+        """
         return next((r for r in reversed(self.revisions) if r.confirmed), None)
 
 
@@ -509,7 +518,8 @@ def _record(
     trait: str, project: str | Path, value: dict | None
 ) -> TraitRecord:
     """``trait``'s stored ``value`` read through its schema. An absent value raises
-    :class:`TraitUnknownError` naming the project's traits; a value the schema refuses raises."""
+    :class:`TraitUnknownError` naming the project's traits; a value the schema refuses raises.
+    """
     if value is None:
         raise TraitUnknownError(
             f"Unknown trait {trait!r}. Traits in this project: {trait_names(project)}"

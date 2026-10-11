@@ -101,7 +101,8 @@ class _AllFrozen(torch.nn.Module):
 
 def test_an_all_frozen_model_reports_rather_than_raises():
     """Adam raises on an empty parameter list; the check builds it inside its own try, so the
-    empty-parameter case reaches the report instead of escaping the function."""
+    empty-parameter case reaches the report instead of escaping the function.
+    """
     report = overfit_check(
         _AllFrozen(), "classification", steps=5, dims=CLS_DIMS, seed=0
     )

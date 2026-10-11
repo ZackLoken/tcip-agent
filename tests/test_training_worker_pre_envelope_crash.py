@@ -58,7 +58,8 @@ def test_a_pre_envelope_crash_whose_audit_line_is_refused_names_both_causes(
     tmp_path, monkeypatch
 ):
     """Setup fails and the run's audit line is refused: the setup error propagates, and the
-    final status names it and the unwritten line."""
+    final status names it and the unwritten line.
+    """
     import tcip_mcp.audit as audit
 
     run_dir = opened_run(

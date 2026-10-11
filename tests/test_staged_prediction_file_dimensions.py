@@ -26,7 +26,8 @@ def _staged(
     box: tuple[float, float, float, float],
 ) -> json_io.LabelDocument:
     """``box`` staged through ``stage_proposals`` for an image of ``size`` under ``project``'s
-    dataset ``ds``; the staged document as its bucket records it."""
+    dataset ``ds``; the staged document as its bucket records it.
+    """
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.tools.proposal_tools import stage_proposals
 
@@ -60,7 +61,8 @@ def test_staged_file_records_the_width_and_height_it_was_staged_for(
     tmp_path: Path, size: tuple[int, int]
 ) -> None:
     """The header of the staged file carries the image's own width and height, each in its own
-    field, for both a landscape and a portrait frame."""
+    field, for both a landscape and a portrait frame.
+    """
     header = _staged(tmp_path, size, (10.0, 20.0, 60.0, 90.0))
 
     assert (header.width, header.height) == size
@@ -70,7 +72,8 @@ def test_staged_geometry_stays_inside_the_frame_the_file_declares(
     tmp_path: Path,
 ) -> None:
     """A staged box sits inside the image it was measured on, and stays inside it after a consumer
-    normalizes the pixel geometry against the dimensions the same file declares."""
+    normalizes the pixel geometry against the dimensions the same file declares.
+    """
     width, height = LANDSCAPE
     header = _staged(tmp_path, LANDSCAPE, (500.0, 60.0, 620.0, 300.0))
     (written,) = header.annotations

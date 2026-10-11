@@ -16,6 +16,7 @@ class EmptyBodyPayload(BaseModel):
 
 class PersonPayload(BaseModel):
     """A JSON body naming the person making the act, for a route whose other parameters are its
-    path's."""
+    path's.
+    """
 
     user: str

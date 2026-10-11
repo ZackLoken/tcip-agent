@@ -61,7 +61,8 @@ class AnnotationPayload(BaseModel):
 class FlagPayload(BaseModel):
     """One flag a save raises: its comment and its target, a ``point`` with the ``subject``
     flagged there, a ``proposal`` (bucket and index), or neither for the image as a whole
-    (:class:`~tcip_annotation.flags.FlagRequest`)."""
+    (:class:`~tcip_annotation.flags.FlagRequest`).
+    """
 
     text: str
     point: tuple[float, float] | None = None
@@ -71,7 +72,8 @@ class FlagPayload(BaseModel):
 
 class SavePayload(BaseModel):
     """One save: the image's annotations and the gestures it adjudicates beside them
-    (:class:`~tcip_mcp.dataset_layout.Gestures`), by the person ``user`` names."""
+    (:class:`~tcip_mcp.dataset_layout.Gestures`), by the person ``user`` names.
+    """
 
     image_path: str
     annotations: list[AnnotationPayload] = []
@@ -94,7 +96,8 @@ class SavePayload(BaseModel):
 
 def _flags(key: Key) -> list[dict]:
     """The image's flags as the editor reads them, oldest first
-    (:func:`~tcip_annotation.flags.read_flags`); a record that will not read answers 400."""
+    (:func:`~tcip_annotation.flags.read_flags`); a record that will not read answers 400.
+    """
     from tcip_annotation.flags import encode_flag, flag_key, read_flags
 
     try:
@@ -113,7 +116,8 @@ def annotation_dict(a: Annotation) -> dict:
 
 def _completion(doc: LabelDocument) -> dict:
     """Each subject ``doc`` holds or marks, with its state
-    (:meth:`~tcip_annotation.json_io.LabelDocument.state`)."""
+    (:meth:`~tcip_annotation.json_io.LabelDocument.state`).
+    """
     return {
         subject: doc.state(subject)
         for subject in sorted(
@@ -125,7 +129,8 @@ def _completion(doc: LabelDocument) -> dict:
 def _admitted(image_path: str) -> tuple[Key, int, int]:
     """The image at ``image_path`` admitted once (:func:`~tcip_web.paths.allowed_image`): the key
     of its label document (:func:`~tcip_mcp.dataset_layout.label_key_of`) and its dimensions. An
-    image under no dataset image tree answers 400."""
+    image under no dataset image tree answers 400.
+    """
     from tcip_mcp.dataset_layout import label_key_of
 
     path, w, h = allowed_image(image_path)
@@ -148,7 +153,8 @@ def load_labels(image_path: str) -> dict:
     """An image's label document in pixel coords: its annotations, each with its ``index`` in the
     document (the index a proposal's ``paired`` names), each subject's completion
     (:func:`_completion`), the image's flags (:func:`_flags`) and the version token a save
-    echoes back, the empty token for an image with no document yet."""
+    echoes back, the empty token for an image with no document yet.
+    """
     key, w, h = _admitted(image_path)
     doc, version = _read(key)
     return _labels_body(image_path, key, w, h, doc, version)
@@ -164,7 +170,8 @@ def _labels_body(
 ) -> dict:
     """The label document as the editor adopts it, with the version token that goes with it: what
     a load answers and what a save answers, so the editor takes a save's token only together
-    with the document it names."""
+    with the document it names.
+    """
     return {
         "image_path": image_path,
         "img_width": w,
@@ -253,7 +260,8 @@ def load_proposals(image_path: str, bucket: str) -> dict:
     its assessment's authority or ``None`` with the ``reason``
     (:func:`~tcip_mcp.delivery.admitted_conf`), both read against the open project. A bucket that
     names no document for the image, or one that will not read, answers 400; no project open
-    answers 409."""
+    answers 409.
+    """
     from tcip_annotation.verdicts import read_verdicts
     from tcip_mcp.dataset_layout import (
         image_proposals,
@@ -349,7 +357,8 @@ class LaunchPriorityQueuePayload(BaseModel):
 def launch_priority_queue(payload: LaunchPriorityQueuePayload) -> dict:
     """Launch :func:`~tcip_mcp.tools.feedback_tools.ranked_review_queue` for the open project
     on a background thread; a checkpoint or images directory outside the allowed roots is refused
-    and a missing one answers 404."""
+    and a missing one answers 404.
+    """
     checkpoint_path = allowed_path(payload.checkpoint_path)
     images_dir = allowed_path(payload.images_dir)
     if not checkpoint_path.is_file():
@@ -375,7 +384,8 @@ def launch_priority_queue(payload: LaunchPriorityQueuePayload) -> dict:
 @router.get("/queue/{job_id}")
 def get_priority_queue_job(job_id: str) -> dict:
     """The queue job ``job_id``'s state and, once completed, its ranked images; an unknown job
-    answers 404."""
+    answers 404.
+    """
     job = _pq_registry.get(job_id)
     if job is None:
         raise HTTPException(404, f"job not found: {job_id}")

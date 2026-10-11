@@ -21,7 +21,8 @@ _open_transaction = threading.local()
 
 def refuse_inside_transaction(operation: str) -> None:
     """Refuse (``TransactionMisuseError``) ``operation`` while this thread holds a transaction,
-    since it would commit apart from it: a record or log write, or a file write."""
+    since it would commit apart from it: a record or log write, or a file write.
+    """
     if getattr(_open_transaction, "held", False):
         raise TransactionMisuseError(
             f"{operation} is not allowed inside an open transaction: use the transaction's own "
@@ -33,7 +34,8 @@ def refuse_inside_transaction(operation: str) -> None:
 @contextmanager
 def held_transaction() -> Generator[None]:
     """Mark this thread as holding a transaction for the body. Refuses
-    (``TransactionMisuseError``) a second one on the same thread."""
+    (``TransactionMisuseError``) a second one on the same thread.
+    """
     refuse_inside_transaction("a second transaction")
     _open_transaction.held = True
     try:
@@ -75,7 +77,8 @@ class Key:
 class Version:
     """What the caller believes is currently stored, as an opaque token derived from the stored
     bytes. ``Version.ABSENT`` asserts that no entry exists yet, which is how a create-only write is
-    expressed."""
+    expressed.
+    """
 
     token: str
 
@@ -96,7 +99,8 @@ class Versioned:
 @dataclass(frozen=True)
 class LogPage:
     """Entries read from a log, the cursor to resume from, and the positions of the entries in
-    this page that would not decode, which ``records`` leaves out."""
+    this page that would not decode, which ``records`` leaves out.
+    """
 
     records: list[Mapping[str, Any]]
     cursor: str

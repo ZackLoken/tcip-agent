@@ -1,5 +1,6 @@
 """Path confinement for client-supplied paths: :func:`assert_path_allowed` and the route forms
-built on it."""
+built on it.
+"""
 
 from __future__ import annotations
 
@@ -85,7 +86,8 @@ def _existing_anchor(resolved: Path) -> Path | None:
 
 def _contained(anchor: Path, root: Path) -> bool:
     """Whether ``anchor`` is the same directory as ``root`` or sits below it, by identity; an
-    ancestor that cannot be compared raises."""
+    ancestor that cannot be compared raises.
+    """
     return (
         nearest_containing_ancestor(anchor, root, tolerant=False) is not None
     )
@@ -113,7 +115,8 @@ def _excluded_by_name(resolved: Path) -> bool:
 
 def _in_open_project(path: str | Path) -> Path:
     """``path`` located against the open project
-    (:func:`~tcip_mcp.registry_paths.located`), against none when no project is open."""
+    (:func:`~tcip_mcp.registry_paths.located`), against none when no project is open.
+    """
     from tcip_web.state import NoProjectOpenError, store
 
     try:
@@ -155,7 +158,8 @@ def assert_path_allowed(path: str | Path) -> Path:
 
 def resolved_path(path: str) -> Path:
     """``path`` located for a route (:func:`_in_open_project`), unconfined; a path that cannot be
-    located answers 400."""
+    located answers 400.
+    """
     from fastapi import HTTPException
 
     try:
@@ -188,7 +192,8 @@ def _resolving(read: Any, path: str) -> tuple[Path, Any]:
     """The client-supplied image ``path`` (:func:`allowed_file`) and what ``read``, a reader of
     the logical image a path names, answers for it, the resolver's refusals translated: a path
     naming no logical image (a band of a grouped capture) answers 404 naming why, a grouped
-    capture missing a band 409, and an ambiguous stem 400."""
+    capture missing a band 409, and an ambiguous stem 400.
+    """
     from fastapi import HTTPException
 
     from tcip_mcp.pipelines.data.band_groups import BandGroupIncompleteError
@@ -207,7 +212,8 @@ def _resolving(read: Any, path: str) -> tuple[Path, Any]:
 
 def resolved_image(path: str) -> tuple[Path, Any]:
     """The client-supplied image ``path`` and the logical image it names
-    (:func:`~tcip_mcp.pipelines.image_utils.resolve_image_path`, :func:`_resolving`)."""
+    (:func:`~tcip_mcp.pipelines.image_utils.resolve_image_path`, :func:`_resolving`).
+    """
     from tcip_mcp.pipelines.image_utils import resolve_image_path
 
     return _resolving(resolve_image_path, path)
@@ -215,7 +221,8 @@ def resolved_image(path: str) -> tuple[Path, Any]:
 
 def allowed_image(path: str) -> tuple[Path, int, int]:
     """The client-supplied image ``path`` and the dimensions of the logical image it names
-    (:func:`~tcip_mcp.pipelines.image_utils.image_path_dimensions`, :func:`_resolving`)."""
+    (:func:`~tcip_mcp.pipelines.image_utils.image_path_dimensions`, :func:`_resolving`).
+    """
     from tcip_mcp.pipelines.image_utils import image_path_dimensions
 
     p, (width, height) = _resolving(image_path_dimensions, path)
@@ -224,7 +231,8 @@ def allowed_image(path: str) -> tuple[Path, int, int]:
 
 def allowed_optional(path: str | None) -> str | None:
     """:func:`allowed_path`'s resolved spelling of an optional client-supplied path, or ``None``
-    when none is given."""
+    when none is given.
+    """
     return str(allowed_path(path)) if path else None
 
 

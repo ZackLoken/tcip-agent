@@ -35,7 +35,8 @@ def _checkpoint(tmp_path: Path):
 
 def _pass(tmp_path: Path, reference=None, **stated):
     """The pass a registered checkpoint of ``tmp_path`` runs under ``stated``, made runnable from
-    ``reference`` when one is given."""
+    ``reference`` when one is given.
+    """
     from tcip_mcp.pipelines.execution import Stated, prepare
 
     return prepare(
@@ -68,7 +69,8 @@ def test_a_reference_derives_the_unstated_merge_threshold_and_the_density_and_ke
 ):
     """A reference's boxes derive an unstated merge threshold and its counted regions the density
     the pass runs at, over the checkpoint's own; a stated merge threshold survives the same
-    reference untouched."""
+    reference untouched.
+    """
     from tcip_mcp.pipelines.derivations import (
         CROSS_TILE_NMS_DERIVATION,
         OBJECT_DENSITY_DERIVATION,
@@ -118,7 +120,8 @@ def test_a_reference_derives_the_unstated_merge_threshold_and_the_density_and_ke
 
 def test_a_detector_pass_refuses_an_unstated_conf_by_name(tmp_path):
     """No default stands behind a detector's conf: a pass with no reference states it, and one
-    left unstated refuses naming it."""
+    left unstated refuses naming it.
+    """
     from tcip_mcp.pipelines.execution import ExecutionRefusedError
 
     with pytest.raises(ExecutionRefusedError, match="conf"):
@@ -143,7 +146,8 @@ def _in_model_point(p, tmp_path: Path) -> dict:
 def test_the_record_a_prediction_is_handed_governs_the_model_it_runs(tmp_path):
     """The execution record is the one authority over a prediction: the pass's own record sets
     the model's conf and the cap its density gives the frame, and a record handed to one
-    prediction sets them for it."""
+    prediction sets them for it.
+    """
     from tcip_mcp.pipelines.operating_point import (
         detector_operating_point_holder,
     )
@@ -168,7 +172,8 @@ def test_the_record_a_prediction_is_handed_governs_the_model_it_runs(tmp_path):
 
 def test_the_public_inference_and_assessment_tools_agree_that_an_unstated_value_is_none():
     """One sentinel across the doors: every door takes the one stated mapping, unstated by
-    default, and that mapping leaves every value unstated until a caller states it."""
+    default, and that mapping leaves every value unstated until a caller states it.
+    """
     from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.calibration_tools import (
         assess_checkpoint,
@@ -188,7 +193,8 @@ def test_the_dry_run_reports_the_stated_values_and_refuses_an_unstated_conf(
 ):
     """The dry-run report shows the values the pass will run at, the density the checkpoint's
     own, over images and over a raster alike; a dry run stating no conf refuses as the pass
-    would."""
+    would.
+    """
     from PIL import Image
 
     from tcip_mcp.pipelines.execution import Stated

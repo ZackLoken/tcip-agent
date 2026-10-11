@@ -29,7 +29,8 @@ def _recorded_meaning(tmp_path):
 
 def _by_plant(rows: list[dict]) -> dict[str, dict]:
     """Index summary dicts (or CSV rows) by plant_id, asserting the cohort is neither empty nor
-    collapsed: a per-plant assertion means nothing if the rows it quantifies over do not exist."""
+    collapsed: a per-plant assertion means nothing if the rows it quantifies over do not exist.
+    """
     indexed = {r["plant_id"]: r for r in rows}
     assert len(indexed) == len(rows) > 1
     return indexed
@@ -41,7 +42,8 @@ def _by_plant(rows: list[dict]) -> dict[str, dict]:
 def test_each_plants_summary_describes_only_that_plants_records():
     """Three plants with deliberately different count distributions, none of which equals the
     cohort-wide statistic: a summary attributed to a plant must be computed over that plant's group,
-    not over the whole delivery, which would ship one cohort number under every plant_id."""
+    not over the whole delivery, which would ship one cohort number under every plant_id.
+    """
     results = [
         {"image": "a1", "plant_id": "PLANT_A", "count": 2},
         {"image": "a2", "plant_id": "PLANT_A", "count": 4},
@@ -71,7 +73,8 @@ def test_each_plants_summary_describes_only_that_plants_records():
 def test_identity_provenance_is_summarized_per_plant_not_across_the_cohort():
     """One plant resolved from a single source, another from two, a third with no provenance at all.
     Mixing these across the cohort would report every plant as 'mixed' and give a well-resolved
-    plant another plant's worst assignment distance."""
+    plant another plant's worst assignment distance.
+    """
     results = [
         {
             "image": "a1",
@@ -117,7 +120,8 @@ def test_identity_provenance_is_summarized_per_plant_not_across_the_cohort():
 def test_delivery_csv_carries_each_plants_own_value_and_image_count(tmp_path):
     """The whole path a mosaic delivery takes, aggregate then export: every CSV row's value,
     n_images and identity columns belong to the plant named in that row. A cohort-wide number in
-    n_images tells the breeder a single-image plant was measured from six."""
+    n_images tells the breeder a single-image plant was measured from six.
+    """
     pytest.importorskip("torch")
     from tests._chain_fixtures import deliver_acknowledged
 
@@ -200,7 +204,8 @@ def test_continuous_summary_reports_the_mean_beside_its_own_standard_deviation()
     """A row labeled as a mean carries the arithmetic mean, and the deviation beside it is the
     sample standard deviation of the same values. Skewed samples, where the mean and the median are
     several units apart, are the ordinary case for a count-derived continuous trait, and a median
-    reported under a mean's label travels with a deviation that describes a different estimator."""
+    reported under a mean's label travels with a deviation that describes a different estimator.
+    """
     results = [
         {"image": "a1", "plant_id": "PLANT_A", "value": 1.0},
         {"image": "a2", "plant_id": "PLANT_A", "value": 2.0},
@@ -223,7 +228,8 @@ def test_continuous_summary_reports_the_mean_beside_its_own_standard_deviation()
 
 def test_summed_areas_stay_within_their_own_plant():
     """The sum strategy over plants with different numbers of contributing images: a cohort-wide sum
-    would give every plant the delivery's total area."""
+    would give every plant the delivery's total area.
+    """
     results = [
         {"image": "a1", "plant_id": "PLANT_A", "area_mm2": 100.0},
         {"image": "a2", "plant_id": "PLANT_A", "area_mm2": 250.0},
@@ -244,7 +250,8 @@ def test_summed_areas_stay_within_their_own_plant():
 
 def _assessed(project, kind: str, experiment_id: str):
     """A bucket published under an assessment of ``kind``, the count trait confirmed first with both
-    its per-image and its per-plant count operationalizations; the bucket as recorded."""
+    its per-image and its per-plant count operationalizations; the bucket as recorded.
+    """
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.tools.calibration_tools import assess_checkpoint
     from tcip_mcp.tools.inference_tools import run_inference
@@ -332,7 +339,8 @@ def test_a_per_image_count_assessment_never_answers_for_a_per_plant_delivery(
     tmp_path,
 ):
     """The per-image count the assessment measured is not the per-plant number the delivery ships:
-    the gate refuses, naming both kinds, rather than lend one measurement to another."""
+    the gate refuses, naming both kinds, rather than lend one measurement to another.
+    """
     pytest.importorskip("torch")
     from tcip_mcp.delivery import DeliveryRefusedError
     from tcip_mcp.pipelines.postprocessing.aggregation import (

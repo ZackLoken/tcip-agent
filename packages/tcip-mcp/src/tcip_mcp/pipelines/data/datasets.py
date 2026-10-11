@@ -147,7 +147,8 @@ class BaseImageDataset(BaseDataset):
     def read_mask(sample: Sample) -> np.ndarray:
         """One mask sample's raster as the integer class ids it carries, decoded from the bytes its
         one read answered (``stored``,
-        :func:`~tcip_mcp.pipelines.data.label_queries.acquired`)."""
+        :func:`~tcip_mcp.pipelines.data.label_queries.acquired`).
+        """
         import io
 
         opened = Image.open(io.BytesIO(sample.stored.value))
@@ -207,7 +208,8 @@ class BaseImageDataset(BaseDataset):
     def _open_image(self, stem: str):
         """Open an image honoring ``expected_channels``: PIL where the pixels have a faithful
         PIL mode (1/3 channels always; 4 only when the source declares its 4th band alpha), else
-        an ``[H, W, C]`` ndarray. See :func:`image_utils.to_pil_if_faithful`."""
+        an ``[H, W, C]`` ndarray. See :func:`image_utils.to_pil_if_faithful`.
+        """
         return load_image(self.image_of(stem), self.expected_channels)
 
     _warned_ndarray_transforms = False
@@ -250,7 +252,8 @@ def indexed_sample_keys(dataset: Any) -> set[str]:
 def target_tensors(target: Any) -> dict[str, torch.Tensor]:
     """A ``{"boxes", "labels", "iscrowd"}`` target of parallel per-box values, with its
     ``attributes`` rows when it carries them, as the tensors every detection loader emits,
-    ``iscrowd`` under torchvision's reference key."""
+    ``iscrowd`` under torchvision's reference key.
+    """
     return {
         "boxes": torch.tensor(target["boxes"], dtype=torch.float32).reshape(
             -1, 4
@@ -276,7 +279,8 @@ row filter keeps in step."""
 
 def crowd_of(target: Mapping[str, Any]) -> Any:
     """A detection target's per-box crowd flags, which every detection producer states; a target
-    stating none refuses (``ValueError``) naming the key."""
+    stating none refuses (``ValueError``) naming the key.
+    """
     if target.get("iscrowd") is None:
         raise ValueError(
             "this detection target states no 'iscrowd': whether each row is one "
@@ -288,7 +292,8 @@ def crowd_of(target: Mapping[str, Any]) -> Any:
 
 def object_region(target: Mapping[str, Any], area: float) -> Region:
     """The objects of a detection ``target`` (its rows but the crowd regions, :func:`object_rows`),
-    their xyxy boxes and labels, over a region of ``area`` pixels."""
+    their xyxy boxes and labels, over a region of ``area`` pixels.
+    """
     keep = object_rows(crowd_of(target))
     return Region(
         boxes=np.asarray(target["boxes"], dtype=np.float32).reshape(-1, 4)[
@@ -309,7 +314,8 @@ def class_counts(regions: Iterable[Region]) -> dict[int, int]:
 def instance_targets(targets: list[dict]) -> list[dict]:
     """``targets`` as the built-in torchvision heads take them: every crowd row
     (:func:`object_rows`) dropped from each per-box key, every other key as it was; the input
-    targets are unchanged."""
+    targets are unchanged.
+    """
     out = []
     for t in targets:
         keep = object_rows(crowd_of(t))
@@ -321,7 +327,8 @@ def instance_targets(targets: list[dict]) -> list[dict]:
 
 class DocumentDataset(BaseImageDataset):
     """A loader over samples whose ground truth is a per-image label document, read under the
-    run's own admitted class space (``scope``)."""
+    run's own admitted class space (``scope``).
+    """
 
     ground_truth_shape = DOCUMENT
 
@@ -343,7 +350,8 @@ class DocumentDataset(BaseImageDataset):
     def det_targets(self, document: LabelDocument) -> dict[str, Any]:
         """One sample's label ``document`` (:meth:`document`) as the target
         :func:`json_det_targets` reads under this run's own class space and this task's own
-        geometry (``reads_geometry``)."""
+        geometry (``reads_geometry``).
+        """
         return json_det_targets(
             document.annotations,
             self.scope,
@@ -352,7 +360,8 @@ class DocumentDataset(BaseImageDataset):
 
     def region(self, stem: str) -> Region:
         """One sample's objects over the frame its label document records
-        (:func:`object_region`)."""
+        (:func:`object_region`).
+        """
         from tcip_mcp.pipelines.data.splits import label_document_extent
 
         document = self.document(stem)
@@ -369,7 +378,8 @@ class DocumentDataset(BaseImageDataset):
     @staticmethod
     def tensors(target: Mapping[str, Any]) -> dict[str, torch.Tensor]:
         """The tensors this task's loader emits for ``target``'s rows, each in the coordinates of
-        the image it is served with: :func:`target_tensors`."""
+        the image it is served with: :func:`target_tensors`.
+        """
         return target_tensors(target)
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
@@ -407,7 +417,8 @@ def slice_candidates(
     ascending indices of every row whose box can meet the slice's half-open ``(x0, y0, x1, y1)``
     extent, a superset :func:`clip_rows_to_tile` decides on. Found from the slice origins each
     box's extent spans, so the cost follows the box-slice incidences; slice origins are distinct,
-    as a lattice's are. Each slice gets its own fresh array."""
+    as a lattice's are. Each slice gets its own fresh array.
+    """
     found: list[list[int]] = [[] for _ in slices]
     boxes = np.asarray(boxes, dtype=np.float64).reshape(-1, 4)
     if slices and len(boxes):
@@ -673,7 +684,8 @@ class TiledDetectionDataset(BaseImageDataset):
     @property
     def tile_entries(self) -> list[tuple[str, tuple[int, int, int, int]]]:
         """``(stem, slice)`` per sample, in index order, each slice its half-open ``(x0, y0, x1,
-        y1)`` lattice box."""
+        y1)`` lattice box.
+        """
         return [(e["stem"], e["slice"]) for e in self._index]
 
     @property
@@ -681,13 +693,15 @@ class TiledDetectionDataset(BaseImageDataset):
         """Per-stem frame facts recorded when the index was built: ``width`` and ``height`` (the
         source header's frame), ``channels`` and ``dtype_itemsize`` (both ``None`` for a source
         no pooled reader was opened for), and ``windowed`` (whether this source reads through a
-        windowed backend)."""
+        windowed backend).
+        """
         return {stem: dict(info) for stem, info in self._source_frames.items()}
 
     @property
     def regions(self) -> list[Region]:
         """Each indexed tile's objects over its own pixel area (:func:`object_region`), in index
-        order."""
+        order.
+        """
         return [
             object_region(e, (x1 - x0) * (y1 - y0))
             for e in self._index
@@ -739,7 +753,8 @@ class TiledDetectionDataset(BaseImageDataset):
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
         """One slice and its clipped targets. The slice is PIL where its dtype has a faithful mode
         (so augmentation applies), else ``[H, W, C]``; a 4-channel slice converts only when the
-        source names its 4th band alpha (:func:`to_pil_if_faithful`)."""
+        source names its 4th band alpha (:func:`to_pil_if_faithful`).
+        """
         e = self._index[idx]
         stem = e["stem"]
         x0, y0, x1, y1 = e["slice"]
@@ -777,7 +792,8 @@ class TiledDetectionDataset(BaseImageDataset):
 
 class InstanceSegDataset(DocumentDataset):
     """Instance masks from per-image polygons: the producer's own samples, each naming its own
-    source and the label document that answers for it."""
+    source and the label document that answers for it.
+    """
 
     task_type = "instance_seg"
     reads_geometry = staticmethod(polygonal)
@@ -786,7 +802,8 @@ class InstanceSegDataset(DocumentDataset):
     @staticmethod
     def tensors(target: Mapping[str, Any]) -> dict[str, torch.Tensor]:
         """:func:`target_tensors` beside ``masks``, each row's polygon rasterized on the
-        ``size`` ``(width, height)`` of the image it is served with (:func:`instance_masks`)."""
+        ``size`` ``(width, height)`` of the image it is served with (:func:`instance_masks`).
+        """
         return {
             **target_tensors(target),
             "masks": instance_masks(target["geometry"], target["size"]),
@@ -798,7 +815,8 @@ def instance_masks(
 ) -> torch.Tensor:
     """Each polygon of ``polygons`` filled on its own ``size`` ``(width, height)`` canvas, as a
     ``[N, height, width]`` uint8 tensor. Every ring of a polygon fills its one mask: a multi-ring
-    instance is one occlusion-split object."""
+    instance is one occlusion-split object.
+    """
     from PIL import ImageDraw
 
     w, h = size
@@ -849,7 +867,8 @@ class SemanticSegDataset(BaseImageDataset):
 
 def table_values(samples: Sequence[Sample]) -> list[str]:
     """Each sample's own table-row value, as its one read answered it
-    (:func:`~tcip_mcp.pipelines.data.label_queries.acquired`)."""
+    (:func:`~tcip_mcp.pipelines.data.label_queries.acquired`).
+    """
     return [s.read for s in acquired(samples)]
 
 
@@ -857,7 +876,8 @@ class TableDataset(BaseImageDataset):
     """A loader over a recorded sample list whose ground truth is one row of a table: each sample
     reads the value its ``row_key`` names in the table it names (:func:`table_values`), read by
     ``convert`` and handed to the head under ``target_key``, its loss contract's own key. A loader
-    whose ground truth derives a count also counts its values per class."""
+    whose ground truth derives a count also counts its values per class.
+    """
 
     ground_truth_shape = TABLE
     target_key = ""
@@ -927,7 +947,8 @@ def builtin_loader(
     task: str, dataset_source: DatasetSourceSchema | None = None
 ) -> type[BaseImageDataset] | None:
     """The built-in loader a run of ``task`` is read by: ``None`` for a run naming a bespoke
-    ``dataset_source`` and for a task no built-in loader reads."""
+    ``dataset_source`` and for a task no built-in loader reads.
+    """
     return None if dataset_source else _DATASET_MAP.get(task)
 
 

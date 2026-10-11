@@ -50,7 +50,8 @@ def _criterion(cal, hold):
 def _gt_records(prefix, n, *, swap_classes, classes=(1, 2), offset=0.0):
     """Per-image records: half the objects class ``classes[0]``, half ``classes[1]``;
     ``swap_classes`` makes the model call every one of them ``classes[1]``. ``offset`` shifts the
-    whole layout so a calibration and a holdout set hold distinct geometry."""
+    whole layout so a calibration and a holdout set hold distinct geometry.
+    """
     recs = []
     for i in range(n):
         gt, dt = [], []
@@ -109,7 +110,8 @@ def test_the_same_geometry_called_correctly_passes():
 
 def test_a_single_class_reference_is_unaffected_by_the_conditioning():
     """One detection class: conditioning on class must be a no-op, the one class's statistics the
-    pooled ones, and an independently class-filtered sweep over the same records agreeing."""
+    pooled ones, and an independently class-filtered sweep over the same records agreeing.
+    """
     cal = _gt_records("cal", 4, swap_classes=False, classes=(1, 1))
     hold = _gt_records(
         "hold", 4, swap_classes=False, classes=(1, 1), offset=5000.0
@@ -140,7 +142,8 @@ def test_a_single_class_reference_is_unaffected_by_the_conditioning():
 
 def test_a_class_the_holdout_never_carries_cannot_pass_by_its_absence():
     """The model confuses classes 1 and 2 in calibration and the holdout holds only class 1: every
-    per-class entry the holdout can show reads bias 0, and class 2 has no evidence at all."""
+    per-class entry the holdout can show reads bias 0, and class 2 has no evidence at all.
+    """
     _conf, evidence, failures = _criterion(
         _gt_records("cal", 4, swap_classes=True),
         _gt_records(
@@ -157,7 +160,8 @@ def test_a_class_the_holdout_never_carries_cannot_pass_by_its_absence():
 def test_a_class_scarce_in_the_holdout_cannot_be_diluted_to_a_pass():
     """Class 2 is present on 2 of 20 holdout images and missed outright both times: the bias is
     measured over the images that carry the class, never diluted by the eighteen that say nothing
-    about it."""
+    about it.
+    """
 
     def calibration(prefix, n, offset):
         recs = []
@@ -207,7 +211,8 @@ def test_a_class_scarce_in_the_holdout_cannot_be_diluted_to_a_pass():
 
 def test_no_conf_in_the_sweep_escapes_a_wholesale_class_swap():
     """For a model that calls every class-1 object class 2, every conf on the curve leaves a class
-    over tolerance; a class's per-image bias is exactly ``|dt_c| - |gt_c|`` at that conf."""
+    over tolerance; a class's per-image bias is exactly ``|dt_c| - |gt_c|`` at that conf.
+    """
     recs = _gt_records("cal", 4, swap_classes=True)
     for r in recs:  # a real score spread, so confs actually filter
         for k, d in enumerate(r["dt"]):
@@ -248,7 +253,8 @@ def _three_class_records(prefix, offset, *, background: int):
     """Three classes of 1 to 3 real objects per image: classes 1 and 2 each found plus one
     spurious detection that survives every conf; class 3's three objects one found confidently,
     one hesitantly, one missed outright. ``background`` always-found objects per class lift each
-    class's typical count without touching the bias arithmetic."""
+    class's typical count without touching the bias arithmetic.
+    """
     recs = []
     for i in range(6):
         gt, dt = [], []
@@ -297,7 +303,8 @@ def _three_class_records(prefix, offset, *, background: int):
 def test_the_pick_serves_the_worst_class_and_a_sparse_reference_still_fails_it():
     """At conf 0.95 the pooled bias is 0 while class 3 sits at -2; at 0.4 every class's bias is at
     most 1, so the objective picks 0.4. At this density one permanent miscount per image is a large
-    relative error in every class, and the criterion refuses all three."""
+    relative error in every class, and the criterion refuses all three.
+    """
     recs = _three_class_records("w", 0.0, background=0)
     sweep = derive_operating_point_curve(
         recs,
@@ -328,7 +335,8 @@ def test_the_pick_serves_the_worst_class_and_a_sparse_reference_still_fails_it()
 
 def test_the_same_pick_passes_once_every_class_is_dense_enough():
     """Two hundred always-found objects per class make the same permanent miscount a small
-    fraction of each class's typical count: the criterion admits the pick it refused above."""
+    fraction of each class's typical count: the criterion admits the pick it refused above.
+    """
     recs = _three_class_records("w", 0.0, background=200)
     conf, _evidence, failures = _criterion(
         recs, _three_class_records("h", 5000.0, background=200)
@@ -369,7 +377,8 @@ def test_the_fraction_term_governs_a_dense_reference():
 def test_a_sparse_classes_recorded_tolerance_is_the_floor_not_the_fraction_term():
     """Class 2 holds two objects per image and one spurious detection on one of five images: its
     recorded tolerance is the floor (1 / 5), an order of magnitude above the fraction term
-    (0.01 * 2)."""
+    (0.01 * 2).
+    """
 
     def build(prefix, offset):
         recs = []
@@ -401,7 +410,8 @@ def test_a_sparse_classes_recorded_tolerance_is_the_floor_not_the_fraction_term(
 
 def test_a_class_present_on_exactly_one_holdout_image_cannot_pass_on_it_alone():
     """A rare class that shows up once, in a dense frame, would derive its own tolerance from that
-    one image; one image is not enough evidence to trust, whatever its density."""
+    one image; one image is not enough evidence to trust, whatever its density.
+    """
 
     def build(prefix, offset):
         recs = []

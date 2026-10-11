@@ -56,7 +56,8 @@ def test_run_id_evaluation_scopes_ground_truth_to_the_runs_own_subject(
     tmp_path: Path, monkeypatch
 ) -> None:
     """The evaluation dataset reads the subject the run's checkpoint records, so the ground truth
-    it scores against holds that subject's objects and no others."""
+    it scores against holds that subject's objects and no others.
+    """
     import tcip_mcp.pipelines.training.eval_runners as runners
     from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.training_tools import evaluate_model

@@ -50,7 +50,8 @@ def call_through_handshake(
     bound: BoundProject | None,
 ) -> list[dict]:
     """Run the real server in memory for ``bound``, complete a handshake as ``declared``, make
-    ``calls`` in order, and hand back each tool's return value."""
+    ``calls`` in order, and hand back each tool's return value.
+    """
     return [
         _body(result)
         for result in results_through_handshake(calls, declared, bound=bound)
@@ -65,7 +66,8 @@ def results_through_handshake(
 ) -> list[Any]:
     """Run the real server in memory, built for ``bound`` (``None``: for no project), complete a
     handshake as ``declared``, make ``calls`` in order, and hand back each call's result as the
-    server sent it, a refused call's error included."""
+    server sent it, a refused call's error included.
+    """
 
     async def run() -> list[Any]:
         bodies: list[Any] = []
@@ -148,7 +150,8 @@ def test_two_handshakes_in_two_runs_mint_two_sessions(
 
 def test_a_call_with_no_handshake_records_no_identity(project: Path) -> None:
     """The control: the web backend, a script and this test process import the tools without a
-    handshake, and their lines keep the shape they always had."""
+    handshake, and their lines keep the shape they always had.
+    """
     from tcip_mcp.tools.meta_tools import report_friction
 
     report_friction(project, "unexpected_behavior", "no handshake")
@@ -165,7 +168,8 @@ def test_a_trait_proposed_through_a_handshake_is_named_by_its_audit_line(
     bound,
 ) -> None:
     """The entry travels as the tool's declared input schema, JSON over the real server; the
-    proposal's own audit line names the harness, and the revision carries no copy of it."""
+    proposal's own audit line names the harness, and the revision carries no copy of it.
+    """
     entry = fx.with_operationalization(
         fx.COUNT_SPEC,
         traits.PER_IMAGE_COUNT,
@@ -217,7 +221,8 @@ class _CapturingResponse:
 @pytest.fixture
 def captured_requests(monkeypatch: pytest.MonkeyPatch, project: Path) -> list:
     """Every ``urllib`` request the tools' push makes, with a backend recorded as serving the
-    workspace and answered as up."""
+    workspace and answered as up.
+    """
     import urllib.request
 
     from tcip_mcp.web_client import backend_port_key

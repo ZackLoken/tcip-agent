@@ -46,7 +46,8 @@ def recorded_children(monkeypatch):
 
 def _canonical_dataset(root: Path, date: str = "2-11-26") -> Path:
     """A small dataset in the canonical layout, the shape ``dataset_root_of`` resolves; its
-    image directory."""
+    image directory.
+    """
     from PIL import Image
 
     from tcip_annotation.state import Annotation, BBox
@@ -73,7 +74,8 @@ def _detection_config(
     images_dir: Path, builder: str = BESPOKE_DETECTION
 ) -> dict:
     """A one-image-per-batch ``training_config`` of the detection ``builder`` at 64/96 px over
-    every admitted image of ``images_dir``, selecting on its loss since nothing is held out."""
+    every admitted image of ``images_dir``, selecting on its loss since nothing is held out.
+    """
     from tests._chain_fixtures import BESPOKE_MODELS, training_config
 
     return training_config(
@@ -104,7 +106,8 @@ def test_the_run_directory_lies_under_its_project_not_the_process_cwd(
     tmp_path: Path, monkeypatch, recorded_children
 ) -> None:
     """The run directory handed to the child and the run record written into it resolve under the
-    project's experiments directory, never under the launching process's cwd."""
+    project's experiments directory, never under the launching process's cwd.
+    """
     pytest.importorskip("torchvision")
     from tcip_mcp.experiments import RUN_FILE, experiments_dir
 
@@ -131,7 +134,8 @@ def test_launched_run_records_the_datasets_identity_in_its_run_record(
 ) -> None:
     """The run record carries the identity of the data section's dataset, so the metric this run
     produces can be traced back to the exact content it trained on. A registered dataset's minted
-    id and its recomputed fingerprint both land there, not None."""
+    id and its recomputed fingerprint both land there, not None.
+    """
     pytest.importorskip("torchvision")
     from tcip_mcp.tools.project_tools import register_dataset
 
@@ -154,7 +158,8 @@ def test_launch_records_what_the_smoke_contract_checked(
 ) -> None:
     """launch_training records a model_contract (subject/gating/batch_source/dims/issues/
     gradient_magnitudes) on the run record, what the launch-time smoke actually checked, and the
-    caller's own config dict is never the one mutated to carry it."""
+    caller's own config dict is never the one mutated to carry it.
+    """
     pytest.importorskip("torchvision")
     project = tmp_path / "project"
     project.mkdir()
@@ -196,7 +201,8 @@ def test_launch_with_overfit_check_records_the_rendered_report(
     tmp_path: Path, monkeypatch, recorded_children
 ) -> None:
     """``launch_training(overfit_check=True)`` runs the diagnostic on the contract's own batch
-    and records the rendered report on both the returned dict and the persisted config."""
+    and records the rendered report on both the returned dict and the persisted config.
+    """
     pytest.importorskip("torchvision")
     from tcip_mcp.tools import training_tools
 
@@ -221,7 +227,8 @@ def test_launch_with_overfit_check_over_a_diverging_model_proceeds_with_a_json_s
     """A model whose loss diverges to nan under the overfit diagnostic never blocks the launch,
     since the check is voluntary and non-gating: the run proceeds, and the persisted report
     renders the non-finite losses as null with the state named beside them, so the record this
-    launch writes still passes check_json_value on what the diagnostic actually observed."""
+    launch writes still passes check_json_value on what the diagnostic actually observed.
+    """
     pytest.importorskip("torchvision")
     from tcip_mcp.tools import training_tools
     from tcip_store import check_json_value
@@ -257,7 +264,8 @@ def test_the_run_record_the_worker_reads_carries_the_seed_and_the_training_keys(
     recorded_children so no subprocess actually spawns); the reader is the one the training
     child performs, the run directory's own ``run.json``. The trainer's keys sit at the config's
     top level and ``run_registry.seeded`` draws a seed into it before the record is written, so
-    the config the worker reads carries both, in the directory the run's own id names."""
+    the config the worker reads carries both, in the directory the run's own id names.
+    """
     pytest.importorskip("torchvision")
     project = tmp_path / "project"
     project.mkdir()
@@ -277,7 +285,8 @@ def test_the_run_record_the_worker_reads_carries_the_seed_and_the_training_keys(
 
 def training_tools_launch(project: Path, config: dict) -> dict:
     """Launch a run of ``project`` and assert the config was accepted, so a preflight refusal
-    never reads as a provenance failure in the tests above."""
+    never reads as a provenance failure in the tests above.
+    """
     from tcip_mcp.tools import training_tools
 
     res = training_tools.launch_training(project, config, actor=None)

@@ -46,7 +46,8 @@ RESERVED_DIMS = ("in_chans", "num_classes", "num_ranks", "attributes")
 
 def _split_dotted(target: str) -> tuple[str, str]:
     """Split ``'module.path:function'`` (or ``'module.path.function'``) into ``(module, attr)``,
-    with no resolution or validation of either half."""
+    with no resolution or validation of either half.
+    """
     if ":" in target:
         mod_name, _, attr = target.partition(":")
     else:
@@ -89,7 +90,8 @@ def resolve_named(
     """The entry ``registry`` holds under ``name``. Where ``register`` names the call that adds
     an entry to ``registry``, a dotted ``module:factory`` ``name`` imports its target instead.
     Refuses (``ValueError``) a name that is neither, naming the ``kind``, the registered names
-    and ``register``, and a dotted name that will not import."""
+    and ``register``, and a dotted name that will not import.
+    """
     if name in registry:
         return registry[name]
     if register is None:
@@ -111,7 +113,8 @@ def resolve_named(
 
 def keyword_parameters(fn: Any) -> tuple[set[str], bool]:
     """The keyword names ``fn``'s signature names (``self`` and variadics excluded), and whether
-    it also takes any keyword (``**kwargs``)."""
+    it also takes any keyword (``**kwargs``).
+    """
     import inspect
 
     params = inspect.signature(fn).parameters.values()
@@ -146,7 +149,8 @@ class SourceLayout:
     path), and nothing else: a run's snapshot (:func:`run_layout`) or a layout written for an
     admission no run holds yet (:func:`staged_sources`), whose temporary ``directory`` is removed
     once nothing holds the layout. ``snapshot`` is the digest of the snapshot record it lays out,
-    every copy's place and content digest."""
+    every copy's place and content digest.
+    """
 
     root: Path
     places: tuple[PurePosixPath, ...]
@@ -157,7 +161,8 @@ class SourceLayout:
 def module_root(dotted: str, source_files: list[str] | None) -> Path:
     """The directory the module ``dotted`` (``'module:function'``) names imports from, off its
     own file among ``source_files`` (:func:`_import_root`). Refuses (``ValueError``) naming both
-    when none is that module's file: a module a run imports is a file it declares."""
+    when none is that module's file: a module a run imports is a file it declares.
+    """
     module = _split_dotted(dotted)[0]
     for file in source_files or []:
         root = _import_root(Path(file), module)
@@ -172,7 +177,8 @@ def module_root(dotted: str, source_files: list[str] | None) -> Path:
 
 def lay_out(directory: Path, copies: Mapping[str, bytes]) -> None:
     """Write each of a snapshot's ``copies`` (:func:`snapshot_model_source`) at its path under
-    ``directory``, the layout :func:`run_layout` states there."""
+    ``directory``, the layout :func:`run_layout` states there.
+    """
     for name, data in copies.items():
         (directory / name).parent.mkdir(parents=True, exist_ok=True)
         (directory / name).write_bytes(data)
@@ -182,7 +188,8 @@ class StagedSources(NamedTuple):
     """A run's source snapshot taken once at its admission (:func:`snapshot_model_source`'s
     ``record`` and ``copies``, which its run directory then holds) and those copies laid out
     (:func:`lay_out`) in a temporary directory the ``layout`` holds, for the admission to import
-    from before any run holds them."""
+    from before any run holds them.
+    """
 
     record: dict
     copies: dict[str, bytes]
@@ -191,7 +198,8 @@ class StagedSources(NamedTuple):
 
 def staged_sources(spec: TrainConfigSchema, project: Path) -> StagedSources:
     """The :class:`StagedSources` of a run of ``project`` over ``spec``; refuses as
-    :func:`snapshot_model_source` does."""
+    :func:`snapshot_model_source` does.
+    """
     import dataclasses
     import tempfile
 
@@ -211,7 +219,8 @@ def run_layout(run_dir: Path, source: dict) -> SourceLayout:
     """The layout a snapshot's copies make under ``run_dir`` (:func:`lay_out`): its
     :data:`SNAPSHOT_DIR`, each copy at the place the snapshot's record ``source``
     (:func:`snapshot_model_source`'s record, a run's own) states, and the digest of every copy's
-    place and ``sha256`` that record states."""
+    place and ``sha256`` that record states.
+    """
     import hashlib
     import json
 
@@ -235,7 +244,8 @@ def owning_run_layout(
     took the source snapshot whose digest is ``snapshot`` (:attr:`SourceLayout.snapshot`, a
     checkpoint's :data:`SNAPSHOT_KEY`) and whose layout holds every file ``spec`` declares.
     Refuses (``ValueError``) a spec declaring no file, or a snapshot and files no run of
-    ``project`` took, naming how a checkpoint comes to have a run."""
+    ``project`` took, naming how a checkpoint comes to have a run.
+    """
     from tcip_mcp.experiments import RUN_FILE, read_run_record, run_dirs
 
     declared = {
@@ -394,7 +404,8 @@ def model_dims(scope: ClassScope, sizes: Mapping[str, int]) -> dict[str, Any]:
 def recorded_model_dims(spec: TrainConfigSchema) -> dict[str, Any]:
     """:func:`model_dims` over what a validated run config records on its data block: its
     ``scope`` and its sizes. Refuses by name a run of a built-in loader's task that records no
-    count its ground truth derives (``num_ranks`` for an ordinal run)."""
+    count its ground truth derives (``num_ranks`` for an ordinal run).
+    """
     from tcip_mcp.pipelines.data.datasets import builtin_loader, stated_sizes
 
     data, task = spec.data, spec.model_source.task
@@ -492,7 +503,8 @@ def _tcip_git_commit() -> str | None:
 
 def capture_env() -> dict:
     """The platform git commit, the Python and ML library versions and the CUDA version this
-    process runs, each ``None`` when it cannot be resolved."""
+    process runs, each ``None`` when it cannot be resolved.
+    """
     import sys
 
     env: dict[str, Any] = {
@@ -523,7 +535,8 @@ def source_seams(
 ) -> list[tuple[str, str, list[str] | None]]:
     """Each module a run of ``spec`` imports from its declared files: the config field naming
     it, its dotted name, and the files declared for it (a ``training_source`` is one of the
-    ``model_source``'s)."""
+    ``model_source``'s).
+    """
     dataset_source = spec.data.dataset_source
     return [
         (field, dotted, files)
@@ -616,7 +629,8 @@ def snapshot_model_source(
     per declared file keyed by its stored path (``registry_paths.stored_path`` against
     ``project``) naming its copy's path in the run directory (``file``, under
     :data:`SNAPSHOT_DIR`), its ``sha256`` and ``bytes``; and each copy's bytes by that path, for
-    :func:`lay_out` to write. Refuses a file that cannot be read."""
+    :func:`lay_out` to write. Refuses a file that cannot be read.
+    """
     import hashlib
 
     from tcip_mcp.registry_paths import stored_path
@@ -640,7 +654,8 @@ def snapshot_bound(
     """``spec``, a run's config, with each file it declares (:func:`source_seams`) replaced by
     its copy in ``run_dir``'s snapshot (``source``, :func:`snapshot_model_source`'s record of that
     run, which names each copy by the declared file's stored path), so the run, and every
-    checkpoint config it writes, names the copies its imports read."""
+    checkpoint config it writes, names the copies its imports read.
+    """
     from tcip_mcp.experiments import project_of_run
     from tcip_mcp.registry_paths import stored_path
 

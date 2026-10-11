@@ -28,7 +28,8 @@ def dice_loss(
     probs: torch.Tensor, targets: torch.Tensor, smooth: float = 1e-6
 ) -> torch.Tensor:
     """One minus the Dice coefficient of ``probs`` against ``targets`` of the same shape, each
-    summed over its last axis and the result averaged over every other axis."""
+    summed over its last axis and the result averaged over every other axis.
+    """
     intersection = (probs * targets).sum(-1)
     return (
         1.0
@@ -43,7 +44,8 @@ def corn_loss(
     """The CORN loss of ``[B, num_ranks - 1]`` conditional ``logits`` against ``[B]`` 0-indexed
     ``ranks``: for each rank ``k``, binary cross-entropy of classifier ``k`` on the samples with
     a rank of at least ``k`` predicting a rank above ``k``, averaged over the classifiers that saw
-    any sample, accumulated in the logits' own dtype."""
+    any sample, accumulated in the logits' own dtype.
+    """
     loss = torch.tensor(0.0, device=logits.device, dtype=logits.dtype)
     n_tasks = 0
     for k in range(num_ranks - 1):
@@ -186,7 +188,8 @@ class CORNLoss(BaseLoss):
 
 class CORALLoss(BaseLoss):
     """Consistent rank logits loss: binary cross-entropy of ``[B, K-1]`` cumulative logits against
-    each sample's rank levels."""
+    each sample's rank levels.
+    """
 
     name = "coral"
 

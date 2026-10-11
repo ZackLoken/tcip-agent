@@ -18,7 +18,8 @@ from tests._producer_fixtures import label_image, registry_over
 
 def _make_dataset(root: Path) -> None:
     """A minimal nested-schema dataset (image + label + registry), so its fingerprint is real
-    rather than the ``None`` a check_dataset_identity.py run reads as bespoke-or-empty."""
+    rather than the ``None`` a check_dataset_identity.py run reads as bespoke-or-empty.
+    """
     (root / "images" / "2-11-26").mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (32, 32)).save(
         root / "images" / "2-11-26" / "img_000.jpg"
@@ -39,7 +40,8 @@ def test_register_dataset_stores_a_relative_path_for_the_projects_own_tree(
     tmp_path: Path,
 ):
     """A dataset that is the project's own tree registers as ``"."``, never as an absolute
-    path."""
+    path.
+    """
     src = tmp_path / "proj"
     _make_dataset(src)
 
@@ -89,7 +91,8 @@ def test_register_dataset_stores_a_nested_relative_path_with_posix_separators(
 ):
     """A dataset under a subdirectory of the project (not the project's own tree) stores a
     deeper relative form than "."; it is posix-separated so the entry reads the same after a
-    cross-machine move, and the accessor resolves it back to the same directory."""
+    cross-machine move, and the accessor resolves it back to the same directory.
+    """
     from tcip_mcp.tools.project_tools import dataset_entry_path
 
     project = tmp_path / "proj"
@@ -112,7 +115,8 @@ def test_stored_path_returns_the_resolved_absolute_path_when_not_contained(
 ):
     """A dataset genuinely outside the project is stored absolute; the fall-through must return
     the resolved form rather than echoing whatever spelling the caller passed, and a '..' form is
-    never produced."""
+    never produced.
+    """
     from tcip_mcp.registry_paths import stored_path
 
     project = tmp_path / "proj"
@@ -132,7 +136,8 @@ def test_stored_path_recognizes_containment_through_a_symlinked_project_root(
 ):
     """Coverage: containment is decided by filesystem identity, so an alias of the project root
     (a symlink standing in for a junction) still recognizes a dataset under the real directory
-    it points at."""
+    it points at.
+    """
     import pytest
 
     from tcip_mcp.registry_paths import stored_path
@@ -203,7 +208,8 @@ def test_resolve_statement_registry_names_the_resolved_root_not_the_stored_dot(
     classes belong to. Both datasets are registered under subdirectories of the project (never
     the project's own tree), so the resolved paths the refusal names can only have come from the
     registry-driven ``roots`` list, never from the message's own echo of its ``project_root``
-    argument (which the un-nested form let this assertion pass without discriminating)."""
+    argument (which the un-nested form let this assertion pass without discriminating).
+    """
     from tcip_mcp.traits import resolve_statement_registry
 
     project = tmp_path / "proj"
@@ -236,7 +242,8 @@ def test_evidence_roots_resolves_a_relatively_registered_dataset(
 ):
     """The dataset is registered under a subdirectory of the project, not the project's own
     tree, so a resolved root can only come from resolving the registry entry, never from the
-    project root _evidence_roots always includes regardless of the registry."""
+    project root _evidence_roots always includes regardless of the registry.
+    """
     from tcip_web.routes.results import _evidence_roots
 
     project = tmp_path / "proj"

@@ -1,6 +1,7 @@
 """N-channel threading: sensor->in_chans, backbones accept in_chans, a train-start channel
 guard, and dataset channel metadata. Multi-channel *readers* are separate; here the plumbing
-carries channel counts and validates them."""
+carries channel counts and validates them.
+"""
 
 import pytest
 
@@ -41,7 +42,8 @@ def test_compose_and_forward_4_channel_model():
 
 def test_train_start_channel_guard():
     """A loader handing the model a batch at a width other than the run's recorded one (a bespoke
-    dataset composing its own bands) refuses at the first batch; a matching one trains."""
+    dataset composing its own bands) refuses at the first batch; a matching one trains.
+    """
     from tcip_mcp.pipelines.training.generic_trainer import (
         _validate_input_channels,
     )
@@ -73,7 +75,8 @@ def _nchan_adapter(in_chans: int):
 
 def test_n_channel_detector_builds_and_trains():
     """The documented multispectral claim, exercised on the detection path: a five-band detector
-    builds, normalizes at five bands and takes a training step."""
+    builds, normalizes at five bands and takes a training step.
+    """
     from tcip_mcp.pipelines.components.detectors import build_detector
 
     adapter = _nchan_adapter(5)
@@ -286,7 +289,8 @@ def test_band_normalization_stats_admits_underivable(tmp_path):
 
 def _strip_tiff_raster(path, *, height=24, width=20, channels=4):
     """A small multi-band strip raster both band-normalization siblings can read: the exact one by
-    decoding it whole, the sampled one by reading pixel windows out of it."""
+    decoding it whole, the sampled one by reading pixel windows out of it.
+    """
     import numpy as np
     import tifffile
 
@@ -386,7 +390,8 @@ def _classification_data(
     tmp_path, *, num_channels: int | None
 ) -> tuple[dict, str]:
     """Four three-band sources under ``tmp_path`` and their label table, as a run's data section
-    states them, with ``data.num_channels`` stated when given: the section and one source."""
+    states them, with ``data.num_channels`` stated when given: the section and one source.
+    """
     import csv
 
     from PIL import Image
@@ -419,7 +424,8 @@ def _classification_data(
 
 def _classification_run(tmp_path, *, num_channels: int | None):
     """A run bound through the producer over :func:`_classification_data`: returns the data block
-    it resolved, in the form its record holds it, once its loaders are built."""
+    it resolved, in the form its record holds it, once its loaders are built.
+    """
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
     from tcip_mcp.pipelines.schemas import DataSpec
     from tests._producer_fixtures import staged_layout
@@ -438,7 +444,8 @@ def _classification_run(tmp_path, *, num_channels: int | None):
 def test_a_checkpoint_reads_images_at_the_width_its_run_recorded(tmp_path):
     """A model is built at the width its run resolved, so that recorded width is what every later
     reader reads at: the builder, the contract dims and the predictor all take the run's own one
-    channel over three-band sources rather than assuming RGB."""
+    channel over three-band sources rather than assuming RGB.
+    """
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.execution import Stated, prepare
     from tcip_mcp.pipelines.model_build import (
@@ -475,7 +482,8 @@ def test_a_run_that_states_no_width_records_the_one_its_sources_carry(
     tmp_path,
 ):
     """Admits valid work: a run that states nothing records the width its own sources carry, and
-    a checkpoint of that run reads at it."""
+    a checkpoint of that run reads at it.
+    """
     data_cfg, train_ds, _image = _classification_run(
         tmp_path, num_channels=None
     )
@@ -493,7 +501,8 @@ def test_a_source_whose_band_count_cannot_be_read_refuses_rather_than_defaulting
     tmp_path,
 ):
     """A run's input channels are derived from its own sources, so a probe that fails refuses by
-    name: a confidently-wrong count sizes the model wrong for every image the run reads."""
+    name: a confidently-wrong count sizes the model wrong for every image the run reads.
+    """
     import pytest
     from PIL import Image
 

@@ -214,7 +214,8 @@ def test_an_unassessed_series_refuses_at_the_door_that_takes_no_acknowledgment(
 
 def test_an_unreadable_prediction_document_is_reported_by_name(tmp_path: Path):
     """A present, unreadable document is an error naming it, never a raise through the tool
-    boundary and never read as this plant's date contributing nothing."""
+    boundary and never read as this plant's date contributing nothing.
+    """
     pytest.importorskip("torch")
     from tcip_mcp.dataset_layout import prediction_key
     from tests._chain_fixtures import attributed_series
@@ -239,7 +240,8 @@ def test_predictions_that_never_classified_the_positive_state_refuse(
     tmp_path: Path,
 ):
     """Detector buckets over the same captures carry no opening axis at all: the delivery refuses
-    rather than reporting full coverage."""
+    rather than reporting full coverage.
+    """
     pytest.importorskip("torch")
     from tests._chain_fixtures import attributed_series, predicted, published
 
@@ -266,7 +268,8 @@ def test_each_bucket_stands_for_the_date_its_record_states_and_two_on_one_date_r
 ):
     """The date a bucket stands for is the capture its own record states, whatever it is named: a
     bucket published under a name naming another date delivers as its recorded date, and two
-    buckets recording one date refuse naming both."""
+    buckets recording one date refuse naming both.
+    """
     pytest.importorskip("torch")
     from tcip_mcp.tools.inference_tools import run_inference
     from tests._chain_fixtures import attributed_series

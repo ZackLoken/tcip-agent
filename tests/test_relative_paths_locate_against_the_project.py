@@ -246,7 +246,8 @@ def _register_model(project: Path) -> str:
 
 def _registered(project: Path) -> str:
     """A detector of :data:`SUBJECT` a run of another project trained, registered into
-    ``project`` through ``register_model`` and spelled relative to it."""
+    ``project`` through ``register_model`` and spelled relative to it.
+    """
     from tests._verified_checkpoint_fixtures import project_checkpoint
 
     data = {
@@ -267,7 +268,8 @@ def _stated():
 
 def _published(project: Path) -> None:
     """The bucket ``preds`` the registered detector publishes over the labeled capture, every
-    path stated absolutely."""
+    path stated absolutely.
+    """
     from tcip_mcp.tools.inference_tools import run_inference
 
     _labeled(project)
@@ -400,7 +402,8 @@ def _stub_child(monkeypatch) -> None:
 
 def _relative_config(project: Path, where: Path) -> dict:
     """A detection config over a dataset at ``project / where`` whose ``images_dir`` is spelled
-    relative to ``project``, and the same dataset laid under the working directory as a decoy."""
+    relative to ``project``, and the same dataset laid under the working directory as a decoy.
+    """
     from tests.test_launch_artifact_anchoring_and_lineage import (
         _canonical_dataset,
         _detection_config,
@@ -420,7 +423,8 @@ def test_a_checkpoint_door_locates_its_checkpoint_once(
     tmp_path: Path, monkeypatch, door: str
 ):
     """The checkpoint a door names arrives through its acquisition, which locates it once: of
-    every location any step answers, whatever spelling it was handed, one is the checkpoint's."""
+    every location any step answers, whatever spelling it was handed, one is the checkpoint's.
+    """
     import tcip_mcp.model_registry as model_registry
     import tcip_mcp.registry_paths as registry_paths
     import tcip_mcp.tools.feedback_tools as feedback_tools
@@ -452,7 +456,8 @@ def test_a_scoped_door_locates_its_callers_spelling_once(
 ):
     """The dataset a scoped audited door names is located from the caller's spelling once, and
     that one location reaches the door's act and its audit scope; the audit row, filed in the
-    dataset's own log, keeps the caller's spelling."""
+    dataset's own log, keeps the caller's spelling.
+    """
     import tcip_mcp.audit as audit
     import tcip_mcp.registry_paths as registry_paths
     import tcip_mcp.tools.project_tools as project_tools
@@ -489,7 +494,8 @@ def test_a_sweep_records_and_trains_on_the_location_it_admitted(
 ):
     """A sweep admitted over a relative ``images_dir`` records that project-rooted location in
     its input, and its trial trains on the same one, a same-named directory under the working
-    directory never entering either."""
+    directory never entering either.
+    """
     pytest.importorskip("torchvision")
     from tcip_mcp.experiments import observe
     from tcip_mcp.tools.training_tools import open_trial
@@ -517,7 +523,8 @@ def test_a_sweep_records_the_base_the_caller_stated_never_its_first_corner(
     tmp_path: Path,
 ):
     """A base stating ``data.split.val_ratio`` beside an axis over it is recorded as stated, so
-    a trial whose point names only another parameter trains on the base's own value."""
+    a trial whose point names only another parameter trains on the base's own value.
+    """
     pytest.importorskip("torchvision")
     from tcip_mcp.experiments import observe
     from tcip_mcp.tools.training_tools import open_trial
@@ -555,7 +562,8 @@ def test_a_runs_source_files_are_stored_against_its_project_like_its_data(
     tmp_path: Path,
 ):
     """``model_source.source_files``, the files a run's builder imports from, are stored against
-    the project as ``images_dir`` is, so a copied project's run reads its own copy of them."""
+    the project as ``images_dir`` is, so a copied project's run reads its own copy of them.
+    """
     pytest.importorskip("torchvision")
     from tcip_mcp.experiments import RUN_FILE, observe, read_record
     from tcip_mcp.pipelines.schemas import train_config
@@ -590,7 +598,8 @@ def test_a_copied_projects_run_and_sweep_trial_read_the_copys_source_files(
 ):
     """Every config path a run or sweep records travels with the project: a copy's run reads its
     resolved dataset builder's source files from the copy, and a copy's sweep trial reads the
-    model source files its sampled choice and its baseline name from the copy."""
+    model source files its sampled choice and its baseline name from the copy.
+    """
     pytest.importorskip("torchvision")
     import shutil
 
@@ -674,7 +683,8 @@ def test_a_copied_sweeps_whole_mapping_choices_open_a_trial_naming_the_copy(
 ):
     """A sweep whose choices are the whole ``model_source`` and ``data`` mappings stores the paths
     inside them against its project, so a trial a copied project opens on those choices names the
-    copy's files."""
+    copy's files.
+    """
     pytest.importorskip("torchvision")
     import shutil
 
@@ -719,7 +729,8 @@ def test_a_copied_sweeps_whole_mapping_choices_open_a_trial_naming_the_copy(
 
 def _authored_checkpoint(project: Path, monkeypatch) -> tuple[str, Path]:
     """A run completed in a new project at ``project`` over a builder module of a name of its own
-    at ``project/<module>.py``: the module's name and the checkpoint the run registered."""
+    at ``project/<module>.py``: the module's name and the checkpoint the run registered.
+    """
     import sys
     import uuid
 
@@ -762,7 +773,8 @@ def _authored_checkpoint(project: Path, monkeypatch) -> tuple[str, Path]:
 
 def _built_from(checkpoint, project: Path) -> Path:
     """The file the builder of ``checkpoint``, loaded for ``project``, was defined in, once the
-    model it builds is built (``model_build.build_from_model_source``)."""
+    model it builds is built (``model_build.build_from_model_source``).
+    """
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.model_build import (
         build_from_model_source,
@@ -783,7 +795,8 @@ def test_a_checkpoint_builds_from_its_runs_snapshot_in_its_own_project(
     tmp_path: Path, monkeypatch
 ):
     """Admits valid work: a run completed through the platform's own producer, loaded in its own
-    project, binds its builder to the copy its run snapshotted and builds."""
+    project, binds its builder to the copy its run snapshotted and builds.
+    """
     pytest.importorskip("torchvision")
     from tcip_mcp.pipelines.model_build import SNAPSHOT_DIR
 
@@ -802,7 +815,8 @@ def test_a_copied_project_builds_from_the_copys_snapshot_with_the_original_gone(
 ):
     """The whole project copied to a new root and the original deleted: the copy's checkpoint
     builds from the copy's own snapshot, its builder and the helper declared beside it alike,
-    with the original's modules of those names still loaded."""
+    with the original's modules of those names still loaded.
+    """
     pytest.importorskip("torchvision")
     import shutil
     import sys
@@ -831,7 +845,8 @@ def test_a_run_carried_whole_builds_from_its_snapshot_never_a_same_named_file(
 ):
     """A run carried whole into another project (``archive_project``, then ``import_project``)
     whose own file at the author's relative location is a different module of the same name
-    builds from the run's snapshot; that file never answers."""
+    builds from the run's snapshot; that file never answers.
+    """
     pytest.importorskip("torchvision")
     from tcip_mcp.tools.project_tools import import_project, write_archive
 
@@ -860,7 +875,8 @@ def test_a_checkpoint_moved_without_its_run_refuses_before_importing(
 ):
     """A checkpoint file carried alone into a project that holds no snapshot of its run refuses
     at load, naming the run directory its source lies in and the primitive that carries a run
-    whole, and imports nothing."""
+    whole, and imports nothing.
+    """
     pytest.importorskip("torchvision")
     import shutil
 
@@ -898,7 +914,8 @@ def test_a_run_missing_its_metrics_log_answers_its_own_error_at_the_checkpoint_d
 ):
     """An existing registered checkpoint whose project holds a run missing its metrics log is
     not an absent checkpoint: evaluation and the review queue answer the broken record's own
-    error."""
+    error.
+    """
     pytest.importorskip("torchvision")
     from tcip_mcp.experiments import METRICS_FILE
     from tcip_mcp.tools.feedback_tools import triage_predictions
@@ -934,7 +951,8 @@ def test_evaluation_takes_a_run_id_and_a_relative_checkpoint_path(
     tmp_path: Path,
 ):
     """A completed run of the project named by its id and the checkpoint it completed named by a
-    relative path both evaluate."""
+    relative path both evaluate.
+    """
     pytest.importorskip("torchvision")
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import registered_checkpoint
@@ -969,7 +987,8 @@ def test_a_resumed_run_records_the_project_rooted_checkpoint(
     tmp_path: Path, monkeypatch
 ):
     """``resume_from`` spelled relative names a checkpoint a run of the project wrote: the run
-    record and the launch's audit line both carry that location."""
+    record and the launch's audit line both carry that location.
+    """
     pytest.importorskip("torchvision")
     from tcip_mcp.experiments import observe
     from tcip_mcp.tools.training_tools import launch_training
@@ -1002,7 +1021,8 @@ def test_a_resumed_run_records_the_project_rooted_checkpoint(
 
 def test_a_config_with_a_relative_path_and_no_project_is_refused_by_name():
     """A config validated where no project is held has no root to read a relative path against:
-    it refuses naming the path, never reading it under the working directory."""
+    it refuses naming the path, never reading it under the working directory.
+    """
     from tcip_mcp.pipelines.schemas import checked_train_config
 
     spec, issues = checked_train_config(
@@ -1022,7 +1042,8 @@ def test_the_preflight_command_reads_a_relative_config_under_its_project(
     project, tmp_path
 ):
     """``--config`` spelled relative names the config under ``--project``: run from a directory
-    holding a decoy of the same name, the project's own config is the one validated."""
+    holding a decoy of the same name, the project's own config is the one validated.
+    """
     import json
 
     from tests._cli_fixtures import run_tcip
@@ -1047,7 +1068,8 @@ def test_the_identity_command_reads_a_relative_dataset_root_under_its_project(
     tmp_path: Path,
 ):
     """The dataset root spelled relative names the dataset under ``--project``, so the check
-    from any working directory reports the registered dataset's own outcome."""
+    from any working directory reports the registered dataset's own outcome.
+    """
     from tcip_mcp.tools.project_tools import register_dataset
     from tests._cli_fixtures import run_tcip
     from tests._web_fixtures import new_project
@@ -1073,7 +1095,8 @@ def test_the_score_command_reads_a_relative_path_under_its_project(
     project, tmp_path
 ):
     """``--path`` spelled relative names the image under ``--project``, run from a directory
-    outside it."""
+    outside it.
+    """
     import json
 
     from tests._cli_fixtures import run_tcip
@@ -1102,7 +1125,8 @@ def test_the_score_command_reads_a_relative_path_under_its_project(
 
 def test_the_doctor_reads_the_project_named_by_a_relative_root(tmp_path: Path):
     """``tcip doctor .`` from inside a project checks that project, establishing the root once
-    where the command starts."""
+    where the command starts.
+    """
     from tests._cli_fixtures import run_tcip
 
     project = _dataset(tmp_path).root
@@ -1117,7 +1141,8 @@ def test_the_shapefile_converter_refuses_relative_paths_by_name(
     tmp_path: Path, monkeypatch
 ):
     """The converter holds no project, so a relative input or output refuses naming the absolute
-    spelling and nothing is written under the working directory."""
+    spelling and nothing is written under the working directory.
+    """
     from tcip_mcp.cli.shp_to_plant_csv import convert_shp_to_plant_csv
     from tests.test_shp_to_plant_csv_script import _point_shapefile
 
@@ -1132,7 +1157,8 @@ def test_the_shapefile_converter_refuses_relative_paths_by_name(
 
 def test_the_census_command_refuses_a_relative_dataset_root(tmp_path: Path):
     """``tcip scan-dataset`` holds no project, so a relative dataset root is refused naming the
-    absolute spelling rather than read under the operator's working directory, where one is."""
+    absolute spelling rather than read under the operator's working directory, where one is.
+    """
     from tests._cli_fixtures import run_tcip
 
     _dataset(tmp_path)
@@ -1147,7 +1173,8 @@ def test_one_relative_path_names_one_project_location_from_any_working_directory
 ):
     """The door answers one relative spelling from two working directories outside two like
     projects, each directory holding nothing the spelling names, with a successful result that is
-    the same: the location it recorded, spelled against its project, or what it read there."""
+    the same: the location it recorded, spelled against its project, or what it read there.
+    """
     found = []
     for name in ("first", "second"):
         (tmp_path / name).mkdir()
@@ -1170,7 +1197,8 @@ def test_a_per_plant_delivery_reads_and_writes_under_the_project(
     """``deliver_per_plant_csv`` with ``dataset_root="ds"`` and ``output_path="out.csv"``, shipped
     under the breeder's recorded acknowledgment, reads the buckets under the project's dataset
     and writes its CSV under the project, from two working directories outside two like projects,
-    leaving each working directory empty."""
+    leaving each working directory empty.
+    """
     pytest.importorskip("torch")
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.delivery import DeliveryRefusedError, record_acknowledgment
@@ -1251,7 +1279,8 @@ def test_a_phenology_measurement_reads_the_buckets_under_the_project_rooted_data
     """The phenology delivery door over a series the platform's producers built, its dataset
     root spelled relative to the project, measures the project's own buckets from two working
     directories outside two like projects: each reaches the delivery's own refusal of the
-    unassessed buckets it read there, and leaves its working directory empty."""
+    unassessed buckets it read there, and leaves its working directory empty.
+    """
     pytest.importorskip("torchvision")
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
     from tests._chain_fixtures import PLANTS, attributed_series

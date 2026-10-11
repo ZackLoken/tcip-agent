@@ -22,7 +22,8 @@ from tests._training_values import schedule
 
 def _phantom_nan() -> torch.Tensor:
     """A non-finite loss on a leaf disconnected from any weight's graph, so a bad call's optimizer
-    step never poisons the weight a later good call relies on."""
+    step never poisons the weight a later good call relies on.
+    """
     return torch.zeros((), requires_grad=True) + float("nan")
 
 
@@ -66,7 +67,8 @@ class CountingRegressor(MeanIntensityRegressor):
     """A :class:`MeanIntensityRegressor` whose state also holds a registered buffer, the count of
     its training forwards, and whose one param group (``get_param_groups``, at the head rate)
     carries a tensor-valued setting, ``rates``, the two rates it was built at: a capture of its
-    training state has a buffer and a tensor setting to hold."""
+    training state has a buffer and a tensor setting to hold.
+    """
 
     def __init__(self, init_weight: float = 0.0) -> None:
         super().__init__(init_weight)
@@ -96,7 +98,8 @@ def build_counting_regressor(
 class TwoRateRegressor(MeanIntensityRegressor):
     """Predicts ``weight * mean(image) + bias``, its weight in a param group at the backbone rate
     and its bias in one at the head rate (``get_param_groups``), the two groups in reverse order
-    when ``reverse_groups``."""
+    when ``reverse_groups``.
+    """
 
     def __init__(self, reverse_groups: bool = False) -> None:
         super().__init__()
@@ -249,7 +252,8 @@ def run_context(
     """The context the child's own entry builds (``subprocess_worker.prepare_run_context``) for
     the run :func:`~tests._verified_checkpoint_fixtures.opened_run` opens under the project
     ``root`` over ``config``: ``run_registry.observed_run``'s run over that directory and the
-    loaders its recorded partition builds, ``epoch_hook`` the context's own."""
+    loaders its recorded partition builds, ``epoch_hook`` the context's own.
+    """
     from tcip_mcp.experiments import observe
     from tcip_mcp.pipelines.training.subprocess_worker import (
         prepare_run_context,
@@ -264,7 +268,8 @@ def run_context(
 
 def frames_data(root, intensities, values) -> dict:
     """The data block of a run training on every frame :func:`write_regression_dataset` writes
-    under ``root``, at ``intensities`` and valued ``values``, with no validation side."""
+    under ``root``, at ``intensities`` and valued ``values``, with no validation side.
+    """
     images_dir, csv_path = write_regression_dataset(root, intensities, values)
     return {
         "images_dir": str(images_dir),
@@ -316,7 +321,8 @@ at ``FIT`` times their intensity, validation frames at ``HOLDOUT_FIT``."""
 def opposed_regression_data(root, train_intensities, val_intensities) -> dict:
     """:func:`drawn_data` of training frames at ``train_intensities`` valued by :data:`FIT` and
     validation frames at ``val_intensities`` valued by :data:`HOLDOUT_FIT`: the two sides are fit
-    by opposite-signed weights, so training progress on one is a regression on the other."""
+    by opposite-signed weights, so training progress on one is a regression on the other.
+    """
     return drawn_data(
         root,
         (train_intensities, [FIT * c for c in train_intensities]),
@@ -338,7 +344,8 @@ def separable_classifier_data(root) -> dict:
 def count_validations(monkeypatch) -> list[str]:
     """A list each explicit ``model_validate`` of a whole training config
     (``schemas.TrainConfigSchema``) or of a model source alone (``schemas.ModelSourceSchema``)
-    appends its class name to from here on."""
+    appends its class name to from here on.
+    """
     from tcip_mcp.pipelines.schemas import ModelSourceSchema, TrainConfigSchema
 
     seen: list[str] = []
@@ -388,7 +395,8 @@ def regressor_config(
     """A :func:`~tests._chain_fixtures.training_config` of the regression ``builder`` (by
     default the mean-intensity regressor) at ``builder_kwargs`` over the data block ``data``:
     one unfrozen stage at :data:`REGRESSOR_ADAMW` under a cosine schedule of ``horizon`` epochs,
-    no epoch checkpoints, with ``overrides`` in place of their keys."""
+    no epoch checkpoints, with ``overrides`` in place of their keys.
+    """
     from tests._chain_fixtures import training_config
 
     source: dict = {
@@ -415,7 +423,8 @@ def classifier_config(horizon: int, data: dict, **overrides) -> dict:
     """A :func:`~tests._chain_fixtures.training_config` of the mean-intensity classifier
     (weight -1) over the data block ``data``: one unfrozen stage in batches of three under a
     cosine schedule of ``horizon`` epochs, AdamW at 0.2, no epoch checkpoints, with
-    ``overrides`` in place of their keys."""
+    ``overrides`` in place of their keys.
+    """
     from tests._chain_fixtures import training_config
 
     return training_config(
@@ -444,7 +453,8 @@ def classifier_config(horizon: int, data: dict, **overrides) -> dict:
 
 def capture_model(monkeypatch, sink: list) -> None:
     """Every model ``generic_trainer.build_from_model_source`` builds appended to ``sink`` as it
-    is built."""
+    is built.
+    """
     from tcip_mcp.pipelines.training import generic_trainer as gt
 
     real_build = gt.build_from_model_source
@@ -459,7 +469,8 @@ def capture_model(monkeypatch, sink: list) -> None:
 
 class _CallScheduledModel(MeanIntensityRegressor):
     """A :class:`MeanIntensityRegressor` answering its weight-fit loss on the one-based
-    training-forward calls ``finite(call)`` admits and a non-finite loss on every other."""
+    training-forward calls ``finite(call)`` admits and a non-finite loss on every other.
+    """
 
     def __init__(self, init_weight: float = 0.0) -> None:
         super().__init__(init_weight)
@@ -478,7 +489,8 @@ class _CallScheduledModel(MeanIntensityRegressor):
 class TransientlyDivergedModel(_CallScheduledModel):
     """Reports a non-finite loss for its first ``bad_batches`` forward calls, then a normal
     weight-fit loss for every call after, for proving one diverged epoch short of the trainer's
-    own two-pass divergence rule does not kill a run."""
+    own two-pass divergence rule does not kill a run.
+    """
 
     def __init__(self, bad_batches: int = 2, init_weight: float = 0.0) -> None:
         super().__init__(init_weight)
@@ -503,7 +515,8 @@ def build_transiently_diverged_model(
 class StepCountedDivergenceModel(_CallScheduledModel):
     """Reports a normal weight-fit loss on the one-based training-forward calls named in
     ``finite_at``, and a non-finite loss on every other call: an exact call-by-call divergence
-    pattern."""
+    pattern.
+    """
 
     def __init__(self, finite_at=(), init_weight: float = 0.0) -> None:
         super().__init__(init_weight)
@@ -529,7 +542,8 @@ class DivergesAfterModel(_CallScheduledModel):
     """Reports a normal weight-fit loss for its first ``good_calls`` forward calls, then a
     non-finite loss for every call after: the reverse of :class:`TransientlyDivergedModel`, for
     proving a run that trains one real epoch and then dies must not let that epoch's real score
-    win a comparison against a config that only ever scored worse."""
+    win a comparison against a config that only ever scored worse.
+    """
 
     def __init__(self, good_calls: int, init_weight: float = 0.0) -> None:
         super().__init__(init_weight)
@@ -552,7 +566,8 @@ def build_diverges_after_model(
 class PixelSumDivideModel(MeanIntensityRegressor):
     """Divides its prediction by the batch's own per-sample pixel sum: a real fp32
     division-by-zero divergence on a batch of zero-intensity images, while a random synthetic
-    smoke batch (never exactly zero) passes the measurement-boundary contract cleanly."""
+    smoke batch (never exactly zero) passes the measurement-boundary contract cleanly.
+    """
 
     def predict(self, images):
         return (self.weight + images.mean(dim=(1, 2, 3))) / images.sum(

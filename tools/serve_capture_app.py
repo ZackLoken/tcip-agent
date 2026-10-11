@@ -29,7 +29,8 @@ def _existing_workspace_conflict(root: Path) -> str | None:
     """``None`` when ``root`` looks safe to seed a fresh harness workspace under; otherwise the
     reason it does not: ``root`` itself already carries a ``.tcip`` directory (it is already a
     project root), or an immediate child of it does (a project already lives directly under
-    ``root``). Either means real state already sits where a scratch workspace would be built."""
+    ``root``). Either means real state already sits where a scratch workspace would be built.
+    """
     if (root / ".tcip").is_dir():
         return f"{root} already carries its own .tcip state"
     if root.is_dir():
@@ -44,7 +45,8 @@ def _refuse_unsafe_root(root: Path) -> None:
     ``TCIP_WORKSPACE``, the root must alias it in neither direction (under it, or containing it);
     when no ``TCIP_WORKSPACE`` is bound, the root must not already look like a workspace, by
     :func:`_existing_workspace_conflict`. Any of these would point a scratch server at real
-    state."""
+    state.
+    """
     resolved = root.resolve()
     if resolved.is_relative_to(REPO_ROOT):
         raise SystemExit(
@@ -125,7 +127,8 @@ def start(root: Path, port: int) -> None:
 
 def stop(root: Path) -> None:
     """Kill the recorded process tree with ``taskkill /T`` and remove its record; refuses on a
-    host other than Windows."""
+    host other than Windows.
+    """
     if sys.platform != "win32":
         raise SystemExit(
             "stop is Windows-only (it kills the process tree with taskkill /T); this host is "

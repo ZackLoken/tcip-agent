@@ -56,7 +56,8 @@ def request_for(token: str) -> str:
 
 def reported(client: Any, token: str) -> bool:
     """Whether exactly one friction report of the open project carries ``token`` in its detail,
-    and that report has the requested category."""
+    and that report has the requested category.
+    """
     reports = client.get("/api/meta/reports").json()["reports"]
     matching = [
         row
@@ -73,7 +74,8 @@ def main(
 ) -> int:
     """Drive the smoke for the ``provider`` row with ``TCIP_WORKSPACE`` set to ``workspace`` (a
     fresh temp directory when omitted) and the backend started on it, waiting
-    ``answer_timeout_s`` for the report. Returns 0 on a pass."""
+    ``answer_timeout_s`` for the report. Returns 0 on a pass.
+    """
     os.environ["TCIP_WORKSPACE"] = workspace or tempfile.mkdtemp(
         prefix="terminal-smoke-ws-"
     )

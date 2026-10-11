@@ -88,7 +88,8 @@ UNDECLARED = [
 
 def test_declared_units_are_read_verbatim_from_crops_yml():
     """The mapping carries each declaring trait's own unit, several distinct ones, so a later
-    assertion that some trait is absent cannot pass merely because the mapping is empty."""
+    assertion that some trait is absent cannot pass merely because the mapping is empty.
+    """
     units = crops_units()
     assert units, "crops.yml units should be loadable in the repo checkout"
     for name, unit in DECLARED_UNITS.items():
@@ -101,7 +102,8 @@ def test_a_trait_declaring_no_unit_is_absent_rather_than_given_one(
 ):
     """Absent from the mapping, not mapped to a plausible-looking stand-in. A guessed unit here is
     a fabricated measurement claim: it would be cross-checked against, and shipped in a delivered
-    units column, as though a breeder had declared it."""
+    units column, as though a breeder had declared it.
+    """
     from tcip_mcp import traits
 
     assert trait_name in {t["name"] for t in traits._crops_traits()}, (
@@ -116,7 +118,8 @@ def test_a_trait_declaring_no_unit_is_absent_rather_than_given_one(
 def test_a_count_suffixed_value_key_implies_no_unit(value_key: str):
     """A count is not a physical unit, so a value_key ending in it implies none. The recognized
     tokens are exactly crops.yml's declared units and their squared forms, so a trailing token that
-    entered the vocabulary through an undeclared trait would start labeling counts as measured."""
+    entered the vocabulary through an undeclared trait would start labeling counts as measured.
+    """
     assert unit_from_value_key(value_key) is None
     # the same key shape with a real declared unit is still recognized, so this is exactness, not
     # a blanket refusal of the pattern
@@ -128,7 +131,8 @@ def test_a_count_valued_delivery_ships_with_a_blank_units_column(
 ):
     """End to end: a per-plant count, delivered for a trait crops.yml declares no unit for, carries
     an empty units column. A unit in that column would read as a physical measurement of a number
-    that is a tally."""
+    that is a tally.
+    """
     results = [
         {
             "plant_id": "PLANT_001",
@@ -199,7 +203,8 @@ def test_a_declared_unit_still_cross_checks_the_value_keys_own_unit(
     tmp_path: Path,
 ):
     """The absence rule above must not cost the check it exists to serve: a trait crops.yml does
-    declare a unit for still refuses a value whose own key implies a different one."""
+    declare a unit for still refuses a value whose own key implies a different one.
+    """
     results = [
         {
             "plant_id": "PLANT_001",

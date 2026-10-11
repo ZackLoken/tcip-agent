@@ -79,7 +79,8 @@ def _admitted(
     """``config`` with ``point`` applied (:func:`_apply_hpo_params`), admitted: validated once
     against ``project`` (``schemas.checked_train_config``) and, when it validates, its structure
     (:func:`_structural_issues`). The spec, ``None`` when it did not validate, its staged
-    sources, ``None`` when none were taken, and every issue."""
+    sources, ``None`` when none were taken, and every issue.
+    """
     try:
         spec, issues = checked_train_config(
             _apply_hpo_params(config, point), project
@@ -129,6 +130,7 @@ def _preflight(
         overfit: When True (with ``smoke``), also run the voluntary ``overfit_check`` diagnostic
             and report it under ``overfit_check``, never gating. The stored report is already
             rendered (``model_contract.render_overfit_report``), with non-finite losses rendered.
+
     """
     from tcip_mcp.pipelines.data.label_queries import admits
 
@@ -331,7 +333,8 @@ def _structural_issues(
     cannot place or read (the snapshot's refusal, before anything imports), a ``model_source``
     or ``data.dataset_source`` builder or a ``training_source`` that does not import from their
     layout, and a ``data`` block that names no locations
-    (``split_construction.data_dir_issues``)."""
+    (``split_construction.data_dir_issues``).
+    """
     from tcip_mcp.pipelines.model_build import (
         import_source_builder,
         source_seams,
@@ -383,7 +386,8 @@ def open_run(
     record and copies, the copies laid out in the directory), the run it was
     relaunched from and the checkpoint it resumes from, its wall clock, the model contract
     preflight proved, and an HPO trial's sampled point. Refuses an existing directory
-    (``experiments.RunDirectoryExistsError``)."""
+    (``experiments.RunDirectoryExistsError``).
+    """
     from tcip_mcp.pipelines.data.split_construction import (
         dataset_identity,
         partition_samples,
@@ -460,6 +464,7 @@ def launch_training(
     dataset identity read (an unreadable identity refuses the launch by name). A spawn failure
     after it leaves a directory with no process, which reads ``interrupted`` once its heartbeat
     window passes.
+
     """
     check_json_value(config, path="config")
     if "experiment_id" in config:
@@ -576,7 +581,8 @@ def _child_env_for_launch(spec: TrainConfigSchema) -> dict[str, str]:
 
 def _start_worker(directory: Path, env: dict[str, str]) -> subprocess.Popen:
     """Start ``subprocess_worker`` over the opened run or sweep ``directory`` in its own process
-    under ``env``."""
+    under ``env``.
+    """
     return subprocess.Popen(
         [
             sys.executable,
@@ -593,7 +599,8 @@ def _watch_wall_clock(proc: subprocess.Popen, timeout_seconds: float) -> None:
     """Daemon watcher: terminates ``proc`` if it is still alive one heartbeat window
     (``experiments.HEARTBEAT_STALE_SECONDS``) past ``timeout_seconds``. The child stops itself at
     its deadline and writes its own final status; a child that did not is hung, and reads
-    interrupted."""
+    interrupted.
+    """
 
     def _watch() -> None:
         try:
@@ -612,7 +619,8 @@ def training_detail(
     """The run, trial or sweep of ``project`` ``experiment_id`` names
     (``experiments.named_directory``) as its ``experiments.TrainingDetail``, its
     ``tensorboard_url`` the one a TensorBoard this process started serves its board at
-    (``experiments.board_of``), or ``None``."""
+    (``experiments.board_of``), or ``None``.
+    """
     from tcip_mcp.pipelines.training.tensorboard_manager import running_url
 
     directory = experiments.named_directory(experiment_id, project=project)
@@ -648,6 +656,7 @@ def monitor_training(project: Path, experiment_id: str) -> dict:
     Args:
         experiment_id: The run's id from launch_training, a trial's id from its sweep, or a
             sweep's id from run_hyperparameter_search.
+
     """
     detail = training_detail(project, experiment_id)
     return (
@@ -858,6 +867,7 @@ def cancel_training(
 
     Args:
         experiment_id: The run's, trial's or sweep's id.
+
     """
     directory = experiments.named_directory(experiment_id, project=project)
     if directory is None:
@@ -885,6 +895,7 @@ def inspect_compute_resources(project: Path) -> dict:
             available (``torch.cuda.mem_get_info``, no extra dependency); ``[]`` otherwise.
         ``active_training_runs``: count of every training run whose state is ``"running"``
             (``experiments.run_observations``).
+
     """
     cpu: dict[str, Any] = {
         "logical_count": os.cpu_count(),
@@ -950,7 +961,8 @@ def open_trial(sweep: Path, trial_id: str, point: dict) -> Path:
     (:func:`open_run`) with ``point`` as its ``trial_params``: an admission issue or a
     resolution that fails is the trial's final status ``failed`` naming why. A config the schema
     refuses, or whose sources cannot be staged, raises ``ValueError`` naming every issue before
-    any directory is opened."""
+    any directory is opened.
+    """
     record = experiments.observe(sweep).record
     project = experiments.project_of_run(sweep)
     spec, sources, issues = _admitted(
@@ -1115,6 +1127,7 @@ def run_hyperparameter_search(
             refused naming the value.
         split_draw_seeds: The seeds ``split_draws`` pairs with every sampled point, one per draw;
             omit for the derived default (see ``split_draws``).
+
     """
     opened = open_sweep(
         project,
@@ -1181,7 +1194,8 @@ def open_sweep(
     bound config redrawing inside its selection (:func:`_data_for_split_draws`); then the act's
     one audit line by ``actor`` naming the sweep (``AuditEntryNotWrittenError`` when it cannot be
     appended). Returns the opened sweep's directory, or the refusal ``{"error", "issues"}`` with
-    nothing created."""
+    nothing created.
+    """
     from tcip_mcp.pipelines.training.hpo import (
         resolved_draw_seeds,
         scheduler_settings,
@@ -1345,7 +1359,8 @@ def launch_sweep(project: Path, source: Path, *, actor: str | None) -> dict:
     """Open a new sweep of ``project`` by ``actor`` (:func:`open_sweep`, which mints its id) from
     the recorded input of the sweep directory ``source``, relaunched from it, and run it
     (:func:`run_sweep`) in its own worker process. Returns ``{"sweep_id", "status": "launched"}``,
-    or the refusal dict when that input no longer opens."""
+    or the refusal dict when that input no longer opens.
+    """
     given = experiments.observe(source).record["input"]
     opened = open_sweep(
         project, **{**given, "relaunched_from": source.name}, actor=actor
@@ -1361,7 +1376,8 @@ def run_sweep(directory: Path) -> SweepGroup:
     (``experiments.write_final_status``), keeping its heartbeat while it runs and training each
     trial through :func:`_run_hpo_trial` in a run directory named for the sweep and Ray's trial
     id. A cancel requested before or during the run ends it ``canceled``. Returns the ended
-    sweep's group (``experiments.read_sweep``)."""
+    sweep's group (``experiments.read_sweep``).
+    """
     import uuid
 
     from tcip_mcp.pipelines.training.hpo import (
@@ -1426,7 +1442,8 @@ def _apply_hpo_params(base_config: dict, params: dict) -> dict:
     """Apply HPO params onto a deep copy of ``base_config``, which may leave unstated a value
     ``params`` names: a dotted key (``optimizer.head_lr``) at the nested field it names, any other
     key (``batch_size``) at the top level. The result is a trial's config, validated by its
-    caller."""
+    caller.
+    """
     import copy
 
     cfg = copy.deepcopy(base_config)
@@ -1585,7 +1602,8 @@ def _split_draws_refusal(
     its first point resolves, its base config's validated data block being ``data``. ``None``
     when nothing here objects, and for one draw. A base config bound to a selection skips the
     ``auto_val`` leg; whether its selection admits a redraw is the first point's resolution's
-    answer."""
+    answer.
+    """
     if split_draws <= 1:
         return None
     from tcip_mcp.pipelines.training.hpo import (
@@ -1660,7 +1678,8 @@ def _spatial_draws_issue(
 ) -> str | None:
     """The refusal ``split_draws`` above 1 meets when the sweep's first point, resolved as
     ``resolution``, split one source over its own pixels (its ``spatial`` split), a partition
-    no draw of ``data.split.seed`` varies; ``None`` otherwise."""
+    no draw of ``data.split.seed`` varies; ``None`` otherwise.
+    """
     if split_draws <= 1 or resolution.spatial is None:
         return None
     return (
@@ -1732,7 +1751,8 @@ def _preflight_points(
     axis's first value, plus one variant per categorical choice and one per range end, each
     holding every other axis at that corner, each point listed once. Combinations of several
     axes away from the corner, and a range's interior, are not among them; each trial's own
-    config is admitted when its trial opens."""
+    config is admitted when its trial opens.
+    """
     from tcip_mcp.pipelines.training.hpo import search_alg_key, space_axes
 
     axes = space_axes(param_space, grid=search_alg_key(search_alg) == "grid")
@@ -1753,7 +1773,8 @@ def _preflight_points(
 
 def _one_real_batch(task: str, train_ds: Any, n: int = 2):
     """``(batch, reason_it_failed)``: one collated ``(images, targets)`` of the first ``n`` items
-    of the run's resolved train dataset, or ``(None, reason)`` when it yields none."""
+    of the run's resolved train dataset, or ``(None, reason)`` when it yields none.
+    """
     try:
         from tcip_mcp.pipelines.training.collation import task_collate
 
@@ -1830,6 +1851,7 @@ def evaluate_model(
             revision (traits.py, e.g. a count trait's center-match) governs the reported count
             and the selection f1; AP@0.5 (``iou_threshold``) is kept as a labeled comparability
             metric. Absent -> the IoU convention governs.
+
     """
     import torch
     from torch.utils.data import DataLoader

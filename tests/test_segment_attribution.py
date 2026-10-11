@@ -52,7 +52,8 @@ def _write_document(
     raster_path: Path, annotations: list[Annotation], width: int = WIDTH
 ) -> LabelDocument:
     """``annotations`` saved as the raster's label document at ``width`` by ``HEIGHT``; the
-    document as read back."""
+    document as read back.
+    """
     label_image(raster_path, annotations, width, HEIGHT, keep_empty=True)
     return _stored(raster_path)
 
@@ -222,7 +223,8 @@ def test_load_canopy_segments_refuses_a_geometry_less_annotation(
     tmp_path: Path,
 ) -> None:
     """An image-level label of the stated subject (a subject with no geometry at all) names no
-    region, same as a Point, and must not reach the box-to-polygon conversion."""
+    region, same as a Point, and must not reach the box-to-polygon conversion.
+    """
     _, raster_path, _georef, identity = _setup(tmp_path)
     data = _write_document(
         raster_path,
@@ -436,7 +438,8 @@ def test_tie_segments_to_plants_leaves_a_plant_within_the_position_error_untied(
 ) -> None:
     """A plant whose projected position clears its segment's boundary by less than the stated
     position error is not tied: a displaced position could have put it in a neighbor's canopy.
-    The bound is the project's; a negative one refuses."""
+    The bound is the project's; a negative one refuses.
+    """
     _, raster_path, georef, _identity = _setup(tmp_path)
     segments_data = _write_document(
         raster_path,
@@ -514,7 +517,8 @@ def _one_segment_tie(
     position_error_m: float,
 ):
     """The tie of ``segment`` to one plant at pixel ``plant_px`` under the georeference
-    ``transform`` states, on a 100-pixel frame."""
+    ``transform`` states, on a 100-pixel frame.
+    """
     from tcip_mcp.pipelines.postprocessing.segment_attribution import (
         CanopySegment,
     )
@@ -532,7 +536,8 @@ def _one_segment_tie(
 
 def test_the_clearance_is_measured_in_meters_on_a_raster_in_feet():
     """EPSG:2263 states its coordinates in US survey feet: a plant two feet (0.61 m) inside its
-    segment's boundary is within a 1 m position error, not two units clear of it."""
+    segment's boundary is within a 1 m position error, not two units clear of it.
+    """
     from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
         GeoTransform,
     )
@@ -566,7 +571,8 @@ def test_the_clearance_is_measured_in_meters_on_a_raster_in_feet():
 
 def test_the_clearance_is_the_nearest_boundary_in_meters_on_anisotropic_pixels():
     """Pixels 10 m wide and 1 m tall: a plant 2 pixels (20 m) from the segment's left edge and 5
-    pixels (5 m) from its top edge clears the boundary by 5 m, so a 10 m bound leaves it untied."""
+    pixels (5 m) from its top edge clears the boundary by 5 m, so a 10 m bound leaves it untied.
+    """
     from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
         GeoTransform,
     )

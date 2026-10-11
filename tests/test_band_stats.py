@@ -32,7 +32,8 @@ from tcip_mcp.pipelines.band_stats import (
 
 def _composite_route_stretch(band, mode, orig_dtype):
     """The per-band stretch a band composite is displayed through, band by band and independently:
-    the ``uint8`` pixels the primitive has to reproduce byte for byte."""
+    the ``uint8`` pixels the primitive has to reproduce byte for byte.
+    """
     raw = band.astype(np.float64)
     if mode == "none":
         if np.issubdtype(orig_dtype, np.integer):
@@ -56,7 +57,8 @@ def _composite_route_stretch(band, mode, orig_dtype):
 def _preview_renderer_stretch(band):
     """The per-band stretch a throwaway band preview is written with: a min-max span with no clip
     of its own, which is the same pixels as the composite route's ``minmax`` because a band's own
-    values can never leave its own min-max span."""
+    values can never leave its own min-max span.
+    """
     raw = band.astype(np.float64)
     lo, hi = float(raw.min()), float(raw.max())
     stretched = (
@@ -68,7 +70,8 @@ def _preview_renderer_stretch(band):
 def _bands() -> dict[str, np.ndarray]:
     """One band per case the stretch has to survive: each integer width, a float raster, a band
     with no spread at all, a float band whose values are negative, a float band with both signs,
-    and an all-zero float band."""
+    and an all-zero float band.
+    """
     rng = np.random.default_rng(0)
     return {
         "uint8": rng.integers(0, 256, size=(7, 5)).astype(np.uint8),
@@ -102,7 +105,8 @@ def test_stretch_band_is_byte_identical_to_the_composite_display_expression(
 
 def test_a_none_stretch_of_an_all_negative_float_band_renders_black():
     """A band with no positive data divides by a positive number (the magnitude of its own
-    minimum), so every pixel is negative before the clip and the render is uniformly black."""
+    minimum), so every pixel is negative before the clip and the render is uniformly black.
+    """
     band = BANDS["float32_negative"]
     assert np.array_equal(
         stretch_band(band, "none", band.dtype),
@@ -136,7 +140,8 @@ def test_stretch_band_refuses_a_mode_it_does_not_implement():
 
 def _derived_bounds(band, mode, orig_dtype) -> tuple[float, float]:
     """The ``(low, high)`` a mode reads off the band itself, written out independently of the
-    primitive: what passing bounds in has to reproduce exactly."""
+    primitive: what passing bounds in has to reproduce exactly.
+    """
     raw = band.astype(np.float64)
     if mode == "none":
         if np.issubdtype(orig_dtype, np.integer):
@@ -167,7 +172,8 @@ def test_a_region_stretched_against_the_whole_bands_bounds_matches_that_bands_ow
     mode,
 ):
     """The property region serving needs: two regions of one raster stretched against one bounds
-    pair are the pixels that raster's whole-view stretch would have shown there."""
+    pair are the pixels that raster's whole-view stretch would have shown there.
+    """
     band = BANDS["uint16"]
     bounds = _derived_bounds(band, mode, band.dtype)
     whole = stretch_band(band, mode, band.dtype, bounds)
@@ -189,7 +195,8 @@ def test_a_none_stretch_of_an_integer_band_keeps_its_dtype_ceiling_whatever_boun
 
 def test_a_none_stretch_of_a_float_band_divides_by_the_maximum_it_is_handed():
     """A float raster has no dtype ceiling, so a region renders against the sampled maximum of the
-    whole raster instead of against its own local one."""
+    whole raster instead of against its own local one.
+    """
     band = BANDS["float32"]
     sampled_max = float(band.max()) * 2.0
     expected = np.clip(
@@ -255,7 +262,8 @@ def _multiband_strip_tiff(
     rowsperstrip: int = 6,
 ) -> np.ndarray:
     """A small multi-band raster the windowed strip backend serves: strip-based, contiguous
-    samples, one page, with per-band value levels a range check can tell apart."""
+    samples, one page, with per-band value levels a range check can tell apart.
+    """
     rng = np.random.default_rng(7)
     arr = rng.integers(0, 4096, size=(height, width, channels)).astype(
         np.uint16
@@ -268,7 +276,8 @@ def test_the_multiband_render_input_is_the_preview_expression_band_for_band(
     tmp_path: Path,
 ):
     """Same check for the pixels the visualization tools hand a renderer for a multi-band raster:
-    the first three bands through the preview expression, composited in memory."""
+    the first three bands through the preview expression, composited in memory.
+    """
     from tcip_mcp.pipelines.raster_source import SourceHeader
     from tcip_mcp.tools.vision_tools import _display_of
 
@@ -285,7 +294,8 @@ def test_the_multiband_render_input_is_the_preview_expression_band_for_band(
 
 def _multiband_array(channels: int = 4, dtype="uint16") -> np.ndarray:
     """A small multi-band array with a different value level per band, so a band selection that
-    reorders or repeats bands is visible in the composite."""
+    reorders or repeats bands is visible in the composite.
+    """
     rng = np.random.default_rng(21)
     arr = rng.integers(0, 4096, size=(6, 5, channels))
     return (arr + np.arange(channels) * 17).astype(dtype)
@@ -387,7 +397,8 @@ def test_a_composite_refuses_a_selection_it_cannot_display():
 
 def _sampled(path: Path, num_channels: int, **kwargs) -> SampledBandRanges:
     """``sampled_band_ranges`` over ``path`` opened at ``num_channels``, as the image route
-    opens it."""
+    opens it.
+    """
     with raster_source.open_raster(path, num_channels) as src:
         return sampled_band_ranges(src, **kwargs)
 
@@ -472,7 +483,8 @@ def test_sampled_clip_bounds_are_exact_when_the_reservoir_holds_every_pixel_walk
     tmp_path: Path,
 ):
     """A reservoir at least as large as the pixels the windows cover keeps all of them, so the cut
-    points are that band's own percentiles and not an estimate of them."""
+    points are that band's own percentiles and not an estimate of them.
+    """
     path = tmp_path / "mosaic.tif"
     arr = _multiband_strip_tiff(path)
     sampled = _sampled(
@@ -517,7 +529,8 @@ def test_the_clip_reservoir_holds_at_most_the_size_it_was_given(
     tmp_path: Path, monkeypatch
 ):
     """The bound that lets one seeded pass describe a raster of any size: the values each band's
-    cut points are read off number the reservoir's size, never the pixels the windows cover."""
+    cut points are read off number the reservoir's size, never the pixels the windows cover.
+    """
     from tcip_mcp.pipelines import band_stats
 
     path = tmp_path / "mosaic.tif"

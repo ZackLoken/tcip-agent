@@ -22,7 +22,8 @@ _RUNS = {
 
 def _checkpoint(path: Path, content: str) -> Path:
     """A checkpoint at ``path`` a run completed under a root of its own, its bytes one per
-    ``content`` (``_verified_checkpoint_fixtures.produced_checkpoint``)."""
+    ``content`` (``_verified_checkpoint_fixtures.produced_checkpoint``).
+    """
     pytest.importorskip("torch")
     from tests._verified_checkpoint_fixtures import produced_checkpoint
 
@@ -60,7 +61,8 @@ def test_doctor_flags_every_registry_entry_the_registry_wrote(
 ) -> None:
     """The doctor's registry check reads the index by key; every entry the registry holds must be
     visible to it, named and with its checkpoint path, or the mandated data-state check degrades
-    into a silent pass on a polluted project."""
+    into a silent pass on a polluted project.
+    """
     root, reg = polluted_project
     registered = reg.list_models()
     assert len(registered) == len(_RUNS)
@@ -96,7 +98,8 @@ def test_identity_resolution_matches_a_registered_checkpoint_by_content(
 ) -> None:
     """A checkpoint copied to a path the registry never saw still resolves to the run that
     produced it, matched on the content hash its final status names: the binding a run's own
-    completion recorded, not a caller-asserted tag."""
+    completion recorded, not a caller-asserted tag.
+    """
     pytest.importorskip("torch")
     from tests._verified_checkpoint_fixtures import (
         finished_run,

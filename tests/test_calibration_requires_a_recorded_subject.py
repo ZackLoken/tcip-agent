@@ -30,7 +30,8 @@ BOX = (8, 10, 30, 34)
 
 class _MaskBoxDataset(Dataset):
     """A bespoke detection dataset over the producer's mask samples: one box per mask, the
-    extent of its foreground, as a builder an agent writes for ground truth no registry scopes."""
+    extent of its foreground, as a builder an agent writes for ground truth no registry scopes.
+    """
 
     def __init__(self, *, samples=None, transforms=None, **_ignored):
         self.samples = list(samples or [])
@@ -94,7 +95,8 @@ def _train_and_register(data_cfg: dict, project_root: Path) -> dict:
     """Train a detector over ``data_cfg`` in a run of ``project_root`` the launcher's own
     producer opened and the child's own entry ran, which registers its checkpoint by completing:
     ``{"checkpoint", "data"}``, the data block the run resolved in the form its record holds
-    it."""
+    it.
+    """
     from tcip_mcp.experiments import observe
     from tests._chain_fixtures import REGION_BUILDER, training_config
     from tests._training_values import evaluation_block

@@ -47,7 +47,8 @@ def _label(
 def test_an_unreadable_label_record_is_an_error_per_document(tmp_path: Path):
     """Label records of a shape the reader refuses are an error per document, naming the refusal;
     a dataset with no label documents at all yields no error, only the count of unlabeled
-    images."""
+    images.
+    """
     root = tmp_path / "unreadable"
     for stem in ("plotA_0_0", "plotA_0_1"):
         write_image(root / "images" / DATE / f"{stem}.jpg", (96, 64))
@@ -92,7 +93,8 @@ def test_a_label_with_no_matching_image_is_an_error(tmp_path: Path):
 
 def test_an_unreadable_first_label_hides_no_later_finding(tmp_path: Path):
     """The census reads each document on its own, so an unreadable label sorting first is one
-    finding and the orphan after it is still reported."""
+    finding and the orphan after it is still reported.
+    """
     root = tmp_path / "ds"
     write_image(root / "images" / DATE / "0_bad.jpg", (96, 64))
     ts.replace(label_key(root, DATE, "0_bad"), ["not", "a", "document"])
@@ -110,7 +112,8 @@ def test_an_unreadable_first_label_hides_no_later_finding(tmp_path: Path):
 
 def test_an_empty_label_not_marked_complete_is_an_error(tmp_path: Path):
     """A platform-written empty document is not an absent one, so a presence check never catches
-    it; an empty label no person marked complete is unannotated, not a negative."""
+    it; an empty label no person marked complete is unannotated, not a negative.
+    """
     root = tmp_path / "ds"
     write_image(root / "images" / DATE / "plotA_0_0.jpg", (96, 64))
     _label(root, "plotA_0_0", [], keep_empty=True)
@@ -123,7 +126,8 @@ def test_an_empty_label_not_marked_complete_is_an_error(tmp_path: Path):
 
 def test_a_confirmed_negative_empty_label_stays_clean(tmp_path: Path):
     """The rail this suppression exists for: a human's Complete-with-nothing must not be flagged
-    as though nobody had looked."""
+    as though nobody had looked.
+    """
     from tests._producer_fixtures import mark_complete
 
     root = tmp_path / "ds"
@@ -139,7 +143,8 @@ def test_an_unreadable_label_is_a_finding_beside_a_readable_one(
     tmp_path: Path,
 ):
     """Coverage, not a guard: the refusal surfaces as a per-document finding beside a readable
-    document of the same capture, never propagating out of the walk."""
+    document of the same capture, never propagating out of the walk.
+    """
     root = tmp_path / "ds"
     write_image(root / "images" / DATE / "plotA_0_0.jpg", (96, 64))
     write_image(root / "images" / DATE / "plotB_0_0.jpg", (96, 64))

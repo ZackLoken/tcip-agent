@@ -42,7 +42,8 @@ set it, so a record carrying it says only what the launcher declared."""
 class AgentIdentity:
     """What the connecting harness declared, the session this server minted, and the terminal
     session the launcher declared, absent when not declared. Its attributes are the fields a
-    record gains, in order."""
+    record gains, in order.
+    """
 
     agent_client_name: str
     agent_client_version: str
@@ -104,7 +105,8 @@ def current() -> AgentIdentity | None:
 
 def audit_fields() -> dict[str, Any]:
     """What an audit line carries: nothing outside a session, so the entry keeps its shape, else
-    the identity with ``terminal_session`` present only when one was declared."""
+    the identity with ``terminal_session`` present only when one was declared.
+    """
     if _current is None:
         return {}
     return {

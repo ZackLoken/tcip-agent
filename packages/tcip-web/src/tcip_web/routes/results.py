@@ -62,7 +62,8 @@ def _is_root(resolved: Path, root: Path) -> bool:
 
 def _belonging(root: Path, path: str, admits=within) -> Path:
     """``path`` resolved, when ``admits`` it against the open project or a dataset registered to
-    it (by default, at or under one); any other path refuses (403), naming the roots checked."""
+    it (by default, at or under one); any other path refuses (403), naming the roots checked.
+    """
     roots = _evidence_roots(root)
     resolved = resolved_path(path)
     if not any(admits(resolved, r) for r in roots):
@@ -191,7 +192,8 @@ class PhenologyPayload(PhenologyInputs):
 
 def _measure(root: Path, payload: PhenologyInputs) -> PhenologyMeasurement:
     """:func:`~tcip_mcp.pipelines.postprocessing.phenology.measure_phenology` over the buckets this
-    route confines to the project ``root``; each of its refusals answers 400."""
+    route confines to the project ``root``; each of its refusals answers 400.
+    """
     from tcip_mcp.operationalization import OperationalizationRefusedError
     from tcip_mcp.subject_registry import RegistryError
     from tcip_mcp.traits import TraitUnknownError
@@ -284,7 +286,8 @@ def phenology_measurement(payload: PhenologyPayload) -> dict:
 
 class AcknowledgmentPayload(BaseModel):
     """Why the exporting person ships the unvalidated result shown, and that result's digest
-    (``result_sha256``, as the refusal or the screen measurement served it)."""
+    (``result_sha256``, as the refusal or the screen measurement served it).
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -334,7 +337,8 @@ def _recorded_acknowledgment(
 
 class ExportCsvPayload(PhenologyInputs):
     """The export door's payload: the measurement inputs, which computation to export, the person
-    exporting it and the acknowledgment fields."""
+    exporting it and the acknowledgment fields.
+    """
 
     # Which server computation to export: a choice of producer, never a claim about what the rows
     # mean or whether they are valid. Picking the "wrong" one yields a correctly-gated CSV.
@@ -600,7 +604,8 @@ def _served_revision(revision: TraitRevision) -> dict:
 def _served(name: str, record: TraitRecord) -> dict:
     """One trait's record as the trait routes serve it: each revision as
     :func:`_served_revision` states it, and ``latest_confirmed``, the number of the revision a
-    delivery reads, or ``None``."""
+    delivery reads, or ``None``.
+    """
     latest_confirmed = record.latest_confirmed
     return {
         "trait": name,
@@ -712,7 +717,8 @@ def confirm_trait_revision(payload: ConfirmRevisionPayload) -> dict:
 
 class RegisteredModel(BaseModel):
     """One registered model as the browser lists it: its name, its checkpoint, its tags and the
-    run that produced it."""
+    run that produced it.
+    """
 
     name: str
     checkpoint_path: str
@@ -729,7 +735,8 @@ class RegisteredModels(BaseModel):
 @router.get("/models/registered")
 def registered_models(tag: str | None = None) -> RegisteredModels:
     """The open project's registered models under ``tag``
-    (:func:`~tcip_mcp.tools.model_tools.registered_listing`), each as the browser lists it."""
+    (:func:`~tcip_mcp.tools.model_tools.registered_listing`), each as the browser lists it.
+    """
     from tcip_mcp.tools.model_tools import registered_listing
 
     return RegisteredModels.model_validate(

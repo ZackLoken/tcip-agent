@@ -140,7 +140,8 @@ ANTIGRAVITY_ID_EFFORTS = ("low", "medium", "high")
 
 def model_id_effort(family: str, model: str | None) -> str | None:
     """The effort a model id states in its own suffix, for a family whose harness takes effort
-    that way (antigravity's `gemini-3.1-pro-high`); None for every other id or family."""
+    that way (antigravity's `gemini-3.1-pro-high`); None for every other id or family.
+    """
     if family == "antigravity" and model:
         suffix = model.rsplit("-", 1)[-1]
         if suffix in ANTIGRAVITY_ID_EFFORTS:
@@ -210,7 +211,8 @@ def claude_model_used(stdout: str) -> str | None:
 
 def model_matches(requested: str, used: str) -> bool:
     """Whether the model the harness reports corresponds to the one requested: a full id must
-    appear as itself, an alias must appear inside every reported id."""
+    appear as itself, an alias must appear inside every reported id.
+    """
     return all(
         requested == name or requested in name for name in used.split(",")
     )

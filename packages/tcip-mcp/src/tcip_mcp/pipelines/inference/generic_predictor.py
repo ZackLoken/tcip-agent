@@ -1,5 +1,6 @@
 """Generic predictor for any bespoke ``model_source`` checkpoint: task read from the saved
-``model_source``, prediction over one image, a batch, or a sliced source."""
+``model_source``, prediction over one image, a batch, or a sliced source.
+"""
 
 from __future__ import annotations
 
@@ -43,7 +44,8 @@ logger = logging.getLogger(__name__)
 
 class WindowedRasterReader(Protocol):
     """A source read window by window: full-raster pixel dimensions, band count, and a windowed
-    decode."""
+    decode.
+    """
 
     height: int
     width: int
@@ -106,7 +108,8 @@ class GenericPredictor:
         self, image_path: str | Path | BandGroupRef
     ) -> tuple[torch.Tensor, int, int]:
         """One source as this model reads it: EXIF-oriented at the model's own width, as a
-        tensor on its device, with the source's ``(width, height)``."""
+        tensor on its device, with the source's ``(width, height)``.
+        """
         img = load_image(image_path, self.in_chans)
         return pil_to_tensor(img).to(self.device), *frame_size(img)
 
@@ -115,7 +118,8 @@ class GenericPredictor:
         self, image_path: str | Path | BandGroupRef, execution: Execution
     ) -> dict:
         """Run inference on a single image, a plain path/string or a :class:`BandGroupRef`, under
-        the untiled ``execution`` record."""
+        the untiled ``execution`` record.
+        """
         if self.task in DETECTION_TASKS:
             return self._predict_whole([image_path], execution)[0]
         tensor, w, h = self.model_input(image_path)
@@ -173,7 +177,8 @@ class GenericPredictor:
     ) -> TcipDetectionModel:
         """This predictor wrapped as the SAHI detection model a prediction runs through, each
         input under the cap ``cap_of`` gives it and ``execution``'s conf, masks cut at the
-        platform's binarize threshold."""
+        platform's binarize threshold.
+        """
         from tcip_mcp.pipelines.measurement.mask_geometry import (
             resolve_binarize_threshold,
         )
@@ -194,7 +199,8 @@ class GenericPredictor:
     ) -> list[dict]:
         """``sources`` under ``execution``, each decoded whole as one slice the size of its frame
         at shift zero and run under its own frame's cap, each result built by
-        :meth:`_detection_record` under the cap its forward ran at."""
+        :meth:`_detection_record` under the cap its forward ran at.
+        """
         from tcip_mcp.pipelines.derivations import detection_cap
 
         density = cast(float, execution.density)
@@ -243,7 +249,8 @@ class GenericPredictor:
         checkpoint carries attributes, ``attributes``, one id per attribute per detection; where
         ``model`` collected masks, ``masks`` as one ``{"segmentation": [[x0, y0, x1, y1, ...],
         ...]}`` per detection, empty where the mask binarized to nothing, and ``mask_binarize``,
-        the provenance of the threshold ``model`` cut them at."""
+        the provenance of the threshold ``model`` cut them at.
+        """
         from tcip_mcp.pipelines.slicing import prediction_rows
 
         kept = prediction_rows(predictions, self.attribute_sizes)

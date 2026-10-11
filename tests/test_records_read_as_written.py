@@ -1,6 +1,7 @@
 """Each record here is written by the platform's own producer and read back by its reader, which
 reads every key the producer writes as stated: a key the producer stopped writing fails the read by
-name (``KeyError``) rather than being tolerated with a default."""
+name (``KeyError``) rather than being tolerated with a default.
+"""
 
 from __future__ import annotations
 
@@ -109,7 +110,8 @@ def test_a_sweep_final_status_lacking_its_state_fails_at_the_read(
     monkeypatch,
 ) -> None:
     """The final status the sweep launch itself writes reads back as its state; the same record
-    with ``state`` removed fails the read by name."""
+    with ``state`` removed fails the read by name.
+    """
     import pytest
 
     import tcip_mcp.tools.training_tools as tt

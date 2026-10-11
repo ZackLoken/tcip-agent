@@ -1,5 +1,6 @@
 """The review queue routes: a launched job runs ``prioritize_review_queue`` over the open project
-and the subject the request named, and its status reports the tool's result or refusal."""
+and the subject the request named, and its status reports the tool's result or refusal.
+"""
 
 from __future__ import annotations
 
@@ -153,7 +154,8 @@ def test_job_fails_honestly_on_the_tool_s_own_refusal(
     opened_client, tmp_path: Path, monkeypatch
 ):
     """The operation's soft ``{"error": ...}`` (an unresolvable scorer name, say) surfaces as the
-    job's ``failed`` status with the same message, never swallowed or completed empty."""
+    job's ``failed`` status with the same message, never swallowed or completed empty.
+    """
     ckpt = tmp_path / "model.pt"
     ckpt.write_bytes(b"not a real checkpoint")
     images = tmp_path / "images"

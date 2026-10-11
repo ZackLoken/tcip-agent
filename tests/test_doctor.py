@@ -26,7 +26,8 @@ from tests._web_fixtures import new_project
 
 def _record_localizing(tmp_path: Path, name: str, localization: str) -> dict:
     """A trait record as the proposing producer writes it, its entry's ``localization`` then
-    replaced, so a record the schema refuses carries every other field a real one does."""
+    replaced, so a record the schema refuses carries every other field a real one does.
+    """
     revision = fx.propose(
         tmp_path / "scratch_project", fx.entry(name, ("leaf_length",))
     )
@@ -60,7 +61,8 @@ def test_doctor_help_prints_the_dispatchers_prog_argument(capsys):
     """The dispatcher passes ``prog=f"tcip {command}"`` into ``doctor.main``'s own keyword
     argument, which threads straight to its ``ArgumentParser``; this calls the module directly
     with that argument, so the usage line proves the parser's own ``prog``, never a global
-    argv mutation."""
+    argv mutation.
+    """
     from tcip_mcp.cli import doctor
 
     with pytest.raises(SystemExit) as exc:
@@ -74,7 +76,8 @@ def _register_absent_checkpoint(
     root: Path, name: str, checkpoint_path: Path
 ) -> None:
     """A registry entry, written by the registry's own producer, naming a checkpoint file that
-    no longer exists: registered while it did, then deleted."""
+    no longer exists: registered while it did, then deleted.
+    """
     from tests._verified_checkpoint_fixtures import produced_checkpoint
 
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
@@ -87,7 +90,8 @@ def test_doctor_flags_registry_checkpoint_path_under_a_temp_directory(
     tmp_path,
 ):
     """``tmp_path`` sits under pytest's own temp tree, so a checkpoint there outside the project
-    is test pollution."""
+    is test pollution.
+    """
     root = _project(tmp_path)
     _register_absent_checkpoint(
         root, "junk", tmp_path / "elsewhere" / "model.pt"
@@ -106,7 +110,8 @@ def test_doctor_flags_registry_checkpoint_path_under_a_temp_directory(
 
 def test_doctor_reports_a_stem_collision_and_completes(tmp_path):
     """A capture already holding two identities for one stem refuses at every reader; the
-    doctor names it as a finding instead of crashing on the exception."""
+    doctor names it as a finding instead of crashing on the exception.
+    """
     root = tmp_path / "proj"
     images = root / "images" / "2026-02-11"
     images.mkdir(parents=True)
@@ -124,7 +129,8 @@ def test_doctor_reports_a_stem_collision_and_completes(tmp_path):
 
 def test_doctor_flags_a_trait_record_that_will_not_read(tmp_path):
     """A trait record the schema refuses reads identically to no trait at all from a listing
-    alone; ``tcip doctor`` is where the agent catches the difference at session start."""
+    alone; ``tcip doctor`` is where the agent catches the difference at session start.
+    """
     import tcip_store as ts
 
     root = _project(tmp_path)
@@ -205,7 +211,8 @@ def test_a_mark_for_any_subject_finishes_an_empty_label_on_a_dateless_dataset(
     tmp_path,
 ):
     """An empty label of the undated capture marked complete for a subject is a confirmed
-    negative there too."""
+    negative there too.
+    """
     from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
     root = tmp_path / "dateless"
@@ -225,7 +232,8 @@ def test_registry_findings_are_read_through_the_registrys_own_entry_shape(
     tmp_path,
 ):
     """Entries written by ModelRegistry are the shape ``tcip doctor`` reports on, so an entry
-    whose checkpoint is gone is named with its own name and path rather than read as nothing."""
+    whose checkpoint is gone is named with its own name and path rather than read as nothing.
+    """
     root = _layout_project(tmp_path, "2026-03-04")
     ckpt_dir = tmp_path / "checkpoints"
     ckpt_dir.mkdir()
@@ -260,7 +268,8 @@ def test_a_missing_checkpoint_and_a_test_checkpoint_are_distinct_registry_findin
 ):
     """Pollution and absence are different data-state problems: an entry pointing at a
     throwaway test checkpoint is not reported as merely missing, and an entry whose checkpoint
-    was never written is not reported as pollution."""
+    was never written is not reported as pollution.
+    """
     root = _layout_project(tmp_path, "2026-03-04")
     # Inside the project, so never pollution; outside it under pytest's own temp tree, pollution.
     ghost = root / ".tcip" / "models" / "orchard.pt"
@@ -284,7 +293,8 @@ def test_a_missing_checkpoint_and_a_test_checkpoint_are_distinct_registry_findin
 def test_a_checkpoint_under_a_temp_rooted_project_is_not_pollution(tmp_path):
     """``tmp_path`` itself sits under a temp tree (pytest's own fixture), so a checkpoint
     resolving inside the project is never pollution merely because the project's own location
-    carries a temp-tree marker: only a checkpoint the root does not contain is scanned."""
+    carries a temp-tree marker: only a checkpoint the root does not contain is scanned.
+    """
     root = _layout_project(tmp_path, "2026-03-04")
     from tests._verified_checkpoint_fixtures import produced_checkpoint
 
@@ -303,7 +313,8 @@ def test_a_checkpoint_under_a_temp_rooted_project_is_not_pollution(tmp_path):
 
 def test_image_census_counts_every_capture_the_loaders_admit(tmp_path):
     """The doctor's image census reads the platform's own extension set, so an .npz capture is
-    keyed to its own label document rather than reported missing."""
+    keyed to its own label document rather than reported missing.
+    """
     from tcip_mcp.cli import doctor
 
     images = tmp_path / "images" / "2026-03-04"
@@ -323,7 +334,8 @@ def test_one_stem_in_two_captures_is_two_images_each_paired_with_its_own_label(
     tmp_path,
 ):
     """Two captures each holding ``same.png``, only one labeled: one image has no label record and
-    no label lacks its image, at the census and at the doctor alike."""
+    no label lacks its image, at the census and at the doctor alike.
+    """
     from tcip_mcp.cli import doctor
     from tcip_mcp.tools.data_tools import scan_dataset
 
@@ -356,7 +368,8 @@ def test_one_stem_in_two_captures_is_two_images_each_paired_with_its_own_label(
 
 def test_only_the_unreadable_trait_record_is_reported(tmp_path):
     """A record the schema refuses is reported by name and reason; a confirmed trait beside it
-    stays silent."""
+    stays silent.
+    """
     import tcip_store as ts
 
     root = _layout_project(tmp_path, "2026-03-04")
@@ -390,7 +403,8 @@ def test_doctor_is_silent_on_a_confirmed_latest_revision(tmp_path: Path):
 
 def test_doctor_warns_on_an_unconfirmed_latest_revision(tmp_path: Path):
     """One line, and exit 1, for a trait whose latest revision the breeder has not confirmed,
-    a confirmed earlier one notwithstanding."""
+    a confirmed earlier one notwithstanding.
+    """
     root = _leaf_project(tmp_path)
     fx.propose_and_confirm(root, fx.entry("leaf", ("leaf_length",)))
     fx.propose(
@@ -451,7 +465,8 @@ def _unreadable_label(image: Path) -> None:
 
 def test_doctor_flags_an_unreadable_label(tmp_path):
     """A corrupt label document is an error-level finding, never a pass: the reader raises on it,
-    and the doctor reports it rather than letting the corruption pass as an empty document."""
+    and the doctor reports it rather than letting the corruption pass as an empty document.
+    """
     date = "2026-03-04"
     root = _layout_project(tmp_path, date)
     image = image_dir(root, date) / "IMG_S.JPG"
@@ -467,7 +482,8 @@ def test_doctor_flags_an_unreadable_label(tmp_path):
 
 def test_a_marked_empty_label_is_clean_to_the_data_quality_check(tmp_path):
     """A mark written through the save door is the one fact the data-quality check reads off
-    the census, on one root under the same backend."""
+    the census, on one root under the same backend.
+    """
     from tcip_mcp.cli import doctor
 
     date = "2026-03-04"
@@ -489,7 +505,8 @@ def test_a_doctor_run_reads_each_label_once_and_reports_an_unreadable_one_once(
     monkeypatch,
 ):
     """The census reads each label once and only the data-quality check reports one that will not
-    read: the provenance check reads the census's result, never the file."""
+    read: the provenance check reads the census's result, never the file.
+    """
     from tcip_mcp.cli import doctor
 
     date = "2026-03-04"

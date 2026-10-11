@@ -55,7 +55,8 @@ def _default_anchor_sizes(
 
 def _probe_in_chans(adapter: Any) -> int | None:
     """The ``in_channels`` of ``adapter``'s first ``Conv2d`` in registration order, or ``None``
-    when it holds no conv."""
+    when it holds no conv.
+    """
     for module in adapter.modules():
         if isinstance(module, nn.Conv2d):
             return int(module.in_channels)
@@ -67,7 +68,8 @@ def _normalization(
 ) -> dict:
     """Validated ``image_mean``/``image_std`` kwargs for a torchvision detector at ``in_chans``
     (probed from ``adapter`` when ``None``): a build at other than three bands stating no
-    per-band statistics refuses naming ``pipelines.derivations.band_normalization_stats``."""
+    per-band statistics refuses naming ``pipelines.derivations.band_normalization_stats``.
+    """
     # The caller is authoritative: only they know the band count, and the probe is a registration-
     # order guess that is wrong for band-projection and neck-first adapters alike.
     if in_chans is None:
@@ -115,7 +117,8 @@ def _rcnn_anchors_and_box_pool(
     aspect_ratios: tuple[float, ...],
 ) -> tuple[Any, Any]:
     """The anchor generator and box RoI pool a two-stage R-CNN reads its feature levels with,
-    ``aspect_ratios`` at every level."""
+    ``aspect_ratios`` at every level.
+    """
     from torchvision.models.detection.rpn import AnchorGenerator
     from torchvision.ops import MultiScaleRoIAlign
 
@@ -303,7 +306,8 @@ _BUILDER_SUPPLIED = frozenset(
 
 def _accepted_kwargs(name: str) -> set[str]:
     """Every keyword the detector ``name`` accepts: its builder's own named parameters plus its
-    torchvision class's, less what the builder supplies itself."""
+    torchvision class's, less what the builder supplies itself.
+    """
     import torchvision.models.detection as detection
 
     from tcip_mcp.pipelines.model_build import keyword_parameters
@@ -321,7 +325,8 @@ def _accepted_kwargs(name: str) -> set[str]:
 
 def _held(name: str) -> property:
     """A property reading and writing ``name`` on the detector an :class:`AttributeDetector`
-    holds."""
+    holds.
+    """
     return property(
         lambda self: getattr(self.detector, name),
         lambda self, value: setattr(self.detector, name, value),

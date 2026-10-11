@@ -69,7 +69,8 @@ _ANY_EXPR = re.compile(r"\$\{\{.*?\}\}")
 
 class UnresolvedExpressionError(Exception):
     """An ``${{ ... }}`` expression this script has no leg value for and will not pass through
-    to a process as literal text."""
+    to a process as literal text.
+    """
 
 
 @dataclass
@@ -94,7 +95,8 @@ def _load_workflow() -> dict[str, Any]:
 
 def _resolve_text(text: str, leg: dict[str, Any]) -> str:
     """Substitute ``${{ matrix.<name> }}`` with the leg's own value; refuse by name on any
-    other ``${{ ... }}`` expression rather than pass its literal text to a process."""
+    other ``${{ ... }}`` expression rather than pass its literal text to a process.
+    """
 
     def repl(match: re.Match[str]) -> str:
         key = match.group(1)

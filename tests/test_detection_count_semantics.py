@@ -78,7 +78,8 @@ def _asymmetric_iou_records() -> list[dict]:
 def test_precision_and_recall_are_not_interchangeable():
     """On a reference with three false positives and two misses the two ratios differ, and each
     must be reported against its own denominator: precision over everything reported, recall over
-    everything real."""
+    everything real.
+    """
     m = detection_metrics(
         _asymmetric_iou_records(),
         trait=None,
@@ -98,7 +99,8 @@ def test_precision_and_recall_are_not_interchangeable():
 
 def test_extra_false_positives_move_precision_and_leave_recall_alone():
     """Hallucinated detections cost precision only. Nothing about how much of the ground truth was
-    found changes when a detector reports more objects that are not there."""
+    found changes when a detector reports more objects that are not there.
+    """
     base = _asymmetric_iou_records()
     noisier = _asymmetric_iou_records()
     noisier[1]["dt"] = [
@@ -169,7 +171,8 @@ def _clustered_center_match_records() -> list[dict]:
 def test_second_detection_of_one_object_is_a_false_positive():
     """A ground-truth object is claimed once. The runner-up detection on an already-matched object
     is a false positive, so five objects and four detections leave tp=3, fp=1, fn=2 rather than a
-    fourth true positive and a negative miss count."""
+    fourth true positive and a negative miss count.
+    """
     records = _clustered_center_match_records()
     criterion = {"kind": "center_match", "tolerance": CENTER_MATCH_TOLERANCE}
     counts = governing_counts(records, criterion, conf_threshold=0.25)
@@ -188,7 +191,8 @@ def test_sweep_records_a_doubly_detected_object_as_one_hit_and_one_false_alarm()
     """The conf sweep counts through the same matcher, so a cluster on one object reads as one hit
     plus a false alarm at every conf that keeps the cluster. The signed count bias is blind to this
     (it is detections minus objects however the pairing resolves), which is why the tp/fp/fn split
-    is what the entry has to be read on."""
+    is what the entry has to be read on.
+    """
     sweep = derive_operating_point_curve(
         _clustered_center_match_records(),
         criterion={
@@ -208,7 +212,8 @@ def test_sweep_records_a_doubly_detected_object_as_one_hit_and_one_false_alarm()
 
 def test_uncontested_detections_all_match():
     """The tolerance still admits every detection that has its own object: one detection per object,
-    each within tolerance, is all true positives with nothing left over."""
+    each within tolerance, is all true positives with nothing left over.
+    """
     dt = [
         {"category_id": 7, "bbox": [90, 94, 20, 12], "score": 0.90},
         {"category_id": 7, "bbox": [292, 192, 16, 16], "score": 0.50},

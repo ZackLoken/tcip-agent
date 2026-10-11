@@ -43,7 +43,8 @@ class BaseScorer(ABC):
     ) -> list[tuple[str, float]]:
         """Return (path, score) pairs sorted descending (highest = most valuable), reading each
         candidate through the loaded checkpoint ``predictor``: its model, its device and its
-        ``in_chans`` travel together."""
+        ``in_chans`` travel together.
+        """
         ...
 
 
@@ -223,14 +224,16 @@ SCORER_REGISTRY: dict[str, Callable[[str], BaseScorer]] = {
 
 def register_scorer(name: str, factory: Callable[[str], BaseScorer]) -> None:
     """Register an acquisition-function scorer under ``name`` so ``method=<name>`` resolves to
-    it."""
+    it.
+    """
     SCORER_REGISTRY[name] = factory
 
 
 def resolve_scorer(method: str, task: str) -> BaseScorer:
     """The scorer the factory registered under ``method``, or the dotted ``module:factory`` it
     names, builds for ``task`` (:func:`~tcip_mcp.pipelines.model_build.resolve_named`, whose
-    refusals propagate)."""
+    refusals propagate).
+    """
     from tcip_mcp.pipelines.model_build import resolve_named
 
     target = resolve_named(

@@ -28,7 +28,8 @@ def _axis_distinct_array(
     height: int, width: int, channels: int = 3
 ) -> np.ndarray:
     """Pixel content that differs along the two axes, so no two distinct rectangles of the same
-    shape hold the same pixels."""
+    shape hold the same pixels.
+    """
     rows = np.arange(height, dtype=np.uint16)[:, None]
     cols = np.arange(width, dtype=np.uint16)[None, :]
     planes = [(rows + 0 * cols), (0 * rows + cols), (5 * rows + 3 * cols)]
@@ -52,7 +53,8 @@ def test_a_region_view_serves_the_block_its_rect_names(
     tmp_path: Path, backend: str
 ) -> None:
     """A full-extent read through the view is the parent's own ``[y0:y1, x0:x1]`` slice for the
-    rect the view was built over, whichever backend the parent is."""
+    rect the view was built over, whichever backend the parent is.
+    """
     arr = _axis_distinct_array(_HEIGHT, _WIDTH)
     assert arr[0, 1, 2] != arr[1, 0, 2], (
         "the fixture must differ along the two axes"
@@ -75,7 +77,8 @@ def test_a_region_view_window_lands_at_its_own_origin_plus_the_local_offset(
 ) -> None:
     """A window inside the view is the parent's slice offset by the rect's row origin in rows and
     its column origin in columns, never the two exchanged: a tiled pass over the block asks for
-    local windows and every one of them must land inside the block it named."""
+    local windows and every one of them must land inside the block it named.
+    """
     arr = _axis_distinct_array(_HEIGHT, _WIDTH)
     local_y0, local_y1, local_x0, local_x1 = 2, 11, 4, 17
 
@@ -95,7 +98,8 @@ def test_every_window_of_a_tiled_pass_over_a_region_view_stays_inside_the_block(
     tmp_path: Path,
 ) -> None:
     """The traversal a windowed inference pass actually performs: the block reassembled from its
-    own local tiles is the block, so no tile of the pass read pixels from outside it."""
+    own local tiles is the block, so no tile of the pass read pixels from outside it.
+    """
     arr = _axis_distinct_array(_HEIGHT, _WIDTH)
     tile = 6
 

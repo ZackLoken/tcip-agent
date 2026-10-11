@@ -1,7 +1,8 @@
 """Every GUI door whose act writes a project record names the person making it: a body that omits
 the person is refused by its model, and one naming no one is refused with the refusal
 ``identity.actor`` raises, before anything is read or written. The names are the one list the
-browser's field is tested on, and the browser's own rule admits exactly what ``actor`` admits."""
+browser's field is tested on, and the browser's own rule admits exactly what ``actor`` admits.
+"""
 
 from __future__ import annotations
 
@@ -116,7 +117,8 @@ def _actor_admits(name: str) -> bool:
 
 def _browser_admits(names: list[str]) -> list[bool]:
     """Whether the browser's rule, as the generated module exports it, admits each of ``names``,
-    run under Node's own ``RegExp``."""
+    run under Node's own ``RegExp``.
+    """
     generated = (FRONTEND_SRC / "api" / "types.generated.ts").read_text(
         encoding="utf-8"
     )

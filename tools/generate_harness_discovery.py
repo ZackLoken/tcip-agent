@@ -33,7 +33,8 @@ def _render_skill_md(
 ) -> str:
     """One knowledge document's SKILL.md text: its own frontmatter, verbatim, plus a body that
     points at the canonical content instead of duplicating it, phrased per `read_instruction`
-    for the harness the tree is generated for."""
+    for the harness the tree is generated for.
+    """
     import yaml
 
     front = yaml.safe_dump(
@@ -62,7 +63,8 @@ def render_agents_skill(
     name: str, description: str, document_path: Path
 ) -> str:
     """The generated Codex/Antigravity SKILL.md text for one knowledge document, phrased for a
-    harness with its own file reader rather than a Claude tool."""
+    harness with its own file reader rather than a Claude tool.
+    """
     return _render_skill_md(
         name,
         description,
@@ -73,7 +75,8 @@ def render_agents_skill(
 
 def render_agents_block(documents) -> str:
     """The generated block for `AGENTS.md`'s root: what TCIP is, the document index, and how a
-    harness with no skill mechanism reaches the same corpus."""
+    harness with no skill mechanism reaches the same corpus.
+    """
     lines = [
         AGENTS_BLOCK_START,
         "TCIP is an agentic ML/CV platform for automated phenotyping in tree-crop breeding. "
@@ -103,7 +106,8 @@ def render_agents_block(documents) -> str:
 
 def stale_skills(skills_dir: Path, render, documents) -> list[str]:
     """Document names whose `SKILL.md` under `skills_dir` is missing or does not equal
-    `render(name, description, path)`."""
+    `render(name, description, path)`.
+    """
     stale = []
     for document in documents:
         skill_path = skills_dir / document.name / "SKILL.md"
@@ -125,7 +129,8 @@ def stray_skill_directories(skills_dir: Path, documents) -> set[str]:
 
 def _write_skill_tree(skills_dir: Path, render, documents) -> list[Path]:
     """Render every document into one `SKILL.md` under its own subdirectory of `skills_dir`,
-    and return the paths written."""
+    and return the paths written.
+    """
     written = []
     for document in documents:
         skill_dir = skills_dir / document.name
@@ -191,7 +196,8 @@ _WEBFETCH = "WebFetch(domain:"
 
 def research_hosts(document_text: str) -> list[str]:
     """The backticked hosts of the research document's source list, in order. Raises
-    `ValueError` when the document carries no source list."""
+    `ValueError` when the document carries no source list.
+    """
     block = _SOURCE_LIST.search(document_text)
     if block is None:
         raise ValueError(
@@ -202,7 +208,8 @@ def research_hosts(document_text: str) -> list[str]:
 
 def render_claude_settings(settings_text: str, hosts: list[str]) -> str:
     """`settings_text` with its allow list's `WebFetch` grants replaced by one per host in
-    `hosts`, after every other allow entry."""
+    `hosts`, after every other allow entry.
+    """
     settings = json.loads(settings_text)
     permissions = settings["permissions"]
     permissions["allow"] = [
@@ -227,7 +234,8 @@ def expected_claude_settings() -> str:
 
 def generate(root: Path = REPO_ROOT) -> list[Path]:
     """Write every generated file at its repository-relative place under `root`, and return the
-    paths written."""
+    paths written.
+    """
     from tcip_mcp.knowledge import list_documents
     from tcip_web.terminal import CLAUDE_SETTINGS
 

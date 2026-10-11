@@ -47,7 +47,8 @@ def _images(root: Path, date: str, names: list[str]) -> None:
 
 def _staged_name(producer: str, date: str, stem: str) -> str:
     """The bucket ``stage_proposals`` publishes for ``stem`` under ``producer``: its own bucket,
-    one per staged image."""
+    one per staged image.
+    """
     return f"{producer}/{date}/{stem}"
 
 
@@ -58,7 +59,8 @@ def _staged(root: Path, producer: str, date: str, stem: str):
 
 def _publish(root: Path, date: str, preds: dict[str, list[float]]) -> str:
     """The model bucket ``baseline/<date>`` under ``root``: one document per image name of
-    ``preds``, a scored ``bud`` box per score (none for an empty list); its name."""
+    ``preds``, a scored ``bud`` box per score (none for an empty list); its name.
+    """
     pytest.importorskip("torch")
     from tests._chain_fixtures import published
 
@@ -91,7 +93,8 @@ def _image(
 
 def _img_path(root: Path, date: str, stem: str) -> str:
     """The path ``_image`` wrote ``stem`` at, for the explicit regime's own ``image_path``
-    argument, which carries the dataset root, date and stem in one value."""
+    argument, which carries the dataset root, date and stem in one value.
+    """
     return str(Path(image_dir(root, date)) / f"{stem}.jpg")
 
 
@@ -147,7 +150,8 @@ def test_focus_over_a_bucket_navigates_past_an_unreadable_prediction_on_another_
     tmp_path: Path, bound
 ) -> None:
     """A corrupt prediction document elsewhere on the date does not close the call: the frame it
-    lands on is readable, and the unreadable one is named instead of raising."""
+    lands on is readable, and the unreadable one is named instead of raising.
+    """
     root = tmp_path / "proj"
     date = "2026-02-11"
     _images(root, date, [f"IMG_{i:04d}.JPG" for i in range(3)])
@@ -291,7 +295,8 @@ def test_stage_proposals_rejects_a_model_name_that_is_no_single_segment(
 ) -> None:
     """A malformed model_name must never name more than the producer segment of the staged
     bucket; date and stem are no caller-supplied strings (image_path resolves them structurally
-    through the same parser propose_annotations uses)."""
+    through the same parser propose_annotations uses).
+    """
     root = tmp_path / "proj"
     date = "2026-02-11"
     _image(root, date, "IMG_0001")
@@ -358,7 +363,8 @@ def test_stage_proposals_refuses_a_shape_naming_no_subject_by_index(
     tmp_path: Path, shape: str, subject
 ) -> None:
     """A staged shape is an annotation, made where every annotation is: one naming no subject is
-    refused by construction, the refusal naming the shape, and nothing is staged."""
+    refused by construction, the refusal naming the shape, and nothing is staged.
+    """
     root = tmp_path / "proj"
     date = "2026-02-11"
     _image(root, date, "IMG_0001")
@@ -536,7 +542,8 @@ def test_stage_proposals_rejects_bad_polygon(tmp_path: Path) -> None:
 
 def test_stage_proposals_requires_a_shape(tmp_path: Path) -> None:
     """Neither input regime named: refused before ever touching the image, naming both regimes
-    rather than guessing which one was meant."""
+    rather than guessing which one was meant.
+    """
     res = stage_proposals(
         tmp_path,
         str(tmp_path / "proj" / "images" / "2026-02-11" / "IMG_0001.jpg"),
@@ -565,7 +572,8 @@ def _staged_assignments_image(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> str:
     """A real image with a candidate already staged by ``propose_annotations``, the platform's
-    own producer for the assignments regime's admitting call."""
+    own producer for the assignments regime's admitting call.
+    """
     from tcip_mcp.pipelines import proposal
     from tcip_mcp.tools.proposal_tools import propose_annotations
 
@@ -633,7 +641,8 @@ def test_stage_proposals_treats_an_empty_boxes_list_beside_assignments_as_no_sha
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An empty ``boxes``/``polygons`` list carries no shape at all, so it is not "combined with
-    boxes/polygons" any more than omitting the argument would be: the assignments regime runs."""
+    boxes/polygons" any more than omitting the argument would be: the assignments regime runs.
+    """
     image_path = _staged_assignments_image(tmp_path, monkeypatch)
     assignments = [{"candidate_id": 1, "subject": "leaf"}]
 
@@ -711,7 +720,8 @@ def test_stage_proposals_refuses_boxes_or_polygons_without_model_name(
 
 class _FakeMultiRingEngine:
     """An engine whose one object always splits into the same two disjoint pixel rings, through
-    the whole-image proposal seam (``propose_annotations``/``stage_proposals``)."""
+    the whole-image proposal seam (``propose_annotations``/``stage_proposals``).
+    """
 
     _RINGS = [
         [(10.0, 10.0), (50.0, 10.0), (50.0, 40.0), (10.0, 40.0)],
@@ -770,7 +780,8 @@ def test_a_two_ring_proposal_round_trips_through_propose_and_accept(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The admit case is the proposer seam's actual return, not a hand-built shape: staged as
-    candidates, accepted with a class, and read back with both rings intact."""
+    candidates, accepted with a class, and read back with both rings intact.
+    """
     from tcip_mcp.pipelines import proposal
     from tcip_mcp.tools.annotation_tools import read_annotations
     from tcip_mcp.tools.proposal_tools import (
@@ -907,7 +918,8 @@ def test_stage_proposals_refuses_an_out_of_range_coordinate_under_rings(
     tmp_path: Path,
 ) -> None:
     """The pixel-frame counterpart of the normalized-range check: a pixel vertex outside the image
-    keeps its refusal at the module's own default image size, not only a specially tiny one."""
+    keeps its refusal at the module's own default image size, not only a specially tiny one.
+    """
     root = tmp_path / "proj"
     date = "2026-02-11"
     _image(root, date, "IMG_0206")
@@ -935,7 +947,8 @@ def test_stage_proposals_refuses_a_normalized_ring_handed_under_rings(
     tmp_path: Path,
 ) -> None:
     """A ring of normalized [0,1] coordinates handed under the pixel-frame key must refuse at the
-    module's own default image size: it never spans a real pixel, unlike a mask contour."""
+    module's own default image size: it never spans a real pixel, unlike a mask contour.
+    """
     root = tmp_path / "proj"
     date = "2026-02-11"
     _image(root, date, "IMG_0207")
@@ -970,7 +983,8 @@ def test_stage_proposals_refuses_a_second_stage_of_the_same_stem(
     tmp_path: Path,
 ) -> None:
     """A staged document a reviewer may already have judged is never rewritten: the second stage
-    answers an error naming the bucket, and the first document is unchanged."""
+    answers an error naming the bucket, and the first document is unchanged.
+    """
     root = tmp_path / "proj"
     date = "2026-02-11"
     _image(root, date, "IMG_0001", size=(640, 480))
@@ -997,7 +1011,8 @@ def test_stage_proposals_admits_two_stems_staged_in_turn(
     tmp_path: Path,
 ) -> None:
     """Each staged image is its own bucket, so two stems staged in turn under one model name
-    both land."""
+    both land.
+    """
     root = tmp_path / "proj"
     date = "2026-02-11"
     _image(root, date, "IMG_0001", size=(640, 480))

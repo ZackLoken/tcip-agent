@@ -1,5 +1,6 @@
 """The test suite, the root of the repository its tests read files from, the browser's sources,
-the names the person rule is tested on, and the reader of the CSV files its tests deliver."""
+the names the person rule is tested on, and the reader of the CSV files its tests deliver.
+"""
 
 import csv
 import json

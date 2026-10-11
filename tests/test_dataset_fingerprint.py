@@ -83,7 +83,8 @@ def test_a_label_edit_changes_the_fingerprint(tmp_path):
 
 def test_pixel_reencode_under_same_filename_changes_the_fingerprint(tmp_path):
     """A BMP re-encoded with other pixels at the same file name and byte size, its labels
-    untouched, changes the fingerprint and not the labels term."""
+    untouched, changes the fingerprint and not the labels term.
+    """
     _make_dataset(tmp_path, pixel=(120, 120, 120), ext="bmp")
     before_fp = dataset_fingerprint(tmp_path)
     before_labels = fingerprint_mod._labels_term(tmp_path, {})
@@ -104,7 +105,8 @@ def test_an_image_rewritten_at_its_size_and_mtime_changes_the_fingerprint(
     tmp_path,
 ):
     """The image term reads every file's bytes on every call: a rewrite that keeps the file's
-    size and modification time still moves the fingerprint."""
+    size and modification time still moves the fingerprint.
+    """
     import os
 
     _make_dataset(tmp_path, pixel=(120, 120, 120), ext="bmp")
@@ -184,7 +186,8 @@ def test_fingerprint_is_content_addressed_move_preserves_it(tmp_path):
 
 def test_the_labels_term_keys_each_document_by_its_capture(tmp_path):
     """One stem's document under two different captures is two different label sets: the term
-    hashes each document's capture beside its stem."""
+    hashes each document's capture beside its stem.
+    """
     undated, dated = tmp_path / "undated", tmp_path / "dated"
     box = [Annotation(subject="bud", geometry=BBox(1, 1, 9, 9))]
     json_io.write_label_document(
@@ -204,7 +207,8 @@ def test_rgb_nested_dataset_fingerprint_golden_pins_the_current_implementations_
     tmp_path,
 ):
     """Fixed image bytes, one label document and a registry fingerprint to the value one run of
-    ``dataset_fingerprint`` over them recorded."""
+    ``dataset_fingerprint`` over them recorded.
+    """
     date = "2026-02-11"
     (tmp_path / "images" / date).mkdir(parents=True)
     (tmp_path / "images" / date / "IMG_1.jpg").write_bytes(
@@ -229,7 +233,8 @@ def test_bandgroup_manifest_file_itself_is_hashed_not_only_its_member_bands(
 ):
     """.bandgroup is hashed as its own bytes, like any other file, so changing the manifest
     alone, with its named band files held byte-for-byte fixed, must change the fingerprint; it
-    also fingerprints deterministically across two calls."""
+    also fingerprints deterministically across two calls.
+    """
     date = "2026-02-11"
     images = tmp_path / "images" / date
     images.mkdir(parents=True)
@@ -269,7 +274,8 @@ def test_a_malformed_registry_refuses_the_fingerprint_and_an_absent_one_admits_i
     tmp_path,
 ):
     """A registry whose bytes will not decode refuses the fingerprint rather than reading as no
-    registry; a dataset holding no registry still fingerprints, unlike one holding a registry."""
+    registry; a dataset holding no registry still fingerprints, unlike one holding a registry.
+    """
     import pytest
 
     from tcip_mcp.dataset_layout import subjects_path

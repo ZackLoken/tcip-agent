@@ -32,7 +32,8 @@ def test_every_count_objective_label_the_calibration_path_can_stamp_is_registere
     """The conf label is built from whichever picker ran, so the objective registry is the source
     of that text, and every label it holds must be registered. The label is assembled into a
     variable before it is stamped, so a registry key that drifts from the text the picker registry
-    names is invisible to a scan of stamp sites."""
+    names is invisible to a scan of stamp sites.
+    """
     from tcip_mcp.pipelines.operating_point import COUNT_OBJECTIVE_PICKERS
 
     labels = {label for _, label in COUNT_OBJECTIVE_PICKERS.values()}
@@ -50,7 +51,8 @@ def test_the_registered_callable_for_an_iou_threshold_stamp_reproduces_the_stamp
     """The IoU threshold a match criterion reports carries a derivation label; the callable that
     label resolves to, run on the same GT, has to return that same number. A registry entry that
     names a different-but-importable derivation passes every static check while pointing an
-    auditor at code that never produced the value."""
+    auditor at code that never produced the value.
+    """
     trait = confirm_bare(
         tmp_path,
         "leaf",
@@ -75,7 +77,8 @@ def test_registering_a_picker_registers_the_labels_it_can_stamp(monkeypatch):
     """A picker's label is the picker registry's own text. A second list of them would let a
     registered picker stamp a label no implementation is recorded for, which is the auditing gap
     this registry exists to close, so the labels are read from the registry rather than restated
-    beside it."""
+    beside it.
+    """
     from tcip_mcp.pipelines import derivations, operating_point
 
     label = "a sweep registered by this test"
@@ -98,7 +101,8 @@ def test_the_registered_callable_for_a_center_match_stamp_reproduces_the_stamped
     """Same demand on the center-match branch, where the reported tolerance is the derived
     fraction scaled by the GT's own average characteristic size: both sides of the comparison run
     the real implementations, so the label is checked against the computation rather than against
-    a number copied out of one of them."""
+    a number copied out of one of them.
+    """
     trait = confirm_bare(tmp_path, "leaf", localization="center_match").entry
     from tcip_mcp.pipelines.training.evaluation import (
         gt_class_avg_size,

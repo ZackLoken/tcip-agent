@@ -13,7 +13,8 @@ def project_state_dir(project: str | Path) -> Path:
 
 def viz_output_path(project: Path, name: str, suffix: str = ".png") -> str:
     """A fresh absolute path under ``<project>/.tcip/artifacts/viz/`` for one rendered artifact,
-    the directory created; ``name`` becomes part of the file name."""
+    the directory created; ``name`` becomes part of the file name.
+    """
     viz_dir = (Path(project) / ".tcip" / "artifacts" / "viz").resolve()
     viz_dir.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%d_%H%M%S")

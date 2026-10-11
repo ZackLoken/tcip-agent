@@ -20,7 +20,8 @@ def test_the_subprocess_resolves_the_authored_criterion_and_leaves_the_trait_ent
     monkeypatch: pytest.MonkeyPatch,
 ):
     """The child resolves the trait's authored localization over the validation GT and
-    completes, and the trait's record still holds the one revision the test confirmed."""
+    completes, and the trait's record still holds the one revision the test confirmed.
+    """
     pytest.importorskip("torchvision")
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.tools import training_tools

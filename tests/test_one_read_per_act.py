@@ -1,6 +1,7 @@
 """One read of each document, each bucket record and each ground-truth table per act: the
 admission's read is the one its loaders, their targets, their class counts, every item and the
-assessment's retained copy consume, and the scoring's read is the one its renderers draw."""
+assessment's retained copy consume, and the scoring's read is the one its renderers draw.
+"""
 
 from __future__ import annotations
 
@@ -23,7 +24,8 @@ _READ_STORES = (
 def _counting_reads(monkeypatch, files: tuple[str, ...] = ()) -> Counter:
     """Every read at the store boundary of a record of :data:`_READ_STORES`, and every open for
     reading of a file whose suffix is among ``files`` by whatever route opens it, counted by what
-    was read."""
+    was read.
+    """
     import builtins
     import io
 
@@ -161,7 +163,8 @@ def test_an_assessment_reads_each_reference_document_once(
 ):
     """The assessment measures the snapshot its own re-admission read, at the version that read
     answered: a document emptied before that re-admission refuses as unannotated, and one emptied
-    after it is measured as read, from the copy retained at that version."""
+    after it is measured as read, from the copy retained at that version.
+    """
     import tcip_mcp.pipelines.data.label_queries as label_queries
     from tcip_annotation import json_io
     from tcip_mcp.assessment import read_assessment
@@ -325,7 +328,8 @@ def test_a_reserved_regions_assessment_reads_its_mosaic_document_once(
 
 def _published_frames(root: Path) -> list[Path]:
     """Two labeled frames of one capture under ``root``, each with its predictions published as
-    the bucket ``published``; their image paths."""
+    the bucket ``published``; their image paths.
+    """
     from PIL import Image
 
     from tcip_annotation.state import Annotation, BBox

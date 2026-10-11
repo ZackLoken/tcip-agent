@@ -30,6 +30,7 @@ def propose_trait(
 
     Returns the revision as written (its ``number`` and ``entry_sha256`` among it), or
     ``{"error": ...}`` naming the refusal.
+
     """
     try:
         revision = traits.propose_trait(

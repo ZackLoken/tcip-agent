@@ -94,7 +94,8 @@ def read_record(project_path: str | Path) -> dict:
 def existing_project(value: str | Path) -> tuple[Path, dict]:
     """``value`` resolved and its record's fields (:func:`record_fields`), when it is a project
     whose record reads; otherwise ``ValueError`` naming the path and what :func:`read_record`
-    refused."""
+    refused.
+    """
     project = Path(value).resolve()
     fields = record_fields(project)
     if fields["record_problem"] is not None:
@@ -108,7 +109,8 @@ def _checked(project_path: str | Path, raw: object) -> dict:
     """``raw``, a record read from ``project_path``, when it holds a non-empty id and a display
     name and a site each as :func:`validate_text` would store it. Raises
     ``ProjectRecordMissingError`` for an absent record and ``ProjectRecordInvalidError`` naming
-    what the record lacks otherwise."""
+    what the record lacks otherwise.
+    """
     if raw is None:
         raise ProjectRecordMissingError(
             f"{project_path} is not a project yet: create it with initialize_project"
@@ -172,7 +174,8 @@ def _update(
     project_path: str | Path, field: str, value: str
 ) -> tuple[dict, str]:
     """Replace one field of a readable record under compare-and-swap; return the record written
-    and the value it replaced."""
+    and the value it replaced.
+    """
     key = project_record_key(project_path)
     while True:
         stored = tcip_store.read_versioned(key, default=None)
@@ -187,7 +190,8 @@ def _update(
 
 def replace_site(project_path: str | Path, site: str) -> dict:
     """Correct the site a readable record holds; its id and display name are kept. Returns
-    ``{"site", "previous_site"}``."""
+    ``{"site", "previous_site"}``.
+    """
     record, previous = _update(
         project_path, "site", validate_text("site", site)
     )
@@ -198,7 +202,8 @@ def rename_project(project: Path, display_name: str, *, actor: str) -> dict:
     """Change the project's display name and record one ``project_renamed`` line by ``actor`` in
     its own log; its directory and every other record are left as they are. Returns ``{"id",
     "display_name", "previous_display_name"}``. Refuses what :func:`validate_text` and
-    :func:`read_record` refuse."""
+    :func:`read_record` refuse.
+    """
     from tcip_mcp.audit import record_event_or_raise
 
     record, previous = _update(
@@ -223,7 +228,8 @@ def rename_project(project: Path, display_name: str, *, actor: str) -> dict:
 
 def record_fields(project_path: str | Path) -> dict:
     """``{"id", "display_name", "site", "record_problem"}``: the record's three fields and ``None``,
-    or three ``None`` beside the text of why the record would not read. Never raises."""
+    or three ``None`` beside the text of why the record would not read. Never raises.
+    """
     try:
         record = read_record(project_path)
     except (

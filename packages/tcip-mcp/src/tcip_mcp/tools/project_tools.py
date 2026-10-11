@@ -46,7 +46,8 @@ def read_datasets(project: str | Path) -> list[dict]:
 
 def dataset_entry_path(project: str | Path, entry: dict) -> Path:
     """The absolute path a dataset registry ``entry`` names, resolved through
-    :func:`~tcip_mcp.registry_paths.resolved_registry_path`."""
+    :func:`~tcip_mcp.registry_paths.resolved_registry_path`.
+    """
     from tcip_mcp.registry_paths import resolved_registry_path
 
     return resolved_registry_path(project, entry["path"])
@@ -81,6 +82,7 @@ def register_dataset(project: Path, dataset_root: str, crop: str) -> dict:
             its label documents are records in).
         crop: The crop this dataset's imagery is of, as ``crops.yml`` names it. Required; the
             expert's fact.
+
     """
     from tcip_mcp.dataset_layout import (
         dataset_identity_path,
@@ -152,6 +154,7 @@ def initialize_project(
         project_path: Root directory of the project.
         display_name: The name the project picker shows; renaming later changes only this.
         site: The orchard or station this project's plants stand in, in the breeder's own words.
+
     """
     from tcip_mcp.audit import record_event_or_raise
     from tcip_mcp.project_record import create_record
@@ -339,7 +342,8 @@ def archive_project(
     include_models: bool = False,
 ) -> dict:
     """Export ``project`` as a portable bundle (:func:`write_archive`, on its terms) and record
-    the export in the project's log."""
+    the export in the project's log.
+    """
     return write_archive(
         project,
         output_path=output_path,
@@ -379,6 +383,7 @@ def write_archive(
         output_path: Destination path for the ZIP file.
         output_dir: Destination directory to write the bundle into as a tree, instead of a ZIP.
         include_models: Whether to include model checkpoints (can be large).
+
     """
     if output_path and output_dir:
         return {
@@ -483,7 +488,8 @@ def _stage_bundle(source: Path, staging: Path) -> int:
 def _sweep_free_locked_leftovers(imports_root: Path) -> None:
     """Remove a crash leftover from an earlier run: a staging sibling whose lock this process
     can take without blocking. A sibling still locked is a concurrent import's live work
-    (including one in its own rename window) and is left alone, its lock file included."""
+    (including one in its own rename window) and is left alone, its lock file included.
+    """
     from filelock import Timeout as _LockTimeout
 
     from tcip_store.file_backend import lock_file_for, path_lock
@@ -555,6 +561,7 @@ def import_project(bundle_path: str, destination: str) -> dict:
         bundle_path: Path to the ``.tcip.zip`` archive, or the directory tree written by
             ``archive_project``'s ``output_dir`` mode.
         destination: Directory to extract into.
+
     """
     from filelock import Timeout as _LockTimeout
 

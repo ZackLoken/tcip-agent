@@ -189,7 +189,8 @@ def test_stop_ends_a_child_that_ignores_sigterm_before_the_call_returns(
     monkeypatch, tmp_path
 ):
     """A stand-in that ignores SIGTERM is ended by the guardian before ``stop_tensorboard``
-    returns."""
+    returns.
+    """
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
 
     monkeypatch.setattr(
@@ -256,7 +257,8 @@ def test_stop_ends_a_child_that_ignores_sigterm_before_the_call_returns(
 
 def _run_guardian(*args: str) -> subprocess.CompletedProcess:
     """Run the guardian's real ``python -m`` entry point with ``args``, so a usage-error
-    assertion exercises the actual subprocess boundary rather than ``_parse_args`` alone."""
+    assertion exercises the actual subprocess boundary rather than ``_parse_args`` alone.
+    """
     return subprocess.run(
         [
             sys.executable,
@@ -272,7 +274,8 @@ def _run_guardian(*args: str) -> subprocess.CompletedProcess:
 
 def test_guardian_usage_error_for_a_missing_term_grace():
     """The guardian's own argument parsing refuses a missing --term-grace with the usage
-    message rather than a traceback, run as the real subprocess entry point."""
+    message rather than a traceback, run as the real subprocess entry point.
+    """
     from tcip_mcp.pipelines.training import tensorboard_guardian as guardian
 
     result = _run_guardian(
@@ -338,8 +341,9 @@ def test_guardian_usage_error_for_a_negative_term_grace():
 
 @pytest.mark.parametrize("term_grace", ["nan", "inf"])
 def test_guardian_usage_error_for_a_non_finite_term_grace(term_grace):
-    """nan and inf both parse as floats but name no usable escalation wait, so both are usage
-    errors rather than a grace the guardian would wait on forever or not at all."""
+    """Nan and inf both parse as floats but name no usable escalation wait, so both are usage
+    errors rather than a grace the guardian would wait on forever or not at all.
+    """
     from tcip_mcp.pipelines.training import tensorboard_guardian as guardian
 
     result = _run_guardian(
@@ -359,7 +363,8 @@ def test_guardian_usage_error_for_a_non_finite_term_grace(term_grace):
 @pytest.mark.parametrize("parent_pid", ["0", "-1"])
 def test_guardian_usage_error_for_a_non_positive_parent(parent_pid):
     """A --parent of zero or less parses as an integer but names no real process, so it is a
-    usage error rather than a pid the guardian would poll forever."""
+    usage error rather than a pid the guardian would poll forever.
+    """
     from tcip_mcp.pipelines.training import tensorboard_guardian as guardian
 
     result = _run_guardian(

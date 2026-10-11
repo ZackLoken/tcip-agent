@@ -51,13 +51,15 @@ def proposal_staging_key(
     dataset_root: str | Path, capture: str, stem: str
 ) -> ts.Key:
     """The candidates the latest proposal run produced for one dataset image, whole, under the
-    dataset root, by the image's capture and stem."""
+    dataset root, by the image's capture and stem.
+    """
     return ts.Key(PROPOSAL_STAGING_STORE, str(dataset_root), (capture, stem))
 
 
 def _staging_key_for(image_path: str) -> ts.Key:
     """The :func:`proposal_staging_key` of the dataset image at ``image_path``; ``ValueError``,
-    :func:`~tcip_mcp.dataset_layout.parse_image_path`'s own, for an image of no capture."""
+    :func:`~tcip_mcp.dataset_layout.parse_image_path`'s own, for an image of no capture.
+    """
     from tcip_mcp.dataset_layout import parse_image_path
 
     return proposal_staging_key(*parse_image_path(image_path))
@@ -173,6 +175,7 @@ def propose_annotations(
         tile_size: Cell edge, in native pixels, of the grid the cells were read off. Required with
             ``grid_cells``.
         overlap: Overlap fraction of the grid the cells were read off.
+
     """
     from tcip_mcp.pipelines.proposal import resolve_proposer
 
@@ -359,7 +362,8 @@ def _stage_assignments_regime(
 ) -> dict:
     """Stage the candidates ``assignments`` names, each with its subject, from the record staged
     at ``address`` for ``img``; refuses when that record is absent or the image's content no
-    longer matches the content identity it recorded."""
+    longer matches the content identity it recorded.
+    """
     try:
         source = resolve_image_path(img)
     except (FileNotFoundError, BandGroupIncompleteError, ValueError) as exc:
@@ -484,7 +488,8 @@ def _stage_document(
     staging key ``address``)
     (:func:`~tcip_mcp.buckets.publish`), its record naming ``producer`` as what proposed them, and
     return the bucket's name; no annotations publishes nothing and returns ``None``. A bucket of
-    that name already published refuses (:class:`~tcip_mcp.buckets.BucketExistsError`)."""
+    that name already published refuses (:class:`~tcip_mcp.buckets.BucketExistsError`).
+    """
     from tcip_annotation import json_io
     from tcip_mcp.buckets import Document, publish
     from tcip_mcp.pipelines.data.selection import ClassScope
@@ -519,7 +524,8 @@ def _stage_explicit_regime(
     polygons: list[dict],
 ) -> dict:
     """Stage explicit boxes and polygons, each carrying a ``subject``, as one staged proposal of
-    ``model_name`` for the image (:func:`_stage_document`)."""
+    ``model_name`` for the image (:func:`_stage_document`).
+    """
     from tcip_annotation.json_io import ring_vertex
     from tcip_mcp.workspace import is_valid_name
 
@@ -750,6 +756,7 @@ def stage_proposals(
         polygons: Explicit polygons; see above. Refused alongside assignments.
         model_name: The producer the explicit regime stages under. Required with
             boxes/polygons, refused with assignments.
+
     """
     if assignments is not None and (boxes or polygons):
         return {

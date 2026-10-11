@@ -56,6 +56,7 @@ def push_panel_event(
             example the browser renders directly: ``data['text']`` shows as a quiet note above that
             tab.
         data: Arbitrary JSON data payload.
+
     """
     from tcip_mcp.web_client import VALID_PANELS, post_panel_event
 
@@ -105,6 +106,7 @@ def focus_human_attention(
         bucket: The name of the published bucket or staged proposals whose proposals the canvas
             shows.
         proposal: The index of the proposal, in the bucket's document for the frame, to focus.
+
     """
     from tcip_annotation.json_io import annotations_hold_subject
     from tcip_mcp.buckets import read_bucket

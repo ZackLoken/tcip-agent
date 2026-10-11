@@ -32,7 +32,8 @@ _USAGE = "usage: tensorboard_guardian --parent <pid> --term-grace <seconds> -- <
 
 def _terminate_and_wait(child: subprocess.Popen, term_grace: float) -> int:
     """Ask the child to stop, escalate if it ignores that, and return its raw exit code
-    (negative when a signal ended it, as ``subprocess`` reports it)."""
+    (negative when a signal ended it, as ``subprocess`` reports it).
+    """
     child.terminate()
     try:
         return child.wait(timeout=term_grace)
@@ -43,7 +44,8 @@ def _terminate_and_wait(child: subprocess.Popen, term_grace: float) -> int:
 
 def _exit_code(returncode: int) -> int:
     """The shell's own reading of a raw Popen return code: 128 plus the signal number when a
-    signal ended it (a negative ``returncode``), the code itself otherwise."""
+    signal ended it (a negative ``returncode``), the code itself otherwise.
+    """
     return 128 - returncode if returncode < 0 else returncode
 
 
@@ -72,7 +74,8 @@ def _parse_args(argv: list[str]) -> tuple[int, float, list[str]]:
     """``--parent`` and ``--term-grace`` may come in either order, both before ``--``; either
     missing, no argv left after it, a non-integer or non-positive parent, or a non-numeric,
     non-finite (``nan``, ``inf``) or negative term-grace is a usage error rather than a
-    traceback, since none of those names a pid to watch or a duration to wait on."""
+    traceback, since none of those names a pid to watch or a duration to wait on.
+    """
     parent_pid: int | None = None
     term_grace: float | None = None
     i = 0

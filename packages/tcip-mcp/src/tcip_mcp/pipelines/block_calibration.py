@@ -28,7 +28,8 @@ def reserved_spatial_regions(
 ) -> SpatialManifest | None:
     """A run's within-image split ``spatial`` (``experiments.RunResolution.spatial``) when it
     reserved a calibration and a holdout region, else ``None``: a run that drew no within-image
-    split, or one that reserved no calibration or no holdout region."""
+    split, or one that reserved no calibration or no holdout region.
+    """
     if (
         spatial is None
         or not spatial.calibration_region
@@ -136,7 +137,8 @@ def check_feasibility(
     gt_counts: dict[str, int], *, side: str, min_present: int = 2
 ) -> None:
     """Refuse by name (:class:`~tcip_mcp.assessment.AssessmentRefusedError`) when fewer than
-    ``min_present`` bands on this side carry any GT at all."""
+    ``min_present`` bands on this side carry any GT at all.
+    """
     from tcip_mcp.assessment import AssessmentRefusedError
 
     n_present = sum(1 for c in gt_counts.values() if c > 0)
@@ -155,7 +157,8 @@ def density_uniformity_flags(
     """Band names whose GT count is a stark outlier (more than ``factor``x the median, or less
     than ``1/factor``x it) relative to its siblings: a cheap smoke check for a plausible
     attestation error (a region marked complete after only part of it was actually annotated),
-    flagged in provenance, never gating on its own."""
+    flagged in provenance, never gating on its own.
+    """
     import statistics
 
     counts = [c for c in gt_counts.values() if c > 0]

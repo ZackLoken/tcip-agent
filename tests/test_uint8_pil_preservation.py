@@ -74,7 +74,8 @@ def test_four_channel_converts_to_rgba_only_when_the_source_declares_alpha():
     the 4th channel really is transparency. band_interpretations (the same GDAL-color-
     interpretation fact raster_source's other consumers already read) is the only signal that
     settles it; with no signal, or a signal naming something other than alpha, the array must
-    stay ndarray rather than guess."""
+    stay ndarray rather than guess.
+    """
     from tcip_mcp.pipelines.image_utils import to_pil_if_faithful
 
     arr = _grid(6, 5, 4)
@@ -137,7 +138,8 @@ def test_load_image_converts_a_real_alpha_tagged_geotiff_to_rgba(
 ):
     """A GDAL-served 4-band GeoTIFF whose 4th band the file itself declares alpha (TIFF
     ExtraSamples=2, unassociated alpha) is the real signal load_image now reads through
-    raster_source.GdalSource.band_interpretations, not a guess from the channel count."""
+    raster_source.GdalSource.band_interpretations, not a guess from the channel count.
+    """
     import tifffile
 
     rgba = _grid(20, 16, 4)
@@ -158,7 +160,8 @@ def test_load_image_keeps_a_declared_spectral_fourth_band_as_ndarray(
 ):
     """A 4-band GeoTIFF whose file tags the 4th band ExtraSamples=0 (unspecified, GDAL's
     'undefined' color interpretation) is a genuine 4th channel, never alpha; load_image must not
-    guess it into RGBA, where PIL's augmentation chain would silently leave it untouched."""
+    guess it into RGBA, where PIL's augmentation chain would silently leave it untouched.
+    """
     import tifffile
 
     ms = _grid(20, 16, 4)
@@ -178,7 +181,8 @@ def test_load_image_keeps_an_undeclared_fourth_band_npy_as_ndarray(
     tmp_path: Path,
 ):
     """A .npy stack carries no color-interpretation metadata at all: no signal ever exists to
-    call its 4th channel alpha, so load_image must never guess it into RGBA."""
+    call its 4th channel alpha, so load_image must never guess it into RGBA.
+    """
     stack = _grid(20, 16, 4)
     np.save(str(tmp_path / "stack.npy"), stack)
     got = load_image(tmp_path / "stack.npy", 4)
@@ -290,7 +294,8 @@ def test_a_uint8_windowed_tile_trains_augmented_through_tiling(tmp_path: Path):
 def test_a_declared_alpha_windowed_tile_trains_augmented(tmp_path: Path):
     """The windowed tile path reads the same real band_interpretations signal load_image does:
     a 4-band GeoTIFF whose file declares its 4th band alpha still gets the PIL augmentation
-    chain, byte-identical to the whole-decode case above."""
+    chain, byte-identical to the whole-decode case above.
+    """
     pytest.importorskip("torch")
     import torch
 
@@ -326,7 +331,8 @@ def test_a_declared_spectral_fourth_band_windowed_tile_trains_unaugmented(
     """A 4-band GeoTIFF whose file declares its 4th band something other than alpha (a genuine
     spectral band) must not be guessed into RGBA: the transform never runs (BaseImageDataset's
     own PIL-only skip, the same path uint16/5-band tiles already take), so the served tile is
-    the tile's own raw, unflipped pixels."""
+    the tile's own raw, unflipped pixels.
+    """
     pytest.importorskip("torch")
     import torch
 

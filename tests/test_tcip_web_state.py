@@ -1,5 +1,6 @@
 """Tests for tcip_web.state.StateStore: versioning, persistence to the open project, reopening,
-the retained panel events and the one project admission."""
+the retained panel events and the one project admission.
+"""
 
 from __future__ import annotations
 
@@ -53,7 +54,8 @@ def test_a_mutation_made_for_a_project_no_longer_open_is_refused_and_not_held(
     tmp_path: Path,
 ) -> None:
     """A route captures the project it acts on once; the write admits that project under the
-    lock, so a mutation computed for one project is never held or persisted as another's."""
+    lock, so a mutation computed for one project is never held or persisted as another's.
+    """
     store = StateStore()
     proj_a = named_project(tmp_path / "A", "A")
     proj_b = named_project(tmp_path / "B", "B")
@@ -74,7 +76,8 @@ def test_a_mutation_made_for_no_project_persists_nowhere(
 ) -> None:
     """A mutation made while no project was open is held and persisted nowhere, whatever is
     open by the time it is applied: not under a project opened meanwhile, and not after a
-    close."""
+    close.
+    """
     store = StateStore()
     project = named_project(tmp_path / "A", "A")
     asyncio.run(store.mutate({"active_tab": "results"}, project=None))
@@ -148,7 +151,8 @@ def test_opening_a_project_whose_snapshot_does_not_decode_refuses_and_leaves_the
     tmp_path: Path,
 ) -> None:
     """A present snapshot that is not its producer's whole shape is reported, never read as a
-    fresh state, and the project open before stays open."""
+    fresh state, and the project open before stays open.
+    """
     store = StateStore()
     proj_a = named_project(tmp_path / "A", "A")
     proj_b = named_project(tmp_path / "B", "B")
@@ -169,7 +173,8 @@ def test_a_persisted_snapshot_stating_a_nested_field_partly_is_reported_not_defa
 ) -> None:
     """A snapshot whose ``view`` states none of its fields is not its producer's whole shape; the
     open refuses rather than filling the view with defaults. The whole snapshot the producer
-    writes opens."""
+    writes opens.
+    """
     store = StateStore()
     project = named_project(tmp_path / "A", "A")
     asyncio.run(store.open_project(project))
@@ -205,7 +210,8 @@ def test_mutate_refuses_a_built_model_with_a_wrongly_typed_field_and_holds_nothi
     None
 ):
     """A pre-built model instance passes model_copy untouched (revalidate_instances="never"), so
-    mutate must dump it and validate the merged result rather than trust it as already valid."""
+    mutate must dump it and validate the merged result rather than trust it as already valid.
+    """
     store = StateStore()
     bad_dataset = DatasetSelection.model_construct(
         current_image_index="banana"
@@ -218,7 +224,8 @@ def test_mutate_refuses_a_built_model_with_a_wrongly_typed_field_and_holds_nothi
 
 def test_mutate_refuses_an_unknown_top_level_key_and_holds_nothing() -> None:
     """A misspelled top-level key (``activ_tab`` for ``active_tab``) must not be silently
-    dropped."""
+    dropped.
+    """
     store = StateStore()
     with pytest.raises(GuiMutationInvalidError):
         asyncio.run(store.mutate({"activ_tab": "results"}, project=None))
@@ -261,7 +268,8 @@ def test_admission_answers_the_open_project_and_refuses_any_other(
 
 class _SwitchingStore(StateStore):
     """A store whose open project is another one at every read after the first, standing in for
-    a switch that lands between two reads of it."""
+    a switch that lands between two reads of it.
+    """
 
     def __init__(self, first: OpenProject, second: OpenProject) -> None:
         super().__init__()
@@ -279,7 +287,8 @@ class _SwitchingStore(StateStore):
 def test_admission_reads_the_open_project_once(tmp_path: Path) -> None:
     """An admission that read the id and the root in two steps would admit one project's id and
     answer the other's root when a switch lands between them; reading the one value once, it
-    answers the project it compared against."""
+    answers the project it compared against.
+    """
     proj_a = named_project(tmp_path / "A", "A")
     proj_b = named_project(tmp_path / "B", "B")
     store = _SwitchingStore(proj_a, proj_b)
@@ -295,7 +304,8 @@ def test_a_switch_publishes_nothing_until_its_departure_commits(
 ):
     """Opening B departs from A in A's stats transaction; while that transaction is open, and when
     its commit fails, the store still holds A with A's state, and B is published, identity and
-    state together, only once the commit has returned."""
+    state together, only once the commit has returned.
+    """
     import contextlib
 
     store = StateStore()
@@ -331,7 +341,8 @@ def test_a_switch_publishes_nothing_until_its_departure_commits(
 def test_a_close_naming_another_project_closes_nothing(tmp_path: Path) -> None:
     """The close compares and closes in one step under the lock: a close naming a project that
     is not the open one leaves the open one open, and a switch that lands while the close waits
-    for the lock is seen by the comparison, so the project opened meanwhile stays open."""
+    for the lock is seen by the comparison, so the project opened meanwhile stays open.
+    """
     store = StateStore()
     proj_a = named_project(tmp_path / "A", "A")
     proj_b = named_project(tmp_path / "B", "B")

@@ -30,7 +30,8 @@ def test_registers_a_csv_and_persists_the_frozen_record(
     tmp_path: Path,
 ) -> None:
     """The recorded shape: per-file {path, sha256, n_plants}, crop, site, registered_at, and a
-    digest over the parsed rows; who registered it is the audit line's."""
+    digest over the parsed rows; who registered it is the audit line's.
+    """
     csv_path = write_plant_csv(tmp_path / "plants.csv", PLANTS)
 
     res = register_plant_registry(
@@ -67,7 +68,8 @@ def test_a_registered_csvs_hash_is_of_the_bytes_its_rows_were_parsed_from(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The file is rewritten with more plants between the parse and anything after it: the
-    recorded hash and count both answer for the bytes the rows came from."""
+    recorded hash and count both answer for the bytes the rows came from.
+    """
     csv_path = write_plant_csv(tmp_path / "plants.csv", PLANTS[:1])
     parsed_bytes = csv_path.read_bytes()
     real = plant_mapping.read_plant_csv_bytes
@@ -120,7 +122,8 @@ def test_refuses_naming_a_file_that_parses_no_georeferenced_plant(
     tmp_path: Path,
 ) -> None:
     """A per-file check: one good file beside one that parses to nothing still refuses, naming
-    only the failing file."""
+    only the failing file.
+    """
     good = write_plant_csv(tmp_path / "good.csv", PLANTS)
     bad = write_plant_csv(tmp_path / "bad.csv", [])
 
@@ -203,7 +206,8 @@ def test_build_plant_mapping_reads_a_registered_registry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Admits valid work: a mapping built by build_plant_mapping over a name
-    register_plant_registry minted, through both platform doors."""
+    register_plant_registry minted, through both platform doors.
+    """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, _ = _write_scene(
@@ -259,7 +263,8 @@ def _deliver_scene(
 ) -> tuple[str, dict[str, str]]:
     """A real, delivered phenology scene through the platform's own producers, for the registry
     doors below to then interfere with. Returns the registered registry's own name and each
-    date's bucket."""
+    date's bucket.
+    """
     from tests.test_second_trait_acceptance import _seed_currant_bloom_trait
 
     _init(tmp_path)
@@ -294,7 +299,8 @@ def test_the_happy_path_through_the_platforms_own_producers_refuses_at_the_class
     mapping recorded is admitted by the delivery door, which resolves the mapping, runs the
     per-plant phenology over it and reaches the one gate. The scene's buckets are unassessed and
     the MCP door takes no acknowledgment, so the gate is where this delivery stops, naming the
-    missing assessment rather than the registry or the mapping."""
+    missing assessment rather than the registry or the mapping.
+    """
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 
     registry_name, preds_by_date = _deliver_scene(tmp_path, monkeypatch)
@@ -320,7 +326,8 @@ def test_a_deleted_registry_refuses_at_delivery_naming_the_registry_and_the_mapp
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A guard: a registry deleted after the mapping was built refuses the delivery by name,
-    rather than verifying an empty plant_csvs_unverified list against nothing."""
+    rather than verifying an empty plant_csvs_unverified list against nothing.
+    """
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 
     registry_name, preds_by_date = _deliver_scene(tmp_path, monkeypatch)
@@ -350,7 +357,8 @@ def test_a_registry_digest_mismatch_refuses_at_delivery(
 ) -> None:
     """A guard: a registry whose stored digest no longer matches what the mapping was built
     against (a hand-edited or store-corrupted record) refuses rather than verifying against the
-    wrong plants."""
+    wrong plants.
+    """
     from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
 
     registry_name, preds_by_date = _deliver_scene(tmp_path, monkeypatch)

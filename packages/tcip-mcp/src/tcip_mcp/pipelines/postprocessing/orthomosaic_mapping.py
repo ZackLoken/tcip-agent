@@ -39,12 +39,14 @@ WGS84_EPSG = 4326
 class GeoreferencingError(ValueError):
     """A GeoTIFF is missing (or carries an unusable form of) a tag this module needs to resolve
     a pixel's real-world coordinate: pixel scale, tiepoint, a geokey directory, or a projected
-    CRS identified by that directory."""
+    CRS identified by that directory.
+    """
 
 
 class RotatedRasterError(GeoreferencingError):
     """A GeoTIFF carries a ``ModelTransformationTag``: a rotated or sheared raster, for which
-    the tiepoint + pixel-scale affine this module implements is the wrong math."""
+    the tiepoint + pixel-scale affine this module implements is the wrong math.
+    """
 
 
 @dataclass
@@ -159,7 +161,8 @@ def pixel_to_native(
 ) -> tuple[float, float]:
     """The (easting, northing) in ``transform``'s native projected CRS for pixel (column, row)
     ``(pixel_x, pixel_y)``, via the tiepoint + pixel-scale GeoTIFF affine, rows increasing
-    southward."""
+    southward.
+    """
     native_x = (
         transform.tiepoint_native_x
         + (pixel_x - transform.tiepoint_pixel_x) * transform.pixel_scale_x
@@ -176,7 +179,8 @@ def native_to_pixel(
 ) -> tuple[float, float]:
     """The pixel (column, row) for a native-CRS coordinate ``(native_x, native_y)``, the inverse
     of :func:`pixel_to_native`; a zero ``pixel_scale_x`` or ``pixel_scale_y`` refuses
-    (``ValueError``) naming it."""
+    (``ValueError``) naming it.
+    """
     if transform.pixel_scale_x == 0:
         raise ValueError(
             "native_to_pixel: transform.pixel_scale_x is zero; the tiepoint + pixel-scale affine "
@@ -200,7 +204,8 @@ def native_to_pixel(
 
 class OrthomosaicGeoreference:
     """A whole-mosaic GeoTIFF's pixels in its native CRS and in WGS84, one transformer per
-    instance."""
+    instance.
+    """
 
     def __init__(self, transform: GeoTransform):
         self.transform = transform
@@ -213,7 +218,8 @@ class OrthomosaicGeoreference:
     ) -> OrthomosaicGeoreference:
         """The georeference a raster's one georeference read answered (an open reader's or a TIFF
         header's ``georeference``). Raises the reason that read refused, or
-        :class:`GeoreferencingError` for a raster whose reader reads no GeoTIFF tags."""
+        :class:`GeoreferencingError` for a raster whose reader reads no GeoTIFF tags.
+        """
         if isinstance(georeference, GeoTransform):
             return cls(georeference)
         raise georeference or GeoreferencingError(
@@ -248,7 +254,8 @@ class OrthomosaicGeoreference:
 
     def wgs84_to_native(self, lat: float, lon: float) -> tuple[float, float]:
         """(easting, northing) in this raster's own native projected CRS for a WGS84
-        ``(lat, lon)``."""
+        ``(lat, lon)``.
+        """
         native_x, native_y = self._transformer().transform(
             lon, lat, direction="INVERSE"
         )
@@ -256,13 +263,15 @@ class OrthomosaicGeoreference:
 
     def wgs84_to_pixel(self, lat: float, lon: float) -> tuple[float, float]:
         """The pixel (column, row) in this raster for a WGS84 ``(lat, lon)``, the inverse of
-        :meth:`pixel_to_wgs84`."""
+        :meth:`pixel_to_wgs84`.
+        """
         return native_to_pixel(self.transform, *self.wgs84_to_native(lat, lon))
 
     def meters_per_native_unit(self) -> float:
         """The meters one unit of this raster's native CRS spans
         (:func:`~tcip_mcp.pipelines.pixel_size.meters_per_crs_unit`); refuses (``ValueError``)
-        naming why when its CRS states no such span."""
+        naming why when its CRS states no such span.
+        """
         from tcip_mcp.pipelines.pixel_size import meters_per_crs_unit
 
         factor, reason = meters_per_crs_unit(self.transform.epsg)
@@ -309,7 +318,8 @@ class DetectionAssignment:
 
 def detection_location(box: Sequence[float]) -> tuple[float, float]:
     """A detection's own location: the center of its corner box
-    (:func:`~tcip_annotation.matching.box_centers`), in the pixel space the box is stated in."""
+    (:func:`~tcip_annotation.matching.box_centers`), in the pixel space the box is stated in.
+    """
     from tcip_annotation.matching import box_centers
 
     cx, cy = box_centers([box])[0].tolist()

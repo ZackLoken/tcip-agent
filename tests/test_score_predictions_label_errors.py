@@ -21,7 +21,8 @@ ONE_BUD = [Annotation(subject="bud", geometry=BBox(1, 1, 5, 5))]
 def _published(project: Path, name: str, image: Path, registry=None):
     """One ``bud`` box at 0.9 on ``image``, carrying the last value of each attribute
     ``registry`` declares on it (none for no registry), published as the bucket ``name``; the
-    bucket."""
+    bucket.
+    """
     from tests._chain_fixtures import published
 
     attributes = (
@@ -82,7 +83,8 @@ def test_score_predictions_over_attributed_documents_scores_the_object_class(
 ) -> None:
     """A prediction carrying attribute values carries the object class in subject, so this
     scores its localization, a valid number about finding the object, never an attribute head's
-    call."""
+    call.
+    """
     from tcip_mcp import subject_registry as cr
 
     img = tmp_path / "images" / UNDATED_BUCKET / "IMG_0000.jpg"
@@ -116,7 +118,8 @@ def test_a_predicted_image_with_no_label_document_is_refused_as_a_reference(
     tmp_path: Path,
 ):
     """An image the bucket predicted and nobody labeled has no reference: scoring and the count
-    triage refuse naming its document, never measuring it against an empty one."""
+    triage refuse naming its document, never measuring it against an empty one.
+    """
     from tcip_annotation.json_io import UnreadableLabelDocumentError
     from tcip_mcp.tools.vision_tools import get_worst_predictions
 
@@ -137,7 +140,8 @@ def test_an_image_the_bucket_names_no_document_for_is_unknown_never_a_miss(
     tmp_path: Path,
 ):
     """A labeled image the bucket's record never predicted is no false negative and no triage
-    score: scoring and triage leave it out and name it, while the image it did predict scores."""
+    score: scoring and triage leave it out and name it, while the image it did predict scores.
+    """
     from tcip_mcp.tools.vision_tools import get_worst_predictions
 
     images = tmp_path / "ds" / "images" / UNDATED_BUCKET

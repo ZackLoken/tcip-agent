@@ -136,7 +136,8 @@ def _install_without_clobbering(temp: Path, destination: Path) -> None:
 
 def verify_identity(conn: sqlite3.Connection, db_path: Path) -> None:
     """Refuse (``StoreError``) a database that is not this module's, before a single row is read:
-    a file that is not a SQLite database, or one whose schema is not this module's DDL."""
+    a file that is not a SQLite database, or one whose schema is not this module's DDL.
+    """
     try:
         found = _schema_of(conn)
     except sqlite3.DatabaseError as exc:
@@ -183,7 +184,8 @@ def open_verified(
     db_path: Path, root: str, timeout_s: float = DEFAULT_LOCK_TIMEOUT_S
 ) -> sqlite3.Connection:
     """Open a published database, verify it, and leave it in WAL at full synchronous; a database
-    not already in WAL is converted under ``root``'s transition lock."""
+    not already in WAL is converted under ``root``'s transition lock.
+    """
     conn = sqlite3.connect(
         str(db_path), isolation_level=None, check_same_thread=False
     )
@@ -209,7 +211,8 @@ def open_verified(
 
 def copy_database(source: Path, destination: Path) -> None:
     """Write a consistent copy of the database at ``source`` to ``destination`` through SQLite's
-    own backup, whatever another connection is committing meanwhile."""
+    own backup, whatever another connection is committing meanwhile.
+    """
     src = sqlite3.connect(str(source))
     try:
         dst = sqlite3.connect(str(destination))
@@ -223,7 +226,8 @@ def copy_database(source: Path, destination: Path) -> None:
 
 def _encoded(key: Key, encode: Callable[[Any], bytes], value: Any) -> bytes:
     """``value`` through ``encode``, or a ``StoreError`` naming the entry and what would not
-    encode."""
+    encode.
+    """
     try:
         return encode(value)
     except (TypeError, ValueError) as exc:
@@ -246,7 +250,8 @@ def _decoded(key: Key, data: bytes) -> Any:
 
 def _versioned(key: Key, data: bytes | None, default: Any) -> Versioned:
     """A stored record as :func:`~tcip_store.file_backend.versioned` answers it, its bytes
-    decoded through :func:`_decoded`."""
+    decoded through :func:`_decoded`.
+    """
     return versioned(
         data,
         default,
@@ -280,7 +285,8 @@ class SqliteBackend:
     def release(self, root: str) -> None:
         """Close every connection this backend holds on the canonical ``root`` or on a root under
         it, on every thread, once every operation using one of them has returned; every other
-        root's connections stay open and in use."""
+        root's connections stay open and in use.
+        """
         prefix = os.path.join(root, "")
 
         def under(slot: tuple[int, int, str]) -> bool:
@@ -398,7 +404,8 @@ class SqliteBackend:
     @contextmanager
     def _mapped(self, keys: tuple[Key, ...]) -> Generator[None]:
         """Turn a driver error raised inside into this layer's own refusal: contention names the
-        first key the call named."""
+        first key the call named.
+        """
         started = time.monotonic()
         try:
             yield
@@ -423,7 +430,8 @@ class SqliteBackend:
         self, keys: tuple[Key, ...], *, timeout_s: float | None = None
     ) -> Generator[sqlite3.Connection]:
         """One ``begin immediate`` transaction over the single root a call names, the write lock
-        taken up front rather than upgraded from a read."""
+        taken up front rather than upgraded from a read.
+        """
         timeout = self.lock_timeout_s if timeout_s is None else timeout_s
         with ExitStack() as held:
             with self._mapped(keys):
@@ -556,7 +564,8 @@ class SqliteBackend:
     def read_log(self, key: Key, *, after: str | None = None) -> LogPage:
         """Entries committed after the cursor, in commit order. The cursor is the last returned
         row's id, which autoincrement never reuses; an entry that will not decode is reported
-        through ``corrupt``."""
+        through ``corrupt``.
+        """
         start = int(after) if after else 0
         with (
             self._mapped((key,)),
@@ -593,7 +602,8 @@ class SqliteBackend:
 
 class Txn:
     """A transaction's handle over the keys it names: reads and writes inside one commit, a read
-    seeing this transaction's own writes. A key the transaction does not name is refused."""
+    seeing this transaction's own writes. A key the transaction does not name is refused.
+    """
 
     def __init__(
         self,
@@ -616,7 +626,8 @@ class Txn:
         self, key: Key, *, default: Any = REQUIRED
     ) -> Versioned:
         """One of the transaction's records and its version; absence answers ``default`` at
-        ``Version.ABSENT`` or raises ``NotFoundError``."""
+        ``Version.ABSENT`` or raises ``NotFoundError``.
+        """
         self._held(key)
         return _versioned(key, self._backend._stored(self._conn, key), default)
 

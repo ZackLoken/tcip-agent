@@ -1,5 +1,6 @@
 """Corrupting a record already written: bytes that will not decode put behind its key in the
-database."""
+database.
+"""
 
 from __future__ import annotations
 

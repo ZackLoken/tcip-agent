@@ -1,7 +1,8 @@
 """Plant-ID mapping across capture dates: each image assigned a plant by its capture sequence
 along a row and its GPS, or by nearest-neighbor GPS where no sequence anchors it, every assignment
 recording its match ``source`` and its GPS ``distance_m``. A mapping is named project state, bound
-to the dataset it was built over and to the build receipt that names it."""
+to the dataset it was built over and to the build receipt that names it.
+"""
 
 from __future__ import annotations
 
@@ -59,7 +60,8 @@ class ImageStamp:
     :attr:`~tcip_mcp.pipelines.raster_source.SourceHeader.kind` (``"photo"``, ``"group"``, or an
     array container's ``"tif"``/``"npy"``/``"npz"``), ``name`` its file name, ``readable`` whether
     a photograph's EXIF read (``None`` for the other kinds), and ``manifest_sha256``/``members`` a
-    band group's own."""
+    band group's own.
+    """
 
     stem: str
     date_folder: str
@@ -129,7 +131,8 @@ the stated value, or the stated value capped to the grid pitch."""
 class Assignment:
     """The mapping we produce for a single image, named by its file name in its date folder;
     ``distance_m`` is the GPS distance (m) to the nearest plant, ``None`` for a stamp with no
-    position."""
+    position.
+    """
 
     __pydantic_config__ = _DECODED
 
@@ -173,7 +176,8 @@ def assignment_is_attributed(assignment: object) -> bool:
 def require_named_plants(plants: list[PlantRecord]) -> None:
     """Refuse (``ValueError``) a registry carrying a blank ``plot_name``
     (:func:`assignment_is_attributed`'s rule) or a duplicate one, naming the offending accession
-    or names."""
+    or names.
+    """
     for p in plants:
         if not assignment_is_attributed({"plot_name": p.plot_name}):
             raise ValueError(
@@ -236,7 +240,8 @@ class MappingBuild:
     ) -> MappingBuild:
         """The build the stored record ``raw`` under ``name`` holds, carrying the record's own
         digest (:func:`record_digest`). A document that does not decode as this record raises
-        ``ValueError`` naming the project and the name."""
+        ``ValueError`` naming the project and the name.
+        """
         from pydantic import ValidationError
 
         try:
@@ -250,7 +255,8 @@ class MappingBuild:
 
     def rows(self) -> dict[str, list[dict]]:
         """The assignments as plain per-date dict rows, each a fresh dict carrying this build's
-        own ``plant_attribution``."""
+        own ``plant_attribution``.
+        """
         return {
             date: [
                 {**a.__dict__, "plant_attribution": self.plant_attribution}
@@ -311,7 +317,8 @@ class MappingBuild:
     def served(self) -> dict:
         """This build as a door answers it: its ``name``, :meth:`summary`, the captures PIL could
         not open per date, the tolerance record and that tolerance's loosest accepted distance
-        (:func:`match_gates`)."""
+        (:func:`match_gates`).
+        """
         return {
             "name": self.name,
             "summary": self.summary(),
@@ -360,7 +367,8 @@ def _exif_dms_to_decimal(
 ) -> float | None:
     """Degrees, minutes and seconds with their hemisphere reference as signed decimal degrees, or
     ``None`` when ``dms`` is absent. Raises ``ValueError`` naming ``path`` for a value that is not
-    three numbers or a reference that is not ``negative`` or ``positive``."""
+    three numbers or a reference that is not ``negative`` or ``positive``.
+    """
     if dms is None:
         return None
     try:
@@ -453,7 +461,8 @@ def _read_date_stamps(
 ) -> list[ImageStamp]:
     """A date's stamps for every logical capture ``list_logical_images`` enumerated, by its
     header's ``kind``: EXIF for a photograph, the manifest's own digest and member names for a
-    band group, bare identity for an array raster (no EXIF to read for either)."""
+    band group, bare identity for an array raster (no EXIF to read for either).
+    """
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.raster_source import SourceHeader
 
@@ -560,7 +569,8 @@ PLANT_CSV_COLUMNS = list(PLANT_CSV_COLUMN_FOR_FIELD.values())
 
 def read_plant_csv_bytes(data: bytes) -> list[PlantRecord]:
     """Parse one plant-locations CSV's own bytes into :class:`PlantRecord` rows, a row with no
-    numeric lat/lon skipped. Bytes that are not UTF-8 raise ``UnicodeDecodeError``."""
+    numeric lat/lon skipped. Bytes that are not UTF-8 raise ``UnicodeDecodeError``.
+    """
     import io
 
     records: list[PlantRecord] = []
@@ -590,7 +600,8 @@ def read_plant_csv_bytes(data: bytes) -> list[PlantRecord]:
 def read_plant_csvs(paths: Iterable[Path]) -> list[PlantRecord]:
     """Read every ``paths`` entry that exists through :func:`read_plant_csv_bytes`, silently
     skipping a path that is not a file. A plant-locations shapefile is not one of these paths:
-    convert it first with :func:`read_plant_shapefile`'s own CLI, ``tcip shp-to-plant-csv``."""
+    convert it first with :func:`read_plant_shapefile`'s own CLI, ``tcip shp-to-plant-csv``.
+    """
     records: list[PlantRecord] = []
     for path in paths:
         p = Path(path)
@@ -608,7 +619,8 @@ class ShapefileRows(NamedTuple):
     reprojected floats. ``missing_fields`` names every CSV column with no resolvable source
     attribute; ``geometry_kinds`` is every geometry type actually read (``"point"``,
     ``"polygon"``, ``"multipolygon"``); ``skipped_null_geometry`` counts features with no
-    geometry at all, invisible in ``rows``."""
+    geometry at all, invisible in ``rows``.
+    """
 
     rows: list[dict[str, object]]
     missing_fields: list[str]
@@ -793,7 +805,8 @@ class ShapefileUnreadableError(ValueError):
 
 class NoGeoreferencedPlantsError(Exception):
     """A registration names a CSV that parsed no georeferenced, named plant. ``paths`` lists
-    every file that failed the parse, so the caller's refusal names them all at once."""
+    every file that failed the parse, so the caller's refusal names them all at once.
+    """
 
     def __init__(self, message: str, *, paths: list[str]) -> None:
         super().__init__(message)
@@ -846,7 +859,8 @@ class PlantRegistryNotFoundError(ValueError):
 
 def load_registry(project: Path | str, name: str) -> dict:
     """The named registry record. A name nothing is stored under (never registered, or deleted
-    since a mapping recorded it) refuses (:class:`PlantRegistryNotFoundError`) naming it."""
+    since a mapping recorded it) refuses (:class:`PlantRegistryNotFoundError`) naming it.
+    """
     record = tcip_store.read(plant_registry_key(project, name), default=None)
     if record is None:
         raise PlantRegistryNotFoundError(
@@ -859,7 +873,8 @@ def load_registry(project: Path | str, name: str) -> dict:
 def registry_csv_entries(record: dict, project: Path | str) -> list[dict]:
     """The ``{path, sha256, n_plants}`` entries a loaded registry record of ``project``
     carries, each ``path`` resolved through
-    :func:`~tcip_mcp.registry_paths.resolved_registry_path`."""
+    :func:`~tcip_mcp.registry_paths.resolved_registry_path`.
+    """
     from tcip_mcp.registry_paths import resolved_registry_path
 
     return [
@@ -1028,7 +1043,8 @@ def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 def attr(row: object, name: str) -> Any:
     """One field of an assignment row, an :class:`Assignment` or the plain dict row
-    :meth:`MappingBuild.rows` produces; ``None`` when it carries none."""
+    :meth:`MappingBuild.rows` produces; ``None`` when it carries none.
+    """
     return row.get(name) if isinstance(row, dict) else getattr(row, name, None)
 
 
@@ -1057,7 +1073,8 @@ def nearest_plant(
 ) -> tuple[int | None, float | None]:
     """The index in ``plants`` (those in ``skip`` passed over) of the plant nearest the ``(lat,
     lon)`` ``position``, and its distance in meters; the index is ``None`` when that plant lies
-    farther than ``within_m`` and both are ``None`` when no plant is left to measure."""
+    farther than ``within_m`` and both are ``None`` when no plant is left to measure.
+    """
     distances = [
         (haversine_m(*position, p.lat, p.lon), i)
         for i, p in enumerate(plants)
@@ -1125,7 +1142,8 @@ def _derive_row_break_threshold(gaps: list[float]) -> float | None:
 
 def _segment_runs(stamps: list[ImageStamp]) -> list[list[ImageStamp]]:
     """Break an ordered list of stamps into row runs on GPS jumps that stand out from that
-    date's own walking gaps (see ``_derive_row_break_threshold``)."""
+    date's own walking gaps (see ``_derive_row_break_threshold``).
+    """
     if not stamps:
         return []
     pairs: list[tuple[ImageStamp, float | None]] = []
@@ -1164,7 +1182,8 @@ def assign_plants(
     """Assign each image to a plant by sequence-anchored NN matching: its nearest unclaimed plant
     within the sequence gate, else its nearest plant within the loosest gate
     (:func:`match_gates`), else none. A stamp with no position (a band group or an array raster,
-    or a photograph with no usable EXIF position) is unmapped."""
+    or a photograph with no usable EXIF position) is unmapped.
+    """
     out: list[Assignment] = []
     gates = match_gates(nn_tolerance_m)
     claimed: set[int] = set()
@@ -1205,7 +1224,8 @@ def assign_plants(
 
 def grid_pitch_m(plants: list[PlantRecord]) -> float:
     """Median nearest-neighbor spacing of the plant centroids, the planting grid pitch (m); 0.0
-    for fewer than two plants."""
+    for fewer than two plants.
+    """
     pts = [(p.lat, p.lon) for p in plants]
     if len(pts) < 2:
         return 0.0
@@ -1253,7 +1273,8 @@ def resolve_nn_tolerance_m(
 
 def match_gates(nn_tolerance_m: float) -> dict:
     """The distances a match is accepted out to, given ``nn_tolerance_m``: the tolerance itself,
-    a sequence-anchored match's ceiling, and ``max_match_distance_m``, the loosest any match is."""
+    a sequence-anchored match's ceiling, and ``max_match_distance_m``, the loosest any match is.
+    """
     return {
         "nn_tolerance_m": nn_tolerance_m,
         "sequence_match_distance_m": nn_tolerance_m * SEQUENCE_MATCH_FACTOR,
@@ -1385,7 +1406,8 @@ def plant_mapping_key(project: Path | str, name: str) -> Key:
 
 def plant_mapping_names(project: Path | str) -> list[str]:
     """Every mapping name persisted under this project that ``NAME_SEGMENT`` admits, sorted, from
-    the store's own key listing."""
+    the store's own key listing.
+    """
     root = str(project_state_dir(project))
     names = (
         key.parts[-1] for key in tcip_store.keys(PLANT_MAPPING_STORE, root)
@@ -1395,20 +1417,23 @@ def plant_mapping_names(project: Path | str) -> list[str]:
 
 def archived_mapping_name(name: str, record_sha256: str) -> str:
     """The key name a superseding rebuild of ``name`` moves its cited record ``record_sha256``
-    to; :func:`plant_mapping_names` never lists it, since ``@`` fails ``NAME_SEGMENT``."""
+    to; :func:`plant_mapping_names` never lists it, since ``@`` fails ``NAME_SEGMENT``.
+    """
     return f"{name}@{record_sha256[:12]}"
 
 
 def record_digest(record: object) -> str:
     """The digest a stored mapping record earns, whatever its shape: sha256 over
-    ``encode_record(record)``, what its receipt names."""
+    ``encode_record(record)``, what its receipt names.
+    """
     return hashlib.sha256(encode_record(record)).hexdigest()
 
 
 class MappingRebuildError(Exception):
     """A same-name rebuild would replace a mapping record a delivery event under this project
     still cites. ``event_ids`` names every citing event; ``status`` is the web door's HTTP status
-    for it."""
+    for it.
+    """
 
     def __init__(
         self, message: str, *, event_ids: list[str], status: int = 409
@@ -1590,7 +1615,8 @@ def _require_receipt(
     project: Path | str, name: str, record_sha256: str
 ) -> None:
     """Refuse unless a ``plant_mapping_built`` event under ``name`` names ``record_sha256`` in
-    the project's own audit log; any matching receipt admits, the latest or not."""
+    the project's own audit log; any matching receipt admits, the latest or not.
+    """
     root_key = tcip_store.canonical_path(project)
     if root_key not in _receipt_cursor:
         _scan_receipts(project, after=None)
@@ -1896,7 +1922,8 @@ def ungeoreferenced_capture_message(
 
 class _StatusError(Exception):
     """A refusal whose ``str(exc)`` is the caller-facing message and ``status`` the web door's HTTP
-    status for it."""
+    status for it.
+    """
 
     def __init__(self, message: str, *, status: int = 400) -> None:
         super().__init__(message)
@@ -1905,7 +1932,8 @@ class _StatusError(Exception):
 
 class UngeoreferencedCaptureError(_StatusError):
     """A plant mapping cannot be built or delivered from the captures at hand: none carries a
-    position this door reads, or none could be read."""
+    position this door reads, or none could be read.
+    """
 
 
 class MappingDeliveryError(_StatusError):
@@ -2042,7 +2070,8 @@ def plant_mapping_disclosure(
     when its plant ids came from mapping ``name``: the mapping resolved and verified against the
     delivered ``buckets`` by recorded date (:func:`resolve_delivery_mapping`, refusing as it does),
     and a population plant the mapping assigns on no delivered date refused
-    (:class:`MappingDeliveryError`) naming each."""
+    (:class:`MappingDeliveryError`) naming each.
+    """
     build, verified = resolve_delivery_mapping(project, name, buckets)
     assigned = {
         a.plot_name

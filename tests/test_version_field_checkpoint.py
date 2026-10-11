@@ -1,5 +1,6 @@
 """load_registered_checkpoint loads a registered checkpoint of the platform's own payload shape
-once its digest has verified it."""
+once its digest has verified it.
+"""
 
 from __future__ import annotations
 

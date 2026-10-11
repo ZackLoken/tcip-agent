@@ -16,7 +16,8 @@ def _stub_search(
     monkeypatch, *, before=None, raises: Exception | None = None
 ) -> list[dict]:
     """Replace Ray Tune's search with one answering the sweep's log directory, first calling
-    ``before(sweep_root)``, or raising ``raises``; returns the calls it received."""
+    ``before(sweep_root)``, or raising ``raises``; returns the calls it received.
+    """
     calls: list[dict] = []
 
     def fake_search(**kw):
@@ -49,7 +50,8 @@ def test_a_cancel_written_before_the_run_ends_the_sweep_canceled_before_its_firs
 ) -> None:
     """A cancel the opened sweep's directory holds when its run starts (a relaunch canceled
     before its worker ran) ends the sweep canceled, its final status carrying the reason, and
-    never starts the search."""
+    never starts the search.
+    """
     from tcip_mcp import experiments
     from tcip_mcp.tools.training_tools import (
         _CANCEL_BEFORE_START_REASON,
@@ -87,7 +89,8 @@ def test_a_cancel_landing_mid_search_ends_the_sweep_canceled(
     raises,
 ) -> None:
     """A cancel that lands while the search runs ends the sweep canceled whether the search
-    returns or raises once it stops."""
+    returns or raises once it stops.
+    """
     from tcip_mcp import experiments
     from tcip_mcp.tools.training_tools import (
         _CANCEL_DURING_RUN_REASON,
@@ -123,7 +126,8 @@ def test_a_cancel_after_the_sweep_ended_refuses_and_leaves_its_final_status_as_w
     monkeypatch,
 ) -> None:
     """A cancel arriving after the sweep ended refuses by name and writes nothing: its final
-    status is the one it ended with."""
+    status is the one it ended with.
+    """
     from tcip_mcp.experiments import cancel_requested, experiment_dir
     from tcip_mcp.tools.training_tools import (
         cancel_training,
@@ -152,7 +156,8 @@ def test_a_second_cancel_keeps_the_time_of_the_first(
     project, real_hpo_base_config
 ) -> None:
     """The cancellation record is written once: a repeated request keeps the first request's
-    time."""
+    time.
+    """
     from tcip_mcp.experiments import request_cancel
 
     opened = opened_sweep(project, real_hpo_base_config)
@@ -168,7 +173,8 @@ def test_a_sweep_cancel_reaches_only_a_sweep_of_the_project_it_is_handed(
     tmp_path_factory,
 ) -> None:
     """The cancel resolves the sweep under the project it is handed; another project holds no
-    such sweep and refuses."""
+    such sweep and refuses.
+    """
     from tcip_mcp.experiments import cancel_requested, experiment_dir
     from tcip_mcp.tools.training_tools import cancel_training
 
@@ -232,7 +238,8 @@ def test_sweep_stopper_stop_all_true_at_once_for_a_trial_ray_killed_outright(
 ) -> None:
     """A trial Ray kills outright never writes its final status, so a disk-based check alone
     would read it as running until the heartbeat window passed; the callback's own live set, fed
-    by Ray's own ``on_trial_error`` report, says otherwise at once."""
+    by Ray's own ``on_trial_error`` report, says otherwise at once.
+    """
     from tcip_mcp.experiments import request_cancel
     from tcip_mcp.pipelines.training.hpo import _build_sweep_stopper
 
@@ -275,7 +282,8 @@ def test_run_hyperparameter_search_refuses_a_relaunched_from_naming_no_sweep_und
 ) -> None:
     """relaunched_from must name a sweep this root holds: a name that resolves to nothing is
     refused before any directory is made, rather than recorded as lineage nothing answers for;
-    a launch naming none is untouched by the check."""
+    a launch naming none is untouched by the check.
+    """
     from tcip_mcp.experiments import sweep_dirs
     from tcip_mcp.tools.training_tools import run_hyperparameter_search
 

@@ -1,6 +1,7 @@
 """The platform's one matcher of detections to ground truth, and geometry helpers over
 :class:`~tcip_annotation.state.Annotation` geometries: box and polygon IoU as matrices and polygon
-containment."""
+containment.
+"""
 
 from __future__ import annotations
 
@@ -39,7 +40,8 @@ Rings = list[list[tuple[float, float]]]
 
 def _boxes(boxes):
     """``boxes`` as an ``m x 4`` array: an array or tensor as given (so a tensor keeps its
-    autograd), anything else as float64."""
+    autograd), anything else as float64.
+    """
     if getattr(boxes, "ndim", None) == 2:
         return boxes
     return np.asarray(boxes, dtype=np.float64).reshape(-1, 4)
@@ -53,14 +55,16 @@ def xywh_corners(boxes) -> np.ndarray:
 
 def box_areas(boxes):
     """The area of each corner box of ``boxes`` (``m x 4``, an array or a tensor, in which the
-    areas are answered)."""
+    areas are answered).
+    """
     b = _boxes(boxes)
     return (b[:, 2] - b[:, 0]) * (b[:, 3] - b[:, 1])
 
 
 def box_sizes(boxes) -> np.ndarray:
     """The characteristic size ``sqrt(w * h)`` of each corner box of ``boxes``, a negative
-    extent counting as zero."""
+    extent counting as zero.
+    """
     b = _boxes(boxes)
     return np.sqrt(
         np.maximum(b[:, 2] - b[:, 0], 0) * np.maximum(b[:, 3] - b[:, 1], 0)
@@ -76,7 +80,8 @@ def box_centers(boxes) -> np.ndarray:
 def iou_matrix(a, b, *, over: str = "union") -> np.ndarray:
     """The pairwise intersection of the corner boxes ``a`` (``m x 4``) and ``b`` (``k x 4``) over
     their union, or with ``over="smaller"`` over the smaller box, as an ``m x k`` float64 array;
-    a pair whose denominator has no area is ``0``."""
+    a pair whose denominator has no area is ``0``.
+    """
     a = np.asarray(a, dtype=np.float64).reshape(-1, 4)
     b = np.asarray(b, dtype=np.float64).reshape(-1, 4)
     iw = np.maximum(
@@ -103,7 +108,8 @@ def iou_matrix(a, b, *, over: str = "union") -> np.ndarray:
 
 def shapely_geometry(rings: Rings):
     """One or more closed rings as one valid Shapely geometry: a polygon for one ring, a
-    multipolygon for several, every ring contributing, repaired by ``make_valid`` when invalid."""
+    multipolygon for several, every ring contributing, repaired by ``make_valid`` when invalid.
+    """
     geom = (
         ShapelyPolygon(rings[0])
         if len(rings) == 1
@@ -115,7 +121,8 @@ def shapely_geometry(rings: Rings):
 def rings_iou_matrix(a: Sequence[Rings], b: Sequence[Rings]) -> np.ndarray:
     """The pairwise IoU of the regions ``a`` against ``b``, each a list of rings
     (:func:`shapely_geometry`), as a ``len(a) x len(b)`` float64 array; a region with no ring
-    overlaps nothing."""
+    overlaps nothing.
+    """
     ga = [shapely_geometry(r) if r else None for r in a]
     gb = [shapely_geometry(r) if r else None for r in b]
     out = np.zeros((len(ga), len(gb)))
@@ -138,7 +145,8 @@ def _cost_matrix(
     """How far each ground-truth record is from each detection record under ``criterion``, and
     the farthest a match may be: the distance between box centers within ``tolerance`` for a
     center match; one minus the box IoU within one minus ``iou_threshold`` for an IoU match, or
-    one minus the region IoU of the records' ``rings`` for a mask IoU match."""
+    one minus the region IoU of the records' ``rings`` for a mask IoU match.
+    """
     if criterion["kind"] == "center_match":
         cg, cd = box_centers(_corners(gt)), box_centers(_corners(dt))
         return (
@@ -206,7 +214,8 @@ class Matching:
     """One image's detections matched to its ground truth, by index into the lists matched:
     ``pairs`` as ``(gt index, detection index)``, ``unpaired`` the detections that pair nothing
     and no crowd region ignores (the false positives), ``ignored`` those a crowd region ignores,
-    and ``missed`` the ground-truth objects nothing pairs (the false negatives)."""
+    and ``missed`` the ground-truth objects nothing pairs (the false negatives).
+    """
 
     pairs: list[tuple[int, int]]
     unpaired: list[int]
@@ -222,7 +231,8 @@ class Matching:
 def objects_of(records: list[dict], *, crowd: bool = False) -> list[int]:
     """The indices of the ground-truth records (``{"iscrowd", ...}``) that are each one object:
     every one but a crowd region (:func:`~tcip_annotation.state.object_rows`); with ``crowd``,
-    the crowd regions instead."""
+    the crowd regions instead.
+    """
     return [
         i
         for i, one in enumerate(object_rows([r["iscrowd"] for r in records]))
@@ -270,7 +280,8 @@ def pair_detections(
 
 def match_record(a: Annotation) -> dict:
     """One annotation as the record the matcher reads: its box as ``[x, y, w, h]`` on the stored
-    grid, its crowd flag, and its rings (a box's own rectangle, for a box)."""
+    grid, its crowd flag, and its rings (a box's own rectangle, for a box).
+    """
     from tcip_annotation.json_io import xywh
 
     b = bbox_of(a.geometry)  # type: ignore[arg-type]
@@ -283,7 +294,8 @@ def match_record(a: Annotation) -> dict:
 
 def geometry_rings(geometry: BBox | Polygon) -> Rings:
     """The region a box or polygon covers, as the rings a mask match reads: a polygon's own rings,
-    a box's rectangle as one ring."""
+    a box's rectangle as one ring.
+    """
     return (
         geometry.rings
         if polygonal(geometry)
@@ -310,7 +322,8 @@ def class_matchings(
     paired to that class's ground truth (:func:`pair_detections` under ``policy``), indices into
     ``gt`` and ``dt``. ``held`` keeps each class's matching by its exact inputs, so a second
     request under the same criterion over the same detections takes the matching already
-    made."""
+    made.
+    """
     out: dict[Any, Matching] = {}
     for cid in sorted({r["category_id"] for r in (*gt, *dt)}):
         gi = [i for i, r in enumerate(gt) if r["category_id"] == cid]
@@ -352,7 +365,8 @@ def class_matchings(
 
 def merged(by_class: dict[Any, Matching]) -> Matching:
     """One image's per-class matchings (:func:`class_matchings`) as one matching, ordered by
-    detection index."""
+    detection index.
+    """
     ms = list(by_class.values())
     return Matching(
         pairs=sorted(
@@ -374,7 +388,8 @@ def pair_proposals(
     """``annotations`` and the ``proposals`` that are detections
     (:func:`~tcip_annotation.state.is_detection`) scoring at least ``conf_threshold`` (every one
     for ``None``) matched by subject (:func:`class_matchings`), indices into the two lists
-    given."""
+    given.
+    """
     gt = [i for i, a in enumerate(annotations) if box_derivable(a.geometry)]
     dt = [i for i, p in enumerate(proposals) if is_detection(p)]
     m = merged(

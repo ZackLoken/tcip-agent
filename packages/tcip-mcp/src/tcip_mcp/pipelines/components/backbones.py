@@ -48,6 +48,7 @@ class BackboneWrapper(nn.Module):
         out_channels: List of channel counts per feature level
             (e.g. [256, 512, 1024, 2048] for ResNet-50).
         num_stages: Number of feature levels.
+
     """
 
     def __init__(
@@ -69,6 +70,7 @@ class BackboneWrapper(nn.Module):
         Returns:
             Dict mapping ``"s0"`` … ``"sN"`` to feature tensors, where
             ``s0`` is the earliest (highest-resolution) stage.
+
         """
         out = self.model(x)
         if isinstance(out, dict):

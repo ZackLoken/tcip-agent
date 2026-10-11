@@ -101,7 +101,8 @@ def report_documents(project_path: str) -> list[MemoryDocument]:
 def report_row(document: MemoryDocument) -> dict:
     """One friction report as a listing shows it: its id, its time and every field its writer
     records, or its id and the reason it will not decode (``malformed``) for a report that will
-    not. A decoded report lacking a field its writer records raises ``KeyError``."""
+    not. A decoded report lacking a field its writer records raises ``KeyError``.
+    """
     entry = document.value
     if isinstance(entry, DecodeError):
         return {"report_id": document.name, "malformed": str(entry)}
@@ -166,6 +167,7 @@ def report_friction(
             error messages).
         user_disagreement: True when this report is capturing the user pushing back on or
             disagreeing with your approach, independent of category.
+
     """
     if category not in REPORT_CATEGORIES:
         return {
@@ -219,6 +221,7 @@ def load_project_memory(
             ``report_friction`` categories; empty means all. Ignored for retrospectives.
         filter_substring: Optional case-insensitive substring matched against each entry's filename
             or its text.
+
     """
     if kind == "reports":
         return _load_reports(str(project), limit, category, filter_substring)
@@ -295,6 +298,7 @@ def read_audit_log(
             string means the end of that day.
         status: Exact status filter, 'ok' or 'exception'.
         limit: Maximum entries to return (default 200), newest first.
+
     """
     from tcip_mcp.audit import audit_entries, audit_log_key, dataset_scope_of
     from tcip_mcp.registry_paths import located
@@ -367,7 +371,8 @@ def _memory_page(
 ) -> dict:
     """Up to ``limit`` rows ``row`` makes of ``documents`` in order (a ``None`` row is skipped)
     under ``corpus``, with their count and how many documents exist; with no documents, a note
-    naming ``noun``."""
+    naming ``noun``.
+    """
     if not documents:
         return {
             corpus: [],
@@ -441,6 +446,7 @@ def write_retrospective(
             unusable. Candidates for tool changes.
         would_do_differently: With hindsight, what would you change about
             your approach?
+
     """
     now = now_iso()
     project_path = str(project)
@@ -507,7 +513,8 @@ def write_retrospective(
 @audited
 def record_distillation_pass(project: Path) -> dict:
     """Record, as this door's audit line, that this project's friction reports and retrospectives
-    were reviewed; records nothing else."""
+    were reviewed; records nothing else.
+    """
     return {"status": "recorded"}
 
 

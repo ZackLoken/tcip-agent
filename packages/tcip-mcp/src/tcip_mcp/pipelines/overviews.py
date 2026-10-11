@@ -58,7 +58,8 @@ def overview_sidecar(path: str | Path) -> Path:
 def overview_dims(path: str | Path) -> list[tuple[int, int]]:
     """The levels of ``path``'s physical pyramid
     (:meth:`~tcip_mcp.pipelines.raster_source.SourceHeader.gdal`'s ``level_dims``). Raises what
-    its header read and GDAL's open raise."""
+    its header read and GDAL's open raise.
+    """
     with SourceHeader(path).gdal() as source:
         return source.level_dims()
 
@@ -68,7 +69,8 @@ def plan_overview_build(ds) -> dict:
     planned over ``ds`` and the raster's TIFF header: ``{"refusal": why}`` when the raster already
     carries internal overviews or has no
     level to build, else its ``levels`` (:func:`overview_levels`) and whether it is a ``palette``
-    raster (whose indices are resampled by nearest, never averaged)."""
+    raster (whose indices are resampled by nearest, never averaged).
+    """
     path = ds.name
     if ds.overviews(1):
         return {
@@ -89,7 +91,8 @@ def plan_overview_build(ds) -> dict:
 def sidecar_valid(path: str | Path) -> bool:
     """Whether ``path``'s external sidecar exists and every tile in it was actually written, read
     off its header (tile byte counts, no pixel decode): a zero-length tile, which reads back as
-    silent zeros, or a header tifffile cannot parse marks the sidecar invalid."""
+    silent zeros, or a header tifffile cannot parse marks the sidecar invalid.
+    """
     sidecar = overview_sidecar(path)
     if not sidecar.is_file():
         return False

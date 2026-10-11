@@ -92,7 +92,8 @@ def test_register_plant_registry_admits_a_shapefile_converted_first(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A shapefile is never registered directly; converted through the platform's own command
-    first, the resulting CSV registers exactly as a hand-authored one would."""
+    first, the resulting CSV registers exactly as a hand-authored one would.
+    """
     from tcip_mcp.cli.shp_to_plant_csv import convert_shp_to_plant_csv
 
     shp = _point_shapefile(tmp_path)

@@ -78,14 +78,16 @@ BATCH_ROWS_PER_EPOCH = 10
 def batch_row_ends(n_batches: int) -> set[int]:
     """The one-based batch counts within an epoch of ``n_batches`` batches after which a
     per-batch row is emitted by default: :data:`BATCH_ROWS_PER_EPOCH` evenly spaced ends, the
-    last the epoch's own, or every batch of an epoch shorter than that."""
+    last the epoch's own, or every batch of an epoch shorter than that.
+    """
     rows = min(BATCH_ROWS_PER_EPOCH, n_batches)
     return {math.ceil(k * n_batches / rows) for k in range(1, rows + 1)}
 
 
 def run_device(spec: TrainConfigSchema) -> torch.device:
     """The device a validated config (``schemas.train_config``) trains on: its ``device``, or
-    cuda when available and cpu otherwise."""
+    cuda when available and cpu otherwise.
+    """
     return torch.device(
         spec.device or ("cuda" if torch.cuda.is_available() else "cpu")
     )
@@ -99,7 +101,8 @@ def _warmup_starts(
     through their membership (``optimizer_factory.captured_sources``): the one rate its members'
     captured groups ran at, ``0.0`` for a group whose members no captured group held (they were
     not training), and its own target for an empty group. Refuses (``ValueError``) a group mixing
-    held and unheld members, or members whose captured groups ran at different rates."""
+    held and unheld members, or members whose captured groups ran at different rates.
+    """
     starts = []
     for index, (sources, target) in enumerate(
         zip(captured_sources(model, optimizer, captured), target_lrs)
@@ -142,7 +145,8 @@ def capture_rng_state(
 ) -> dict[str, Any]:
     """Snapshot every random stream a run draws from: the four set_seed seeds and
     ``loader_generator``, the generator a loader shuffles with (``None`` for a loader that has
-    none), restorable with :func:`restore_rng_state`."""
+    none), restorable with :func:`restore_rng_state`.
+    """
     return {
         "python_rng_state": random.getstate(),
         "numpy_rng_state": np.random.get_state(),
@@ -161,7 +165,8 @@ def restore_rng_state(
 ) -> None:
     """Restore the streams :func:`capture_rng_state` captured, the loader's into
     ``loader_generator``. Refuses (``ValueError``) a capture and a loader that disagree on whether
-    the loader draws from a generator of its own."""
+    the loader draws from a generator of its own.
+    """
     if (state["loader_rng_state"] is None) != (loader_generator is None):
         raise ValueError(
             "the captured random state and this loader disagree on whether the loader shuffles "
@@ -181,7 +186,8 @@ def loader_worker_init(
 ) -> None:
     """DataLoader worker-process initializer: configures the platform GDAL cache budget at
     ``1 / num_workers`` of it per worker (the whole budget for ``None``), and seeds numpy and
-    random per worker when ``seed`` is given."""
+    random per worker when ``seed`` is given.
+    """
     from tcip_mcp.pipelines.raster_source import configure_gdal_cache
 
     share = 1.0 / num_workers if num_workers else 1.0
@@ -197,7 +203,8 @@ def seeded_loader_kwargs(
 ) -> dict:
     """DataLoader kwargs wiring :func:`loader_worker_init` as the ``worker_init_fn`` (scaled by
     ``num_workers`` when given), plus a ``generator`` seeded with ``seed`` when one is given, none
-    otherwise."""
+    otherwise.
+    """
     kwargs: dict = {
         "worker_init_fn": functools.partial(
             loader_worker_init,
@@ -214,7 +221,8 @@ def seeded_loader_kwargs(
 
 def run_transforms(spec: TrainConfigSchema) -> Any:
     """The training transforms a validated config's (``schemas.train_config``) ``augmentation``
-    declares, or ``None`` for none."""
+    declares, or ``None`` for none.
+    """
     augmentation = spec.augmentation
     if not augmentation:
         return None
@@ -228,7 +236,8 @@ def run_loaders(
 ) -> tuple[DataLoader, DataLoader | None]:
     """``run``'s train loader and, when ``val_ds`` is given, its val loader, collating for the
     task its config names, at the batch size the run reads (``TrainRun.reads``) and its config's
-    ``num_workers`` and ``sampler``, seeded from its ``seed``."""
+    ``num_workers`` and ``sampler``, seeded from its ``seed``.
+    """
     from tcip_mcp.pipelines.data.samplers import build_sampler
     from tcip_mcp.pipelines.training.collation import task_collate
 
@@ -309,7 +318,8 @@ def effective_data_geometry(
 
 def _uniform_native_size(train_ds: Any) -> tuple[int, int] | None:
     """The one ``(width, height)`` every training source shares, or ``None`` when sizes differ,
-    a source cannot be probed, or the dataset exposes no source list to probe."""
+    a source cannot be probed, or the dataset exposes no source list to probe.
+    """
     stems = sorted(indexed_sample_keys(train_ds))
     resolve = getattr(train_ds, "image_of", None)
     if not stems or resolve is None:
@@ -333,7 +343,8 @@ def _uniform_native_size(train_ds: Any) -> tuple[int, int] | None:
 def checkpoint_path(run_dir: Path | str, name: str) -> Path:
     """One checkpoint of the run whose directory is ``run_dir``: ``<run_dir>/<name>.pt``, ``name``
     being ``model_best``, ``model_final``, an epoch checkpoint or a bespoke loop's own tag. A name
-    that is not one file name refuses with ``BadKeyError`` (``experiments.run_name``)."""
+    that is not one file name refuses with ``BadKeyError`` (``experiments.run_name``).
+    """
     from tcip_mcp.experiments import run_name
 
     return Path(run_dir) / f"{run_name(name)}.pt"
@@ -341,7 +352,8 @@ def checkpoint_path(run_dir: Path | str, name: str) -> Path:
 
 def write_checkpoint(payload: dict, path: Path) -> Path:
     """Publish one checkpoint at ``path`` once it is whole (``experiments.publish_once``) and
-    return it. A name already written refuses with ``FileExistsError``."""
+    return it. A name already written refuses with ``FileExistsError``.
+    """
     from tcip_mcp.experiments import publish_once
 
     publish_once(path, lambda handle: torch.save(payload, handle))
@@ -354,7 +366,8 @@ def checkpoint_stamp(run: TrainRun) -> dict:
     (``TrainConfigSchema.record``) without its data locations (``experiments.DATA_PATHS``), which
     the run's own record keeps, and every other path (``experiments.CONFIG_PATHS``) stored against
     the run's project as its run record stores it; under ``SNAPSHOT_KEY`` the digest of the source
-    snapshot its run took (``SourceLayout.snapshot``)."""
+    snapshot its run took (``SourceLayout.snapshot``).
+    """
     from tcip_mcp.experiments import CONFIG_PATHS, DATA_PATHS
     from tcip_mcp.registry_paths import recorded_paths
 
@@ -421,7 +434,8 @@ def _epoch_state(
 ) -> dict:
     """One epoch's training state (:func:`capture_training_state`) with the selection value,
     stage, epoch and metrics it was taken at: what a stage hands the next and what
-    ``model_best.pt`` is written from."""
+    ``model_best.pt`` is written from.
+    """
     return {
         **capture_training_state(model, optimizer),
         "selection": selection,
@@ -454,7 +468,8 @@ def _save_checkpoint(
     """Write a resumable periodic checkpoint carrying the run's ``stamp``
     (:func:`checkpoint_stamp`), its current training state (:func:`capture_training_state`, the
     same representation a stage's best is held in) and the resume state
-    (:class:`_ResumeState`)."""
+    (:class:`_ResumeState`).
+    """
     state = _ResumeState(
         scheduler_state_dict=scheduler.state_dict(),
         scaler_state_dict=scaler.state_dict() if scaler is not None else None,
@@ -488,7 +503,8 @@ def _save_checkpoint(
 def _build_scheduler(optimizer, spec: SchedulerSpec):
     """The scheduler ``spec.type`` names (``schemas.SCHEDULER_TYPES``) at the settings ``spec``
     carries, a horizon-bound one over the block's own ``horizon_epochs``; a onecycle schedule
-    cycles the rate alone, the optimizer's stated momentum the one it trains at."""
+    cycles the rate alone, the optimizer's stated momentum the one it trains at.
+    """
     if isinstance(spec, CosineSchedule):
         return torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer, T_max=spec.horizon_epochs, eta_min=spec.eta_min
@@ -523,7 +539,8 @@ def _validate(
     **keywords: Any,
 ) -> dict:
     """``evaluation.evaluate`` of ``model`` over ``val_loader`` at ``keywords``, its own
-    keyword arguments, every key prefixed :data:`VAL_METRIC_PREFIX`."""
+    keyword arguments, every key prefixed :data:`VAL_METRIC_PREFIX`.
+    """
     metrics = evaluate(model, val_loader, device, task, **keywords)
     return {f"{VAL_METRIC_PREFIX}{k}": v for k, v in metrics.items()}
 
@@ -531,7 +548,8 @@ def _validate(
 def config_trait(spec: TrainConfigSchema, project: Path) -> TraitEntry | None:
     """The confirmed entry of the trait a validated config's (``schemas.train_config``)
     ``evaluation`` block names, read from ``project`` (refusing as
-    ``operationalization.latest_confirmed`` does), or ``None`` when the block names none."""
+    ``operationalization.latest_confirmed`` does), or ``None`` when the block names none.
+    """
     name = spec.evaluation.trait
     if not name:
         return None
@@ -613,7 +631,8 @@ def resolve_objective(
     """A run's objective: ``selection_metric``, :func:`resolve_selection_metric` over its
     validated config's (``schemas.train_config``) task, ``evaluation`` trait (:func:`config_trait`
     in ``project``) and ``selection_metric``, and ``higher_is_better``, that metric's declared
-    direction."""
+    direction.
+    """
     metric = resolve_selection_metric(
         spec.model_source.task,
         config_trait(spec, project),

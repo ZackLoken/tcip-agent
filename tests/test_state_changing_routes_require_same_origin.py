@@ -1,5 +1,6 @@
 """Every state-changing route refuses a cross-site Origin before it reaches a handler, the check
-``TrustBoundaryMiddleware`` makes ahead of routing."""
+``TrustBoundaryMiddleware`` makes ahead of routing.
+"""
 
 from __future__ import annotations
 
@@ -18,7 +19,8 @@ _PARAM_RE = re.compile(r"\{[^}]*\}")
 
 def _filled_path(route: APIRoute) -> str:
     """``route.path`` with each ``{param}`` segment replaced by a placeholder no record
-    resolves; the check runs before routing, so what fills the placeholder never matters."""
+    resolves; the check runs before routing, so what fills the placeholder never matters.
+    """
     return _PARAM_RE.sub("does-not-exist", route.path)
 
 
@@ -42,7 +44,8 @@ def test_every_state_changing_route_refuses_a_foreign_origin(
     client: TestClient,
 ) -> None:
     """A foreign Origin never reaches a handler: the check runs before routing, so this fails
-    at the first enumerated path whether or not that path resolves to a real record."""
+    at the first enumerated path whether or not that path resolves to a real record.
+    """
     for method, path in _state_changing_calls():
         resp = client.request(
             method, path, json={}, headers={"origin": FOREIGN_ORIGIN}
@@ -87,7 +90,8 @@ def test_a_permitted_origin_still_reaches_the_handler(
 ) -> None:
     """A request from the backend's own origin, from the Vite dev server's origin, and with no
     Origin header reaches the handler's own outcome: both origins are loopback hosts, and a
-    missing Origin is a non-browser client."""
+    missing Origin is a non-browser client.
+    """
     body = ActiveTabPayload(active_tab="annotate").model_dump()
     for origin in ("http://127.0.0.1", "http://127.0.0.1:5173", None):
         headers = {"origin": origin} if origin else {}

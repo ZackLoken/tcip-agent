@@ -42,7 +42,8 @@ SUBJECT = "bud"
 
 def _target_geometry(task: str):
     """The geometry one task's loader actually reads: a box for detection, a closed ring for
-    instance_seg, whose loader reads polygons only and rasterizes their rings."""
+    instance_seg, whose loader reads polygons only and rasterizes their rings.
+    """
     if task == "instance_seg":
         return Polygon(
             rings=[[(10.0, 10.0), (30.0, 10.0), (30.0, 30.0), (10.0, 30.0)]]
@@ -52,7 +53,8 @@ def _target_geometry(task: str):
 
 def _labeled(root: Path, stems, *, task: str = "detection") -> Path:
     """One labeled directory: an image and a per-image label document per stem, each carrying the
-    geometry ``task``'s own loader reads; the image directory."""
+    geometry ``task``'s own loader reads; the image directory.
+    """
     images_dir = root / "images" / UNDATED_BUCKET
     for stem in stems:
         write_image(images_dir / f"{stem}.png", (IMG, IMG), (70, 90, 60))
@@ -82,7 +84,8 @@ def _big_source(
     root: Path, stem: str, width: int, height: int, *, task: str = "detection"
 ) -> Path:
     """One source large enough to hold a within-image spatial split, with GT across its extent in
-    the geometry ``task``'s own loader reads; the image directory."""
+    the geometry ``task``'s own loader reads; the image directory.
+    """
     from PIL import Image
 
     images_dir = root / "images" / UNDATED_BUCKET
@@ -124,7 +127,8 @@ def _membership(ds) -> set[str]:
 def _recorded(project: Path, task: str, data_cfg: dict, **config) -> dict:
     """The partition the launcher's own producer resolves for a ``task`` run of ``project`` over
     ``data_cfg``, with ``config``'s keys laid beside it, read back from the launch record it
-    writes: the record's members come from the producer, never from a loader's own keys."""
+    writes: the record's members come from the producer, never from a loader's own keys.
+    """
     import copy
 
     from tcip_mcp.experiments import run_resolution
@@ -195,7 +199,8 @@ def test_a_starved_draw_refuses_by_the_draws_own_floor(
     tmp_path: Path, task: str
 ):
     """A group policy that collapses every sample into one group leaves no side to hold out, so
-    the run refuses naming the floor rather than training without validation."""
+    the run refuses naming the floor rather than training without validation.
+    """
     stems = ["a_0_0", "b_0_0"]
     images_dir = _labeled(tmp_path / "ds", stems, task=task)
     data_cfg = {

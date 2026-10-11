@@ -37,7 +37,8 @@ def _write_gt(
     subject: str = "bud",
 ) -> None:
     """Save the label document of ``image``; each box is pixel-xyxy ``(x1, y1, x2, y2)`` of
-    ``subject``."""
+    ``subject``.
+    """
     anns = [Annotation(subject=subject, geometry=BBox(*b)) for b in boxes]
     label_image(image, anns, w, h, keep_empty=keep_empty)
 
@@ -70,7 +71,8 @@ def _write_pred(
     name: str = "baseline",
 ):
     """Publish the bucket ``<name>/2-11-26`` under ``dataset_root``: one document per image name
-    of ``preds``, each entry ``(x1, y1, x2, y2, conf)`` a box of ``subject``; the bucket."""
+    of ``preds``, each entry ``(x1, y1, x2, y2, conf)`` a box of ``subject``; the bucket.
+    """
     pytest.importorskip("torch")
     from tests._chain_fixtures import published
 
@@ -97,7 +99,8 @@ def _published_bucket(
     project: Path, name: str, image: Path, labels: list[int], *, scope: dict
 ) -> str:
     """The bucket ``name`` published under ``scope`` holding ``image``'s document: one box at
-    ``(40, 32, 60, 48)`` per entry of ``labels``, each its class index plus one; its name."""
+    ``(40, 32, 60, 48)`` per entry of ``labels``, each its class index plus one; its name.
+    """
     pytest.importorskip("torch")
     from tests._chain_fixtures import published
 
@@ -186,7 +189,8 @@ def test_dataset_tree_reports_a_label_problem_and_keeps_listing_other_dates(
     dataset_root: Path,
 ) -> None:
     """A corrupt label costs its own subjects, never the whole tree: the other date's
-    dates_with_images/subjects_by_date entries are unaffected."""
+    dates_with_images/subjects_by_date entries are unaffected.
+    """
     _unreadable(dataset_root / "images" / "2-11-26" / "IMG_0000.JPG")
 
     resp = opened_client.get(
@@ -263,7 +267,8 @@ def test_dataset_select_carries_a_label_problem_with_no_subject_named(
 ) -> None:
     """A corrupt label makes the date's own subject list empty, which is exactly the date a
     subject-less default-open selects; the advisory must name the problem even then, not only
-    when a subject happens to be named."""
+    when a subject happens to be named.
+    """
     _unreadable(dataset_root / "images" / "2-11-26" / "IMG_0000.JPG")
 
     resp = opened_client.post(
@@ -359,7 +364,8 @@ def test_dataset_select_still_selects_over_an_unreadable_label(
     opened_client: TestClient, dataset_root: Path, opened_project: Path
 ) -> None:
     """The advisory check never blocks a selection: an unreadable label reads as advisory-absent
-    rather than refusing the select outright."""
+    rather than refusing the select outright.
+    """
     _unreadable(dataset_root / "images" / "2-11-26" / "IMG_0000.JPG")
 
     resp = opened_client.post(
@@ -384,7 +390,8 @@ def test_an_undated_captures_subjects_are_listed_by_every_door_alike(
     opened_project: Path,
 ) -> None:
     """The tree, the selection, the subjects route and the core query each list an ``undated``
-    capture's subjects, and the selection lists its image."""
+    capture's subjects, and the selection lists its image.
+    """
     from tcip_mcp.dataset_layout import UNDATED_BUCKET, capture_subjects
 
     root = tmp_path / "undated_ds"
@@ -619,7 +626,8 @@ def test_an_image_under_an_additive_image_root_loads_and_saves(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> None:
     """An image the backend admits through a ``TCIP_IMAGE_ROOTS`` entry, a dataset registered to
-    no project, is annotated by its own label key like any other."""
+    no project, is annotated by its own label key like any other.
+    """
     from tcip_web.state import store
 
     extra = tmp_path_factory.mktemp("additive") / "archive"
@@ -686,7 +694,8 @@ def test_annotate_load_authorship_person_tool_and_unattributed(
 ) -> None:
     """The load route's authorship field classifies each record: a person's own created_by reads
     person, a bare producer with no accepted_by reads tool, and no created_by at all reads
-    unattributed. Built through the platform's own writer, never hand-written JSON."""
+    unattributed. Built through the platform's own writer, never hand-written JSON.
+    """
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     anns = [
         Annotation(
@@ -717,7 +726,8 @@ def test_annotate_load_authorship_agrees_with_is_unadjudicated_agent_authorship(
     tmp_path: Path,
 ) -> None:
     """authorship_of and is_unadjudicated_agent_authorship classify every shape the same way: one
-    predicate, never two spellings of the agent-authorship rule."""
+    predicate, never two spellings of the agent-authorship rule.
+    """
     from tcip_annotation.json_io import is_unadjudicated_agent_authorship
 
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
@@ -759,7 +769,8 @@ def test_annotate_load_authorship_tool_accepted_through_the_editor(
 ) -> None:
     """A model's own proposal, once a person accepts it into ground truth, reads tool_accepted:
     its created_by travels into GT and accepted_by is the person's sign-off, so it is no longer
-    an unadjudicated tool call but it is still not the person's own hand."""
+    an unadjudicated tool call but it is still not the person's own hand.
+    """
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     _write_gt(img_path, [], keep_empty=True)
     bucket = _write_pred(
@@ -1012,7 +1023,8 @@ def test_annotate_save_prefers_rings_over_points_when_both_are_sent(
 ):
     """`rings` is the full shape and `points` only ever one contour, so `rings` wins: otherwise a
     client that sends both (a loaded multi-ring shape plus a single-ring mirror of it) would
-    persist the truncated version."""
+    persist the truncated version.
+    """
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     rings = [[[10, 10], [30, 10], [30, 30]], [[60, 10], [80, 10], [80, 30]]]
     resp = opened_client.post(
@@ -1060,7 +1072,8 @@ def test_annotate_save_audits_into_the_log_of_the_dataset_it_wrote(
     """Labels travel with their dataset, so the trail of a label write is recorded beside them
     and not in the log of the project that happened to have the dataset open. The route and the
     tool save through one library function, so one save through each leaves exactly one line
-    apiece in the dataset's log, the same facts recorded."""
+    apiece in the dataset's log, the same facts recorded.
+    """
     from tcip_mcp.tools.annotation_tools import save_annotations
     from tests._web_fixtures import bound_to
 
@@ -1103,7 +1116,8 @@ def test_a_document_the_bucket_record_does_not_name_is_no_prediction_of_it(
     dataset_root: Path,
 ) -> None:
     """A bucket's documents are the ones its record names: an image it never predicted has no
-    document in it."""
+    document in it.
+    """
     bucket = _write_pred(
         dataset_root, {"IMG_0000.JPG": [(40, 32, 60, 48, 0.9)]}
     )
@@ -1130,7 +1144,8 @@ def _launch_setup(tmp_path, monkeypatch):
 
 def _held_worker(monkeypatch, inference_routes):
     """Replace the inference worker with one holding its job running until the returned event
-    is set (or five seconds pass), then completing it."""
+    is set (or five seconds pass), then completing it.
+    """
     import threading
 
     event = threading.Event()
@@ -1154,7 +1169,8 @@ def test_a_launch_into_a_bucket_that_exists_fails_its_job_and_writes_nothing(
     monkeypatch,
 ) -> None:
     """The publication refuses a bucket that exists, as it refuses every door's: the job ends
-    failed naming the rule, the bucket keeps exactly the record it held, and no line is logged."""
+    failed naming the rule, the bucket keeps exactly the record it held, and no line is logged.
+    """
     import tcip_store
     from tcip_mcp.dataset_layout import bucket_key
     from tcip_web.routes import inference
@@ -1237,7 +1253,8 @@ def test_inference_launch_refuses_a_second_launch_while_the_first_still_writes(
 ) -> None:
     """A second launch of the same model and date while the first job still writes is refused
     naming that job; once the first job is terminal the launch is admitted again, the
-    publication being what refuses a bucket that exists."""
+    publication being what refuses a bucket that exists.
+    """
     import time
 
     ckpt, dataset_root, date, inference_routes = _launch_setup(
@@ -1305,7 +1322,8 @@ def test_inference_launch_in_flight_check_resolves_a_differently_spelled_dataset
     monkeypatch,
 ) -> None:
     """The live job a refusal names is found by resolved directory identity, so a
-    trailing-separator spelling of the same dataset root still names the first job."""
+    trailing-separator spelling of the same dataset root still names the first job.
+    """
     import os
     import time
 
@@ -1357,7 +1375,8 @@ def test_inference_launch_resolves_explicit_conf_source_from_the_payload(
     monkeypatch,
 ) -> None:
     """A caller-stated conf travels on the job as stated, which the worker's pass records as
-    stated."""
+    stated.
+    """
     from tests._verified_checkpoint_fixtures import SAMPLE_CONF
 
     ckpt, dataset_root, date, inference_routes = _launch_setup(
@@ -1386,7 +1405,8 @@ def test_inference_launch_carries_an_omitted_conf_as_unstated(
     monkeypatch,
 ) -> None:
     """An omitted conf travels on the job as unstated, never as a value; the worker's pass,
-    holding no reference, refuses it by name."""
+    holding no reference, refuses it by name.
+    """
     ckpt, dataset_root, date, inference_routes = _launch_setup(
         tmp_path, monkeypatch
     )
@@ -1447,7 +1467,8 @@ def test_state_socket_broadcasts_a_mutation_while_open(
     """A mutation made while ``/ws/state`` is connected pushes the same envelope shape the
     connect-time replay sends: the broadcast and the replay build it from different inputs
     (a subscriber payload versus the store's own snapshot and version), and only this exercises
-    the broadcast path."""
+    the broadcast path.
+    """
     with opened_client.websocket_connect("ws://127.0.0.1/ws/state") as ws:
         replay = ws.receive_json()
         assert replay["type"] == "state_snapshot"
@@ -1461,7 +1482,8 @@ def test_state_socket_broadcasts_a_mutation_while_open(
 
 def test_dataset_state_route_is_retired(opened_client: TestClient) -> None:
     """``/api/dataset/state`` is not registered; ``/api/state`` is the one route over the
-    singleton snapshot."""
+    singleton snapshot.
+    """
     assert opened_client.get("/api/dataset/state").status_code == 404
 
 
@@ -1617,7 +1639,8 @@ def test_annotate_resave_preserves_original_creator(
     opened_client, dataset_root, tmp_path
 ) -> None:
     """A re-save must not wholesale re-stamp loaded shapes to the current annotator: the
-    original creator survives (keep-original-creator policy); only new shapes get stamped."""
+    original creator survives (keep-original-creator policy); only new shapes get stamped.
+    """
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     label_image(
         img_path,
@@ -1665,7 +1688,8 @@ def test_annotate_resave_keeps_the_crowd_flag(
     opened_client, dataset_root, tmp_path
 ) -> None:
     """A crowd region the load route hands the canvas comes back on save as a crowd region: the
-    flag round-trips through the payload, and a shape that never carried one saves without it."""
+    flag round-trips through the payload, and a shape that never carried one saves without it.
+    """
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     label_image(
         img_path,
@@ -1715,7 +1739,8 @@ def test_annotate_save_reads_the_crowd_flag_through_the_decoders_check(
     opened_client, dataset_root, tmp_path, flag, status, crowd
 ) -> None:
     """The save route interprets the flag once, through the decoder's own check: a string is no
-    flag and refuses, where a coercing model would have read it as one; a null reads as no crowd."""
+    flag and refuses, where a coercing model would have read it as one; a null reads as no crowd.
+    """
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"
     resp = opened_client.post(
         "/api/annotate/labels",
@@ -1740,7 +1765,8 @@ def test_the_mcp_read_and_the_web_load_project_an_annotation_alike(
 ) -> None:
     """Both read doors hand a writer-produced crowd annotation to their client through the one
     projection: the MCP read's dict and the web load's are the same but for the editor's two
-    load-time facts, ``authorship`` and the document ``index``."""
+    load-time facts, ``authorship`` and the document ``index``.
+    """
     from tcip_mcp.tools.annotation_tools import read_annotations as mcp_read
 
     img_path = dataset_root / "images" / "2-11-26" / "IMG_0000.JPG"

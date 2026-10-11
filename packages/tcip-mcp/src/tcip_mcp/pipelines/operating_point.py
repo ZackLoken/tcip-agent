@@ -1,5 +1,6 @@
 """The measurement criteria an assessment computes, each reading its tolerances, floors and
-objective from the trait entry it is handed, and the detector knobs an execution record sets."""
+objective from the trait entry it is handed, and the detector knobs an execution record sets.
+"""
 
 from __future__ import annotations
 
@@ -68,7 +69,8 @@ def _bias_equivalence(
 ) -> tuple[bool, float]:
     """Whether a bias measured over ``n`` present samples is equivalent to zero at the scope's
     tolerance (mean plus one-sided standard error within it), and that tolerance. ``n == 0`` never
-    passes."""
+    passes.
+    """
     tolerance = _effective_count_bias_tolerance(
         tolerance_frac, typical_count, n
     )
@@ -118,7 +120,8 @@ def set_detector_operating_point(
 ) -> None:
     """Set both knobs on the holder :func:`detector_operating_point_holder` resolves, so the
     operating point governs which boxes exist. A knob the model does not expose refuses
-    (``ValueError``) naming it and the holder."""
+    (``ValueError``) naming it and the holder.
+    """
     target, path = detector_operating_point_holder(model)
     for attr, val in zip(
         OPERATING_POINT_ATTRS, (score_thresh, detections_per_img), strict=True
@@ -139,7 +142,8 @@ def governed_forward(
     """``model``'s output for each of ``inputs``, in input order, each produced under the
     in-model score threshold ``conf`` and its own detection cap of ``caps``, both set in the
     model (:func:`set_detector_operating_point`): one forward per distinct cap, over the inputs it
-    governs."""
+    governs.
+    """
     outputs: list = [None] * len(inputs)
     for cap in sorted(set(caps)):
         at = [i for i, c in enumerate(caps) if c == cap]
@@ -164,7 +168,8 @@ def _min_dt_score(records: list[dict]) -> float | None:
 
 def cap_saturated_frac(records: list[dict]) -> float:
     """Fraction of ``records`` whose frame kept as many detections as the cap the collection pass
-    gave it; every record states its frame's ``count`` and ``cap``."""
+    gave it; every record states its frame's ``count`` and ``cap``.
+    """
     return (
         sum(r["count"] == r["cap"] for r in records) / len(records)
         if records
@@ -306,7 +311,8 @@ def count_criterion(
 def _classification_kappa(items: list[dict]) -> float | None:
     """Cohen's kappa between the reference's and the model's positive/negative call over matched
     instances, chance-corrected from the reference's own base rates; ``None`` for no items or a
-    single class on either side."""
+    single class on either side.
+    """
     n = len(items)
     if n == 0:
         return None
@@ -398,7 +404,8 @@ def scalar_criterion(
 ) -> tuple[dict, list[str]]:
     """A per-image scalar prediction's held-out skill: ``criterion``'s ``score`` over the holdout
     items' ``(predicted, true)`` values must be finite, above zero and above ``floor``.
-    ``(evidence, failures)``."""
+    ``(evidence, failures)``.
+    """
     import torch
 
     true = torch.tensor([float(it["true"]) for it in hold_items])
@@ -429,7 +436,8 @@ def spatial_disjointness(
     """The reference rects (full-mosaic pixel coordinates) not held out from training under a
     within-image split's recorded regions ``spatial``: each rect must lie inside one of its
     ``val_region``/``holdout_region``/``calibration_region`` rects and overlap none of its
-    ``train_region`` rects."""
+    ``train_region`` rects.
+    """
     from tcip_mcp.pipelines.raster_source import (
         rect_contains_rect,
         rects_overlap,

@@ -87,7 +87,8 @@ class TestBoxRoundtrip:
     ) -> None:
         """Coverage: five box annotations of five distinct subjects, written and read back
         through the same per-image label document, all five subjects and the count surviving the
-        round trip."""
+        round trip.
+        """
         subjects = ["bud", "shoot", "leaf", "nut", "bush"]
         annotations = [
             Annotation(
@@ -153,7 +154,8 @@ class TestPolygonRoundtrip:
         self, img_dir: Path
     ) -> None:
         """A model-predicted mask the editor overlays can be occlusion-split: one instance, two
-        contours. Both rings must come back so the person sees the whole object."""
+        contours. Both rings must come back so the person sees the whole object.
+        """
         rings = [
             [(100.0, 50.0), (150.0, 50.0), (150.0, 200.0), (100.0, 200.0)],
             [(300.0, 60.0), (350.0, 60.0), (350.0, 190.0), (300.0, 190.0)],

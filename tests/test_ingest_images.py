@@ -17,7 +17,8 @@ from tcip_mcp.tools.ingest_tools import ingest_images
 
 def _make_image(path: Path, exif_date: str | None = None) -> None:
     """Write a tiny image; when ``exif_date`` ('YYYY:MM:DD HH:MM:SS') is set, embed it
-    as EXIF DateTimeOriginal so the ingest EXIF reader round-trips it."""
+    as EXIF DateTimeOriginal so the ingest EXIF reader round-trips it.
+    """
     from PIL import Image
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -32,7 +33,8 @@ def _make_image(path: Path, exif_date: str | None = None) -> None:
 
 def _make_raster(path: Path, **metadata: str) -> None:
     """Write a tiny GeoTIFF carrying ``metadata`` in GDAL's default metadata domain, where a
-    stitching engine writes an orthomosaic's own capture date."""
+    stitching engine writes an orthomosaic's own capture date.
+    """
     import rasterio
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -50,7 +52,8 @@ def _make_raster(path: Path, **metadata: str) -> None:
 
 def _make_tagged_tiff(path: Path, datetime_tag: str) -> None:
     """Write a tiny TIFF whose DateTime tag (306) states ``datetime_tag``, the standard tag rather
-    than any one engine's metadata item."""
+    than any one engine's metadata item.
+    """
     import numpy as np
     import tifffile
 
@@ -122,7 +125,8 @@ def test_ingest_exif_buckets_and_undated(project, tmp_path):
 def test_ingested_bytes_read_back_through_the_image_path(project, tmp_path):
     """The writer is the real ingest_images tool. The reader is tcip_store's blob read at
     dataset_layout.image_path(root, date, stem, ext): the bytes it hands back are byte-identical
-    to the source file ingest copied from, not merely present."""
+    to the source file ingest copied from, not merely present.
+    """
     import tcip_store as ts
 
     src = tmp_path / "raw"
@@ -140,7 +144,8 @@ def test_ingest_buckets_a_raster_by_the_capture_date_its_metadata_states(
     project, tmp_path
 ):
     """A raster states its capture date in raster metadata, not in EXIF: an orthomosaic lands in a
-    real date bucket the same as a photo does."""
+    real date bucket the same as a photo does.
+    """
     src = tmp_path / "raw"
     _make_raster(src / "mosaic.tif", capture_date="2025-09-16")
 
@@ -194,7 +199,8 @@ def test_ingest_still_ingests_a_file_whose_capture_date_cannot_be_read(
 ):
     """The probe never gates ingestion: an unreadable container is copied and counted like any
     other, buckets undated, and is named in the report so the difference from a file that simply
-    states no date stays visible."""
+    states no date stays visible.
+    """
     src = tmp_path / "raw"
     src.mkdir(parents=True)
     (src / name).write_bytes(b"this is not an image at all")
@@ -232,7 +238,8 @@ def test_a_date_mode_that_names_its_own_bucket_opens_no_file(
     project, tmp_path, monkeypatch, date_from
 ):
     """Only the per-file mode reads a file; the modes that name the bucket from the caller's own
-    argument never open one, so an unreadable file costs nothing and reports nothing."""
+    argument never open one, so an unreadable file costs nothing and reports nothing.
+    """
     src = tmp_path / "raw"
     _make_image(src / "a.jpg", exif_date="2026:02:11 10:30:00")
     (src / "broken.tif").write_bytes(b"this is not an image at all")
@@ -300,7 +307,8 @@ def test_ingest_same_stem_in_two_different_buckets_is_admitted(
     project, tmp_path
 ):
     """foo.jpg into one date and foo.png into another land side by side: the collision key is
-    scoped per bucket."""
+    scoped per bucket.
+    """
     src = tmp_path / "raw"
     _make_image(src / "foo.jpg", exif_date="2026:02:11 10:00:00")
     _make_image(src / "foo.png", exif_date="2026:03:01 10:00:00")
@@ -334,7 +342,8 @@ def test_ingest_stem_collision_across_two_calls_refuses_naming_both_files(
     project, tmp_path
 ):
     """The classic collision: one call places foo.jpg, a later call offers foo.png into the
-    same bucket. The bucket keeps holding foo.jpg alone; nothing from the second call lands."""
+    same bucket. The bucket keeps holding foo.jpg alone; nothing from the second call lands.
+    """
     src1 = tmp_path / "raw1"
     _make_image(src1 / "foo.jpg", exif_date="2026:02:11 10:00:00")
     first = ingest_images(project, source=str(src1))
@@ -381,7 +390,8 @@ def test_ingest_admits_a_source_after_a_band_group_manifest_with_a_different_ste
     project, tmp_path
 ):
     """A manifest at one stem never blocks an ordinary source at another stem in the same
-    bucket."""
+    bucket.
+    """
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
 
     src = tmp_path / "raw"
@@ -409,7 +419,8 @@ def test_ingest_after_a_band_group_manifest_refuses_naming_the_manifest(
     project, tmp_path
 ):
     """cap.jpg after a cap.bandgroup manifest: the door refuses rather than admitting a source
-    that would mint the manifest-versus-raw ambiguity every reader already refuses."""
+    that would mint the manifest-versus-raw ambiguity every reader already refuses.
+    """
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
 
     src = tmp_path / "raw"
@@ -550,7 +561,8 @@ def test_inspect_project_counts_canonical_images(project, tmp_path):
 
 def test_ingest_after_import_admits_a_second_date(tmp_path):
     """A project the import door lands is usable at once: import, then ingest, is the admit
-    case."""
+    case.
+    """
     from tcip_mcp.project_record import read_record
     from tcip_mcp.tools.project_tools import archive_project, import_project
     from tests._web_fixtures import new_project

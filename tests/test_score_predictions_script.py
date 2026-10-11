@@ -20,7 +20,8 @@ from tests._producer_fixtures import write_image
 
 def _fixture(tmp_path: Path) -> tuple[Path, str]:
     """An image, its label document, and a published bucket holding its document; the image
-    and the bucket's name."""
+    and the bucket's name.
+    """
     pytest.importorskip("torch")
     from tests._chain_fixtures import published
     from tests._producer_fixtures import label_image

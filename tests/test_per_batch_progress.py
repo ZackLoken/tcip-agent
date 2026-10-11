@@ -1,5 +1,6 @@
 """Per-batch progress rows: the trainer emits them at a stated cadence, on the run's one metrics
-log, and no reader of that log takes one for an epoch row."""
+log, and no reader of that log takes one for an epoch row.
+"""
 
 from __future__ import annotations
 
@@ -47,7 +48,8 @@ def _context(
     """The context of a regression run over opposed frames (``validated``, else over its
     training frames alone with no validation side), its training frames at ``intensities`` (by
     default three training batches an epoch), opened by the launcher's own producer, recording
-    every epoch hook call into ``hook_calls``; ``extra`` are config keys."""
+    every epoch hook call into ``hook_calls``; ``extra`` are config keys.
+    """
     root = tmp_path / "ds"
     data = (
         opposed_regression_data(root, intensities, VAL_INTENSITIES)
@@ -64,7 +66,8 @@ def _context(
 
 def test_a_run_admits_what_its_training_reads_once(tmp_path, monkeypatch):
     """Building a run's loaders, training it and evaluating it twice read one admission of what
-    its training reads."""
+    its training reads.
+    """
     from tcip_mcp.pipelines.schemas import TrainConfigSchema
 
     calls: list[int] = []
@@ -86,7 +89,8 @@ def test_a_run_admits_what_its_training_reads_once(tmp_path, monkeypatch):
 @pytest.mark.usefixtures("seed_bud_trait_spec")
 def test_a_run_resolves_what_its_evaluation_reads_once(tmp_path, monkeypatch):
     """Training a run stating a confirmed trait and evaluating it twice read the trait's entry
-    off the registry once."""
+    off the registry once.
+    """
     import tcip_mcp.pipelines.training.generic_trainer as generic_trainer
 
     calls: list[int] = []
@@ -113,7 +117,8 @@ def test_the_trainers_validation_and_a_bodys_evaluation_hand_evaluate_one_keywor
 ):
     """Over one run stating its own IoU threshold and a confirmed trait, the trainer's
     validation and ``ctx.evaluate`` hand ``evaluate`` the same keywords, the trait's entry
-    among them."""
+    among them.
+    """
     import tcip_mcp.pipelines.training.evaluation as evaluation
     import tcip_mcp.pipelines.training.generic_trainer as generic_trainer
 
@@ -171,7 +176,8 @@ def test_a_config_stating_no_cadence_logs_ten_batch_rows_every_epoch(
 ):
     """No stated cadence: each of two epochs logs ten rows (every batch of a shorter epoch),
     spaced evenly over the epoch, the gaps between them never differing by more than one batch,
-    the last at the epoch's own final batch."""
+    the last at the epoch's own final batch.
+    """
     intensities = [0.1 + 0.6 * i / n_batches for i in range(n_batches)]
     ctx = _context(tmp_path, [], intensities, validated=False, batch_size=1)
     assert ctx.default_train().status == "completed"
@@ -194,7 +200,8 @@ def test_the_best_selection_reads_epoch_rows_and_never_a_batch_row_s_selection(
     tmp_path,
 ):
     """A bespoke loop's batch row carrying a ``selection`` better than every epoch's does not
-    become the run's best selection."""
+    become the run's best selection.
+    """
     ctx = _context(tmp_path, [])
     ctx.log_metrics(1, {"selection": 0.5})
     ctx.log_batch(3, 1, {"selection": -100.0})

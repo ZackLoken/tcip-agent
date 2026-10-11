@@ -43,7 +43,6 @@ def test_a_boxs_width_and_height_reach_the_loader_unswapped(tmp_path):
     so every object trains against the wrong extent while the box count and its position both look
     right.
     """
-
     size = (120, 80)
     images = tmp_path / "images" / UNDATED_BUCKET
     _make_images(images, ["img0"], size)
@@ -120,7 +119,6 @@ def test_each_detection_sample_carries_its_own_index_as_image_id(tmp_path):
     """The target dict says which sample it came from, and a consumer joins per-sample results back
     through that field. A shared value silently attributes every sample's boxes to one image.
     """
-
     size = (120, 80)
     images = tmp_path / "images" / UNDATED_BUCKET
     stems = ["a", "b", "c"]
@@ -147,7 +145,6 @@ def test_an_ordinal_sample_carries_the_rank_count_its_head_decodes_with(
     ranks the scale reaches, never how many samples were loaded. The ranks here are sparse, so the
     two are different numbers.
     """
-
     images = tmp_path / "images" / UNDATED_BUCKET
     _make_images(images, ["s0", "s1", "s2"], (48, 32))
     csv_path = tmp_path / "ranks.csv"

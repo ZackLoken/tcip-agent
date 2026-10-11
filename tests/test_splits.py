@@ -42,7 +42,8 @@ def _split(
     stems, *, counts=None, splits=_SIDES, seed=1, weighted=True, minimums=None
 ):
     """The draw over ``stems`` grouped by tile prefix, every member counted (one each unless
-    ``counts`` says otherwise), at a minimum of one foreground group per side unless stated."""
+    ``counts`` says otherwise), at a minimum of one foreground group per side unless stated.
+    """
     return group_balanced_split(
         stems,
         counts=counts if counts is not None else dict.fromkeys(stems, 1),
@@ -94,7 +95,8 @@ def test_group_split_foreground_stratification():
 
 def test_group_split_refuses_a_member_with_no_measured_count():
     """A member the counts do not name refuses at the algorithm rather than balancing as a
-    background member."""
+    background member.
+    """
     stems = _grouped(4)
     counts = {s: 1 for s in stems[1:]}
     with pytest.raises(ValueError, match="no foreground count"):
@@ -105,7 +107,8 @@ def test_group_split_calibration_side_gets_its_stated_minimum():
     """Over six foreground groups at a skewed (0.6, 0.2, 0.2) ratio, a one-per-side minimum
     lands 4/1/1 (train's floor absorbs every group the balancing pass would otherwise give the
     smaller sides); stating a per-side minimum of two for the third side raises its own floor to
-    two groups, taking from train's share instead."""
+    two groups, taking from train's share instead.
+    """
     stems = _grouped(6)
 
     default_parts = _split(stems)
@@ -155,7 +158,8 @@ def test_refuse_insufficient_foreground_groups_names_the_sides_and_the_shortfall
 
 def test_refuse_insufficient_foreground_groups_carries_the_callers_own_remedy():
     """The caller states what to add, since what counts as foreground differs by the ground
-    truth a draw reads."""
+    truth a draw reads.
+    """
     from tcip_mcp.pipelines.data.splits import (
         refuse_insufficient_foreground_groups,
     )
@@ -215,7 +219,8 @@ def test_resolve_group_key_fn_named_policy_still_works():
 
 def _kept_tiles(split, width, height):
     """Every kept tile's rect, tagged with the side whose region contains it, recomputed
-    independently of the split's own kept-tile counters."""
+    independently of the split's own kept-tile counters.
+    """
     from tcip_mcp.pipelines.raster_source import rect_contains_rect
 
     lattice = slice_lattice(height, width, split.tile_size, split.overlap)
@@ -274,7 +279,8 @@ def test_center_out_order_ties_resolve_in_declared_order():
 
     Two equal-share slots resolve center-out in the order they were given, whichever order
     that is: swapping the input order swaps which cardinal side each lands on, so the tie is
-    the caller's declared order, never a coin flip."""
+    the caller's declared order, never a coin flip.
+    """
     from tcip_mcp.pipelines.data.splits import _center_out_order
 
     forward = _center_out_order([("val", 0.2), ("test", 0.2), ("train", 0.6)])
@@ -290,7 +296,8 @@ def test_spatial_strip_split_tied_shares_place_by_declared_order():
     """Coverage of the fixed tie-break: equal shares resolve center-out by their position in
     the declared ``split_names`` order, so permuting which of the two tied names comes second
     swaps which cardinal side that name lands on, mirroring the swap in the declared order, and
-    the returned split carries no ``seed`` field."""
+    the returned split carries no ``seed`` field.
+    """
     # 4160 = 320 + 15 * 256: the lattice ends flush, so no pulled-back slice crowds an edge side.
     forward = spatial_strip_split(
         4160,
@@ -399,7 +406,8 @@ def test_label_document_extent_reads_the_frame_off_the_document_it_is_handed(
     tmp_path,
 ):
     """The extent is the frame the stored document records; a document stating none refuses
-    naming where it was read."""
+    naming where it was read.
+    """
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tests._producer_fixtures import image_label_key, label_image
@@ -427,7 +435,8 @@ def test_count_label_lines_counts_every_instance_of_the_subject_assessed_or_not(
     tmp_path,
 ):
     """Every record of the scope's subject is foreground, whether or not it carries a value for
-    each attribute the registry declares; another subject's record is not."""
+    each attribute the registry declares; another subject's record is not.
+    """
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp import subject_registry as cr

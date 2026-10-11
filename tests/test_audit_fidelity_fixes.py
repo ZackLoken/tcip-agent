@@ -20,7 +20,8 @@ def test_mcp_save_annotations_empty_writes_the_empty_document_the_route_writes(
     bound,
 ):
     """An empty save writes an empty label document through the one save both label doors call:
-    the document stays, holding nothing, never deleted."""
+    the document stays, holding nothing, never deleted.
+    """
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     img = blank_image(bound.root)
@@ -40,7 +41,8 @@ def test_mcp_save_annotations_refuses_by_index_through_the_decoders_checks(
     bound, bad
 ):
     """Each annotation is admitted by the decoder's own object and subject checks, the refusal
-    naming its index, and nothing is written; the valid one beside it is not written alone."""
+    naming its index, and nothing is written; the valid one beside it is not written alone.
+    """
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     img = blank_image(bound.root)
@@ -78,7 +80,8 @@ def test_encode_predictions_stamps_model_provenance(tmp_path):
 
 def test_draw_splits_counts_json_objects_not_lines(tmp_path):
     """A pretty-printed negative ({annotations: []}) is several text lines; the stratifier
-    sees 0."""
+    sees 0.
+    """
     from tcip_mcp.tools.data_tools import draw_splits
     from tests._producer_fixtures import mark_complete
 

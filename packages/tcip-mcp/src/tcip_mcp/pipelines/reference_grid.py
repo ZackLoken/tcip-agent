@@ -1,7 +1,8 @@
 """Named reference grid over a raster's native pixel frame: cells recomputed from the serializable
 geometry dict (:func:`grid_geometry`) by :func:`reference_cells`, each named spreadsheet-style, a
 bijective base-26 column letter plus a 1-based row number ("B3", ``tcip_annotation.grid``'s
-``column_label``)."""
+``column_label``).
+"""
 
 from __future__ import annotations
 
@@ -22,7 +23,8 @@ cover most of the cell."""
 class Cell:
     """One grid cell: its name plus its half-open native-pixel rect (``x0 <= x < x1``,
     ``y0 <= y < y1``, the same convention as ``raster_source.Rect``). ``col``/``row`` are
-    0-based grid coordinates; ``name`` is ``column_label(col)`` + 1-based row."""
+    0-based grid coordinates; ``name`` is ``column_label(col)`` + 1-based row.
+    """
 
     name: str
     col: int

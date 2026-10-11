@@ -1,5 +1,6 @@
 """The MCP server registers every tool with torch unimportable: a tool module that needs torch
-imports it inside its own functions."""
+imports it inside its own functions.
+"""
 
 from __future__ import annotations
 
@@ -64,7 +65,8 @@ def test_server_imports_with_torch_absent():
 def test_block_torch_finder_actually_blocks_torch_import():
     """The meta-path finder the subprocess checks above install really prevents importing
     torch, rather than implementing the pre-3.4 find_module/load_module protocol Python 3.12
-    never calls, which would leave torch importable while looking like it was blocked."""
+    never calls, which would leave torch importable while looking like it was blocked.
+    """
     result = subprocess.run(
         [sys.executable, "-c", _BLOCK_TORCH_AND_TRY_IMPORT],
         capture_output=True,

@@ -30,7 +30,8 @@ def test_a_scope_the_admission_produced_round_trips_through_the_selection_and_th
 ) -> None:
     """The admitting case, through the producers: the draw records the scope its admission read
     targets under, every declared attribute in it, the selection reads it back whole, and a run
-    bound to it records that same scope on its own data section."""
+    bound to it records that same scope on its own data section.
+    """
     pytest.importorskip("torch")
     from tests._producer_fixtures import train_val
 

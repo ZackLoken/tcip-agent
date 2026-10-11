@@ -1,5 +1,6 @@
 """Active learning selector: review-queue (medium-confidence) and unscoreable partitioning over a
-checkpoint's own prediction dicts."""
+checkpoint's own prediction dicts.
+"""
 
 from __future__ import annotations
 

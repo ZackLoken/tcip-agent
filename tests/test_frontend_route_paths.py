@@ -100,7 +100,8 @@ def test_the_generated_proxy_module_is_what_the_registered_routes_produce() -> (
 ):
     """The checked-in dev-proxy module is a projection of the app's routes, not a hand-edited
     copy: a socket route added under a new prefix that never reached the module would leave the
-    dev server unable to proxy it."""
+    dev server unable to proxy it.
+    """
     generated = _generator().render_proxy(app)
     assert PROXY_GENERATED.read_text(encoding="utf-8") == generated, (
         "packages/tcip-web/frontend/src/api/devProxy.generated.ts is out of date; "
@@ -119,7 +120,8 @@ def _proxy_entries_from_generated_module() -> tuple[tuple[str, bool], ...]:
 def test_vite_config_builds_its_real_proxy_from_the_generated_module() -> None:
     """The one assertion that reads the real ``vite.config.ts``: its ``server.proxy`` is built by
     mapping each ``DEV_PROXY`` entry's own ``path``/``ws`` fields into a proxy rule, structurally,
-    never by a literal of its own a substring match could mistake for the real thing."""
+    never by a literal of its own a substring match could mistake for the real thing.
+    """
     vite_text = VITE_CONFIG.read_text(encoding="utf-8")
     assert "./src/api/devProxy.generated" in vite_text, (
         "vite.config.ts no longer imports the generated proxy module"
@@ -138,14 +140,16 @@ def test_the_real_apis_websocket_routes_make_the_api_prefix_proxy_websockets() -
     None
 ):
     """Three sockets are mounted under ``/api`` rather than under ``/ws``, so the generated
-    ``/api`` entry must itself carry ``ws: true`` or the dev server never proxies them."""
+    ``/api`` entry must itself carry ``ws: true`` or the dev server never proxies them.
+    """
     entries = dict(_generator().collect_proxy_entries(app))
     assert entries.get("/api") is True
 
 
 def test_the_frontend_serving_paths_are_never_proxy_entries() -> None:
     """A route the app itself serves the frontend or its health probe through never becomes a
-    proxy entry, so the dev server keeps serving its own root, modules and HMR there."""
+    proxy entry, so the dev server keeps serving its own root, modules and HMR there.
+    """
     from tcip_web.app import FRONTEND_SERVING_PATHS
 
     fresh = FastAPI()

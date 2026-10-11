@@ -34,7 +34,8 @@ from tests._verified_checkpoint_fixtures import partition_side, unbuilt_source  
 
 def _train_val(project: Path, task: str, data: DataSpec):
     """``split_construction.auto_train_val`` of a ``task`` run of ``project`` over ``data``, which
-    declares no dataset builder, untransformed: ``(train_ds, val_ds, partition, resolved)``."""
+    declares no dataset builder, untransformed: ``(train_ds, val_ds, partition, resolved)``.
+    """
     return auto_train_val(
         project, task, data, None, staged_layout(project, {})
     )
@@ -46,7 +47,8 @@ STEMS = ("a", "b", "c", "d", "e", "f", "g", "h")
 def _resolved(project: Path, experiment_id: str, task: str, data_cfg: dict):
     """A run under ``project`` over ``data_cfg`` resolved by the launcher's own producer: what its
     launch record says it resolved, and the train and val datasets the child's own context
-    producer builds its loaders from out of that record."""
+    producer builds its loaders from out of that record.
+    """
     from tcip_mcp.experiments import observe, run_resolution
     from tcip_mcp.pipelines.training.subprocess_worker import (
         prepare_run_context,
@@ -69,7 +71,8 @@ def _resolved(project: Path, experiment_id: str, task: str, data_cfg: dict):
 
 def _mask_dataset(root: Path) -> tuple[Path, Path]:
     """A dataset whose ground truth is one ``<stem>.png`` mask per image, each carrying a distinct
-    foreground block so a mask read back can be told from its neighbor's."""
+    foreground block so a mask read back can be told from its neighbor's.
+    """
     images_dir, masks_dir = root / "images" / UNDATED_BUCKET, root / "masks"
     images_dir.mkdir(parents=True, exist_ok=True)
     masks_dir.mkdir(parents=True, exist_ok=True)
@@ -126,7 +129,8 @@ def test_a_bound_semantic_seg_run_trains_over_exactly_its_selections_samples(
     tmp_path: Path,
 ):
     """The loaders hold exactly the samples the selection recorded on each side, each reading the
-    mask it names, and the held-out calibration side builds neither loader."""
+    mask it names, and the held-out calibration side builds neither loader.
+    """
     root = tmp_path / "ds"
     _images_dir, masks_dir = _mask_dataset(root)
     out = tmp_path / "m"
@@ -175,7 +179,8 @@ def test_a_bound_classification_run_trains_over_exactly_its_selections_samples(
 
 def _document_dataset(root: Path) -> tuple[Path, None]:
     """A dataset whose ground truth is one label document per image, each holding one ``bud``;
-    its images directory, and no ground-truth place, since the images' own keys address it."""
+    its images directory, and no ground-truth place, since the images' own keys address it.
+    """
     from tcip_annotation.state import Annotation, BBox
     from tests._producer_fixtures import label_image
 
@@ -198,7 +203,8 @@ def _drop_ground_truth_of_a(
     images_dir: Path, ground_truth: Path | None
 ) -> None:
     """Remove member ``a``'s ground truth: its label document, its row from a table, its mask
-    from a directory."""
+    from a directory.
+    """
     import tcip_store
     from tests._producer_fixtures import image_label_key
 
@@ -216,7 +222,8 @@ def _drop_ground_truth_of_a(
 
 def _drop_image_of_a(images_dir: Path, ground_truth: Path | None) -> None:
     """Remove member ``a``'s image, and empty its label document when it has one, so the truth
-    left behind reads ``unannotated`` rather than admitted."""
+    left behind reads ``unannotated`` rather than admitted.
+    """
     from tests._producer_fixtures import label_image
 
     (images_dir / "a.png").unlink()
@@ -237,7 +244,8 @@ def test_a_recorded_sample_is_tallied_as_a_fresh_admission_tallies_it(
 ):
     """One admission evaluates a directory's candidates and a selection's recorded samples alike:
     with one member's ground truth or image gone, the refusal of the recorded samples names the
-    tallies a fresh admission over the same members answers."""
+    tallies a fresh admission over the same members answers.
+    """
     from tcip_mcp.pipelines.data.label_queries import (
         admit,
         admits,
@@ -278,7 +286,8 @@ def test_a_directory_named_like_a_mask_is_admitted_by_neither_read_of_it(
 ):
     """What a mask is is one predicate, so the admission that enumerates a directory and the
     re-admission that checks a recorded sample's own path cannot disagree: a directory named
-    ``a.1.png`` is a mask to neither."""
+    ``a.1.png`` is a mask to neither.
+    """
     from tcip_mcp.pipelines.data.label_queries import admit, readmitted_samples
 
     images_dir, masks_dir = (
@@ -314,7 +323,8 @@ def test_a_directory_named_like_a_mask_is_admitted_by_neither_read_of_it(
 def test_a_mask_sample_reaches_its_own_mask(tmp_path: Path):
     """The mask a loader serves for one sample is the file that sample names, not one rebuilt from
     a directory and a stem: each fixture mask carries a distinct foreground area, so a mask served
-    from the wrong sample reads as the wrong area."""
+    from the wrong sample reads as the wrong area.
+    """
     root = tmp_path / "ds"
     _images_dir, masks_dir = _mask_dataset(root)
     out = tmp_path / "m"
@@ -338,7 +348,8 @@ def test_a_mask_sample_reaches_its_own_mask(tmp_path: Path):
 def test_a_row_key_sample_reaches_the_row_it_names(tmp_path: Path):
     """The label a loader serves for one sample is the row its ``row_key`` names in the table it
     names: each fixture row carries a distinct label, so a row read by position instead of by key
-    reads as the wrong label."""
+    reads as the wrong label.
+    """
     root = tmp_path / "ds"
     _images_dir, csv_path = _table_dataset(root)
     out = tmp_path / "m"
@@ -366,7 +377,8 @@ def test_an_unbound_semantic_seg_run_reads_its_membership_off_its_own_samples(
     tmp_path: Path,
 ):
     """No selection: the run's own producer admits the masks beside the images and every loader is
-    built from those samples, so membership is read off the loaders rather than off a record."""
+    built from those samples, so membership is read off the loaders rather than off a record.
+    """
     root = tmp_path / "ds"
     images_dir, masks_dir = _mask_dataset(root)
     data = DataSpec.model_validate(
@@ -408,7 +420,8 @@ def test_an_unbound_regression_run_reads_its_membership_off_its_own_samples(
     tmp_path: Path,
 ):
     """The same for a table: the run's own producer admits the rows naming an image that exists,
-    and each loader indexes exactly the rows it was handed."""
+    and each loader indexes exactly the rows it was handed.
+    """
     root = tmp_path / "ds"
     images_dir, csv_path = _table_dataset(root)
     data = DataSpec.model_validate(
@@ -496,7 +509,8 @@ def _frozen(
     project: Path, experiment_id: str, task: str, data_cfg: dict
 ) -> dict:
     """Resolve a run under ``project`` through the child's own producer, which records its
-    resolved record, and freeze it."""
+    resolved record, and freeze it.
+    """
     from tcip_mcp.tools.data_tools import freeze_selection
 
     _resolved(project, experiment_id, task, data_cfg)
@@ -506,7 +520,8 @@ def _frozen(
 def test_a_mask_run_freezes_into_a_selection_its_bind_accepts(tmp_path: Path):
     """The staleness check freezing rests on is per member, against the digest the run's own
     producer recorded, so a mask run freezes: the frozen selection names each member's own mask
-    and a later run binds to exactly that partition."""
+    and a later run binds to exactly that partition.
+    """
     root = tmp_path / "ds"
     images_dir, masks_dir = _mask_dataset(root)
     data_cfg = {
@@ -544,7 +559,8 @@ def test_a_mask_run_freezes_into_a_selection_its_bind_accepts(tmp_path: Path):
 
 def test_a_table_run_freezes_into_a_selection_its_bind_accepts(tmp_path: Path):
     """The same for a table: the frozen selection names each member's own row in the table the
-    run read, and a later run binds to exactly that partition."""
+    run read, and a later run binds to exactly that partition.
+    """
     root = tmp_path / "ds"
     images_dir, csv_path = _table_dataset(root)
     data_cfg = {
@@ -578,7 +594,8 @@ def test_a_mask_edited_after_the_run_refuses_the_freeze_by_name(
 ):
     """A member's mask replaced after the run digests differently from the ``at_run`` the record
     holds, so freezing refuses and names it rather than composing a selection over ground truth
-    the run never saw."""
+    the run never saw.
+    """
     root = tmp_path / "ds"
     images_dir, masks_dir = _mask_dataset(root)
     data_cfg = {
@@ -602,7 +619,8 @@ def test_a_mask_edited_after_the_run_refuses_the_freeze_by_name(
 
 def _three_class_masks(root: Path) -> tuple[Path, Path]:
     """Four images and their masks, one of which alone reaches class 2: a run sizing each loader
-    by the classes its own half happens to hold would size the two halves differently."""
+    by the classes its own half happens to hold would size the two halves differently.
+    """
     images_dir, masks_dir = root / "images" / UNDATED_BUCKET, root / "masks"
     images_dir.mkdir(parents=True, exist_ok=True)
     masks_dir.mkdir(parents=True, exist_ok=True)
@@ -624,7 +642,8 @@ def test_a_stated_class_count_refuses_on_the_run_path_whatever_its_value(
 ):
     """A built-in loader's count is the one its ground truth derives, never an input: a config
     stating one refuses on the run path before any loader is built, whether it is below, above or
-    equal to the derived count, and a config stating none records the derived count."""
+    equal to the derived count, and a config stating none records the derived count.
+    """
     images_dir, masks_dir = _three_class_masks(tmp_path / "ds")
     base = {
         "images_dir": str(images_dir),
@@ -649,7 +668,8 @@ def test_a_stated_class_count_refuses_on_the_run_path_whatever_its_value(
 
 def test_a_table_run_stating_a_count_refuses(tmp_path: Path):
     """Table values ``0`` and ``1`` derive two classes; a count stated beside them refuses by
-    name, and the unstated run records two."""
+    name, and the unstated run records two.
+    """
     from tests._producer_fixtures import run_over
 
     images_dir, csv_path = _table_dataset(tmp_path / "table")
@@ -673,7 +693,8 @@ def test_a_runs_unstated_class_count_is_read_once_over_every_sample(
     tmp_path: Path,
 ):
     """A class reaching one side only still sizes the run: the count a config states none of is
-    read off every sample the run was handed, before the split, and recorded once."""
+    read off every sample the run was handed, before the split, and recorded once.
+    """
     images_dir, masks_dir = _three_class_masks(tmp_path / "ds")
     data = DataSpec.model_validate(
         {
@@ -700,7 +721,8 @@ def test_a_runs_metrics_are_reported_over_the_class_space_it_trains_in(
 ):
     """The half being scored is never asked how many classes there are: a training half whose
     masks reach only class 1 is still measured over the three the run trains in, so the two halves
-    of one run report metrics on one scale."""
+    of one run report metrics on one scale.
+    """
     import torch
     from torch.utils.data import DataLoader
 
@@ -752,7 +774,8 @@ def test_the_place_and_the_record_read_one_ground_truth_shape(tmp_path: Path):
     """The sniff over a place a config names and the read over a sample's own recorded ground
     truth answer with one shape, because the place asks the record's own rule of what it finds
     there: a table, a directory of masks, and no place at all for the label documents an image's
-    own key addresses, each read the same way from either side."""
+    own key addresses, each read the same way from either side.
+    """
     from tcip_mcp.pipelines.data.label_queries import ground_truth_shape
     from tcip_mcp.pipelines.data.selection import shape_of
     from tests._producer_fixtures import image_label_key
@@ -773,7 +796,8 @@ def test_a_mask_run_refuses_a_stated_class_space_and_admits_the_empty_one(
     tmp_path: Path,
 ):
     """A mask raster carries its own classes, so a scope naming a subject over it refuses by name;
-    the explicit empty scope admits and is what the run records."""
+    the explicit empty scope admits and is what the run records.
+    """
     images_dir, masks_dir = _mask_dataset(tmp_path / "ds")
 
     def data(scope: dict) -> DataSpec:
@@ -811,7 +835,8 @@ def test_the_bound_and_drawn_mask_routes_record_one_directory_the_same_way(
 
     def trained(experiment_id: str, data_cfg: dict) -> dict:
         """Every member the run trains or validates on, with the ground truth, its digest at the
-        run and the source the record names for it."""
+        run and the source the record names for it.
+        """
         partition = _resolved(
             tmp_path, experiment_id, "semantic_seg", data_cfg
         )[0].partition
@@ -877,7 +902,8 @@ def test_a_document_run_and_a_mask_run_record_the_same_images_the_same_way(
         experiment_id: str, task: str, data_cfg: dict
     ) -> tuple[dict, dict, dict]:
         """The resolved partition, and what the loaders this run actually built say each
-        member's own ground truth and source are."""
+        member's own ground truth and source are.
+        """
         record, train_ds, val_ds = _resolved(
             tmp_path, experiment_id, task, data_cfg
         )

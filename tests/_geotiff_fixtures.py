@@ -21,7 +21,8 @@ def build_geokeys(
     *, model_type: int = 1, projected_epsg: int | None = UTM_15N_EPSG
 ) -> tuple[int, ...]:
     """A ``GeoKeyDirectoryTag``'s flat uint16 array naming ``model_type`` (1 == Projected) and,
-    when given, a projected CRS by EPSG code."""
+    when given, a projected CRS by EPSG code.
+    """
     entries: list[int] = [1024, 0, 1, model_type]
     if projected_epsg is not None:
         entries += [3072, 0, 1, projected_epsg]
@@ -100,7 +101,8 @@ def write_geotiff(
 
 def geotransform_of_file(path: Path):
     """The geotransform ``path``'s header states, read through the platform's one header read;
-    raises the reason that read refused."""
+    raises the reason that read refused.
+    """
     from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
         OrthomosaicGeoreference,
     )
@@ -122,7 +124,8 @@ def write_canonical_dataset_raster(
     channels: int = 3,
 ) -> Path:
     """A georeferenced raster at ``<dataset_root>/images/<date>/<stem>.tif``, its dataset
-    registered (``register_dataset``) under ``crop``; the raster's path."""
+    registered (``register_dataset``) under ``crop``; the raster's path.
+    """
     from tcip_mcp.tools.project_tools import register_dataset
 
     raster_path = dataset_root / "images" / date / f"{stem}.tif"

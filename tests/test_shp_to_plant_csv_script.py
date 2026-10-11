@@ -92,7 +92,8 @@ def _point_shapefile(
 
 def _polygon_shapefile(tmp_path: Path) -> Path:
     """A square centered exactly on ``POINT_NATIVE``, so its centroid is the center by
-    construction, not something this test would need to recompute geometrically."""
+    construction, not something this test would need to recompute geometrically.
+    """
     cx, cy = POINT_NATIVE
     half = 10.0
     ring = [
@@ -150,7 +151,8 @@ def test_swapped_axis_order_would_fail_this_test(tmp_path: Path) -> None:
     (authority-compliant, lat/lon) axis order instead of ``always_xy`` lands outside a plausible
     longitude range for UTM 15N. Exercises the same pyproj call the script makes, with
     ``always_xy=True`` deliberately omitted, so a regression that drops it would be caught by
-    the assertion above failing, not by this test passing either way."""
+    the assertion above failing, not by this test passing either way.
+    """
     import pyproj
 
     # Deliberately no always_xy=True, the parameter the script applies.
@@ -340,7 +342,8 @@ def test_main_cli_refusal_returns_nonzero(tmp_path: Path) -> None:
 def _alnum_point_shapefile(tmp_path: Path) -> Path:
     """A ``plot_number`` held as a string field with a non-numeric value, the shape a real plot
     naming scheme can take; the reader carries it through verbatim, unlike ``PlantRecord``'s own
-    ``Optional[float]`` field."""
+    ``Optional[float]`` field.
+    """
     import fiona
 
     path = tmp_path / "alnum.shp"
@@ -378,8 +381,9 @@ def _alnum_point_shapefile(tmp_path: Path) -> Path:
 def test_read_plant_shapefile_point_rows_match_reference_and_attrs_verbatim(
     tmp_path: Path,
 ) -> None:
-    """coverage. A point feature reads its own coordinate, reprojected to WGS84, and
-    carries every DBF attribute through as the value's own string."""
+    """Coverage. A point feature reads its own coordinate, reprojected to WGS84, and
+    carries every DBF attribute through as the value's own string.
+    """
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         read_plant_shapefile,
     )
@@ -400,8 +404,9 @@ def test_read_plant_shapefile_point_rows_match_reference_and_attrs_verbatim(
 def test_read_plant_shapefile_polygon_rows_match_reference_and_attrs_verbatim(
     tmp_path: Path,
 ) -> None:
-    """coverage. A polygon feature reads its centroid, reprojected the same way, and is
-    reported under its own geometry kind."""
+    """Coverage. A polygon feature reads its centroid, reprojected the same way, and is
+    reported under its own geometry kind.
+    """
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         read_plant_shapefile,
     )
@@ -420,8 +425,9 @@ def test_read_plant_shapefile_polygon_rows_match_reference_and_attrs_verbatim(
 def test_read_plant_shapefile_non_numeric_plot_number_carried_verbatim(
     tmp_path: Path,
 ) -> None:
-    """coverage. A plot number held as a string field survives the reader verbatim, where
-    PlantRecord's own float field would narrow it to nothing."""
+    """Coverage. A plot number held as a string field survives the reader verbatim, where
+    PlantRecord's own float field would narrow it to nothing.
+    """
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         read_plant_shapefile,
     )
@@ -433,7 +439,7 @@ def test_read_plant_shapefile_non_numeric_plot_number_carried_verbatim(
 def test_read_plant_shapefile_refuses_a_crs_it_cannot_resolve(
     tmp_path: Path,
 ) -> None:
-    """coverage. A shapefile with no .prj refuses by name rather than guessing a CRS."""
+    """Coverage. A shapefile with no .prj refuses by name rather than guessing a CRS."""
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         ShapefileCrsUnknownError,
         read_plant_shapefile,
@@ -453,7 +459,8 @@ def test_read_plant_shapefile_refuses_a_crs_it_cannot_resolve(
 def _garbage_prj_shapefile(tmp_path: Path) -> Path:
     """A ``.shp`` with a valid geometry beside a ``.prj`` holding unparseable WKT: fiona answers
     the same falsy ``layer.crs`` a missing ``.prj`` would (probed directly against this
-    environment's fiona), never an exception at open or at read."""
+    environment's fiona), never an exception at open or at read.
+    """
     shp = _point_shapefile(tmp_path, epsg=UTM_15N_EPSG)
     (tmp_path / "points.prj").write_text(
         "this is not valid WKT at all !!! ###"
@@ -464,8 +471,9 @@ def _garbage_prj_shapefile(tmp_path: Path) -> Path:
 def test_garbage_prj_refuses_through_convert_shp_to_plant_csv(
     tmp_path: Path,
 ) -> None:
-    """coverage. A .prj holding unparseable text answers the same falsy layer CRS a missing
-    one does, so the command refuses it through the same check rather than guessing."""
+    """Coverage. A .prj holding unparseable text answers the same falsy layer CRS a missing
+    one does, so the command refuses it through the same check rather than guessing.
+    """
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         ShapefileCrsUnknownError,
     )
@@ -513,8 +521,9 @@ def _line_string_shapefile(tmp_path: Path) -> Path:
 def test_line_string_geometry_refuses_named_through_convert_shp_to_plant_csv(
     tmp_path: Path,
 ) -> None:
-    """guard. A line string refuses by name rather than being centroided, since a line's centroid
-    is not a plant's location."""
+    """Guard. A line string refuses by name rather than being centroided, since a line's centroid
+    is not a plant's location.
+    """
     shp = _line_string_shapefile(tmp_path)
     with pytest.raises(ValueError, match="LineString"):
         convert_shp_to_plant_csv(shp, tmp_path / "plants.csv")
@@ -549,7 +558,7 @@ def _point_shapefile_with_null_feature(tmp_path: Path) -> Path:
 
 
 def test_null_geometry_feature_is_skipped_and_counted(tmp_path: Path) -> None:
-    """coverage. A feature with no geometry is skipped and counted, never raised on."""
+    """Coverage. A feature with no geometry is skipped and counted, never raised on."""
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         read_plant_shapefile,
     )
@@ -562,8 +571,9 @@ def test_null_geometry_feature_is_skipped_and_counted(tmp_path: Path) -> None:
 def test_convert_shp_to_plant_csv_reports_skipped_null_geometry(
     tmp_path: Path,
 ) -> None:
-    """coverage. The command reports the reader's skipped-null count beside its own row
-    count, so a caller sees that features were dropped."""
+    """Coverage. The command reports the reader's skipped-null count beside its own row
+    count, so a caller sees that features were dropped.
+    """
     shp = _point_shapefile_with_null_feature(tmp_path)
     result = convert_shp_to_plant_csv(shp, tmp_path / "plants.csv")
     assert result["n_features"] == 1
@@ -574,9 +584,10 @@ def test_convert_shp_to_plant_csv_reports_skipped_null_geometry(
 
 
 def test_plant_csv_columns_matches_written_header(tmp_path: Path) -> None:
-    """coverage that the written header is the constant itself, not a list that merely agrees:
+    """Coverage that the written header is the constant itself, not a list that merely agrees:
     the writer, the shapefile reader and read_plant_csv_bytes all index through
-    PLANT_CSV_COLUMN_FOR_FIELD, which PLANT_CSV_COLUMNS is derived from."""
+    PLANT_CSV_COLUMN_FOR_FIELD, which PLANT_CSV_COLUMNS is derived from.
+    """
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         PLANT_CSV_COLUMN_FOR_FIELD,
         PLANT_CSV_COLUMNS,
@@ -603,10 +614,11 @@ def test_plant_csv_columns_matches_written_header(tmp_path: Path) -> None:
 def test_every_written_column_survives_read_plant_csv_bytes(
     tmp_path: Path,
 ) -> None:
-    """coverage that every column the writer emits is read back by read_plant_csv_bytes. It holds
+    """Coverage that every column the writer emits is read back by read_plant_csv_bytes. It holds
     at the tree before the shared mapping too, since the two literal lists agreed there; what it
     pins is the round trip itself, so a future rename that moves only one side is caught here
-    rather than in a delivery."""
+    rather than in a delivery.
+    """
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         read_plant_csv_bytes,
     )
@@ -628,7 +640,7 @@ def test_every_written_column_survives_read_plant_csv_bytes(
 def test_converter_csv_carries_non_numeric_plot_number_verbatim(
     tmp_path: Path,
 ) -> None:
-    """coverage. The written CSV carries a non-numeric plot number through unchanged."""
+    """Coverage. The written CSV carries a non-numeric plot number through unchanged."""
     csv_path = tmp_path / "plants.csv"
     convert_shp_to_plant_csv(_alnum_point_shapefile(tmp_path), csv_path)
     rows = csv_rows(csv_path)

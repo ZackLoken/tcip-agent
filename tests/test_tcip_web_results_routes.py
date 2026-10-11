@@ -1,5 +1,6 @@
 """The Results routes: plant mapping, the phenology measurement, the CSV exports and the
-delivery-event listing."""
+delivery-event listing.
+"""
 
 from __future__ import annotations
 
@@ -28,7 +29,8 @@ def test_list_traits_names_an_unreadable_record_alongside_the_valid_one(
     client: TestClient, opened_project: Path
 ) -> None:
     """A record its schema refuses is visible by name and reason, never silently absent the way a
-    dropped trait looks like none."""
+    dropped trait looks like none.
+    """
     from tcip_mcp import traits
 
     valid = traits.read_trait("bud_opening", opened_project).model_dump(
@@ -53,7 +55,8 @@ def test_plant_mapping_build_requires_a_registered_dataset(
     opened_project: Path,
 ) -> None:
     """A directory that is not a registered dataset's own images/ root refuses, naming that,
-    rather than silently building an empty mapping over nothing."""
+    rather than silently building an empty mapping over nothing.
+    """
     resp = client.post(
         "/api/results/plant_mapping/build",
         json={
@@ -130,7 +133,8 @@ def test_an_assessed_series_measures_its_curves_and_milestones_validated(
     tmp_path: Path,
 ) -> None:
     """Each (plant, date) curve row counts that date's detections, and the milestone columns the
-    response names are each a date inside the series."""
+    response names are each a date inside the series.
+    """
     series = _series(tmp_path)
 
     resp = client.post(
@@ -175,7 +179,8 @@ def test_an_unassessed_series_refuses_until_shown_unvalidated_and_never_exports_
     tmp_path: Path,
 ) -> None:
     """A breeder can look at provisional numbers (``show_unvalidated``, a display choice); only
-    an acknowledgment opens the export."""
+    an acknowledgment opens the export.
+    """
     body = _series(tmp_path, fractions=(0.0, 1.0), assessed=False).body()
 
     refused = client.post("/api/results/phenology_measurement", json=body)
@@ -247,7 +252,8 @@ def test_an_acknowledgment_is_recorded_only_from_the_browser_and_with_a_reason(
 ) -> None:
     """A request from no browser, or one declaring an agent identity, cannot originate the
     breeder's act, and a reason of spaces says nothing; each refuses before anything runs, and
-    the same acknowledgment from the browser ships, signed by the person it names."""
+    the same acknowledgment from the browser ships, signed by the person it names.
+    """
     from tcip_mcp import agent_identity
 
     body = _series(tmp_path, fractions=(0.0, 1.0), assessed=False).body()
@@ -290,7 +296,8 @@ def test_an_export_saves_the_delivery_under_the_project_and_logs_it_with_its_dat
 ) -> None:
     """The browser download is the breeder's copy; the delivery belongs to the project, so the
     identical bytes land in ``results_export/``, in the trait's own schema, and the delivery's
-    line lands in the log of the dataset its buckets sit in."""
+    line lands in the log of the dataset its buckets sit in.
+    """
     from tcip_mcp.delivery import read_delivery_events
     from tcip_mcp.operationalization import latest_confirmed
     from tcip_mcp.pipelines.postprocessing import phenology
@@ -363,7 +370,8 @@ def test_export_csv_answers_409_when_the_delivery_event_audit_line_cannot_be_app
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The CSV is already on disk by the time the delivery's audit line is appended; a failed
-    append answers 409 naming the file written, which is left in place."""
+    append answers 409 naming the file written, which is left in place.
+    """
     body = _series(tmp_path, fractions=(0.0, 1.0)).body()
     refuse_audit_appends(monkeypatch)
 
@@ -399,7 +407,8 @@ def test_caller_composed_rows_and_validity_claims_are_refused_at_the_payload(
     client: TestClient,
 ) -> None:
     """These doors compute what they deliver, so neither caller-composed rows nor a caller's
-    claim about validity is a field either takes."""
+    claim about validity is a field either takes.
+    """
     inputs = {
         "mapping_name": "valley",
         "trait": "bud_opening",
@@ -444,7 +453,8 @@ def test_phenology_measurement_refuses_when_the_delivered_dataset_carries_no_reg
     tmp_path: Path,
 ) -> None:
     """The delivered buckets resolve to a dataset root that carries no registry; the door refuses
-    by name rather than checking the project root's own."""
+    by name rather than checking the project root's own.
+    """
     pytest.importorskip("torch")
     from tests._chain_fixtures import predicted, published
 
@@ -483,7 +493,8 @@ COUNT_SCOPE = {"subject": fx.COUNT_SUBJECT}
 def _unassessed_count_bucket(project: Path, *, scope: dict = COUNT_SCOPE):
     """Two frames of three detections each, published under no assessment as the bucket
     ``live/counts`` of the project's own images, in a project whose count trait is confirmed; the
-    bucket."""
+    bucket.
+    """
     pytest.importorskip("torch")
     from tests._chain_fixtures import predicted, published
 
@@ -574,7 +585,8 @@ def test_an_assessed_count_bucket_delivers_validated_and_discards_an_acknowledgm
 ) -> None:
     """A validated delivery's event carries no acknowledgment, even when one was posted beside
     it: it cleared nothing. Its buckets' root is a dataset registered to the project, never one
-    that merely sits under it."""
+    that merely sits under it.
+    """
     pytest.importorskip("torch")
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.tools.project_tools import register_dataset
@@ -773,7 +785,8 @@ def test_export_count_csv_refuses_a_malformed_payload_with_422_not_500(
 def _orthomosaic(project: Path) -> tuple[Any, str]:
     """An unassessed whole-raster bucket over the project's own image tree and a registered plant
     registry over its 2x2 grid, in a project whose per-plant count is confirmed;
-    ``(bucket, registry name)``."""
+    ``(bucket, registry name)``.
+    """
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
     from tests.test_orthomosaic_tools import (
@@ -833,7 +846,8 @@ def test_an_unassessed_raster_bucket_delivers_under_acknowledgment_with_its_regi
     tmp_path: Path,
 ) -> None:
     """The event discloses the registry it matched against and, naming no walked mapping, carries
-    no resolved mapping key."""
+    no resolved mapping key.
+    """
     bucket, registry = _orthomosaic(tmp_path)
 
     resp = acknowledged_post(
@@ -897,7 +911,8 @@ def test_registered_models_answers_a_resolved_absolute_checkpoint_path(
     opened_project: Path,
 ) -> None:
     """A relative stored checkpoint_path (the registry's own internal spelling) still answers
-    absolute over this route, the surface the Inference tab feeds straight back into a launch."""
+    absolute over this route, the surface the Inference tab feeds straight back into a launch.
+    """
     pytest.importorskip("torch")
     from tcip_mcp.model_registry import ModelRegistry
     from tests._verified_checkpoint_fixtures import produced_checkpoint
@@ -956,7 +971,8 @@ def test_a_launched_inference_job_is_canceled_by_its_id_naming_the_person(
     opened_project: Path,
 ) -> None:
     """A job the launch door started is canceled by its id: the answer names it and one
-    ``inference_canceled`` line names the person; an id naming no job refuses by name."""
+    ``inference_canceled`` line names the person; an id naming no job refuses by name.
+    """
     pytest.importorskip("torch")
     from PIL import Image
 
@@ -1034,7 +1050,8 @@ def test_inference_list_row_and_stream_frame_are_one_projection(
     opened_project: Path,
 ) -> None:
     """The list route's row and the stream's final frame are ``_summary``'s, so a job's
-    dropped-box count reaches the poll as it reaches the stream, under one name."""
+    dropped-box count reaches the poll as it reaches the stream, under one name.
+    """
     from tcip_web.routes import inference as inference_routes
 
     job = inference_routes.InferenceJob(
@@ -1071,7 +1088,8 @@ def test_inference_stream_to_a_missing_job_sends_a_typed_terminal_frame(
     client: TestClient,
 ) -> None:
     """The not-found frame is typed the same as a run's own terminal frame, so the client stops
-    reconnecting against a job that will never exist."""
+    reconnecting against a job that will never exist.
+    """
     with client.websocket_connect(
         "ws://127.0.0.1/api/inference/jobs/does-not-exist/stream"
     ) as ws:

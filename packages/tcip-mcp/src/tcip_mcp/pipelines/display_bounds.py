@@ -21,7 +21,8 @@ VIZ_ARTIFACT_MAX_EDGE = 1024
 
 def within_cap(width: int, height: int, max_pixels: int) -> bool:
     """Whether a ``width`` x ``height`` read is at most ``max_pixels`` pixels: the one test of a
-    read or a cell against a display's area cap."""
+    read or a cell against a display's area cap.
+    """
     return width * height <= max_pixels
 
 
@@ -60,7 +61,8 @@ def fit_within(
 @dataclass(frozen=True)
 class ReadPlan:
     """One display read: the level it reads (0 native, ``i`` the ``i``-th overview level), the
-    output size, and whether any level's window fit the area it was planned under."""
+    output size, and whether any level's window fit the area it was planned under.
+    """
 
     level: int
     width: int
@@ -117,7 +119,8 @@ def plan_read(
 
 def planned_read(raster, rect: Rect, plan: ReadPlan):
     """``raster.read_region`` of ``rect`` at the output size and off the level ``plan`` names,
-    natively when that is the rect's own size."""
+    natively when that is the rect's own size.
+    """
     if (plan.width, plan.height) == (rect.width, rect.height):
         return raster.read_region(rect)
     if plan.level:

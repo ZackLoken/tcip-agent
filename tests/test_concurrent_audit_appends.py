@@ -1,5 +1,6 @@
 """Concurrent appenders to one audit log, in threads and in separate processes: every append
-that returned is in the log exactly once, and every append that raised is reported."""
+that returned is in the log exactly once, and every append that raised is reported.
+"""
 
 from __future__ import annotations
 

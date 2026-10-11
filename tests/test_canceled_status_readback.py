@@ -1,6 +1,7 @@
 """A canceled run or job reads back as ``canceled`` through each reader of its status: the web job
 registry and the run directory's derived state. Each status is written by its own producer, never
-spelled into a fixture."""
+spelled into a fixture.
+"""
 
 from __future__ import annotations
 

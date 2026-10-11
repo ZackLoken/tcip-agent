@@ -3,7 +3,8 @@
 ``val_map50`` is a labeled comparability metric, not necessarily what governs a trait's
 phenotype; a stated metric that no model carries is a distinct error from an empty registry.
 Also covers lower-is-better ranking, the metrics source a registration derives, and a completed
-run's checkpoint metrics sourced from the checkpoint's own epoch rather than the last one."""
+run's checkpoint metrics sourced from the checkpoint's own epoch rather than the last one.
+"""
 
 import pytest
 
@@ -18,7 +19,8 @@ def _checkpoint(tmp_path, name: str) -> str:
 
 def _registered(tmp_path, *entries: tuple[str, dict | None]):
     """A registry holding one foreign entry per ``(name, metrics)``, each over a checkpoint file
-    of its own."""
+    of its own.
+    """
     from tcip_mcp.model_registry import ModelRegistry
 
     reg = ModelRegistry(str(tmp_path))
@@ -94,7 +96,8 @@ def test_rank_registered_models_excludes_unverified_entries_by_default(
     tmp_path,
 ):
     """A caller-asserted metric is not silently trusted: it is ranked only when the caller
-    explicitly says to consider unverified numbers."""
+    explicitly says to consider unverified numbers.
+    """
     from tcip_mcp.tools.model_tools import rank_registered_models
 
     _registered(tmp_path, ("asserted", {"val_map50": 0.99}))
@@ -118,7 +121,8 @@ def test_rank_registered_models_refusals_name_no_argument_a_breeder_would_not_pa
 ):
     """The two ranking refusals a breeder can reach through the GUI (an undeclared direction,
     every carrier unverified) read as plain sentences: neither names this tool's own
-    parameters, since a breeder using the rank control never calls it directly."""
+    parameters, since a breeder using the rank control never calls it directly.
+    """
     from tcip_mcp.tools.model_tools import rank_registered_models
 
     _registered(tmp_path, ("asserted", {"val_map50": 0.99}))
@@ -161,7 +165,8 @@ def test_register_model_refuses_a_nonexistent_checkpoint(tmp_path):
 
 def test_register_model_refuses_bytes_the_verified_reader_refuses(tmp_path):
     """A registration names a checkpoint every later reader can load: bytes the verified reader
-    refuses are refused at the door and nothing is stored, and a readable checkpoint registers."""
+    refuses are refused at the door and nothing is stored, and a readable checkpoint registers.
+    """
     from tcip_mcp.model_registry import (
         ModelRegistry,
         UnregisteredCheckpointError,
@@ -228,7 +233,8 @@ def test_best_model_lower_is_better_for_loss(tmp_path):
 
 def test_best_model_excludes_an_entry_with_no_metrics_from_ranking(tmp_path):
     """An entry with no metrics (``metrics_source: null``) is not malformed: it is simply
-    excluded from ranking, like any other entry that does not carry the metric."""
+    excluded from ranking, like any other entry that does not carry the metric.
+    """
     from tcip_mcp.model_registry import best_model
 
     models = _registered(
@@ -248,7 +254,8 @@ def test_a_completed_runs_metrics_come_from_its_best_checkpoint_not_its_last_epo
     monkeypatch,
 ):
     """A run the default trainer completes names its best checkpoint, whose metrics are that
-    epoch's own, sourced ``trainer``; the registry lists it under the run's id."""
+    epoch's own, sourced ``trainer``; the registry lists it under the run's id.
+    """
     torch = pytest.importorskip("torch")
     from tcip_mcp.experiments import METRICS_FILE, partition_rows, read_rows
     from tcip_mcp.model_registry import ModelRegistry
@@ -290,7 +297,8 @@ def test_a_registry_payload_that_json_cannot_hold_is_refused_at_register_model(
 ):
     """Metrics arrive from a caller, so the field that will not encode is named before anything
     reaches the registry: a stringified measurement would read as a recorded number to every
-    later reader."""
+    later reader.
+    """
     import tcip_store as ts
     from tcip_mcp.model_registry import ModelRegistry
 

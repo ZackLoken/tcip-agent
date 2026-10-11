@@ -41,7 +41,8 @@ VAL_INTENSITIES = [0.15, 0.35, 0.60, 0.90]
 
 def _config(stages: list[dict], data: dict | None = None, **extra) -> dict:
     """A regression config at seed 3 over ``stages``; ``data`` is filled in by :func:`_train`,
-    and a config never trained states its one band alone."""
+    and a config never trained states its one band alone.
+    """
     return regressor_config(
         data=data or {"num_channels": 1},
         **{"seed": 3, "stages": stages, **extra},
@@ -54,7 +55,8 @@ def _opposed(root: Path) -> dict:
 
 def _consistent(root: Path) -> dict:
     """Training and holdout frames both fit by weight +2, so the holdout loss improves as the
-    training loss does."""
+    training loss does.
+    """
     return drawn_data(
         root,
         (TRAIN_INTENSITIES, [2.0 * c for c in TRAIN_INTENSITIES]),
@@ -64,7 +66,8 @@ def _consistent(root: Path) -> dict:
 
 def _train(tmp_path, config: dict, name: str, frames=_opposed, **kwargs):
     """The run ``name`` under ``tmp_path`` over ``config`` with ``frames``' data block, opened by
-    the launcher's own producer and trained over its own loaders with ``kwargs``."""
+    the launcher's own producer and trained over its own loaders with ``kwargs``.
+    """
     ctx = run_context(
         tmp_path,
         {**config, "data": frames(tmp_path / frames.__name__)},
@@ -94,7 +97,8 @@ def test_a_stage_starts_from_the_weights_and_optimizer_state_of_the_prior_stage_
     """The next stage starts from its predecessor's best epoch whole: the weight, its optimizer
     momentum and the model's registered buffer as they stood then, not as the last epoch left
     them; and every held epoch state carries the optimizer's tensor-valued group setting beside
-    them, each as it was taken."""
+    them, each as it was taken.
+    """
     from tcip_mcp.pipelines.training.optimizer_factory import GROUPS_KEY
 
     models: list = []
@@ -194,7 +198,8 @@ def test_a_resume_puts_back_the_buffer_and_the_tensor_setting_its_capture_holds(
     """What a capture of a model and its optimizer holds, a resume's restore puts back into a
     freshly built pair: the model's registered buffer, and a tensor-valued group setting moved
     in place since the pair was built, the way a scheduler fills a tensor setting. The capture
-    stays as it was taken once the restored pair moves on."""
+    stays as it was taken once the restored pair moves on.
+    """
     from tcip_mcp.pipelines.training.optimizer_factory import (
         GROUPS_KEY,
         build_optimizer,
@@ -247,7 +252,8 @@ def test_a_resume_puts_back_the_buffer_and_the_tensor_setting_its_capture_holds(
 
 def test_a_stage_ends_on_its_own_plateau_and_the_next_stage_runs(tmp_path):
     """A stage whose first epoch is its best ends one epoch later, before its schedule's
-    four-epoch horizon, and the next stage starts."""
+    four-epoch horizon, and the next stage starts.
+    """
     run = _train(
         tmp_path,
         _config(
@@ -280,7 +286,8 @@ def test_the_run_ends_with_the_first_stage_that_does_not_improve_on_the_one_befo
 ):
     """A run runs every stage while each stage's best improves by ``min_delta`` on its
     predecessor's best; the first that does not ends the run completed, the stages after it
-    never running, and the run's last epoch row names the stage that ended it."""
+    never running, and the run's last epoch row names the stage that ended it.
+    """
     run = _train(
         tmp_path,
         _config(
@@ -304,7 +311,8 @@ def test_a_stage_under_a_schedule_with_no_horizon_runs_until_its_plateau(
 ):
     """A stage carries no epoch count: under a step schedule holding its rate, a model whose
     holdout loss keeps improving trains past every count a sample config states and ends on its
-    plateau."""
+    plateau.
+    """
     config = _config(
         [{"freeze_to": 0}],
         scheduler=schedule("step", gamma=1.0),
@@ -331,7 +339,8 @@ def test_a_horizon_bound_schedule_is_built_over_its_horizon_and_ends_the_stage_t
     tmp_path, monkeypatch, kind
 ):
     """The block's ``horizon_epochs`` is what the scheduler is built over and where a stage
-    whose selection keeps improving ends; a plateau before it ends the stage first."""
+    whose selection keeps improving ends; a plateau before it ends the stage first.
+    """
     built: list = []
     real_build_scheduler = gt._build_scheduler
 
@@ -371,7 +380,8 @@ def test_a_run_with_no_validation_loader_ends_its_stage_on_the_training_loss_pla
     tmp_path,
 ):
     """Selecting on ``loss`` with no validation loader, the training loss is the selection value
-    the stop rule reads: a loss that cannot improve ends the stage one epoch after its first."""
+    the stop rule reads: a loss that cannot improve ends the stage one epoch after its first.
+    """
     # Zero-intensity frames: the prediction is zero whatever the weight, so the loss is fixed.
     config = _config(
         [{"freeze_to": 0}],
@@ -389,7 +399,8 @@ def test_a_run_with_no_validation_loader_ends_its_stage_on_the_training_loss_pla
 
 def test_a_stage_with_no_selectable_epoch_fails_the_run_naming_it(tmp_path):
     """A model whose predictions are all non-finite gives its prediction-derived selection metric
-    no value that ranks, so no epoch of the first stage is selectable."""
+    no value that ranks, so no epoch of the first stage is selectable.
+    """
     config = _config(
         [{"freeze_to": 0}, {"freeze_to": 0}],
         horizon=2,
@@ -456,7 +467,8 @@ def test_a_resume_whose_optimizer_orders_its_groups_differently_warms_up_as_the_
     """Two param groups at different rates, a stage boundary with warmup, and a resume part way
     through the warmup into an optimizer whose groups come in the reverse order: each parameter
     warms up from its own handed-off rate, so the resumed run trains as the uninterrupted one.
-    Each stage plateaus one epoch after its first, so the second ends inside its warmup."""
+    Each stage plateaus one epoch after its first, so the second ends inside its warmup.
+    """
 
     def two_rate_config(**builder_kwargs) -> dict:
         return _config(
@@ -521,7 +533,8 @@ def test_the_trainer_runs_the_config_its_schema_admits(
     tmp_path, stated, read_as
 ):
     """A config the schema admits trains as the schema reads it: what validation coerced or
-    left as the run's own is what the trainer acts on, here under a four-epoch horizon."""
+    left as the run's own is what the trainer acts on, here under a four-epoch horizon.
+    """
     from tcip_mcp.pipelines.schemas import checked_train_config
 
     config = {**_config([{"freeze_to": 0}], horizon=4), **stated}
@@ -543,7 +556,8 @@ def test_the_trainer_runs_the_config_its_schema_admits(
 def test_a_worker_run_validates_its_config_once(tmp_path, monkeypatch):
     """A run the worker trains, from its observed record through the default trainer and the
     context's seed, device and model, reads its settings off one validation of its config and
-    never validates its model source again."""
+    never validates its model source again.
+    """
     from tcip_mcp.experiments import observe
     from tcip_mcp.pipelines.training.subprocess_worker import (
         prepare_run_context,
@@ -601,7 +615,8 @@ def test_an_unknown_scheduler_is_refused_and_a_named_one_is_admitted(tmp_path):
 
 def test_a_onecycle_schedule_trains_at_the_stated_sgd_momentum():
     """OneCycle cycles the rate alone: the momentum the config states is the one each step
-    takes, never a momentum cycle the schedule brings of its own."""
+    takes, never a momentum cycle the schedule brings of its own.
+    """
     from torch import nn
 
     from tcip_mcp.pipelines.schemas import train_config

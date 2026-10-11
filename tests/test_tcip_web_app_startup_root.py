@@ -1,7 +1,8 @@
 """Tests for the web backend's start: ``python -m tcip_web``'s ``main`` resolves the workspace once,
 publishes the port under it and configures the backend with it, refusing an unset
 ``TCIP_WORKSPACE``; the lifespan opens the project the last-opened pointer names; every test runs
-its backend on its own scratch workspace."""
+its backend on its own scratch workspace.
+"""
 
 from __future__ import annotations
 

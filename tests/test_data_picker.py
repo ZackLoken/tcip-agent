@@ -58,7 +58,8 @@ def _data(config: dict):
 
 def _chosen(config: dict, selection_dir: str, project: Path) -> dict:
     """``config`` with the data block choosing ``selection_dir`` builds
-    (``training_tools.data_with_selection``), as the relaunch route launches it."""
+    (``training_tools.data_with_selection``), as the relaunch route launches it.
+    """
     from tcip_mcp.tools.training_tools import data_with_selection
 
     return {
@@ -94,7 +95,8 @@ def _stub_child(monkeypatch) -> None:
 def _selection_with_an_empty_val_side(project: Path, root: Path, out: Path):
     """A real ``draw_splits`` draw under ``project``, rewritten without its ``val`` samples: the
     shape a run binds to as leaving it with an empty side. Every other recorded field stays
-    exactly what the draw wrote, so this exercises only the one refusal under test."""
+    exactly what the draw wrote, so this exercises only the one refusal under test.
+    """
     from tcip_mcp.pipelines.data.selection import Selection, write_selection
 
     drawn = _draw(project, root, out)
@@ -130,7 +132,8 @@ def test_preflight_config_flags_a_selection_that_leaves_an_empty_side(
     tmp_path: Path,
 ):
     """The same refusal, reached through preflight_config: the bind would raise this exact way at
-    launch, so preflight names it before the child ever runs."""
+    launch, so preflight names it before the child ever runs.
+    """
     from tcip_mcp.tools.training_tools import preflight_config
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
@@ -146,7 +149,8 @@ def test_selection_compatibility_admits_a_draw_splits_selection_with_no_empty_si
     tmp_path: Path,
 ):
     """A selection draw_splits itself drew, never hand-mutated: valid work still passes once the
-    empty-side check lives in the shared function."""
+    empty-side check lives in the shared function.
+    """
     from tcip_mcp.pipelines.data.split_construction import (
         selection_compatibility,
     )
@@ -167,7 +171,8 @@ def test_preflight_reports_the_conflict_issues_even_when_the_manifest_is_unreada
     tmp_path: Path,
 ):
     """The drawn-key conflicts don't need the selection to answer, so an unreadable
-    selection_dir must never suppress them: preflight names the conflict."""
+    selection_dir must never suppress them: preflight names the conflict.
+    """
     from tcip_mcp.tools.training_tools import preflight_config
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
@@ -216,7 +221,8 @@ def test_list_split_choices_offers_a_table_selection_for_a_table_configuration(
 ):
     """The picker anchors on the image location and resolves the ground truth through the task's
     own key, so an ordinary images-plus-table configuration finds the selections drawn over that
-    dataset. Requiring a directory key would return nothing for every table run."""
+    dataset. Requiring a directory key would return nothing for every table run.
+    """
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.tools.data_tools import draw_splits
     from tcip_mcp.tools.training_tools import list_split_choices
@@ -275,7 +281,8 @@ def test_list_split_choices_route_404s_for_an_unknown_experiment(
     client: TestClient,
 ) -> None:
     """The route itself exists and answers a known id (proving the 404 below discriminates the
-    one unknown id, never a route that failed to mount at all)."""
+    one unknown id, never a route that failed to mount at all).
+    """
     monkeypatch.chdir(tmp_path)
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
@@ -304,7 +311,8 @@ def test_list_split_choices_offers_every_recorded_partition_with_the_bindings_ow
     dataset's own ``splits`` directory, a second one elsewhere that a run bound to through
     ``launch_training``, a third for another subject reached through a bound run (offered on its
     own terms, since a selection states its own scope), and a directory under the dataset's
-    ``splits`` whose record will not decode (listed disabled, never absent)."""
+    ``splits`` whose record will not decode (listed disabled, never absent).
+    """
     monkeypatch.chdir(tmp_path)
     _stub_child(monkeypatch)
 
@@ -368,7 +376,8 @@ def test_list_split_choices_offers_every_recorded_partition_with_the_bindings_ow
 
 def test_list_split_choices_offers_a_frozen_manifest(tmp_path: Path):
     """A selection freeze_selection wrote one level under the dataset's own splits directory is
-    offered the identical checked-then-compatibility way as any other candidate."""
+    offered the identical checked-then-compatibility way as any other candidate.
+    """
     from tcip_mcp.tools.data_tools import freeze_selection
     from tcip_mcp.tools.training_tools import list_split_choices
     from tests.test_freeze_selection import _real_drawn_experiment
@@ -392,7 +401,8 @@ def test_list_split_choices_offers_two_frozen_manifests_under_one_splits_directo
     tmp_path: Path,
 ):
     """Two runs each freeze to their own default directory (no output_path given), landing
-    under the dataset's one splits/ directory; list_split_choices offers both."""
+    under the dataset's one splits/ directory; list_split_choices offers both.
+    """
     from tcip_mcp.tools.data_tools import freeze_selection
     from tcip_mcp.tools.training_tools import list_split_choices
     from tests.test_freeze_selection import _real_drawn_experiment
@@ -424,7 +434,8 @@ def test_list_split_choices_as_recorded_reports_moved_directories_like_preflight
 ):
     """The picker's own "As recorded" row checks the same directory presence preflight would
     refuse a launch on, so a launch whose stated images_dir no longer exists reads disabled
-    before Start rather than only failing after it."""
+    before Start rather than only failing after it.
+    """
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.tools.training_tools import list_split_choices
 
@@ -445,7 +456,8 @@ def test_list_split_choices_reports_the_recorded_split_keys_a_partition_replaces
 ):
     """Choosing a partition replaces ``data.split`` wholesale
     (``training_tools.data_with_selection``); the listing discloses every stated key other
-    than ``selection_dir`` that drops, per offered selection."""
+    than ``selection_dir`` that drops, per offered selection.
+    """
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.tools.training_tools import list_split_choices
 
@@ -482,7 +494,8 @@ def test_list_split_choices_reports_the_redraw_flag_among_the_keys_a_partition_r
     """A config's own stated ``data.split`` names ``redraw_within_selection`` (bound and
     redrawing) as well as ``selection_dir`` and ``seed``: offering a different partition drops
     all of them but ``selection_dir`` itself, and the listing names every one dropped, the
-    redraw flag included."""
+    redraw flag included.
+    """
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.tools.training_tools import list_split_choices
 
@@ -515,7 +528,8 @@ def test_list_split_choices_never_names_a_null_valued_split_key_as_replaced(
     monkeypatch,
 ):
     """A stated ``data.split`` key present with a ``null`` value never configured anything a
-    chosen partition could drop; it must not be named among ``replaced_split_keys``."""
+    chosen partition could drop; it must not be named among ``replaced_split_keys``.
+    """
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.tools.training_tools import list_split_choices
 
@@ -542,7 +556,8 @@ def test_list_split_choices_reads_the_picked_runs_own_launch_record_only_once(
     monkeypatch,
 ):
     """The listing reads every run directory's launch record once, the picked run's own
-    included: the one read that finds the picked run also answers its binding."""
+    included: the one read that finds the picked run also answers its binding.
+    """
     monkeypatch.chdir(tmp_path)
     import tcip_mcp.experiments as experiments_module
     from tcip_mcp.tools.training_tools import list_split_choices
@@ -578,7 +593,8 @@ def test_list_split_choices_does_not_offer_the_own_selection_under_a_different_s
     """A differently spelled path to the config's own bound directory (a trailing separator,
     dropped by ``Path(...).resolve()`` but not by a raw string compare) must not be offered as
     if it were a second, alternative partition: both spellings normalize to the identical
-    picker identity."""
+    picker identity.
+    """
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.tools.training_tools import list_split_choices
 
@@ -610,7 +626,8 @@ def test_list_split_choices_offers_a_symlinked_manifest_directory_once(
 ):
     """A symlink under the dataset's ``splits/`` directory to a sibling manifest directory
     resolves to the identical directory the candidate dedupe must fold, or one partition is
-    offered twice under two spellings."""
+    offered twice under two spellings.
+    """
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.tools.training_tools import list_split_choices
 
@@ -643,7 +660,8 @@ def test_list_split_choices_offers_a_case_respelled_duplicate_manifest_once(
     monkeypatch,
 ):
     """Two candidate runs bound to the identical directory under different case spelling must be
-    offered once, not twice, on a case-insensitive filesystem."""
+    offered once, not twice, on a case-insensitive filesystem.
+    """
     if os.name != "nt":
         pytest.skip(
             "case folding only matters on a case-insensitive filesystem"
@@ -685,7 +703,8 @@ def test_relaunch_route_refuses_a_selection_dir_the_launch_cannot_bind(
     client: TestClient,
 ) -> None:
     """The browser's string is checked by the launch it reaches: a directory nothing is recorded
-    under, and one whose record is broken, both answer the launch's own refusal."""
+    under, and one whose record is broken, both answer the launch's own refusal.
+    """
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.pipelines.data.selection import selection_key
 
@@ -728,7 +747,8 @@ def test_relaunch_route_launches_the_stated_data_unchanged_when_no_partition_is_
     client: TestClient,
 ) -> None:
     """ "As recorded" launches the stated config's own data section as it validates, whether it
-    was bound or drawn: the route never rewrites data.split unless a partition is chosen."""
+    was bound or drawn: the route never rewrites data.split unless a partition is chosen.
+    """
     monkeypatch.chdir(tmp_path)
     import tcip_mcp.tools.training_tools as training_tools_module
     from tcip_mcp.pipelines.schemas import train_config
@@ -781,7 +801,8 @@ def test_relaunch_route_launches_a_new_run_with_the_chosen_partition(
 ) -> None:
     """A launch with a chosen partition submits a string the server itself listed; the new run's
     launch record states that candidate, data.split replaced wholesale and the stated class scope
-    dropped, and names the run it was relaunched from, whose own record is untouched."""
+    dropped, and names the run it was relaunched from, whose own record is untouched.
+    """
     monkeypatch.chdir(tmp_path)
     _stub_child(monkeypatch)
     from tcip_mcp.experiments import RUN_FILE, experiment_dir, read_record
@@ -825,7 +846,8 @@ def test_relaunch_route_admits_a_symlinked_spelling_of_an_offered_split_director
     """The picker's own dedupe offers one spelling of a symlinked directory; the relaunch route
     must still admit the other spelling of the identical directory, not just the one string it
     happened to list. tcip_store.canonical_path is the one comparison both sides share, so a
-    symlinked or differently cased spelling of an offered directory is accepted."""
+    symlinked or differently cased spelling of an offered directory is accepted.
+    """
     monkeypatch.chdir(tmp_path)
     _stub_child(monkeypatch)
     from tcip_mcp.tools.training_tools import list_split_choices
@@ -880,7 +902,8 @@ def test_a_chosen_selection_binds_and_the_runs_own_resolved_record_names_it(
 ) -> None:
     """The candidate config the route builds for a chosen partition, resolved and opened by the
     launcher's own producer: the run's launch record names the chosen selection as the partition
-    it bound to."""
+    it bound to.
+    """
     from tcip_mcp.experiments import observe
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")

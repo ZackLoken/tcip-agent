@@ -1,5 +1,6 @@
 """What an audited tool does when its own audit entry cannot be appended: a body that returned
-raises the unwritten line, and a body that raised keeps its own exception."""
+raises the unwritten line, and a body that raised keeps its own exception.
+"""
 
 from __future__ import annotations
 

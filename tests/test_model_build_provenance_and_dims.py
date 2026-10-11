@@ -41,7 +41,8 @@ def build_probe_net(
 ):
     """A tiny module whose parameter shapes follow its builder kwargs, one head per attribute
     sized by its values. Its forward is never run here; these tests read parameter shapes
-    only."""
+    only.
+    """
     import torch.nn as nn
 
     class ProbeNet(nn.Module):
@@ -66,7 +67,8 @@ def _param_shapes(model) -> dict:
 def _write_registry(dataset_root: Path) -> None:
     """A registry with three subjects of different shape, so no scope's class count is guessable
     from the file's overall size: 'leaf' carries a three-value ordinal axis, 'bush' a two-value
-    categorical one, and 'bud' none at all."""
+    categorical one, and 'bud' none at all.
+    """
     registry = subject_registry.SubjectRegistry(
         subjects=(
             subject_registry.Subject(
@@ -118,7 +120,8 @@ def test_contract_dims_take_the_admitted_attributes_without_the_loader_backgroun
     The attributes are the scope the run was admitted under, not a reading of the registry as it
     stands now: this run was admitted when its subject declared two condition values, the registry
     has since gained a third, and a re-resolution would smoke a head one value wider than the head
-    that trains."""
+    that trains.
+    """
     from PIL import Image
 
     from tcip_annotation.state import Annotation, BBox
@@ -193,7 +196,8 @@ def test_contract_dims_count_only_the_subject_for_a_scope_declaring_no_attribute
 ):
     """An instance_seg scope whose subject declares no attribute trains one class, the subject
     itself, and hands no attributes. The resolved count stays at that one class rather than
-    gaining a background slot; a run resolving no frame carries no smoke frame."""
+    gaining a background slot; a run resolving no frame carries no smoke frame.
+    """
     dataset_root = tmp_path / "subject_2026"
     images_dir = dataset_root / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True)
@@ -222,7 +226,8 @@ def test_contract_dims_count_only_the_subject_for_a_scope_declaring_no_attribute
 def test_snapshot_copies_each_dotted_module_at_its_module_path(tmp_path):
     """Each of the three bespoke seams' modules, declared under its source's ``source_files`` and
     lying outside the project, is copied at its path under its import root, the module its own
-    reference names, so the copy binds as that module and never as its top-level package."""
+    reference names, so the copy binds as that module and never as its top-level package.
+    """
     pkg = _agent_package(
         tmp_path,
         "agent_code_seams",
@@ -271,7 +276,8 @@ def test_snapshot_captures_the_module_of_a_builder_spelled_without_a_colon(
     tmp_path,
 ):
     """``module.path.function`` is the other accepted builder spelling; the function name is the
-    last segment, so the module is everything before it, not the first segment."""
+    last segment, so the module is everything before it, not the first segment.
+    """
     pkg = _agent_package(
         tmp_path,
         "agent_code_dotted",
@@ -304,7 +310,8 @@ def test_snapshot_captures_the_module_of_a_builder_spelled_without_a_colon(
 
 def test_a_missing_or_empty_builder_refuses_at_the_configs_validation():
     """``builder`` of ``None`` and of ``""`` both refuse where the config is validated, naming
-    ``model_source.builder``, before anything reads the model source; a named builder admits."""
+    ``model_source.builder``, before anything reads the model source; a named builder admits.
+    """
     for builder in (None, ""):
         _spec, issues = checked_train_config(
             training_config({"builder": builder, "task": "detection"}, {})
@@ -339,7 +346,8 @@ def _probe_config() -> dict:
 def test_builder_kwargs_restating_a_dimension_refuses_by_name(restated):
     """The band count and the one count reach the builder from the run's data section alone; a
     builder_kwargs carrying any dimension refuses naming it before any build, the rank count
-    included though this run resolves none."""
+    included though this run resolves none.
+    """
     config = _probe_config()
     config["model_source"]["builder_kwargs"] = {restated: 4}
 
@@ -349,7 +357,8 @@ def test_builder_kwargs_restating_a_dimension_refuses_by_name(restated):
 
 def test_a_model_source_stating_its_own_width_refuses_by_name():
     """A width stated on the model source itself refuses by name where the config is
-    validated."""
+    validated.
+    """
     config = _probe_config()
     config["model_source"]["in_chans"] = 4
 
@@ -359,7 +368,8 @@ def test_a_model_source_stating_its_own_width_refuses_by_name():
 
 def test_an_ordinal_run_recording_no_rank_count_refuses_by_name():
     """A checkpoint's rank count is read at the recorded-dimension boundary, which names what is
-    missing rather than failing on a bare key."""
+    missing rather than failing on a bare key.
+    """
     config = training_config(
         {"builder": PROBE_NET, "task": "ordinal"},
         {"num_channels": 3, "scope": {}},
@@ -371,7 +381,8 @@ def test_an_ordinal_run_recording_no_rank_count_refuses_by_name():
 
 def test_a_run_over_label_documents_recording_a_count_refuses():
     """A run over label documents is sized by its scope, the subject and its attributes; a count
-    recorded beside it would be a second size, so the dimensions refuse rather than choose."""
+    recorded beside it would be a second size, so the dimensions refuse rather than choose.
+    """
     config = training_config(
         {"builder": PROBE_NET, "task": "detection"},
         {
@@ -392,7 +403,8 @@ def test_a_run_builds_at_the_width_and_heads_its_admitted_data_records(
     its own admission builds a model reading that run's band count, its one subject and one head
     per attribute its registry declares. The single-band sources, the one subject and the
     three-value attribute all differ from ``build_probe_net``'s defaults, so a build that dropped
-    any of them would come out at the default shape."""
+    any of them would come out at the default shape.
+    """
     from PIL import Image
 
     from tcip_annotation.state import Annotation, BBox
@@ -447,7 +459,8 @@ def test_a_saved_checkpoint_rebuilds_the_architecture_its_config_builds(
     """The checkpoint written by the envelope's save path carries enough of the model source for
     the inference-side rebuild to reconstruct the same architecture the run trained. Both sides
     are produced here by the real build path, so a stamp that records less than the builder was
-    called with shows up as a shape difference rather than passing on a restated literal."""
+    called with shows up as a shape difference rather than passing on a restated literal.
+    """
     from tcip_mcp.experiments import CONFIG_PATHS, observe
     from tcip_mcp.pipelines.model_build import (
         SNAPSHOT_DIR,
@@ -508,7 +521,8 @@ def test_child_pythonpath_carries_sys_path_and_the_existing_env_value(
 ):
     """The string a spawned process or Ray worker gets must reproduce this interpreter's own
     import search path, with any existing PYTHONPATH the caller already set preserved at the end
-    rather than displaced by it."""
+    rather than displaced by it.
+    """
     import os
 
     from tcip_mcp.pipelines.model_build import child_pythonpath

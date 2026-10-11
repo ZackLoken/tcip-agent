@@ -130,7 +130,8 @@ def space_axes(
     ``low`` or ``high`` is no int64 value, the values Ray's integer sampler draws (numpy's
     ``Generator.integers``, whose exclusive end may reach ``2**63``), and, under ``grid`` (a grid
     search enumerating every discrete axis), an ``int`` axis spanning more than
-    :data:`GRID_AXIS_LIMIT` values, before anything is enumerated."""
+    :data:`GRID_AXIS_LIMIT` values, before anything is enumerated.
+    """
     import numpy as np
 
     drawable = np.iinfo(np.int64)
@@ -180,7 +181,8 @@ def _to_tune_space(
     """Convert the platform param-space dict (:func:`space_axes`) into a Ray Tune search space.
     ``grid=True`` enumerates every discrete axis (categorical / int) via ``grid_search``;
     continuous axes stay sampled. ``grid_keys`` names categorical axes forced to ``grid_search``
-    regardless of ``grid``."""
+    regardless of ``grid``.
+    """
     from ray import tune
 
     space: dict[str, Any] = {}
@@ -261,7 +263,8 @@ def scheduler_settings(scheduler: dict) -> tuple[type, dict]:
     rest of ``scheduler`` as its settings. Refuses (``ValueError``) an unknown name, and by name
     every setting that class takes that the block leaves unstated and every one it states that
     the class does not take, the settings a sweep supplies itself (:data:`_SWEEP_SUPPLIED`)
-    excepted."""
+    excepted.
+    """
     from ray.tune import schedulers
 
     from tcip_mcp.pipelines.model_build import (
@@ -290,7 +293,8 @@ def scheduler_settings(scheduler: dict) -> tuple[type, dict]:
 def build_scheduler(scheduler: dict, *, hyperparam_mutations: dict):
     """The Ray Tune trial scheduler the block ``scheduler`` states (:func:`scheduler_settings`),
     ``pbt`` mutating over ``hyperparam_mutations`` (the search space). ``metric``/``mode`` are
-    not passed."""
+    not passed.
+    """
     from tcip_mcp.pipelines.model_build import keyword_parameters
 
     cls, settings = scheduler_settings(scheduler)
@@ -316,7 +320,8 @@ def _default_trial_resources(max_concurrent: int) -> dict[str, float]:
 
 def _has_attached_console() -> bool:
     """Whether this process has a console to signal Ray's daemons through: always on a platform
-    other than Windows; on Windows, when ``GetConsoleCP`` reads nonzero."""
+    other than Windows; on Windows, when ``GetConsoleCP`` reads nonzero.
+    """
     if sys.platform != "win32":
         return True
     import ctypes
@@ -327,7 +332,8 @@ def _has_attached_console() -> bool:
 def _kill_ray_daemons_before_shutdown(ray: Any) -> None:
     """Kill every daemon this process's Ray cluster started (the reaper last) and each one's
     descendants, ahead of ``ray.shutdown()``, waiting one second on them together; a process
-    already gone or unreachable is skipped. A no-op for a cluster this module did not start."""
+    already gone or unreachable is skipped. A no-op for a cluster this module did not start.
+    """
     import psutil
 
     private = getattr(ray, "_private", None)
@@ -517,7 +523,8 @@ def resolved_draw_seeds(
     """The seeds a sweep over ``split_draws`` draws pairs with every sampled point: ``None`` at
     one draw or below; above one, ``stated`` when given, else the base config's validated
     ``data.split`` section ``split``'s own seed plus the draw index, refused when it states
-    none."""
+    none.
+    """
     if split_draws <= 1:
         return None
     if stated is not None:
@@ -533,7 +540,8 @@ def split_draw_search_space(
 ) -> dict:
     """The search space for ``tune_search`` and :func:`planned_trial_count`: ``param_space``
     itself when ``draw_seeds`` (:func:`resolved_draw_seeds`) is ``None``; otherwise a copy
-    carrying :data:`SPLIT_DRAW_SEED_KEY` as a categorical grid axis over them."""
+    carrying :data:`SPLIT_DRAW_SEED_KEY` as a categorical grid axis over them.
+    """
     if draw_seeds is None:
         return param_space
     return {
@@ -640,6 +648,7 @@ def tune_search(
             missing) and :func:`build_search_alg` builds the native sampler with
             ``constant_grid_search``, so every sampled point is trained once per seed whether
             ``search_alg`` is ``random`` or ``grid``; a backend ``search_alg`` refuses.
+
     """
     if split_draws > 1 and SPLIT_DRAW_SEED_KEY not in param_space:
         raise ValueError(

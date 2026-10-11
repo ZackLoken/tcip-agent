@@ -1,5 +1,6 @@
 """MCP server entry point: every domain tool, served on stdio for the project named at start
-(``--project <path>``)."""
+(``--project <path>``).
+"""
 
 from __future__ import annotations
 
@@ -26,12 +27,14 @@ _TOOLS: list[tuple[Callable[..., Any], dict[str, Any]]] = []
 
 class NoProjectError(ToolError):
     """A tool that acts on a project was called on a server started for none; the server hands
-    the agent its message."""
+    the agent its message.
+    """
 
 
 def tool(**options: Any) -> Callable[[_Tool], _Tool]:
     """Declare the decorated function an MCP tool, with ``options`` passed to the server's own
-    registration when :func:`build_server` builds a server, and return it unchanged."""
+    registration when :func:`build_server` builds a server, and return it unchanged.
+    """
 
     def decorate(fn: _Tool) -> _Tool:
         _TOOLS.append((fn, options))
@@ -73,7 +76,8 @@ def _bound(
     """``fn`` as the server registers it: each :data:`_CONTEXT` parameter it takes is registered
     without it, every call passing the server's own value, since no person makes an act an MCP
     client calls and the project is the one the server was started for. With no binding, a call
-    to a function taking one raises :class:`NoProjectError` naming ``--project``."""
+    to a function taking one raises :class:`NoProjectError` naming ``--project``.
+    """
     sig = inspect.signature(fn, eval_str=True)
     bound = set(_CONTEXT) & sig.parameters.keys()
     if not bound:
@@ -100,7 +104,8 @@ def _bound(
 def build_server(binding: BoundProject | None) -> MCPServer:
     """A server registering every declared tool, each acting on the project of ``binding`` or,
     with ``None``, a server started for no project, which serves only the tools taking no
-    :data:`_CONTEXT` parameter."""
+    :data:`_CONTEXT` parameter.
+    """
     server = MCPServer(
         "tcip-pipeline", lifespan=agent_identity.session_lifespan
     )
@@ -123,7 +128,8 @@ def main(argv: list[str] | None = None) -> None:
     """Start the MCP server on stdio for ``--project`` and the workspace ``TCIP_WORKSPACE`` names,
     or for no project and no workspace when ``--project`` is omitted. Exits naming the path when
     ``--project`` names a directory holding no project record; refuses what
-    :func:`~tcip_mcp.workspace.workspace_from_environment` refuses when a project is named."""
+    :func:`~tcip_mcp.workspace.workspace_from_environment` refuses when a project is named.
+    """
     parser = argparse.ArgumentParser(prog="python -m tcip_mcp")
     parser.add_argument(
         "--project",

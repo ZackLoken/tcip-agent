@@ -35,7 +35,8 @@ _GDAL_DATE_ITEMS = ("capture_date",)
 def _iso_date(raw: object) -> str | None:
     """A capture-date value in any spelling
     :func:`~tcip_mcp.pipelines.image_utils.parse_capture_time` reads, as ISO ``YYYY-MM-DD``;
-    ``None`` if none fits."""
+    ``None`` if none fits.
+    """
     from tcip_mcp.pipelines.image_utils import parse_capture_time
 
     parsed = parse_capture_time(raw)
@@ -45,7 +46,8 @@ def _iso_date(raw: object) -> str | None:
 def _photographic_capture_date(path: Path) -> tuple[str | None, str | None]:
     """EXIF ``DateTimeOriginal`` from a photographic container
     (:func:`~tcip_mcp.pipelines.image_utils.exif_capture_time`), and why it could not be read.
-    ``Image.open`` decodes the header only and never the pixels."""
+    ``Image.open`` decodes the header only and never the pixels.
+    """
     from PIL import Image
 
     from tcip_mcp.pipelines.image_utils import exif_capture_time
@@ -142,7 +144,8 @@ def _iter_source_images(source: str, recursive: bool):
 
 def _validate_bucket_literal(date_from: str) -> None:
     """A literal ``date_from`` becomes a path segment: reject separators/traversal and a
-    dot-prefixed name, the same bucket grammar every listing over ``images/`` enforces."""
+    dot-prefixed name, the same bucket grammar every listing over ``images/`` enforces.
+    """
     if date_from in ("exif", "none"):
         return
     if not dataset_layout.is_bucket_name(date_from):
@@ -262,6 +265,7 @@ def ingest_images(
     skipped_collisions, errors, unreadable_dates, move, band_groups}``, where
     ``unreadable_dates`` names each ingested file whose capture date could not be read and the
     reason. ``skipped_collisions`` names only an exact re-ingest.
+
     """
     try:
         _validate_bucket_literal(date_from)
@@ -402,6 +406,7 @@ def import_coco(
 
     Returns ``{document, capture, written}``, ``written`` the stem of every label document
     written.
+
     """
     from tcip_mcp.pipelines.data.coco_import import import_coco_document
 

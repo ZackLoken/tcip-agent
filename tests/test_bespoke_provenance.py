@@ -41,7 +41,8 @@ def _model_source() -> dict:
 
 def _snapshot(model_source: dict, project: Path) -> tuple[dict, dict]:
     """``snapshot_model_source`` over a run of ``project`` of ``model_source`` over no data
-    (:func:`~tests._chain_fixtures.training_config`), validated: its record and its copies."""
+    (:func:`~tests._chain_fixtures.training_config`), validated: its record and its copies.
+    """
     from tcip_mcp.pipelines.schemas import train_config
     from tests._chain_fixtures import training_config
 
@@ -62,7 +63,8 @@ def test_snapshot_model_source_copies_each_declared_file_at_its_path_in_its_tree
 ):
     """Each declared file is keyed by its stored path and copied at its path under the import
     root of the declared module holding it, else under the project, so a helper lands beside the
-    module that imports it."""
+    module that imports it.
+    """
     helper = tmp_path / "agent_code" / "helpers.py"
     helper.parent.mkdir()
     helper.write_text("SCALE = 2\n", encoding="utf-8")
@@ -124,7 +126,8 @@ def test_a_declared_file_of_the_builders_stem_that_is_not_python_holds_no_module
     tmp_path,
 ):
     """A declared ``review.txt`` is no module, so the plan of a builder ``review:build`` it is
-    declared for refuses, though a ``review`` module of that name is already loaded."""
+    declared for refuses, though a ``review`` module of that name is already loaded.
+    """
     import sys
     import types
 
@@ -162,7 +165,8 @@ def test_snapshot_model_source_refuses_a_file_outside_every_tree_it_can_place(
 ):
     """A declared file outside the project and under no declared module's import root has no
     path in the run's snapshot, so the snapshot refuses it, naming it and the roots it could have
-    been placed under."""
+    been placed under.
+    """
     from tests import REPO_ROOT
 
     stray = tmp_path.parent / "stray" / "helpers.py"
@@ -183,7 +187,8 @@ def test_snapshot_model_source_refuses_a_file_outside_every_tree_it_can_place(
 
 def test_snapshot_model_source_refuses_two_files_landing_on_one_copy(tmp_path):
     """The project's own ``bespoke_models.py`` and the builder's module of that path under its
-    import root would be one copy; the snapshot refuses rather than keep either."""
+    import root would be one copy; the snapshot refuses rather than keep either.
+    """
     shadow = tmp_path / "bespoke_models.py"
     shadow.write_text("", encoding="utf-8")
     src = {
@@ -199,7 +204,8 @@ def test_a_project_file_beside_an_external_builder_named_like_the_standard_libra
     tmp_path,
 ):
     """A project-local ``code.py`` declared beside a builder from another tree is placed under
-    the one snapshot root as ``code`` once copied, so the plan refuses it by that name."""
+    the one snapshot root as ``code`` once copied, so the plan refuses it by that name.
+    """
     from tcip_mcp.pipelines.model_build import module_plan
     from tcip_mcp.pipelines.schemas import train_config
     from tests._chain_fixtures import training_config
@@ -221,7 +227,8 @@ def test_a_preflight_over_a_declared_standard_library_name_imports_nothing(
     tmp_path,
 ):
     """The preflight places a config's declared files before it imports any of them, so a
-    declared ``code.py`` is refused and the loaded ``code`` module is never replaced."""
+    declared ``code.py`` is refused and the loaded ``code`` module is never replaced.
+    """
     import code
     import sys
 
@@ -260,7 +267,8 @@ def test_a_preflight_over_a_declared_standard_library_name_imports_nothing(
 
 def test_a_run_whose_snapshot_refuses_leaves_no_run_directory(tmp_path):
     """A declared file that cannot be read refuses the run before its directory exists, so no
-    half-opened run is left behind."""
+    half-opened run is left behind.
+    """
     from tcip_mcp.experiments import experiment_dir
     from tests._verified_checkpoint_fixtures import (
         BUILT_DETECTOR,
@@ -290,7 +298,8 @@ def test_a_declared_file_named_like_the_standard_library_refuses_before_a_run_op
 ):
     """A declared ``code.py`` beside the builder would import as the standard library's
     ``code`` once the run binds its declared files, so the snapshot refuses it by name and no
-    run directory is left."""
+    run directory is left.
+    """
     from tcip_mcp.experiments import experiment_dir
     from tests._verified_checkpoint_fixtures import (
         BUILT_DETECTOR,
@@ -323,7 +332,8 @@ def test_a_declared_file_named_like_the_standard_library_refuses_before_a_run_op
 
 def test_snapshot_model_source_keeps_files_sharing_a_name_apart(tmp_path):
     """Two declared files sharing a basename land at their own paths, each with its own
-    content."""
+    content.
+    """
     for name in ("a", "b"):
         (tmp_path / name).mkdir()
         (tmp_path / name / "model.py").write_text(
@@ -385,7 +395,8 @@ def test_a_pass_rebuilds_a_bespoke_detector_and_predicts(tmp_path):
 def test_predictor_loads_at_the_two_channels_its_run_recorded(tmp_path):
     """The width a run records on its data section is the one its model was built at, and the
     predictor reads that checkpoint's images at it: a two-band run loads at two channels, not a
-    silent default of 3."""
+    silent default of 3.
+    """
     import csv
 
     import numpy as np

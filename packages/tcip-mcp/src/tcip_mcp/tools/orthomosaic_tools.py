@@ -271,7 +271,8 @@ def _segment_counts(
     canopy segment contains its centroid, a tie standing only with ``position_error_m`` of
     clearance. Returns the counts, the ``CanopySegmentDisclosure`` and each registry plant that
     regime leaves uncounted, with why. The canopy document is the raster's own label document
-    (:func:`~tcip_mcp.dataset_layout.label_key_of`)."""
+    (:func:`~tcip_mcp.dataset_layout.label_key_of`).
+    """
     from tcip_annotation.json_io import (
         UnreadableLabelDocumentError,
         document_at,

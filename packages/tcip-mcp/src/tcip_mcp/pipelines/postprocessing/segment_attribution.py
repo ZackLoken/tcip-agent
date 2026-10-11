@@ -47,7 +47,8 @@ from tcip_mcp.pipelines.postprocessing.plant_mapping import (
 class CanopySegmentError(ValueError):
     """A canopy-segment document, or one of its own annotations, cannot stand behind a segment
     tie: a document/raster identity mismatch, an absent subject, a ``Point`` naming no region, or
-    a record not positively a person's."""
+    a record not positively a person's.
+    """
 
 
 @dataclass
@@ -176,7 +177,8 @@ class TiedSegment:
 class UntiedSegment:
     """A canopy segment tied to no registry plant: it contains none, or it contains
     ``plant_within_position_error``, the one plant whose position lies closer to its boundary
-    than the stated position error."""
+    than the stated position error.
+    """
 
     segment_index: int
     polygon: Polygon
@@ -187,7 +189,8 @@ class UntiedSegment:
 class SegmentTie:
     """The result of tying every canopy segment in one raster to the registry plants it can be
     tied to: the segments actually tied, the segments left untied with why, and the plants a tie
-    does not cover because no segment holds them or they lie outside the raster."""
+    does not cover because no segment holds them or they lie outside the raster.
+    """
 
     tied: list[TiedSegment]
     untied: list[UntiedSegment]
@@ -201,7 +204,8 @@ class SegmentTie:
     @property
     def plants_within_position_error(self) -> list[str]:
         """Plot names of every plant inside a segment but within the position error of its
-        boundary, read off the untied segments."""
+        boundary, read off the untied segments.
+        """
         return sorted(
             s.plant_within_position_error
             for s in self.untied
@@ -221,7 +225,8 @@ def _clearance_m(
 ) -> float:
     """The distance in meters from ``plant``, a position in the raster's native CRS, to
     ``polygon``'s boundary, the boundary put into that CRS through the raster's own affine and the
-    distance taken there, then scaled by the meters one native unit spans."""
+    distance taken there, then scaled by the meters one native unit spans.
+    """
     rings = [
         [georef.pixel_to_native(x, y) for x, y in ring]
         for ring in polygon.rings
@@ -381,7 +386,8 @@ def assign_detections_to_segments(
     boxes: Sequence[Sequence[float]], tie: SegmentTie
 ) -> list[SegmentAssignment]:
     """One :class:`SegmentAssignment` per xyxy box of ``boxes`` (full-mosaic pixel space), its
-    centroid tested against every candidate segment ``tie`` holds, tied and untied both."""
+    centroid tested against every candidate segment ``tie`` holds, tied and untied both.
+    """
     candidates: list[TiedSegment | UntiedSegment] = [*tie.tied, *tie.untied]
 
     out: list[SegmentAssignment] = []

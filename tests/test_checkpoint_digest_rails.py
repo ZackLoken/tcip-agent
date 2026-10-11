@@ -53,7 +53,8 @@ def _register(
 
 def _infer(tmp_path: Path, ckpt: str, bucket: str = "preds") -> dict:
     """``run_inference`` of ``ckpt`` over one image, untiled, publishing the bucket named
-    ``bucket`` under ``tmp_path``."""
+    ``bucket`` under ``tmp_path``.
+    """
     from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.inference_tools import run_inference
     from tests._verified_checkpoint_fixtures import SAMPLE_CONF
@@ -158,7 +159,8 @@ def test_triage_predictions_refuses_an_unregistered_checkpoint(tmp_path):
 
 def test_triage_predictions_refuses_by_the_project_it_acts_on(tmp_path):
     """The project the call acts on is where the load looks: registered under a project the call
-    does not name, the checkpoint still refuses, naming the project it did name."""
+    does not name, the checkpoint still refuses, naming the project it did name.
+    """
     registered_root = tmp_path / "registered"
     registered_root.mkdir()
     other_root = tmp_path / "elsewhere"
@@ -179,7 +181,8 @@ def test_triage_predictions_admits_a_checkpoint_registered_under_the_project_it_
     tmp_path,
 ):
     """The admitting direction, roles reversed: acting on the project the checkpoint really is
-    registered under lets the same call through."""
+    registered under lets the same call through.
+    """
     registered_root = tmp_path / "registered"
     registered_root.mkdir()
     ckpt = secondary_checkpoint(registered_root)
@@ -196,7 +199,8 @@ def test_review_priority_route_worker_fails_the_job_on_an_unregistered_checkpoin
     tmp_path,
 ):
     """The review-priority route's own worker, driven directly, fails its job on a checkpoint
-    nothing registered."""
+    nothing registered.
+    """
     pytest.importorskip("fastapi")
     from tcip_web.routes.annotate import PriorityQueueJob, _pq_worker
 
@@ -223,7 +227,8 @@ def test_review_priority_route_worker_completes_the_job_with_a_registered_checkp
     monkeypatch,
 ):
     """The admitting half: a checkpoint a run of the job's own project completed runs
-    _pq_worker to a completed job rather than a failed one."""
+    _pq_worker to a completed job rather than a failed one.
+    """
     pytest.importorskip("fastapi")
     from types import SimpleNamespace
 
@@ -287,7 +292,8 @@ def test_run_inference_refuses_a_registered_checkpoint_replaced_by_rename(
 def _identical_runs_data(tmp_path) -> dict:
     """One data section over which runs of one id and seed, one in each of two projects, train
     identical bytes, outside both projects, so each checkpoint spells its locations the same
-    way."""
+    way.
+    """
     from tests._verified_checkpoint_fixtures import (
         SCOPED_DATA,
         detection_images,
@@ -322,7 +328,8 @@ def test_a_foreign_registration_before_its_run_completed_leaves_the_run_its_one_
 ):
     """The same bytes registered as foreign first and then named by a run's completion resolve
     to one entry, the run's. A run of the same id in another project trains them: each
-    checkpoint names its run's snapshot by the run's own directory under its project."""
+    checkpoint names its run's snapshot by the run's own directory under its project.
+    """
     from tcip_mcp.experiments import observe
     from tcip_mcp.model_registry import (
         load_registered_checkpoint,
@@ -361,7 +368,8 @@ def test_two_foreign_registrations_of_one_sha256_resolve_to_one_entry(
 ):
     """The registry is keyed by a checkpoint's bytes: the same foreign bytes registered twice,
     from two paths under two names, leave one entry for those bytes, the later registration's,
-    and a load of either copy resolves to that one entry."""
+    and a load of either copy resolves to that one entry.
+    """
     from tcip_mcp.model_registry import (
         load_registered_checkpoint,
         registered_entries,
@@ -462,7 +470,8 @@ def test_run_inference_admits_a_second_checkpoint_of_a_run_registered_under_a_di
 ):
     """A checkpoint a run saved beside the deliverable its completion registered
     (``secondary_checkpoint``) is registered explicitly under a distinct name and admitted under
-    its own digest, its entry naming no producing run."""
+    its own digest, its entry naming no producing run.
+    """
     second = secondary_checkpoint(tmp_path)
     _register(tmp_path, second, name="run-second")
 
@@ -511,7 +520,8 @@ def test_a_completed_runs_final_status_and_the_load_agree_on_its_digest(
     tmp_path,
 ):
     """The completion's recorded digest and the load's recomputed one are one digest, and the
-    metrics a ranking reads are the ones the checkpoint's own payload carries."""
+    metrics a ranking reads are the ones the checkpoint's own payload carries.
+    """
     from tcip_mcp.experiments import observe
     from tcip_mcp.model_registry import (
         ModelRegistry,

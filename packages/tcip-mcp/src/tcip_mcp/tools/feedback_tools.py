@@ -20,7 +20,8 @@ def _load_or_refuse(checkpoint_path: Path, project: Path):
     ``checkpoint_path`` (``model_registry.load_registered_checkpoint``) and
     ``None``, or ``None`` and the ``{"error": ...}`` of each refusal that load raises: no file at
     the location, a checkpoint ``project``'s registry names no entry for, or a project record
-    that will not read."""
+    that will not read.
+    """
     from tcip_mcp.model_registry import (
         CheckpointNotFoundError,
         load_registered_checkpoint,
@@ -113,7 +114,8 @@ def _prepare_queue_sources(images_dir: str, subject: str | None):
 def _untiled(checkpoint, stated: Any) -> tuple[Any, dict | None]:
     """``checkpoint`` readied untiled under ``stated``
     (:func:`~tcip_mcp.pipelines.execution.prepare`), or the refusal when torch is not installed.
-    Returns ``(preparation, refusal)``."""
+    Returns ``(preparation, refusal)``.
+    """
     try:
         from tcip_mcp.pipelines.execution import prepare
 
@@ -154,6 +156,7 @@ def prioritize_review_queue(
         budget: Number of images to return.
         subject: The subject whose finished images (marked complete in their label document)
             are skipped; omitted ranks every candidate image.
+
     """
     return ranked_review_queue(
         project,
@@ -177,7 +180,8 @@ def ranked_review_queue(
     """The unfinished images under the established location ``images_dir`` ranked by ``method``
     under the registered checkpoint at the established location ``checkpoint_path``, the top
     ``budget`` as ``queue`` (each marked ``reference_member`` for a selection-bound run), or the
-    refusal ``{"error": ...}``; ``subject``'s finished images are skipped."""
+    refusal ``{"error": ...}``; ``subject``'s finished images are skipped.
+    """
     checkpoint, refusal = _load_or_refuse(checkpoint_path, project)
     if refusal is not None:
         return refusal
@@ -266,6 +270,7 @@ def triage_predictions(
         high: Upper confidence bound for the needs-review band.
         subject: The subject whose finished images (marked complete in their label document)
             are skipped; omitted triages every candidate image.
+
     """
     checkpoint, refusal = _load_or_refuse(
         located(checkpoint_path, project), project

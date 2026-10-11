@@ -1,5 +1,6 @@
 """view_gui_state: the agent reads the GUI state the web backend persisted for the project it acts
-on, through the same decoder the backend reopens it with."""
+on, through the same decoder the backend reopens it with.
+"""
 
 from __future__ import annotations
 

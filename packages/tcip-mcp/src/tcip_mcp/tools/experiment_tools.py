@@ -31,6 +31,7 @@ def get_experiment(
         view: 'full' for the whole directory, 'lineage' for the traced chain only.
         metrics_limit: Maximum epoch rows to return, view='full' only. None returns all.
         metrics_offset: Epoch row offset to start from, view='full' only.
+
     """
     from tcip_mcp.experiments import (
         get_experiment as _get,
@@ -60,7 +61,8 @@ def get_experiment(
 def list_experiments(project: Path) -> dict:
     """Every run and sweep of the project (``experiments.training_listing``):
     ``{"runs", "sweeps"}``, each run launched on its own as its row and each sweep with its trial
-    rows under it."""
+    rows under it.
+    """
     from tcip_mcp.experiments import training_listing
 
     return training_listing(project).model_dump()

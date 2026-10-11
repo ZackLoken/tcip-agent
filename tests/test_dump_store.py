@@ -1,5 +1,6 @@
 """``tcip dump-store``: every record and log of a project's store databases written out as files
-a person reads, each decoding to the value the database holds."""
+a person reads, each decoding to the value the database holds.
+"""
 
 from __future__ import annotations
 
@@ -32,7 +33,8 @@ def _project_with_records(tmp_path: Path) -> Path:
 
 def _held(project: Path) -> dict[tuple, object]:
     """Every record and every log each database under ``project`` holds, read through the seam,
-    by ``(root relative to the project, store, parts, suffix)``."""
+    by ``(root relative to the project, store, parts, suffix)``.
+    """
     held: dict[tuple, object] = {}
     for root in {
         database.parent.parent for database in project.rglob("store.db")
@@ -68,7 +70,8 @@ def test_the_records_a_database_holds_and_the_records_its_dump_writes_agree(
     tmp_path: Path,
 ):
     """Store by store, the dump's files read back to exactly the keys and values each database
-    answers."""
+    answers.
+    """
     project = _project_with_records(tmp_path)
     out = tmp_path.parent / "dump"
 
@@ -85,7 +88,8 @@ def test_every_key_the_store_admits_dumps_to_its_own_file_inside_the_destination
 ):
     """A key with no parts, parts that would climb out of the destination, two parts that differ
     only by case and a part holding a lone surrogate each land in a file of their own under
-    ``out_dir``, and a key holding both a record and log entries dumps both."""
+    ``out_dir``, and a key holding both a record and log entries dumps both.
+    """
     project = new_project(tmp_path).root
     root = str(project)
     for parts, value in (

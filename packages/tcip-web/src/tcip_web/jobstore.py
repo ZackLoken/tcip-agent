@@ -48,7 +48,8 @@ class JobRegistry:
 
     def _insert(self, job_id: str, job: Any) -> None:
         """Add ``job`` under ``job_id`` and evict overflow (:func:`evict_terminal`); called under
-        the lock."""
+        the lock.
+        """
         self.jobs[job_id] = job
         evict_terminal(self.jobs)
 

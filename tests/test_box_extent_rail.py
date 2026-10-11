@@ -1,5 +1,6 @@
 """An inverted or zero-extent box is refused wherever a writer builds one: the save doors, the
-per-image writer and the prediction encoder."""
+per-image writer and the prediction encoder.
+"""
 
 from __future__ import annotations
 
@@ -24,7 +25,8 @@ from tests._producer_fixtures import image_label_key, write_image
 
 def test_the_encoding_keeps_only_what_has_extent_on_the_stored_grid(tmp_path):
     """A box that rounds to no width, and a mask whose rings have none, are no detection: the
-    encoding keeps the one detection with extent, and the count it reports is the document's."""
+    encoding keeps the one detection with extent, and the count it reports is the document's.
+    """
     from tcip_annotation.mask_contours import mask_to_polygon_rings
     from tcip_mcp.pipelines.postprocessing.export import encode_predictions
     from tests._producer_fixtures import painted_array
@@ -129,7 +131,8 @@ def test_the_writer_admits_an_ordered_box(tmp_path):
 
 def test_the_writer_refuses_a_collinear_polygon(tmp_path):
     """A polygon whose points all sit on one line has a derived bbox with no real extent either:
-    the same boundary check catches it, not only a bare BBox."""
+    the same boundary check catches it, not only a bare BBox.
+    """
     key = label_key(tmp_path, UNDATED_BUCKET, "img")
     with pytest.raises(ValueError):
         write_label_document(
@@ -249,7 +252,8 @@ def _seed_review_dataset(
     tmp_path: Path, *, pred_box=(10, 10, 20, 20), gt_box=None
 ):
     """The label document of one image and the bucket ``m`` proposing ``pred_box`` on it; the
-    label document's key."""
+    label document's key.
+    """
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tests._producer_fixtures import label_image, registry_over
     from tests._web_fixtures import open_new_project
@@ -356,7 +360,8 @@ def test_a_corrected_geometry_is_checked_as_any_saved_shape_is(
     shape,
 ) -> None:
     """A geometry correction is a save like any other, so every value the corrected shape carries
-    is checked, whichever geometry it resolves to."""
+    is checked, whichever geometry it resolves to.
+    """
     gt = _seed_review_dataset(tmp_path, gt_box=(1, 1, 3, 3))
 
     resp = client.post(
@@ -444,7 +449,8 @@ def test_encode_predictions_drops_a_degenerate_box_and_reports_the_count():
 def test_encode_predictions_drops_a_box_that_rounds_to_zero_extent():
     """A box with real pre-round extent that collapses to nothing at the document's stored
     2-decimal quantum is dropped here, the same as an already-zero-extent box: the encoder must
-    never be handed a box it would refuse and fail the whole run over."""
+    never be handed a box it would refuse and fail the whole run over.
+    """
     from tcip_mcp.pipelines.postprocessing.export import encode_predictions
 
     result = {
@@ -506,7 +512,8 @@ def test_stage_proposals_refuses_a_shape_stating_no_confidence(
     tmp_path, shape
 ):
     """A staged shape is a prediction, so it states the confidence its producer reported; one
-    stating none is refused by name, never staged at a confidence nobody reported."""
+    stating none is refused by name, never staged at a confidence nobody reported.
+    """
     from tcip_mcp.tools.proposal_tools import stage_proposals
 
     image = tmp_path / "images" / "2026-01-01" / "img_001.jpg"
@@ -540,7 +547,8 @@ def test_stage_proposals_refuses_a_shape_stating_no_subject_by_its_index(
     tmp_path, shape
 ):
     """Every staged shape states its own subject; one stating none is refused naming the shape's
-    index and the missing field, never staged under an empty subject."""
+    index and the missing field, never staged under an empty subject.
+    """
     from tcip_mcp.tools.proposal_tools import stage_proposals
 
     image = tmp_path / "images" / "2026-01-01" / "img_001.jpg"

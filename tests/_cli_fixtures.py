@@ -15,7 +15,8 @@ def run_tcip(
     timeout: float = 120,
 ) -> subprocess.CompletedProcess:
     """``tcip <command> <args>`` through the console dispatcher in a child process started in
-    ``cwd``; the finished process with its output as text."""
+    ``cwd``; the finished process with its output as text.
+    """
     return subprocess.run(
         [sys.executable, "-m", "tcip_web.cli", command, *args],
         cwd=None if cwd is None else str(cwd),

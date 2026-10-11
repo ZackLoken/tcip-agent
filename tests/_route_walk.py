@@ -1,5 +1,6 @@
 """The app's routes walked through the frontend route generator's own walk of its router tree,
-and the state-changing ones among them."""
+and the state-changing ones among them.
+"""
 
 from __future__ import annotations
 
@@ -26,7 +27,8 @@ def route_generator():
 
 def state_changing_routes(target) -> list[APIRoute]:
     """Every route of the app ``target`` declaring a method in
-    ``trust_boundary.STATE_CHANGING_METHODS``."""
+    ``trust_boundary.STATE_CHANGING_METHODS``.
+    """
     return [
         route
         for route in route_generator().iter_api_routes(target)

@@ -68,7 +68,8 @@ class _StubDetector:
 
 class _StubModel:
     """Composed-model stand-in exposing ``.detector``, both operating-point knobs, which its
-    empty-prediction forward honors trivially."""
+    empty-prediction forward honors trivially.
+    """
 
     def __init__(self, detector: _StubDetector) -> None:
         self.detector = detector
@@ -204,7 +205,8 @@ def test_evaluating_a_run_leaves_its_directory_byte_identical(
 ):
     """An evaluation of a completed run by its id writes nothing: the run's files before and after
     are the same names holding the same bytes, no audit line is left for it, and the result comes
-    back to the caller."""
+    back to the caller.
+    """
     import tcip_store as ts
     from tcip_mcp.audit import audit_log_key
     from tcip_mcp.tools.training_tools import evaluate_model
@@ -253,7 +255,8 @@ def test_evaluate_model_reads_its_loader_at_the_checkpoints_own_width(
     tmp_path, monkeypatch
 ):
     """The door measures at the width the checkpoint reads at, and a checkpoint recording none
-    stops it where the predictor refuses rather than sizing the loader off the references."""
+    stops it where the predictor refuses rather than sizing the loader off the references.
+    """
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import (
         ONE_BAND_DETECTOR,
@@ -415,7 +418,8 @@ def test_the_scored_model_is_the_one_the_door_already_built(
 
     def _independent(conf: float) -> dict:
         """The evaluation of the independent copy counted at ``conf``, each image capped at the
-        record's density, its objective weighted by the checkpoint's recorded weights."""
+        record's density, its objective weighted by the checkpoint's recorded weights.
+        """
         return evaluate(
             independent_model,
             recorded["loader"],
@@ -452,7 +456,8 @@ def test_the_three_evaluation_loaders_over_one_truth_and_one_predictor_agree(
     build their loader over one ground truth for one predictor at the same width and the same
     untiled block: every factory build each door makes is recorded and the three doors' records
     are compared with each other. The predictor reads one band of three-band sources, so a door
-    sizing its loader off the sources would disagree."""
+    sizing its loader off the sources would disagree.
+    """
     from PIL import Image
 
     import tcip_mcp.pipelines.data.datasets as datasets
@@ -577,7 +582,8 @@ def test_explicit_tiling_override_on_checkpoint(tmp_path, monkeypatch):
 
 def _sliced_stub(boxes, **training) -> StubPredictor:
     """A three-band detector answering ``boxes`` at 0.9 on a 128px frame, trained at
-    ``training``'s geometry."""
+    ``training``'s geometry.
+    """
     return StubPredictor(
         task="detection",
         in_chans=3,
@@ -593,7 +599,8 @@ def _full_frame(
     tmp_path, monkeypatch, stub, annotations, *, checkpoint=None, **stated
 ) -> dict:
     """``run_full_frame_evaluation`` of one 128px frame labeled with ``annotations`` through
-    ``stub``, at the sample detector values unless ``stated`` names its own."""
+    ``stub``, at the sample detector values unless ``stated`` names its own.
+    """
     from tcip_mcp.pipelines.training.eval_runners import (
         run_full_frame_evaluation,
     )
@@ -635,7 +642,8 @@ def test_full_frame_scores_a_detection_in_a_crowd_region_as_neither(
     tmp_path, monkeypatch
 ):
     """The delivery-grade gate reads each record's crowd flag off the loader's target: a
-    detection inside a crowd region is neither a true nor a false positive."""
+    detection inside a crowd region is neither a true nor a false positive.
+    """
     from tcip_annotation.state import Annotation, BBox
 
     r = _full_frame(
@@ -659,7 +667,8 @@ def test_full_frame_reads_each_ground_truth_box_on_the_stored_grid(
     tmp_path, monkeypatch
 ):
     """The delivery-grade gate scores the box its document holds, on the stored two-decimal grid,
-    never the float arithmetic of the loader's corners."""
+    never the float arithmetic of the loader's corners.
+    """
     import tcip_mcp.pipelines.training.evaluation as evaluation
     from tcip_annotation.state import Annotation, BBox
 
@@ -746,7 +755,8 @@ def test_a_tiled_pass_with_no_basis_for_its_edge_refuses_naming_it(
     tmp_path, monkeypatch
 ):
     """A checkpoint with no persisted training tile geometry has no real basis to tile at: a tiled
-    pass with no stated edge refuses, naming the missing basis, never fabricating a scale."""
+    pass with no stated edge refuses, naming the missing basis, never fabricating a scale.
+    """
     from tcip_mcp.pipelines.execution import ExecutionRefusedError
 
     with pytest.raises(ExecutionRefusedError, match="tile_size"):
@@ -795,7 +805,8 @@ def test_the_evaluation_derives_an_unrecorded_tile_geometry_from_its_ground_trut
     """A checkpoint with no persisted tiling and no stated edge is scored at the lattice the
     evaluated ground truth derives, recorded by the derivation's name, never at an ungrounded
     scale, each value under the derivation that produced it: a stated edge keeps its own source
-    beside the overlap derived for it."""
+    beside the overlap derived for it.
+    """
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.derivations import (
         TILE_EDGE_DERIVATION,
@@ -838,7 +849,8 @@ def test_the_evaluation_derives_tile_geometry_from_the_checkpoint(
     tmp_path, monkeypatch
 ):
     """The checkpoint's own persisted training geometry governs the evaluation instead of an
-    arbitrary fixed scale."""
+    arbitrary fixed scale.
+    """
     from tcip_annotation.state import Annotation, BBox
 
     stub = _sliced_stub([], train_tile_size=224, train_overlap=0.1)
@@ -871,7 +883,8 @@ def test_launch_training_persists_effective_tile_geometry(
     below would fail, since the poisoned ``train`` would be the one actually invoked. Because the
     real subprocess re-imports fresh, the monkeypatch here has no effect and the run completes
     normally, proving the training body genuinely executes outside this process, not merely that
-    the API still returns the right shape."""
+    the API still returns the right shape.
+    """
     pytest.importorskip("torchvision")
     monkeypatch.chdir(tmp_path)
     import os

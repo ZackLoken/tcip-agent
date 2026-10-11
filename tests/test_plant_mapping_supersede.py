@@ -45,7 +45,8 @@ def _deliver(
 def _cited_mapping(tmp_path: Path) -> tuple[OpenProject, str, dict[str, str]]:
     """``tmp_path`` made a project holding a mapping built, delivered from (so a delivery event
     cites its digest), and the plant CSV it was built over, for a rebuild under the same name to
-    then be tried against; the project, the images root and the buckets by date."""
+    then be tried against; the project, the images root and the buckets by date.
+    """
     project = _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root, plant_csv, preds_by_date = _write_scene(
@@ -70,7 +71,8 @@ def test_a_cited_rebuild_refuses_naming_the_citing_events(
     tmp_path: Path,
 ) -> None:
     """A guard: a same-name rebuild whose current record a delivery event cites refuses unless
-    supersede=True."""
+    supersede=True.
+    """
     _, images_root, _ = _cited_mapping(tmp_path)
     before = plant_mapping.load_mapping(tmp_path, "valley")
     assert before is not None
@@ -109,7 +111,8 @@ def test_a_cited_rebuild_with_supersede_archives_the_old_record_and_keeps_it_rea
     """Admits valid work: supersede=True archives the current record under
     <name>@<digest[:12]>, the new record's own supersedes names the archived digest, the
     archived record stays readable on its own build's receipt, the supersede writing one receipt
-    alone, and plant_mapping_names never lists it."""
+    alone, and plant_mapping_names never lists it.
+    """
     from tcip_mcp.audit import audit_log_key
 
     def receipts() -> list[dict]:
@@ -162,7 +165,8 @@ def test_resolved_mapping_key_for_citation_names_the_archive_once_superseded(
     tmp_path: Path,
 ) -> None:
     """Coverage: a delivery event's own cited digest resolves to the current name while
-    unmoved, and to the archived key once a supersede rebuild has moved the name on."""
+    unmoved, and to the archived key once a supersede rebuild has moved the name on.
+    """
     _, images_root, _ = _cited_mapping(tmp_path)
     before = plant_mapping.load_mapping(tmp_path, "valley")
     assert before is not None
@@ -197,7 +201,8 @@ def test_the_delivery_events_route_resolves_a_superseded_citation_to_the_archive
     client,
 ) -> None:
     """The panel route's own plant_mapping_resolved_key names the archive once a supersede
-    rebuild has moved the cited name on, and the plain name while it has not."""
+    rebuild has moved the cited name on, and the plain name while it has not.
+    """
     import asyncio
 
     from tcip_web.state import store
@@ -266,7 +271,8 @@ def test_a_rebuild_over_a_record_that_will_not_decode_proceeds_on_its_raw_digest
     monkeypatch,
 ) -> None:
     """The record being replaced is identified by its raw digest, whatever its shape: the rebuild
-    asks the citation check about that digest and lands."""
+    asks the citation check about that digest and lands.
+    """
     images_root, registry = _built(tmp_path)
     key = plant_mapping.plant_mapping_key(tmp_path, "valley")
     malformed = {"name": "valley", "an old shape": True}

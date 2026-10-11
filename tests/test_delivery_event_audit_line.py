@@ -26,7 +26,8 @@ def test_a_failed_audit_append_raises_with_the_delivery_events_record_already_wr
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The record is the delivery's evidence and is written before the audit line; a dropped
-    append still reaches the caller as a raise."""
+    append still reaches the caller as a raise.
+    """
     revision = seed_confirmed_count(tmp_path / "trait_project")
     bucket = _bucket(tmp_path)
     # The acknowledgment the unassessed bucket ships under lands its own line first.
@@ -48,7 +49,8 @@ def test_the_audit_line_names_the_records_event_id_and_nothing_else(
     tmp_path: Path,
 ) -> None:
     """An ordinary delivery writes one record and one audit line, a generic ``delivery_event``
-    operation whose only fact is the record's ``event_id``: the door lives in the record alone."""
+    operation whose only fact is the record's ``event_id``: the door lives in the record alone.
+    """
     from tcip_mcp import agent_identity
 
     revision = seed_confirmed_count(tmp_path / "trait_project")

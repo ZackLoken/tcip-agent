@@ -93,7 +93,8 @@ def test_draw_splits_stats_golden(tmp_path: Path):
 
 def test_draw_splits_selection_document_golden(tmp_path: Path):
     """The selection is the draw's one record, in the database under its directory. Every
-    sample names its own source and label; the draw copies nothing."""
+    sample names its own source and label; the draw copies nothing.
+    """
     from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.tools.data_tools import draw_splits
     from tcip_store.file_backend import is_bookkeeping

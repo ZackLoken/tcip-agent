@@ -17,7 +17,8 @@ from typing import Any
 
 def encode_record(value: Any) -> bytes:
     """A record's bytes: UTF-8 JSON indented by two, keys in their authored order, a trailing
-    newline. Refuses what :func:`check_json_value` refuses, before anything is spelled."""
+    newline. Refuses what :func:`check_json_value` refuses, before anything is spelled.
+    """
     check_json_value(value)
     text = json.dumps(
         value, indent=2, ensure_ascii=False, allow_nan=False, sort_keys=False
@@ -27,7 +28,8 @@ def encode_record(value: Any) -> bytes:
 
 def encode_log_line(value: Any) -> bytes:
     """A log entry's bytes: UTF-8 JSON on one line, keys in their authored order. Refuses as
-    :func:`encode_record` does."""
+    :func:`encode_record` does.
+    """
     check_json_value(value)
     return json.dumps(
         value, ensure_ascii=False, allow_nan=False, sort_keys=False

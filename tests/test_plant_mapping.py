@@ -32,7 +32,8 @@ DATE = "2026-02-11"
 @pytest.fixture
 def stamp(tmp_path: Path):
     """Stamps read by the platform's own reader off geotagged photographs written under
-    ``tmp_path``, each captured ``seconds`` after one start time."""
+    ``tmp_path``, each captured ``seconds`` after one start time.
+    """
 
     def make(stem: str, lat: float, lon: float, seconds: int):
         path = tmp_path / DATE / f"{stem}.JPG"
@@ -50,7 +51,8 @@ def stamp(tmp_path: Path):
 def _one_build(project: Path) -> MappingBuild:
     """One mapping named "mapping" of a registered dataset's captures on :data:`DATE`, built,
     registered and persisted through the platform's own producers (``map_captures``), as
-    ``load_mapping`` reads it back."""
+    ``load_mapping`` reads it back.
+    """
     named_project(project, "Orchard")
     map_captures(project, project / "ds", [DATE], name="mapping")
     build = load_mapping(project, "mapping")
@@ -240,7 +242,8 @@ def test_load_mapping_refuses_a_record_missing_capture_digests(
     tmp_path: Path,
 ) -> None:
     """A record without its capture digests (one the producer wrote, then stripped) fails the
-    required-keys read naming the missing key."""
+    required-keys read naming the missing key.
+    """
     _one_build(tmp_path)
     key = plant_mapping_key(tmp_path, "mapping")
     record = tcip_store.read(key)
@@ -273,7 +276,8 @@ def test_persisting_a_mapping_into_a_directory_that_does_not_exist_yet_still_lan
     tmp_path: Path,
 ) -> None:
     """The first mapping of a fresh project, whose state directory holds nothing yet, lands
-    where it is named and reads back."""
+    where it is named and reads back.
+    """
     build = _one_build(tmp_path)
 
     assert tcip_store.exists(plant_mapping_key(tmp_path, "mapping"))
@@ -284,7 +288,8 @@ def test_persisting_a_mapping_waits_on_the_lock_its_record_is_written_under(
     tmp_path: Path,
 ) -> None:
     """The write takes the database's write lock, and reports the contention rather than
-    writing past a holder of it."""
+    writing past a holder of it.
+    """
     from tcip_store import StoreBusyError
     from tcip_store.sqlite_backend import SqliteBackend
     from tests._audit_fixtures import held_by_another_writer

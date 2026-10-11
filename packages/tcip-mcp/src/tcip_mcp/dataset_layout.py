@@ -1,6 +1,7 @@
 """Canonical dataset layout: an image's path, ``<dataset_root>/images/<capture>/<stem>.<imgext>``,
 and the keys of its label document (capture and stem), a prediction bucket (its name) and the
-bucket's documents (name and stem); and the one label save."""
+bucket's documents (name and stem); and the one label save.
+"""
 
 from __future__ import annotations
 
@@ -32,7 +33,8 @@ PREDICTION_BUCKETS = "prediction_buckets"
 
 def label_key(dataset_root: str | Path, capture: str, stem: str) -> Key:
     """The label document of the image ``stem`` of ``capture`` under ``dataset_root``, the triple
-    :func:`parse_image_path` answers for an image path."""
+    :func:`parse_image_path` answers for an image path.
+    """
     return Key(LABEL_DOCUMENTS, str(Path(dataset_root)), (capture, stem))
 
 
@@ -50,7 +52,8 @@ def is_bucket_name(name: str) -> bool:
     """Whether ``name`` is legal as a capture bucket directory name under ``images/``: a single
     safe path segment (see
     ``workspace.is_valid_name``) that does not start with a dot, so a hidden directory (an
-    editor's swap file, platform cruft) is never mistaken for one."""
+    editor's swap file, platform cruft) is never mistaken for one.
+    """
     from tcip_mcp.workspace import is_valid_name
 
     return is_valid_name(name) and not name.startswith(".")
@@ -58,7 +61,8 @@ def is_bucket_name(name: str) -> bool:
 
 def parse_capture_dir(images_dir: str | Path) -> tuple[Path, str]:
     """``(dataset_root, capture)`` of a capture directory ``<root>/images/<capture>``; any other
-    directory, the image tree ``<root>/images`` itself included, raises ``ValueError`` naming it."""
+    directory, the image tree ``<root>/images`` itself included, raises ``ValueError`` naming it.
+    """
     directory = Path(images_dir)
     if directory.parent.name != "images":
         raise ValueError(
@@ -70,7 +74,8 @@ def parse_capture_dir(images_dir: str | Path) -> tuple[Path, str]:
 
 def parse_image_path(image_path: str | Path) -> tuple[Path, str, str]:
     """``(dataset_root, capture, stem)`` of an image at ``<root>/images/<capture>/<stem>``
-    (:func:`parse_capture_dir` of its directory)."""
+    (:func:`parse_capture_dir` of its directory).
+    """
     img = Path(image_path)
     return (*parse_capture_dir(img.parent), img.stem)
 
@@ -78,7 +83,8 @@ def parse_image_path(image_path: str | Path) -> tuple[Path, str, str]:
 def capture_of(source: str | Path) -> tuple[str | None, str | None]:
     """``(dataset_id, capture)`` of an image source: the identity record's id of the dataset root
     whose image tree holds it (``None`` when the root records none) and its capture; both
-    ``None`` for a source that is no image of a capture."""
+    ``None`` for a source that is no image of a capture.
+    """
     try:
         root, capture, _stem = parse_image_path(source)
     except ValueError:
@@ -94,7 +100,8 @@ def image_root(dataset_root: str | Path) -> Path:
 
 def image_dir(dataset_root: str | Path, capture: str) -> Path:
     """``<dataset_root>/images/<capture>/``: where a capture's image bytes live; ``ValueError``
-    for a capture that is not a single safe path segment."""
+    for a capture that is not a single safe path segment.
+    """
     from tcip_mcp.workspace import is_valid_name
 
     if not is_valid_name(capture):
@@ -118,7 +125,8 @@ def image_path(
 
 def list_dates(dataset_root: str | Path) -> list[str]:
     """Sorted capture names under ``images/``, each a directory whose name
-    :func:`is_bucket_name` admits."""
+    :func:`is_bucket_name` admits.
+    """
     imgs = image_root(dataset_root)
     if not imgs.is_dir():
         return []
@@ -145,7 +153,8 @@ def dataset_root_of(path: str | Path) -> Path | None:
 
 def subjects_path(dataset_root: str | Path) -> Path:
     """``<dataset_root>/subjects.json``: the one nested registry that decodes the dataset's
-    labels, written through ``tcip_store.encode_record`` in declared order."""
+    labels, written through ``tcip_store.encode_record`` in declared order.
+    """
     return Path(dataset_root, SUBJECTS_FILENAME)
 
 
@@ -190,7 +199,8 @@ def decode_dataset_identity_document(
 def read_dataset_identity(dataset_root: str | Path) -> dict | None:
     """The dataset's identity record (``{crop, id, fingerprint}``) decoded through
     :func:`decode_dataset_identity_document`, or ``None`` for a dataset never registered. A record
-    that does not decode raises ``ValueError``."""
+    that does not decode raises ``ValueError``.
+    """
     stored = tcip_store.read_blob_versioned(
         dataset_identity_path(dataset_root), default=None
     )
@@ -203,7 +213,8 @@ def read_dataset_identity(dataset_root: str | Path) -> dict | None:
 
 def require_dataset_identity(dataset_root: str | Path) -> dict:
     """:func:`read_dataset_identity`, refusing with ``ValueError`` naming ``register_dataset`` a
-    dataset never registered."""
+    dataset never registered.
+    """
     identity = read_dataset_identity(dataset_root)
     if identity is None:
         raise ValueError(
@@ -224,7 +235,8 @@ class Gestures:
     image when ``None``) or, mapped to ``False``, its marks withdrawn; whether proposals were
     hidden while the person annotated; each flag it raises
     (:class:`~tcip_annotation.flags.FlagRequest`); and each open flag it resolves, by id, with
-    the reply given."""
+    the reply given.
+    """
 
     bucket: str | None = None
     accept: frozenset[int] = frozenset()
@@ -239,14 +251,16 @@ class Gestures:
 
 def label_key_of(image_path: str | Path) -> Key:
     """The label document of the image at ``image_path`` (:func:`parse_image_path`, then
-    :func:`label_key`); an image under no dataset image tree refuses (``ValueError``)."""
+    :func:`label_key`); an image under no dataset image tree refuses (``ValueError``).
+    """
     return label_key(*parse_image_path(image_path))
 
 
 def image_proposals(bucket: str, key: Key) -> tuple[Bucket, list]:
     """The published bucket named ``bucket`` under the root of the label document ``key`` and its
     proposals for that image, in document order; a bucket that names no document for the image
-    refuses (``ValueError``)."""
+    refuses (``ValueError``).
+    """
     from tcip_annotation.json_io import read_predictions
     from tcip_mcp.buckets import read_bucket
 
@@ -261,7 +275,8 @@ def image_proposals(bucket: str, key: Key) -> tuple[Bucket, list]:
 
 def verdict_key_of(key: Key, bucket: str) -> Key:
     """The verdict shard of the proposals the bucket named ``bucket`` holds for the image whose
-    label document ``key`` names."""
+    label document ``key`` names.
+    """
     from tcip_annotation.verdicts import verdict_key
 
     return verdict_key(key.root, bucket, key.parts[-1])
@@ -278,7 +293,8 @@ def proposal_pairs(
     localization criterion the assessment ``bucket`` was published under measured its count by;
     a bucket published under none, or under one that measured no count, pairs under the
     platform's comparability convention. Refuses (``ValueError``) a bucket's assessment with no
-    ``project`` to read it from."""
+    ``project`` to read it from.
+    """
     from tcip_annotation.matching import pair_proposals
     from tcip_mcp.assessment import read_assessment
     from tcip_mcp.pipelines.training.evaluation import resolve_match_criterion
@@ -302,7 +318,8 @@ def proposal_pairs(
 
 def signed_off(annotation: Annotation, by: str, at: str) -> Annotation:
     """``annotation`` taken responsibility for by the person ``by`` at ``at``: its
-    ``accepted_by`` and ``accepted_at``, everything else as it was."""
+    ``accepted_by`` and ``accepted_at``, everything else as it was.
+    """
     return replace(annotation, accepted_by=by, accepted_at=at)
 
 
@@ -545,7 +562,8 @@ def capture_subjects(
     dataset_root: str | Path, capture: str
 ) -> tuple[list[str], list[str]]:
     """The distinct subjects the label documents of ``capture`` hold, sorted, and the stem of
-    every one of them that will not read."""
+    every one of them that will not read.
+    """
     from tcip_annotation.json_io import (
         UnreadableLabelDocumentError,
         read_label_document,

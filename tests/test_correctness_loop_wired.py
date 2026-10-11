@@ -30,7 +30,8 @@ from tcip_mcp.pipelines.model_build import resolve_contract_dims  # noqa: E402
 
 def _broken_builder(**kwargs):
     """An 'agent-written' builder that imports fine but fails the measurement contract: its
-    eval-mode forward returns a bare tensor, not the list[dict] detection scorers consume."""
+    eval-mode forward returns a bare tensor, not the list[dict] detection scorers consume.
+    """
     import torch.nn as nn
 
     class _Broken(nn.Module):
@@ -79,7 +80,8 @@ def _bespoke_classification_dataset(
 ):
     """An agent-authored classification dataset that owns its own class space: the platform
     resolves no count for a run built through a builder, which is why such a run must smoke the
-    batch it holds rather than one synthesized at a count nobody resolved."""
+    batch it holds rather than one synthesized at a count nobody resolved.
+    """
     from torch.utils.data import Dataset
 
     class _DS(Dataset):
@@ -95,7 +97,8 @@ def _bespoke_classification_dataset(
 def _admitted_tree(tmp_path):
     """An images directory whose label documents the platform's own producer admits samples from,
     for a bespoke run: a builder does not exempt its run from naming the data the producer
-    reads."""
+    reads.
+    """
     from PIL import Image
 
     from tcip_annotation.state import Annotation, BBox
@@ -155,7 +158,8 @@ def _spec(task: str, data: dict):
 
 def test_resolve_contract_dims_reads_the_frame_the_run_resolved():
     """The smoke frame is the square tile a tiled run resolved, else the frame an untiled run's
-    sources share, and nothing when the run resolved neither."""
+    sources share, and nothing when the run resolved neither.
+    """
     tiled = _spec("detection", {"tiling": {"enabled": True, "tile_size": 512}})
     native = _spec(
         "detection",
@@ -180,7 +184,8 @@ def test_model_dims_states_only_what_the_run_holds():
     """A run that records no width refuses by name rather than building at a guess; a run that
     holds no count states none, leaving the contract to say whether its own task needed one; a rank
     count answers for an ordinal run under its own name, and img_size is the only value the
-    contract resolver adds."""
+    contract resolver adds.
+    """
     from tcip_mcp.pipelines.data.selection import ClassScope
     from tcip_mcp.pipelines.model_build import model_dims
 
@@ -206,7 +211,8 @@ def test_model_dims_states_only_what_the_run_holds():
 
 def test_model_dims_hands_the_admitted_subject_and_every_attribute(tmp_path):
     """A scoped run's model is built at the one subject its samples were admitted under and one
-    head per attribute the registry declares, never a count stated beside them."""
+    head per attribute the registry declares, never a count stated beside them.
+    """
     from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tcip_mcp.pipelines.model_build import model_dims
     from tcip_mcp.subject_registry import Attribute, Subject, SubjectRegistry
@@ -271,7 +277,8 @@ def test_preflight_smokes_a_tiled_run_at_the_edge_its_resolution_derived(
     tmp_path, monkeypatch
 ):
     """A tiled run stating no tile edge smokes at the edge its own resolution derives from its
-    objects, the one its loaders tile at."""
+    objects, the one its loaders tile at.
+    """
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.pipelines.data.split_construction import resolve_run
     from tcip_mcp.pipelines.model_build import staged_sources
@@ -312,7 +319,8 @@ def test_preflight_smokes_an_untiled_run_of_mixed_frames_on_a_real_batch(
     tmp_path, monkeypatch
 ):
     """An untiled run whose frames share no one size records no native frame, so its smoke runs
-    one real batch off its own dataset rather than a synthetic one at a size no frame has."""
+    one real batch off its own dataset rather than a synthetic one at a size no frame has.
+    """
     monkeypatch.chdir(tmp_path)
     from PIL import Image
 
@@ -380,7 +388,8 @@ def test_preflight_builds_and_smokes_at_the_count_the_run_resolved(
 ):
     """The model is built and smoked at the class count this run's own ground truth carries, read
     the way its loaders read it, and at the band count its sources carry: the platform hands the
-    builder both, so no head can be declared wider than the data."""
+    builder both, so no head can be declared wider than the data.
+    """
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.tools.training_tools import preflight_config
     from tests.test_mask_and_table_membership import _three_class_masks
@@ -412,7 +421,8 @@ def test_preflight_smokes_a_single_class_run_within_its_own_count(
 ):
     """The synthetic batch is shaped within the count the run resolved: an all-background mask
     run trains one class, and a batch shaped at a wider minimum would index past the head the run
-    actually builds while its own data passes."""
+    actually builds while its own data passes.
+    """
     import numpy as np
     from PIL import Image
 
@@ -481,7 +491,8 @@ def test_preflight_smokes_a_single_class_run_within_its_own_count(
 
 def test_preflight_smokes_bespoke_task_on_a_real_batch(tmp_path, monkeypatch):
     """A bespoke dataset_source run declaring no width has no synthetic shape to smoke at either,
-    and the batch from its own dataset answers for both."""
+    and the batch from its own dataset answers for both.
+    """
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -522,7 +533,8 @@ def test_preflight_smoke_batch_matches_what_the_run_will_build(
     tmp_path, monkeypatch
 ):
     """The smoked dataset is the one the run's own resolution builds, which a bespoke builder
-    accepting only the producer's own four names builds fine."""
+    accepting only the producer's own four names builds fine.
+    """
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.pipelines.data.split_construction import resolve_run
     from tcip_mcp.pipelines.model_build import staged_sources
@@ -559,7 +571,8 @@ def test_preflight_smoke_batch_matches_what_the_run_will_build(
 
 def test_preflight_blocks_when_no_batch_can_be_built(tmp_path, monkeypatch):
     """A dataset that cannot produce an item blocks the launch at its resolution, naming the
-    builder's own reason, rather than reaching a skipped smoke check."""
+    builder's own reason, rather than reaching a skipped smoke check.
+    """
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -595,7 +608,8 @@ def test_preflight_blocks_when_no_batch_can_be_built(tmp_path, monkeypatch):
 
 def _table_tree(tmp_path) -> tuple[Path, Path]:
     """Four 32 px frames and a table labeling them in three classes, under ``tmp_path``: their
-    images directory and the table."""
+    images directory and the table.
+    """
     import csv
 
     from PIL import Image
@@ -620,7 +634,8 @@ def _table_tree(tmp_path) -> tuple[Path, Path]:
 
 def _bespoke_classification_data(imgs: Path, table: Path, **sizes) -> dict:
     """The data block of a run over ``imgs`` labeled by ``table`` whose loaders
-    :func:`_bespoke_classification_dataset` builds, stating ``sizes``, drawing its own split."""
+    :func:`_bespoke_classification_dataset` builds, stating ``sizes``, drawing its own split.
+    """
     return {
         "images_dir": str(imgs),
         "labels_dir": str(table),
@@ -635,7 +650,8 @@ def _bespoke_classification_data(imgs: Path, table: Path, **sizes) -> dict:
 
 def test_ctx_check_contract_and_overfit_check(tmp_path):
     """The model is built and smoked at what the run recorded: its own width and class count, the
-    sizes its loaders were built at, and the frame its untiled sources share."""
+    sizes its loaders were built at, and the frame its untiled sources share.
+    """
     from tests.tiny_trainer_fixtures import run_context
 
     imgs, table = _table_tree(tmp_path)
@@ -672,7 +688,8 @@ def test_ctx_smokes_a_bespoke_dataset_run_at_the_count_its_data_states(
 ):
     """A bespoke dataset owns its class space, so its run states the count on its data section;
     the platform records the band count its sources carry beside it and builds the model at both,
-    and both proofs run at those dimensions."""
+    and both proofs run at those dimensions.
+    """
     from tests.tiny_trainer_fixtures import run_context
 
     monkeypatch.chdir(tmp_path)
@@ -706,7 +723,8 @@ def test_a_classification_record_stating_no_class_count_builds_no_model():
     (``recorded_model_dims``, which ``ctx.check_contract`` and ``ctx.overfit_check`` build
     through): a batch shaped at a count nobody resolved would prove the model against a class
     space the run does not train in. A run the producer resolved records its count
-    (:func:`test_ctx_check_contract_and_overfit_check`)."""
+    (:func:`test_ctx_check_contract_and_overfit_check`).
+    """
     from tcip_mcp.pipelines.model_build import recorded_model_dims
 
     with pytest.raises(ValueError, match="records no num_classes"):

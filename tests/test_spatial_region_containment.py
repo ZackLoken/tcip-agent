@@ -34,7 +34,8 @@ the strip between them; the containment check reads nothing else of it."""
 
 def test_a_rect_in_an_unattested_gap_between_regions_is_a_leak():
     """A rect drawn from the silent strip touches no train pixel, so an overlap test alone reads it
-    clean, yet nothing in the split ever attested it as held out."""
+    clean, yet nothing in the split ever attested it as held out.
+    """
     from tcip_mcp.pipelines.raster_source import (
         rect_contains_rect,
         rects_overlap,
@@ -53,13 +54,15 @@ def test_a_rect_in_an_unattested_gap_between_regions_is_a_leak():
 
 def test_a_rect_inside_an_attested_region_is_admitted():
     """The companion obligation: a rect fully inside a recorded non-train region reads clean, or
-    a mosaic reference could never be assessed at all."""
+    a mosaic reference could never be assessed at all.
+    """
     assert spatial_disjointness(GAPPED, [(650, 100, 750, 300)]) == []
 
 
 def _mosaic_dataset(root: Path) -> Path:
     """One large single-source mosaic with GT spread across its whole extent, enough for the real
-    spatial-strip split to derive a four-way layout over it; returns its images directory."""
+    spatial-strip split to derive a four-way layout over it; returns its images directory.
+    """
     from PIL import Image
 
     from tests._producer_fixtures import label_image

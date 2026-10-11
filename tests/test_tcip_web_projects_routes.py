@@ -31,7 +31,8 @@ def _make_project(
     ws: Path, name: str, *, dates=(), subjects=()
 ) -> OpenProject:
     """A workspace project made by ``tests._web_fixtures.named_project``, its display name
-    ``name``, holding one image per date and the named subjects."""
+    ``name``, holding one image per date and the named subjects.
+    """
     from PIL import Image
 
     from tests._web_fixtures import named_project
@@ -147,7 +148,8 @@ def test_projects_report_per_date_subject_model_availability(
 def test_projects_report_a_label_problem_and_still_list(client, workspace_dir):
     """A corrupt label under one project must not 500 the whole listing (mirrors
     record_problem): the project still lists, its other dates are unaffected, and the document
-    is named."""
+    is named.
+    """
     from tcip_annotation.state import Annotation, BBox
     from tests._producer_fixtures import image_label_key, label_image
     from tests._record_damage_fixtures import damage_record
@@ -251,7 +253,8 @@ def test_list_reports_record_fields_across_four_project_states(
     """A project with a record, one with ``.tcip`` and nothing else, one whose record is
     undecodable, and one whose record decodes to something else: all four list, each with its
     record's fields or the ``record_problem`` naming why they are absent. The recordless one gets
-    no database published under it by the listing, the store's own guarantee at this surface."""
+    no database published under it by the listing, the store's own guarantee at this surface.
+    """
     import tcip_store
     from tcip_mcp.project_record import project_record_key
     from tcip_store.file_backend import database_file

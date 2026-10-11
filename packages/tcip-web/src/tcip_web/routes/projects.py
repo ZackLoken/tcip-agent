@@ -49,7 +49,8 @@ class ProjectSummary(BaseModel):
 
 def _summarize(project_dir: Path, record: dict) -> ProjectSummary:
     """``project_dir`` listed with ``record``, its record's fields
-    (:func:`tcip_mcp.workspace.project_records`)."""
+    (:func:`tcip_mcp.workspace.project_records`).
+    """
     from tcip_mcp.pipelines.image_utils import logical_image_count
     from tcip_web.routes.dataset import _subjects_by_date
 
@@ -75,7 +76,8 @@ def _summarize(project_dir: Path, record: dict) -> ProjectSummary:
 def list_projects() -> dict:
     """The workspace's projects, newest first, with the open project's id (``open_id``).
     ``last_opened_problem`` names a last-opened pointer whose project is no longer in the
-    workspace while nothing is open, and is null otherwise."""
+    workspace while nothing is open, and is null otherwise.
+    """
     records = workspace.project_records(store.workspace)
     projects: list[ProjectSummary] = []
     for child, record in records:
@@ -104,7 +106,8 @@ def list_projects() -> dict:
 def workspace_project(project_id: str) -> tuple[Path, dict]:
     """The directory and record fields of the workspace project whose record holds
     ``project_id`` (:func:`tcip_mcp.workspace.project_by_id`); 404 naming why when none, or two,
-    do."""
+    do.
+    """
     try:
         return workspace.project_by_id(
             workspace.project_records(store.workspace), project_id
@@ -122,7 +125,8 @@ async def _open(project: OpenProject) -> None:
 async def open_last_opened() -> None:
     """Open the project the workspace's last-opened pointer names; with no pointer, open nothing.
     A pointer naming no project in the workspace leaves nothing open and is logged; the project
-    list names it (``last_opened_problem``)."""
+    list names it (``last_opened_problem``).
+    """
     project_id = workspace.read_last_opened(store.workspace)
     if project_id is None:
         return
@@ -146,7 +150,8 @@ async def open_project(req: OpenRequest) -> dict:
     """Open the project ``req.id`` names; 400 for a request naming no one, 404 when the workspace
     holds no single project with it (a project whose record will not read is not found by its
     id), 409 naming why when its persisted GUI state will not read. Returns ``{id,
-    display_name, path}``."""
+    display_name, path}``.
+    """
     from tcip_store import StoreError
 
     actor(req.user)
@@ -164,7 +169,8 @@ async def open_project(req: OpenRequest) -> dict:
 
 def _job_conflict(target: Path) -> str | None:
     """The first unfinished job of this process's two in-memory job registries that runs for
-    ``target``."""
+    ``target``.
+    """
     from tcip_web.jobstore import live
     from tcip_web.routes import annotate, inference
 
@@ -196,7 +202,8 @@ async def remove_project(req: RemovalRequest) -> dict:
     closing it, when it is the open project, only once the removal is admitted. 404 for no such
     project, 400 for a confirm name that is not its display name, 409 while a job or run of it is
     live or the archive refuses, 400 for a request naming no one. Returns ``{archive_path,
-    moved_to}``."""
+    moved_to}``.
+    """
     person = actor(req.user)
     project, fields = workspace_project(req.id)
     display_name = fields["display_name"]
@@ -235,7 +242,8 @@ class RenameRequest(BaseModel):
 def rename_project_route(req: RenameRequest) -> dict:
     """Change the display name of the project ``req.id`` names; its directory is left as it is.
     404 for no such project, 400 for a display name the record refuses or a request naming no
-    one. Returns ``{id, display_name, previous_display_name}``."""
+    one. Returns ``{id, display_name, previous_display_name}``.
+    """
     person = actor(req.user)
     project, _ = workspace_project(req.id)
     try:

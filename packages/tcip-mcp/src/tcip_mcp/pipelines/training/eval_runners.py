@@ -114,7 +114,8 @@ def run_full_frame_evaluation(
     :func:`~tcip_mcp.pipelines.training.evaluation.detection_metrics`, by mask for an
     instance-segmentation checkpoint and by box otherwise, beside the reference's object and
     detection counts and the pass's ``execution`` record. An empty admission, and a document
-    carrying the subject only in geometry a detector cannot read, refuse by name."""
+    carrying the subject only in geometry a detector cannot read, refuse by name.
+    """
     from tcip_mcp.pipelines.execution import Reference, prepare
     from tcip_mcp.pipelines.operating_point import cap_saturated_frac
     from tcip_mcp.pipelines.training.evaluation import (

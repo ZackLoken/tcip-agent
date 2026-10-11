@@ -1,5 +1,6 @@
 """A training config has one shape: every key the trainer reads sits at the top level beside
-``model_source`` and ``data``, and a nested ``training`` section is refused by name."""
+``model_source`` and ``data``, and a nested ``training`` section is refused by name.
+"""
 
 import copy
 from pathlib import Path
@@ -65,7 +66,8 @@ FLAT_CONFIG: dict = training_config(
 def _required_paths() -> list[str]:
     """Every value the schema requires, by its dotted path, read off the schema itself: its
     required top-level fields and the required fields of the optimizer, of the stated schedule
-    and of the stop rule."""
+    and of the stop rule.
+    """
     top = [
         n for n, f in TrainConfigSchema.model_fields.items() if f.is_required()
     ]
@@ -94,7 +96,8 @@ door."""
 
 def _door_issues(config: dict) -> list[str]:
     """The issues the launch door's structural check reports for ``config``, which the schema
-    admits, for this repository as its project."""
+    admits, for this repository as its project.
+    """
     from tcip_mcp.tools.training_tools import _structural_issues
     from tests import REPO_ROOT
 
@@ -122,7 +125,8 @@ def test_a_config_stating_no_tuned_value_is_admitted_and_refused_at_the_door_nam
 
 def test_a_config_naming_its_own_loop_states_only_what_its_loop_reads():
     """The door requires the default trainer's regime of a config the default trainer runs; a
-    config naming its own ``training_source`` leaves unstated what its loop never reads."""
+    config naming its own ``training_source`` leaves unstated what its loop never reads.
+    """
     custom = {
         k: v
         for k, v in FLAT_CONFIG.items()
@@ -136,8 +140,9 @@ def test_a_config_naming_its_own_loop_states_only_what_its_loop_reads():
 
 
 def test_an_optimizer_naming_no_family_is_refused_naming_it():
-    """guard. The optimizer's family has no default: a block naming none is refused naming
-    ``optimizer.name``, and the same block naming it is admitted."""
+    """Guard. The optimizer's family has no default: a block naming none is refused naming
+    ``optimizer.name``, and the same block naming it is admitted.
+    """
     assert _names(
         _issues_of(_without(FLAT_CONFIG, "optimizer.name")), "optimizer.name"
     )
@@ -196,7 +201,8 @@ def test_sgd_states_its_momentum_and_no_other_optimizer_does():
 def test_a_sweep_base_config_may_omit_only_what_its_search_space_names():
     """A trial's config is validated once its point is applied, so a base config leaving the
     swept rate to the sweep validates, and one leaving a rate nothing sweeps is refused naming
-    it."""
+    it.
+    """
     from tcip_mcp.tools.training_tools import _apply_hpo_params
 
     base = _without(FLAT_CONFIG, "optimizer.head_lr")
@@ -241,7 +247,8 @@ def test_top_level_stages_are_typed_by_stage_spec():
 
 def test_the_trainer_reads_the_flat_config_as_given(tmp_path, monkeypatch):
     """What train() reads (run.spec.stages) is the configured schedule itself, with no
-    second placement to reconcile against."""
+    second placement to reconcile against.
+    """
     monkeypatch.chdir(tmp_path)
     from tests._chain_fixtures import DETECTION_SOURCE
     from tests._verified_checkpoint_fixtures import (
@@ -281,7 +288,8 @@ def test_a_stage_states_its_own_gradient_accumulation():
 def test_the_stop_rule_validates_as_stated_and_refuses_a_zero_patience_and_an_on_switch():
     """The stop rule's two values are the config's own, read as stated, and neither has a
     default; a patience of zero and an ``enabled`` key, since nothing but the rule ends a stage,
-    are refused by name."""
+    are refused by name.
+    """
     stated = train_config(
         {**FLAT_CONFIG, "early_stopping": {"patience": 3, "min_delta": 0.02}}
     )
@@ -346,7 +354,8 @@ def test_lr_scaling_requires_its_power_and_names_no_reference_batch():
 
 def test_the_loaders_read_the_batch_size_the_schema_validated(tmp_path):
     """The batch size the schema admits is the one the loaders are built at, coerced the same
-    way, and one it refuses builds no loader."""
+    way, and one it refuses builds no loader.
+    """
     pytest.importorskip("torch")
     from tests.tiny_trainer_fixtures import (
         frames_data,
@@ -380,7 +389,8 @@ def test_model_source_refuses_an_undeclared_key_by_name():
 
 def test_model_source_admits_every_declared_key(tmp_path):
     """Every declared key validates with no issue, image_stats_sampling as the normalization
-    derivation's own producer (``derivations.image_stats_provenance``) renders it."""
+    derivation's own producer (``derivations.image_stats_provenance``) renders it.
+    """
     pytest.importorskip("torch")
     from PIL import Image
 
@@ -412,7 +422,8 @@ def test_model_source_admits_every_declared_key(tmp_path):
 
 def test_a_width_stated_on_the_model_source_is_refused_by_name():
     """The width is the run's own ``data.num_channels``, handed to the builder; a model source
-    stating one beside it is refused by name rather than read as a second spelling."""
+    stating one beside it is refused by name rather than read as a second spelling.
+    """
     issues = _issues_of(
         {
             "model_source": {
@@ -467,14 +478,16 @@ def test_a_fact_a_reader_reads_is_refused_where_the_config_is_validated(
 ):
     """``model_source.task`` and every ``data`` key a resolver or a recorded-dimension reader
     reads are typed where the config enters: one missing, of the wrong type or misspelled is
-    named there, before any reader below the boundary meets it."""
+    named there, before any reader below the boundary meets it.
+    """
     issues = _issues_of(config)
     assert any(issue.startswith(path) for issue in issues), issues
 
 
 def test_a_stated_tiling_block_reaches_the_tiler_as_stated():
     """Admits valid work: every tiler option a ``data.tiling`` block states validates and reaches
-    the tiler's keyword arguments by name, and one left unstated is left to the tiler."""
+    the tiler's keyword arguments by name, and one left unstated is left to the tiler.
+    """
     from tcip_mcp.pipelines.schemas import train_config
 
     stated = {

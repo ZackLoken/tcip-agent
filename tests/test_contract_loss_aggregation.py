@@ -95,7 +95,8 @@ class _TwoOptimizableTerms(torch.nn.Module):
 
 def test_train_loss_is_the_sum_of_every_returned_loss_term():
     """The reported train loss accounts for all three terms (1 + 10 + 100 at scale 1), not the
-    first, the largest, or the last of them."""
+    first, the largest, or the last of them.
+    """
     report = check_model_contract(
         _ThreeTermLoss(), "classification", dims=CLS_DIMS
     )

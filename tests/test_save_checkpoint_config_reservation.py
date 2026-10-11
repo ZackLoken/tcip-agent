@@ -21,7 +21,8 @@ from tcip_mcp.pipelines.training.envelope import TrainContext  # noqa: E402
 
 def _ctx(tmp_path) -> tuple[TrainContext, dict]:
     """The context of a run the launcher's own writer opened under ``tmp_path``, and the config
-    its run trains under as its spec records it."""
+    its run trains under as its spec records it.
+    """
     from tests._verified_checkpoint_fixtures import detection_config
     from tests.tiny_trainer_fixtures import run_context
 
@@ -43,7 +44,8 @@ def test_save_checkpoint_writes_the_launch_config_never_the_loops_own(
 ) -> None:
     """The checkpoint carries the config the run trains under, its launch config with the
     resolved data section and its source files bound to the run's snapshot, every field but the
-    data locations only the run's record keeps, its paths read back against the project."""
+    data locations only the run's record keeps, its paths read back against the project.
+    """
     from tcip_mcp.experiments import CONFIG_PATHS
     from tcip_mcp.registry_paths import runtime_paths
 
@@ -75,7 +77,8 @@ def test_the_default_trainer_and_a_bespoke_loop_stamp_one_checkpoint_config(
     launcher's own writer opened, write one stamp: one ``config``, the model's and the dataset
     builder's declared files each this run's own snapshot copy of it, as the run's record names
     it, and no field of the run's data locations (``experiments.DATA_PATHS``), and one
-    ``SNAPSHOT_KEY``, the run's own snapshot digest."""
+    ``SNAPSHOT_KEY``, the run's own snapshot digest.
+    """
     from tcip_mcp.experiments import DATA_PATHS, observe
     from tcip_mcp.pipelines.training.generic_trainer import train
     from tcip_mcp.registry_paths import _each_path, stored_path
