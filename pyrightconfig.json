@@ -1,0 +1,22 @@
+{
+  "include": [
+    "packages/tcip-store/src",
+    "packages/tcip-annotation/src",
+    "packages/tcip-mcp/src",
+    "packages/tcip-web/src",
+    "tools",
+    "tests"
+  ],
+  "exclude": ["**/node_modules", "**/__pycache__", "packages/tcip-web/static", "docs"],
+  "extraPaths": [
+    "packages/tcip-store/src",
+    "packages/tcip-annotation/src",
+    "packages/tcip-mcp/src",
+    "packages/tcip-web/src"
+  ],
+  "pythonVersion": "3.13",
+  "pythonPlatform": "All",
+  "typeCheckingMode": "standard",
+  "reportMissingImports": "none",
+  "reportMissingModuleSource": "none"
+}
