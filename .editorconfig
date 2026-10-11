@@ -1,0 +1,28 @@
+# Editor settings every tracked text file follows; the gates (ruff, prettier, yamllint,
+# markdownlint) enforce the widths these state.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+
+[*.py]
+indent_size = 4
+
+[*.{ts,tsx,js,json,jsonc,css,html}]
+indent_size = 2
+
+[*.{yml,yaml}]
+indent_size = 2
+max_line_length = 100
+
+[*.md]
+max_line_length = 100
+# A line break of two trailing spaces is Markdown's own.
+trim_trailing_whitespace = false
+
+[*.ps1]
+indent_size = 4
