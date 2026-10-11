@@ -1,0 +1,5 @@
+{
+  // The issue and pull request templates are body fragments GitHub renders under its own
+  // title, so none opens with a top-level heading; the root configuration carries the rest.
+  "config": { "MD041": false }
+}
