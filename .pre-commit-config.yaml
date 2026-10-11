@@ -1,0 +1,63 @@
+# Every gate CI runs, on the staged files: `pre-commit install` once, then each commit runs
+# them; `pre-commit run --all-files` is the whole tree. The revs pin the versions CI installs.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.8
+    hooks:
+      - id: ruff
+        args: [packages, tests, tools]
+        pass_filenames: false
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v2.2.0
+    hooks:
+      - id: mypy
+        # mypy.ini names the roots; the editable packages resolve from the environment.
+        language: system
+        entry: mypy
+        pass_filenames: false
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.38.0
+    hooks:
+      - id: yamllint
+  - repo: https://github.com/hadolint/hadolint
+    rev: v2.15.1
+    hooks:
+      - id: hadolint
+        files: ^packages/tcip-web/Dockerfile$
+  - repo: https://github.com/DavidAnson/markdownlint-cli2
+    rev: v0.23.3
+    hooks:
+      - id: markdownlint-cli2
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.12
+    hooks:
+      - id: actionlint
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+  - repo: local
+    hooks:
+      - id: frontend-format
+        name: frontend format (prettier)
+        entry: npm --prefix packages/tcip-web/frontend run format:check
+        language: system
+        files: ^packages/tcip-web/frontend/
+        pass_filenames: false
+      - id: frontend-lint
+        name: frontend lint (eslint)
+        entry: npm --prefix packages/tcip-web/frontend run lint
+        language: system
+        files: ^packages/tcip-web/frontend/
+        pass_filenames: false
+      - id: frontend-typecheck
+        name: frontend typecheck (tsc)
+        entry: npm --prefix packages/tcip-web/frontend run typecheck
+        language: system
+        files: ^packages/tcip-web/frontend/
+        pass_filenames: false
+      - id: powershell-analyzer
+        name: PSScriptAnalyzer
+        entry: pwsh -NoProfile -Command "Invoke-ScriptAnalyzer -EnableExit -Path"
+        language: system
+        files: \.ps1$
