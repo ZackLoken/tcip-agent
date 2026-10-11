@@ -301,8 +301,9 @@ class GenericPredictor:
         non-detection task falls back to :meth:`predict` on a decoded source and refuses on a
         reader.
 
-        The record's ``tile_resize`` stretches each slice PIL represents faithfully and maps the
-        result back. ``require_masks`` on an ``instance_seg`` checkpoint adds ``masks``, one
+        The record's ``tile_resize`` stretches each slice and maps the result back; a slice PIL
+        does not represent faithfully refuses (``ValueError``). ``require_masks`` on an
+        ``instance_seg`` checkpoint adds ``masks``, one
         ``{"segmentation": [[x0, y0, x1, y1, ...], ...]}`` per detection: the merged SAHI polygons
         in full-frame pixels, empty where the mask binarized to nothing.
 

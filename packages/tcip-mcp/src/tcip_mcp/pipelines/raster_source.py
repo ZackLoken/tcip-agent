@@ -47,6 +47,28 @@ if TYPE_CHECKING:
 ARRAY_CONTAINER_EXTS = (".npy", ".npz", ".tif", ".tiff")
 
 _PIL_MODES = {1: "L", 3: "RGB", 4: "RGBA"}
+_PHOTO_DTYPE = np.dtype("uint8")
+"""The dtype a photograph decodes as in every mode of ``_PIL_MODES``."""
+_ALPHA_BANDS = 4
+"""The one band count whose PIL mode :func:`faithful_pil_mode` decides by the source's band
+interpretations."""
+
+
+def faithful_pil_mode(
+    dtype: Any, channels: int, band_interpretations: tuple[str, ...] | None
+) -> str | None:
+    """The PIL mode pixels of ``dtype`` and ``channels`` bands take without loss: L or RGB for
+    uint8 at 1 or 3 bands, RGBA for uint8 at ``_ALPHA_BANDS`` only when ``band_interpretations``
+    (the source's GDAL color interpretations) names the last band ``"alpha"``, which no other
+    count reads; ``None`` for anything else.
+    """
+    alpha = band_interpretations is not None and tuple(
+        band_interpretations[_ALPHA_BANDS - 1 :]
+    ) == ("alpha",)
+    if np.dtype(dtype) != np.uint8 or (channels == _ALPHA_BANDS and not alpha):
+        return None
+    return _PIL_MODES.get(channels)
+
 
 # A plain, documented platform default, not derived from a measurement: the share of the host's
 # physical RAM the decoded-pixel caches here may hold, leaving the model, tile batch and OS the
@@ -681,7 +703,7 @@ class PhotographicSource(_ClosableSource):
         opened.close()
         self.width, self.height = self.image.size
         self.num_channels = len(self.image.getbands())
-        self.dtype = np.dtype("uint8")  # L/RGB/RGBA are all 8-bit
+        self.dtype = _PHOTO_DTYPE
         self._frame: np.ndarray | None = None
 
     @property
@@ -771,7 +793,7 @@ class BandGroupSource(_ClosableSource):
         self.width = first.width
         self.height = first.height
         self.num_channels = group.channels
-        self.dtype = np.result_type(*[m.dtype for m in self._members])
+        self.dtype = group.dtype
 
     @property
     def resident_bytes(self) -> int:
@@ -834,7 +856,6 @@ class GdalSource(_ClosableSource):
         self._palette_lut: np.ndarray | None = header.palette_lut
         if self._palette_lut is not None:
             self.num_channels = 3
-            self.dtype = np.dtype("uint8")
             self.band_interpretations = ("red", "green", "blue")
         else:
             self.band_interpretations = tuple(
@@ -1087,6 +1108,44 @@ class SourceHeader:
     def channels(self) -> int:
         """The band count the source's own data holds at no hint (:meth:`_layout_at`)."""
         return self._layout_at(None)[2]
+
+    @cached_property
+    def dtype(self) -> np.dtype:
+        """The dtype the source's pixels decode as, from what this record acquired: a
+        photograph's (``_PHOTO_DTYPE``), a TIFF's stored sample dtype (a palette TIFF's index
+        dtype, which :func:`tiff_header` admits only as uint8), a numpy array's own, a band
+        group's members' common type.
+        """
+        if self.kind == "group":
+            return np.result_type(*(m.dtype for m in self.members))
+        if self.kind == "photo":
+            return _PHOTO_DTYPE
+        return self.tiff.dtype if self.kind == "tif" else self.array.dtype
+
+    def pil_mode_at(
+        self, num_channels: int
+    ) -> tuple[np.dtype, int, str | None]:
+        """``(dtype, bands, mode)`` of the pixels the source is served as at ``num_channels``,
+        read off this record: ``mode`` the PIL mode they are served in
+        (:func:`faithful_pil_mode`; a photograph's always its count's own), ``None`` for an
+        ``[H, W, C]`` array. The band interpretations are read for a source of
+        ``_ALPHA_BANDS`` bands alone, off a windowed reader opened and closed here. A photograph
+        at a count PIL has no mode for refuses as :meth:`open` does.
+        """
+        if self.kind == "photo":
+            self._refuse_unless_photographic(num_channels)
+            return self.dtype, num_channels, _PIL_MODES[num_channels]
+        bands = self._layout_at(num_channels)[2]
+        interpretations = None
+        reader = self.windowed(num_channels) if bands == _ALPHA_BANDS else None
+        if reader is not None:
+            with reader:
+                interpretations = getattr(reader, "band_interpretations", None)
+        return (
+            self.dtype,
+            bands,
+            faithful_pil_mode(self.dtype, bands, interpretations),
+        )
 
     @property
     def route_channels(self) -> int:

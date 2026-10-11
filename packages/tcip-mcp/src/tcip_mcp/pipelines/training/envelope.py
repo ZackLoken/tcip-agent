@@ -184,10 +184,19 @@ class TrainContext:
         """Wrap a detection or instance-segmentation dataset in the native-resolution tiler
         (``datasets.TiledDetectionDataset``) at the lattice you compose it at, ``tile_size`` and
         ``overlap``, both required. ``kwargs``: sliver_frac / skip_empty /
-        keep_regions / transforms.
+        keep_regions / transforms, the transforms admitted over ``base``'s samples first
+        (``datasets.refuse_unchained``).
         """
-        from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
+        from tcip_mcp.pipelines.data.datasets import (
+            TiledDetectionDataset,
+            refuse_unchained,
+        )
 
+        refuse_unchained(
+            [base.sample_of(k) for k in base.stems],
+            base.expected_channels,
+            kwargs.get("transforms"),
+        )
         return TiledDetectionDataset(
             base, tile_size=tile_size, overlap=overlap, **kwargs
         )
