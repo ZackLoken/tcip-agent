@@ -94,42 +94,47 @@ def test_holder_refuses_when_the_module_and_its_detectors_roi_heads_both_expose_
     torchvision two-stage detector under ``.detector`` (whose ``roi_heads`` already exposes the
     knob) plus a knob restated on the wrapper itself. The platform must not silently pick one.
     """
+    from tcip_mcp.pipelines.operating_point import (
+        SCORE_THRESH,
+        detector_operating_point_holder,
+    )
     from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
     model = _built(BUILT_DETECTOR)
     assert hasattr(model.detector, "roi_heads")
-    assert hasattr(model.detector.roi_heads, "score_thresh")
+    assert hasattr(model.detector.roi_heads, SCORE_THRESH)
     model.score_thresh = 0.5  # restated on the wrapper itself, ambiguous with .detector.roi_heads
-
-    from tcip_mcp.pipelines.operating_point import (
-        detector_operating_point_holder,
-    )
 
     with pytest.raises(ValueError, match="more than one location"):
         detector_operating_point_holder(model)
 
 
 def test_set_detector_operating_point_sets_each_knob_on_the_holder():
+    """Each knob lands on its own attribute of a built detector's holder."""
     from tcip_mcp.pipelines.operating_point import set_detector_operating_point
+    from tests._verified_checkpoint_fixtures import built_detector
 
-    model = SimpleNamespace(score_thresh=0.5, detections_per_img=100)
+    model = _built(built_detector())
     set_detector_operating_point(model, score_thresh=0.2, detections_per_img=3)
-    assert (model.score_thresh, model.detections_per_img) == (0.2, 3)
+    holder = model.detector.roi_heads
+    assert (holder.score_thresh, holder.detections_per_img) == (0.2, 3)
 
 
 @pytest.mark.parametrize(
-    "model",
-    [SimpleNamespace(unrelated=1), SimpleNamespace(score_thresh=0.5)],
-    ids=["no knob", "no cap knob"],
+    "model, missing",
+    [
+        (SimpleNamespace(unrelated=1), "score_thresh"),
+        (SimpleNamespace(score_thresh=0.5), "detections_per_img"),
+        (SimpleNamespace(detections_per_img=100), "score_thresh"),
+    ],
+    ids=["no knob", "no cap knob", "no score knob"],
 )
 def test_set_detector_operating_point_refuses_a_knob_the_model_does_not_expose(
-    model,
+    model, missing
 ):
     from tcip_mcp.pipelines.operating_point import set_detector_operating_point
 
-    with pytest.raises(
-        ValueError, match="exposes no (score_thresh|detections_per_img)"
-    ):
+    with pytest.raises(ValueError, match=f"exposes no {missing} "):
         set_detector_operating_point(
             model, score_thresh=0.2, detections_per_img=3
         )
