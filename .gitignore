@@ -68,6 +68,7 @@ VISION_AGENT_PLAN.md
 *.cover
 htmlcov/
 .coverage
+packages/tcip-web/frontend/coverage/
 
 # ── Rust (if agent shell is rebuilt) ─────────────────────────────────────
 /tcip-agent/target/
