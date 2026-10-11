@@ -10,7 +10,7 @@ function stubFetch(status: number, headers: Record<string, string>) {
       status,
       headers: new Headers(headers),
       blob: async () => new Blob([]),
-    } as unknown as Response),
+    }),
   );
 }
 

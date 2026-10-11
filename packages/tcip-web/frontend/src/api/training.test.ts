@@ -12,7 +12,7 @@ describe("trainingApi.cancel", () => {
       ok: true,
       status: 200,
       json: async () => ({ experiment_id: "r1", status: "running", cancel_requested: true }),
-    } as Response);
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     const res = await trainingApi.cancel("r1", "jordan");

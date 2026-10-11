@@ -1,18 +1,18 @@
-import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 // Auto-cleanup needs vitest globals (not enabled here), so clean up explicitly.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
 import { api } from "@/api/client";
 import type { LoadedLabels, SaveResult } from "@/api/client";
-import { FLAG_MARK, FOCUS_HALO, MATCH_COLORS, MATCH_TYPES, MATCH_WORDS } from "@/lib/symbology";
-import type { Flag, ServedProposals } from "@/store/types";
+import { StructuredRefusalError } from "@/api/http";
+import { sessionsApi } from "@/api/sessions";
 import { subjectsApi, subjectColor } from "@/api/subjects";
 import * as canvasSync from "@/lib/canvasSync";
 import { notifyCanvasStateRequest } from "@/lib/canvasSync";
 import { CUT_MISSES_REFUSAL } from "@/lib/polygonGeometry";
-import { StructuredRefusalError } from "@/api/http";
-import { sessionsApi } from "@/api/sessions";
+import { FLAG_MARK, FOCUS_HALO, MATCH_COLORS, MATCH_TYPES, MATCH_WORDS } from "@/lib/symbology";
 import { useStore } from "@/store";
+import type { Flag, ServedProposals } from "@/store/types";
 import { AnnotateTab } from "@/tabs/AnnotateTab";
 import { openTestProject } from "@/test/store";
 
@@ -1293,7 +1293,7 @@ describe("AnnotateTab ioError banner", () => {
     await flush();
 
     act(addBox);
-    saveSpy.mockResolvedValueOnce({ status: "conflict" } as SaveResult);
+    saveSpy.mockResolvedValueOnce({ status: "conflict" });
     pressSave();
     await flush();
 
@@ -1309,7 +1309,7 @@ describe("AnnotateTab ioError banner", () => {
     await flush();
 
     act(addBox);
-    saveSpy.mockResolvedValueOnce({ status: "conflict" } as SaveResult);
+    saveSpy.mockResolvedValueOnce({ status: "conflict" });
     pressSave();
     await flush();
 

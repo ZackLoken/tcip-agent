@@ -18,9 +18,9 @@
  */
 
 import type { CanvasStatePayload } from "@/api/types.generated";
+import { boxDraft, type DraftStroke } from "@/lib/draftStrokes";
 import { annotationsToCanvas } from "@/lib/labelSerde";
 import { ringsBbox } from "@/lib/polygonGeometry";
-import { boxDraft, type DraftStroke } from "@/lib/draftStrokes";
 import {
   focusesAnnotation,
   focusesProposal,
@@ -347,10 +347,10 @@ export function createCanvasPusher(
     if (!full) body.shapes = null; // heartbeat: backend keeps the last geometry for this image
     try {
       const res = post(body);
-      if (res && typeof (res as Promise<unknown>).then === "function") {
+      if (res && typeof res.then === "function") {
         // A dropped full push (rejected, or resolved as a conflict) must not let later
         // heartbeats masquerade as fresh geometry.
-        void (res as Promise<{ status?: string } | unknown>).then(
+        void res.then(
           (r) => {
             if (r && typeof r === "object" && (r as { status?: string }).status === "conflict") {
               fullPending = fullPending || full;

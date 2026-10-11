@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import * as client from "@/api/client";
 import { OVERVIEWS_REQUIRED } from "@/api/types.generated";

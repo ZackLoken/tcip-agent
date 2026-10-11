@@ -6,9 +6,9 @@
 import { wsUrl } from "@/api/http";
 import { ROUTES } from "@/api/routes";
 import { createReconnectingSocket, type ReconnectingSocket } from "@/lib/reconnectingSocket";
-import type { GuiState, OpenProject } from "@/store/types";
 import { useStore } from "@/store";
 import type { DeclaredIdentity } from "@/store/slices/agentActivity";
+import type { GuiState, OpenProject } from "@/store/types";
 
 type IncomingMessage =
   | {

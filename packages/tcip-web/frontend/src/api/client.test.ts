@@ -1,8 +1,8 @@
 import { renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { RENDER_CACHE_VERSION } from "@/api/types.generated";
 import { api } from "@/api/client";
+import { RENDER_CACHE_VERSION } from "@/api/types.generated";
 import { stateSocket } from "@/api/ws";
 import { useDisplayPixels } from "@/hooks/useDisplayPixels";
 
@@ -19,7 +19,7 @@ function stubFetch(status: number, body: unknown = {}) {
       status,
       json: async () => body,
       text: async () => JSON.stringify(body),
-    } as Response),
+    }),
   );
 }
 

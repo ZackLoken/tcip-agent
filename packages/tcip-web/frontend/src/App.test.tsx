@@ -1,9 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import App from "@/App";
-import { stateSocket } from "@/api/ws";
+import { api, type ProjectSummary } from "@/api/client";
+import { sessionsApi } from "@/api/sessions";
 import { GUI_STATE_DEFAULTS } from "@/api/types.generated";
+import { stateSocket } from "@/api/ws";
+import App from "@/App";
 import { useActiveTabSync } from "@/hooks/useActiveTabSync";
 import { useStore } from "@/store";
 
@@ -53,9 +55,6 @@ vi.mock("@/api/client", async (importOriginal) => {
     },
   };
 });
-
-import { api, type ProjectSummary } from "@/api/client";
-import { sessionsApi } from "@/api/sessions";
 
 const VALLEY: ProjectSummary = {
   id: "a1b2c3d4e5f6",

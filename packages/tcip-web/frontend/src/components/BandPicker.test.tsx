@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BandPicker } from "@/components/BandPicker";
 import { defaultBandSelection, type BandSelection } from "@/lib/bandSelection";

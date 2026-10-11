@@ -1,7 +1,7 @@
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 // Auto-cleanup needs vitest globals (not enabled here), so clean up explicitly:
 // a leftover overlay from one test would leak into the next.
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 import { HelpOverlay } from "@/components/HelpOverlay";
 import { ANNOTATE_KEYS } from "@/lib/annotateKeys";

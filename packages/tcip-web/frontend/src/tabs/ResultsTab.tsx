@@ -32,9 +32,9 @@ import type {
 } from "@/api/types.generated";
 import { DeliveryEventsPanel } from "@/components/DeliveryEventsPanel";
 import { TabHeading } from "@/components/TabHeading";
+import { UNSET_GLYPH } from "@/lib/glyphs";
 import { useStore } from "@/store";
 import { selectProjectRoot } from "@/store/slices/gui";
-import { UNSET_GLYPH } from "@/lib/glyphs";
 import { CHART, CHART_LINE_COLORS } from "@/tabs/chartTheme";
 
 interface DateRow {

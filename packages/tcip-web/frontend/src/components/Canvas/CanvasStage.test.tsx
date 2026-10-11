@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/api/client";
 import { CanvasStage, type CanvasRegion } from "@/components/Canvas/CanvasStage";

@@ -5,7 +5,6 @@
 
 import { getJson, postJson, StructuredRefusalError } from "@/api/http";
 import { ROUTES } from "@/api/routes";
-import { stateSocket } from "@/api/ws";
 import {
   RENDER_CACHE_VERSION,
   type JobStatus,
@@ -16,6 +15,7 @@ import {
   type RenameRequest,
   type ViewReads,
 } from "@/api/types.generated";
+import { stateSocket } from "@/api/ws";
 import type { CanvasStateBody } from "@/lib/canvasSync";
 import { annotationsToCanvas } from "@/lib/labelSerde";
 import type { PixelRect } from "@/lib/viewGeometry";
