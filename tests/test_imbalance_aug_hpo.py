@@ -699,11 +699,15 @@ def test_build_search_alg_native_and_backend():
 
 
 def test_available_search_algs_lists_natives_and_installed_backends():
+    """Every native name a sweep may state is listed, beside each installed backend."""
     pytest.importorskip("ray")
-    from tcip_mcp.pipelines.training.hpo import available_search_algs
+    from tcip_mcp.pipelines.training.hpo import (
+        _NATIVE_SEARCH,
+        available_search_algs,
+    )
 
     algs = available_search_algs()
-    assert "random" in algs and "grid" in algs
+    assert _NATIVE_SEARCH <= set(algs)
     pytest.importorskip("optuna")
     assert "optuna" in algs  # backend installed in this env
 

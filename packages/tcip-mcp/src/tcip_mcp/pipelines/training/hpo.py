@@ -44,9 +44,9 @@ _external_cluster_warned = False
 # where trial results land, so a sweep drops them for its duration and restores them after.
 _ENV_VARS_RAY_TUNE_REFUSES = ("TUNE_RESULT_DIR", "RAY_AIR_LOCAL_CACHE_DIR")
 
-# Native samplers (BasicVariantGenerator), no extra dependency. ``grid`` becomes a grid
-# over the discrete axes of the space; ``random`` samples them.
-_NATIVE_SEARCH = {"random", "grid", "variant_generator"}
+GRID_SEARCH = "grid"
+"""The native search that enumerates every discrete axis of its space."""
+_NATIVE_SEARCH = {"random", GRID_SEARCH}
 
 
 def search_alg_key(search_alg: str) -> str:
@@ -70,9 +70,7 @@ _SEARCH_BACKENDS: dict[str, tuple[str, str, str, str]] = {
     ),
 }
 """Each offered backend searcher: the backend module it needs (probed with ``find_spec``), the
-Ray wrapper class constructed directly, and that class's own seed keyword. Not offered: nevergrad
-(its wrapper takes no seed), ax (its wrapper fails to set up a real space under the installed
-Ray), and zoopt, hpbandster, hebo (abandoned upstreams)."""
+Ray wrapper class constructed directly, and that class's own seed keyword."""
 FIFO_SCHEDULER = "fifo"
 """The scheduler that runs every trial to completion and prunes none."""
 _SCHEDULERS = {
@@ -94,7 +92,7 @@ point."""
 
 def available_search_algs() -> list[str]:
     """Search algorithms usable on this machine: natives + backends whose module imports."""
-    algs = ["random", "grid"]
+    algs = sorted(_NATIVE_SEARCH)
     for name, (
         module,
         _wrapper_module,
@@ -214,14 +212,12 @@ def build_search_alg(
 ):
     """Build the Ray Tune searcher ``name`` names, constructed with ``seed``.
 
-    A native name (``random``/``grid``) builds Ray's ``BasicVariantGenerator`` with
+    A native name (:data:`_NATIVE_SEARCH`) builds Ray's ``BasicVariantGenerator`` with
     ``random_state=seed``; ``constant_grid_search`` pairs every sampled point with each value of
     the space's grid axes. A backend name constructs its own Ray wrapper class
     (:data:`_SEARCH_BACKENDS`) with the seed in that class's own keyword. ``metric``/``mode`` are
     not passed. Raises ``ValueError`` naming the choice for a searcher not offered here, for an
-    offered backend
-    that is not installed, and for ``constant_grid_search`` asked of a backend; the choice is
-    honored, never swapped for another algorithm.
+    offered backend that is not installed, and for ``constant_grid_search`` asked of a backend.
     """
     from tcip_mcp.pipelines.model_build import resolve_named
 
@@ -243,7 +239,7 @@ def build_search_alg(
     if constant_grid_search:
         raise ValueError(
             f"constant_grid_search is the native sampler's, and search_alg '{key}' "
-            "is a backend searcher; choose random or grid."
+            f"is a backend searcher; choose one of {sorted(_NATIVE_SEARCH)}."
         )
     module, wrapper_module, wrapper_class, seed_kw = backend
     if find_spec(module) is None:
@@ -306,7 +302,7 @@ def build_scheduler(scheduler: dict, *, hyperparam_mutations: dict):
 def _default_trial_resources(max_concurrent: int) -> dict[str, float]:
     """Derive a per-trial Ray resource request from the host's actual GPU count and the caller's
     own requested concurrency: ``gpu=0.0`` with no CUDA device; otherwise ``device_count /
-    max_concurrent`` capped at 1.0. ``max_concurrent=1`` (the default) yields ``gpu=1.0``.
+    max_concurrent`` capped at 1.0.
     """
     try:
         import torch
@@ -463,8 +459,7 @@ def _build_sweep_stopper(sweep_root: Path) -> tuple[Any, Any]:
     which point Ray's own stop kills whatever actor a trial that never polls ``should_cancel`` left
     running.
 
-    Returns ``(stopper, callback)``; the caller wires the stopper onto ``run_config.stop`` and the
-    callback into ``run_config.callbacks``.
+    Returns ``(stopper, callback)``.
     """
     from ray.tune import Callback, Stopper
 
@@ -567,7 +562,7 @@ def _search_space_and_points(
     )
     space = _to_tune_space(
         param_space,
-        grid=(normalized_search_alg == "grid"),
+        grid=(normalized_search_alg == GRID_SEARCH),
         grid_keys=grid_keys,
     )
     filtered = {k: v for k, v in (baseline_params or {}).items() if k in space}
@@ -620,8 +615,7 @@ def tune_search(
 ) -> None:
     """Run an HPO sweep on Ray Tune, its results in Ray's experiment store at ``sweep_dir``.
     A cancel requested of that directory
-    (``experiments.request_cancel``) stops it (:func:`_build_sweep_stopper`). Every argument is
-    the sweep's own, stated by its caller.
+    (``experiments.request_cancel``) stops it (:func:`_build_sweep_stopper`).
 
     Args:
         objective_fn: ``fn(config, report)``, trains one trial for the trial's ``config`` and calls
@@ -630,8 +624,7 @@ def tune_search(
         metric / mode: the reported metric name and whether to ``min`` or ``max`` it.
         num_samples: number of trials (with a grid space, samples over the grid); the count
             launched is :func:`planned_trial_count`'s.
-        search_alg: the searcher's name (see module docstring); native ``random``/``grid`` need
-            no searcher backend.
+        search_alg: the searcher's name (see module docstring).
         scheduler: the trial scheduler's block, its ``name`` and every setting its Ray class
             takes (:func:`scheduler_settings`).
         seed: the searcher's own seed, the sweep's stated one; required.
@@ -646,23 +639,20 @@ def tune_search(
         split_draws: Above 1, ``param_space`` must already carry a ``SPLIT_DRAW_SEED_KEY`` grid
             axis (:func:`split_draw_search_space`; raises ``ValueError`` naming the axis when it is
             missing) and :func:`build_search_alg` builds the native sampler with
-            ``constant_grid_search``, so every sampled point is trained once per seed whether
-            ``search_alg`` is ``random`` or ``grid``; a backend ``search_alg`` refuses.
+            ``constant_grid_search``, so every sampled point is trained once per seed under any
+            native ``search_alg``; a backend ``search_alg`` refuses.
 
     """
     if split_draws > 1 and SPLIT_DRAW_SEED_KEY not in param_space:
         raise ValueError(
             f"tune_search: split_draws={split_draws} pairs {SPLIT_DRAW_SEED_KEY!r} as a grid "
-            "axis with every sampled point, and param_space carries no such axis: pass it "
-            "explicitly, or call through run_hyperparameter_search's own split_draws, which adds "
-            "it for you."
+            "axis with every sampled point, and param_space carries no such axis; "
+            "split_draw_search_space adds it."
         )
 
     import ray
     from ray import tune
 
-    # The normalized name is the helper's third return, read at every branch point below;
-    # result["search_alg"] stays the caller's own string.
     space, points, normalized_search_alg = _search_space_and_points(
         param_space, search_alg, split_draws, baseline_params
     )
@@ -676,9 +666,7 @@ def tune_search(
     )
     sched = build_scheduler(scheduler, hyperparam_mutations=space)
 
-    # Concurrency: a backend searcher must be wrapped (TuneConfig.max_concurrent_trials is
-    # ignored once Ray wraps a searcher). The native BasicVariantGenerator honors
-    # max_concurrent_trials on the Tuner directly.
+    # Ray ignores max_concurrent_trials for a backend searcher unless it is wrapped.
     from ray.tune.search import Searcher
     from ray.tune.search.basic_variant import BasicVariantGenerator
 
