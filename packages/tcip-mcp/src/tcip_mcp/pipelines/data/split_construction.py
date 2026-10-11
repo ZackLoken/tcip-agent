@@ -1102,19 +1102,38 @@ def run_loader(
     Over a within-image split ``spatial`` (:func:`partition_spatial`) the callable also takes
     ``side`` (``"train"`` unless named) and builds the run's one sample's tiles kept to that
     side's recorded region; a sample list that is not that one sample, by member, refuses
-    (``ValueError``) naming it.
+    (``ValueError``) naming it. Either builder runs only once ``transforms`` is admitted over the
+    samples at the block's band count
+    (:func:`~tcip_mcp.pipelines.data.datasets.refuse_unchained`).
     """
-    from tcip_mcp.pipelines.data.datasets import build_from_dataset_source
+    from tcip_mcp.pipelines.data.datasets import (
+        build_from_dataset_source,
+        refuse_unchained,
+        stated_sizes,
+    )
+
+    def admitted(build: Any) -> Any:
+        def loader(
+            *, samples: Sequence[Sample], transforms: Any, **side: str
+        ) -> Any:
+            refuse_unchained(
+                samples, stated_sizes(data)["num_channels"], transforms
+            )
+            return build(samples=samples, transforms=transforms, **side)
+
+        return loader
 
     if data.dataset_source is not None:
-        return partial(
-            build_from_dataset_source,
-            (data.dataset_source, layout),
-            task=task,
-            scope=data.recorded_scope,
+        return admitted(
+            partial(
+                build_from_dataset_source,
+                (data.dataset_source, layout),
+                task=task,
+                scope=data.recorded_scope,
+            )
         )
     if spatial is None:
-        return partial(_block_loader, task, data)
+        return admitted(partial(_block_loader, task, data))
 
     def side_view(
         *, samples: Sequence[Sample], transforms: Any, side: str = "train"
@@ -1133,7 +1152,7 @@ def run_loader(
             region=getattr(spatial, f"{side}_region"),
         )
 
-    return side_view
+    return admitted(side_view)
 
 
 def recorded_datasets(

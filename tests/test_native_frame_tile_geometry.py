@@ -344,14 +344,10 @@ def test_a_windowed_raster_source_is_resized_and_undone_the_same_way():
     } == _expected_middle_half_boxes()
 
 
-def test_a_windowed_alpha_tagged_source_is_resized_and_undone_the_same_way(
-    caplog,
-):
+def test_a_windowed_alpha_tagged_source_is_resized_and_undone_the_same_way():
     """A windowed 4-band reader whose ``band_interpretations`` declares the 4th band alpha gets
-    the recorded resize applied and undone as the 3-band case does, logging no skip warning.
+    the recorded resize applied and undone as the 3-band case does.
     """
-    import logging
-
     import numpy as np
 
     class _Reader:
@@ -368,24 +364,18 @@ def test_a_windowed_alpha_tagged_source_is_resized_and_undone_the_same_way(
     )
     pred.in_chans = 4
 
-    with caplog.at_level(logging.WARNING):
-        r = _sliced(
-            pred, _Reader(), tile_resize=(128, 96), source_label="raster"
-        )
+    r = _sliced(pred, _Reader(), tile_resize=(128, 96), source_label="raster")
 
     assert {
         tuple(round(v, 4) for v in b) for b in r["boxes"]
     } == _expected_middle_half_boxes()
-    assert not any("recorded train-time resize" in m for m in caplog.messages)
 
 
-def test_a_windowed_undeclared_fourth_band_source_keeps_its_own_pixels(caplog):
+def test_a_windowed_undeclared_fourth_band_source_refuses_the_recorded_resize():
     """A windowed 4-band reader with no band_interpretations fact (an .npy-backed reader, or a
-    GDAL file whose 4th band carries no alpha tag) must not be guessed into RGBA: the recorded
-    resize is skipped, reported the same way the uint16/5-band case already is, not silently.
+    GDAL file whose 4th band carries no alpha tag) is never guessed into RGBA, so the recorded
+    resize refuses by name rather than skip.
     """
-    import logging
-
     import numpy as np
 
     class _Reader:
@@ -401,24 +391,14 @@ def test_a_windowed_undeclared_fourth_band_source_keeps_its_own_pixels(caplog):
     )
     pred.in_chans = 4
 
-    with caplog.at_level(logging.WARNING):
-        r = _sliced(
-            pred, _Reader(), tile_resize=(128, 96), source_label="raster"
-        )
-
-    assert {
-        tuple(round(v, 4) for v in b) for b in r["boxes"]
-    } == _expected_middle_half_boxes()
-    assert any("recorded train-time resize" in m for m in caplog.messages)
+    with pytest.raises(ValueError, match="4-band uint8 pixels"):
+        _sliced(pred, _Reader(), tile_resize=(128, 96), source_label="raster")
 
 
-def test_a_tile_no_pil_mode_represents_keeps_its_own_pixels(tmp_path, caplog):
-    """The training loader's transform chain is PIL-only and skipped such a sample too, so applying
-    the recorded resize here would introduce a geometry training never applied. The skip is
-    reported, not silent.
+def test_a_tile_no_pil_mode_represents_refuses_the_recorded_resize(tmp_path):
+    """The training loader refuses an augmentation over such a frame, so a recorded resize over a
+    tile no PIL mode takes refuses by name rather than serve it unresized.
     """
-    import logging
-
     import numpy as np
 
     arr = np.zeros((IMAGE, IMAGE, 3), dtype=np.uint16)
@@ -426,11 +406,8 @@ def test_a_tile_no_pil_mode_represents_keeps_its_own_pixels(tmp_path, caplog):
     np.save(path, arr)
     pred = _stub_predictor(_MiddleHalfDetector(min_size=800, max_size=1333))
 
-    with caplog.at_level(logging.WARNING):
-        r = _sliced(pred, str(path), tile_resize=(128, 96))
-
-    assert {tuple(b) for b in r["boxes"]} == _expected_middle_half_boxes()
-    assert any("recorded train-time resize" in m for m in caplog.messages)
+    with pytest.raises(ValueError, match="3-band uint16 pixels"):
+        _sliced(pred, str(path), tile_resize=(128, 96))
 
 
 # --- the doors on either side of the tier -------------------------------

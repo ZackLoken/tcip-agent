@@ -270,8 +270,8 @@ class TcipDetectionModel(DetectionModel):
 
     Each slice, an ``[H, W, C]`` array at whatever band count the source carries, reaches the model
     through the predictor's own tensor conversion; ``tile_resize`` stretches a slice PIL represents
-    faithfully to that ``(width, height)`` and maps its boxes and masks back per axis, and a batch
-    holding a slice PIL does not represent logs that the resize was skipped for it. Each slice runs
+    faithfully to that ``(width, height)`` and maps its boxes and masks back per axis, and refuses
+    a slice PIL does not represent (``datasets.unchained``). Each slice runs
     under the detection cap ``cap_of`` gives it, which ``caps`` keeps per slice of the last batch,
     and the in-model score threshold ``conf``
     (:func:`~tcip_mcp.pipelines.operating_point.governed_forward`). Its detections become
@@ -325,31 +325,30 @@ class TcipDetectionModel(DetectionModel):
         )
         from tcip_mcp.pipelines.operating_point import governed_forward
 
-        tensors, meta, unresized = [], [], False
+        tensors, meta = [], []
         for arr in images:
             h, w = arr.shape[:2]
-            pil = to_pil_if_faithful(
-                arr, band_interpretations=self._band_interpretations
-            )
-            model_input: Any
-            if self._tile_resize is not None and isinstance(pil, Image.Image):
+            model_input: Any = arr
+            scale = (1.0, 1.0)
+            if self._tile_resize is not None:
                 from tcip_mcp.pipelines.data.augmentations import Resize
+                from tcip_mcp.pipelines.data.datasets import unchained
 
                 target = (int(self._tile_resize[0]), int(self._tile_resize[1]))
+                pil = to_pil_if_faithful(
+                    arr, band_interpretations=self._band_interpretations
+                )
+                if not isinstance(pil, Image.Image):
+                    raise unchained(
+                        f"recorded resize to {target}",
+                        f"a {w}x{h} tile",
+                        arr.shape[2],
+                        arr.dtype,
+                    )
                 model_input, _ = Resize(size=target)(pil, {})
                 scale = (target[0] / w, target[1] / h)
-            else:
-                model_input, scale = arr, (1.0, 1.0)
-                unresized = unresized or self._tile_resize is not None
             tensors.append(pil_to_tensor(model_input).to(self.device))
             meta.append((scale, h, w))
-        if unresized:
-            logger.warning(
-                "tiled inference: the checkpoint's recorded train-time resize %s was not applied, "
-                "these tiles are in no PIL mode and the training loader's own transform chain "
-                "skipped such samples too.",
-                self._tile_resize,
-            )
         self.caps = [self._cap_of(arr) for arr in images]
         self._original_predictions = list(
             zip(

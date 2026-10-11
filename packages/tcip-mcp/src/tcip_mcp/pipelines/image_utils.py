@@ -373,25 +373,18 @@ def pixel_array(img) -> tuple[np.ndarray, tuple[str, ...] | None]:
 def to_pil_if_faithful(
     arr, *, band_interpretations: tuple[str, ...] | None = None
 ):
-    """An ``[H, W, C]`` uint8 ndarray with 1 or 3 channels as a PIL image (mode L or RGB, a single
-    channel squeezed); a 4-channel array only when ``band_interpretations`` (the source's GDAL
-    color interpretations) names its 4th band ``"alpha"``; anything else is returned unchanged.
+    """An ``[H, W, C]`` ndarray as a PIL image in the mode
+    :func:`~tcip_mcp.pipelines.raster_source.faithful_pil_mode` gives its dtype, channel count
+    and ``band_interpretations`` (a single channel squeezed); anything else is returned unchanged.
     """
-    if not isinstance(arr, np.ndarray):
+    if not isinstance(arr, np.ndarray) or arr.ndim != 3:
         return arr
-    if arr.dtype != np.uint8 or arr.ndim != 3 or arr.shape[2] not in (1, 3, 4):
+    mode = raster_source.faithful_pil_mode(
+        arr.dtype, arr.shape[2], band_interpretations
+    )
+    if mode is None:
         return arr
-    if arr.shape[2] == 1:
-        return Image.fromarray(arr[:, :, 0], mode="L")
-    if arr.shape[2] == 3:
-        return Image.fromarray(arr, mode="RGB")
-    if (
-        band_interpretations is not None
-        and len(band_interpretations) == 4
-        and band_interpretations[3] == "alpha"
-    ):
-        return Image.fromarray(arr, mode="RGBA")
-    return arr
+    return Image.fromarray(arr[:, :, 0] if mode == "L" else arr, mode=mode)
 
 
 def pil_to_tensor(img) -> torch.Tensor:
@@ -414,13 +407,11 @@ def pil_to_tensor(img) -> torch.Tensor:
 def load_image(path: str | Path | BandGroupRef, num_channels: int):
     """Open an image at ``num_channels``, which every caller states.
 
-    Returns a ``PIL.Image`` wherever PIL has a faithful mode for the decoded pixels: photographic
-    formats at 1/3/4 channels, and any array container (``.npy`` / ``.npz`` / GeoTIFF / a
-    :class:`BandGroupRef`) whose pixels come back uint8 with 1 or 3 channels, or 4 channels whose
-    4th band the source itself declares alpha (:func:`to_pil_if_faithful`). Everything else
-    (uint16/float rasters, other band counts, an undeclared or genuinely spectral 4th band) stays
-    an ``[H, W, C]`` ndarray. A photographic RGB file requested as 1 channel is converted to
-    grayscale; as 3, kept RGB. Reads through ``raster_source``.
+    Returns a photograph as the ``PIL.Image`` of its count's mode, and an array container's
+    pixels (``.npy`` / ``.npz`` / GeoTIFF / a :class:`BandGroupRef`) as a ``PIL.Image`` where
+    :func:`~tcip_mcp.pipelines.raster_source.faithful_pil_mode` gives them a mode
+    (:func:`to_pil_if_faithful`), else as an ``[H, W, C]`` ndarray. Reads through
+    ``raster_source``.
     """
     with raster_source.open_raster(path, num_channels) as src:
         if isinstance(src, raster_source.PhotographicSource):

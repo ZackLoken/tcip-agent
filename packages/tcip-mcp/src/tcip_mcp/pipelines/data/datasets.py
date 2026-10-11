@@ -8,7 +8,6 @@ bespoke ``dataset_source`` builder for a task no loader here covers.
 
 from __future__ import annotations
 
-import logging
 from abc import ABC, abstractmethod
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -64,8 +63,6 @@ from tcip_mcp.pipelines.schemas import (
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.model_build import SourceLayout
 
-logger = logging.getLogger(__name__)
-
 
 class BaseDataset(Dataset, ABC):
     """Abstract base for all task-specific datasets."""
@@ -83,6 +80,17 @@ class BaseDataset(Dataset, ABC):
     def class_distribution(self) -> dict[int, int]:
         """Class ID → count. Subclasses should override for efficiency."""
         return {}
+
+    def sample_classes(self) -> list[int | None]:
+        """Each indexed example's class id, in index order and in the space
+        :attr:`class_distribution` keys, ``None`` for one carrying no class, read off its ground
+        truth without decoding its image. A dataset stating a class distribution states this
+        beside it; one that does not refuses (``NotImplementedError``) naming it.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} states no class per example: a sampler weighs each example "
+            "by its class, so define sample_classes beside class_distribution."
+        )
 
     @abstractmethod
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]: ...
@@ -207,30 +215,26 @@ class BaseImageDataset(BaseDataset):
 
     def _open_image(self, stem: str):
         """Open an image honoring ``expected_channels``: PIL where the pixels have a faithful
-        PIL mode (1/3 channels always; 4 only when the source declares its 4th band alpha), else
-        an ``[H, W, C]`` ndarray. See :func:`image_utils.to_pil_if_faithful`.
+        PIL mode, else an ``[H, W, C]`` ndarray (:func:`image_utils.load_image`).
         """
         return load_image(self.image_of(stem), self.expected_channels)
 
-    _warned_ndarray_transforms = False
-
-    def _finalize(self, img, target: dict) -> tuple[torch.Tensor, dict]:
-        """Apply PIL transforms (when applicable) or convert straight to a tensor."""
-        if self.transforms is not None and isinstance(img, Image.Image):
-            return self.transforms(img, target)
-        if (
-            self.transforms is not None
-            and not BaseImageDataset._warned_ndarray_transforms
-        ):
-            # Warned once: config claiming augmentation the model never saw is a provenance break.
-            BaseImageDataset._warned_ndarray_transforms = True
-            logger.warning(
-                "augmentation is configured but skipped for images whose dtype or band count "
-                "PIL cannot represent faithfully (e.g. uint16 or 5-band pixels, or a 4-band "
-                "uint8 raster whose 4th band the source doesn't declare alpha): the transform "
-                "pipeline is PIL-only. This run trains those images unaugmented."
+    def _finalize(
+        self, stem: str, img, target: dict
+    ) -> tuple[torch.Tensor, dict]:
+        """Sample ``stem``'s decoded ``img`` through the transforms, or as a tensor when there are
+        none. A frame decoded as an array, which no faithful PIL mode takes
+        (:func:`~tcip_mcp.pipelines.raster_source.faithful_pil_mode`), refuses the transforms
+        (:func:`unchained`) naming the stem, its dtype and its band count.
+        """
+        if self.transforms is None:
+            return pil_to_tensor(img), target
+        if not isinstance(img, Image.Image):
+            pixels = raster_source.hwc_array(img)
+            raise unchained(
+                self.transforms, stem, pixels.shape[2], pixels.dtype
             )
-        return pil_to_tensor(img), target
+        return self.transforms(img, target)
 
 
 # ====================================================================
@@ -304,11 +308,21 @@ def object_region(target: Mapping[str, Any], area: float) -> Region:
     )
 
 
+def class_ids(region: Region) -> list[int]:
+    """The 0-indexed class id of each object of ``region``: its 1-indexed label shifted."""
+    return [int(label) - 1 for label in region.labels.tolist()]
+
+
 def class_counts(regions: Iterable[Region]) -> dict[int, int]:
-    """Objects per 0-indexed class id over ``regions``."""
-    return dict(
-        Counter(int(label) - 1 for r in regions for label in r.labels.tolist())
-    )
+    """Objects per 0-indexed class id over ``regions`` (:func:`class_ids`)."""
+    return dict(Counter(c for r in regions for c in class_ids(r)))
+
+
+def region_classes(regions: Iterable[Region]) -> list[int | None]:
+    """Each region's first object's 0-indexed class id (:func:`class_ids`), ``None`` for a
+    region holding no object.
+    """
+    return [next(iter(class_ids(r)), None) for r in regions]
 
 
 def instance_targets(targets: list[dict]) -> list[dict]:
@@ -375,6 +389,13 @@ class DocumentDataset(BaseImageDataset):
         """Each sample's :meth:`region`, in index order."""
         return [self.region(stem) for stem in self.stems]
 
+    @property
+    def class_distribution(self) -> dict[int, int]:
+        return class_counts(self.regions)
+
+    def sample_classes(self) -> list[int | None]:
+        return region_classes(self.regions)
+
     @staticmethod
     def tensors(target: Mapping[str, Any]) -> dict[str, torch.Tensor]:
         """The tensors this task's loader emits for ``target``'s rows, each in the coordinates of
@@ -388,7 +409,7 @@ class DocumentDataset(BaseImageDataset):
         target = self.tensors(
             {**self.det_targets(self.document(stem)), "size": frame_size(img)}
         )
-        return self._finalize(img, {**target, "image_id": idx})
+        return self._finalize(stem, img, {**target, "image_id": idx})
 
 
 class DetectionDataset(DocumentDataset):
@@ -399,10 +420,6 @@ class DetectionDataset(DocumentDataset):
     task_type = "detection"
     reads_geometry = staticmethod(box_derivable)
     reads_description = "a box or a polygon of its subject"
-
-    @property
-    def class_distribution(self) -> dict[int, int]:
-        return class_counts(self.regions)
 
 
 # ====================================================================
@@ -712,6 +729,9 @@ class TiledDetectionDataset(BaseImageDataset):
     def class_distribution(self) -> dict[int, int]:
         return class_counts(self.regions)
 
+    def sample_classes(self) -> list[int | None]:
+        return region_classes(self.regions)
+
     def _read_windowed_tile(
         self, stem: str, info: dict, s: tuple[int, int, int, int]
     ):
@@ -751,9 +771,9 @@ class TiledDetectionDataset(BaseImageDataset):
         return region, getattr(src, "band_interpretations", None)
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
-        """One slice and its clipped targets. The slice is PIL where its dtype has a faithful mode
-        (so augmentation applies), else ``[H, W, C]``; a 4-channel slice converts only when the
-        source names its 4th band alpha (:func:`to_pil_if_faithful`).
+        """One slice and its clipped targets. The slice is PIL where its dtype has a faithful mode,
+        else ``[H, W, C]``; a 4-channel slice converts only when the source names its 4th band
+        alpha (:func:`to_pil_if_faithful`).
         """
         e = self._index[idx]
         stem = e["stem"]
@@ -777,6 +797,7 @@ class TiledDetectionDataset(BaseImageDataset):
             region = arr[y0:y1, x0:x1]
         tile = to_pil_if_faithful(region, band_interpretations=interpretations)
         return self._finalize(
+            stem,
             tile,
             {
                 **self._tensors({**e, "size": (x1 - x0, y1 - y0)}),
@@ -857,7 +878,7 @@ class SemanticSegDataset(BaseImageDataset):
         img = self._open_image(stem)
         mask = self.read_mask(self._samples[stem])
         target = {"masks": torch.tensor(mask, dtype=torch.int64)}
-        return self._finalize(img, target)
+        return self._finalize(stem, img, target)
 
 
 # ====================================================================
@@ -894,12 +915,20 @@ class TableDataset(BaseImageDataset):
 
     @property
     def class_distribution(self) -> dict[int, int]:
-        return dict(Counter(self._values)) if self.ground_truth_count else {}
+        return dict(Counter(c for c in self.sample_classes() if c is not None))
+
+    def sample_classes(self) -> list[int | None]:
+        """Each sample's value where this loader's ground truth derives a class count, else
+        ``None`` for every sample.
+        """
+        if self.ground_truth_count:
+            return list(self._values)
+        return [None] * len(self._values)
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
+        stem = self.stems[idx]
         return self._finalize(
-            self._open_image(self.stems[idx]),
-            {self.target_key: self._values[idx]},
+            stem, self._open_image(stem), {self.target_key: self._values[idx]}
         )
 
 
@@ -1169,3 +1198,36 @@ def build_dataset(
 
     ds.expected_channels = sizes["num_channels"]
     return ds
+
+
+def refuse_unchained(
+    samples: Sequence[Sample], num_channels: int, transforms: Any
+) -> None:
+    """Refuse (``ValueError``) ``transforms`` over ``samples`` when a sample's source is served
+    at ``num_channels`` as an array rather than a PIL image
+    (:meth:`~tcip_mcp.pipelines.raster_source.SourceHeader.pil_mode_at`), naming its location,
+    its dtype, its band count and the transforms (:func:`unchained`); ``None`` transforms refuse
+    nothing and read no source.
+    """
+    if transforms is None:
+        return
+    for sample in resolved(samples):
+        dtype, bands, mode = raster_source.SourceHeader(
+            sample.image
+        ).pil_mode_at(num_channels)
+        if mode is None:
+            raise unchained(transforms, sample.location, bands, dtype)
+
+
+def unchained(
+    transforms: Any, frame: str, bands: int, dtype: Any
+) -> ValueError:
+    """The refusal of ``transforms`` over ``frame``, served as ``bands``-band ``dtype`` pixels
+    no faithful PIL mode takes.
+    """
+    return ValueError(
+        f"this run states the augmentation {transforms!r} over {frame}, which is served as "
+        f"{bands}-band {dtype} pixels with no faithful PIL mode, and the augmentation chain "
+        "takes PIL images only: reading it unaugmented would depart from the augmentation the "
+        "run records. Drop the augmentation, or run over frames the chain takes."
+    )
