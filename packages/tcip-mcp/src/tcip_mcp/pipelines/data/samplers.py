@@ -126,9 +126,7 @@ class OverSampler(Sampler):
         self._indices.extend(extras)
 
     def __iter__(self):
-        # Global RNG (like ClassBalancedSampler's multinomial): order varies per
-        # epoch and is controlled by set_seed(). A default-constructed Generator
-        # has a fixed seed, which would freeze the order identically every epoch.
+        # The global RNG: the order varies per epoch and set_seed() governs it.
         perm = torch.randperm(len(self._indices))
         return iter([self._indices[i] for i in perm])
 

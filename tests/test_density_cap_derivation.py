@@ -62,5 +62,8 @@ def test_the_density_reaches_toward_the_densest_image_of_a_skewed_reference():
 
 
 def test_an_empty_reference_derives_no_density_and_refuses():
-    with pytest.raises(ValueError, match="none were counted"):
+    """No regions leave no object-bearing one, the basis a frame's cap rests on."""
+    with pytest.raises(
+        ValueError, match="none of the 0 counted regions is object-bearing"
+    ):
         derive_object_density([])
