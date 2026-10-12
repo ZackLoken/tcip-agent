@@ -349,9 +349,8 @@ def run_over(
     layout it imports from (``datasets.BespokeSource``, the layout ``model_build.staged_sources``
     stages); the rest are resolved off the admitted samples the way a run resolves them, its
     tiling block through ``split_construction._with_lattice``, the loader built from that block
-    at ``transforms`` as a run's training side is (``split_construction.recorded_datasets``), and
-    what it serves recorded on it (``generic_trainer.effective_data_geometry``). The data section
-    is in the form a run's record holds it.
+    at ``transforms`` as a run's training side is (``split_construction.recorded_datasets``). The
+    data section is in the form a run's record holds it.
     """
     from tcip_mcp.pipelines.data.split_construction import (
         _with_lattice,
@@ -359,9 +358,6 @@ def run_over(
         run_sizes,
     )
     from tcip_mcp.pipelines.schemas import DataSpec
-    from tcip_mcp.pipelines.training.generic_trainer import (
-        effective_data_geometry,
-    )
 
     admitted = admit_over(
         images_dir, ground_truth, subject=subject, members=members
@@ -391,7 +387,7 @@ def run_over(
         transforms,
         dataset_source and dataset_source[1],
     )
-    return dataset, effective_data_geometry(task, data, dataset).record()
+    return dataset, data.record()
 
 
 def served_regions(dataset: Any) -> list:

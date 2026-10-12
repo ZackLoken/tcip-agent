@@ -44,6 +44,7 @@ from tests._dense_op_fixtures import (
     good_cal_holdout,  # noqa: E402
     toy_records as _sweep_records,  # noqa: E402
 )
+from tests._training_values import IOU_THRESHOLD  # noqa: E402
 from tests._trait_fixtures import BUD_OPENING  # noqa: E402
 
 # ── 1. conf operating-point sweep + count-unbiased pick + the count criterion ──
@@ -305,7 +306,7 @@ def test_golden_execution_record_of_an_untiled_pass_runs_at_what_it_states(
 
     assert (record["conf"], record["density"]) == (
         SAMPLE_CONF,
-        checkpoint.spec.data.train_object_density,
+        checkpoint.geometry.object_density,
     )
     assert record["sources"] == {"conf": "explicit", "density": "derived"}
     assert record["tile_size"] is None and record["cross_tile_nms"] is None
@@ -371,10 +372,21 @@ def test_golden_no_operating_point_default_survives_and_each_door_takes_stated_v
     # a detector leaves unstated, as the two goldens below pin.
     ev_sig = inspect.signature(training_tools_mod.evaluate_model)
     assert ev_sig.parameters["stated"].default is None
-    assert ev_sig.parameters["iou_threshold"].default == 0.5
     assert not {"conf_threshold", "cross_tile_nms", "max_dets"} & set(
         ev_sig.parameters
     )
+    # The IoU it scores at is the caller's, at the door and both runners; none stated refuses.
+    for door in (
+        training_tools_mod.evaluate_model,
+        runners.run_test_evaluation,
+        runners.run_full_frame_evaluation,
+    ):
+        assert (
+            inspect.signature(door).parameters["iou_threshold"].default
+            is inspect.Parameter.empty
+        ), door
+    with pytest.raises(TypeError, match="iou_threshold"):
+        training_tools_mod.evaluate_model(tmp_path, "run", str(tmp_path))  # type: ignore[call-arg]
 
     ff_sig = inspect.signature(runners.run_full_frame_evaluation)
     # The stated execution values arrive whole and resolve inside the runner's own prepared pass.
@@ -487,6 +499,7 @@ def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_n
             str(images_dir),
             **regime,
             stated=execution_mod.Stated(**unstated_conf),
+            iou_threshold=IOU_THRESHOLD,
         )
         assert "conf" in refused.get("error", ""), (regime, refused)
         ran = training_tools_mod.evaluate_model(
@@ -495,6 +508,7 @@ def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_n
             str(images_dir),
             **regime,
             stated=execution_mod.Stated(**SAMPLE_DETECTOR_PASS),
+            iou_threshold=IOU_THRESHOLD,
         )
         assert "error" not in ran, (regime, ran)
         assert (

@@ -17,6 +17,7 @@ import pytest
 import tifffile
 
 from tests._producer_fixtures import dataset_over, label_image, registry_over  # noqa: E402
+from tests._training_values import IOU_THRESHOLD  # noqa: E402
 
 
 def _write_group(images_dir: Path, stem: str, fill=(111, 222)) -> None:
@@ -300,7 +301,11 @@ def test_visualize_annotations_on_a_band_member_answers_the_resolvers_refusal(
     member = image_dir(grouped_dataset, "2026-04-01") / "capture_001_G.tif"
     for source in ("annotations", "predictions", "comparison"):
         result = visualize(
-            tmp_path, source=source, path=str(member), bucket="preds"
+            tmp_path,
+            source=source,
+            path=str(member),
+            bucket="preds",
+            iou_threshold=IOU_THRESHOLD,
         )
         assert "capture_001.bandgroup" in result["error"], (source, result)
         assert "name the manifest" in result["error"]

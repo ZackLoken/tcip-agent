@@ -28,6 +28,7 @@ from tcip_mcp.pipelines.execution import (
     Execution,
     Stated,
 )
+from tcip_mcp.pipelines.schemas import TraitRevisionRef
 from tcip_mcp.registry_paths import (
     PathFields,
     located,
@@ -180,13 +181,12 @@ class Assessment:
     ``delivery_kind``, ``producer`` (:attr:`~tcip_mcp.model_registry.VerifiedCheckpoint.producer`)
     and ``execution`` are ``None`` for a physical-scale assessment. ``disjointness`` and
     ``criterion`` are the evidence the failures were read from, ``scale`` the scale a
-    physical-scale assessment derived. ``revision`` is the trait revision it was judged under, as
-    :attr:`~tcip_mcp.traits.TraitRevision.ref` names it.
+    physical-scale assessment derived. ``revision`` is the trait revision it was judged under.
     """
 
     assessment_id: str
     delivery_kind: str | None
-    revision: dict[str, Any]
+    revision: TraitRevisionRef
     producer: dict[str, str | None] | None
     execution: Execution | None
     reference: Reference
@@ -240,8 +240,10 @@ def read_assessment(project: Path | str, assessment_id: str) -> Assessment:
             for s in raw["samples"]
         ],
     )
+    revision = TraitRevisionRef.model_validate(record.pop("revision"))
     return Assessment(
         **record,
+        revision=revision,
         reference=reference,
         execution=Execution.of(execution) if execution else None,
     )
@@ -274,7 +276,7 @@ def _finish(
 
     record = {
         "assessment_id": run_dir.name,
-        "revision": revision.ref,
+        "revision": revision.ref.model_dump(),
         **record,
         "passed": not record["failures"],
     }
@@ -450,10 +452,10 @@ def _prepared(
     checkpoint = load_registered_checkpoint(
         located(checkpoint_path, project), project=project
     )
-    from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
+    from tcip_mcp.pipelines.model_contract import DETECTOR_TASKS
 
     expected = (
-        tuple(sorted(DETECTION_TASKS))
+        tuple(sorted(DETECTOR_TASKS))
         if delivery_kind in DETECTOR_KINDS
         else ("ordinal",)
         if delivery_kind == PER_PLANT_ORDINAL_AGGREGATE

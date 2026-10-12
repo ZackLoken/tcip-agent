@@ -28,22 +28,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _native_ratio_tile_size(train_native_size: Any) -> int | None:
+def _native_ratio_tile_size(
+    native_size: tuple[int, int] | None,
+) -> int | None:
     """The tile edge a checkpoint's own uniform untiled training frame justifies: the frame's edge
-    when every training frame shared one square size (``train_native_size``, stamped ``[width,
-    height]``), else ``None``.
+    when every training frame shared one square size (its geometry's ``native_size``), else
+    ``None``.
     """
-    if (
-        not isinstance(train_native_size, (list, tuple))
-        or len(train_native_size) != 2
-    ):
+    if native_size is None:
         return None
-    try:
-        width, height = int(train_native_size[0]), int(train_native_size[1])
-    except (TypeError, ValueError):
-        return None
-    if width <= 0 or height <= 0:
-        return None
+    width, height = native_size
     if width != height:
         logger.info(
             "no tile edge derivable from this checkpoint's untiled training frame (%dx%d): tile "

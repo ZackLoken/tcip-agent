@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from tests._training_values import IOU_THRESHOLD
 from tests.test_coco_import import (
     BOX,
     DATE,
@@ -303,7 +304,11 @@ def _evaluate_model(project: Path) -> dict:
 
     _labeled(project)
     result = evaluate_model(
-        project, _registered(project), f"images/{DATE}", stated=_stated()
+        project,
+        _registered(project),
+        f"images/{DATE}",
+        stated=_stated(),
+        iou_threshold=IOU_THRESHOLD,
     )
     assert "error" not in result, result
     return {
@@ -937,7 +942,11 @@ def test_a_run_missing_its_metrics_log_answers_its_own_error_at_the_checkpoint_d
     spelling = _relative(checkpoint, project)
 
     evaluated = evaluate_model(
-        project, spelling, f"images/{DATE}", stated=_stated()
+        project,
+        spelling,
+        f"images/{DATE}",
+        stated=_stated(),
+        iou_threshold=IOU_THRESHOLD,
     )
     triaged = triage_predictions(project, spelling, f"images/{DATE}")
 
@@ -971,13 +980,18 @@ def test_evaluation_takes_a_run_id_and_a_relative_checkpoint_path(
     )
 
     by_id = evaluate_model(
-        project, checkpoint.parent.name, f"images/{DATE}", stated=_stated()
+        project,
+        checkpoint.parent.name,
+        f"images/{DATE}",
+        stated=_stated(),
+        iou_threshold=IOU_THRESHOLD,
     )
     by_path = evaluate_model(
         project,
         _relative(checkpoint, project),
         f"images/{DATE}",
         stated=_stated(),
+        iou_threshold=IOU_THRESHOLD,
     )
 
     assert "error" not in by_id and "error" not in by_path, (by_id, by_path)
@@ -1100,7 +1114,7 @@ def test_the_score_command_reads_a_relative_path_under_its_project(
     import json
 
     from tests._cli_fixtures import run_tcip
-    from tests.test_score_predictions_script import _fixture
+    from tests.test_score_predictions_script import SCORED_AT, _fixture
 
     image, bucket = _fixture(project)
     cwd = tmp_path.parent / "operator_cwd"
@@ -1115,6 +1129,7 @@ def test_the_score_command_reads_a_relative_path_under_its_project(
             bucket,
             "--project",
             str(project),
+            *SCORED_AT,
         ],
         cwd=cwd,
     )

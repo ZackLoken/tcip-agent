@@ -30,12 +30,13 @@ from tcip_mcp.pipelines.data.datasets import (
 )
 from tcip_mcp.pipelines.model_build import (
     CONFIG_KEY,
+    GEOMETRY_KEY,
     METRICS_KEY,
     SNAPSHOT_KEY,
     STATE_DICT_KEY,
     build_from_model_source,
 )
-from tcip_mcp.pipelines.model_contract import DETECTION_TASKS, TCIPModel
+from tcip_mcp.pipelines.model_contract import DETECTOR_TASKS, TCIPModel
 from tcip_mcp.pipelines.schemas import (
     CosineSchedule,
     DataSpec,
@@ -47,6 +48,7 @@ from tcip_mcp.pipelines.schemas import (
     ScoreWeights,
     StageSpec,
     TrainConfigSchema,
+    TrainGeometry,
 )
 from tcip_mcp.pipelines.training.evaluation import (
     HIGHER_IS_BETTER_BY_METRIC,
@@ -283,24 +285,23 @@ def run_loaders(
 
 def effective_data_geometry(
     task: str, data: DataSpec, train_ds: Any
-) -> DataSpec:
-    """The resolved data block ``data`` of a ``task`` run with what ``train_ds`` serves recorded
-    on it.
+) -> TrainGeometry:
+    """The :class:`~tcip_mcp.pipelines.schemas.TrainGeometry` of a ``task`` run whose resolved
+    data block is ``data``, read off what ``train_ds`` serves.
 
-    A detector's train dataset records ``train_object_density`` over the ``regions`` it exposes,
-    a frame or a tile each (``derivations.derive_object_density``, whose refusals propagate),
+    A detector's ``object_density`` is derived over the ``regions`` its train dataset exposes, a
+    frame or a tile each (``derivations.derive_object_density``, whose refusals propagate),
     whoever built it; one exposing no ``regions`` refuses (``ValueError``) naming that interface.
-    A run the platform resolved untiled (``data.tiling`` the disabled block) records
-    ``train_native_size``, ``[width, height]``, when its training frames all share one size;
-    mixed sizes record none, and so does a run whose tiling the platform did not resolve.
-    Probing is header-only for the common containers (``image_dimensions``) and needs the
-    dataset's source list.
+    A run the platform resolved untiled (``data.tiling`` the disabled block) records its
+    ``native_size`` when its training frames all share one size; mixed sizes record none, and so
+    does a run whose tiling the platform did not resolve. Probing is header-only for the common
+    containers (``image_dimensions``) and needs the dataset's source list.
     """
     from tcip_mcp.pipelines.derivations import derive_object_density
-    from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
+    from tcip_mcp.pipelines.model_contract import DETECTOR_TASKS
 
-    update: dict[str, Any] = {}
-    if task in DETECTION_TASKS:
+    density = None
+    if task in DETECTOR_TASKS:
         regions = getattr(train_ds, "regions", None)
         if regions is None:
             raise ValueError(
@@ -309,12 +310,12 @@ def effective_data_geometry(
                 "builder's dataset exposes regions, a list of derivations.Region, one per frame "
                 "or tile it serves."
             )
-        update["train_object_density"] = derive_object_density(regions)
+        density = derive_object_density(regions)
     untiled = data.tiling is not None and not data.tiling.enabled
-    native = _uniform_native_size(train_ds) if untiled else None
-    if native is not None:
-        update["train_native_size"] = list(native)
-    return data.model_copy(update=update)
+    return TrainGeometry(
+        native_size=_uniform_native_size(train_ds) if untiled else None,
+        object_density=density,
+    )
 
 
 def _uniform_native_size(train_ds: Any) -> tuple[int, int] | None:
@@ -367,7 +368,8 @@ def checkpoint_stamp(run: TrainRun) -> dict:
     (``TrainConfigSchema.record``) without its data locations (``experiments.DATA_PATHS``), which
     the run's own record keeps, and every other path (``experiments.CONFIG_PATHS``) stored against
     the run's project as its run record stores it; under ``SNAPSHOT_KEY`` the digest of the source
-    snapshot its run took (``SourceLayout.snapshot``).
+    snapshot its run took (``SourceLayout.snapshot``); under ``GEOMETRY_KEY`` its
+    ``TrainRun.geometry``.
     """
     from tcip_mcp.experiments import CONFIG_PATHS, DATA_PATHS
     from tcip_mcp.registry_paths import recorded_paths
@@ -384,6 +386,7 @@ def checkpoint_stamp(run: TrainRun) -> dict:
             run.spec.record(exclude={"data": paths}), CONFIG_PATHS, run.project
         ),
         SNAPSHOT_KEY: run.layout.snapshot,
+        GEOMETRY_KEY: run.geometry.model_dump(mode="json"),
     }
 
 
@@ -547,19 +550,6 @@ def _validate(
     return {f"{VAL_METRIC_PREFIX}{k}": v for k, v in metrics.items()}
 
 
-def config_trait(spec: TrainConfigSchema, project: Path) -> TraitEntry | None:
-    """The confirmed entry of the trait a validated config's (``schemas.train_config``)
-    ``evaluation`` block names, read from ``project`` (refusing as
-    ``operationalization.latest_confirmed`` does), or ``None`` when the block names none.
-    """
-    name = spec.evaluation.trait
-    if not name:
-        return None
-    from tcip_mcp.operationalization import latest_confirmed
-
-    return latest_confirmed(name, project).entry
-
-
 def resolve_selection_metric(
     task: str,
     trait: TraitEntry | None,
@@ -586,7 +576,7 @@ def resolve_selection_metric(
         including the ``"objective"`` default, is rejected. Defaults to ``True`` for a caller that
         has not built a loader yet.
     """
-    default = "objective" if task in DETECTION_TASKS else "loss"
+    default = "objective" if task in DETECTOR_TASKS else "loss"
     resolved = requested or default
     if resolved not in HIGHER_IS_BETTER_BY_METRIC:
         raise ValueError(
@@ -630,14 +620,20 @@ def resolve_selection_metric(
 def resolve_objective(
     spec: TrainConfigSchema, *, project: Path, has_val_loader: bool
 ) -> Objective:
-    """A run's :class:`~tcip_mcp.pipelines.schemas.Objective`: ``selection_metric``,
-    :func:`resolve_selection_metric` over its validated config's (``schemas.train_config``) task,
-    ``evaluation`` trait (:func:`config_trait` in ``project``) and ``selection_metric``, and
-    ``higher_is_better``, that metric's declared direction.
+    """A run's :class:`~tcip_mcp.pipelines.schemas.Objective`: ``revision``, the latest
+    confirmed revision in ``project`` of the trait its validated config's
+    (``schemas.train_config``) ``evaluation`` block names (refusing as
+    ``operationalization.latest_confirmed`` does), ``None`` when it names none;
+    ``selection_metric``, :func:`resolve_selection_metric` over its task, that revision's entry and
+    its ``selection_metric``; and ``higher_is_better``, that metric's declared direction.
     """
+    from tcip_mcp.operationalization import latest_confirmed
+
+    name = spec.evaluation.trait
+    revision = latest_confirmed(name, project) if name else None
     metric = resolve_selection_metric(
         spec.model_source.task,
-        config_trait(spec, project),
+        revision.entry if revision is not None else None,
         spec.evaluation.selection_metric,
         score_weights=spec.evaluation.score_weights,
         has_val_loader=has_val_loader,
@@ -645,6 +641,7 @@ def resolve_objective(
     return Objective(
         selection_metric=metric,
         higher_is_better=HIGHER_IS_BETTER_BY_METRIC[metric],
+        revision=revision.ref if revision is not None else None,
     )
 
 
@@ -1065,7 +1062,7 @@ def train(
                     if canceled:
                         break
                     final_row = None
-                    if task in DETECTION_TASKS:
+                    if task in DETECTOR_TASKS:
                         images, targets = batch
                         images = [img.to(device) for img in images]
                         targets = instance_targets(

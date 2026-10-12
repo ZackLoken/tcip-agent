@@ -959,7 +959,8 @@ def test_the_assessment_count_and_the_editor_pairing_agree_under_a_crowd_region(
     what pairs.
     """
     from tcip_mcp.dataset_layout import image_proposals, proposal_pairs
-    from tcip_mcp.pipelines.training.evaluation import resolve_match_criterion
+    from tcip_mcp.pipelines.schemas import COMPARABILITY_IOU
+    from tcip_mcp.pipelines.training.evaluation import comparability_criterion
     from tcip_mcp.tools.proposal_tools import stage_proposals
 
     image = _image(tmp_path)
@@ -1003,7 +1004,9 @@ def test_the_assessment_count_and_the_editor_pairing_agree_under_a_crowd_region(
     annotations = _stored(tmp_path, image).annotations
 
     counted = _counted(
-        annotations, proposals, resolve_match_criterion(None, [])
+        annotations,
+        proposals,
+        comparability_criterion(COMPARABILITY_IOU, by_mask=False),
     )
     paired = proposal_pairs(tmp_path, bucket, annotations, proposals)
 
@@ -1025,7 +1028,8 @@ def test_the_editor_pairs_a_bucket_under_its_assessments_center_match(
     pytest.importorskip("torch")
     from tcip_mcp.assessment import read_assessment
     from tcip_mcp.dataset_layout import image_proposals, proposal_pairs
-    from tcip_mcp.pipelines.training.evaluation import resolve_match_criterion
+    from tcip_mcp.pipelines.schemas import COMPARABILITY_IOU
+    from tcip_mcp.pipelines.training.evaluation import comparability_criterion
     from tests._chain_fixtures import IMG, run_the_chain
 
     chain = run_the_chain(tmp_path, experiment_id="exp-editor-pairing")
@@ -1074,12 +1078,8 @@ def test_the_editor_pairs_a_bucket_under_its_assessments_center_match(
     assert (
         len(paired) == _counted(annotations, proposals, criterion)["tp"] == 1
     )
-    assert (
-        _counted(annotations, proposals, resolve_match_criterion(None, []))[
-            "tp"
-        ]
-        == 0
-    )
+    convention = comparability_criterion(COMPARABILITY_IOU, by_mask=False)
+    assert _counted(annotations, proposals, convention)["tp"] == 0
 
 
 # ── the proposer is named ──────────────────────────────────────────────────

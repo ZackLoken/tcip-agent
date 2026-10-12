@@ -514,6 +514,7 @@ def test_evaluate_reports_each_attributes_agreement_over_the_pairs_it_assesses(
         conf_threshold=0.0,
         iou_threshold=IOU_THRESHOLD,
         score_weights=None,
+        trait=None,
         density=1.0,
     )
 

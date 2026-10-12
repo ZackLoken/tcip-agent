@@ -1,6 +1,7 @@
-"""What a run's train dataset serves (its object density, its native frame) lands in the
-persisted config, a run's tiling block is the one its resolution wrote, and a tiling stated on a
-task that trains whole frames is refused at the door rather than recorded unrealized.
+"""What a run's train dataset serves (its object density, its native frame) is the resolution's
+own geometry record, never an input key, a run's tiling block is the one its resolution wrote,
+and a tiling stated on a task that trains whole frames is refused at the door rather than
+recorded unrealized.
 """
 
 from __future__ import annotations
@@ -39,8 +40,8 @@ class _OpaqueStub:
 
 
 def _geometry(data_cfg: dict, train_ds, task: str = "detection"):
-    """``data_cfg`` validated as a ``task`` run's data block with what ``train_ds`` serves
-    recorded on it (``generic_trainer.effective_data_geometry``).
+    """The geometry a ``task`` run whose data block is ``data_cfg`` reads off what ``train_ds``
+    serves (``generic_trainer.effective_data_geometry``).
     """
     from tcip_mcp.pipelines.schemas import DataSpec
     from tcip_mcp.pipelines.training.generic_trainer import (
@@ -52,16 +53,13 @@ def _geometry(data_cfg: dict, train_ds, task: str = "detection"):
     )
 
 
-def test_stamp_tiled_run_records_its_tiles_density_and_leaves_the_lattice_it_was_given():
-    """The lattice a tiled run serves is the one its resolution wrote into ``data.tiling``; the
-    stamp adds the density over the tiles and nothing else.
-    """
+def test_stamp_tiled_run_records_its_tiles_density_and_no_native_frame():
+    """A tiled run's geometry is the density over the tiles it serves and no native frame."""
     tiling = {"enabled": True, "tile_size": 96, "overlap": 0.25}
     stamped = _geometry({"tiling": tiling}, _TiledStub())
 
-    assert stamped.record()["tiling"] == tiling
-    assert stamped.train_object_density == pytest.approx(2 / (96 * 96))
-    assert stamped.train_native_size is None
+    assert stamped.object_density == pytest.approx(2 / (96 * 96))
+    assert stamped.native_size is None
 
 
 def test_a_detector_dataset_records_its_density_whoever_built_it():
@@ -73,13 +71,11 @@ def test_a_detector_dataset_records_its_density_whoever_built_it():
 
     assert _geometry(
         bespoke, _TiledStub()
-    ).train_object_density == pytest.approx(2 / (96 * 96))
+    ).object_density == pytest.approx(2 / (96 * 96))
     with pytest.raises(ValueError, match="regions"):
         _geometry(bespoke, _OpaqueStub())
     assert (
-        _geometry(
-            bespoke, _OpaqueStub(), "classification"
-        ).train_object_density
+        _geometry(bespoke, _OpaqueStub(), "classification").object_density
         is None
     )
 
@@ -106,8 +102,8 @@ def _detection_dataset(tmp_path, sizes):
     return dataset_over("detection", str(images_dir), subject="bud")
 
 
-def test_stamp_untiled_uniform_frames_record_train_native_size(tmp_path):
-    """An untiled run records the shared native frame as [width, height], and the object
+def test_stamp_untiled_uniform_frames_record_their_native_size(tmp_path):
+    """An untiled run records the shared native frame as (width, height), and the object
     density counted over those frames.
     """
     stamped = _geometry(
@@ -115,20 +111,50 @@ def test_stamp_untiled_uniform_frames_record_train_native_size(tmp_path):
         _detection_dataset(tmp_path, [(64, 48), (64, 48)]),
     )
 
-    assert stamped.train_native_size == [64, 48]
-    assert stamped.train_object_density == pytest.approx(1 / (64 * 48))
+    assert stamped.native_size == (64, 48)
+    assert stamped.object_density == pytest.approx(1 / (64 * 48))
 
 
 def test_stamp_untiled_mixed_frames_record_nothing(tmp_path):
     """Mixed source sizes have no single native frame; stamping any one of them would be a
-    guess, so no train_native_size is written.
+    guess, so no native size is recorded.
     """
     stamped = _geometry(
         {"tiling": {"enabled": False}},
         _detection_dataset(tmp_path, [(64, 48), (32, 32)]),
     )
 
-    assert stamped.train_native_size is None
+    assert stamped.native_size is None
+
+
+@pytest.mark.parametrize(
+    "stated", [{"train_native_size": [64, 48]}, {"train_object_density": 0.001}]
+)
+def test_a_config_stating_a_resolved_geometry_key_refuses_at_the_door_naming_it(
+    tmp_path, stated
+):
+    """The native frame and the object density are what a run's resolution reads off its frames,
+    never input: a config stating either refuses at the launch door naming the key, and the same
+    config without it opens a run whose resolution records the frame its uniform untiled frames
+    share, the frame the smoke and the predictor read.
+    """
+    from tcip_mcp.experiments import observe
+    from tcip_mcp.pipelines.training.run_registry import observed_run
+    from tcip_mcp.tools.training_tools import preflight_config
+    from tests._verified_checkpoint_fixtures import opened_run
+
+    config = _base_config({"enabled": False}, tmp_path)
+    (key,) = stated
+    report = preflight_config(
+        tmp_path, {**config, "data": {**config["data"], **stated}}
+    )
+    assert not report["valid"]
+    assert any(key in issue for issue in report["issues"]), report["issues"]
+
+    run_dir = opened_run(tmp_path, config)
+    geometry = observe(run_dir).resolved_geometry
+    assert geometry is not None and geometry.native_size == (64, 48)
+    assert observed_run(observe(run_dir)).geometry == geometry
 
 
 # ── the run's resolved record, for a launched run and an HPO trial alike ──
@@ -199,6 +225,41 @@ def test_a_tiling_stated_on_a_task_that_trains_whole_frames_refuses_at_the_door(
         match=rf"data\.tiling is enabled for a run of task '{task}'",
     ):
         train_config(config)
+
+
+def test_the_tiling_question_and_the_detector_question_each_read_their_own_set(
+    monkeypatch,
+):
+    """A task admitted to the tiling set alone tiles where a config's tiling is admitted, and is
+    a detector nowhere a head's kind is asked: its validation states no confidence and its
+    batches collate as tensors.
+    """
+    from tcip_mcp.pipelines import model_contract
+    from tcip_mcp.pipelines.schemas import train_config
+    from tcip_mcp.pipelines.training.collation import task_collate
+    from tests._chain_fixtures import BESPOKE_MODELS
+
+    monkeypatch.setattr(
+        model_contract,
+        "TILING_TASKS",
+        model_contract.TILING_TASKS | {"semantic_seg"},
+    )
+    tiling = {"enabled": True, "tile_size": 64}
+    spec = train_config(
+        training_config(
+            {
+                "builder": BESPOKE_SEMANTIC_SEG,
+                "source_files": [BESPOKE_MODELS],
+                "task": "semantic_seg",
+            },
+            {"num_channels": 3, "tiling": tiling},
+            evaluation=evaluation_block(conf_threshold=None),
+        )
+    )
+
+    assert spec.data.tiling is not None and spec.data.tiling.tile_size == 64
+    assert spec.trainer_reads().conf_threshold is None
+    assert task_collate("semantic_seg") is task_collate("classification")
 
 
 def test_an_untiled_runs_resolved_record_carries_the_disabled_block(tmp_path):

@@ -254,7 +254,9 @@ def _preflight(
             )
             task = resolved_spec.model_source.task
             built_at = recorded_model_dims(resolved_spec)
-            dims = resolve_contract_dims(resolved_spec, built_at)
+            dims = resolve_contract_dims(
+                resolved_spec, built_at, resolution.geometry
+            )
             model = build_from_model_source(
                 resolved_spec.model_source, sources.layout, built_at
             )
@@ -1806,7 +1808,8 @@ def evaluate_model(
     images_dir: str,
     labels_dir: str | None = None,
     stated: Stated | None = None,
-    iou_threshold: float = 0.5,
+    *,
+    iou_threshold: float,
     tiling: TilingSpec | None = None,
     use_tiled_inference: bool = False,
     trait: str | None = None,
@@ -1847,16 +1850,18 @@ def evaluate_model(
             ``overlap``, ``postprocess`` and ``cross_tile_nms`` (derived from the evaluated
             ground truth when unstated). The resolved record, each value's source with it, is
             returned under ``execution``.
-        iou_threshold: The IoU a match must reach under the IoU convention.
+        iou_threshold: The IoU a match must reach, stated (the comparability convention is
+            ``schemas.COMPARABILITY_IOU``).
         tiling: Optional tiling (``schemas.TilingSpec``: enabled, tile_size, overlap, ...) for a
             tile-level eval, refused enabled for a task that does not tile
             (``schemas.run_tiling``). None + a run id reuses the run's training tiling;
             None + a checkpoint path stays untiled.
-        use_tiled_inference: Score the delivery regime (full-frame via tiled inference).
+        use_tiled_inference: Score the delivery regime (full-frame via tiled inference);
+            refused for a checkpoint whose task does not tile.
         trait: When set, the derived localization criterion of the trait's latest confirmed
             revision (traits.py, e.g. a count trait's center-match) governs the reported count
-            and the selection f1; AP@0.5 (``iou_threshold``) is kept as a labeled comparability
-            metric. Absent -> the IoU convention governs.
+            and the selection f1; the convention's counts at ``iou_threshold`` are kept as
+            labeled comparability metrics. Absent -> the IoU convention governs.
 
     """
     import torch
@@ -1910,6 +1915,14 @@ def evaluate_model(
         ValueError,
     ) as exc:
         return {"error": str(exc)}
+    from tcip_mcp.pipelines.model_contract import TILING_TASKS
+
+    if use_tiled_inference and task not in TILING_TASKS:
+        return {
+            "error": f"use_tiled_inference is set for a checkpoint of task {task!r}, and "
+            f"only a {sorted(TILING_TASKS)} checkpoint predicts over tiles; drop "
+            "use_tiled_inference."
+        }
     stated = stated or Stated()
 
     from tcip_annotation.json_io import UnreadableLabelDocumentError
@@ -1924,9 +1937,7 @@ def evaluate_model(
             f"labels_dir={labels_dir!r} admits nothing to evaluate: {exc}"
         }
 
-    from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
-
-    if use_tiled_inference and task in DETECTION_TASKS:
+    if use_tiled_inference:
         try:
             return run_full_frame_evaluation(
                 checkpoint,

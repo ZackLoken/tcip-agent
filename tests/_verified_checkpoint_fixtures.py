@@ -276,13 +276,13 @@ def finished_run(
     ``config``'s keys take the place of its config's own. Returns the run directory.
     """
     from tcip_mcp import experiments
-    from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
+    from tcip_mcp.pipelines.model_contract import DETECTOR_TASKS
     from tcip_mcp.pipelines.training.subprocess_worker import run_directory
 
     run_id = experiment_id or experiments.mint_experiment_id()
     model_source = model_source or dict(BUILT_DETECTOR)
     task = model_source.get("task")
-    geometric = task in DETECTION_TASKS
+    geometric = task in DETECTOR_TASKS
     stated = data or (dict(SCOPED_DATA) if geometric else {"num_channels": 3})
     if "images_dir" not in stated:
         where = fixture_data_dir(root, run_id)

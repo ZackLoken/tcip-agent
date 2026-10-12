@@ -119,7 +119,10 @@ class TestEvaluatePredictions:
         from tcip_mcp.tools.annotation_tools import score_predictions
 
         result = score_predictions(
-            str(data_dir / "images" / DATE), DATA_DIR_BUCKET, iou_threshold=0.5
+            str(data_dir / "images" / DATE),
+            DATA_DIR_BUCKET,
+            iou_threshold=0.5,
+            conf_threshold=0.25,
         )
         assert result["image_count"] == 3
         assert "precision" in result
@@ -137,7 +140,11 @@ class TestEvaluatePredictionsDetail:
 
         img = str(data_dir / "images" / DATE / "img_001.jpg")
         result = score_predictions(
-            img, DATA_DIR_BUCKET, iou_threshold=0.5, detail=True
+            img,
+            DATA_DIR_BUCKET,
+            iou_threshold=0.5,
+            conf_threshold=0.25,
+            detail=True,
         )
         assert "error" not in result
         assert "detections" in result
@@ -175,7 +182,9 @@ class TestEvaluateFolderEnumeration:
         _write_empty_label(images_dir / "cap.bandgroup", 8, 8)
 
         bucket = _empty_bucket(tmp_path, images_dir / "cap.bandgroup")
-        result = score_predictions(str(images_dir), bucket, iou_threshold=0.5)
+        result = score_predictions(
+            str(images_dir), bucket, iou_threshold=0.5, conf_threshold=0.25
+        )
         assert result["image_count"] == 1
         assert [row["image"] for row in result["per_image"]] == [
             "cap.bandgroup"
@@ -195,7 +204,9 @@ class TestEvaluateFolderEnumeration:
         _write_empty_label(images_dir / "cap.npz", 8, 8)
 
         bucket = _empty_bucket(tmp_path, images_dir / "cap.npz")
-        result = score_predictions(str(images_dir), bucket, iou_threshold=0.5)
+        result = score_predictions(
+            str(images_dir), bucket, iou_threshold=0.5, conf_threshold=0.25
+        )
         assert result["image_count"] == 1
         assert [row["image"] for row in result["per_image"]] == ["cap.npz"]
 
@@ -216,6 +227,7 @@ class TestEvaluateFolderEnumeration:
             str(images_dir),
             _empty_bucket(tmp_path, elsewhere),
             iou_threshold=0.5,
+            conf_threshold=0.25,
         )
         assert result["image_count"] == 0
 

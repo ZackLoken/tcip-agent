@@ -124,6 +124,7 @@ def test_val_loss_forwards_all_negative_images():
         conf_threshold=VALIDATION_CONF,
         iou_threshold=IOU_THRESHOLD,
         score_weights=WEIGHTS,
+        trait=None,
         density=1.0,
     )
     # Both batches forwarded through the detector (full batch incl. negatives), not just foreground.
@@ -143,12 +144,42 @@ def test_all_negative_only_loader_is_not_skipped():
         conf_threshold=VALIDATION_CONF,
         iou_threshold=IOU_THRESHOLD,
         score_weights=WEIGHTS,
+        trait=None,
         density=1.0,
     )
     assert stub.calls == [(2, 0)]  # forwarded, not skipped
     assert result["loss"] == pytest.approx(
         2.5
     )  # finite, non-zero: negatives contribute loss
+
+
+@pytest.mark.parametrize(
+    "unstated, stated",
+    [
+        ("density", {"conf_threshold": VALIDATION_CONF}),
+        ("conf_threshold", {"density": 1.0}),
+    ],
+)
+def test_a_detector_evaluated_with_an_unstated_operating_value_refuses_by_name(
+    unstated, stated
+):
+    """A detector counts its boxes at a stated confidence and caps each frame at the density its
+    run recorded; handed ``None`` for either, the evaluation refuses naming it before any batch is
+    read, an empty loader included.
+    """
+    for loader in ([_det_batch([1])], []):
+        with pytest.raises(ValueError, match=rf"\['{unstated}'\]"):
+            evaluate(
+                _StubModel(_StubDetector()),
+                loader,
+                torch.device("cpu"),
+                "detection",
+                dims=_DIMS,
+                iou_threshold=IOU_THRESHOLD,
+                score_weights=WEIGHTS,
+                trait=None,
+                **{unstated: None, **stated},
+            )
 
 
 # ── tiled evaluation regimes ──────────────────────────────────────────────
@@ -185,7 +216,11 @@ def test_run_id_reuses_training_tiling(tmp_path, monkeypatch):
 
     captured = _capture_run_test_evaluation(monkeypatch)
     evaluate_model(
-        tmp_path, run_dir.name, str(images_dir), stated=DETECTOR_PASS
+        tmp_path,
+        run_dir.name,
+        str(images_dir),
+        stated=DETECTOR_PASS,
+        iou_threshold=IOU_THRESHOLD,
     )
     assert isinstance(captured["ds"], TiledDetectionDataset)
     assert (
@@ -225,7 +260,11 @@ def test_evaluating_a_run_leaves_its_directory_byte_identical(
     before = snapshot()
     audit_before = list(ts.read_log(audit_log_key(tmp_path)).records)
     result = evaluate_model(
-        tmp_path, run_dir.name, str(images_dir), stated=DETECTOR_PASS
+        tmp_path,
+        run_dir.name,
+        str(images_dir),
+        stated=DETECTOR_PASS,
+        iou_threshold=IOU_THRESHOLD,
     )
 
     assert "error" not in result, result
@@ -245,7 +284,13 @@ def test_explicit_checkpoint_stays_untiled(tmp_path, monkeypatch):
     ckpt = registered_checkpoint(tmp_path)
 
     captured = _capture_run_test_evaluation(monkeypatch)
-    evaluate_model(tmp_path, ckpt, str(images_dir), stated=DETECTOR_PASS)
+    evaluate_model(
+        tmp_path,
+        ckpt,
+        str(images_dir),
+        stated=DETECTOR_PASS,
+        iou_threshold=IOU_THRESHOLD,
+    )
     assert isinstance(captured["ds"], DetectionDataset)
     assert not isinstance(captured["ds"], TiledDetectionDataset)
     assert captured["tiling"] is None
@@ -274,7 +319,13 @@ def test_evaluate_model_reads_its_loader_at_the_checkpoints_own_width(
     )
 
     captured = _capture_run_test_evaluation(monkeypatch)
-    evaluate_model(tmp_path, ckpt, str(images_dir), stated=DETECTOR_PASS)
+    evaluate_model(
+        tmp_path,
+        ckpt,
+        str(images_dir),
+        stated=DETECTOR_PASS,
+        iou_threshold=IOU_THRESHOLD,
+    )
     assert captured["ds"].expected_channels == 1
 
     from tcip_mcp.tools.model_tools import register_model
@@ -289,7 +340,11 @@ def test_evaluate_model_reads_its_loader_at_the_checkpoints_own_width(
     )
 
     r = evaluate_model(
-        tmp_path, str(unstated), str(images_dir), stated=DETECTOR_PASS
+        tmp_path,
+        str(unstated),
+        str(images_dir),
+        stated=DETECTOR_PASS,
+        iou_threshold=IOU_THRESHOLD,
     )
 
     assert "no band count" in r["error"], r
@@ -401,7 +456,11 @@ def test_the_scored_model_is_the_one_the_door_already_built(
     # the same weights differ in that one metric by more than float noise.
     torch.manual_seed(777)
     measured = evaluate_model(
-        tmp_path, ckpt, str(images_dir), stated=DETECTOR_PASS
+        tmp_path,
+        ckpt,
+        str(images_dir),
+        stated=DETECTOR_PASS,
+        iou_threshold=IOU_THRESHOLD,
     )
     assert "error" not in measured, measured
     assert len(builds) == 1
@@ -536,12 +595,17 @@ def test_the_three_evaluation_loaders_over_one_truth_and_one_predictor_agree(
                 str(images_dir),
                 stated=DETECTOR_PASS,
                 use_tiled_inference=True,
+                iou_threshold=IOU_THRESHOLD,
             ),
         ),
         (
             "diagnostic",
             lambda: evaluate_model(
-                tmp_path, ckpt, str(images_dir), stated=DETECTOR_PASS
+                tmp_path,
+                ckpt,
+                str(images_dir),
+                stated=DETECTOR_PASS,
+                iou_threshold=IOU_THRESHOLD,
             ),
         ),
     ):
@@ -576,6 +640,7 @@ def test_explicit_tiling_override_on_checkpoint(tmp_path, monkeypatch):
         tiling=TilingSpec.model_validate(
             {"enabled": True, "tile_size": 64, "sliver_frac": 0.5}
         ),
+        iou_threshold=IOU_THRESHOLD,
     )
     assert isinstance(captured["ds"], TiledDetectionDataset)
 
@@ -616,6 +681,8 @@ def _full_frame(
         checkpoint,
         checkpoint_admission(checkpoint, images_dir),
         stated=Stated(**{**SAMPLE_DETECTOR_PASS, **stated}),
+        iou_threshold=IOU_THRESHOLD,
+        trait=None,
     )
 
 
@@ -890,6 +957,7 @@ def test_launch_training_persists_effective_tile_geometry(
     import os
 
     import tcip_mcp.pipelines.training.generic_trainer as gt
+    from tcip_mcp import experiments
     from tcip_mcp.experiments import run_resolution
     from tcip_mcp.pipelines.slicing import overlap_ratio
     from tcip_mcp.tools import training_tools
@@ -926,7 +994,10 @@ def test_launch_training_persists_effective_tile_geometry(
         150,
         pytest.approx(overlap_ratio(150, 30)),
     )
-    assert resolved.train_object_density is not None
+    geometry = experiments.find_observation(
+        eid, project=tmp_path
+    ).resolved_geometry
+    assert geometry is not None and geometry.object_density is not None
 
     # "completed", not any terminal state: a child run inside this process would hit _poison_train.
     assert run_to_end(tmp_path, eid)["state"] == "completed"

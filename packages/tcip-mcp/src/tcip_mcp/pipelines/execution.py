@@ -321,7 +321,7 @@ def execution_record(
     """The one complete execution record a fresh pass of ``checkpoint`` runs under, each value's
     source recorded. A detector's ``conf`` is the stated one; its ``density`` the one
     ``reference``'s regions derive (``derivations.derive_object_density``), else the one
-    the checkpoint recorded of its training regions (``data.train_object_density``).
+    the checkpoint recorded of its training regions (its geometry's ``object_density``).
     Tiled at ``geometry``, an edge or overlap it leaves unresolved derives from ``reference``'s
     regions (``derivations.derive_tile_geometry``), each recorded by the derivation that
     produced it, and it merges across tiles by ``postprocess`` (the documented default when
@@ -342,11 +342,11 @@ def execution_record(
         derive_object_density,
         derive_tile_geometry,
     )
-    from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
+    from tcip_mcp.pipelines.model_contract import DETECTOR_TASKS
 
     values: dict[str, Any] = {}
     sources: dict[str, str] = {}
-    if checkpoint.task in DETECTION_TASKS:
+    if checkpoint.task in DETECTOR_TASKS:
         if stated.conf is None:
             raise ExecutionRefusedError(
                 f"{checkpoint.path} is a detector and this pass states no conf: state the "
@@ -356,8 +356,8 @@ def execution_record(
         if reference is not None:
             values["density"] = derive_object_density(reference.regions)
             sources["density"] = OBJECT_DENSITY_DERIVATION
-        elif checkpoint.spec.data.train_object_density is not None:
-            values["density"] = checkpoint.spec.data.train_object_density
+        elif checkpoint.geometry.object_density is not None:
+            values["density"] = checkpoint.geometry.object_density
             sources["density"] = "derived"
         else:
             raise ExecutionRefusedError(

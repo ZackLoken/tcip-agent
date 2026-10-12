@@ -7,7 +7,7 @@ plus per-image TP/FP/FN.
 
 Usage:
     tcip score-predictions --path <image_or_images_dir> --bucket <name> \
-        [--iou-threshold 0.5] [--conf-threshold <default>] [--detail] \
+        --iou-threshold <iou> --conf-threshold <conf> [--detail] \
         [--trait <trait_name> --project <project>]
 
 --project is required with --trait, since a trait's derived localization criterion is read from
@@ -46,16 +46,15 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser.add_argument(
         "--iou-threshold",
         type=float,
-        default=0.5,
-        help="IoU threshold for a positive match (the AP@0.5 comparability "
-        "convention).",
+        required=True,
+        help="IoU threshold for a positive match under the comparability "
+        "convention.",
     )
     parser.add_argument(
         "--conf-threshold",
         type=float,
-        default=None,
-        help="Minimum confidence to consider a prediction. Omitted uses the "
-        "tool's own default.",
+        required=True,
+        help="Minimum confidence to consider a prediction.",
     )
     parser.add_argument(
         "--detail",
@@ -90,19 +89,14 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
 
     from tcip_mcp.tools.annotation_tools import score_predictions
 
-    stated = (
-        {}
-        if args.conf_threshold is None
-        else {"conf_threshold": args.conf_threshold}
-    )
     result = score_predictions(
         args.path,
         args.bucket,
         iou_threshold=args.iou_threshold,
+        conf_threshold=args.conf_threshold,
         detail=args.detail,
         trait=trait,
         project=project,
-        **stated,
     )
     print(json.dumps(result, indent=2))
     return 1 if "error" in result else 0

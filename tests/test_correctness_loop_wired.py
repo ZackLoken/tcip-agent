@@ -26,6 +26,7 @@ pytest.importorskip("torchvision")
 from torch.utils.data import Dataset  # noqa: E402
 
 from tcip_mcp.pipelines.model_build import resolve_contract_dims  # noqa: E402
+from tcip_mcp.pipelines.schemas import TrainGeometry  # noqa: E402
 
 
 def _broken_builder(**kwargs):
@@ -161,22 +162,22 @@ def test_resolve_contract_dims_reads_the_frame_the_run_resolved():
     sources share, and nothing when the run resolved neither.
     """
     tiled = _spec("detection", {"tiling": {"enabled": True, "tile_size": 512}})
-    native = _spec(
-        "detection",
-        {"tiling": {"enabled": False}, "train_native_size": [96, 64]},
-    )
+    untiled = _spec("detection", {"tiling": {"enabled": False}})
+    native = TrainGeometry(native_size=(96, 64), object_density=None)
+    unshared = TrainGeometry(native_size=None, object_density=None)
 
-    assert resolve_contract_dims(tiled, {"in_chans": 4, "num_classes": 5}) == {
+    assert resolve_contract_dims(
+        tiled, {"in_chans": 4, "num_classes": 5}, unshared
+    ) == {
         "in_chans": 4,
         "num_classes": 5,
         "img_size": (512, 512),
     }
-    assert resolve_contract_dims(native, {"in_chans": 3})["img_size"] == (
-        96,
-        64,
-    )
+    assert resolve_contract_dims(untiled, {"in_chans": 3}, native)[
+        "img_size"
+    ] == (96, 64)
     assert "img_size" not in resolve_contract_dims(
-        _spec("detection", {}), {"in_chans": 3}
+        _spec("detection", {}), {"in_chans": 3}, unshared
     )
 
 
@@ -190,19 +191,22 @@ def test_model_dims_states_only_what_the_run_holds():
     from tcip_mcp.pipelines.model_build import model_dims
 
     scope = ClassScope()
-    frame = {"tiling": {"enabled": False}, "train_native_size": [32, 32]}
+    frame = {"tiling": {"enabled": False}}
+    shared = TrainGeometry(native_size=(32, 32), object_density=None)
 
     with pytest.raises(ValueError, match="data.num_channels"):
         model_dims(scope, {})
     detector = model_dims(scope, {"num_channels": 3})
     assert detector == {"in_chans": 3}
-    assert resolve_contract_dims(_spec("detection", frame), detector) == {
+    assert resolve_contract_dims(
+        _spec("detection", frame), detector, shared
+    ) == {
         "in_chans": 3,
         "img_size": (32, 32),
     }  # a detector's synthetic box needs no count
     ordinal = model_dims(scope, {"num_channels": 3, "num_ranks": 4})
     assert ordinal == {"in_chans": 3, "num_ranks": 4}
-    assert resolve_contract_dims(_spec("ordinal", frame), ordinal) == {
+    assert resolve_contract_dims(_spec("ordinal", frame), ordinal, shared) == {
         "in_chans": 3,
         "num_classes": 4,
         "img_size": (32, 32),
@@ -663,8 +667,8 @@ def test_ctx_check_contract_and_overfit_check(tmp_path):
     assert (
         recorded.num_channels,
         recorded.num_classes,
-        recorded.train_native_size,
-    ) == (3, 3, [32, 32])
+        ctx.run.geometry.native_size,
+    ) == (3, 3, (32, 32))
     report = ctx.check_contract()
     assert report["ok"], report["issues"]
     # overfit is voluntary + non-gating; steps flow through as an override kwarg.

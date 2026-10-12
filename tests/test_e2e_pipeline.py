@@ -285,7 +285,9 @@ class TestE2EPipelineEdgeCases:
         )
 
         # A bucket name never published: evaluate should handle gracefully
-        result = score_predictions(str(img_path), "none/2026-01-01")
+        result = score_predictions(
+            str(img_path), "none/2026-01-01", iou_threshold=0.5, conf_threshold=0.25
+        )
         # Either returns an error dict or metrics with 0 TP
         assert isinstance(result, dict)
 

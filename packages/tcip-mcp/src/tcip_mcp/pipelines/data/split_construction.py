@@ -26,6 +26,7 @@ if TYPE_CHECKING:
         SplitSpec,
         TilingSpec,
         TrainConfigSchema,
+        TrainGeometry,
     )
 
 logger = logging.getLogger(__name__)
@@ -1021,14 +1022,15 @@ def auto_train_val(
 
 class ResolvedRun(NamedTuple):
     """A run resolved once, at launch: the datasets built at it, ``spec``, the validated launch
-    config it was resolved from, and ``data``, ``partition`` and ``objective``, what it
-    resolved.
+    config it was resolved from, and ``data``, ``geometry``, ``partition`` and ``objective``,
+    what it resolved.
     """
 
     train_ds: Any
     val_ds: Any
     spec: TrainConfigSchema
     data: DataSpec
+    geometry: TrainGeometry
     partition: dict
     objective: Objective
 
@@ -1040,10 +1042,11 @@ class ResolvedRun(NamedTuple):
     @property
     def record(self) -> dict:
         """What the run's ``run.json`` holds of this resolution: ``data`` as it records itself,
-        ``partition`` and ``objective``.
+        ``geometry``, ``partition`` and ``objective``.
         """
         return {
             "data": self.data.record(),
+            "geometry": self.geometry.model_dump(mode="json"),
             "partition": self.partition,
             "objective": self.objective.model_dump(),
         }
@@ -1059,7 +1062,7 @@ def resolve_run(
 ) -> ResolvedRun:
     """Resolve the validated config ``spec`` (``schemas.train_config``) once for a run of
     ``project`` whose declared files ``layout`` lays out (``model_build.SourceLayout``): its data
-    block through :func:`auto_train_val`, what its train dataset serves recorded on it
+    block through :func:`auto_train_val`, the geometry its train dataset serves
     (:func:`~tcip_mcp.pipelines.training.generic_trainer.effective_data_geometry`), and its
     objective (:func:`~tcip_mcp.pipelines.training.generic_trainer.resolve_objective` for a run
     with or without a val side), or ``objective`` as given, a sweep's own for its trials.
@@ -1080,12 +1083,14 @@ def resolve_run(
         layout,
         tallies_out=tallies_out,
     )
-    data = effective_data_geometry(task, data, train_ds)
+    geometry = effective_data_geometry(task, data, train_ds)
     if objective is None:
         objective = resolve_objective(
             spec, project=project, has_val_loader=val_ds is not None
         )
-    return ResolvedRun(train_ds, val_ds, spec, data, partition, objective)
+    return ResolvedRun(
+        train_ds, val_ds, spec, data, geometry, partition, objective
+    )
 
 
 def run_loader(

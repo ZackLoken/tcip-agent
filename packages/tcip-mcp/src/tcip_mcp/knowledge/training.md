@@ -210,8 +210,9 @@ project's sweeps; a sweep's trial is one beneath its sweep (see HPO). Runs and s
 directory, so a new one takes a name neither holds. A run directory is written as the run goes and never rewritten:
 `run.json`, written by the launcher before the run starts (the config as
 launched, its seed, environment, dataset identity, the run it was relaunched from,
-and what the launch resolved: the data section, the partition it trains on and the objective it
-selects by), `metrics.jsonl`, a heartbeat, and `final_status.json` once it ends (its state, its
+and what the launch resolved: the data section, the geometry read off its training frames (the
+one native size its untiled frames share, a detector's object density), the partition it trains
+on and the objective it selects by), `metrics.jsonl`, a heartbeat, and `final_status.json` once it ends (its state, its
 `status_error`,
 and the path and sha256 of the checkpoint its completion registers). Every checkpoint is written
 once under its own name. A relaunch is a new directory naming its parent.

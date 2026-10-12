@@ -67,6 +67,7 @@ if TYPE_CHECKING:
         DataSpec,
         SpatialManifest,
         TrainConfigSchema,
+        TrainGeometry,
     )
 
 logger = logging.getLogger(__name__)
@@ -518,8 +519,8 @@ class RunObservation:
 
     @property
     def resolution(self) -> dict | None:
-        """What a run's input resolved to at launch (its ``data``, ``partition`` and
-        ``objective``), ``None`` for a sweep trial whose sampled point was refused at its
+        """What a run's input resolved to at launch (its ``data``, ``geometry``, ``partition``
+        and ``objective``), ``None`` for a sweep trial whose sampled point was refused at its
         admission or failed to resolve.
         """
         return self.record["resolved"]
@@ -545,6 +546,20 @@ class RunObservation:
             None
             if resolved is None
             else DataSpec.model_validate(resolved["data"])
+        )
+
+    @cached_property
+    def resolved_geometry(self) -> TrainGeometry | None:
+        """The geometry a run's launch read off its training frames (:attr:`resolution`'s),
+        validated once; ``None`` for a run that resolved to nothing.
+        """
+        from tcip_mcp.pipelines.schemas import TrainGeometry
+
+        resolved = self.resolution
+        return (
+            None
+            if resolved is None
+            else TrainGeometry.model_validate(resolved["geometry"])
         )
 
     @cached_property

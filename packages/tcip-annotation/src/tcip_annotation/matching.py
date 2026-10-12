@@ -31,9 +31,8 @@ from tcip_annotation.state import (
 )
 
 REVIEW_CONF_FLOOR = 0.25
-"""The confidence below which a prediction is neither matched nor drawn when a visualization or a
-scoring call states none: a viewing filter a person moves, never an execution record's operating
-point."""
+"""The confidence below which a prediction is neither matched nor drawn when a visualization
+states none: a viewing filter a person moves, never an execution record's operating point."""
 
 Rings = list[list[tuple[float, float]]]
 

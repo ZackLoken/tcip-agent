@@ -20,7 +20,7 @@ import torch
 from torch.nn import functional
 
 from tcip_mcp.pipelines.active_learning import DEFAULT_SCORER
-from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
+from tcip_mcp.pipelines.model_contract import DETECTOR_TASKS
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
@@ -69,7 +69,7 @@ class UncertaintyScorer(BaseScorer):
         for path in image_paths:
             tensor = predictor.model_input(path)[0].unsqueeze(0)
 
-            if self.task in DETECTION_TASKS:
+            if self.task in DETECTOR_TASKS:
                 outputs = model([tensor[0]])
                 if isinstance(outputs, list):
                     outputs = outputs[0]

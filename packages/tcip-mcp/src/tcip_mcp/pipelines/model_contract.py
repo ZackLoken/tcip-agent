@@ -20,18 +20,21 @@ from typing import Any, Protocol, runtime_checkable
 
 from tcip_store.values import finite_or_none, stored_number
 
-DETECTION_TASKS = frozenset({"detection", "instance_seg"})
-"""The tasks whose model answers boxes, scores and labels per image."""
+DETECTOR_TASKS = frozenset({"detection", "instance_seg"})
+"""The tasks whose model answers scored boxes and labels per image: the heads a detection cap,
+a confidence and an operating point govern."""
+TILING_TASKS = frozenset({"detection", "instance_seg"})
+"""The tasks a run trains and predicts over tiles of, each tile's targets clipped to it."""
 # The tasks ``_synth_batch`` can shape a batch for. A task outside this set is not refused as
 # unsupported (the platform has no fixed task taxonomy), but it cannot be smoked blind, so the
 # caller supplies ``sample_batch=`` instead of the contract inventing a shape for it.
-_SYNTHESIZABLE_TASKS = DETECTION_TASKS | {
+_SYNTHESIZABLE_TASKS = DETECTOR_TASKS | {
     "classification",
     "ordinal",
     "regression",
     "semantic_seg",
 }
-_COUNTED_TASKS = _SYNTHESIZABLE_TASKS - DETECTION_TASKS - {"regression"}
+_COUNTED_TASKS = _SYNTHESIZABLE_TASKS - DETECTOR_TASKS - {"regression"}
 """The tasks whose synthetic target carries a class or rank id, so a batch for one cannot be
 shaped without the run's own count. A detector labels its one box foreground and a regression
 target is a value, so neither reads one."""
@@ -108,7 +111,7 @@ def _synth_batch(
     collate = task_collate(task)
     width, height = img_size
 
-    if task in DETECTION_TASKS:
+    if task in DETECTOR_TASKS:
         img = torch.rand(in_chans, height, width, device=device)
         box = [width * 0.2, height * 0.2, width * 0.7, height * 0.7]
         # One foreground instance (labels are 1-indexed), through the loaders' own tensor builder.
@@ -190,7 +193,7 @@ def _driving_batch(
     )
     return images, instance_targets(
         targets
-    ) if task in DETECTION_TASKS else targets
+    ) if task in DETECTOR_TASKS else targets
 
 
 def _contains_tensor(value: Any, _depth: int = 0, _max_depth: int = 4) -> bool:
@@ -316,7 +319,7 @@ def check_model_contract(
         images, _ = _driving_batch(task, dims, sample_batch, dev)
         with torch.no_grad():
             out = model(images)
-        if task in DETECTION_TASKS:
+        if task in DETECTOR_TASKS:
             report["eval_output_type"] = "list[dict]"
             required = {"boxes", "scores", "labels"}
             if task == "instance_seg":

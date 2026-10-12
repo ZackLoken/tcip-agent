@@ -275,7 +275,7 @@ def test_web_worker_runs_a_native_frame_tile_scale_and_forwards_its_recorded_res
             scores=(),
             task="detection",
             train_tile_size=None,
-            train_native_size=[64, 64],
+            train_native_size=(64, 64),
             train_augmentation={"resize": {"size": [128, 128]}},
         ),
     )

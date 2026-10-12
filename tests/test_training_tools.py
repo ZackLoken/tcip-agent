@@ -1070,6 +1070,7 @@ def _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=None):
     same stand-ins from that record.
     """
     from tcip_mcp.pipelines.data import samplers, split_construction as sc
+    from tcip_mcp.pipelines.schemas import TrainGeometry
     from tcip_mcp.pipelines.training import generic_trainer as gt
 
     ds = _FakeDataset()
@@ -1090,7 +1091,11 @@ def _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=None):
     monkeypatch.setattr(sc, "auto_train_val", fake_auto_train_val)
     monkeypatch.setattr(sc, "recorded_datasets", lambda *a, **k: (ds, ds))
     monkeypatch.setattr(
-        gt, "effective_data_geometry", lambda task, data, train_ds: data
+        gt,
+        "effective_data_geometry",
+        lambda task, data, train_ds: TrainGeometry(
+            native_size=None, object_density=None
+        ),
     )
     monkeypatch.setattr(gt, "train", fake_train)
     monkeypatch.setattr(samplers, "build_sampler", lambda *a, **k: None)

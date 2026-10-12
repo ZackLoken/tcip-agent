@@ -7,7 +7,7 @@ returned. --project is required: the artifact lands under it and a relative --pa
 Usage:
     tcip visualize --source annotations --path <image.jpg> \
         --project <project> [--task detect] [--class-names fruit,shoot] \
-        [--conf-threshold <default>] [--iou-threshold 0.5] [--n 16] [--bucket <name>]
+        [--conf-threshold <default>] [--iou-threshold <iou>] [--n 16] [--bucket <name>]
 
 --source is one of 'annotations' (path = image file), 'predictions' (path = image file),
 'comparison' (path = image file), or 'dataset' (path = dataset root folder containing images/,
@@ -60,8 +60,9 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser.add_argument(
         "--iou-threshold",
         type=float,
-        default=0.5,
-        help="IoU threshold for a positive match (source=comparison only).",
+        default=None,
+        help="IoU threshold for a positive match under the comparability "
+        "convention (source=comparison, where it is required).",
     )
     parser.add_argument(
         "--n",

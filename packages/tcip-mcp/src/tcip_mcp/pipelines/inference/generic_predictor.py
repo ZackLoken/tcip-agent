@@ -37,7 +37,7 @@ from tcip_mcp.pipelines.model_build import (
     build_from_model_source,
     recorded_model_dims,
 )
-from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
+from tcip_mcp.pipelines.model_contract import DETECTOR_TASKS, TILING_TASKS
 
 logger = logging.getLogger(__name__)
 
@@ -64,10 +64,10 @@ class GenericPredictor:
     The checkpoint must carry its run config, whose ``model_source`` names the builder and the
     task, and the weights (``model_build``'s ``STATE_DICT_KEY``).
 
-    The input geometry the run trained at travels on the checkpoint's embedded config and is
-    exposed as-recorded: ``train_tile_size``/``train_overlap`` (a tiled run's tile lattice),
-    ``train_native_size`` (the one frame size an untiled run's frames all shared, ``[width,
-    height]``), and ``train_augmentation`` (the augmentation config that run declared). ``dims``
+    The input geometry the run trained at travels on the checkpoint and is exposed as-recorded:
+    ``train_tile_size``/``train_overlap`` (a tiled run's tile lattice, off its config),
+    ``train_native_size`` (its recorded geometry's ``native_size``), and ``train_augmentation``
+    (the augmentation config that run declared). ``dims``
     are the dimensions the model was built at
     (:func:`~tcip_mcp.pipelines.model_build.recorded_model_dims`).
     """
@@ -89,7 +89,7 @@ class GenericPredictor:
         tiling = run_tiling(self.task, spec.data.tiling)
         self.train_tile_size = tiling.tile_size if tiling is not None else None
         self.train_overlap = tiling.overlap if tiling is not None else None
-        self.train_native_size = spec.data.train_native_size
+        self.train_native_size = checkpoint.geometry.native_size
         self.train_augmentation = spec.augmentation
 
         self.dims = recorded_model_dims(spec)
@@ -120,7 +120,7 @@ class GenericPredictor:
         """Run inference on a single image, a plain path/string or a :class:`BandGroupRef`, under
         the untiled ``execution`` record.
         """
-        if self.task in DETECTION_TASKS:
+        if self.task in DETECTOR_TASKS:
             return self._predict_whole([image_path], execution)[0]
         tensor, w, h = self.model_input(image_path)
         outputs = self.model(tensor.unsqueeze(0))
@@ -155,7 +155,7 @@ class GenericPredictor:
                 )
                 for p in image_paths
             ]
-        if self.task not in DETECTION_TASKS:
+        if self.task not in DETECTOR_TASKS:
             return [self.predict(p, execution) for p in image_paths]
         step = max(1, batch_size)
         return [
@@ -326,12 +326,12 @@ class GenericPredictor:
                 "prior/progress apply only to a windowed-reader source: a whole-decode pass writes "
                 "its files all at once and has no resume seam to feed them into."
             )
-        if self.task not in DETECTION_TASKS:
+        if self.task not in TILING_TASKS:
             if windowed:
                 raise ValueError(
-                    f"sliced prediction over a windowed reader needs a detection or instance_seg "
-                    f"task, got {self.task!r}: a raster too large to decode whole has no untiled "
-                    "fallback."
+                    f"sliced prediction over a windowed reader needs a task that tiles "
+                    f"({sorted(TILING_TASKS)}), got {self.task!r}: a raster too large to decode "
+                    "whole has no untiled fallback."
                 )
             return self.predict(
                 cast("str | Path | BandGroupRef", source), execution

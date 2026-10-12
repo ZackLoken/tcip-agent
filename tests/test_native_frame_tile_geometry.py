@@ -23,6 +23,10 @@ pytest.importorskip("torch")
 
 from tests._chain_fixtures import BESPOKE_DETECTION, BESPOKE_MODELS  # noqa: E402
 from tests._producer_fixtures import gray_frame  # noqa: E402
+from tests._training_values import IOU_THRESHOLD  # noqa: E402
+
+SCORED = {"iou_threshold": IOU_THRESHOLD, "trait": None}
+"""What the full-frame runner scores these references under: the sample IoU and no trait."""
 
 pytest.importorskip("torchvision")
 import torch  # noqa: E402
@@ -183,19 +187,28 @@ def test_explicit_tile_size_outranks_the_native_frame():
     assert _geometry(stub, tile_size=320, tiled=False) == (320, "explicit")
 
 
-@pytest.mark.parametrize(
-    "stamp", [None, [512], [0, 0], ["wide", "tall"], 512, [-4, -4]]
-)
-def test_an_unusable_native_frame_stamp_yields_no_tile_edge_and_never_raises(
-    stamp,
-):
-    """A checkpoint this platform did not write can carry anything under that key, and
-    ``resolve_tile_geometry`` is a fact-return every caller relies on not to raise.
-    """
-    assert _geometry(_GeometryStub(train_native_size=stamp)) == (
+def test_no_native_frame_yields_no_tile_edge():
+    assert _geometry(_GeometryStub(train_native_size=None)) == (
         None,
         "unavailable",
     )
+
+
+@pytest.mark.parametrize(
+    "native_size", [[512], [0, 0], ["wide", "tall"], 512, [-4, -4]]
+)
+def test_a_geometry_record_refuses_a_native_size_that_is_no_frame(native_size):
+    """A checkpoint's recorded geometry is read through its one schema, so a native size that is
+    not two positive pixel counts refuses where the record is read, never reaching a reader.
+    """
+    from pydantic import ValidationError
+
+    from tcip_mcp.pipelines.schemas import TrainGeometry
+
+    with pytest.raises(ValidationError, match="native_size"):
+        TrainGeometry.model_validate(
+            {"native_size": native_size, "object_density": None}
+        )
 
 
 # --- the recorded train-time resize -------------------------------------
@@ -284,7 +297,7 @@ def test_a_checkpoint_carries_its_untiled_training_geometry_to_the_predictor(
     pred = GenericPredictor(checkpoint, device="cpu")
 
     assert pred.train_tile_size is None
-    assert pred.train_native_size == [TILE, TILE]
+    assert pred.train_native_size == (TILE, TILE)
     assert pred.train_augmentation == {"resize": {"size": [32, 32]}}
 
 
@@ -585,7 +598,10 @@ def test_delivery_grade_evaluation_admits_a_native_frame_basis_and_reproduces_th
         lambda *a, **kw: _persisted_regime_predictor(),
     )
     persisted = run_full_frame_evaluation(
-        checkpoint, checkpoint_admission(checkpoint, images_dir), stated=stated
+        checkpoint,
+        checkpoint_admission(checkpoint, images_dir),
+        stated=stated,
+        **SCORED,
     )
     monkeypatch.setattr(
         predictor_mod,
@@ -593,7 +609,10 @@ def test_delivery_grade_evaluation_admits_a_native_frame_basis_and_reproduces_th
         lambda *a, **kw: _native_frame_regime_predictor(),
     )
     native = run_full_frame_evaluation(
-        checkpoint, checkpoint_admission(checkpoint, images_dir), stated=stated
+        checkpoint,
+        checkpoint_admission(checkpoint, images_dir),
+        stated=stated,
+        **SCORED,
     )
     monkeypatch.undo()
 
@@ -697,6 +716,7 @@ def test_delivery_grade_evaluation_forwards_the_native_frame_resize_into_predict
         checkpoint,
         checkpoint_admission(checkpoint, images_dir),
         stated=Stated(**SAMPLE_DETECTOR_PASS),
+        **SCORED,
     )
 
     assert "error" not in r

@@ -23,13 +23,14 @@ from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
 from tcip_mcp.pipelines.data.label_queries import registry_scope  # noqa: E402
 from tcip_mcp.pipelines.data.selection import ClassScope  # noqa: E402
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
-from tcip_mcp.pipelines.schemas import ScoreWeights  # noqa: E402
+from tcip_mcp.pipelines.schemas import COMPARABILITY_IOU, ScoreWeights  # noqa: E402
 from tcip_mcp.pipelines.training.eval_runners import (  # noqa: E402
     evaluation_result,
     run_test_evaluation,
 )
 from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     classification_metrics,
+    comparability_criterion,
     compute_composite_objective,
     concordance_correlation_coefficient,
     derive_operating_point_curve,
@@ -504,9 +505,10 @@ def test_resolve_match_criterion_scales_a_center_match_to_the_reference():
     )
 
 
-def test_resolve_match_criterion_no_trait_is_iou_comparability_convention():
-    result = resolve_match_criterion(None, [])
+def test_the_comparability_criterion_is_iou_matching_under_no_trait():
+    result = comparability_criterion(COMPARABILITY_IOU, by_mask=False)
     assert result["kind"] == "iou_match"
+    assert result["iou_threshold"] == COMPARABILITY_IOU
     assert result["trait"] is None
 
 
@@ -555,7 +557,7 @@ def test_resolve_match_criterion_iou_match_refuses_a_reference_with_no_box_to_de
         iou_margin=fx.IOU_MARGIN,
     )
     with pytest.raises(ValueError, match="no ground-truth box"):
-        resolve_match_criterion(trait, [], iou_threshold=0.42)
+        resolve_match_criterion(trait, [])
 
 
 # --------------------------------------------------------------------------
@@ -1075,9 +1077,9 @@ def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts(
         dims = {"ordinal": {"num_ranks": 3}, "regression": {}}.get(
             task, {"num_classes": 2}
         )
-        from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
+        from tcip_mcp.pipelines.model_contract import DETECTOR_TASKS
 
-        detector = task in DETECTION_TASKS
+        detector = task in DETECTOR_TASKS
         result = evaluate(
             model,
             loader,
@@ -1205,6 +1207,8 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(
         ).runnable(),
         None,
         "cpu",
+        iou_threshold=IOU_THRESHOLD,
+        trait=None,
     )
 
     images_dir = tmp_path / "ff" / "images" / UNDATED_BUCKET
@@ -1234,6 +1238,8 @@ def test_both_eval_regimes_share_common_keys_and_keep_their_own_apart(
         checkpoint,
         checkpoint_admission(checkpoint, images_dir),
         stated=Stated(tile_size=32, overlap=0.0, **SAMPLE_DETECTOR_PASS),
+        iou_threshold=IOU_THRESHOLD,
+        trait=None,
     )
 
     for field in common_fields:
@@ -1303,15 +1309,18 @@ def test_a_full_frame_evaluation_merges_at_the_threshold_its_ground_truth_derive
     )
     admission = checkpoint_admission(checkpoint, images_dir)
     stated = Stated(tile_size=32, overlap=0.0, conf=SAMPLE_CONF)
+    scored = {"iou_threshold": IOU_THRESHOLD, "trait": None}
 
     if not derives:
         with pytest.raises(ExecutionRefusedError, match="cross_tile_nms"):
-            run_full_frame_evaluation(checkpoint, admission, stated=stated)
+            run_full_frame_evaluation(
+                checkpoint, admission, stated=stated, **scored
+            )
         return
     from tests._verified_checkpoint_fixtures import objects_over
 
     execution = run_full_frame_evaluation(
-        checkpoint, admission, stated=stated
+        checkpoint, admission, stated=stated, **scored
     )["execution"]
     assert execution["sources"]["cross_tile_nms"] == CROSS_TILE_NMS_DERIVATION
     assert execution["cross_tile_nms"] == pytest.approx(
@@ -1511,7 +1520,10 @@ def test_score_predictions_folder_counts_every_image_through_the_matcher(
     from tests.conftest import DATA_DIR_BUCKET
 
     r = score_predictions(
-        str(data_dir / "images" / "2-11-26"), DATA_DIR_BUCKET
+        str(data_dir / "images" / "2-11-26"),
+        DATA_DIR_BUCKET,
+        iou_threshold=0.5,
+        conf_threshold=0.25,
     )
     assert "map50" in r
     # fixture: each image has 2 GT, predictions = 1 TP + 1 FP -> tp=1,fp=1,fn=1 per image

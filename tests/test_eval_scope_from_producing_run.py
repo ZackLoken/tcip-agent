@@ -62,6 +62,7 @@ def test_run_id_evaluation_scopes_ground_truth_to_the_runs_own_subject(
     from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._producer_fixtures import admit_over
+    from tests._training_values import IOU_THRESHOLD
     from tests._verified_checkpoint_fixtures import (
         SAMPLE_DETECTOR_PASS,
         finished_run,
@@ -89,6 +90,7 @@ def test_run_id_evaluation_scopes_ground_truth_to_the_runs_own_subject(
         run_dir.name,
         str(images_dir),
         stated=Stated(**SAMPLE_DETECTOR_PASS),
+        iou_threshold=IOU_THRESHOLD,
     )
     assert "error" not in res, res
 

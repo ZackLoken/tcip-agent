@@ -8,12 +8,13 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Literal, cast
+from typing import TYPE_CHECKING, Annotated, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 import tcip_store as ts
 from tcip_mcp.audit import now_iso
+from tcip_mcp.pipelines.schemas import TraitRevisionRef
 from tcip_store import Key
 
 if TYPE_CHECKING:
@@ -461,15 +462,13 @@ class TraitRevision(BaseModel):
         return self.confirmed_at is not None and self.withdrawn_at is None
 
     @property
-    def ref(self) -> dict[str, Any]:
-        """This revision as every record and delivered file names it: the trait, the revision
-        number and the entry's content hash.
-        """
-        return {
-            "trait": self.entry.name,
-            "trait_revision": self.number,
-            "trait_revision_sha256": self.entry_sha256,
-        }
+    def ref(self) -> TraitRevisionRef:
+        """This revision as every record and delivered file names it."""
+        return TraitRevisionRef(
+            trait=self.entry.name,
+            trait_revision=self.number,
+            trait_revision_sha256=self.entry_sha256,
+        )
 
 
 class TraitRecord(BaseModel):
@@ -490,6 +489,24 @@ class TraitRecord(BaseModel):
         ``None``.
         """
         return next((r for r in reversed(self.revisions) if r.confirmed), None)
+
+    def revision(self, number: int, entry_sha256: str) -> TraitRevision:
+        """Revision ``number``, which must hold the entry ``entry_sha256`` hashes. Refuses
+        (``ValueError``) a number no revision holds, and (:class:`RevisionMovedError`) a revision
+        whose entry hash is another.
+        """
+        name = self.latest.entry.name
+        if not 1 <= number <= len(self.revisions):
+            raise ValueError(
+                f"trait {name!r} has revisions 1 to {len(self.revisions)}, not {number}"
+            )
+        revision = self.revisions[number - 1]
+        if entry_sha256 != revision.entry_sha256:
+            raise RevisionMovedError(
+                f"revision {number} of {name!r} holds entry {revision.entry_sha256}, not the "
+                f"{entry_sha256} named; re-read it"
+            )
+        return revision
 
 
 # ── the store ────────────────────────────────────────────────────────────────
@@ -655,7 +672,7 @@ def propose_trait(
 
 
 class RevisionMovedError(ValueError):
-    """Raised when a confirmation's hash is not the hash of the revision it names."""
+    """Raised when a hash named for a revision is not the hash of that revision's entry."""
 
 
 def confirm_revision(
@@ -682,19 +699,9 @@ def confirm_revision(
 
     key = trait_key(project, trait)
     with ts.transaction(key) as txn:
-        revisions = list(
-            _record(trait, project, txn.read(key, default=None)).revisions
-        )
-        if not 1 <= number <= len(revisions):
-            raise ValueError(
-                f"trait {trait!r} has revisions 1 to {len(revisions)}, not {number}"
-            )
-        revision = revisions[number - 1]
-        if entry_sha256 != revision.entry_sha256:
-            raise RevisionMovedError(
-                f"revision {number} of {trait!r} holds entry {revision.entry_sha256}, not the "
-                f"{entry_sha256} that was shown; re-read it and confirm what it holds"
-            )
+        record = _record(trait, project, txn.read(key, default=None))
+        revision = record.revision(number, entry_sha256)
+        revisions = list(record.revisions)
         if confirmed and revision.confirmed_at is not None:
             raise ValueError(
                 f"revision {number} of {trait!r} was already confirmed"
