@@ -192,8 +192,7 @@ def test_an_admitted_sample_enters_at_its_admitted_version_under_the_root_as_spe
     samples = admitted_membership(
         [("2026-02-11", root / "images" / "2026-02-11", None)],
         scope=ClassScope(subject="bud"),
-        group_by="tile_prefix",
-        group_key_map=None,
+        grouping="tile_prefix",
     ).samples.values()
     admitted = dataset_fingerprint(root, samples)
     assert admitted is not None

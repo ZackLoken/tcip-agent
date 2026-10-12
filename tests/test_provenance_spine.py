@@ -96,6 +96,7 @@ def test_draw_splits_selection_embeds_digests_and_seed(data_dir, tmp_path):
     from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.tools.data_tools import draw_splits
     from tests._producer_fixtures import label_image
+    from tests._training_values import drawn_split
 
     images_dir = data_dir / "images" / "2-11-26"
     Image.new("RGB", (640, 480), color=(128, 128, 128)).save(
@@ -113,11 +114,14 @@ def test_draw_splits_selection_embeds_digests_and_seed(data_dir, tmp_path):
         tmp_path,
         str(data_dir),
         output_path=str(out),
-        seed=7,
         subject="bud",
-        val_ratio=0.25,
-        calibration_ratio=0.125,
-        holdout_ratio=0.125,
+        **drawn_split(
+            seed=7,
+            val_ratio=0.25,
+            calibration_ratio=0.125,
+            holdout_ratio=0.125,
+            grouping="tile_prefix",
+        ),
     )
     assert result["seed"] == 7
     drawn = read_selection(out, project=tmp_path)

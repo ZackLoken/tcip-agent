@@ -7,14 +7,16 @@ carrying a ``training`` key is refused by name.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, Literal, NamedTuple, cast, get_args
+from typing import Annotated, Any, Literal, NamedTuple, cast, get_args
 
 from pydantic import (
     AfterValidator,
     BaseModel,
     ConfigDict,
+    Discriminator,
     Field,
     PositiveInt,
+    Tag,
     ValidationError,
     ValidationInfo,
     model_validator,
@@ -35,28 +37,57 @@ ResolvedPath = Annotated[str, AfterValidator(_located)]
 holds), and that location is read and recorded."""
 
 
-class StageSpec(BaseModel):
+class _Stated(BaseModel):
+    """A block a config states: a key outside its fields refuses by name, and ``rationale``
+    carries why the block states what it does.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    rationale: str = Field(min_length=1)
+
+
+class SamplerSpec(_Stated):
+    """``sampler``: the train loader's sampler ``name`` names (``samplers.build_sampler``), its
+    own values kept as stated beside the block's ``rationale``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+    name: str
+
+
+class AugmentationSpec(_Stated):
+    """``augmentation``: each transform's name (``augmentations.build_augmentation``) to the
+    values its constructor takes, kept as stated in order beside the block's ``rationale``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
+class StageSpec(_Stated):
     """One progressive-unfreeze step: the trainer reads ``freeze_to`` and the stage's own
     ``gradient_accumulation_steps``, while the learning rate comes from the top-level
     ``optimizer`` block, never per stage. Any other key, a per-stage ``lr`` or ``epochs``
     included, is refused by name.
     """
 
-    model_config = ConfigDict(extra="forbid")
-    freeze_to: int = 0
+    freeze_to: int
+    """``0`` trains every parameter, ``-1`` freezes every backbone stage, a positive count
+    freezes that many (``generic_trainer.apply_stage_freeze``)."""
     gradient_accumulation_steps: int | None = Field(None, ge=1)
     """``None``, stated or not, is the run's own top-level ``gradient_accumulation_steps``."""
 
 
-class EarlyStoppingSpec(BaseModel):
+class EarlyStoppingSpec(_Stated):
     """The stop rule that ends a stage and the run: a stage ends once its selection value has not
-    improved by ``min_delta`` for ``patience`` epochs, and the run ends with the stage whose best
-    does not improve by ``min_delta`` on the best of the stage before it.
+    improved by ``min_delta`` for ``patience`` epochs, the run ends with the stage whose best
+    does not improve by ``min_delta`` on the best of the stage before it, and the run stops as
+    diverged after ``nonfinite_passes`` consecutive full training passes with no finite batch
+    loss.
     """
 
-    model_config = ConfigDict(extra="forbid")
     patience: int = Field(ge=1)
     min_delta: float = Field(ge=0)
+    nonfinite_passes: int = Field(ge=1)
 
 
 class TraitRevisionRef(BaseModel):
@@ -70,26 +101,17 @@ class TraitRevisionRef(BaseModel):
     trait_revision_sha256: str
 
 
-class Objective(BaseModel):
-    """A run's objective, resolved once at launch: the metric its epochs are selected by, that
-    metric's declared direction, and ``revision``, the confirmed revision of the trait its
-    evaluation names that every evaluation of the run scores under (``None`` for a run naming
-    no trait).
-    """
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    selection_metric: str
-    higher_is_better: bool
-    revision: TraitRevisionRef | None
+def revision_record(ref: TraitRevisionRef | None) -> dict | None:
+    """``ref`` as every record stores it, ``None`` for a run whose evaluation names no trait."""
+    return None if ref is None else ref.model_dump()
 
 
-class OptimizerSpec(BaseModel):
+class OptimizerSpec(_Stated):
     """The optimizer every stage builds (``optimizer_factory.build_optimizer``): its family and
     its tuned settings required (both rates, the weight decay, and ``momentum`` for ``sgd`` and
     for no other optimizer).
     """
 
-    model_config = ConfigDict(extra="forbid")
     name: str
     backbone_lr: float = Field(gt=0)
     head_lr: float = Field(gt=0)
@@ -106,12 +128,11 @@ class OptimizerSpec(BaseModel):
         return self
 
 
-class HorizonSchedule(BaseModel):
+class HorizonSchedule(_Stated):
     """A schedule built over its own ``horizon_epochs`` scheduled epochs, the most a stage under
     it runs past its warmup.
     """
 
-    model_config = ConfigDict(extra="forbid")
     horizon_epochs: int = Field(ge=1)
 
 
@@ -122,28 +143,43 @@ class CosineSchedule(HorizonSchedule):
     eta_min: float
 
 
-class PlateauSchedule(BaseModel):
-    """The rate times ``factor`` once the validation loss has not improved for ``patience``
-    epochs.
+class PlateauSchedule(_Stated):
+    """The rate times ``factor`` once the validation loss has not improved, by ``threshold`` in
+    ``threshold_mode``, for ``patience`` epochs, then ``cooldown`` epochs before the count
+    resumes, never below ``min_lr``, a change smaller than ``eps`` not applied
+    (``torch.optim.lr_scheduler.ReduceLROnPlateau``).
     """
 
-    model_config = ConfigDict(extra="forbid")
     type: Literal["plateau"]
     factor: float
     patience: int
+    threshold: float
+    threshold_mode: Literal["rel", "abs"]
+    cooldown: int
+    min_lr: float
+    eps: float
 
 
 class OneCycleSchedule(HorizonSchedule):
-    """One cycle over the block's horizon peaking at ``max_lr``."""
+    """One cycle over the block's horizon peaking at ``max_lr``, each of
+    ``torch.optim.lr_scheduler.OneCycleLR``'s own settings stated.
+    """
 
     type: Literal["onecycle"]
     max_lr: float
+    pct_start: float
+    anneal_strategy: Literal["cos", "linear"]
+    cycle_momentum: bool
+    base_momentum: float
+    max_momentum: float
+    div_factor: float
+    final_div_factor: float
+    three_phase: bool
 
 
-class StepSchedule(BaseModel):
+class StepSchedule(_Stated):
     """The rate times ``gamma`` every ``step_size`` epochs."""
 
-    model_config = ConfigDict(extra="forbid")
     type: Literal["step"]
     step_size: int
     gamma: float
@@ -182,16 +218,69 @@ COMPARABILITY_IOU = AP_IOU_THRESHOLDS[0]
 """The comparability convention: the IoU a match must reach where no trait's criterion governs,
 COCO's first average-precision threshold, the one ``map50`` reports at."""
 
+SelectionMetric = Literal[
+    "loss",
+    "objective",
+    "mae",
+    "rmse",
+    "precision",
+    "recall",
+    "f1",
+    "map",
+    "map50",
+    "iou_precision",
+    "iou_recall",
+    "iou_f1",
+    "accuracy",
+    "rank_acc",
+    "quadratic_weighted_kappa",
+    "r_squared",
+    "mIoU",
+    "dice",
+    "pixel_acc",
+]
+"""Every directed scalar metric, by its bare (un-``val_``-prefixed) name; a raw count, a signed
+bias and a non-finite state companion have no direction."""
 
-class EvaluationSpec(BaseModel):
+_LOWER_IS_BETTER: frozenset[SelectionMetric] = frozenset(
+    {"loss", "objective", "mae", "rmse"}
+)
+
+HIGHER_IS_BETTER_BY_METRIC: dict[str, bool] = {
+    metric: metric not in _LOWER_IS_BETTER for metric in get_args(SelectionMetric)
+}
+"""Direction of a better value for each :data:`SelectionMetric`."""
+
+CENTER_MATCH_COMPARABILITY_KEYS: frozenset[str] = frozenset(
+    {
+        "map50",
+        "map",
+        "iou_precision",
+        "iou_recall",
+        "iou_f1",
+    }
+)
+"""The metric keys reported comparability-only (``map50_role``) under a trait's own governing
+criterion: the IoU-convention average precision and counts."""
+
+
+def selection_of(metric: str) -> tuple[str, bool]:
+    """``metric``, a validated config's ``evaluation.selection_metric``, and whether a higher
+    value of it ranks better (:data:`HIGHER_IS_BETTER_BY_METRIC`): the one read of a run's or a
+    sweep's selection and its direction.
+    """
+    return metric, HIGHER_IS_BETTER_BY_METRIC[metric]
+
+
+class EvaluationSpec(_Stated):
     """What a run's validation pass scores against: the confirmed trait it selects for, the
-    selection metric (resolved by ``generic_trainer.resolve_selection_metric``), and the
-    thresholds and score weights the validation pass applies.
+    selection metric, one with a declared ranking direction (:data:`SelectionMetric`, checked
+    over the run by ``generic_trainer.resolve_selection_metric``), and the thresholds and score
+    weights the validation pass applies.
     """
 
-    model_config = ConfigDict(extra="forbid")
     trait: str | None = None
-    selection_metric: str | None = None
+    selection_metric: SelectionMetric
     conf_threshold: float | None = Field(None, ge=0, le=1)
     """The confidence a detector's validation counts boxes at."""
     iou_threshold: float = COMPARABILITY_IOU
@@ -200,12 +289,11 @@ class EvaluationSpec(BaseModel):
     score_weights: ScoreWeights | None = None
 
 
-class LrScalingSpec(BaseModel):
+class LrScalingSpec(_Stated):
     """Effective-batch LR scaling: each stage's learning rates times ``(its effective batch / the
     first stage's) ** scale_power``, capped at ``max_lr`` when one is stated.
     """
 
-    model_config = ConfigDict(extra="forbid")
     scale_power: float
     max_lr: float | None = Field(None, gt=0)
 
@@ -262,26 +350,48 @@ class DatasetSourceSchema(BaseModel):
     source_files: list[ResolvedPath] | None = None
 
 
-class SplitSpec(BaseModel):
-    """``data.split``: a bound selection (``selection_dir``, ``redraw_within_selection``), or the
-    parameters a run drawing its own split states.
+class BoundSplit(BaseModel):
+    """``data.split`` bound to the selection recorded at ``selection_dir``: its train and val
+    sides as recorded, or, with a ``seed`` stated, redrawn inside them at it. The draw's reason
+    is the selection's own record.
     """
 
     model_config = ConfigDict(extra="forbid")
-    selection_dir: ResolvedPath | None = None
-    redraw_within_selection: bool = False
+    selection_dir: ResolvedPath
     seed: int | None = None
-    group_by: str | None = None
-    group_key_map: dict[str, str] | None = None
-    stratify_foreground: bool = True
-    val_ratio: float | None = None
-    calibration_ratio: float | None = None
-    holdout_ratio: float | None = None
 
-    @property
-    def stated(self) -> set[str]:
-        """The keys this section states a value for."""
-        return set(self.model_dump(exclude_unset=True, exclude_none=True))
+
+class DrawnSplit(_Stated):
+    """``data.split`` a run draws itself at ``seed``: each side but ``train`` at its stated
+    ``<side>_ratio`` (zero draws no such side, ``train`` the remainder), balanced by foreground
+    count when ``stratify_foreground``, grouped by ``grouping``: a named policy, or an explicit
+    ``{<capture>/<stem>: group_key}`` map covering every member.
+    """
+
+    seed: int
+    val_ratio: float
+    calibration_ratio: float
+    holdout_ratio: float
+    stratify_foreground: bool
+    grouping: str | dict[str, str]
+
+
+def _split_kind(value: Any) -> str:
+    """``"bound"`` for a ``data.split`` naming a ``selection_dir``, else ``"drawn"``."""
+    held = (
+        value.get("selection_dir")
+        if isinstance(value, dict)
+        else getattr(value, "selection_dir", None)
+    )
+    return "drawn" if held is None else "bound"
+
+
+SplitSpec = Annotated[
+    Annotated[BoundSplit, Tag("bound")] | Annotated[DrawnSplit, Tag("drawn")],
+    Discriminator(_split_kind),
+]
+"""``data.split``: :class:`BoundSplit` when it names a ``selection_dir``, else
+:class:`DrawnSplit`."""
 
 
 Rect = tuple[int, int, int, int]
@@ -319,19 +429,17 @@ class SpatialManifest(BaseModel):
     raster_content_identity: dict
 
 
-class TilingSpec(BaseModel):
-    """``data.tiling``: whether a run tiles its loader (:func:`run_tiling`), the
+class TilingSpec(_Stated):
+    """``data.tiling``, stated for a run that tiles its loader (:func:`run_tiling`): the
     ``datasets.TiledDetectionDataset`` options it states (an unstated edge and overlap derived,
-    every other unstated option the tiler's default), and a within-image spatial split's
-    ``buffer``. A key outside these fields refuses by name.
+    an unstated sliver fraction derived by the tiler), whether a tile holding no object trains
+    (``skip_empty``), and a within-image spatial split's ``buffer``.
     """
 
-    model_config = ConfigDict(extra="forbid")
-    enabled: bool = True
     tile_size: int | None = None
     overlap: float | None = None
     sliver_frac: float | None = None
-    skip_empty: bool | None = None
+    skip_empty: bool
     keep_regions: list[Rect] | None = None
     buffer: int | None = None
 
@@ -340,23 +448,22 @@ class TilingSpec(BaseModel):
         an option it leaves ``None`` is omitted.
         """
         return self.model_dump(
-            exclude_none=True, exclude={"enabled", "buffer", *exclude}
+            exclude_none=True, exclude={"rationale", "buffer", *exclude}
         )
 
 
 def run_tiling(task: str, tiling: TilingSpec | None) -> TilingSpec | None:
-    """The tiling a run of ``task`` builds its loaders at: ``tiling`` when it is stated and
-    enabled, ``None`` otherwise. A task outside ``model_contract.TILING_TASKS`` trains whole
-    frames, so an enabled ``tiling`` for one refuses (``ValueError``) naming the task and
-    ``data.tiling``.
+    """The tiling a run of ``task`` builds its loaders at: ``tiling``, ``None`` for a run stating
+    none. A task outside ``model_contract.TILING_TASKS`` trains whole frames, so a ``tiling``
+    stated for one refuses (``ValueError``) naming the task and ``data.tiling``.
     """
     from tcip_mcp.pipelines.model_contract import TILING_TASKS
 
-    if tiling is None or not tiling.enabled:
+    if tiling is None:
         return None
     if task not in TILING_TASKS:
         raise ValueError(
-            f"data.tiling is enabled for a run of task {task!r}: only a "
+            f"data.tiling is stated for a run of task {task!r}: only a "
             f"{sorted(TILING_TASKS)} run trains and predicts over tiles, its targets clipped "
             "to each one, so this run would never read the tiling it states. Drop data.tiling."
         )
@@ -385,10 +492,7 @@ class DataSpec(_Recorded):
     images_dir: ResolvedPath | None = None
     labels_dir: ResolvedPath | None = None
     dataset_source: DatasetSourceSchema | None = None
-    split: SplitSpec = Field(
-        default_factory=lambda: SplitSpec.model_validate({})
-    )
-    auto_val: bool = True
+    split: SplitSpec
     scope: ClassScope | None = None
     tiling: TilingSpec | None = None
     num_channels: int | None = None
@@ -457,42 +561,42 @@ class TrainerReads(NamedTuple):
 class TrainConfigSchema(_Recorded):
     """The one training config shape: trainer keys at the top level, no nested section; a key
     outside these fields is a bespoke loop's own and is kept as stated. It requires
-    ``model_source`` and ``data`` alone; what training reads besides is
-    :meth:`trainer_reads`.
+    ``model_source``, ``data``, ``evaluation``, the seeding and precision every trainer reads,
+    and ``rationale``, the reason for the top-level values it states; what training reads
+    besides is :meth:`trainer_reads`.
     """
 
     model_config = ConfigDict(extra="allow", protected_namespaces=())
     model_source: ModelSourceSchema
     data: DataSpec
+    rationale: str = Field(min_length=1)
     training_source: str | None = Field(None, min_length=1)
     """A bespoke ``train(ctx)`` loop, a dotted ``module:function``; ``None`` for the default
     trainer."""
     batch_size: int | None = Field(None, ge=1)
     num_workers: int = Field(0, ge=0)
-    sampler: dict | None = None
-    """The train loader's sampler (``samplers.build_sampler``), its ``name`` beside its own
-    values; ``None`` draws every sample once an epoch in shuffled order."""
-    augmentation: dict | None = None
+    sampler: SamplerSpec | None = None
+    """``None`` draws every sample once an epoch in shuffled order."""
+    augmentation: AugmentationSpec | None = None
     device: str | None = None
     """``None``: cuda when available, else cpu."""
-    seed: int | None = None
-    deterministic: bool = False
-    mixed_precision: bool = True
+    seed: int
+    deterministic: bool
+    """Whether cuDNN runs its deterministic algorithms (``generic_trainer.set_seed``)."""
+    mixed_precision: bool
+    """Whether a cuda run trains under automatic mixed precision."""
     stages: list[StageSpec] | None = Field(None, min_length=1)
     gradient_accumulation_steps: int = Field(1, ge=1)
     optimizer: OptimizerSpec | None = None
     scheduler: SchedulerSpec | None = None
     stage_warmup_epochs: int = Field(0, ge=0)
-    enforce_monotonic_unfreeze: bool = True
     checkpoint_every_n_epochs: int | None = Field(None, ge=0)
     early_stopping: EarlyStoppingSpec | None = None
     lr_scaling: LrScalingSpec | None = None
     log_every_n_batches: int | None = Field(None, ge=1)
     """``None``: ``generic_trainer.BATCH_ROWS_PER_EPOCH`` rows an epoch
     (``generic_trainer.batch_row_ends``)."""
-    evaluation: EvaluationSpec = Field(
-        default_factory=lambda: EvaluationSpec.model_validate({})
-    )
+    evaluation: EvaluationSpec
 
     @model_validator(mode="before")
     @classmethod

@@ -39,6 +39,7 @@ from tests._producer_fixtures import dataset_over, label_image, run_over  # noqa
 from tests._training_values import (  # noqa: E402
     IOU_THRESHOLD,
     adamw_optimizer,
+    drawn_split,
     evaluation_block,
 )
 from tests.tiny_trainer_fixtures import write_regression_dataset  # noqa: E402
@@ -68,7 +69,7 @@ def _train_config(model_source: dict, data: dict, batch_size: int) -> dict:
     from tests._chain_fixtures import training_config
 
     # No val_loader at any call site below: loss is the only metric coherent to select on
-    # without one, detection/instance_seg's own default (objective) needs a validation pass.
+    # without one.
     return training_config(
         model_source,
         data,
@@ -92,7 +93,9 @@ def _trained(
         worker_run(
             tmp_path,
             _train_config(
-                model_source, {**data, "auto_val": False}, batch_size
+                model_source,
+                {**data, "split": drawn_split(val_ratio=0.0)},
+                batch_size,
             ),
         )
     )

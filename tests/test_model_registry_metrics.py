@@ -135,7 +135,7 @@ def test_rank_registered_models_refusals_name_no_argument_a_breeder_would_not_pa
     ]
 
     assert no_direction == (
-        "'val_map99' has no declared ranking direction (evaluation.HIGHER_IS_BETTER_BY_METRIC "
+        "'val_map99' has no declared ranking direction (schemas.HIGHER_IS_BETTER_BY_METRIC "
         "names no entry for it). State a direction to rank by it anyway, or pick one of the "
         "available metrics."
     )
@@ -259,6 +259,7 @@ def test_a_completed_runs_metrics_come_from_its_best_checkpoint_not_its_last_epo
     torch = pytest.importorskip("torch")
     from tcip_mcp.experiments import METRICS_FILE, partition_rows, read_rows
     from tcip_mcp.model_registry import ModelRegistry
+    from tests._training_values import drawn_split
     from tests._verified_checkpoint_fixtures import worker_run
     from tests.tiny_trainer_fixtures import (
         regressor_config,
@@ -275,7 +276,7 @@ def test_a_completed_runs_metrics_come_from_its_best_checkpoint_not_its_last_epo
             data={
                 "images_dir": str(images_dir),
                 "labels_dir": str(csv_path),
-                "auto_val": False,
+                "split": drawn_split(val_ratio=0.0),
             },
         ),
         experiment_id="exp-best",

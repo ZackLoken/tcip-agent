@@ -3,7 +3,12 @@
 import pytest
 
 from tests._chain_fixtures import CLASSIFIER_SOURCE
-from tests._training_values import schedule
+from tests._training_values import (
+    drawn_split,
+    evaluation_block,
+    schedule,
+    stage,
+)
 
 torch = pytest.importorskip("torch")
 
@@ -57,10 +62,11 @@ def test_cancel_before_training_yields_canceled(tmp_path):
         {
             "images_dir": str(images_dir),
             "labels_dir": str(labels),
-            "auto_val": False,
+            "split": drawn_split(val_ratio=0.0),
         },
-        stages=[{"freeze_to": -1}],
+        stages=[stage(-1)],
         scheduler=schedule("cosine", horizon_epochs=3),
+        evaluation=evaluation_block(selection_metric="loss"),
     )
     ctx = run_context(tmp_path, cfg)
     request_cancel(ctx.run_dir)  # request cancellation before any epoch runs

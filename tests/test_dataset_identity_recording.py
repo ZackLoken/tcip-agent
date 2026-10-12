@@ -14,6 +14,7 @@ import pytest
 
 from tcip_mcp.experiments import compare_experiments
 from tests._chain_fixtures import training_config
+from tests._training_values import drawn_split
 from tests._verified_checkpoint_fixtures import BUILT_DETECTOR, opened_run
 
 SUBJECT = "bud"
@@ -52,7 +53,7 @@ def _config(images_dir: Path) -> dict:
         {
             "images_dir": str(images_dir),
             "scope": {"subject": SUBJECT},
-            "split": {"seed": 0, "val_ratio": 0.15},
+            "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
         },
     )
 
@@ -106,7 +107,7 @@ def test_compare_experiments_mixed_none_fingerprint_is_unknown_not_same(
             },
             {
                 **table_images(tmp_path / "loose"),
-                "split": {"seed": 0, "val_ratio": 0.15},
+                "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
             },
         ),
         experiment_id="b",
@@ -128,12 +129,17 @@ def test_dataset_identity_helper_registered_vs_bespoke(tmp_path):
     reg = register_dataset(tmp_path, str(tmp_path), crop="currant")
     ds_id, fp = dataset_identity(
         DataSpec.model_validate(
-            {"images_dir": str(tmp_path / "images" / "2-11-26")}
+            {
+                "images_dir": str(tmp_path / "images" / "2-11-26"),
+                "split": drawn_split(),
+            }
         )
     )
     assert ds_id == reg["id"] and fp == reg["fingerprint"]
     # bespoke / imageless run -> no fabricated identity
-    assert dataset_identity(DataSpec.model_validate({})) == (None, None)
+    assert dataset_identity(
+        DataSpec.model_validate({"split": drawn_split()})
+    ) == (None, None)
 
 
 def test_dataset_identity_raises_a_fingerprint_read_failure(
@@ -159,7 +165,10 @@ def test_dataset_identity_raises_a_fingerprint_read_failure(
     with pytest.raises(OSError, match="simulated I/O error"):
         dataset_identity(
             DataSpec.model_validate(
-                {"images_dir": str(tmp_path / "images" / "2-11-26")}
+                {
+                    "images_dir": str(tmp_path / "images" / "2-11-26"),
+                    "split": drawn_split(),
+                }
             )
         )
 
@@ -231,7 +240,7 @@ def test_a_launch_records_the_identity_of_the_dataset_it_trains_on(
             {
                 "images_dir": str(images_dir),
                 "scope": {"subject": SUBJECT},
-                "split": {"seed": 0, "val_ratio": 0.15},
+                "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
             },
         ),
         actor=None,

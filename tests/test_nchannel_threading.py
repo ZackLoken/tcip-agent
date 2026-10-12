@@ -8,6 +8,7 @@ import pytest
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._chain_fixtures import CLASSIFIER_SOURCE, training_config
 from tests._producer_fixtures import dataset_over  # noqa: E402
+from tests._training_values import drawn_split  # noqa: E402
 
 torch = pytest.importorskip("torch")
 
@@ -401,7 +402,7 @@ def _classification_data(
     data_cfg = {
         "images_dir": str(images_dir),
         "labels_dir": str(csv_path),
-        "split": {"group_by": "stem", "val_ratio": 0.5, "seed": 1},
+        "split": drawn_split(seed=1),
     }
     if num_channels is not None:
         data_cfg["num_channels"] = num_channels

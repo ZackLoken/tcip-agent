@@ -21,7 +21,13 @@ torchvision = pytest.importorskip("torchvision")
 
 from tests import REPO_ROOT, bespoke_models  # noqa: E402
 from tests._producer_fixtures import run_over  # noqa: E402
-from tests._training_values import adamw_optimizer, evaluation_block, schedule  # noqa: E402
+from tests._training_values import (  # noqa: E402
+    adamw_optimizer,
+    drawn_split,
+    evaluation_block,
+    schedule,
+    stage,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -93,12 +99,13 @@ class TestFullClassificationPipeline:
             {
                 "images_dir": images_dir,
                 "labels_dir": csv_path,
-                "split": {"seed": 0, "val_ratio": 0.34},
+                "split": drawn_split(val_ratio=0.34, grouping="tile_prefix"),
             },
-            stages=[{"freeze_to": -1}],
+            stages=[stage(-1)],
             batch_size=4,
             optimizer=adamw_optimizer(),
             scheduler=schedule("cosine", horizon_epochs=2),
+            evaluation=evaluation_block(selection_metric="loss"),
         )
         observation = observe(worker_run(tmp_path, config))
 
@@ -217,8 +224,12 @@ class TestDetectionPipelineRealData:
 
         config = training_config(
             model_source,
-            {**data, "images_dir": str(images_dir), "auto_val": False},
-            stages=[{"freeze_to": 0}],
+            {
+                **data,
+                "images_dir": str(images_dir),
+                "split": drawn_split(val_ratio=0.0),
+            },
+            stages=[stage(0)],
             evaluation=evaluation_block(selection_metric="loss"),
         )
         observation = observe(worker_run(tmp_path, config))

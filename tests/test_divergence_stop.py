@@ -1,7 +1,8 @@
-"""What the trainer does with a run whose loss goes non-finite: two consecutive full training
-passes with no finite batch loss stop the run as failed, uniform across loader shapes and reset
-at every stage boundary; anything short of that (one bad epoch, a single finite loss inside an
-otherwise-bad epoch, a healthy run) must never trip the same check.
+"""What the trainer does with a run whose loss goes non-finite: the count of consecutive full
+training passes with no finite batch loss its stop rule states (``nonfinite_passes``) stops the
+run as failed, uniform across loader shapes and reset at every stage boundary; anything short
+of that (fewer bad epochs, a single finite loss inside an otherwise-bad epoch, a healthy run)
+must never trip the same check.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ torch = pytest.importorskip("torch")
 
 from tcip_mcp.experiments import experiment_dir
 from tcip_mcp.pipelines.training.generic_trainer import train
+from tests._training_values import drawn_split, stage, stop_rule
 from tests.tiny_trainer_fixtures import (
     ALWAYS_DIVERGED_MODEL,
     MEAN_INTENSITY_REGRESSOR,
@@ -38,13 +40,14 @@ def _trained(
     batch_size: int = 2,
     stages: list[dict] | None = None,
     experiment_id: str | None = None,
+    nonfinite_passes: int = 2,
 ):
     """A regression run of ``builder`` over six training frames and no validation side, whose
-    stage the schedule's ``horizon`` ends, its stop rule's patience
-    (``_training_values.stop_rule``) past both that horizon and the two diverged passes that stop
-    a run, opened by the launcher's own producer and trained over its own loader: its
-    ``batch_size`` sets the batches-per-epoch shape a test reasons about (2 -> three
-    batches/epoch, 6 -> one batch/epoch).
+    stage the schedule's ``horizon`` ends, its stop rule (``_training_values.stop_rule``) stopping
+    it after ``nonfinite_passes`` diverged passes at a patience past that horizon, opened by the
+    launcher's own producer and trained over its own loader: its ``batch_size`` sets the
+    batches-per-epoch shape a test reasons about (2 -> three batches/epoch, 6 -> one
+    batch/epoch).
     """
     data = frames_data(
         tmp_path / "ds",
@@ -57,6 +60,7 @@ def _trained(
         builder=builder,
         builder_kwargs=builder_kwargs,
         batch_size=batch_size,
+        early_stopping=stop_rule(nonfinite_passes=nonfinite_passes),
     )
     if stages is not None:
         config["stages"] = stages
@@ -84,6 +88,34 @@ def test_a_run_whose_loss_never_recovers_stops_after_two_diverged_epochs(
     assert DIVERGED_PASSES_PHRASE in run.status_error
     assert "diverged" in run.status_error
     assert run.current_epoch == 2
+
+
+def test_a_run_stops_at_the_diverged_pass_count_its_stop_rule_states(tmp_path):
+    """A stop rule stating three diverged passes stops an always-diverged run at its third epoch
+    naming the count, and lets a run diverged for two passes, one short of it, recover and
+    complete.
+    """
+    stopped = _trained(
+        tmp_path / "stopped",
+        ALWAYS_DIVERGED_MODEL,
+        {},
+        horizon=30,
+        nonfinite_passes=3,
+    )
+    assert stopped.status == "failed"
+    assert "3 consecutive full training passes" in stopped.status_error
+    assert stopped.current_epoch == 3
+
+    # Three batches/epoch: six bad batches are two fully diverged epochs.
+    recovered = _trained(
+        tmp_path / "recovered",
+        TRANSIENT_BUILDER,
+        {"bad_batches": 6, "init_weight": 0.0},
+        horizon=4,
+        nonfinite_passes=3,
+    )
+    assert recovered.status == "completed", recovered.status_error
+    assert len(recovered.metrics_history) == 4
 
 
 def test_a_healthy_run_never_trips_the_divergence_check(tmp_path):
@@ -144,7 +176,7 @@ def test_stage_boundary_resets_the_diverged_epoch_counter(tmp_path):
         STEP_COUNTED_BUILDER,
         {"finite_at": [1, 2, 3, 10, 11, 12]},
         horizon=2,
-        stages=[{"freeze_to": 0}, {"freeze_to": 0}],
+        stages=[stage(0), stage(0)],
     )
 
     assert run.status == "completed", run.status_error
@@ -200,7 +232,7 @@ def test_launch_training_real_subprocess_reports_the_diverged_stop(
         data={
             "images_dir": str(images_dir),
             "labels_dir": str(csv_path),
-            "split": {"seed": 0, "val_ratio": 0.15},
+            "split": drawn_split(val_ratio=0.15),
         },
         builder="tiny_trainer_fixtures:build_pixel_sum_divide_model",
         batch_size=4,

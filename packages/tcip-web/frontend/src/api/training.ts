@@ -41,7 +41,7 @@ export interface SelectionChoice {
   train: number;
   val: number;
   calibration: number;
-  /** The recorded data.split keys choosing this partition drops (seed, group_by, ...). */
+  /** The recorded data.split keys choosing this partition drops (seed, grouping, ...). */
   replaced_split_keys: string[];
 }
 

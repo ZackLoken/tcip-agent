@@ -27,6 +27,7 @@ from tests._chain_fixtures import (  # noqa: E402
 )
 from tests._mapping_fixtures import write_plant_csv  # noqa: E402
 from tests._producer_fixtures import image_label_key, label_image  # noqa: E402
+from tests._training_values import drawn_split, tiling_block  # noqa: E402
 
 TILE = 32
 OVERLAP = 0.2
@@ -139,14 +140,14 @@ def _build_experiment(
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
-        "auto_val": True,
-        "tiling": {"enabled": True, "tile_size": TILE, "overlap": 0.2},
-        "split": {
-            "val_ratio": 0.2,
-            "holdout_ratio": 0.15,
-            "seed": 1,
-            "calibration_ratio": calibration_ratio,
-        },
+        "tiling": tiling_block(tile_size=TILE, overlap=0.2),
+        "split": drawn_split(
+            val_ratio=0.2,
+            holdout_ratio=0.15,
+            seed=1,
+            calibration_ratio=calibration_ratio,
+            grouping="tile_prefix",
+        ),
     }
     if plant_csv_paths:
         data_cfg["plant_csv_paths"] = plant_csv_paths
@@ -997,14 +998,14 @@ def _build_attribute_scoped_experiment(
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
-        "auto_val": True,
-        "tiling": {"enabled": True, "tile_size": TILE, "overlap": 0.2},
-        "split": {
-            "val_ratio": 0.2,
-            "holdout_ratio": 0.15,
-            "seed": 1,
-            "calibration_ratio": 0.15,
-        },
+        "tiling": tiling_block(tile_size=TILE, overlap=0.2),
+        "split": drawn_split(
+            val_ratio=0.2,
+            holdout_ratio=0.15,
+            seed=1,
+            calibration_ratio=0.15,
+            grouping="tile_prefix",
+        ),
     }
     completed = _completed_over(tmp_path, data_cfg, experiment_id)
     recorded_scope = run_resolution(

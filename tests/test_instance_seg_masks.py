@@ -18,6 +18,7 @@ from tests._producer_fixtures import (
     gray_frame,
     painted_array,
 )
+from tests._training_values import tiling_block
 
 torch = pytest.importorskip("torch")
 
@@ -172,7 +173,7 @@ UNSTATED_LATTICE_PASS = Stated(conf=0.0, cross_tile_nms=SAMPLE_CROSS_TILE_NMS)
 STRADDLING = [(4.0, 4.0), (124.0, 60.0), (4.0, 60.0)]
 """A stem's triangle, in a frame two :data:`TILE` px tiles wide, crossing the seam at x=64:
 within the second tile its diagonal edge starts at y=32, where its bounding box starts at y=4."""
-TRAINED_LATTICE = {"tile_size": TILE, "overlap": 0.0, "sliver_frac": 0.25}
+TRAINED_LATTICE = tiling_block(tile_size=TILE, overlap=0.0, sliver_frac=0.25)
 """The lattice the fixture run states: two tiles per frame; two objects derive no sliver
 spread, and a quarter of the triangle's size keeps both of its pieces."""
 
@@ -296,10 +297,7 @@ def test_an_instance_seg_run_trains_over_its_instances_clipped_to_each_tile(
         completed["path"], project=tmp_path
     ).spec.data.tiling
     assert recorded is not None
-    assert recorded.model_dump(exclude_none=True) == {
-        "enabled": True,
-        **TRAINED_LATTICE,
-    }
+    assert recorded.model_dump(exclude_none=True) == TRAINED_LATTICE
 
 
 def test_predict_sliced_require_masks_false_returns_boxes_only(

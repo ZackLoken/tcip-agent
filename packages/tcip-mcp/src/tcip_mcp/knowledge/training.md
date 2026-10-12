@@ -12,8 +12,11 @@ Multi-stage training for transfer learning:
 ```yaml
 stages:
   - freeze_to: -1    # Freeze entire backbone, train head only
-  - freeze_to: 2     # Unfreeze last 2 backbone layers
+    rationale: ...
+  - freeze_to: 2     # Freeze the first 2 backbone stages
+    rationale: ...
   - freeze_to: 0     # Full fine-tuning
+    rationale: ...
 ```
 
 Illustrative shape: the stage count and freeze depths above are one example, not a template;
@@ -22,10 +25,15 @@ shape.
 
 A stage carries no epoch count (a stage stating `epochs` is refused by name): it trains until
 the stop rule below ends it, or until a horizon-bound schedule reaches its horizon. Each stage
-has its own freeze depth and, optionally, its own
-`gradient_accumulation_steps`. Learning rate is not per-stage: the top-level `optimizer` block's
+states its own freeze depth, its `rationale` and, optionally, its own
+`gradient_accumulation_steps`. A nonzero `freeze_to` freezes through the model's own
+`freeze_backbone(stage)`, a negative one up to the `num_stages` its `backbone` declares; a model
+exposing neither is refused by name rather than trained unfrozen, and a non-decreasing trainable
+set is enforced across stages. Learning rate is not per-stage: the top-level `optimizer` block's
 `backbone_lr`/`head_lr` are stated for the first stage's target effective batch (a per-stage `lr`
-key is refused by name). The physical batch is the loader's `batch_size` and stays fixed for the
+key is refused by name). The model's own `get_param_groups(backbone_lr, head_lr)` places them
+when it defines one; otherwise its `backbone` module's parameters train at `backbone_lr` and the
+rest at `head_lr`, and a model with neither is refused when the two rates differ. The physical batch is the loader's `batch_size` and stays fixed for the
 run, so a later stage grows its effective batch through accumulation alone; an epoch's last
 accumulation window may hold fewer batches, and its loss is averaged over the batches it holds.
 Each epoch row records the stage's `target_eff_batch` (loader batch size times
@@ -50,10 +58,14 @@ checkpoint's), or none once a batch ran past that row.
 early_stopping:
   patience: ...   # epochs without an improvement of min_delta before a stage ends
   min_delta: ...  # the smallest change in the selection value that counts as improvement
+  nonfinite_passes: ...  # consecutive full passes with no finite batch loss that fail the run
+  rationale: ...
 ```
 
-The block is required and ships no default: both values are yours to set from the project in
-hand, and to state with your reason. Set `min_delta` from the selection metric's own
+The block is required and ships no default: every value is yours to set from the project in
+hand, and to state with your reason in its `rationale`. A run whose every batch loss is
+non-finite for `nonfinite_passes` consecutive full training passes stops as diverged, naming the
+count. Set `min_delta` from the selection metric's own
 epoch-to-epoch noise on this data (a change smaller than that noise is not an improvement), and
 `patience` from the project's earlier runs where they exist (how many flat epochs preceded a
 later gain); with no earlier run, choose one and say why. The rule reads the run's selection
@@ -72,11 +84,11 @@ ends on its plateau alone. `stage_warmup_epochs` warms each stage after the firs
 predecessor's rates with the schedule held, whatever the schedule.
 
 The stop rule and `model_best.pt` share the same selection criterion; there is no separate
-`metric`/`mode` key on `early_stopping`. Both are driven by `evaluation.selection_metric`
-(defaults to the composite objective for detection/instance_seg, `loss` otherwise; the objective
-blends its terms by the `evaluation.score_weights` block the run states, `schemas.ScoreWeights`,
-one non-negative weight per term, and a run selecting on it without them is refused by name),
-and both compare in whichever direction `evaluation.HIGHER_IS_BETTER_BY_METRIC` declares for that metric,
+`metric`/`mode` key on `early_stopping`. Both are driven by `evaluation.selection_metric`, which
+the run states (no default; `objective` blends its terms by the `evaluation.score_weights` block
+the run states, `schemas.ScoreWeights`, one non-negative weight per term, and a run selecting on
+it without them is refused by name; a run with no validation side selects on `loss` alone),
+and both compare in whichever direction `schemas.HIGHER_IS_BETTER_BY_METRIC` declares for that metric,
 not always "lower wins": selecting on `f1` keeps the highest-F1 checkpoint, selecting on `loss`
 keeps the lowest-loss one. A `selection_metric` with no declared direction is refused. For a
 count trait with a center-match criterion, an explicit `selection_metric` must be one of the
@@ -87,7 +99,8 @@ comparability metrics are rejected:
 evaluation:
   trait: catkin
   conf_threshold: ...    # a detector's: the confidence its validation counts boxes at
-  selection_metric: f1   # optional, omit to use the task's default (objective/loss)
+  selection_metric: f1   # required: the metric model_best.pt and the stop rule rank by
+  rationale: ...
 ```
 
 ## Config Structure
@@ -99,15 +112,18 @@ the plain blocks in `pipeline-design/SKILL.md`; don't re-derive it here.
 The example below is representative, not exhaustive; the config is an open dict, and
 `generic_trainer.train()`'s own docstring is the canonical, always-current list of every key it
 reads (device/seed/deterministic/mixed_precision/stages/optimizer/scheduler/lr_scaling/
-stage_warmup_epochs/enforce_monotonic_unfreeze/gradient_accumulation_steps/
+stage_warmup_epochs/gradient_accumulation_steps/
 checkpoint_every_n_epochs/log_every_n_batches/early_stopping). Read that docstring rather than assuming this
 example is complete. The tuned values ship no default: a launch (`preflight_config`,
 `launch_training`, a sweep's every checked point and every trial) requires `batch_size`, a detector's
 `evaluation.conf_threshold` under any trainer, and the `DefaultTrainerRegime` blocks (what the
 default trainer reads when no `training_source` names a loop of your own), each stated by the
 config or swept by a search, and refuses a config leaving one unstated, naming it. The schema
-itself requires only `model_source` and `data`, so a checkpoint's config validates as what
-inference reads. Every one of those keys, `evaluation` included, sits at the top level of
+itself requires `model_source`, `data` with its `split`, `seed`, `deterministic`,
+`mixed_precision`, `evaluation` with its `selection_metric`, and a `rationale` for the config and
+for every block it states (a stage, the optimizer, the schedule, the stop rule, the evaluation,
+`lr_scaling`, the split, the tiling, the sampler and the augmentation): one free-text reason per
+block, recorded on the run where the block sits. Every one of those keys, `evaluation` included, sits at the top level of
 the config beside `model_source` and `data`. There is no `training` section: a config that
 nests keys under one is refused by `preflight_config` by name, since nothing would read them.
 
@@ -129,27 +145,49 @@ config = {
         "images_dir": "data/images",  # each image's own label document is its ground truth
         # the subject it is admitted for; admission adds every attribute the registry declares
         "scope": {"subject": "fruit"},
-        # the run's own train/val draw: its seed and its val share are both stated
-        "split": {"seed": 7, "val_ratio": 0.2},  # 0.2 an example value
+        # the run's own draw states its seed, every share, its grouping and stratification
+        "split": {
+            "seed": ...,
+            "val_ratio": ...,
+            "calibration_ratio": ...,
+            "holdout_ratio": ...,
+            "grouping": ...,
+            "stratify_foreground": ...,
+            "rationale": ...,
+        },
     },
     # each ... below is a value you tune for this dataset
+    "rationale": ...,
     "batch_size": ...,
-    "stages": [{"freeze_to": ...}],
+    "stages": [{"freeze_to": ..., "rationale": ...}],
     "optimizer": {
         "name": "adamw",
         "backbone_lr": ...,
         "head_lr": ...,
         "weight_decay": ...,
+        "rationale": ...,
     },
-    "scheduler": {"type": "cosine", "eta_min": ..., "horizon_epochs": ...},
-    "early_stopping": {"patience": ..., "min_delta": ...},
+    "scheduler": {
+        "type": "cosine",
+        "eta_min": ...,
+        "horizon_epochs": ...,
+        "rationale": ...,
+    },
+    "early_stopping": {
+        "patience": ...,
+        "min_delta": ...,
+        "nonfinite_passes": ...,
+        "rationale": ...,
+    },
+    "evaluation": {"selection_metric": ..., "rationale": ...},
     "checkpoint_every_n_epochs": ...,
-    "mixed_precision": True,
+    "mixed_precision": ...,
     "device": "cuda",
-    "seed": 42,  # optional, reproducible init/shuffle when set
-    "deterministic": False,  # optional, cuDNN deterministic algorithms (slower)
+    "seed": ...,  # every stream's seed, recorded on the run
+    "deterministic": ...,  # cuDNN deterministic algorithms (slower)
     # optional; each transform states every value its constructor takes
     "augmentation": {
+        "rationale": ...,
         "horizontal_flip": {"p": ...},
         "random_crop": {
             "size": [..., ...],
@@ -168,18 +206,21 @@ samples each name their own.
 A detection or instance_seg run may state `data.tiling` to train over tiles of each frame, each
 object's region clipped to the tile once, its box the bounds of what the tile shows and its
 instance mask that region, and its checkpoint then predicts at that lattice
-when a pass states none. A run of any other task trains whole frames, and an enabled `data.tiling`
-on one is refused by name.
+when a pass states none. The block states whether the tiler keeps object-free tiles
+(`skip_empty`) and its `rationale`; a run states no `data.tiling` to train whole frames, the one
+spelling of an untiled run, recorded as `tiling: null`. A run of any other task trains whole
+frames, and a `data.tiling` on one is refused by name.
 
 ## Samplers
 
 The top-level `sampler` config key is a block naming the train loader's sampler beside that
-sampler's own values (`build_sampler` in `pipelines/data/samplers.py`); with no block the loader
-draws every sample once an epoch in shuffled order. Registered names: `class_balanced`,
-`oversample` (which states its `min_count`, the count every class is duplicated up to:
-`{"name": "oversample", "min_count": ...}`), `weighted_random` (imbalance handling, weights
-auto-computed from the dataset's class distribution), and `tile_locality`. A block missing a
-value its sampler requires, or stating one it does not take, is refused at preflight by name.
+sampler's own values and its `rationale` (`build_sampler` in `pipelines/data/samplers.py`); with
+no block the loader draws every sample once an epoch in shuffled order. Registered names:
+`class_balanced`, `oversample` (which states its `min_count`, the count every class is duplicated
+up to: `{"name": "oversample", "min_count": ..., "rationale": ...}`), `weighted_random` (imbalance
+handling, weights auto-computed from the dataset's class distribution), and `tile_locality`. A
+block missing a value its sampler requires, or its reason, or stating one it does not take, is
+refused at preflight by name.
 
 `tile_locality` matters for windowed tiled training on full-width strip-layout rasters:
 there a fully shuffled tile order forces the same strips to be decoded over and over, since
@@ -212,7 +253,8 @@ directory, so a new one takes a name neither holds. A run directory is written a
 launched, its seed, environment, dataset identity, the run it was relaunched from,
 and what the launch resolved: the data section, the geometry read off its training frames (the
 one native size its untiled frames share, a detector's object density), the partition it trains
-on and the objective it selects by), `metrics.jsonl`, a heartbeat, and `final_status.json` once it ends (its state, its
+on and the confirmed trait revision its evaluation scores under; the metric it selects by and
+that metric's direction are its config's own), `metrics.jsonl`, a heartbeat, and `final_status.json` once it ends (its state, its
 `status_error`,
 and the path and sha256 of the checkpoint its completion registers). Every checkpoint is written
 once under its own name. A relaunch is a new directory naming its parent.
@@ -235,7 +277,8 @@ once under its own name. A relaunch is a new directory naming its parent.
 ## HPO
 
 `run_hyperparameter_search` runs a Ray Tune sweep that trains each trial for real, toward the one
-objective the sweep resolves from its base config, in that objective's own direction. The search
+`evaluation.selection_metric` its base config states, in that metric's own direction; a
+`param_space` sweeping that metric is refused. The search
 *algorithm*, the trial *scheduler* with its settings and the trial count are yours to choose per
 task/data and to state; match them to the space and budget, since none has a default:
 
@@ -289,10 +332,10 @@ run_hyperparameter_search(
   halving scheduler; every scheduler's `time_attr` is stated like its other settings.
 - `baseline_params` seeds the search with a point you state; `max_concurrent` bounds
   parallel trials (default 1, safe for single-GPU training).
-- A sweep is its own directory, `.tcip/experiments/<sweep_id>/` beside the runs: its `sweep.json` input (the objective
-  it resolved once included), a heartbeat, its final status once it ends, and one run directory
-  per trial, `<sweep_id>_<ray trial id>`, a run like any other with the sampled point as its
-  `trial_params` and the sweep's objective as its own. Ray's own store sits in the same directory
+- A sweep is its own directory, `.tcip/experiments/<sweep_id>/` beside the runs: its `sweep.json` (its input and the
+  trait revision it resolved once), a heartbeat, its final status once it ends, and one run
+  directory per trial, `<sweep_id>_<ray trial id>`, a run like any other with the sampled point
+  as its `trial_params` and the sweep's trait revision as its own. Ray's own store sits in the same directory
   (also the TensorBoard logdir); auto-launches TensorBoard. Returns the ended sweep as
   `monitor_training` reads it, `{"run", "sweep", "tensorboard_url"}`: the sweep's trial rows and
   their outcome (`best_params`/`best_value`) under `sweep`.
@@ -310,12 +353,16 @@ run_hyperparameter_search(
 ## Dataset Selections
 
 Use `draw_splits` to draw a selection's train, val, calibration and holdout sides. Each side but
-`train` is stated as a share and `train` takes the remainder; an unstated share takes
-`splits.DEFAULT_SHARES` (owner ruling, which the group draw rounds to whole groups), and the
-`seed` has no default. A side the draw would leave empty refuses naming
-it. A run drawing its own split takes no default share: it states `val_ratio`, and a run drawing
-a within-image split (the spatial_strip route) reserves a holdout or calibration region only
-where `holdout_ratio` or `calibration_ratio` states one. The samples
+`train` is stated as a share and `train` takes the remainder (the group draw rounds them to whole
+groups); a draw states every share, its `seed`, its `grouping` (a named policy or an explicit map),
+`stratify_foreground` and its `rationale`, none with a default, admitted as a run's drawn
+`data.split` is, and the selection records the shares, the stratification and the reason. A side
+the draw would leave empty refuses naming it. A run drawing its own split states the same keys in
+`data.split`: `val_ratio` zero trains on every admitted sample with no validation side, selecting
+on `loss`; a run drawing a within-image split (the spatial_strip route, one tiled source) reserves
+a holdout or calibration region only where `holdout_ratio` or `calibration_ratio` states one, and
+a run over several sources stating either refuses, since its reference is a selection's to draw.
+The samples
 are drawn through the same admission a training run uses, and which admission that is depends on
 what the dataset's ground truth is. A draw over the dataset's label documents (no
 `ground_truth`) requires `subject`, since that admission is subject-scoped; the selection's scope
@@ -345,9 +392,9 @@ measure (a count needs detections to compare, a scalar needs table rows).
   than one per requested side, counted for the draw's own subject regardless of
   `stratify_foreground`; a run's own train/val draw and a redraw inside a selection refuse by the
   same floor rather than training without validation
-- `stratify_foreground=True` (default) balances splits by each source's foreground annotation
-  count, not per-class distribution; the minimum-foreground floor above sees real foreground
-  either way
+- `stratify_foreground` (stated, no default) set balances splits by each source's foreground
+  annotation count, not per-class distribution; the minimum-foreground floor above sees real
+  foreground either way
 - Reproducible from the stated seed
 
 A run names the selection it should train against with `data.split.selection_dir` (the
@@ -363,26 +410,24 @@ loaders are built in one vocabulary.
 A caller wanting a fixed validation side draws a selection for it rather than naming a second
 directory pair: a selection carries validation membership, and a directory beside it would be a
 second membership source.
-`selection_dir` conflicts with a
-drawn split's own parameters (`group_by`, `group_key_map`, `val_ratio`, `seed`,
-`stratify_foreground`, `holdout_ratio`, `calibration_ratio`). The loaders read the
+A `data.split` naming `selection_dir` is a bound split, which states at most a `seed` beside
+it: a drawn split's own parameters (`grouping`, the shares, `stratify_foreground`, `rationale`) are refused by name there, the
+selection recording its own draw and its reason. The loaders read the
 selection's `train` and `val` samples as recorded, admitting nothing afresh; its `calibration`
 samples build neither loader. The run's `run.json` then records the bound membership in its
 partition, with the selection it bound (the selection's directory, its digest and whether the run
 redrew inside it).
 
-`data.split.redraw_within_selection: true` beside `selection_dir` and `seed` admits `seed` (the
-one conflict key it lifts) and redraws train and val fresh inside the selection's own
-train-plus-val samples, at that seed, instead of binding the recorded partition; `calibration`
-stays untouched and is never redrawn. A starved side (too few foreground groups among those
-samples to give both train and val one) refuses by name rather than retrying or degrading.
-`run_hyperparameter_search` with `split_draws` above 1 on a selection-bound `base_config` sets
-this flag on its own copy, so a sweep's seed grid redraws inside the selection instead of every
-trial training on its one recorded partition; `freeze_selection` still refuses a bound run,
-redrawn or not, naming the reproduction for a redrawn one (bind a later run to the same selection
-with the same seed and the flag, with the label documents this run's own `run.json` recorded
-unchanged, since the redraw reads per-stem annotation counts at run time) rather than a fresh
-freeze.
+A `data.split.seed` beside `selection_dir` redraws train and val fresh inside the selection's
+own train-plus-val samples, at that seed, instead of binding the recorded partition;
+`calibration` stays untouched and is never redrawn. A starved side (too few foreground groups
+among those samples to give both train and val one) refuses by name rather than retrying or
+degrading. `run_hyperparameter_search` with `split_draws` above 1 on a selection-bound
+`base_config` gives each trial its own seed, so a sweep's seed grid redraws inside the selection
+instead of every trial training on its one recorded partition. `freeze_selection` freezes a bound
+run's partition as it does a drawn one's, redrawn or not, into a selection carrying the bound
+selection's shares, stratification and reason, which a later run binds to train on the same
+sides.
 
 Feeding review-corrected labels back into training? A person's accepts and corrections in the
 Annotate tab are written into the label documents themselves (see the `annotation` skill), so the

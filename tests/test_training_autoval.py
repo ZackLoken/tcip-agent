@@ -24,6 +24,7 @@ from tests._producer_fixtures import (
     label_image,  # noqa: E402
     train_val as _train_val,
 )
+from tests._training_values import drawn_split, stage, tiling_block  # noqa: E402
 from tests._verified_checkpoint_fixtures import partition_side as recorded_side  # noqa: E402
 
 IMG = 64
@@ -32,6 +33,14 @@ IMG = 64
 _save_png = partial(write_noise_image, size=IMG)
 
 _BUD = [Annotation(subject="bud", geometry=BBox(19.2, 19.2, 44.8, 44.8))]
+
+_TILED = tiling_block(tile_size=128, overlap=0.2)
+"""The tiling block the spatial-split runs here state."""
+
+
+def _drawn(**stated) -> dict:
+    """A drawn split at seed 1 grouping each source's tiles together, with ``stated`` over it."""
+    return drawn_split(**{"seed": 1, "grouping": "tile_prefix", **stated})
 
 
 def _manifest(partition: dict) -> dict:
@@ -74,7 +83,7 @@ def test_a_run_naming_a_ground_truth_place_that_does_not_exist_refuses_naming_it
     data_cfg: dict = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
-        "split": {"seed": 1, "val_ratio": 0.15},
+        "split": _drawn(val_ratio=0.15),
     }
 
     for place in (tmp_path / "gone", tmp_path / "empty"):
@@ -95,8 +104,7 @@ def test_auto_train_val_detection_splits(tmp_path: Path):
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
-        "auto_val": True,
-        "split": {"val_ratio": 0.4, "seed": 1},
+        "split": _drawn(val_ratio=0.4),
     }
     train_ds, val_ds, partition, _data = _train_val(
         tmp_path, "detection", data_cfg
@@ -114,18 +122,13 @@ def test_auto_train_val_detection_splits(tmp_path: Path):
     assert val_ds.transforms is None
 
 
-def test_auto_train_val_malformed_group_by_raises(tmp_path: Path):
-    """An unrecognized split.group_by is a caller-config error and propagates."""
+def test_auto_train_val_malformed_grouping_raises(tmp_path: Path):
+    """An unrecognized split.grouping policy is a caller-config error and propagates."""
     images_dir, _all_stems = _detection_dataset(tmp_path / "ds")
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
-        "auto_val": True,
-        "split": {
-            "group_by": "not_a_real_grouping_key",
-            "seed": 1,
-            "val_ratio": 0.15,
-        },
+        "split": _drawn(grouping="not_a_real_grouping_key", val_ratio=0.15),
     }
     with pytest.raises(ValueError):
         _train_val(tmp_path, "detection", data_cfg)
@@ -139,8 +142,7 @@ def test_auto_train_val_malformed_val_ratio_refuses(tmp_path: Path):
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
-        "auto_val": True,
-        "split": {"val_ratio": "not_a_number", "seed": 1},
+        "split": _drawn(val_ratio="not_a_number"),
     }
     with pytest.raises(ValueError, match="not_a_number"):
         _train_val(tmp_path, "detection", data_cfg)
@@ -161,8 +163,7 @@ def test_auto_train_val_ordinal_draws_over_the_tables_own_rows(tmp_path: Path):
     data_cfg = {
         "images_dir": str(images_dir),
         "labels_dir": str(csv_path),
-        "auto_val": True,
-        "split": {"val_ratio": 0.5, "seed": 1},
+        "split": _drawn(val_ratio=0.5),
     }
     train_ds, val_ds, partition, _data = _train_val(
         tmp_path, "ordinal", data_cfg
@@ -190,7 +191,8 @@ def test_auto_train_val_single_untiled_source_refuses_validation_and_trains_with
     tmp_path: Path,
 ):
     """A single untiled source has no second group and no tiling geometry to validate on: a
-    requested validation refuses naming ``auto_val=False``, and that stated choice trains.
+    requested validation refuses naming the zero shares that train without it, and that stated
+    choice trains.
     """
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     _save_png(images_dir / "src_0_0.png")
@@ -198,12 +200,12 @@ def test_auto_train_val_single_untiled_source_refuses_validation_and_trains_with
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
-        "auto_val": True,
+        "split": _drawn(val_ratio=0.15),
     }
-    with pytest.raises(ValueError, match="auto_val=False"):
+    with pytest.raises(ValueError, match="every share zero"):
         _train_val(tmp_path, "detection", data_cfg)
 
-    data_cfg["auto_val"] = False
+    data_cfg["split"] = _drawn(val_ratio=0.0)
     train_ds, val_ds, _, _data = _train_val(tmp_path, "detection", data_cfg)
     assert val_ds is None and train_ds.num_samples == 1
 
@@ -247,14 +249,8 @@ def test_auto_train_val_single_source_tiled_spatial_split(tmp_path: Path):
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
-        "auto_val": True,
-        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": {
-            "val_ratio": 0.25,
-            "holdout_ratio": 0.1,
-            "calibration_ratio": 0,
-            "seed": 1,
-        },
+        "tiling": _TILED,
+        "split": _drawn(val_ratio=0.25, holdout_ratio=0.1),
     }
     train_ds, val_ds, partition, _resolved = _train_val(
         tmp_path, "detection", data_cfg
@@ -279,16 +275,15 @@ def test_auto_train_val_single_source_tiled_spatial_split(tmp_path: Path):
 def test_a_single_tiled_source_with_no_val_share_refuses_by_name(
     tmp_path: Path,
 ):
-    """The spatial geometry draws the run's one requested partition: a zero val share refuses as
-    every draw refuses it, before any strip is laid.
+    """The spatial geometry lays its validation strip first: a reserved share beside a zero val
+    share refuses naming it, before any strip is laid.
     """
     images_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
-        "auto_val": True,
-        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": {"val_ratio": 0.0, "seed": 1},
+        "tiling": _TILED,
+        "split": _drawn(val_ratio=0.0, holdout_ratio=0.1),
     }
     with pytest.raises(ValueError, match="val_ratio above zero"):
         _train_val(tmp_path, "detection", data_cfg)
@@ -308,14 +303,8 @@ def test_spatial_manifest_tied_val_holdout_fractions_place_by_declared_order(
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
-        "auto_val": True,
-        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": {
-            "val_ratio": 0.2,
-            "holdout_ratio": 0.2,
-            "calibration_ratio": 0,
-            "seed": 1,
-        },
+        "tiling": _TILED,
+        "split": _drawn(val_ratio=0.2, holdout_ratio=0.2),
     }
     train_ds, val_ds, partition, _resolved = _train_val(
         tmp_path, "detection", data_cfg
@@ -340,14 +329,10 @@ def test_spatial_manifest_tied_holdout_calibration_fractions_place_by_declared_o
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
-        "auto_val": True,
-        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": {
-            "val_ratio": 0.25,
-            "holdout_ratio": 0.15,
-            "calibration_ratio": 0.15,
-            "seed": 1,
-        },
+        "tiling": _TILED,
+        "split": _drawn(
+            val_ratio=0.25, holdout_ratio=0.15, calibration_ratio=0.15
+        ),
     }
     train_ds, val_ds, partition, _resolved = _train_val(
         tmp_path, "detection", data_cfg
@@ -370,14 +355,8 @@ def test_spatial_manifest_pins_train_val_and_holdout_regions_for_distinct_fracti
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
-        "auto_val": True,
-        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": {
-            "val_ratio": 0.25,
-            "holdout_ratio": 0.1,
-            "calibration_ratio": 0,
-            "seed": 1,
-        },
+        "tiling": _TILED,
+        "split": _drawn(val_ratio=0.25, holdout_ratio=0.1),
     }
     train_ds, val_ds, partition, _resolved = _train_val(
         tmp_path, "detection", data_cfg
@@ -398,14 +377,8 @@ def test_spatial_manifest_persists_train_and_val_regions_too(tmp_path: Path):
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
-        "auto_val": True,
-        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": {
-            "val_ratio": 0.25,
-            "holdout_ratio": 0.1,
-            "calibration_ratio": 0,
-            "seed": 1,
-        },
+        "tiling": _TILED,
+        "split": _drawn(val_ratio=0.25, holdout_ratio=0.1),
     }
     manifest = _manifest(_train_val(tmp_path, "detection", data_cfg)[2])
     assert (
@@ -433,19 +406,8 @@ def test_auto_train_val_single_source_spatial_split_ignores_a_stray_keep_regions
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
-        "auto_val": True,
-        "tiling": {
-            "enabled": True,
-            "tile_size": 128,
-            "overlap": 0.2,
-            "keep_regions": [(0, 0, 100, 100)],
-        },
-        "split": {
-            "val_ratio": 0.25,
-            "holdout_ratio": 0.1,
-            "calibration_ratio": 0,
-            "seed": 1,
-        },
+        "tiling": {**_TILED, "keep_regions": [(0, 0, 100, 100)]},
+        "split": _drawn(val_ratio=0.25, holdout_ratio=0.1),
     }
     train_ds, val_ds, _, _data = _train_val(tmp_path, "detection", data_cfg)
     assert val_ds is not None
@@ -474,14 +436,13 @@ def test_auto_train_val_degenerate_grouping_refuses_and_a_stem_grouping_draws(
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
-        "auto_val": True,
-        "split": {"val_ratio": 0.5, "seed": 1},
+        "split": _drawn(val_ratio=0.5),
     }
     with pytest.raises(
         ValueError, match="fewer than the 2 the requested sides need"
     ):
         _train_val(tmp_path, "detection", data_cfg)
-    data_cfg["split"]["group_by"] = "stem"
+    data_cfg["split"]["grouping"] = "stem"
     train_ds, val_ds, partition, _data = _train_val(
         tmp_path, "detection", data_cfg
     )
@@ -493,10 +454,10 @@ def test_auto_train_val_degenerate_grouping_refuses_and_a_stem_grouping_draws(
     assert partition["group_by"] == "stem"
 
 
-def test_auto_train_val_explicit_group_key_map_starving_val_refuses(
+def test_auto_train_val_explicit_grouping_map_starving_val_refuses(
     tmp_path: Path,
 ):
-    """A caller-supplied group_key_map that starves val is a deliberate leakage policy, not a
+    """A caller-supplied grouping map that starves val is a deliberate leakage policy, not a
     data limitation: the run refuses it rather than discard it for another grouping.
     """
     images_dir, stems = _two_mosaic_tiles(tmp_path)
@@ -506,8 +467,7 @@ def test_auto_train_val_explicit_group_key_map_starving_val_refuses(
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
-        "auto_val": True,
-        "split": {"val_ratio": 0.5, "seed": 1, "group_key_map": group_key_map},
+        "split": _drawn(val_ratio=0.5, grouping=group_key_map),
     }
     with pytest.raises(
         ValueError, match="fewer than the 2 the requested sides need"
@@ -525,14 +485,8 @@ def test_a_calibration_ratio_of_zero_reserves_no_calibration_region(
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
-        "auto_val": True,
-        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": {
-            "val_ratio": 0.25,
-            "holdout_ratio": 0.1,
-            "calibration_ratio": 0,
-            "seed": 1,
-        },
+        "tiling": _TILED,
+        "split": _drawn(val_ratio=0.25, holdout_ratio=0.1),
     }
     train_ds, val_ds, partition, _resolved = _train_val(
         tmp_path, "detection", data_cfg
@@ -559,15 +513,9 @@ def test_a_single_source_spatial_run_builds_its_loaders_at_the_stated_band_count
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
-        "auto_val": True,
         "num_channels": 1,
-        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": {
-            "val_ratio": 0.25,
-            "holdout_ratio": 0.1,
-            "calibration_ratio": 0,
-            "seed": 1,
-        },
+        "tiling": _TILED,
+        "split": _drawn(val_ratio=0.25, holdout_ratio=0.1),
     }
     train_ds, val_ds, partition, resolved = _train_val(
         tmp_path, "detection", data_cfg
@@ -594,14 +542,8 @@ def _within_image_context(tmp_path: Path):
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
-        "auto_val": True,
-        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": {
-            "val_ratio": 0.25,
-            "holdout_ratio": 0.1,
-            "calibration_ratio": 0,
-            "seed": 1,
-        },
+        "tiling": _TILED,
+        "split": _drawn(val_ratio=0.25, holdout_ratio=0.1),
     }
     observation = observe(
         opened_run(
@@ -686,7 +628,7 @@ def test_a_runs_band_count_is_read_over_every_source_and_a_disagreement_refuses(
     images_dir = tmp_path / "ds" / "images" / UNDATED_BUCKET
     for stem in ("a", "b"):
         _multiband_source(images_dir, stem, 5)
-    split = {"group_by": "stem", "val_ratio": 0.5, "seed": 1}
+    split = _drawn(grouping="stem", val_ratio=0.5)
     base_cfg = {"images_dir": str(images_dir), "scope": {"subject": "bud"}}
 
     train_ds, val_ds, _, _data = _train_val(
@@ -745,7 +687,7 @@ def test_a_stated_band_count_reads_every_source_at_it_and_probes_none(
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
         "num_channels": 1,
-        "split": {"group_by": "stem", "val_ratio": 0.5, "seed": 1},
+        "split": _drawn(grouping="stem", val_ratio=0.5),
     }
 
     train_ds, val_ds, _, _data = _train_val(tmp_path, "detection", data_cfg)
@@ -769,7 +711,7 @@ def test_a_runs_sources_are_probed_once_each_for_the_whole_run(
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
-        "split": {"group_by": "stem", "val_ratio": 0.5, "seed": 1},
+        "split": _drawn(grouping="stem", val_ratio=0.5),
     }
 
     train_ds, val_ds, _, _data = _train_val(tmp_path, "detection", data_cfg)
@@ -795,16 +737,13 @@ def test_one_preflight_reads_a_sources_header_once_for_its_sizes(
         {
             "images_dir": str(images_dir),
             "scope": {"subject": "bud"},
-            "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-            "split": {
-                "val_ratio": 0.2,
-                "holdout_ratio": 0.1,
-                "calibration_ratio": 0.15,
-                "seed": 1,
-            },
+            "tiling": _TILED,
+            "split": _drawn(
+                val_ratio=0.2, holdout_ratio=0.1, calibration_ratio=0.15
+            ),
         },
         batch_size=1,
-        stages=[{"freeze_to": 0}],
+        stages=[stage(0)],
     )
     probed = _probe_spy(monkeypatch)
 
@@ -826,7 +765,7 @@ def test_a_bound_run_records_the_width_it_read_its_sources_at(tmp_path: Path):
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
-        "split": {"group_by": "stem", "val_ratio": 0.5, "seed": 1},
+        "split": _drawn(grouping="stem", val_ratio=0.5),
     }
 
     train_ds, _val_ds, _, resolved = _train_val(
@@ -854,14 +793,10 @@ def test_a_calibration_ratio_adds_a_disjoint_calibration_region(
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
-        "auto_val": True,
-        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": {
-            "val_ratio": 0.2,
-            "holdout_ratio": 0.1,
-            "calibration_ratio": 0.15,
-            "seed": 1,
-        },
+        "tiling": _TILED,
+        "split": _drawn(
+            val_ratio=0.2, holdout_ratio=0.1, calibration_ratio=0.15
+        ),
     }
     train_ds, val_ds, partition, _resolved = _train_val(
         tmp_path, "detection", data_cfg
@@ -892,35 +827,32 @@ def test_a_spatial_split_raises_on_unresolvable_extent(tmp_path: Path):
     """
     from tcip_mcp.pipelines.data.split_construction import (
         _with_lattice,
-        run_shares,
         run_sizes,
         spatial_single_source_split,
+        stated_shares,
     )
-    from tcip_mcp.pipelines.schemas import DataSpec, SplitSpec
+    from tcip_mcp.pipelines.schemas import DataSpec
     from tests._producer_fixtures import admit_over
 
-    split = SplitSpec.model_validate(
+    stated = DataSpec.model_validate(
         {
-            "val_ratio": 0.2,
-            "holdout_ratio": 0.1,
-            "calibration_ratio": 0.15,
-            "seed": 1,
+            "tiling": _TILED,
+            "split": _drawn(
+                val_ratio=0.2, holdout_ratio=0.1, calibration_ratio=0.15
+            ),
         }
     )
 
-    def _drawn(images_dir: Path):
+    def _split_over(images_dir: Path):
         admitted = admit_over(images_dir, subject="bud")
         samples = admitted.every_sample()
-        stated = DataSpec.model_validate(
-            {"tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2}}
-        )
         block = _with_lattice(
             "detection",
             run_sizes("detection", stated, admitted.scope, samples),
             samples,
         )
         return spatial_single_source_split(
-            "detection", samples[0], block, run_shares(split, spatial=True)
+            "detection", samples[0], block, stated_shares(stated.split)
         )
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
@@ -930,10 +862,10 @@ def test_a_spatial_split_raises_on_unresolvable_extent(tmp_path: Path):
     with pytest.raises(
         ValueError, match="states no positive width and height"
     ):
-        _drawn(images_dir)
+        _split_over(images_dir)
 
     framed, _stem = _big_single_source(tmp_path / "framed", 4000, 3000)
-    assert _drawn(framed).train_region
+    assert _split_over(framed).train_region
 
 
 def test_single_tiled_source_raises_on_an_unreadable_label(
@@ -955,9 +887,8 @@ def test_single_tiled_source_raises_on_an_unreadable_label(
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
-        "auto_val": True,
-        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": {"val_ratio": 0.2, "seed": 1},
+        "tiling": _TILED,
+        "split": _drawn(val_ratio=0.2),
     }
     with pytest.raises(UnreadableLabelDocumentError):
         _train_val(tmp_path, "detection", data_cfg)
@@ -972,14 +903,10 @@ def test_a_spatial_split_raises_on_infeasible_layout(tmp_path: Path):
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
-        "auto_val": True,
-        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": {
-            "val_ratio": 0.33,
-            "holdout_ratio": 0.33,
-            "calibration_ratio": 0.33,
-            "seed": 1,
-        },
+        "tiling": _TILED,
+        "split": _drawn(
+            val_ratio=0.33, holdout_ratio=0.33, calibration_ratio=0.33
+        ),
     }
     with pytest.raises(ValueError, match="is infeasible at this mosaic size"):
         _train_val(tmp_path, "detection", data_cfg)
@@ -1011,19 +938,10 @@ def test_a_spatial_split_raises_on_empty_gt_bearing_side(tmp_path: Path):
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
-        "auto_val": True,
-        "tiling": {
-            "enabled": True,
-            "tile_size": 64,
-            "overlap": 0.2,
-            "skip_empty": True,
-        },
-        "split": {
-            "val_ratio": 0.2,
-            "holdout_ratio": 0.1,
-            "calibration_ratio": 0.2,
-            "seed": 1,
-        },
+        "tiling": tiling_block(tile_size=64, overlap=0.2, skip_empty=True),
+        "split": _drawn(
+            val_ratio=0.2, holdout_ratio=0.1, calibration_ratio=0.2
+        ),
     }
     with pytest.raises(ValueError, match="zero kept"):
         _train_val(tmp_path, "detection", data_cfg)
@@ -1037,14 +955,8 @@ def test_a_spatial_split_records_raster_content_identity(tmp_path: Path):
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
-        "auto_val": True,
-        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": {
-            "val_ratio": 0.25,
-            "holdout_ratio": 0.1,
-            "calibration_ratio": 0,
-            "seed": 1,
-        },
+        "tiling": _TILED,
+        "split": _drawn(val_ratio=0.25, holdout_ratio=0.1),
     }
     manifest = _manifest(_train_val(tmp_path, "detection", data_cfg)[2])
     identity = manifest["raster_content_identity"]
@@ -1066,8 +978,7 @@ def test_train_emits_val_loss_with_autoval(tmp_path: Path):
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
-        "auto_val": True,
-        "split": {"val_ratio": 0.4, "seed": 1},
+        "split": _drawn(val_ratio=0.4),
     }
     from tests.tiny_trainer_fixtures import run_context
 

@@ -3,7 +3,7 @@
 A detection or instance_seg run the known loaders cover names its membership once, through the
 platform's own producer, and builds every loader out of the samples that producer made. Which
 route the caller took decides which side each sample lands on and nothing about how a loader finds
-its members: whether the caller named a validation directory, turned ``auto_val`` off, or let the
+its members: whether the caller named a validation directory, stated every share zero, or let the
 run draw its own split, each loader reads the source and the label document its own samples
 state.
 
@@ -36,7 +36,11 @@ from tcip_mcp.pipelines.model_contract import (  # noqa: E402
     TILING_TASKS,
 )
 from tests._producer_fixtures import label_image, train_val, write_image  # noqa: E402
-from tests._training_values import evaluation_block  # noqa: E402
+from tests._training_values import (  # noqa: E402
+    drawn_split,
+    evaluation_block,
+    tiling_block,
+)
 from tests._verified_checkpoint_fixtures import partition_side as recorded_side  # noqa: E402
 
 IMG = 64
@@ -156,8 +160,7 @@ def test_the_drawn_route_loaders_name_their_own_samples(
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": SUBJECT},
-        "auto_val": True,
-        "split": {"val_ratio": 0.5, "seed": 1},
+        "split": drawn_split(val_ratio=0.5, seed=1, grouping="tile_prefix"),
     }
 
     train_ds, val_ds, partition, _data = train_val(tmp_path, task, data_cfg)
@@ -170,15 +173,23 @@ def test_the_drawn_route_loaders_name_their_own_samples(
 
 
 @pytest.mark.parametrize("task", sorted(DETECTOR_TASKS))
-def test_auto_val_off_trains_on_every_admitted_sample_and_records_them(
+def test_a_zero_validation_share_trains_on_every_admitted_sample_and_records_them(
     tmp_path: Path, task: str
 ):
+    """Guard. A drawn split stating every share zero, the one spelling of a run with no
+    validation side, trains on every admitted sample, records them all on the training side, and
+    selects on the training loss; the same run selecting on a validation metric refuses naming
+    the validation loader it has none of.
+    """
+    from tests._chain_fixtures import training_config
+    from tests._verified_checkpoint_fixtures import opened_run, unbuilt_source
+
     stems = ["a_0_0", "b_0_0", "c_0_0"]
     images_dir = _labeled(tmp_path / "ds", stems, task=task)
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": SUBJECT},
-        "auto_val": False,
+        "split": drawn_split(val_ratio=0.0, grouping="tile_prefix"),
     }
     record = _recorded(
         tmp_path,
@@ -195,6 +206,15 @@ def test_auto_val_off_trains_on_every_admitted_sample_and_records_them(
     assert recorded_side(partition, "val") == []
     _one_target(train_ds, task)
     assert recorded_side(record, "train") == sorted(stems)
+    with pytest.raises(ValueError, match="needs a validation loader"):
+        opened_run(
+            tmp_path,
+            training_config(
+                unbuilt_source(task),
+                data_cfg,
+                evaluation=evaluation_block(selection_metric="objective"),
+            ),
+        )
 
 
 @pytest.mark.parametrize("task", sorted(DETECTOR_TASKS))
@@ -209,14 +229,13 @@ def test_a_starved_draw_refuses_by_the_draws_own_floor(
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": SUBJECT},
-        "auto_val": True,
-        "split": {
-            "val_ratio": 0.5,
-            "seed": 1,
-            "group_key_map": {
+        "split": drawn_split(
+            val_ratio=0.5,
+            seed=1,
+            grouping={
                 f"{UNDATED_BUCKET}/{s}": "one_group" for s in stems
             },
-        },
+        ),
     }
 
     with pytest.raises(
@@ -238,14 +257,10 @@ def test_one_tiled_source_still_splits_spatially_over_its_own_samples(
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": SUBJECT},
-        "auto_val": True,
-        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": {
-            "val_ratio": 0.25,
-            "holdout_ratio": 0.1,
-            "calibration_ratio": 0,
-            "seed": 1,
-        },
+        "tiling": tiling_block(tile_size=128, overlap=0.2),
+        "split": drawn_split(
+            val_ratio=0.25, holdout_ratio=0.1, seed=1, grouping="tile_prefix"
+        ),
     }
 
     train_ds, val_ds, partition, _resolved = train_val(
@@ -280,7 +295,7 @@ def test_the_train_only_and_drawn_routes_record_one_directory_the_same_way(
     whole_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": SUBJECT},
-        "auto_val": False,
+        "split": drawn_split(val_ratio=0.0, seed=1, grouping="tile_prefix"),
     }
     whole = _recorded(
         tmp_path,
@@ -292,8 +307,7 @@ def test_the_train_only_and_drawn_routes_record_one_directory_the_same_way(
     drawn_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": SUBJECT},
-        "auto_val": True,
-        "split": {"val_ratio": 0.5, "seed": 1},
+        "split": drawn_split(val_ratio=0.5, seed=1, grouping="tile_prefix"),
     }
     drawn = _recorded(tmp_path, "detection", drawn_cfg)
 

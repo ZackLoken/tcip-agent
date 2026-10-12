@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import logging
-import random
 import time
 from dataclasses import dataclass, field
 from functools import cached_property
@@ -14,13 +12,11 @@ if TYPE_CHECKING:
     from tcip_mcp.experiments import RunObservation
     from tcip_mcp.pipelines.model_build import SourceLayout
     from tcip_mcp.pipelines.schemas import (
-        Objective,
         TrainConfigSchema,
         TrainerReads,
         TrainGeometry,
+        TraitRevisionRef,
     )
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -28,8 +24,8 @@ class TrainRun:
     id: str
     # The run's validated config.
     spec: TrainConfigSchema
-    # The objective the run's launch resolved.
-    objective: Objective
+    # The confirmed trait revision the run's launch resolved, None for a run naming no trait.
+    trait_revision: TraitRevisionRef | None
     # The geometry the run's launch read off its training frames.
     geometry: TrainGeometry
     # The project the run belongs to.
@@ -40,7 +36,7 @@ class TrainRun:
     current_epoch: int = 0
     current_stage: int = 0
     # The held best epoch's selection value, which train() sets when it ends (the losing-side
-    # infinity for the run's objective when no epoch was selectable).
+    # infinity for the run's selection direction when no epoch was selectable).
     best_metric: float = float("inf")
     metrics_history: list[dict] = field(default_factory=list)
     start_time: float = 0.0
@@ -69,7 +65,7 @@ class TrainRun:
         """The keywords ``evaluation.evaluate`` reads off this run, resolved once: the dims its
         config records (``model_build.recorded_model_dims``), the confidence it reads
         (:attr:`reads`), its stated ``evaluation.iou_threshold`` and ``score_weights``, the trait
-        entry at the revision its :attr:`objective` records (read from :attr:`project`, ``None``
+        entry at its :attr:`trait_revision` (read from :attr:`project`, ``None``
         for a run naming no trait; a revision whose entry no longer carries the recorded hash
         refuses with ``traits.RevisionMovedError``), and its :attr:`geometry`'s
         ``object_density``.
@@ -77,7 +73,7 @@ class TrainRun:
         from tcip_mcp.pipelines.model_build import recorded_model_dims
         from tcip_mcp.traits import read_trait
 
-        spec, ref = self.spec, self.objective.revision
+        spec, ref = self.spec, self.trait_revision
         return {
             "dims": recorded_model_dims(spec),
             "conf_threshold": self.reads.conf_threshold,
@@ -123,7 +119,7 @@ def observed_run(
     under its validated launch config (``RunObservation.spec``) with the data block its launch
     resolved (``RunObservation.resolved_data``) laid over it and its source files bound to the
     run's own snapshot (``model_build.snapshot_bound``), which it imports from as the record
-    states it (``model_build.run_layout``), toward the objective and at the geometry that
+    states it (``model_build.run_layout``), under the trait revision and at the geometry that
     resolution carries. A run whose input resolved to nothing ended at its opening and has none.
     """
     from tcip_mcp.experiments import project_of_run
@@ -141,21 +137,10 @@ def observed_run(
     return TrainRun(
         id=observation.directory.name,
         spec=spec,
-        objective=observation.objective,
+        trait_revision=observation.trait_revision,
         geometry=geometry,
         project=project_of_run(observation.directory),
         layout=run_layout(observation.directory, observation.record["source"]),
         output_dir=str(observation.directory),
         origin=origin,
     )
-
-
-def seeded(spec: TrainConfigSchema) -> TrainConfigSchema:
-    """``spec``, or when it states no ``seed`` a copy carrying one drawn from OS entropy, so no
-    run starts unseeded.
-    """
-    if spec.seed is not None:
-        return spec
-    seed = random.SystemRandom().randrange(2**31)
-    logger.info("no seed configured; drew seed=%d.", seed)
-    return spec.model_copy(update={"seed": seed})

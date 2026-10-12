@@ -159,24 +159,11 @@ export interface RunRow {
   launch: Record<string, string | null> | null;
 }
 
-export interface TraitRevisionRef {
-  trait: string;
-  trait_revision: number;
-  trait_revision_sha256: string;
-}
-
-export interface Objective {
-  selection_metric: string;
-  higher_is_better: boolean;
-  revision: TraitRevisionRef | null;
-}
-
 export interface SweepGroup {
   sweep_id: string;
   state: string;
   status_error: string | null;
   input: Record<string, unknown>;
-  objective: Objective;
   cancel_requested: boolean;
   heartbeat: string;
   trials: RunRow[];

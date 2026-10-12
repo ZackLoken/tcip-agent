@@ -39,16 +39,16 @@ def register_model(
 def _labeled_available_metrics(models: list[dict]) -> list[dict]:
     """Every metric key any registered model carries, each with what is known about it.
 
-    ``direction`` is ``"higher"``/``"lower"`` when :mod:`evaluation`'s declaration names the bare
+    ``direction`` is ``"higher"``/``"lower"`` when :mod:`schemas`'s declaration names the bare
     (``val_``-stripped) key, else ``None``: an undeclared metric still shows up here, it just needs
     a stated direction to be ranked. ``sources`` names the distinct ``metrics_source`` values among
     entries that carry the key. Never refuses.
     """
-    from tcip_mcp.pipelines.training.evaluation import (
+    from tcip_mcp.pipelines.schemas import (
         CENTER_MATCH_COMPARABILITY_KEYS,
         HIGHER_IS_BETTER_BY_METRIC,
-        VAL_METRIC_PREFIX,
     )
+    from tcip_mcp.pipelines.training.evaluation import VAL_METRIC_PREFIX
 
     keys = sorted({k for m in models for k in m["metrics"]})
     result = []
@@ -109,7 +109,7 @@ def rank_registered_models(
     Args:
         metric: Metric key to rank by; empty lists instead of ranking.
         higher_is_better: Overrides the declared direction
-            (``evaluation.HIGHER_IS_BETTER_BY_METRIC``, keyed by the ``val_``-stripped name) when
+            (``schemas.HIGHER_IS_BETTER_BY_METRIC``, keyed by the ``val_``-stripped name) when
             given; required when ``metric`` is undeclared.
         include_unverified: Also rank entries whose ``metrics_source`` is not ``"trainer"``.
         experiment_ids: Narrow to entries produced by one of these experiments, applied before
@@ -176,10 +176,8 @@ def ranked_registered_model(
     naming why none ranks: an empty ``metric``, nothing registered, nothing registered by the
     marked experiments, an undeclared direction, every carrier unverified, no carrier.
     """
-    from tcip_mcp.pipelines.training.evaluation import (
-        HIGHER_IS_BETTER_BY_METRIC,
-        VAL_METRIC_PREFIX,
-    )
+    from tcip_mcp.pipelines.schemas import HIGHER_IS_BETTER_BY_METRIC
+    from tcip_mcp.pipelines.training.evaluation import VAL_METRIC_PREFIX
     from tcip_store.values import NOT_FINITE_SUFFIX
 
     if not metric:
@@ -212,7 +210,7 @@ def ranked_registered_model(
         resolved_direction, direction_source = declared, "declared"
     else:
         return {
-            "error": f"'{metric}' has no declared ranking direction (evaluation."
+            "error": f"'{metric}' has no declared ranking direction (schemas."
             "HIGHER_IS_BETTER_BY_METRIC names no entry for it). State a direction to "
             "rank by it anyway, or pick one of the available metrics.",
             "needs_direction": True,

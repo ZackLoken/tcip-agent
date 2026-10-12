@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from tests._training_values import IOU_THRESHOLD
+from tests._training_values import IOU_THRESHOLD, RATIONALE, drawn_split
 
 torch = pytest.importorskip("torch")
 
@@ -81,7 +81,7 @@ def test_a_drawn_detection_run_reads_each_document_once(
         {
             "images_dir": str(images_dir),
             "scope": {"subject": "bud"},
-            "split": {"val_ratio": 0.4, "seed": 1},
+            "split": drawn_split(val_ratio=0.4, seed=1, grouping="tile_prefix"),
         },
     )
     _consume(train, val)
@@ -105,7 +105,7 @@ def test_a_drawn_table_run_reads_its_table_once(tmp_path: Path, monkeypatch):
         {
             "images_dir": str(images_dir),
             "labels_dir": str(csv_path),
-            "split": {"val_ratio": 0.5, "seed": 0},
+            "split": drawn_split(val_ratio=0.5, grouping="tile_prefix"),
         },
     )
     _consume(train, val)
@@ -130,7 +130,9 @@ def test_a_written_draw_reads_each_document_once_with_its_fingerprint(
         val_ratio=0.25,
         calibration_ratio=0,
         holdout_ratio=0,
-        group_by="stem",
+        grouping="stem",
+        stratify_foreground=True,
+        rationale=RATIONALE,
         output_path=str(tmp_path / "selection"),
     )
 
@@ -263,7 +265,7 @@ def test_a_semantic_run_reads_each_mask_once(tmp_path: Path, monkeypatch):
         {
             "images_dir": str(images_dir),
             "labels_dir": str(masks_dir),
-            "split": {"val_ratio": 0.5, "seed": 0},
+            "split": drawn_split(val_ratio=0.5, grouping="tile_prefix"),
         },
     )
     _consume(train, val)

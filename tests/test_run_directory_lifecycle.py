@@ -20,7 +20,15 @@ import pytest
 pytest.importorskip("torch")
 
 from tcip_mcp.pipelines.model_build import STATE_DICT_KEY  # noqa: E402
-from tests._training_values import fifo_search, sweep_space  # noqa: E402
+from tests._training_values import (  # noqa: E402
+    drawn_split,
+    fifo_search,
+    sweep_space,
+)
+
+ONE_RATE = {"optimizer.backbone_lr": 0.01, "optimizer.head_lr": 0.01}
+"""A trial point moving both rates together, since the one-weight regressors train every
+parameter at one rate."""
 
 
 @pytest.fixture
@@ -69,7 +77,7 @@ def launch(tmp_path, monkeypatch, children):
             data={
                 "images_dir": str(images_dir),
                 "labels_dir": str(csv_path),
-                "split": {"seed": 0, "val_ratio": 0.15},
+                "split": drawn_split(val_ratio=0.15),
             },
             **extra,
         )
@@ -256,9 +264,8 @@ def test_progress_logged_after_the_final_status_never_reopens_the_run(
     summary = monitor_training(tmp_path, res["experiment_id"])["run"]
     assert summary["state"] == "completed"
     assert summary["best_metric"] is not None
-    assert summary["best_metric"] == best_selection(
-        rows, observation.objective
-    )
+    assert observation.spec.evaluation.selection_metric == "loss"
+    assert summary["best_metric"] == best_selection(rows, False)
 
 
 def test_a_reader_never_sees_a_final_status_before_its_bytes_are_whole(
@@ -543,7 +550,7 @@ def _trial(
         data={
             "images_dir": str(images_dir),
             "labels_dir": str(csv_path),
-            "split": {"val_ratio": 0.34, "seed": 3},
+            "split": drawn_split(val_ratio=0.34, seed=3),
         },
         **extra,
     )
@@ -551,7 +558,7 @@ def _trial(
     sweep = opened_sweep(tmp_path, base_config)
     reported: list[float] = []
     _run_hpo_trial(
-        point or {"optimizer.head_lr": 0.01}, reported.append, sweep, "a"
+        point or dict(ONE_RATE), reported.append, sweep, "a"
     )
     (trial_dir,) = run_dirs(tmp_path)
     return trial_dir, reported
@@ -567,26 +574,22 @@ def _trial_row(project: Path, trial_dir: Path) -> dict:
     ).model_dump()
 
 
-def test_an_hpo_trial_is_a_run_directory_reporting_the_sweeps_one_objective(
+def test_an_hpo_trial_is_a_run_directory_reporting_the_sweeps_one_selection(
     tmp_path,
 ):
     """A trial is a run directory like any launched run's, its sampled point and what it resolved
-    on its launch record, and it reports the sweep's objective each epoch; its result is the best
-    of what it reported, in the sweep's direction.
+    on its launch record, and it reports its config's selection each epoch; its result is the
+    best of what it reported, in that metric's direction (``loss``, lower better).
     """
     from tcip_mcp.experiments import RUN_FILE, observe, read_record
 
     trial_dir, reported = _trial(tmp_path)
 
     record = read_record(trial_dir / RUN_FILE)
-    objective = {
-        "selection_metric": "loss",
-        "higher_is_better": False,
-        "revision": None,
-    }
-    assert record["trial_params"] == {"optimizer.head_lr": 0.01}
+    assert record["trial_params"] == ONE_RATE
     assert record["resolved"]["partition"]["samples"]
-    assert record["resolved"]["objective"] == objective
+    assert record["resolved"]["trait_revision"] is None
+    assert record["config"]["evaluation"]["selection_metric"] == "loss"
     assert observe(trial_dir).state == "completed"
     assert len(reported) == 2
     assert _trial_row(tmp_path, trial_dir)["best_metric"] == min(reported)
@@ -596,7 +599,8 @@ def test_a_trial_whose_resolution_fails_is_a_directory_whose_final_status_names_
     tmp_path,
 ):
     """A trial whose sampled point cannot resolve still opens its run directory, and its final
-    status is ``failed`` naming why; the sweep's listing reads it as a row with no objective.
+    status is ``failed`` naming why; the sweep's listing reads it as a row with no best value
+    and no metric name.
     """
     from tcip_mcp.experiments import observe
 
@@ -615,12 +619,12 @@ def test_a_trial_whose_resolution_fails_is_a_directory_whose_final_status_names_
         row["best_metric_name"],
     ) == ("failed", final["status_error"], None, None)
     with pytest.raises(ValueError, match="resolved to nothing"):
-        observe(trial_dir).objective
+        observe(trial_dir).trait_revision
 
 
 def _reports_only(ctx):
-    """A bespoke body that reports its objective through ``ctx.report_objective`` alone and saves
-    a checkpoint carrying no metrics.
+    """A bespoke body that reports its selection value through ``ctx.report_objective`` alone
+    and saves a checkpoint carrying no metrics.
     """
     ctx.report_objective(0.25)
     ctx.save_checkpoint(
@@ -643,48 +647,117 @@ def test_a_report_only_trial_projects_the_value_it_reported(tmp_path):
     assert _trial_row(tmp_path, trial_dir)["best_metric"] == 0.25
 
 
-def test_the_sweep_the_live_summary_and_a_trial_read_one_recorded_objective(
+RESOLVED_KEYS = {"data", "geometry", "partition", "trait_revision"}
+"""What a run's launch record says its launch resolved: no selection metric, no direction."""
+
+
+@pytest.mark.usefixtures("seed_bud_trait_spec")
+def test_a_runs_and_a_sweeps_records_carry_no_metric_and_every_reader_answers_the_configs(
     tmp_path, monkeypatch, real_hpo_base_config
 ):
-    """The objective a sweep resolves once is the one its trials record and the one each trial's
-    live summary names, even for a point whose own config states another metric: the three read
-    one record. The trial's body is not run.
+    """Guard. A run opened through the launcher's own producer (``run_context``) and a sweep
+    opened by ``open_sweep`` with its one trial record no selection metric and no direction,
+    only the trait revision beside what they resolved, the sweep's and its trial's one revision;
+    every reader answers the config's own metric: the run's summary and the selection row its
+    body reports, the trial's summary, and the sweep's search direction and outcome. The trial's
+    body is not run.
     """
     import tcip_mcp.tools.training_tools as tt
-    from tcip_mcp.experiments import find_sweep, observe, run_dirs, run_summary
+    from tcip_mcp.experiments import (
+        METRICS_FILE,
+        find_sweep,
+        observe,
+        read_rows,
+        read_sweep,
+        run_dirs,
+        run_rows,
+        run_summary,
+    )
+    from tcip_mcp.pipelines.schemas import selection_of
     from tcip_mcp.pipelines.training import subprocess_worker
+    from tests import _trait_fixtures as fx
+    from tests._training_values import evaluation_block
+    from tests.tiny_trainer_fixtures import (
+        TRAIN_INTENSITIES,
+        VAL_INTENSITIES,
+        opposed_regression_data,
+        regressor_config,
+        run_context,
+    )
+
+    single = tmp_path / "single"
+    ctx = run_context(
+        single,
+        regressor_config(
+            data=opposed_regression_data(
+                single / "ds", TRAIN_INTENSITIES, VAL_INTENSITIES
+            ),
+            evaluation=evaluation_block(selection_metric="mae"),
+        ),
+    )
+    assert set(observe(ctx.run_dir).record["resolved"]) == RESOLVED_KEYS
+    ctx.report_objective(0.25)
+    rows = read_rows(ctx.run_dir / METRICS_FILE)[0]
+    assert rows[-1]["selection_metric"] == "mae"
+    assert run_summary(observe(ctx.run_dir), rows, None).best_metric_name == "mae"
 
     monkeypatch.setattr(
         subprocess_worker, "run_directory", lambda *a, **k: None
     )
+    modes: list[str] = []
 
     def one_trial(**kw):
-        kw["objective_fn"](
-            {"evaluation.selection_metric": "loss"}, lambda value: None
+        modes.append(kw["mode"])
+        # A newer revision confirmed once the sweep opened: the trial still records the sweep's.
+        fx.propose_and_confirm(
+            tmp_path,
+            fx.with_fields(
+                fx.latest("bud_opening", tmp_path),
+                notes="A newer statement of the trait.",
+            ),
         )
+        kw["objective_fn"]({}, lambda value: None)
 
     monkeypatch.setattr(
         "tcip_mcp.pipelines.training.hpo.tune_search", one_trial
     )
+    base_config = {
+        **real_hpo_base_config,
+        "evaluation": {
+            **real_hpo_base_config["evaluation"],
+            "trait": "bud_opening",
+        },
+    }
     result = tt.run_hyperparameter_search(
         tmp_path,
-        base_config=real_hpo_base_config,
+        base_config=base_config,
         param_space=sweep_space(),
         n_trials=1,
         search_seed=0,
         **fifo_search(),
         auto_tensorboard=False,
     )
-    sweep = observe(find_sweep(result["sweep"]["sweep_id"], project=tmp_path))
+    sweep_dir = find_sweep(result["sweep"]["sweep_id"], project=tmp_path)
     (trial_dir,) = run_dirs(tmp_path)
     trial = observe(trial_dir)
-
-    assert sweep.objective.selection_metric != "loss"
-    assert trial.objective == sweep.objective
-    assert (
-        run_summary(trial, [], None).best_metric_name
-        == sweep.objective.selection_metric
+    metric, higher = selection_of(
+        real_hpo_base_config["evaluation"]["selection_metric"]
     )
+
+    assert set(observe(sweep_dir).record) == {
+        "created",
+        "trait_revision",
+        "input",
+    }
+    assert set(trial.record["resolved"]) == RESOLVED_KEYS
+    swept = observe(sweep_dir).trait_revision
+    assert swept is not None
+    assert trial.trait_revision == swept
+    assert run_summary(trial, [], None).best_metric_name == metric
+    assert modes == ["max" if higher else "min"]
+    assert "objective" not in read_sweep(
+        sweep_dir, run_rows(tmp_path)
+    ).model_dump()
 
 
 def test_a_context_for_an_ended_run_is_refused_and_writes_nothing(

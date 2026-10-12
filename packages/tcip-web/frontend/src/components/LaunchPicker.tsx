@@ -18,7 +18,7 @@ export interface DataChoice {
   disabled?: boolean;
   /** Shown under a disabled choice: the compatibility reason, or an unreadable record's text. */
   reason?: string;
-  /** The recorded data.split keys choosing this partition drops (seed, group_by, ...), shown
+  /** The recorded data.split keys choosing this partition drops (seed, grouping, ...), shown
    * beside the two standing disclosures; empty or absent when the config recorded none. */
   replacedSplitKeys?: string[];
 }

@@ -10,6 +10,8 @@ import os
 
 import pytest
 
+from tests._training_values import sampler
+
 torch = pytest.importorskip("torch")
 
 
@@ -301,7 +303,7 @@ def test_tile_locality_refuses_unknown_worker_regime(monkeypatch):
 
     _patch_gdal_cache(monkeypatch, 62_000_000)
     with pytest.raises(ValueError, match="num_workers"):
-        build_sampler({"name": "tile_locality"}, _two_source_dataset())
+        build_sampler(_admitted("tile_locality"), _two_source_dataset())
 
 
 def test_tile_locality_refuses_multi_worker_without_batch_size(monkeypatch):
@@ -310,7 +312,7 @@ def test_tile_locality_refuses_multi_worker_without_batch_size(monkeypatch):
     _patch_gdal_cache(monkeypatch, 62_000_000)
     with pytest.raises(ValueError, match="batch_size"):
         build_sampler(
-            {"name": "tile_locality"}, _two_source_dataset(), num_workers=2
+            _admitted("tile_locality"), _two_source_dataset(), num_workers=2
         )
 
 
@@ -326,6 +328,13 @@ def test_tile_locality_refuses_windowed_source_without_dtype_size(monkeypatch):
 
 
 # ── build_sampler call shape: the loader context must not disturb the existing names ──
+
+
+def _admitted(name: str, **values):
+    """The sampler block naming ``name`` at ``values`` as the schema admits it."""
+    from tcip_mcp.pipelines.schemas import SamplerSpec
+
+    return SamplerSpec.model_validate(sampler(name, **values))
 
 
 def _table_run(tmp_path, values: list[int], block: dict, task: str):
@@ -355,13 +364,13 @@ def test_build_sampler_builds_tile_locality_through_the_factory(monkeypatch):
     )
 
     _patch_gdal_cache(monkeypatch, 62_000_000)
-    sampler = build_sampler(
-        {"name": "tile_locality"},
+    built = build_sampler(
+        _admitted("tile_locality"),
         _two_source_dataset(),
         num_workers=2,
         batch_size=4,
     )
-    assert isinstance(sampler, TileLocalitySampler)
+    assert isinstance(built, TileLocalitySampler)
 
 
 def test_build_sampler_imbalance_samplers_build_with_or_without_the_loader_context(
@@ -373,25 +382,25 @@ def test_build_sampler_imbalance_samplers_build_with_or_without_the_loader_conte
     from tcip_mcp.pipelines.data import samplers
 
     ds = _table_run(
-        tmp_path, [0, 1, 0, 1], {"name": "class_balanced"}, "classification"
+        tmp_path, [0, 1, 0, 1], sampler("class_balanced"), "classification"
     ).train_loader.dataset
     for block in (
-        {"name": "class_balanced"},
-        {"name": "oversample", "min_count": 3},
-        {"name": "weighted_random"},
+        _admitted("class_balanced"),
+        _admitted("oversample", min_count=3),
+        _admitted("weighted_random"),
     ):
         for kwargs in ({}, {"num_workers": 4, "batch_size": 8}):
-            sampler = samplers.build_sampler(block, ds, **kwargs)
-            assert len(list(iter(sampler))) >= len(ds)
+            built = samplers.build_sampler(block, ds, **kwargs)
+            assert len(list(iter(built))) >= len(ds)
 
 
 @pytest.mark.parametrize(
     "block, named",
     [
-        ({"name": "oversample"}, "min_count"),
-        ({"name": "class_balanced", "min_count": 5}, "min_count"),
-        ({"name": "random"}, "Unknown sampler 'random'"),
-        ({"name": "tile_locality", "num_workers": 4}, "train loader supplies"),
+        (sampler("oversample"), "min_count"),
+        (sampler("class_balanced", min_count=5), "min_count"),
+        (sampler("random"), "Unknown sampler 'random'"),
+        (sampler("tile_locality", num_workers=4), "train loader supplies"),
     ],
     ids=[
         "oversample-without-its-count",
@@ -426,7 +435,7 @@ def test_a_stated_oversampler_count_is_the_count_the_train_loader_draws_at(
     ctx = _table_run(
         tmp_path,
         [0, 0, 1, 1],
-        {"name": "oversample", "min_count": 5},
+        sampler("oversample", min_count=5),
         "classification",
     )
 
@@ -445,14 +454,14 @@ def test_each_imbalance_sampler_weighs_the_classes_its_loaders_distribution_coun
     from tcip_mcp.pipelines.data.samplers import build_sampler
 
     ctx = _table_run(
-        tmp_path, [0, 0, 0, 1], {"name": "oversample", "min_count": 5}, task
+        tmp_path, [0, 0, 0, 1], sampler("oversample", min_count=5), task
     )
     ds = ctx.train_loader.dataset
     assert ds.class_distribution == {0: 3, 1: 1}
     weight = compute_class_weights(ds.class_distribution, normalize=False)
     expected = [weight[label].item() for label in (0, 0, 0, 1)]
-    balanced = build_sampler({"name": "class_balanced"}, ds)
-    weighted = build_sampler({"name": "weighted_random"}, ds)
+    balanced = build_sampler(_admitted("class_balanced"), ds)
+    weighted = build_sampler(_admitted("weighted_random"), ds)
     assert weighted._sampler.weights.tolist() == pytest.approx(expected)
     assert balanced._weights.tolist() == pytest.approx(expected)
     assert len(list(iter(ctx.train_loader.sampler))) == 4 + 3 * 2 + 1 * 5
@@ -485,7 +494,7 @@ def test_an_imbalance_sampler_over_a_loader_stating_no_classes_refuses_naming_bo
         ValueError, match=r"ClassBalancedSampler.*'regression'"
     ):
         _table_run(
-            tmp_path, [0, 1, 0, 1], {"name": "class_balanced"}, "regression"
+            tmp_path, [0, 1, 0, 1], sampler("class_balanced"), "regression"
         )
 
 
@@ -503,8 +512,8 @@ def test_the_oversampler_over_an_instance_segmentation_loader_draws_at_its_distr
     ds = dataset_over("instance_seg", images["images_dir"], subject="bud")
 
     assert ds.class_distribution == {0: 2}
-    sampler = build_sampler({"name": "oversample", "min_count": 5}, ds)
-    assert len(list(iter(sampler))) == 2 + 2 * 3
+    built = build_sampler(_admitted("oversample", min_count=5), ds)
+    assert len(list(iter(built))) == 2 + 2 * 3
 
 
 def test_the_oversampler_reshuffles_per_epoch_under_the_global_seed(tmp_path):
@@ -513,7 +522,7 @@ def test_the_oversampler_reshuffles_per_epoch_under_the_global_seed(tmp_path):
     ds = _table_run(
         tmp_path,
         [0] * 8 + [1],
-        {"name": "oversample", "min_count": 4},
+        sampler("oversample", min_count=4),
         "classification",
     ).train_loader.dataset
     s = OverSampler(ds, min_count=4)

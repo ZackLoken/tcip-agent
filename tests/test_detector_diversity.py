@@ -16,7 +16,11 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
 from tcip_mcp.pipelines.components.necks import FPN, PAN  # noqa: E402
-from tests._training_values import adamw_optimizer, evaluation_block  # noqa: E402
+from tests._training_values import (  # noqa: E402
+    adamw_optimizer,
+    drawn_split,
+    evaluation_block,
+)
 
 
 def _features():
@@ -131,7 +135,7 @@ def test_detection_anchor_free_e2e(tmp_path: Path):
         {
             "images_dir": str(images_dir),
             "scope": {"subject": "bud"},
-            "auto_val": False,
+            "split": drawn_split(val_ratio=0.0),
         },
         optimizer=adamw_optimizer(),
         evaluation=evaluation_block(selection_metric="loss"),

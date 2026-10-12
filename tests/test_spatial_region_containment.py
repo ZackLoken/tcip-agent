@@ -20,6 +20,7 @@ pytest.importorskip("torch")
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.pipelines.operating_point import spatial_disjointness  # noqa: E402
 from tcip_mcp.pipelines.schemas import SpatialManifest  # noqa: E402
+from tests._training_values import drawn_split, tiling_block  # noqa: E402
 
 MOSAIC_W, MOSAIC_H = 4000, 3000
 GAPPED = SpatialManifest.model_construct(
@@ -97,14 +98,10 @@ def test_persisted_four_way_geometry_admits_its_calibration_region_and_refuses_t
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
-        "auto_val": True,
-        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": {
-            "val_ratio": 0.2,
-            "holdout_ratio": 0.1,
-            "calibration_ratio": 0.15,
-            "seed": 1,
-        },
+        "tiling": tiling_block(tile_size=128, overlap=0.2),
+        "split": drawn_split(
+            val_ratio=0.2, holdout_ratio=0.1, calibration_ratio=0.15, seed=1
+        ),
     }
     resolved_run(tmp_path, data_cfg, experiment_id="exp_four_way")
     spatial = run_resolution("exp_four_way", project=tmp_path).spatial
@@ -142,14 +139,8 @@ def test_a_spatial_runs_resolved_record_carries_no_drawn_seed(tmp_path):
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
-        "auto_val": True,
-        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": {
-            "val_ratio": 0.2,
-            "holdout_ratio": 0.1,
-            "calibration_ratio": 0,
-            "seed": 7,
-        },
+        "tiling": tiling_block(tile_size=128, overlap=0.2),
+        "split": drawn_split(val_ratio=0.2, holdout_ratio=0.1, seed=7),
     }
     resolved_run(tmp_path, data_cfg, experiment_id="exp_spatial_no_seed")
     resolved = run_resolution("exp_spatial_no_seed", project=tmp_path)

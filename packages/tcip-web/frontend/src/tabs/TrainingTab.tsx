@@ -81,11 +81,13 @@ function runRowLabel(run: RunRow): string {
   return `${base}, best ${run.best_metric_name} ${run.best_metric}`;
 }
 
-/** What a sweep's trials amount to so far, under the objective its record states. */
+/** What a sweep's trials amount to so far, under the selection metric its recorded base config
+ * states (`input.base_config.evaluation.selection_metric`). */
 function sweepOutcomeLine(sweep: SweepGroup): string {
+  const base = sweep.input.base_config as { evaluation: { selection_metric: string } };
   return sweep.outcome.best_params == null
     ? "no completed trial yet"
-    : `best ${sweep.objective.selection_metric} ${String(sweep.outcome.best_value)}`;
+    : `best ${base.evaluation.selection_metric} ${String(sweep.outcome.best_value)}`;
 }
 
 const NO_OTHER_PARTITION =

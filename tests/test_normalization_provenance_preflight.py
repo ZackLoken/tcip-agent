@@ -18,7 +18,7 @@ from tests._chain_fixtures import (
     run_config,
     training_config,
 )
-from tests._training_values import evaluation_block
+from tests._training_values import drawn_split, evaluation_block
 
 SUBJECT = "leaf"
 
@@ -37,7 +37,7 @@ def _cfg(images_dir, *, builder_kwargs, image_stats_sampling=None):
         {
             "images_dir": str(images_dir),
             "scope": {"subject": SUBJECT},
-            "auto_val": False,
+            "split": drawn_split(val_ratio=0.0),
         },
         evaluation=evaluation_block(selection_metric="loss"),
     )
@@ -275,10 +275,13 @@ def test_preflight_keeps_every_sample_of_a_two_date_selection(tmp_path):
         str(root),
         output_path=str(out),
         subject=SUBJECT,
-        seed=7,
-        val_ratio=0.25,
-        calibration_ratio=0.125,
-        holdout_ratio=0.125,
+        **drawn_split(
+            seed=7,
+            val_ratio=0.25,
+            calibration_ratio=0.125,
+            holdout_ratio=0.125,
+            grouping="tile_prefix",
+        ),
     ), "the draw is the fixture"
     drawn = read_selection(out, project=tmp_path)
     bound = [s for s in drawn.samples if s.side in ("train", "val")]

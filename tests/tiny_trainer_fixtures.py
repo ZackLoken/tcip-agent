@@ -17,7 +17,13 @@ import torch.nn as nn
 from torch.nn import functional
 
 from tests import REPO_ROOT
-from tests._training_values import schedule
+from tests._training_values import (
+    adamw_optimizer,
+    drawn_split,
+    evaluation_block,
+    schedule,
+    stage,
+)
 
 
 def _phantom_nan() -> torch.Tensor:
@@ -274,13 +280,14 @@ def run_context(
 
 def frames_data(root, intensities, values) -> dict:
     """The data block of a run training on every frame :func:`write_regression_dataset` writes
-    under ``root``, at ``intensities`` and valued ``values``, with no validation side.
+    under ``root``, at ``intensities`` and valued ``values``, with no validation side (every
+    share zero).
     """
     images_dir, csv_path = write_regression_dataset(root, intensities, values)
     return {
         "images_dir": str(images_dir),
         "labels_dir": str(csv_path),
-        "auto_val": False,
+        "split": drawn_split(val_ratio=0.0),
     }
 
 
@@ -308,14 +315,13 @@ def drawn_data(root, train: tuple[list, list], val: tuple[list, list]) -> dict:
     return {
         "images_dir": str(images_dir),
         "labels_dir": str(csv_path),
-        "split": {
-            "seed": 0,
-            "val_ratio": n_val / (n_train + n_val),
-            "group_key_map": {
+        "split": drawn_split(
+            val_ratio=n_val / (n_train + n_val),
+            grouping={
                 f"{UNDATED_BUCKET}/img{i}": group
                 for i, group in enumerate(groups)
             },
-        },
+        ),
     }
 
 
@@ -391,12 +397,7 @@ TINY_TRAINER_FILE = str(REPO_ROOT / "tests" / "tiny_trainer_fixtures.py")
 its builders declares under ``model_source.source_files``; never this module's own
 ``__file__``, which names a run's snapshot copy once a run has bound the module there."""
 
-REGRESSOR_ADAMW = {
-    "name": "adamw",
-    "backbone_lr": 0.05,
-    "head_lr": 0.05,
-    "weight_decay": 0.0,
-}
+REGRESSOR_ADAMW = adamw_optimizer(backbone_lr=0.05, head_lr=0.05)
 """The AdamW section the one-weight regressors here train at."""
 
 
@@ -411,7 +412,7 @@ def regressor_config(
     """A :func:`~tests._chain_fixtures.training_config` of the regression ``builder`` (by
     default the mean-intensity regressor) at ``builder_kwargs`` over the data block ``data``:
     one unfrozen stage at :data:`REGRESSOR_ADAMW` under a cosine schedule of ``horizon`` epochs,
-    no epoch checkpoints, with ``overrides`` in place of their keys.
+    selecting on the loss, no epoch checkpoints, with ``overrides`` in place of their keys.
     """
     from tests._chain_fixtures import training_config
 
@@ -426,9 +427,10 @@ def regressor_config(
         source,
         data,
         **{
-            "stages": [{"freeze_to": 0}],
+            "stages": [stage(0)],
             "optimizer": REGRESSOR_ADAMW,
             "scheduler": schedule("cosine", horizon_epochs=horizon),
+            "evaluation": evaluation_block(selection_metric="loss"),
             "checkpoint_every_n_epochs": 0,
             **overrides,
         },
@@ -438,8 +440,8 @@ def regressor_config(
 def classifier_config(horizon: int, data: dict, **overrides) -> dict:
     """A :func:`~tests._chain_fixtures.training_config` of the mean-intensity classifier
     (weight -1) over the data block ``data``: one unfrozen stage in batches of three under a
-    cosine schedule of ``horizon`` epochs, AdamW at 0.2, no epoch checkpoints, with
-    ``overrides`` in place of their keys.
+    cosine schedule of ``horizon`` epochs, AdamW at 0.2, selecting on the loss, no epoch
+    checkpoints, with ``overrides`` in place of their keys.
     """
     from tests._chain_fixtures import training_config
 
@@ -453,14 +455,10 @@ def classifier_config(horizon: int, data: dict, **overrides) -> dict:
         data,
         **{
             "batch_size": 3,
-            "stages": [{"freeze_to": 0}],
+            "stages": [stage(0)],
             "scheduler": schedule("cosine", horizon_epochs=horizon),
-            "optimizer": {
-                "name": "adamw",
-                "backbone_lr": 0.2,
-                "head_lr": 0.2,
-                "weight_decay": 0.0,
-            },
+            "optimizer": adamw_optimizer(backbone_lr=0.2, head_lr=0.2),
+            "evaluation": evaluation_block(selection_metric="loss"),
             "checkpoint_every_n_epochs": 0,
             **overrides,
         },

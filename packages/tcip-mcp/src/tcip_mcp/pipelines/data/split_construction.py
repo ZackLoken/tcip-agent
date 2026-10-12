@@ -20,13 +20,15 @@ if TYPE_CHECKING:
     from tcip_mcp.pipelines.image_utils import BandGroupRef
     from tcip_mcp.pipelines.model_build import SourceLayout
     from tcip_mcp.pipelines.schemas import (
+        BoundSplit,
         DataSpec,
-        Objective,
+        DrawnSplit,
         SpatialManifest,
         SplitSpec,
         TilingSpec,
         TrainConfigSchema,
         TrainGeometry,
+        TraitRevisionRef,
     )
 
 logger = logging.getLogger(__name__)
@@ -36,21 +38,6 @@ SPATIAL_SIDE_ORDER = ("train", "val", "holdout", "calibration")
 (:func:`~tcip_mcp.pipelines.data.splits.spatial_strip_split`)."""
 
 
-def _selection_conflict_keys() -> tuple[str, ...]:
-    """The ``data.split`` keys a drawn split states and a bound selection records instead, each
-    side's share stated as ``<side>_ratio``.
-    """
-    from tcip_mcp.pipelines.data.selection import SIDES
-
-    return (
-        "group_by",
-        "group_key_map",
-        "seed",
-        "stratify_foreground",
-        *(f"{side}_ratio" for side in SIDES[1:]),
-    )
-
-
 def data_dir_issues(data: DataSpec) -> list[str]:
     """Every objection to the data locations an unbound run's producer reads: ``data.images_dir``
     missing or naming a path that does not exist, and a stated ``data.labels_dir`` that is not a
@@ -58,8 +45,9 @@ def data_dir_issues(data: DataSpec) -> list[str]:
     Empty for a config bound to a selection (:func:`selection_compatibility`).
     """
     from tcip_mcp.pipelines.data.label_queries import ground_truth_shape
+    from tcip_mcp.pipelines.schemas import BoundSplit
 
-    if data.split.selection_dir:
+    if isinstance(data.split, BoundSplit):
         return []
     images_dir = data.images_dir
     issues = [] if images_dir else ["Missing 'data.images_dir'"]
@@ -74,33 +62,16 @@ def data_dir_issues(data: DataSpec) -> list[str]:
 
 
 def selection_compatibility(
-    data: DataSpec, selection: Selection | None, selection_dir: str
+    data: DataSpec,
+    split: BoundSplit,
+    selection: Selection | None,
 ) -> list[str]:
-    """Every objection binding a run's data block ``data`` to ``selection`` (read at
-    ``selection_dir``; ``None`` when it would not read) raises: a drawn split's own key under
-    ``data.split`` beside the selection (``seed`` admitted only beside
-    ``redraw_within_selection``), that flag with no seed, a stated ``data.labels_dir`` (each
+    """Every objection binding a run's data block ``data`` through its bound ``split`` to
+    ``selection`` (``None`` when it would not read) raises: a stated ``data.labels_dir`` (each
     sample names its own ground truth), and, with a selection in hand, a stated ``data.scope``
     (the selection records its own class space) and an empty train or val side.
     """
-    split = data.split
-    redraw = split.redraw_within_selection
-    conflicts = sorted(
-        k
-        for k in _selection_conflict_keys()
-        if k in split.stated and not (redraw and k == "seed")
-    )
     issues: list[str] = []
-    if conflicts:
-        issues.append(
-            f"data.split.selection_dir conflicts with {conflicts}: a recorded partition and "
-            "a drawn split's own parameters/source cannot both govern one run."
-        )
-    if redraw and split.seed is None:
-        issues.append(
-            "data.split.redraw_within_selection=true requires data.split.seed: the seed the "
-            "redraw draws train and val at."
-        )
     if data.labels_dir is not None:
         issues.append(
             "data.labels_dir is stated beside data.split.selection_dir, whose samples each name "
@@ -118,8 +89,8 @@ def selection_compatibility(
     counts = selection.counts()
     if not counts["train"] or not counts["val"]:
         issues.append(
-            f"the selection at {selection_dir} leaves an empty side (train={counts['train']}, "
-            f"val={counts['val']}); a run needs both."
+            f"the selection at {split.selection_dir} leaves an empty side "
+            f"(train={counts['train']}, val={counts['val']}); a run needs both."
         )
     return issues
 
@@ -141,8 +112,7 @@ def admitted_membership(
     places: Sequence[tuple[str, Path | str, str | None]],
     *,
     scope: ClassScope,
-    group_by: str,
-    group_key_map: Mapping[str, str] | None,
+    grouping: str | Mapping[str, str],
 ) -> Membership:
     """Admit each place ``(name, images_dir, ground_truth)``, ``ground_truth`` ``None`` for the
     images' own label documents
@@ -152,7 +122,7 @@ def admitted_membership(
     (:func:`~tcip_mcp.pipelines.data.splits.resolve_group_key_fn` over the identities).
 
     Raises ``ValueError`` when nothing is admitted (the admission's own reason, naming every
-    place searched and the tallies) and for a grouping policy that does not cover the members;
+    place searched and the tallies) and for a ``grouping`` that does not cover the members;
     the admissions' own refusals propagate.
     """
     from tcip_mcp.pipelines.data.label_queries import (
@@ -194,11 +164,7 @@ def admitted_membership(
             raise ValueError(
                 f"{exc} Searched {searched} ({tallies})."
             ) from exc
-    group_of = resolve_group_key_fn(
-        group_by,
-        sorted(identities.values()),
-        group_key_map=dict(group_key_map) if group_key_map else None,
-    )
+    group_of = resolve_group_key_fn(grouping, sorted(identities.values()))
     samples: dict[str, Sample] = {}
     for where, admitted in enumerate(admissions):
         built = admitted.samples(
@@ -214,26 +180,24 @@ def admitted_membership(
     return Membership(
         samples,
         admissions[0].scope,
-        recorded_group_by(group_by, group_key_map),
+        recorded_group_by(grouping),
         tallies,
     )
 
 
-def run_membership(data: DataSpec) -> Membership:
+def run_membership(data: DataSpec, split: DrawnSplit) -> Membership:
     """:func:`admitted_membership` over a run's data block naming its locations
     (:func:`data_dir_issues`): its one place (``images_dir`` and the ``labels_dir`` a mask or
     table run names), under the ``scope`` it states (the empty one when it states none), grouped
-    by its ``split`` section's policy.
+    by its drawn ``split``'s grouping.
     """
     from tcip_mcp.pipelines.data.selection import ClassScope
-    from tcip_mcp.pipelines.data.splits import DEFAULT_GROUP_BY
 
     images_dir = cast(str, data.images_dir)
     return admitted_membership(
         [(images_dir, images_dir, data.labels_dir)],
         scope=data.scope if data.scope is not None else ClassScope(),
-        group_by=data.split.group_by or DEFAULT_GROUP_BY,
-        group_key_map=data.split.group_key_map,
+        grouping=split.grouping,
     )
 
 
@@ -262,23 +226,15 @@ def check_shares(sides: Mapping[str, float]) -> dict[str, float]:
     return {"train": remainder, **drawn}
 
 
-def run_shares(split: SplitSpec, *, spatial: bool) -> dict[str, float]:
-    """The shares a run drawing its own split states (:func:`check_shares`, ``train`` the
-    remainder): ``val`` at ``val_ratio``, and on a within-image spatial split each other side of
-    :data:`SPATIAL_SIDE_ORDER` whose ``<side>_ratio`` is stated. A ``val`` share unstated or zero
-    refuses, since the run draws its own validation side.
+def stated_shares(split: DrawnSplit) -> dict[str, float]:
+    """The shares the drawn ``split`` states, each side's ``<side>_ratio``
+    (:func:`check_shares`, ``train`` the remainder and a side at zero not drawn).
     """
-    sides = SPATIAL_SIDE_ORDER[1:] if spatial else ("val",)
-    stated = {side: getattr(split, f"{side}_ratio") for side in sides}
-    shares = check_shares(
-        {side: share for side, share in stated.items() if share is not None}
+    from tcip_mcp.pipelines.data.selection import SIDES
+
+    return check_shares(
+        {side: getattr(split, f"{side}_ratio") for side in SIDES[1:]}
     )
-    if "val" not in shares:
-        raise ValueError(
-            "a run drawing its own validation side states data.split.val_ratio "
-            "above zero; set data.auto_val=False to train without validation."
-        )
-    return shares
 
 
 def draw_sides(
@@ -377,11 +333,11 @@ def draw_sides(
 
 
 def split_seed(split: SplitSpec) -> int:
-    """The seed a draw over ``split`` states; one stating none refuses (``ValueError``)."""
+    """The seed ``split`` draws at; a bound split stating none refuses (``ValueError``)."""
     if split.seed is None:
         raise ValueError(
-            "this run draws its own split and states no seed: the partition a draw "
-            "produces depends on it, so state data.split.seed."
+            "this bound data.split states no seed to redraw its selection at: the "
+            "partition a redraw produces depends on it, so state data.split.seed."
         )
     return split.seed
 
@@ -431,8 +387,8 @@ def spatial_single_source_split(
     data: DataSpec,
     shares: Mapping[str, float],
 ) -> SpatialManifest:
-    """Derive the run's requested ``shares`` (:func:`run_shares`: ``train``, ``val``, ``holdout``
-    and, when stated, ``calibration``) over one source's own tile lattice,
+    """Derive the run's requested ``shares`` (:func:`stated_shares`: ``train``, ``val`` and each
+    reserved side stated above zero) over one source's own tile lattice,
     by disjoint pixel strips (:func:`~tcip_mcp.pipelines.data.splits.spatial_strip_split`), and
     return it as the :class:`~tcip_mcp.pipelines.schemas.SpatialManifest` a run's partition
     records; the reserved regions record only their geometry and kept-tile count. It is drawn at
@@ -454,7 +410,7 @@ def spatial_single_source_split(
 
     stem = sample.member
     remedy = (
-        "reduce the reserved shares, or set data.auto_val=False to train on it without "
+        "reduce the reserved shares, or state every share zero to train on it whole without "
         "validation"
     )
 
@@ -584,19 +540,19 @@ def resolved_tiling(
     samples: Sequence[Sample],
     scope: ClassScope,
     sizes: Mapping[str, int],
-) -> TilingSpec:
+) -> TilingSpec | None:
     """The tiling block a ``task`` loader over ``samples`` (at ``scope`` and ``sizes``) is built
-    at: ``{"enabled": False}`` when it does not tile, else ``tiling`` with its edge and overlap,
-    the stated ones or the ones ``samples``' objects derive (``derivations.derive_tile_geometry``,
-    whose refusals propagate).
+    at: ``None`` when it does not tile, else ``tiling`` with its edge and overlap, the stated
+    ones or the ones ``samples``' objects derive (``derivations.derive_tile_geometry``, whose
+    refusals propagate).
     """
     from tcip_mcp.pipelines.data.datasets import build_dataset
     from tcip_mcp.pipelines.derivations import derive_tile_geometry
-    from tcip_mcp.pipelines.schemas import TilingSpec, run_tiling
+    from tcip_mcp.pipelines.schemas import run_tiling
 
     tiler = run_tiling(task, tiling)
     if tiler is None:
-        return TilingSpec.model_validate({"enabled": False})
+        return None
     regions = (
         []
         if tiler.tile_size is not None and tiler.overlap is not None
@@ -621,8 +577,8 @@ def predictor_dataset(
 ) -> Any:
     """The ``task`` loader over ``samples`` under ``scope`` a predictor scores: at the band count
     ``predictor`` reads its sources at (``predictor.in_chans``) and the tiling block
-    :func:`resolved_tiling` resolves ``tiling`` to over them, an absent or disabled block
-    untiled. The sizing and the resolution refuse as they do.
+    :func:`resolved_tiling` resolves ``tiling`` to over them, an absent block untiled. The sizing
+    and the resolution refuse as they do.
     """
     from tcip_mcp.pipelines.data.datasets import build_dataset, resolve_sizes
 
@@ -665,7 +621,8 @@ def redrawn_selection(
 ) -> Selection:
     """``selection`` with train and val redrawn fresh over its own train-plus-val samples at
     ``seed`` (:func:`draw_sides`, over each sample's recorded group key, at the val share the
-    selection already delivered, stratified), the reference sides untouched. The draw's refusals
+    selection already delivered, stratified as the selection records its own draw was), the
+    reference sides untouched. The draw's refusals
     raise, naming ``selection_dir``. Each redrawn sample keeps the read it carries
     (:func:`~tcip_mcp.pipelines.data.label_queries.acquired`).
     """
@@ -679,13 +636,13 @@ def redrawn_selection(
             selection.scope,
             ratios=check_shares({"val": val_share}),
             seed=seed,
-            stratify=True,
+            stratify=selection.stratify_foreground,
         )
     except ValueError as exc:
         raise ValueError(
             f"redrawing train and val inside the selection at {selection_dir!r}: "
-            f"{exc} Drop data.split.redraw_within_selection and data.split.seed to "
-            "bind the selection's recorded partition instead."
+            f"{exc} Drop data.split.seed to bind the selection's recorded partition "
+            "instead."
         ) from exc
     from tcip_mcp.pipelines.data.selection import refuse_crossing_sides
 
@@ -811,29 +768,31 @@ def _sample_loaders(
 def _drawn_split(
     task: str,
     data: DataSpec,
+    split: DrawnSplit,
     layout: SourceLayout,
     *,
     transforms,
     tallies_out: dict[str, int] | None,
 ):
-    """``(train_ds, val_ds, partition, resolved)`` for a run that draws its own split over
+    """``(train_ds, val_ds, partition, resolved)`` for a run that draws its own ``split`` over
     ``data``'s ground truth: its one place's membership (:func:`admitted_membership`, its tallies
-    copied into ``tallies_out``), then, with ``auto_val`` on, train and val drawn through
-    :func:`draw_sides`, or a single tiled source split over its own tile lattice
-    (:func:`spatial_single_source_split`). ``auto_val`` off trains on every member with no
-    validation. ``resolved`` is ``data`` with its class space and sizes recorded, and a
-    within-image split is the partition's. Raises when the validation requested cannot be drawn
-    (naming ``auto_val=False``), and with the membership's and the draw's own refusals. Either
-    geometry draws the one partition :func:`run_shares` resolves.
+    copied into ``tallies_out``), then train and val drawn at the split's shares
+    (:func:`stated_shares`) through :func:`draw_sides`, or every stated side over a single tiled
+    source's own tile lattice (:func:`spatial_single_source_split`). A split stating every share
+    zero trains on every member with no validation. ``resolved`` is ``data`` with its class space
+    and sizes recorded, and a within-image split is the partition's. Raises when a single source
+    cannot hold the sides requested out, when a run over several sources states a reserved
+    share (a reference is the reserved strips of one tiled source, or a selection
+    ``draw_splits`` draws), and with the membership's and the draw's own refusals.
     """
-    split = data.split
-    membership = run_membership(data)
+    membership = run_membership(data, split)
     if tallies_out is not None:
         tallies_out.update(membership.tallies)
     samples = list(membership.samples.values())
     resolved = run_sizes(task, data, membership.scope, samples)
+    shares = stated_shares(split)
 
-    if not data.auto_val:
+    if len(shares) == 1:
         return _sample_loaders(
             task,
             _with_lattice(task, resolved, samples),
@@ -846,17 +805,19 @@ def _drawn_split(
     if len(samples) < 2:
         from tcip_mcp.pipelines.schemas import run_tiling
 
-        if run_tiling(task, data.tiling) is None:
+        if run_tiling(task, data.tiling) is None or "val" not in shares:
             raise ValueError(
-                f"{len(samples)} admitted source(s) leave nothing to hold a validation side out "
-                f"of for this {task} run; set data.auto_val=False to train without validation, "
-                "or admit more sources."
+                f"{len(samples)} admitted source(s) leave nothing to hold {sorted(shares)} out "
+                f"of for this {task} run: one source splits only within itself, tiled and "
+                "with a validation strip; state data.tiling and data.split.val_ratio above "
+                "zero, every share zero to train on it whole without validation, or admit "
+                "more sources."
             )
         # A tiled source the platform builds itself holds out disjoint pixel blocks, drawn at the
         # lattice its own objects derive.
         resolved = _with_lattice(task, resolved, samples)
         manifest = spatial_single_source_split(
-            task, samples[0], resolved, run_shares(split, spatial=True)
+            task, samples[0], resolved, shares
         )
         return _sample_loaders(
             task,
@@ -869,11 +830,20 @@ def _drawn_split(
             spatial=manifest,
         )
 
-    seed = split_seed(split)
+    from tcip_mcp.pipelines.data.selection import REFERENCE_SIDES
+
+    reserved = sorted(f"{side}_ratio" for side in set(REFERENCE_SIDES) & set(shares))
+    if reserved:
+        raise ValueError(
+            f"data.split states {reserved} over {len(samples)} admitted sources: a run holds "
+            "a reference out only as the reserved strips of one tiled source; draw a "
+            "selection with draw_splits for a reference, or state those shares zero."
+        )
+    seed = split.seed
     drawn, _counted = draw_sides(
         membership.samples,
         membership.scope,
-        ratios=run_shares(split, spatial=False),
+        ratios=shares,
         seed=seed,
         stratify=split.stratify_foreground,
     )
@@ -911,13 +881,13 @@ def auto_train_val(
     Two routes, and a run of any task takes one of them:
       1. ``data.split.selection_dir`` set -> train on the selection's own ``train`` and ``val``
         samples instead of drawing a split, each sample reading the source and the ground truth the
-        draw recorded for it, under the selection's own scope. Checked
-        ahead of ``auto_val``; every conflict, empty-side refusal and build failure raises. The
+        draw recorded for it, under the selection's own scope. Every conflict, empty-side
+        refusal and build failure raises. The
         loader refuses by name when the task reads another shape than the samples name. The
         calibration side never builds a loader.
-        ``data.split.redraw_within_selection: true`` (beside ``selection_dir`` and ``seed``)
-        redraws train and val fresh inside the selection's own train-plus-val samples, calibration
-        still untouched; a starved side refuses.
+        A ``data.split.seed`` stated beside ``selection_dir`` redraws train and val fresh at it
+        inside the selection's own train-plus-val samples, calibration still untouched; a
+        starved side refuses.
       2. Otherwise -> :func:`_drawn_split`, which admits once through the producer over the
         images' own label documents, or the mask directory or table ``data.labels_dir`` names, and
         builds every loader from the resulting samples.
@@ -933,11 +903,14 @@ def auto_train_val(
             "config names, so there is nothing here to admit."
         )
 
-    selection_dir = data.split.selection_dir
+    from tcip_mcp.pipelines.schemas import BoundSplit
 
-    # 1. A named selection is an explicit partition auto_val does not govern; every refusal
-    # here, and any build failure while binding to it, raises rather than degrading.
-    if selection_dir:
+    split = data.split
+
+    # 1. A named selection is an explicit partition; every refusal here, and any build failure
+    # while binding to it, raises rather than degrading.
+    if isinstance(split, BoundSplit):
+        selection_dir = split.selection_dir
         from tcip_mcp.pipelines.data.label_queries import readmitted_samples
         from tcip_mcp.pipelines.data.selection import (
             REFERENCE_SIDES,
@@ -953,7 +926,7 @@ def auto_train_val(
             unread = exc
         # The bind's own refusals, stated once so the preflight that offered this selection and
         # the launch that binds it say the same thing, the config's own even over an unread one.
-        bind_issues = selection_compatibility(data, selection, selection_dir)
+        bind_issues = selection_compatibility(data, split, selection)
         if bind_issues:
             raise ValueError(" ".join(bind_issues)) from unread
         if selection is None:
@@ -974,10 +947,9 @@ def auto_train_val(
             ),
         )
         # A redraw repartitions the selection's own train-plus-val samples; the reference untouched.
-        redraw = data.split.redraw_within_selection
         seed = selection.seed
-        if redraw:
-            seed = split_seed(data.split)
+        if split.seed is not None:
+            seed = split.seed
             selection = redrawn_selection(selection, selection_dir, seed)
 
         reference_samples = [
@@ -1009,21 +981,26 @@ def auto_train_val(
             selection={
                 "selection_dir": selection_dir,
                 "selection_sha256": selection_digest(selection, project),
-                "redraw": redraw,
+                "redraw": split.seed is not None,
             },
         )
 
     # 2. Otherwise the producer names this run's membership off the ground truth its config points
     # at, and every branch of the resolution order below builds from the samples it made.
     return _drawn_split(
-        task, data, layout, transforms=transforms, tallies_out=tallies_out
+        task,
+        data,
+        split,
+        layout,
+        transforms=transforms,
+        tallies_out=tallies_out,
     )
 
 
 class ResolvedRun(NamedTuple):
     """A run resolved once, at launch: the datasets built at it, ``spec``, the validated launch
-    config it was resolved from, and ``data``, ``geometry``, ``partition`` and ``objective``,
-    what it resolved.
+    config it was resolved from, and ``data``, ``geometry``, ``partition`` and
+    ``trait_revision``, what it resolved.
     """
 
     train_ds: Any
@@ -1032,7 +1009,7 @@ class ResolvedRun(NamedTuple):
     data: DataSpec
     geometry: TrainGeometry
     partition: dict
-    objective: Objective
+    trait_revision: TraitRevisionRef | None
 
     @property
     def spatial(self) -> SpatialManifest | None:
@@ -1042,13 +1019,15 @@ class ResolvedRun(NamedTuple):
     @property
     def record(self) -> dict:
         """What the run's ``run.json`` holds of this resolution: ``data`` as it records itself,
-        ``geometry``, ``partition`` and ``objective``.
+        ``geometry``, ``partition`` and ``trait_revision``.
         """
+        from tcip_mcp.pipelines.schemas import revision_record
+
         return {
             "data": self.data.record(),
             "geometry": self.geometry.model_dump(mode="json"),
             "partition": self.partition,
-            "objective": self.objective.model_dump(),
+            "trait_revision": revision_record(self.trait_revision),
         }
 
 
@@ -1057,20 +1036,20 @@ def resolve_run(
     layout: SourceLayout,
     *,
     project: Path,
-    objective: Objective | None = None,
+    trait_revision: TraitRevisionRef | None = None,
     tallies_out: dict[str, int] | None = None,
 ) -> ResolvedRun:
     """Resolve the validated config ``spec`` (``schemas.train_config``) once for a run of
     ``project`` whose declared files ``layout`` lays out (``model_build.SourceLayout``): its data
     block through :func:`auto_train_val`, the geometry its train dataset serves
     (:func:`~tcip_mcp.pipelines.training.generic_trainer.effective_data_geometry`), and its
-    objective (:func:`~tcip_mcp.pipelines.training.generic_trainer.resolve_objective` for a run
-    with or without a val side), or ``objective`` as given, a sweep's own for its trials.
-    ``tallies_out`` is :func:`auto_train_val`'s. Every refusal of the resolution raises.
+    trait revision (:func:`~tcip_mcp.pipelines.training.generic_trainer.resolve_trait_revision`
+    for a run with or without a val side), or ``trait_revision`` as given, a sweep's own for its
+    trials. ``tallies_out`` is :func:`auto_train_val`'s. Every refusal of the resolution raises.
     """
     from tcip_mcp.pipelines.training.generic_trainer import (
         effective_data_geometry,
-        resolve_objective,
+        resolve_trait_revision,
         run_transforms,
     )
 
@@ -1084,12 +1063,12 @@ def resolve_run(
         tallies_out=tallies_out,
     )
     geometry = effective_data_geometry(task, data, train_ds)
-    if objective is None:
-        objective = resolve_objective(
+    if trait_revision is None:
+        trait_revision = resolve_trait_revision(
             spec, project=project, has_val_loader=val_ds is not None
         )
     return ResolvedRun(
-        train_ds, val_ds, spec, data, geometry, partition, objective
+        train_ds, val_ds, spec, data, geometry, partition, trait_revision
     )
 
 

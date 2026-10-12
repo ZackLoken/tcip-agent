@@ -353,12 +353,9 @@ def test_the_tiler_carries_exactly_the_per_box_keys_the_loader_names(
     from tests._producer_fixtures import dataset_over
 
     images_dir = _frames(tmp_path / "ds", {"color": "red", "grade": "mid"})
-    tiling = {
-        "enabled": True,
-        "tile_size": 32,
-        "overlap": 0.0,
-        "sliver_frac": 0.5,
-    }
+    from tests._training_values import tiling_block
+
+    tiling = tiling_block(tile_size=32, overlap=0.0, sliver_frac=0.5)
 
     tiled = dataset_over(
         "detection", images_dir, subject=SUBJECT, tiling=tiling

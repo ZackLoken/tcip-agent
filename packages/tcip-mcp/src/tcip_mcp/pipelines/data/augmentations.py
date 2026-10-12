@@ -13,11 +13,15 @@ Usage:
 from __future__ import annotations
 
 import random
+from typing import TYPE_CHECKING
 
 import torch
 from PIL import Image, ImageEnhance, ImageFilter
 
 from tcip_mcp.pipelines.image_utils import pil_to_tensor
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.schemas import AugmentationSpec
 
 
 class Compose:
@@ -344,7 +348,7 @@ _AUGMENTATION_REGISTRY: dict[str, type] = {
 }
 
 
-def recorded_resize(config: dict | None) -> tuple[int, int] | None:
+def recorded_resize(config: AugmentationSpec | None) -> tuple[int, int] | None:
     """The fixed ``(width, height)`` an augmentation config resizes every sample to, or ``None``
     when it pins no size.
 
@@ -352,7 +356,7 @@ def recorded_resize(config: dict | None) -> tuple[int, int] | None:
     :class:`Resize` in it. An unbuildable config raises. :class:`RandomResizedCrop` is not
     reported.
     """
-    if not config:
+    if config is None:
         return None
     sizes = [
         t.size
@@ -365,26 +369,22 @@ def recorded_resize(config: dict | None) -> tuple[int, int] | None:
     return int(width), int(height)
 
 
-def build_augmentation(config: dict) -> Compose:
+def build_augmentation(config: AugmentationSpec) -> Compose:
     """The augmentation chain ``config`` states, in its order, ending in :class:`ToTensor`.
 
     ``config`` maps each transform's name (:data:`_AUGMENTATION_REGISTRY`) to a dict stating
-    every value that transform's constructor takes, e.g. ``{"horizontal_flip": {"p": 0.5},
-    "resize": {"size": [512, 512]}}``. Refuses (``ValueError``) a ``config`` that is no dict, an
-    unknown transform, and by name an entry that is not a dict stating exactly its transform's
-    values.
+    every value that transform's constructor takes, e.g. ``{"rationale": "...",
+    "horizontal_flip": {"p": 0.5}, "resize": {"size": [512, 512]}}``. Refuses (``ValueError``)
+    an unknown transform, and by name an entry that is not a dict stating exactly its
+    transform's values.
     """
     from tcip_mcp.pipelines.model_build import (
         keyword_parameters,
         resolve_named,
     )
 
-    if not isinstance(config, dict):
-        raise ValueError(
-            f"augmentation {config!r} is no dict of transform entries"
-        )
     transforms: list = []
-    for name, params in config.items():
+    for name, params in (config.model_extra or {}).items():
         cls = resolve_named(name, _AUGMENTATION_REGISTRY, kind="augmentation")
         values = keyword_parameters(cls)[0]
         if not isinstance(params, dict) or set(params) != values:

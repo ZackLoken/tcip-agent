@@ -114,7 +114,6 @@ def _bespoke_detection_checkpoint(
         data={
             "num_channels": in_chans,
             "scope": dict(SCOPE),
-            "tiling": {"enabled": False},
         },
     )
 

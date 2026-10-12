@@ -217,7 +217,10 @@ class ClassScope:
 
 @dataclass(frozen=True)
 class Selection:
-    """A drawn partition: its samples, the scope they were admitted under, and how they were drawn.
+    """A drawn partition: its samples, the scope they were admitted under, and how they were drawn:
+    its ``seed`` and grouping, ``ratios``, the share each side was requested at
+    (``split_construction.check_shares``'s answer), whether it was balanced by foreground count
+    (``stratify_foreground``), and ``rationale``, why it was drawn so.
 
     ``scope`` is the class space the draw admitted through, empty for a draw over ground truth no
     registry scopes, a mask raster or a table row, whose class space a binding run derives from
@@ -228,6 +231,9 @@ class Selection:
     seed: int
     group_by: str
     scope: ClassScope
+    ratios: dict[str, float]
+    stratify_foreground: bool
+    rationale: str
     dataset_fingerprint: str | None = None
 
     def on(self, side: str) -> list[Sample]:
@@ -396,6 +402,9 @@ def selection_document(selection: Selection) -> dict[str, Any]:
         "scope": asdict(selection.scope),
         "seed": selection.seed,
         "group_by": selection.group_by,
+        "ratios": selection.ratios,
+        "stratify_foreground": selection.stratify_foreground,
+        "rationale": selection.rationale,
         "dataset_fingerprint": selection.dataset_fingerprint,
     }
 
@@ -483,6 +492,9 @@ def as_selection(document: Any, *, where: str) -> Selection:
         scope=scope,
         seed=document["seed"],
         group_by=document["group_by"],
+        ratios=document["ratios"],
+        stratify_foreground=document["stratify_foreground"],
+        rationale=document["rationale"],
         dataset_fingerprint=document["dataset_fingerprint"],
     )
 

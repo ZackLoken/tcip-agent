@@ -18,14 +18,14 @@ from tests._chain_fixtures import (
     SAVE_BUILT_WEIGHTS,
     training_config,
 )
-from tests._training_values import sweep_space
+from tests._training_values import drawn_split, sweep_space
 
 torch = pytest.importorskip("torch")
 
 SCOPED_DATA = {
     "num_channels": 3,
     "scope": {"subject": "bud"},
-    "split": {"seed": 0, "val_ratio": 0.15},
+    "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
 }
 """A three-band detection run's data section, stating the one subject it is scoped to and the
 seed its own draw is made at; the admission reads the attributes the registry declares for it."""
@@ -267,8 +267,9 @@ def finished_run(
     final status it writes. ``training_source`` is its body, by default one logging ``rows``
     (each an ``epoch`` plus its metrics) and saving the model its config builds under its seed
     with ``metrics`` as its checkpoint metrics, which completes it; ``seed`` states that seed
-    (drawn when unset); ``wall_clock_passed`` launches it with a wall clock it has passed by the
-    time it ends, and ``cancel_requested`` requests its cancellation before it starts.
+    (the sample config's when unset); ``wall_clock_passed`` launches it with a wall clock it has
+    passed by the time it ends, and ``cancel_requested`` requests its cancellation before it
+    starts.
     ``model_source`` defaults to :data:`BUILT_DETECTOR` and ``data`` to :data:`SCOPED_DATA` for a
     detection or instance_seg model, three bands otherwise; ``registry`` is the subject registry
     its own frames' dataset declares, so its admission records that registry's attributes. A run
@@ -299,7 +300,12 @@ def finished_run(
         stated = {**frames, **stated}
     split = stated.get("split") or {}
     if "selection_dir" not in split:
-        stated = {**stated, "split": {"seed": 0, "val_ratio": 0.15, **split}}
+        stated = {
+            **stated,
+            "split": drawn_split(
+                **{"val_ratio": 0.15, "grouping": "tile_prefix", **split}
+            ),
+        }
     run_config = training_config(
         model_source, stated, training_source=training_source, **config
     )
@@ -330,7 +336,7 @@ def resolved_run(
 ) -> Path:
     """A run under ``root`` of a ``task`` model (:func:`unbuilt_source`) opened by
     :func:`opened_run` over ``data``, whose launch record holds the data section, partition and
-    objective the launcher's producer resolved; no body runs. Returns the run directory.
+    trait revision the launcher's producer resolved; no body runs. Returns the run directory.
     """
     return opened_run(
         root,

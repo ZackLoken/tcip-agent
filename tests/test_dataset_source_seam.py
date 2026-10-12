@@ -15,6 +15,7 @@ import pytest
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests import REPO_ROOT
 from tests._chain_fixtures import BESPOKE_MODELS, GT_ANCHOR_DETECTOR
+from tests._training_values import drawn_split, tiling_block
 
 torch = pytest.importorskip("torch")
 
@@ -199,7 +200,7 @@ def _ctx(root: Path, task: str, data: dict):
         {
             **data,
             "scope": asdict(_scope()),
-            "auto_val": False,
+            "split": drawn_split(val_ratio=0.0),
             "images_dir": str(root / "ds" / "images" / UNDATED_BUCKET),
         },
         evaluation=evaluation_block(selection_metric="loss"),
@@ -219,12 +220,7 @@ def test_a_bodys_platform_loader_reads_at_the_runs_sizes_and_lattice(
     ``ctx.build_dataset`` builds the platform's loader over the subset of samples it was handed,
     at the band count and the lattice the run's data block records.
     """
-    lattice = {
-        "enabled": True,
-        "tile_size": 8,
-        "overlap": 0.25,
-        "sliver_frac": 0.5,
-    }
+    lattice = tiling_block(tile_size=8, overlap=0.25, sliver_frac=0.5)
     ctx, samples = _ctx(
         tmp_path, "detection", {"num_channels": 3, "tiling": lattice}
     )
@@ -279,7 +275,7 @@ def test_a_bodys_door_takes_the_samples_and_the_augmentation_and_nothing_else(
     for unowned in (
         {"dataset_source": ctx.spec.data.dataset_source},
         {"scope": _scope()},
-        {"tiling": TilingSpec.model_validate({"enabled": True})},
+        {"tiling": TilingSpec.model_validate(tiling_block())},
         {"sizes": {"num_channels": 3}},
         {"labels_dir": "X:/elsewhere"},
         {"stems": ["s0"]},
@@ -378,7 +374,10 @@ def test_preflight_requires_the_data_a_bespoke_run_is_still_admitted_from(
     from tcip_mcp.tools.training_tools import preflight_config
     from tests._chain_fixtures import training_config
 
-    data: dict = {"dataset_source": DATASET_SOURCE}
+    data: dict = {
+        "dataset_source": DATASET_SOURCE,
+        "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
+    }
     config = training_config(
         {
             "builder": GT_ANCHOR_DETECTOR,
@@ -401,7 +400,6 @@ def test_preflight_requires_the_data_a_bespoke_run_is_still_admitted_from(
         **data,
         "images_dir": str(root / "images" / UNDATED_BUCKET),
         "scope": {"subject": "leaf"},
-        "split": {"seed": 0, "val_ratio": 0.15},
     }
     admitted = preflight_config(
         tmp_path, {**config, "data": located_data}, smoke=False
@@ -436,7 +434,10 @@ def test_snapshot_copies_the_dataset_builders_module_as_that_module(
         "task": "detection",
     }
     spec = train_config(
-        training_config(model_source, {"dataset_source": DATASET_SOURCE})
+        training_config(
+            model_source,
+            {"dataset_source": DATASET_SOURCE, "split": drawn_split()},
+        )
     )
     record, copies = snapshot_model_source(spec, tmp_path)
 
@@ -445,7 +446,8 @@ def test_snapshot_copies_the_dataset_builders_module_as_that_module(
     assert copies[entry["file"]] == Path(__file__).read_bytes()
     undeclared = train_config(
         training_config(
-            model_source, {"dataset_source": {"builder": BESPOKE_DS}}
+            model_source,
+            {"dataset_source": {"builder": BESPOKE_DS}, "split": drawn_split()},
         )
     )
     with pytest.raises(ValueError, match="test_dataset_source_seam"):

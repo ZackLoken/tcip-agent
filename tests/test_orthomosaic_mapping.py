@@ -429,7 +429,6 @@ def _bespoke_detection_checkpoint(
             "task": "detection",
         },
         in_chans,
-        tiling={"enabled": False},
     )
 
 

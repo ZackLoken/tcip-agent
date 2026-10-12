@@ -363,16 +363,18 @@ def overfit_check(
     model: TCIPModel,
     task: str,
     *,
+    seed: int,
+    deterministic: bool,
     dims: Mapping[str, Any] | None = None,
     steps: int = 20,
-    seed: int = 0,
     lr: float = 1e-2,
     device: str = "cpu",
     sample_batch: Any = None,
 ) -> dict:
     """Drive ``steps`` optimizer updates on one fixed tiny batch; the loss must fall.
 
-    ``dims`` is as for :func:`check_model_contract`. Seeded + CPU by default. Returns
+    ``dims`` is as for :func:`check_model_contract`. Seeded at the run's own ``seed`` and
+    ``deterministic`` (``generic_trainer.set_seed``), on CPU by default. Returns
     ``{"passed": bool, "losses": [...], "initial": float, "final": float, "issue": str|None}``.
     ``passed`` iff every loss is finite and the final loss is strictly below the initial one,
     the minimal evidence a bespoke model with a real learnable path actually optimizes.
@@ -394,7 +396,7 @@ def overfit_check(
             "final": None,
             "issue": reason,
         }
-    set_seed(seed)
+    set_seed(seed, deterministic=deterministic)
     dev = torch.device(device)
     try:
         model.to(dev)

@@ -15,6 +15,7 @@ import torch  # noqa: E402
 
 from tcip_mcp.pipelines.training import generic_trainer as gt
 from tcip_mcp.pipelines.training.generic_trainer import train
+from tests._training_values import adamw_optimizer
 from tests.tiny_trainer_fixtures import (
     build_data_scaled_gradient_model,
     capture_model,
@@ -50,12 +51,7 @@ def _trained(
         gradient_accumulation_steps=accumulation,
         batch_size=1,
         seed=0,
-        optimizer={
-            "name": "adamw",
-            "backbone_lr": 0.01,
-            "head_lr": 0.01,
-            "weight_decay": 0.0,
-        },
+        optimizer=adamw_optimizer(backbone_lr=0.01, head_lr=0.01),
     )
     ctx = run_context(tmp_path, config)
     return train(ctx.run, ctx.train_loader)

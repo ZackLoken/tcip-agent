@@ -38,10 +38,10 @@ from tcip_mcp.pipelines.model_build import (
 )
 from tcip_mcp.pipelines.model_contract import DETECTOR_TASKS, TCIPModel
 from tcip_mcp.pipelines.schemas import (
+    CENTER_MATCH_COMPARABILITY_KEYS,
     CosineSchedule,
     DataSpec,
     HorizonSchedule,
-    Objective,
     OneCycleSchedule,
     PlateauSchedule,
     SchedulerSpec,
@@ -49,9 +49,10 @@ from tcip_mcp.pipelines.schemas import (
     StageSpec,
     TrainConfigSchema,
     TrainGeometry,
+    TraitRevisionRef,
+    selection_of,
 )
 from tcip_mcp.pipelines.training.evaluation import (
-    HIGHER_IS_BETTER_BY_METRIC,
     VAL_LOSS_KEY,
     VAL_METRIC_PREFIX,
     evaluate,
@@ -127,7 +128,7 @@ def _warmup_starts(
     return starts
 
 
-def set_seed(seed: int, deterministic: bool = False) -> None:
+def set_seed(seed: int, *, deterministic: bool) -> None:
     """Seed random / numpy / torch (+ cuda) for reproducible runs.
 
     ``deterministic`` additionally forces cuDNN deterministic algorithms
@@ -184,42 +185,33 @@ def restore_rng_state(
         loader_generator.set_state(state["loader_rng_state"])
 
 
-def loader_worker_init(
-    worker_id: int, seed: int | None = None, num_workers: int | None = None
-) -> None:
+def loader_worker_init(worker_id: int, *, num_workers: int | None = None) -> None:
     """DataLoader worker-process initializer: configures the platform GDAL cache budget at
     ``1 / num_workers`` of it per worker (the whole budget for ``None``), and seeds numpy and
-    random per worker when ``seed`` is given.
+    random from the seed torch gave the worker (``torch.initial_seed``, the loader generator's
+    base seed plus ``worker_id``).
     """
     from tcip_mcp.pipelines.raster_source import configure_gdal_cache
 
     share = 1.0 / num_workers if num_workers else 1.0
     configure_gdal_cache(share=share)
-    if seed is not None:
-        worker_seed = (seed + worker_id) % (2**32)
-        np.random.seed(worker_seed)
-        random.seed(worker_seed)
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
 
 
-def seeded_loader_kwargs(
-    seed: int | None, num_workers: int | None = None
-) -> dict:
+def seeded_loader_kwargs(seed: int, num_workers: int | None = None) -> dict:
     """DataLoader kwargs wiring :func:`loader_worker_init` as the ``worker_init_fn`` (scaled by
-    ``num_workers`` when given), plus a ``generator`` seeded with ``seed`` when one is given, none
-    otherwise.
+    ``num_workers`` when given), plus a ``generator`` seeded with ``seed``.
     """
-    kwargs: dict = {
+    generator = torch.Generator()
+    generator.manual_seed(seed)
+    return {
         "worker_init_fn": functools.partial(
-            loader_worker_init,
-            seed=None if seed is None else int(seed),
-            num_workers=num_workers,
+            loader_worker_init, num_workers=num_workers
         ),
+        "generator": generator,
     }
-    if seed is not None:
-        generator = torch.Generator()
-        generator.manual_seed(int(seed))
-        kwargs["generator"] = generator
-    return kwargs
 
 
 def run_transforms(spec: TrainConfigSchema) -> Any:
@@ -227,7 +219,7 @@ def run_transforms(spec: TrainConfigSchema) -> Any:
     declares, or ``None`` for none.
     """
     augmentation = spec.augmentation
-    if not augmentation:
+    if augmentation is None:
         return None
     from tcip_mcp.pipelines.data.augmentations import build_augmentation
 
@@ -292,9 +284,9 @@ def effective_data_geometry(
     A detector's ``object_density`` is derived over the ``regions`` its train dataset exposes, a
     frame or a tile each (``derivations.derive_object_density``, whose refusals propagate),
     whoever built it; one exposing no ``regions`` refuses (``ValueError``) naming that interface.
-    A run the platform resolved untiled (``data.tiling`` the disabled block) records its
+    A run the platform resolved untiled (no ``data.tiling`` over a dataset it builds) records its
     ``native_size`` when its training frames all share one size; mixed sizes record none, and so
-    does a run whose tiling the platform did not resolve. Probing is header-only for the common
+    does a run whose dataset a ``dataset_source`` builds. Probing is header-only for the common
     containers (``image_dimensions``) and needs the dataset's source list.
     """
     from tcip_mcp.pipelines.derivations import derive_object_density
@@ -311,7 +303,7 @@ def effective_data_geometry(
                 "or tile it serves."
             )
         density = derive_object_density(regions)
-    untiled = data.tiling is not None and not data.tiling.enabled
+    untiled = data.tiling is None and data.dataset_source is None
     return TrainGeometry(
         native_size=_uniform_native_size(train_ds) if untiled else None,
         object_density=density,
@@ -366,10 +358,11 @@ def checkpoint_stamp(run: TrainRun) -> dict:
     """What every checkpoint of ``run`` carries beside its own state: under ``CONFIG_KEY`` its
     spec (``TrainRun.spec``, its source files its own snapshot copies) as it records itself
     (``TrainConfigSchema.record``) without its data locations (``experiments.DATA_PATHS``), which
-    the run's own record keeps, and every other path (``experiments.CONFIG_PATHS``) stored against
-    the run's project as its run record stores it; under ``SNAPSHOT_KEY`` the digest of the source
-    snapshot its run took (``SourceLayout.snapshot``); under ``GEOMETRY_KEY`` its
-    ``TrainRun.geometry``.
+    the run's own record keeps, its split whole, and every other path
+    (``experiments.CONFIG_PATHS``, a bound split's selection directory among them) stored against
+    the run's project as its run record stores it and read back against the project
+    (``VerifiedCheckpoint.spec``); under ``SNAPSHOT_KEY`` the digest of the source snapshot its
+    run took (``SourceLayout.snapshot``); under ``GEOMETRY_KEY`` its ``TrainRun.geometry``.
     """
     from tcip_mcp.experiments import CONFIG_PATHS, DATA_PATHS
     from tcip_mcp.registry_paths import recorded_paths
@@ -506,9 +499,8 @@ def _save_checkpoint(
 
 
 def _build_scheduler(optimizer, spec: SchedulerSpec):
-    """The scheduler ``spec.type`` names (``schemas.SCHEDULER_TYPES``) at the settings ``spec``
-    carries, a horizon-bound one over the block's own ``horizon_epochs``; a onecycle schedule
-    cycles the rate alone, the optimizer's stated momentum the one it trains at.
+    """The scheduler ``spec.type`` names (``schemas.SCHEDULER_TYPES``) at every setting ``spec``
+    carries, a horizon-bound one over the block's own ``horizon_epochs``.
     """
     if isinstance(spec, CosineSchedule):
         return torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -516,14 +508,29 @@ def _build_scheduler(optimizer, spec: SchedulerSpec):
         )
     elif isinstance(spec, PlateauSchedule):
         return torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode="min", factor=spec.factor, patience=spec.patience
+            optimizer,
+            mode="min",
+            factor=spec.factor,
+            patience=spec.patience,
+            threshold=spec.threshold,
+            threshold_mode=spec.threshold_mode,
+            cooldown=spec.cooldown,
+            min_lr=spec.min_lr,
+            eps=spec.eps,
         )
     elif isinstance(spec, OneCycleSchedule):
         return torch.optim.lr_scheduler.OneCycleLR(
             optimizer,
             max_lr=spec.max_lr,
             total_steps=spec.horizon_epochs,
-            cycle_momentum=False,
+            pct_start=spec.pct_start,
+            anneal_strategy=spec.anneal_strategy,
+            cycle_momentum=spec.cycle_momentum,
+            base_momentum=spec.base_momentum,
+            max_momentum=spec.max_momentum,
+            div_factor=spec.div_factor,
+            final_div_factor=spec.final_div_factor,
+            three_phase=spec.three_phase,
         )
     return torch.optim.lr_scheduler.StepLR(
         optimizer, step_size=spec.step_size, gamma=spec.gamma
@@ -551,98 +558,68 @@ def _validate(
 
 
 def resolve_selection_metric(
-    task: str,
     trait: TraitEntry | None,
-    requested: str | None,
+    requested: str,
     *,
     score_weights: ScoreWeights | None,
-    has_val_loader: bool = True,
-) -> str:
-    """Resolve the bare metric key (into ``val_metrics``, without the ``val_`` prefix) that drives
-    both ``model_best.pt`` and early stopping.
+    has_val_loader: bool,
+) -> None:
+    """Admit ``requested``, the stated ``evaluation.selection_metric`` (the bare metric key into
+    ``val_metrics`` that drives both ``model_best.pt`` and early stopping), over the run.
 
-    Default: ``"objective"`` for detection/instance_seg, else ``"loss"``. An explicit ``requested``
-        is honored, except it is rejected when ``trait``, the trait's confirmed entry, is a
-        center-match trait and ``requested`` names a metric that trait's own localization
-        criterion demotes to comparability-only (``evaluation.CENTER_MATCH_COMPARABILITY_KEYS``);
-        an unstated kind rejects nothing here.
-
-    A resolved metric (default or explicit) with no declared ranking direction
-    (``evaluation.HIGHER_IS_BETTER_BY_METRIC``) is rejected, and so is ``"objective"`` without
-    the ``score_weights`` (``evaluation.score_weights``) that weight it.
-
-    ``has_val_loader``: every metric but ``"loss"`` needs a validation pass, so a run with no
-        validation loader can only select on ``"loss"`` (the training loss); anything else,
-        including the ``"objective"`` default, is rejected. Defaults to ``True`` for a caller that
-        has not built a loader yet.
+    Refuses (``ValueError``) ``"objective"`` without the ``score_weights``
+    (``evaluation.score_weights``) that weight it, any metric but ``"loss"`` (the training loss)
+    for a run with no validation loader (``has_val_loader``), and, when ``trait``, the trait's
+    confirmed entry, is a center-match trait, a metric that trait's own localization criterion
+    demotes to comparability-only (``schemas.CENTER_MATCH_COMPARABILITY_KEYS``).
     """
-    default = "objective" if task in DETECTOR_TASKS else "loss"
-    resolved = requested or default
-    if resolved not in HIGHER_IS_BETTER_BY_METRIC:
+    if requested == "objective" and score_weights is None:
         raise ValueError(
-            f"evaluation.selection_metric={resolved!r} has no declared ranking direction "
-            "(evaluation.HIGHER_IS_BETTER_BY_METRIC names no entry for it), so model_best.pt "
-            f"and early stopping would have to guess which way it improves. Choose one of "
-            f"{sorted(HIGHER_IS_BETTER_BY_METRIC)}."
-        )
-    if resolved == "objective" and score_weights is None:
-        raise ValueError(
-            "evaluation.selection_metric resolves to 'objective', which blends its terms by "
+            "evaluation.selection_metric is 'objective', which blends its terms by "
             "weights this run states nowhere: state evaluation.score_weights "
             f"(schemas.ScoreWeights: {', '.join(ScoreWeights.model_fields)}), or select on "
             "another metric."
         )
-    if not has_val_loader and resolved != "loss":
+    if not has_val_loader and requested != "loss":
         raise ValueError(
-            f"evaluation.selection_metric={resolved!r} needs a validation loader to compute, "
+            f"evaluation.selection_metric={requested!r} needs a validation loader to compute, "
             "and this run has none. Only 'loss' (the training loss) can be selected on without "
             "one; configure a validation split, or set evaluation.selection_metric='loss'."
         )
     if trait is not None:
-        from tcip_mcp.pipelines.training.evaluation import (
-            CENTER_MATCH_COMPARABILITY_KEYS,
-        )
         from tcip_mcp.traits import CENTER_MATCH
 
         if (
             trait.localization == CENTER_MATCH
-            and resolved in CENTER_MATCH_COMPARABILITY_KEYS
+            and requested in CENTER_MATCH_COMPARABILITY_KEYS
         ):
             raise ValueError(
-                f"evaluation.selection_metric={resolved!r} is a comparability-only metric for "
+                f"evaluation.selection_metric={requested!r} is a comparability-only metric for "
                 f"trait {trait.name!r} (localization=center_match), it does not govern this "
                 "trait's phenotype count. Select by 'objective', 'f1', 'precision', 'recall', or "
                 "'loss', which resolve through the trait's own center-match criterion."
             )
-    return resolved
 
 
-def resolve_objective(
+def resolve_trait_revision(
     spec: TrainConfigSchema, *, project: Path, has_val_loader: bool
-) -> Objective:
-    """A run's :class:`~tcip_mcp.pipelines.schemas.Objective`: ``revision``, the latest
-    confirmed revision in ``project`` of the trait its validated config's
-    (``schemas.train_config``) ``evaluation`` block names (refusing as
-    ``operationalization.latest_confirmed`` does), ``None`` when it names none;
-    ``selection_metric``, :func:`resolve_selection_metric` over its task, that revision's entry and
-    its ``selection_metric``; and ``higher_is_better``, that metric's declared direction.
+) -> TraitRevisionRef | None:
+    """The latest confirmed revision in ``project`` of the trait the validated config ``spec``'s
+    ``evaluation`` block names (refusing as ``operationalization.latest_confirmed`` does),
+    ``None`` when it names none, once its ``selection_metric`` is admitted over that revision's
+    entry (:func:`resolve_selection_metric`, whose refusals propagate).
     """
     from tcip_mcp.operationalization import latest_confirmed
 
     name = spec.evaluation.trait
     revision = latest_confirmed(name, project) if name else None
-    metric = resolve_selection_metric(
-        spec.model_source.task,
+    resolve_selection_metric(
         revision.entry if revision is not None else None,
         spec.evaluation.selection_metric,
         score_weights=spec.evaluation.score_weights,
         has_val_loader=has_val_loader,
     )
-    return Objective(
-        selection_metric=metric,
-        higher_is_better=HIGHER_IS_BETTER_BY_METRIC[metric],
-        revision=revision.ref if revision is not None else None,
-    )
+    return revision.ref if revision is not None else None
 
 
 def _selection_value(
@@ -689,31 +666,39 @@ def apply_stage_freeze(
     freeze_to: int,
     *,
     prev_trainable: int | None = None,
-    enforce_monotonic: bool = True,
 ) -> int:
     """Apply a stage's progressive-unfreeze policy and return the resulting trainable-param count.
 
-    ``freeze_to``: ``0`` (or a model with no ``freeze_backbone``) trains everything; ``<0`` freezes
-        all backbone stages; ``>0`` freezes up to that stage, best-effort, a bespoke model need not
-        expose ``freeze_backbone``. When ``enforce_monotonic`` and ``prev_trainable`` is given, an
-        unfreeze that shrinks the trainable set raises (progressive unfreeze must only ever grow
-        it).
+    ``freeze_to``: ``0`` trains everything; ``<0`` freezes every stage the model's ``backbone``
+    declares (``num_stages``); ``>0`` freezes up to that stage, each through the model's own
+    ``freeze_backbone``. Refuses (``ValueError``) a nonzero ``freeze_to`` over a model exposing
+    no ``freeze_backbone``, and a negative one over a backbone declaring no ``num_stages``. With
+    ``prev_trainable`` given, an unfreeze that shrinks the trainable set raises (progressive
+    unfreeze must only ever grow it).
     """
-    if not freeze_to or not hasattr(model, "freeze_backbone"):
+    if not freeze_to:
         for p in model.parameters():
             p.requires_grad = True
+    elif not hasattr(model, "freeze_backbone"):
+        raise ValueError(
+            f"stage freeze_to={freeze_to} freezes through the model's freeze_backbone, which "
+            f"this {type(model).__name__} does not expose; state freeze_to 0, or build a model "
+            "exposing freeze_backbone(stage)."
+        )
     elif freeze_to < 0:
-        num_stages = getattr(getattr(model, "backbone", None), "num_stages", 4)
+        num_stages = getattr(getattr(model, "backbone", None), "num_stages", None)
+        if num_stages is None:
+            raise ValueError(
+                f"stage freeze_to={freeze_to} freezes every stage of the model's backbone, and "
+                f"this {type(model).__name__}'s backbone declares no num_stages; state the "
+                "stage count to freeze to."
+            )
         model.freeze_backbone(num_stages)
     else:
         model.freeze_backbone(freeze_to)
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    if (
-        enforce_monotonic
-        and prev_trainable is not None
-        and trainable < prev_trainable
-    ):
+    if prev_trainable is not None and trainable < prev_trainable:
         raise RuntimeError(
             f"Non-decreasing unfreeze violated: {trainable} < {prev_trainable} trainable params"
         )
@@ -772,9 +757,8 @@ def train(
     carry that spec and the run's source snapshot (:func:`checkpoint_stamp`):
 
     - ``device`` (str, default cuda-if-available else cpu)
-    - ``seed`` (int | None), ``deterministic`` (bool, default False), RNG seeding before model
-      build.
-    - ``mixed_precision`` (bool, default True), AMP, only when ``device`` is cuda.
+    - ``seed`` (int) and ``deterministic`` (bool), RNG seeding before model build.
+    - ``mixed_precision`` (bool), AMP, only when ``device`` is cuda.
     - ``stages`` (list of ``{freeze_to, gradient_accumulation_steps}``), at least one.
     - ``optimizer`` (``schemas.OptimizerSpec``), the one source of learning rate, stated for the
       first stage's target effective batch.
@@ -785,8 +769,7 @@ def train(
       scaled by ``(its target effective batch / the first stage's) ** scale_power``, capped at the
       optional ``max_lr``. The target is nominal (the loader's batch size times the stage's
       accumulation), not an epoch's shorter remainder window.
-    - ``stage_warmup_epochs`` (int, default 0), ``enforce_monotonic_unfreeze`` (bool, default
-      True).
+    - ``stage_warmup_epochs`` (int, default 0).
     - ``gradient_accumulation_steps`` (int, default 1), and a per-stage override. The physical
       batch is the config's ``batch_size``. An epoch's last window
       may hold fewer batches than the accumulation, and its loss is averaged over the batches it
@@ -803,9 +786,10 @@ def train(
     - ``evaluation`` (``schemas.EvaluationSpec``), passed through to
       ``_validate``/``evaluate``.
 
-    Best-model selection and early stopping read ``run.objective``, the metric and direction the
-    run's launch resolved. Each stage after the first starts from its predecessor's best epoch
-    whole (:func:`_epoch_state`: weights, buffers and optimizer state taken at one moment), with
+    Best-model selection and early stopping read the config's ``evaluation.selection_metric`` and
+    its direction (:func:`selection_of`). Each stage after the first starts from its
+    predecessor's best epoch whole (:func:`_epoch_state`: weights, buffers and optimizer state
+    taken at one moment), with
     a freshly built optimizer at its own learning rates. A stage that ends with no selectable
     epoch fails the run, naming the stage. The run's best epoch is held until the run ends and
     written once as ``model_best.pt`` beside ``model_final.pt``, the weights the run ended at,
@@ -816,7 +800,9 @@ def train(
     """
     run.status = "running"
     run.start_time = time.time()
-    higher_is_better = run.objective.higher_is_better
+    selection_metric, higher_is_better = selection_of(
+        run.spec.evaluation.selection_metric
+    )
     # The losing-side sentinel for this run's own direction: any real value beats it.
     losing_side = float("-inf") if higher_is_better else float("inf")
     best: dict | None = None  # the run's best epoch (_epoch_state)
@@ -845,9 +831,7 @@ def train(
         device = run_device(spec)
 
         # Seed before model build so pretrained=False init + shuffle are reproducible.
-        seed = spec.seed
-        if seed is not None:
-            set_seed(seed, deterministic=spec.deterministic)
+        set_seed(spec.seed, deterministic=spec.deterministic)
 
         task = spec.model_source.task
         evaluated = run.evaluation_arguments
@@ -873,7 +857,6 @@ def train(
         first_eff_batch = physical_batch * accumulation(stages[0])
         prev_trainable = None  # trainable param count of the previous stage
         trait = evaluated["trait"]
-        selection_metric = run.objective.selection_metric
         loader_generator = getattr(train_loader, "generator", None)
 
         global_step = 0
@@ -937,10 +920,7 @@ def train(
             # Progressive unfreezing (+ monotonic guard), the shared craft primitive a custom
             # train(ctx) reuses via ctx.apply_stage_freeze.
             trainable = apply_stage_freeze(
-                model,
-                stage.freeze_to,
-                prev_trainable=prev_trainable,
-                enforce_monotonic=spec.enforce_monotonic_unfreeze,
+                model, stage.freeze_to, prev_trainable=prev_trainable
             )
             prev_trainable = trainable
 
@@ -1139,12 +1119,12 @@ def train(
                     if n_batches and not epoch_had_finite_loss
                     else 0
                 )
-                if diverged_epochs >= 2:
+                if diverged_epochs >= stop_rule.nonfinite_passes:
                     run.status = "failed"
                     run.status_error = (
-                        "Training loss was non-finite for 2 consecutive full training passes "
-                        "(no batch in either pass produced a finite loss); the run stopped as "
-                        "diverged."
+                        f"Training loss was non-finite for {diverged_epochs} consecutive full "
+                        "training passes (no batch in any of them produced a finite loss), "
+                        "early_stopping.nonfinite_passes; the run stopped as diverged."
                     )
                     diverged = True
                 if diverged or canceled:

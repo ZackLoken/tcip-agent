@@ -568,7 +568,8 @@ class TiledDetectionDataset(BaseImageDataset):
     slices no rect contains count in ``tiles_dropped_outside_regions``. Without ``keep_regions``
     both counts stay 0 and every slice is kept.
 
-    ``tile_size`` and ``overlap`` are the lattice's, both required. A row crossing the slice edge
+    ``tile_size`` and ``overlap`` are the lattice's, both required, and so is ``skip_empty``,
+    whether a slice left holding no row is dropped. A row crossing the slice edge
     whose clipped region's bounds fall under ``sliver_frac`` of the class's average size is a
     tile-seam sliver and dropped; unstated, the fraction derives from the ground truth's own
     size spread (``derivations.derive_sliver_frac``), and ground truth too sparse to derive it
@@ -580,8 +581,9 @@ class TiledDetectionDataset(BaseImageDataset):
         base: DocumentDataset,
         tile_size: int,
         overlap: float,
+        *,
+        skip_empty: bool,
         sliver_frac: float | None = None,
-        skip_empty: bool = False,
         transforms: Any = None,
         keep_regions: Sequence[tuple[int, int, int, int]] | None = None,
     ) -> None:
@@ -1180,7 +1182,7 @@ def build_dataset(
     if tiler is not None:
         if tiler.tile_size is None or tiler.overlap is None:
             raise ValueError(
-                f"build_dataset was given an enabled tiling with tile_size {tiler.tile_size!r} "
+                f"build_dataset was given a tiling with tile_size {tiler.tile_size!r} "
                 f"and overlap {tiler.overlap!r}: a tiler runs on one whole lattice; state both, "
                 "or resolve them with split_construction.resolved_tiling."
             )

@@ -4,6 +4,7 @@
 
 import copy
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -13,19 +14,32 @@ from tcip_mcp.pipelines.schemas import (
     SCHEDULER_TYPES,
     DefaultTrainerRegime,
     EarlyStoppingSpec,
+    EvaluationSpec,
     OptimizerSpec,
     StageSpec,
+    TilingSpec,
     TrainConfigSchema,
     checked_train_config,
     train_config,
 )
-from tests._chain_fixtures import training_config
+from tests._chain_fixtures import (
+    BESPOKE_DETECTION,
+    BESPOKE_MODELS,
+    training_config,
+)
 from tests._training_values import (
+    RATIONALE,
     SCHEDULE_SETTINGS,
     adamw_optimizer,
+    augmentation,
+    drawn_split,
     evaluation_block,
+    sampler,
     schedule,
     sgd_optimizer,
+    stage,
+    stop_rule,
+    tiling_block,
 )
 
 
@@ -35,12 +49,14 @@ def _issues_of(config):
 
 
 def _without(config: dict, path: str) -> dict:
-    """A copy of ``config`` with the key at the dotted ``path`` removed."""
+    """A copy of ``config`` with the key at the dotted ``path`` removed, a list entry named by
+    its index.
+    """
     copied = copy.deepcopy(config)
     *parents, leaf = path.split(".")
-    node = copied
+    node: Any = copied
     for part in parents:
-        node = node[part]
+        node = node[int(part)] if isinstance(node, list) else node[part]
     del node[leaf]
     return copied
 
@@ -54,27 +70,37 @@ def _names(issues: list[str], path: str) -> bool:
 
 FLAT_CONFIG: dict = training_config(
     {"builder": "module:build_net", "builder_kwargs": {}, "task": "detection"},
-    {"images_dir": str(Path(__file__).parent / "images")},
+    {
+        "images_dir": str(Path(__file__).parent / "images"),
+        "split": drawn_split(),
+        "tiling": tiling_block(tile_size=64, overlap=0.25),
+    },
     num_workers=0,
     mixed_precision=True,
     optimizer=adamw_optimizer(),
-    stages=[{"freeze_to": -1}, {"freeze_to": 2}],
+    stages=[stage(-1), stage(2)],
     evaluation=evaluation_block(selection_metric="f1"),
+    lr_scaling={"scale_power": 0.5, "rationale": RATIONALE},
+    sampler=sampler("oversample", min_count=2),
+    augmentation=augmentation(horizontal_flip={"p": 0.5}),
 )
 
 
 def _required_paths() -> list[str]:
     """Every value the schema requires, by its dotted path, read off the schema itself: its
-    required top-level fields and the required fields of the optimizer, of the stated schedule
-    and of the stop rule.
+    required top-level fields and the required fields of each stated block (a stage, the
+    optimizer, the stated schedule, the stop rule, the evaluation and the tiling).
     """
     top = [
         n for n, f in TrainConfigSchema.model_fields.items() if f.is_required()
     ]
     blocks = {
+        "stages.0": StageSpec,
         "optimizer": OptimizerSpec,
         "scheduler": type(train_config(FLAT_CONFIG).scheduler),
         "early_stopping": EarlyStoppingSpec,
+        "evaluation": EvaluationSpec,
+        "data.tiling": TilingSpec,
     }
     nested = [
         f"{block}.{n}"
@@ -83,6 +109,58 @@ def _required_paths() -> list[str]:
         if f.is_required()
     ]
     return [*top, *nested]
+
+
+STATED_PATHS = [
+    "seed",
+    "deterministic",
+    "mixed_precision",
+    "evaluation",
+    "data.split",
+    "stages.0.freeze_to",
+    "early_stopping.patience",
+    "early_stopping.min_delta",
+    "early_stopping.nonfinite_passes",
+    "evaluation.selection_metric",
+    "data.tiling.skip_empty",
+]
+"""Every value training or its loaders read that a config states itself, by its dotted path."""
+
+DRAWN_SPLIT_PATHS = [
+    f"data.split.{key}"
+    for key in (
+        "seed",
+        "val_ratio",
+        "calibration_ratio",
+        "holdout_ratio",
+        "stratify_foreground",
+        "grouping",
+        "rationale",
+    )
+]
+"""Every key a drawn split states."""
+
+SCHEDULE_PATHS = [
+    (kind, f"scheduler.{key}")
+    for kind, settings in SCHEDULE_SETTINGS.items()
+    for key in settings
+]
+"""Each scheduler type beside each setting its sample block states."""
+
+RATIONALE_PATHS = [
+    "rationale",
+    "stages.1.rationale",
+    "optimizer.rationale",
+    "scheduler.rationale",
+    "early_stopping.rationale",
+    "evaluation.rationale",
+    "lr_scaling.rationale",
+    "data.split.rationale",
+    "data.tiling.rationale",
+    "sampler.rationale",
+    "augmentation.rationale",
+]
+"""The reason of every block :data:`FLAT_CONFIG` states, by its dotted path."""
 
 
 TRAINER_READ_PATHS = [
@@ -108,10 +186,160 @@ def test_a_flat_config_validates_with_no_issue():
     assert _issues_of(FLAT_CONFIG) == []
 
 
-@pytest.mark.parametrize("path", _required_paths())
-def test_a_config_stating_no_required_value_is_refused_naming_it(path):
+def _refused_naming(config: dict, path: str, project: Path) -> None:
+    """Assert ``config`` less the key at ``path`` is refused naming it where a config is
+    validated and at the launch door, and ``config`` itself is admitted.
+    """
+    from tcip_mcp.tools.training_tools import launch_training
+
+    unstated = _without(config, path)
+    issues = _issues_of(unstated)
+    assert _names(issues, path), issues
+    refused = launch_training(project, unstated, actor=None)
+    assert _names(refused["issues"], path), refused
+    assert _issues_of(config) == []
+
+
+@pytest.mark.parametrize(
+    "path",
+    sorted({*_required_paths(), *STATED_PATHS}) + DRAWN_SPLIT_PATHS,
+)
+def test_a_config_stating_no_required_value_is_refused_naming_it(
+    path, tmp_path
+):
+    """Guard. Every value training reads that a config states, a drawn split's shares,
+    stratification and seed among them, is refused unstated by name where the config is
+    validated and at the launch door, and the config stating it is admitted.
+    """
+    _refused_naming(FLAT_CONFIG, path, tmp_path)
+
+
+@pytest.mark.parametrize(("kind", "path"), SCHEDULE_PATHS)
+def test_a_schedule_stating_no_setting_is_refused_naming_it(
+    kind, path, tmp_path
+):
+    """Guard. Every setting a schedule hands its torch scheduler is refused unstated by name."""
+    _refused_naming(
+        {**FLAT_CONFIG, "scheduler": schedule(kind)}, path, tmp_path
+    )
+
+
+@pytest.mark.parametrize("path", DRAWN_SPLIT_PATHS)
+def test_a_drawn_split_omitting_a_draw_key_is_refused_by_that_field(path):
+    """Guard. Each draw key is the drawn split's own required field: one left out is refused by
+    that field's requiredness, located at it, never by a check over the split as a whole.
+    """
+    key = path.removeprefix("data.split.")
+    issues = _issues_of(_without(FLAT_CONFIG, path))
+    assert f"data.split.drawn.{key}: Field required" in issues, issues
+
+
+def test_a_drawn_split_groups_by_a_named_policy_or_an_explicit_map():
+    """A drawn split's one ``grouping`` admits a named policy or an explicit map."""
+    assert isinstance(FLAT_CONFIG["data"]["split"]["grouping"], str)
+    assert _issues_of(FLAT_CONFIG) == []
+    by_map = copy.deepcopy(FLAT_CONFIG)
+    by_map["data"]["split"]["grouping"] = {"2-11-26/s00": "a"}
+    assert _issues_of(by_map) == []
+
+
+@pytest.mark.parametrize("path", RATIONALE_PATHS)
+def test_a_block_stating_no_reason_is_refused_naming_it(path):
+    """Guard. Every stated block carries its own ``rationale``: one left out is refused naming
+    the block, and the config stating each is admitted.
+    """
     issues = _issues_of(_without(FLAT_CONFIG, path))
     assert _names(issues, path), issues
+    assert _issues_of(FLAT_CONFIG) == []
+
+
+def _least_admitted(config: dict, paths: list[str]) -> dict:
+    """``config`` less each of ``paths`` whose removal the schema and the launch door both still
+    admit, one at a time: the least config the platform runs, whatever defaults it carries.
+    """
+    least = copy.deepcopy(config)
+    for path in paths:
+        fewer = _without(least, path)
+        if not _issues_of(fewer) and not _door_issues(fewer):
+            least = fewer
+    return least
+
+
+def _at(record: dict, path: str) -> Any:
+    """The value at the dotted ``path`` of ``record``; ``KeyError`` naming it when absent."""
+    node: Any = record
+    for part in path.split("."):
+        node = node[int(part)] if isinstance(node, list) else node[part]
+    return node
+
+
+RECORDED_PATHS = [
+    "batch_size",
+    *STATED_PATHS,
+    *(f"scheduler.{key}" for key in SCHEDULE_SETTINGS["onecycle"]),
+    *(
+        f"data.split.{key}"
+        for key in (
+            "val_ratio",
+            "calibration_ratio",
+            "holdout_ratio",
+            "stratify_foreground",
+        )
+    ),
+    "rationale",
+    *(
+        f"{block}.rationale"
+        for block in (
+            "stages.0",
+            "optimizer",
+            "scheduler",
+            "early_stopping",
+            "evaluation",
+            "data.split",
+            "data.tiling",
+        )
+    ),
+]
+"""Every value training and its loaders read, by its dotted path in a run's recorded config."""
+
+
+def test_a_runs_record_names_every_value_its_training_reads(tmp_path):
+    """Guard. The least config the platform admits for a tiled, drawn detection run under a
+    one-cycle schedule, opened by the launcher's own producer, records every value training and
+    its loaders read in ``run.json``'s config, and the worker's own read of that record carries
+    each at the same value: no value training reads can stay off the record as a default.
+    """
+    from tcip_mcp.experiments import observe
+    from tests._verified_checkpoint_fixtures import (
+        SCOPED_DATA,
+        detection_images,
+        fixture_data_dir,
+        opened_run,
+    )
+    from tests.tiny_trainer_fixtures import run_context
+
+    config = training_config(
+        {
+            "builder": BESPOKE_DETECTION,
+            "source_files": [BESPOKE_MODELS],
+            "task": "detection",
+        },
+        {
+            **detection_images(
+                fixture_data_dir(tmp_path, "least"), SCOPED_DATA["scope"], n=4
+            ),
+            **SCOPED_DATA,
+            "split": drawn_split(),
+            "tiling": tiling_block(tile_size=32, sliver_frac=0.5),
+        },
+        scheduler=schedule("onecycle"),
+    )
+    least = _least_admitted(config, RECORDED_PATHS)
+
+    recorded = observe(opened_run(tmp_path, least)).record["config"]
+    worker = run_context(tmp_path, least).run.spec.record()
+    for path in RECORDED_PATHS:
+        assert _at(recorded, path) == _at(worker, path) is not None, path
 
 
 @pytest.mark.parametrize("path", TRAINER_READ_PATHS)
@@ -164,7 +392,7 @@ def test_each_schedule_states_its_own_settings_and_no_other(kind):
     settings = {
         name: field
         for name, field in schedule_class.model_fields.items()
-        if name != "type"
+        if name not in ("type", "rationale")
     }
     assert set(settings) == set(SCHEDULE_SETTINGS[kind])
     assert all(field.is_required() for field in settings.values())
@@ -239,9 +467,7 @@ def test_an_empty_training_section_is_refused_too():
 
 def test_top_level_stages_are_typed_by_stage_spec():
     """A stage carries no epoch count: one stating ``epochs`` is refused by name."""
-    issues = _issues_of(
-        {**FLAT_CONFIG, "stages": [{"freeze_to": 0, "epochs": 5}]}
-    )
+    issues = _issues_of({**FLAT_CONFIG, "stages": [stage(0, epochs=5)]})
     assert any("stages.0.epochs" in issue for issue in issues), issues
 
 
@@ -271,82 +497,69 @@ def test_the_trainer_reads_the_flat_config_as_given(tmp_path, monkeypatch):
 
 def test_stage_spec_refuses_a_per_stage_lr():
     """train() reads learning rates from the optimizer block alone, so a stage lr is refused."""
-    StageSpec.model_validate({"freeze_to": -1})
+    StageSpec.model_validate(stage(-1))
     with pytest.raises(ValidationError, match="lr"):
-        StageSpec.model_validate({"freeze_to": -1, "lr": 1e-3})
+        StageSpec.model_validate(stage(-1, lr=1e-3))
 
 
 def test_a_stage_states_its_own_gradient_accumulation():
     """train() reads a stage's own accumulation, so the schema admits it."""
-    stages = [
-        {"freeze_to": -1},
-        {"freeze_to": 0, "gradient_accumulation_steps": 4},
-    ]
+    stages = [stage(-1), stage(0, gradient_accumulation_steps=4)]
     assert _issues_of({**FLAT_CONFIG, "stages": stages}) == []
 
 
 def test_the_stop_rule_validates_as_stated_and_refuses_a_zero_patience_and_an_on_switch():
-    """The stop rule's two values are the config's own, read as stated, and neither has a
-    default; a patience of zero and an ``enabled`` key, since nothing but the rule ends a stage,
-    are refused by name.
+    """The stop rule's values are the config's own, read as stated, and none has a default; a
+    patience of zero and an ``enabled`` key, since nothing but the rule ends a stage, are
+    refused by name.
     """
     stated = train_config(
-        {**FLAT_CONFIG, "early_stopping": {"patience": 3, "min_delta": 0.02}}
+        {
+            **FLAT_CONFIG,
+            "early_stopping": stop_rule(3, 0.02, nonfinite_passes=4),
+        }
     )
     assert stated.early_stopping is not None
     assert (
         stated.early_stopping.patience,
         stated.early_stopping.min_delta,
-    ) == (3, 0.02)
-    for value in ("patience", "min_delta"):
+        stated.early_stopping.nonfinite_passes,
+    ) == (3, 0.02, 4)
+    for value in ("patience", "min_delta", "nonfinite_passes"):
         issues = _issues_of(_without(FLAT_CONFIG, f"early_stopping.{value}"))
         assert any(f"early_stopping.{value}" in issue for issue in issues), (
             issues
         )
     assert any(
         "early_stopping.patience" in issue
-        for issue in _issues_of(
-            {
-                **FLAT_CONFIG,
-                "early_stopping": {"patience": 0, "min_delta": 0.0},
-            }
-        )
+        for issue in _issues_of({**FLAT_CONFIG, "early_stopping": stop_rule(0)})
     )
     assert any(
         "early_stopping.enabled" in issue
         for issue in _issues_of(
-            {
-                **FLAT_CONFIG,
-                "early_stopping": {
-                    "enabled": True,
-                    "patience": 3,
-                    "min_delta": 0.0,
-                },
-            }
+            {**FLAT_CONFIG, "early_stopping": {**stop_rule(3), "enabled": True}}
         )
     )
 
 
 def test_lr_scaling_requires_its_power_and_names_no_reference_batch():
+    scaling = {"scale_power": 0.5, "rationale": RATIONALE}
     assert (
-        _issues_of(
-            {**FLAT_CONFIG, "lr_scaling": {"scale_power": 0.5, "max_lr": 0.01}}
-        )
+        _issues_of({**FLAT_CONFIG, "lr_scaling": {**scaling, "max_lr": 0.01}})
         == []
     )
     assert any(
         "lr_scaling.scale_power" in issue
-        for issue in _issues_of({**FLAT_CONFIG, "lr_scaling": {}})
+        for issue in _issues_of(
+            {**FLAT_CONFIG, "lr_scaling": {"rationale": RATIONALE}}
+        )
     )
     assert any(
         "reference_effective_batch" in issue
         for issue in _issues_of(
             {
                 **FLAT_CONFIG,
-                "lr_scaling": {
-                    "scale_power": 0.5,
-                    "reference_effective_batch": 64,
-                },
+                "lr_scaling": {**scaling, "reference_effective_batch": 64},
             }
         )
     )
@@ -414,7 +627,6 @@ def test_model_source_admits_every_declared_key(tmp_path):
                 "source_files": [str(Path(__file__).parent / "m.py")],
                 "image_stats_sampling": image_stats_provenance(result),
             },
-            "data": {},
         }
     )
     assert issues == []
@@ -445,11 +657,11 @@ def test_a_width_stated_on_the_model_source_is_refused_by_name():
             {**FLAT_CONFIG, "model_source": {"builder": "module:build_net"}},
         ),
         (
-            "data.split.seed",
+            "data.split.drawn.seed",
             {**FLAT_CONFIG, "data": {"split": {"seed": "first"}}},
         ),
         (
-            "data.split.selection_dirr",
+            "data.split.drawn.selection_dirr",
             {**FLAT_CONFIG, "data": {"split": {"selection_dirr": "m"}}},
         ),
         (
@@ -465,7 +677,7 @@ def test_a_width_stated_on_the_model_source_is_refused_by_name():
             {**FLAT_CONFIG, "data": {"tiling": {"tile_size": "large"}}},
         ),
         (
-            "data.split.spatial_manifest",
+            "data.split.drawn.spatial_manifest",
             {
                 **FLAT_CONFIG,
                 "data": {"split": {"spatial_manifest": {"stem": "a"}}},
@@ -486,24 +698,24 @@ def test_a_fact_a_reader_reads_is_refused_where_the_config_is_validated(
 
 def test_a_stated_tiling_block_reaches_the_tiler_as_stated():
     """Admits valid work: every tiler option a ``data.tiling`` block states validates and reaches
-    the tiler's keyword arguments by name, and one left unstated is left to the tiler.
+    the tiler's keyword arguments by name, its reason none of them, and one left unstated is
+    left to the tiler.
     """
     from tcip_mcp.pipelines.schemas import train_config
 
-    stated = {
-        "enabled": True,
-        "tile_size": 64,
-        "overlap": 0.25,
-        "sliver_frac": 0.5,
-        "skip_empty": True,
-        "keep_regions": [[0, 0, 64, 64]],
-    }
+    stated = tiling_block(
+        tile_size=64,
+        overlap=0.25,
+        sliver_frac=0.5,
+        skip_empty=True,
+        keep_regions=[[0, 0, 64, 64]],
+    )
     tiling = train_config(
-        {**FLAT_CONFIG, "data": {"tiling": stated}}
+        {**FLAT_CONFIG, "data": {**FLAT_CONFIG["data"], "tiling": stated}}
     ).data.tiling
     assert tiling is not None
     assert tiling.tiler_options() == {
-        **{k: v for k, v in stated.items() if k != "enabled"},
+        **{k: v for k, v in stated.items() if k != "rationale"},
         "keep_regions": [(0, 0, 64, 64)],
     }
     assert tiling.tiler_options(frozenset({"keep_regions"})) == {

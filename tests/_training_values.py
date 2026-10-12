@@ -1,13 +1,37 @@
 """The sample blocks a test config states, since the platform ships no default for any of them:
 the optimizer, schedule, stop rule and evaluation blocks ``_chain_fixtures.training_config``
-builds its run from (and a test states over it as an override), and a sample search space and
-search.
+builds its run from (and a test states over it as an override), the drawn split and tiling
+blocks a data section states, and a sample search space and search.
 """
 
-SCHEDULE_SETTINGS = {
+from typing import Any
+
+RATIONALE = "a sample reason the test states for this block"
+"""The reason every sample block here states (``schemas`` requires one per stated block)."""
+
+SCHEDULE_SETTINGS: dict[str, dict[str, Any]] = {
     "cosine": {"eta_min": 1e-6, "horizon_epochs": 3},
-    "plateau": {"factor": 0.3, "patience": 2},
-    "onecycle": {"max_lr": 2e-2, "horizon_epochs": 3},
+    "plateau": {
+        "factor": 0.3,
+        "patience": 2,
+        "threshold": 1e-4,
+        "threshold_mode": "rel",
+        "cooldown": 0,
+        "min_lr": 0.0,
+        "eps": 1e-8,
+    },
+    "onecycle": {
+        "max_lr": 2e-2,
+        "horizon_epochs": 3,
+        "pct_start": 0.3,
+        "anneal_strategy": "cos",
+        "cycle_momentum": False,
+        "base_momentum": 0.85,
+        "max_momentum": 0.95,
+        "div_factor": 25.0,
+        "final_div_factor": 1e4,
+        "three_phase": False,
+    },
     "step": {"step_size": 3, "gamma": 0.5},
 }
 """A sample of each scheduler type's own settings."""
@@ -15,38 +39,93 @@ SCHEDULE_SETTINGS = {
 
 def schedule(kind: str, **stated) -> dict:
     """A ``scheduler`` block of type ``kind`` stating its own sample settings
-    (:data:`SCHEDULE_SETTINGS`), with ``stated`` over them.
+    (:data:`SCHEDULE_SETTINGS`) and :data:`RATIONALE`, with ``stated`` over them.
     """
-    return {"type": kind, **SCHEDULE_SETTINGS[kind], **stated}
+    return {
+        "type": kind,
+        **SCHEDULE_SETTINGS[kind],
+        "rationale": RATIONALE,
+        **stated,
+    }
 
 
-def stop_rule(patience: int = 50, min_delta: float = 0.0) -> dict:
-    """An ``early_stopping`` block; the default patience sits past the horizons
+def stop_rule(
+    patience: int = 50, min_delta: float = 0.0, nonfinite_passes: int = 2
+) -> dict:
+    """An ``early_stopping`` block; the sample patience sits past the horizons
     :data:`SCHEDULE_SETTINGS` states, so a sample stage under a horizon-bound schedule ends at
     its horizon unless the test states a longer one.
     """
-    return {"patience": patience, "min_delta": min_delta}
+    return {
+        "patience": patience,
+        "min_delta": min_delta,
+        "nonfinite_passes": nonfinite_passes,
+        "rationale": RATIONALE,
+    }
 
 
-def adamw_optimizer() -> dict:
-    """A sample AdamW ``optimizer`` block."""
+def stage(freeze_to: int = 0, **stated) -> dict:
+    """A ``stages`` entry at ``freeze_to`` stating :data:`RATIONALE`, with ``stated`` over it."""
+    return {"freeze_to": freeze_to, "rationale": RATIONALE, **stated}
+
+
+def adamw_optimizer(**stated) -> dict:
+    """A sample AdamW ``optimizer`` block, with ``stated`` over it."""
     return {
         "name": "adamw",
         "backbone_lr": 1e-4,
         "head_lr": 1e-3,
         "weight_decay": 0.0,
+        "rationale": RATIONALE,
+        **stated,
     }
 
 
-def sgd_optimizer() -> dict:
-    """A sample SGD ``optimizer`` block, its momentum stated."""
+def sgd_optimizer(**stated) -> dict:
+    """A sample SGD ``optimizer`` block, its momentum stated, with ``stated`` over it."""
     return {
         "name": "sgd",
         "backbone_lr": 1e-3,
         "head_lr": 1e-2,
         "weight_decay": 0.0,
         "momentum": 0.9,
+        "rationale": RATIONALE,
+        **stated,
     }
+
+
+def drawn_split(**stated) -> dict:
+    """A drawn ``data.split`` block, and ``draw_splits``'s statement of a draw: half the members
+    on the validation side, no reserved side, one group per member, balanced by foreground count,
+    at seed 0, with ``stated`` over it.
+    """
+    return {
+        "seed": 0,
+        "val_ratio": 0.5,
+        "calibration_ratio": 0.0,
+        "holdout_ratio": 0.0,
+        "grouping": "stem",
+        "stratify_foreground": True,
+        "rationale": RATIONALE,
+        **stated,
+    }
+
+
+def tiling_block(**stated) -> dict:
+    """A ``data.tiling`` block keeping object-free tiles, with ``stated`` over it."""
+    return {"skip_empty": False, "rationale": RATIONALE, **stated}
+
+
+def augmentation(**transforms) -> dict:
+    """An ``augmentation`` block of ``transforms``, each a transform's name to its values,
+    stating :data:`RATIONALE`.
+    """
+    return {"rationale": RATIONALE, **transforms}
+
+
+def sampler(name: str, **values) -> dict:
+    """A ``sampler`` block naming ``name`` at ``values``, stating :data:`RATIONALE`."""
+    return {"name": name, "rationale": RATIONALE, **values}
 
 
 VALIDATION_CONF = 0.35
@@ -62,12 +141,14 @@ SCORE_WEIGHTS = {"loss": 0.5, "f1": 0.3, "map50": 0.2}
 
 
 def evaluation_block(**stated) -> dict:
-    """An ``evaluation`` block at :data:`VALIDATION_CONF` weighting its objective by
-    :data:`SCORE_WEIGHTS`, with ``stated`` over it.
+    """An ``evaluation`` block selecting on the composite objective at :data:`VALIDATION_CONF`,
+    weighting it by :data:`SCORE_WEIGHTS`, with ``stated`` over it.
     """
     return {
+        "selection_metric": "objective",
         "conf_threshold": VALIDATION_CONF,
         "score_weights": dict(SCORE_WEIGHTS),
+        "rationale": RATIONALE,
         **stated,
     }
 

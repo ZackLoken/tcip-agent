@@ -17,6 +17,7 @@ import pytest
 from tcip_mcp.pipelines.image_utils import AmbiguousImageStemError
 from tests._chain_fixtures import DETECTION_SOURCE, training_config
 from tests._cli_fixtures import run_tcip
+from tests._training_values import drawn_split, tiling_block
 
 
 def _ingested_bucket(tmp_path: Path) -> Path:
@@ -161,7 +162,7 @@ def test_preflight_admits_a_clean_multi_image_bucket(tmp_path):
         {
             "images_dir": str(bucket),
             "scope": {"subject": SUBJECT},
-            "split": {"seed": 0, "val_ratio": 0.15},
+            "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
         },
     )
     r = preflight_config(tmp_path, cfg)
@@ -185,7 +186,7 @@ def test_preflight_split_policy_stems_admits_a_clean_multi_image_bucket(
         {
             "images_dir": str(bucket),
             "scope": {"subject": SUBJECT},
-            "split": {"group_by": "stem", "seed": 0, "val_ratio": 0.15},
+            "split": drawn_split(val_ratio=0.15),
         },
     )
     r = preflight_config(tmp_path, cfg)
@@ -211,11 +212,10 @@ def test_calibration_ratio_feasibility_admits_a_clean_multi_image_bucket(
         {
             "images_dir": str(bucket),
             "scope": {"subject": SUBJECT},
-            "tiling": {
-                "enabled": True,
-                "sliver_frac": 0.5,
-            },  # stated: two boxes, no spread
-            "split": {"calibration_ratio": 0.2, "val_ratio": 0.15, "seed": 1},
+            "tiling": tiling_block(sliver_frac=0.5),  # stated: two boxes, no spread
+            "split": drawn_split(
+                calibration_ratio=0.2, val_ratio=0.15, seed=1, grouping="tile_prefix"
+            ),
         },
     )
     r = preflight_config(tmp_path, cfg)

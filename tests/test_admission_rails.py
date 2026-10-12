@@ -27,6 +27,7 @@ from tests._producer_fixtures import (  # noqa: E402
     registry_over,
     write_image,
 )
+from tests._training_values import tiling_block  # noqa: E402
 
 BUD = "bud"
 
@@ -660,7 +661,7 @@ def test_detection_and_its_tiles_keep_a_partially_assessed_stem(tmp_path):
         images_dir,
         subject=BUD,
         tiling={
-            "enabled": True,
+            **tiling_block(),
             "tile_size": 64,
             "overlap": 0.0,
             "sliver_frac": 0.5,

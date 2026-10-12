@@ -20,6 +20,7 @@ torch = pytest.importorskip("torch")
 from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.pipelines.schemas import DataSpec  # noqa: E402
 from tcip_store import encode_record  # noqa: E402
+from tests._training_values import drawn_split  # noqa: E402
 
 IMG = 32
 SUBJECT = "leaf"
@@ -55,10 +56,13 @@ def _draw(project: Path, root: Path, out: Path, *, seed: int = 2):
         str(root),
         output_path=str(out),
         subject=SUBJECT,
-        seed=seed,
-        val_ratio=0.3,
-        calibration_ratio=0.15,
-        holdout_ratio=0.15,
+        **drawn_split(
+            seed=seed,
+            val_ratio=0.3,
+            calibration_ratio=0.15,
+            holdout_ratio=0.15,
+            grouping="tile_prefix",
+        ),
     )
     assert "error" not in result, result
     return read_selection(out, project=project)
@@ -175,7 +179,7 @@ def test_a_document_emptied_after_its_admission_never_trains_as_empty(
         {
             "images_dir": str(images_dir),
             "scope": {"subject": SUBJECT},
-            "split": {"seed": 0, "val_ratio": 0.15},
+            "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
         }
     )
 

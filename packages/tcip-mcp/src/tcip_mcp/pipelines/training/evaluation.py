@@ -26,48 +26,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-CENTER_MATCH_COMPARABILITY_KEYS: frozenset[str] = frozenset(
-    {
-        "map50",
-        "map",
-        "iou_precision",
-        "iou_recall",
-        "iou_f1",
-    }
-)
-"""The metric keys reported comparability-only (``map50_role``) under a trait's own governing
-criterion: the IoU-convention average precision and counts."""
-
 VAL_METRIC_PREFIX = "val_"
 """The prefix every validation metric key carries in a run's metrics log and registry entry."""
 
 VAL_LOSS_KEY = VAL_METRIC_PREFIX + "loss"
 """The validation loss's key in a run's metrics log."""
-
-HIGHER_IS_BETTER_BY_METRIC: dict[str, bool] = {
-    "loss": False,
-    "objective": False,
-    "mae": False,
-    "rmse": False,
-    "precision": True,
-    "recall": True,
-    "f1": True,
-    "map": True,
-    "map50": True,
-    "iou_precision": True,
-    "iou_recall": True,
-    "iou_f1": True,
-    "accuracy": True,
-    "rank_acc": True,
-    "quadratic_weighted_kappa": True,
-    "r_squared": True,
-    "mIoU": True,
-    "dice": True,
-    "pixel_acc": True,
-}
-"""Direction of a better value for each directed scalar metric, keyed by its bare
-(un-``val_``-prefixed) name; a raw count, a signed bias and a non-finite state companion have no
-direction."""
 
 
 def _rounded(value):

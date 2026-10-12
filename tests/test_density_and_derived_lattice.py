@@ -20,6 +20,7 @@ from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
 from tcip_mcp.pipelines.execution import ExecutionRefusedError, Stated  # noqa: E402
 from tests import REPO_ROOT  # noqa: E402
+from tests._training_values import drawn_split, tiling_block  # noqa: E402
 from tests._verified_checkpoint_fixtures import (
     SAMPLE_CONF,
     SAMPLE_DETECTOR_PASS,
@@ -83,6 +84,7 @@ def compose_tiles(ctx) -> None:
         ctx.train_loader.dataset,
         tile_size=edge,
         overlap=overlap,
+        skip_empty=False,
         sliver_frac=0.5,
     )
     model = ctx.build_model()
@@ -289,8 +291,8 @@ def test_the_tiler_the_spatial_split_and_the_pass_derive_one_lattice_from_one_gr
         {
             "images_dir": str(images_dir),
             "scope": {"subject": "bud"},
-            "tiling": {"enabled": True, "sliver_frac": 0.5},
-            "split": {"val_ratio": 0.2, "seed": 1},
+            "tiling": tiling_block(sliver_frac=0.5),
+            "split": drawn_split(val_ratio=0.2, seed=1, grouping="tile_prefix"),
         },
         monkeypatch,
     )
@@ -353,8 +355,8 @@ def test_a_drawn_tiled_run_resolves_its_lattice_once(
         {
             "images_dir": str(images_dir),
             "scope": {"subject": "bud"},
-            "tiling": {"enabled": True, "tile_size": 64, "sliver_frac": 0.5},
-            "split": {"val_ratio": 0.25, "seed": 0},
+            "tiling": tiling_block(tile_size=64, sliver_frac=0.5),
+            "split": drawn_split(val_ratio=0.25, grouping="tile_prefix"),
         },
         monkeypatch,
     )
@@ -389,7 +391,7 @@ def test_an_object_as_long_as_the_derived_overlap_lies_whole_in_a_tile_at_a_stat
         "detection",
         image.parent,
         subject="bud",
-        tiling={"enabled": True, "tile_size": 100, "sliver_frac": 0.5},
+        tiling=tiling_block(tile_size=100, sliver_frac=0.5),
     )
     (region,) = run_over("detection", image.parent, subject="bud")[0].regions
     ((x0, y0, x1, y1),) = region.boxes.tolist()
@@ -586,7 +588,7 @@ def _frames_config(project: Path, name: str, **data) -> dict:
                 fixture_data_dir(project, name), SCOPED_DATA["scope"], n=4
             ),
             **SCOPED_DATA,
-            "split": {"seed": 0, "val_ratio": 0.25},
+            "split": drawn_split(val_ratio=0.25, grouping="tile_prefix"),
             **data,
         },
         evaluation=evaluation_block(selection_metric="loss"),
@@ -733,7 +735,7 @@ def test_a_tiling_stated_beside_a_builder_refuses_at_admission_naming_both(
                 tmp_path,
                 "both",
                 dataset_source=source,
-                tiling={"enabled": True},
+                tiling=tiling_block(),
             ),
         )
     assert all(
@@ -748,7 +750,7 @@ def test_a_tiling_stated_beside_a_builder_refuses_at_admission_naming_both(
 def test_an_enabled_tiling_without_its_lattice_refuses_naming_its_resolver(
     tmp_path: Path,
 ):
-    """A tiling block reaching the factory enabled with no edge or overlap refuses naming both
+    """A tiling block reaching the factory with no edge or overlap refuses naming both
     and the resolver that states them, and the same block resolved builds its tiler.
     """
     from tcip_mcp.pipelines.data.datasets import build_dataset
@@ -766,7 +768,7 @@ def test_an_enabled_tiling_without_its_lattice_refuses_naming_its_resolver(
     )
     sizes, tiling = (
         {"num_channels": 3},
-        TilingSpec.model_validate({"sliver_frac": 0.5}),
+        TilingSpec.model_validate(tiling_block(sliver_frac=0.5)),
     )
 
     with pytest.raises(ValueError) as refused:

@@ -44,19 +44,15 @@ def _single_source_mosaic(
 
 
 def _data_cfg(images_dir: Path, **split) -> dict:
-    cfg = {
-        "val_ratio": 0.25,
-        "holdout_ratio": 0.1,
-        "calibration_ratio": 0,
-        "seed": 1,
-    }
-    cfg.update(split)
+    from tests._training_values import drawn_split, tiling_block
+
     return {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
-        "auto_val": True,
-        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-        "split": cfg,
+        "tiling": tiling_block(tile_size=128, overlap=0.2),
+        "split": drawn_split(
+            **{"val_ratio": 0.25, "holdout_ratio": 0.1, "seed": 1, **split}
+        ),
     }
 
 

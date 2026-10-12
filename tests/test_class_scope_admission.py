@@ -13,6 +13,7 @@ import pytest
 from tcip_mcp.pipelines.data.selection import ClassScope, read_selection
 from tcip_mcp.subject_registry import Attribute
 from tcip_mcp.tools.data_tools import draw_splits
+from tests._training_values import drawn_split
 from tests.test_selection_binding import (
     DATES,
     SUBJECT,
@@ -42,10 +43,13 @@ def test_a_scope_the_admission_produced_round_trips_through_the_selection_and_th
         str(root),
         output_path=str(out),
         subject=SUBJECT,
-        seed=1,
-        val_ratio=0.25,
-        calibration_ratio=0.125,
-        holdout_ratio=0.125,
+        **drawn_split(
+            seed=1,
+            val_ratio=0.25,
+            calibration_ratio=0.125,
+            holdout_ratio=0.125,
+            grouping="tile_prefix",
+        ),
     )
     assert "error" not in result, result
 
@@ -69,20 +73,28 @@ def _images_dir(root: Path) -> str:
     return str(root / "images" / DATES[0])
 
 
+def run_membership(block: dict):
+    """The membership a run's data ``block``, drawing its own split, admits."""
+    from tcip_mcp.pipelines.data.split_construction import (
+        run_membership as admitted,
+    )
+    from tcip_mcp.pipelines.schemas import DataSpec, DrawnSplit
+
+    data = DataSpec.model_validate(block)
+    assert isinstance(data.split, DrawnSplit)
+    return admitted(data, data.split)
+
+
 def test_a_run_recording_its_attributes_is_admitted_under_them_not_the_registrys(
     tmp_path: Path,
 ) -> None:
-    from tcip_mcp.pipelines.data.split_construction import run_membership
-    from tcip_mcp.pipelines.schemas import DataSpec
-
     images_dir = _images_dir(_attribute_scoped_dataset(tmp_path / "ds"))
     membership = run_membership(
-        DataSpec.model_validate(
-            {
-                "images_dir": images_dir,
-                "scope": asdict(ClassScope(SUBJECT, (REVERSED,))),
-            }
-        )
+        {
+            "images_dir": images_dir,
+            "scope": asdict(ClassScope(SUBJECT, (REVERSED,))),
+            "split": drawn_split(grouping="tile_prefix"),
+        }
     )
 
     assert membership.scope.attributes == (REVERSED,)
@@ -92,16 +104,16 @@ def test_a_document_scope_with_no_attributes_read_refuses_and_a_fresh_statement_
     tmp_path: Path,
 ) -> None:
     from tcip_mcp.pipelines.data.label_queries import admit
-    from tcip_mcp.pipelines.data.split_construction import run_membership
-    from tcip_mcp.pipelines.schemas import DataSpec
 
     images_dir = _images_dir(_attribute_scoped_dataset(tmp_path / "ds"))
     with pytest.raises(ValueError, match="records no attributes"):
         admit(images_dir, scope=ClassScope(SUBJECT))
 
     fresh = run_membership(
-        DataSpec.model_validate(
-            {"images_dir": images_dir, "scope": {"subject": SUBJECT}}
-        )
+        {
+            "images_dir": images_dir,
+            "scope": {"subject": SUBJECT},
+            "split": drawn_split(grouping="tile_prefix"),
+        }
     )
     assert fresh.scope.attributes == (CONDITION,)

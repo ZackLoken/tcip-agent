@@ -9,6 +9,7 @@ from pathlib import Path
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tcip_mcp.pipelines.data.selection import REFERENCE_SIDES
 from tcip_mcp.tools.feedback_tools import prioritize_review_queue
+from tests._training_values import drawn_split
 
 DATE = "2026-03-04"
 
@@ -549,10 +550,13 @@ def _draw_flat(project: Path, root: Path, out: Path, *, seed: int = 2):
         str(root),
         output_path=str(out),
         subject=_FLAT_SUBJECT,
-        seed=seed,
-        val_ratio=0.3,
-        calibration_ratio=0.15,
-        holdout_ratio=0.15,
+        **drawn_split(
+            seed=seed,
+            val_ratio=0.3,
+            calibration_ratio=0.15,
+            holdout_ratio=0.15,
+            grouping="tile_prefix",
+        ),
     )
     assert "error" not in result, result
     return read_selection(out, project=project)

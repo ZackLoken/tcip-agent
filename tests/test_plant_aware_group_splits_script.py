@@ -3,7 +3,7 @@
 Over per-stem georeferenced GeoTIFFs at known real-world offsets from two plants, the derived
 ``{stem: group_key}`` map: same physical plant -> same group key regardless of
 which "date" (source raster) the stem came from, a plant far outside tolerance -> a named refusal,
-an ungeoreferenced source -> a named refusal, and the map ``draw_splits(group_key_map=...)``
+an ungeoreferenced source -> a named refusal, and the map ``draw_splits(grouping=...)``
 actually accepts, keeping every group's stems on one split side.
 """
 
@@ -21,6 +21,7 @@ from tcip_mcp.cli.plant_aware_group_splits import (
     main,
 )
 from tests._mapping_fixtures import write_plant_csv
+from tests._training_values import RATIONALE, drawn_split
 
 UTM_15N_EPSG = 32615
 PIXEL_SCALE = 1.0
@@ -256,10 +257,25 @@ def test_refuses_on_empty_plant_list(tmp_path: Path) -> None:
         derive_plant_group_key_map({"r1": r1}, [])
 
 
-# ── draw_splits(group_key_map=...) admits the derived map (rail-admits-valid-work) ─────────────
+# ── draw_splits(grouping=...) admits the derived map (rail-admits-valid-work) ─────────────
 
 
 SUBJECT = "leaf"
+
+SHARES = {"val_ratio": 0.15, "calibration_ratio": 0.1, "holdout_ratio": 0.05}
+"""The shares the draws here state, each side drawn over four plant groups."""
+
+DRAW_ARGS = [
+    *(
+        arg
+        for key, share in SHARES.items()
+        for arg in (f"--{key.replace('_', '-')}", str(share))
+    ),
+    "--stratify-foreground",
+    "--rationale",
+    RATIONALE,
+]
+"""The command's statement of :data:`SHARES`, stratified, with its reason."""
 
 
 def _write_dataset_stem(
@@ -313,13 +329,15 @@ def test_draw_splits_keeps_every_plants_stems_on_one_split_side(
     result = draw_splits(
         tmp_path,
         folder_path=str(dataset_root),
-        val_ratio=0.25,
-        calibration_ratio=0.125,
-        holdout_ratio=0.125,
-        seed=0,
-        group_key_map=group_key_map,
         output_path=str(out_dir),
         subject=SUBJECT,
+        **drawn_split(
+            val_ratio=0.25,
+            calibration_ratio=0.125,
+            holdout_ratio=0.125,
+            seed=0,
+            grouping=group_key_map,
+        ),
     )
 
     assert "error" not in result, result
@@ -369,12 +387,7 @@ def test_main_cli_end_to_end(
             str(four_plant_csv),
             "--subject",
             SUBJECT,
-            "--val-ratio",
-            "0.25",
-            "--calibration-ratio",
-            "0.125",
-            "--holdout-ratio",
-            "0.125",
+            *DRAW_ARGS,
             "--seed",
             "0",
             "--output-path",
@@ -417,6 +430,7 @@ def test_the_command_locates_its_dataset_root_once(
             str(four_plant_csv),
             "--subject",
             SUBJECT,
+            *DRAW_ARGS,
             "--seed",
             "3",
         ]
@@ -426,13 +440,14 @@ def test_the_command_locates_its_dataset_root_once(
     assert answered.count(dataset_root.resolve()) == 1, answered
 
 
-def test_the_cli_and_the_tool_draw_one_selection_at_the_default_shares(
+def test_the_cli_and_the_tool_draw_one_selection_at_the_stated_shares(
     tmp_path: Path,
     project: Path,
     four_plant_csv: Path,
 ) -> None:
-    """Stated only a seed, the CLI and ``draw_splits`` draw at the one set of default shares: the
-    two selections place every member on the same side, all four sides drawn.
+    """Stated one draw, the CLI and ``draw_splits`` draw one selection: the two place every
+    member on the same side, all four sides drawn, and each records the shares, the
+    stratification and the reason it was stated.
     """
     from tcip_mcp.dataset_layout import parse_image_path
     from tcip_mcp.pipelines.data.selection import read_selection
@@ -450,6 +465,7 @@ def test_the_cli_and_the_tool_draw_one_selection_at_the_default_shares(
             str(four_plant_csv),
             "--subject",
             SUBJECT,
+            *DRAW_ARGS,
             "--seed",
             "3",
             "--output-path",
@@ -465,12 +481,15 @@ def test_the_cli_and_the_tool_draw_one_selection_at_the_default_shares(
     result = draw_splits(
         project,
         folder_path=str(dataset_root),
-        seed=3,
         subject=SUBJECT,
-        group_key_map=derive_plant_group_key_map(
-            stem_to_raster, _plants(four_plant_csv)
-        ),
         output_path=str(tool_out),
+        **drawn_split(
+            seed=3,
+            **SHARES,
+            grouping=derive_plant_group_key_map(
+                stem_to_raster, _plants(four_plant_csv)
+            ),
+        ),
     )
     assert "error" not in result, result
 
@@ -481,6 +500,17 @@ def test_the_cli_and_the_tool_draw_one_selection_at_the_default_shares(
         }
 
     assert sides(cli_out) == sides(tool_out)
+    for out in (cli_out, tool_out):
+        drawn = read_selection(out, project=project)
+        assert (drawn.stratify_foreground, drawn.rationale) == (True, RATIONALE)
+        assert drawn.ratios == pytest.approx(
+            {
+                "train": 0.7,
+                "val": 0.15,
+                "calibration": 0.1,
+                "holdout": 0.05,
+            }
+        )
     assert set(sides(cli_out).values()) == {
         "train",
         "val",
@@ -492,26 +522,33 @@ def test_the_cli_and_the_tool_draw_one_selection_at_the_default_shares(
 def test_main_cli_without_a_seed_refuses(
     tmp_path: Path, project: Path, four_plant_csv: Path
 ) -> None:
-    """The seed has no default: omitting --seed refuses via argparse before anything is
-    written.
+    """Guard. The seed, each share, the stratification and the reason have no default: omitting
+    any refuses via argparse naming it before anything is written.
     """
     dataset_root = _four_plant_dataset(tmp_path)
     out_dir = tmp_path / "cli_defaults_out"
+    stated = ["--seed", "3", *DRAW_ARGS]
+    flags = [arg for arg in stated if arg.startswith("--")]
 
-    with pytest.raises(SystemExit):
-        main(
-            [
-                str(dataset_root),
-                "--project",
-                str(project),
-                "--plant-csv",
-                str(four_plant_csv),
-                "--subject",
-                SUBJECT,
-                "--output-path",
-                str(out_dir),
-            ]
-        )
+    for flag in flags:
+        at = stated.index(flag)
+        takes_value = flag != "--stratify-foreground"
+        unstated = stated[:at] + stated[at + 1 + takes_value :]
+        with pytest.raises(SystemExit):
+            main(
+                [
+                    str(dataset_root),
+                    "--project",
+                    str(project),
+                    "--plant-csv",
+                    str(four_plant_csv),
+                    "--subject",
+                    SUBJECT,
+                    *unstated,
+                    "--output-path",
+                    str(out_dir),
+                ]
+            )
 
     assert not out_dir.exists()
 
@@ -533,12 +570,7 @@ def test_main_cli_reports_refusal_and_nonzero_exit(
             SUBJECT,
             "--seed",
             "0",
-            "--val-ratio",
-            "0.1",
-            "--calibration-ratio",
-            "0.05",
-            "--holdout-ratio",
-            "0.05",
+            *DRAW_ARGS,
         ]
     )
 

@@ -12,6 +12,7 @@ import pytest
 from PIL import Image
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tests._training_values import augmentation
 from tests.conftest import DATA_DIR_BUCKET
 
 DATE = "2-11-26"
@@ -235,40 +236,42 @@ class TestEvaluateFolderEnumeration:
 # ── Augmentation tests ──────────────────────────────────────────────────────
 
 
+def _chain(**transforms):
+    """The chain an ``augmentation`` block of ``transforms`` builds once the schema admits it."""
+    from tcip_mcp.pipelines.data.augmentations import build_augmentation
+    from tcip_mcp.pipelines.schemas import AugmentationSpec
+
+    return build_augmentation(
+        AugmentationSpec.model_validate(augmentation(**transforms))
+    )
+
+
 class TestAugmentations:
     """Test data augmentation pipeline."""
 
     def test_build_empty_augmentation(self):
-        from tcip_mcp.pipelines.data.augmentations import build_augmentation
-
-        transforms = build_augmentation({})
+        transforms = _chain()
         # Should just have ToTensor
         assert len(transforms.transforms) == 1
 
     def test_build_full_augmentation(self):
-        from tcip_mcp.pipelines.data.augmentations import build_augmentation
-
-        config = {
-            "horizontal_flip": {"p": 0.5},
-            "vertical_flip": {"p": 0.3},
-            "color_jitter": {
+        transforms = _chain(
+            horizontal_flip={"p": 0.5},
+            vertical_flip={"p": 0.3},
+            color_jitter={
                 "brightness": 0.3,
                 "contrast": 0.3,
                 "saturation": 0.0,
             },
-            "gaussian_blur": {"p": 0.1, "radius": 2.0},
-        }
-        transforms = build_augmentation(config)
+            gaussian_blur={"p": 0.1, "radius": 2.0},
+        )
         # 4 augmentations + ToTensor
         assert len(transforms.transforms) == 5
 
     def test_augmentation_preserves_detection_target(self):
         import torch
 
-        from tcip_mcp.pipelines.data.augmentations import build_augmentation
-
-        config = {"horizontal_flip": {"p": 1.0}}  # always flip
-        transforms = build_augmentation(config)
+        transforms = _chain(horizontal_flip={"p": 1.0})  # always flip
 
         img = Image.new("RGB", (100, 100), color=(128, 128, 128))
         target = {
@@ -285,16 +288,13 @@ class TestAugmentations:
     def test_augmentation_classification(self):
         import torch
 
-        from tcip_mcp.pipelines.data.augmentations import build_augmentation
-
-        config = {
-            "color_jitter": {
+        transforms = _chain(
+            color_jitter={
                 "brightness": 0.1,
                 "contrast": 0.0,
                 "saturation": 0.0,
             }
-        }
-        transforms = build_augmentation(config)
+        )
 
         img = Image.new("RGB", (64, 64), color=(128, 128, 128))
         target = {"labels": 3}

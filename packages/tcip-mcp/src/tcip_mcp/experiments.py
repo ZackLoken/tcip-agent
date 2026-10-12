@@ -43,7 +43,7 @@ from pydantic import BaseModel
 
 from tcip_mcp.audit import now_iso
 from tcip_mcp.pipelines.data.selection import SAMPLE_PATHS
-from tcip_mcp.pipelines.schemas import Objective
+from tcip_mcp.pipelines.schemas import TraitRevisionRef, selection_of
 from tcip_mcp.registry_paths import (
     PathFields,
     recorded_paths,
@@ -94,16 +94,16 @@ DATA_PATHS: PathFields = (
     ("images_dir",),
     ("labels_dir",),
     ("plant_csv_paths", "[]"),
-    ("split", "selection_dir"),
 )
 """The fields of a run's data section that name where its samples are."""
 
 _DATA_BLOCK_PATHS: PathFields = (
     *DATA_PATHS,
+    ("split", "selection_dir"),
     ("dataset_source", "source_files", "[]"),
 )
-"""Every field of a run's data section that names a path: :data:`DATA_PATHS` and the source files
-its dataset builder imports."""
+"""Every field of a run's data section that names a path: :data:`DATA_PATHS`, the selection a
+bound split names and the source files its dataset builder imports."""
 
 CONFIG_PATHS: PathFields = (
     ("model_source", "source_files", "[]"),
@@ -520,7 +520,7 @@ class RunObservation:
     @property
     def resolution(self) -> dict | None:
         """What a run's input resolved to at launch (its ``data``, ``geometry``, ``partition``
-        and ``objective``), ``None`` for a sweep trial whose sampled point was refused at its
+        and ``trait_revision``), ``None`` for a sweep trial whose sampled point was refused at its
         admission or failed to resolve.
         """
         return self.record["resolved"]
@@ -563,19 +563,18 @@ class RunObservation:
         )
 
     @cached_property
-    def objective(self) -> Objective:
-        """The objective the record carries, validated once: a sweep's own, else what a run's
-        launch resolved (:attr:`resolution`'s). Refuses (``ValueError``) naming the run when it
-        resolved to nothing.
+    def trait_revision(self) -> TraitRevisionRef | None:
+        """The confirmed trait revision the record carries, validated once: a sweep's own, else
+        what a run's launch resolved (:attr:`resolution`'s); ``None`` for one naming no trait.
+        Refuses (``ValueError``) naming the run when it resolved to nothing.
         """
-        if self.record_file == SWEEP_FILE:
-            return Objective.model_validate(self.record["objective"])
-        resolved = self.resolution
-        if resolved is None:
+        held = self.record if self.record_file == SWEEP_FILE else self.resolution
+        if held is None:
             raise ValueError(
-                f"run {self.directory.name} resolved to nothing and carries no objective"
+                f"run {self.directory.name} resolved to nothing and carries no trait revision"
             )
-        return Objective.model_validate(resolved["objective"])
+        ref = held["trait_revision"]
+        return None if ref is None else TraitRevisionRef.model_validate(ref)
 
     @property
     def sweep(self) -> str | None:
@@ -748,11 +747,11 @@ def epoch_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def best_selection(
-    rows: list[dict[str, Any]], objective: Objective
+    rows: list[dict[str, Any]], higher_is_better: bool
 ) -> float | None:
     """The best finite ``selection`` among a run's metrics-log epoch rows
-    (:func:`partition_rows`) in the direction of ``objective``, the run's recorded one; ``None``
-    when no row carries one.
+    (:func:`partition_rows`), the highest when ``higher_is_better`` and else the lowest;
+    ``None`` when no row carries one.
     """
     values = [
         float(row["selection"])
@@ -761,7 +760,7 @@ def best_selection(
     ]
     if not values:
         return None
-    return max(values) if objective.higher_is_better else min(values)
+    return max(values) if higher_is_better else min(values)
 
 
 class RunRow(BaseModel):
@@ -794,13 +793,16 @@ def run_summary(
     ``metrics_log``, read as :func:`epoch_rows`) and the agent identity its ``launch`` event
     declared (:func:`launch_declarations`, ``None`` for a run no launch event names): its
     record's own
-    fields, its last logged epoch, and its best selection value under the objective its launch
-    resolved (:func:`best_selection`) with that objective's metric name, both ``None`` for a run
-    that resolved to nothing.
+    fields, its last logged epoch, and its best selection value (:func:`best_selection`) under
+    its config's selection metric and direction
+    (``schemas.selection_of``) with that metric's name, both ``None`` for a run that resolved to
+    nothing.
     """
     record, spec = observation.record, observation.spec
-    objective = (
-        observation.objective if observation.resolution is not None else None
+    selection = (
+        selection_of(spec.evaluation.selection_metric)
+        if observation.resolution is not None
+        else None
     )
     rows = epoch_rows(rows)
     return RunRow(
@@ -814,12 +816,10 @@ def run_summary(
         task=spec.model_source.task,
         images_dir=spec.data.images_dir,
         current_epoch=rows[-1].get(EPOCH_KEY) if rows else None,
-        best_metric=best_selection(rows, objective)
-        if objective is not None
+        best_metric=best_selection(rows, selection[1])
+        if selection is not None
         else None,
-        best_metric_name=objective.selection_metric
-        if objective is not None
-        else None,
+        best_metric_name=selection[0] if selection is not None else None,
         output_dir=str(observation.directory),
         status_error=observation.status_error,
         heartbeat=observation.heartbeat,
@@ -841,7 +841,7 @@ def run_rows(project: Path | str) -> list[RunRow]:
 
 
 def _completed_with_value(trial: RunRow) -> bool:
-    """Whether a sweep's trial completed reporting a value under the sweep's objective."""
+    """Whether a sweep's trial completed reporting a value under the sweep's selection."""
     return trial.state == "completed" and trial.best_metric is not None
 
 
@@ -907,16 +907,25 @@ def group_split_draws(
     return out
 
 
+def sweep_selection(given: dict[str, Any]) -> tuple[str, bool]:
+    """The metric and direction (``schemas.selection_of``) a sweep whose recorded input is
+    ``given`` ranks its trials by: its base config's ``evaluation.selection_metric``, which no
+    trial's point sweeps.
+    """
+    return selection_of(given["base_config"]["evaluation"]["selection_metric"])
+
+
 def sweep_outcome(
-    trials: list[RunRow], given: dict[str, Any], objective: Objective
+    trials: list[RunRow], given: dict[str, Any]
 ) -> dict[str, Any]:
-    """What a sweep's trial rows amount to under its recorded input ``given`` and ``objective``:
-    ``best_params`` and ``best_value`` over its completed trials in the objective's direction;
+    """What a sweep's trial rows amount to under its recorded input ``given``: ``best_params``
+    and ``best_value`` over its completed trials in its selection's direction
+    (:func:`sweep_selection`);
     above one draw, the best point by mean over its draws (:func:`group_split_draws`), with
     ``best_value_spread`` and every point's ``split_sensitivity``. ``best_params`` is ``None``
     when no trial or point qualifies.
     """
-    choose = max if objective.higher_is_better else min
+    choose = max if sweep_selection(given)[1] else min
     if given["split_draws"] > 1:
         groups = group_split_draws(trials, given["split_draw_seeds"])
         eligible = [g for g in groups if g["eligible"]]
@@ -957,7 +966,6 @@ class SweepGroup(BaseModel):
     state: str
     status_error: str | None
     input: dict[str, Any]
-    objective: Objective
     cancel_requested: bool
     heartbeat: str
     trials: list[RunRow]
@@ -975,11 +983,10 @@ def read_sweep(directory: Path, rows: list[RunRow]) -> SweepGroup:
         state=sweep.state,
         status_error=sweep.status_error,
         input=sweep.record["input"],
-        objective=sweep.objective,
         cancel_requested=cancel_requested(directory),
         heartbeat=sweep.heartbeat,
         trials=trials,
-        outcome=sweep_outcome(trials, sweep.record["input"], sweep.objective),
+        outcome=sweep_outcome(trials, sweep.record["input"]),
     )
 
 

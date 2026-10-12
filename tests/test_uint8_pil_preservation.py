@@ -20,8 +20,9 @@ from PIL import Image
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
 from tests._producer_fixtures import dataset_over  # noqa: E402
+from tests._training_values import augmentation, drawn_split, tiling_block
 
-TILING = {"enabled": True, "tile_size": 64, "overlap": 0.2, "sliver_frac": 0.5}
+TILING = tiling_block(tile_size=64, overlap=0.2, sliver_frac=0.5)
 """The tiling every windowed case states; its sliver cutoff stated, since one box derives none."""
 
 
@@ -425,10 +426,10 @@ def _augmented_run(
             "images_dir": str(images_dir),
             "num_channels": 3,
             "scope": {"subject": "bud"},
-            "auto_val": False,
+            "split": drawn_split(val_ratio=0.0),
             **({"dataset_source": DATASET_SOURCE} if bespoke else {}),
         },
-        augmentation={"horizontal_flip": {"p": 1.0}},
+        augmentation=augmentation(horizontal_flip={"p": 1.0}),
         evaluation=evaluation_block(selection_metric="loss"),
     )
 
@@ -463,7 +464,12 @@ def test_a_bodys_tiler_refuses_the_chain_over_uint16_frames(tmp_path: Path):
     raster_source.close_source_pool()
     try:
         ctx = run_context(tmp_path, _augmented_run(tmp_path, _grid(40, 32, 3)))
-        lattice = {"tile_size": 16, "overlap": 0.0, "sliver_frac": 0.5}
+        lattice = {
+            "tile_size": 16,
+            "overlap": 0.0,
+            "sliver_frac": 0.5,
+            "skip_empty": False,
+        }
         deep = dataset_over(
             "detection",
             str(

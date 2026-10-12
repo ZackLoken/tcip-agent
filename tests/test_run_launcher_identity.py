@@ -129,9 +129,9 @@ def test_launch_refuses_when_the_launch_record_cannot_be_written(
     assert run_dirs(tmp_path) == []
 
 
-def test_a_launch_records_the_seed_it_draws(tmp_path, monkeypatch):
-    """No seed in the caller's config: the launch draws one onto the config its ``run.json``
-    records, the one record the child trains from.
+def test_a_launch_records_the_seed_its_config_states(tmp_path, monkeypatch):
+    """The config's stated seed is the one its ``run.json`` records, the one record the child
+    trains from.
     """
     from tcip_mcp.tools import training_tools
 
@@ -139,14 +139,11 @@ def test_a_launch_records_the_seed_it_draws(tmp_path, monkeypatch):
     seed_bud_images(images_dir, n=2, size=32, box=(1, 1, 9, 9))
     _fake_popen(monkeypatch, [])
 
-    cfg = small_detection_config(images_dir)
+    cfg = {**small_detection_config(images_dir), "seed": 1234}
     result = training_tools.launch_training(tmp_path, cfg, actor=None)
     assert "error" not in result, result
-    assert "seed" not in cfg
-    assert isinstance(
-        _launch_record(tmp_path, result["experiment_id"])["config"]["seed"],
-        int,
-    )
+    recorded = _launch_record(tmp_path, result["experiment_id"])["config"]
+    assert recorded["seed"] == 1234
 
 
 def test_a_spawn_failure_leaves_a_directory_that_reads_interrupted(

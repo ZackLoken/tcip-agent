@@ -10,10 +10,12 @@ import pytest
 from tests._chain_fixtures import DETECTION_SOURCE, training_config
 from tests._training_values import (
     asha_scheduler,
+    drawn_split,
     evaluation_block,
     fifo_scheduler,
     fifo_search,
     sweep_space,
+    tiling_block,
     tune_arguments,
 )
 from tests._verified_checkpoint_fixtures import opened_sweep
@@ -329,7 +331,7 @@ def test_run_hyperparameter_search_refuses_split_draws_when_a_bound_selection_wo
     assert tt.experiments.sweep_dirs(tmp_path) == []
 
 
-def test_run_hyperparameter_search_refuses_split_draws_when_auto_val_is_off(
+def test_run_hyperparameter_search_refuses_split_draws_over_a_zero_validation_share(
     tmp_path, real_hpo_base_config, monkeypatch
 ):
     import tcip_mcp.tools.training_tools as tt
@@ -340,7 +342,10 @@ def test_run_hyperparameter_search_refuses_split_draws_when_auto_val_is_off(
     )
 
     cfg = dict(real_hpo_base_config)
-    cfg["data"] = {**cfg["data"], "auto_val": False}
+    cfg["data"] = {
+        **cfg["data"],
+        "split": {**cfg["data"]["split"], "val_ratio": 0.0},
+    }
     result = tt.run_hyperparameter_search(
         tmp_path,
         base_config=cfg,
@@ -351,7 +356,7 @@ def test_run_hyperparameter_search_refuses_split_draws_when_auto_val_is_off(
         search_seed=0,
     )
 
-    assert "error" in result and "auto_val" in result["error"]
+    assert "error" in result and "val_ratio zero" in result["error"]
     assert not ran
 
 
@@ -862,21 +867,18 @@ def test_the_seed_axis_refusal_answers_before_a_later_points_schema_error(
 # -- admits valid work -------------------------------------------------------------
 
 
-def _bound_hpo_config(selection_dir, *, auto_val: bool | None = None) -> dict:
+def _bound_hpo_config(selection_dir) -> dict:
     data: dict = {"split": {"selection_dir": str(selection_dir), "seed": 42}}
-    if auto_val is not None:
-        data["auto_val"] = auto_val
     return training_config(DETECTION_SOURCE, data)
 
 
-def test_run_hyperparameter_search_admits_split_draws_bound_to_a_selection_and_sets_the_redraw_flag(
+def test_run_hyperparameter_search_admits_split_draws_bound_to_a_selection(
     tmp_path,
     monkeypatch,
 ):
-    """A base_config bound to a selection is no longer refused: run_hyperparameter_search sets
-    data.split.redraw_within_selection on its own copy, so every trial redraws train and val
-    inside the selection's own members instead of its one recorded partition, and the recorded
-    sweep manifest's own base_config carries the claim.
+    """A base_config bound to a selection is admitted: each trial's seed axis value is its
+    bound split's seed, so every trial redraws train and val inside the selection's own members
+    instead of its one recorded partition; the recorded base_config is the caller's.
     """
     import tcip_mcp.tools.training_tools as tt
     from tcip_mcp.tools.data_tools import draw_splits
@@ -892,10 +894,13 @@ def test_run_hyperparameter_search_admits_split_draws_bound_to_a_selection_and_s
         str(root),
         output_path=str(selection_dir),
         subject=SUBJECT,
-        seed=2,
-        val_ratio=0.25,
-        calibration_ratio=0.125,
-        holdout_ratio=0.125,
+        **drawn_split(
+            seed=2,
+            val_ratio=0.25,
+            calibration_ratio=0.125,
+            holdout_ratio=0.125,
+            grouping="tile_prefix",
+        ),
     )
     assert "error" not in make_result, make_result
 
@@ -925,7 +930,7 @@ def test_run_hyperparameter_search_admits_split_draws_bound_to_a_selection_and_s
 
     manifest = result["sweep"]["input"]
     recorded_split = manifest["base_config"]["data"]["split"]
-    assert recorded_split["redraw_within_selection"] is True
+    assert set(recorded_split) == {"selection_dir", "seed"}
     assert recorded_split["seed"] == 42
 
 
@@ -951,10 +956,13 @@ def test_a_bound_sweep_reads_and_redraws_its_selection_once_on_opening(
         str(root),
         output_path=str(selection_dir),
         subject=SUBJECT,
-        seed=2,
-        val_ratio=0.25,
-        calibration_ratio=0.125,
-        holdout_ratio=0.125,
+        **drawn_split(
+            seed=2,
+            val_ratio=0.25,
+            calibration_ratio=0.125,
+            holdout_ratio=0.125,
+            grouping="tile_prefix",
+        ),
     )
     calls = {"read": 0, "redraw": 0}
     real_read, real_redraw = (
@@ -991,50 +999,6 @@ def test_a_bound_sweep_reads_and_redraws_its_selection_once_on_opening(
 
     assert not isinstance(opened, dict), opened
     assert calls == {"read": 1, "redraw": 1}
-
-
-def test_run_hyperparameter_search_admits_split_draws_bound_with_auto_val_false(
-    tmp_path, monkeypatch
-):
-    """A bound base_config does not read auto_val (the selection branch binds ahead of it), so
-    auto_val=False no longer refuses it the way it refuses a drawn config.
-    """
-    import tcip_mcp.tools.training_tools as tt
-    from tcip_mcp.tools.data_tools import draw_splits
-    from tests.test_selection_binding import (
-        SUBJECT,
-        _two_subject_two_date_dataset,
-    )
-
-    root = _two_subject_two_date_dataset(tmp_path / "ds")
-    selection_dir = tmp_path / "m"
-    make_result = draw_splits(
-        tmp_path,
-        str(root),
-        output_path=str(selection_dir),
-        subject=SUBJECT,
-        seed=2,
-        val_ratio=0.25,
-        calibration_ratio=0.125,
-        holdout_ratio=0.125,
-    )
-    assert "error" not in make_result, make_result
-
-    _search(monkeypatch)
-
-    cfg = _bound_hpo_config(selection_dir, auto_val=False)
-    result = tt.run_hyperparameter_search(
-        tmp_path,
-        base_config=cfg,
-        param_space=sweep_space(),
-        n_trials=1,
-        **fifo_search(),
-        split_draws=2,
-        trial_budget=2,
-        search_seed=0,
-    )
-
-    assert "error" not in result, result
 
 
 def test_run_hyperparameter_search_admits_split_draws_and_derives_seeds_from_the_base_config(
@@ -1144,37 +1108,8 @@ def test_run_hyperparameter_search_admits_split_draws_for_instance_seg(
     cfg["data"] = {
         **detection_images(tmp_path / "polygons", scope, polygons=True),
         "scope": scope,
-        "split": {"seed": 0, "val_ratio": 0.15},
+        "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
     }
-
-    _search(monkeypatch)
-
-    result = tt.run_hyperparameter_search(
-        tmp_path,
-        base_config=cfg,
-        param_space=sweep_space(),
-        n_trials=1,
-        **fifo_search(),
-        split_draws=2,
-        trial_budget=2,
-        search_seed=0,
-    )
-
-    assert "error" not in result, result
-
-
-def test_run_hyperparameter_search_admits_split_draws_with_explicit_auto_val_true(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-):
-    """data.auto_val=True explicitly stated (not merely defaulted) admits the same as omitting
-    it.
-    """
-    import tcip_mcp.tools.training_tools as tt
-
-    cfg = dict(real_hpo_base_config)
-    cfg["data"] = {**cfg["data"], "auto_val": True}
 
     _search(monkeypatch)
 
@@ -1802,7 +1737,7 @@ def _trial_rows(
 
 def _two_draw_sweep(project, real_hpo_base_config):
     """A two-draw sweep over ``real_hpo_base_config`` opened by its own writer (``open_sweep``):
-    its objective is lower=better and its seeds are 42 and 43. Returns its directory.
+    its selection metric is lower=better and its seeds are 42 and 43. Returns its directory.
     """
     from tests._verified_checkpoint_fixtures import opened_sweep
 
@@ -1826,9 +1761,7 @@ def _outcome(project, real_hpo_base_config, trials) -> dict:
     sweep = _two_draw_sweep(project, real_hpo_base_config)
     observed = observe(sweep)
     return sweep_outcome(
-        _trial_rows(sweep, trials),
-        observed.record["input"],
-        observed.objective,
+        _trial_rows(sweep, trials), observed.record["input"]
     )
 
 
@@ -2044,15 +1977,11 @@ def _one_source_tiled_cfg(images_dir) -> dict:
         {
             "images_dir": str(images_dir),
             "scope": {"subject": "bud"},
-            "auto_val": True,
-            "split": {"val_ratio": 0.2, "seed": 1},
+            "split": drawn_split(val_ratio=0.2, seed=1, grouping="tile_prefix"),
             # sliver_frac stated: a fixture this small derives no box-size spread.
-            "tiling": {
-                "enabled": True,
-                "tile_size": 128,
-                "overlap": 0.2,
-                "sliver_frac": 0.5,
-            },
+            "tiling": tiling_block(
+                tile_size=128, overlap=0.2, sliver_frac=0.5
+            ),
         },
     )
 
@@ -2078,7 +2007,7 @@ def test_run_hyperparameter_search_refuses_split_draws_over_a_single_source_spat
     )
     cfg = _one_source_tiled_cfg(images_dir)
     cfg["model_source"] = {**cfg["model_source"], "task": task}
-    # The default holdout strip is narrower than this mosaic's tile lattice admits.
+    # A holdout strip of a tenth, which this mosaic's tile lattice admits.
     cfg["data"]["split"]["holdout_ratio"] = 0.1
 
     ran = []
@@ -2115,7 +2044,7 @@ def test_run_hyperparameter_search_admits_a_single_source_spatial_config_at_one_
 
     images_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
     cfg = _one_source_tiled_cfg(images_dir)
-    # The default holdout strip is narrower than this mosaic's tile lattice admits.
+    # A holdout strip of a tenth, which this mosaic's tile lattice admits.
     cfg["data"]["split"]["holdout_ratio"] = 0.1
 
     _search(monkeypatch)
@@ -2169,8 +2098,8 @@ def test_split_draws_over_one_bespoke_source_refuse_the_validation_they_cannot_d
     monkeypatch,
 ):
     """A bespoke dataset_source never takes the spatial-strip route, so one admitted source
-    leaves nothing to hold a validation side out of: the sweep refuses naming
-    ``auto_val=False`` rather than training each draw without validation.
+    leaves nothing to hold a validation side out of: the sweep refuses naming the zero shares
+    that train without one, rather than training each draw without validation.
     """
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
@@ -2204,7 +2133,7 @@ def test_split_draws_over_one_bespoke_source_refuse_the_validation_they_cannot_d
         search_seed=0,
     )
 
-    assert any("auto_val=False" in issue for issue in result["issues"]), result
+    assert any("every share zero" in issue for issue in result["issues"]), result
 
 
 def test_run_hyperparameter_search_reads_an_earlier_legs_reason_before_this_one(
@@ -2212,7 +2141,7 @@ def test_run_hyperparameter_search_reads_an_earlier_legs_reason_before_this_one(
     real_hpo_base_config,
     monkeypatch,
 ):
-    """A config an earlier leg already refuses (here, ``data.auto_val`` off) reads
+    """A config an earlier leg already refuses (here, a zero ``data.split.val_ratio``) reads
     that leg's own reason, never the spatial split's: that leg reads the first point's
     resolution, which a config an earlier leg rejected never reaches.
     """
@@ -2226,8 +2155,8 @@ def test_run_hyperparameter_search_reads_an_earlier_legs_reason_before_this_one(
     cfg = dict(real_hpo_base_config)
     cfg["data"] = {
         **cfg["data"],
-        "auto_val": False,
-        "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+        "split": {**cfg["data"]["split"], "val_ratio": 0.0},
+        "tiling": tiling_block(tile_size=128, overlap=0.2),
     }
     result = tt.run_hyperparameter_search(
         tmp_path,
@@ -2239,6 +2168,6 @@ def test_run_hyperparameter_search_reads_an_earlier_legs_reason_before_this_one(
         search_seed=0,
     )
 
-    assert "error" in result and "auto_val" in result["error"]
+    assert "error" in result and "val_ratio zero" in result["error"]
     assert "over its own pixels" not in result["error"]
     assert not ran

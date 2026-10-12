@@ -33,6 +33,11 @@ from tcip_mcp.pipelines.schemas import (  # noqa: E402
 from tcip_mcp.pipelines.training.envelope import TrainContext
 from tests._chain_fixtures import built_model, training_config
 from tests._producer_fixtures import registry_over  # noqa: E402
+from tests._training_values import (  # noqa: E402
+    drawn_split,
+    evaluation_block,
+    tiling_block,
+)
 
 UNSHARED = TrainGeometry(native_size=None, object_density=None)
 """A resolution whose training frames share no one size."""
@@ -180,7 +185,8 @@ def test_contract_dims_take_the_admitted_attributes_without_the_loader_backgroun
                 "scope": asdict(scope),
                 "num_channels": 5,
                 "images_dir": str(images_dir),
-                "tiling": {"enabled": True, "tile_size": 640},
+                "tiling": tiling_block(tile_size=640),
+                "split": drawn_split(),
             },
         )
     )
@@ -221,6 +227,7 @@ def test_contract_dims_count_only_the_subject_for_a_scope_declaring_no_attribute
                 "scope": asdict(registry_scope(images_dir, "bud")),
                 "num_channels": 3,
                 "images_dir": str(images_dir),
+                "split": drawn_split(),
             },
         )
     )
@@ -304,7 +311,7 @@ def test_snapshot_captures_the_module_of_a_builder_spelled_without_a_colon(
                         str(pkg / "__init__.py"),
                     ],
                 },
-                {},
+                {"split": drawn_split()},
             )
         ),
         tmp_path / "project",
@@ -321,7 +328,10 @@ def test_a_missing_or_empty_builder_refuses_at_the_configs_validation():
     """
     for builder in (None, ""):
         _spec, issues = checked_train_config(
-            training_config({"builder": builder, "task": "detection"}, {})
+            training_config(
+                {"builder": builder, "task": "detection"},
+                {"split": drawn_split()},
+            )
         )
         assert any(
             issue.startswith("model_source.builder") for issue in issues
@@ -329,7 +339,10 @@ def test_a_missing_or_empty_builder_refuses_at_the_configs_validation():
 
     assert (
         checked_train_config(
-            training_config({"builder": PROBE_NET, "task": "detection"}, {})
+            training_config(
+                {"builder": PROBE_NET, "task": "detection"},
+                {"split": drawn_split()},
+            )
         )[1]
         == []
     )
@@ -490,8 +503,9 @@ def test_a_saved_checkpoint_rebuilds_the_architecture_its_config_builds(
         },
         {
             **table_images(fixture_data_dir(tmp_path, "probe"), n=4),
-            "split": {"seed": 0, "val_ratio": 0.25},
+            "split": drawn_split(val_ratio=0.25, grouping="tile_prefix"),
         },
+        evaluation=evaluation_block(selection_metric="loss"),
     )
     ctx = TrainContext(
         run=observed_run(observe(opened_run(tmp_path, config))),

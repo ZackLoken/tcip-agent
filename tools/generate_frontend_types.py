@@ -93,7 +93,6 @@ def declared_models() -> list[type[BaseModel]]:
         SegmentTieDisclosure,
     )
     from tcip_mcp.pipelines.execution import Stated
-    from tcip_mcp.pipelines.schemas import Objective, TraitRevisionRef
     from tcip_mcp.traits import (
         Operationalization,
         PositiveState,
@@ -152,8 +151,6 @@ def declared_models() -> list[type[BaseModel]]:
         ServingCell,
         ViewReads,
         RunRow,
-        TraitRevisionRef,
-        Objective,
         SweepGroup,
         TrainingDetail,
         TrainingListing,

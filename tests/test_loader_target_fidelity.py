@@ -97,7 +97,11 @@ def test_a_seam_fragment_is_not_indexed_as_a_whole_object(
 
     base = dataset_over("detection", str(images), subject=BUD)
     ds = TiledDetectionDataset(
-        base, tile_size=64, overlap=0.0, sliver_frac=sliver_frac
+        base,
+        tile_size=64,
+        overlap=0.0,
+        sliver_frac=sliver_frac,
+        skip_empty=False,
     )
 
     per_tile = {e["slice"][:2]: len(e["boxes"]) for e in ds._index}

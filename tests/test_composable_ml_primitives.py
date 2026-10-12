@@ -88,11 +88,12 @@ def _built(block: dict, model):
 class TestOptimizerFactory:
     def test_build_adamw(self):
         assert isinstance(
-            _built(adamw_optimizer(), nn.Linear(10, 5)), torch.optim.AdamW
+            _built(adamw_optimizer(backbone_lr=1e-3), nn.Linear(10, 5)),
+            torch.optim.AdamW,
         )
 
     def test_build_sgd_at_its_stated_momentum(self):
-        opt = _built(sgd_optimizer(), nn.Linear(10, 5))
+        opt = _built(sgd_optimizer(backbone_lr=1e-2), nn.Linear(10, 5))
         assert isinstance(opt, torch.optim.SGD)
         assert opt.param_groups[0]["momentum"] == sgd_optimizer()["momentum"]
 
@@ -124,7 +125,9 @@ class TestOptimizerFactory:
         if find_spec("torch_optimizer") is not None:
             pytest.skip("torch_optimizer is importable in this environment")
         with pytest.raises(ImportError, match="torch_optimizer"):
-            _built({**adamw_optimizer(), "name": "lamb"}, nn.Linear(10, 5))
+            _built(
+                adamw_optimizer(name="lamb", backbone_lr=1e-3), nn.Linear(10, 5)
+            )
 
 
 # ====================================================================

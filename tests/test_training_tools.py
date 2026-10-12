@@ -21,7 +21,14 @@ from tests._chain_fixtures import (
     TRAIN_BESPOKE,
     training_config,
 )
-from tests._training_values import evaluation_block, fifo_search
+from tests._training_values import (
+    augmentation,
+    drawn_split,
+    evaluation_block,
+    fifo_search,
+    stage,
+    tiling_block,
+)
 
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
@@ -36,7 +43,7 @@ def _labeled(tmp_path: Path) -> dict:
     return {
         **detection_images(tmp_path / "labeled", scope),
         "scope": scope,
-        "split": {"seed": 0, "val_ratio": 0.15},
+        "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
     }
 
 
@@ -80,14 +87,14 @@ def test_preflight_config_accepts_trainer_canonical_stages(tmp_path):
     cfg = training_config(
         DETECTION_SOURCE,
         _labeled(tmp_path),
-        stages=[{"freeze_to": -1}, {"freeze_to": 2}],
+        stages=[stage(-1), stage(2)],
     )
     r = preflight_config(tmp_path, cfg)
     assert r["valid"] is True, r["issues"]
 
     # A stage carries no epoch count, and the stop rule that ends it is stated.
     r2 = preflight_config(
-        tmp_path, {**cfg, "stages": [{"freeze_to": 0, "epochs": 5}]}
+        tmp_path, {**cfg, "stages": [stage(0, epochs=5)]}
     )
     assert any(i.startswith("stages.0.epochs:") for i in r2["issues"]), r2[
         "issues"
@@ -147,7 +154,7 @@ def test_a_smoke_preflight_validates_its_config_once(tmp_path, monkeypatch):
             "scope": {},
             "images_dir": str(images_dir),
             "labels_dir": str(csv_path),
-            "split": {"seed": 1, "val_ratio": 0.15},
+            "split": drawn_split(val_ratio=0.15, seed=1, grouping="tile_prefix"),
         },
     )
 
@@ -281,13 +288,13 @@ def test_preflight_config_refuses_a_per_stage_lr_by_name(tmp_path):
     cfg = training_config(
         DETECTION_SOURCE,
         _labeled(tmp_path),
-        stages=[{"freeze_to": -1, "lr": 1e-3}],
+        stages=[stage(-1, lr=1e-3)],
     )
     r = preflight_config(tmp_path, cfg)
     assert r["valid"] is False
     assert any(i.startswith("stages.0.lr:") for i in r["issues"]), r["issues"]
 
-    cfg["stages"] = [{"freeze_to": -1}]
+    cfg["stages"] = [stage(-1)]
     assert preflight_config(tmp_path, cfg)["valid"] is True
 
 
@@ -311,7 +318,7 @@ def test_preflight_config_warns_when_most_candidates_wont_train(tmp_path):
         {
             "images_dir": str(imgs),
             "scope": {"subject": "bud"},
-            "auto_val": False,
+            "split": drawn_split(val_ratio=0.0),
         },
         evaluation=evaluation_block(selection_metric="loss"),
     )
@@ -335,7 +342,7 @@ def test_preflight_config_no_coverage_warning_when_everything_trains(tmp_path):
         {
             "images_dir": str(imgs),
             "scope": {"subject": "bud"},
-            "split": {"seed": 0, "val_ratio": 0.15},
+            "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
         },
     )
     assert preflight_config(tmp_path, cfg)["warnings"] == []
@@ -369,7 +376,7 @@ def test_preflight_config_blocks_rather_than_swallows_an_unreadable_label(
     data_cfg = {
         "images_dir": str(imgs),
         "scope": {"subject": "bud"},
-        "split": {"seed": 0, "val_ratio": 0.15},
+        "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
     }
     cfg = training_config(DETECTION_SOURCE, dict(data_cfg))
     r = preflight_config(tmp_path, cfg)
@@ -422,13 +429,14 @@ def test_preflight_admits_the_run_once(tmp_path):
         {
             "images_dir": str(imgs),
             "scope": {"subject": "bud"},
-            "tiling": {"enabled": True, "tile_size": 64, "overlap": 0.2},
-            "split": {
-                "calibration_ratio": 0.15,
-                "val_ratio": 0.2,
-                "holdout_ratio": 0.1,
-                "seed": 1,
-            },
+            "tiling": tiling_block(tile_size=64, overlap=0.2),
+            "split": drawn_split(
+                calibration_ratio=0.15,
+                val_ratio=0.2,
+                holdout_ratio=0.1,
+                seed=1,
+                grouping="tile_prefix",
+            ),
         },
     )
     with pytest.MonkeyPatch.context() as patch:
@@ -473,7 +481,7 @@ def test_preflight_config_blocks_a_document_only_the_admission_reader_refuses(
         {
             "images_dir": str(imgs),
             "scope": {"subject": "bud"},
-            "split": {"seed": 0, "val_ratio": 0.15},
+            "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
         },
     )
     r = preflight_config(tmp_path, cfg)
@@ -540,11 +548,10 @@ def test_preflight_config_rejects_incoherent_selection_metric(tmp_path):
     cfg["evaluation"] = evaluation_block(selection_metric="map50")
     assert preflight_config(tmp_path, cfg)["valid"] is True
 
-    # An undeclared direction is caught here even with no trait at all: it would otherwise
-    # surface only as a failed run once resolve_selection_metric runs mid-training.
+    # A metric with no declared direction is refused here by the field's type, before any run.
     cfg["evaluation"] = evaluation_block(selection_metric="not_a_real_metric")
     r = preflight_config(tmp_path, cfg)
-    assert any("no declared ranking direction" in i for i in r["issues"])
+    assert any("evaluation.selection_metric" in i for i in r["issues"]), r
 
 
 def test_preflight_config_names_a_non_mapping_evaluation_block_as_an_issue(
@@ -563,7 +570,7 @@ def test_preflight_config_names_a_non_mapping_evaluation_block_as_an_issue(
         {
             "images_dir": str(imgs),
             "scope": {"subject": "bud"},
-            "split": {"seed": 0, "val_ratio": 0.15},
+            "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
         },
         evaluation="not_a_mapping",
     )
@@ -602,7 +609,7 @@ def _reserve_cal_big_single_source(
 
 def test_preflight_calibration_ratio_wrong_task_flags_issue(tmp_path):
     """A classification run never resolves to the within-image split a calibration region
-    reserves from, so the fraction is named as having no effect.
+    reserves from, so its draw refuses the fraction by name.
     """
     from tcip_mcp.tools.training_tools import preflight_config
     from tests.tiny_trainer_fixtures import write_regression_dataset
@@ -615,18 +622,20 @@ def test_preflight_calibration_ratio_wrong_task_flags_issue(tmp_path):
         {
             "images_dir": str(images_dir),
             "labels_dir": str(csv_path),
-            "split": {"calibration_ratio": 0.15, "val_ratio": 0.15, "seed": 1},
+            "split": drawn_split(
+                calibration_ratio=0.15, val_ratio=0.15, seed=1
+            ),
         },
     )
     r = preflight_config(tmp_path, cfg)
     assert any(
-        "calibration_ratio" in i and "no effect" in i for i in r["issues"]
+        "calibration_ratio" in i and "reserved strips" in i for i in r["issues"]
     ), r["issues"]
 
 
 def test_preflight_calibration_ratio_multi_member_flags_issue(tmp_path):
     """Two admitted members resolve to the group-balanced split, which reserves no calibration
-    region, so the fraction is named as having no effect.
+    region, so its draw refuses the fraction by name.
     """
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -639,13 +648,15 @@ def test_preflight_calibration_ratio_multi_member_flags_issue(tmp_path):
             "images_dir": str(images_dir),
             "scope": {"subject": "bud"},
             # sliver_frac stated: two boxes derive no size spread.
-            "tiling": {"enabled": True, "tile_size": 32, "sliver_frac": 0.5},
-            "split": {"calibration_ratio": 0.15, "val_ratio": 0.15, "seed": 1},
+            "tiling": tiling_block(tile_size=32, sliver_frac=0.5),
+            "split": drawn_split(
+                calibration_ratio=0.15, val_ratio=0.15, seed=1
+            ),
         },
     )
     r = preflight_config(tmp_path, cfg)
     assert any(
-        "calibration_ratio" in i and "no effect" in i for i in r["issues"]
+        "calibration_ratio" in i and "reserved strips" in i for i in r["issues"]
     ), r["issues"]
 
 
@@ -661,14 +672,14 @@ def test_preflight_reserved_regions_infeasible_layout_refuses_under_smoke(
         {
             "images_dir": str(images_dir),
             "scope": {"subject": "bud"},
-            "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
+            "tiling": tiling_block(tile_size=128, overlap=0.2),
             # Nothing left for a real train fraction at this mosaic size.
-            "split": {
-                "val_ratio": 0.33,
-                "holdout_ratio": 0.33,
-                "seed": 1,
-                "calibration_ratio": 0.33,
-            },
+            "split": drawn_split(
+                val_ratio=0.33,
+                holdout_ratio=0.33,
+                seed=1,
+                calibration_ratio=0.33,
+            ),
         },
     )
     r = preflight_config(tmp_path, cfg, smoke=True)
@@ -696,13 +707,13 @@ def test_preflight_reserved_regions_report_an_unreadable_label_by_name(
         {
             "images_dir": str(images_dir),
             "scope": {"subject": "bud"},
-            "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-            "split": {
-                "val_ratio": 0.2,
-                "holdout_ratio": 0.1,
-                "seed": 1,
-                "calibration_ratio": 0.15,
-            },
+            "tiling": tiling_block(tile_size=128, overlap=0.2),
+            "split": drawn_split(
+                val_ratio=0.2,
+                holdout_ratio=0.1,
+                seed=1,
+                calibration_ratio=0.15,
+            ),
         },
     )
     r = preflight_config(tmp_path, cfg, smoke=True)
@@ -729,13 +740,13 @@ def test_preflight_reserved_regions_admit_a_feasible_layout(tmp_path):
         {
             "images_dir": str(images_dir),
             "scope": {"subject": "bud"},
-            "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-            "split": {
-                "val_ratio": 0.2,
-                "holdout_ratio": 0.1,
-                "seed": 1,
-                "calibration_ratio": 0.15,
-            },
+            "tiling": tiling_block(tile_size=128, overlap=0.2),
+            "split": drawn_split(
+                val_ratio=0.2,
+                holdout_ratio=0.1,
+                seed=1,
+                calibration_ratio=0.15,
+            ),
         },
     )
     r = preflight_config(tmp_path, cfg, smoke=True)
@@ -775,7 +786,7 @@ def _built_groups(config: dict) -> list[tuple[float, float]]:
 @pytest.mark.parametrize(
     "unstated, named",
     [
-        ("evaluation", "evaluation.conf_threshold unstated"),
+        ("conf_threshold", "evaluation.conf_threshold unstated"),
         ("batch_size", "batch_size unstated"),
         ("stages", "['stages'] unstated"),
     ],
@@ -797,7 +808,9 @@ def test_the_launch_door_refuses_what_a_trainer_reads_unstated_and_the_schema_ad
         {} if training_source is None else {"training_source": training_source}
     )
     config = training_config(DETECTION_SOURCE, _labeled(tmp_path), **loop)
-    config.pop(unstated)
+    (config["evaluation"] if unstated == "conf_threshold" else config).pop(
+        unstated
+    )
     report = preflight_config(tmp_path, config)
     if unstated == "stages" and training_source is not None:
         assert report["valid"] is True, report["issues"]
@@ -807,7 +820,12 @@ def test_the_launch_door_refuses_what_a_trainer_reads_unstated_and_the_schema_ad
         ]
     train_config(config)
 
-    classifier = training_config(CLASSIFIER_SOURCE, {}, evaluation={}, **loop)
+    classifier = training_config(
+        CLASSIFIER_SOURCE,
+        {},
+        evaluation=evaluation_block(selection_metric="loss", conf_threshold=None),
+        **loop,
+    )
     assert train_config(classifier).trainer_reads().conf_threshold is None
 
 
@@ -851,7 +869,7 @@ def test_apply_hpo_params_preserves_base_config_stages():
     """Sweeping a rate must not overwrite the agent's own progressive-unfreeze schedule with a
     hardcoded recipe: base_config's stages survive unchanged.
     """
-    custom_stages = [{"freeze_to": -1}, {"freeze_to": 2}, {"freeze_to": 0}]
+    custom_stages = [stage(-1), stage(2), stage(0)]
     out = _applied(
         _base("x:y", stages=custom_stages), {"optimizer.head_lr": 3e-3}
     )
@@ -1001,7 +1019,9 @@ def _classifier_base(project: Path, **overrides) -> dict:
     return training_config(
         CLASSIFIER_SOURCE,
         _labeled(project),
-        evaluation={"selection_metric": "accuracy"},
+        evaluation=evaluation_block(
+            selection_metric="accuracy", conf_threshold=None, score_weights=None
+        ),
         **overrides,
     )
 
@@ -1301,7 +1321,7 @@ def test_run_hpo_trial_uses_base_augmentation_and_model(monkeypatch, tmp_path):
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=captured)
     base = _classifier_base(
-        tmp_path, augmentation={"horizontal_flip": {"p": 0.5}}
+        tmp_path, augmentation=augmentation(horizontal_flip={"p": 0.5})
     )
     _trial({"optimizer.head_lr": 3e-4}, [].append, base, tmp_path)
     assert (
@@ -1372,13 +1392,10 @@ def test_run_hpo_trial_producer_fed_data_split_seed_over_the_single_source_spati
         {
             "images_dir": str(images_dir),
             "scope": {"subject": "bud"},
-            "auto_val": True,
-            "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-            "split": {
-                "val_ratio": 0.25,
-                "holdout_ratio": 0.1,
-                "calibration_ratio": 0,
-            },
+            "tiling": tiling_block(tile_size=128, overlap=0.2),
+            "split": drawn_split(
+                val_ratio=0.25, holdout_ratio=0.1, grouping="tile_prefix"
+            ),
         },
     )
 
@@ -1400,8 +1417,8 @@ def test_run_hpo_trial_producer_fed_data_split_seed_over_the_single_source_spati
 def test_a_trials_launch_record_carries_the_seed_it_trained_under(
     monkeypatch, tmp_path
 ):
-    """An unset seed is drawn onto the trial's launch record once, and the body trains under
-    that recorded seed.
+    """A trial's launch record carries the seed its sweep's base config states, the one every
+    trial of the sweep trains under, and the body trains under that recorded seed.
     """
     pytest.importorskip("torch")
     from tcip_mcp.experiments import RUN_FILE, read_record
@@ -1421,15 +1438,11 @@ def test_a_trials_launch_record_carries_the_seed_it_trained_under(
         return run
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train)
-    trial_dir = _trial(
-        {"optimizer.head_lr": 3e-4},
-        [].append,
-        _detection_base(tmp_path),
-        tmp_path,
-    )
+    base = {**_detection_base(tmp_path), "seed": 11}
+    trial_dir = _trial({"optimizer.head_lr": 3e-4}, [].append, base, tmp_path)
 
     recorded = read_record(trial_dir / RUN_FILE)["config"]["seed"]
-    assert recorded is not None and recorded == captured["seed"]
+    assert recorded == captured["seed"] == 11
 
 
 def test_run_hpo_trial_diverged_run_never_outranks_a_worse_but_alive_config(
@@ -1439,7 +1452,7 @@ def test_run_hpo_trial_diverged_run_never_outranks_a_worse_but_alive_config(
     not that epoch's real score, so it can never outrank a config that only scored worse. Drives
     the real training body (nothing mocked).
 
-    ``auto_val`` off, so the score ranked is the training loss over every admitted row: what is
+    Every share zero, so the score ranked is the training loss over every admitted row: what is
     under test is how a diverged run ranks, and a drawn validation side would spend this model's
     one good forward on measuring rather than training.
     """
@@ -1461,7 +1474,7 @@ def test_run_hpo_trial_diverged_run_never_outranks_a_worse_but_alive_config(
         data={
             "images_dir": str(images_dir),
             "labels_dir": str(csv_path),
-            "auto_val": False,
+            "split": drawn_split(val_ratio=0.0),
         },
     )
     reported: list = []
@@ -1807,8 +1820,9 @@ def test_hpo_admits_a_categorical_evaluation_axis_naming_the_same_metric_at_ever
     real_hpo_base_config,
     monkeypatch,
 ):
-    """A categorical evaluation axis is admitted: every trial records the sweep's one
-    objective.
+    """A categorical evaluation axis naming the base config's metric at every choice is
+    admitted, every trial selecting on the sweep's one metric; a choice naming another is
+    refused naming the base config's.
     """
     from tcip_mcp.tools import training_tools
 
@@ -1838,6 +1852,57 @@ def test_hpo_admits_a_categorical_evaluation_axis_naming_the_same_metric_at_ever
     assert seen == [param_space]
 
 
+@pytest.mark.parametrize(
+    "param_space",
+    [
+        {
+            "evaluation": {
+                "type": "categorical",
+                "choices": [
+                    evaluation_block(selection_metric="map"),
+                    evaluation_block(selection_metric="loss"),
+                ],
+            }
+        },
+        {
+            "evaluation.selection_metric": {
+                "type": "categorical",
+                "choices": ["map", "loss"],
+            }
+        },
+    ],
+    ids=["a-block-axis", "a-metric-axis"],
+)
+def test_a_sweep_whose_space_samples_another_selection_metric_is_refused_naming_the_base_configs(
+    tmp_path, real_hpo_base_config, param_space
+):
+    """Guard. A sweep ranks every trial by its base config's one selection metric: a space axis
+    sampling another, whether the whole evaluation block or the metric itself, refuses before
+    anything opens, naming the base config's metric.
+    """
+    from tcip_mcp.experiments import sweep_dirs
+    from tcip_mcp.tools import training_tools
+
+    base_config = {
+        **real_hpo_base_config,
+        "evaluation": evaluation_block(selection_metric="map"),
+    }
+    refused = training_tools.run_hyperparameter_search(
+        tmp_path,
+        base_config,
+        param_space=param_space,
+        n_trials=1,
+        **fifo_search(),
+        search_seed=0,
+    )
+
+    assert refused["error"] == (
+        "a sweep ranks every trial by the one evaluation.selection_metric its base_config "
+        "states ('map'); state it there and sample no other."
+    )
+    assert sweep_dirs(tmp_path) == []
+
+
 def test_dataset_identity_tolerates_a_genuinely_unregistered_dataset(tmp_path):
     """The admitting half: no identity document at all still reads as (None, fp), not a refusal."""
     from tcip_mcp.pipelines.data.split_construction import dataset_identity
@@ -1847,7 +1912,9 @@ def test_dataset_identity_tolerates_a_genuinely_unregistered_dataset(tmp_path):
     images_dir.mkdir(parents=True)
 
     ds_id, fp = dataset_identity(
-        DataSpec.model_validate({"images_dir": str(images_dir)})
+        DataSpec.model_validate(
+            {"images_dir": str(images_dir), "split": drawn_split()}
+        )
     )
     assert ds_id is None
 
@@ -1882,7 +1949,7 @@ def test_cancel_end_to_end_through_the_real_trainer_ends_canceled_with_records_a
         data={
             "images_dir": str(images_dir),
             "labels_dir": str(csv_path),
-            "split": {"seed": 0, "val_ratio": 0.15},
+            "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
         },
     )
     reported: list = []

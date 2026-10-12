@@ -484,8 +484,10 @@ def test_golden_evaluate_model_runs_each_regime_at_its_stated_conf_and_refuses_n
     unstated_conf = {
         k: v for k, v in SAMPLE_DETECTOR_PASS.items() if k != "conf"
     }
+    from tests._training_values import tiling_block
+
     tiling = TilingSpec.model_validate(
-        {"tile_size": 64, "overlap": 0.0, "sliver_frac": 0.5}
+        tiling_block(tile_size=64, overlap=0.0, sliver_frac=0.5)
     )
     regimes = [
         (tile_ds, {"tiling": tiling}),

@@ -130,12 +130,13 @@ def _loader(task: str, root: Path):
     """The loader the ordinary producer builds over the dataset's imported documents."""
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
     from tcip_mcp.pipelines.schemas import DataSpec
+    from tests._training_values import drawn_split
 
     data = DataSpec.model_validate(
         {
             "images_dir": str(root / "images" / DATE),
             "scope": {"subject": SUBJECT},
-            "auto_val": False,
+            "split": drawn_split(val_ratio=0.0),
         }
     )
     from tests._producer_fixtures import staged_layout
@@ -906,7 +907,11 @@ def test_a_crowd_region_imports_and_reaches_training_and_evaluation_as_one(
     target = _targets("detection", root)["tree_01"]
     assert target["iscrowd"].tolist() == [0, 1]
     tiled = TiledDetectionDataset(
-        _loader("detection", root), tile_size=IMG, overlap=0.0, sliver_frac=0.5
+        _loader("detection", root),
+        tile_size=IMG,
+        overlap=0.0,
+        sliver_frac=0.5,
+        skip_empty=False,
     )  # stated: one box derives no spread
     assert tiled.num_samples == 1  # tree_01, whole, in its one tile
     assert tiled[0][1]["iscrowd"].tolist() == [0, 1]
