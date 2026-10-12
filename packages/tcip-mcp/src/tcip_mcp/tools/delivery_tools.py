@@ -17,18 +17,20 @@ def deliver_per_plant_csv(
     plants: list[str],
     dataset_root: str,
     buckets: list[str],
+    value_key: str,
     crop: str = "",
     pipeline_version: str = "",
     plant_mapping: str = "",
     scale_assessment_id: str | None = None,
     acknowledgment_id: str | None = None,
 ) -> dict:
-    """The general per-plant CSV door: ``aggregate_per_plant``'s own output delivered over the
-    published buckets it came from, for exactly the plants ``plants`` names.
+    """The general per-plant CSV door: per-image ``results`` aggregated per plant under the
+    trait's confirmed ``plant_aggregation`` and delivered over the published buckets they came
+    from, for exactly the plants ``plants`` names.
 
-    Every check a delivered number has to pass (the meaning, the population, the units, the one
-    gate over the buckets and, for a dimensional value, the physical-scale assessment) and the
-    delivered schema are
+    The aggregation, every check a delivered number has to pass (the meaning, the population, the
+    units, the one gate over the buckets and, for a dimensional value, the physical-scale
+    assessment) and the delivered schema are
     :func:`~tcip_mcp.pipelines.postprocessing.aggregation.deliver_per_plant_aggregate`'s. An
     unvalidated delivery ships only under ``acknowledgment_id``, a breeder's recorded
     acknowledgment of exactly this result, which this door executes and never records.
@@ -38,7 +40,9 @@ def deliver_per_plant_csv(
     the mapping assigned on no delivered date.
 
     Args:
-        results: ``aggregate_per_plant``'s own output, one dict per plant.
+        results: Per-image records, each carrying as ``plant_id`` the plant
+            ``build_plant_mapping`` assigned its image, its ``plant_attribution`` and its value
+            under ``value_key``.
         output_path: Where to write the CSV.
         delivered_phenotype: The crop-vocabulary phenotype this CSV ships under.
         delivery_kind: ``per_plant_count_aggregate``, ``per_plant_ordinal_aggregate`` or
@@ -47,6 +51,7 @@ def deliver_per_plant_csv(
         dataset_root: The dataset root the buckets are published under.
         buckets: The names of the published buckets the values came from, one per capture date;
             each stands for the date its own record states.
+        value_key: The key every record's value sits under, one the operationalization covers.
         crop / pipeline_version: Written into every row.
         plant_mapping: The persisted plant mapping the rows' plant ids came from, or empty.
         scale_assessment_id: The physical-scale assessment a dimensional value rests on.
@@ -77,6 +82,7 @@ def deliver_per_plant_csv(
             project,
             results,
             str(located(output_path, project)),
+            value_key=value_key,
             delivered_phenotype=delivered_phenotype,
             delivery_kind=delivery_kind,
             buckets=delivered,

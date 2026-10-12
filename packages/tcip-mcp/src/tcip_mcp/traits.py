@@ -20,16 +20,22 @@ from tcip_store import Key
 if TYPE_CHECKING:
     from tcip_mcp.subject_registry import SubjectRegistry
 
-# Count objectives, each the name of one conf picker.
-# COUNT_UNBIASED minimizes signed per-image count bias E[FP-FN]; the phenotype is a count.
-COUNT_UNBIASED = "count_unbiased"
-# DETECTION_F1 optimizes matching quality; the phenotype is presence/localization.
-DETECTION_F1 = "detection_f1"
-PRESENCE = "presence"  # only whether the object is present
-
-# Localization, what counts as "finding" an object.
-CENTER_MATCH = "center_match"  # predicted center within a derived tolerance of a GT center
-IOU_MATCH = "iou_match"  # IoU >= a derived/def threshold
+CountObjective = Literal["", "count_unbiased", "detection_f1", "presence"]
+"""What a delivered count must be reliable for, each the name of one conf picker
+(``operating_point.COUNT_OBJECTIVE_PICKERS``), or empty until decided."""
+CrossingRule = Literal["", "linear_whole_day"]
+"""How a milestone's day is read between two capture dates (``phenology.CROSSING_RULES``), or
+empty until authored."""
+RegressionCriterion = Literal["", "r_squared", "concordance_correlation_coefficient"]
+"""The skill statistic a regression delivery is assessed by
+(``operating_point.REGRESSION_CRITERIA``), or empty until authored."""
+PlantAggregation = Literal["", "median", "mean", "mode", "sum"]
+"""The statistic a plant's per-image values combine into (``aggregation.PLANT_AGGREGATIONS``),
+or empty until authored."""
+Localization = Literal["", "center_match", "iou_match"]
+"""What finding one object means: a predicted center within a derived tolerance of a reference
+center, or an overlap reaching a derived IoU threshold (:data:`LOCALIZATION_FIELDS`); empty until
+decided."""
 
 # ── the delivery kinds ───────────────────────────────────────────────────────
 
@@ -57,10 +63,8 @@ other kinds are measured off a scalar head (ordinal or regression)."""
 
 if TYPE_CHECKING:
     DeliveryKind = str
-    Localization = str
 else:
     DeliveryKind = Literal[DELIVERY_KINDS]
-    Localization = Literal["", CENTER_MATCH, IOU_MATCH]
 
 _COUNT_FIELDS = (
     "count_objective",
@@ -74,23 +78,28 @@ CONSTITUTING_FIELDS: dict[str, tuple[str, ...]] = {
         "positive_state",
         "milestone_on",
         "milestone_fractions",
+        "crossing_rule",
         *_COUNT_FIELDS,
         "classifier_agreement_floor",
     ),
     PER_IMAGE_COUNT: _COUNT_FIELDS,
-    PER_PLANT_COUNT_AGGREGATE: _COUNT_FIELDS,
-    PER_PLANT_ORDINAL_AGGREGATE: ("ordinal_agreement_floor",),
+    PER_PLANT_COUNT_AGGREGATE: (*_COUNT_FIELDS, "plant_aggregation"),
+    PER_PLANT_ORDINAL_AGGREGATE: (
+        "ordinal_agreement_floor",
+        "plant_aggregation",
+    ),
     PER_PLANT_REGRESSION_AGGREGATE: (
         "regression_criterion",
         "regression_skill_floor",
+        "plant_aggregation",
     ),
 }
 """The spec fields an operationalization of each kind rests on, its assessment's criterion
 included, each required to hold a value before the operationalization is proposed."""
 
-LOCALIZATION_FIELDS: dict[str, tuple[str, ...]] = {
-    CENTER_MATCH: (),
-    IOU_MATCH: ("iou_jitter_px", "iou_margin"),
+LOCALIZATION_FIELDS: dict[Localization, tuple[str, ...]] = {
+    "center_match": (),
+    "iou_match": ("iou_jitter_px", "iou_margin"),
 }
 """The spec fields each localization's match criterion compares by, required beside
 ``localization`` wherever a kind rests on it."""
@@ -247,16 +256,18 @@ class TraitEntry(BaseModel):
     """Crossing fractions for a milestone-delivering trait."""
     milestone_on: str
     """The quantity the milestones cross, e.g. ``positive_fraction``."""
+    crossing_rule: CrossingRule
+    """How a milestone's date is read off the fraction curve between the two capture dates that
+    bracket its crossing; empty until authored."""
     majority_milestone: str
     """The crossing key (e.g. ``95per``) the crops.yml majority-date milestone maps to, or empty."""
     phenology_prefix: str
     """The phenology CSV milestone-column prefix."""
     majority_label: str
     """The label the majority-alias column carries."""
-    count_objective: str
-    """What the delivered number must be reliable for (``count_unbiased``, ``detection_f1``,
-    ``presence`` or another registered picker), a consequence judgment only the breeder makes;
-    empty until decided."""
+    count_objective: CountObjective
+    """What the delivered number must be reliable for, a consequence judgment only the breeder
+    makes; empty until decided."""
     localization: Localization
     """What finding one object means; empty until decided."""
     localization_tolerance: str
@@ -280,11 +291,14 @@ class TraitEntry(BaseModel):
     """Min acceptable Cohen's kappa for the classifier operating point; null until authored."""
     ordinal_agreement_floor: float | None
     """Min acceptable ordinal agreement criterion value; null until authored."""
-    regression_criterion: str
-    """The regression skill statistic a regression delivery is assessed by
-    (``operating_point.REGRESSION_CRITERIA``); empty until authored."""
+    regression_criterion: RegressionCriterion
+    """The regression skill statistic a regression delivery is assessed by; empty until
+    authored."""
     regression_skill_floor: float | None
     """Min acceptable value of ``regression_criterion``; null until authored."""
+    plant_aggregation: PlantAggregation
+    """The statistic a plant's per-image values combine into for a per-plant delivery; empty until
+    authored."""
     scale_tolerance_frac: float | None
     """Max relative disagreement a physical-scale reference half may show; null until authored."""
     holdout_match_quality_floor: float | None = Field(gt=0, le=1)
@@ -345,6 +359,13 @@ QUESTIONS: dict[str, str] = {
     ),
     "milestone_on": "Which share of a plant's objects do the milestone dates track?",
     "milestone_fractions": "At which shares of that state across a plant do you record a date?",
+    "crossing_rule": (
+        "When a plant crosses one of those shares between two capture dates, how is the day "
+        "read?"
+    ),
+    "plant_aggregation": (
+        "When a plant is seen in several images, which one number stands for it?"
+    ),
     "scale_tolerance_frac": (
         "By what fraction may two physical measurements of the same reference object disagree "
         "before the scale behind a length is no use to you?"

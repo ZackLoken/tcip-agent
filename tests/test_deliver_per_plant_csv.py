@@ -1,5 +1,5 @@
-"""Tests for the general per-plant CSV door: ``aggregate_per_plant``'s own output delivered over
-published buckets, its plant identities checked against a mapping built by
+"""Tests for the general per-plant CSV door: per-image records aggregated and delivered over
+published buckets, their plant identities checked against a mapping built by
 ``build_plant_mapping``.
 """
 
@@ -112,12 +112,9 @@ def _bucket(
     return published(project, f"{name}/{date}", results, scope=SCOPE).name
 
 
-def _results(*plant_counts: tuple[str, int | None]) -> list[dict]:
-    from tcip_mcp.pipelines.postprocessing.aggregation import (
-        aggregate_per_plant,
-    )
-
-    records = [
+def _records(*plant_counts: tuple[str, int | None]) -> list[dict]:
+    """One per-image record per ``(plant_id, count)``, the count omitted where ``None``."""
+    return [
         {
             "plant_id": plant,
             "plant_attribution": "image",
@@ -125,12 +122,11 @@ def _results(*plant_counts: tuple[str, int | None]) -> list[dict]:
         }
         for plant, count in plant_counts
     ]
-    return aggregate_per_plant(records, strategy="count", value_key="count")
 
 
 def _deliver(
     tmp_path: Path,
-    results: list[dict],
+    records: list[dict],
     plants: list[str],
     dataset_root: Path,
     buckets: list[str],
@@ -140,13 +136,14 @@ def _deliver(
 
     return deliver_per_plant_csv(
         tmp_path,
-        results,
+        records,
         str(tmp_path / "o.csv"),
         "stem_count",
         KIND,
         plants,
         str(dataset_root),
         buckets,
+        value_key="count",
         **kwargs,
     )
 
@@ -155,7 +152,7 @@ def test_a_verified_mapping_over_an_unassessed_bucket_reaches_the_gate_and_refus
     tmp_path,
 ):
     """The whole producer chain: a mapping built over a registered registry, a published bucket
-    and records from ``aggregate_per_plant``. The mapping verifies and every delivered plant is
+    and per-image records. The mapping verifies and every delivered plant is
     one it assigned, so the delivery reaches the one gate; the bucket was published under no
     assessment and this door takes no acknowledgment, so it refuses there, writing nothing.
     """
@@ -166,7 +163,7 @@ def test_a_verified_mapping_over_an_unassessed_bucket_reaches_the_gate_and_refus
 
     refused = _deliver(
         tmp_path,
-        _results(("P1", 2), ("P2", 1)),
+        _records(("P1", 2), ("P2", 1)),
         ["P1", "P2"],
         dataset_root,
         [bucket],
@@ -187,7 +184,7 @@ def test_an_unknown_plant_mapping_refuses_by_name(tmp_path):
 
     res = _deliver(
         tmp_path,
-        _results(("P1", 3)),
+        _records(("P1", 3)),
         ["P1"],
         dataset_root,
         [bucket],
@@ -212,7 +209,7 @@ def test_a_delivered_date_the_mapping_does_not_cover_refuses(tmp_path):
 
     res = _deliver(
         tmp_path,
-        _results(("P1", 1)),
+        _records(("P1", 1)),
         ["P1"],
         dataset_root,
         [
@@ -244,7 +241,7 @@ def test_predictions_under_another_dataset_than_the_mappings_refuse(tmp_path):
 
     res = _deliver(
         tmp_path,
-        _results(("P1", 1)),
+        _records(("P1", 1)),
         ["P1"],
         other,
         [_bucket(tmp_path, other, date, {"P1": 1})],
@@ -286,7 +283,7 @@ def test_a_mapping_with_no_capture_at_all_for_a_delivered_date_refuses(
 
     res = _deliver(
         tmp_path,
-        _results(("P1", 3)),
+        _records(("P1", 3)),
         ["P1"],
         dataset_root,
         list(preds_by_date.values()),
@@ -308,7 +305,7 @@ def test_a_delivered_plant_the_mapping_never_assigned_refuses_by_name(
 
     res = _deliver(
         tmp_path,
-        _results(("P1", 1), ("GHOST", 2)),
+        _records(("P1", 1), ("GHOST", 2)),
         ["P1", "GHOST"],
         dataset_root,
         [bucket],
@@ -336,7 +333,7 @@ def test_a_capture_added_since_the_mapping_was_built_refuses(tmp_path):
 
     res = _deliver(
         tmp_path,
-        _results(("P1", 1)),
+        _records(("P1", 1)),
         ["P1"],
         dataset_root,
         [bucket],

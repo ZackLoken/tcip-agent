@@ -16,7 +16,6 @@ from tcip_mcp.pipelines.operating_point import (
     cap_saturated_frac,
     count_criterion,
 )  # noqa: E402
-from tcip_mcp.traits import DETECTION_F1, PRESENCE  # noqa: E402
 from tests import _trait_fixtures as fx  # noqa: E402
 from tests._dense_op_fixtures import (  # noqa: E402
     _box,
@@ -301,7 +300,7 @@ def test_padding_with_empty_records_cannot_dilute_the_equivalence_test():
 # ── Pick-then-label from the trait's objective ───────────────────────────────
 
 
-@pytest.mark.parametrize("objective", [DETECTION_F1, PRESENCE])
+@pytest.mark.parametrize("objective", ["detection_f1", "presence"])
 def test_an_f1_objective_picks_f1_max_and_labels_it_accordingly(objective):
     """Presence deliberately shares the F1-max picker and label with detection F1."""
     conf, evidence, _failures = _criterion(

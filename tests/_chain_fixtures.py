@@ -365,17 +365,19 @@ def acknowledged(
 
 def deliver_acknowledged(
     project: Path,
-    results: list[dict],
+    records: list[dict],
     out: Path,
     delivered_phenotype: str,
     *,
+    value_key: str,
     delivery_kind: str,
     buckets: list | None = None,
     **kwargs: Any,
 ):
-    """``deliver_per_plant_aggregate`` of ``results``' plants over ``buckets`` (by default a bucket
-    published under no assessment, :func:`unassessed_bucket`), shipped unvalidated under the
-    breeder's acknowledgment (:func:`acknowledged`).
+    """``deliver_per_plant_aggregate`` of the per-image ``records``' ``value_key`` for the plants
+    they carry, over ``buckets`` (by default a bucket published under no assessment,
+    :func:`unassessed_bucket`), shipped unvalidated under the breeder's acknowledgment
+    (:func:`acknowledged`).
     """
     from tcip_mcp.pipelines.postprocessing.aggregation import (
         deliver_per_plant_aggregate,
@@ -390,12 +392,13 @@ def deliver_acknowledged(
         project,
         lambda ack: deliver_per_plant_aggregate(
             project,
-            results,
+            records,
             str(out),
+            value_key=value_key,
             delivered_phenotype=delivered_phenotype,
             delivery_kind=delivery_kind,
             buckets=delivered,
-            plants=[r["plant_id"] for r in results],
+            plants=list(dict.fromkeys(r["plant_id"] for r in records)),
             door="test_delivery",
             acknowledgment_id=ack,
             actor=None,

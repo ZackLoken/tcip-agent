@@ -41,12 +41,21 @@ def _recorded_meaning(tmp_path: Path):
     )
 
 
+def _records(value_key: str, *values: tuple[str, float]) -> list[dict]:
+    """One per-image record under ``value_key`` per ``(plant_id, value)``."""
+    return [
+        {"plant_id": plant, value_key: value, "plant_attribution": "image"}
+        for plant, value in values
+    ]
+
+
 def _deliver(
     project: Path,
-    results: list[dict],
+    records: list[dict],
     out: Path,
     delivered_phenotype: str,
     *,
+    value_key: str,
     delivery_kind: str,
     buckets=None,
 ):
@@ -57,9 +66,10 @@ def _deliver(
 
     return deliver_acknowledged(
         project,
-        results,
+        records,
         out,
         delivered_phenotype,
+        value_key=value_key,
         delivery_kind=delivery_kind,
         buckets=buckets,
     )
@@ -133,28 +143,13 @@ def test_a_count_valued_delivery_ships_with_a_blank_units_column(
     an empty units column. A unit in that column would read as a physical measurement of a number
     that is a tally.
     """
-    results = [
-        {
-            "plant_id": "PLANT_001",
-            "value": 7,
-            "observations": 3,
-            "value_key": "detections_count",
-            "plant_attribution": "image",
-        },
-        {
-            "plant_id": "PLANT_014",
-            "value": 2,
-            "observations": 1,
-            "value_key": "detections_count",
-            "plant_attribution": "image",
-        },
-    ]
     out_path = tmp_path / "counts.csv"
     _deliver(
         tmp_path,
-        results,
+        _records("detections_count", ("PLANT_001", 7), ("PLANT_014", 2)),
         out_path,
         "stem_count",
+        value_key="detections_count",
         delivery_kind=PER_PLANT_COUNT_AGGREGATE,
     )
     rows = csv_rows(out_path)
@@ -173,16 +168,7 @@ def test_a_dimensional_value_ships_for_a_trait_crops_yml_declares_no_unit_for(
     construction, so a dimensional value ships with no stated physical scale, unlike the same
     shape in a count delivery, which has nothing answering for its unit without one.
     """
-    results = [
-        {
-            "plant_id": "PLANT_001",
-            "value": 812.5,
-            "observations": 2,
-            "value_key": "area_mm2",
-            "plant_attribution": "image",
-        }
-    ]
-    assert _resolve_units("plant_surface_area", results, True)[:2] == (
+    assert _resolve_units("plant_surface_area", "area_mm2", True)[:2] == (
         "mm2",
         "mm",
     )
@@ -190,9 +176,10 @@ def test_a_dimensional_value_ships_for_a_trait_crops_yml_declares_no_unit_for(
     out_path = tmp_path / "area.csv"
     _deliver(
         tmp_path,
-        results,
+        _records("area_mm2", ("PLANT_001", 812.5)),
         out_path,
         "plant_surface_area",
+        value_key="area_mm2",
         delivery_kind=PER_PLANT_REGRESSION_AGGREGATE,
     )
     rows = csv_rows(out_path)
@@ -205,22 +192,14 @@ def test_a_declared_unit_still_cross_checks_the_value_keys_own_unit(
     """The absence rule above must not cost the check it exists to serve: a trait crops.yml does
     declare a unit for still refuses a value whose own key implies a different one.
     """
-    results = [
-        {
-            "plant_id": "PLANT_001",
-            "value": 3.4,
-            "observations": 1,
-            "value_key": "thickness_cm",
-            "plant_attribution": "image",
-        }
-    ]
     assert crops_units()["bark_thickness"] == "mm"
     with pytest.raises(ValueError, match="declared units"):
         _deliver(
             tmp_path,
-            results,
+            _records("thickness_cm", ("PLANT_001", 3.4)),
             tmp_path / "mismatch.csv",
             "bark_thickness",
+            value_key="thickness_cm",
             delivery_kind=PER_PLANT_COUNT_AGGREGATE,
             buckets=[],
         )

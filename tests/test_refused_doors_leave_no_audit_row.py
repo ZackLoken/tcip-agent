@@ -74,6 +74,7 @@ def _deliver_per_plant_csv(tmp_path: Path):
         ["p1"],
         str(tmp_path),
         ["preds/2025-09-14"],
+        "count",
     )
 
 

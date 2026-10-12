@@ -587,10 +587,8 @@ def resolve_selection_metric(
             "one; configure a validation split, or set evaluation.selection_metric='loss'."
         )
     if trait is not None:
-        from tcip_mcp.traits import CENTER_MATCH
-
         if (
-            trait.localization == CENTER_MATCH
+            trait.localization == "center_match"
             and requested in CENTER_MATCH_COMPARABILITY_KEYS
         ):
             raise ValueError(

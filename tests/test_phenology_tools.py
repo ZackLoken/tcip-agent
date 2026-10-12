@@ -159,7 +159,6 @@ def test_an_assessed_series_delivers_validated_milestones_under_its_revision(
     assert {r["delivery_event_id"] for r in rows} == {res["delivery_event_id"]}
     (event,) = read_delivery_events(tmp_path)
     assert event.door == "deliver_phenology_milestones"
-    assert event.require_all_dates_complete is True
     assert event.producer.model_dump() == series.assessment["producer"]
     assert {b.assessment_id for b in event.buckets} == {
         series.assessment["assessment_id"]

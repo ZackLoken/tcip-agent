@@ -2,17 +2,16 @@
 
 A delivery is normally many plants with genuinely different statistics, so these fixtures keep the
 per-plant groups distinguishable from each other and from the cohort as a whole: every plant's
-summary, observation count and identity-provenance must describe that plant's own records, and a
-continuous trait's mean and standard deviation must describe the same estimator of the same values.
-The gate is exercised here only where the kind an assessment measured could be mistaken for the
-kind a delivery ships.
+value, observation count and identity-provenance must describe that plant's own records. The gate
+is exercised here only where the kind an assessment measured could be mistaken for the kind a
+delivery ships.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from tcip_mcp.pipelines.postprocessing.aggregation import aggregate_per_plant
+from tcip_mcp.pipelines.postprocessing.aggregation import _per_plant
 from tcip_mcp.traits import PER_IMAGE_COUNT, PER_PLANT_COUNT_AGGREGATE
 from tests import _trait_fixtures as fx, csv_rows
 
@@ -53,20 +52,14 @@ def test_each_plants_summary_describes_only_that_plants_records():
         {"image": "c1", "plant_id": "PLANT_C", "count": 7},
     ]
     out = _by_plant(
-        aggregate_per_plant(results, strategy="count", value_key="count")
+        _per_plant(results, plant_aggregation="median", value_key="count")
     )
 
     assert out["PLANT_A"]["value"] == 4
     assert out["PLANT_B"]["value"] == 15.0
     assert out["PLANT_C"]["value"] == 7
-    assert (out["PLANT_A"]["min_count"], out["PLANT_A"]["max_count"]) == (2, 9)
-    assert (out["PLANT_B"]["min_count"], out["PLANT_B"]["max_count"]) == (
-        10,
-        20,
-    )
-    assert (out["PLANT_C"]["min_count"], out["PLANT_C"]["max_count"]) == (7, 7)
     assert [
-        out[p]["observations"] for p in ("PLANT_A", "PLANT_B", "PLANT_C")
+        out[p]["n_images"] for p in ("PLANT_A", "PLANT_B", "PLANT_C")
     ] == [3, 2, 1]
 
 
@@ -106,7 +99,7 @@ def test_identity_provenance_is_summarized_per_plant_not_across_the_cohort():
         {"image": "c1", "plant_id": "PLANT_C", "count": 7},
     ]
     out = _by_plant(
-        aggregate_per_plant(results, strategy="count", value_key="count")
+        _per_plant(results, plant_aggregation="median", value_key="count")
     )
 
     assert out["PLANT_A"]["plant_id_source"] == "gnss_sequence"
@@ -118,7 +111,7 @@ def test_identity_provenance_is_summarized_per_plant_not_across_the_cohort():
 
 
 def test_delivery_csv_carries_each_plants_own_value_and_image_count(tmp_path):
-    """The whole path a mosaic delivery takes, aggregate then export: every CSV row's value,
+    """The whole path a delivery takes, per-image records to the CSV: every CSV row's value,
     n_images and identity columns belong to the plant named in that row. A cohort-wide number in
     n_images tells the breeder a single-image plant was measured from six.
     """
@@ -170,16 +163,13 @@ def test_delivery_csv_carries_each_plants_own_value_and_image_count(tmp_path):
             "plant_attribution": "image",
         },
     ]
-    summaries = aggregate_per_plant(
-        results, strategy="count", value_key="count"
-    )
-
     out_path = tmp_path / "per_plant.csv"
     deliver_acknowledged(
         tmp_path,
-        summaries,
+        results,
         out_path,
         "stem_count",
+        value_key="count",
         delivery_kind=PER_PLANT_COUNT_AGGREGATE,
         crop="currant",
     )
@@ -197,14 +187,12 @@ def test_delivery_csv_carries_each_plants_own_value_and_image_count(tmp_path):
     assert rows["PLANT_C"]["plant_id_source"] == ""
 
 
-# -- a continuous trait's two summary statistics describe one estimator ------
+# -- a plant's mean is its own -------------------------------------------------
 
 
-def test_continuous_summary_reports_the_mean_beside_its_own_standard_deviation():
-    """A row labeled as a mean carries the arithmetic mean, and the deviation beside it is the
-    sample standard deviation of the same values. Skewed samples, where the mean and the median are
-    several units apart, are the ordinary case for a count-derived continuous trait, and a median
-    reported under a mean's label travels with a deviation that describes a different estimator.
+def test_each_plants_mean_describes_only_that_plants_records():
+    """Skewed samples, where each plant's mean and median are several units apart, so a mean
+    computed over the wrong group or under the wrong statistic shows.
     """
     results = [
         {"image": "a1", "plant_id": "PLANT_A", "value": 1.0},
@@ -215,20 +203,16 @@ def test_continuous_summary_reports_the_mean_beside_its_own_standard_deviation()
         {"image": "b3", "plant_id": "PLANT_B", "value": 30.0},
     ]
     out = _by_plant(
-        aggregate_per_plant(results, strategy="mean", value_key="value")
+        _per_plant(results, plant_aggregation="mean", value_key="value")
     )
 
     assert out["PLANT_A"]["value"] == pytest.approx(4.0)
-    assert out["PLANT_A"]["std"] == pytest.approx(4.3589, abs=1e-9)
-    assert out["PLANT_A"]["n_observations_with_value"] == 3
     assert out["PLANT_B"]["value"] == pytest.approx(17.0)
-    assert out["PLANT_B"]["std"] == pytest.approx(11.2694, abs=1e-9)
-    assert out["PLANT_B"]["n_observations_with_value"] == 3
 
 
 def test_summed_areas_stay_within_their_own_plant():
-    """The sum strategy over plants with different numbers of contributing images: a cohort-wide sum
-    would give every plant the delivery's total area.
+    """The sum statistic over plants with different numbers of contributing images: a cohort-wide
+    sum would give every plant the delivery's total area.
     """
     results = [
         {"image": "a1", "plant_id": "PLANT_A", "area_mm2": 100.0},
@@ -236,13 +220,13 @@ def test_summed_areas_stay_within_their_own_plant():
         {"image": "b1", "plant_id": "PLANT_B", "area_mm2": 40.0},
     ]
     out = _by_plant(
-        aggregate_per_plant(results, strategy="sum", value_key="area_mm2")
+        _per_plant(results, plant_aggregation="sum", value_key="area_mm2")
     )
 
     assert out["PLANT_A"]["value"] == pytest.approx(350.0)
-    assert out["PLANT_A"]["n_observations_with_value"] == 2
+    assert out["PLANT_A"]["n_images"] == 2
     assert out["PLANT_B"]["value"] == pytest.approx(40.0)
-    assert out["PLANT_B"]["n_observations_with_value"] == 1
+    assert out["PLANT_B"]["n_images"] == 1
 
 
 # -- an assessment answers for the kind it measured, and no other -------
@@ -300,14 +284,9 @@ def _assessed(project, kind: str, experiment_id: str):
     return read_bucket(root, bucket)
 
 
-_ROWS = [
-    {
-        "plant_id": "PLANT_A",
-        "value": 4,
-        "observations": 3,
-        "value_key": "count",
-        "plant_attribution": "image",
-    }
+_RECORDS = [
+    {"plant_id": "PLANT_A", "count": count, "plant_attribution": "image"}
+    for count in (2, 4, 9)
 ]
 
 
@@ -322,8 +301,9 @@ def test_a_per_plant_count_assessment_validates_a_per_plant_count_delivery(
     bucket = _assessed(tmp_path, PER_PLANT_COUNT_AGGREGATE, "exp-kind-matched")
     delivered = deliver_per_plant_aggregate(
         tmp_path,
-        _ROWS,
+        _RECORDS,
         str(tmp_path / "matched.csv"),
+        value_key="count",
         delivered_phenotype="stem_count",
         delivery_kind=PER_PLANT_COUNT_AGGREGATE,
         buckets=[bucket],
@@ -355,8 +335,9 @@ def test_a_per_image_count_assessment_never_answers_for_a_per_plant_delivery(
     ):
         deliver_per_plant_aggregate(
             tmp_path,
-            _ROWS,
+            _RECORDS,
             str(tmp_path / "crossed.csv"),
+            value_key="count",
             delivered_phenotype="stem_count",
             delivery_kind=PER_PLANT_COUNT_AGGREGATE,
             buckets=[bucket],

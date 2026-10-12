@@ -209,6 +209,5 @@ class DeliveryEventRecord(TraitRevisionRef):
     validated: bool
     acknowledgment: Acknowledgment | None
     population: list[str]
-    require_all_dates_complete: bool | None
     plant_mapping: PlantMapping | None
     produced_at: str

@@ -112,19 +112,7 @@ def test_a_value_key_outside_the_confirmed_set_refuses(project: Path):
             PER_PLANT_COUNT_AGGREGATE,
             project=project,
             trait=fx.COUNT_TRAIT,
-            value_keys=["stem_count", "leaf_length"],
-        )
-
-
-def test_a_row_carrying_no_value_key_refuses_and_counts_them(project: Path):
-    _confirmed_aggregate(project, PER_PLANT_COUNT_AGGREGATE)
-
-    with pytest.raises(OperationalizationRefusedError, match="2 row"):
-        confirmed_revision(
-            PER_PLANT_COUNT_AGGREGATE,
-            project=project,
-            trait=fx.COUNT_TRAIT,
-            value_keys=["stem_count", "", None],
+            value_key="leaf_length",
         )
 
 
@@ -215,7 +203,7 @@ def test_an_unconfirmed_trait_reports_that_rather_than_a_binding(
             PER_PLANT_COUNT_AGGREGATE,
             project=tmp_path,
             trait=fx.COUNT_TRAIT,
-            value_keys=["not_covered"],
+            value_key="not_covered",
         )
 
     assert "is confirmed" in str(excinfo.value) and "not_covered" not in str(
@@ -259,7 +247,7 @@ def test_an_aggregate_revision_admits_its_named_value_keys(
             project=project,
             trait=fx.COUNT_TRAIT,
             delivered_phenotype="stem_count",
-            value_keys=["stem_count"],
+            value_key="stem_count",
         )
         == revision
     )
@@ -577,7 +565,7 @@ def test_a_phenotype_no_confirmed_trait_delivers_refuses_and_names_the_proposing
             PER_PLANT_COUNT_AGGREGATE,
             project=tmp_path,
             delivered_phenotype="cluster_nut_count",
-            value_keys=["count"],
+            value_key="count",
         )
 
     assert "0 traits with a confirmed revision deliver" in str(excinfo.value)
@@ -600,7 +588,7 @@ def test_a_phenotype_two_confirmed_traits_deliver_refuses_as_ambiguous(
             PER_PLANT_COUNT_AGGREGATE,
             project=tmp_path,
             delivered_phenotype="stem_count",
-            value_keys=["count"],
+            value_key="count",
         )
 
     assert "2 traits with a confirmed revision deliver" in str(excinfo.value)
@@ -625,7 +613,7 @@ def test_a_revision_states_each_aggregate_kind_it_delivers(
             kind,
             project=tmp_path,
             delivered_phenotype="astringency",
-            value_keys=["astringency"],
+            value_key="astringency",
         )
 
     admits(PER_PLANT_ORDINAL_AGGREGATE)

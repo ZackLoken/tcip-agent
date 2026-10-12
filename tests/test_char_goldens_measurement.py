@@ -178,33 +178,34 @@ _PHENO_SERIES = [
     ("2026-03-02", 0.55),
     ("2026-03-12", 0.97),
 ]
+_RULE = BUD_OPENING.crossing_rule
 
 
 def test_golden_crossing_dates_interpolated():
     # The return is a Crossing record (date + evidentiary bound), not a bare string.
     # 0.05 lies midway 0.0 to 0.10, 10 days
     assert (
-        phenology_mod.crossing_date(_PHENO_SERIES, 0.05).date == "2026-02-15"
+        phenology_mod.crossing_date(_PHENO_SERIES, 0.05, _RULE).date == "2026-02-15"
     )
     assert (
-        phenology_mod.crossing_date(_PHENO_SERIES, 0.50).date == "2026-03-01"
+        phenology_mod.crossing_date(_PHENO_SERIES, 0.50, _RULE).date == "2026-03-01"
     )
     assert (
-        phenology_mod.crossing_date(_PHENO_SERIES, 0.95).date == "2026-03-12"
+        phenology_mod.crossing_date(_PHENO_SERIES, 0.95, _RULE).date == "2026-03-12"
     )
     # 0.97 observed, not 0.95 exactly
     assert (
-        phenology_mod.crossing_date(_PHENO_SERIES, 0.95).bound
+        phenology_mod.crossing_date(_PHENO_SERIES, 0.95, _RULE).bound
         == "interpolated"
     )
-    assert phenology_mod.crossing_date(_PHENO_SERIES, 0.97).bound == "exact"
+    assert phenology_mod.crossing_date(_PHENO_SERIES, 0.97, _RULE).bound == "exact"
     # never reached within the observed window -> right-censored at the last observed date, not a
     # bare None: distinguishable from "no observations at all".
-    c99 = phenology_mod.crossing_date(_PHENO_SERIES, 0.99)
+    c99 = phenology_mod.crossing_date(_PHENO_SERIES, 0.99, _RULE)
     assert c99.date == "2026-03-12"
     assert c99.bound == "right_censored"
     assert (
-        phenology_mod.crossing_date([], 0.99) is None
+        phenology_mod.crossing_date([], 0.99, _RULE) is None
     )  # no observations at all -> still None
 
 
@@ -253,11 +254,7 @@ def test_golden_per_plant_phenology_series_and_milestones(tmp_path: Path):
         ],
     }
     res = phenology_mod.per_plant_phenology(
-        mapping,
-        buckets,
-        BUD_OPENING,
-        ["P1"],
-        require_all_dates_complete=phenology_mod.REQUIRE_ALL_DATES_COMPLETE,
+        mapping, buckets, BUD_OPENING, ["P1"]
     )
 
     # Both buckets carry the state's attribute on every detection, so the fraction is delivered.

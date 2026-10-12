@@ -27,14 +27,14 @@ from tcip_mcp.pipelines.training.evaluation import (
     resolve_match_criterion,
     scaled_to,
 )
-from tcip_mcp.traits import COUNT_UNBIASED, DETECTION_F1, PRESENCE, TraitEntry
+from tcip_mcp.traits import CountObjective, RegressionCriterion, TraitEntry
 
 COUNT_OBJECTIVE_PICKERS: dict[
-    str, tuple[Callable[[dict], float | None], str]
+    CountObjective, tuple[Callable[[dict], float | None], str]
 ] = {
-    COUNT_UNBIASED: (pick_count_unbiased, "count-unbiased count curve"),
-    DETECTION_F1: (pick_f1_max, "F1-max count curve"),
-    PRESENCE: (pick_f1_max, "F1-max count curve"),
+    "count_unbiased": (pick_count_unbiased, "count-unbiased count curve"),
+    "detection_f1": (pick_f1_max, "F1-max count curve"),
+    "presence": (pick_f1_max, "F1-max count curve"),
 }
 """The count objectives a calibration can fit, each as the picker it runs over the calibration
 curve and the label its conf is recorded under."""
@@ -42,7 +42,9 @@ curve and the label its conf is recorded under."""
 _EQUIVALENCE_Z = 1.645
 """The one-sided multiplier of the mean-plus-standard-error equivalence test (about 95 percent)."""
 
-REGRESSION_CRITERIA: dict[str, Callable[[Any, Any], float | None]] = {
+REGRESSION_CRITERIA: dict[
+    RegressionCriterion, Callable[[Any, Any], float | None]
+] = {
     "r_squared": r_squared,
     "concordance_correlation_coefficient": concordance_correlation_coefficient,
 }
@@ -209,14 +211,9 @@ def count_criterion(
     both clear ``holdout_match_quality_floor``; and when the held-out 90th-percentile per-image
     count error is within ``count_error_tolerance``. The entry carries every one of those fields.
     A conf at or below the floor, applied on the attribute path beside it, fails as
-    ``conf_censored``. An objective with no registered picker, or a calibration curve the
-    objective picks no conf on, refuses (``ValueError``).
+    ``conf_censored``. A calibration curve the objective picks no conf on refuses
+    (``ValueError``).
     """
-    if entry.count_objective not in COUNT_OBJECTIVE_PICKERS:
-        raise ValueError(
-            f"count_objective {entry.count_objective!r} has no registered picker "
-            f"(registered: {sorted(COUNT_OBJECTIVE_PICKERS)})."
-        )
     picker, conf_label = COUNT_OBJECTIVE_PICKERS[entry.count_objective]
     criterion = resolve_match_criterion(entry, cal_records)
     cal_criterion = scaled_to(criterion, cal_records)

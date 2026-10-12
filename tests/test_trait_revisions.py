@@ -184,17 +184,10 @@ def test_one_confirmation_covers_every_delivery_kind_the_revision_states(
     count_event = _deliver_counts(tmp_path, "per_image")
     deliver_acknowledged(
         tmp_path,
-        [
-            {
-                "plant_id": "p1",
-                "value": 5,
-                "observations": 2,
-                "value_key": "count",
-                "plant_attribution": "image",
-            }
-        ],
+        [{"plant_id": "p1", "count": 5, "plant_attribution": "image"}] * 2,
         tmp_path / "per_plant.csv",
         "stem_count",
+        value_key="count",
         delivery_kind=traits.PER_PLANT_COUNT_AGGREGATE,
         buckets=[_bucket(tmp_path)],
     )

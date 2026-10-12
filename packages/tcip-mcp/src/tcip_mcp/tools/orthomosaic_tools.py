@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _PER_PLANT_VALUE_KEY = "count"
-"""The quantity every row of this delivery holds, named once for the aggregation and its rows."""
+"""The quantity every row of this delivery holds, named once for its records and their delivery."""
 
 
 def orthomosaic_plant_counts(
@@ -216,17 +216,6 @@ def orthomosaic_plant_counts(
         raise ValueError(
             f"these population plants cannot be counted from this raster: {refused}."
         )
-    results = [
-        {
-            "plant_id": p,
-            "value": counts[p],
-            "value_key": _PER_PLANT_VALUE_KEY,
-            "observations": 1,
-            "plant_attribution": attribution,
-        }
-        for p in wanted
-    ]
-
     from tcip_mcp.pipelines.postprocessing.aggregation import (
         deliver_per_plant_aggregate,
     )
@@ -234,8 +223,16 @@ def orthomosaic_plant_counts(
 
     delivered = deliver_per_plant_aggregate(
         project,
-        results,
+        [
+            {
+                "plant_id": p,
+                _PER_PLANT_VALUE_KEY: counts[p],
+                "plant_attribution": attribution,
+            }
+            for p in wanted
+        ],
         str(output_csv_path),
+        value_key=_PER_PLANT_VALUE_KEY,
         delivered_phenotype=delivered_phenotype,
         delivery_kind=PER_PLANT_COUNT_AGGREGATE,
         buckets=[found],

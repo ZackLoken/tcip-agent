@@ -290,19 +290,14 @@ def resolve_match_criterion(
         IOU_MATCH_DERIVATION,
         derive_iou_match_threshold,
     )
-    from tcip_mcp.traits import (
-        CENTER_MATCH,
-        IOU_MATCH,
-        LOCALIZATION_FIELDS,
-        authored,
-    )
+    from tcip_mcp.traits import LOCALIZATION_FIELDS, authored
 
     authored(trait, ("localization",))
     boxes_per_image = [
         [a["bbox"] for a in gt_objects(rec, class_id=class_id)]
         for rec in per_image
     ]
-    if trait.localization == CENTER_MATCH:
+    if trait.localization == "center_match":
         frac, frac_source = localization_frac(trait, boxes_per_image)
         return scaled_to(
             {
@@ -314,7 +309,7 @@ def resolve_match_criterion(
             per_image,
             class_id,
         )
-    authored(trait, LOCALIZATION_FIELDS[IOU_MATCH])
+    authored(trait, LOCALIZATION_FIELDS["iou_match"])
     threshold = derive_iou_match_threshold(
         boxes_per_image,
         jitter_px=cast(float, trait.iou_jitter_px),

@@ -126,7 +126,6 @@ def _deliver(
             dataset_root=dataset_root,
             buckets=list(buckets),
             plants=plants,
-            require_all_dates_complete=phenology.REQUIRE_ALL_DATES_COMPLETE,
         )
         return acknowledged(
             project,

@@ -394,15 +394,7 @@ def test_a_per_plant_count_over_a_bucket_counting_another_subject_refuses(
     )
 
     fx.seed_confirmed_aggregate(tmp_path, "stem_count", value_keys=["count"])
-    rows = [
-        {
-            "plant_id": "p1",
-            "value": 1.0,
-            "observations": 1,
-            "value_key": "count",
-            "plant_attribution": "image",
-        }
-    ]
+    records = [{"plant_id": "p1", "count": 1.0, "plant_attribution": "image"}]
 
     def deliver(subject: str, name: str) -> dict:
         pytest.importorskip("torch")
@@ -414,9 +406,10 @@ def test_a_per_plant_count_over_a_bucket_counting_another_subject_refuses(
         )
         return deliver_acknowledged(
             tmp_path,
-            rows,
+            records,
             tmp_path / f"{name}.csv",
             "stem_count",
+            value_key="count",
             delivery_kind=PER_PLANT_COUNT_AGGREGATE,
             buckets=[read_bucket(bucket.root, bucket.name)],
         )

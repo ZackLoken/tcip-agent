@@ -158,8 +158,6 @@ export interface PhenologyMeasurementResponse {
   validated: boolean;
   unvalidated_reason: string | null;
   result_sha256: Record<"curves" | "milestones", string> | null;
-  // The missingness rule the rows were computed under.
-  require_all_dates_complete: boolean;
   trait: string;
   trait_revision: number;
   trait_revision_sha256: string;

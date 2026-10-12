@@ -1,6 +1,6 @@
-"""Per-plant aggregation: a record carries an explicit ``plant_id_key`` value or one
-``plant_id_fn`` resolves, the assignment rows' ``source``/``distance_m`` pass through, the units
-column comes from ``crops.yml``, and each strategy (count, mean, mode, sum) aggregates.
+"""Per-plant aggregation: every record carries its ``plant_id``, the assignment rows'
+``source``/``distance_m`` pass through, the units column comes from ``crops.yml``, each statistic
+aggregates, and a delivery aggregates per-image records under its trait's ``plant_aggregation``.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from tcip_mcp.pipelines.postprocessing.aggregation import (
-    aggregate_per_plant,
+    _per_plant,
     deliver_per_plant_aggregate,
 )
 from tcip_mcp.traits import (
@@ -43,19 +43,13 @@ def _recorded_meaning(tmp_path):
     )
 
 
-def _identity_fn(image_name: str) -> str:
-    """A trivial plant_id_fn for tests that don't care about grouping specifics: every image maps
-    to a plant_id equal to its own stem-derived group key.
-    """
-    return image_name.rsplit("_", 1)[0]
-
-
 def _deliver(
     project: Path,
-    results: list[dict],
+    records: list[dict],
     out: Path,
     delivered_phenotype: str,
     *,
+    value_key: str,
     delivery_kind: str = PER_PLANT_COUNT_AGGREGATE,
     buckets=None,
     **kwargs,
@@ -67,9 +61,10 @@ def _deliver(
 
     return deliver_acknowledged(
         project,
-        results,
+        records,
         out,
         delivered_phenotype,
+        value_key=value_key,
         delivery_kind=delivery_kind,
         buckets=buckets,
         **kwargs,
@@ -79,84 +74,32 @@ def _deliver(
 # ── plant identity: no guessing, ever ──────────────────────
 
 
-def test_no_extract_plant_id_helper_exists_anymore():
-    import tcip_mcp.pipelines.postprocessing.aggregation as agg_module
-
-    assert not hasattr(agg_module, "_extract_plant_id")
-
-
-def test_missing_plant_id_and_no_fn_raises():
-    results = [{"image": "bush_42_flight_3", "count": 1}]
-    with pytest.raises(ValueError, match="plant_id_fn|build_plant_mapping"):
-        aggregate_per_plant(results, strategy="count", value_key="count")
-
-
-def test_missing_image_key_and_no_plant_id_raises():
-    """A record with no image key and no plant id raises like any other unresolved-identity
-    record.
+@pytest.mark.parametrize(
+    "record",
+    [
+        {"image": "bush_42_flight_3", "count": 1},
+        {"count": 1},
+        {"image": "x", "plant_id": "", "count": 1},
+        {"image": "unmapped_img", "plant_id": None, "count": 2},
+    ],
+)
+def test_a_record_carrying_no_plant_id_refuses_naming_the_mapping(record):
+    """A record whose ``plant_id`` is absent, empty or ``None`` (an unmapped assignment) refuses,
+    naming the primitive that assigns plants, and never groups under a missing key.
     """
-    results = [{"count": 1}]
-    with pytest.raises(ValueError, match="plant_id_fn|build_plant_mapping"):
-        aggregate_per_plant(results, strategy="count", value_key="count")
+    with pytest.raises(ValueError, match="build_plant_mapping"):
+        _per_plant([record], plant_aggregation="median", value_key="count")
 
 
-def test_plant_id_fn_returning_none_raises_not_groups_under_none():
-    """build_plant_mapping's own plant_id_fn can legitimately return None for an unmapped image
-    (plot_name=None, source='unmapped'). That must raise cleanly here, not silently group under a
-    None key and crash later when aggregate_per_plant sorts groups against a real string key.
-    """
-
-    def sometimes_none(image_name: str) -> str | None:
-        return None if "unmapped" in image_name else "PLANT_001"
-
-    results = [
-        {"image": "mapped_img", "count": 1},
-        {"image": "unmapped_img", "count": 2},
-    ]
-    with pytest.raises(ValueError, match="plant_id_fn|build_plant_mapping"):
-        aggregate_per_plant(
-            results,
-            strategy="count",
-            value_key="count",
-            plant_id_fn=sometimes_none,
-        )
-
-
-def test_empty_string_plant_id_value_raises():
-    """A membership test alone (`plant_id_key in r`) would pass for an empty-string value: the
-    check must be on the value, not just presence of the key.
-    """
-    results = [{"image": "x", "plant_id": "", "count": 1}]
-    with pytest.raises(ValueError, match="plant_id_fn|build_plant_mapping"):
-        aggregate_per_plant(results, strategy="count", value_key="count")
-
-
-def test_explicit_plant_id_key_takes_precedence():
-    results = [
+def test_records_group_by_their_plant_id():
+    records = [
         {"image": "PLANT_001_2024_05_15", "plant_id": "PLANT_001", "count": 3},
         {"image": "PLANT_001_2024_06_20", "plant_id": "PLANT_001", "count": 5},
     ]
-    out = aggregate_per_plant(results, strategy="count", value_key="count")
+    out = _per_plant(records, plant_aggregation="median", value_key="count")
     assert len(out) == 1
     assert out[0]["plant_id"] == "PLANT_001"
-    assert out[0]["observations"] == 2
-
-
-def test_plant_id_fn_override_keeps_series_together():
-    def strip_date(image_name: str) -> str:
-        return image_name.rsplit("_", 3)[0]
-
-    results = [
-        {"image": "PLANT_001_2024_05_15", "count": 1},
-        {"image": "PLANT_001_2024_06_20", "count": 4},
-        {"image": "PLANT_001_2025_05_15", "count": 2},
-    ]
-    out = aggregate_per_plant(
-        results, strategy="count", value_key="count", plant_id_fn=strip_date
-    )
-    assert len(out) == 1
-    assert out[0]["plant_id"] == "PLANT_001"
-    assert out[0]["observations"] == 3
+    assert out[0]["n_images"] == 2
 
 
 # ── identity provenance pass-through (build_plant_mapping's honest signals) ──
@@ -196,78 +139,60 @@ def _mapped_rows(project, *assigned: tuple[str, float]) -> list[dict]:
 
 
 def test_plant_id_source_passes_through_when_uniform(tmp_path):
-    out = aggregate_per_plant(
+    out = _per_plant(
         _mapped_rows(tmp_path, ("sequence", 1.0), ("sequence", 2.0)),
-        strategy="count",
+        plant_aggregation="median",
         value_key="count",
     )
     assert out[0]["plant_id_source"] == "sequence"
 
 
 def test_plant_id_source_reports_mixed_when_not_uniform(tmp_path):
-    out = aggregate_per_plant(
+    out = _per_plant(
         _mapped_rows(tmp_path, ("sequence", 1.0), ("nearest_neighbor", 2.0)),
-        strategy="count",
+        plant_aggregation="median",
         value_key="count",
     )
     assert out[0]["plant_id_source"] == "mixed"
 
 
 def test_plant_id_distance_m_max_tracked(tmp_path):
-    out = aggregate_per_plant(
+    out = _per_plant(
         _mapped_rows(tmp_path, ("sequence", 1.5), ("sequence", 4.2)),
-        strategy="count",
+        plant_aggregation="median",
         value_key="count",
     )
     assert out[0]["plant_id_distance_m_max"] == pytest.approx(4.2)
 
 
 def test_plant_id_source_absent_when_never_supplied():
-    results = [{"image": "a", "plant_id": "P1", "count": 1}]
-    out = aggregate_per_plant(results, strategy="count", value_key="count")
+    records = [{"image": "a", "plant_id": "P1", "count": 1}]
+    out = _per_plant(records, plant_aggregation="median", value_key="count")
     assert "plant_id_source" not in out[0]
 
 
-# ── strategies (all now supply plant_id_fn, no bare-filename grouping left) ─
+# ── statistics ─
 
 
-def test_count_strategy_median():
-    results = [
-        {"image": "bush_1_f_1", "count": 2, "plant_id": "bush_1"},
-        {"image": "bush_1_f_2", "count": 4, "plant_id": "bush_1"},
-        {"image": "bush_1_f_3", "count": 9, "plant_id": "bush_1"},
-    ]
-    out = aggregate_per_plant(results, strategy="count", value_key="count")
-    assert out[0]["value"] == 4
-    assert out[0]["min_count"] == 2
-    assert out[0]["max_count"] == 9
-
-
-def test_mean_strategy():
-    results = [
-        {"image": "bush_1_f_1", "value": 1.0, "plant_id": "bush_1"},
-        {"image": "bush_1_f_2", "value": 3.0, "plant_id": "bush_1"},
-    ]
-    out = aggregate_per_plant(results, strategy="mean", value_key="value")
-    assert out[0]["value"] == 2.0
-
-
-def test_mode_strategy():
-    results = [
-        {"image": "bush_1_f_1", "grade": 2, "plant_id": "bush_1"},
-        {"image": "bush_1_f_2", "grade": 2, "plant_id": "bush_1"},
-        {"image": "bush_1_f_3", "grade": 5, "plant_id": "bush_1"},
-    ]
-    out = aggregate_per_plant(results, strategy="mode", value_key="grade")
-    assert out[0]["value"] == 2
-    assert out[0]["agreement"] == pytest.approx(2 / 3, abs=1e-4)
-
-
-def test_unknown_strategy_raises():
-    with pytest.raises(ValueError, match="Unknown aggregation strategy"):
-        aggregate_per_plant(
-            [{"image": "a_b_c", "count": 1, "plant_id": "a"}], strategy="nope"
-        )
+@pytest.mark.parametrize(
+    "plant_aggregation, value",
+    [("median", 6.5), ("mean", 6), ("mode", 9), ("sum", 24)],
+)
+def test_each_statistic_is_its_plants_value_over_the_records_carrying_one(
+    plant_aggregation, value
+):
+    """A record missing the value key is a missing observation: it counts toward the plant's
+    observations and never enters the statistic as a zero.
+    """
+    records = [
+        {"image": f"bush_1_f_{i}", "count": c, "plant_id": "bush_1"}
+        for i, c in enumerate((2, 4, 9, 9))
+    ] + [{"image": "bush_1_f_4", "plant_id": "bush_1"}]
+    (out,) = _per_plant(
+        records, plant_aggregation=plant_aggregation, value_key="count"
+    )
+    assert out["value"] == value
+    assert out["n_images"] == 5
 
 
 # ── CSV export ────────────────────────────────────────────────────────────
@@ -284,34 +209,55 @@ def test_the_per_plant_delivery_names_its_phenotype_in_the_crop_vocabulary_sense
     assert "trait_name" not in params
 
 
+@pytest.mark.parametrize("door", ["delivery", "tool"])
+def test_a_per_plant_delivery_names_its_value_key_with_no_default(door):
+    """The key every record's value sits under is required by both doors' signatures: a call
+    omitting it is a ``TypeError``, never a guess at ``count``.
+    """
+    import inspect
+
+    from tcip_mcp.tools.delivery_tools import deliver_per_plant_csv
+
+    signature = inspect.signature(
+        deliver_per_plant_aggregate
+        if door == "delivery"
+        else deliver_per_plant_csv
+    )
+    assert (
+        signature.parameters["value_key"].default is inspect.Parameter.empty
+    )
+    arguments = {
+        name: None
+        for name, p in signature.parameters.items()
+        if p.default is inspect.Parameter.empty and name != "value_key"
+    }
+    with pytest.raises(TypeError, match="value_key"):
+        signature.bind(**arguments)
+
+
 def test_a_per_plant_count_delivery_writes_its_population_one_row_each(
     tmp_path,
 ):
-    results = [
-        {
-            "plant_id": "PLANT_001",
-            "value": 7,
-            "observations": 3,
-            "value_key": "count",
-            "plant_attribution": "image",
-        },
-        {
-            "plant_id": "PLANT_002",
-            "value": 4,
-            "observations": 2,
-            "value_key": "count",
-            "plant_attribution": "image",
-        },
+    records = [
+        {"plant_id": plant, "count": count, "plant_attribution": "image"}
+        for plant, count, n in (("PLANT_001", 7, 3), ("PLANT_002", 4, 2))
+        for _ in range(n)
     ]
     out_path = tmp_path / "out" / "aggregated.csv"
     delivered = _deliver(
-        tmp_path, results, out_path, "stem_count", crop="currant"
+        tmp_path,
+        records,
+        out_path,
+        "stem_count",
+        value_key="count",
+        crop="currant",
     )
 
     with open(out_path, newline="") as f:
         reader = csv.DictReader(f)
         rows = list(reader)
         assert "trait_name" not in (reader.fieldnames or [])
+        assert "plant_aggregation" not in (reader.fieldnames or [])
     assert [r["plant_id"] for r in rows] == ["PLANT_001", "PLANT_002"]
     assert rows[0]["crop"] == "currant"
     assert rows[0]["delivered_phenotype"] == "stem_count"
@@ -322,16 +268,47 @@ def test_a_per_plant_count_delivery_writes_its_population_one_row_each(
     assert delivered["acknowledged_by"] == "user:breeder"
 
 
+@pytest.mark.parametrize("statistic", ["mean", "median"])
+def test_a_delivery_aggregates_under_the_statistic_its_trait_confirms(
+    tmp_path, statistic
+):
+    """The per-plant number is the confirmed revision's ``plant_aggregation`` over the plant's
+    per-image values: records whose mean and median differ deliver the one the entry states.
+    """
+    from tcip_mcp import traits
+
+    trait = fx.DELIVERY_TRAIT_BY_PHENOTYPE["stem_count"]
+    fx.propose_and_confirm(
+        tmp_path,
+        fx.with_fields(
+            traits.read_trait(trait, tmp_path).latest_confirmed.entry,
+            plant_aggregation=statistic,
+        ),
+    )
+    values = (1, 2, 9)
+    out_path = tmp_path / "out.csv"
+    _deliver(
+        tmp_path,
+        [
+            {"plant_id": "P1", "count": v, "plant_attribution": "image"}
+            for v in values
+        ],
+        out_path,
+        "stem_count",
+        value_key="count",
+    )
+    expected = {"mean": 4, "median": 2}[statistic]
+    assert float(csv_rows(out_path)[0]["value"]) == expected
+
+
 @pytest.mark.parametrize("attributions", [(None,), ("image", "detection")])
 def test_a_delivery_refuses_rows_that_omit_or_disagree_on_plant_attribution(
     tmp_path, attributions
 ):
-    results = [
+    records = [
         {
             "plant_id": f"P{i}",
-            "value": 7,
-            "observations": 3,
-            "value_key": "count",
+            "count": 7,
             **({} if a is None else {"plant_attribution": a}),
         }
         for i, a in enumerate(attributions)
@@ -340,7 +317,12 @@ def test_a_delivery_refuses_rows_that_omit_or_disagree_on_plant_attribution(
         ValueError, match="disagree on or omit plant_attribution"
     ):
         _deliver(
-            tmp_path, results, tmp_path / "out.csv", "stem_count", buckets=[]
+            tmp_path,
+            records,
+            tmp_path / "out.csv",
+            "stem_count",
+            value_key="count",
+            buckets=[],
         )
 
 
@@ -351,21 +333,19 @@ def test_a_dimensional_value_key_labels_its_units_squared_for_an_area(
     derived from the key that produced the number, never a caller-asserted string. Squared, not the
     bare linear unit: an area labeled "mm" understates its own dimensionality.
     """
-    results = [
-        {
-            "plant_id": "PLANT_001",
-            "value": 12.5,
-            "observations": 1,
-            "value_key": "area_mm2",
-            "plant_attribution": "image",
-        }
-    ]
     out_path = tmp_path / "out.csv"
     _deliver(
         tmp_path,
-        results,
+        [
+            {
+                "plant_id": "PLANT_001",
+                "area_mm2": 12.5,
+                "plant_attribution": "image",
+            }
+        ],
         out_path,
         "plant_surface_area",
+        value_key="area_mm2",
         delivery_kind=PER_PLANT_REGRESSION_AGGREGATE,
     )
     rows = csv_rows(out_path)
@@ -384,17 +364,21 @@ def test_a_count_delivery_of_a_dimensional_value_refuses_without_a_physical_scal
         value_keys=["area_mm2"],
         measured_subject="bud",
     )
-    results = [
+    records = [
         {
             "plant_id": "PLANT_001",
-            "value": 12.5,
-            "observations": 1,
-            "value_key": "area_mm2",
+            "area_mm2": 12.5,
             "plant_attribution": "image",
         }
     ]
     with pytest.raises(ValueError, match="calibrate_physical_scale"):
-        _deliver(tmp_path, results, tmp_path / "out.csv", "plant_surface_area")
+        _deliver(
+            tmp_path,
+            records,
+            tmp_path / "out.csv",
+            "plant_surface_area",
+            value_key="area_mm2",
+        )
     assert not (tmp_path / "out.csv").exists()
 
 
@@ -416,21 +400,13 @@ def test_a_delivery_refuses_a_unit_mismatched_against_crops_yml(tmp_path):
             "no non-mm trait found in crops.yml to construct a mismatch against"
         )
 
-    results = [
-        {
-            "plant_id": "P1",
-            "value": 1.0,
-            "observations": 1,
-            "value_key": "area_mm2",
-            "plant_attribution": "image",
-        }
-    ]
     with pytest.raises(ValueError, match="declared units|refusing"):
         _deliver(
             tmp_path,
-            results,
+            [{"plant_id": "P1", "area_mm2": 1.0, "plant_attribution": "image"}],
             tmp_path / "out.csv",
             mismatched_trait,
+            value_key="area_mm2",
             buckets=[],
         )
 
@@ -445,21 +421,19 @@ def test_a_delivery_never_labels_a_pixel_value_with_crops_yml_units(tmp_path):
     assert crops_units()["bark_thickness"] == "mm"
     # A scalar head's delivery, since a count delivery refuses a unit-declared trait whose
     # value_key implies no physical unit; a scalar head's declared unit may legitimately not appear.
-    results = [
-        {
-            "plant_id": "P1",
-            "value": 124.0,
-            "observations": 1,
-            "value_key": "principal_axis_extent_px",
-            "plant_attribution": "image",
-        }
-    ]
     out_path = tmp_path / "out.csv"
     _deliver(
         tmp_path,
-        results,
+        [
+            {
+                "plant_id": "P1",
+                "principal_axis_extent_px": 124.0,
+                "plant_attribution": "image",
+            }
+        ],
         out_path,
         "bark_thickness",
+        value_key="principal_axis_extent_px",
         delivery_kind=PER_PLANT_REGRESSION_AGGREGATE,
     )
     rows = csv_rows(out_path)
@@ -467,16 +441,15 @@ def test_a_delivery_never_labels_a_pixel_value_with_crops_yml_units(tmp_path):
     assert rows[0]["value"] == "124.0"
 
 
-def test_units_never_fall_back_with_no_value_key_at_all():
-    """A results list with no value_key resolves no unit: crops.yml's declared unit is not
-    inherited when nothing names the quantity it would describe.
+def test_units_never_fall_back_with_an_empty_value_key():
+    """An empty value_key resolves no unit outside a scalar delivery: crops.yml's declared unit is
+    not inherited when nothing names the quantity it would describe.
     """
     from tcip_mcp.pipelines.postprocessing.aggregation import _resolve_units
     from tcip_mcp.traits import crops_units
 
     assert crops_units()["bark_thickness"] == "mm"
-    results = [{"plant_id": "P1", "value": 1.0, "observations": 1}]
-    assert _resolve_units("bark_thickness", results, False) == ("", None, "mm")
+    assert _resolve_units("bark_thickness", "", False) == ("", None, "mm")
 
 
 @pytest.mark.parametrize(
@@ -543,31 +516,16 @@ def test_resolve_units_squares_area_but_cross_checks_the_linear_declared_unit():
     """
     from tcip_mcp.pipelines.postprocessing.aggregation import _resolve_units
 
-    results = [
-        {
-            "plant_id": "P1",
-            "value": 800.0,
-            "observations": 1,
-            "value_key": "area_mm2",
-        }
-    ]
     # no crops.yml entry -> no cross-check
-    assert _resolve_units("__no_such_trait__", results, False) == (
+    assert _resolve_units("__no_such_trait__", "area_mm2", False) == (
         "mm2",
         "mm",
         None,
     )
-
-    results_linear = [
-        {
-            "plant_id": "P1",
-            "value": 12.0,
-            "observations": 1,
-            "value_key": "principal_axis_extent_mm",
-        }
-    ]
     # non-area stays unsquared
-    assert _resolve_units("__no_such_trait__", results_linear, False) == (
+    assert _resolve_units(
+        "__no_such_trait__", "principal_axis_extent_mm", False
+    ) == (
         "mm",
         "mm",
         None,
@@ -580,7 +538,11 @@ def test_resolve_units_squares_area_but_cross_checks_the_linear_declared_unit():
     units = crops_units()
     mm_trait = next((name for name, u in units.items() if u == "mm"), None)
     if mm_trait is not None:
-        assert _resolve_units(mm_trait, results, False) == ("mm2", "mm", "mm")
+        assert _resolve_units(mm_trait, "area_mm2", False) == (
+            "mm2",
+            "mm",
+            "mm",
+        )
 
 
 def test_resolve_units_recognizes_a_bespoke_non_mask_geometry_value_key():
@@ -591,15 +553,7 @@ def test_resolve_units_recognizes_a_bespoke_non_mask_geometry_value_key():
     """
     from tcip_mcp.pipelines.postprocessing.aggregation import _resolve_units
 
-    results = [
-        {
-            "plant_id": "P1",
-            "value": 14.2,
-            "observations": 1,
-            "value_key": "nut_diameter_mm",
-        }
-    ]
-    assert _resolve_units("__no_such_trait__", results, False) == (
+    assert _resolve_units("__no_such_trait__", "nut_diameter_mm", False) == (
         "mm",
         "mm",
         None,
@@ -612,16 +566,8 @@ def test_resolve_units_propagates_the_area_squared_mismatch_refusal():
     """
     from tcip_mcp.pipelines.postprocessing.aggregation import _resolve_units
 
-    results = [
-        {
-            "plant_id": "P1",
-            "value": 800.0,
-            "observations": 1,
-            "value_key": "area_mm",
-        }
-    ]
     with pytest.raises(ValueError):
-        _resolve_units("__no_such_trait__", results, False)
+        _resolve_units("__no_such_trait__", "area_mm", False)
 
 
 def test_delivery_skill_documents_the_real_csv_schema(tmp_path):
@@ -637,17 +583,10 @@ def test_delivery_skill_documents_the_real_csv_schema(tmp_path):
     out_path = tmp_path / "schema.csv"
     _deliver(
         tmp_path,
-        [
-            {
-                "plant_id": "P1",
-                "value": 1.0,
-                "observations": 1,
-                "value_key": "count",
-                "plant_attribution": "image",
-            }
-        ],
+        [{"plant_id": "P1", "count": 1.0, "plant_attribution": "image"}],
         out_path,
         "stem_count",
+        value_key="count",
     )
     with open(out_path, newline="") as f:
         written = next(csv.reader(f))

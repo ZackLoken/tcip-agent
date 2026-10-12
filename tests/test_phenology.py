@@ -28,7 +28,7 @@ from tests._trait_fixtures import BUD_OPENING, entry
 OPENING = cr.Attribute("opening", "categorical", ("closed", "open"))
 """The attribute :data:`BUD_OPENING`'s positive state names."""
 OPENED = BUD_OPENING.positive_state
-COMPLETE = phenology.REQUIRE_ALL_DATES_COMPLETE
+RULE = BUD_OPENING.crossing_rule
 
 
 def _registry(*attributes: cr.Attribute) -> cr.SubjectRegistry:
@@ -112,7 +112,7 @@ def test_crossing_date_does_not_crash_on_malformed_date():
         ("2026-13-01", 0.9),  # out-of-range month, excluded
         ("2026-02-15", 1.0),
     ]
-    c = phenology.crossing_date(series, 0.50)
+    c = phenology.crossing_date(series, 0.50, RULE)
     assert c.date == "2026-02-08"
     assert c.bound == "interpolated"
     assert phenology.positive_onset_date(series) == "2026-02-15"
@@ -129,7 +129,7 @@ def test_real_points_drops_undated_and_sorts():
 
 def test_crossing_interpolates_between_dates():
     series = [("2024-05-01", 0.0), ("2024-05-11", 1.0)]
-    c = phenology.crossing_date(series, 0.50)
+    c = phenology.crossing_date(series, 0.50, RULE)
     assert c.date == "2024-05-06"
     assert c.bound == "interpolated"
     assert c.gap_days == 10
@@ -139,14 +139,14 @@ def test_crossing_first_point_already_at_target_is_left_censored():
     # A left-censored crossing must be flagged, not returned as a bare tuple indistinguishable
     # from a real single-date measurement.
     series = [("2024-05-01", 0.2), ("2024-05-05", 0.8)]
-    c = phenology.crossing_date(series, 0.05)
+    c = phenology.crossing_date(series, 0.05, RULE)
     assert c.date == "2024-05-01"
     assert c.bound == "left_censored"
 
 
 def test_crossing_exact_match_is_not_censored():
     series = [("2024-05-01", 0.0), ("2024-05-05", 0.50)]
-    c = phenology.crossing_date(series, 0.50)
+    c = phenology.crossing_date(series, 0.50, RULE)
     assert c.date == "2024-05-05"
     assert c.bound == "exact"
 
@@ -155,14 +155,14 @@ def test_crossing_never_reached_is_right_censored():
     # The last observed point never meets the target: right-censored there, unlike no
     # observations at all, which stays None.
     series = [("2024-05-01", 0.0), ("2024-05-05", 0.3)]
-    c = phenology.crossing_date(series, 0.95)
+    c = phenology.crossing_date(series, 0.95, RULE)
     assert c.date == "2024-05-05"
     assert c.bound == "right_censored"
     assert c.gap_days is None
 
 
 def test_crossing_no_observations_is_none():
-    assert phenology.crossing_date([], 0.95) is None
+    assert phenology.crossing_date([], 0.95, RULE) is None
 
 
 def test_opening_onset_is_first_nonzero_date():
@@ -197,6 +197,17 @@ def test_plant_milestones_returns_four_dates_and_bounds():
     assert m["bud_majority_date"] == m["bud_95per_date"]
     assert m["bud_50per_date"] == "2024-05-11"
     assert m["bud_50per_date_bound"] == "exact"
+
+
+def test_the_milestones_and_their_schema_restate_no_crossing_rule():
+    """The rule a crossing is read under is the trait revision's, which every delivered CSV pins
+    by its revision columns: neither a plant's milestones nor the schema restates it.
+    """
+    ms = phenology.plant_milestones(
+        [("2024-05-01", 0.0), ("2024-05-09", 1.0)], BUD_OPENING
+    )
+    assert "crossing_rule" not in ms
+    assert "crossing_rule" not in phenology.phenology_csv_columns(BUD_OPENING)
 
 
 def test_plant_milestones_requires_spec_no_bud_opening_fallback():
@@ -361,7 +372,6 @@ def test_per_plant_phenology_builds_fraction_series_over_attributed_buckets(
         buckets,
         BUD_OPENING,
         ["P1"],
-        require_all_dates_complete=COMPLETE,
     )
 
     assert out["positive_class_assessed"] is True
@@ -390,7 +400,6 @@ def test_per_plant_phenology_bare_detector_bucket_refuses_whole_delivery(
         buckets,
         BUD_OPENING,
         ["P1"],
-        require_all_dates_complete=COMPLETE,
     )
 
     assert out["positive_class_assessed"] is False
@@ -410,7 +419,6 @@ def test_per_plant_phenology_missing_image_is_disclosed_not_a_zero(tmp_path):
         buckets,
         BUD_OPENING,
         ["P1"],
-        require_all_dates_complete=COMPLETE,
     )
 
     row = out["rows"][0]
@@ -444,7 +452,6 @@ def test_per_plant_phenology_multi_date_and_excludes_plant_with_one_bad_date(
         buckets,
         BUD_OPENING,
         ["P1"],
-        require_all_dates_complete=COMPLETE,
     )
 
     row = out["rows"][0]
@@ -483,7 +490,6 @@ def test_a_plant_the_mapping_captured_on_no_image_of_a_date_is_incomplete_on_it(
         buckets,
         BUD_OPENING,
         ["P1", "P2"],
-        require_all_dates_complete=COMPLETE,
     )
 
     p1, p2 = out["rows"]
@@ -543,6 +549,7 @@ _SPEC_SHAPES = [
         "b",
         BUD_OPENING.delivers,
         milestone_fractions=(0.1, 0.9),
+        crossing_rule=RULE,
         phenology_prefix="b",
     ),
     # A majority label with no majority milestone: a column must not be built from the label
@@ -551,6 +558,7 @@ _SPEC_SHAPES = [
         "b",
         BUD_OPENING.delivers,
         milestone_fractions=(0.1, 0.9),
+        crossing_rule=RULE,
         phenology_prefix="b",
         majority_label="peak",
     ),
@@ -560,6 +568,7 @@ _SPEC_SHAPES = [
         "b",
         BUD_OPENING.delivers,
         milestone_fractions=(0.1, 0.9),
+        crossing_rule=RULE,
         phenology_prefix="b",
         majority_milestone="95per",
         majority_label="peak",
@@ -623,7 +632,6 @@ def test_excluded_plant_carries_the_same_milestone_keys_as_an_included_one(
         buckets,
         BUD_OPENING,
         ["GOOD", "BAD"],
-        require_all_dates_complete=COMPLETE,
     )
     by_plant = {r["plant_id"]: r for r in res["rows"]}
     assert by_plant["BAD"]["n_dates_missing_images"] == 1  # genuinely excluded
@@ -701,7 +709,6 @@ def test_per_plant_phenology_excludes_unattributed_assignments_from_rows(
         buckets,
         BUD_OPENING,
         ["P1"],
-        require_all_dates_complete=COMPLETE,
     )
     assert [r["plant_id"] for r in out["rows"]] == ["P1"]
     assert "n_images_unmapped" not in out

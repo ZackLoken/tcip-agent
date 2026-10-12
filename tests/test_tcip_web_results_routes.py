@@ -159,6 +159,30 @@ def test_an_assessed_series_measures_its_curves_and_milestones_validated(
         assert plant_a[column["bound"]], column
 
 
+def test_no_door_takes_a_switch_computing_milestones_over_incomplete_dates(
+    client: TestClient,
+    tmp_path: Path,
+) -> None:
+    """A plant's milestones are computed only when every one of its dates is complete, whatever a
+    caller sends: the web route and the tool each refuse the key that once switched that off, by
+    name, and nothing is written.
+    """
+    from tcip_mcp.tools.phenology_tools import deliver_phenology_milestones
+
+    switched = _series(tmp_path, fractions=(0.0, 1.0)).body(
+        require_all_dates_complete=False
+    )
+
+    refused = client.post("/api/results/phenology_measurement", json=switched)
+    assert refused.status_code == 422
+    assert "require_all_dates_complete" in refused.text
+    with pytest.raises(TypeError, match="require_all_dates_complete"):
+        deliver_phenology_milestones(
+            tmp_path, **switched, output_csv_path=str(tmp_path / "out.csv")
+        )
+    assert not (tmp_path / "out.csv").exists()
+
+
 def test_the_curve_counts_every_image_of_a_plant_on_a_date(
     client: TestClient,
     tmp_path: Path,

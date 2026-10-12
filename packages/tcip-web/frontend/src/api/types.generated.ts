@@ -281,7 +281,6 @@ export interface PhenologyPayload {
   buckets: string[];
   trait: string;
   plants: string[];
-  require_all_dates_complete?: boolean;
   show_unvalidated?: boolean;
 }
 
@@ -307,7 +306,6 @@ export interface ExportCsvPayload {
   buckets: string[];
   trait: string;
   plants: string[];
-  require_all_dates_complete?: boolean;
   payload: "curves" | "milestones";
   filename?: string | null;
   user: string;
@@ -445,7 +443,6 @@ export interface DeliveryEventRecord {
   validated: boolean;
   acknowledgment: Acknowledgment | null;
   population: string[];
-  require_all_dates_complete: boolean | null;
   plant_mapping: PlantMappingDisclosure | PlantRegistryDisclosure | CanopySegmentDisclosure | null;
   produced_at: string;
 }
@@ -469,10 +466,11 @@ export interface TraitEntry {
   positive_state: PositiveState | null;
   milestone_fractions: number[];
   milestone_on: string;
+  crossing_rule: "" | "linear_whole_day";
   majority_milestone: string;
   phenology_prefix: string;
   majority_label: string;
-  count_objective: string;
+  count_objective: "" | "count_unbiased" | "detection_f1" | "presence";
   localization: "" | "center_match" | "iou_match";
   localization_tolerance: string;
   localization_tolerance_frac: number;
@@ -482,8 +480,9 @@ export interface TraitEntry {
   count_error_tolerance: number | null;
   classifier_agreement_floor: number | null;
   ordinal_agreement_floor: number | null;
-  regression_criterion: string;
+  regression_criterion: "" | "r_squared" | "concordance_correlation_coefficient";
   regression_skill_floor: number | null;
+  plant_aggregation: "" | "median" | "mean" | "mode" | "sum";
   scale_tolerance_frac: number | null;
   holdout_match_quality_floor: number | null;
   notes: string;

@@ -21,7 +21,7 @@ acknowledgment, the population) is recorded once on the delivery event the last 
 | delivered_phenotype | string | Delivered phenotype name (from crop skill) |
 | value | float/string | Measurement value |
 | units | string | Physical unit implied by the value's own `value_key`, blank for a count trait or a trait crops.yml declares no unit for. In a count delivery a unit-declared trait's `value_key` must itself imply a unit, and a dimensional value rests on a physical-scale assessment; in an ordinal or regression delivery a `value_key` implying no unit takes the trait's own declared unit from `crops.yml` |
-| value_key | string | Which aggregated field `value` came from (e.g. `count`, `area_mm2`), so a reader can detect a px/mm mismatch independently |
+| value_key | string | The key the per-image records held `value`'s inputs under (e.g. `count`, `area_mm2`), so a reader can detect a px/mm mismatch independently |
 | n_images | int | Number of source images |
 | pipeline_version | string | Pipeline that produced this result |
 | plant_id_source | string | How the plant identity was resolved for this plant's images, the assignment rows' own `source` (`"mixed"` when they disagree); blank when the records carried no `source` |
@@ -35,11 +35,13 @@ acknowledgment, the population) is recorded once on the delivery event the last 
 
 ## Aggregation Rules
 
-Aggregating per-image measurements into a per-plant value is an agent choice keyed to the trait's
-read-semantics, not a frozen one-function-per-type map. The table below is a starting reference of
-common choices; pick (or compose) the aggregation the trait's definition actually calls for (a
-skewed count may want a median, a robust mean, or a yield-model estimate; a date wants a crossing),
-and record which you used. When the trait carries read-semantics fields (its entry), those govern.
+The statistic a plant's per-image values combine into is part of the trait's definition: the
+entry's `plant_aggregation`, which every per-plant aggregate kind rests on and the breeder
+confirms. Ask the breeder its question when it is unauthored and propose their answer with
+`propose_trait`; a per-plant delivery takes the per-image records and aggregates them itself
+under the confirmed statistic, so nothing outside the delivery picks one. The table below is a
+starting reference for that conversation, never the answer (a skewed count may want a median; a
+date wants a crossing, whose rule is the entry's `crossing_rule`).
 
 Examples use real `crops.yml` trait names; verify any trait against `crops.yml` before use.
 
@@ -60,7 +62,7 @@ Examples use real `crops.yml` trait names; verify any trait against `crops.yml` 
 | `calibrate_physical_scale` | Derive a per-pixel physical scale from reference objects of breeder-measured length on a selection's calibration side and check it on its holdout side; recorded as an assessment a dimensional delivery names |
 | `run_inference` | Run a checkpoint over images or a raster and publish the predictions as a new bucket named `bucket` under the images' dataset root: one document per image (one for a raster) and the bucket's record of the checkpoint, class scope, execution record, capture and assessment behind them, in one commit. A bucket is published once; a name already published refuses. With `assessment_id` the pass runs exactly that assessment's execution record and the bucket names it |
 | `deliver_per_image_counts` | Per-image detection-count CSV from one published bucket; see the Per-Image CSV Schema below |
-| `deliver_per_plant_csv` | The general per-plant CSV door: `aggregate_per_plant`'s own output over the published buckets it came from, for the case neither specialist door's own composition covers; a named `plant_mapping` is resolved and verified against the delivered buckets, and every delivered plant must be one it assigned on the delivered dates |
+| `deliver_per_plant_csv` | The general per-plant CSV door: per-image records, each carrying its `plant_id`, and the `value_key` their values sit under, aggregated per plant under the trait's confirmed `plant_aggregation` over the published buckets they came from, for the case neither specialist door's own composition covers; a named `plant_mapping` is resolved and verified against the delivered buckets, and every delivered plant must be one it assigned on the delivered dates |
 | `deliver_phenology_milestones` | Per-plant milestone CSV from buckets whose scope classifies the trait's positive state, and a plant mapping; its own column schema; see `phenology` skill |
 | `register_plant_registry` | Names a plant-locations CSV set once (per-file `sha256`/`n_plants`, `crop`, `site`, a content digest over the parsed rows), so `deliver_orthomosaic_plant_counts` and `build_plant_mapping` read the same registered version by name (`plant_registry`) instead of re-asserting file paths; a shapefile is converted first by `tcip shp-to-plant-csv` |
 | `deliver_orthomosaic_plant_counts` | Per-plant detection counts from a published whole-raster bucket plus a `plant_registry` name. Nearest-neighbor by default; `canopy_subject` switches to containment in an accepted canopy boundary instead (refused alongside a stated `nn_tolerance_m`). Fewer rows than the registry names can ship under either regime, the absent plants named on the delivery event |
@@ -107,8 +109,9 @@ uncharacterized, which is a claim about a quantity that has been defined.
 - The per-plant doors take `delivered_phenotype`, a crop-vocabulary delivered-phenotype name, and
   resolve it to the trait whose latest confirmed revision `delivers` it: none or more than one
   refuses. The delivery kind (`per_plant_count_aggregate`, `per_plant_ordinal_aggregate` or
-  `per_plant_regression_aggregate`) names the operationalization, and every row's value key has to
-  be inside its confirmed set.
+  `per_plant_regression_aggregate`) names the operationalization, the records' value key has to
+  be inside its confirmed set, and the delivery aggregates each plant's records under the
+  revision's `plant_aggregation`.
 - A `state_crossing_dates` operationalization and every delivery under it are checked against the
   delivered dataset's own subject registry, never a bare spec value: a delivery whose buckets'
   dataset carries no registry refuses, and a positive state naming an attribute the registry does
@@ -130,8 +133,8 @@ and a dimensional detector delivery no
 physical-scale assessment in the delivered unit answers for.
 
 A delivery with any unvalidated finding refuses, one sentence per finding, and the refusal carries
-the digest of the result it would write: its rows, population, missingness rule and plant-mapping
-disclosure beside its kind, revision, producer and every finding. A breeder's acknowledgment,
+the digest of the result it would write: its rows, population and plant-mapping disclosure
+beside its kind, revision, producer and every finding. A breeder's acknowledgment,
 recorded once in the Results tab under the identity the backend runs as, with a non-empty reason
 and that digest, and audited as `delivery_acknowledged`, ships exactly that result with
 `validated` false; one given for any other result refuses, and no tool or request from outside a
@@ -140,8 +143,8 @@ browser records one.
 Every delivery composes its CSV and its one `delivery_events` record, validated against its schema
 before anything is written, then writes the file and the record once: the door, the kind, the
 revision, the delivered file and its digest, the producer once, each bucket's finding, the scale
-assessment, whether it is validated, the acknowledgment, the population and missingness rule, and
-the plant-mapping disclosure. Its one audit line, naming only the record's `event_id`, files in
+assessment, whether it is validated, the acknowledgment, the population, and the plant-mapping
+disclosure. Its one audit line, naming only the record's `event_id`, files in
 the log of the dataset the buckets sit in.
 
 A per-plant count from a whole raster is a raster-visible count, not a whole-tree total: where the
