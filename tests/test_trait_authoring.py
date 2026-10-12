@@ -81,18 +81,12 @@ def test_a_proposal_off_the_vocabulary_refuses_and_appends_nothing(
     assert "leaf" not in trait_names(tmp_path)
 
 
-def test_count_objective_is_not_a_closed_vocabulary_and_unset_stays_empty():
-    """A trait may name any objective an agent has implemented and registered a picker for;
-    admission accepts it, and an unset one stays honestly empty rather than defaulted.
+def test_every_picker_names_an_admitted_count_objective_and_unset_stays_empty():
+    """Admission accepts each objective a picker implements, and an unset one stays honestly
+    empty rather than defaulted.
     """
     from tcip_mcp.pipelines.operating_point import COUNT_OBJECTIVE_PICKERS
 
-    assert (
-        entry(
-            "custom", ("leaf_length",), count_objective="a_brand_new_objective"
-        ).count_objective
-        == "a_brand_new_objective"
-    )
     assert entry("undecided", ("leaf_length",)).count_objective == ""
     for objective in COUNT_OBJECTIVE_PICKERS:
         assert (
@@ -140,20 +134,55 @@ def test_an_unset_count_objective_refuses_the_proposal_asking_the_breeder(
     assert propose(tmp_path, decided).entry.count_objective == "detection_f1"
 
 
-def test_an_unregistered_count_objective_refuses_the_count_criterion_by_name():
-    from tcip_mcp.pipelines.operating_point import count_criterion
+@pytest.mark.parametrize(
+    "field",
+    [
+        "count_objective",
+        "crossing_rule",
+        "regression_criterion",
+        "plant_aggregation",
+        "localization",
+    ],
+)
+def test_an_entry_naming_what_no_table_implements_refuses_naming_the_field(
+    field: str,
+):
+    """A name outside the field's vocabulary refuses where the entry a proposal takes is built,
+    naming the field.
+    """
+    with pytest.raises(ValidationError, match=field):
+        entry("custom", ("leaf_length",), **{field: "a_name_no_table_has"})
 
-    custom = entry(
-        "custom", ("leaf_length",), count_objective="a_brand_new_objective"
-    )
-    with pytest.raises(ValueError, match="no registered picker"):
-        count_criterion(
-            [],
-            [],
-            custom,
-            staged_conf_floor=0.05,
-            staged_conf_floor_attribute_path=None,
-        )
+
+@pytest.mark.parametrize(
+    "vocabulary, table",
+    [
+        ("CountObjective", "tcip_mcp.pipelines.operating_point:COUNT_OBJECTIVE_PICKERS"),
+        ("CrossingRule", "tcip_mcp.pipelines.postprocessing.phenology:CROSSING_RULES"),
+        (
+            "RegressionCriterion",
+            "tcip_mcp.pipelines.operating_point:REGRESSION_CRITERIA",
+        ),
+        (
+            "PlantAggregation",
+            "tcip_mcp.pipelines.postprocessing.aggregation:PLANT_AGGREGATIONS",
+        ),
+        ("Localization", "tcip_mcp.traits:LOCALIZATION_FIELDS"),
+    ],
+)
+def test_every_authorable_name_has_an_implementation_and_no_other(
+    vocabulary: str, table: str
+):
+    """A field's vocabulary and the table its reader subscripts name the same set, the empty
+    unauthored member aside.
+    """
+    import importlib
+    from typing import get_args
+
+    module, name = table.split(":")
+    implemented = getattr(importlib.import_module(module), name)
+    authorable = set(get_args(getattr(traits, vocabulary))) - {""}
+    assert authorable == set(implemented)
 
 
 # ── the record ───────────────────────────────────────────────────────────────
@@ -332,6 +361,49 @@ def test_a_positive_state_its_registry_does_not_declare_refuses_at_proposal(
     )
 
 
+@pytest.mark.parametrize(
+    "kind, field",
+    [
+        (traits.STATE_CROSSING_DATES, "crossing_rule"),
+        (traits.PER_PLANT_COUNT_AGGREGATE, "plant_aggregation"),
+        (traits.PER_PLANT_ORDINAL_AGGREGATE, "plant_aggregation"),
+        (traits.PER_PLANT_REGRESSION_AGGREGATE, "plant_aggregation"),
+    ],
+)
+def test_an_operationalization_leaving_its_breeder_definition_unauthored_refuses_asking_for_it(
+    tmp_path: Path, kind: str, field: str
+):
+    """The rule a milestone's day is read under and the statistic a plant's images combine into
+    are the trait's definition: an operationalization resting on one refuses unauthored at the
+    proposal, asking the breeder its question, and appends nothing; authored, it is admitted.
+    """
+    import re
+
+    from tests._trait_fixtures import (
+        with_fields,
+        with_floors,
+        with_operationalization,
+    )
+
+    stated = with_operationalization(
+        with_floors(with_fields(BUD_OPENING, name="leaf_timing")),
+        kind,
+        measured_subject="bud",
+        delivered_phenotypes=BUD_OPENING.delivers,
+        delivered_value_keys=(
+            ("count",) if kind in traits.VALUE_KEY_KINDS else ()
+        ),
+    )
+    with pytest.raises(
+        traits.UnauthoredFieldError,
+        match=re.escape(f"{field}: {traits.QUESTIONS[field]}"),
+    ):
+        propose(tmp_path, with_fields(stated, **{field: ""}))
+    assert "leaf_timing" not in trait_names(tmp_path)
+    if kind != traits.STATE_CROSSING_DATES:
+        assert propose(tmp_path, stated).entry == stated
+
+
 # ── the positive state resolved from a prediction bucket's own recorded scope ──
 
 
@@ -431,7 +503,6 @@ def _deliver_series(tmp_path: Path, *, attributed: bool) -> dict:
             dataset_root=tmp_path / "ds",
             buckets=buckets,
             plants=list(PLOTS),
-            require_all_dates_complete=phenology.REQUIRE_ALL_DATES_COMPLETE,
         )
         return acknowledged(
             tmp_path,
@@ -452,10 +523,28 @@ def _deliver_series(tmp_path: Path, *, attributed: bool) -> dict:
 
 @pytest.mark.usefixtures("seed_bud_operationalization")
 def test_a_series_classifying_the_states_attribute_delivers(tmp_path: Path):
+    """The delivered milestones are read under the crossing rule the shipped revision states, and
+    the rows pin that revision by number and digest rather than restating its rule in a column.
+    """
+    from tcip_mcp.delivery import read_delivery_events
+    from tests import csv_rows
+
     res = _deliver_series(tmp_path, attributed=True)
 
     assert "error" not in res, res
-    assert (tmp_path / "out.csv").exists()
+    rows = csv_rows(tmp_path / "out.csv")
+    (event,) = read_delivery_events(tmp_path)
+    (shipped,) = [
+        r
+        for r in traits.read_trait(event.trait, tmp_path).revisions
+        if r.number == event.trait_revision
+    ]
+    assert shipped.entry_sha256 == event.trait_revision_sha256
+    assert shipped.entry.crossing_rule == BUD_OPENING.crossing_rule
+    assert {(r["trait_revision"], r["trait_revision_sha256"]) for r in rows} == {
+        (str(shipped.number), shipped.entry_sha256)
+    }
+    assert all("crossing_rule" not in r for r in rows)
 
 
 @pytest.mark.usefixtures("seed_bud_operationalization")

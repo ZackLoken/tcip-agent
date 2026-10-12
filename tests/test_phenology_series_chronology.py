@@ -57,7 +57,7 @@ def test_crossing_uses_the_bracket_that_exists_in_time():
         ("2026-03-05", 0.70),
     ]
 
-    c = phenology.crossing_date(series, 0.50)
+    c = phenology.crossing_date(series, 0.50, BUD_OPENING.crossing_rule)
 
     assert c.bound == "interpolated"
     assert c.date == "2026-03-04"
@@ -72,7 +72,7 @@ def test_crossing_above_target_at_the_first_capture_stays_left_censored_when_the
     """
     series = [("2026-03-01", 0.60), ("2026-03-05", 0.20), ("2026-03-09", 0.80)]
 
-    c = phenology.crossing_date(series, 0.50)
+    c = phenology.crossing_date(series, 0.50, BUD_OPENING.crossing_rule)
 
     assert c.bound == "left_censored"
     assert c.date == "2026-03-01"
@@ -94,7 +94,7 @@ def test_first_capture_exactly_on_the_target_is_an_upper_bound():
     """
     series = [("2026-03-01", 0.50), ("2026-03-05", 0.90)]
 
-    c = phenology.crossing_date(series, 0.50)
+    c = phenology.crossing_date(series, 0.50, BUD_OPENING.crossing_rule)
 
     assert c.bound == "left_censored"
     assert c.date == "2026-03-01"
@@ -107,7 +107,7 @@ def test_first_capture_exactly_on_the_target_keeps_its_date_when_the_curve_falls
     """
     series = [("2026-03-01", 0.50), ("2026-03-05", 0.20), ("2026-03-09", 0.80)]
 
-    c = phenology.crossing_date(series, 0.50)
+    c = phenology.crossing_date(series, 0.50, BUD_OPENING.crossing_rule)
 
     assert c.bound == "left_censored"
     assert c.date == "2026-03-01"
@@ -156,11 +156,7 @@ def test_milestones_of_a_noisy_plant_and_a_steady_plant_are_each_read_in_capture
     }
 
     out = phenology.per_plant_phenology(
-        mapping,
-        buckets,
-        BUD_OPENING,
-        ["P1", "P2"],
-        require_all_dates_complete=phenology.REQUIRE_ALL_DATES_COMPLETE,
+        mapping, buckets, BUD_OPENING, ["P1", "P2"]
     )
 
     rows = {r["plant_id"]: r for r in out["rows"]}

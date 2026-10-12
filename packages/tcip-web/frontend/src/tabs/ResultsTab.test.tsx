@@ -33,7 +33,6 @@ const VALIDATED = {
   dates_delivered: [],
   images_unattributed: 0,
   result_sha256: null,
-  require_all_dates_complete: true,
 };
 
 beforeEach(() => {
@@ -204,7 +203,6 @@ describe("ResultsTab evidence gate", () => {
     dates_delivered: [],
     images_unattributed: 0,
     result_sha256: { curves: "c".repeat(64), milestones: "d".repeat(64) },
-    require_all_dates_complete: true,
   };
 
   async function renderAndCompute() {

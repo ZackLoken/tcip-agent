@@ -122,10 +122,6 @@ export function ResultsTab() {
   const [resultSha256, setResultSha256] = useState<Record<"curves" | "milestones", string> | null>(
     null,
   );
-  // The missingness rule the breeder chose (null leaves the server's own), and the rule the
-  // displayed rows were computed under.
-  const [requireAllComplete, setRequireAllComplete] = useState<boolean | null>(null);
-  const [appliedRule, setAppliedRule] = useState<boolean | null>(null);
   // What the mapping's own delivery-time check could not verify, shown beside the numbers rather
   // than only in the exported CSV.
   const [capturesUnverified, setCapturesUnverified] = useState<string[]>([]);
@@ -249,7 +245,7 @@ export function ResultsTab() {
     refreshDatasetTree();
   }, [refreshDatasetTree]);
 
-  async function compute(showUnvalidated = false, rule: boolean | null = requireAllComplete) {
+  async function compute(showUnvalidated = false) {
     if (!projectRoot || !datasetRoot) return;
     if (!trait) {
       setError(traitError ?? "Pick a trait before computing.");
@@ -272,7 +268,6 @@ export function ResultsTab() {
         trait,
         plants,
         show_unvalidated: showUnvalidated,
-        ...(rule === null ? {} : { require_all_dates_complete: rule }),
       };
       setLastRequest(request);
       // One request computes both projections from one server-side measurement: a milestone
@@ -283,7 +278,6 @@ export function ResultsTab() {
       setUnvalidated(!res.validated);
       setUnvalidatedReason(res.unvalidated_reason);
       setResultSha256(res.result_sha256);
-      setAppliedRule(res.require_all_dates_complete);
       setCapturesUnverified(res.captures_unverified ?? []);
       setPlantCsvsUnverified(res.plant_csvs_unverified ?? []);
       setDatesDelivered(res.dates_delivered ?? []);
@@ -330,7 +324,6 @@ export function ResultsTab() {
         buckets: lastRequest.buckets,
         trait: lastRequest.trait,
         plants: lastRequest.plants,
-        require_all_dates_complete: lastRequest.require_all_dates_complete,
         payload,
         filename,
         user: useStore.getState().user,
@@ -558,9 +551,9 @@ export function ResultsTab() {
         <p className="text-[10px] text-tcip-muted mb-2">
           A per-image count (a bucket, no plant identity) or a per-plant count through the
           orthomosaic composition (a bucket plus a registered plant registry). The ordinal and
-          regression aggregates (their per-plant strategy is an agent choice) and the per-plant
-          walked-capture count (its across-dates strategy is not yet a structured, breeder-confirmed
-          field) have no route here; deliver those through the agent.
+          regression aggregates and the per-plant walked-capture count, each aggregated under the
+          statistic the confirmed revision of its trait states, have no route here; deliver those
+          through the agent.
         </p>
         <div className="grid grid-cols-[1fr_1fr] gap-3">
           <div className="flex flex-col gap-2">
@@ -907,20 +900,6 @@ export function ResultsTab() {
                       Ask the agent to assess this
                     </button>
                   </div>
-                )}
-                {appliedRule !== null && (
-                  <label className="text-[11px] flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={requireAllComplete ?? appliedRule}
-                      onChange={(e) => {
-                        setRequireAllComplete(e.target.checked);
-                        void compute(unvalidated, e.target.checked);
-                      }}
-                      disabled={loading}
-                    />
-                    Milestones only for plants observed completely on every delivered date
-                  </label>
                 )}
                 {datesDelivered.length > 0 && (
                   <div className="text-[11px] text-tcip-muted">

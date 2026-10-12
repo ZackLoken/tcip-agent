@@ -133,7 +133,6 @@ def test_two_attributes_train_two_heads_publish_both_values_and_deliver(
         dataset_root=str(series.root),
         buckets=list(series.buckets.values()),
         plants=list(PLANTS),
-        require_all_dates_complete=True,
     )
     out = tmp_path / "out" / "milestones.csv"
     delivered = acknowledged(

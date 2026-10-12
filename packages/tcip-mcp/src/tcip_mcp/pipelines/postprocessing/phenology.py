@@ -17,7 +17,7 @@ helper, not the delivered trait.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from tcip_mcp.buckets import Bucket
     from tcip_mcp.delivery import Result
     from tcip_mcp.pipelines.data.selection import ClassScope
-    from tcip_mcp.traits import PositiveState, TraitRevision
+    from tcip_mcp.traits import CrossingRule, PositiveState, TraitRevision
 
 
 def _milestone_targets(spec) -> dict[str, float]:
@@ -50,12 +50,6 @@ def _milestone_columns(spec) -> list[tuple[str, str]]:
     if spec.majority_milestone:
         cols.insert(0, (spec.majority_label, spec.majority_milestone))
     return cols
-
-
-REQUIRE_ALL_DATES_COMPLETE = True
-"""The missingness rule a phenology measurement takes when its caller states none: a plant's
-milestones are computed only when every one of its dates is complete. Every door defaults to this,
-and the delivery event records the rule a delivery ran under."""
 
 
 def milestone_date_columns(spec) -> list[dict[str, str]]:
@@ -160,7 +154,7 @@ class Crossing:
       - ``"exact"``: the target fraction was actually observed on this date.
       - ``"left_censored"``: the first observed point already meets the target, the true crossing
         may have happened any time before it; this date is an upper bound, not a measured crossing.
-      - ``"interpolated"``: linearly interpolated between the two bracketing observed dates.
+      - ``"interpolated"``: read between the two bracketing observed dates by the crossing rule.
       - ``"right_censored"``: the last observed point still hasn't met the target, the true
         crossing,
         if it happens at all, is after this date; this date is a lower bound, the mirror of
@@ -176,16 +170,38 @@ class Crossing:
     gap_days: int | None = None
 
 
+def _linear_whole_day(
+    d1: str, r1: float, d2: str, r2: float, target: float
+) -> Crossing:
+    """The day ``target`` is reached on the straight line from ``(d1, r1)`` to ``(d2, r2)``,
+    rounded to the nearest whole day.
+    """
+    y1, m1, day1 = date_key(d1)
+    y2, m2, day2 = date_key(d2)
+    gap = (date(y2, m2, day2) - date(y1, m1, day1)).days
+    t = max(0.0, min(1.0, (target - r1) / (r2 - r1))) if r2 != r1 else 1.0
+    est = date(y1, m1, day1) + timedelta(days=round(t * gap))
+    return Crossing(est.isoformat(), "interpolated", gap_days=gap)
+
+
+CROSSING_RULES: dict[
+    CrossingRule, Callable[[str, float, str, float, float], Crossing]
+] = {"linear_whole_day": _linear_whole_day}
+"""How a crossing is read between its two bracketing capture dates, by the name a trait entry's
+``crossing_rule`` states."""
+
+
 def crossing_date(
-    series: list[tuple[str, float]], target: float
+    series: list[tuple[str, float]], target: float, rule: CrossingRule
 ) -> Crossing | None:
     """Earliest date the fraction curve reaches ``>= target``, with its evidentiary bound.
 
-    Linear interpolation between neighboring observed dates when the crossing falls between two
-    points; a left-censored crossing (the first observed point already meets the target) or a
+    A crossing between two observed points is read by the :data:`CROSSING_RULES` entry ``rule``
+    names; a left-censored crossing (the first observed point already meets the target) or a
     right-censored one (the last observed point still hasn't) is flagged as such. ``None`` only
     when there are no real observed points.
     """
+    between = CROSSING_RULES[rule]
     points = _real_points(series)
     if not points:
         return None
@@ -195,16 +211,7 @@ def crossing_date(
         if r2 >= target:
             if r2 == target:
                 return Crossing(iso(d2), "exact")
-            y1, m1, day1 = date_key(d1)
-            y2, m2, day2 = date_key(d2)
-            gap = (date(y2, m2, day2) - date(y1, m1, day1)).days
-            t = (
-                max(0.0, min(1.0, (target - r1) / (r2 - r1)))
-                if r2 != r1
-                else 1.0
-            )
-            est = date(y1, m1, day1) + timedelta(days=round(t * gap))
-            return Crossing(est.isoformat(), "interpolated", gap_days=gap)
+            return between(d1, r1, d2, r2, target)
     return Crossing(iso(points[-1][0]), "right_censored")
 
 
@@ -223,10 +230,11 @@ def plant_milestones(series: list[tuple[str, float]], spec) -> dict:
     columns.
 
     The column names (``phenology_prefix`` + each milestone key, plus the majority alias), the
-    crossing fractions and the majority mapping come from ``spec``, which is required.
+    crossing fractions, the crossing rule and the majority mapping come from ``spec``, which is
+    required.
     """
     crossings = {
-        key: crossing_date(series, frac)
+        key: crossing_date(series, frac, spec.crossing_rule)
         for key, frac in _milestone_targets(spec).items()
     }
     out: dict = {}
@@ -393,8 +401,6 @@ def per_plant_phenology(
     buckets: dict[str, Bucket],
     spec,
     plants: list[str],
-    *,
-    require_all_dates_complete: bool,
 ) -> dict:
     """Full canonical pipeline: predictions + plant mapping -> per-plant milestones
     against ``spec``'s ``positive_state`` and milestones, one row per plant in ``plants`` and no
@@ -404,11 +410,9 @@ def per_plant_phenology(
     positive-fraction series, the milestone dates, coverage-disclosure fields
     (``n_dates_unclassified``, ``n_dates_missing_images``, a date the mapping captured the plant on
     no image counting as missing) and ``complete``, whether every one of its dates is complete:
-    imaged, every detection carrying the positive state's attribute, and fully observed. With
-    ``require_all_dates_complete`` a plant's
-    milestones are computed only when it is complete, and otherwise from its complete dates alone.
-    ``positive_class_assessed`` is ``True`` iff at least one date, anywhere in the delivery, was
-    complete.
+    imaged, every detection carrying the positive state's attribute, and fully observed. A plant's
+    milestones are computed only when it is complete. ``positive_class_assessed`` is ``True`` iff
+    at least one date, anywhere in the delivery, was complete.
     """
     per_plant = per_plant_series(mapping, buckets, spec.positive_state, plants)
     rows = []
@@ -470,14 +474,7 @@ def per_plant_phenology(
         }
         # An excluded plant goes through the producer with an empty series, so every row has one
         # key set.
-        row.update(
-            plant_milestones(
-                frac_series
-                if complete or not require_all_dates_complete
-                else [],
-                spec,
-            )
-        )
+        row.update(plant_milestones(frac_series if complete else [], spec))
         rows.append(row)
     return {"rows": rows, "positive_class_assessed": any_classified_date}
 
@@ -485,15 +482,14 @@ def per_plant_phenology(
 @dataclass(frozen=True)
 class PhenologyMeasurement:
     """One trait's per-plant phenology over a plant mapping and its delivered buckets: the
-    confirmed revision it is measured under, the buckets by date, the rows, the missingness rule
-    they were computed under, and the mapping's delivery disclosure.
+    confirmed revision it is measured under, the buckets by date, the rows, and the mapping's
+    delivery disclosure.
     """
 
     revision: TraitRevision
     buckets: dict[str, Bucket]
     rows: list[dict]
     positive_class_assessed: bool
-    require_all_dates_complete: bool
     plant_mapping: dict
     plants: list[str]
 
@@ -517,7 +513,7 @@ class PhenologyMeasurement:
 
     def result(self, *, curves: bool) -> Result:
         """The delivered result: the milestone rows, or the curve rows with ``curves``, under
-        their columns, with the population, missingness rule and mapping disclosure.
+        their columns, with the population and mapping disclosure.
         """
         from tcip_mcp.delivery import Result
 
@@ -527,7 +523,6 @@ class PhenologyMeasurement:
             else phenology_csv_columns(self.revision.entry),
             self.curve_rows() if curves else self.milestone_rows(),
             population=self.plants,
-            require_all_dates_complete=self.require_all_dates_complete,
             plant_mapping=self.plant_mapping,
         )
 
@@ -540,7 +535,6 @@ def measure_phenology(
     dataset_root: Path,
     buckets: Sequence[str],
     plants: Sequence[str],
-    require_all_dates_complete: bool,
 ) -> PhenologyMeasurement:
     """Measure ``trait``'s phenology over the buckets named ``buckets`` published under
     the established location ``dataset_root``, each at the
@@ -576,11 +570,7 @@ def measure_phenology(
         project, mapping_name, dated
     )
     measured = per_plant_phenology(
-        mapping_build.rows(),
-        dated,
-        revision.entry,
-        wanted,
-        require_all_dates_complete=require_all_dates_complete,
+        mapping_build.rows(), dated, revision.entry, wanted
     )
     return PhenologyMeasurement(
         revision=revision,
@@ -591,7 +581,6 @@ def measure_phenology(
             b.scope.state_ids(revision.entry.positive_state) is not None
             for b in dated.values()
         ),
-        require_all_dates_complete=require_all_dates_complete,
         plant_mapping=mapping_build.delivery_disclosure(verified, list(dated)),
         plants=wanted,
     )
@@ -613,8 +602,8 @@ def deliver_phenology(
     The buckets clear the one gate for a ``state_crossing_dates`` delivery, the recorded
     acknowledgment ``acknowledgment_id`` shipping them unvalidated when it does not validate them.
     Writes exactly :func:`phenology_csv_columns` (or :func:`curve_csv_columns`) with the
-    delivery's one event under ``door``, its population, missingness rule and plant-mapping
-    disclosure (:func:`~tcip_mcp.delivery.deliver_csv`); returns what was delivered.
+    delivery's one event under ``door``, its population and plant-mapping disclosure
+    (:func:`~tcip_mcp.delivery.deliver_csv`); returns what was delivered.
     """
     from tcip_mcp.delivery import deliver_csv, gate
     from tcip_mcp.traits import STATE_CROSSING_DATES
@@ -642,5 +631,4 @@ def deliver_phenology(
         **delivered,
         "n_rows": len(result.rows),
         "columns": list(result.columns),
-        "require_all_dates_complete": measurement.require_all_dates_complete,
     }

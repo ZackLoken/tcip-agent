@@ -90,13 +90,12 @@ class Clearance:
 @dataclass(frozen=True)
 class Result:
     """A delivery's measured result and disclosure as it is shown and written: the CSV's columns
-    and rows, its population, its missingness rule and its plant-mapping disclosure.
+    and rows, its population and its plant-mapping disclosure.
     """
 
     columns: Sequence[str]
     rows: Sequence[dict]
     population: Sequence[str]
-    require_all_dates_complete: bool | None = None
     plant_mapping: dict | None = None
 
     def encoded(self, cells: dict[str, Any]) -> bytes:
@@ -260,8 +259,8 @@ def result_digest(
     scale_finding: str | None,
 ) -> str:
     """The digest of the result a breeder's acknowledgment binds to: ``result``'s rows as the CSV
-    writes them (without the delivery's own cells, which are receipt), its population,
-    missingness rule and plant-mapping disclosure, beside the kind, the trait revision, the
+    writes them (without the delivery's own cells, which are receipt), its population and
+    plant-mapping disclosure, beside the kind, the trait revision, the
     producer, each bucket's finding and the scale assessment's.
     """
     return hashlib.sha256(
@@ -269,7 +268,6 @@ def result_digest(
             {
                 "rows": result.encoded({}).decode("utf-8"),
                 "population": list(result.population),
-                "require_all_dates_complete": result.require_all_dates_complete,
                 "plant_mapping": _DISCLOSURE.dump_python(
                     _DISCLOSURE.validate_python(result.plant_mapping),
                     mode="json",
@@ -550,8 +548,8 @@ def deliver_csv(
     """Compose ``result`` as a CSV (each row carrying the :data:`DELIVERY_COLUMNS` cells of this
     delivery) and its one delivery event (the door, the kind, the trait revision it ships under,
     the delivered file and its sha256, the producer, each bucket's finding, the scale assessment,
-    whether it is validated, the acknowledgment it ships under, and the result's population,
-    missingness rule and plant-mapping disclosure), validating the event before anything is
+    whether it is validated, the acknowledgment it ships under, and the result's population and
+    plant-mapping disclosure), validating the event before anything is
     written; then write the CSV at ``output_path``, the event, and its one audit line by
     ``actor``, ``delivery_event``, in the log of the dataset root the buckets are published
     under. Returns what was delivered: ``csv_path``, ``validated``, ``delivery_event_id``,
@@ -580,7 +578,6 @@ def deliver_csv(
             "validated": clearance.validated,
             "acknowledgment": clearance.acknowledgment,
             "population": list(result.population),
-            "require_all_dates_complete": result.require_all_dates_complete,
             "plant_mapping": result.plant_mapping,
             "produced_at": now_iso(),
         }

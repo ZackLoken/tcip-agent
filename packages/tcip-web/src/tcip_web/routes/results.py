@@ -179,8 +179,6 @@ class PhenologyInputs(BaseModel):
     trait: str
     # The population: the plant ids this measurement is for, one row each, never every mapped plot.
     plants: list[str]
-    # Whether a plant missing any delivered date is left out of the milestones.
-    require_all_dates_complete: bool = phenology.REQUIRE_ALL_DATES_COMPLETE
 
 
 class PhenologyPayload(PhenologyInputs):
@@ -207,7 +205,6 @@ def _measure(root: Path, payload: PhenologyInputs) -> PhenologyMeasurement:
             dataset_root=dataset_root,
             buckets=payload.buckets,
             plants=payload.plants,
-            require_all_dates_complete=payload.require_all_dates_complete,
         )
     except OperationalizationRefusedError as exc:
         raise HTTPException(400, exc.as_detail()) from exc
@@ -266,7 +263,6 @@ def phenology_measurement(payload: PhenologyPayload) -> dict:
         "validated": reason is None,
         "unvalidated_reason": reason,
         "result_sha256": digests or None,
-        "require_all_dates_complete": measurement.require_all_dates_complete,
         **measurement.revision.ref.model_dump(),
         "positive_class_assessed": measurement.positive_class_assessed,
         **{

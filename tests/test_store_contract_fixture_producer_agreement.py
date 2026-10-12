@@ -19,6 +19,7 @@ TRAIT_GOLDEN: dict[str, Any] = {
                 "positive_state": {"attribute": "stage", "value": "büsch"},
                 "milestone_fractions": [0.5],
                 "milestone_on": "positive_fraction",
+                "crossing_rule": "linear_whole_day",
                 "majority_milestone": "",
                 "phenology_prefix": "",
                 "majority_label": "",
@@ -33,6 +34,7 @@ TRAIT_GOLDEN: dict[str, Any] = {
                 "classifier_agreement_floor": None,
                 "ordinal_agreement_floor": None,
                 "regression_skill_floor": None,
+                "plant_aggregation": "",
                 "regression_criterion": "",
                 "scale_tolerance_frac": None,
                 "holdout_match_quality_floor": None,
@@ -84,7 +86,6 @@ DELIVERY_EVENT_GOLDEN: dict[str, Any] = {
     "validated": True,
     "acknowledgment": None,
     "population": ["plot_ü"],
-    "require_all_dates_complete": True,
     "plant_mapping": {
         "name": "valley",
         "dataset_id": "ds-1",

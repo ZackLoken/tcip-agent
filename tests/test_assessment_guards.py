@@ -355,15 +355,10 @@ def test_an_iou_match_operationalization_is_proposed_only_with_its_jitter_and_ma
     rests on: a proposal selecting ``iou_match`` without them is refused asking the breeder, and
     one stating them is recorded.
     """
-    from tcip_mcp.traits import (
-        IOU_MATCH,
-        QUESTIONS,
-        UnauthoredFieldError,
-        trait_names,
-    )
+    from tcip_mcp.traits import QUESTIONS, UnauthoredFieldError, trait_names
 
     with pytest.raises(UnauthoredFieldError) as refused:
-        confirm_count_trait(tmp_path, localization=IOU_MATCH)
+        confirm_count_trait(tmp_path, localization="iou_match")
     assert "iou_jitter_px" in str(refused.value) and "iou_margin" in str(
         refused.value
     )
@@ -372,7 +367,7 @@ def test_an_iou_match_operationalization_is_proposed_only_with_its_jitter_and_ma
 
     confirmed = confirm_count_trait(
         tmp_path,
-        localization=IOU_MATCH,
+        localization="iou_match",
         iou_jitter_px=fx.IOU_JITTER_PX,
         iou_margin=fx.IOU_MARGIN,
     )
@@ -591,13 +586,6 @@ def test_a_scalar_prediction_carrying_no_output_refuses_the_assessment_by_name(
 
     with pytest.raises(AssessmentRefusedError, match="_values"):
         _scalar(p, [sample], entry, {sample.location: "digest"})
-    # The statistic is the revision's own: one the platform registers no scorer for refuses by
-    # name before any image is predicted, whatever a caller might have preferred.
-    unregistered = entry.model_copy(
-        update={"regression_criterion": "pearson_r"}
-    )
-    with pytest.raises(AssessmentRefusedError, match="'pearson_r'"):
-        _scalar(p, [sample], unregistered, {sample.location: "digest"})
 
     class Short:
         def predict_batch(self, sources, execution, *, tile_batch_size):

@@ -495,6 +495,35 @@ def test_a_delivery_reads_the_rasters_georeferencing_once(
     assert len(reads) == 2
 
 
+def test_a_delivery_reads_the_confirmed_revision_once_per_act(
+    tmp_path, monkeypatch
+):
+    """The per-plant statistic and the binding come from one read of the confirmed revision, the
+    delivery's own: the door hands its per-plant records over and reads none itself.
+    """
+    from tcip_mcp import operationalization
+
+    raster_path = _raster(tmp_path)
+    _write_geo_raster(raster_path)
+    bucket = _raster_bucket(tmp_path, raster_path, [(8.0, 8.0, 12.0, 12.0)])
+    registry = _plant_registry(
+        tmp_path, _plant_grid_csv(tmp_path, raster_path, _PLANT_PIXELS)
+    )
+    reads: list = []
+    real = operationalization.confirmed_revision
+
+    def counting(*args, **kwargs):
+        reads.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(operationalization, "confirmed_revision", counting)
+    delivered = _deliver(tmp_path, bucket, registry, _GRID)
+    assert "error" not in delivered, delivered
+    # Two acts: the attempt the delivery gate refuses for its acknowledgment, then the
+    # acknowledged one; each reads the revision once.
+    assert len(reads) == 2
+
+
 def test_a_far_detection_is_counted_to_no_plant(tmp_path):
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)

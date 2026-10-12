@@ -1,18 +1,8 @@
-"""Per-plant aggregation, temporal/spatial aggregation of per-image results.
-
-Aggregation strategies (per-plant summary of a per-image value):
-  - count:    Median detection count across images per plant
-  - mode:     Most frequent value (ordinal traits)
-  - mean:     Arithmetic mean (continuous traits)
-  - sum:      Sum of values (area traits)
+"""The per-plant delivery, which aggregates per-image records under the statistic its trait's
+confirmed revision names among :data:`PLANT_AGGREGATIONS`.
 
 A trait's phenology milestones (percentile-crossing dates of its positive-state fraction) are
 ``postprocessing/phenology.py``'s.
-
-Usage:
-    results = aggregate_per_plant(image_results, strategy="count")
-    deliver_per_plant_aggregate(
-        project, results, "output.csv", delivered_phenotype="stem_count", ...)
 
 ``delivered_phenotype`` is a crop-vocabulary delivered-phenotype name (``stem_count`` is one, as an
 example rather than as the shape), which is what the CSV column and the unit cross-check are about.
@@ -22,86 +12,50 @@ from __future__ import annotations
 
 import logging
 import statistics
-from collections import Counter, defaultdict
-from collections.abc import Sequence
+from collections import defaultdict
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from tcip_mcp.buckets import Bucket
+    from tcip_mcp.traits import PlantAggregation
 
 logger = logging.getLogger(__name__)
 
 
-def aggregate_per_plant(
-    image_results: list[dict],
-    strategy: str = "count",
-    plant_id_key: str = "plant_id",
-    value_key: str = "count",
-    plant_id_fn: Any = None,
+def _per_plant(
+    records: list[dict], *, plant_aggregation: PlantAggregation, value_key: str
 ) -> list[dict]:
-    """Aggregate per-image results to per-plant summaries.
+    """Per-plant summaries of per-image ``records``, one per ``plant_id``: the plant, its record
+    count as ``n_images``, and as ``value`` the :data:`PLANT_AGGREGATIONS` statistic
+    ``plant_aggregation`` names over the records' ``value_key`` (a record without it is a missing
+    observation; ``None`` when every record of the plant misses it).
 
-    Every record's ``plant_id`` must come from an explicit ``plant_id_key`` value or
-    ``plant_id_fn(image)``; a record for which neither resolves raises, naming
-    ``build_plant_mapping`` (``tcip_mcp.pipelines.postprocessing.plant_mapping``).
-
-    When a record carries an assignment's ``source``/``distance_m`` (as ``build_plant_mapping``'s
-    ``Assignment`` rows do), they are summarized per plant as ``plant_id_source`` (``"mixed"``
-    where the plant's images disagree) and ``plant_id_distance_m_max``. A record's
-    ``plant_attribution`` (the
-    granularity objects were attributed to plants at, e.g. ``plant_mapping.MappingBuild``'s
-    ``"image"`` or ``orthomosaic_mapping.DetectionAssignment``'s ``"detection"``) is carried onto
-    the summary; a plant whose own images disagree on it refuses (see :func:`_agreed`).
-
-    Args:
-        image_results: List of dicts, each with at least an 'image' key, a plant_id_key or a value
-            plant_id_fn can resolve, and a value field (e.g., 'count', 'class', 'value').
-        strategy: Aggregation strategy, 'count', 'mode', 'mean', 'sum'.
-        plant_id_key: Key in each result dict for plant identification.
-        value_key: Key in each result dict for the value to aggregate.
-        plant_id_fn: Callable to derive plant_id from the image path when plant_id_key is absent.
-
-    Returns:
-        List of per-plant summary dicts.
-
+    A record carrying no ``plant_id`` refuses, naming ``build_plant_mapping``. Where records carry
+    an assignment's ``source``/``distance_m`` (as ``build_plant_mapping``'s ``Assignment`` rows
+    do), they are summarized per plant as ``plant_id_source`` (``"mixed"`` where the plant's
+    images disagree) and ``plant_id_distance_m_max``.
     """
     groups: dict[str, list[dict]] = defaultdict(list)
-    for r in image_results:
-        if plant_id_key in r and r[plant_id_key] not in (None, ""):
-            pid = r[plant_id_key]
-        elif plant_id_fn is not None:
-            pid = plant_id_fn(r.get("image", ""))
-        else:
-            pid = None
-        if pid in (None, ""):
+    for r in records:
+        if r.get("plant_id") in (None, ""):
             raise ValueError(
-                f"aggregate_per_plant: record {r.get('image', '<no image key>')!r} has no "
-                f"{plant_id_key!r} value and no plant_id_fn resolved one. Plant identity is never "
-                "guessed from a filename. Pass plant_id_fn=... built from "
-                "tcip_mcp.pipelines.postprocessing.plant_mapping.build_plant_mapping's real "
-                f"GNSS+sequence resolution, or ensure every record carries a {plant_id_key!r} key."
+                f"record {r.get('image', '<no image key>')!r} carries no plant_id. Plant "
+                "identity is never guessed from a filename: attach the plant each image was "
+                "assigned by tcip_mcp.pipelines.postprocessing.plant_mapping.build_plant_mapping."
             )
-        groups[pid].append(r)
+        groups[str(r["plant_id"])].append(r)
 
-    from tcip_mcp.pipelines.model_build import resolve_named
-
-    aggregator = resolve_named(
-        strategy, _STRATEGIES, kind="aggregation strategy"
-    )
-
+    statistic = PLANT_AGGREGATIONS[plant_aggregation]
     results = []
     for plant_id, items in sorted(groups.items()):
         values = [r[value_key] for r in items if value_key in r]
-        summary = aggregator(values, len(items) - len(values))
-        summary["plant_id"] = plant_id
-        summary["observations"] = len(items)
-        summary["value_key"] = value_key
-        summary["plant_attribution"] = _agreed(
-            items,
-            "plant_attribution",
-            f"aggregate_per_plant, plant {plant_id!r}",
-        )
+        summary: dict[str, Any] = {
+            "plant_id": plant_id,
+            "n_images": len(items),
+            "value": statistic(values) if values else None,
+        }
         sources = {r["source"] for r in items if r.get("source") is not None}
         if sources:
             summary["plant_id_source"] = (
@@ -117,84 +71,22 @@ def aggregate_per_plant(
     return results
 
 
-def _agreed(
-    items: list[dict], key: str, where: str, *, required: bool = False
-) -> Any:
-    """The one value every item states for ``key``; ``None`` when every item omits an optional
-    ``key``. Refuses (``ValueError`` naming ``where``) when the items disagree or, with
-    ``required``, when any omits it.
-    """
-    values = {r.get(key) for r in items}
-    if len(values) > 1 or (required and None in values):
-        raise ValueError(
-            f"{where}: records disagree on{' or omit' if required else ''} {key} "
-            f"({sorted(str(v) for v in values)}); every record must state the same one."
-        )
-    return next(iter(values))
-
-
-# ── Strategy implementations ────────────────────────────────────────────────
-
-
-def _agg_count(values: list, n_missing: int) -> dict:
-    """Median count across images.
-
-    A missing value_key is a missing observation, not a measured 0.
-    """
-    return {
-        "value": statistics.median(values) if values else None,
-        "min_count": min(values) if values else None,
-        "max_count": max(values) if values else None,
-        "n_missing": n_missing,
-    }
-
-
-def _agg_mean(values: list, n_missing: int) -> dict:
-    """Arithmetic mean of continuous values; ``None`` when every item omits ``value_key``."""
-    if not values:
-        return {"value": None, "n_observations_with_value": 0}
-    return {
-        "value": round(statistics.mean(values), 4),
-        "std": round(statistics.stdev(values), 4) if len(values) > 1 else 0.0,
-        "n_observations_with_value": len(values),
-    }
-
-
-def _agg_mode(values: list, n_missing: int) -> dict:
-    """Most frequent value (for ordinal traits)."""
-    if not values:
-        return {"value": None}
-    counter = Counter(values)
-    mode_val, mode_count = counter.most_common(1)[0]
-    return {
-        "value": mode_val,
-        "agreement": round(mode_count / len(values), 4),
-        "distribution": dict(counter),
-    }
-
-
-def _agg_sum(values: list, n_missing: int) -> dict:
-    """Sum of values (for area traits); ``None`` when every item omits ``value_key``."""
-    if not values:
-        return {"value": None, "n_observations_with_value": 0}
-    return {"value": sum(values), "n_observations_with_value": len(values)}
-
-
-_STRATEGIES = {
-    "count": _agg_count,
-    "mean": _agg_mean,
-    "mode": _agg_mode,
-    "sum": _agg_sum,
+PLANT_AGGREGATIONS: dict[PlantAggregation, Callable[[list], Any]] = {
+    "median": statistics.median,
+    "mean": statistics.mean,
+    "mode": statistics.mode,
+    "sum": sum,
 }
+"""The per-plant statistics by the name a trait entry's ``plant_aggregation`` states."""
 
 
 def _resolve_units(
     delivered_phenotype: str,
-    results: list[dict],
+    value_key: str,
     scalar: bool,
 ) -> tuple[str, str | None, str | None]:
-    """``(display_unit, linear_basis, declared_unit)``: the units implied by the aggregated
-    values' own value_key, and crops.yml's declared unit for ``delivered_phenotype`` or ``None``.
+    """``(display_unit, linear_basis, declared_unit)``: the units implied by the delivered
+    values' ``value_key``, and crops.yml's declared unit for ``delivered_phenotype`` or ``None``.
 
     Under a ``scalar`` head's delivery, a value_key with no unit suffix at all takes the declared
     unit; one that explicitly ends in ``_px`` (or is bare ``"px"``) never does. A value_key that
@@ -208,25 +100,10 @@ def _resolve_units(
     )
     from tcip_mcp.traits import crops_units
 
-    implied_pairs = {
-        p
-        for p in (unit_from_value_key(r.get("value_key", "")) for r in results)
-        if p
-    }
-    if len(implied_pairs) > 1:
-        implied_units = {display for display, _linear_basis in implied_pairs}
-        raise ValueError(
-            f"results for delivered phenotype {delivered_phenotype!r} imply more than one "
-            f"physical unit ({sorted(implied_units)}) across rows, cannot label a single units "
-            "column."
-        )
     declared = crops_units().get(delivered_phenotype)
-    pair = next(iter(implied_pairs), None)
+    pair = unit_from_value_key(value_key)
     if pair is None:
-        explicitly_px = any(
-            is_pixel_space_key(r.get("value_key", "")) for r in results
-        )
-        if scalar and declared is not None and not explicitly_px:
+        if scalar and declared is not None and not is_pixel_space_key(value_key):
             return declared, declared, declared
         return "", None, declared
     display, linear_basis = pair
@@ -241,9 +118,10 @@ def _resolve_units(
 
 def deliver_per_plant_aggregate(
     project: Path,
-    results: list[dict],
+    records: list[dict],
     output_path: str,
     *,
+    value_key: str,
     delivered_phenotype: str,
     delivery_kind: str,
     buckets: Sequence[Bucket],
@@ -256,60 +134,73 @@ def deliver_per_plant_aggregate(
     acknowledgment_id: str | None = None,
     actor: str | None,
 ) -> dict:
-    """Deliver per-plant aggregated ``results`` (:func:`aggregate_per_plant`'s own output) as a
-    ``delivery_kind`` CSV at ``output_path``, by ``actor``, for exactly the population ``plants``
+    """Deliver the per-plant aggregate of per-image ``records`` (each carrying its ``plant_id``
+    and its value under ``value_key``) as a ``delivery_kind`` CSV at ``output_path``, by
+    ``actor``, for exactly the population ``plants``
     (:func:`~tcip_mcp.pipelines.postprocessing.phenology.population`'s list), over the published
     ``buckets`` the values came from.
 
     ``delivered_phenotype`` resolves to the one trait whose latest confirmed revision delivers it,
-    and that revision's ``delivery_kind`` operationalization must cover it and every row's value
-    key. The rows must be exactly the population, every one carrying a value, and agree on
-    ``plant_attribution``. The units come from the rows' own value key, cross-checked against
-    crops.yml. The buckets, the physical-scale assessment ``scale_assessment_id`` and the unit
-    clear the one gate, the recorded acknowledgment ``acknowledgment_id`` shipping them
-    unvalidated when it does not validate them.
+    and that revision's ``delivery_kind`` operationalization must cover it and ``value_key``. The
+    records are aggregated per plant under the revision's ``plant_aggregation``
+    (:func:`_per_plant`); the plants must be exactly the population, every one carrying a value,
+    and the records agree on ``plant_attribution``. The units come from ``value_key``,
+    cross-checked against crops.yml. The buckets, the physical-scale assessment
+    ``scale_assessment_id`` and the unit clear the one gate, the recorded acknowledgment
+    ``acknowledgment_id`` shipping them unvalidated when it does not validate them.
 
     Each row carries the plant, its value and unit, its provenance of attribution, and the
-    delivery's own cells, written with the delivery's one event under ``door`` with its population
-    and ``plant_mapping`` disclosure (:func:`~tcip_mcp.delivery.deliver_csv`); returns what was
-    delivered.
+    delivery's own cells, written with the delivery's one event under ``door`` with its
+    population and ``plant_mapping`` disclosure (:func:`~tcip_mcp.delivery.deliver_csv`); returns
+    what was delivered.
     """
     from tcip_mcp.delivery import DELIVERY_COLUMNS, Result, deliver_csv, gate
     from tcip_mcp.operationalization import confirmed_revision
     from tcip_mcp.traits import PER_PLANT_COUNT_AGGREGATE
 
-    by_plant = {str(r["plant_id"]): r for r in results}
+    units, linear_basis, declared = _resolve_units(
+        delivered_phenotype,
+        value_key,
+        scalar=delivery_kind != PER_PLANT_COUNT_AGGREGATE,
+    )
+    if delivery_kind == PER_PLANT_COUNT_AGGREGATE and declared and not units:
+        raise ValueError(
+            f"delivered phenotype {delivered_phenotype!r} is declared "
+            f"units={declared!r}, and the value key {value_key!r} implies no physical unit."
+        )
+    revision = confirmed_revision(
+        delivery_kind,
+        project=project,
+        delivered_phenotype=delivered_phenotype,
+        value_key=value_key,
+    )
+    by_plant = {
+        s["plant_id"]: s
+        for s in _per_plant(
+            records,
+            plant_aggregation=revision.entry.plant_aggregation,
+            value_key=value_key,
+        )
+    }
     if sorted(by_plant) != sorted(plants):
         raise ValueError(
-            f"the rows cover plants {sorted(by_plant)} and the population is {sorted(plants)}: a "
-            "delivery ships exactly its population, one row each."
+            f"the records cover plants {sorted(by_plant)} and the population is "
+            f"{sorted(plants)}: a delivery ships exactly its population, one row each."
         )
-    none_valued = [p for p in plants if by_plant[p].get("value") is None]
+    none_valued = [p for p in plants if by_plant[p]["value"] is None]
     if none_valued:
         raise ValueError(
             f"plant(s) {none_valued} carry no {delivered_phenotype!r} observation: a "
             "missing measurement never ships as an empty cell; leave them out of "
             "the population."
         )
-    attribution = _agreed(
-        results, "plant_attribution", "the delivered rows", required=True
-    )
-    units, linear_basis, declared = _resolve_units(
-        delivered_phenotype,
-        results,
-        scalar=delivery_kind != PER_PLANT_COUNT_AGGREGATE,
-    )
-    if delivery_kind == PER_PLANT_COUNT_AGGREGATE and declared and not units:
+    attributions = {r.get("plant_attribution") for r in records}
+    if len(attributions) > 1 or None in attributions:
         raise ValueError(
-            f"delivered phenotype {delivered_phenotype!r} is declared "
-            f"units={declared!r}, and the rows' value key implies no physical unit."
+            "the delivered records disagree on or omit plant_attribution "
+            f"({sorted(str(a) for a in attributions)}); every record must state the same one."
         )
-    revision = confirmed_revision(
-        delivery_kind,
-        project=project,
-        delivered_phenotype=delivered_phenotype,
-        value_keys=[r.get("value_key", "") for r in results],
-    )
+    (attribution,) = attributions
     result = Result(
         [
             "plant_id",
@@ -332,8 +223,8 @@ def deliver_per_plant_aggregate(
                 "delivered_phenotype": delivered_phenotype,
                 "value": by_plant[plant]["value"],
                 "units": units,
-                "value_key": by_plant[plant].get("value_key", ""),
-                "n_images": by_plant[plant].get("observations", 0),
+                "value_key": value_key,
+                "n_images": by_plant[plant]["n_images"],
                 "pipeline_version": pipeline_version,
                 "plant_id_source": by_plant[plant].get("plant_id_source", ""),
                 "plant_attribution": attribution,

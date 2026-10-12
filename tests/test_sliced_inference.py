@@ -803,6 +803,6 @@ def test_the_bucket_records_the_slice_geometry_the_checkpoint_derived(
     assert (execution.tile_size, execution.overlap) == (TILE, OVERLAP)
     assert execution.postprocess == "nmm"
     assert execution.sahi_version == sahi.__version__
-    merge = cross_tile_merge(execution)
-    assert type(merge) is POSTPROCESS_NAME_TO_CLASS["NMM"]
-    assert (merge.match_metric, merge.match_threshold) == ("IOS", 0.6)
+    merger = cross_tile_merge(execution)
+    assert type(merger) is POSTPROCESS_NAME_TO_CLASS["NMM"]
+    assert (merger.match_metric, merger.match_threshold) == ("IOS", 0.6)

@@ -240,8 +240,8 @@ chains the canonical primitives, in the project's own directory, never in this r
 build path, every step audited.
 Each training phase calls `launch_training` (full audited envelope, leakage-free split,
 tiling persistence) against a `model_source` builder; run each stage's model with
-`run_inference`; then aggregate with the importable postprocessing libs
-(`aggregate_per_plant` / `export_aggregated_csv`, or `deliver_phenology_milestones` for milestone dates):
+`run_inference`; then hand the per-image records to a delivery door (`deliver_per_plant_csv`,
+which aggregates them per plant, or `deliver_phenology_milestones` for milestone dates):
 
 ```python
 # <trait>_pipeline.py: chain the primitives; each launch_training goes
@@ -254,8 +254,7 @@ run_inference(
     bucket="stage-b/<date>",
 )
 
-# aggregate_per_plant never guesses plant identity from a filename; supply a real plant_id_fn.
-# build_plant_mapping (a GNSS + capture-sequence resolver) is the real mechanism.
+# Plant identity is never guessed from a filename: build_plant_mapping assigns each image its plant.
 from pathlib import Path
 from tcip_mcp.pipelines.postprocessing.plant_mapping import load_mapping
 
@@ -264,32 +263,30 @@ build = load_mapping(
 )  # from a prior build_plant_mapping call
 by_stem = {row["stem"]: row for rows in build.rows().values() for row in rows}
 
-
-def plant_id_fn(image_path: str) -> str | None:
-    row = by_stem.get(Path(image_path).stem)
-    return row["plot_name"] if row else None
-
-
-# Each row carries its assignment's own source, distance_m and plant_attribution, read by those names.
-image_results = [
-    {**r, **{k: row[k] for k in ("source", "distance_m", "plant_attribution")}}
+# Each record carries its assignment's plant, source, distance_m and plant_attribution.
+records = [
+    {
+        **r,
+        "plant_id": row["plot_name"],
+        **{k: row[k] for k in ("source", "distance_m", "plant_attribution")},
+    }
     for r in read_stage_b_preds_as_image_results(
         "stage-b/<date>"
     )  # your own per-image count reader
     if (row := by_stem.get(Path(r["image"]).stem))
 ]
 
-# The final CSV is a phenotype delivery door: it clears the one gate over the published buckets
-# the counts came from, and an unvalidated bucket refuses without a breeder's recorded acknowledgment.
-summaries = aggregate_per_plant(image_results, plant_id_fn=plant_id_fn)
+# The delivery door aggregates each plant's records under the trait's confirmed plant_aggregation
+# and clears the one gate over the buckets; an unvalidated bucket needs a recorded acknowledgment.
 deliver_per_plant_csv(
-    summaries,
+    records,
     "phenotype.csv",
     delivered_phenotype="<phenotype>",
     delivery_kind="per_plant_count_aggregate",
     plants=[...],
     dataset_root=dataset_root,
     buckets=["stage-b/<date>"],
+    value_key="count",
 )
 ```
 

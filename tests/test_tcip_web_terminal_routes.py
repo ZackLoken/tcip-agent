@@ -374,10 +374,10 @@ def test_each_rows_rendered_argv_spawns_in_a_real_pty_and_streams(
     assert created["launched"][
         "delivery_unverified"
     ] == row.delivery_unverified(created["launched"]["version"])
-    (line,) = audit_rows(opened_project, "agent_terminal_started")
-    assert line["arguments"]["prepared"] == expected_prepared
-    assert line["arguments"]["confinement"] == row.confinement
-    assert line["arguments"]["argv"] == launched
+    (started,) = audit_rows(opened_project, "agent_terminal_started")
+    assert started["arguments"]["prepared"] == expected_prepared
+    assert started["arguments"]["confinement"] == row.confinement
+    assert started["arguments"]["argv"] == launched
 
 
 def test_a_launch_preparation_that_fails_refuses_the_launch_naming_it(

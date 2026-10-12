@@ -25,7 +25,7 @@ def test_the_subprocess_resolves_the_authored_criterion_and_leaves_the_trait_ent
     pytest.importorskip("torchvision")
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.tools import training_tools
-    from tcip_mcp.traits import CENTER_MATCH, read_trait
+    from tcip_mcp.traits import read_trait
     from tests._trait_fixtures import entry, propose_and_confirm
 
     monkeypatch.setattr(
@@ -45,7 +45,7 @@ def test_the_subprocess_resolves_the_authored_criterion_and_leaves_the_trait_ent
         height=128,
     )
     proposed = propose_and_confirm(
-        tmp_path, entry("leaf", ("leaf_length",), localization=CENTER_MATCH)
+        tmp_path, entry("leaf", ("leaf_length",), localization="center_match")
     )
 
     cfg = training_config(

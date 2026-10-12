@@ -167,20 +167,20 @@ def deliver_phenology_milestones(
     buckets: list[str],
     output_csv_path: str,
     plants: list[str],
-    require_all_dates_complete: bool = phenology.REQUIRE_ALL_DATES_COMPLETE,
     acknowledgment_id: str | None = None,
 ) -> dict:
     """Per-plant phenology milestones from prediction buckets whose scope declares the positive
     state's attribute, and a plant mapping.
 
     A phenology milestone is a crossing of the fraction of a plant's detected objects a classifier
-    calls the trait's positive class. The CSV carries each milestone date the trait's latest
-    confirmed revision declares and its evidentiary bound, one row per plant in ``plants``, and
-    the delivery's ``validated``, ``trait_revision`` and ``delivery_event_id``. Every bucket must
-    have been published under an assessment that answers for a ``state_crossing_dates`` delivery
-    of that revision, or the delivery ships only under ``acknowledgment_id``, a breeder's recorded
-    acknowledgment of exactly this result, which this door executes and never records. The buckets
-    must name one producer.
+    calls the trait's positive class, read under the crossing rule the trait's latest confirmed
+    revision states. The CSV carries each milestone date that revision declares and its
+    evidentiary bound, one row per plant in ``plants``, a plant with any incomplete date carrying
+    none, and the delivery's ``validated``, ``trait_revision`` and ``delivery_event_id``. Every
+    bucket must have been published under an assessment that answers for a
+    ``state_crossing_dates`` delivery of that revision, or the delivery ships only under
+    ``acknowledgment_id``, a breeder's recorded acknowledgment of exactly this result, which this
+    door executes and never records. The buckets must name one producer.
 
     Args:
         trait: A trait in this project.
@@ -191,11 +191,6 @@ def deliver_phenology_milestones(
         output_csv_path: Where to write the CSV.
         plants: The delivery's population, the plant ids (the mapping's ``plot_name`` values) it
             is for; an empty list refuses.
-        require_all_dates_complete: Compute a plant's milestones only when every one of its dates
-            carries the positive state's attribute on every detection and is fully observed;
-            ``False`` computes them from its complete dates alone. Defaults to
-            ``phenology.REQUIRE_ALL_DATES_COMPLETE``; recorded on the delivery
-            event.
         acknowledgment_id: A breeder's recorded acknowledgment of this unvalidated result.
 
     """
@@ -215,7 +210,6 @@ def deliver_phenology_milestones(
             dataset_root=located(dataset_root, project),
             buckets=buckets,
             plants=plants,
-            require_all_dates_complete=require_all_dates_complete,
         )
         delivered = phenology.deliver_phenology(
             project,

@@ -1225,7 +1225,7 @@ def test_a_per_plant_delivery_reads_and_writes_under_the_project(
         TWO_PLANTS,
         _bucket,
         _mapped,
-        _results,
+        _records,
     )
 
     found = []
@@ -1240,12 +1240,13 @@ def test_a_per_plant_delivery_reads_and_writes_under_the_project(
         bucket = _bucket(
             project, dataset_root, date, {"P1": 2, "P2": 1}, name="run"
         )
-        results = _results(("P1", 2), ("P2", 1))
+        records = _records(("P1", 2), ("P2", 1))
         with pytest.raises(DeliveryRefusedError) as refused:
             deliver_per_plant_aggregate(
                 project,
-                results,
+                records,
                 str(project / "unacknowledged.csv"),
+                value_key="count",
                 delivered_phenotype="stem_count",
                 delivery_kind=KIND,
                 buckets=[read_bucket(dataset_root, bucket)],
@@ -1266,13 +1267,14 @@ def test_a_per_plant_delivery_reads_and_writes_under_the_project(
 
         delivered = deliver_per_plant_csv(
             project,
-            results,
+            records,
             "out.csv",
             "stem_count",
             KIND,
             ["P1", "P2"],
             _relative(dataset_root, project),
             [bucket],
+            value_key="count",
             crop="currant",
             acknowledgment_id=act.acknowledgment_id,
         )
@@ -1314,7 +1316,6 @@ def test_a_phenology_measurement_reads_the_buckets_under_the_project_rooted_data
             list(series.buckets.values()),
             "out.csv",
             list(PLANTS),
-            require_all_dates_complete=True,
         )
         assert "no assessment answers for bucket" in refused.get(
             "error", ""

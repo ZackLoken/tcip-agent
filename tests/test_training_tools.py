@@ -861,7 +861,8 @@ def test_apply_hpo_params_optimizer_axes_reach_optimizer_param_groups():
     (backbone_lr, backbone_decay), (head_lr, head_decay) = _built_groups(
         _applied(_base(), swept)
     )
-    assert (backbone_lr, head_lr) == (pytest.approx(3e-4), pytest.approx(3e-3))
+    assert backbone_lr == pytest.approx(3e-4)
+    assert head_lr == pytest.approx(3e-3)
     assert backbone_decay == head_decay == pytest.approx(2e-4)
 
 

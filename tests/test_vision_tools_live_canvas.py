@@ -157,7 +157,7 @@ def test_a_capture_no_gui_answered_reports_the_state_as_last_known(
     image = _canvas_image(tmp_path)
     _push_state(tmp_path, image, received_at=_ago(600))
 
-    pings: list[tuple[str, str]] = []
+    pings: list[tuple[BoundProject, str, str]] = []
 
     def silent_hub(
         target: BoundProject,

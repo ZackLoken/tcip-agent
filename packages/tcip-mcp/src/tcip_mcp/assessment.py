@@ -802,8 +802,7 @@ def _scalar(
     """The scalar criterion over the holdout side: each sample's one predicted rank or value
     against its table row (:func:`~tcip_mcp.pipelines.data.datasets.table_values`). A pass that
     returns other than one prediction per sample, and a prediction carrying no output, refuse by
-    name; a regression delivery is scored by the revision's own ``regression_criterion``, one the
-    platform does not register refusing by name.
+    name; a regression delivery is scored by the revision's own ``regression_criterion``.
     """
     from tcip_mcp.pipelines.data.datasets import table_values
     from tcip_mcp.pipelines.operating_point import (
@@ -813,12 +812,6 @@ def _scalar(
     from tcip_mcp.pipelines.training.evaluation import quadratic_weighted_kappa
 
     ordinal = p.checkpoint.task == "ordinal"
-    if not ordinal and entry.regression_criterion not in REGRESSION_CRITERIA:
-        raise AssessmentRefusedError(
-            f"the revision assesses its regression delivery by "
-            f"{entry.regression_criterion!r}, and a regression delivery is "
-            f"assessed by one of {sorted(REGRESSION_CRITERIA)}."
-        )
     suffix, cast_to = ("_ranks", int) if ordinal else ("_values", float)
     predictions = p.predict([s.image for s in hold])
     if len(predictions) != len(hold):

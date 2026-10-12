@@ -995,10 +995,8 @@ def test_launch_training_persists_effective_tile_geometry(
     tiling = resolved.tiling
     assert tiling is not None
     # Every 30 px box derives one extent: the edge five of them, the overlap that extent's.
-    assert (tiling.tile_size, tiling.overlap) == (
-        150,
-        pytest.approx(overlap_ratio(150, 30)),
-    )
+    assert tiling.tile_size == 150
+    assert tiling.overlap == pytest.approx(overlap_ratio(150, 30))
     geometry = experiments.find_observation(
         eid, project=tmp_path
     ).resolved_geometry

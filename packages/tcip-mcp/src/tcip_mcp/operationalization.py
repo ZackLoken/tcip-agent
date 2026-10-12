@@ -4,7 +4,7 @@ of whether its operationalization binds what a delivery door is about to write.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast
 
@@ -53,7 +53,7 @@ def confirmed_revision(
     project: str | Path,
     trait: str | None = None,
     delivered_phenotype: str | None = None,
-    value_keys: Sequence[Any] | None = None,
+    value_key: str | None = None,
     registry: SubjectRegistry | None = None,
 ) -> TraitRevision:
     """The latest confirmed revision a ``delivery_kind`` delivery ships under, bound (:func:`bind`)
@@ -77,7 +77,7 @@ def confirmed_revision(
         revision,
         delivery_kind,
         delivered_phenotype=delivered_phenotype,
-        value_keys=value_keys,
+        value_key=value_key,
         registry=registry,
     )
     return revision
@@ -88,14 +88,14 @@ def bind(
     delivery_kind: str,
     *,
     delivered_phenotype: str | None = None,
-    value_keys: Sequence[Any] | None = None,
+    value_key: str | None = None,
     buckets: Mapping[str, str | None] | None = None,
     registry: SubjectRegistry | None = None,
 ) -> None:
     """Refuse (:class:`OperationalizationRefusedError`) a delivery ``revision``'s ``delivery_kind``
-    operationalization does not bind: a delivered phenotype it does not cover, a row value key
-    outside its set or missing, a bucket (``buckets``: name to the subject its detections are of)
-    not counting its measured subject, or, with ``registry`` given, a positive state the delivered
+    operationalization does not bind: a delivered phenotype it does not cover, a value key
+    outside its set, a bucket (``buckets``: name to the subject its detections are of) not
+    counting its measured subject, or, with ``registry`` given, a positive state the delivered
     dataset's registry no longer declares.
     """
     entry = revision.entry
@@ -128,21 +128,14 @@ def bind(
         raise refuse(
             f"covers {list(stated.delivered_phenotypes)}, not {delivered_phenotype!r}"
         )
-    if value_keys is not None and delivery_kind in VALUE_KEY_KINDS:
-        missing = sum(1 for key in value_keys if not key)
-        if missing:
-            raise refuse(
-                f"covers value keys {list(stated.delivered_value_keys)}, and {missing} "
-                "row(s) carry no value key at all"
-            )
-        offending = sorted(
-            {str(key) for key in value_keys} - set(stated.delivered_value_keys)
+    if (
+        value_key is not None
+        and delivery_kind in VALUE_KEY_KINDS
+        and value_key not in stated.delivered_value_keys
+    ):
+        raise refuse(
+            f"covers value keys {list(stated.delivered_value_keys)}, not {value_key!r}"
         )
-        if offending:
-            raise refuse(
-                f"covers value keys {list(stated.delivered_value_keys)}, and these "
-                f"rows carry {offending}"
-            )
     for bucket, subject in (buckets or {}).items():
         if stated.measured_subject != subject:
             raise refuse(

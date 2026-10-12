@@ -3,7 +3,8 @@
 ``tools/generate_delivery_fixture.py`` makes real deliveries in scratch projects and writes the
 records ``GET /api/results/delivery-events`` serves for them to
 ``frontend/src/test/deliveryEvents.json``; this test regenerates them and holds the checked-in
-file to what a regeneration serves, every value compared but those a run mints.
+file to what a regeneration serves, every value compared but those a run mints. The trait
+listings ``tools/generate_trait_fixture.py`` writes are held the same way.
 """
 
 from __future__ import annotations
@@ -162,6 +163,32 @@ def test_the_comparison_keeps_every_value_a_run_does_not_mint() -> None:
         assert _normalized(fixture) != _normalized(checked)
     reminted = _changed(checked, "validated", "event_id", "another-id")
     assert _normalized(reminted) == _normalized(checked)
+
+
+def test_the_trait_listing_fixture_is_what_a_regeneration_serves(
+    tmp_path,
+) -> None:
+    """The checked-in trait listings are what ``tools/generate_trait_fixture.py`` serves: an entry
+    field added to the schema and not to the fixture, or a stale hash, fails this.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "tcip_trait_fixture_generator",
+        REPO_ROOT / "tools" / "generate_trait_fixture.py",
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    workspace = (tmp_path / "workspace").resolve()
+    workspace.mkdir()
+
+    served = module.listings(workspace)
+
+    assert json.loads(
+        module.GENERATED_PATH.read_text(encoding="utf-8")
+    ) == served, (
+        "packages/tcip-web/frontend/src/test/traitListings.json is out of date; "
+        "run python tools/generate_trait_fixture.py"
+    )
 
 
 def test_the_delivery_fixture_is_what_a_regeneration_serves() -> None:
