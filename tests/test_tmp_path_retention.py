@@ -1,10 +1,12 @@
-"""A test's workspace is removed when the test passes and kept when it fails, under the
+"""A test's workspace is emptied when the test passes and kept when it fails, under the
 ``failed`` retention policy, through the suite's own ``tmp_path`` fixture loaded into a child
-session the way ``tests/conftest.py`` loads it.
+session the way ``tests/conftest.py`` loads it; the emptied root stays so its numbered name is
+not handed out again.
 """
 
 from __future__ import annotations
 
+import os
 import textwrap
 from pathlib import Path
 
@@ -33,7 +35,7 @@ TWO_TESTS = textwrap.dedent(
 )
 
 
-def test_a_passed_tests_workspace_is_removed_and_a_failed_ones_kept(tmp_path):
+def test_a_passed_tests_workspace_is_emptied_and_a_failed_ones_kept(tmp_path):
     test_file = tmp_path / "test_two.py"
     test_file.write_text(TWO_TESTS, encoding="utf-8")
     proc = child_pytest(
@@ -44,6 +46,7 @@ def test_a_passed_tests_workspace_is_removed_and_a_failed_ones_kept(tmp_path):
         "-o",
         "tmp_path_retention_policy=failed",
         timeout=120,
+        env={k: v for k, v in os.environ.items() if k != "TCIP_MIN_TESTS"},
     )
     output = proc.stdout + proc.stderr
     assert "1 failed, 1 passed" in output, output
@@ -53,5 +56,6 @@ def test_a_passed_tests_workspace_is_removed_and_a_failed_ones_kept(tmp_path):
         .read_text(encoding="utf-8")
         .splitlines()
     )
-    assert not Path(roots["passes"]).exists(), roots
+    passed_root = Path(roots["passes"])
+    assert passed_root.is_dir() and not any(passed_root.iterdir()), roots
     assert (Path(roots["fails"]) / "payload.bin").exists(), roots
