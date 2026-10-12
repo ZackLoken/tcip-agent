@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -76,22 +77,29 @@ def tmp_path(
 ) -> Path:
     """Each test's ``tmp_path`` is ``<workspace>/project`` inside its own fresh workspace, which
     ``TCIP_WORKSPACE`` names and the web backend is started with, no additive image roots.
+    The workspace is removed after a test that passed under the ``failed`` retention policy,
+    the way pytest's own ``tmp_path`` is, and kept after one that failed.
 
     A refusal case uses a directory beside the workspace (``tmp_path_factory.mktemp``); a test of
     the additive roots starts the backend with them itself.
     """
+    from _pytest.tmpdir import tmppath_result_key
+
     from tcip_web.state import store
 
     name = re.sub(r"[\W]", "_", request.node.name)[:30]
-    workspace = (
-        tmp_path_factory.mktemp(name, numbered=True) / "workspace"
-    ).resolve()
+    root = tmp_path_factory.mktemp(name, numbered=True).resolve()
+    workspace = root / "workspace"
     project = workspace / "project"
     project.mkdir(parents=True)
     monkeypatch.setenv("TCIP_WORKSPACE", str(workspace))
     monkeypatch.delenv("TCIP_IMAGE_ROOTS", raising=False)
     store.configure(workspace, ())
-    return project
+    yield project
+    policy = request.config.getini("tmp_path_retention_policy")
+    outcome = request.node.stash.get(tmppath_result_key, {})
+    if policy == "failed" and outcome.get("call", True):
+        shutil.rmtree(root, ignore_errors=True)
 
 
 @pytest.fixture(autouse=True)
