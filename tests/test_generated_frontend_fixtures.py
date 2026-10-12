@@ -183,9 +183,9 @@ def test_the_trait_listing_fixture_is_what_a_regeneration_serves(
 
     served = module.listings(workspace)
 
-    assert json.loads(
-        module.GENERATED_PATH.read_text(encoding="utf-8")
-    ) == served, (
+    assert (
+        json.loads(module.GENERATED_PATH.read_text(encoding="utf-8")) == served
+    ), (
         "packages/tcip-web/frontend/src/test/traitListings.json is out of date; "
         "run python tools/generate_trait_fixture.py"
     )

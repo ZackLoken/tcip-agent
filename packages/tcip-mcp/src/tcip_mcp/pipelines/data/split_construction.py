@@ -832,7 +832,9 @@ def _drawn_split(
 
     from tcip_mcp.pipelines.data.selection import REFERENCE_SIDES
 
-    reserved = sorted(f"{side}_ratio" for side in set(REFERENCE_SIDES) & set(shares))
+    reserved = sorted(
+        f"{side}_ratio" for side in set(REFERENCE_SIDES) & set(shares)
+    )
     if reserved:
         raise ValueError(
             f"data.split states {reserved} over {len(samples)} admitted sources: a run holds "

@@ -539,7 +539,9 @@ def test_a_sweep_records_the_base_the_caller_stated_never_its_first_corner(
 
     project = tmp_path / "project"
     config = _detection_config(_canonical_dataset(project / "ds"))
-    config["data"]["split"] = drawn_split(val_ratio=0.2, grouping="tile_prefix")
+    config["data"]["split"] = drawn_split(
+        val_ratio=0.2, grouping="tile_prefix"
+    )
     space = {
         **sweep_space(),
         "data.split.val_ratio": {

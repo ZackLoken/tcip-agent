@@ -532,12 +532,17 @@ def test_the_stop_rule_validates_as_stated_and_refuses_a_zero_patience_and_an_on
         )
     assert any(
         "early_stopping.patience" in issue
-        for issue in _issues_of({**FLAT_CONFIG, "early_stopping": stop_rule(0)})
+        for issue in _issues_of(
+            {**FLAT_CONFIG, "early_stopping": stop_rule(0)}
+        )
     )
     assert any(
         "early_stopping.enabled" in issue
         for issue in _issues_of(
-            {**FLAT_CONFIG, "early_stopping": {**stop_rule(3), "enabled": True}}
+            {
+                **FLAT_CONFIG,
+                "early_stopping": {**stop_rule(3), "enabled": True},
+            }
         )
     )
 

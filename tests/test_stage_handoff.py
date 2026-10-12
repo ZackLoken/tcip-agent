@@ -622,9 +622,7 @@ def test_a_resumed_run_canceled_at_its_first_poll_saves_the_checkpoint_row(
     """
     from tcip_mcp.experiments import request_cancel
 
-    config = _config(
-        [stage(0)], horizon=3, checkpoint_every_n_epochs=1
-    )
+    config = _config([stage(0)], horizon=3, checkpoint_every_n_epochs=1)
     straight = _train(tmp_path, config, "straight")
     assert straight.status == "completed", straight.status_error
     checkpoint = (

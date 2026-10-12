@@ -247,7 +247,8 @@ _LOWER_IS_BETTER: frozenset[SelectionMetric] = frozenset(
 )
 
 HIGHER_IS_BETTER_BY_METRIC: dict[str, bool] = {
-    metric: metric not in _LOWER_IS_BETTER for metric in get_args(SelectionMetric)
+    metric: metric not in _LOWER_IS_BETTER
+    for metric in get_args(SelectionMetric)
 }
 """Direction of a better value for each :data:`SelectionMetric`."""
 

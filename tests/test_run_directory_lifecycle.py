@@ -557,9 +557,7 @@ def _trial(
     base_config["model_source"]["source_files"].append(__file__)
     sweep = opened_sweep(tmp_path, base_config)
     reported: list[float] = []
-    _run_hpo_trial(
-        point or dict(ONE_RATE), reported.append, sweep, "a"
-    )
+    _run_hpo_trial(point or dict(ONE_RATE), reported.append, sweep, "a")
     (trial_dir,) = run_dirs(tmp_path)
     return trial_dir, reported
 
@@ -699,7 +697,9 @@ def test_a_runs_and_a_sweeps_records_carry_no_metric_and_every_reader_answers_th
     ctx.report_objective(0.25)
     rows = read_rows(ctx.run_dir / METRICS_FILE)[0]
     assert rows[-1]["selection_metric"] == "mae"
-    assert run_summary(observe(ctx.run_dir), rows, None).best_metric_name == "mae"
+    assert (
+        run_summary(observe(ctx.run_dir), rows, None).best_metric_name == "mae"
+    )
 
     monkeypatch.setattr(
         subprocess_worker, "run_directory", lambda *a, **k: None
@@ -755,9 +755,10 @@ def test_a_runs_and_a_sweeps_records_carry_no_metric_and_every_reader_answers_th
     assert trial.trait_revision == swept
     assert run_summary(trial, [], None).best_metric_name == metric
     assert modes == ["max" if higher else "min"]
-    assert "objective" not in read_sweep(
-        sweep_dir, run_rows(tmp_path)
-    ).model_dump()
+    assert (
+        "objective"
+        not in read_sweep(sweep_dir, run_rows(tmp_path)).model_dump()
+    )
 
 
 def test_a_context_for_an_ended_run_is_refused_and_writes_nothing(

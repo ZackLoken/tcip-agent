@@ -60,7 +60,15 @@ def test_refuses_a_trait_scoped_run_naming_no_project(tmp_path):
 
     result = run_tcip(
         "score-predictions",
-        ["--path", str(img), "--bucket", bucket, *SCORED_AT, "--trait", "bud_count"],
+        [
+            "--path",
+            str(img),
+            "--bucket",
+            bucket,
+            *SCORED_AT,
+            "--trait",
+            "bud_count",
+        ],
         cwd=cwd,
     )
 

@@ -244,9 +244,7 @@ def test_a_recorded_resize_is_read_through_the_builders_own_chain():
     """The size the last resize of the chain the config builds states, the dict form's own."""
     assert _resize(augmentation(resize={"size": [320, 240]})) == (320, 240)
     assert _resize(
-        augmentation(
-            resize={"size": [800, 600]}, horizontal_flip={"p": 0.5}
-        )
+        augmentation(resize={"size": [800, 600]}, horizontal_flip={"p": 0.5})
     ) == (800, 600)
 
 

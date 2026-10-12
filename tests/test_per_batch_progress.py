@@ -104,9 +104,7 @@ def test_a_run_resolves_what_its_evaluation_reads_once(tmp_path, monkeypatch):
         calls.append(1)
         return real(trait, project)
 
-    ctx = _context(
-        tmp_path, [], evaluation=TRAIT_SCOPED
-    )
+    ctx = _context(tmp_path, [], evaluation=TRAIT_SCOPED)
     monkeypatch.setattr(traits, "read_trait", counted)
     assert ctx.default_train().status == "completed"
     model = ctx.build_model()
@@ -133,12 +131,11 @@ def test_a_run_scores_under_the_trait_revision_its_launch_resolved(
         return real(*args, **kwargs)
 
     monkeypatch.setattr(generic_trainer, "evaluate", recorded)
-    ctx = _context(
-        tmp_path, [], evaluation=TRAIT_SCOPED
-    )
+    ctx = _context(tmp_path, [], evaluation=TRAIT_SCOPED)
     launched = fx.latest("bud_opening", tmp_path)
     superseding = fx.propose_and_confirm(
-        tmp_path, fx.with_fields(launched, notes="A newer statement of the trait.")
+        tmp_path,
+        fx.with_fields(launched, notes="A newer statement of the trait."),
     )
     recorded = ctx.run.trait_revision
     assert recorded is not None
@@ -148,23 +145,25 @@ def test_a_run_scores_under_the_trait_revision_its_launch_resolved(
 
 
 @pytest.mark.usefixtures("seed_bud_trait_spec")
-def test_a_run_whose_recorded_revision_holds_another_entry_refuses_by_name(tmp_path):
+def test_a_run_whose_recorded_revision_holds_another_entry_refuses_by_name(
+    tmp_path,
+):
     """The body reads the trait entry at the revision its launch recorded, the entry's hash
     included: a record naming a hash that revision does not hold refuses naming both, rather than
     scoring under an entry the launch never resolved.
     """
     from tcip_mcp.traits import RevisionMovedError
 
-    ctx = _context(
-        tmp_path, [], evaluation=TRAIT_SCOPED
-    )
+    ctx = _context(tmp_path, [], evaluation=TRAIT_SCOPED)
     recorded = ctx.run.trait_revision
     assert recorded is not None
     ctx.run.trait_revision = recorded.model_copy(
         update={"trait_revision_sha256": "0" * 64}
     )
 
-    with pytest.raises(RevisionMovedError, match=recorded.trait_revision_sha256):
+    with pytest.raises(
+        RevisionMovedError, match=recorded.trait_revision_sha256
+    ):
         ctx.run.evaluation_arguments
 
 
@@ -191,9 +190,7 @@ def test_the_trainers_validation_and_a_bodys_evaluation_hand_evaluate_one_keywor
 
     monkeypatch.setattr(generic_trainer, "evaluate", recorded("trainer"))
     monkeypatch.setattr(evaluation, "evaluate", recorded("body"))
-    ctx = _context(
-        tmp_path, [], evaluation=TRAIT_SCOPED
-    )
+    ctx = _context(tmp_path, [], evaluation=TRAIT_SCOPED)
     assert ctx.default_train().status == "completed"
     ctx.evaluate(ctx.build_model())
 

@@ -103,7 +103,11 @@ def _resolve_units(
     declared = crops_units().get(delivered_phenotype)
     pair = unit_from_value_key(value_key)
     if pair is None:
-        if scalar and declared is not None and not is_pixel_space_key(value_key):
+        if (
+            scalar
+            and declared is not None
+            and not is_pixel_space_key(value_key)
+        ):
             return declared, declared, declared
         return "", None, declared
     display, linear_basis = pair

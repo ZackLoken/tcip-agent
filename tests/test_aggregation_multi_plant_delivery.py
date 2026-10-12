@@ -58,9 +58,11 @@ def test_each_plants_summary_describes_only_that_plants_records():
     assert out["PLANT_A"]["value"] == 4
     assert out["PLANT_B"]["value"] == 15.0
     assert out["PLANT_C"]["value"] == 7
-    assert [
-        out[p]["n_images"] for p in ("PLANT_A", "PLANT_B", "PLANT_C")
-    ] == [3, 2, 1]
+    assert [out[p]["n_images"] for p in ("PLANT_A", "PLANT_B", "PLANT_C")] == [
+        3,
+        2,
+        1,
+    ]
 
 
 def test_identity_provenance_is_summarized_per_plant_not_across_the_cohort():

@@ -357,7 +357,12 @@ def test_keep_regions_none_indexes_every_slice(tmp_path):
         base, tile_size=64, overlap=0.2, sliver_frac=SLIVER, skip_empty=False
     )
     explicit_none = TiledDetectionDataset(
-        base, tile_size=64, overlap=0.2, sliver_frac=SLIVER, skip_empty=False, keep_regions=None
+        base,
+        tile_size=64,
+        overlap=0.2,
+        sliver_frac=SLIVER,
+        skip_empty=False,
+        keep_regions=None,
     )
     from tcip_mcp.pipelines.slicing import slice_lattice
 
@@ -390,7 +395,8 @@ def test_keep_regions_restricts_to_fully_inside_tiles(tmp_path):
         base,
         tile_size=64,
         overlap=0.2,
-        sliver_frac=SLIVER, skip_empty=False,
+        sliver_frac=SLIVER,
+        skip_empty=False,
         keep_regions=[(0, 0, 128, 256)],
     )
 
@@ -423,14 +429,16 @@ def test_keep_regions_two_views_share_one_base_and_partition_disjointly(
         base,
         tile_size=64,
         overlap=0.2,
-        sliver_frac=SLIVER, skip_empty=False,
+        sliver_frac=SLIVER,
+        skip_empty=False,
         keep_regions=[(0, 0, 128, 256)],
     )
     right = TiledDetectionDataset(
         base,
         tile_size=64,
         overlap=0.2,
-        sliver_frac=SLIVER, skip_empty=False,
+        sliver_frac=SLIVER,
+        skip_empty=False,
         keep_regions=[(128, 0, 256, 256)],
     )
 

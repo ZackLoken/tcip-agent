@@ -292,7 +292,9 @@ def test_the_tiler_the_spatial_split_and_the_pass_derive_one_lattice_from_one_gr
             "images_dir": str(images_dir),
             "scope": {"subject": "bud"},
             "tiling": tiling_block(sliver_frac=0.5),
-            "split": drawn_split(val_ratio=0.2, seed=1, grouping="tile_prefix"),
+            "split": drawn_split(
+                val_ratio=0.2, seed=1, grouping="tile_prefix"
+            ),
         },
         monkeypatch,
     )

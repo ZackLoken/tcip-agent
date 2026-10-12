@@ -185,7 +185,9 @@ def restore_rng_state(
         loader_generator.set_state(state["loader_rng_state"])
 
 
-def loader_worker_init(worker_id: int, *, num_workers: int | None = None) -> None:
+def loader_worker_init(
+    worker_id: int, *, num_workers: int | None = None
+) -> None:
     """DataLoader worker-process initializer: configures the platform GDAL cache budget at
     ``1 / num_workers`` of it per worker (the whole budget for ``None``), and seeds numpy and
     random from the seed torch gave the worker (``torch.initial_seed``, the loader generator's
@@ -684,7 +686,9 @@ def apply_stage_freeze(
             "exposing freeze_backbone(stage)."
         )
     elif freeze_to < 0:
-        num_stages = getattr(getattr(model, "backbone", None), "num_stages", None)
+        num_stages = getattr(
+            getattr(model, "backbone", None), "num_stages", None
+        )
         if num_stages is None:
             raise ValueError(
                 f"stage freeze_to={freeze_to} freezes every stage of the model's backbone, and "

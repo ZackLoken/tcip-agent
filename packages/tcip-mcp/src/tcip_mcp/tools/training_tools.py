@@ -1264,7 +1264,9 @@ def open_sweep(
     metric = (base_config.get("evaluation") or {}).get("selection_metric")
     sampled = {
         value.get("selection_metric") if isinstance(value, dict) else value
-        for name, (_kind, values) in space_axes(param_space, grid=False).items()
+        for name, (_kind, values) in space_axes(
+            param_space, grid=False
+        ).items()
         if name in ("evaluation", "evaluation.selection_metric")
         for value in values
     }

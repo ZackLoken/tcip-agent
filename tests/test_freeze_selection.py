@@ -66,7 +66,9 @@ def _real_drawn_experiment(
             {
                 "images_dir": str(images_dir),
                 "scope": {"subject": subject},
-                "split": drawn_split(val_ratio=val_ratio, grouping="tile_prefix"),
+                "split": drawn_split(
+                    val_ratio=val_ratio, grouping="tile_prefix"
+                ),
             },
             **(
                 {}
@@ -125,7 +127,9 @@ def test_freeze_selection_round_trips_through_a_real_bind(tmp_path: Path):
         assert ts.exists(sample.ground_truth)
 
     second = train_config(run_config(Path(selection_dir), DETECTION_SOURCE))
-    assert selection_compatibility(second.data, second.data.split, frozen) == []
+    assert (
+        selection_compatibility(second.data, second.data.split, frozen) == []
+    )
 
     resolution = resolve_run(
         second, staged_sources(second, tmp_path).layout, project=tmp_path
@@ -361,7 +365,9 @@ def test_freeze_selection_refuses_a_spatial_split(tmp_path: Path):
             "images_dir": str(images_dir),
             "scope": {"subject": "bud"},
             "tiling": tiling_block(tile_size=128, overlap=0.2),
-            "split": drawn_split(val_ratio=0.2, seed=1, grouping="tile_prefix"),
+            "split": drawn_split(
+                val_ratio=0.2, seed=1, grouping="tile_prefix"
+            ),
         },
         experiment_id="exp-spatial",
     )

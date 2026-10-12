@@ -119,7 +119,11 @@ def test_overfit_check_judges_the_whole_objective_not_the_first_term():
     """A run where the first term improves while the objective as a whole worsens is refused."""
     model = _UnoptimizedCompanionTerm()
     report = overfit_check(
-        model, "classification", steps=15, dims=CLS_DIMS, seed=0,
+        model,
+        "classification",
+        steps=15,
+        dims=CLS_DIMS,
+        seed=0,
         deterministic=False,
     )
     assert report["passed"] is False

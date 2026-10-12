@@ -93,9 +93,7 @@ def test_preflight_config_accepts_trainer_canonical_stages(tmp_path):
     assert r["valid"] is True, r["issues"]
 
     # A stage carries no epoch count, and the stop rule that ends it is stated.
-    r2 = preflight_config(
-        tmp_path, {**cfg, "stages": [stage(0, epochs=5)]}
-    )
+    r2 = preflight_config(tmp_path, {**cfg, "stages": [stage(0, epochs=5)]})
     assert any(i.startswith("stages.0.epochs:") for i in r2["issues"]), r2[
         "issues"
     ]
@@ -154,7 +152,9 @@ def test_a_smoke_preflight_validates_its_config_once(tmp_path, monkeypatch):
             "scope": {},
             "images_dir": str(images_dir),
             "labels_dir": str(csv_path),
-            "split": drawn_split(val_ratio=0.15, seed=1, grouping="tile_prefix"),
+            "split": drawn_split(
+                val_ratio=0.15, seed=1, grouping="tile_prefix"
+            ),
         },
     )
 
@@ -629,7 +629,8 @@ def test_preflight_calibration_ratio_wrong_task_flags_issue(tmp_path):
     )
     r = preflight_config(tmp_path, cfg)
     assert any(
-        "calibration_ratio" in i and "reserved strips" in i for i in r["issues"]
+        "calibration_ratio" in i and "reserved strips" in i
+        for i in r["issues"]
     ), r["issues"]
 
 
@@ -656,7 +657,8 @@ def test_preflight_calibration_ratio_multi_member_flags_issue(tmp_path):
     )
     r = preflight_config(tmp_path, cfg)
     assert any(
-        "calibration_ratio" in i and "reserved strips" in i for i in r["issues"]
+        "calibration_ratio" in i and "reserved strips" in i
+        for i in r["issues"]
     ), r["issues"]
 
 
@@ -823,7 +825,9 @@ def test_the_launch_door_refuses_what_a_trainer_reads_unstated_and_the_schema_ad
     classifier = training_config(
         CLASSIFIER_SOURCE,
         {},
-        evaluation=evaluation_block(selection_metric="loss", conf_threshold=None),
+        evaluation=evaluation_block(
+            selection_metric="loss", conf_threshold=None
+        ),
         **loop,
     )
     assert train_config(classifier).trainer_reads().conf_threshold is None
@@ -1021,7 +1025,9 @@ def _classifier_base(project: Path, **overrides) -> dict:
         CLASSIFIER_SOURCE,
         _labeled(project),
         evaluation=evaluation_block(
-            selection_metric="accuracy", conf_threshold=None, score_weights=None
+            selection_metric="accuracy",
+            conf_threshold=None,
+            score_weights=None,
         ),
         **overrides,
     )

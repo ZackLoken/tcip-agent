@@ -247,7 +247,9 @@ def test_an_optimizer_trains_a_built_detectors_backbone_at_backbone_lr_and_the_r
     assert {r for i, r in rate.items() if i not in backbone} == {1e-3}
 
     bare = nn.Linear(2, 1)
-    with pytest.raises(ValueError, match="backbone_lr .* and head_lr .* differ"):
+    with pytest.raises(
+        ValueError, match="backbone_lr .* and head_lr .* differ"
+    ):
         build_optimizer(spec, bare, backbone_lr=1e-4, head_lr=1e-3)
     one_rate = build_optimizer(spec, bare, backbone_lr=1e-3, head_lr=1e-3)
     assert [g["lr"] for g in one_rate.param_groups] == [1e-3]
@@ -489,9 +491,7 @@ def test_warmup_lr_ramps_at_stage_boundary(tmp_path: Path):
     """The second stage warms up for two epochs with its schedule suppressed, then runs its
     schedule's one-epoch horizon.
     """
-    run, _ = _trained(
-        tmp_path, [stage(-1), stage(0)], stage_warmup_epochs=2
-    )
+    run, _ = _trained(tmp_path, [stage(-1), stage(0)], stage_warmup_epochs=2)
     assert run.status == "completed", run.status_error
 
     stage1 = [m for m in run.metrics_history if m["stage"] == 1]
