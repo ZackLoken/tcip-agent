@@ -450,7 +450,9 @@ def test_a_checkpoint_reads_images_at_the_width_its_run_recorded(tmp_path):
     # The run recorded both: the width it read at and the count its own table carried.
     dims = recorded_model_dims(checkpoint.spec)
     assert dims == {"in_chans": 1, "num_classes": 2}
-    assert resolve_contract_dims(checkpoint.spec, dims) == {
+    assert resolve_contract_dims(
+        checkpoint.spec, dims, checkpoint.geometry
+    ) == {
         "in_chans": 1,
         "num_classes": 2,
         "img_size": (32, 32),

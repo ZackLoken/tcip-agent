@@ -292,12 +292,13 @@ def proposal_pairs(
     index, by the one matcher (:func:`~tcip_annotation.matching.pair_proposals`) under the
     localization criterion the assessment ``bucket`` was published under measured its count by;
     a bucket published under none, or under one that measured no count, pairs under the
-    platform's comparability convention. Refuses (``ValueError``) a bucket's assessment with no
-    ``project`` to read it from.
+    platform's comparability convention (``schemas.COMPARABILITY_IOU``). Refuses
+    (``ValueError``) a bucket's assessment with no ``project`` to read it from.
     """
     from tcip_annotation.matching import pair_proposals
     from tcip_mcp.assessment import read_assessment
-    from tcip_mcp.pipelines.training.evaluation import resolve_match_criterion
+    from tcip_mcp.pipelines.schemas import COMPARABILITY_IOU
+    from tcip_mcp.pipelines.training.evaluation import comparability_criterion
 
     criterion = None
     if bucket.assessment_id is not None:
@@ -311,7 +312,9 @@ def proposal_pairs(
         )
         criterion = count["localization"] if count else None
     m = pair_proposals(
-        annotations, proposals, criterion or resolve_match_criterion(None, [])
+        annotations,
+        proposals,
+        criterion or comparability_criterion(COMPARABILITY_IOU, by_mask=False),
     )
     return {p: g for g, p in m.pairs}
 

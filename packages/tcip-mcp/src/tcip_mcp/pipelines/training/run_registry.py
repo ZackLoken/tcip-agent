@@ -17,6 +17,7 @@ if TYPE_CHECKING:
         Objective,
         TrainConfigSchema,
         TrainerReads,
+        TrainGeometry,
     )
 
 logger = logging.getLogger(__name__)
@@ -25,15 +26,15 @@ logger = logging.getLogger(__name__)
 @dataclass
 class TrainRun:
     id: str
-    # The run's config validated once by its producer (``schemas.train_config``), the one form
-    # every reader of the run's settings reads.
+    # The run's validated config.
     spec: TrainConfigSchema
-    # The run's resolved objective (``generic_trainer.resolve_objective``), read by the body and
-    # never resolved again.
+    # The objective the run's launch resolved.
     objective: Objective
-    # The project the run belongs to, obtained once by the process running it.
+    # The geometry the run's launch read off its training frames.
+    geometry: TrainGeometry
+    # The project the run belongs to.
     project: Path
-    # The laid-out source files every import the run makes reads (``model_build.SourceLayout``).
+    # The run's laid-out source files.
     layout: SourceLayout
     status: str = "running"
     current_epoch: int = 0
@@ -67,21 +68,27 @@ class TrainRun:
     def evaluation_arguments(self) -> dict:
         """The keywords ``evaluation.evaluate`` reads off this run, resolved once: the dims its
         config records (``model_build.recorded_model_dims``), the confidence it reads
-        (:attr:`reads`), its stated ``evaluation.iou_threshold`` and ``score_weights``, the
-        confirmed trait its config selects for (``generic_trainer.config_trait``, read from
-        :attr:`project`), and its data block's ``train_object_density``.
+        (:attr:`reads`), its stated ``evaluation.iou_threshold`` and ``score_weights``, the trait
+        entry at the revision its :attr:`objective` records (read from :attr:`project`, ``None``
+        for a run naming no trait; a revision whose entry no longer carries the recorded hash
+        refuses with ``traits.RevisionMovedError``), and its :attr:`geometry`'s
+        ``object_density``.
         """
         from tcip_mcp.pipelines.model_build import recorded_model_dims
-        from tcip_mcp.pipelines.training.generic_trainer import config_trait
+        from tcip_mcp.traits import read_trait
 
-        spec = self.spec
+        spec, ref = self.spec, self.objective.revision
         return {
             "dims": recorded_model_dims(spec),
             "conf_threshold": self.reads.conf_threshold,
             "iou_threshold": spec.evaluation.iou_threshold,
             "score_weights": spec.evaluation.score_weights,
-            "trait": config_trait(spec, self.project),
-            "density": spec.data.train_object_density,
+            "trait": None
+            if ref is None
+            else read_trait(ref.trait, self.project)
+            .revision(ref.trait_revision, ref.trait_revision_sha256)
+            .entry,
+            "density": self.geometry.object_density,
         }
 
     @property
@@ -116,14 +123,14 @@ def observed_run(
     under its validated launch config (``RunObservation.spec``) with the data block its launch
     resolved (``RunObservation.resolved_data``) laid over it and its source files bound to the
     run's own snapshot (``model_build.snapshot_bound``), which it imports from as the record
-    states it (``model_build.run_layout``), toward the objective that resolution carries. A run
-    whose input resolved to nothing ended at its opening and has none.
+    states it (``model_build.run_layout``), toward the objective and at the geometry that
+    resolution carries. A run whose input resolved to nothing ended at its opening and has none.
     """
     from tcip_mcp.experiments import project_of_run
     from tcip_mcp.pipelines.model_build import run_layout, snapshot_bound
 
-    data = observation.resolved_data
-    assert data is not None, (
+    data, geometry = observation.resolved_data, observation.resolved_geometry
+    assert data is not None and geometry is not None, (
         "a run whose input resolved to nothing ended at its opening"
     )
     spec = snapshot_bound(
@@ -135,6 +142,7 @@ def observed_run(
         id=observation.directory.name,
         spec=spec,
         objective=observation.objective,
+        geometry=geometry,
         project=project_of_run(observation.directory),
         layout=run_layout(observation.directory, observation.record["source"]),
         output_dir=str(observation.directory),

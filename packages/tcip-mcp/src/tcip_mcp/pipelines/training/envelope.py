@@ -116,7 +116,9 @@ class TrainContext:
         )
         from tcip_mcp.pipelines.model_contract import no_batch_reason
 
-        dims = resolve_contract_dims(self.spec, recorded_model_dims(self.spec))
+        dims = resolve_contract_dims(
+            self.spec, recorded_model_dims(self.spec), self.run.geometry
+        )
         if no_batch_reason(self.task, dims, None) is not None:
             batch = next(iter(self.train_loader or []), None)
             if batch is not None:
@@ -444,14 +446,14 @@ class TrainContext:
         self._write_scalars(metrics, step)
 
     def save_checkpoint(self, state: dict, tag: str = "checkpoint") -> str:
-        """Write ``state`` once under ``tag``, stamped with this run's config and source snapshot
-        (``generic_trainer.checkpoint_stamp``), record it in ``run.saved``, and return the path
-        written.
+        """Write ``state`` once under ``tag``, stamped with this run's config, source snapshot and
+        geometry (``generic_trainer.checkpoint_stamp``), record it in ``run.saved``, and return
+        the path written.
         A tag already written refuses with ``FileExistsError``. A ``metrics`` key in ``state`` is
         the deliverable's metrics, sourced ``training_source``.
 
         Refuses (``ValueError``) a ``state`` carrying a key the stamp writes: the checkpoint's
-        config and snapshot are always this run's own.
+        config, snapshot and geometry are always this run's own.
         """
         from tcip_mcp.experiments import require_open
         from tcip_mcp.pipelines.training.generic_trainer import (
@@ -465,8 +467,9 @@ class TrainContext:
         if reserved := sorted(set(state) & set(stamp)):
             raise ValueError(
                 f"ctx.save_checkpoint: state carries {reserved}, reserved for this run's own "
-                "launch config, the record every publishing door reads this run's scope from, and "
-                "its source snapshot; name a bespoke loop's own field something else."
+                "launch config, the record every publishing door reads this run's scope from, its "
+                "source snapshot and the geometry its launch resolved; name a bespoke loop's own "
+                "field something else."
             )
         self.run.saved[tag] = write_checkpoint(
             {**state, **stamp}, checkpoint_path(self.run_dir, tag)

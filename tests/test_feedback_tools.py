@@ -211,7 +211,7 @@ def test_triage_predicts_a_detector_at_its_low_bound(tmp_path, monkeypatch):
 
     density = load_registered_checkpoint(
         ckpt, project=tmp_path
-    ).spec.data.train_object_density
+    ).geometry.object_density
     assert [(e.conf, e.density) for e in ran_at] == [(0.3, density)]
     assert triaged["review_images"] == ["a.jpg"]
 

@@ -185,7 +185,7 @@ def test_a_frame_assessments_reference_derives_the_density_that_governs_its_pass
     assessed = assess(tmp_path, checkpoint_path, selection_dir)
 
     trained = load_registered_checkpoint(checkpoint_path, project=tmp_path)
-    assert trained.spec.data.train_object_density == pytest.approx(
+    assert trained.geometry.object_density == pytest.approx(
         1 / (IMG * IMG)
     )
     assert (

@@ -140,7 +140,8 @@ def test_a_pass_with_no_reference_caps_each_frame_at_the_checkpoints_density_tim
     forwards = _in_model_caps(p.predictor.model)
     small, large = p.predict(paths)
 
-    density = checkpoint.spec.data.train_object_density
+    density = checkpoint.geometry.object_density
+    assert density is not None
     caps = [detection_cap(density, w * h) for w, h in frames.values()]
     assert (p.execution.density, p.execution.sources["density"]) == (
         density,
@@ -154,10 +155,10 @@ def test_a_pass_with_no_reference_caps_each_frame_at_the_checkpoints_density_tim
 
 def _without_density(project: Path):
     """A checkpoint no run produced: the bytes of :func:`project_checkpoint`'s with the density
-    its config records removed, registered in explicit mode; loaded through the registry.
+    its geometry records set to none, registered in explicit mode; loaded through the registry.
     """
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.model_build import CONFIG_KEY
+    from tcip_mcp.pipelines.model_build import GEOMETRY_KEY
     from tests._verified_checkpoint_fixtures import (
         project_checkpoint,
         register_checkpoint,
@@ -166,7 +167,7 @@ def _without_density(project: Path):
     payload = torch.load(
         project_checkpoint(project), map_location="cpu", weights_only=False
     )
-    del payload[CONFIG_KEY]["data"]["train_object_density"]
+    payload[GEOMETRY_KEY]["object_density"] = None
     path = project / "foreign.pt"
     torch.save(payload, path)
     register_checkpoint(project, str(path), name="foreign")
@@ -186,7 +187,7 @@ def test_a_checkpoint_recording_no_density_refuses_a_detector_pass_naming_the_pr
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
     foreign = _without_density(tmp_path)
-    assert foreign.spec.data.train_object_density is None
+    assert foreign.geometry.object_density is None
 
     with pytest.raises(ExecutionRefusedError, match="launch_training"):
         prepare(
@@ -279,6 +280,7 @@ def test_the_tiler_the_spatial_split_and_the_pass_derive_one_lattice_from_one_gr
     )
     from tests._predictor_fixtures import StubPredictor, install
     from tests._producer_fixtures import checkpoint_admission, dataset_over
+    from tests._training_values import IOU_THRESHOLD
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
     images_dir = _mosaic(tmp_path / "ds")
@@ -312,6 +314,8 @@ def test_the_tiler_the_spatial_split_and_the_pass_derive_one_lattice_from_one_gr
         checkpoint,
         checkpoint_admission(checkpoint, images_dir),
         stated=Stated(**SAMPLE_DETECTOR_PASS),
+        iou_threshold=IOU_THRESHOLD,
+        trait=None,
     )["execution"]
 
     objects = dataset_over(
@@ -616,7 +620,7 @@ def test_the_density_the_trainer_validates_under_is_the_one_its_checkpoint_recor
     recorded = load_registered_checkpoint(
         observation.checkpoint["path"], project=tmp_path
     )
-    assert handed and set(handed) == {recorded.spec.data.train_object_density}
+    assert handed and set(handed) == {recorded.geometry.object_density}
 
 
 def test_a_bespoke_detection_dataset_exposing_regions_records_its_density_and_validates(
@@ -656,10 +660,8 @@ def test_a_bespoke_detection_dataset_exposing_regions_records_its_density_and_va
     trained = load_registered_checkpoint(
         observation.checkpoint["path"], project=tmp_path
     )
-    assert trained.spec.data.train_object_density == pytest.approx(
-        1 / (64 * 48)
-    )
-    assert validated == [trained.spec.data.train_object_density]
+    assert trained.geometry.object_density == pytest.approx(1 / (64 * 48))
+    assert validated == [trained.geometry.object_density]
 
     with pytest.raises(ValueError, match="regions"):
         opened_run(
@@ -708,9 +710,8 @@ def test_a_bespoke_body_tiles_at_the_lattice_it_states_and_validates_over_its_ti
     ]
     assert (row["tile_size"], row["overlap"]) == COMPOSED_LATTICE
     assert observation.record["resolved"]["data"].get("tiling") is None
-    assert (
-        observation.record["resolved"]["data"].get("train_native_size") is None
-    )
+    geometry = observation.resolved_geometry
+    assert geometry is not None and geometry.native_size is None
 
 
 def test_a_tiling_stated_beside_a_builder_refuses_at_admission_naming_both(
@@ -1029,7 +1030,8 @@ def test_the_published_cap_reaches_the_row_scoring_its_bucket(
         )
         return scored[-1]
 
-    density = verified_checkpoint(tmp_path).spec.data.train_object_density
+    density = verified_checkpoint(tmp_path).geometry.object_density
+    assert density is not None
     capped, proposed = row("capped"), row(staged["bucket"])
     assert capped["cap"] == detection_cap(density, 96 * 96)
     assert capped["count"] == len(capped["dt"]) <= capped["cap"]

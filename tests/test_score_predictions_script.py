@@ -17,6 +17,9 @@ from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._cli_fixtures import run_tcip
 from tests._producer_fixtures import write_image
 
+SCORED_AT = ["--iou-threshold", "0.5", "--conf-threshold", "0.25"]
+"""A sample IoU and confidence each scoring here states."""
+
 
 def _fixture(tmp_path: Path) -> tuple[Path, str]:
     """An image, its label document, and a published bucket holding its document; the image
@@ -57,7 +60,7 @@ def test_refuses_a_trait_scoped_run_naming_no_project(tmp_path):
 
     result = run_tcip(
         "score-predictions",
-        ["--path", str(img), "--bucket", bucket, "--trait", "bud_count"],
+        ["--path", str(img), "--bucket", bucket, *SCORED_AT, "--trait", "bud_count"],
         cwd=cwd,
     )
 
@@ -72,7 +75,9 @@ def test_scores_a_single_image_with_no_project_named(tmp_path):
     cwd.mkdir()
 
     result = run_tcip(
-        "score-predictions", ["--path", str(img), "--bucket", bucket], cwd=cwd
+        "score-predictions",
+        ["--path", str(img), "--bucket", bucket, *SCORED_AT],
+        cwd=cwd,
     )
 
     assert result.returncode == 0, result.stderr

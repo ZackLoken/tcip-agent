@@ -25,10 +25,17 @@ from tcip_mcp.pipelines.model_build import (  # noqa: E402
     resolve_contract_dims,
     snapshot_model_source,
 )
-from tcip_mcp.pipelines.schemas import checked_train_config, train_config  # noqa: E402
+from tcip_mcp.pipelines.schemas import (  # noqa: E402
+    TrainGeometry,
+    checked_train_config,
+    train_config,
+)
 from tcip_mcp.pipelines.training.envelope import TrainContext
 from tests._chain_fixtures import built_model, training_config
 from tests._producer_fixtures import registry_over  # noqa: E402
+
+UNSHARED = TrainGeometry(native_size=None, object_density=None)
+"""A resolution whose training frames share no one size."""
 
 PROBE_NET = f"{Path(__file__).stem}:build_probe_net"
 """The ``model_source`` builder of :func:`build_probe_net`."""
@@ -181,7 +188,7 @@ def test_contract_dims_take_the_admitted_attributes_without_the_loader_backgroun
     _write_registry(dataset_root)  # a third condition value declared since
     assert len(registry_scope(images_dir, "leaf").attributes[0].values) == 3
 
-    dims = resolve_contract_dims(spec, recorded_model_dims(spec))
+    dims = resolve_contract_dims(spec, recorded_model_dims(spec), UNSHARED)
 
     assert dims == {
         "in_chans": 5,
@@ -218,7 +225,7 @@ def test_contract_dims_count_only_the_subject_for_a_scope_declaring_no_attribute
         )
     )
 
-    dims = resolve_contract_dims(spec, recorded_model_dims(spec))
+    dims = resolve_contract_dims(spec, recorded_model_dims(spec), UNSHARED)
 
     assert dims == {"in_chans": 3, "num_classes": 1}
 

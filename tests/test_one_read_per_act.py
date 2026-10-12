@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._training_values import IOU_THRESHOLD
+
 torch = pytest.importorskip("torch")
 
 
@@ -475,6 +477,7 @@ def test_a_comparison_render_reads_its_documents_and_bucket_once(
         str(frame),
         bucket="published",
         conf_threshold=0.0,
+        iou_threshold=IOU_THRESHOLD,
     )
 
     assert "error" not in result, result
@@ -494,7 +497,7 @@ def test_a_folder_scoring_resolves_its_images_once(
     scans = _counting_scans(monkeypatch)
 
     result = score_predictions(
-        str(frames[0].parent), "published", conf_threshold=0.0
+        str(frames[0].parent), "published", IOU_THRESHOLD, conf_threshold=0.0
     )
 
     assert "error" not in result, result

@@ -12,6 +12,7 @@ torch = pytest.importorskip("torch")
 
 from tcip_mcp.pipelines.model_build import (  # noqa: E402
     CONFIG_KEY,
+    GEOMETRY_KEY,
     METRICS_KEY,
     SNAPSHOT_KEY,
     STATE_DICT_KEY,
@@ -37,6 +38,33 @@ def test_save_checkpoint_refuses_a_state_carrying_its_own_config_key(
 
     with pytest.raises(ValueError, match="reserved for this run's own"):
         ctx.save_checkpoint({STATE_DICT_KEY: {}, CONFIG_KEY: launched})
+
+
+@pytest.mark.parametrize("key", [CONFIG_KEY, SNAPSHOT_KEY, GEOMETRY_KEY])
+def test_a_checkpoint_written_past_the_stamp_refuses_naming_the_key_it_lacks(
+    tmp_path, key
+) -> None:
+    """A produced checkpoint's payload saved back without one key the stamp writes refuses where
+    the checkpoint is read, naming that key and the stamp, never on whatever the absent value
+    leaves its reader to guess at.
+    """
+    from tcip_mcp.model_registry import load_registered_checkpoint
+    from tests._verified_checkpoint_fixtures import (
+        register_checkpoint,
+        registered_checkpoint,
+    )
+
+    payload = torch.load(
+        registered_checkpoint(tmp_path), map_location="cpu", weights_only=False
+    )
+    del payload[key]
+    unstamped = tmp_path / "unstamped.pt"
+    torch.save(payload, unstamped)
+    register_checkpoint(tmp_path, str(unstamped), name="unstamped")
+    checkpoint = load_registered_checkpoint(str(unstamped), project=tmp_path)
+
+    with pytest.raises(ValueError, match=rf"carries no '{key}'.*checkpoint_stamp"):
+        (checkpoint.spec, checkpoint.layout, checkpoint.geometry)
 
 
 def test_save_checkpoint_writes_the_launch_config_never_the_loops_own(
@@ -76,8 +104,8 @@ def test_the_default_trainer_and_a_bespoke_loop_stamp_one_checkpoint_config(
     """The default trainer and a bespoke loop's ``ctx.save_checkpoint``, over one run the
     launcher's own writer opened, write one stamp: one ``config``, the model's and the dataset
     builder's declared files each this run's own snapshot copy of it, as the run's record names
-    it, and no field of the run's data locations (``experiments.DATA_PATHS``), and one
-    ``SNAPSHOT_KEY``, the run's own snapshot digest.
+    it, and no field of the run's data locations (``experiments.DATA_PATHS``), one
+    ``SNAPSHOT_KEY``, the run's own snapshot digest, and one ``GEOMETRY_KEY``.
     """
     from tcip_mcp.experiments import DATA_PATHS, observe
     from tcip_mcp.pipelines.training.generic_trainer import train
@@ -109,7 +137,7 @@ def test_the_default_trainer_and_a_bespoke_loop_stamp_one_checkpoint_config(
     assert trained.status == "completed", trained.status_error
     path = ctx.save_checkpoint({STATE_DICT_KEY: {}}, "model_bespoke")
 
-    stamped = {CONFIG_KEY, SNAPSHOT_KEY}
+    stamped = {CONFIG_KEY, SNAPSHOT_KEY, GEOMETRY_KEY}
     by_trainer, by_loop = (
         {
             key: value

@@ -15,6 +15,7 @@ from tcip_mcp.pipelines.postprocessing.plant_mapping import (
     ToleranceSource,
     UnattributedSegmentSource,
 )
+from tcip_mcp.pipelines.schemas import TraitRevisionRef
 from tcip_mcp.traits import Text
 
 
@@ -191,19 +192,15 @@ PlantMapping = (
 """The one of three disclosures a delivery's ``plant_mapping`` is."""
 
 
-class DeliveryEventRecord(BaseModel):
-    """The stored per-delivery record: what shipped, under which trait revision and kind, from
-    which producer, what the gate found per bucket, and the acknowledgment it shipped under.
+class DeliveryEventRecord(TraitRevisionRef):
+    """The stored per-delivery record: the trait revision it shipped under (its
+    :class:`~tcip_mcp.pipelines.schemas.TraitRevisionRef` fields), what shipped and of which kind,
+    from which producer, what the gate found per bucket, and the acknowledgment it shipped under.
     """
-
-    model_config = ConfigDict(extra="forbid")
 
     event_id: str
     door: str
     delivery_kind: str
-    trait: str
-    trait_revision: int
-    trait_revision_sha256: str
     output_path: str
     output_sha256: str
     producer: Producer

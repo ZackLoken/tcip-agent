@@ -297,9 +297,9 @@ def triage_predictions(
             "unscoreable_images": [],
         }
     from tcip_mcp.pipelines.execution import ExecutionRefusedError, Stated
-    from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
+    from tcip_mcp.pipelines.model_contract import DETECTOR_TASKS
 
-    detector = checkpoint.task in DETECTION_TASKS
+    detector = checkpoint.task in DETECTOR_TASKS
     prep, refusal = _untiled(
         checkpoint, Stated(conf=low if detector else None)
     )

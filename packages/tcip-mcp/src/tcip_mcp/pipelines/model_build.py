@@ -29,15 +29,21 @@ from tcip_store import canonical_path
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.data.selection import ClassScope
-    from tcip_mcp.pipelines.schemas import ModelSourceSchema, TrainConfigSchema
+    from tcip_mcp.pipelines.schemas import (
+        ModelSourceSchema,
+        TrainConfigSchema,
+        TrainGeometry,
+    )
 
 STATE_DICT_KEY = "model_state_dict"
 CONFIG_KEY = "config"
 METRICS_KEY = "metrics"
 SNAPSHOT_KEY = "source_snapshot"
+GEOMETRY_KEY = "geometry"
 """A checkpoint's keys holding its weights, the config its model builds from, the metrics it
-was selected on and the digest of the source snapshot its run took
-(:attr:`SourceLayout.snapshot`)."""
+was selected on, the digest of the source snapshot its run took
+(:attr:`SourceLayout.snapshot`) and the geometry its run's resolution read off its training
+frames (``schemas.TrainGeometry``)."""
 
 RESERVED_DIMS = ("in_chans", "num_classes", "num_ranks", "attributes")
 """The dimensions the platform hands a model builder (:func:`model_dims`), never its
@@ -446,14 +452,15 @@ def build_from_model_source(
 
 
 def resolve_contract_dims(
-    spec: TrainConfigSchema, dims: Mapping[str, Any]
+    spec: TrainConfigSchema,
+    dims: Mapping[str, Any],
+    geometry: TrainGeometry,
 ) -> dict:
-    """The dimensions a synthetic smoke batch of a validated run config is shaped at: the width,
-    count and attributes the model is built at (``dims``, :func:`model_dims`, a rank count
-    carried as ``num_classes``) and the ``img_size``, ``(width, height)``, of the frame its
-    resolved data block trains on: the square tile its tiling resolved, else the frame every
-    untiled training source shares (``train_native_size``). A run that resolved neither carries
-    no ``img_size``.
+    """The dimensions a synthetic smoke batch of a run resolved to ``spec`` and ``geometry`` is
+    shaped at: the width, count and attributes the model is built at (``dims``,
+    :func:`model_dims`, a rank count carried as ``num_classes``) and the ``img_size``,
+    ``(width, height)``, of the frame it trains on: the square tile its tiling resolved, else
+    ``geometry.native_size``. A run that resolved neither carries no ``img_size``.
     """
     from tcip_mcp.pipelines.schemas import run_tiling
 
@@ -462,7 +469,7 @@ def resolve_contract_dims(
     frame = (
         (tiler.tile_size, tiler.tile_size)
         if tiler is not None
-        else spec.data.train_native_size
+        else geometry.native_size
     )
     return {
         "in_chans": dims["in_chans"],

@@ -135,8 +135,8 @@ def _assessment_finding(
     judged = assessment.revision
     if judged != revision.ref:
         return (
-            f"assessment {aid} was judged under {judged['trait']!r} revision "
-            f"{judged['trait_revision']} ({judged['trait_revision_sha256'][:12]}), "
+            f"assessment {aid} was judged under {judged.trait!r} revision "
+            f"{judged.trait_revision} ({judged.trait_revision_sha256[:12]}), "
             f"and this delivery ships under revision {revision.number} "
             f"({revision.entry_sha256[:12]}); assess again under the revision delivered."
         )
@@ -221,7 +221,7 @@ def _assessments(
                 project,
                 assessment,
                 revision=revision
-                or latest_confirmed(assessment.revision["trait"], project),
+                or latest_confirmed(assessment.revision.trait, project),
                 delivery_kind=delivery_kind or assessment.delivery_kind,
             )
         except (ValueError, TraitUnknownError) as exc:
@@ -275,7 +275,7 @@ def result_digest(
                     mode="json",
                 ),
                 "delivery_kind": delivery_kind,
-                **revision.ref,
+                **revision.ref.model_dump(),
                 "producer": producer.model_dump(),
                 "buckets": [b.model_dump() for b in buckets],
                 "scale_finding": scale_finding,
@@ -561,7 +561,7 @@ def deliver_csv(
     data = result.encoded(
         {
             "validated": clearance.validated,
-            **revision.ref,
+            **revision.ref.model_dump(),
             "delivery_event_id": event_id,
         }
     )
@@ -571,7 +571,7 @@ def deliver_csv(
             "event_id": event_id,
             "door": door,
             "delivery_kind": delivery_kind,
-            **revision.ref,
+            **revision.ref.model_dump(),
             "output_path": str(path),
             "output_sha256": hashlib.sha256(data).hexdigest(),
             "producer": clearance.producer,

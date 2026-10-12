@@ -112,7 +112,7 @@ def test_a_reference_derives_the_unstated_merge_threshold_and_the_density_and_ke
     ) == (pytest.approx(3 / frame), OBJECT_DENSITY_DERIVATION)
     assert (
         unstated.execution.density
-        != _checkpoint(tmp_path).spec.data.train_object_density
+        != _checkpoint(tmp_path).geometry.object_density
     )
     assert stated.execution.cross_tile_nms == 0.42
     assert stated.execution.sources["cross_tile_nms"] == "explicit"
@@ -209,7 +209,7 @@ def test_the_dry_run_reports_the_stated_values_and_refuses_an_unstated_conf(
     )
 
     checkpoint = project_checkpoint(tmp_path)
-    density = _checkpoint(tmp_path).spec.data.train_object_density
+    density = _checkpoint(tmp_path).geometry.object_density
     images_dir = tmp_path / "images" / "undated"
     images_dir.mkdir(parents=True)
     Image.new("RGB", (64, 64)).save(images_dir / "a.png")

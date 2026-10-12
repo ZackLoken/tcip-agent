@@ -234,7 +234,7 @@ def visualize(
     task: str = "detect",
     class_names: str = "",
     conf_threshold: float = REVIEW_CONF_FLOOR,
-    iou_threshold: float = 0.5,
+    iou_threshold: float | None = None,
     n: int = 16,
     bucket: str = "",
 ) -> dict:
@@ -267,7 +267,8 @@ def visualize(
         conf_threshold: Minimum confidence; filters displayed predictions (source='predictions')
             and the predictions matched against GT (source='comparison'). Defaults to the viewing
             filter ``matching.REVIEW_CONF_FLOOR``.
-        iou_threshold: IoU threshold for a positive match (source='comparison' only).
+        iou_threshold: IoU threshold for a positive match (source='comparison', where it is
+            required; the comparability convention is ``schemas.COMPARABILITY_IOU``).
         n: Number of samples in the grid (source='dataset' only).
         bucket: The name of the bucket, published under the image's dataset root, whose document
             for the image is rendered (source='predictions' and 'comparison', where it is
@@ -294,6 +295,11 @@ def visualize(
             conf_threshold=conf_threshold,
         )
     if source == "comparison":
+        if iou_threshold is None:
+            return {
+                "error": "source='comparison' requires iou_threshold, the IoU a match must "
+                "reach under the comparability convention."
+            }
         return _viz_comparison(
             project,
             path,
@@ -484,8 +490,9 @@ def _viz_comparison(
     project: Path,
     image_path: str,
     bucket: str,
+    *,
     task: str = "detect",
-    iou_threshold: float = 0.5,
+    iou_threshold: float,
     class_names: str = "",
     conf_threshold: float = REVIEW_CONF_FLOOR,
 ) -> dict:

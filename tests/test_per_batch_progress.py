@@ -87,26 +87,78 @@ def test_a_run_admits_what_its_training_reads_once(tmp_path, monkeypatch):
 @pytest.mark.usefixtures("seed_bud_trait_spec")
 def test_a_run_resolves_what_its_evaluation_reads_once(tmp_path, monkeypatch):
     """Training a run stating a confirmed trait and evaluating it twice read the trait's entry
-    off the registry once.
+    off the registry once, at the revision its objective records.
     """
-    import tcip_mcp.pipelines.training.generic_trainer as generic_trainer
+    import tcip_mcp.traits as traits
 
     calls: list[int] = []
-    real = generic_trainer.config_trait
+    real = traits.read_trait
 
-    def counted(spec, project):
+    def counted(trait, project):
         calls.append(1)
-        return real(spec, project)
+        return real(trait, project)
 
     ctx = _context(
         tmp_path, [], evaluation={"iou_threshold": 0.6, "trait": "bud_opening"}
     )
-    monkeypatch.setattr(generic_trainer, "config_trait", counted)
+    monkeypatch.setattr(traits, "read_trait", counted)
     assert ctx.default_train().status == "completed"
     model = ctx.build_model()
     ctx.evaluate(model)
     ctx.evaluate(model)
     assert calls == [1]
+
+
+@pytest.mark.usefixtures("seed_bud_trait_spec")
+def test_a_run_scores_under_the_trait_revision_its_launch_resolved(
+    tmp_path, monkeypatch
+):
+    """A run launched against a trait's confirmed revision, then trained after the breeder
+    confirms a newer one, scores every epoch under the revision its launch resolved.
+    """
+    import tcip_mcp.pipelines.training.generic_trainer as generic_trainer
+    from tests import _trait_fixtures as fx
+
+    handed: list = []
+    real = generic_trainer.evaluate
+
+    def recorded(*args, **kwargs):
+        handed.append(kwargs["trait"])
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(generic_trainer, "evaluate", recorded)
+    ctx = _context(
+        tmp_path, [], evaluation={"iou_threshold": 0.6, "trait": "bud_opening"}
+    )
+    launched = fx.latest("bud_opening", tmp_path)
+    superseding = fx.propose_and_confirm(
+        tmp_path, fx.with_fields(launched, notes="A newer statement of the trait.")
+    )
+    recorded = ctx.run.objective.revision
+    assert recorded is not None
+    assert recorded.trait_revision == superseding.number - 1
+    assert ctx.default_train().status == "completed"
+    assert handed and all(trait == launched for trait in handed)
+
+
+@pytest.mark.usefixtures("seed_bud_trait_spec")
+def test_a_run_whose_recorded_revision_holds_another_entry_refuses_by_name(tmp_path):
+    """The body reads the trait entry at the revision its launch recorded, the entry's hash
+    included: a record naming a hash that revision does not hold refuses naming both, rather than
+    scoring under an entry the launch never resolved.
+    """
+    from tcip_mcp.traits import RevisionMovedError
+
+    ctx = _context(
+        tmp_path, [], evaluation={"iou_threshold": 0.6, "trait": "bud_opening"}
+    )
+    recorded = ctx.run.objective.revision
+    assert recorded is not None
+    moved = recorded.model_copy(update={"trait_revision_sha256": "0" * 64})
+    ctx.run.objective = ctx.run.objective.model_copy(update={"revision": moved})
+
+    with pytest.raises(RevisionMovedError, match=recorded.trait_revision_sha256):
+        ctx.run.evaluation_arguments
 
 
 @pytest.mark.usefixtures("seed_bud_trait_spec")

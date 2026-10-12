@@ -192,7 +192,8 @@ Grid cell system:
 2. Load predictions (from inference or prior annotation)
 3. `annotation_tools.score_predictions` (library call, or `tcip score-predictions`) pairs
    predictions to GT through the platform's one matcher, by IoU (over regions when any
-   annotation is a polygon; default threshold: 0.5), and returns aggregate TP/FP/FN and average
+   annotation is a polygon) at the `iou_threshold` and `conf_threshold` you state, and returns
+   aggregate TP/FP/FN and average
    precision; `detail=True` adds a per-detection breakdown (each TP/FP/FN tagged with the
    annotation it names and its indices). A prediction carries its object class in
    `subject`, so this scores the object's localization, never an attribute head's call

@@ -17,6 +17,7 @@ import numpy as np
 import torch
 
 from tcip_annotation.json_io import xywh
+from tcip_mcp.pipelines.schemas import AP_IOU_THRESHOLDS, COMPARABILITY_IOU
 from tcip_store import stored_number, stored_numbers
 
 if TYPE_CHECKING:
@@ -126,10 +127,6 @@ def precision_recall_f1(tp: int, fp: int, fn: int) -> dict[str, float]:
     )
     return {"precision": precision, "recall": recall, "f1": f1}
 
-
-AP_IOU_THRESHOLDS = tuple(round(0.5 + 0.05 * i, 2) for i in range(10))
-"""The IoU thresholds ``map`` averages average precision over, 0.50 to 0.95 by 0.05: the COCO
-convention's own, so ``map`` stays comparable to a COCO-reported figure."""
 
 _AP_RECALL_POINTS = 101
 """The recall points average precision is interpolated at, the COCO convention's own."""
@@ -294,20 +291,30 @@ def localization_frac(
     )
 
 
+def comparability_criterion(iou_threshold: float, *, by_mask: bool) -> dict:
+    """The criterion that governs where no trait does, in :func:`resolve_match_criterion`'s
+    shape: IoU matching at ``iou_threshold`` (:func:`iou_criterion`), the comparability
+    convention.
+    """
+    return {
+        **iou_criterion(iou_threshold, by_mask=by_mask),
+        "derived_from": "comparability convention",
+        "trait": None,
+    }
+
+
 def resolve_match_criterion(
-    trait: TraitEntry | None,
+    trait: TraitEntry,
     per_image: list[dict],
     *,
     class_id: int | None = None,
-    iou_threshold: float = 0.5,
     by_mask: bool = False,
 ) -> dict:
     """The localization criterion that governs a trait's phenotype count and model selection, as
     ``{kind, tolerance_frac and tolerance | iou_threshold, derived_from, trait}``, resolved once
     over the reference ``per_image`` and carried whole to every count and match over it.
 
-    With no trait it is IoU matching at ``iou_threshold``, the comparability convention. With one,
-    its stated ``localization`` governs, an unauthored one refusing
+    The trait's stated ``localization`` governs, an unauthored one refusing
     (:class:`~tcip_mcp.traits.UnauthoredFieldError`): a center match's tolerance is a
     fraction of the average object size (:func:`localization_frac`), scaled to ``per_image`` here
     and to another reference by :func:`scaled_to`; an IoU match's threshold is the one the ground
@@ -316,12 +323,6 @@ def resolve_match_criterion(
     whose boxes the jitter displaces past overlap, refuses. An IoU match is over masks when
     ``by_mask`` (:func:`iou_criterion`).
     """
-    if trait is None:
-        return {
-            **iou_criterion(iou_threshold, by_mask=by_mask),
-            "derived_from": "comparability convention",
-            "trait": None,
-        }
     from tcip_mcp.pipelines.derivations import (
         IOU_MATCH_DERIVATION,
         derive_iou_match_threshold,
@@ -1276,17 +1277,21 @@ def detection_metrics(
 ) -> dict:
     """A detector's metrics over ``per_image``, every number from the one matcher: ``tp``/``fp``/
     ``fn``/``precision``/``recall``/``f1`` at ``conf_threshold`` (:func:`governing_counts`) under
-    the criterion that governs (:func:`resolve_match_criterion`, ``trait``'s own when given, by
-    mask when ``by_mask``), recorded under ``governing_criterion``; ``map50`` and ``map``, the
-    average precision (:func:`average_precision`) at the IoU 0.5 convention and over
-    :data:`AP_IOU_THRESHOLDS`. Under a trait's criterion the IoU convention's own counts ride
-    beside them as ``iou_precision``/``iou_recall``/``iou_f1`` and ``map50_role`` labels the
-    convention's numbers comparability only. ``matchings`` holds each image's governing
+    the criterion that governs (:func:`resolve_match_criterion` of ``trait`` when given, else
+    :func:`comparability_criterion` at ``iou_threshold``, by mask when ``by_mask``), recorded
+    under ``governing_criterion``; ``map50`` and ``map``, the average precision
+    (:func:`average_precision`) at ``schemas.COMPARABILITY_IOU`` and over every one of
+    ``schemas.AP_IOU_THRESHOLDS``.
+    Under a trait's criterion the IoU convention's own counts ride beside them as
+    ``iou_precision``/``iou_recall``/``iou_f1`` and ``map50_role`` labels the convention's
+    numbers comparability only. ``matchings`` holds each image's governing
     matching (:func:`matched`), the one the counts sum; every matching is made once per distinct
     criterion and detection set.
     """
-    criterion = resolve_match_criterion(
-        trait, per_image, iou_threshold=iou_threshold, by_mask=by_mask
+    criterion = (
+        comparability_criterion(iou_threshold, by_mask=by_mask)
+        if trait is None
+        else resolve_match_criterion(trait, per_image, by_mask=by_mask)
     )
     held: dict = {}
     governing = matched(per_image, criterion, conf=conf_threshold, held=held)
@@ -1303,7 +1308,7 @@ def detection_metrics(
             for k in ("tp", "fp", "fn", "precision", "recall", "f1")
         },
         "governing_criterion": criterion,
-        "map50": round(ap[0.5], 6),
+        "map50": round(ap[COMPARABILITY_IOU], 6),
         "map": round(float(np.mean(list(ap.values()))), 6),
         "matchings": governing,
     }
@@ -1339,15 +1344,16 @@ def evaluate(
     conf_threshold: float | None,
     iou_threshold: float,
     score_weights: ScoreWeights | None,
-    trait: TraitEntry | None = None,
-    density: float | None = None,
+    trait: TraitEntry | None,
+    density: float | None,
 ) -> dict:
     """Compute per-task validation/test metrics. Returns bare metric keys. ``conf_threshold`` is
     the confidence a detector's boxes are counted at, read from the run's validated
     ``evaluation.conf_threshold`` or the pass's execution record; ``None`` for any other head.
     A detector predicts each image at no score floor, every box the cap ``density`` gives its
     frame admits (``derivations.detection_cap``, through ``operating_point.governed_forward``);
-    ``density`` is required for a detector and ``None`` for any other head.
+    ``density`` is ``None`` for any other head. A detector handed ``None`` for either refuses
+    (``ValueError``) naming it, before any batch is read.
 
     ``dims`` is what the model was built at (:func:`~tcip_mcp.pipelines.model_build.model_dims`);
     a class or rank count is read from it, never off the half being scored. A detector's metrics
@@ -1357,15 +1363,31 @@ def evaluate(
     ``attribute_agreement``: per
     attribute name, the matched pairs' count and :func:`classification_metrics` over them
     (:func:`attribute_pairs`, under the governing criterion at ``conf_threshold``). ``trait`` is
-    the trait's confirmed entry whose criterion governs the count; absent, the IoU convention at
+    the trait's confirmed entry whose criterion governs the count; ``None``, the IoU convention at
     ``iou_threshold`` governs.
     """
     from tcip_mcp.pipelines.derivations import detection_cap
-    from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
+    from tcip_mcp.pipelines.model_contract import DETECTOR_TASKS
     from tcip_mcp.pipelines.operating_point import governed_forward
 
-    is_detection = task in DETECTION_TASKS
+    is_detection = task in DETECTOR_TASKS
     is_instance_seg = task == "instance_seg"
+    if is_detection:
+        if conf_threshold is None or density is None:
+            unstated = [
+                name
+                for name, value in (
+                    ("conf_threshold", conf_threshold),
+                    ("density", density),
+                )
+                if value is None
+            ]
+            raise ValueError(
+                f"a {task} evaluation counts its boxes at a stated conf_threshold and caps "
+                "each frame at its run's recorded density (derivations.detection_cap); it "
+                f"was handed None for {unstated}."
+            )
+        conf, cap_density = conf_threshold, density
 
     model.eval()
     total_loss = 0.0
@@ -1419,9 +1441,7 @@ def evaluate(
             frames = [
                 (int(img.shape[-1]), int(img.shape[-2])) for img in images
             ]
-            caps = [
-                detection_cap(cast(float, density), w * h) for w, h in frames
-            ]
+            caps = [detection_cap(cap_density, w * h) for w, h in frames]
             outputs = governed_forward(model, images, caps, conf=0.0)
             for (w, h), cap, t, out in zip(
                 frames, caps, targets, outputs, strict=True
@@ -1489,7 +1509,6 @@ def evaluate(
     result: dict = stored_number("loss", _rounded(loss))
 
     if is_detection:
-        conf = cast(float, conf_threshold)
         m = detection_metrics(
             per_image,
             trait=trait,

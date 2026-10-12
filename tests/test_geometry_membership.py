@@ -31,7 +31,10 @@ from tcip_mcp.pipelines.data.split_construction import (  # noqa: E402
     partition_samples,
     partition_spatial,
 )
-from tcip_mcp.pipelines.model_contract import DETECTION_TASKS  # noqa: E402
+from tcip_mcp.pipelines.model_contract import (  # noqa: E402
+    DETECTOR_TASKS,
+    TILING_TASKS,
+)
 from tests._producer_fixtures import label_image, train_val, write_image  # noqa: E402
 from tests._training_values import evaluation_block  # noqa: E402
 from tests._verified_checkpoint_fixtures import partition_side as recorded_side  # noqa: E402
@@ -144,7 +147,7 @@ def _recorded(project: Path, task: str, data_cfg: dict, **config) -> dict:
     return run_resolution(run_dir.name, project=project).partition
 
 
-@pytest.mark.parametrize("task", sorted(DETECTION_TASKS))
+@pytest.mark.parametrize("task", sorted(DETECTOR_TASKS))
 def test_the_drawn_route_loaders_name_their_own_samples(
     tmp_path: Path, task: str
 ):
@@ -166,7 +169,7 @@ def test_the_drawn_route_loaders_name_their_own_samples(
     _one_target(train_ds, task)
 
 
-@pytest.mark.parametrize("task", sorted(DETECTION_TASKS))
+@pytest.mark.parametrize("task", sorted(DETECTOR_TASKS))
 def test_auto_val_off_trains_on_every_admitted_sample_and_records_them(
     tmp_path: Path, task: str
 ):
@@ -194,7 +197,7 @@ def test_auto_val_off_trains_on_every_admitted_sample_and_records_them(
     assert recorded_side(record, "train") == sorted(stems)
 
 
-@pytest.mark.parametrize("task", sorted(DETECTION_TASKS))
+@pytest.mark.parametrize("task", sorted(DETECTOR_TASKS))
 def test_a_starved_draw_refuses_by_the_draws_own_floor(
     tmp_path: Path, task: str
 ):
@@ -222,7 +225,7 @@ def test_a_starved_draw_refuses_by_the_draws_own_floor(
         train_val(tmp_path, task, data_cfg)
 
 
-@pytest.mark.parametrize("task", sorted(DETECTION_TASKS))
+@pytest.mark.parametrize("task", sorted(TILING_TASKS))
 def test_one_tiled_source_still_splits_spatially_over_its_own_samples(
     tmp_path: Path, task: str
 ):

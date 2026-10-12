@@ -16,7 +16,7 @@ import logging
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import tcip_store
 from tcip_mcp.audit import now_iso
@@ -34,7 +34,7 @@ from tcip_store import Key, finite_number
 if TYPE_CHECKING:
     from tcip_mcp.experiments import RunObservation
     from tcip_mcp.pipelines.model_build import SourceLayout
-    from tcip_mcp.pipelines.schemas import TrainConfigSchema
+    from tcip_mcp.pipelines.schemas import TrainConfigSchema, TrainGeometry
 
 logger = logging.getLogger(__name__)
 
@@ -244,11 +244,25 @@ class VerifiedCheckpoint:
             "experiment_id": self.experiment_id,
         }
 
+    def stamped(self, key: str) -> Any:
+        """The payload's ``key``, one of the keys ``generic_trainer.checkpoint_stamp`` writes.
+        Refuses (``ValueError``) a payload carrying none, naming the key and the stamp.
+        """
+        if key not in self.payload:
+            raise ValueError(
+                f"{self.path} carries no {key!r}: a checkpoint carries what "
+                "generic_trainer.checkpoint_stamp writes, as the default trainer and "
+                "ctx.save_checkpoint save it, and this one was written past that stamp. Save "
+                "it through a run (launch_training, or ctx.save_checkpoint in its training "
+                "body)."
+            )
+        return self.payload[key]
+
     @cached_property
     def spec(self) -> TrainConfigSchema:
-        """The run config the checkpoint's payload carries, its stored paths
+        """The run config the checkpoint's payload carries (:meth:`stamped`), its stored paths
         (``experiments.CONFIG_PATHS``) read against :attr:`project`, validated once
-        (``schemas.train_config``, which refuses (``ValueError``) one that is invalid or absent):
+        (``schemas.train_config``, which refuses (``ValueError``) one that is invalid):
         a config stating its ``model_source`` and ``data`` validates with no training regime.
         A source file it declares (``model_build.source_seams``') that does not exist refuses
         (``ValueError``) naming it and how to carry the run whole, before anything is
@@ -259,9 +273,7 @@ class VerifiedCheckpoint:
         from tcip_mcp.pipelines.schemas import train_config
 
         spec = train_config(
-            runtime_paths(
-                self.payload.get(CONFIG_KEY, {}), CONFIG_PATHS, self.project
-            )
+            runtime_paths(self.stamped(CONFIG_KEY), CONFIG_PATHS, self.project)
         )
         absent = [
             file
@@ -279,11 +291,22 @@ class VerifiedCheckpoint:
         return spec
 
     @cached_property
+    def geometry(self) -> TrainGeometry:
+        """The geometry its run's resolution read off its training frames, as the payload's
+        ``GEOMETRY_KEY`` records it (:meth:`stamped`), validated once (refusing, ``ValueError``,
+        one that is invalid).
+        """
+        from tcip_mcp.pipelines.model_build import GEOMETRY_KEY
+        from tcip_mcp.pipelines.schemas import TrainGeometry
+
+        return TrainGeometry.model_validate(self.stamped(GEOMETRY_KEY))
+
+    @cached_property
     def layout(self) -> SourceLayout:
         """The run snapshot the checkpoint's model imports from, the one its payload's
-        ``SNAPSHOT_KEY`` digest names, as the record of the run of :attr:`project` that took it
-        states it (``model_build.owning_run_layout``, which refuses a config declaring no file, or
-        a snapshot and files no run of :attr:`project` took).
+        ``SNAPSHOT_KEY`` digest names (:meth:`stamped`), as the record of the run of
+        :attr:`project` that took it states it (``model_build.owning_run_layout``, which refuses a
+        config declaring no file, or a snapshot and files no run of :attr:`project` took).
         """
         from tcip_mcp.pipelines.model_build import (
             SNAPSHOT_KEY,
@@ -291,7 +314,7 @@ class VerifiedCheckpoint:
         )
 
         return owning_run_layout(
-            self.spec, self.payload.get(SNAPSHOT_KEY), self.project
+            self.spec, self.stamped(SNAPSHOT_KEY), self.project
         )
 
     @property

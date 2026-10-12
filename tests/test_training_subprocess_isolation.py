@@ -188,9 +188,9 @@ def test_a_run_whose_ground_truth_carries_its_own_classes_records_the_empty_scop
 def test_the_launch_record_carries_the_resolution_and_the_child_resolves_nothing(
     tmp_path, monkeypatch
 ):
-    """The launcher resolves a run once and writes what it resolved (data section, partition,
-    objective) into its launch record; the child builds its context from that record alone,
-    resolving nothing again and writing nothing beside it.
+    """The launcher resolves a run once and writes what it resolved (data section, geometry,
+    partition, objective) into its launch record; the child builds its context from that record
+    alone, resolving nothing again and writing nothing beside it.
     """
     from tcip_mcp.experiments import RUN_FILE, observe
     from tcip_mcp.pipelines.data import split_construction as sc
@@ -204,7 +204,7 @@ def test_the_launch_record_carries_the_resolution_and_the_child_resolves_nothing
     run_dir = opened_run(tmp_path, detection_config(tmp_path / "data"))
     launch_bytes = (run_dir / RUN_FILE).read_bytes()
     resolved = observe(run_dir).record["resolved"]
-    assert set(resolved) == {"data", "partition", "objective"}
+    assert set(resolved) == {"data", "geometry", "partition", "objective"}
     files_before = sorted(p.name for p in run_dir.iterdir())
 
     def resolves_again(*args, **kwargs):
@@ -217,6 +217,7 @@ def test_the_launch_record_carries_the_resolution_and_the_child_resolves_nothing
 
     assert ctx.run.objective.model_dump() == resolved["objective"]
     assert ctx.spec.data.record() == resolved["data"]
+    assert ctx.run.geometry.model_dump(mode="json") == resolved["geometry"]
     train_ds = ctx.train_loader.dataset
     assert sorted(
         {train_ds.sample_of(key).member for key in train_ds.stems}
@@ -363,6 +364,7 @@ def test_the_live_summary_folds_its_rows_in_the_recorded_objectives_direction(
     run_dir = opened_run(tmp_path, detection_config(tmp_path / "data"))
     record = decode_value((run_dir / RUN_FILE).read_bytes())
     record["resolved"]["objective"] = {
+        **record["resolved"]["objective"],
         "selection_metric": "map50",
         "higher_is_better": higher_is_better,
     }

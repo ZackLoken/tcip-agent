@@ -267,7 +267,7 @@ def phenology_measurement(payload: PhenologyPayload) -> dict:
         "unvalidated_reason": reason,
         "result_sha256": digests or None,
         "require_all_dates_complete": measurement.require_all_dates_complete,
-        **measurement.revision.ref,
+        **measurement.revision.ref.model_dump(),
         "positive_class_assessed": measurement.positive_class_assessed,
         **{
             key: disclosure[key]

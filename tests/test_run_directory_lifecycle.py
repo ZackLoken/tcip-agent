@@ -579,7 +579,11 @@ def test_an_hpo_trial_is_a_run_directory_reporting_the_sweeps_one_objective(
     trial_dir, reported = _trial(tmp_path)
 
     record = read_record(trial_dir / RUN_FILE)
-    objective = {"selection_metric": "loss", "higher_is_better": False}
+    objective = {
+        "selection_metric": "loss",
+        "higher_is_better": False,
+        "revision": None,
+    }
     assert record["trial_params"] == {"optimizer.head_lr": 0.01}
     assert record["resolved"]["partition"]["samples"]
     assert record["resolved"]["objective"] == objective

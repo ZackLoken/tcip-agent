@@ -98,8 +98,11 @@ def test_evaluate_model_refuses_an_unregistered_checkpoint_by_bare_path(
     images_dir, _ = _images(tmp_path)
 
     from tcip_mcp.tools.training_tools import evaluate_model
+    from tests._training_values import IOU_THRESHOLD
 
-    r = evaluate_model(tmp_path, ckpt, str(images_dir))
+    r = evaluate_model(
+        tmp_path, ckpt, str(images_dir), iou_threshold=IOU_THRESHOLD
+    )
     assert "register_model" in r["error"]
 
 

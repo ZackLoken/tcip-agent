@@ -39,6 +39,7 @@ def _answer(assessment: Assessment) -> dict[str, Any]:
     samples = answer["reference"].pop("samples")
     return {
         **answer,
+        "revision": assessment.revision.model_dump(),
         "execution": assessment.execution.record()
         if assessment.execution
         else None,

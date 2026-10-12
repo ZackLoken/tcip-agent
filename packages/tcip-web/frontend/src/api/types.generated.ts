@@ -159,9 +159,16 @@ export interface RunRow {
   launch: Record<string, string | null> | null;
 }
 
+export interface TraitRevisionRef {
+  trait: string;
+  trait_revision: number;
+  trait_revision_sha256: string;
+}
+
 export interface Objective {
   selection_metric: string;
   higher_is_better: boolean;
+  revision: TraitRevisionRef | null;
 }
 
 export interface SweepGroup {
@@ -437,12 +444,12 @@ export interface Acknowledgment {
 }
 
 export interface DeliveryEventRecord {
-  event_id: string;
-  door: string;
-  delivery_kind: string;
   trait: string;
   trait_revision: number;
   trait_revision_sha256: string;
+  event_id: string;
+  door: string;
+  delivery_kind: string;
   output_path: string;
   output_sha256: string;
   producer: Producer;

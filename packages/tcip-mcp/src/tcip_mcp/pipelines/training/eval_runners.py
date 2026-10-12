@@ -49,9 +49,9 @@ def run_test_evaluation(
     loader,
     device,
     *,
-    iou_threshold: float = 0.5,
+    iou_threshold: float,
     tiling: TilingSpec | None = None,
-    trait: TraitEntry | None = None,
+    trait: TraitEntry | None,
 ) -> dict:
     """Score ``loader`` against the untiled ``pass_``'s model, its boxes counted at the pass's
     conf, each image capped at the pass's density and the objective weighted by the checkpoint's
@@ -101,9 +101,9 @@ def run_full_frame_evaluation(
     admitted: Admission,
     *,
     stated: Stated,
-    iou_threshold: float = 0.5,
+    iou_threshold: float,
     device: str | None = None,
-    trait: TraitEntry | None = None,
+    trait: TraitEntry | None,
 ) -> dict:
     """``checkpoint`` evaluated full frame: its tiled pass over ``stated`` (its conf the stated
     one), its density, any tile geometry the checkpoint does not record and its merge threshold

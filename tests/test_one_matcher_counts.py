@@ -140,8 +140,8 @@ def test_one_scoring_matches_each_class_once_per_distinct_criterion(
 
     import tcip_annotation.matching as matching
     from tcip_annotation.state import Annotation, BBox
+    from tcip_mcp.pipelines.schemas import AP_IOU_THRESHOLDS
     from tcip_mcp.pipelines.training.evaluation import (
-        AP_IOU_THRESHOLDS,
         detection_metrics,
         records_from_annotation,
     )

@@ -528,6 +528,7 @@ def test_run_full_frame_evaluation_tiled_instance_seg_scores_masks(
         run_full_frame_evaluation,
     )
     from tests._producer_fixtures import label_image
+    from tests._training_values import IOU_THRESHOLD
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     gray_frame(images_dir, name="a.png")
@@ -554,6 +555,8 @@ def test_run_full_frame_evaluation_tiled_instance_seg_scores_masks(
         stated=Stated(
             tile=True, tile_size=TILE, overlap=0.2, **SAMPLE_DETECTOR_PASS
         ),
+        iou_threshold=IOU_THRESHOLD,
+        trait=None,
     )
     samples = admitted.every_sample()
     trained = build_dataset(
@@ -569,7 +572,11 @@ def test_run_full_frame_evaluation_tiled_instance_seg_scores_masks(
     assert r["governing_criterion"]["kind"] == "mask_iou_match"
 
     implicit = run_full_frame_evaluation(
-        checkpoint, admitted, stated=Stated(**SAMPLE_DETECTOR_PASS)
+        checkpoint,
+        admitted,
+        stated=Stated(**SAMPLE_DETECTOR_PASS),
+        iou_threshold=IOU_THRESHOLD,
+        trait=None,
     )
     assert (
         implicit["execution"]["tile_size"],

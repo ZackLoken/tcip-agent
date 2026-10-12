@@ -14,6 +14,7 @@ pytest.importorskip("pycocotools")
 
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tests._predictor_fixtures import StubPredictor, install  # noqa: E402
+from tests._training_values import IOU_THRESHOLD  # noqa: E402
 from tests._verified_checkpoint_fixtures import (
     SAMPLE_CONF,
     SAMPLE_CROSS_TILE_NMS,
@@ -21,6 +22,9 @@ from tests._verified_checkpoint_fixtures import (
 
 CONF_AND_MERGE = {"conf": SAMPLE_CONF, "cross_tile_nms": SAMPLE_CROSS_TILE_NMS}
 """The conf and merge threshold a tiled pass over these single-object references states."""
+
+SCORED = {"iou_threshold": IOU_THRESHOLD, "trait": None}
+"""What the full-frame runner scores these references under: the sample IoU and no trait."""
 
 # seed_bud_trait_spec (conftest.py) confirms bud_opening in this test's project, so the
 # trait/subject="bud" call sites resolve.
@@ -47,6 +51,7 @@ def test_gating_path_runs_at_the_density_the_evaluated_reference_derives(
         str(images_dir),
         use_tiled_inference=True,
         stated=Stated(tile_size=128, overlap=0.0, **CONF_AND_MERGE),
+        iou_threshold=IOU_THRESHOLD,
     )
     assert "error" not in r, r
     # One bud in each 128 px reference frame; the checkpoint trained on one in each 64 x 48.
@@ -110,11 +115,15 @@ def test_diagnostic_path_runs_at_the_checkpoints_own_density(
     ckpt = registered_checkpoint(tmp_path)
 
     evaluate_model(
-        tmp_path, str(ckpt), str(images_dir), stated=Stated(conf=SAMPLE_CONF)
+        tmp_path,
+        str(ckpt),
+        str(images_dir),
+        stated=Stated(conf=SAMPLE_CONF),
+        iou_threshold=IOU_THRESHOLD,
     )
     density = load_registered_checkpoint(
         ckpt, project=tmp_path
-    ).spec.data.train_object_density
+    ).geometry.object_density
     assert (
         captured["execution"].density,
         captured["execution"].sources["density"],
@@ -152,7 +161,11 @@ def test_bare_checkpoint_path_reuses_its_own_stamped_tiling_and_subject(
     )
 
     evaluate_model(
-        tmp_path, str(ckpt), str(images_dir), use_tiled_inference=True
+        tmp_path,
+        str(ckpt),
+        str(images_dir),
+        use_tiled_inference=True,
+        iou_threshold=IOU_THRESHOLD,
     )
     # The measurement is handed the checkpoint whose own record states its class space and its
     # tiling, and the door states no geometry of its own beside it.
@@ -192,7 +205,11 @@ def test_gate_translates_geometry_refusal_to_error_dict(tmp_path, monkeypatch):
     ckpt = registered_checkpoint(tmp_path)
 
     r = evaluate_model(
-        tmp_path, str(ckpt), str(images_dir), use_tiled_inference=True
+        tmp_path,
+        str(ckpt),
+        str(images_dir),
+        use_tiled_inference=True,
+        iou_threshold=IOU_THRESHOLD,
     )
     assert "error" in r
     assert "tiling=" in r["error"]
@@ -218,7 +235,11 @@ def test_gate_translates_unreadable_label_to_error_dict(tmp_path, monkeypatch):
     ckpt = registered_checkpoint(tmp_path)
 
     r = evaluate_model(
-        tmp_path, str(ckpt), str(images_dir), use_tiled_inference=True
+        tmp_path,
+        str(ckpt),
+        str(images_dir),
+        use_tiled_inference=True,
+        iou_threshold=IOU_THRESHOLD,
     )
     assert "error" in r
     assert "2026-03-02/IMG_0001" in r["error"]
@@ -245,12 +266,49 @@ def test_both_regimes_refuse_a_stray_labels_dir_by_name(
         str(images_dir),
         labels_dir=str(stray),
         use_tiled_inference=use_tiled_inference,
+        iou_threshold=IOU_THRESHOLD,
     )
 
     assert (
         "stray_labels" in r["error"]
         and "admits nothing to evaluate" in r["error"]
     ), r
+
+
+def test_tiled_inference_on_a_checkpoint_whose_task_does_not_tile_refuses_by_name(
+    tmp_path,
+):
+    """``use_tiled_inference`` over a classification checkpoint refuses naming the flag and the
+    task, never scoring the untiled regime in its place.
+    """
+    from pathlib import Path
+
+    from tcip_mcp.experiments import observe
+    from tcip_mcp.tools.training_tools import evaluate_model
+    from tests._chain_fixtures import CLASSIFIER_SOURCE
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
+
+    ckpt = registered_checkpoint(tmp_path, model_source=dict(CLASSIFIER_SOURCE))
+    trained_on = observe(Path(ckpt).parent).resolved_data
+    assert trained_on is not None
+
+    def evaluated(**flag) -> dict:
+        return evaluate_model(
+            tmp_path,
+            ckpt,
+            str(trained_on.images_dir),
+            str(trained_on.labels_dir),
+            iou_threshold=IOU_THRESHOLD,
+            **flag,
+        )
+
+    refused = evaluated(use_tiled_inference=True)
+    assert (
+        "use_tiled_inference" in refused["error"]
+        and "'classification'" in refused["error"]
+    ), refused
+    scored = evaluated()
+    assert "error" not in scored and "accuracy" in scored, scored
 
 
 def test_a_frame_that_hits_its_cap_is_reported_saturated(
@@ -292,6 +350,7 @@ def test_a_frame_that_hits_its_cap_is_reported_saturated(
         checkpoint,
         checkpoint_admission(checkpoint, images_dir),
         stated=Stated(**CONF_AND_MERGE),
+        **SCORED,
     )
     assert (
         r["cap_saturated_frac"] == 1.0
@@ -337,6 +396,7 @@ def test_the_gate_reads_its_references_at_the_predictors_own_width(
         checkpoint,
         checkpoint_admission(checkpoint, images_dir),
         stated=Stated(**CONF_AND_MERGE),
+        **SCORED,
     )
 
     assert r["scored_images"] == 4
@@ -367,6 +427,7 @@ def test_run_full_frame_evaluation_records_merge_and_execution(
         checkpoint,
         checkpoint_admission(checkpoint, images_dir),
         stated=Stated(**CONF_AND_MERGE),
+        **SCORED,
     )
 
     assert [execution.cross_tile_nms for execution in detector.executions] == [
@@ -412,6 +473,7 @@ def test_the_gate_refuses_documents_whose_geometry_a_detector_cannot_read(
             checkpoint,
             checkpoint_admission(checkpoint, images_dir),
             stated=Stated(),
+            **SCORED,
         )
 
     # Admits valid work: the same eight images, their documents carrying boxes, score.
@@ -420,6 +482,7 @@ def test_the_gate_refuses_documents_whose_geometry_a_detector_cannot_read(
         checkpoint,
         checkpoint_admission(checkpoint, images_dir),
         stated=Stated(**CONF_AND_MERGE),
+        **SCORED,
     )
     assert scored["scored_images"] == 8
 
@@ -445,4 +508,5 @@ def test_the_gate_refuses_an_images_tree_with_no_ground_truth(
             checkpoint,
             checkpoint_admission(checkpoint, images_dir),
             stated=Stated(),
+            **SCORED,
         )

@@ -14,6 +14,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    PositiveInt,
     ValidationError,
     ValidationInfo,
     model_validator,
@@ -58,14 +59,28 @@ class EarlyStoppingSpec(BaseModel):
     min_delta: float = Field(ge=0)
 
 
+class TraitRevisionRef(BaseModel):
+    """One trait revision as every record names it: the trait, the revision's number and its
+    entry's content hash (``traits.entry_sha256``).
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    trait: str
+    trait_revision: int
+    trait_revision_sha256: str
+
+
 class Objective(BaseModel):
-    """A run's objective, resolved once at launch: the metric its epochs are selected by and that
-    metric's declared direction.
+    """A run's objective, resolved once at launch: the metric its epochs are selected by, that
+    metric's declared direction, and ``revision``, the confirmed revision of the trait its
+    evaluation names that every evaluation of the run scores under (``None`` for a run naming
+    no trait).
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     selection_metric: str
     higher_is_better: bool
+    revision: TraitRevisionRef | None
 
 
 class OptimizerSpec(BaseModel):
@@ -159,6 +174,15 @@ class ScoreWeights(BaseModel):
     map50: float = Field(ge=0)
 
 
+AP_IOU_THRESHOLDS = tuple(round(0.5 + 0.05 * i, 2) for i in range(10))
+"""The IoU thresholds ``map`` averages average precision over, 0.50 to 0.95 by 0.05: the COCO
+convention's own, so ``map`` stays comparable to a COCO-reported figure."""
+
+COMPARABILITY_IOU = AP_IOU_THRESHOLDS[0]
+"""The comparability convention: the IoU a match must reach where no trait's criterion governs,
+COCO's first average-precision threshold, the one ``map50`` reports at."""
+
+
 class EvaluationSpec(BaseModel):
     """What a run's validation pass scores against: the confirmed trait it selects for, the
     selection metric (resolved by ``generic_trainer.resolve_selection_metric``), and the
@@ -169,9 +193,10 @@ class EvaluationSpec(BaseModel):
     trait: str | None = None
     selection_metric: str | None = None
     conf_threshold: float | None = Field(None, ge=0, le=1)
-    """The confidence a detector's validation counts boxes at, read through
-    :meth:`TrainConfigSchema.trainer_reads`."""
-    iou_threshold: float = 0.5
+    """The confidence a detector's validation counts boxes at."""
+    iou_threshold: float = COMPARABILITY_IOU
+    """The IoU a match must reach where no trait's criterion governs; unstated,
+    :data:`COMPARABILITY_IOU`."""
     score_weights: ScoreWeights | None = None
 
 
@@ -321,18 +346,18 @@ class TilingSpec(BaseModel):
 
 def run_tiling(task: str, tiling: TilingSpec | None) -> TilingSpec | None:
     """The tiling a run of ``task`` builds its loaders at: ``tiling`` when it is stated and
-    enabled, ``None`` otherwise. A task outside ``model_contract.DETECTION_TASKS`` trains whole
+    enabled, ``None`` otherwise. A task outside ``model_contract.TILING_TASKS`` trains whole
     frames, so an enabled ``tiling`` for one refuses (``ValueError``) naming the task and
     ``data.tiling``.
     """
-    from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
+    from tcip_mcp.pipelines.model_contract import TILING_TASKS
 
     if tiling is None or not tiling.enabled:
         return None
-    if task not in DETECTION_TASKS:
+    if task not in TILING_TASKS:
         raise ValueError(
             f"data.tiling is enabled for a run of task {task!r}: only a "
-            f"{sorted(DETECTION_TASKS)} run trains and predicts over tiles, its targets clipped "
+            f"{sorted(TILING_TASKS)} run trains and predicts over tiles, its targets clipped "
             "to each one, so this run would never read the tiling it states. Drop data.tiling."
         )
     return tiling
@@ -352,8 +377,8 @@ class _Recorded(BaseModel):
 
 class DataSpec(_Recorded):
     """``data``: where a run's samples are and how they split, and what its resolution records
-    beside them (``scope``, the sizes, the stamped geometry and object density). A key outside
-    these fields refuses by name, and so does a ``tiling`` beside a ``dataset_source``.
+    beside them (``scope`` and the sizes). A key outside these fields refuses by name, and so
+    does a ``tiling`` beside a ``dataset_source``.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -369,8 +394,6 @@ class DataSpec(_Recorded):
     num_channels: int | None = None
     num_classes: int | None = None
     num_ranks: int | None = None
-    train_native_size: list[int] | None = None
-    train_object_density: float | None = None
     plant_csv_paths: list[ResolvedPath] | None = None
 
     @model_validator(mode="after")
@@ -389,6 +412,18 @@ class DataSpec(_Recorded):
         recording none).
         """
         return ClassScope.recorded(self.scope)
+
+
+class TrainGeometry(BaseModel):
+    """What a run's resolution read off the frames its train dataset serves: ``native_size``,
+    the one ``(width, height)`` every training frame of a run the platform resolved untiled
+    shares (``None`` when sizes differ or the run tiles), and ``object_density``, a detector's
+    objects per pixel over the regions it trains on (``None`` for any other head).
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    native_size: tuple[PositiveInt, PositiveInt] | None
+    object_density: float | None
 
 
 NESTED_TRAINING_SECTION_REFUSAL = (
@@ -496,7 +531,7 @@ class TrainConfigSchema(_Recorded):
         ``sampler`` block its sampler refuses (``samplers.sampler_settings``).
         """
         from tcip_mcp.pipelines.data.samplers import sampler_settings
-        from tcip_mcp.pipelines.model_contract import DETECTION_TASKS
+        from tcip_mcp.pipelines.model_contract import DETECTOR_TASKS
 
         unstated = []
         if self.sampler is not None:
@@ -510,7 +545,7 @@ class TrainConfigSchema(_Recorded):
                 "config states, under any trainer"
             )
         if (
-            self.model_source.task in DETECTION_TASKS
+            self.model_source.task in DETECTOR_TASKS
             and self.evaluation.conf_threshold is None
         ):
             unstated.append(

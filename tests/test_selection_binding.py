@@ -1322,6 +1322,7 @@ def test_a_bound_detection_run_stating_no_metric_selects_by_the_composite_object
     assert observation.objective.model_dump() == {
         "selection_metric": "objective",
         "higher_is_better": False,
+        "revision": None,
     }
     rows = epoch_rows(read_rows(observation.metrics_log)[0])
     assert rows

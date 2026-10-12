@@ -13,7 +13,7 @@ from tcip_annotation.json_io import (
     read_document_versioned,
     read_predictions,
 )
-from tcip_annotation.matching import REVIEW_CONF_FLOOR, Matching
+from tcip_annotation.matching import Matching
 from tcip_mcp.buckets import Bucket, read_bucket, source_root
 from tcip_mcp.dataset_layout import label_key_of
 from tcip_mcp.pipelines.image_utils import image_path_dimensions
@@ -301,8 +301,8 @@ def _evaluate_folder(
 def score_predictions(
     path: str,
     bucket: str,
-    iou_threshold: float = 0.5,
-    conf_threshold: float = REVIEW_CONF_FLOOR,
+    iou_threshold: float,
+    conf_threshold: float,
     detail: bool = False,
     trait: TraitEntry | None = None,
     *,
@@ -325,7 +325,8 @@ def score_predictions(
             relative path refuses).
         bucket: The name of the bucket, published under ``path``'s dataset root, whose documents
             are scored.
-        iou_threshold: IoU threshold for a positive match (the AP@0.5 comparability convention).
+        iou_threshold: IoU threshold for a positive match (the comparability convention is
+            ``schemas.COMPARABILITY_IOU``).
         conf_threshold: Minimum confidence to consider a prediction.
         detail: Single-image only, also return the per-detection ``detections`` breakdown: each
             entry the annotation it names as ``client_annotation`` projects it (corner ``bbox``,

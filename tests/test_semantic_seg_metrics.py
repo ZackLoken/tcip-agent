@@ -140,6 +140,8 @@ def test_evaluate_semantic_seg_surfaces_miou(tmp_path: Path):
         conf_threshold=None,
         iou_threshold=IOU_THRESHOLD,
         score_weights=None,
+        trait=None,
+        density=None,
     )
 
     assert "loss" in result

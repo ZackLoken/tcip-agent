@@ -36,7 +36,11 @@ from tests._chain_fixtures import (  # noqa: E402
 )
 from tests._image_fixtures import write_noise_image  # noqa: E402
 from tests._producer_fixtures import dataset_over, label_image, run_over  # noqa: E402
-from tests._training_values import adamw_optimizer, evaluation_block  # noqa: E402
+from tests._training_values import (  # noqa: E402
+    IOU_THRESHOLD,
+    adamw_optimizer,
+    evaluation_block,
+)
 from tests.tiny_trainer_fixtures import write_regression_dataset  # noqa: E402
 
 IMG = 64
@@ -333,7 +337,11 @@ def test_ordinal_evaluate_model_e2e(tmp_path: Path, monkeypatch):
     _assert_trained(observation)
 
     result = evaluate_model(
-        tmp_path, observation.directory.name, str(images_dir), str(csv_path)
+        tmp_path,
+        observation.directory.name,
+        str(images_dir),
+        str(csv_path),
+        iou_threshold=IOU_THRESHOLD,
     )
     assert "error" not in result, result
     assert "mae" in result
@@ -362,7 +370,11 @@ def test_regression_evaluate_model_e2e(tmp_path: Path, monkeypatch):
     _assert_trained(observation)
 
     result = evaluate_model(
-        tmp_path, observation.directory.name, str(images_dir), str(csv_path)
+        tmp_path,
+        observation.directory.name,
+        str(images_dir),
+        str(csv_path),
+        iou_threshold=IOU_THRESHOLD,
     )
     assert "error" not in result, result
     assert "mae" in result

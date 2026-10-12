@@ -10,8 +10,10 @@ import numpy as np
 import pytest
 from PIL import Image
 
+from tcip_annotation.matching import REVIEW_CONF_FLOOR
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tcip_mcp.pipelines.raster_source import SourceHeader
+from tests._training_values import IOU_THRESHOLD
 
 
 def _display(image_path: str) -> tuple[np.ndarray, tuple[int, int]]:
@@ -624,8 +626,16 @@ def test_scoring_and_the_comparison_render_state_one_count_for_one_image(
         scope={"subject": "bud"},
     )
 
-    scored = score_predictions(str(image), PUBLISHED, detail=True)
-    rendered = visualize(tmp_path, "comparison", str(image), bucket=PUBLISHED)
+    scored = score_predictions(
+        str(image), PUBLISHED, IOU_THRESHOLD, REVIEW_CONF_FLOOR, detail=True
+    )
+    rendered = visualize(
+        tmp_path,
+        "comparison",
+        str(image),
+        iou_threshold=IOU_THRESHOLD,
+        bucket=PUBLISHED,
+    )
 
     assert "error" not in scored and "error" not in rendered, (
         scored,
@@ -650,11 +660,37 @@ class TestVisualizeComparison:
         from tcip_mcp.tools.vision_tools import visualize
 
         img = str(viz_bucket / "images" / UNDATED_BUCKET / "img_001.jpg")
-        result = visualize(viz_bucket, "comparison", img, bucket=PUBLISHED)
+        result = visualize(
+            viz_bucket,
+            "comparison",
+            img,
+            iou_threshold=IOU_THRESHOLD,
+            bucket=PUBLISHED,
+        )
         assert "error" not in result, result
         assert Path(result["image_path"]).is_file()
         assert result["gt_count"] == 2
         assert result["pred_count"] == 2
+
+    def test_the_scoring_doors_refuse_an_unstated_iou_threshold_by_name(
+        self, viz_bucket: Path
+    ):
+        """A comparison render and ``score_predictions`` score at the IoU their caller states,
+        and refuse naming ``iou_threshold`` when it states none.
+        """
+        from tcip_mcp.tools.annotation_tools import score_predictions
+        from tcip_mcp.tools.vision_tools import visualize
+
+        img = str(viz_bucket / "images" / UNDATED_BUCKET / "img_001.jpg")
+        unstated = visualize(viz_bucket, "comparison", img, bucket=PUBLISHED)
+        assert "iou_threshold" in unstated["error"]
+        with pytest.raises(TypeError, match="iou_threshold"):
+            score_predictions(img, PUBLISHED, conf_threshold=REVIEW_CONF_FLOOR)  # type: ignore[call-arg]
+
+        scored = score_predictions(
+            img, PUBLISHED, IOU_THRESHOLD, REVIEW_CONF_FLOOR
+        )
+        assert "error" not in scored, scored
 
     def test_an_image_the_bucket_did_not_predict_draws_its_ground_truth_all_missed(
         self, viz_bucket: Path
@@ -676,7 +712,11 @@ class TestVisualizeComparison:
         )
 
         result = visualize(
-            viz_bucket, "comparison", str(img), bucket=PUBLISHED
+            viz_bucket,
+            "comparison",
+            str(img),
+            iou_threshold=IOU_THRESHOLD,
+            bucket=PUBLISHED,
         )
 
         assert "error" not in result, result
@@ -695,7 +735,11 @@ class TestVisualizeComparison:
         _damage(_label_key(img))
 
         result = visualize(
-            viz_bucket, "comparison", str(img), bucket=PUBLISHED
+            viz_bucket,
+            "comparison",
+            str(img),
+            iou_threshold=IOU_THRESHOLD,
+            bucket=PUBLISHED,
         )
         assert "img_001" in result["error"]
 
@@ -708,7 +752,11 @@ class TestVisualizeComparison:
         _damage(_prediction_key(viz_bucket, img))
 
         result = visualize(
-            viz_bucket, "comparison", str(img), bucket=PUBLISHED
+            viz_bucket,
+            "comparison",
+            str(img),
+            iou_threshold=IOU_THRESHOLD,
+            bucket=PUBLISHED,
         )
         assert "img_001" in result["error"]
 
@@ -721,6 +769,7 @@ class TestVisualizeComparison:
             viz_bucket,
             "comparison",
             str(viz_bucket / "images" / UNDATED_BUCKET / "img_001.jpg"),
+            iou_threshold=IOU_THRESHOLD,
             bucket=PUBLISHED,
         )
         assert "error" in result

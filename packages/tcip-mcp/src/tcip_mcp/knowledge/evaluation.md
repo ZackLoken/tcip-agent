@@ -19,7 +19,7 @@ These are labeled comparability metrics: a fixed-convention number (mAP@50 = AP 
 lets runs be compared on the same ruler. They do not govern the phenotype. The criterion that
 governs the delivered measurement (which detections are a hit, what the count is) is the *trait's*
 localization criterion with a tolerance derived from the data in hand, e.g. a center-match with
-`half_class_avg_size` tolerance for small, thin objects like catkins, not a frozen IoU@0.5. Choose the governing
+`half_class_avg_size` tolerance for small, thin objects like catkins, not a frozen IoU threshold. Choose the governing
 criterion per trait/data; keep mAP@50 alongside only as the comparability label (see `operating_point`
 / the derive-don't-pin rail). There is no single mandated "primary" metric per task.
 
@@ -50,9 +50,11 @@ measurement-agreement/method-comparison contexts specifically because of that de
 | `list_experiments` | List every run of the project, and every sweep with its trial runs under it |
 | `rank_registered_models` | Rank registered models by a stated metric, direction and verification status |
 
-`evaluate_model` accepts an optional `trait=`: when set, the trait's own governing criterion
-(not the IoU@0.5 comparability convention) determines detection counts/F1, matching what governs
-delivery (see Metrics by Task Type above); omit it and the IoU@0.5 convention governs instead. For
+`evaluate_model`, `score_predictions` and a comparison render take `iou_threshold` stated, the IoU
+a match must reach (the comparability convention is `schemas.COMPARABILITY_IOU`, which a run's
+unstated `evaluation.iou_threshold` reads). `evaluate_model` accepts an optional `trait=`: when set, the trait's own governing
+criterion (not the comparability convention) determines detection counts/F1, matching what governs
+delivery (see Metrics by Task Type above); omit it and the convention governs instead. For
 a tile-trained checkpoint, `evaluate_model` reports in one of two regimes: the default tile-level
 run is a diagnostic only, scored over per-tile ground truth, not the shipped full-frame count;
 `use_tiled_inference=True` reconstructs predictions to full frame and is the delivery-grade metric
@@ -129,7 +131,8 @@ When metrics are poor, investigate systematically:
 3. Per-image breakdown: `annotation_tools.score_predictions` (library call, or
    `tcip score-predictions`) on a dataset dir; find images with the highest FP/FN counts
    (no built-in per-class breakdown for detection; use
-   `annotation_tools.score_predictions(<image>, detail=True)` per image and aggregate by
+   `annotation_tools.score_predictions(<image>, <bucket>, <iou>, <conf>, detail=True)` per
+   image and aggregate by
    `class_id` if class-level numbers are needed). The breakdown is the object's localization,
    never an attribute head's call: `evaluate`'s `attribute_agreement` (per attribute, over the
    matched pairs) and an assessment's classifier criterion triage the attribute axes instead
