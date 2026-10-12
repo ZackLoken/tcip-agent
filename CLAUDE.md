@@ -46,12 +46,8 @@ Your default failure is pushing through friction by guessing.
   this session. One docstring, one sample project, one capture rig describes that instance, not the
   platform's general case; ask before generalizing. A claim about purpose is checked by testing its
   premise.
-- Semantic search first, grep second. When a claude-context server is configured, its search is the
-  default for any exploratory or orientation read: it finds concept-shaped matches grep cannot, and
-  it is much faster than sweeping the tree. Reach for `git grep` once you know the exact string you
-  are pinning, which is a symbol, a call site or a line number. Do not default to grep for
-  everything. The index reflects the last rebuild, so uncommitted code is grep-only, and `docs/` is
-  not indexed at all.
+- Orientation reads go by `git grep` or the Grep tool over a named subtree and then the file
+  itself; no code index is maintained while the tree changes daily.
 - Progressive disclosure: start simple; add complexity only when data or metrics justify it.
 
 ## Invariants that protect the science
