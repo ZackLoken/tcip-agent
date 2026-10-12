@@ -75,9 +75,9 @@ def test_a_detector_dataset_records_its_density_whoever_built_it():
     """
     bespoke = {"dataset_source": {"builder": "my_module:build_ds"}}
 
-    assert _geometry(
-        bespoke, _TiledStub()
-    ).object_density == pytest.approx(2 / (96 * 96))
+    assert _geometry(bespoke, _TiledStub()).object_density == pytest.approx(
+        2 / (96 * 96)
+    )
     with pytest.raises(ValueError, match="regions"):
         _geometry(bespoke, _OpaqueStub())
     assert (
@@ -132,7 +132,8 @@ def test_stamp_untiled_mixed_frames_record_nothing(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "stated", [{"train_native_size": [64, 48]}, {"train_object_density": 0.001}]
+    "stated",
+    [{"train_native_size": [64, 48]}, {"train_object_density": 0.001}],
 )
 def test_a_config_stating_a_resolved_geometry_key_refuses_at_the_door_naming_it(
     tmp_path, stated
@@ -295,7 +296,9 @@ def test_an_untiled_runs_resolved_record_carries_no_tiling(tmp_path):
     tiled = _resolved_data(
         opened_run(
             tmp_path,
-            _base_config(tiling_block(tile_size=32, sliver_frac=0.5), tmp_path),
+            _base_config(
+                tiling_block(tile_size=32, sliver_frac=0.5), tmp_path
+            ),
         )
     )["tiling"]
     assert tiled["tile_size"] == 32 and tiled["rationale"]

@@ -447,7 +447,10 @@ def test_snapshot_copies_the_dataset_builders_module_as_that_module(
     undeclared = train_config(
         training_config(
             model_source,
-            {"dataset_source": {"builder": BESPOKE_DS}, "split": drawn_split()},
+            {
+                "dataset_source": {"builder": BESPOKE_DS},
+                "split": drawn_split(),
+            },
         )
     )
     with pytest.raises(ValueError, match="test_dataset_source_seam"):

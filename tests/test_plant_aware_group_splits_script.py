@@ -502,7 +502,10 @@ def test_the_cli_and_the_tool_draw_one_selection_at_the_stated_shares(
     assert sides(cli_out) == sides(tool_out)
     for out in (cli_out, tool_out):
         drawn = read_selection(out, project=project)
-        assert (drawn.stratify_foreground, drawn.rationale) == (True, RATIONALE)
+        assert (drawn.stratify_foreground, drawn.rationale) == (
+            True,
+            RATIONALE,
+        )
         assert drawn.ratios == pytest.approx(
             {
                 "train": 0.7,

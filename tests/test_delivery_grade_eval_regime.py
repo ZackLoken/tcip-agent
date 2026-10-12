@@ -290,7 +290,9 @@ def test_tiled_inference_on_a_checkpoint_whose_task_does_not_tile_refuses_by_nam
     from tests._chain_fixtures import CLASSIFIER_SOURCE
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
-    ckpt = registered_checkpoint(tmp_path, model_source=dict(CLASSIFIER_SOURCE))
+    ckpt = registered_checkpoint(
+        tmp_path, model_source=dict(CLASSIFIER_SOURCE)
+    )
     trained_on = observe(Path(ckpt).parent).resolved_data
     assert trained_on is not None
 

@@ -81,7 +81,9 @@ def test_a_drawn_detection_run_reads_each_document_once(
         {
             "images_dir": str(images_dir),
             "scope": {"subject": "bud"},
-            "split": drawn_split(val_ratio=0.4, seed=1, grouping="tile_prefix"),
+            "split": drawn_split(
+                val_ratio=0.4, seed=1, grouping="tile_prefix"
+            ),
         },
     )
     _consume(train, val)

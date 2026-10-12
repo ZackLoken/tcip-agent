@@ -185,20 +185,26 @@ def test_golden_crossing_dates_interpolated():
     # The return is a Crossing record (date + evidentiary bound), not a bare string.
     # 0.05 lies midway 0.0 to 0.10, 10 days
     assert (
-        phenology_mod.crossing_date(_PHENO_SERIES, 0.05, _RULE).date == "2026-02-15"
+        phenology_mod.crossing_date(_PHENO_SERIES, 0.05, _RULE).date
+        == "2026-02-15"
     )
     assert (
-        phenology_mod.crossing_date(_PHENO_SERIES, 0.50, _RULE).date == "2026-03-01"
+        phenology_mod.crossing_date(_PHENO_SERIES, 0.50, _RULE).date
+        == "2026-03-01"
     )
     assert (
-        phenology_mod.crossing_date(_PHENO_SERIES, 0.95, _RULE).date == "2026-03-12"
+        phenology_mod.crossing_date(_PHENO_SERIES, 0.95, _RULE).date
+        == "2026-03-12"
     )
     # 0.97 observed, not 0.95 exactly
     assert (
         phenology_mod.crossing_date(_PHENO_SERIES, 0.95, _RULE).bound
         == "interpolated"
     )
-    assert phenology_mod.crossing_date(_PHENO_SERIES, 0.97, _RULE).bound == "exact"
+    assert (
+        phenology_mod.crossing_date(_PHENO_SERIES, 0.97, _RULE).bound
+        == "exact"
+    )
     # never reached within the observed window -> right-censored at the last observed date, not a
     # bare None: distinguishable from "no observations at all".
     c99 = phenology_mod.crossing_date(_PHENO_SERIES, 0.99, _RULE)

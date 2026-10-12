@@ -292,7 +292,11 @@ def test_real_models_still_smoke_green_on_the_collated_batch():
     assert report["eval_output_type"] == "list[dict]"
 
     learned = overfit_check(
-        _OrdinalProbe(num_ranks=4), "ordinal", steps=20, dims=ORD_DIMS, seed=0,
+        _OrdinalProbe(num_ranks=4),
+        "ordinal",
+        steps=20,
+        dims=ORD_DIMS,
+        seed=0,
         deterministic=False,
     )
     assert learned["passed"], learned["issue"]

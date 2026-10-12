@@ -386,7 +386,9 @@ def test_an_unbound_semantic_seg_run_reads_its_membership_off_its_own_samples(
         {
             "images_dir": str(images_dir),
             "labels_dir": str(masks_dir),
-            "split": drawn_split(val_ratio=0.25, seed=7, grouping="tile_prefix"),
+            "split": drawn_split(
+                val_ratio=0.25, seed=7, grouping="tile_prefix"
+            ),
         }
     )
 
@@ -429,7 +431,9 @@ def test_an_unbound_regression_run_reads_its_membership_off_its_own_samples(
         {
             "images_dir": str(images_dir),
             "labels_dir": str(csv_path),
-            "split": drawn_split(val_ratio=0.25, seed=7, grouping="tile_prefix"),
+            "split": drawn_split(
+                val_ratio=0.25, seed=7, grouping="tile_prefix"
+            ),
         }
     )
 
@@ -855,7 +859,9 @@ def test_the_bound_and_drawn_mask_routes_record_one_directory_the_same_way(
         {
             "images_dir": str(images_dir),
             "labels_dir": str(masks_dir),
-            "split": drawn_split(val_ratio=0.25, seed=7, grouping="tile_prefix"),
+            "split": drawn_split(
+                val_ratio=0.25, seed=7, grouping="tile_prefix"
+            ),
         },
     )
 

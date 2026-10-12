@@ -157,8 +157,14 @@ def test_an_entry_naming_what_no_table_implements_refuses_naming_the_field(
 @pytest.mark.parametrize(
     "vocabulary, table",
     [
-        ("CountObjective", "tcip_mcp.pipelines.operating_point:COUNT_OBJECTIVE_PICKERS"),
-        ("CrossingRule", "tcip_mcp.pipelines.postprocessing.phenology:CROSSING_RULES"),
+        (
+            "CountObjective",
+            "tcip_mcp.pipelines.operating_point:COUNT_OBJECTIVE_PICKERS",
+        ),
+        (
+            "CrossingRule",
+            "tcip_mcp.pipelines.postprocessing.phenology:CROSSING_RULES",
+        ),
         (
             "RegressionCriterion",
             "tcip_mcp.pipelines.operating_point:REGRESSION_CRITERIA",
@@ -541,9 +547,9 @@ def test_a_series_classifying_the_states_attribute_delivers(tmp_path: Path):
     ]
     assert shipped.entry_sha256 == event.trait_revision_sha256
     assert shipped.entry.crossing_rule == BUD_OPENING.crossing_rule
-    assert {(r["trait_revision"], r["trait_revision_sha256"]) for r in rows} == {
-        (str(shipped.number), shipped.entry_sha256)
-    }
+    assert {
+        (r["trait_revision"], r["trait_revision_sha256"]) for r in rows
+    } == {(str(shipped.number), shipped.entry_sha256)}
     assert all("crossing_rule" not in r for r in rows)
 
 

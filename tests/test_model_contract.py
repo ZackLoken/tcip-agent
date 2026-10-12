@@ -211,7 +211,11 @@ def test_check_model_contract_detection_ok():
 def test_overfit_check_classification_passes():
     model = bespoke_models.build_bespoke_classifier(num_classes=2)
     report = overfit_check(
-        model, "classification", steps=25, dims=CLS_DIMS, seed=0,
+        model,
+        "classification",
+        steps=25,
+        dims=CLS_DIMS,
+        seed=0,
         deterministic=False,
     )
     assert report["passed"], report["issue"]
@@ -227,7 +231,11 @@ def test_render_overfit_report_passes_through_a_finite_report():
 
     model = bespoke_models.build_bespoke_classifier(num_classes=2)
     raw = overfit_check(
-        model, "classification", steps=5, dims=CLS_DIMS, seed=0,
+        model,
+        "classification",
+        steps=5,
+        dims=CLS_DIMS,
+        seed=0,
         deterministic=False,
     )
     rendered = render_overfit_report(raw)

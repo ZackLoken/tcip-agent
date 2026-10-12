@@ -568,7 +568,9 @@ class RunObservation:
         what a run's launch resolved (:attr:`resolution`'s); ``None`` for one naming no trait.
         Refuses (``ValueError``) naming the run when it resolved to nothing.
         """
-        held = self.record if self.record_file == SWEEP_FILE else self.resolution
+        held = (
+            self.record if self.record_file == SWEEP_FILE else self.resolution
+        )
         if held is None:
             raise ValueError(
                 f"run {self.directory.name} resolved to nothing and carries no trait revision"

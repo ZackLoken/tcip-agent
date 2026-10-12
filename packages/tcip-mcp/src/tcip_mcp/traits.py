@@ -26,7 +26,9 @@ CountObjective = Literal["", "count_unbiased", "detection_f1", "presence"]
 CrossingRule = Literal["", "linear_whole_day"]
 """How a milestone's day is read between two capture dates (``phenology.CROSSING_RULES``), or
 empty until authored."""
-RegressionCriterion = Literal["", "r_squared", "concordance_correlation_coefficient"]
+RegressionCriterion = Literal[
+    "", "r_squared", "concordance_correlation_coefficient"
+]
 """The skill statistic a regression delivery is assessed by
 (``operating_point.REGRESSION_CRITERIA``), or empty until authored."""
 PlantAggregation = Literal["", "median", "mean", "mode", "sum"]

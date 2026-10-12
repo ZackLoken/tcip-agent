@@ -126,7 +126,8 @@ class TestOptimizerFactory:
             pytest.skip("torch_optimizer is importable in this environment")
         with pytest.raises(ImportError, match="torch_optimizer"):
             _built(
-                adamw_optimizer(name="lamb", backbone_lr=1e-3), nn.Linear(10, 5)
+                adamw_optimizer(name="lamb", backbone_lr=1e-3),
+                nn.Linear(10, 5),
             )
 
 

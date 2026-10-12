@@ -73,7 +73,11 @@ def test_a_model_whose_loss_never_moves_is_refused():
 def test_a_model_that_really_learns_passes():
     """The rail admits valid work: a real learnable path drives the loss down and passes."""
     report = overfit_check(
-        _LinearProbe(), "classification", steps=25, dims=CLS_DIMS, seed=0,
+        _LinearProbe(),
+        "classification",
+        steps=25,
+        dims=CLS_DIMS,
+        seed=0,
         deterministic=False,
     )
     assert report["passed"], report["issue"]
@@ -106,7 +110,11 @@ def test_an_all_frozen_model_reports_rather_than_raises():
     empty-parameter case reaches the report instead of escaping the function.
     """
     report = overfit_check(
-        _AllFrozen(), "classification", steps=5, dims=CLS_DIMS, seed=0,
+        _AllFrozen(),
+        "classification",
+        steps=5,
+        dims=CLS_DIMS,
+        seed=0,
         deterministic=False,
     )
     assert report["passed"] is False

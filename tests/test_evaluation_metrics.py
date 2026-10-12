@@ -812,7 +812,9 @@ def test_resolve_selection_metric_admits_a_weighted_objective_and_a_plain_metric
     resolve_selection_metric(
         None, "objective", score_weights=WEIGHTS, has_val_loader=True
     )
-    resolve_selection_metric(None, "f1", score_weights=None, has_val_loader=True)
+    resolve_selection_metric(
+        None, "f1", score_weights=None, has_val_loader=True
+    )
 
 
 def test_resolve_selection_metric_with_no_val_loader_accepts_only_loss():
@@ -861,7 +863,9 @@ def test_an_evaluation_block_selecting_on_a_metric_with_no_declared_direction_is
     from tcip_mcp.pipelines.schemas import EvaluationSpec
 
     with pytest.raises(ValidationError, match="selection_metric"):
-        EvaluationSpec(**evaluation_block(selection_metric="not_a_real_metric"))
+        EvaluationSpec(
+            **evaluation_block(selection_metric="not_a_real_metric")
+        )
     EvaluationSpec(**evaluation_block(selection_metric="f1"))
 
 

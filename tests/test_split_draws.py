@@ -1760,9 +1760,7 @@ def _outcome(project, real_hpo_base_config, trials) -> dict:
 
     sweep = _two_draw_sweep(project, real_hpo_base_config)
     observed = observe(sweep)
-    return sweep_outcome(
-        _trial_rows(sweep, trials), observed.record["input"]
-    )
+    return sweep_outcome(_trial_rows(sweep, trials), observed.record["input"])
 
 
 def test_a_sweeps_outcome_groups_trials_by_point_and_picks_the_best_by_mean(
@@ -1977,7 +1975,9 @@ def _one_source_tiled_cfg(images_dir) -> dict:
         {
             "images_dir": str(images_dir),
             "scope": {"subject": "bud"},
-            "split": drawn_split(val_ratio=0.2, seed=1, grouping="tile_prefix"),
+            "split": drawn_split(
+                val_ratio=0.2, seed=1, grouping="tile_prefix"
+            ),
             # sliver_frac stated: a fixture this small derives no box-size spread.
             "tiling": tiling_block(
                 tile_size=128, overlap=0.2, sliver_frac=0.5
@@ -2133,7 +2133,9 @@ def test_split_draws_over_one_bespoke_source_refuse_the_validation_they_cannot_d
         search_seed=0,
     )
 
-    assert any("every share zero" in issue for issue in result["issues"]), result
+    assert any("every share zero" in issue for issue in result["issues"]), (
+        result
+    )
 
 
 def test_run_hyperparameter_search_reads_an_earlier_legs_reason_before_this_one(

@@ -638,9 +638,7 @@ def test_a_dry_draw_leaves_no_audit_line_and_a_written_selection_leaves_one(
             if row["tool"] == "draw_splits"
         ]
 
-    assert "error" not in _draw(
-        tmp_path, str(root), seed=1, subject="bud"
-    )
+    assert "error" not in _draw(tmp_path, str(root), seed=1, subject="bud")
     assert lines() == []
     out = tmp_path / "m"
     assert "error" not in _draw(
@@ -719,7 +717,12 @@ def test_a_draw_stating_no_share_grouping_stratification_or_reason_refuses_namin
     )
     assert "error" not in result, result
     drawn = read_selection(out, project=tmp_path)
-    shares = {"train": 0.5, "val": 0.25, "calibration": 0.125, "holdout": 0.125}
+    shares = {
+        "train": 0.5,
+        "val": 0.25,
+        "calibration": 0.125,
+        "holdout": 0.125,
+    }
     assert (drawn.ratios, drawn.stratify_foreground, drawn.rationale) == (
         shares,
         True,

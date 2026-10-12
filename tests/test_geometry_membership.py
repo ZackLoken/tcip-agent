@@ -232,9 +232,7 @@ def test_a_starved_draw_refuses_by_the_draws_own_floor(
         "split": drawn_split(
             val_ratio=0.5,
             seed=1,
-            grouping={
-                f"{UNDATED_BUCKET}/{s}": "one_group" for s in stems
-            },
+            grouping={f"{UNDATED_BUCKET}/{s}": "one_group" for s in stems},
         ),
     }
 

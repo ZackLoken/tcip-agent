@@ -63,7 +63,9 @@ def test_a_checkpoint_written_past_the_stamp_refuses_naming_the_key_it_lacks(
     register_checkpoint(tmp_path, str(unstamped), name="unstamped")
     checkpoint = load_registered_checkpoint(str(unstamped), project=tmp_path)
 
-    with pytest.raises(ValueError, match=rf"carries no '{key}'.*checkpoint_stamp"):
+    with pytest.raises(
+        ValueError, match=rf"carries no '{key}'.*checkpoint_stamp"
+    ):
         (checkpoint.spec, checkpoint.layout, checkpoint.geometry)
 
 
@@ -195,7 +197,9 @@ def test_a_bound_runs_checkpoint_carries_its_split_whole_and_reads_it_back_bound
 
     manifest_dir = tmp_path / "manifest"
     _draw(tmp_path, _dataset(tmp_path / "data"), manifest_dir)
-    _run_dir, path = _bound_checkpoint(tmp_path, manifest_dir, "exp-bound-stamp")
+    _run_dir, path = _bound_checkpoint(
+        tmp_path, manifest_dir, "exp-bound-stamp"
+    )
 
     stamped = torch.load(path, weights_only=False)[CONFIG_KEY]["data"]["split"]
     assert stamped["selection_dir"] == stored_path(manifest_dir, tmp_path)

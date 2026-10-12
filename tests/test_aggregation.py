@@ -223,9 +223,7 @@ def test_a_per_plant_delivery_names_its_value_key_with_no_default(door):
         if door == "delivery"
         else deliver_per_plant_csv
     )
-    assert (
-        signature.parameters["value_key"].default is inspect.Parameter.empty
-    )
+    assert signature.parameters["value_key"].default is inspect.Parameter.empty
     arguments = {
         name: None
         for name, p in signature.parameters.items()
@@ -403,7 +401,13 @@ def test_a_delivery_refuses_a_unit_mismatched_against_crops_yml(tmp_path):
     with pytest.raises(ValueError, match="declared units|refusing"):
         _deliver(
             tmp_path,
-            [{"plant_id": "P1", "area_mm2": 1.0, "plant_attribution": "image"}],
+            [
+                {
+                    "plant_id": "P1",
+                    "area_mm2": 1.0,
+                    "plant_attribution": "image",
+                }
+            ],
             tmp_path / "out.csv",
             mismatched_trait,
             value_key="area_mm2",

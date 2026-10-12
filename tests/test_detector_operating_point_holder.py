@@ -42,7 +42,9 @@ def _built(model_source: dict):
     from tests import REPO_ROOT
     from tests._chain_fixtures import training_config
 
-    spec = train_config(training_config(model_source, {"split": drawn_split()}))
+    spec = train_config(
+        training_config(model_source, {"split": drawn_split()})
+    )
     return build_from_model_source(
         spec.model_source, staged_sources(spec, REPO_ROOT).layout, _DIMS
     )

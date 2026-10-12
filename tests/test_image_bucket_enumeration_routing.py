@@ -212,9 +212,14 @@ def test_calibration_ratio_feasibility_admits_a_clean_multi_image_bucket(
         {
             "images_dir": str(bucket),
             "scope": {"subject": SUBJECT},
-            "tiling": tiling_block(sliver_frac=0.5),  # stated: two boxes, no spread
+            "tiling": tiling_block(
+                sliver_frac=0.5
+            ),  # stated: two boxes, no spread
             "split": drawn_split(
-                calibration_ratio=0.2, val_ratio=0.15, seed=1, grouping="tile_prefix"
+                calibration_ratio=0.2,
+                val_ratio=0.15,
+                seed=1,
+                grouping="tile_prefix",
             ),
         },
     )

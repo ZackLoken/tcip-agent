@@ -1072,9 +1072,14 @@ def test_a_bound_split_stating_a_seed_redraws_and_one_stating_none_keeps_the_rec
     assert kept == {s.location for s in drawn.on("train")}
     assert (bound["selection"]["redraw"], bound["seed"]) == (False, drawn.seed)
 
-    redrawn = [_opened(f"exp-redrawn-{seed}", seed=seed) for seed in range(3, 8)]
+    redrawn = [
+        _opened(f"exp-redrawn-{seed}", seed=seed) for seed in range(3, 8)
+    ]
     for seed, (_train, partition) in zip(range(3, 8), redrawn):
-        assert (partition["selection"]["redraw"], partition["seed"]) == (True, seed)
+        assert (partition["selection"]["redraw"], partition["seed"]) == (
+            True,
+            seed,
+        )
     assert any(train != kept for train, _ in redrawn)
 
 
