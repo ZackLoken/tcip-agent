@@ -91,8 +91,9 @@ implementation is replaceable and the guarantee is not.
 - When two code paths must agree, call one from the other. A consistency check whose two sides share
   an implementation proves nothing.
 - A library the environment already carries is read before anything is written by hand: torch,
-  torchvision, numpy, rasterio, shapely, pyproj, pycocotools, SAHI, OpenCV, and a library in the
-  lock through a declared dependency, which the change declares. A hand-written version of what
+  torchvision, numpy, rasterio, fiona, shapely, pyproj, pycocotools, SAHI, OpenCV, and scipy and
+  scikit-learn, which are in the lock through those and are declared where read. OpenCV is the
+  one image-processing library; scikit-image is never declared. A hand-written version of what
   one of them provides and maintains is a defect; only a platform rule the library call cannot
   carry stays, as a thin layer over the call. The platform's own code is the measurement gate,
   the trait entry, the records and the rails, and as little else as possible.
@@ -160,7 +161,13 @@ for general techniques only, never for a per-trait pipeline; the endpoint is a t
   from the other"); the test guards that they still agree, and never licenses a second
   implementation to stay. Guard tests cannot stand in for it. A guard test proves the site it
   guards, so a suite of them stays green over exactly this defect, which is how it survives to be
-  found by a reader instead of by the suite.
+  found by a reader instead of by the suite. A metric, a derivation or a training mechanism
+  ships the same test pointed outward: its number compared against an external reference
+  (pycocotools for average precision, scikit-learn for the agreement and classification metrics,
+  a tiny dataset whose right answer is known in advance for a training or freezing mechanism),
+  since a suite that compares the platform only to itself proves nothing about the number. A
+  change replacing a hand-written implementation with a library call lands with that test as
+  its gate.
 - Gates before reporting a change done: `ruff check packages tests tools`, `mypy`, and the change's
   own test files. Never report a gate before its slowest part finishes; green means no detected
   breakage, never correctness. A test touching the filesystem outside `tmp_path` is the first reread
