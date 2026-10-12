@@ -77,8 +77,10 @@ def tmp_path(
 ) -> Path:
     """Each test's ``tmp_path`` is ``<workspace>/project`` inside its own fresh workspace, which
     ``TCIP_WORKSPACE`` names and the web backend is started with, no additive image roots.
-    The workspace is removed after a test that passed under the ``failed`` retention policy,
-    the way pytest's own ``tmp_path`` is, and kept after one that failed.
+    The workspace's contents are removed after a test that passed under the ``failed``
+    retention policy, the way pytest's own ``tmp_path`` is, and kept after one that failed; the
+    emptied root itself stays, so a numbered name is never handed to a second test in the
+    session.
 
     A refusal case uses a directory beside the workspace (``tmp_path_factory.mktemp``); a test of
     the additive roots starts the backend with them itself.
@@ -99,7 +101,11 @@ def tmp_path(
     policy = request.config.getini("tmp_path_retention_policy")
     outcome = request.node.stash.get(tmppath_result_key, {})
     if policy == "failed" and outcome.get("call", True):
-        shutil.rmtree(root, ignore_errors=True)
+        for entry in root.iterdir():
+            if entry.is_dir() and not entry.is_symlink():
+                shutil.rmtree(entry, ignore_errors=True)
+            else:
+                entry.unlink(missing_ok=True)
 
 
 @pytest.fixture(autouse=True)
