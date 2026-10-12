@@ -18,7 +18,11 @@ from tests._chain_fixtures import (  # noqa: E402
     training_config,
 )
 from tests._producer_fixtures import dataset_over, registry_over  # noqa: E402
-from tests._training_values import evaluation_block  # noqa: E402
+from tests._training_values import (  # noqa: E402
+    drawn_split,
+    evaluation_block,
+    tiling_block,
+)
 
 torch = pytest.importorskip("torch")
 
@@ -49,13 +53,15 @@ def _geometry(data_cfg: dict, train_ds, task: str = "detection"):
     )
 
     return effective_data_geometry(
-        task, DataSpec.model_validate(data_cfg), train_ds
+        task,
+        DataSpec.model_validate({"split": drawn_split(), **data_cfg}),
+        train_ds,
     )
 
 
 def test_stamp_tiled_run_records_its_tiles_density_and_no_native_frame():
     """A tiled run's geometry is the density over the tiles it serves and no native frame."""
-    tiling = {"enabled": True, "tile_size": 96, "overlap": 0.25}
+    tiling = tiling_block(tile_size=96, overlap=0.25)
     stamped = _geometry({"tiling": tiling}, _TiledStub())
 
     assert stamped.object_density == pytest.approx(2 / (96 * 96))
@@ -107,8 +113,7 @@ def test_stamp_untiled_uniform_frames_record_their_native_size(tmp_path):
     density counted over those frames.
     """
     stamped = _geometry(
-        {"tiling": {"enabled": False}},
-        _detection_dataset(tmp_path, [(64, 48), (64, 48)]),
+        {"tiling": None}, _detection_dataset(tmp_path, [(64, 48), (64, 48)])
     )
 
     assert stamped.native_size == (64, 48)
@@ -120,8 +125,7 @@ def test_stamp_untiled_mixed_frames_record_nothing(tmp_path):
     guess, so no native size is recorded.
     """
     stamped = _geometry(
-        {"tiling": {"enabled": False}},
-        _detection_dataset(tmp_path, [(64, 48), (32, 32)]),
+        {"tiling": None}, _detection_dataset(tmp_path, [(64, 48), (32, 32)])
     )
 
     assert stamped.native_size is None
@@ -143,7 +147,7 @@ def test_a_config_stating_a_resolved_geometry_key_refuses_at_the_door_naming_it(
     from tcip_mcp.tools.training_tools import preflight_config
     from tests._verified_checkpoint_fixtures import opened_run
 
-    config = _base_config({"enabled": False}, tmp_path)
+    config = _base_config(None, tmp_path)
     (key,) = stated
     report = preflight_config(
         tmp_path, {**config, "data": {**config["data"], **stated}}
@@ -162,7 +166,8 @@ def test_a_config_stating_a_resolved_geometry_key_refuses_at_the_door_naming_it(
 
 def _base_config(tiling, project: Path, *, task: str = "detection"):
     """A ``task`` run's config over frames of its own under ``project`` (a detection run's
-    labeled by documents, a classification run's by a table), stating ``tiling``.
+    labeled by documents, a classification run's by a table), stating ``tiling`` (``None`` for
+    a run that tiles nothing).
     """
     from tests._chain_fixtures import BESPOKE_MODELS, CLASSIFIER_SOURCE
     from tests._verified_checkpoint_fixtures import (
@@ -187,7 +192,11 @@ def _base_config(tiling, project: Path, *, task: str = "detection"):
         source, frames = dict(CLASSIFIER_SOURCE), table_images(where, n=4)
     return training_config(
         source,
-        {**frames, "tiling": tiling, "split": {"seed": 0, "val_ratio": 0.25}},
+        {
+            **frames,
+            "tiling": tiling,
+            "split": drawn_split(val_ratio=0.25, grouping="tile_prefix"),
+        },
         evaluation=evaluation_block(selection_metric="loss"),
     )
 
@@ -209,20 +218,24 @@ def _resolved_data(run_dir) -> dict:
 def test_a_tiling_stated_on_a_task_that_trains_whole_frames_refuses_at_the_door(
     task, builder
 ):
-    """A run whose task trains whole frames stating an enabled ``data.tiling`` is refused when
-    its config is validated, naming the task and ``data.tiling``, never trained untiled with the
-    statement ignored.
+    """A run whose task trains whole frames stating a ``data.tiling`` is refused when its config
+    is validated, naming the task and ``data.tiling``, never trained untiled with the statement
+    ignored.
     """
     from tcip_mcp.pipelines.schemas import train_config
     from tests._chain_fixtures import BESPOKE_MODELS
 
     config = training_config(
         {"builder": builder, "source_files": [BESPOKE_MODELS], "task": task},
-        {"num_channels": 3, "tiling": {"enabled": True, "tile_size": 64}},
+        {
+            "num_channels": 3,
+            "tiling": tiling_block(tile_size=64),
+            "split": drawn_split(),
+        },
     )
     with pytest.raises(
         ValueError,
-        match=rf"data\.tiling is enabled for a run of task '{task}'",
+        match=rf"data\.tiling is stated for a run of task '{task}'",
     ):
         train_config(config)
 
@@ -244,7 +257,7 @@ def test_the_tiling_question_and_the_detector_question_each_read_their_own_set(
         "TILING_TASKS",
         model_contract.TILING_TASKS | {"semantic_seg"},
     )
-    tiling = {"enabled": True, "tile_size": 64}
+    tiling = tiling_block(tile_size=64)
     spec = train_config(
         training_config(
             {
@@ -252,7 +265,7 @@ def test_the_tiling_question_and_the_detector_question_each_read_their_own_set(
                 "source_files": [BESPOKE_MODELS],
                 "task": "semantic_seg",
             },
-            {"num_channels": 3, "tiling": tiling},
+            {"num_channels": 3, "tiling": tiling, "split": drawn_split()},
             evaluation=evaluation_block(conf_threshold=None),
         )
     )
@@ -262,10 +275,10 @@ def test_the_tiling_question_and_the_detector_question_each_read_their_own_set(
     assert task_collate("semantic_seg") is task_collate("classification")
 
 
-def test_an_untiled_runs_resolved_record_carries_the_disabled_block(tmp_path):
-    """A classification run stating no tiling opens through the launcher's own producer, and the
-    record it resolved, validated again as every reader validates it, carries the disabled
-    block.
+def test_an_untiled_runs_resolved_record_carries_no_tiling(tmp_path):
+    """Guard. A classification run stating no tiling opens through the launcher's own producer,
+    and the record it resolved, validated again as every reader validates it, carries
+    ``tiling: None``, the one spelling of an untiled run; a tiled one carries its block.
     """
     from tcip_mcp.experiments import observe
     from tcip_mcp.pipelines.training.run_registry import observed_run
@@ -275,9 +288,17 @@ def test_an_untiled_runs_resolved_record_carries_the_disabled_block(tmp_path):
     run_dir = opened_run(tmp_path, config)
 
     data = _resolved_data(run_dir)
-    assert data["tiling"] == {"enabled": False}
+    assert "tiling" in data and data["tiling"] is None
     assert data["images_dir"] == config["data"]["images_dir"]
-    assert observed_run(observe(run_dir)).spec.data.tiling.enabled is False
+    assert observed_run(observe(run_dir)).spec.data.tiling is None
+
+    tiled = _resolved_data(
+        opened_run(
+            tmp_path,
+            _base_config(tiling_block(tile_size=32, sliver_frac=0.5), tmp_path),
+        )
+    )["tiling"]
+    assert tiled["tile_size"] == 32 and tiled["rationale"]
 
 
 def _trial(tmp_path, base_config):
@@ -293,9 +314,9 @@ def _trial(tmp_path, base_config):
 
 
 def test_a_sweep_over_a_tiling_its_task_never_reads_opens_nothing(tmp_path):
-    """A sweep whose classification base config states an enabled tiling is refused by name before
-    any directory opens; the same base config stating none opens a trial whose resolved record
-    carries the disabled block.
+    """A sweep whose classification base config states a tiling is refused by name before any
+    directory opens; the same base config stating none opens a trial whose resolved record
+    carries no tiling.
     """
     from tcip_mcp import experiments
     from tcip_mcp.tools.training_tools import open_sweep
@@ -306,9 +327,7 @@ def test_a_sweep_over_a_tiling_its_task_never_reads_opens_nothing(tmp_path):
     refused = open_sweep(
         tmp_path,
         _base_config(
-            {"enabled": True, "tile_size": 999},
-            tmp_path,
-            task="classification",
+            tiling_block(tile_size=999), tmp_path, task="classification"
         ),
         space,
         actor=None,
@@ -316,14 +335,14 @@ def test_a_sweep_over_a_tiling_its_task_never_reads_opens_nothing(tmp_path):
     )
 
     assert isinstance(refused, dict)
-    assert "data.tiling is enabled for a run of task 'classification'" in str(
+    assert "data.tiling is stated for a run of task 'classification'" in str(
         refused
     ), refused
     assert experiments.sweep_dirs(tmp_path) == []
     trial_dir = _trial(
         tmp_path, _base_config(None, tmp_path, task="classification")
     )
-    assert _resolved_data(trial_dir)["tiling"] == {"enabled": False}
+    assert _resolved_data(trial_dir)["tiling"] is None
 
 
 def test_an_hpo_trials_resolved_record_carries_the_effective_tile_geometry(
@@ -334,11 +353,9 @@ def test_an_hpo_trials_resolved_record_carries_the_effective_tile_geometry(
     """
     trial_dir = _trial(
         tmp_path,
-        _base_config(
-            {"enabled": True, "tile_size": 32, "sliver_frac": 0.5}, tmp_path
-        ),
+        _base_config(tiling_block(tile_size=32, sliver_frac=0.5), tmp_path),
     )
 
     tiling = _resolved_data(trial_dir)["tiling"]
-    assert tiling["enabled"] is True and tiling["tile_size"] == 32
+    assert tiling["tile_size"] == 32
     assert isinstance(tiling["overlap"], float)

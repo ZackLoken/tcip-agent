@@ -189,22 +189,18 @@ def test_group_split_with_no_foreground_balances_by_tile_count():
 # --- resolve_group_key_fn ---
 
 
-def test_resolve_group_key_fn_unrecognized_group_by_raises():
-    with pytest.raises(ValueError, match="Unknown group_by"):
+def test_resolve_group_key_fn_unrecognized_policy_raises():
+    with pytest.raises(ValueError, match="Unknown grouping policy"):
         resolve_group_key_fn("not_a_real_key", ["a", "b"])
 
 
-def test_resolve_group_key_fn_group_key_map_missing_stems_raises():
+def test_resolve_group_key_fn_map_missing_stems_raises():
     with pytest.raises(ValueError, match="missing"):
-        resolve_group_key_fn(
-            "tile_prefix", ["a", "b"], group_key_map={"a": "g1"}
-        )
+        resolve_group_key_fn({"a": "g1"}, ["a", "b"])
 
 
-def test_resolve_group_key_fn_group_key_map_used_when_it_covers_every_stem():
-    fn = resolve_group_key_fn(
-        "tile_prefix", ["a", "b"], group_key_map={"a": "g1", "b": "g1"}
-    )
+def test_resolve_group_key_fn_map_used_when_it_covers_every_stem():
+    fn = resolve_group_key_fn({"a": "g1", "b": "g1"}, ["a", "b"])
     assert fn("a") == fn("b") == "g1"
 
 

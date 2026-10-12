@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Sequence
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import torch
 from torch.utils.data import (
@@ -20,6 +20,9 @@ from torch.utils.data import (
 )
 
 from tcip_mcp.pipelines.data.datasets import BaseDataset
+
+if TYPE_CHECKING:
+    from tcip_mcp.pipelines.schemas import SamplerSpec
 
 logger = logging.getLogger(__name__)
 
@@ -303,9 +306,9 @@ LOADER_CONTEXT = ("num_workers", "batch_size")
 sampler block."""
 
 
-def sampler_settings(block: dict) -> tuple[type, dict]:
-    """The sampler class ``block["name"]`` names and the rest of ``block`` as its own values.
-    Refuses (``ValueError``) an unknown name, and by name a value its constructor requires that
+def sampler_settings(block: SamplerSpec) -> tuple[type, dict]:
+    """The sampler class ``block.name`` names and the block's own values. Refuses
+    (``ValueError``) an unknown name, and by name a value its constructor requires that
     ``block`` leaves unstated, one it states that the constructor does not take, or one of
     :data:`LOADER_CONTEXT`, which the loader supplies.
     """
@@ -313,23 +316,23 @@ def sampler_settings(block: dict) -> tuple[type, dict]:
 
     from tcip_mcp.pipelines.model_build import resolve_named
 
-    cls = resolve_named(block.get("name", ""), _SAMPLER_MAP, kind="sampler")
-    settings = {k: v for k, v in block.items() if k != "name"}
+    cls = resolve_named(block.name, _SAMPLER_MAP, kind="sampler")
+    settings = dict(block.model_extra or {})
     supplied = sorted(set(settings) & set(LOADER_CONTEXT))
     if supplied:
         raise ValueError(
-            f"sampler {block['name']!r} states {supplied}, which the train loader "
+            f"sampler {block.name!r} states {supplied}, which the train loader "
             "supplies; drop them from the block"
         )
     try:
         inspect.signature(cls).bind(None, **settings)
     except TypeError as exc:
-        raise ValueError(f"sampler {block['name']!r}: {exc}") from exc
+        raise ValueError(f"sampler {block.name!r}: {exc}") from exc
     return cls, settings
 
 
 def build_sampler(
-    block: dict,
+    block: SamplerSpec,
     dataset: BaseDataset,
     *,
     num_workers: int | None = None,

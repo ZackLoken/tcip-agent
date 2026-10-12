@@ -23,7 +23,11 @@ pytest.importorskip("torch")
 
 from tests._chain_fixtures import BESPOKE_DETECTION, BESPOKE_MODELS  # noqa: E402
 from tests._producer_fixtures import gray_frame  # noqa: E402
-from tests._training_values import IOU_THRESHOLD  # noqa: E402
+from tests._training_values import (  # noqa: E402
+    IOU_THRESHOLD,
+    augmentation,
+    tiling_block,
+)
 
 SCORED = {"iou_threshold": IOU_THRESHOLD, "trait": None}
 """What the full-frame runner scores these references under: the sample IoU and no trait."""
@@ -214,43 +218,56 @@ def test_a_geometry_record_refuses_a_native_size_that_is_no_frame(native_size):
 # --- the recorded train-time resize -------------------------------------
 
 
+def _admitted(config):
+    """``config``, an ``augmentation`` block, as the schema admits it."""
+    from tcip_mcp.pipelines.schemas import AugmentationSpec
+
+    return AugmentationSpec.model_validate(config)
+
+
+def _resize(config):
+    """The recorded resize of the ``augmentation`` block ``config`` once the schema admits it."""
+    from tcip_mcp.pipelines.data.augmentations import recorded_resize
+
+    return recorded_resize(_admitted(config))
+
+
 def test_a_config_with_no_resize_records_no_resize():
     from tcip_mcp.pipelines.data.augmentations import recorded_resize
 
     assert recorded_resize(None) is None
-    assert recorded_resize({}) is None
-    assert recorded_resize({"horizontal_flip": {"p": 0.5}}) is None
+    assert _resize(augmentation()) is None
+    assert _resize(augmentation(horizontal_flip={"p": 0.5})) is None
 
 
 def test_a_recorded_resize_is_read_through_the_builders_own_chain():
     """The size the last resize of the chain the config builds states, the dict form's own."""
-    from tcip_mcp.pipelines.data.augmentations import recorded_resize
-
-    assert recorded_resize({"resize": {"size": [320, 240]}}) == (320, 240)
-    assert recorded_resize(
-        {"resize": {"size": [800, 600]}, "horizontal_flip": {"p": 0.5}}
+    assert _resize(augmentation(resize={"size": [320, 240]})) == (320, 240)
+    assert _resize(
+        augmentation(
+            resize={"size": [800, 600]}, horizontal_flip={"p": 0.5}
+        )
     ) == (800, 600)
 
 
 @pytest.mark.parametrize(
     "config, refusal",
     [
-        ({"not_a_transform": {"p": 0.5}}, "Unknown augmentation"),
-        ({"resize": [640, 640]}, "'resize'"),
-        ({"resize": True}, "'resize'"),
+        (augmentation(not_a_transform={"p": 0.5}), "Unknown augmentation"),
+        (augmentation(resize=[640, 640]), "'resize'"),
+        (augmentation(resize=True), "'resize'"),
         ("nadir_rotation", "'nadir_rotation'"),
+        ({"resize": {"size": [640, 640]}}, "rationale"),
     ],
 )
 def test_an_unbuildable_recorded_config_raises_rather_than_reading_as_no_resize(
     config, refusal
 ):
-    """A config the builder refuses (an unknown transform, a shorthand, a preset name) raises its
-    refusal here too, never read as a run that pinned no size.
+    """A config the schema or the builder refuses (an unknown transform, a shorthand, a preset
+    name, no reason) raises its refusal here too, never read as a run that pinned no size.
     """
-    from tcip_mcp.pipelines.data.augmentations import recorded_resize
-
     with pytest.raises(ValueError, match=refusal):
-        recorded_resize(config)
+        _resize(config)
 
 
 def test_the_recorded_resize_travels_only_with_a_native_frame_tile_edge():
@@ -259,13 +276,11 @@ def test_the_recorded_resize_travels_only_with_a_native_frame_tile_edge():
     """
     from tcip_mcp.pipelines.slicing import resolve_tile_geometry
 
-    augmentation = {"resize": {"size": [640, 640]}}
+    chain = _admitted(augmentation(resize={"size": [640, 640]}))
     native = _GeometryStub(
-        train_native_size=[512, 512], train_augmentation=augmentation
+        train_native_size=[512, 512], train_augmentation=chain
     )
-    persisted = _GeometryStub(
-        train_tile_size=512, train_augmentation=augmentation
-    )
+    persisted = _GeometryStub(train_tile_size=512, train_augmentation=chain)
 
     def resize(stub, **kw):
         return resolve_tile_geometry(stub, overlap=None, **kw).tile_resize
@@ -276,7 +291,7 @@ def test_the_recorded_resize_travels_only_with_a_native_frame_tile_edge():
     assert resize(native, tiled=True, tile_size=512) is None
     assert (
         resize(
-            _GeometryStub(train_augmentation=augmentation),
+            _GeometryStub(train_augmentation=chain),
             tiled=True,
             tile_size=None,
         )
@@ -290,7 +305,9 @@ def test_a_checkpoint_carries_its_untiled_training_geometry_to_the_predictor(
     from tcip_mcp.model_registry import load_registered_checkpoint
 
     checkpoint = load_registered_checkpoint(
-        _native_frame_checkpoint(tmp_path, {"resize": {"size": [32, 32]}}),
+        _native_frame_checkpoint(
+            tmp_path, augmentation(resize={"size": [32, 32]})
+        ),
         project=tmp_path,
     )
 
@@ -298,7 +315,9 @@ def test_a_checkpoint_carries_its_untiled_training_geometry_to_the_predictor(
 
     assert pred.train_tile_size is None
     assert pred.train_native_size == (TILE, TILE)
-    assert pred.train_augmentation == {"resize": {"size": [32, 32]}}
+    assert pred.train_augmentation == _admitted(
+        augmentation(resize={"size": [32, 32]})
+    )
 
 
 # --- the tile pass itself -----------------------------------------------
@@ -427,11 +446,12 @@ def test_a_tile_no_pil_mode_represents_refuses_the_recorded_resize(tmp_path):
 
 
 def _trained_checkpoint(
-    tmp_path: Path, tiling: dict, *, size: int = TILE, **config
+    tmp_path: Path, tiling: dict | None, *, size: int = TILE, **config
 ) -> str:
     """The checkpoint a run under ``tmp_path`` completed over two square ``size`` px bud frames of
-    its own, its tiny detector resizing between ``size`` and twice it, under ``tiling`` and with
-    ``config``'s keys in place of its config's own; registered by completing.
+    its own, its tiny detector resizing between ``size`` and twice it, under ``tiling`` (``None``
+    for an untiled run) and with ``config``'s keys in place of its config's own; registered by
+    completing.
     """
     from tests._producer_fixtures import seed_bud_images
     from tests._verified_checkpoint_fixtures import (
@@ -465,7 +485,7 @@ def _native_frame_checkpoint(
     """:func:`_trained_checkpoint` of an untiled run, under ``augmentation`` when given."""
     return _trained_checkpoint(
         tmp_path,
-        {"enabled": False},
+        None,
         **({} if augmentation is None else {"augmentation": augmentation}),
     )
 
@@ -483,7 +503,9 @@ def test_a_tiled_pass_over_a_native_frame_checkpoint_says_what_it_rests_on(
         predicted_over,
     )
 
-    ckpt = _native_frame_checkpoint(tmp_path, {"resize": {"size": [32, 32]}})
+    ckpt = _native_frame_checkpoint(
+        tmp_path, augmentation(resize={"size": [32, 32]})
+    )
 
     p, results = predicted_over(
         tmp_path,
@@ -562,7 +584,9 @@ def _native_frame_regime_predictor():
     p = _stub_predictor(_MiddleHalfDetector(min_size=800, max_size=1333))
     p.train_tile_size, p.train_overlap = None, 0.0
     p.train_native_size = [TILE, TILE]
-    p.train_augmentation = {"resize": {"size": [TILE * 2, TILE * 2]}}
+    p.train_augmentation = _admitted(
+        augmentation(resize={"size": [TILE * 2, TILE * 2]})
+    )
     return p
 
 
@@ -806,7 +830,7 @@ def _tiled_checkpoint(tmp_path: Path, tile_size: int) -> str:
     """:func:`_trained_checkpoint` of a run tiled at ``tile_size`` over frames of that size."""
     return _trained_checkpoint(  # sliver_frac stated: one box per frame derives no spread
         tmp_path,
-        {"tile_size": tile_size, "overlap": 0.2, "sliver_frac": 0.5},
+        tiling_block(tile_size=tile_size, overlap=0.2, sliver_frac=0.5),
         size=tile_size,
     )
 
@@ -816,9 +840,7 @@ def _tiled_checkpoint(tmp_path: Path, tile_size: int) -> str:
     [
         (lambda tmp_path: _tiled_checkpoint(tmp_path, 128), "128"),
         (
-            lambda tmp_path: _trained_checkpoint(
-                tmp_path, {"enabled": False}, size=512
-            ),
+            lambda tmp_path: _trained_checkpoint(tmp_path, None, size=512),
             "512",
         ),
     ],

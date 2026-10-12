@@ -26,7 +26,12 @@ from tcip_mcp.pipelines.data.split_construction import (
 from tcip_mcp.pipelines.model_build import staged_sources  # noqa: E402
 from tcip_mcp.pipelines.schemas import train_config  # noqa: E402
 from tests._chain_fixtures import DETECTION_SOURCE, run_config, training_config  # noqa: E402
-from tests._training_values import evaluation_block  # noqa: E402
+from tests._training_values import (  # noqa: E402
+    RATIONALE,
+    drawn_split,
+    evaluation_block,
+    tiling_block,
+)
 from tests._verified_checkpoint_fixtures import (  # noqa: E402
     opened_run,
     resolved_run,
@@ -46,11 +51,12 @@ def _real_drawn_experiment(
     *,
     date: str = DATES[0],
     subject: str = SUBJECT,
-    auto_val: bool = True,
+    val_ratio: float = 0.15,
 ) -> dict:
     """Draws a real train/val split over ``root``'s own fixture dataset through the launcher's
-    own resolution, recorded in ``experiment_id``'s launch record under ``project``; a run with
-    ``auto_val`` off selects on its training loss. Returns the resolved ``data`` block.
+    own resolution, at ``val_ratio``, recorded in ``experiment_id``'s launch record under
+    ``project``; a run drawing no validation side selects on its training loss. Returns the
+    resolved ``data`` block.
     """
     images_dir = root / "images" / date
     opened_run(
@@ -60,12 +66,11 @@ def _real_drawn_experiment(
             {
                 "images_dir": str(images_dir),
                 "scope": {"subject": subject},
-                "auto_val": auto_val,
-                "split": {"seed": 0, "val_ratio": 0.15},
+                "split": drawn_split(val_ratio=val_ratio, grouping="tile_prefix"),
             },
             **(
                 {}
-                if auto_val
+                if val_ratio
                 else {"evaluation": evaluation_block(selection_metric="loss")}
             ),
         ),
@@ -111,13 +116,16 @@ def test_freeze_selection_round_trips_through_a_real_bind(tmp_path: Path):
     frozen = read_selection(selection_dir, project=tmp_path)
     assert frozen.counts()["calibration"] == frozen.counts()["holdout"] == 0
     assert frozen.counts()["train"] and frozen.counts()["val"]
+    # The draw the run made, as its own split stated it.
+    assert frozen.ratios == pytest.approx({"train": 0.85, "val": 0.15})
+    assert (frozen.stratify_foreground, frozen.rationale) == (True, RATIONALE)
     assert {s.ground_truth.parts[-1] for s in frozen.samples} <= set("abcdef")
     for sample in frozen.samples:
         assert Path(sample.source).parent == root / "images" / DATES[0]
         assert ts.exists(sample.ground_truth)
 
     second = train_config(run_config(Path(selection_dir), DETECTION_SOURCE))
-    assert selection_compatibility(second.data, frozen, selection_dir) == []
+    assert selection_compatibility(second.data, second.data.split, frozen) == []
 
     resolution = resolve_run(
         second, staged_sources(second, tmp_path).layout, project=tmp_path
@@ -223,7 +231,7 @@ def test_freeze_selection_keeps_two_scopes_same_named_members_apart(
     }
 
 
-def test_freeze_selection_carries_an_explicit_group_key_map_onto_its_samples(
+def test_freeze_selection_carries_an_explicit_grouping_map_onto_its_samples(
     tmp_path: Path,
 ):
     """The run drew under an agent-supplied map; the frozen selection records each sample's own
@@ -242,16 +250,15 @@ def test_freeze_selection_carries_an_explicit_group_key_map_onto_its_samples(
         {
             "images_dir": str(images_dir),
             "scope": {"subject": SUBJECT},
-            "split": {
-                "seed": 0,
-                "val_ratio": 0.15,
-                "group_key_map": {
+            "split": drawn_split(
+                val_ratio=0.15,
+                grouping={
                     member_identity(DATES[0], s): "g1" for s in ("a", "b", "c")
                 }
                 | {
                     member_identity(DATES[0], s): "g2" for s in ("d", "e", "f")
                 },
-            },
+            ),
         },
         experiment_id="exp-explicit-map",
     )
@@ -287,10 +294,13 @@ def _bound_run(
         str(root),
         output_path=str(selection_dir),
         subject=SUBJECT,
-        seed=2,
-        val_ratio=0.25,
-        calibration_ratio=0.125,
-        holdout_ratio=0.125,
+        **drawn_split(
+            seed=2,
+            val_ratio=0.25,
+            calibration_ratio=0.125,
+            holdout_ratio=0.125,
+            grouping="tile_prefix",
+        ),
     )
     assert "error" not in drawn, drawn
 
@@ -303,7 +313,7 @@ def _bound_run(
 
 @pytest.mark.parametrize(
     "split_extra",
-    [{}, {"redraw_within_selection": True, "seed": 11}],
+    [{}, {"seed": 11}],
     ids=["bound", "redrawn"],
 )
 def test_a_bound_run_freezes_and_a_later_run_rebinds_to_its_membership(
@@ -350,8 +360,8 @@ def test_freeze_selection_refuses_a_spatial_split(tmp_path: Path):
         {
             "images_dir": str(images_dir),
             "scope": {"subject": "bud"},
-            "tiling": {"enabled": True, "tile_size": 128, "overlap": 0.2},
-            "split": {"val_ratio": 0.2, "seed": 1},
+            "tiling": tiling_block(tile_size=128, overlap=0.2),
+            "split": drawn_split(val_ratio=0.2, seed=1, grouping="tile_prefix"),
         },
         experiment_id="exp-spatial",
     )
@@ -413,7 +423,7 @@ def test_freeze_selection_refuses_an_empty_val_side(tmp_path: Path):
     from tcip_mcp.tools.data_tools import freeze_selection
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
-    _real_drawn_experiment(tmp_path, root, "exp-no-val", auto_val=False)
+    _real_drawn_experiment(tmp_path, root, "exp-no-val", val_ratio=0.0)
 
     result = freeze_selection(tmp_path, "exp-no-val")
     assert "error" in result and "validation" in result["error"]

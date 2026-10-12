@@ -20,6 +20,7 @@ from tcip_mcp.experiments import (  # noqa: E402
     run_summary,
 )
 from tcip_mcp.pipelines.training.envelope import TrainContext  # noqa: E402
+from tests._training_values import evaluation_block  # noqa: E402
 from tests.tiny_trainer_fixtures import (  # noqa: E402
     TRAIN_INTENSITIES,
     VAL_INTENSITIES,
@@ -28,6 +29,11 @@ from tests.tiny_trainer_fixtures import (  # noqa: E402
     regressor_config,
     run_context,
 )
+
+TRAIT_SCOPED = evaluation_block(
+    selection_metric="loss", iou_threshold=0.6, trait="bud_opening"
+)
+"""A regression run's evaluation block scoring under the confirmed bud-opening trait."""
 
 
 def batch_rows(rows):
@@ -87,7 +93,7 @@ def test_a_run_admits_what_its_training_reads_once(tmp_path, monkeypatch):
 @pytest.mark.usefixtures("seed_bud_trait_spec")
 def test_a_run_resolves_what_its_evaluation_reads_once(tmp_path, monkeypatch):
     """Training a run stating a confirmed trait and evaluating it twice read the trait's entry
-    off the registry once, at the revision its objective records.
+    off the registry once, at the trait revision its launch records.
     """
     import tcip_mcp.traits as traits
 
@@ -99,7 +105,7 @@ def test_a_run_resolves_what_its_evaluation_reads_once(tmp_path, monkeypatch):
         return real(trait, project)
 
     ctx = _context(
-        tmp_path, [], evaluation={"iou_threshold": 0.6, "trait": "bud_opening"}
+        tmp_path, [], evaluation=TRAIT_SCOPED
     )
     monkeypatch.setattr(traits, "read_trait", counted)
     assert ctx.default_train().status == "completed"
@@ -128,13 +134,13 @@ def test_a_run_scores_under_the_trait_revision_its_launch_resolved(
 
     monkeypatch.setattr(generic_trainer, "evaluate", recorded)
     ctx = _context(
-        tmp_path, [], evaluation={"iou_threshold": 0.6, "trait": "bud_opening"}
+        tmp_path, [], evaluation=TRAIT_SCOPED
     )
     launched = fx.latest("bud_opening", tmp_path)
     superseding = fx.propose_and_confirm(
         tmp_path, fx.with_fields(launched, notes="A newer statement of the trait.")
     )
-    recorded = ctx.run.objective.revision
+    recorded = ctx.run.trait_revision
     assert recorded is not None
     assert recorded.trait_revision == superseding.number - 1
     assert ctx.default_train().status == "completed"
@@ -150,12 +156,13 @@ def test_a_run_whose_recorded_revision_holds_another_entry_refuses_by_name(tmp_p
     from tcip_mcp.traits import RevisionMovedError
 
     ctx = _context(
-        tmp_path, [], evaluation={"iou_threshold": 0.6, "trait": "bud_opening"}
+        tmp_path, [], evaluation=TRAIT_SCOPED
     )
-    recorded = ctx.run.objective.revision
+    recorded = ctx.run.trait_revision
     assert recorded is not None
-    moved = recorded.model_copy(update={"trait_revision_sha256": "0" * 64})
-    ctx.run.objective = ctx.run.objective.model_copy(update={"revision": moved})
+    ctx.run.trait_revision = recorded.model_copy(
+        update={"trait_revision_sha256": "0" * 64}
+    )
 
     with pytest.raises(RevisionMovedError, match=recorded.trait_revision_sha256):
         ctx.run.evaluation_arguments
@@ -185,7 +192,7 @@ def test_the_trainers_validation_and_a_bodys_evaluation_hand_evaluate_one_keywor
     monkeypatch.setattr(generic_trainer, "evaluate", recorded("trainer"))
     monkeypatch.setattr(evaluation, "evaluate", recorded("body"))
     ctx = _context(
-        tmp_path, [], evaluation={"iou_threshold": 0.6, "trait": "bud_opening"}
+        tmp_path, [], evaluation=TRAIT_SCOPED
     )
     assert ctx.default_train().status == "completed"
     ctx.evaluate(ctx.build_model())
@@ -259,10 +266,7 @@ def test_the_best_selection_reads_epoch_rows_and_never_a_batch_row_s_selection(
 
     rows = read_rows(ctx.run_dir / METRICS_FILE)[0]
     for higher_is_better, best in ((False, 0.5), (True, 0.7)):
-        objective = ctx.run.objective.model_copy(
-            update={"higher_is_better": higher_is_better}
-        )
-        assert best_selection(rows, objective) == best
+        assert best_selection(rows, higher_is_better) == best
 
 
 def test_a_bespoke_loop_logs_a_batch_row_and_neither_sink_takes_the_other_s_stamp(

@@ -14,7 +14,7 @@ pytest.importorskip("pycocotools")
 
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tests._predictor_fixtures import StubPredictor, install  # noqa: E402
-from tests._training_values import IOU_THRESHOLD  # noqa: E402
+from tests._training_values import IOU_THRESHOLD, tiling_block  # noqa: E402
 from tests._verified_checkpoint_fixtures import (
     SAMPLE_CONF,
     SAMPLE_CROSS_TILE_NMS,
@@ -156,7 +156,9 @@ def test_bare_checkpoint_path_reuses_its_own_stamped_tiling_and_subject(
         tmp_path,
         data={
             **SCOPED_DATA,
-            "tiling": {"tile_size": 384, "overlap": 0.15, "sliver_frac": 0.5},
+            "tiling": tiling_block(
+                tile_size=384, overlap=0.15, sliver_frac=0.5
+            ),
         },
     )
 

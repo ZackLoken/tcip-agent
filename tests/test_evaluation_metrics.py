@@ -57,6 +57,7 @@ from tests._training_values import (  # noqa: E402
     IOU_THRESHOLD,
     SCORE_WEIGHTS,
     VALIDATION_CONF,
+    drawn_split,
     evaluation_block,
 )
 
@@ -807,67 +808,25 @@ def test_selection_value_raises_when_the_metric_is_not_among_this_epochs_val_met
         _selection_value("detection", {"val_loss": 0.1}, 0.2, "objective")
 
 
-def test_resolve_selection_metric_defaults():
-    w = WEIGHTS
-    assert (
-        resolve_selection_metric("detection", None, None, score_weights=w)
-        == "objective"
+def test_resolve_selection_metric_admits_a_weighted_objective_and_a_plain_metric():
+    resolve_selection_metric(
+        None, "objective", score_weights=WEIGHTS, has_val_loader=True
     )
-    assert (
-        resolve_selection_metric("instance_seg", None, None, score_weights=w)
-        == "objective"
-    )
-    assert (
-        resolve_selection_metric(
-            "classification", None, None, score_weights=None
-        )
-        == "loss"
-    )
-    assert (
-        resolve_selection_metric(
-            "semantic_seg", None, None, score_weights=None
-        )
-        == "loss"
-    )
+    resolve_selection_metric(None, "f1", score_weights=None, has_val_loader=True)
 
 
 def test_resolve_selection_metric_with_no_val_loader_accepts_only_loss():
-    assert (
-        resolve_selection_metric(
-            "classification",
-            None,
-            None,
-            score_weights=None,
-            has_val_loader=False,
-        )
-        == "loss"
+    resolve_selection_metric(
+        None, "loss", score_weights=None, has_val_loader=False
     )
-    assert (
-        resolve_selection_metric(
-            "classification",
-            None,
-            "loss",
-            score_weights=None,
-            has_val_loader=False,
-        )
-        == "loss"
-    )
-    with pytest.raises(ValueError, match="needs a validation loader"):
-        resolve_selection_metric(
-            "detection",
-            None,
-            None,
-            score_weights=WEIGHTS,
-            has_val_loader=False,
-        )
-    with pytest.raises(ValueError, match="needs a validation loader"):
-        resolve_selection_metric(
-            "classification",
-            None,
-            "accuracy",
-            score_weights=None,
-            has_val_loader=False,
-        )
+    for requested, weights in (("objective", WEIGHTS), ("accuracy", None)):
+        with pytest.raises(ValueError, match="needs a validation loader"):
+            resolve_selection_metric(
+                None,
+                requested,
+                score_weights=weights,
+                has_val_loader=False,
+            )
 
 
 @_with_bud_trait
@@ -875,7 +834,7 @@ def test_resolve_selection_metric_rejects_incoherent_explicit_choice(tmp_path):
     trait = fx.latest("bud_opening", tmp_path)
     with pytest.raises(ValueError, match="comparability-only"):
         resolve_selection_metric(
-            "detection", trait, "map50", score_weights=None
+            trait, "map50", score_weights=None, has_val_loader=True
         )
 
 
@@ -884,54 +843,51 @@ def test_resolve_selection_metric_allows_coherent_explicit_choice(tmp_path):
     # A legitimate explicit choice must still succeed: a rail must admit valid work, not
     # only reject invalid work.
     trait = fx.latest("bud_opening", tmp_path)
-    assert (
-        resolve_selection_metric("detection", trait, "f1", score_weights=None)
-        == "f1"
-    )
-    assert (
+    for metric in ("f1", "recall"):
         resolve_selection_metric(
-            "detection", trait, "recall", score_weights=None
+            trait, metric, score_weights=None, has_val_loader=True
         )
-        == "recall"
-    )
-    assert (
-        resolve_selection_metric(
-            "detection", None, "map50", score_weights=None
-        )
-        == "map50"
+    resolve_selection_metric(
+        None, "map50", score_weights=None, has_val_loader=True
     )  # no trait -> no gate
 
 
-def test_resolve_selection_metric_rejects_a_metric_with_no_declared_direction():
-    with pytest.raises(ValueError, match="no declared ranking direction"):
-        resolve_selection_metric(
-            "detection", None, "not_a_real_metric", score_weights=None
-        )
+def test_an_evaluation_block_selecting_on_a_metric_with_no_declared_direction_is_refused():
+    """Guard. ``evaluation.selection_metric`` names a metric with a declared ranking direction
+    (``schemas.SelectionMetric``); any other is refused by the field's type.
+    """
+    from pydantic import ValidationError
+
+    from tcip_mcp.pipelines.schemas import EvaluationSpec
+
+    with pytest.raises(ValidationError, match="selection_metric"):
+        EvaluationSpec(**evaluation_block(selection_metric="not_a_real_metric"))
+    EvaluationSpec(**evaluation_block(selection_metric="f1"))
 
 
 def test_a_detector_run_selecting_on_the_objective_refuses_unweighted_and_resolves_weighted(
     tmp_path,
 ):
-    """A detector config selecting on ``objective``, stated or by default, with no
-    ``score_weights`` refuses at its resolution naming the key; the same config stating them
-    resolves to the objective, which its recorded weights weight term by term.
+    """A detector config selecting on ``objective`` with no ``score_weights`` refuses at its
+    resolution naming the key; the same config stating them resolves, its objective weighted
+    term by term by its recorded weights.
     """
     from tcip_mcp.pipelines.schemas import train_config
-    from tcip_mcp.pipelines.training.generic_trainer import resolve_objective
+    from tcip_mcp.pipelines.training.generic_trainer import (
+        resolve_trait_revision,
+    )
     from tests._chain_fixtures import training_config
     from tests._verified_checkpoint_fixtures import unbuilt_source
 
-    unweighted = {"conf_threshold": VALIDATION_CONF}
-    for stated in ({}, {"selection_metric": "objective"}):
-        spec = train_config(
-            training_config(
-                unbuilt_source("detection"),
-                {},
-                evaluation={**unweighted, **stated},
-            )
+    spec = train_config(
+        training_config(
+            unbuilt_source("detection"),
+            {},
+            evaluation=evaluation_block(score_weights=None),
         )
-        with pytest.raises(ValueError, match="evaluation.score_weights"):
-            resolve_objective(spec, project=tmp_path, has_val_loader=True)
+    )
+    with pytest.raises(ValueError, match="evaluation.score_weights"):
+        resolve_trait_revision(spec, project=tmp_path, has_val_loader=True)
 
     weights = {"loss": 1.0, "f1": 0.0, "map50": 0.0}
     spec = train_config(
@@ -942,10 +898,8 @@ def test_a_detector_run_selecting_on_the_objective_refuses_unweighted_and_resolv
         )
     )
     assert (
-        resolve_objective(
-            spec, project=tmp_path, has_val_loader=True
-        ).selection_metric
-        == "objective"
+        resolve_trait_revision(spec, project=tmp_path, has_val_loader=True)
+        is None
     )
     assert (
         compute_composite_objective(
@@ -1012,8 +966,8 @@ def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts(
     """
     pytest.importorskip("torchvision")
     from tcip_mcp.pipelines.model_contract import _SYNTHESIZABLE_TASKS
+    from tcip_mcp.pipelines.schemas import HIGHER_IS_BETTER_BY_METRIC
     from tcip_mcp.pipelines.training.evaluation import (
-        HIGHER_IS_BETTER_BY_METRIC,
         evaluate,
         governing_counts,
     )
@@ -1405,7 +1359,7 @@ def _context(tmp_path, model_source, data: dict, **overrides):
         tmp_path,
         training_config(
             model_source,
-            {**data, "split": {"seed": 0, "val_ratio": 0.25}},
+            {**data, "split": drawn_split(val_ratio=0.25)},
             optimizer=adamw_optimizer(),
             **overrides,
         ),
@@ -1502,15 +1456,14 @@ def test_validate_classification_metrics(tmp_path):
         model_source,
         {"images_dir": str(images_dir), "labels_dir": str(csv_path)},
         batch_size=3,
+        evaluation=evaluation_block(selection_metric="loss"),
     )
     run = train(ctx.run, ctx.train_loader, val_loader=ctx.val_loader)
 
     assert run.status == "completed", run.status_error
     last = run.metrics_history[-1]
     assert "val_accuracy" in last and "val_f1" in last
-    assert run.best_metric == pytest.approx(
-        last["val_loss"]
-    )  # selection falls back to val_loss
+    assert run.best_metric == pytest.approx(last["val_loss"])
 
 
 def test_score_predictions_folder_counts_every_image_through_the_matcher(

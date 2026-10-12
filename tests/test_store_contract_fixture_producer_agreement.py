@@ -116,19 +116,16 @@ def test_a_selection_record_carries_each_sample_s_own_source_label_group_and_sid
     import tcip_store as ts
     from tcip_mcp.pipelines.data import selection
     from tcip_mcp.tools.data_tools import draw_splits
+    from tests._training_values import drawn_split
     from tests.test_training_autoval import _detection_dataset
 
     _detection_dataset(tmp_path / "ds")
     drawn = draw_splits(
         tmp_path,
         str(tmp_path / "ds"),
-        seed=1,
         subject="bud",
-        val_ratio=0.25,
-        calibration_ratio=0,
-        holdout_ratio=0,
-        group_by="stem",
         output_path=str(tmp_path / "splits"),
+        **drawn_split(seed=1, val_ratio=0.25),
     )
     assert "error" not in drawn, drawn
     fresh = ts.read(selection.selection_key(tmp_path / "splits"))

@@ -18,6 +18,7 @@ import pytest
 from tcip_annotation.state import Annotation, BBox, Polygon
 from tests import _trait_fixtures as fx, csv_rows
 from tests._producer_fixtures import label_image
+from tests._training_values import drawn_split
 
 DATE = "2026-01-01"
 PX_PER_MM = (
@@ -110,11 +111,12 @@ def _reference(
         str(root),
         output_path=str(selection),
         subject=SUBJECT,
-        group_by="stem",
-        seed=1,
-        val_ratio=0.25,
-        calibration_ratio=0.25,
-        holdout_ratio=0.25,
+        **drawn_split(
+            seed=1,
+            val_ratio=0.25,
+            calibration_ratio=0.25,
+            holdout_ratio=0.25,
+        ),
     )
     assert "error" not in drawn, drawn
     return selection, csv_path

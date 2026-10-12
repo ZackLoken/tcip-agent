@@ -16,9 +16,9 @@ from tcip_mcp.pipelines.training.generic_trainer import set_seed  # noqa: E402
 
 
 def test_set_seed_reproducible():
-    set_seed(123)
+    set_seed(123, deterministic=False)
     a = (random.random(), float(np.random.rand()), float(torch.rand(1)))
-    set_seed(123)
+    set_seed(123, deterministic=False)
     b = (random.random(), float(np.random.rand()), float(torch.rand(1)))
     assert a == b
 
@@ -49,7 +49,13 @@ import tcip_mcp.pipelines.components.losses  # noqa: F401,E402
 import tcip_mcp.pipelines.components.necks  # noqa: F401,E402
 from tcip_mcp.pipelines.training.generic_trainer import run_loaders, train  # noqa: E402
 from tests._producer_fixtures import dataset_over  # noqa: E402
-from tests._training_values import adamw_optimizer, schedule  # noqa: E402
+from tests._training_values import (  # noqa: E402
+    adamw_optimizer,
+    drawn_split,
+    evaluation_block,
+    schedule,
+    stage,
+)
 
 
 def _classification_data(tmp_path: Path, n: int = 6):
@@ -79,6 +85,7 @@ def _cfg(stages, horizon: int = 1, **extra):
         stages=stages,
         optimizer=adamw_optimizer(),
         scheduler=schedule("cosine", horizon_epochs=horizon),
+        evaluation=evaluation_block(selection_metric="loss"),
         **extra,
     )
 
@@ -112,7 +119,7 @@ def _trained(
                     "data": {
                         "images_dir": images_dir,
                         "labels_dir": labels_dir,
-                        "auto_val": False,
+                        "split": drawn_split(val_ratio=0.0),
                     },
                 },
                 experiment_id=name,
@@ -127,7 +134,7 @@ def test_seeded_train_reproducible(tmp_path):
     data = _classification_data(tmp_path)
 
     def run_once(name):
-        run = _trained(data, tmp_path, _cfg([{"freeze_to": -1}], seed=7), name)
+        run = _trained(data, tmp_path, _cfg([stage(-1)], seed=7), name)
         return run.metrics_history[0]["train_loss"]
 
     assert run_once("a") == pytest.approx(run_once("b"))
@@ -135,7 +142,7 @@ def test_seeded_train_reproducible(tmp_path):
 
 def test_resume_continues_epochs(tmp_path):
     data = _classification_data(tmp_path)
-    cfg = _cfg([{"freeze_to": -1}], 2)
+    cfg = _cfg([stage(-1)], 2)
 
     _trained(data, tmp_path, cfg, "out")
     ckpt = _run_dir(tmp_path, "out") / "checkpoint_epoch_1.pt"
@@ -150,7 +157,7 @@ def test_resume_continues_epochs(tmp_path):
 
 def test_resume_skips_completed_stage_and_restores_optimizer(tmp_path):
     data = _classification_data(tmp_path)
-    cfg = _cfg([{"freeze_to": -1}, {"freeze_to": 0}])
+    cfg = _cfg([stage(-1), stage(0)])
 
     _trained(data, tmp_path, cfg, "out")
     ckpt = (
@@ -172,7 +179,7 @@ def test_resume_restores_rng_state_not_just_reseeds(tmp_path):
     captures beside the global streams.
     """
     data = _classification_data(tmp_path)
-    cfg = _cfg([{"freeze_to": -1}], 2, seed=11)
+    cfg = _cfg([stage(-1)], 2, seed=11)
 
     # Straight-through baseline: both epochs in one uninterrupted run.
     straight = _trained(data, tmp_path, cfg, "straight")
@@ -203,7 +210,7 @@ def test_resume_from_a_checkpoint_missing_a_resume_key_refuses_naming_it(
     resuming from a guessed default.
     """
     data = _classification_data(tmp_path)
-    cfg = _cfg([{"freeze_to": -1}], 2)
+    cfg = _cfg([stage(-1)], 2)
 
     _trained(data, tmp_path, cfg, "out")
     ckpt_path = _run_dir(tmp_path, "out") / "checkpoint_epoch_1.pt"
@@ -220,7 +227,7 @@ def test_resume_from_a_checkpoint_missing_its_scheduler_state_refuses_naming_it(
     tmp_path,
 ):
     data = _classification_data(tmp_path)
-    cfg = _cfg([{"freeze_to": -1}], 2)
+    cfg = _cfg([stage(-1)], 2)
 
     _trained(data, tmp_path, cfg, "out")
     ckpt_path = _run_dir(tmp_path, "out") / "checkpoint_epoch_1.pt"
@@ -237,7 +244,7 @@ def test_a_resume_whose_optimizer_restore_raises_fails_the_run(
     tmp_path, monkeypatch
 ):
     data = _classification_data(tmp_path)
-    cfg = _cfg([{"freeze_to": -1}], 2)
+    cfg = _cfg([stage(-1)], 2)
 
     _trained(data, tmp_path, cfg, "out")
 
@@ -283,7 +290,7 @@ def test_a_cuda_resume_restores_the_rng_streams(tmp_path, monkeypatch):
     import tcip_mcp.pipelines.training.generic_trainer as trainer
 
     data = _classification_data(tmp_path)
-    cfg = _cfg([{"freeze_to": -1}], 2, device="cuda")
+    cfg = _cfg([stage(-1)], 2, device="cuda")
 
     _trained(data, tmp_path, cfg, "out")
     ckpt_path = _run_dir(tmp_path, "out") / "checkpoint_epoch_1.pt"
@@ -315,8 +322,7 @@ def test_a_cuda_resume_restores_the_rng_streams(tmp_path, monkeypatch):
 
 def test_seeded_loader_kwargs_reproducible_shuffle():
     """The platform's own DataLoader construction sites are seeded: two loaders built
-    from the same seed shuffle identically; an unseeded run stays honestly unseeded
-    (a worker init fn, but no generator).
+    from the same seed shuffle identically.
     """
     from tcip_mcp.pipelines.training.generic_trainer import (
         seeded_loader_kwargs,
@@ -328,13 +334,10 @@ def test_seeded_loader_kwargs_reproducible_shuffle():
     perm2 = torch.randperm(10, generator=kw2["generator"])
     assert torch.equal(perm1, perm2)
 
-    assert "generator" not in seeded_loader_kwargs(None)
-
 
 def test_loader_worker_init_fn_is_picklable():
     """Windows spawn pickles worker_init_fn to every DataLoader worker, so a closure here
-    breaks every num_workers > 0 run on this platform. Seeded and unseeded runs alike must
-    hand out a picklable init fn.
+    breaks every num_workers > 0 run on this platform.
     """
     import pickle
 
@@ -342,15 +345,14 @@ def test_loader_worker_init_fn_is_picklable():
         seeded_loader_kwargs,
     )
 
-    for seed in (42, None):
-        fn = seeded_loader_kwargs(seed)["worker_init_fn"]
-        assert pickle.loads(pickle.dumps(fn)) is not None
+    fn = seeded_loader_kwargs(42)["worker_init_fn"]
+    assert pickle.loads(pickle.dumps(fn)) is not None
 
 
 def test_loader_worker_init_configures_gdal_cache_and_seeds(monkeypatch):
     """Every spawned worker starts on GDAL's stock cache default, so the init fn must apply
-    the platform budget in the worker; per-worker numpy/random seeding applies only when the
-    run is seeded.
+    the platform budget in the worker and seed numpy and random from the seed torch gave that
+    worker (``torch.initial_seed`` inside it, set here as torch sets it).
     """
     from tcip_mcp.pipelines import raster_source
     from tcip_mcp.pipelines.training.generic_trainer import (
@@ -364,21 +366,22 @@ def test_loader_worker_init_configures_gdal_cache_and_seeds(monkeypatch):
         lambda share=1.0: calls.append("cache"),
     )
 
-    seeded_loader_kwargs(7)["worker_init_fn"](worker_id=1)
-    first = (random.random(), float(np.random.rand()))
-    seeded_loader_kwargs(7)["worker_init_fn"](worker_id=1)
-    again = (random.random(), float(np.random.rand()))
-    assert first == again
-
-    seeded_loader_kwargs(None)["worker_init_fn"](worker_id=0)
-    assert calls == ["cache", "cache", "cache"]
+    with torch.random.fork_rng():
+        torch.manual_seed(2**32 + 21)
+        seeded_loader_kwargs(7)["worker_init_fn"](worker_id=1)
+    drawn = (random.random(), float(np.random.rand()))
+    assert drawn == (
+        random.Random(21).random(),
+        float(np.random.RandomState(21).rand()),
+    )
+    assert calls == ["cache"]
 
 
 def test_resume_from_non_resumable_checkpoint_fails_loudly(tmp_path):
     # Resuming a checkpoint without optimizer state (e.g. model_best.pt) must fail
     # loudly, not silently restart from scratch.
     data = _classification_data(tmp_path)
-    cfg = _cfg([{"freeze_to": -1}])
+    cfg = _cfg([stage(-1)])
 
     _trained(data, tmp_path, cfg, "out")
     best = (

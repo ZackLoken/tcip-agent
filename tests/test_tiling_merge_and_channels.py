@@ -6,6 +6,7 @@ import numpy as np
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._producer_fixtures import dataset_over, label_image, painted_array  # noqa: E402
+from tests._training_values import tiling_block
 
 
 def _patched(width=40, height=24, bands=5, patch=(28, 12)) -> np.ndarray:
@@ -60,7 +61,7 @@ def test_tiled_detection_reads_multiband_and_keeps_boxes_on_their_pixels(
         subject="bud",
         stated={"num_channels": 5},
         tiling={
-            "enabled": True,
+            **tiling_block(),
             "tile_size": 16,
             "overlap": 0.0,
             "sliver_frac": 0.5,
@@ -125,7 +126,7 @@ def test_tiled_dataset_refuses_labels_authored_in_a_different_frame(tmp_path):
             subject="bud",
             stated={"num_channels": 5},
             tiling={
-                "enabled": True,
+                **tiling_block(),
                 "tile_size": 16,
                 "overlap": 0.0,
                 "sliver_frac": 0.5,
@@ -155,7 +156,7 @@ def test_the_authored_frame_raises_on_a_corrupt_label_rather_than_reading_as_no_
             subject="bud",
             stated={"num_channels": 5},
             tiling={
-                "enabled": True,
+                **tiling_block(),
                 "tile_size": 16,
                 "overlap": 0.0,
                 "sliver_frac": 0.5,
@@ -173,7 +174,7 @@ def test_ctx_tiled_dataset_inherits_the_band_count(tmp_path):
     )
     assert (
         TiledDetectionDataset(
-            base, tile_size=16, overlap=0.0, sliver_frac=0.5
+            base, tile_size=16, overlap=0.0, sliver_frac=0.5, skip_empty=False
         ).expected_channels
         == 5
     )
@@ -204,7 +205,7 @@ def test_tiled_detection_handles_channel_first_rasters(tmp_path):
         subject="bud",
         stated={"num_channels": 5},
         tiling={
-            "enabled": True,
+            **tiling_block(),
             "tile_size": 16,
             "overlap": 0.0,
             "sliver_frac": 0.5,

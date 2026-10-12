@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from tests._chain_fixtures import BESPOKE_DETECTION
-from tests._training_values import evaluation_block
+from tests._training_values import drawn_split, evaluation_block
 
 
 @pytest.fixture
@@ -88,7 +88,7 @@ def _detection_config(
         {
             "images_dir": str(images_dir),
             "scope": {"subject": "bud"},
-            "auto_val": False,
+            "split": drawn_split(val_ratio=0.0),
         },
         batch_size=1,
         evaluation=evaluation_block(selection_metric="loss"),
@@ -262,22 +262,23 @@ def test_the_run_record_the_worker_reads_carries_the_seed_and_the_training_keys(
 ) -> None:
     """The writer is the real launch_training (Popen and TensorBoard stubbed by
     recorded_children so no subprocess actually spawns); the reader is the one the training
-    child performs, the run directory's own ``run.json``. The trainer's keys sit at the config's
-    top level and ``run_registry.seeded`` draws a seed into it before the record is written, so
-    the config the worker reads carries both, in the directory the run's own id names.
+    child performs, the run directory's own ``run.json``. The trainer's keys and the seed the
+    caller states sit at the config's top level, so the config the worker reads carries both,
+    in the directory the run's own id names.
     """
     pytest.importorskip("torchvision")
     project = tmp_path / "project"
     project.mkdir()
 
     images_dir = _canonical_dataset(project / "ds")
-    res = training_tools_launch(project, _detection_config(images_dir))
+    stated = _detection_config(images_dir)
+    res = training_tools_launch(project, stated)
 
     record = _launch_record(res)
     config = record["config"]
 
     assert Path(res["output_dir"]).name == res["experiment_id"]
-    assert isinstance(config["seed"], int)
+    assert config["seed"] == stated["seed"]
     assert config["device"] == "cpu"
     assert "training" not in config
     assert "experiment_id" not in config

@@ -50,8 +50,11 @@ function sweep(overrides: Partial<SweepGroup> & { sweep_id: string }): SweepGrou
   return {
     state: "running",
     status_error: null,
-    input: { n_trials: 2, search_alg: "random" },
-    objective: { selection_metric: "map50", higher_is_better: true, revision: null },
+    input: {
+      n_trials: 2,
+      search_alg: "random",
+      base_config: { evaluation: { selection_metric: "map50" } },
+    },
     cancel_requested: false,
     heartbeat: "",
     trials: [],

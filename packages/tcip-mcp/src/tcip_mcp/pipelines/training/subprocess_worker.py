@@ -72,8 +72,8 @@ def prepare_run_context(
     if val_loader is None and task in DETECTOR_TASKS:
         logger.warning(
             "No validation loader for %s run %s: best-model selection and the stop rule read the "
-            "training loss. Bind a selection through data.split.selection_dir, or enable "
-            "auto_val.",
+            "training loss. Bind a selection through data.split.selection_dir, or state "
+            "data.split.val_ratio above zero.",
             task,
             run_dir.name,
         )

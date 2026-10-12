@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from tests._training_values import IOU_THRESHOLD
+from tests._training_values import IOU_THRESHOLD, drawn_split
 from tests.test_coco_import import (
     BOX,
     DATE,
@@ -107,12 +107,9 @@ def _draw_splits(project: Path) -> Path:
     result = draw_splits(
         project,
         ".",
-        seed=0,
-        val_ratio=0.34,
-        calibration_ratio=0.0,
-        holdout_ratio=0.0,
         output_path="splits/drawn",
         subject=SUBJECT,
+        **drawn_split(val_ratio=0.34, grouping="tile_prefix"),
     )
     assert "error" not in result, result
     (row,) = [r for r in audit_rows(project) if r["tool"] == "draw_splits"]
@@ -254,7 +251,7 @@ def _registered(project: Path) -> str:
     data = {
         "num_channels": 3,
         "scope": {"subject": SUBJECT},
-        "split": {"seed": 0, "val_ratio": 0.15},
+        "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
     }
     return _relative(project_checkpoint(project, data=data), project)
 
@@ -542,7 +539,7 @@ def test_a_sweep_records_the_base_the_caller_stated_never_its_first_corner(
 
     project = tmp_path / "project"
     config = _detection_config(_canonical_dataset(project / "ds"))
-    config["data"]["split"] = {"seed": 0, "val_ratio": 0.2}
+    config["data"]["split"] = drawn_split(val_ratio=0.2, grouping="tile_prefix")
     space = {
         **sweep_space(),
         "data.split.val_ratio": {
@@ -934,7 +931,7 @@ def test_a_run_missing_its_metrics_log_answers_its_own_error_at_the_checkpoint_d
             data={
                 "num_channels": 3,
                 "scope": {"subject": SUBJECT},
-                "split": {"seed": 0, "val_ratio": 0.15},
+                "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
             },
         )
     )
@@ -974,7 +971,7 @@ def test_evaluation_takes_a_run_id_and_a_relative_checkpoint_path(
             data={
                 "num_channels": 3,
                 "scope": {"subject": SUBJECT},
-                "split": {"seed": 0, "val_ratio": 0.15},
+                "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
             },
         )
     )

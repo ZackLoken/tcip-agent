@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tests._training_values import drawn_split, tiling_block
 
 torch = pytest.importorskip("torch")
 
@@ -96,7 +97,7 @@ def _checkpoint(
             "images_dir": str(images),
             "num_channels": in_chans,
             "scope": {"subject": "bud"},
-            "tiling": tiling or {"enabled": False},
+            "tiling": tiling,
         },
     )
     return ckpt, load_registered_checkpoint(ckpt, project=tmp_path)
@@ -412,12 +413,7 @@ def test_training_and_inference_slice_one_frame_on_one_lattice(tmp_path):
         str(images),
         subject="bud",
         stated={"num_channels": 3},
-        tiling={
-            "enabled": True,
-            "tile_size": TILE,
-            "overlap": OVERLAP,
-            "sliver_frac": 0.5,
-        },
+        tiling=tiling_block(tile_size=TILE, overlap=OVERLAP, sliver_frac=0.5),
     )  # stated: one box derives no spread
 
     _path, checkpoint = _checkpoint(tmp_path)
@@ -698,10 +694,13 @@ def test_an_assessed_tiled_pass_and_its_bucket_run_one_merge(
         str(tmp_path / "ds"),
         output_path=str(selection),
         subject="bud",
-        seed=2,
-        val_ratio=0.2,
-        calibration_ratio=0.2,
-        holdout_ratio=0.2,
+        **drawn_split(
+            seed=2,
+            val_ratio=0.2,
+            calibration_ratio=0.2,
+            holdout_ratio=0.2,
+            grouping="tile_prefix",
+        ),
     )
     assert "error" not in drawn, drawn
     ckpt, _record = _checkpoint(tmp_path)
@@ -772,7 +771,9 @@ def test_the_bucket_records_the_slice_geometry_the_checkpoint_derived(
         _checkpoint(  # sliver_frac stated: three boxes derive no spread
             tmp_path,
             with_masks=with_masks,
-            tiling={"tile_size": TILE, "overlap": OVERLAP, "sliver_frac": 0.5},
+            tiling=tiling_block(
+                tile_size=TILE, overlap=OVERLAP, sliver_frac=0.5
+            ),
         )
     )
     images = tmp_path / "images" / UNDATED_BUCKET

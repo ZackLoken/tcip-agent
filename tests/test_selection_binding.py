@@ -33,6 +33,7 @@ from tests._producer_fixtures import (
     registry_over,
     train_val as _train_val,
 )
+from tests._training_values import RATIONALE, drawn_split
 from tests._verified_checkpoint_fixtures import partition_side
 
 SUBJECT = "leaf"
@@ -250,10 +251,13 @@ def _draw(
         str(root),
         output_path=str(out),
         subject=subject,
-        seed=seed,
-        val_ratio=0.25,
-        calibration_ratio=0.125,
-        holdout_ratio=0.125,
+        **drawn_split(
+            seed=seed,
+            val_ratio=0.25,
+            calibration_ratio=0.125,
+            holdout_ratio=0.125,
+            grouping="tile_prefix",
+        ),
     )
     assert "error" not in result, result
     return read_selection(out, project=project)
@@ -609,6 +613,9 @@ def test_a_sample_naming_a_row_of_its_ground_truth_refuses_the_geometry_loaders(
                 scope=ClassScope() if row_key else scope,
                 seed=0,
                 group_by="stem",
+                ratios={"train": 1.0},
+                stratify_foreground=True,
+                rationale=RATIONALE,
             ),
             project=tmp_path,
         )
@@ -783,7 +790,7 @@ def test_an_unbound_bespoke_run_is_handed_the_same_samples_a_bound_one_is(
         "images_dir": str(root / "images" / DATES[0]),
         "scope": {"subject": SUBJECT},
         "dataset_source": source,
-        "split": {"val_ratio": 0.5, "seed": 3},
+        "split": drawn_split(val_ratio=0.5, seed=3, grouping="tile_prefix"),
     }
     unbound_train, unbound_val, _unbound_partition, _unbound = _train_val(
         tmp_path, task, unbound_cfg
@@ -889,6 +896,9 @@ def test_auto_train_val_refuses_a_selection_with_an_empty_side(tmp_path: Path):
             scope=drawn.scope,
             seed=drawn.seed,
             group_by=drawn.group_by,
+            ratios=drawn.ratios,
+            stratify_foreground=drawn.stratify_foreground,
+            rationale=drawn.rationale,
         ),
         project=tmp_path,
     )
@@ -937,9 +947,12 @@ def test_auto_train_val_refuses_a_selection_with_no_subject(tmp_path: Path):
         _train_val(tmp_path, "detection", _run_data_cfg(root, out))
 
 
-def test_auto_train_val_selection_conflicts_with_a_drawn_splits_own_parameters(
+def test_a_split_naming_a_selection_refuses_a_drawn_splits_own_parameter_by_name(
     tmp_path: Path,
 ):
+    """A split naming a selection is a bound split, which carries no share: the schema refuses
+    one stated beside it by name.
+    """
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(tmp_path, root, out)
@@ -983,12 +996,11 @@ def test_auto_train_val_binding_failure_raises_rather_than_degrading(
         _train_val(tmp_path, "detection", _run_data_cfg(root, out))
 
 
-# -- redraw_within_selection ---------------------------------------------------
+# -- a redraw inside the selection, at a stated seed ---------------------------
 
 
 def _redraw_cfg(root: Path, out: Path, seed: int) -> dict:
     data_cfg = _run_data_cfg(root, out)
-    data_cfg["split"]["redraw_within_selection"] = True
     data_cfg["split"]["seed"] = seed
     return data_cfg
 
@@ -1028,26 +1040,42 @@ def test_two_redraw_seeds_differ_and_the_same_seed_repeats(tmp_path: Path):
     assert any(_train(seed) != first for seed in range(2, 8))
 
 
-def test_a_redraw_without_a_seed_refuses(tmp_path: Path):
+def test_a_bound_split_stating_a_seed_redraws_and_one_stating_none_keeps_the_recorded_sides(
+    tmp_path: Path,
+):
+    """Guard. Through the child's own context (``run_context``) over a bound selection: a split
+    stating no seed trains on the selection's recorded train side at its recorded seed, and one
+    stating a seed redraws inside the selection at it, recorded as a redraw.
+    """
+    from tcip_mcp.experiments import observe
+    from tests._chain_fixtures import training_config
+    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
+    from tests.tiny_trainer_fixtures import run_context
+
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
-    _draw(tmp_path, root, out)
-    data_cfg = _run_data_cfg(root, out)
-    data_cfg["split"]["redraw_within_selection"] = True
+    drawn = _draw(tmp_path, root, out)
 
-    with pytest.raises(ValueError, match="requires data.split.seed"):
-        _train_val(tmp_path, "detection", data_cfg)
+    def _opened(experiment_id: str, **split):
+        ctx = run_context(
+            tmp_path,
+            training_config(
+                BUILT_DETECTOR,
+                {"split": {"selection_dir": str(out), **split}},
+            ),
+            experiment_id=experiment_id,
+        )
+        partition = observe(ctx.run_dir).record["resolved"]["partition"]
+        return set(ctx.train_loader.dataset.stems), partition
 
+    kept, bound = _opened("exp-bound")
+    assert kept == {s.location for s in drawn.on("train")}
+    assert (bound["selection"]["redraw"], bound["seed"]) == (False, drawn.seed)
 
-def test_a_seed_without_the_redraw_flag_still_conflicts(tmp_path: Path):
-    root = _two_subject_two_date_dataset(tmp_path / "ds")
-    out = tmp_path / "m"
-    _draw(tmp_path, root, out)
-    data_cfg = _run_data_cfg(root, out)
-    data_cfg["split"]["seed"] = 3
-
-    with pytest.raises(ValueError, match="seed"):
-        _train_val(tmp_path, "detection", data_cfg)
+    redrawn = [_opened(f"exp-redrawn-{seed}", seed=seed) for seed in range(3, 8)]
+    for seed, (_train, partition) in zip(range(3, 8), redrawn):
+        assert (partition["selection"]["redraw"], partition["seed"]) == (True, seed)
+    assert any(train != kept for train, _ in redrawn)
 
 
 def test_a_redraw_refuses_a_starved_pool_through_the_draws_own_floor(
@@ -1080,7 +1108,7 @@ def test_a_redraw_refuses_a_starved_pool_through_the_draws_own_floor(
         "1 foreground group(s), fewer than the 2 the requested sides need"
         in starved
     )
-    assert "redraw_within_selection" in starved
+    assert "Drop data.split.seed" in starved
 
 
 def test_the_explicit_draw_the_runs_own_draw_and_the_redraw_agree_member_for_member(
@@ -1108,10 +1136,7 @@ def test_the_explicit_draw_the_runs_own_draw_and_the_redraw_agree_member_for_mem
         str(root),
         output_path=str(out),
         subject=SUBJECT,
-        seed=2,
-        val_ratio=0.25,
-        calibration_ratio=0,
-        holdout_ratio=0,
+        **drawn_split(seed=2, val_ratio=0.25, grouping="tile_prefix"),
     )
     assert explicit["splits"]["val"] == 2, explicit
     selection = read_selection(out, project=tmp_path)
@@ -1122,8 +1147,9 @@ def test_the_explicit_draw_the_runs_own_draw_and_the_redraw_agree_member_for_mem
         {
             "images_dir": str(images_dir),
             "scope": {"subject": SUBJECT},
-            "auto_val": True,
-            "split": {"val_ratio": 0.25, "seed": 2},
+            "split": drawn_split(
+                val_ratio=0.25, seed=2, grouping="tile_prefix"
+            ),
         },
     )
     redrawn = redrawn_selection(selection, str(out), 2)
@@ -1180,6 +1206,9 @@ def one_foreground_group_selection(tmp_path: Path) -> tuple[Path, Path]:
             scope=registry_scope(images_dir, SUBJECT),
             seed=1,
             group_by="explicit_map",
+            ratios={"train": 0.25, "val": 0.25, "calibration": 0.5},
+            stratify_foreground=True,
+            rationale=RATIONALE,
         ),
         project=tmp_path,
     )
@@ -1197,9 +1226,7 @@ def test_preflight_flags_a_redraw_whose_members_hold_one_foreground_group(
 
     root, out = one_foreground_group_selection(tmp_path)
     config = _preflight_config(root, out)
-    config["data"]["split"].update(
-        {"redraw_within_selection": True, "seed": 1}
-    )
+    config["data"]["split"]["seed"] = 1
 
     result = preflight_config(tmp_path, config)
 
@@ -1245,7 +1272,7 @@ def test_preflight_config_flags_a_selection_with_no_subject(tmp_path: Path):
     assert any("records no subject" in i for i in result["issues"])
 
 
-def test_preflight_config_admits_the_redraw_pair_with_a_warning(
+def test_preflight_config_admits_a_redraw_seed_with_a_warning(
     tmp_path: Path,
 ):
     from tcip_mcp.tools.training_tools import preflight_config
@@ -1254,14 +1281,12 @@ def test_preflight_config_admits_the_redraw_pair_with_a_warning(
     out = tmp_path / "m"
     _draw(tmp_path, root, out)
     config = _preflight_config(root, out)
-    config["data"]["split"].update(
-        {"redraw_within_selection": True, "seed": 1}
-    )
+    config["data"]["split"]["seed"] = 1
 
     result = preflight_config(tmp_path, config)
 
     assert result["issues"] == []
-    assert any("redraw_within_selection=true" in w for w in result["warnings"])
+    assert any("this run redraws" in w for w in result["warnings"])
 
 
 # -- the run's own resolved record ---------------------------------------------
@@ -1295,12 +1320,12 @@ def test_the_resolved_partition_carries_the_selection_it_bound(tmp_path: Path):
     assert all(s.ground_truth_digest for s in samples)
 
 
-def test_a_bound_detection_run_stating_no_metric_selects_by_the_composite_objective(
+def test_a_bound_detection_run_stating_the_composite_objective_selects_by_it(
     tmp_path: Path,
 ):
-    """The chain's detector trained over a drawn selection with no selection metric stated:
-    the completed run's record resolves the detection default, the composite objective, and
-    every epoch it logged ranks on a finite objective above zero rather than on its loss.
+    """The chain's detector trained over a drawn selection stating the composite objective as
+    its selection metric: the completed run resolves no trait revision, and every epoch it
+    logged ranks on a finite objective above zero rather than on its loss.
     """
     import math
 
@@ -1312,18 +1337,14 @@ def test_a_bound_detection_run_stating_no_metric_selects_by_the_composite_object
     chain.synthetic_capture(root)
     chain.draw_reference_selection(tmp_path, root, tmp_path / "selection")
     config = chain.run_config(tmp_path / "selection")
-    assert "selection_metric" not in config["evaluation"]
+    assert config["evaluation"]["selection_metric"] == "objective"
 
     observation = observe(
         worker_run(tmp_path, config, experiment_id="exp-default-objective")
     )
 
     assert observation.state == "completed", observation.status_error
-    assert observation.objective.model_dump() == {
-        "selection_metric": "objective",
-        "higher_is_better": False,
-        "revision": None,
-    }
+    assert observation.trait_revision is None
     rows = epoch_rows(read_rows(observation.metrics_log)[0])
     assert rows
     for row in rows:
@@ -1345,7 +1366,7 @@ def test_a_run_that_draws_its_own_split_records_no_binding(tmp_path: Path):
         {
             "images_dir": str(root / "images" / DATES[0]),
             "scope": {"subject": SUBJECT},
-            "split": {"seed": 0, "val_ratio": 0.15},
+            "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
         },
         experiment_id="exp-drawn",
     )

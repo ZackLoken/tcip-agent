@@ -84,6 +84,7 @@ def test_draw_splits_counts_json_objects_not_lines(tmp_path):
     """
     from tcip_mcp.tools.data_tools import draw_splits
     from tests._producer_fixtures import mark_complete
+    from tests._training_values import RATIONALE
 
     images = [blank_image(tmp_path, name=f"img_{i}.JPG") for i in range(4)]
 
@@ -101,7 +102,9 @@ def test_draw_splits_counts_json_objects_not_lines(tmp_path):
         val_ratio=0.5,
         calibration_ratio=0.0,
         holdout_ratio=0.0,
-        group_by="stem",
+        grouping="stem",
+        stratify_foreground=True,
+        rationale=RATIONALE,
         subject="bud",
     )
     assert "error" not in res

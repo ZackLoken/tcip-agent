@@ -10,14 +10,14 @@ from __future__ import annotations
 
 import pytest
 
-from tcip_mcp.pipelines.schemas import SplitSpec
+from tcip_mcp.pipelines.schemas import DrawnSplit
 from tcip_mcp.pipelines.training.hpo import (
     _search_space_and_points,
     planned_trial_count,
     resolved_draw_seeds,
     split_draw_search_space,
 )
-from tests._training_values import tune_arguments
+from tests._training_values import drawn_split, tune_arguments
 
 SPACE = {
     "optimizer.head_lr": {"type": "loguniform", "low": 1e-5, "high": 1e-2},
@@ -37,7 +37,7 @@ BASELINE = {
 }
 """A sample baseline point over :data:`SPACE`'s own axes."""
 
-SEEDED_SPLIT = SplitSpec.model_validate({"seed": 42})
+SEEDED_SPLIT = DrawnSplit.model_validate(drawn_split(seed=42))
 """A base config's ``data.split`` stating seed 42."""
 
 
@@ -241,7 +241,9 @@ def test_split_draw_search_space_at_one_draw_returns_param_space_itself():
     space = {
         "optimizer.head_lr": {"type": "loguniform", "low": 1e-4, "high": 1e-2}
     }
-    seeds = resolved_draw_seeds(SplitSpec.model_validate({}), 1, None)
+    seeds = resolved_draw_seeds(
+        DrawnSplit.model_validate(drawn_split()), 1, None
+    )
     assert seeds is None
     assert split_draw_search_space(space, seeds) is space
 

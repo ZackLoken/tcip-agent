@@ -22,6 +22,7 @@ pytest.importorskip("pycocotools")
 from torch.utils.data import Dataset  # noqa: E402
 
 from tcip_mcp.assessment import ASSESSMENTS_DIR  # noqa: E402
+from tests._training_values import drawn_split  # noqa: E402
 
 IMG = 48
 STEMS = ("m0", "m1", "m2", "m3")
@@ -128,7 +129,7 @@ def test_a_run_that_recorded_no_subject_is_refused_assessment_by_name(
     data_cfg = {
         "images_dir": str(images),
         "labels_dir": str(masks),
-        "auto_val": False,
+        "split": drawn_split(val_ratio=0.0),
         "dataset_source": {
             "builder": f"{Path(__file__).stem}:build_mask_box_ds",
             "source_files": [__file__],

@@ -13,9 +13,12 @@ from typing import TYPE_CHECKING, Any
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.pipelines.execution import Stated
 from tests._training_values import (
+    RATIONALE,
+    drawn_split,
     evaluation_block,
     schedule,
     sgd_optimizer,
+    stage,
     stop_rule,
 )
 
@@ -142,10 +145,13 @@ def draw_reference_selection(project: Path, root: Path, out: Path):
         str(root),
         output_path=str(out),
         subject=SUBJECT,
-        seed=2,
-        val_ratio=0.2,
-        calibration_ratio=0.2,
-        holdout_ratio=0.2,
+        **drawn_split(
+            seed=2,
+            val_ratio=0.2,
+            calibration_ratio=0.2,
+            holdout_ratio=0.2,
+            grouping="tile_prefix",
+        ),
     )
     assert "error" not in result, result
     return read_selection(out, project=project)
@@ -165,24 +171,29 @@ def run_config(
 
 
 def training_config(model_source: dict, data: dict, **overrides: Any) -> dict:
-    """A one-epoch CPU run of ``model_source`` over the ``data`` section, every other key the
-    toy detectors train at (the optimizer, schedule, stop rule and evaluation blocks the sample
-    ones of ``tests._training_values``, the schedule's one-epoch horizon ending the stage), with a
-    copy of each of ``overrides`` in place of its key.
+    """A one-epoch seeded CPU run of ``model_source`` over the ``data`` section (drawing the sample
+    split of ``tests._training_values.drawn_split`` when it states none), every other key the toy
+    detectors train at (the optimizer, schedule, stop rule and evaluation blocks the sample ones
+    of ``tests._training_values``, the schedule's one-epoch horizon ending the stage), with a
+    copy of each of ``overrides`` in place of its key. Its one stage trains every parameter at
+    one rate, since the toy detectors expose neither a backbone to freeze nor parameter groups.
     """
     import copy
 
     return {
         "model_source": copy.deepcopy(model_source),
-        "data": data,
+        "data": {"split": drawn_split(), **data},
+        "rationale": RATIONALE,
         "batch_size": 2,
-        "stages": [{"freeze_to": -1}],
+        "seed": 0,
+        "deterministic": False,
+        "stages": [stage(0)],
         "mixed_precision": False,
         "device": "cpu",
         "checkpoint_every_n_epochs": 1,
         "early_stopping": stop_rule(),
         "evaluation": evaluation_block(),
-        "optimizer": sgd_optimizer(),
+        "optimizer": sgd_optimizer(backbone_lr=1e-2),
         "scheduler": schedule("cosine", horizon_epochs=1),
         "gradient_accumulation_steps": 1,
         **copy.deepcopy(overrides),
@@ -743,10 +754,13 @@ def attributed_series(
         str(root),
         output_path=str(selection_dir),
         subject=SUBJECT,
-        seed=2,
-        val_ratio=0.2,
-        calibration_ratio=0.2,
-        holdout_ratio=0.2,
+        **drawn_split(
+            seed=2,
+            val_ratio=0.2,
+            calibration_ratio=0.2,
+            holdout_ratio=0.2,
+            grouping="tile_prefix",
+        ),
     )
     assert "error" not in drawn, drawn
     config = run_config(selection_dir, model_source or BLOB_BUILDER, seed=2)

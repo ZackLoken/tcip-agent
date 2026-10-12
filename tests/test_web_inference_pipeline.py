@@ -5,7 +5,9 @@ from pathlib import Path
 import pytest
 
 from tcip_mcp.pipelines.execution import Stated
+from tcip_mcp.pipelines.schemas import AugmentationSpec
 from tests._predictor_fixtures import BOX, StubPredictor, install
+from tests._training_values import augmentation
 
 BUCKET = "out/2026-01-01"
 
@@ -276,7 +278,9 @@ def test_web_worker_runs_a_native_frame_tile_scale_and_forwards_its_recorded_res
             task="detection",
             train_tile_size=None,
             train_native_size=(64, 64),
-            train_augmentation={"resize": {"size": [128, 128]}},
+            train_augmentation=AugmentationSpec.model_validate(
+                augmentation(resize={"size": [128, 128]})
+            ),
         ),
     )
 

@@ -25,7 +25,13 @@ from tcip_mcp.pipelines.model_build import (  # noqa: E402
 from tcip_mcp.pipelines.schemas import SCHEDULER_TYPES  # noqa: E402
 from tcip_mcp.pipelines.training import generic_trainer as gt  # noqa: E402
 from tcip_mcp.pipelines.training.generic_trainer import train  # noqa: E402
-from tests._training_values import schedule, stop_rule  # noqa: E402
+from tests._training_values import (  # noqa: E402
+    adamw_optimizer,
+    evaluation_block,
+    schedule,
+    stage,
+    stop_rule,
+)
 from tests.tiny_trainer_fixtures import (  # noqa: E402
     COUNTING_REGRESSOR,
     NAN_EVAL_REGRESSOR,
@@ -164,7 +170,7 @@ def test_a_stage_starts_from_the_weights_and_optimizer_state_of_the_prior_stage_
     run = _train(
         tmp_path,
         _config(
-            [{"freeze_to": 0}, {"freeze_to": 0}],
+            [stage(0), stage(0)],
             horizon=3,
             builder=COUNTING_REGRESSOR,
         ),
@@ -212,7 +218,7 @@ def test_a_resume_puts_back_the_buffer_and_the_tensor_setting_its_capture_holds(
     ctx = run_context(
         tmp_path,
         _config(
-            [{"freeze_to": 0}],
+            [stage(0)],
             _opposed(tmp_path / "ds"),
             builder=COUNTING_REGRESSOR,
         ),
@@ -259,7 +265,7 @@ def test_a_stage_ends_on_its_own_plateau_and_the_next_stage_runs(tmp_path):
     run = _train(
         tmp_path,
         _config(
-            [{"freeze_to": 0}, {"freeze_to": 0}],
+            [stage(0), stage(0)],
             horizon=4,
             early_stopping=stop_rule(1, 1e-4),
         ),
@@ -293,7 +299,7 @@ def test_the_run_ends_with_the_first_stage_that_does_not_improve_on_the_one_befo
     run = _train(
         tmp_path,
         _config(
-            [{"freeze_to": 0}] * 3,
+            [stage(0)] * 3,
             horizon=2,
             early_stopping=stop_rule(min_delta=min_delta),
         ),
@@ -316,14 +322,9 @@ def test_a_stage_under_a_schedule_with_no_horizon_runs_until_its_plateau(
     plateau.
     """
     config = _config(
-        [{"freeze_to": 0}],
+        [stage(0)],
         scheduler=schedule("step", gamma=1.0),
-        optimizer={
-            "name": "adamw",
-            "backbone_lr": 2e-3,
-            "head_lr": 2e-3,
-            "weight_decay": 0.0,
-        },
+        optimizer=adamw_optimizer(backbone_lr=2e-3, head_lr=2e-3),
         early_stopping=stop_rule(3, 1e-6),
     )
     run = _train(tmp_path, config, "unbounded", frames=_consistent)
@@ -353,7 +354,7 @@ def test_a_horizon_bound_schedule_is_built_over_its_horizon_and_ends_the_stage_t
     monkeypatch.setattr(gt, "_build_scheduler", recording_build_scheduler)
     reached = _train(
         tmp_path,
-        _config([{"freeze_to": 0}], scheduler=schedule(kind)),
+        _config([stage(0)], scheduler=schedule(kind)),
         "horizon",
         frames=_consistent,
     )
@@ -368,7 +369,7 @@ def test_a_horizon_bound_schedule_is_built_over_its_horizon_and_ends_the_stage_t
     plateaued = _train(
         tmp_path,
         _config(
-            [{"freeze_to": 0}],
+            [stage(0)],
             scheduler=schedule(kind),
             early_stopping=stop_rule(1),
         ),
@@ -386,7 +387,7 @@ def test_a_run_with_no_validation_loader_ends_its_stage_on_the_training_loss_pla
     """
     # Zero-intensity frames: the prediction is zero whatever the weight, so the loss is fixed.
     config = _config(
-        [{"freeze_to": 0}],
+        [stage(0)],
         frames_data(tmp_path / "flat", [0.0] * 6, [1.0] * 6),
         scheduler=schedule("step"),
         early_stopping=stop_rule(1),
@@ -404,9 +405,9 @@ def test_a_stage_with_no_selectable_epoch_fails_the_run_naming_it(tmp_path):
     no value that ranks, so no epoch of the first stage is selectable.
     """
     config = _config(
-        [{"freeze_to": 0}, {"freeze_to": 0}],
+        [stage(0), stage(0)],
         horizon=2,
-        evaluation={"selection_metric": "mae"},
+        evaluation=evaluation_block(selection_metric="mae"),
         builder=NAN_EVAL_REGRESSOR,
     )
     run = _train(tmp_path, config, "no-best")
@@ -423,7 +424,7 @@ def test_a_run_resumed_across_a_stage_boundary_trains_as_the_uninterrupted_run(
     tmp_path, resume_epoch, warmup_epochs, scheduler
 ):
     config = _config(
-        [{"freeze_to": 0}, {"freeze_to": 0}],
+        [stage(0), stage(0)],
         early_stopping=stop_rule(1, 1e-4),
         checkpoint_every_n_epochs=1,
         stage_warmup_epochs=warmup_epochs,
@@ -474,13 +475,8 @@ def test_a_resume_whose_optimizer_orders_its_groups_differently_warms_up_as_the_
 
     def two_rate_config(**builder_kwargs) -> dict:
         return _config(
-            [{"freeze_to": 0}, {"freeze_to": 0}],
-            optimizer={
-                "name": "adamw",
-                "backbone_lr": 0.01,
-                "head_lr": 0.05,
-                "weight_decay": 0.0,
-            },
+            [stage(0), stage(0)],
+            optimizer=adamw_optimizer(backbone_lr=0.01, head_lr=0.05),
             scheduler=schedule("step"),
             stage_warmup_epochs=3,
             early_stopping=stop_rule(1),
@@ -524,7 +520,7 @@ def _canceled_at(tmp_path, call: int):
     name = f"canceled-at-{call}"
     run_dir = experiment_dir(name, project=tmp_path)
     config = _config(
-        [{"freeze_to": 0}],
+        [stage(0)],
         horizon=5,
         batch_size=2,
         checkpoint_every_n_epochs=1,
@@ -602,7 +598,7 @@ def test_a_cancel_seen_as_a_stage_starts_saves_its_best_epoch_with_that_epoch_ro
     monkeypatch.setattr(gt, "_build_scheduler", cancel_at_the_second_stage)
     run = _train(
         tmp_path,
-        _config([{"freeze_to": 0}, {"freeze_to": 0}], horizon=3),
+        _config([stage(0), stage(0)], horizon=3),
         name,
     )
 
@@ -627,7 +623,7 @@ def test_a_resumed_run_canceled_at_its_first_poll_saves_the_checkpoint_row(
     from tcip_mcp.experiments import request_cancel
 
     config = _config(
-        [{"freeze_to": 0}], horizon=3, checkpoint_every_n_epochs=1
+        [stage(0)], horizon=3, checkpoint_every_n_epochs=1
     )
     straight = _train(tmp_path, config, "straight")
     assert straight.status == "completed", straight.status_error
@@ -664,7 +660,7 @@ def test_the_scheduler_steps_every_epoch_outside_a_stage_warmup(
     ramps to its target, holds it through the first epoch after the warmup, then halves.
     """
     config = _config(
-        [{"freeze_to": 0}, {"freeze_to": 0}],
+        [stage(0), stage(0)],
         scheduler=schedule("step", step_size=1, gamma=0.5),
         early_stopping=stop_rule(3, 1e9),
         stage_warmup_epochs=warmup_epochs,
@@ -673,8 +669,8 @@ def test_the_scheduler_steps_every_epoch_outside_a_stage_warmup(
     assert run.status == "completed", run.status_error
 
     rates = [
-        [m["lr"] for m in run.metrics_history if m["stage"] == stage]
-        for stage in (0, 1)
+        [m["lr"] for m in run.metrics_history if m["stage"] == index]
+        for index in (0, 1)
     ]
     target = rates[0][0]
     halving = [target * 0.5**i for i in range(4)]
@@ -689,13 +685,20 @@ def test_the_scheduler_steps_every_epoch_outside_a_stage_warmup(
 @pytest.mark.parametrize(
     ("stated", "read_as"),
     [
-        ({"early_stopping": {"patience": "2", "min_delta": "0"}}, 3),
+        (
+            {
+                "early_stopping": {
+                    **stop_rule(),
+                    "patience": "2",
+                    "min_delta": "0",
+                }
+            },
+            3,
+        ),
         (
             {
                 "log_every_n_batches": "2",
-                "stages": [
-                    {"freeze_to": 0, "gradient_accumulation_steps": None}
-                ],
+                "stages": [stage(0, gradient_accumulation_steps=None)],
             },
             4,
         ),
@@ -709,7 +712,7 @@ def test_the_trainer_runs_the_config_its_schema_admits(
     """
     from tcip_mcp.pipelines.schemas import checked_train_config
 
-    config = {**_config([{"freeze_to": 0}], horizon=4), **stated}
+    config = {**_config([stage(0)], horizon=4), **stated}
     assert checked_train_config(config)[1] == []
     steps: list = []
     run = _train(
@@ -738,7 +741,7 @@ def test_a_worker_run_validates_its_config_once(tmp_path, monkeypatch):
     from tests.tiny_trainer_fixtures import count_validations
 
     run_dir = opened_run(
-        tmp_path, _config([{"freeze_to": 0}], _opposed(tmp_path / "ds"))
+        tmp_path, _config([stage(0)], _opposed(tmp_path / "ds"))
     )
 
     validations = count_validations(monkeypatch)
@@ -753,7 +756,7 @@ def test_a_stage_stating_an_epoch_count_is_refused_and_one_stating_none_is_admit
 ):
     from tcip_mcp.pipelines.schemas import checked_train_config
 
-    refused = _config([{"freeze_to": 0, "epochs": 3}])
+    refused = _config([stage(0, epochs=3)])
     assert any(
         "stages.0.epochs" in issue
         for issue in checked_train_config(refused)[1]
@@ -761,7 +764,7 @@ def test_a_stage_stating_an_epoch_count_is_refused_and_one_stating_none_is_admit
     with pytest.raises(ValueError, match="stages.0.epochs"):
         _train(tmp_path, refused, "counted")
 
-    admitted = _train(tmp_path, _config([{"freeze_to": 0}]), "one")
+    admitted = _train(tmp_path, _config([stage(0)]), "one")
     assert admitted.status == "completed", admitted.status_error
 
 
@@ -769,14 +772,14 @@ def test_an_unknown_scheduler_is_refused_and_a_named_one_is_admitted(tmp_path):
     with pytest.raises(ValueError, match="scheduler.*cosine_warm"):
         _train(
             tmp_path,
-            _config([{"freeze_to": 0}], scheduler={"type": "cosine_warm"}),
+            _config([stage(0)], scheduler={"type": "cosine_warm"}),
             "unknown",
         )
 
     admitted = _train(
         tmp_path,
         _config(
-            [{"freeze_to": 0}],
+            [stage(0)],
             scheduler=schedule("step"),
             early_stopping=stop_rule(1),
         ),
@@ -796,7 +799,7 @@ def test_a_onecycle_schedule_trains_at_the_stated_sgd_momentum():
 
     spec = train_config(
         _config(
-            [{"freeze_to": 0}],
+            [stage(0)],
             optimizer=sgd_optimizer(),
             scheduler=schedule("onecycle"),
         )
@@ -816,3 +819,84 @@ def test_a_onecycle_schedule_trains_at_the_stated_sgd_momentum():
     assert [g["momentum"] for g in optimizer.param_groups] == [
         spec.optimizer.momentum
     ]
+
+
+def _built(scheduler_block: dict):
+    """The torch scheduler a run whose config states ``scheduler_block`` builds over an SGD
+    optimizer at its stated momentum.
+    """
+    from torch import nn
+
+    from tcip_mcp.pipelines.schemas import train_config
+    from tests._training_values import sgd_optimizer
+
+    spec = train_config(
+        _config(
+            [stage(0)], optimizer=sgd_optimizer(), scheduler=scheduler_block
+        )
+    )
+    assert spec.optimizer is not None and spec.scheduler is not None
+    optimizer = torch.optim.SGD(
+        nn.Linear(2, 1).parameters(),
+        lr=spec.optimizer.head_lr,
+        momentum=spec.optimizer.momentum,
+    )
+    return gt._build_scheduler(optimizer, spec.scheduler), optimizer
+
+
+def test_a_plateau_schedule_builds_at_every_setting_it_states():
+    """Each setting a plateau block states is the one the torch scheduler holds."""
+    scheduler, _ = _built(
+        schedule(
+            "plateau",
+            factor=0.4,
+            patience=5,
+            threshold=1e-3,
+            threshold_mode="abs",
+            cooldown=2,
+            min_lr=1e-5,
+            eps=1e-7,
+        )
+    )
+
+    assert (
+        scheduler.factor,
+        scheduler.patience,
+        scheduler.threshold,
+        scheduler.threshold_mode,
+        scheduler.cooldown,
+        scheduler.min_lrs,
+        scheduler.eps,
+    ) == (0.4, 5, 1e-3, "abs", 2, [1e-5], 1e-7)
+
+
+def test_a_onecycle_schedule_builds_at_every_setting_it_states():
+    """Each setting a one-cycle block states is the one the torch scheduler holds: its horizon,
+    its phases and where the first ends, its annealing, its momentum cycle and both rate
+    divisors.
+    """
+    scheduler, optimizer = _built(
+        schedule(
+            "onecycle",
+            max_lr=2e-2,
+            horizon_epochs=10,
+            pct_start=0.4,
+            anneal_strategy="linear",
+            cycle_momentum=True,
+            base_momentum=0.8,
+            max_momentum=0.9,
+            div_factor=10.0,
+            final_div_factor=100.0,
+            three_phase=True,
+        )
+    )
+    (group,) = optimizer.param_groups
+
+    assert scheduler.total_steps == 10
+    assert len(scheduler._schedule_phases) == 3
+    assert scheduler._schedule_phases[0]["end_step"] == pytest.approx(3.0)
+    assert scheduler._anneal_func_type == "linear"
+    assert scheduler.cycle_momentum is True
+    assert (group["base_momentum"], group["max_momentum"]) == (0.8, 0.9)
+    assert group["initial_lr"] == pytest.approx(2e-3)
+    assert group["min_lr"] == pytest.approx(2e-5)

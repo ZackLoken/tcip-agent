@@ -18,6 +18,7 @@ pytest.importorskip("torchvision")
 
 import tcip_store as ts
 from tests._chain_fixtures import training_config
+from tests._training_values import RATIONALE, drawn_split
 from tests._verified_checkpoint_fixtures import opened_run
 from tests.test_selection_binding import (
     DATES,
@@ -36,7 +37,7 @@ def _bespoke_config(images_dir: Path, *, subject: str = SUBJECT) -> dict:
         {
             "images_dir": str(images_dir),
             "scope": {"subject": subject},
-            "split": {"seed": 0, "val_ratio": 0.15},
+            "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
         },
     )
 
@@ -107,6 +108,9 @@ def _selection_with_an_empty_val_side(project: Path, root: Path, out: Path):
             scope=drawn.scope,
             seed=drawn.seed,
             group_by=drawn.group_by,
+            ratios=drawn.ratios,
+            stratify_foreground=drawn.stratify_foreground,
+            rationale=drawn.rationale,
         ),
         project=project,
     )
@@ -121,9 +125,8 @@ def test_selection_compatibility_flags_an_empty_side(tmp_path: Path):
     out = tmp_path / "m"
     selection = _selection_with_an_empty_val_side(tmp_path, root, out)
 
-    issues = selection_compatibility(
-        _data(_bound_config(root, out)), selection, str(out)
-    )
+    data = _data(_bound_config(root, out))
+    issues = selection_compatibility(data, data.split, selection)
 
     assert any("empty side" in i for i in issues)
 
@@ -158,20 +161,17 @@ def test_selection_compatibility_admits_a_draw_splits_selection_with_no_empty_si
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     selection = _draw(tmp_path, root, out)
+    data = _data(_bound_config(root, out))
 
-    assert (
-        selection_compatibility(
-            _data(_bound_config(root, out)), selection, str(out)
-        )
-        == []
-    )
+    assert selection_compatibility(data, data.split, selection) == []
 
 
-def test_preflight_reports_the_conflict_issues_even_when_the_manifest_is_unreadable(
+def test_preflight_refuses_a_draw_key_beside_a_selection_even_when_it_is_unreadable(
     tmp_path: Path,
 ):
-    """The drawn-key conflicts don't need the selection to answer, so an unreadable
-    selection_dir must never suppress them: preflight names the conflict.
+    """A split naming a selection is a bound split, which carries no draw key: the schema
+    refuses one by name without reading the selection, so an unreadable selection_dir never
+    suppresses it.
     """
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -180,12 +180,12 @@ def test_preflight_reports_the_conflict_issues_even_when_the_manifest_is_unreada
     config["data"]["split"] = {
         "selection_dir": str(tmp_path / "nope"),
         "seed": 7,
-        "group_by": "stem",
+        "grouping": "stem",
     }
 
     result = preflight_config(tmp_path, config)
 
-    assert len([i for i in result["issues"] if "conflicts with" in i]) == 1
+    assert [i for i in result["issues"] if "grouping" in i], result["issues"]
 
 
 # -- read_selection_checked ------------------------------------------------------
@@ -239,7 +239,9 @@ def test_list_split_choices_offers_a_table_selection_for_a_table_configuration(
         val_ratio=0.25,
         calibration_ratio=0.125,
         holdout_ratio=0.125,
-        group_by="stem",
+        grouping="stem",
+        stratify_foreground=True,
+        rationale=RATIONALE,
     )
     assert "error" not in drawn, drawn
 
@@ -259,7 +261,7 @@ def test_list_split_choices_offers_a_table_selection_for_a_table_configuration(
             {
                 "images_dir": str(images_dir),
                 "labels_dir": str(csv_path),
-                "split": {"seed": 0, "val_ratio": 0.15},
+                "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
             },
         ),
         experiment_id="exp-table-picker",
@@ -466,11 +468,9 @@ def test_list_split_choices_reports_the_recorded_split_keys_a_partition_replaces
     _draw(tmp_path, root, dataset_default)
 
     cfg = _bespoke_config(root / "images" / DATES[0])
-    cfg["data"]["split"] = {
-        "seed": 7,
-        "val_ratio": 0.15,
-        "group_by": "tile_prefix",
-    }
+    cfg["data"]["split"] = drawn_split(
+        seed=7, val_ratio=0.15, grouping="tile_prefix"
+    )
     opened_run(tmp_path, cfg, experiment_id="exp-drawn-policy")
 
     result = list_split_choices(tmp_path, "exp-drawn-policy")
@@ -487,14 +487,12 @@ def test_list_split_choices_reports_the_recorded_split_keys_a_partition_replaces
     assert entry["replaced_split_keys"] == dropped
 
 
-def test_list_split_choices_reports_the_redraw_flag_among_the_keys_a_partition_replaces(
+def test_list_split_choices_reports_the_redraw_seed_among_the_keys_a_partition_replaces(
     tmp_path: Path,
     monkeypatch,
 ):
-    """A config's own stated ``data.split`` names ``redraw_within_selection`` (bound and
-    redrawing) as well as ``selection_dir`` and ``seed``: offering a different partition drops
-    all of them but ``selection_dir`` itself, and the listing names every one dropped, the
-    redraw flag included.
+    """A config's own stated ``data.split`` names a ``seed`` (bound and redrawing at it) beside
+    ``selection_dir``: offering a different partition drops it, and the listing names it.
     """
     monkeypatch.chdir(tmp_path)
     from tcip_mcp.tools.training_tools import list_split_choices
@@ -506,7 +504,7 @@ def test_list_split_choices_reports_the_redraw_flag_among_the_keys_a_partition_r
     _draw(tmp_path, root, own_manifest_dir, seed=3)
 
     cfg = _bound_config(root, own_manifest_dir)
-    cfg["data"]["split"].update({"seed": 11, "redraw_within_selection": True})
+    cfg["data"]["split"]["seed"] = 11
     opened_run(tmp_path, cfg, experiment_id="exp-redrawn-policy")
 
     result = list_split_choices(tmp_path, "exp-redrawn-policy")
@@ -536,9 +534,11 @@ def test_list_split_choices_never_names_a_null_valued_split_key_as_replaced(
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     dataset_default = root / "splits"
     _draw(tmp_path, root, dataset_default)
+    own_manifest_dir = tmp_path / "own"
+    _draw(tmp_path, root, own_manifest_dir, seed=3)
 
-    cfg = _bespoke_config(root / "images" / DATES[0])
-    cfg["data"]["split"] = {"seed": 7, "val_ratio": 0.15, "group_by": None}
+    cfg = _bound_config(root, own_manifest_dir)
+    cfg["data"]["split"]["seed"] = None
     opened_run(tmp_path, cfg, experiment_id="exp-null-policy-key")
 
     result = list_split_choices(tmp_path, "exp-null-policy-key")
@@ -548,7 +548,7 @@ def test_list_split_choices_never_names_a_null_valued_split_key_as_replaced(
         if m["selection_dir"] == str(dataset_default)
     )
 
-    assert entry["replaced_split_keys"] == ["seed", "val_ratio"]
+    assert entry["replaced_split_keys"] == []
 
 
 def test_list_split_choices_reads_the_picked_runs_own_launch_record_only_once(

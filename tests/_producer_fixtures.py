@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from tcip_mcp.dataset_layout import label_key_of as image_label_key
+from tests._training_values import drawn_split
 
 
 def label_image(
@@ -216,7 +217,7 @@ def small_detection_config(
         {
             "images_dir": str(images_dir),
             "scope": {"subject": "bud"},
-            "split": {"seed": 0, "val_ratio": 0.15},
+            "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
         },
     )
 
@@ -364,6 +365,7 @@ def run_over(
     )
     samples = admitted.every_sample()
     block = {
+        "split": drawn_split(),
         **(stated or {}),
         **({} if tiling is None else {"tiling": tiling}),
         **(
@@ -412,7 +414,12 @@ def staged_layout(project, data: Any):
 
     block = data if isinstance(data, dict) else data.record()
     return staged_sources(
-        train_config(training_config(DETECTION_SOURCE, block)), Path(project)
+        train_config(
+            training_config(
+                DETECTION_SOURCE, {"split": drawn_split(), **block}
+            )
+        ),
+        Path(project),
     ).layout
 
 

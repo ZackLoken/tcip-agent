@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from tests._chain_fixtures import training_config
+from tests._training_values import drawn_split, evaluation_block
 
 TOP_LEVEL_BUILDER = """
 def build_probe(**kwargs):
@@ -907,11 +908,11 @@ def test_a_packaged_builder_outside_the_path_launches_and_trains_in_the_worker(
         {
             "images_dir": str(images_dir),
             "labels_dir": str(csv_path),
-            "split": {"seed": 0, "val_ratio": 0.15},
+            "split": drawn_split(val_ratio=0.15),
         },
         batch_size=4,
-        stages=[{"freeze_to": 0}],
         checkpoint_every_n_epochs=0,
+        evaluation=evaluation_block(selection_metric="loss"),
     )
 
     res = launch_training(tmp_path, cfg, actor=None)

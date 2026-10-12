@@ -503,7 +503,7 @@ describe("LaunchPicker", () => {
                   {
                     selectionDir: "/data/splits",
                     label: <span>/data/splits</span>,
-                    replacedSplitKeys: ["group_by", "seed"],
+                    replacedSplitKeys: ["grouping", "seed"],
                   },
                 ],
               },
@@ -518,7 +518,7 @@ describe("LaunchPicker", () => {
     );
     fireEvent.click(screen.getByText("exp-1"));
     expect(
-      screen.getByText(/replaces the recorded split policy:\s*group_by, seed/),
+      screen.getByText(/replaces the recorded split policy:\s*grouping, seed/),
     ).toBeInTheDocument();
   });
 

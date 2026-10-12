@@ -26,14 +26,6 @@ if TYPE_CHECKING:
 # the full stem.
 _TILE_GROUP_RE = re.compile(r"^(.*)_\d+_\d+$")
 
-# The grouping policy every split door applies when its config states none.
-DEFAULT_GROUP_BY = "tile_prefix"
-
-DEFAULT_SHARES = {"val": 0.15, "calibration": 0.10, "holdout": 0.05}
-"""Owner ruling: the share of each side beside ``train``, which takes the remainder (0.70); soft
-targets the group draw rounds to whole groups. A door states any of them to replace it, a share
-of zero drawing no such side."""
-
 
 def default_group_key(stem: str) -> str:
     """Group key for a stem: strip a trailing ``_<x>_<y>`` tile offset.
@@ -239,61 +231,48 @@ def refuse_insufficient_foreground_groups(
 
 def member_identity(capture: str, stem: str) -> str:
     """A draw's member identity for one image, ``<capture>/<stem>``, the key an agent-supplied
-    ``group_key_map`` names it by.
+    ``grouping`` map names it by.
     """
     return f"{capture}/{stem}"
 
 
-def recorded_group_by(
-    group_by: str, group_key_map: Mapping[str, str] | None
-) -> str:
-    """The grouping policy a draw records: ``"explicit_map"`` when a group key map overrides
-    ``group_by``, else ``group_by`` itself.
+def recorded_group_by(grouping: str | Mapping[str, str]) -> str:
+    """The grouping policy a draw records: its named policy, or ``"explicit_map"`` for a draw
+    grouped by an explicit map.
     """
-    return "explicit_map" if group_key_map else group_by
+    return grouping if isinstance(grouping, str) else "explicit_map"
 
 
 def resolve_group_key_fn(
-    group_by: str,
-    stems: Sequence[str],
-    *,
-    group_key_map: dict[str, str] | None = None,
+    grouping: str | Mapping[str, str], stems: Sequence[str]
 ) -> Callable[[str], str]:
-    """Resolve a grouping policy to a callable. An unrecognized ``group_by`` string, or a
-    ``group_key_map`` missing coverage for some of ``stems``, raises.
+    """Resolve ``grouping``, a named policy or an explicit ``{identity: group_key}`` map, to a
+    callable. An unrecognized policy, or a map missing coverage for some of ``stems``, raises.
     """
-    if group_key_map is not None:
-        missing = sorted(s for s in stems if s not in group_key_map)
-        if missing:
-            preview = missing[:10]
-            more = f" (+{len(missing) - 10} more)" if len(missing) > 10 else ""
-            raise ValueError(
-                f"group_key_map is missing {len(missing)} stem(s): {preview}{more}"
-            )
-        return lambda s: group_key_map[s]
-    from tcip_mcp.pipelines.model_build import resolve_named
+    if isinstance(grouping, str):
+        from tcip_mcp.pipelines.model_build import resolve_named
 
-    return resolve_named(group_by, GROUP_KEY_FNS, kind="group_by policy")
+        return resolve_named(grouping, GROUP_KEY_FNS, kind="grouping policy")
+    missing = sorted(s for s in stems if s not in grouping)
+    if missing:
+        preview = missing[:10]
+        more = f" (+{len(missing) - 10} more)" if len(missing) > 10 else ""
+        raise ValueError(
+            f"the grouping map is missing {len(missing)} stem(s): {preview}{more}"
+        )
+    return lambda s: grouping[s]
 
 
 def recorded_group_key_fn(
-    group_by: str,
-    *,
-    date: str,
-    stems: Sequence[str] = (),
-    group_key_map: dict[str, str] | None = None,
+    grouping: str | Mapping[str, str], *, date: str, stems: Sequence[str] = ()
 ) -> Callable[[str], str]:
     """The group key a draw records for a bare stem admitted out of capture ``date``'s directory:
-    the stem becomes its member identity (:func:`member_identity`) and the policy is resolved
-    against those identities (:func:`resolve_group_key_fn`).
-
-    With ``stems``, ``group_key_map`` is checked for coverage of their identities before any key
-    is handed out; with neither, the named policy alone answers.
+    the stem becomes its member identity (:func:`member_identity`) and ``grouping`` is resolved
+    against those identities (:func:`resolve_group_key_fn`), a map checked for coverage of
+    ``stems``' identities before any key is handed out.
     """
     identities = [member_identity(date, stem) for stem in stems]
-    key_fn = resolve_group_key_fn(
-        group_by, identities, group_key_map=group_key_map
-    )
+    key_fn = resolve_group_key_fn(grouping, identities)
     return lambda stem: key_fn(member_identity(date, stem))
 
 

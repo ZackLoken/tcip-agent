@@ -19,6 +19,12 @@ from tests._chain_fixtures import (
     BESPOKE_SEMANTIC_SEG,
     training_config,
 )
+from tests._training_values import (
+    drawn_split,
+    evaluation_block,
+    stage,
+    tiling_block,
+)
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
@@ -150,19 +156,21 @@ def _bespoke_task_model(**_kwargs):
 
 
 def _spec(task: str, data: dict):
-    """A validated config of a ``task`` model over ``data``."""
+    """A validated config of a ``task`` model over ``data``, drawing a sample split."""
     from tcip_mcp.pipelines.schemas import train_config
     from tests._verified_checkpoint_fixtures import unbuilt_source
 
-    return train_config(training_config(unbuilt_source(task), data))
+    return train_config(
+        training_config(unbuilt_source(task), {"split": drawn_split(), **data})
+    )
 
 
 def test_resolve_contract_dims_reads_the_frame_the_run_resolved():
     """The smoke frame is the square tile a tiled run resolved, else the frame an untiled run's
     sources share, and nothing when the run resolved neither.
     """
-    tiled = _spec("detection", {"tiling": {"enabled": True, "tile_size": 512}})
-    untiled = _spec("detection", {"tiling": {"enabled": False}})
+    tiled = _spec("detection", {"tiling": tiling_block(tile_size=512)})
+    untiled = _spec("detection", {"tiling": None})
     native = TrainGeometry(native_size=(96, 64), object_density=None)
     unshared = TrainGeometry(native_size=None, object_density=None)
 
@@ -191,7 +199,7 @@ def test_model_dims_states_only_what_the_run_holds():
     from tcip_mcp.pipelines.model_build import model_dims
 
     scope = ClassScope()
-    frame = {"tiling": {"enabled": False}}
+    frame = {"tiling": None}
     shared = TrainGeometry(native_size=(32, 32), object_density=None)
 
     with pytest.raises(ValueError, match="data.num_channels"):
@@ -260,10 +268,10 @@ def test_preflight_smoke_blocks_broken_builder(tmp_path, monkeypatch):
         {
             "images_dir": str(imgs),
             "scope": {"subject": "leaf"},
-            "split": {"seed": 0, "val_ratio": 0.15},
+            "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
         },
         batch_size=1,
-        stages=[{"freeze_to": 0}],
+        stages=[stage(0)],
     )
     # Fast path (no smoke) is structurally valid: the builder imports fine.
     assert preflight_config(tmp_path, cfg)["valid"] is True
@@ -302,11 +310,11 @@ def test_preflight_smokes_a_tiled_run_at_the_edge_its_resolution_derived(
         {
             "images_dir": str(imgs),
             "scope": {"subject": "bud"},
-            "tiling": {"enabled": True, "sliver_frac": 0.5},
-            "split": {"seed": 0, "val_ratio": 0.25},
+            "tiling": tiling_block(sliver_frac=0.5),
+            "split": drawn_split(val_ratio=0.25, grouping="tile_prefix"),
         },
         batch_size=1,
-        stages=[{"freeze_to": 0}],
+        stages=[stage(0)],
     )
     spec = train_config(cfg)
     edge = resolve_run(
@@ -346,10 +354,10 @@ def test_preflight_smokes_an_untiled_run_of_mixed_frames_on_a_real_batch(
         {
             "images_dir": str(imgs),
             "scope": {"subject": "leaf"},
-            "split": {"seed": 0, "val_ratio": 0.15},
+            "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
         },
         batch_size=1,
-        stages=[{"freeze_to": 0}],
+        stages=[stage(0)],
     )
 
     r = preflight_config(tmp_path, cfg, smoke=True)
@@ -370,10 +378,10 @@ def test_preflight_smoke_passes_valid_builder(tmp_path, monkeypatch):
         {
             "images_dir": str(imgs),
             "scope": {"subject": "leaf"},
-            "split": {"seed": 0, "val_ratio": 0.15},
+            "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
         },
         batch_size=1,
-        stages=[{"freeze_to": 0}],
+        stages=[stage(0)],
     )
     r = preflight_config(tmp_path, cfg, smoke=True, overfit=True)
     assert r["valid"] is True, r["issues"]
@@ -408,10 +416,10 @@ def test_preflight_builds_and_smokes_at_the_count_the_run_resolved(
         {
             "images_dir": str(images_dir),
             "labels_dir": str(masks_dir),
-            "split": {"seed": 0, "val_ratio": 0.15},
+            "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
         },
         batch_size=1,
-        stages=[{"freeze_to": 0}],
+        stages=[stage(0)],
     )
 
     r = preflight_config(tmp_path, cfg, smoke=True)
@@ -455,10 +463,10 @@ def test_preflight_smokes_a_single_class_run_within_its_own_count(
         {
             "images_dir": str(images_dir),
             "labels_dir": str(masks_dir),
-            "split": {"seed": 0, "val_ratio": 0.15},
+            "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
         },
         batch_size=1,
-        stages=[{"freeze_to": 0}],
+        stages=[stage(0)],
     )
 
     synthetic = preflight_config(tmp_path, cfg, smoke=True)
@@ -510,13 +518,13 @@ def test_preflight_smokes_bespoke_task_on_a_real_batch(tmp_path, monkeypatch):
         {
             "images_dir": str(imgs),
             "scope": {"subject": "leaf"},
-            "split": {"seed": 0, "val_ratio": 0.15},
+            "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
             "dataset_source": {
                 "builder": f"{Path(__file__).stem}:_bespoke_task_dataset",
                 "source_files": [__file__],
             },
         },
-        stages=[{"freeze_to": 0}],
+        stages=[stage(0)],
     )
     r = preflight_config(tmp_path, cfg, smoke=True, overfit=True)
     assert r["valid"] is True, r["issues"]
@@ -549,7 +557,7 @@ def test_preflight_smoke_batch_matches_what_the_run_will_build(
     data = {
         "images_dir": str(imgs),
         "scope": {"subject": "leaf"},
-        "split": {"seed": 0, "val_ratio": 0.15},
+        "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
         "dataset_source": {
             "builder": f"{Path(__file__).stem}:_strict_bespoke_dataset",
             "source_files": [__file__],
@@ -591,13 +599,13 @@ def test_preflight_blocks_when_no_batch_can_be_built(tmp_path, monkeypatch):
         {
             "images_dir": str(imgs),
             "scope": {"subject": "leaf"},
-            "split": {"seed": 0, "val_ratio": 0.15},
+            "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
             "dataset_source": {
                 "builder": f"{Path(__file__).stem}:_unbuildable_dataset",
                 "source_files": [__file__],
             },
         },
-        stages=[{"freeze_to": 0}],
+        stages=[stage(0)],
     )
     r = preflight_config(tmp_path, cfg, smoke=True)
     assert r["valid"] is False
@@ -633,7 +641,7 @@ def _bespoke_classification_data(imgs: Path, table: Path, **sizes) -> dict:
         "images_dir": str(imgs),
         "labels_dir": str(table),
         **sizes,
-        "split": {"seed": 0, "val_ratio": 0.15},
+        "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
         "dataset_source": {
             "builder": f"{Path(__file__).stem}:_bespoke_classification_dataset",
             "source_files": [__file__],
@@ -659,8 +667,9 @@ def test_ctx_check_contract_and_overfit_check(tmp_path):
             {
                 "images_dir": str(imgs),
                 "labels_dir": str(table),
-                "auto_val": False,
+                "split": drawn_split(val_ratio=0.0),
             },
+            evaluation=evaluation_block(selection_metric="loss"),
         ),
     )
     recorded = ctx.run.spec.data
@@ -674,6 +683,45 @@ def test_ctx_check_contract_and_overfit_check(tmp_path):
     # overfit is voluntary + non-gating; steps flow through as an override kwarg.
     over = ctx.overfit_check(steps=15)
     assert over["passed"], over["issue"]
+
+
+def test_ctx_overfit_check_seeds_at_the_runs_own_seed_and_determinism(
+    tmp_path, monkeypatch
+):
+    """Guard. The overfit diagnostic seeds at the seed and determinism its run's config states,
+    never at a value of its own.
+    """
+    from tcip_mcp.pipelines.training import generic_trainer
+    from tests.tiny_trainer_fixtures import run_context
+
+    imgs, table = _table_tree(tmp_path)
+    ctx = run_context(
+        tmp_path,
+        training_config(
+            {
+                "builder": BESPOKE_CLASSIFIER,
+                "source_files": [BESPOKE_MODELS],
+                "task": "classification",
+            },
+            {
+                "images_dir": str(imgs),
+                "labels_dir": str(table),
+                "split": drawn_split(val_ratio=0.0),
+            },
+            evaluation=evaluation_block(selection_metric="loss"),
+            seed=13,
+        ),
+    )
+    seeded: list[tuple[int, bool]] = []
+    monkeypatch.setattr(
+        generic_trainer,
+        "set_seed",
+        lambda seed, *, deterministic: seeded.append((seed, deterministic)),
+    )
+
+    ctx.overfit_check(steps=2)
+
+    assert seeded == [(13, ctx.run.spec.deterministic)]
 
 
 def test_ctx_smokes_a_bespoke_dataset_run_at_the_count_its_data_states(
@@ -696,6 +744,7 @@ def test_ctx_smokes_a_bespoke_dataset_run_at_the_count_its_data_states(
                 "task": "classification",
             },
             _bespoke_classification_data(imgs, table, num_classes=3),
+            evaluation=evaluation_block(selection_metric="loss"),
         ),
     )
     resolved = ctx.run.spec.data
@@ -737,6 +786,7 @@ def test_ctx_apply_stage_freeze_matches_trainer_guard(tmp_path):
         training_config(
             unbuilt_source("regression"),
             frames_data(tmp_path / "ds", [0.1, 0.5], [0.2, 1.0]),
+            evaluation=evaluation_block(selection_metric="loss"),
         ),
     )
     full = ctx.apply_stage_freeze(model, 0)

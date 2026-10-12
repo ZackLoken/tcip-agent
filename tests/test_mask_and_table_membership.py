@@ -28,7 +28,7 @@ from tcip_mcp.pipelines.schemas import DataSpec  # noqa: E402
 from tcip_mcp.tools.data_tools import draw_splits  # noqa: E402
 from tests._chain_fixtures import training_config  # noqa: E402
 from tests._producer_fixtures import painted_frame, staged_layout  # noqa: E402
-from tests._training_values import IOU_THRESHOLD  # noqa: E402
+from tests._training_values import IOU_THRESHOLD, drawn_split  # noqa: E402
 from tests._verified_checkpoint_fixtures import partition_side, unbuilt_source  # noqa: E402
 
 
@@ -112,11 +112,12 @@ def _drawn(root: Path, ground_truth: Path, out: Path, *, seed: int = 4):
         str(root),
         output_path=str(out),
         ground_truth=str(ground_truth),
-        seed=seed,
-        val_ratio=0.25,
-        calibration_ratio=0.125,
-        holdout_ratio=0.125,
-        group_by="stem",
+        **drawn_split(
+            seed=seed,
+            val_ratio=0.25,
+            calibration_ratio=0.125,
+            holdout_ratio=0.125,
+        ),
     )
     assert "error" not in result, result
     return read_selection(out, project=out.parent)
@@ -385,7 +386,7 @@ def test_an_unbound_semantic_seg_run_reads_its_membership_off_its_own_samples(
         {
             "images_dir": str(images_dir),
             "labels_dir": str(masks_dir),
-            "split": {"val_ratio": 0.25, "seed": 7},
+            "split": drawn_split(val_ratio=0.25, seed=7, grouping="tile_prefix"),
         }
     )
 
@@ -428,7 +429,7 @@ def test_an_unbound_regression_run_reads_its_membership_off_its_own_samples(
         {
             "images_dir": str(images_dir),
             "labels_dir": str(csv_path),
-            "split": {"val_ratio": 0.25, "seed": 7},
+            "split": drawn_split(val_ratio=0.25, seed=7, grouping="tile_prefix"),
         }
     )
 
@@ -484,7 +485,7 @@ def test_a_dotted_row_key_names_one_member_end_to_end(tmp_path: Path):
     data_cfg = {
         "images_dir": str(images_dir),
         "labels_dir": str(csv_path),
-        "split": {"val_ratio": 0.5, "seed": 3, "group_by": "stem"},
+        "split": drawn_split(val_ratio=0.5, seed=3),
     }
     resolved, train_ds, val_ds = _resolved(
         tmp_path, "exp-dotted", "classification", data_cfg
@@ -527,7 +528,7 @@ def test_a_mask_run_freezes_into_a_selection_its_bind_accepts(tmp_path: Path):
     data_cfg = {
         "images_dir": str(images_dir),
         "labels_dir": str(masks_dir),
-        "split": {"val_ratio": 0.25, "seed": 7},
+        "split": drawn_split(val_ratio=0.25, seed=7, grouping="tile_prefix"),
     }
 
     result = _frozen(tmp_path, "exp-mask-freeze", "semantic_seg", data_cfg)
@@ -566,7 +567,7 @@ def test_a_table_run_freezes_into_a_selection_its_bind_accepts(tmp_path: Path):
     data_cfg = {
         "images_dir": str(images_dir),
         "labels_dir": str(csv_path),
-        "split": {"val_ratio": 0.25, "seed": 7},
+        "split": drawn_split(val_ratio=0.25, seed=7, grouping="tile_prefix"),
     }
 
     result = _frozen(tmp_path, "exp-table-freeze", "classification", data_cfg)
@@ -601,7 +602,7 @@ def test_a_mask_edited_after_the_run_refuses_the_freeze_by_name(
     data_cfg = {
         "images_dir": str(images_dir),
         "labels_dir": str(masks_dir),
-        "split": {"val_ratio": 0.25, "seed": 7},
+        "split": drawn_split(val_ratio=0.25, seed=7, grouping="tile_prefix"),
     }
     from tcip_mcp.tools.data_tools import freeze_selection
 
@@ -648,7 +649,7 @@ def test_a_stated_class_count_refuses_on_the_run_path_whatever_its_value(
     base = {
         "images_dir": str(images_dir),
         "labels_dir": str(masks_dir),
-        "split": {"group_by": "stem", "val_ratio": 0.25, "seed": 3},
+        "split": drawn_split(val_ratio=0.25, seed=3),
     }
 
     for stated in (2, 3, 9):
@@ -700,7 +701,7 @@ def test_a_runs_unstated_class_count_is_read_once_over_every_sample(
         {
             "images_dir": str(images_dir),
             "labels_dir": str(masks_dir),
-            "split": {"group_by": "stem", "val_ratio": 0.25, "seed": 3},
+            "split": drawn_split(val_ratio=0.25, seed=3),
         }
     )
 
@@ -735,7 +736,7 @@ def test_a_runs_metrics_are_reported_over_the_class_space_it_trains_in(
         {
             "images_dir": str(images_dir),
             "labels_dir": str(masks_dir),
-            "split": {"group_by": "stem", "val_ratio": 0.25, "seed": 3},
+            "split": drawn_split(val_ratio=0.25, seed=3),
         }
     )
 
@@ -808,7 +809,7 @@ def test_a_mask_run_refuses_a_stated_class_space_and_admits_the_empty_one(
                 "images_dir": str(images_dir),
                 "labels_dir": str(masks_dir),
                 "scope": scope,
-                "split": {"group_by": "stem", "val_ratio": 0.25, "seed": 5},
+                "split": drawn_split(val_ratio=0.25, seed=5),
             }
         )
 
@@ -854,7 +855,7 @@ def test_the_bound_and_drawn_mask_routes_record_one_directory_the_same_way(
         {
             "images_dir": str(images_dir),
             "labels_dir": str(masks_dir),
-            "split": {"val_ratio": 0.25, "seed": 7},
+            "split": drawn_split(val_ratio=0.25, seed=7, grouping="tile_prefix"),
         },
     )
 
@@ -898,7 +899,7 @@ def test_a_document_run_and_a_mask_run_record_the_same_images_the_same_way(
             16,
         )
 
-    split = {"group_by": "stem", "val_ratio": 0.25, "seed": 11}
+    split = drawn_split(val_ratio=0.25, seed=11)
 
     def resolved(
         experiment_id: str, task: str, data_cfg: dict

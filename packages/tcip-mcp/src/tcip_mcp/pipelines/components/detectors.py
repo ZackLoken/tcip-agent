@@ -348,10 +348,11 @@ class AttributeDetector(nn.Module):
     masked to the rows its target column assesses (``attributes`` other than
     :data:`~tcip_annotation.json_io.UNASSESSED`), joins the detector's losses; in eval mode each
     head pools at the detector's output boxes in the resized frame and every output dict carries
-    ``attributes``, boxes by attributes in declared order, int64. ``roi_heads``, ``score_thresh``
-    and ``detections_per_img`` read and write the held detector's.
+    ``attributes``, boxes by attributes in declared order, int64. ``backbone``, ``roi_heads``,
+    ``score_thresh`` and ``detections_per_img`` read and write the held detector's.
     """
 
+    backbone = _held("backbone")
     roi_heads = _held("roi_heads")
     score_thresh = _held(SCORE_THRESH)
     detections_per_img = _held(DETECTIONS_PER_IMG)

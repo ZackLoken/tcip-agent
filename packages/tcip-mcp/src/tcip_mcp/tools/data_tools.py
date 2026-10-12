@@ -6,7 +6,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from tcip_mcp.audit import audited
-from tcip_mcp.pipelines.data.splits import DEFAULT_GROUP_BY, DEFAULT_SHARES
+from tcip_mcp.pipelines.schemas import DrawnSplit
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
 
@@ -49,10 +49,14 @@ def freeze_selection(
     from tcip_mcp.pipelines.data.label_queries import acquired
     from tcip_mcp.pipelines.data.selection import (
         Selection,
+        read_selection,
         read_selection_checked,
         write_selection,
     )
-    from tcip_mcp.pipelines.data.split_construction import partition_samples
+    from tcip_mcp.pipelines.data.split_construction import (
+        partition_samples,
+        stated_shares,
+    )
 
     try:
         resolved = run_resolution(experiment_id, project=project)
@@ -107,7 +111,14 @@ def freeze_selection(
             f"{existing_error or 'freeze_selection never overwrites one.'}"
         }
 
+    # The draw the run's partition came from: its own drawn split, or the selection it bound.
+    split = resolved.data.split
     try:
+        drawn_as: DrawnSplit | Selection = (
+            split
+            if isinstance(split, DrawnSplit)
+            else read_selection(split.selection_dir, project=project)
+        )
         write_selection(
             out_dir,
             Selection(
@@ -115,6 +126,11 @@ def freeze_selection(
                 scope=scope,
                 seed=partition["seed"],
                 group_by=partition["group_by"],
+                ratios=stated_shares(drawn_as)
+                if isinstance(drawn_as, DrawnSplit)
+                else drawn_as.ratios,
+                stratify_foreground=drawn_as.stratify_foreground,
+                rationale=drawn_as.rationale,
                 dataset_fingerprint=dataset_fingerprint(dataset_root, samples),
             ),
             project=project,
@@ -212,12 +228,12 @@ def draw_splits(
     project: Path,
     folder_path: str,
     seed: int,
-    val_ratio: float = DEFAULT_SHARES["val"],
-    calibration_ratio: float = DEFAULT_SHARES["calibration"],
-    holdout_ratio: float = DEFAULT_SHARES["holdout"],
-    group_by: str = DEFAULT_GROUP_BY,
-    group_key_map: dict[str, str] | None = None,
-    stratify_foreground: bool = True,
+    val_ratio: float,
+    calibration_ratio: float,
+    holdout_ratio: float,
+    stratify_foreground: bool,
+    rationale: str,
+    grouping: str | dict[str, str],
     output_path: str | None = None,
     subject: str | None = None,
     ground_truth: str | None = None,
@@ -252,13 +268,14 @@ def draw_splits(
     Balancing by foreground count applies to label documents only.
 
     ``train`` takes the remainder of the other sides' shares
-    (:func:`~tcip_mcp.pipelines.data.split_construction.check_shares`), each of which defaults to
-    :data:`~tcip_mcp.pipelines.data.splits.DEFAULT_SHARES`. The ``calibration`` and ``holdout``
-    sides are the reference an assessment fits an operating point on and checks it against, drawn
-    as one share and cut between the two at the same seed; a side whose ratio is zero is not
-    drawn, and shares leaving ``train`` nothing refuse. The draw refuses, before any write, when
-    the tree holds fewer foreground groups of ``subject`` than one per requested side, and when a
-    side would be left empty, naming it. The answer's
+    (:func:`~tcip_mcp.pipelines.data.split_construction.check_shares`), each stated. The
+    ``calibration`` and ``holdout`` sides are the reference an assessment fits an operating point
+    on and checks it against, drawn as one share and cut between the two at the same seed; a side
+    whose ratio is zero is not drawn, and shares leaving ``train`` nothing refuse. The draw's
+    statement is admitted as a run's drawn ``data.split`` is (``schemas.DrawnSplit``); the
+    selection records the shares, the stratification and the rationale. The draw refuses, before any
+    write, when the tree holds fewer foreground groups of ``subject`` than one per requested
+    side, and when a side would be left empty, naming it. The answer's
     ``calibration_foreground_groups`` reports how many of the reference's groups carry a
     foreground annotation, and ``realized_ratios`` each side's share of the draw actually
     delivered, which can diverge from the ratios asked for on a tree sized at the floor.
@@ -269,13 +286,13 @@ def draw_splits(
         val_ratio: Fraction for validation set.
         calibration_ratio: Fraction held out for an assessment to fit its operating point on.
         holdout_ratio: Fraction held out for an assessment to check its operating point against.
-        group_by: Group selector: ``"tile_prefix"`` (strip a trailing ``_<x>_<y>`` tile offset) or
-            ``"stem"`` (one group per member). Ignored when ``group_key_map`` is given. The
-            resolved key is recorded on every sample.
-        group_key_map: An agent-derived ``{identity: group_key}`` map overriding ``group_by``,
-            keyed ``<capture>/<stem>``; must cover every admitted member. Recorded as
-            ``group_by="explicit_map"``.
         stratify_foreground: Balance splits by foreground annotation count.
+        rationale: Why the draw states the shares, grouping and stratification it does.
+        grouping: A named policy, ``"tile_prefix"`` (strip a trailing ``_<x>_<y>`` tile offset)
+            or ``"stem"`` (one group per member), or an agent-derived ``{identity: group_key}``
+            map keyed ``<capture>/<stem>`` covering every admitted member, recorded as the
+            selection's ``group_by`` ``"explicit_map"``. The resolved key is recorded on every
+            sample.
         output_path: Where to write the selection. Omitted, nothing is written and the answer is
             the draw's statistics only.
         subject: The object class the selection is drawn for. Required over label documents.
@@ -284,16 +301,24 @@ def draw_splits(
             image; the images are the dataset's own ``images/`` tree either way.
 
     """
+    from pydantic import ValidationError
+
+    try:
+        draw = DrawnSplit(
+            seed=seed,
+            val_ratio=val_ratio,
+            calibration_ratio=calibration_ratio,
+            holdout_ratio=holdout_ratio,
+            stratify_foreground=stratify_foreground,
+            rationale=rationale,
+            grouping=grouping,
+        )
+    except ValidationError as exc:
+        return {"error": str(exc)}
     return draw_splits_at(
         project,
         str(located(folder_path, project)),
-        seed=seed,
-        val_ratio=val_ratio,
-        calibration_ratio=calibration_ratio,
-        holdout_ratio=holdout_ratio,
-        group_by=group_by,
-        group_key_map=group_key_map,
-        stratify_foreground=stratify_foreground,
+        draw,
         output_path=output_path and str(located(output_path, project)),
         subject=subject,
         ground_truth=ground_truth and str(located(ground_truth, project)),
@@ -303,21 +328,15 @@ def draw_splits(
 def draw_splits_at(
     project: Path,
     folder_path: str,
+    draw: DrawnSplit,
     *,
-    seed: int,
-    val_ratio: float,
-    calibration_ratio: float,
-    holdout_ratio: float,
-    group_by: str,
-    group_key_map: dict[str, str] | None,
-    stratify_foreground: bool,
     output_path: str | None,
     subject: str | None,
     ground_truth: str | None,
 ) -> dict:
-    """The selection drawn over the dataset root ``folder_path`` as :func:`draw_splits` states
-    it, written at ``output_path`` and read against ``ground_truth``, each a location already
-    established (absolute).
+    """The selection the drawn split ``draw`` draws over the dataset root ``folder_path`` as
+    :func:`draw_splits` states it, written at ``output_path`` and read against
+    ``ground_truth``, each a location already established (absolute).
     """
     if not Path(folder_path).is_dir():
         return {"error": f"Directory not found: {folder_path}"}
@@ -335,8 +354,8 @@ def draw_splits_at(
     )
     from tcip_mcp.pipelines.data.split_construction import (
         admitted_membership,
-        check_shares,
         draw_sides,
+        stated_shares,
     )
     from tcip_mcp.pipelines.data.splits import foreground_group_count
     from tcip_mcp.pipelines.image_utils import (
@@ -371,25 +390,19 @@ def draw_splits_at(
                 "external COCO document into label documents with import_coco."
             }
 
+    seed, stratified = draw.seed, draw.stratify_foreground
     try:
-        ratios = check_shares(
-            {
-                "val": val_ratio,
-                "calibration": calibration_ratio,
-                "holdout": holdout_ratio,
-            }
-        )
+        ratios = stated_shares(draw)
         membership = admitted_membership(
             places,
             scope=ClassScope(subject=subject),
-            group_by=group_by,
-            group_key_map=group_key_map,
+            grouping=draw.grouping,
         )
         drawn, counted = draw_sides(
             membership.samples,
             membership.scope,
             seed=seed,
-            stratify=stratify_foreground,
+            stratify=stratified,
             ratios=ratios,
         )
     except (
@@ -417,7 +430,7 @@ def draw_splits_at(
         "total_stems": len(drawn),
         "total_annotations": sum(counted.values()),
         "groups": len({sample.group for sample in drawn.values()}),
-        "stratified": stratify_foreground,
+        "stratify_foreground": stratified,
         "seed": seed,
         "group_by": membership.group_by,
         "scope": asdict(membership.scope),
@@ -444,6 +457,9 @@ def draw_splits_at(
                 scope=membership.scope,
                 seed=seed,
                 group_by=membership.group_by,
+                ratios=ratios,
+                stratify_foreground=stratified,
+                rationale=draw.rationale,
                 dataset_fingerprint=dataset_fingerprint(
                     folder_path, drawn.values()
                 ),
@@ -460,6 +476,8 @@ def draw_splits_at(
             "seed": seed,
             "ratios": ratios,
             "group_by": membership.group_by,
+            "stratify_foreground": stratified,
+            "rationale": draw.rationale,
             "subject": subject,
             "ground_truth": ground_truth,
         },

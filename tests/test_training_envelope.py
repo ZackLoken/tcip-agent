@@ -27,7 +27,13 @@ from tcip_mcp.pipelines.training.envelope import (
     run_training_envelope,
 )  # noqa: E402
 from tests._producer_fixtures import dataset_over  # noqa: E402
-from tests._training_values import adamw_optimizer, schedule  # noqa: E402
+from tests._training_values import (  # noqa: E402
+    adamw_optimizer,
+    drawn_split,
+    evaluation_block,
+    schedule,
+    stage,
+)
 from tests._verified_checkpoint_fixtures import (  # noqa: E402
     completed_checkpoint,
     detection_config,
@@ -276,11 +282,12 @@ def test_a_resumed_run_records_its_resume_checkpoint_and_completes(tmp_path):
         {
             "images_dir": str(images_dir),
             "labels_dir": str(csv_path),
-            "split": {"seed": 3, "val_ratio": 0.15},
+            "split": drawn_split(seed=3, val_ratio=0.15),
         },
-        stages=[{"freeze_to": -1}],
+        stages=[stage(-1)],
         scheduler=schedule("cosine", horizon_epochs=2),
         optimizer=adamw_optimizer(),
+        evaluation=evaluation_block(selection_metric="loss"),
         seed=3,
     )
     # Generate the resumable checkpoint by training a first run directly (not through the
@@ -306,8 +313,9 @@ def test_a_resumed_run_records_its_resume_checkpoint_and_completes(tmp_path):
 def test_report_objective_records_a_selection_row_that_reaches_the_epoch_hook(
     tmp_path,
 ):
-    """A bespoke body's reported objective is one metrics row stamping it the ``selection`` under
-    the run's objective, at the last epoch logged, and fires the epoch hook like any row.
+    """A bespoke body's reported value is one metrics row stamping it the ``selection`` under
+    the config's selection metric, at the last epoch logged, and fires the epoch hook like any
+    row.
     """
     from tcip_mcp.experiments import METRICS_FILE, read_rows
 
@@ -320,7 +328,7 @@ def test_report_objective_records_a_selection_row_that_reaches_the_epoch_hook(
     ctx.log_metrics(2, {"train_loss": 0.5})
     ctx.report_objective(3.14)
 
-    metric = ctx.run.objective.selection_metric
+    metric = ctx.spec.evaluation.selection_metric
     assert seen[-1] == (2, {"selection": 3.14, "selection_metric": metric})
     last = read_rows(run_dir / METRICS_FILE)[0][-1]
     assert (last["epoch"], last["selection"], last["selection_metric"]) == (

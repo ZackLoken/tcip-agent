@@ -201,6 +201,7 @@ class TestE2EPipeline:
 
         # ── Step 10: Split dataset ───────────────────────────────────
         from tcip_mcp.pipelines.data.selection import read_selection
+        from tests._training_values import drawn_split
 
         split_dir = tmp_path / "splits"
         split_result = draw_splits(
@@ -208,10 +209,13 @@ class TestE2EPipeline:
             root,
             output_path=str(split_dir),
             subject="bud",
-            seed=1,
-            val_ratio=0.25,
-            calibration_ratio=0.125,
-            holdout_ratio=0.125,
+            **drawn_split(
+                seed=1,
+                val_ratio=0.25,
+                calibration_ratio=0.125,
+                holdout_ratio=0.125,
+                grouping="tile_prefix",
+            ),
         )
         assert split_result["total_stems"] == 5
         drawn = read_selection(split_dir, project=project_dir)

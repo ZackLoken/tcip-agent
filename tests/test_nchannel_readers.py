@@ -61,6 +61,7 @@ def test_grayscale_classification_end_to_end(tmp_path):
     pytest.importorskip("torchvision")
     from tcip_mcp.pipelines.training.generic_trainer import train
     from tests._chain_fixtures import training_config
+    from tests._training_values import drawn_split, evaluation_block
     from tests.tiny_trainer_fixtures import run_context
 
     images_dir, labels = write_regression_dataset(
@@ -79,8 +80,9 @@ def test_grayscale_classification_end_to_end(tmp_path):
                 "images_dir": str(images_dir),
                 "labels_dir": str(labels),
                 "num_channels": 1,
-                "auto_val": False,
+                "split": drawn_split(val_ratio=0.0),
             },
+            evaluation=evaluation_block(selection_metric="loss"),
         ),
     )
     assert ctx.train_loader.dataset[0][0].shape[0] == 1

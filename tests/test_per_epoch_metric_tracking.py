@@ -53,7 +53,7 @@ def test_hpo_trial_body_writes_train_and_val_loss_every_epoch(tmp_path):
     from tcip_mcp.tools.training_tools import _run_hpo_trial
     from tests._chain_fixtures import training_config
     from tests._producer_fixtures import seed_labeled_images
-    from tests._training_values import schedule
+    from tests._training_values import drawn_split, schedule, stage
     from tests._verified_checkpoint_fixtures import (
         BUILT_DETECTOR,
         opened_sweep,
@@ -71,9 +71,9 @@ def test_hpo_trial_body_writes_train_and_val_loss_every_epoch(tmp_path):
         {
             "images_dir": str(images_dir),
             "scope": {"subject": "leaf"},
-            "split": {"seed": 0, "val_ratio": 0.15},
+            "split": drawn_split(val_ratio=0.15),
         },
-        stages=[{"freeze_to": -1}],
+        stages=[stage(-1)],
         scheduler=schedule("cosine", horizon_epochs=2),
     )
     reported: list[float] = []

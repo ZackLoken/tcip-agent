@@ -82,7 +82,12 @@ def _tiled(images_dir, **kwargs) -> TiledDetectionDataset:
     base = dataset_over("detection", str(images_dir), subject="bud")
     # sliver_frac stated: one labeled box derives no size spread.
     return TiledDetectionDataset(
-        base, tile_size=64, overlap=0.2, sliver_frac=0.5, **kwargs
+        base,
+        tile_size=64,
+        overlap=0.2,
+        sliver_frac=0.5,
+        skip_empty=False,
+        **kwargs,
     )
 
 
@@ -224,7 +229,7 @@ def test_photographic_construction_opens_no_raster_backend(
 
     monkeypatch.setattr(raster_source.SourceHeader, "open", _refuse)
     ds = TiledDetectionDataset(
-        base, tile_size=64, overlap=0.2, sliver_frac=0.5
+        base, tile_size=64, overlap=0.2, sliver_frac=0.5, skip_empty=False
     )
     assert len(ds) == 16
 

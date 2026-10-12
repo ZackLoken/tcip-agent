@@ -239,6 +239,7 @@ def real_hpo_base_config(tmp_path: Path) -> dict:
         BESPOKE_MODELS,
         training_config,
     )
+    from tests._training_values import drawn_split
     from tests._verified_checkpoint_fixtures import detection_images
 
     scope = {"subject": DATA_DIR_SUBJECT}
@@ -252,7 +253,7 @@ def real_hpo_base_config(tmp_path: Path) -> dict:
         {
             **detection_images(tmp_path / "hpo-data", scope),
             "scope": scope,
-            "split": {"seed": 0, "val_ratio": 0.15},
+            "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
         },
     )
 

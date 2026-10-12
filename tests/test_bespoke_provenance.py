@@ -17,6 +17,7 @@ from tests._chain_fixtures import (
     BESPOKE_MODELS,
     GT_ANCHOR_DETECTOR,
 )
+from tests._training_values import drawn_split
 
 pytest.importorskip("torch")
 pytest.importorskip("torchvision")
@@ -47,7 +48,8 @@ def _snapshot(model_source: dict, project: Path) -> tuple[dict, dict]:
     from tests._chain_fixtures import training_config
 
     return snapshot_model_source(
-        train_config(training_config(model_source, {})), project
+        train_config(training_config(model_source, {"split": drawn_split()})),
+        project,
     )
 
 
@@ -151,7 +153,7 @@ def test_a_declared_file_of_the_builders_stem_that_is_not_python_holds_no_module
                             "task": "detection",
                             "source_files": [str(tmp_path / "review.txt")],
                         },
-                        {},
+                        {"split": drawn_split()},
                     )
                 ),
                 tmp_path,
@@ -220,7 +222,10 @@ def test_a_project_file_beside_an_external_builder_named_like_the_standard_libra
     }
 
     with pytest.raises(ValueError, match="standard-library module code"):
-        module_plan(train_config(training_config(source, {})), tmp_path)
+        module_plan(
+            train_config(training_config(source, {"split": drawn_split()})),
+            tmp_path,
+        )
 
 
 def test_a_preflight_over_a_declared_standard_library_name_imports_nothing(

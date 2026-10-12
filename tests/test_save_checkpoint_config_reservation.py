@@ -178,3 +178,27 @@ def test_the_default_trainer_and_a_bespoke_loop_stamp_one_checkpoint_config(
     for field in DATA_PATHS:
         _each_path(stored["data"], field, found)
     assert located == [], located
+
+
+def test_a_bound_runs_checkpoint_carries_its_split_whole_and_reads_it_back_bound(
+    tmp_path,
+) -> None:
+    """A run bound to a selection stamps its split whole, the selection's directory stored
+    against the project as its run record stores it, and the checkpoint's spec reads that
+    directory back against the project as the same bound split.
+    """
+    from tcip_mcp.model_registry import load_registered_checkpoint
+    from tcip_mcp.pipelines.schemas import BoundSplit
+    from tcip_mcp.registry_paths import stored_path
+    from tests.test_feedback_tools import _bound_checkpoint
+    from tests.test_selection_ground_truth_digests import _dataset, _draw
+
+    manifest_dir = tmp_path / "manifest"
+    _draw(tmp_path, _dataset(tmp_path / "data"), manifest_dir)
+    _run_dir, path = _bound_checkpoint(tmp_path, manifest_dir, "exp-bound-stamp")
+
+    stamped = torch.load(path, weights_only=False)[CONFIG_KEY]["data"]["split"]
+    assert stamped["selection_dir"] == stored_path(manifest_dir, tmp_path)
+    split = load_registered_checkpoint(path, project=tmp_path).spec.data.split
+    assert isinstance(split, BoundSplit), split
+    assert split.selection_dir == str(manifest_dir)

@@ -21,7 +21,11 @@ from tcip_mcp.pipelines.data.augmentations import (  # noqa: E402
     ToTensor,
     build_augmentation,
 )
-from tests._training_values import asha_scheduler, tune_arguments  # noqa: E402
+from tests._training_values import (  # noqa: E402
+    asha_scheduler,
+    augmentation,
+    tune_arguments,
+)
 
 # --------------------------------------------------------------------------
 # Losses
@@ -205,11 +209,18 @@ EVERY_TRANSFORM: dict[str, dict] = {
 value its transform takes."""
 
 
+def _built(config):
+    """The chain ``config``, an ``augmentation`` block, builds once the schema admits it."""
+    from tcip_mcp.pipelines.schemas import AugmentationSpec
+
+    return build_augmentation(AugmentationSpec.model_validate(config))
+
+
 def test_build_augmentation_builds_each_transform_at_the_values_its_entry_states():
     """Guard. Every entry of the dict form builds its transform, in the config's order, holding
     exactly the values the entry states, the chain ending in ToTensor.
     """
-    chain = build_augmentation(EVERY_TRANSFORM).transforms
+    chain = _built(augmentation(**EVERY_TRANSFORM)).transforms
 
     assert [vars(t) for t in chain[:-1]] == list(EVERY_TRANSFORM.values())
     assert isinstance(chain[-1], ToTensor)
@@ -218,17 +229,19 @@ def test_build_augmentation_builds_each_transform_at_the_values_its_entry_states
 @pytest.mark.parametrize(
     "config, named",
     [
-        ({"horizontal_flip": True}, "'horizontal_flip'"),
-        ({"horizontal_flip": 0.5}, "'horizontal_flip'"),
-        ({"resize": [640, 640]}, "'resize'"),
+        (augmentation(horizontal_flip=True), "'horizontal_flip'"),
+        (augmentation(horizontal_flip=0.5), "'horizontal_flip'"),
+        (augmentation(resize=[640, 640]), "'resize'"),
         ("nadir_rotation", "'nadir_rotation'"),
-        ({"color_jitter": {"hue": 0.1}}, "'color_jitter'"),
+        (augmentation(color_jitter={"hue": 0.1}), "'color_jitter'"),
         (
-            {"color_jitter": {**EVERY_TRANSFORM["color_jitter"], "hue": 0.1}},
+            augmentation(
+                color_jitter={**EVERY_TRANSFORM["color_jitter"], "hue": 0.1}
+            ),
             "'hue'",
         ),
-        ({"rotation": {"degrees": 90}}, "'rotation'"),
-        ({"horizontal_flip": {"p": 0.5}, "mosaic": {}}, "mosaic"),
+        (augmentation(rotation={"degrees": 90}), "'rotation'"),
+        (augmentation(horizontal_flip={"p": 0.5}, mosaic={}), "mosaic"),
     ],
     ids=[
         "true",
@@ -249,7 +262,7 @@ def test_build_augmentation_refuses_an_entry_not_stating_its_values_by_name(
     transform refuses by its name: nothing in the chain is a value the config did not state.
     """
     with pytest.raises(ValueError, match=named):
-        build_augmentation(config)
+        _built(config)
 
 
 def test_random_rotation_detection_keeps_boxes_valid():

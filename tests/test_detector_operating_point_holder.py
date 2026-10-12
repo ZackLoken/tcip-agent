@@ -19,6 +19,7 @@ from tests._chain_fixtures import (
     BARE_SCORE_THRESH_DETECTOR,
     BESPOKE_MODELS,
 )
+from tests._training_values import drawn_split
 
 torch = pytest.importorskip("torch")
 
@@ -41,7 +42,7 @@ def _built(model_source: dict):
     from tests import REPO_ROOT
     from tests._chain_fixtures import training_config
 
-    spec = train_config(training_config(model_source, {}))
+    spec = train_config(training_config(model_source, {"split": drawn_split()}))
     return build_from_model_source(
         spec.model_source, staged_sources(spec, REPO_ROOT).layout, _DIMS
     )
@@ -151,7 +152,6 @@ def _checkpoint(tmp_path, builder: str) -> str:
             "task": "detection",
         },
         data={
-            "tiling": {"enabled": False},
             "num_channels": 3,
             "scope": {"subject": "bud"},
         },
@@ -191,10 +191,13 @@ def _assessed(tmp_path: Path, builder: str) -> dict:
         str(root),
         output_path=str(selection_dir),
         subject="bud",
-        seed=2,
-        val_ratio=0.25,
-        calibration_ratio=0.25,
-        holdout_ratio=0.25,
+        **drawn_split(
+            seed=2,
+            val_ratio=0.25,
+            calibration_ratio=0.25,
+            holdout_ratio=0.25,
+            grouping="tile_prefix",
+        ),
     )
     assert "error" not in drawn, drawn
     confirm_count_trait(tmp_path)

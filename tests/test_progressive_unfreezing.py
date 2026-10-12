@@ -33,6 +33,13 @@ from tcip_mcp.pipelines.training.optimizer_factory import (  # noqa: E402
     compute_lr_scale,
     restore_training_state,
 )
+from tests._training_values import (  # noqa: E402
+    RATIONALE,
+    adamw_optimizer,
+    drawn_split,
+    evaluation_block,
+    stage,
+)
 
 IMG = 64
 BASE_BB_LR = 1e-3
@@ -178,7 +185,6 @@ def test_a_tensor_valued_bespoke_group_setting_survives_a_resume():
     """
     from tcip_mcp.pipelines.schemas import OptimizerSpec
     from tcip_mcp.pipelines.training.optimizer_factory import build_optimizer
-    from tests._training_values import adamw_optimizer
 
     spec = OptimizerSpec.model_validate(adamw_optimizer())
     model = _CustomGroupRegressor()
@@ -200,6 +206,83 @@ def test_a_tensor_valued_bespoke_group_setting_survives_a_resume():
     assert torch.equal(
         resumed.param_groups[0]["custom"], torch.tensor([3.0, 4.0])
     )
+
+
+@pytest.mark.parametrize(
+    "attributes",
+    [(), ("grade",)],
+    ids=["plain", "with-attribute-heads"],
+)
+def test_an_optimizer_trains_a_built_detectors_backbone_at_backbone_lr_and_the_rest_at_head_lr(
+    attributes,
+):
+    """A detector the platform's ``build_detector`` builds, its subject's attribute heads beside
+    it or not, trains the parameters of its ``backbone`` at the stated ``backbone_lr`` and every
+    other at ``head_lr``; a model exposing neither groups nor a backbone refuses differing rates
+    by name and trains at equal ones.
+    """
+    from tcip_mcp import subject_registry
+    from tcip_mcp.pipelines.schemas import OptimizerSpec
+    from tcip_mcp.pipelines.training.optimizer_factory import build_optimizer
+    from tests.bespoke_models import build_bespoke_detection
+
+    spec = OptimizerSpec.model_validate(
+        adamw_optimizer(backbone_lr=1e-4, head_lr=1e-3)
+    )
+    model = build_bespoke_detection(
+        min_size=64,
+        max_size=128,
+        attributes=tuple(
+            subject_registry.Attribute(name, "ordinal", ("low", "high"))
+            for name in attributes
+        ),
+    ).detector
+    opt = build_optimizer(
+        spec, model, backbone_lr=spec.backbone_lr, head_lr=spec.head_lr
+    )
+    rate = {id(p): g["lr"] for g in opt.param_groups for p in g["params"]}
+    backbone = {id(p) for p in model.backbone.parameters()}
+    assert backbone and len(backbone) < len(rate)
+    assert {rate[i] for i in backbone} == {1e-4}
+    assert {r for i, r in rate.items() if i not in backbone} == {1e-3}
+
+    bare = nn.Linear(2, 1)
+    with pytest.raises(ValueError, match="backbone_lr .* and head_lr .* differ"):
+        build_optimizer(spec, bare, backbone_lr=1e-4, head_lr=1e-3)
+    one_rate = build_optimizer(spec, bare, backbone_lr=1e-3, head_lr=1e-3)
+    assert [g["lr"] for g in one_rate.param_groups] == [1e-3]
+
+
+class _NoStageCount(nn.Module):
+    """A model freezing through ``freeze_backbone`` over a backbone declaring no stage count."""
+
+    def __init__(self):
+        super().__init__()
+        self.backbone = nn.Linear(2, 2)
+
+    def freeze_backbone(self, to_stage: int) -> None:
+        for p in self.backbone.parameters():
+            p.requires_grad = False
+
+
+def test_a_stage_freeze_a_model_cannot_apply_refuses_by_name():
+    """A nonzero ``freeze_to`` over a model with no ``freeze_backbone``, and a negative one over a
+    backbone declaring no ``num_stages``, refuse naming what is missing; a built classifier's
+    backbone freezes whole under a negative one while its head stays trainable.
+    """
+    from tcip_mcp.pipelines.training.generic_trainer import apply_stage_freeze
+    from tests.bespoke_models import build_bespoke_classifier
+
+    with pytest.raises(ValueError, match="freeze_backbone"):
+        apply_stage_freeze(nn.Linear(2, 1), 1)
+    with pytest.raises(ValueError, match="num_stages"):
+        apply_stage_freeze(_NoStageCount(), -1)
+    assert apply_stage_freeze(nn.Linear(2, 1), 0) == 3
+
+    model = build_bespoke_classifier(num_classes=2)
+    apply_stage_freeze(model, -1)
+    assert not any(p.requires_grad for p in model.backbone.parameters())
+    assert all(p.requires_grad for p in model.heads.parameters())
 
 
 def test_a_restore_puts_every_tensor_on_its_parameter_dtype_and_the_next_step_runs():
@@ -328,15 +411,15 @@ def test_freeze_to_is_per_stage_for_a_wrapped_bespoke_backbone():
 
         def forward(self, x):
             out = {}
-            for i, stage in enumerate(self.stages):
-                x = stage(x)
+            for i, layer in enumerate(self.stages):
+                x = layer(x)
                 out[f"s{i}"] = x
             return out
 
     bb = BackboneWrapper(Staged(), [16, 32, 64, 128])
     counts = []
-    for stage in range(bb.num_stages + 1):  # 0 .. 4
-        bb.freeze_to(stage)
+    for to_stage in range(bb.num_stages + 1):  # 0 .. 4
+        bb.freeze_to(to_stage)
         counts.append(
             sum(p.numel() for p in bb.model.parameters() if p.requires_grad)
         )
@@ -375,16 +458,14 @@ def _trained(tmp_path: Path, stages, n: int = 6, **extra):
         {
             "images_dir": str(images_dir),
             "labels_dir": str(csv_path),
-            "auto_val": False,
+            "split": drawn_split(val_ratio=0.0),
         },
         **{
             "stages": stages,
-            "optimizer": {
-                "name": "adamw",
-                "backbone_lr": BASE_BB_LR,
-                "head_lr": 1e-3,
-                "weight_decay": 0,
-            },
+            "optimizer": adamw_optimizer(
+                backbone_lr=BASE_BB_LR, head_lr=1e-3, weight_decay=0
+            ),
+            "evaluation": evaluation_block(selection_metric="loss"),
             **extra,
         },
     )
@@ -399,7 +480,7 @@ def _trained(tmp_path: Path, stages, n: int = 6, **extra):
 
 def test_monotonic_unfreeze_guard_fails(tmp_path: Path):
     # Stage 0 fully unfreezes; stage 1 re-freezes the backbone -> guard must fire.
-    run, _ = _trained(tmp_path, [{"freeze_to": 0}, {"freeze_to": -1}])
+    run, _ = _trained(tmp_path, [stage(0), stage(-1)])
     assert run.status == "failed"
     assert "Non-decreasing unfreeze" in run.status_error
 
@@ -409,7 +490,7 @@ def test_warmup_lr_ramps_at_stage_boundary(tmp_path: Path):
     schedule's one-epoch horizon.
     """
     run, _ = _trained(
-        tmp_path, [{"freeze_to": -1}, {"freeze_to": 0}], stage_warmup_epochs=2
+        tmp_path, [stage(-1), stage(0)], stage_warmup_epochs=2
     )
     assert run.status == "completed", run.status_error
 
@@ -428,12 +509,12 @@ def test_lr_scaling_is_relative_to_the_first_stage_effective_batch(
     the multiplier is (8/2)^0.5 == 2.0. Six samples make three batches, so the second stage's one
     window holds three of the four batches it targets: one optimizer step against three.
     """
-    stages = [
-        {"freeze_to": -1},
-        {"freeze_to": 0, "gradient_accumulation_steps": 4},
-    ]
+    stages = [stage(-1), stage(0, gradient_accumulation_steps=4)]
     run, _ = _trained(
-        tmp_path, stages, lr_scaling={"scale_power": 0.5}, batch_size=2
+        tmp_path,
+        stages,
+        lr_scaling={"scale_power": 0.5, "rationale": RATIONALE},
+        batch_size=2,
     )
     assert run.status == "completed", run.status_error
     assert [m["target_eff_batch"] for m in run.metrics_history] == [2, 8]
@@ -443,7 +524,7 @@ def test_lr_scaling_is_relative_to_the_first_stage_effective_batch(
 
 
 def test_two_stage_handoff_smoke(tmp_path: Path):
-    run, run_dir = _trained(tmp_path, [{"freeze_to": -1}, {"freeze_to": 0}])
+    run, run_dir = _trained(tmp_path, [stage(-1), stage(0)])
     assert run.status == "completed", run.status_error
     assert all(math.isfinite(m["train_loss"]) for m in run.metrics_history)
     tps = [m["trainable_params"] for m in run.metrics_history]

@@ -14,6 +14,7 @@ torch = pytest.importorskip("torch")
 
 from tcip_mcp.pipelines.model_build import METRICS_KEY
 from tcip_mcp.pipelines.training.generic_trainer import train
+from tests._training_values import evaluation_block
 from tests.tiny_trainer_fixtures import (
     TRAIN_INTENSITIES,
     VAL_INTENSITIES,
@@ -30,7 +31,8 @@ def _config(
     tmp_path, evaluation: dict | None = None, *, validated: bool = True
 ) -> dict:
     """A regression config over opposed frames under ``tmp_path`` (``validated``), or over the
-    training frames alone with no validation side.
+    training frames alone with no validation side, ``evaluation`` stated over its sample
+    evaluation block.
     """
     data = (
         opposed_regression_data(
@@ -47,7 +49,11 @@ def _config(
         3,
         data=data,
         builder_kwargs={"init_weight": 0.0},
-        **({"evaluation": evaluation} if evaluation is not None else {}),
+        **(
+            {"evaluation": evaluation_block(**evaluation)}
+            if evaluation is not None
+            else {}
+        ),
     )
 
 
@@ -179,7 +185,7 @@ def test_a_run_selecting_on_f1_keeps_its_highest_f1_checkpoint(tmp_path):
         classifier_config(
             5,
             separable_classifier_data(tmp_path / "ds"),
-            evaluation={"selection_metric": "f1"},
+            evaluation=evaluation_block(selection_metric="f1"),
         ),
     )
     run = train(ctx.run, ctx.train_loader, val_loader=ctx.val_loader)
@@ -223,7 +229,7 @@ def test_a_loss_selected_run_with_no_validation_loader_still_completes_and_selec
     tmp_path,
 ):
     """No validation loader means no metric but the training loss exists; a run selecting on the
-    default (loss) metric must still complete and choose the lowest-loss epoch.
+    training loss must still complete and choose the lowest-loss epoch.
     """
     ctx = run_context(tmp_path, _config(tmp_path, validated=False))
     assert ctx.val_loader is None

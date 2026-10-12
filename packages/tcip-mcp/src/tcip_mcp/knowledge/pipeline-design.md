@@ -128,7 +128,7 @@ Three seams support bespoke work; the platform guarantees integrity around it:
   Never a directory, a document path or a format flag: the platform names the samples and your
   builder builds over them, so a strip split over your own samples composes the tiled wrapper
   inside `train(ctx)` at the lattice it states (`ctx.tiled_dataset(base, tile_size=,
-  overlap=)`). The platform resolves no `data.tiling` for a bespoke run and refuses a config
+  overlap=, skip_empty=)`, whether object-free tiles are kept stated too). The platform resolves no `data.tiling` for a bespoke run and refuses a config
   stating one beside its `dataset_source`. `ctx.build_dataset` takes `samples` and `transforms`
   and nothing else, and builds over the samples you hand it, whole: through the run's builder,
   or through the platform's factory at the run's recorded `sizes` and `tiling`, under the run's

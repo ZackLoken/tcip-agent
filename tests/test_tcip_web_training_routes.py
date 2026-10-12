@@ -361,10 +361,8 @@ def test_compare_route_compares_two_runs_and_names_an_unknown_id(
 def test_metric_directions_route_answers_the_declared_table(
     opened_client: TestClient,
 ) -> None:
-    """The route answers evaluation.py's own declared-direction table."""
-    from tcip_mcp.pipelines.training.evaluation import (
-        HIGHER_IS_BETTER_BY_METRIC,
-    )
+    """The route answers the schema's own declared-direction table."""
+    from tcip_mcp.pipelines.schemas import HIGHER_IS_BETTER_BY_METRIC
 
     resp = opened_client.get("/api/training/metric-directions")
     assert resp.status_code == 200
@@ -566,6 +564,7 @@ def test_a_route_launch_shows_its_declaration_from_its_launch_event(
 
 
 def _regression_config(tmp_path: Path) -> dict:
+    from tests._training_values import drawn_split
     from tests.tiny_trainer_fixtures import (
         regressor_config,
         write_regression_dataset,
@@ -579,7 +578,7 @@ def _regression_config(tmp_path: Path) -> dict:
         data={
             "images_dir": str(images_dir),
             "labels_dir": str(csv_path),
-            "split": {"seed": 0, "val_ratio": 0.15},
+            "split": drawn_split(val_ratio=0.15),
         },
     )
 

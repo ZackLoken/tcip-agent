@@ -16,6 +16,7 @@ from tcip_mcp.web_client import gui_snapshot_key
 from tcip_store.file_backend import lock_file_for
 from tests._chain_fixtures import BESPOKE_DETECTION
 from tests._producer_fixtures import one_labeled_capture
+from tests._training_values import drawn_split
 
 
 def _hand_zip(path: Path, members: dict[str, bytes]) -> Path:
@@ -331,10 +332,13 @@ def test_a_splits_root_nested_under_a_nested_dataset_root_archives_and_round_tri
         str(curated),
         subject="bud",
         output_path=str(curated / "splits"),
-        seed=1,
-        val_ratio=0.25,
-        calibration_ratio=0.125,
-        holdout_ratio=0.125,
+        **drawn_split(
+            seed=1,
+            val_ratio=0.25,
+            calibration_ratio=0.125,
+            holdout_ratio=0.125,
+            grouping="tile_prefix",
+        ),
     )
     assert "error" not in splits_result, splits_result
 
@@ -412,7 +416,7 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(
             {
                 "images_dir": str(root / "images" / "2026-03-04"),
                 "scope": {"subject": "bud"},
-                "split": {"seed": 0, "val_ratio": 0.15},
+                "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
             },
         ),
         param_space=sweep_space(),
@@ -427,10 +431,13 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(
         str(root),
         output_path=str(root / "splits_out"),
         subject="bud",
-        seed=1,
-        val_ratio=0.25,
-        calibration_ratio=0.125,
-        holdout_ratio=0.125,
+        **drawn_split(
+            seed=1,
+            val_ratio=0.25,
+            calibration_ratio=0.125,
+            holdout_ratio=0.125,
+            grouping="tile_prefix",
+        ),
     )
     assert "error" not in splits_result, splits_result
 

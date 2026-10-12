@@ -238,7 +238,6 @@ def test_the_trainer_and_the_validation_loss_hand_the_heads_objects_only(
         {
             "images_dir": str(_labeled(tmp_path / "ds")),
             "scope": {"subject": SUBJECT, "attributes": []},
-            "split": {"seed": 0, "val_ratio": 0.5},
         },
     )
     ctx = run_context(tmp_path, config)
@@ -267,7 +266,12 @@ def test_the_overfit_probe_drives_the_model_with_objects_only(tmp_path: Path):
     RecordingDetector.handed.clear()
 
     overfit_check(
-        RecordingDetector(), "detection", sample_batch=batch, steps=2
+        RecordingDetector(),
+        "detection",
+        seed=0,
+        deterministic=False,
+        sample_batch=batch,
+        steps=2,
     )
 
     assert RecordingDetector.handed and all(

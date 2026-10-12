@@ -10,7 +10,7 @@ import sys
 import threading
 from collections.abc import Sized
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 from tcip_mcp import experiments
 from tcip_mcp.audit import audited, now_iso, record_event_or_raise
@@ -20,10 +20,15 @@ from tcip_mcp.pipelines.data.split_construction import (
     data_dir_issues,
     resolve_run,
     selection_compatibility,
-    split_seed,
 )
 from tcip_mcp.pipelines.execution import Stated
-from tcip_mcp.pipelines.schemas import TilingSpec, checked_train_config
+from tcip_mcp.pipelines.schemas import (
+    BoundSplit,
+    DrawnSplit,
+    TilingSpec,
+    checked_train_config,
+    revision_record,
+)
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
 from tcip_store import StoreError, canonical_path, check_json_value
@@ -137,15 +142,11 @@ def _preflight(
     issues = list(issues)
     warnings: list[str] = []
     split = spec.data.split if spec is not None else None
-    if (
-        split is not None
-        and split.selection_dir
-        and split.redraw_within_selection
-    ):
+    if isinstance(split, BoundSplit) and split.seed is not None:
         warnings.append(
-            "data.split.redraw_within_selection=true: this run redraws train and val inside the "
-            "selection's own train and val samples at this seed; the selection's calibration side "
-            "stays untouched."
+            f"data.split.seed={split.seed} beside data.split.selection_dir: this run redraws "
+            "train and val inside the selection's own train and val samples at this seed; the "
+            "selection's calibration side stays untouched."
         )
 
     # Normalization provenance: per-band builder_kwargs statistics must carry which images
@@ -192,27 +193,13 @@ def _preflight(
     if sampling_record is not None and resolution is None:
         result["image_stats_containment"] = "not_checked"
     if resolution is not None:
-        from tcip_mcp.pipelines.data.selection import REFERENCE_SIDES
         from tcip_mcp.pipelines.data.split_construction import (
             partition_samples,
         )
 
-        resolved_split = resolution.data.split
         known = {
             str(s.source) for s in partition_samples(resolution.partition)
         }
-        reserved = sorted(
-            f"{side}_ratio"
-            for side in REFERENCE_SIDES
-            if getattr(resolved_split, f"{side}_ratio")
-        )
-        if reserved and resolution.spatial is None:
-            issues.append(
-                f"data.split {reserved} have no effect: this run over {len(known)} admitted "
-                "sources did not resolve to the single-source spatial-strip split a reserved "
-                "region is cut from (a run with tiling enabled over one admitted "
-                "source); draw a selection with draw_splits for a reference."
-            )
         if sampling_record is not None:
             bad = sorted(
                 {
@@ -303,7 +290,12 @@ def _preflight(
                     rng_state = capture_rng_state(None)
                     try:
                         raw_report = overfit_check(
-                            model, task, sample_batch=batch, dims=dims
+                            model,
+                            task,
+                            seed=resolved_spec.seed,
+                            deterministic=resolved_spec.deterministic,
+                            sample_batch=batch,
+                            dims=dims,
                         )
                     except Exception as exc:  # noqa: BLE001, becomes the report's issue only
                         raw_report = {
@@ -378,8 +370,8 @@ def open_run(
     trial_params: dict | None = None,
 ) -> None:
     """Open the run directory ``run_dir`` (``experiments.open_run_directory``) with its
-    ``run.json``: the validated launch config ``spec``, seeded (``run_registry.seeded``) and
-    recorded as it dumps (``TrainConfigSchema.record``), as the run's input, ``resolved`` as what
+    ``run.json``: the validated launch config ``spec``, recorded as it dumps
+    (``TrainConfigSchema.record``), as the run's input, ``resolved`` as what
     that input resolved to (``split_construction.resolve_run``'s record, ``None`` for an HPO
     trial refused at its admission or whose resolution failed, which then ends ``failed``), the
     environment and the dataset
@@ -395,9 +387,7 @@ def open_run(
         partition_samples,
     )
     from tcip_mcp.pipelines.model_build import capture_env
-    from tcip_mcp.pipelines.training.run_registry import seeded
 
-    spec = seeded(spec)
     dataset_id, fingerprint = dataset_identity(
         spec.data, partition_samples(resolved["partition"]) if resolved else ()
     )
@@ -437,8 +427,9 @@ def launch_training(
     The run's training body (dataset build, model forward/backward, checkpointing) executes in a
     separate OS process, writing into the run's own directory
     (``<project>/.tcip/experiments/<experiment_id>/``). Use monitor_training to monitor progress
-    and cancel_training to stop a run. The platform itself stops a run when it is dead (two
-    consecutive full training passes with no finite batch loss) or when its stages end it: its
+    and cancel_training to stop a run. The platform itself stops a run when it is dead (its
+    ``early_stopping.nonfinite_passes`` consecutive full training passes with no finite batch
+    loss) or when its stages end it: its
     last stage ended (on its ``early_stopping`` plateau, or at a horizon-bound schedule's
     horizon), or a stage whose best did not improve by ``min_delta`` on the stage before it, on
     the run's selection value (the training loss for a run with no validation loader).
@@ -707,11 +698,17 @@ def list_split_choices(project: Path, experiment_id: str) -> dict:
     if own is None:
         return {"error": f"Experiment not found: {experiment_id}"}
     data = own.spec.data
-    own_selection_dir = data.split.selection_dir
-    replaced_split_keys = sorted(data.split.stated - {"selection_dir"})
+    split = data.split
+    own_selection_dir = (
+        split.selection_dir if isinstance(split, BoundSplit) else None
+    )
+    replaced_split_keys = sorted(
+        set(split.model_dump(exclude_unset=True, exclude_none=True))
+        - {"selection_dir"}
+    )
 
     own_selection = None
-    if own_selection_dir:
+    if isinstance(split, BoundSplit):
         as_recorded = {
             "case": "bound",
             "line": "on the partition it bound",
@@ -719,17 +716,15 @@ def list_split_choices(project: Path, experiment_id: str) -> dict:
             "reason": None,
         }
         own_selection, own_error = read_selection_checked(
-            own_selection_dir, project=project
+            split.selection_dir, project=project
         )
         if own_selection is None:
             as_recorded["compatible"] = False
             as_recorded["reason"] = own_error or (
-                f"no selection recorded under {own_selection_dir}; run draw_splits first."
+                f"no selection recorded under {split.selection_dir}; run draw_splits first."
             )
         else:
-            own_issues = selection_compatibility(
-                data, own_selection, own_selection_dir
-            )
+            own_issues = selection_compatibility(data, split, own_selection)
             if own_issues:
                 as_recorded["compatible"] = False
                 as_recorded["reason"] = "; ".join(own_issues)
@@ -823,10 +818,9 @@ def list_split_choices(project: Path, experiment_id: str) -> dict:
                 }
             )
             continue
+        chosen = data_with_selection(data, candidate_dir, project)
         issues = selection_compatibility(
-            data_with_selection(data, candidate_dir, project),
-            selection,
-            candidate_dir,
+            chosen, cast(BoundSplit, chosen.split), selection
         )
         counts = selection.counts()
         entry: dict = {
@@ -860,8 +854,9 @@ def cancel_training(
     A run stops at its next batch/epoch boundary, still saves ``model_final.pt``, the weights it
     stopped at (with no metrics once a batch ran past the epoch row those weights were taken
     at, since no row describes them), and writes its final status 'canceled'; a run whose
-    divergence verdict lands first (two consecutive full training passes with no finite batch
-    loss, checked ahead of cancellation at the same boundary) ends 'failed' instead, with no
+    divergence verdict lands first (its ``early_stopping.nonfinite_passes`` consecutive full
+    training passes with no finite batch loss, checked ahead of cancellation at the same
+    boundary) ends 'failed' instead, with no
     ``model_final.pt``.
     A sweep stops each running trial at its next batch boundary and launches no more. The
     returned ``state`` is the one read now, so it may still read 'running'.
@@ -961,7 +956,8 @@ def open_trial(sweep: Path, trial_id: str, point: dict) -> Path:
     ``<sweep id>_<trial_id>``, and return it. The sweep's recorded base config with ``point``
     applied, admitted (:func:`_admitted`) and, when it stands,
     resolved against its project through the one run producer
-    (``split_construction.resolve_run``, at the sweep's own objective), and the directory opened
+    (``split_construction.resolve_run``, at the sweep's own trait revision), and the directory
+    opened
     (:func:`open_run`) with ``point`` as its ``trial_params``: an admission issue or a
     resolution that fails is the trial's final status ``failed`` naming why. A config the schema
     refuses, or whose sources cannot be staged, raises ``ValueError`` naming every issue before
@@ -984,7 +980,7 @@ def open_trial(sweep: Path, trial_id: str, point: dict) -> Path:
                 spec,
                 sources.layout,
                 project=project,
-                objective=observed.objective,
+                trait_revision=observed.trait_revision,
             ).record
         except Exception as exc:  # noqa: BLE001, whatever stops the resolution fails the trial
             status_error = str(exc)
@@ -1046,16 +1042,18 @@ def run_hyperparameter_search(
     caller's choice; the ``hpo`` module's ``available_search_algs`` and ``available_schedulers``
     list them.
 
-    Trials optimize the objective ``base_config`` resolves to once (its selection metric and the
-    direction that metric's declaration says is better), recorded in the sweep's input and in
-    every trial's launch record; each trains under the base config's regime and reports the
-    ``selection`` rows its metrics log records.
+    Trials optimize the ``evaluation.selection_metric`` ``base_config`` states, in the direction
+    that metric's declaration says is better (``schemas.selection_of``), under the trait
+    revision the base config resolves to once, recorded in the sweep's record and in every
+    trial's launch record; a ``param_space`` axis sampling another metric is refused. Each trial
+    trains under the base config's regime and reports the ``selection`` rows its metrics log
+    records.
 
     Everything one sweep writes lands in its own directory, ``.tcip/experiments/<sweep_id>/``
     beside the project's runs, whose names it shares (:func:`open_sweep`, :func:`run_sweep`):
     its ``sweep.json`` written once before the first
     trial starts, carrying every argument this call resolved (``base_config``, the resolved
-    ``param_space`` and the objective included); a heartbeat this call keeps while it runs; one
+    ``param_space`` and the trait revision included); a heartbeat this call keeps while it runs; one
     run directory per trial, ``<sweep_id>_<ray trial id>``, a run like any other; Ray's own
     experiment store (also the TensorBoard logdir); and its final status, written once when the
     sweep ends. An existing directory refuses by name. The result, as ``monitor_training``'s at any
@@ -1112,12 +1110,12 @@ def run_hyperparameter_search(
             ``split_draw_seeds`` (default: the base config's own ``data.split.seed`` plus the draw
             index), paired with every sampled point through Ray's
             own ``BasicVariantGenerator(constant_grid_search=True)`` so each point trains once per
-            seed. A ``base_config`` bound to a selection gains
-            ``data.split.redraw_within_selection: true`` on its own copy (``data.split.seed``
-            stated), so every trial redraws train and val inside the
-            selection's own train-plus-val samples, calibration untouched; refused when those
+            seed. Over a ``base_config`` bound to a selection each trial's seed redraws train
+            and val inside the selection's own train-plus-val samples, calibration untouched;
+            refused when those
             samples resolve to fewer than two foreground groups. Otherwise refused when
-            ``data.auto_val`` is off, ``search_alg`` is not a native one, ``scheduler`` prunes,
+            ``data.split.val_ratio`` is zero, ``search_alg`` is not a native one, ``scheduler``
+            prunes,
             ``split_draw_seeds`` is given at a length other than ``split_draws`` or names the same
             seed twice, ``baseline_params`` names ``data.split.seed``,
             ``param_space`` already sweeps ``data.split.seed`` itself, or ``param_space`` sweeps
@@ -1182,16 +1180,16 @@ def open_sweep(
     """Check a sweep's arguments: its scheduler block (``hpo.scheduler_settings``), the first
     point :func:`_preflight_points` lists applied to
     ``base_config`` and admitted once (:func:`_admitted`), its data block the one every
-    split-draw check reads, then resolved once (:func:`_preflight`), whose objective every trial
-    records and whose partition answers whether its draws can vary
+    split-draw check reads, a ``param_space`` axis sampling an ``evaluation.selection_metric``
+    other than the base config's refused, then resolved once (:func:`_preflight`), whose trait
+    revision every trial records and whose partition answers whether its draws can vary
     (:func:`_spatial_draws_issue`), then each other point it lists admitted the same way; every
     trial's own point is admitted when its trial opens (:func:`open_trial`).
     Create the sweep's
     directory under ``project``, named by ``experiments.mint_experiment_id("hpo")``, with its
-    ``sweep.json`` written once, carrying the objective and every argument as its ``input``:
+    ``sweep.json`` written once, carrying the trait revision and, as its ``input``, every argument:
     ``base_config`` as the caller stated it, never a sampled point's values, its paths stored
-    against ``project`` (``experiments.RECORD_PATHS``), and ``data.split`` rewritten only for a
-    bound config redrawing inside its selection (:func:`_data_for_split_draws`); then the act's
+    against ``project`` (``experiments.RECORD_PATHS``); then the act's
     one audit line by ``actor`` naming the sweep (``AuditEntryNotWrittenError`` when it cannot be
     appended). Returns the opened sweep's directory, or the refusal ``{"error", "issues"}`` with
     nothing created.
@@ -1199,6 +1197,7 @@ def open_sweep(
     from tcip_mcp.pipelines.training.hpo import (
         resolved_draw_seeds,
         scheduler_settings,
+        space_axes,
         split_draw_search_space,
     )
 
@@ -1248,14 +1247,8 @@ def open_sweep(
             "issues": first_issues,
         }
 
-    # A bound base_config admitted to split_draws redraws inside its selection from here on.
-    data = _data_for_split_draws(first_spec.data, split_draws)
-    if data is not first_spec.data:
-        base_config = {**base_config, "data": data.record()}
-        first_spec = first_spec.model_copy(update={"data": data})
-
-    # Checked ahead of preflight, so its own reason is what an auto_val refusal reads as, not
-    # whatever preflight would have hit first.
+    # Checked ahead of preflight, so its own reason is what a zero validation share's refusal
+    # reads as, not whatever preflight would have hit first.
     draws_refusal = _split_draws_refusal(
         first_spec.data,
         param_space,
@@ -1267,6 +1260,20 @@ def open_sweep(
     )
     if draws_refusal is not None:
         return {"error": draws_refusal, "issues": []}
+
+    metric = (base_config.get("evaluation") or {}).get("selection_metric")
+    sampled = {
+        value.get("selection_metric") if isinstance(value, dict) else value
+        for name, (_kind, values) in space_axes(param_space, grid=False).items()
+        if name in ("evaluation", "evaluation.selection_metric")
+        for value in values
+    }
+    if sampled - {metric}:
+        return {
+            "error": "a sweep ranks every trial by the one evaluation.selection_metric its "
+            f"base_config states ({metric!r}); state it there and sample no other.",
+            "issues": [],
+        }
 
     seed_axis_refusal = caller_split_seed_refusal(param_space, split_draws)
     if seed_axis_refusal is not None:
@@ -1298,7 +1305,6 @@ def open_sweep(
     spatial_refusal = _spatial_draws_issue(resolution, split_draws)
     if spatial_refusal is not None:
         return {"error": spatial_refusal, "issues": []}
-    objective = resolution.objective
 
     draw_seeds = resolved_draw_seeds(
         resolution.spec.data.split, split_draws, split_draw_seeds
@@ -1328,7 +1334,7 @@ def open_sweep(
         return {"error": str(exc), "issues": []}
     record = {
         "created": now_iso(),
-        "objective": objective.model_dump(),
+        "trait_revision": revision_record(resolution.trait_revision),
         "input": {
             "n_trials": n_trials,
             "search_alg": search_alg,
@@ -1414,7 +1420,7 @@ def run_sweep(directory: Path) -> SweepGroup:
             objective_fn=objective_fn,
             param_space=search_param_space,
             metric="objective",
-            mode="max" if observed.objective.higher_is_better else "min",
+            mode="max" if experiments.sweep_selection(given)[1] else "min",
             num_samples=given["n_trials"],
             search_alg=given["search_alg"],
             scheduler=given["scheduler"],
@@ -1470,26 +1476,9 @@ def _apply_hpo_params(base_config: dict, params: dict) -> dict:
     return cfg
 
 
-def _data_for_split_draws(data: DataSpec, split_draws: int) -> DataSpec:
-    """The validated data block ``data`` a sweep over ``split_draws`` draws is minted from:
-    ``data`` itself unless ``split_draws`` is above 1 and it is bound to a selection, in which
-    case a copy with ``split.redraw_within_selection: true``; a block stating no
-    ``split.seed`` refuses (``ValueError``).
-    """
-    if split_draws <= 1 or not data.split.selection_dir:
-        return data
-    split = data.split.model_copy(
-        update={
-            "redraw_within_selection": True,
-            "seed": split_seed(data.split),
-        }
-    )
-    return data.model_copy(update={"split": split})
-
-
 def _split_draws_argument_refusal(split_draws: object) -> str | None:
-    """Whether ``split_draws`` itself is a draw count at all, checked before every other leg
-    (including :func:`_data_for_split_draws`): a value that is not an ``int`` (a ``bool`` is
+    """Whether ``split_draws`` itself is a draw count at all, checked before every other leg:
+    a value that is not an ``int`` (a ``bool`` is
     an ``int`` and reads as the integer it names) refuses by name, and a value below one refuses by
     name.
     """
@@ -1604,8 +1593,8 @@ def _split_draws_refusal(
     """Every reason of the paired path's own a sweep refuses ``split_draws`` above 1 for before
     its first point resolves, its base config's validated data block being ``data``. ``None``
     when nothing here objects, and for one draw. A base config bound to a selection skips the
-    ``auto_val`` leg; whether its selection admits a redraw is the first point's resolution's
-    answer.
+    validation-share leg; whether its selection admits a redraw is the first point's
+    resolution's answer.
     """
     if split_draws <= 1:
         return None
@@ -1616,10 +1605,10 @@ def _split_draws_refusal(
         search_alg_key,
     )
 
-    if not data.split.selection_dir and not data.auto_val:
+    if isinstance(data.split, DrawnSplit) and not data.split.val_ratio:
         return (
-            "split_draws needs a drawn validation split, and base_config sets "
-            "data.auto_val=False."
+            "split_draws needs a drawn validation split, and base_config states "
+            "data.split.val_ratio zero."
         )
     if search_alg_key(search_alg) not in _NATIVE_SEARCH:
         native = sorted(_NATIVE_SEARCH)
@@ -1717,7 +1706,7 @@ _SEED_AXIS_REMEDY = (
     "picks the best by mean over draws. The paired path's own conditions apply, bound and "
     "unbound alike: a config bound to a selection redraws train and val inside the selection's "
     "own train and val samples (the selection must be readable and resolve at least two "
-    "foreground groups across them); an unbound config keeps auto_val on; search_alg "
+    "foreground groups across them); an unbound config states val_ratio above zero; search_alg "
     "is a native search algorithm; the scheduler prunes nothing; split_draw_seeds is one per "
     "draw and distinct; baseline_params names no seed; no other data.* axis is in param_space; "
     "a trial_budget is stated on a launch that is not a relaunch, and Ray's variant count over "
@@ -1725,10 +1714,10 @@ _SEED_AXIS_REMEDY = (
     "trainable source is admitted under data.images_dir (a single admitted source's own "
     "single-source spatial-strip path pairs no distinct partition with any draw). A single fixed "
     "seed belongs in "
-    "base_config's own data.split.seed: the drawn path's partition depends on it, and the "
-    "single-source spatial path's, or a selection-bound config's without redraw_within_selection, "
-    "never does (the spatial path still records the config's value on the split record, a "
-    "different fact, not claimed here)."
+    "base_config's own data.split.seed: the drawn path's partition and a selection-bound "
+    "config's redraw depend on it, and the single-source spatial path's never does (the spatial "
+    "path still records the config's value on the split record, a different fact, not claimed "
+    "here)."
 )
 
 
@@ -1852,8 +1841,8 @@ def evaluate_model(
             returned under ``execution``.
         iou_threshold: The IoU a match must reach, stated (the comparability convention is
             ``schemas.COMPARABILITY_IOU``).
-        tiling: Optional tiling (``schemas.TilingSpec``: enabled, tile_size, overlap, ...) for a
-            tile-level eval, refused enabled for a task that does not tile
+        tiling: Optional tiling (``schemas.TilingSpec``: tile_size, overlap, skip_empty, ...) for
+            a tile-level eval, refused for a task that does not tile
             (``schemas.run_tiling``). None + a run id reuses the run's training tiling;
             None + a checkpoint path stays untiled.
         use_tiled_inference: Score the delivery regime (full-frame via tiled inference);

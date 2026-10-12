@@ -13,7 +13,7 @@ torch = pytest.importorskip("torch")
 from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.schemas import train_config
 from tests._chain_fixtures import training_config
-from tests._training_values import tune_arguments
+from tests._training_values import drawn_split, tune_arguments
 
 
 def _config(**keys) -> dict:
@@ -113,7 +113,7 @@ def test_the_class_space_recorded_is_the_one_the_run_admitted(tmp_path):
         {
             "images_dir": str(images_dir),
             "scope": {"subject": "bud"},
-            "split": {"val_ratio": 0.5, "seed": 1},
+            "split": drawn_split(seed=1),
         },
     )
 
@@ -145,7 +145,7 @@ def test_a_run_over_an_attributed_subject_records_its_attributes_in_declared_ord
         {
             "images_dir": str(images_dir),
             "scope": {"subject": "bud"},
-            "split": {"val_ratio": 0.5, "seed": 1},
+            "split": drawn_split(seed=1),
         },
     )
 
@@ -178,7 +178,7 @@ def test_a_run_whose_ground_truth_carries_its_own_classes_records_the_empty_scop
         {
             "images_dir": str(images_dir),
             "labels_dir": str(masks_dir),
-            "split": {"val_ratio": 0.5, "seed": 1},
+            "split": drawn_split(seed=1),
         },
     )
 
@@ -189,7 +189,7 @@ def test_the_launch_record_carries_the_resolution_and_the_child_resolves_nothing
     tmp_path, monkeypatch
 ):
     """The launcher resolves a run once and writes what it resolved (data section, geometry,
-    partition, objective) into its launch record; the child builds its context from that record
+    partition, trait revision) into its launch record; the child builds its context from that record
     alone, resolving nothing again and writing nothing beside it.
     """
     from tcip_mcp.experiments import RUN_FILE, observe
@@ -204,7 +204,7 @@ def test_the_launch_record_carries_the_resolution_and_the_child_resolves_nothing
     run_dir = opened_run(tmp_path, detection_config(tmp_path / "data"))
     launch_bytes = (run_dir / RUN_FILE).read_bytes()
     resolved = observe(run_dir).record["resolved"]
-    assert set(resolved) == {"data", "geometry", "partition", "objective"}
+    assert set(resolved) == {"data", "geometry", "partition", "trait_revision"}
     files_before = sorted(p.name for p in run_dir.iterdir())
 
     def resolves_again(*args, **kwargs):
@@ -215,7 +215,7 @@ def test_the_launch_record_carries_the_resolution_and_the_child_resolves_nothing
 
     ctx = worker.prepare_run_context(observe(run_dir))
 
-    assert ctx.run.objective.model_dump() == resolved["objective"]
+    assert ctx.run.trait_revision is None is resolved["trait_revision"]
     assert ctx.spec.data.record() == resolved["data"]
     assert ctx.run.geometry.model_dump(mode="json") == resolved["geometry"]
     train_ds = ctx.train_loader.dataset
@@ -317,8 +317,8 @@ BESPOKE_LOOP = f"{Path(__file__).stem}:_bespoke_loop"
 
 
 def test_run_summary_reads_the_run_directory(tmp_path):
-    """A live run's summary names the objective its launch recorded and carries no best while
-    no row stamps a ``selection``.
+    """A live run's summary names its config's selection metric and carries no best while no
+    row stamps a ``selection``.
     """
     from tcip_mcp.experiments import observe, read_rows, run_summary
     from tests._verified_checkpoint_fixtures import (
@@ -338,41 +338,43 @@ def test_run_summary_reads_the_run_directory(tmp_path):
     assert result["current_epoch"] == 3
     assert result["output_dir"] == str(run_dir)
     assert result["best_metric"] is None
-    assert result["best_metric_name"] == observation.objective.selection_metric
+    assert (
+        result["best_metric_name"]
+        == observation.spec.evaluation.selection_metric
+    )
 
 
 @pytest.mark.parametrize(
-    "higher_is_better, best",
-    [(True, 0.7), (False, 0.5)],
+    "metric, best",
+    [("map50", 0.7), ("loss", 0.5)],
     ids=["higher-is-better", "lower-is-better"],
 )
-def test_the_live_summary_folds_its_rows_in_the_recorded_objectives_direction(
-    tmp_path, higher_is_better, best
+def test_the_live_summary_folds_its_rows_in_its_configs_metric_direction(
+    tmp_path, metric, best
 ):
-    """The live summary's best is folded in the direction the run's launch record states, never
-    one the summary looks up from the metric's name: the same rows give the highest under a
-    higher-is-better objective and the lowest under a lower-is-better one.
+    """The live summary's best is folded in the declared direction of the metric the run's
+    config selects on: the same rows give the highest under a higher-is-better metric and the
+    lowest under a lower-is-better one.
     """
-    from tcip_mcp.experiments import RUN_FILE, observe, read_rows, run_summary
-    from tcip_store import decode_value, encode_record
+    from tcip_mcp.experiments import observe, read_rows, run_summary
+    from tests._training_values import evaluation_block
     from tests._verified_checkpoint_fixtures import (
         detection_config,
         log_epoch,
         opened_run,
     )
 
-    run_dir = opened_run(tmp_path, detection_config(tmp_path / "data"))
-    record = decode_value((run_dir / RUN_FILE).read_bytes())
-    record["resolved"]["objective"] = {
-        **record["resolved"]["objective"],
-        "selection_metric": "map50",
-        "higher_is_better": higher_is_better,
-    }
-    (run_dir / RUN_FILE).write_bytes(encode_record(record))
-    log_epoch(run_dir, 1, {"selection": 0.5, "selection_metric": "map50"})
-    log_epoch(run_dir, 2, {"selection": 0.7, "selection_metric": "map50"})
+    run_dir = opened_run(
+        tmp_path,
+        detection_config(
+            tmp_path / "data",
+            evaluation=evaluation_block(selection_metric=metric),
+        ),
+    )
+    log_epoch(run_dir, 1, {"selection": 0.5, "selection_metric": metric})
+    log_epoch(run_dir, 2, {"selection": 0.7, "selection_metric": metric})
     log_epoch(
-        run_dir, 3, {"selection": float("nan"), "selection_metric": "map50"}
+        run_dir, 3, {"selection": float("nan"), "selection_metric": metric}
     )
 
     observation = observe(run_dir)
@@ -380,7 +382,7 @@ def test_the_live_summary_folds_its_rows_in_the_recorded_objectives_direction(
         observation, read_rows(observation.metrics_log)[0], None
     ).model_dump()
     assert (result["best_metric_name"], result["best_metric"]) == (
-        "map50",
+        metric,
         best,
     )
 

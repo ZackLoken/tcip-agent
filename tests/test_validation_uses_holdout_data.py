@@ -57,10 +57,10 @@ def test_the_run_a_test_trains_is_the_one_its_directory_records(tmp_path):
     recorded = observed_run(observation)
     partition = observation.record["resolved"]["partition"]
 
-    assert (ctx.run.id, ctx.run.spec.record(), ctx.run.objective) == (
+    assert (ctx.run.id, ctx.run.spec.record(), ctx.run.trait_revision) == (
         recorded.id,
         recorded.spec.record(),
-        recorded.objective,
+        recorded.trait_revision,
     )
     for side, loader in (("train", ctx.train_loader), ("val", ctx.val_loader)):
         dataset = loader.dataset
@@ -144,9 +144,9 @@ def test_best_checkpoint_and_early_stopping_follow_the_holdout_loader(
     models: list = []
     capture_model(monkeypatch, models)
 
-    ctx = _context(
-        tmp_path, 4, early_stopping={"patience": 1, "min_delta": 1e-4}
-    )
+    from tests._training_values import stop_rule
+
+    ctx = _context(tmp_path, 4, early_stopping=stop_rule(1, 1e-4))
     run = train(ctx.run, ctx.train_loader, val_loader=ctx.val_loader)
 
     assert run.status == "completed", run.status_error

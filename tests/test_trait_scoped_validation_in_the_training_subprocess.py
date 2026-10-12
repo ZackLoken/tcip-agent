@@ -35,7 +35,7 @@ def test_the_subprocess_resolves_the_authored_criterion_and_leaves_the_trait_ent
     from tcip_annotation.state import Annotation, BBox
     from tests._chain_fixtures import BLOB_BUILDER, training_config
     from tests._producer_fixtures import seed_labeled_images
-    from tests._training_values import evaluation_block
+    from tests._training_values import drawn_split, evaluation_block
 
     images_dir = seed_labeled_images(
         tmp_path / "ds" / "images" / "train",
@@ -53,7 +53,7 @@ def test_the_subprocess_resolves_the_authored_criterion_and_leaves_the_trait_ent
         {
             "images_dir": str(images_dir),
             "scope": {"subject": "leaf"},
-            "split": {"seed": 0, "val_ratio": 0.15},
+            "split": drawn_split(val_ratio=0.15),
         },
         evaluation=evaluation_block(trait="leaf"),
     )

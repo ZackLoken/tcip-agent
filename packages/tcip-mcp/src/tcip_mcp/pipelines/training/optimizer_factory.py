@@ -1,8 +1,7 @@
 """Optimizer factory with differential learning rate support.
 
-Registered optimizers: SGD, Adam, AdamW, LAMB.
-Supports `model.get_param_groups(backbone_lr, head_lr)` for
-differential LR between backbone and heads.
+Registered optimizers: SGD, Adam, AdamW, LAMB, each over a model's backbone and head parameter
+groups (:func:`param_groups`).
 """
 
 from __future__ import annotations
@@ -60,26 +59,53 @@ def build_optimizer(
     backbone_lr: float,
     head_lr: float,
 ) -> torch.optim.Optimizer:
-    """The optimizer ``spec`` names over ``model`` at ``backbone_lr``/``head_lr`` (the block's own
-    rates, or a stage's scaled ones), with the block's weight decay and, for ``sgd``, its
-    momentum; each registered builder takes the settings it reads and no other.
-
-    If model has `get_param_groups(backbone_lr, head_lr)`, uses those
-    param groups. Otherwise gives all params the head_lr.
+    """The optimizer ``spec`` names over ``model``'s parameter groups at ``backbone_lr`` and
+    ``head_lr`` (the block's own rates, or a stage's scaled ones; :func:`param_groups`), with
+    the block's weight decay and, for ``sgd``, its momentum; each registered builder takes the
+    settings it reads and no other. :func:`param_groups`'s refusal propagates.
     """
-    if hasattr(model, "get_param_groups"):
-        # A bespoke model's own opt-in method, not part of nn.Module's stub.
-        param_groups = cast(Any, model).get_param_groups(backbone_lr, head_lr)
-    else:
-        param_groups = [{"params": model.parameters(), "lr": head_lr}]
-
     from tcip_mcp.pipelines.model_build import resolve_named
 
     factory = resolve_named(spec.name, _OPTIMIZER_BUILDERS, kind="optimizer")
     settings = {} if spec.momentum is None else {"momentum": spec.momentum}
     return factory(
-        param_groups, lr=head_lr, weight_decay=spec.weight_decay, **settings
+        param_groups(model, backbone_lr, head_lr),
+        lr=head_lr,
+        weight_decay=spec.weight_decay,
+        **settings,
     )
+
+
+def param_groups(
+    model: nn.Module, backbone_lr: float, head_lr: float
+) -> list[dict]:
+    """``model``'s parameter groups at ``backbone_lr`` and ``head_lr``: its own
+    ``get_param_groups(backbone_lr, head_lr)`` when it defines one, else the parameters of its
+    ``backbone`` module at ``backbone_lr`` and every other at ``head_lr``. A model exposing
+    neither trains every parameter at the one rate when the two are equal, and refuses
+    (``ValueError``) naming both when they differ.
+    """
+    if hasattr(model, "get_param_groups"):
+        # A bespoke model's own opt-in method, not part of nn.Module's stub.
+        return cast(Any, model).get_param_groups(backbone_lr, head_lr)
+    backbone = getattr(model, "backbone", None)
+    if isinstance(backbone, nn.Module):
+        held = {id(p) for p in backbone.parameters()}
+        return [
+            {"params": list(backbone.parameters()), "lr": backbone_lr},
+            {
+                "params": [p for p in model.parameters() if id(p) not in held],
+                "lr": head_lr,
+            },
+        ]
+    if backbone_lr != head_lr:
+        raise ValueError(
+            f"optimizer.backbone_lr {backbone_lr} and head_lr {head_lr} differ, and this "
+            f"{type(model).__name__} exposes neither get_param_groups nor a backbone module "
+            "to train at backbone_lr; state the two rates equal, or build a model exposing "
+            "one."
+        )
+    return [{"params": list(model.parameters()), "lr": head_lr}]
 
 
 def compute_lr_scale(
@@ -202,8 +228,7 @@ def restore_training_state(
     if missing:
         raise ValueError(
             f"the optimizer holds no parameter named {missing}, which the captured optimizer "
-            "held; a stage's optimizer must hold every parameter the previous stage trained "
-            "(enforce_monotonic_unfreeze)."
+            "held; a stage's optimizer must hold every parameter the previous stage trained."
         )
     packed["state"] = {
         pid_of[params[name]]: {k: _copied(v) for k, v in buf.items()}

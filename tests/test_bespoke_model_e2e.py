@@ -40,7 +40,11 @@ from tcip_mcp.pipelines.model_build import CONFIG_KEY  # noqa: E402
 from tests import bespoke_models  # noqa: E402 (the agent-authored bespoke model + train loop)
 from tests._image_fixtures import write_noise_image  # noqa: E402
 from tests._producer_fixtures import dataset_over, label_image  # noqa: E402
-from tests._training_values import adamw_optimizer, schedule  # noqa: E402
+from tests._training_values import (  # noqa: E402
+    adamw_optimizer,
+    drawn_split,
+    schedule,
+)
 
 IMG = 64
 
@@ -111,12 +115,11 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
             "images_dir": str(images_dir),
             "num_channels": 3,
             "scope": asdict(dataset.scope),
-            "split": {"seed": 0, "val_ratio": 0.15},
+            "split": drawn_split(val_ratio=0.15),
         },
         training_source=TRAIN_BESPOKE,
         scheduler=schedule("cosine", horizon_epochs=2),
-        seed=0,
-        optimizer=adamw_optimizer(),
+        optimizer=adamw_optimizer(backbone_lr=1e-3),
     )
     from tests._verified_checkpoint_fixtures import worker_run
 
@@ -204,6 +207,8 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     overfit = overfit_check(
         built_model(config),
         "detection",
+        seed=0,
+        deterministic=False,
         steps=30,
         lr=5e-3,
         dims={"in_chans": 3, "num_classes": 1, "img_size": (64, 64)},

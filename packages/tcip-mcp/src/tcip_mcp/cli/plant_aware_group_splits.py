@@ -7,7 +7,7 @@ pixel resolves to a (lat, lon) via its GeoTIFF tags, then to the nearest plant i
 CSV, so every capture of one physical plant across every date lands in the same split side.
 
 Uses ``read_plant_csvs``, ``OrthomosaicGeoreference.pixel_to_wgs84`` and ``nearest_plant``, then
-hands the resulting ``{identity: group_key}`` map to ``draw_splits(group_key_map=...)``.
+hands the resulting ``{identity: group_key}`` map to ``draw_splits(grouping=...)``.
 ``identity`` is ``<date>/<stem>``, since a stem is unique only within one capture date.
 
 ``--subject`` is required: ``draw_splits`` draws its samples through the platform's own per-subject
@@ -16,11 +16,11 @@ admission and refuses to write a selection without one.
 Usage:
     tcip plant-aware-group-splits <dataset_root> --project <project> --plant-csv <plants.csv> \
         [--plant-csv <more_plants.csv> ...] --subject <subject> --seed <seed> \
-        [--val-ratio <ratio>] [--calibration-ratio <ratio>] [--holdout-ratio <ratio>] \
+        --val-ratio <ratio> --calibration-ratio <ratio> --holdout-ratio <ratio> \
+        --stratify-foreground | --no-stratify-foreground --rationale <why> \
         [--tolerance-m <meters>] [--output-path <dir>]
 
-The ratios default to ``draw_splits``'s own (``splits.DEFAULT_SHARES``), train the remainder; the
-seed has no default.
+Every value of the draw is stated, train taking the remainder of the ratios.
 """
 
 from __future__ import annotations
@@ -29,8 +29,6 @@ import argparse
 import json
 import sys
 from pathlib import Path
-
-from tcip_mcp.pipelines.data.splits import DEFAULT_SHARES
 
 
 def derive_plant_group_key_map(
@@ -133,21 +131,32 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser.add_argument(
         "--val-ratio",
         type=float,
-        default=DEFAULT_SHARES["val"],
+        required=True,
         help="Fraction for the validation side; train takes the remainder.",
     )
     parser.add_argument(
         "--calibration-ratio",
         type=float,
-        default=DEFAULT_SHARES["calibration"],
+        required=True,
         help="Fraction an assessment fits its operating point on.",
     )
     parser.add_argument(
         "--holdout-ratio",
         type=float,
-        default=DEFAULT_SHARES["holdout"],
+        required=True,
         help="Fraction an assessment checks its operating point against. A side "
         "whose ratio is zero is not drawn.",
+    )
+    parser.add_argument(
+        "--stratify-foreground",
+        action=argparse.BooleanOptionalAction,
+        required=True,
+        help="Whether the draw balances its sides by foreground annotation count.",
+    )
+    parser.add_argument(
+        "--rationale",
+        required=True,
+        help="Why the draw states the ratios and stratification it does.",
     )
     parser.add_argument(
         "--seed",
@@ -177,11 +186,9 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
 
     from tcip_mcp.cli import bound_project
     from tcip_mcp.dataset_layout import parse_image_path
-    from tcip_mcp.pipelines.data.splits import (
-        DEFAULT_GROUP_BY,
-        member_identity,
-    )
+    from tcip_mcp.pipelines.data.splits import member_identity
     from tcip_mcp.pipelines.postprocessing.plant_mapping import read_plant_csvs
+    from tcip_mcp.pipelines.schemas import DrawnSplit
     from tcip_mcp.registry_paths import located
     from tcip_mcp.tools.data_tools import _scan_dataset, draw_splits_at
 
@@ -226,13 +233,15 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     result = draw_splits_at(
         project,
         dataset_root,
-        seed=args.seed,
-        val_ratio=args.val_ratio,
-        calibration_ratio=args.calibration_ratio,
-        holdout_ratio=args.holdout_ratio,
-        group_by=DEFAULT_GROUP_BY,
-        group_key_map=group_key_map,
-        stratify_foreground=True,
+        DrawnSplit(
+            seed=args.seed,
+            val_ratio=args.val_ratio,
+            calibration_ratio=args.calibration_ratio,
+            holdout_ratio=args.holdout_ratio,
+            stratify_foreground=args.stratify_foreground,
+            rationale=args.rationale,
+            grouping=group_key_map,
+        ),
         output_path=args.output_path
         and str(located(args.output_path, project)),
         subject=args.subject,

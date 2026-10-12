@@ -12,6 +12,24 @@ from PIL import Image
 
 from tcip_annotation.state import Annotation, BBox
 from tests._producer_fixtures import image_label_key, label_image
+from tests._training_values import RATIONALE, drawn_split
+
+_DRAW = drawn_split(
+    seed=1,
+    val_ratio=0.25,
+    calibration_ratio=0.125,
+    holdout_ratio=0.125,
+    grouping="tile_prefix",
+)
+"""The draw both goldens are of."""
+
+GOLDEN_REQUESTED_RATIOS = {
+    "train": 0.5,
+    "val": 0.25,
+    "calibration": 0.125,
+    "holdout": 0.125,
+}
+"""The shares :data:`_DRAW` requests, as its selection records them."""
 
 # 4 source prefixes (srcA..srcD) x 3 tiles x 1 GT box each: 4 leakage groups, uniform density,
 # exactly meeting the draw's floor (one group each for train/val, two for the reference).
@@ -28,7 +46,7 @@ GOLDEN_DRAW_SPLITS = {
     "groups": 4,
     "seed": 1,
     "group_by": "tile_prefix",
-    "stratified": True,
+    "stratify_foreground": True,
 }
 GOLDEN_CALIBRATION_FOREGROUND_GROUPS = 2
 GOLDEN_REALIZED_RATIOS = {
@@ -74,11 +92,8 @@ def test_draw_splits_stats_golden(tmp_path: Path):
         tmp_path,
         str(root),
         output_path=str(out),
-        seed=1,
         subject="bud",
-        val_ratio=0.25,
-        calibration_ratio=0.125,
-        holdout_ratio=0.125,
+        **_DRAW,
     )
     result.pop("selection_dir")
     assert result.pop("scope") == {"subject": "bud", "attributes": ()}
@@ -105,11 +120,8 @@ def test_draw_splits_selection_document_golden(tmp_path: Path):
         tmp_path,
         str(root),
         output_path=str(out),
-        seed=1,
         subject="bud",
-        val_ratio=0.25,
-        calibration_ratio=0.125,
-        holdout_ratio=0.125,
+        **_DRAW,
     )
     assert result["splits"] == GOLDEN_DRAW_SPLITS["splits"]
     assert result["total_stems"] == 12
@@ -126,6 +138,8 @@ def test_draw_splits_selection_document_golden(tmp_path: Path):
     drawn = read_selection(out, project=tmp_path)
     assert drawn.counts() == GOLDEN_DRAW_SPLITS["splits"]
     assert {s.group: s.side for s in drawn.samples} == GOLDEN_SIDE_BY_GROUP
+    assert drawn.ratios == GOLDEN_REQUESTED_RATIOS
+    assert (drawn.stratify_foreground, drawn.rationale) == (True, RATIONALE)
     for sample in drawn.samples:
         assert Path(sample.source).parent == root / "images" / "2-11-26"
         assert sample.ground_truth == image_label_key(sample.source)

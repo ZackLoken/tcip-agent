@@ -1,4 +1,4 @@
-"""generic_trainer unit tests: minted-id uniqueness, seed defaulting, terminal
+"""generic_trainer unit tests: minted-id uniqueness, the run's stated seeding, terminal
 status on setup failure, and atomic checkpoint writes.
 """
 
@@ -8,11 +8,8 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from tcip_mcp.pipelines.schemas import train_config
 from tcip_mcp.pipelines.training import generic_trainer as gt
 from tcip_mcp.pipelines.training.generic_trainer import train
-from tcip_mcp.pipelines.training.run_registry import seeded
-from tests._chain_fixtures import training_config
 
 # mint_experiment_id: id uniqueness (same-second and cross-thread)
 
@@ -49,29 +46,7 @@ def test_mint_experiment_id_unique_across_threads():
     assert len(set(results)) == n
 
 
-# seeded: reproducibility, every run gets a recorded seed
-
-
-def _spec(**stated):
-    from tests._verified_checkpoint_fixtures import unbuilt_source
-
-    return train_config(
-        training_config(unbuilt_source("detection"), {}, **stated)
-    )
-
-
-def test_seeded_draws_and_records_a_seed_when_unset():
-    seed = seeded(_spec()).record().get("seed")
-    assert isinstance(seed, int) and 0 <= seed < 2**31
-
-
-def test_seeded_keeps_an_explicit_seed():
-    assert seeded(_spec(seed=123)).seed == 123
-
-
-def test_seeded_drawn_seeds_are_independent():
-    seeds = {seeded(_spec()).seed for _ in range(8)}
-    assert len(seeds) == 8  # OS entropy per run, not one fixed default
+# the run's own seeding: the seed and determinism its config states
 
 
 def _context(tmp_path, **stated):
@@ -89,19 +64,19 @@ def _context(tmp_path, **stated):
 
 
 def test_train_applies_the_runs_seed(tmp_path, monkeypatch):
+    """The trainer seeds every stream at the seed and determinism the run's config states."""
     captured = {}
 
-    def fake_set_seed(seed, deterministic=False):
+    def fake_set_seed(seed, *, deterministic):
         captured["seed"] = seed
         captured["deterministic"] = deterministic
 
     monkeypatch.setattr(gt, "set_seed", fake_set_seed)
-    ctx = _context(tmp_path, seed=seeded(_spec()).seed)
+    ctx = _context(tmp_path, seed=123, deterministic=True)
     run = train(ctx.run, ctx.train_loader)
 
     assert run.status == "completed", run.status_error
-    assert captured["seed"] == run.spec.seed is not None
-    assert captured["deterministic"] is False
+    assert captured == {"seed": 123, "deterministic": True}
 
 
 # ====================================================================
@@ -178,7 +153,7 @@ def test_capture_and_restore_rng_state_roundtrip():
 
     import numpy as np
 
-    gt.set_seed(0)
+    gt.set_seed(0, deterministic=False)
     state = gt.capture_rng_state(None)
     expected_next = (random.random(), np.random.rand(), torch.rand(1))
 

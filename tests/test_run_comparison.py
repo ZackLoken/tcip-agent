@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from tests._training_values import drawn_split
+
 
 def _opened(
     project, experiment_id: str, *, data_dir=None, split: dict | None = None
@@ -144,7 +146,7 @@ def test_split_reports_a_redrawn_bound_selection_distinctly(tmp_path):
     compare as the same data.
     """
     _bound("exp-bound-plain", tmp_path)
-    _bound("exp-bound-redrawn", tmp_path, redraw_within_selection=True, seed=7)
+    _bound("exp-bound-redrawn", tmp_path, seed=7)
 
     plain, redrawn = (
         c["split"]
@@ -155,7 +157,11 @@ def test_split_reports_a_redrawn_bound_selection_distinctly(tmp_path):
 
 
 def test_split_reports_a_drawn_seed_with_no_binding(tmp_path):
-    _opened(tmp_path, "exp-drawn-split", split={"seed": 99, "val_ratio": 0.15})
+    _opened(
+        tmp_path,
+        "exp-drawn-split",
+        split=drawn_split(seed=99, val_ratio=0.15),
+    )
 
     (c,) = _compared(tmp_path, "exp-drawn-split")
     assert c["split"] == {"case": "drawn", "seed": 99}

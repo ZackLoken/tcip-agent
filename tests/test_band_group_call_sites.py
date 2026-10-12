@@ -17,7 +17,7 @@ import pytest
 import tifffile
 
 from tests._producer_fixtures import dataset_over, label_image, registry_over  # noqa: E402
-from tests._training_values import IOU_THRESHOLD  # noqa: E402
+from tests._training_values import IOU_THRESHOLD, drawn_split  # noqa: E402
 
 
 def _write_group(images_dir: Path, stem: str, fill=(111, 222)) -> None:
@@ -361,10 +361,13 @@ def test_a_selection_records_a_grouped_capture_by_its_own_manifest_path(
         str(grouped_dataset),
         output_path=str(out),
         subject="bud",
-        seed=1,
-        val_ratio=0.25,
-        calibration_ratio=0.125,
-        holdout_ratio=0.125,
+        **drawn_split(
+            seed=1,
+            val_ratio=0.25,
+            calibration_ratio=0.125,
+            holdout_ratio=0.125,
+            grouping="tile_prefix",
+        ),
     )
     assert "error" not in result, result
 

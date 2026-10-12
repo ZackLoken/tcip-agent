@@ -16,6 +16,7 @@ from tcip_annotation.state import BBox, Polygon
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tcip_mcp.pipelines.data.datasets import clip_rows_to_tile
 from tests._producer_fixtures import dataset_over  # noqa: E402
+from tests._training_values import tiling_block
 
 SLIVER = 0.5
 """The sliver cutoff the wrapper tests state: their one-box fixtures derive no size spread."""
@@ -117,14 +118,14 @@ def test_a_dataset_too_sparse_to_derive_its_sliver_cutoff_refuses_naming_the_fie
             "detection",
             str(images_dir),
             subject="bud",
-            tiling={"enabled": True, "tile_size": 64, "overlap": 0.2},
+            tiling=tiling_block(tile_size=64, overlap=0.2),
         )
     stated = dataset_over(
         "detection",
         str(images_dir),
         subject="bud",
         tiling={
-            "enabled": True,
+            **tiling_block(),
             "tile_size": 64,
             "overlap": 0.2,
             "sliver_frac": SLIVER,
@@ -142,7 +143,7 @@ def test_tiled_detection_dataset_wrapper(tmp_path):
         str(images_dir),
         subject="bud",
         tiling={
-            "enabled": True,
+            **tiling_block(),
             "tile_size": 64,
             "overlap": 0.2,
             "sliver_frac": SLIVER,
@@ -194,7 +195,7 @@ def test_detection_and_instance_seg_tiles_of_one_frame_agree(tmp_path):
     edges = [shapely_geometry(region.rings).boundary for region in regions]
     # A tenth of the objects' size keeps the triangle's corner pieces, whose boxes are the point.
     tiling = {
-        "enabled": True,
+        **tiling_block(),
         "tile_size": 64,
         "overlap": 0.25,
         "sliver_frac": 0.1,
@@ -275,7 +276,7 @@ def test_tiled_dataset_keeps_empty_tiles(tmp_path):
         str(images_dir),
         subject="bud",
         tiling={
-            "enabled": True,
+            **tiling_block(),
             "tile_size": 64,
             "overlap": 0.2,
             "sliver_frac": SLIVER,
@@ -299,7 +300,7 @@ def test_tiled_dataset_collate_roundtrip(tmp_path):
         str(images_dir),
         subject="bud",
         tiling={
-            "enabled": True,
+            **tiling_block(),
             "tile_size": 64,
             "overlap": 0.2,
             "sliver_frac": SLIVER,
@@ -329,13 +330,13 @@ def test_build_dataset_no_tiling_unchanged(tmp_path):
         tmp_path / "cls", [0.4, 0.4], [0, 1], height=32, width=32
     )
     with pytest.raises(
-        ValueError, match="data.tiling is enabled for a run of task 'classific"
+        ValueError, match="data.tiling is stated for a run of task 'classific"
     ):
         dataset_over(
             "classification",
             str(cls_dir),
             str(csv_path),
-            tiling={"enabled": True},
+            tiling=tiling_block(),
         )
     ds2 = dataset_over("classification", str(cls_dir), str(csv_path))
     assert ds2.num_samples == 2  # plain classification dataset
@@ -353,10 +354,10 @@ def test_keep_regions_none_indexes_every_slice(tmp_path):
     images_dir = _det_dataset(tmp_path, n=1, size=256)
     base = dataset_over("detection", str(images_dir), subject="bud")
     plain = TiledDetectionDataset(
-        base, tile_size=64, overlap=0.2, sliver_frac=SLIVER
+        base, tile_size=64, overlap=0.2, sliver_frac=SLIVER, skip_empty=False
     )
     explicit_none = TiledDetectionDataset(
-        base, tile_size=64, overlap=0.2, sliver_frac=SLIVER, keep_regions=None
+        base, tile_size=64, overlap=0.2, sliver_frac=SLIVER, skip_empty=False, keep_regions=None
     )
     from tcip_mcp.pipelines.slicing import slice_lattice
 
@@ -383,13 +384,13 @@ def test_keep_regions_restricts_to_fully_inside_tiles(tmp_path):
     images_dir = _det_dataset(tmp_path, n=1, size=256)
     base = dataset_over("detection", str(images_dir), subject="bud")
     full = TiledDetectionDataset(
-        base, tile_size=64, overlap=0.2, sliver_frac=SLIVER
+        base, tile_size=64, overlap=0.2, sliver_frac=SLIVER, skip_empty=False
     )
     left_half = TiledDetectionDataset(
         base,
         tile_size=64,
         overlap=0.2,
-        sliver_frac=SLIVER,
+        sliver_frac=SLIVER, skip_empty=False,
         keep_regions=[(0, 0, 128, 256)],
     )
 
@@ -422,14 +423,14 @@ def test_keep_regions_two_views_share_one_base_and_partition_disjointly(
         base,
         tile_size=64,
         overlap=0.2,
-        sliver_frac=SLIVER,
+        sliver_frac=SLIVER, skip_empty=False,
         keep_regions=[(0, 0, 128, 256)],
     )
     right = TiledDetectionDataset(
         base,
         tile_size=64,
         overlap=0.2,
-        sliver_frac=SLIVER,
+        sliver_frac=SLIVER, skip_empty=False,
         keep_regions=[(128, 0, 256, 256)],
     )
 

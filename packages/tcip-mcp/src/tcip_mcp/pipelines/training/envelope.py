@@ -22,7 +22,12 @@ from typing import TYPE_CHECKING, Any
 from tcip_store import stored_number
 
 if TYPE_CHECKING:
-    from tcip_mcp.pipelines.schemas import SpatialManifest, TrainConfigSchema
+    from tcip_mcp.pipelines.schemas import (
+        AugmentationSpec,
+        SamplerSpec,
+        SpatialManifest,
+        TrainConfigSchema,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +74,7 @@ class TrainContext:
         return self.run.spec
 
     @property
-    def seed(self) -> Any:
+    def seed(self) -> int:
         """The validated config's ``seed``."""
         return self.spec.seed
 
@@ -80,14 +85,13 @@ class TrainContext:
 
         return run_device(self.spec)
 
-    def set_seed(
-        self, seed: int | None = None, deterministic: bool = False
-    ) -> None:
+    def set_seed(self) -> None:
+        """Seed every random stream at the validated config's ``seed`` and ``deterministic``
+        (``generic_trainer.set_seed``).
+        """
         from tcip_mcp.pipelines.training.generic_trainer import set_seed
 
-        eff = self.seed if seed is None else seed
-        if eff is not None:
-            set_seed(int(eff), deterministic=deterministic)
+        set_seed(self.spec.seed, deterministic=self.spec.deterministic)
 
     # ---- model ----
     def build_model(self) -> Any:
@@ -146,7 +150,11 @@ class TrainContext:
         return overfit_check(
             model or self.build_model(),
             self.task,
-            **self._contract_args(**overrides),
+            **self._contract_args(
+                seed=self.spec.seed,
+                deterministic=self.spec.deterministic,
+                **overrides,
+            ),
         )
 
     # ---- the default trainer: one optional convenience ----
@@ -181,13 +189,19 @@ class TrainContext:
         )(samples=samples, transforms=transforms)
 
     def tiled_dataset(
-        self, base: Any, *, tile_size: int, overlap: float, **kwargs: Any
+        self,
+        base: Any,
+        *,
+        tile_size: int,
+        overlap: float,
+        skip_empty: bool,
+        **kwargs: Any,
     ) -> Any:
         """Wrap a detection or instance-segmentation dataset in the native-resolution tiler
         (``datasets.TiledDetectionDataset``) at the lattice you compose it at, ``tile_size`` and
-        ``overlap``, both required. ``kwargs``: sliver_frac / skip_empty /
-        keep_regions / transforms, the transforms admitted over ``base``'s samples first
-        (``datasets.refuse_unchained``).
+        ``overlap``, and ``skip_empty``, whether a tile holding no object is dropped, each
+        required. ``kwargs``: sliver_frac / keep_regions / transforms, the transforms admitted
+        over ``base``'s samples first (``datasets.refuse_unchained``).
         """
         from tcip_mcp.pipelines.data.datasets import (
             TiledDetectionDataset,
@@ -200,7 +214,11 @@ class TrainContext:
             kwargs.get("transforms"),
         )
         return TiledDetectionDataset(
-            base, tile_size=tile_size, overlap=overlap, **kwargs
+            base,
+            tile_size=tile_size,
+            overlap=overlap,
+            skip_empty=skip_empty,
+            **kwargs,
         )
 
     def task_collate(self) -> Any:
@@ -210,7 +228,7 @@ class TrainContext:
 
     def build_sampler(
         self,
-        block: dict,
+        block: SamplerSpec,
         dataset: Any,
         *,
         num_workers: int | None = None,
@@ -222,7 +240,7 @@ class TrainContext:
             block, dataset, num_workers=num_workers, batch_size=batch_size
         )
 
-    def build_augmentation(self, cfg: dict) -> Any:
+    def build_augmentation(self, cfg: AugmentationSpec) -> Any:
         from tcip_mcp.pipelines.data.augmentations import build_augmentation
 
         return build_augmentation(cfg)
@@ -273,20 +291,16 @@ class TrainContext:
         freeze_to: int,
         *,
         prev_trainable: int | None = None,
-        enforce_monotonic: bool = True,
     ) -> int:
         """Apply a stage's progressive-unfreeze policy (+ the monotonic guard) and return the new
-        trainable-param count.
+        trainable-param count (``generic_trainer.apply_stage_freeze``, whose refusals propagate).
         """
         from tcip_mcp.pipelines.training.generic_trainer import (
             apply_stage_freeze,
         )
 
         return apply_stage_freeze(
-            model,
-            freeze_to,
-            prev_trainable=prev_trainable,
-            enforce_monotonic=enforce_monotonic,
+            model, freeze_to, prev_trainable=prev_trainable
         )
 
     def compute_lr_scale(self, *args: Any, **kwargs: Any) -> Any:
@@ -399,13 +413,13 @@ class TrainContext:
 
     def report_objective(self, value: float) -> None:
         """Record ``value`` as a metrics row stamping it the ``selection`` under the run's
-        objective, at the last epoch logged (:meth:`_epoch_sink`).
+        config's ``evaluation.selection_metric``, at the last epoch logged (:meth:`_epoch_sink`).
         """
         self._epoch_sink(
             self._epoch,
             {
                 "selection": float(value),
-                "selection_metric": self.run.objective.selection_metric,
+                "selection_metric": self.spec.evaluation.selection_metric,
             },
         )
 

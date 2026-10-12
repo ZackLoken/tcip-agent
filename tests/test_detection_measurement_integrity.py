@@ -26,6 +26,8 @@ from tests._training_values import (
     IOU_THRESHOLD,
     SCORE_WEIGHTS,
     VALIDATION_CONF,
+    drawn_split,
+    tiling_block,
 )  # noqa: E402
 from tests._verified_checkpoint_fixtures import (  # noqa: E402
     SAMPLE_DETECTOR_PASS,
@@ -208,7 +210,7 @@ def test_run_id_reuses_training_tiling(tmp_path, monkeypatch):
     images_dir = seed_bud_images(tmp_path / "images" / UNDATED_BUCKET)
     data = {
         **SCOPED_DATA,
-        "tiling": {"enabled": True, "tile_size": 64, "sliver_frac": 0.5},
+        "tiling": tiling_block(tile_size=64, sliver_frac=0.5),
     }
     run_dir = finished_run(
         tmp_path, experiment_id="det-measure-tiled", data=data
@@ -548,10 +550,13 @@ def test_the_three_evaluation_loaders_over_one_truth_and_one_predictor_agree(
         str(root),
         output_path=str(tmp_path / "selection"),
         subject="bud",
-        seed=2,
-        val_ratio=0.25,
-        calibration_ratio=0.25,
-        holdout_ratio=0.25,
+        **drawn_split(
+            seed=2,
+            val_ratio=0.25,
+            calibration_ratio=0.25,
+            holdout_ratio=0.25,
+            grouping="tile_prefix",
+        ),
     )
     assert "error" not in drawn, drawn
     confirm_count_trait(tmp_path)
@@ -638,7 +643,7 @@ def test_explicit_tiling_override_on_checkpoint(tmp_path, monkeypatch):
         str(images_dir),
         stated=DETECTOR_PASS,
         tiling=TilingSpec.model_validate(
-            {"enabled": True, "tile_size": 64, "sliver_frac": 0.5}
+            tiling_block(tile_size=64, sliver_frac=0.5)
         ),
         iou_threshold=IOU_THRESHOLD,
     )
@@ -981,7 +986,7 @@ def test_launch_training_persists_effective_tile_geometry(
 
     cfg = small_detection_config(images_dir, BLOB_BUILDER)
     # no tile_size: the lattice the ground truth derives must be persisted
-    cfg["data"]["tiling"] = {"enabled": True, "sliver_frac": 0.5}
+    cfg["data"]["tiling"] = tiling_block(sliver_frac=0.5)
     res = training_tools.launch_training(tmp_path, cfg, actor=None)
     assert res["pid"] != os.getpid()  # a different OS process, not this one
     eid = res["experiment_id"]
