@@ -90,14 +90,21 @@ implementation is replaceable and the guarantee is not.
 - Enumerate the consumers before deleting anything; a deleted assertion's fact needs a new home.
 - When two code paths must agree, call one from the other. A consistency check whose two sides share
   an implementation proves nothing.
-- A rail must admit valid work, not only reject invalid work: every refusal ships with a test
-  proving a legitimate call still succeeds, constructed through the platform's own producer.
-- No silent fallback when required information is missing: require it or refuse, naming the real
-  primitive. A guessed value that can reach a delivered result is a fabrication with a warning
-  attached. A refusal is the last resort, never the design: the goal is fewer places where a fact
-  can go missing, so a fact read in several places gets one producer and one path its readers share,
-  and one check at that boundary, rather than a refusal inside each reader. Several readers each
-  asking the same question is the defect, and adding a refusal to each is how it survives.
+- A library the environment already carries is read before anything is written by hand: torch,
+  torchvision, numpy, rasterio, shapely, pyproj, pycocotools, SAHI, OpenCV, and a library in the
+  lock through a declared dependency, which the change declares. A hand-written version of what
+  one of them provides and maintains is a defect; only a platform rule the library call cannot
+  carry stays, as a thin layer over the call. The platform's own code is the measurement gate,
+  the trait entry, the records and the rails, and as little else as possible.
+- No silent fallback when required information is missing. A required value is a pydantic field
+  or a parameter with no default, and its type is what refuses it unstated; nothing is written by
+  hand to say the same. A guessed value that can reach a delivered result is a fabrication with a
+  warning attached. A hand-written refusal exists in one place only: where the data cannot carry
+  what a claim needs and the message must name the primitive the caller should use instead, at
+  the one boundary that fact enters, never inside each reader of it; several readers each asking
+  the same question is the defect, and a check in each is how it survives. The few hand-written
+  refusals that remain each ship with a test, through the platform's own producer, that a
+  legitimate call still succeeds.
 - A stated format, subject or root is a claim the data must positively carry, never one it merely
   fails to contradict.
 - Nothing on disk is a consumer. Every project, record, lock, hash, log row and checkpoint that
