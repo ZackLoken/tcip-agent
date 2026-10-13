@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Protocol, cast
 
@@ -38,8 +37,6 @@ from tcip_mcp.pipelines.model_build import (
     recorded_model_dims,
 )
 from tcip_mcp.pipelines.model_contract import DETECTOR_TASKS, TILING_TASKS
-
-logger = logging.getLogger(__name__)
 
 
 class WindowedRasterReader(Protocol):
@@ -83,7 +80,6 @@ class GenericPredictor:
         self.checkpoint_path = checkpoint.path
         self.checkpoint_sha256 = checkpoint.sha256
         spec = checkpoint.spec
-        self.model_source = spec.model_source
         self.task = spec.model_source.task
 
         tiling = run_tiling(self.task, spec.data.tiling)
@@ -98,7 +94,10 @@ class GenericPredictor:
             len(a.values) for a in self.dims.get("attributes", ())
         ]
         self.model = build_from_model_source(
-            spec.model_source, checkpoint.layout, self.dims
+            spec.model_source,
+            checkpoint.layout,
+            self.dims,
+            checkpoint.geometry,
         )
         self.model.load_state_dict(checkpoint.payload[STATE_DICT_KEY])
         self.model.to(self.device)
@@ -368,19 +367,6 @@ class GenericPredictor:
             cast(int, execution.tile_size),
             execution.tile_resize,
         )
-        model_edge = (
-            min(int(tile_resize[0]), int(tile_resize[1]))
-            if tile_resize
-            else tile_size
-        )
-        min_size = (self.model_source.builder_kwargs or {}).get("min_size")
-        if min_size and abs(int(min_size) - model_edge) > model_edge:
-            logger.warning(
-                "tiled inference: model min_size=%s differs greatly from the %spx tiles "
-                "it is handed (tiles will be rescaled).",
-                min_size,
-                model_edge,
-            )
         collect_masks = self.task == "instance_seg" and require_masks
         merge = cross_tile_merge(execution)
         from tcip_mcp.pipelines.derivations import detection_cap

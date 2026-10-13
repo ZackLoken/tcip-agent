@@ -15,8 +15,9 @@ Derive it by measuring the dataset, not by classifying the trait:
 
 - `tcip scan-dataset <folder_path>`: how many images, labels and predictions exist,
   and the detected label format; capture dates come from `ingest_images`, below.
-- `pipelines.derivations.gt_aspect_ratios` over the GT `(w, h)`: the object elongation that
-  actually occurs here, rather than an assumed shape.
+- `pipelines.derivations.derive_detector_geometry` over the frame and the GT boxes: the object
+  sizes and elongation that actually occur here (`gt_aspect_ratios` inside it), rather than an
+  assumed shape.
 - Object scale against your tile size: whether objects survive tiling, and whether a seam cuts
   them. `pipelines.derivations.derive_cross_tile_nms` reads the GT's neighbor-IoU tail for an
   `nms` merge, and returns `None` when the GT gives no basis for a threshold. An assessment or a
@@ -103,10 +104,13 @@ the derivations, the `ctx` craft library, and the proposal-engine and scorer reg
 
 Tailor the architecture to the data in hand, derived rather than pinned:
 
-- Anchors from the GT box shapes, not a fixed `(0.5, 1, 2)`. Feed the dataset's GT `(w, h)`
-  through `pipelines.derivations.gt_aspect_ratios` and set anchor *sizes* from the GT object-size
-  distribution, so anchors cover the objects that actually occur (e.g. elongated organs a default
-  ratio can't match).
+- A torchvision detector's input scale and anchors from the frame and the GT boxes:
+  `pipelines.derivations.derive_detector_geometry` keeps the frame at its native scale and sizes
+  and shapes the anchors to the objects that actually occur (e.g. elongated organs). A run's
+  resolution derives it at the run's own frame (the tile edge, else the frame its sources share)
+  and records it as `TrainGeometry.detector`, which the platform hands every detection builder;
+  a run resolving no one frame (mixed sizes, a dataset its own builder serves) states it with its
+  reason as `model_source.detector_geometry`, or refuses naming both.
 - Strides / feature levels to the object scale: add a finer pyramid level for tiny objects,
   drop levels you don't need.
 - Normalization to the batch size: with the tiny batches large detectors force, BatchNorm
@@ -145,10 +149,12 @@ Three seams support bespoke work; the platform guarantees integrity around it:
   built-in loader is not a task with no producer: the platform admits by the shape of the ground
   truth (the images' own label documents, or the masks or table `data.labels_dir` names), whatever
   the task, so your builder receives the same samples a built-in loader would. Registry-free, imported like any module, never `exec`'d.
-- `pipelines.model_build.build_from_model_source(spec.model_source, layout, dims)` builds from a
-  validated config's `model_source`: an *importable* builder you wrote (`{"builder":
-  "my_module:build_net", "builder_kwargs": {...}, "source_files": [...], "task": "detection"}`,
-  `builder` and `task` required), imported from `layout`, the run's declared files laid out under
+- `pipelines.model_build.build_from_model_source(spec.model_source, layout, dims, geometry)`
+  builds from a validated config's `model_source` at the geometry its run's resolution recorded:
+  an *importable* builder you wrote (`{"builder": "my_module:build_net", "builder_kwargs":
+  {...}, "source_files": [...], "task": "detection", "normalization": {...}}`, `builder`, `task`
+  and `normalization` required), imported
+  from `layout`, the run's declared files laid out under
   one root (`model_build.SourceLayout`; `ctx.build_model` hands it the run's own). `source_files`
   names the files your run imports, the builder's own module among them and a
   `training_source` loop's module too; a builder whose module none of them is refuses, and so
@@ -167,8 +173,14 @@ Three seams support bespoke work; the platform guarantees integrity around it:
   isolates, and `attributes`, the scope's attribute records when it declares any, one
   per-instance head per record sized by its values (`build_detector` takes them and adds those
   heads over its boxes); over ground truth carrying its own classes, `num_classes` or `num_ranks`
-  as that ground truth derives them; a regression run carries no count. Your builder accepts
-  those keywords, and `builder_kwargs` restating one refuses by name. A bespoke `dataset_source` whose loader composes its own bands
+  as that ground truth derives them; a regression run carries no count. Beside them it hands
+  `image_mean`/`image_std` from `normalization`, and `pretrained_weights`, the weights your
+  builder loads, when its source names them (the weights' own statistics, or a statement of
+  every band for a model reading more bands than they carry); and to a detection builder,
+  always, `min_size`, `max_size`,
+  `anchor_base_size` and `aspect_ratios`, the geometry the run's resolution recorded. Your
+  builder accepts those keywords (one that reads no anchors still accepts them), and
+  `builder_kwargs` restating one refuses by name. A bespoke `dataset_source` whose loader composes its own bands
   states `data.num_channels` for the width it hands the model, and one over ground truth that
   carries its own classes states `data.num_classes` or `data.num_ranks`.
   `pipelines.model_contract`

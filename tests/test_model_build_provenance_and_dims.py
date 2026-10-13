@@ -19,6 +19,7 @@ from tcip_mcp import subject_registry  # noqa: E402
 from tcip_mcp.pipelines.data.label_queries import registry_scope  # noqa: E402
 from tcip_mcp.pipelines.model_build import (  # noqa: E402
     CONFIG_KEY,
+    GEOMETRY_KEY,
     SNAPSHOT_KEY,
     STATE_DICT_KEY,
     recorded_model_dims,
@@ -26,12 +27,19 @@ from tcip_mcp.pipelines.model_build import (  # noqa: E402
     snapshot_model_source,
 )
 from tcip_mcp.pipelines.schemas import (  # noqa: E402
+    HANDED_TO_BUILDER,
     TrainGeometry,
     checked_train_config,
     train_config,
 )
 from tcip_mcp.pipelines.training.envelope import TrainContext
-from tests._chain_fixtures import built_model, training_config
+from tests import REPO_ROOT
+from tests._chain_fixtures import (
+    FRAME_STATISTICS,
+    built_model,
+    training_config,
+    weights_statistics,
+)
 from tests._producer_fixtures import registry_over  # noqa: E402
 from tests._training_values import (  # noqa: E402
     drawn_split,
@@ -39,8 +47,12 @@ from tests._training_values import (  # noqa: E402
     tiling_block,
 )
 
-UNSHARED = TrainGeometry(native_size=None, object_density=None)
+UNSHARED = TrainGeometry(native_size=None, object_density=None, detector=None)
 """A resolution whose training frames share no one size."""
+
+WEIGHTS_NORMALIZATION = weights_statistics({})["normalization"]
+"""The normalization record of the pretrained weights a probe model names: these tests read
+the shapes a build takes, never the data its statistics would describe."""
 
 PROBE_NET = f"{Path(__file__).stem}:build_probe_net"
 """The ``model_source`` builder of :func:`build_probe_net`."""
@@ -49,11 +61,18 @@ PROBE_FILES = [__file__]
 
 
 def build_probe_net(
-    *, num_classes: int = 2, in_chans: int = 3, attributes: tuple = ()
+    *,
+    image_mean: list[float],
+    image_std: list[float],
+    pretrained_weights=None,
+    num_classes: int = 2,
+    in_chans: int = 3,
+    attributes: tuple = (),
 ):
     """A tiny module whose parameter shapes follow its builder kwargs, one head per attribute
-    sized by its values. Its forward is never run here; these tests read parameter shapes
-    only.
+    sized by its values, taking the statistics it is handed and the weights a run normalizing
+    by weights hands it, loading none. Its forward is never run here; these tests read
+    parameter shapes only.
     """
     import torch.nn as nn
 
@@ -180,7 +199,13 @@ def test_contract_dims_take_the_admitted_attributes_without_the_loader_backgroun
     ]  # the head this run trains
     spec = train_config(
         training_config(
-            {"builder": PROBE_NET, "builder_kwargs": {}, "task": "detection"},
+            tmp_path,
+            {
+                "builder": PROBE_NET,
+                "builder_kwargs": {},
+                "task": "detection",
+                "normalization": WEIGHTS_NORMALIZATION,
+            },
             {
                 "scope": asdict(scope),
                 "num_channels": 5,
@@ -218,10 +243,12 @@ def test_contract_dims_count_only_the_subject_for_a_scope_declaring_no_attribute
 
     spec = train_config(
         training_config(
+            tmp_path,
             {
                 "builder": PROBE_NET,
                 "builder_kwargs": {},
                 "task": "instance_seg",
+                "normalization": WEIGHTS_NORMALIZATION,
             },
             {
                 "scope": asdict(registry_scope(images_dir, "bud")),
@@ -260,6 +287,7 @@ def test_snapshot_copies_each_dotted_module_at_its_module_path(tmp_path):
     ]
     spec = train_config(
         training_config(
+            tmp_path / "project",
             {
                 "builder": "agent_code_seams.nets:build_net",
                 "source_files": [
@@ -268,6 +296,7 @@ def test_snapshot_copies_each_dotted_module_at_its_module_path(tmp_path):
                     str(declared[3]),
                 ],
                 "task": "detection",
+                "normalization": WEIGHTS_NORMALIZATION,
             },
             {
                 "dataset_source": {
@@ -303,9 +332,11 @@ def test_snapshot_captures_the_module_of_a_builder_spelled_without_a_colon(
     record, _copies = snapshot_model_source(
         train_config(
             training_config(
+                tmp_path / "project",
                 {
                     "builder": "agent_code_dotted.detectors.build_net",
                     "task": "detection",
+                    "normalization": WEIGHTS_NORMALIZATION,
                     "source_files": [
                         str(pkg / "detectors.py"),
                         str(pkg / "__init__.py"),
@@ -329,7 +360,12 @@ def test_a_missing_or_empty_builder_refuses_at_the_configs_validation():
     for builder in (None, ""):
         _spec, issues = checked_train_config(
             training_config(
-                {"builder": builder, "task": "detection"},
+                REPO_ROOT,
+                {
+                    "builder": builder,
+                    "task": "detection",
+                    "normalization": WEIGHTS_NORMALIZATION,
+                },
                 {"split": drawn_split()},
             )
         )
@@ -340,7 +376,12 @@ def test_a_missing_or_empty_builder_refuses_at_the_configs_validation():
     assert (
         checked_train_config(
             training_config(
-                {"builder": PROBE_NET, "task": "detection"},
+                REPO_ROOT,
+                {
+                    "builder": PROBE_NET,
+                    "task": "detection",
+                    "normalization": WEIGHTS_NORMALIZATION,
+                },
                 {"split": drawn_split()},
             )
         )[1]
@@ -349,30 +390,68 @@ def test_a_missing_or_empty_builder_refuses_at_the_configs_validation():
 
 
 def _probe_config() -> dict:
-    """A classification run's recorded config: table ground truth records the empty scope."""
+    """A classification run's recorded config of this repository: table ground truth records
+    the empty scope.
+    """
     return training_config(
+        REPO_ROOT,
         {
             "builder": PROBE_NET,
             "source_files": PROBE_FILES,
             "task": "classification",
+            "normalization": WEIGHTS_NORMALIZATION,
         },
         {"num_channels": 5, "num_classes": 7, "scope": {}},
     )
 
 
-@pytest.mark.parametrize(
-    "restated", ["in_chans", "num_classes", "num_ranks", "attributes"]
-)
-def test_builder_kwargs_restating_a_dimension_refuses_by_name(restated):
-    """The band count and the one count reach the builder from the run's data section alone; a
-    builder_kwargs carrying any dimension refuses naming it before any build, the rank count
-    included though this run resolves none.
+@pytest.mark.parametrize("restated", HANDED_TO_BUILDER)
+def test_builder_kwargs_restating_a_handed_value_refuses_by_name(restated):
+    """The dimensions reach the builder from the run's data section, the weights and statistics
+    from the model source's normalization record and a detector's geometry from the run's
+    resolution; a builder_kwargs carrying
+    any of them refuses naming it where the config is validated, the rank count included though
+    this run resolves none.
     """
     config = _probe_config()
     config["model_source"]["builder_kwargs"] = {restated: 4}
 
-    with pytest.raises(ValueError, match=restated):
-        built_model(config)
+    issues = checked_train_config(config)[1]
+    assert any(restated in issue for issue in issues), issues
+
+
+def handed_kwargs(**kwargs) -> dict:
+    """A builder answering the keyword values it was handed."""
+    return kwargs
+
+
+def test_the_names_a_build_hands_are_the_names_a_restatement_refuses():
+    """A build stating weights, their statistics and a detector geometry hands its builder only
+    names :data:`HANDED_TO_BUILDER` holds, and every one of them but the count and attributes
+    this run has none of.
+    """
+    from tcip_mcp.pipelines.derivations import pretrained_normalization
+    from tcip_mcp.pipelines.schemas import PretrainedWeights
+    from tests._chain_fixtures import detector_geometry
+
+    weights = {"library": "timm", "name": "resnet18.a1_in1k"}
+    config = training_config(
+        REPO_ROOT,
+        {
+            "builder": f"{Path(__file__).stem}:handed_kwargs",
+            "source_files": PROBE_FILES,
+            "task": "classification",
+            "normalization": pretrained_normalization(
+                PretrainedWeights(**weights)
+            ).model_dump(),
+        },
+        {"num_channels": 3, "num_classes": 7, "scope": {}},
+    )
+
+    handed = built_model(config, detector_geometry())
+
+    assert set(HANDED_TO_BUILDER) - set(handed) == {"num_ranks", "attributes"}
+    assert set(handed) <= set(HANDED_TO_BUILDER)
 
 
 def test_a_model_source_stating_its_own_width_refuses_by_name():
@@ -391,7 +470,12 @@ def test_an_ordinal_run_recording_no_rank_count_refuses_by_name():
     missing rather than failing on a bare key.
     """
     config = training_config(
-        {"builder": PROBE_NET, "task": "ordinal"},
+        REPO_ROOT,
+        {
+            "builder": PROBE_NET,
+            "task": "ordinal",
+            "normalization": WEIGHTS_NORMALIZATION,
+        },
         {"num_channels": 3, "scope": {}},
     )
 
@@ -404,7 +488,12 @@ def test_a_run_over_label_documents_recording_a_count_refuses():
     recorded beside it would be a second size, so the dimensions refuse rather than choose.
     """
     config = training_config(
-        {"builder": PROBE_NET, "task": "detection"},
+        REPO_ROOT,
+        {
+            "builder": PROBE_NET,
+            "task": "detection",
+            "normalization": WEIGHTS_NORMALIZATION,
+        },
         {
             "num_channels": 3,
             "num_classes": 5,
@@ -454,10 +543,12 @@ def test_a_run_builds_at_the_width_and_heads_its_admitted_data_records(
         )
     _dataset, data = run_over("detection", images_dir, subject="leaf")
     config = training_config(
+        tmp_path,
         {
             "builder": PROBE_NET,
             "source_files": PROBE_FILES,
             "task": "detection",
+            "normalization": WEIGHTS_NORMALIZATION,
         },
         data,
     )
@@ -496,10 +587,12 @@ def test_a_saved_checkpoint_rebuilds_the_architecture_its_config_builds(
     )
 
     config = training_config(
+        tmp_path,
         {
             "builder": PROBE_NET,
             "source_files": PROBE_FILES,
             "task": "classification",
+            "normalization": FRAME_STATISTICS,
         },
         {
             **table_images(fixture_data_dir(tmp_path, "probe"), n=4),
@@ -532,7 +625,10 @@ def test_a_saved_checkpoint_rebuilds_the_architecture_its_config_builds(
     layout = owning_run_layout(spec, loaded[SNAPSHOT_KEY], tmp_path)
     assert layout.root == ctx.run_dir / SNAPSHOT_DIR
     rebuilt = build_from_model_source(
-        spec.model_source, layout, recorded_model_dims(spec)
+        spec.model_source,
+        layout,
+        recorded_model_dims(spec),
+        TrainGeometry.model_validate(loaded[GEOMETRY_KEY]),
     )
     assert _param_shapes(rebuilt) == _param_shapes(trained)
 

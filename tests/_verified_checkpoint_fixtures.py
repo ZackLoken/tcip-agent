@@ -15,6 +15,7 @@ from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._chain_fixtures import (
     BESPOKE_DETECTION,
     BESPOKE_MODELS,
+    FRAME_STATISTICS,
     SAVE_BUILT_WEIGHTS,
     training_config,
 )
@@ -32,11 +33,11 @@ seed its own draw is made at; the admission reads the attributes the registry de
 
 BUILT_DETECTOR: dict[str, Any] = {
     "builder": BESPOKE_DETECTION,
-    "builder_kwargs": {"min_size": 64, "max_size": 128},
     "source_files": [BESPOKE_MODELS],
     "task": "detection",
+    "normalization": FRAME_STATISTICS,
 }
-"""A tiny detection builder's ``model_source``."""
+"""A tiny detection builder's ``model_source``, normalizing by its own frames' statistics."""
 
 SAVE_A_SECOND_CHECKPOINT = (
     "bespoke_models:save_built_weights_and_a_second_checkpoint"
@@ -45,14 +46,8 @@ SAVE_A_SECOND_CHECKPOINT = (
 
 
 def built_detector(**builder_kwargs: Any) -> dict:
-    """:data:`BUILT_DETECTOR` with ``builder_kwargs`` laid over its own builder keywords."""
-    return {
-        **BUILT_DETECTOR,
-        "builder_kwargs": {
-            **BUILT_DETECTOR["builder_kwargs"],
-            **builder_kwargs,
-        },
-    }
+    """:data:`BUILT_DETECTOR` with ``builder_kwargs`` as its builder keywords."""
+    return {**BUILT_DETECTOR, "builder_kwargs": builder_kwargs}
 
 
 def detector_declaring(*files: str) -> dict:
@@ -63,13 +58,6 @@ def detector_declaring(*files: str) -> dict:
         **BUILT_DETECTOR,
         "source_files": [*BUILT_DETECTOR["source_files"], *files],
     }
-
-
-ONE_BAND_DETECTOR = built_detector(image_mean=[0.4], image_std=[0.2])
-""":data:`BUILT_DETECTOR` normalizing one band, for a checkpoint whose data records one channel."""
-
-SQUARE_64_DETECTOR = built_detector(max_size=64)
-""":data:`BUILT_DETECTOR` with its resize bounds both at 64 px."""
 
 
 def detection_images(
@@ -132,17 +120,28 @@ def table_images(where: Path, *, n: int = 2) -> dict:
 
 
 def detection_config(
-    where: Path, *, model_source: dict = BUILT_DETECTOR, **config: Any
+    where: Path,
+    *,
+    project: Path,
+    model_source: dict = BUILT_DETECTOR,
+    split: dict | None = None,
+    **config: Any,
 ) -> dict:
     """A :func:`~tests._chain_fixtures.training_config` of ``model_source`` (by default
-    :data:`BUILT_DETECTOR`) over two :func:`detection_images` frames under ``where``, scoped as
-    :data:`SCOPED_DATA`, with ``config``'s keys in place of their own.
+    :data:`BUILT_DETECTOR`) under ``project`` over two :func:`detection_images` frames under
+    ``where``, scoped as :data:`SCOPED_DATA` and drawing ``split`` when one is given, with
+    ``config``'s keys in place of their own.
     """
     from tests._chain_fixtures import training_config
 
     return training_config(
+        project,
         model_source,
-        {**detection_images(where, SCOPED_DATA["scope"]), **SCOPED_DATA},
+        {
+            **detection_images(where, SCOPED_DATA["scope"]),
+            **SCOPED_DATA,
+            **({} if split is None else {"split": split}),
+        },
         **config,
     )
 
@@ -307,7 +306,11 @@ def finished_run(
             ),
         }
     run_config = training_config(
-        model_source, stated, training_source=training_source, **config
+        Path(root),
+        model_source,
+        stated,
+        training_source=training_source,
+        **config,
     )
     if metrics:
         run_config["fixture_metrics"] = metrics
@@ -340,19 +343,21 @@ def resolved_run(
     """
     return opened_run(
         root,
-        training_config(unbuilt_source(task), data),
+        training_config(Path(root), unbuilt_source(task), data),
         experiment_id=experiment_id,
     )
 
 
 def unbuilt_source(task: str) -> dict:
     """The ``model_source`` of a ``task`` run no body ever builds a model for: the tiny detection
-    builder named for a run that only resolves and records.
+    builder named for a run that only resolves and records, normalizing by the statistics of
+    the frames it trains on (:data:`~tests._chain_fixtures.FRAME_STATISTICS`).
     """
     return {
         "builder": BESPOKE_DETECTION,
         "source_files": [BESPOKE_MODELS],
         "task": task,
+        "normalization": FRAME_STATISTICS,
     }
 
 

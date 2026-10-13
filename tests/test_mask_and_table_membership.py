@@ -57,7 +57,7 @@ def _resolved(project: Path, experiment_id: str, task: str, data_cfg: dict):
 
     run_dir = opened_run(
         project,
-        training_config(unbuilt_source(task), data_cfg),
+        training_config(project, unbuilt_source(task), data_cfg),
         experiment_id=experiment_id,
     )
     ctx = prepare_run_context(observe(run_dir))
@@ -77,7 +77,7 @@ def _mask_dataset(root: Path) -> tuple[Path, Path]:
     images_dir.mkdir(parents=True, exist_ok=True)
     masks_dir.mkdir(parents=True, exist_ok=True)
     for index, stem in enumerate(STEMS):
-        Image.new("RGB", (16, 16), (10 * index, 20, 30)).save(
+        Image.new("RGB", (16, 16), (10 * index, 20 + index, 30 + index)).save(
             images_dir / f"{stem}.png"
         )
         painted_frame(
@@ -95,7 +95,7 @@ def _table_dataset(root: Path) -> tuple[Path, Path]:
     images_dir.mkdir(parents=True, exist_ok=True)
     rows = []
     for index, stem in enumerate(STEMS):
-        Image.new("RGB", (16, 16), (10 * index, 20, 30)).save(
+        Image.new("RGB", (16, 16), (10 * index, 20 + index, 30 + index)).save(
             images_dir / f"{stem}.png"
         )
         rows.append((stem, index % 3))
@@ -477,7 +477,7 @@ def test_a_dotted_row_key_names_one_member_end_to_end(tmp_path: Path):
     dotted = [f"a.{index}" for index in range(8)]
     rows = []
     for index, key in enumerate(dotted):
-        Image.new("RGB", (16, 16), (10 * index, 20, 30)).save(
+        Image.new("RGB", (16, 16), (10 * index, 20 + index, 30 + index)).save(
             images_dir / f"{key}.png"
         )
         rows.append((key, index % 3))
@@ -630,7 +630,7 @@ def _three_class_masks(root: Path) -> tuple[Path, Path]:
     images_dir.mkdir(parents=True, exist_ok=True)
     masks_dir.mkdir(parents=True, exist_ok=True)
     for index, stem in enumerate(STEMS[:4]):
-        Image.new("RGB", (16, 16), (10 * index, 20, 30)).save(
+        Image.new("RGB", (16, 16), (10 * index, 20 + index, 30 + index)).save(
             images_dir / f"{stem}.png"
         )
         extents = [((0, 0, 8, 8), 1)] + (
@@ -744,7 +744,7 @@ def test_a_runs_metrics_are_reported_over_the_class_space_it_trains_in(
         }
     )
 
-    train_ds, _val_ds, _partition, resolved = _train_val(
+    train_ds, _val_ds, partition, resolved = _train_val(
         tmp_path, "semantic_seg", data
     )
     held = {
@@ -757,7 +757,14 @@ def test_a_runs_metrics_are_reported_over_the_class_space_it_trains_in(
 
     count = resolved.num_classes
     assert count is not None
-    model = bespoke_models.build_bespoke_semantic_seg(num_classes=count)
+    from tests._chain_fixtures import frame_statistics, train_sources
+
+    stats = frame_statistics(train_sources(partition), 3)
+    model = bespoke_models.build_bespoke_semantic_seg(
+        num_classes=count,
+        image_mean=stats["image_mean"],
+        image_std=stats["image_std"],
+    )
     loader = DataLoader(
         train_ds, batch_size=1, collate_fn=task_collate("semantic_seg")
     )

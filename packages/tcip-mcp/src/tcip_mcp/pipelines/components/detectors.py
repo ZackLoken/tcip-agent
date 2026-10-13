@@ -44,13 +44,11 @@ class BackboneNeckAdapter(nn.Module):
         return OrderedDict({"0": neck_out})
 
 
-def _default_anchor_sizes(
-    num_levels: int, base: int = 32
-) -> tuple[tuple[int, ...], ...]:
-    """One anchor size per pyramid level, doubling each level.
+def _anchor_sizes(num_levels: int, base: int) -> tuple[tuple[int, ...], ...]:
+    """One anchor size per pyramid level, ``base`` at the finest, doubling each level.
 
-    ``base=32, num_levels=4`` -> ``((32,),(64,),(128,),(256,))``. Generated for ``num_levels``
-    so ``add_p2`` (5+ levels) doesn't crash.
+    ``base=8, num_levels=4`` -> ``((8,),(16,),(32,),(64,))``. Generated for ``num_levels`` so
+    ``add_p2`` (5+ levels) doesn't crash.
     """
     return tuple((base * 2**i,) for i in range(num_levels))
 
@@ -69,45 +67,21 @@ def _normalization(
     adapter: Any, in_chans: int | None, image_mean, image_std, detector: str
 ) -> dict:
     """Validated ``image_mean``/``image_std`` kwargs for a torchvision detector at ``in_chans``
-    (probed from ``adapter`` when ``None``): a build at other than three bands stating no
-    per-band statistics refuses naming ``pipelines.derivations.band_normalization_stats``.
+    (probed from ``adapter`` when ``None``), one value per band. Refuses (``ValueError``)
+    statistics of another length than the band count, naming the stated route.
     """
+    mean, std = [float(v) for v in image_mean], [float(v) for v in image_std]
     # The caller is authoritative: only they know the band count, and the probe is a registration-
     # order guess that is wrong for band-projection and neck-first adapters alike.
     if in_chans is None:
         in_chans = _probe_in_chans(adapter)
-    if image_mean is None and image_std is None:
-        if in_chans is None:
-            raise ValueError(
-                f"build_detector('{detector}', ...) cannot tell how many bands this backbone "
-                f"takes, and no image_mean/image_std were given: torchvision would normalize with "
-                f"3-element ImageNet statistics, which describe an image nobody here has "
-                f"confirmed is RGB. State in_chans, or pass per-band statistics derived with "
-                "pipelines.derivations.band_normalization_stats(...)."
-            )
-        if in_chans == 3:
-            return {}  # torchvision's own ImageNet default applies
-        raise ValueError(
-            f"build_detector('{detector}', ..., in_chans={in_chans}) needs per-band image_mean and "
-            f"image_std of length {in_chans}: torchvision normalizes with 3-element ImageNet "
-            f"statistics by default, which do not describe a {in_chans}-band image: at 1 channel "
-            f"they silently broadcast it to 3, and at any other count they raise inside the "
-            f"transform. Derive them from your training split with "
-            f"pipelines.derivations.band_normalization_stats(...) and pass both."
-        )
-    if image_mean is None or image_std is None:
-        raise ValueError(
-            f"build_detector('{detector}', ...) needs image_mean and image_std together; got only "
-            f"{'image_mean' if image_mean is not None else 'image_std'}."
-        )
-    mean, std = [float(v) for v in image_mean], [float(v) for v in image_std]
-    # With no in_chans stated and none probable, the statistics themselves state the band count.
     bands = in_chans if in_chans is not None else len(mean)
     if len(mean) != bands or len(std) != bands:
         raise ValueError(
             f"build_detector('{detector}', ...) got image_mean of length {len(mean)} and "
             f"image_std of length {len(std)}; both must be {bands}, the band count this detector "
-            "reads."
+            "reads. A model reading more bands than its pretrained weights carry statistics for "
+            "states every band's mean and std with its reason (schemas.StatedBeyondWeights)."
         )
     return {"image_mean": mean, "image_std": std}
 
@@ -127,7 +101,7 @@ def _rcnn_anchors_and_box_pool(
     ratios = tuple(float(r) for r in aspect_ratios)
     return (
         AnchorGenerator(
-            sizes=_default_anchor_sizes(num_levels, anchor_base_size),
+            sizes=_anchor_sizes(num_levels, anchor_base_size),
             aspect_ratios=(ratios,) * num_levels,
         ),
         MultiScaleRoIAlign(
@@ -144,13 +118,13 @@ def _build_faster_rcnn(
     *,
     featmap_names: list[str],
     num_levels: int,
-    anchor_base_size: int = 32,
-    min_size: int = 800,
-    max_size: int = 1333,
-    aspect_ratios: tuple[float, ...] = (0.5, 1.0, 2.0),
+    anchor_base_size: int,
+    min_size: int,
+    max_size: int,
+    aspect_ratios: tuple[float, ...],
     in_chans: int | None = None,
-    image_mean: Any = None,
-    image_std: Any = None,
+    image_mean: Any,
+    image_std: Any,
     **kwargs: Any,
 ) -> Any:
     from torchvision.models.detection import FasterRCNN
@@ -178,18 +152,18 @@ def _build_fcos(
     *,
     featmap_names: list[str],
     num_levels: int,
-    anchor_base_size: int = 32,
-    min_size: int = 800,
-    max_size: int = 1333,
+    anchor_base_size: int,
+    min_size: int,
+    max_size: int,
     in_chans: int | None = None,
-    image_mean: Any = None,
-    image_std: Any = None,
+    image_mean: Any,
+    image_std: Any,
     **kwargs: Any,
 ) -> Any:
     from torchvision.models.detection import FCOS
     from torchvision.models.detection.rpn import AnchorGenerator
 
-    sizes = _default_anchor_sizes(num_levels, anchor_base_size)
+    sizes = _anchor_sizes(num_levels, anchor_base_size)
     # FCOS is anchor-free: exactly one point/anchor per location (ratio 1.0).
     anchor_generator = AnchorGenerator(
         sizes=sizes, aspect_ratios=((1.0,),) * num_levels
@@ -211,19 +185,19 @@ def _build_retinanet(
     *,
     featmap_names: list[str],
     num_levels: int,
-    anchor_base_size: int = 32,
-    min_size: int = 800,
-    max_size: int = 1333,
-    aspect_ratios: tuple[float, ...] = (0.5, 1.0, 2.0),
+    anchor_base_size: int,
+    min_size: int,
+    max_size: int,
+    aspect_ratios: tuple[float, ...],
     in_chans: int | None = None,
-    image_mean: Any = None,
-    image_std: Any = None,
+    image_mean: Any,
+    image_std: Any,
     **kwargs: Any,
 ) -> Any:
     from torchvision.models.detection import RetinaNet
     from torchvision.models.detection.rpn import AnchorGenerator
 
-    sizes = _default_anchor_sizes(num_levels, anchor_base_size)
+    sizes = _anchor_sizes(num_levels, anchor_base_size)
     # RetinaNet: 3 octave scales x len(ratios) anchors/location.
     octave_sizes = tuple(
         tuple(int(s[0] * 2 ** (k / 3)) for k in range(3)) for s in sizes
@@ -251,13 +225,13 @@ def _build_mask_rcnn(
     *,
     featmap_names: list[str],
     num_levels: int,
-    anchor_base_size: int = 32,
-    min_size: int = 800,
-    max_size: int = 1333,
-    aspect_ratios: tuple[float, ...] = (0.5, 1.0, 2.0),
+    anchor_base_size: int,
+    min_size: int,
+    max_size: int,
+    aspect_ratios: tuple[float, ...],
     in_chans: int | None = None,
-    image_mean: Any = None,
-    image_std: Any = None,
+    image_mean: Any,
+    image_std: Any,
     **kwargs: Any,
 ) -> Any:
     from torchvision.models.detection import MaskRCNN
@@ -473,8 +447,9 @@ def build_detector(
     detector class's, which the builder forwards, but an operating-point knob (a detection cap,
     ``box_detections_per_img`` or ``detections_per_img``, or a score threshold,
     ``box_score_thresh`` or ``score_thresh``), which refuses (``ValueError``): both are set at
-    every forward. An ``in_chans != 3`` build additionally requires ``image_mean``/``image_std``
-    of that length (``_normalization``).
+    every forward. Every build requires ``anchor_base_size``, ``min_size``, ``max_size`` and,
+    but for ``fcos``, ``aspect_ratios`` (``schemas.DetectorGeometry``), and ``image_mean`` and
+    ``image_std`` of the band count's length (``_normalization``).
     """
     from tcip_mcp.pipelines.model_build import resolve_named
 

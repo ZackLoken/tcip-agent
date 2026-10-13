@@ -22,6 +22,7 @@ from tests import _trait_fixtures as fx  # noqa: E402
 from tests._chain_fixtures import (  # noqa: E402
     BESPOKE_DETECTION,
     BESPOKE_MODELS,
+    FRAME_STATISTICS,
     SAVE_BUILT_WEIGHTS,
     training_config,
 )
@@ -83,9 +84,9 @@ def _write_mosaic(
 
 _BLOCK_MODEL_SOURCE = {
     "builder": BESPOKE_DETECTION,
-    "builder_kwargs": {"min_size": TILE, "max_size": TILE * 2},
     "source_files": [BESPOKE_MODELS],
     "task": "detection",
+    "normalization": FRAME_STATISTICS,
 }
 
 
@@ -100,7 +101,10 @@ def _completed_over(project: Path, data_cfg: dict, experiment_id: str) -> dict:
     run_dir = worker_run(
         project,
         training_config(
-            _BLOCK_MODEL_SOURCE, data_cfg, training_source=SAVE_BUILT_WEIGHTS
+            project,
+            _BLOCK_MODEL_SOURCE,
+            data_cfg,
+            training_source=SAVE_BUILT_WEIGHTS,
         ),
         experiment_id=experiment_id,
     )

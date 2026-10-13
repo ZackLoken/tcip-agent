@@ -2,10 +2,9 @@
 end through the audited envelope.
 
 Proves the whole CV-scientist vision at once:
-  * (a) architecture modifications take effect end to end: the ``AnchorGenerator`` uses aspect
-    ratios derived from the synthetic GT (via ``derivations.gt_aspect_ratios``) and sizes from
-    the GT size distribution (not torchvision defaults), and every norm layer is GroupNorm (no
-    BatchNorm);
+  * (a) architecture modifications take effect end to end: the ``AnchorGenerator`` uses the
+    aspect ratios and base size ``derivations.derive_detector_geometry`` derives from the
+    synthetic GT, and every norm layer is GroupNorm (no BatchNorm);
   * (b) the custom ``train(ctx)`` loop (not ``ctx.default_train``) had its metrics, checkpoint and
     audit bracket recorded by the envelope, the source and environment in the launch record, and
     the model registered by completing;
@@ -22,6 +21,7 @@ import pytest
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._chain_fixtures import (
+    FRAME_STATISTICS,
     GT_ANCHOR_DETECTOR,
     TRAIN_BESPOKE,
     training_config,
@@ -74,14 +74,13 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
         ModelRegistry,
         load_registered_checkpoint,
     )
-    from tcip_mcp.pipelines.derivations import gt_aspect_ratios
+    from tcip_mcp.pipelines.derivations import DETECTOR_GEOMETRY_DERIVATION
     from tcip_mcp.pipelines.execution import Stated, prepare
     from tcip_mcp.pipelines.model_contract import overfit_check
 
-    # 1. Synthetic detection data: open (tall) boxes so GT-derived anchors differ from defaults.
+    # 1. Synthetic detection data: open (tall) boxes so GT-derived anchors are tall too.
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     shapes = [(15, 36), (16, 40), (17, 44)]
-    gt_wh: list[tuple[int, int]] = []
     for i in range(6):
         _save_png(images_dir / f"img{i}.png")
         w, h = shapes[i % len(shapes)]
@@ -93,7 +92,6 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
             IMG,
             keep_empty=True,
         )
-        gt_wh.append((w, h))
 
     dataset = dataset_over("detection", str(images_dir), subject="bud")
 
@@ -102,15 +100,12 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     # train_bespoke runs its scheduler's horizon beside the loaders' batch and the blocks
     # ctx.build_optimizer, ctx.build_scheduler and ctx.evaluate read.
     config = training_config(
+        tmp_path,
         {
             "builder": GT_ANCHOR_DETECTOR,
-            "builder_kwargs": {
-                "gt_boxes_wh": gt_wh,
-                "min_size": IMG,
-                "max_size": IMG * 2,
-            },
             "task": "detection",
             "source_files": [src_file],
+            "normalization": FRAME_STATISTICS,
         },
         {
             "images_dir": str(images_dir),
@@ -133,22 +128,16 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     assert ckpt.is_file()
 
     # ---- (a) modifications took effect end to end (rebuilt from the trained checkpoint) ----
-    expected_ratios = tuple(gt_aspect_ratios(gt_wh))
-    expected_sizes = bespoke_models.gt_anchor_sizes(gt_wh)
-    assert expected_ratios != (
-        0.5,
-        1.0,
-        2.0,
-    )  # not torchvision's default ratios
-    assert expected_sizes != (
-        32,
-        64,
-        128,
-        256,
-        512,
-    )  # not torchvision's default sizes
-
     checkpoint = load_registered_checkpoint(str(ckpt), project=tmp_path)
+    geometry = checkpoint.geometry.detector
+    assert geometry is not None
+    assert geometry.source == DETECTOR_GEOMETRY_DERIVATION
+    expected_ratios = tuple(geometry.aspect_ratios)
+    # Every ground-truth box is tall: taller than any fixed ratio set reaches.
+    assert max(expected_ratios) > 2.0
+    base = geometry.anchor_base_size
+    expected_sizes = (base, base * 2, base * 4)
+
     p = prepare(
         checkpoint,
         Stated(tile=False, conf=0.0, rationale=RATIONALE),
@@ -208,7 +197,7 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
     from tests._chain_fixtures import built_model
 
     overfit = overfit_check(
-        built_model(config),
+        built_model(config, geometry),
         "detection",
         seed=0,
         deterministic=False,

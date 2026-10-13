@@ -37,7 +37,9 @@ def test_launch_training_defaults_into_the_projects_experiment_store(
     )
 
     res = training_tools.launch_training(
-        tmp_path, small_detection_config(images_dir, BLOB_BUILDER), actor=None
+        tmp_path,
+        small_detection_config(images_dir, BLOB_BUILDER, project=tmp_path),
+        actor=None,
     )
     assert "error" not in res, res
     run_dir = Path(res["output_dir"])

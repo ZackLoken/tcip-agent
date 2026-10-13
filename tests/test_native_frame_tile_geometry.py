@@ -16,12 +16,15 @@ from pathlib import Path
 import pytest
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
-from tcip_mcp.pipelines.schemas import ModelSourceSchema
 from tests._producer_fixtures import checkpoint_admission
 
 pytest.importorskip("torch")
 
-from tests._chain_fixtures import BESPOKE_DETECTION, BESPOKE_MODELS  # noqa: E402
+from tests._chain_fixtures import (  # noqa: E402
+    BESPOKE_DETECTION,
+    BESPOKE_MODELS,
+    FRAME_STATISTICS,
+)
 from tests._producer_fixtures import gray_frame  # noqa: E402
 from tests._training_values import (  # noqa: E402
     IOU_THRESHOLD,
@@ -118,9 +121,6 @@ def _stub_predictor(model, *, task: str = "detection") -> GenericPredictor:
     p.in_chans = 3
     p.attribute_sizes = []
     p.device = torch.device("cpu")
-    p.model_source = ModelSourceSchema.model_validate(
-        {"builder": "m:f", "task": task}
-    )
     p.model = model.eval()
     return p
 
@@ -447,9 +447,9 @@ def _trained_checkpoint(
     tmp_path: Path, tiling: dict | None, *, size: int = TILE, **config
 ) -> str:
     """The checkpoint a run under ``tmp_path`` completed over two square ``size`` px bud frames of
-    its own, its tiny detector resizing between ``size`` and twice it, under ``tiling`` (``None``
-    for an untiled run) and with ``config``'s keys in place of its config's own; registered by
-    completing.
+    its own, its tiny detector at the statistics and geometry those frames derive, under
+    ``tiling`` (``None`` for an untiled run) and with ``config``'s keys in place of its config's
+    own; registered by completing.
     """
     from tests._producer_fixtures import seed_bud_images
     from tests._verified_checkpoint_fixtures import (
@@ -470,7 +470,7 @@ def _trained_checkpoint(
             "builder": BESPOKE_DETECTION,
             "task": "detection",
             "source_files": [BESPOKE_MODELS],
-            "builder_kwargs": {"min_size": size, "max_size": size * 2},
+            "normalization": FRAME_STATISTICS,
         },
         data={"images_dir": str(images), "tiling": tiling, **_RUN_DATA},
         **config,

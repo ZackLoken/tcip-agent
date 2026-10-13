@@ -60,7 +60,9 @@ def _context(tmp_path, **stated):
     )
 
     data = frames_data(tmp_path / "ds", [0.1, 0.5], [0.2, 1.0])
-    return run_context(tmp_path, regressor_config(data=data, **stated))
+    return run_context(
+        tmp_path, regressor_config(data=data, project=tmp_path, **stated)
+    )
 
 
 def test_train_applies_the_runs_seed(tmp_path, monkeypatch):

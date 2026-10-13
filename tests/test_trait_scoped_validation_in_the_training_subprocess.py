@@ -49,6 +49,7 @@ def test_the_subprocess_resolves_the_authored_criterion_and_leaves_the_trait_ent
     )
 
     cfg = training_config(
+        tmp_path,
         BLOB_BUILDER,
         {
             "images_dir": str(images_dir),

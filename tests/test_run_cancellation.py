@@ -27,7 +27,7 @@ def test_cancel_training_reaches_the_runs_own_poll(tmp_path):
 
     run_dir = opened_run(
         tmp_path,
-        detection_config(tmp_path / "data"),
+        detection_config(tmp_path / "data", project=tmp_path),
         experiment_id="cancel-run-1",
     )
     run = observed_run(observe(run_dir))
@@ -58,6 +58,7 @@ def test_cancel_before_training_yields_canceled(tmp_path):
     )
 
     cfg = training_config(
+        tmp_path,
         CLASSIFIER_SOURCE,
         {
             "images_dir": str(images_dir),

@@ -19,12 +19,17 @@ pytest.importorskip("torchvision")
 
 
 def _two_subject_dataset(root: Path) -> Path:
-    """Images carrying two subjects with deliberately different counts: 2 buds, 5 leaves."""
-    from PIL import Image
-
+    """Images carrying two subjects with deliberately different counts: 2 buds, 5 leaves, each
+    object painted bright on its frame.
+    """
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
-    from tests._producer_fixtures import label_image, registry_over
+    from tests._producer_fixtures import (
+        BRIGHT,
+        label_image,
+        painted_frame,
+        registry_over,
+    )
 
     images_dir = root / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True, exist_ok=True)
@@ -33,9 +38,6 @@ def _two_subject_dataset(root: Path) -> Path:
         SubjectRegistry(subjects=(Subject(name="bud"), Subject(name="leaf"))),
     )
     for i in range(3):
-        Image.new("RGB", (160, 96), color=(100, 130, 90)).save(
-            images_dir / f"img{i}.png"
-        )
         buds = [
             Annotation(
                 subject="bud", geometry=BBox(5 + 12 * k, 5, 15 + 12 * k, 20)
@@ -48,6 +50,12 @@ def _two_subject_dataset(root: Path) -> Path:
             )
             for k in range(5)
         ]
+        extents = [(5 + 12 * k, 5, 15 + 12 * k, 20) for k in range(2)] + [
+            (6 + 20 * k, 40, 24 + 20 * k, 70) for k in range(5)
+        ]
+        painted_frame(
+            160, 96, (100, 130, 90), [(box, BRIGHT) for box in extents]
+        ).save(images_dir / f"img{i}.png")
         label_image(images_dir / f"img{i}.png", buds + leaves, 160, 96)
     return images_dir
 

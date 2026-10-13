@@ -107,7 +107,7 @@ bound split names and the source files its dataset builder imports."""
 
 CONFIG_PATHS: PathFields = (
     ("model_source", "source_files", "[]"),
-    ("model_source", "image_stats_sampling", "windows", "[]", "0"),
+    ("model_source", "normalization", "source", "windows", "[]", "0"),
     *within(("data",), _DATA_BLOCK_PATHS),
 )
 """Every field of a run's config that names a path, the one inventory each record's path fields
@@ -925,8 +925,12 @@ def sweep_outcome(
     (:func:`sweep_selection`);
     above one draw, the best point by mean over its draws (:func:`group_split_draws`), with
     ``best_value_spread`` and every point's ``split_sensitivity``. ``best_params`` is ``None``
-    when no trial or point qualifies.
+    when no trial or point qualifies. ``best_at_range_end`` names each numeric axis of the
+    stated space (``hpo.space_axes``) whose ``low`` or ``high`` the best params sit at, the end
+    beside it: a best the search could not look past, a finding to report.
     """
+    from tcip_mcp.pipelines.training.hpo import space_axes
+
     choose = max if sweep_selection(given)[1] else min
     if given["split_draws"] > 1:
         groups = group_split_draws(trials, given["split_draw_seeds"])
@@ -936,7 +940,7 @@ def sweep_outcome(
             if eligible
             else None
         )
-        return {
+        best = {
             "best_params": best_group["point"] if best_group else None,
             **stored_number(
                 "best_value",
@@ -945,17 +949,31 @@ def sweep_outcome(
             "best_value_spread": best_group["block"] if best_group else None,
             "split_sensitivity": groups,
         }
-    done = [t for t in trials if _completed_with_value(t)]
-    best_trial = (
-        choose(done, key=lambda t: cast(float, t.best_metric))
-        if done
-        else None
-    )
+    else:
+        done = [t for t in trials if _completed_with_value(t)]
+        best_trial = (
+            choose(done, key=lambda t: cast(float, t.best_metric))
+            if done
+            else None
+        )
+        best = {
+            "best_params": best_trial.trial_params if best_trial else None,
+            **stored_number(
+                "best_value", best_trial.best_metric if best_trial else None
+            ),
+        }
+    params = best["best_params"] or {}
     return {
-        "best_params": best_trial.trial_params if best_trial else None,
-        **stored_number(
-            "best_value", best_trial.best_metric if best_trial else None
-        ),
+        **best,
+        "best_at_range_end": {
+            name: end
+            for name, (ptype, ends) in space_axes(
+                given["param_space"], grid=False
+            ).items()
+            if ptype != "categorical" and name in params
+            for end, bound in zip(("low", "high"), ends)
+            if params[name] == bound
+        },
     }
 
 

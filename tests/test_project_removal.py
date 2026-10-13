@@ -138,7 +138,9 @@ def test_a_live_run_refuses_the_removal_and_writes_nothing_then_a_finished_one_a
     ws = tmp_path.parent
     made = _project(ws, "valley_block", "Valley block")
     opened_run(
-        made.root, detection_config(ws / "run-data"), experiment_id="exp-live"
+        made.root,
+        detection_config(ws / "run-data", project=made.root),
+        experiment_id="exp-live",
     )
     body = {"id": made.id, "confirm_name": "Valley block", "user": "tester"}
 

@@ -15,7 +15,11 @@ from pathlib import Path
 import pytest
 
 from tcip_mcp.pipelines.image_utils import AmbiguousImageStemError
-from tests._chain_fixtures import DETECTION_SOURCE, training_config
+from tests._chain_fixtures import (
+    DETECTION_SOURCE,
+    training_config,
+    weights_statistics,
+)
 from tests._cli_fixtures import run_tcip
 from tests._training_values import drawn_split, tiling_block
 
@@ -45,14 +49,15 @@ def _ingested_bucket_of(tmp_path: Path, stems: list[str]) -> Path:
     collision added: the rail's admitting counterpart to :func:`_ingested_bucket` plus
     :func:`_collide`, proving a routed site still enumerates every member of a clean bucket.
     """
-    from PIL import Image
-
     from tcip_mcp.tools.ingest_tools import ingest_images
+    from tests._producer_fixtures import BRIGHT, painted_frame
 
     source = tmp_path / "source"
     source.mkdir()
     for stem in stems:
-        Image.new("RGB", (16, 16)).save(source / f"{stem}.jpg")
+        painted_frame(16, 16, (0, 0, 0), [((2, 2, 8, 8), BRIGHT)]).save(
+            source / f"{stem}.jpg"
+        )
 
     result = ingest_images(tmp_path / "proj", str(source))
     assert "error" not in result, result
@@ -90,7 +95,8 @@ def test_preflight_refuses_a_stem_collision(tmp_path):
     _label(bucket, "shoot_001")
 
     cfg = training_config(
-        DETECTION_SOURCE,
+        tmp_path,
+        weights_statistics(DETECTION_SOURCE),
         {"images_dir": str(bucket), "scope": {"subject": SUBJECT}},
     )
     r = preflight_config(tmp_path, cfg)
@@ -158,6 +164,7 @@ def test_preflight_admits_a_clean_multi_image_bucket(tmp_path):
     _label(bucket, "shoot_001", "shoot_002")
 
     cfg = training_config(
+        tmp_path,
         DETECTION_SOURCE,
         {
             "images_dir": str(bucket),
@@ -182,6 +189,7 @@ def test_preflight_split_policy_stems_admits_a_clean_multi_image_bucket(
     _label(bucket, "shoot_001", "shoot_002")
 
     cfg = training_config(
+        tmp_path,
         DETECTION_SOURCE,
         {
             "images_dir": str(bucket),
@@ -208,7 +216,8 @@ def test_calibration_ratio_feasibility_admits_a_clean_multi_image_bucket(
     _label(bucket, "shoot_001", "shoot_002")
 
     cfg = training_config(
-        DETECTION_SOURCE,
+        tmp_path,
+        weights_statistics(DETECTION_SOURCE),
         {
             "images_dir": str(bucket),
             "scope": {"subject": SUBJECT},

@@ -190,7 +190,7 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
     checkpoint = Path(observe(first).checkpoint["path"])
     opened_run(
         project,
-        detection_config(project / "data"),
+        detection_config(project / "data", project=project),
         experiment_id="exp-resumed",
         resume_from=str(checkpoint),
     )

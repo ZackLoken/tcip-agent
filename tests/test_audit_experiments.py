@@ -122,7 +122,9 @@ def test_get_experiment_reads_the_run_directory(tmp_path):
 
     run_dir = opened_run(
         tmp_path,
-        detection_config(tmp_path / "ds", backbone="resnet50"),
+        detection_config(
+            tmp_path / "ds", project=tmp_path, backbone="resnet50"
+        ),
         experiment_id="exp-005",
     )
     log_epoch(run_dir, 0, {"loss": 1.0})
@@ -145,10 +147,14 @@ def test_list_experiments(tmp_path):
     import tcip_mcp.experiments as exp
 
     opened_run(
-        tmp_path, detection_config(tmp_path / "ds"), experiment_id="exp-a"
+        tmp_path,
+        detection_config(tmp_path / "ds", project=tmp_path),
+        experiment_id="exp-a",
     )
     opened_run(
-        tmp_path, detection_config(tmp_path / "ds"), experiment_id="exp-b"
+        tmp_path,
+        detection_config(tmp_path / "ds", project=tmp_path),
+        experiment_id="exp-b",
     )
 
     listing = exp.run_rows(tmp_path)
@@ -160,10 +166,14 @@ def test_compare_experiments(tmp_path):
     import tcip_mcp.experiments as exp
 
     x = opened_run(
-        tmp_path, detection_config(tmp_path / "ds"), experiment_id="exp-x"
+        tmp_path,
+        detection_config(tmp_path / "ds", project=tmp_path),
+        experiment_id="exp-x",
     )
     y = opened_run(
-        tmp_path, detection_config(tmp_path / "ds"), experiment_id="exp-y"
+        tmp_path,
+        detection_config(tmp_path / "ds", project=tmp_path),
+        experiment_id="exp-y",
     )
     log_epoch(x, 0, {"mAP50": 0.6})
     log_epoch(y, 0, {"mAP50": 0.7})
@@ -178,7 +188,7 @@ def test_compare_experiments(tmp_path):
 def test_get_experiment_lineage(tmp_path):
     import tcip_mcp.experiments as exp
 
-    config = detection_config(tmp_path / "ds")
+    config = detection_config(tmp_path / "ds", project=tmp_path)
     opened_run(
         tmp_path, config, experiment_id="exp-l", relaunched_from="exp-k"
     )

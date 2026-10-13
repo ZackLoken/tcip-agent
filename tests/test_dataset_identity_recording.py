@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from tcip_mcp.experiments import compare_experiments
-from tests._chain_fixtures import training_config
+from tests._chain_fixtures import FRAME_STATISTICS, training_config
 from tests._training_values import drawn_split
 from tests._verified_checkpoint_fixtures import BUILT_DETECTOR, opened_run
 
@@ -21,34 +21,31 @@ SUBJECT = "bud"
 
 
 def _make_dataset(root: Path, *, shade: int = 0) -> Path:
-    """Two labeled images of ``shade`` under one capture date; answers their images
-    directory.
+    """Two labeled images on a ground of ``shade``, each object bright, under one capture date;
+    answers their images directory.
     """
-    from PIL import Image
-
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
-    from tests._producer_fixtures import label_image, registry_over
+    from tests._producer_fixtures import labeled_frame, registry_over
 
     images_dir = root / "images" / "2-11-26"
     images_dir.mkdir(parents=True, exist_ok=True)
     for i in range(2):
-        Image.new("RGB", (32, 32), color=(shade, 10 * i, 0)).save(
-            images_dir / f"img_{i:03d}.jpg"
-        )
-        label_image(
+        labeled_frame(
             images_dir / f"img_{i:03d}.jpg",
             [Annotation(subject=SUBJECT, geometry=BBox(1, 1, 9, 9))],
-            32,
-            32,
+            64,
+            64,
+            (shade, 10 * i, 0),
         )
     registry_over(root, SubjectRegistry(subjects=(Subject(name=SUBJECT),)))
     return images_dir
 
 
-def _config(images_dir: Path) -> dict:
-    """A :data:`BUILT_DETECTOR` run's config over ``images_dir``."""
+def _config(project: Path, images_dir: Path) -> dict:
+    """A :data:`BUILT_DETECTOR` run's config of ``project`` over ``images_dir``."""
     return training_config(
+        project,
         BUILT_DETECTOR,
         {
             "images_dir": str(images_dir),
@@ -59,7 +56,7 @@ def _config(images_dir: Path) -> dict:
 
 
 def test_compare_experiments_surfaces_shared_fingerprint(tmp_path):
-    first = _config(_make_dataset(tmp_path / "first"))
+    first = _config(tmp_path, _make_dataset(tmp_path / "first"))
     opened_run(tmp_path, first, experiment_id="a")
     opened_run(tmp_path, first, experiment_id="b")
     assert (
@@ -70,7 +67,7 @@ def test_compare_experiments_surfaces_shared_fingerprint(tmp_path):
     )
     opened_run(
         tmp_path,
-        _config(_make_dataset(tmp_path / "second", shade=200)),
+        _config(tmp_path, _make_dataset(tmp_path / "second", shade=200)),
         experiment_id="c",
     )
     assert (
@@ -95,15 +92,19 @@ def test_compare_experiments_mixed_none_fingerprint_is_unknown_not_same(
     )
 
     opened_run(
-        tmp_path, _config(_make_dataset(tmp_path / "first")), experiment_id="a"
+        tmp_path,
+        _config(tmp_path, _make_dataset(tmp_path / "first")),
+        experiment_id="a",
     )
     opened_run(
         tmp_path,
         training_config(
+            tmp_path,
             {
                 "builder": MEAN_INTENSITY_CLASSIFIER,
                 "source_files": [TINY_TRAINER_FILE],
                 "task": "classification",
+                "normalization": FRAME_STATISTICS,
             },
             {
                 **table_images(tmp_path / "loose"),
@@ -193,7 +194,7 @@ def test_a_trial_over_a_data_axis_records_the_dataset_its_own_input_names(
     )
 
     trial_dir = open_trial(
-        opened_sweep(tmp_path, _config(base_images)),
+        opened_sweep(tmp_path, _config(tmp_path, base_images)),
         "a",
         {"data.images_dir": str(other_images)},
     )
@@ -231,12 +232,13 @@ def test_a_launch_records_the_identity_of_the_dataset_it_trains_on(
 
     images_dir = _make_dataset(tmp_path)
     registered = register_dataset(tmp_path, str(tmp_path), crop="currant")
-    from tests._verified_checkpoint_fixtures import SQUARE_64_DETECTOR
+    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
     launched = launch_training(
         tmp_path,
         training_config(
-            SQUARE_64_DETECTOR,
+            tmp_path,
+            BUILT_DETECTOR,
             {
                 "images_dir": str(images_dir),
                 "scope": {"subject": SUBJECT},

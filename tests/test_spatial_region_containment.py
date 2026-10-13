@@ -9,17 +9,13 @@ all: a gap between regions, or coordinates the persisted geometry never covered.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
-
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 pytest.importorskip("torch")
 
-from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.pipelines.operating_point import spatial_disjointness  # noqa: E402
 from tcip_mcp.pipelines.schemas import SpatialManifest  # noqa: E402
+from tests._producer_fixtures import big_single_source  # noqa: E402
 from tests._training_values import drawn_split, tiling_block  # noqa: E402
 
 MOSAIC_W, MOSAIC_H = 4000, 3000
@@ -60,27 +56,6 @@ def test_a_rect_inside_an_attested_region_is_admitted():
     assert spatial_disjointness(GAPPED, [(650, 100, 750, 300)]) == []
 
 
-def _mosaic_dataset(root: Path) -> Path:
-    """One large single-source mosaic with GT spread across its whole extent, enough for the real
-    spatial-strip split to derive a four-way layout over it; returns its images directory.
-    """
-    from PIL import Image
-
-    from tests._producer_fixtures import label_image
-
-    images_dir = root / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True, exist_ok=True)
-    image = images_dir / "mosaic.png"
-    Image.new("RGB", (MOSAIC_W, MOSAIC_H), color=(90, 90, 90)).save(image)
-    boxes = [
-        Annotation(subject="bud", geometry=BBox(x, y, x + 20, y + 20))
-        for x in range(20, MOSAIC_W - 20, 200)
-        for y in range(20, MOSAIC_H - 20, 200)
-    ]
-    label_image(image, boxes, MOSAIC_W, MOSAIC_H, keep_empty=True)
-    return images_dir
-
-
 def test_persisted_four_way_geometry_admits_its_calibration_region_and_refuses_the_unattested(
     tmp_path,
 ):
@@ -94,7 +69,7 @@ def test_persisted_four_way_geometry_admits_its_calibration_region_and_refuses_t
     from tcip_mcp.experiments import run_resolution
     from tests._verified_checkpoint_fixtures import resolved_run
 
-    images_dir = _mosaic_dataset(tmp_path / "ds")
+    images_dir, _stem = big_single_source(tmp_path / "ds", MOSAIC_W, MOSAIC_H)
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
@@ -135,7 +110,7 @@ def test_a_spatial_runs_resolved_record_carries_no_drawn_seed(tmp_path):
     from tcip_mcp.experiments import run_resolution
     from tests._verified_checkpoint_fixtures import resolved_run
 
-    images_dir = _mosaic_dataset(tmp_path / "ds")
+    images_dir, _stem = big_single_source(tmp_path / "ds", MOSAIC_W, MOSAIC_H)
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},

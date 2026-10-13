@@ -14,7 +14,7 @@ import tcip_store as ts
 from tcip_mcp.tools.project_tools import archive_project, import_project
 from tcip_mcp.web_client import gui_snapshot_key
 from tcip_store.file_backend import lock_file_for
-from tests._chain_fixtures import BESPOKE_DETECTION
+from tests._chain_fixtures import BESPOKE_DETECTION, FRAME_STATISTICS
 from tests._producer_fixtures import one_labeled_capture
 from tests._training_values import drawn_split
 
@@ -288,22 +288,25 @@ def test_an_external_dataset_entry_stays_absolute_and_is_disclosed(tmp_path):
 
 
 def _annotated_dataset(root: Path, n: int) -> None:
-    """``n`` distinct single-tile foreground groups of one subject, enough to clear
-    draw_splits' floor (one group each for train/val, two for calibration).
+    """``n`` distinct single-tile foreground groups of one subject, each object painted bright,
+    enough to clear draw_splits' floor (one group each for train/val, two for calibration).
     """
-    from PIL import Image
-
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
-    from tests._producer_fixtures import label_image, registry_over
+    from tests._producer_fixtures import (
+        BRIGHT,
+        label_image,
+        painted_frame,
+        registry_over,
+    )
 
     images_dir = root / "images" / "2026-03-04"
     images_dir.mkdir(parents=True, exist_ok=True)
     for i in range(n):
         stem = f"img_{i:03d}"
-        Image.new("RGB", (640, 480), color=(128, 128, 128)).save(
-            images_dir / f"{stem}.jpg"
-        )
+        painted_frame(
+            640, 480, (128, 128, 128), [((288, 216, 352, 264), BRIGHT)]
+        ).save(images_dir / f"{stem}.jpg")
         label_image(
             images_dir / f"{stem}.jpg",
             [Annotation(subject="bud", geometry=BBox(288, 216, 352, 264))],
@@ -408,10 +411,12 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(
     hpo_result = tt.run_hyperparameter_search(
         root,
         base_config=training_config(
+            root,
             {
                 "builder": BESPOKE_DETECTION,
                 "source_files": [BESPOKE_MODELS],
                 "task": "detection",
+                "normalization": FRAME_STATISTICS,
             },
             {
                 "images_dir": str(root / "images" / "2026-03-04"),

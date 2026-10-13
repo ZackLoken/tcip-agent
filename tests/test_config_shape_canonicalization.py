@@ -22,10 +22,13 @@ from tcip_mcp.pipelines.schemas import (
     checked_train_config,
     train_config,
 )
+from tests import REPO_ROOT
 from tests._chain_fixtures import (
     BESPOKE_DETECTION,
     BESPOKE_MODELS,
+    FRAME_STATISTICS,
     training_config,
+    weights_statistics,
 )
 from tests._training_values import (
     RATIONALE,
@@ -69,7 +72,14 @@ def _names(issues: list[str], path: str) -> bool:
 
 
 FLAT_CONFIG: dict = training_config(
-    {"builder": "module:build_net", "builder_kwargs": {}, "task": "detection"},
+    REPO_ROOT,
+    weights_statistics(
+        {
+            "builder": "module:build_net",
+            "builder_kwargs": {},
+            "task": "detection",
+        }
+    ),
     {
         "images_dir": str(Path(__file__).parent / "images"),
         "split": drawn_split(),
@@ -177,7 +187,6 @@ def _door_issues(config: dict) -> list[str]:
     admits, for this repository as its project.
     """
     from tcip_mcp.tools.training_tools import _structural_issues
-    from tests import REPO_ROOT
 
     return _structural_issues(train_config(config), REPO_ROOT)[1]
 
@@ -319,10 +328,12 @@ def test_a_runs_record_names_every_value_its_training_reads(tmp_path):
     from tests.tiny_trainer_fixtures import run_context
 
     config = training_config(
+        tmp_path,
         {
             "builder": BESPOKE_DETECTION,
             "source_files": [BESPOKE_MODELS],
             "task": "detection",
+            "normalization": FRAME_STATISTICS,
         },
         {
             **detection_images(
@@ -476,7 +487,7 @@ def test_the_trainer_reads_the_flat_config_as_given(tmp_path, monkeypatch):
     second placement to reconcile against.
     """
     monkeypatch.chdir(tmp_path)
-    from tests._chain_fixtures import DETECTION_SOURCE
+    from tests._chain_fixtures import DETECTION_SOURCE, own_statistics
     from tests._verified_checkpoint_fixtures import (
         SCOPED_DATA,
         detection_images,
@@ -487,10 +498,11 @@ def test_the_trainer_reads_the_flat_config_as_given(tmp_path, monkeypatch):
         **detection_images(tmp_path / "ds", SCOPED_DATA["scope"]),
         **SCOPED_DATA,
     }
-    run = run_context(
-        tmp_path,
+    config = own_statistics(
         {**FLAT_CONFIG, "model_source": DETECTION_SOURCE, "data": data},
-    ).run
+        tmp_path,
+    )
+    run = run_context(tmp_path, config).run
     assert run.spec.record()["stages"] == FLAT_CONFIG["stages"]
     assert "training" not in run.spec.record()
 
@@ -584,7 +596,10 @@ def test_the_loaders_read_the_batch_size_the_schema_validated(tmp_path):
     assert _issues_of({**FLAT_CONFIG, "batch_size": "3"}) == []
     data = frames_data(tmp_path / "ds", [0.1, 0.2, 0.3], [0.2, 0.4, 0.6])
     train_loader = run_context(
-        tmp_path, regressor_config(data=data, batch_size="3", num_workers="0")
+        tmp_path,
+        regressor_config(
+            data=data, project=tmp_path, batch_size="3", num_workers="0"
+        ),
     ).train_loader
     assert (train_loader.batch_size, train_loader.num_workers) == (3, 0)
     with pytest.raises(ValueError, match="batch_size"):
@@ -606,30 +621,28 @@ def test_model_source_refuses_an_undeclared_key_by_name():
 
 
 def test_model_source_admits_every_declared_key(tmp_path):
-    """Every declared key validates with no issue, image_stats_sampling as the normalization
-    derivation's own producer (``derivations.band_normalization_stats``) records it.
+    """Every declared key validates with no issue, the statistics as their derivation's own
+    producer records them and the geometry stated with its reason.
     """
     pytest.importorskip("torch")
-    from PIL import Image
-
-    from tcip_mcp.pipelines.derivations import band_normalization_stats
+    from tests._chain_fixtures import (
+        frame_statistics,
+        stated_detector_geometry,
+    )
+    from tests._image_fixtures import write_noise_image
 
     image = tmp_path / "a.png"
-    Image.new("RGB", (8, 8), (20, 40, 60)).save(image)
-    result = band_normalization_stats([image], 3, max_images=1, seed=0)
-    assert result is not None
+    write_noise_image(image, 8)
     issues = _issues_of(
         {
             **FLAT_CONFIG,
             "model_source": {
                 "builder": "m:f",
-                "builder_kwargs": {
-                    "image_mean": result.mean,
-                    "image_std": result.std,
-                },
+                "builder_kwargs": {},
                 "task": "detection",
                 "source_files": [str(Path(__file__).parent / "m.py")],
-                "image_stats_sampling": result.sampling.model_dump(),
+                "normalization": frame_statistics([image], 3),
+                "detector_geometry": stated_detector_geometry((8, 8)),
             },
         }
     )

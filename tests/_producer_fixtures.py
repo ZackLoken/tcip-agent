@@ -180,6 +180,42 @@ def seed_labeled_images(
     return images_dir
 
 
+def big_single_source(
+    root: Path, width: int, height: int, *, polygons: bool = False
+) -> tuple[Path, str]:
+    """One ``width`` by ``height`` noise mosaic under ``root``'s undated capture with a scatter
+    of 20 px ``bud`` boxes (``polygons``: squares) every 200 px, labeled at its real size: a
+    single-image dataset large enough to hold a spatial split. Returns its image directory and
+    stem.
+    """
+    import torch
+    from torchvision.utils import save_image
+
+    from tcip_annotation.state import Annotation, BBox, Polygon
+    from tcip_mcp.dataset_layout import UNDATED_BUCKET
+
+    images_dir = root / "images" / UNDATED_BUCKET
+    images_dir.mkdir(parents=True, exist_ok=True)
+    stem = "mosaic"
+    save_image(
+        torch.rand(3, height, width) * 0.3, str(images_dir / f"{stem}.png")
+    )
+    boxes = [
+        Annotation(
+            subject="bud",
+            geometry=Polygon(
+                rings=[[(x, y), (x + 20, y), (x + 20, y + 20), (x, y + 20)]]
+            )
+            if polygons
+            else BBox(x, y, x + 20, y + 20),
+        )
+        for x in range(20, width - 20, 200)
+        for y in range(20, height - 20, 200)
+    ]
+    label_image(images_dir / f"{stem}.png", boxes, width, height)
+    return images_dir, stem
+
+
 def seed_bud_images(
     images_dir,
     *,
@@ -202,22 +238,24 @@ def seed_bud_images(
 
 
 def small_detection_config(
-    images_dir, model_source: dict | None = None
+    images_dir, model_source: dict | None = None, *, project, **data: Any
 ) -> dict:
-    """A :func:`~tests._chain_fixtures.training_config` of ``model_source`` (by default the
-    bespoke torchvision detector,
+    """A :func:`~tests._chain_fixtures.training_config` of ``project`` of ``model_source`` (by
+    default the bespoke torchvision detector,
     :data:`~tests._verified_checkpoint_fixtures.BUILT_DETECTOR`) over ``images_dir``'s ``bud``
-    boxes, drawing its split at seed 0.
+    boxes, drawing its split at seed 0, with ``data``'s keys in its data section.
     """
     from tests._chain_fixtures import training_config
     from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
     return training_config(
+        project,
         model_source or BUILT_DETECTOR,
         {
             "images_dir": str(images_dir),
             "scope": {"subject": "bud"},
             "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
+            **data,
         },
     )
 
@@ -407,17 +445,26 @@ def served_regions(dataset: Any) -> list:
 def staged_layout(project, data: Any):
     """The layout a run of ``project`` of the bespoke detector over the data block ``data`` (a
     dict, or a ``DataSpec``) imports from at its admission (``model_build.staged_sources``).
+    The layout reads no data, so its model source normalizes by the weights it names
+    (``_chain_fixtures.weights_statistics``).
     """
     from tcip_mcp.pipelines.model_build import staged_sources
     from tcip_mcp.pipelines.schemas import train_config
-    from tests._chain_fixtures import DETECTION_SOURCE, training_config
+    from tests._chain_fixtures import (
+        DETECTION_SOURCE,
+        training_config,
+        weights_statistics,
+    )
 
     block = data if isinstance(data, dict) else data.record()
     return staged_sources(
         train_config(
             training_config(
-                DETECTION_SOURCE, {"split": drawn_split(), **block}
-            )
+                Path(project),
+                weights_statistics(DETECTION_SOURCE),
+                {"split": drawn_split(), **block},
+            ),
+            Path(project),
         ),
         Path(project),
     ).layout
@@ -425,13 +472,15 @@ def staged_layout(project, data: Any):
 
 def train_val(project, task: str, data_cfg: dict, transforms: Any = None):
     """``split_construction.auto_train_val`` for a ``task`` run of ``project`` over ``data_cfg``
-    validated as a run's data block, a dataset builder it declares imported from
-    :func:`staged_layout`: ``(train_ds, val_ds, partition, resolved)``.
+    validated as a run's data block of ``project``, a dataset builder it declares imported
+    from :func:`staged_layout`: ``(train_ds, val_ds, partition, resolved)``.
     """
     from tcip_mcp.pipelines.data.split_construction import auto_train_val
     from tcip_mcp.pipelines.schemas import DataSpec
 
-    data = DataSpec.model_validate(data_cfg)
+    data = DataSpec.model_validate(
+        data_cfg, context={"project": Path(project)}
+    )
     return auto_train_val(
         project, task, data, transforms, staged_layout(project, data_cfg)
     )

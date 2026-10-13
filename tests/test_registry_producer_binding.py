@@ -44,7 +44,7 @@ def test_a_tag_naming_a_run_never_makes_that_run_a_producer(tmp_path):
 
     opened_run(
         tmp_path,
-        detection_config(tmp_path / "data"),
+        detection_config(tmp_path / "data", project=tmp_path),
         experiment_id="exp-rail1",
     )
     forged = produced_checkpoint(

@@ -20,7 +20,10 @@ from tcip_mcp.pipelines.model_contract import (  # noqa: E402
     check_model_contract,
     overfit_check,
 )
-from tcip_mcp.pipelines.schemas import checked_train_config  # noqa: E402
+from tcip_mcp.pipelines.schemas import (  # noqa: E402
+    TrainGeometry,
+    checked_train_config,
+)
 from tcip_store import check_json_value  # noqa: E402
 from tests import bespoke_models  # noqa: E402
 
@@ -29,9 +32,28 @@ CLS_DIMS = {"in_chans": 3, "num_classes": 2, "img_size": (64, 64)}
 DET_DIMS = {"in_chans": 3, "num_classes": 1, "img_size": (64, 64)}
 
 
-def _bespoke_builder(**kwargs):
-    """An importable 'agent-written' builder: a real bespoke classification module."""
-    return bespoke_models.build_bespoke_classifier(num_classes=2)
+def _classifier():
+    """A real bespoke two-class classifier at :func:`band_statistics`."""
+    from tests._chain_fixtures import band_statistics
+
+    return bespoke_models.build_bespoke_classifier(
+        num_classes=2, **band_statistics()
+    )
+
+
+def _bespoke_builder(*, image_mean, image_std, **_handed):
+    """An importable 'agent-written' builder: a real bespoke classification module at the
+    statistics it is handed, loading none of the weights it is handed.
+    """
+    return bespoke_models.build_bespoke_classifier(
+        num_classes=2, image_mean=image_mean, image_std=image_std
+    )
+
+
+_UNRESOLVED = TrainGeometry(
+    native_size=None, object_density=None, detector=None
+)
+"""The geometry of a classification run that resolved no frame."""
 
 
 def _source(builder: str):
@@ -41,15 +63,17 @@ def _source(builder: str):
     from tcip_mcp.pipelines.model_build import staged_sources
     from tcip_mcp.pipelines.schemas import train_config
     from tests import REPO_ROOT
-    from tests._chain_fixtures import training_config
+    from tests._chain_fixtures import training_config, weights_normalization
 
     spec = train_config(
         training_config(
+            REPO_ROOT,
             {
                 "builder": builder,
                 "builder_kwargs": {},
                 "source_files": [__file__],
                 "task": "classification",
+                "normalization": weights_normalization(),
             },
             {},
         )
@@ -60,7 +84,7 @@ def _source(builder: str):
 def test_build_from_model_source_imports_builder():
     source, layout = _source(f"{Path(__file__).stem}:_bespoke_builder")
     model = build_from_model_source(
-        source, layout, {"in_chans": 3, "num_classes": 2}
+        source, layout, {"in_chans": 3, "num_classes": 2}, _UNRESOLVED
     )
     assert isinstance(model, TCIPModel)
 
@@ -73,7 +97,7 @@ def test_a_config_stating_no_model_source_is_refused_at_validation():
 def test_build_from_model_source_bad_builder_raises():
     with pytest.raises(ValueError, match="not found|Invalid dotted"):
         source, layout = _source(f"{Path(__file__).stem}:does_not_exist")
-        build_from_model_source(source, layout, {"in_chans": 3})
+        build_from_model_source(source, layout, {"in_chans": 3}, _UNRESOLVED)
 
 
 # --------------------------------------------------------------------------
@@ -82,9 +106,7 @@ def test_build_from_model_source_bad_builder_raises():
 
 
 def test_tcip_model_protocol_membership():
-    assert isinstance(
-        bespoke_models.build_bespoke_classifier(num_classes=2), TCIPModel
-    )
+    assert isinstance(_classifier(), TCIPModel)
     assert not isinstance(object(), TCIPModel)
 
 
@@ -94,7 +116,7 @@ def test_tcip_model_protocol_membership():
 
 
 def test_check_model_contract_classification_ok():
-    model = bespoke_models.build_bespoke_classifier(num_classes=2)
+    model = _classifier()
     report = check_model_contract(model, "classification", dims=CLS_DIMS)
     assert report["ok"], report["issues"]
     assert report["eval_output_type"] == "dict"
@@ -106,7 +128,7 @@ def test_check_model_contract_records_per_parameter_gradient_magnitudes():
     conjunct only asks whether a .grad exists, not what it is, so the report also states each
     named parameter's gradient norm rather than gating the report on presence alone.
     """
-    model = bespoke_models.build_bespoke_classifier(num_classes=2)
+    model = _classifier()
     report = check_model_contract(model, "classification", dims=CLS_DIMS)
     assert report["ok"], report["issues"]
     mags = report["gradient_magnitudes"]
@@ -195,8 +217,10 @@ def test_check_model_contract_accepts_a_ragged_nested_eval_output():
 
 
 def test_check_model_contract_detection_ok():
+    from tests._chain_fixtures import detector_values
+
     model = bespoke_models.build_bespoke_detection(
-        num_classes=1, min_size=64, max_size=128
+        num_classes=1, **detector_values()
     )
     report = check_model_contract(model, "detection", dims=DET_DIMS)
     assert report["ok"], report["issues"]
@@ -209,7 +233,7 @@ def test_check_model_contract_detection_ok():
 
 
 def test_overfit_check_classification_passes():
-    model = bespoke_models.build_bespoke_classifier(num_classes=2)
+    model = _classifier()
     report = overfit_check(
         model,
         "classification",
@@ -229,7 +253,7 @@ def test_overfit_check_classification_passes():
 def test_render_overfit_report_passes_through_a_finite_report():
     from tcip_mcp.pipelines.model_contract import render_overfit_report
 
-    model = bespoke_models.build_bespoke_classifier(num_classes=2)
+    model = _classifier()
     raw = overfit_check(
         model,
         "classification",

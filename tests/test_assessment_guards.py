@@ -652,7 +652,11 @@ def test_an_instance_segmentation_assessment_reads_its_reference_through_polygon
     from tcip_mcp.pipelines.data.selection import source_digests
     from tcip_mcp.pipelines.execution import prepare
     from tcip_mcp.pipelines.operating_point import STAGED_CONF_FLOOR
-    from tests._chain_fixtures import BESPOKE_INSTANCE_SEG, BESPOKE_MODELS
+    from tests._chain_fixtures import (
+        BESPOKE_INSTANCE_SEG,
+        BESPOKE_MODELS,
+        FRAME_STATISTICS,
+    )
     from tests._producer_fixtures import samples_over
     from tests._verified_checkpoint_fixtures import (
         detection_images,
@@ -664,9 +668,9 @@ def test_an_instance_segmentation_assessment_reads_its_reference_through_polygon
             tmp_path,
             model_source={
                 "builder": BESPOKE_INSTANCE_SEG,
-                "builder_kwargs": {"min_size": 64, "max_size": 128},
                 "source_files": [BESPOKE_MODELS],
                 "task": "instance_seg",
+                "normalization": FRAME_STATISTICS,
             },
         ),
         project=tmp_path,

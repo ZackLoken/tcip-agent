@@ -233,8 +233,9 @@ Working now:
   agent-written `nn.Module` that imports the plain building blocks (necks, heads, losses, backbone
   wrappers, and `build_detector`, one of whose four builders is mask-capable for `instance_seg`), on
   RGB and N-channel imagery (multi-band GeoTIFF/NPZ/grayscale; `num_channels` threads to the
-  backbone's `in_chans`, and an `in_chans != 3` detector takes per-band `image_mean`/`image_std`
-  from `derivations.band_normalization_stats`).
+  backbone's `in_chans`, and every model takes the per-band `image_mean`/`image_std` its
+  `model_source.normalization` record carries, whose source is one of those `schemas.Normalization`
+  admits).
 - Training that loads the native per-image label documents directly, experiment tracking,
   annotation/review, model-proposed labels reviewed on the canvas, assessment of a trait's
   positive-state classifier (`assess_checkpoint` for a state-crossing delivery), and per-plant CSV

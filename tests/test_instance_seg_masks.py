@@ -12,7 +12,12 @@ import numpy as np
 import pytest
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
-from tests._chain_fixtures import BESPOKE_INSTANCE_SEG, BESPOKE_MODELS
+from tests._chain_fixtures import (
+    BESPOKE_INSTANCE_SEG,
+    BESPOKE_MODELS,
+    FRAME_STATISTICS,
+    detector_values,
+)
 from tests._producer_fixtures import (
     checkpoint_admission,
     gray_frame,
@@ -78,7 +83,7 @@ def test_contract_rejects_maskless_instance_seg_model():
 
 def test_contract_accepts_real_masked_instance_seg_model():
     model = bespoke_models.build_bespoke_instance_seg(
-        num_classes=1, min_size=64, max_size=128
+        num_classes=1, **detector_values()
     )
     report = check_model_contract(model, "instance_seg", dims=_SMOKE_DIMS)
     assert report["ok"], report["issues"]
@@ -90,7 +95,7 @@ def test_contract_detection_task_unaffected_by_mask_requirement():
     guard that the instance_seg-only requirement stays instance_seg-only.
     """
     model = bespoke_models.build_bespoke_detection(
-        num_classes=1, min_size=64, max_size=128
+        num_classes=1, **detector_values()
     )
     report = check_model_contract(model, "detection", dims=_SMOKE_DIMS)
     assert report["ok"], report["issues"]
@@ -211,7 +216,7 @@ def _stem_run(tmp_path) -> Path:
             "builder": BESPOKE_INSTANCE_SEG,
             "task": "instance_seg",
             "source_files": [BESPOKE_MODELS],
-            "builder_kwargs": {"min_size": TILE, "max_size": TILE * 2},
+            "normalization": FRAME_STATISTICS,
         },
         data={
             "images_dir": str(images),

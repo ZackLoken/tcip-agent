@@ -25,6 +25,7 @@ from tests._chain_fixtures import (
     BESPOKE_DETECTION,
     BESPOKE_INSTANCE_SEG,
     BESPOKE_MODELS,
+    FRAME_STATISTICS,
 )
 from tests._geotiff_fixtures import (
     PIXEL_SCALE,
@@ -402,33 +403,26 @@ def _windowed_multiband_tiff(
 
 
 def _bespoke_detection_checkpoint(
-    tmp_path: Path, raster_path: Path, *, in_chans: int, tile_size: int = TILE
+    tmp_path: Path, raster_path: Path, *, in_chans: int
 ) -> str:
-    """A real bespoke detector checkpoint for a raster with ``in_chans`` bands.
-
-    At ``in_chans != 3``, ``build_detector`` refuses without per-band ``image_mean``/``image_std``
-    (torchvision's 3-element ImageNet default doesn't describe an N-band raster); derived here from
-    ``raster_path`` itself via ``derivations.band_normalization_stats``, mirroring how a real
-    multispectral model_source is built, not a pinned placeholder.
+    """A real bespoke detector checkpoint for a raster with ``in_chans`` bands, normalizing by the
+    band statistics derived from ``raster_path`` itself (``derivations.band_normalization_stats``),
+    mirroring how a real multispectral model_source is built, not a pinned placeholder.
     """
     from tcip_mcp.pipelines.derivations import band_normalization_stats
 
-    builder_kwargs: dict = {"min_size": tile_size, "max_size": tile_size * 2}
-    if in_chans != 3:
-        stats = band_normalization_stats(
-            [str(raster_path)], in_chans, max_images=1, seed=0
-        )
-        assert stats is not None
-        builder_kwargs["image_mean"] = stats.mean
-        builder_kwargs["image_std"] = stats.std
+    stats = band_normalization_stats(
+        [str(raster_path)], in_chans, max_images=1, seed=0
+    )
+    assert stats is not None
 
     return _raster_checkpoint(
         tmp_path,
         {
             "builder": BESPOKE_DETECTION,
-            "builder_kwargs": builder_kwargs,
             "source_files": [BESPOKE_MODELS],
             "task": "detection",
+            "normalization": stats.model_dump(mode="json"),
         },
         in_chans,
     )
@@ -522,21 +516,16 @@ def test_predict_sliced_windowed_source_matches_full_array_predict_sliced(
 
 
 def _bespoke_instance_seg_checkpoint(
-    tmp_path: Path, *, in_chans: int = 3, tile_size: int = TILE
+    tmp_path: Path, *, in_chans: int = 3
 ) -> str:
-    """A real bespoke Mask R-CNN checkpoint (RGB only, no multispectral norm derivation needed
-    for this end-to-end mask-shape test).
-    """
+    """A real bespoke Mask R-CNN checkpoint normalizing by its own frames' statistics."""
     return _raster_checkpoint(
         tmp_path,
         {
             "builder": BESPOKE_INSTANCE_SEG,
             "task": "instance_seg",
             "source_files": [BESPOKE_MODELS],
-            "builder_kwargs": {
-                "min_size": tile_size,
-                "max_size": tile_size * 2,
-            },
+            "normalization": FRAME_STATISTICS,
         },
         in_chans,
     )
@@ -681,7 +670,6 @@ def test_windowed_predict_sliced_reaches_real_slicing_for_instance_seg_with_and_
     """
     torch = pytest.importorskip("torch")
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
-    from tcip_mcp.pipelines.schemas import ModelSourceSchema
 
     class _FakeReader:
         height, width, num_channels = 64, 64, 3
@@ -693,9 +681,6 @@ def test_windowed_predict_sliced_reaches_real_slicing_for_instance_seg_with_and_
     p.task = "instance_seg"
     p.in_chans = 3
     p.attribute_sizes = []
-    p.model_source = ModelSourceSchema.model_validate(
-        {"builder": "m:f", "task": p.task}
-    )
     p.model = torch.nn.Identity()
     p.device = torch.device("cpu")
 

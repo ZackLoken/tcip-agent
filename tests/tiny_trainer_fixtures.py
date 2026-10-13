@@ -5,12 +5,14 @@ Every model here holds parameters initialized from constants (one, except
 :class:`TwoRateRegressor`), so a run's trajectory is decided by the data it is fed and never by
 random init. Each builder accepts the width
 (``in_chans``) and, for the classifier, the class count a builder is handed; a model reads a
-frame's mean intensity whatever its width. A frame is filled with one intensity
+frame's mean intensity whatever its width. A frame holds its intensity to within half a level
 (:func:`write_regression_dataset`), so the loss landscape a run presents is fixed by its frames'
 (intensity, value) pairs alone.
 """
 
 from __future__ import annotations
+
+from pathlib import Path
 
 import torch
 import torch.nn as nn
@@ -95,8 +97,11 @@ def build_mean_intensity_regressor(
     init_weight: float = 0.0,
     cancel_at_call: int | None = None,
     cancel_output_dir: str | None = None,
+    **_statistics,
 ) -> MeanIntensityRegressor:
-    """``model_source`` builder for :class:`MeanIntensityRegressor`."""
+    """``model_source`` builder for :class:`MeanIntensityRegressor`, which reads raw
+    intensities, not the statistics it is handed.
+    """
     return MeanIntensityRegressor(
         init_weight=init_weight,
         cancel_at_call=cancel_at_call,
@@ -130,7 +135,7 @@ class CountingRegressor(MeanIntensityRegressor):
 
 
 def build_counting_regressor(
-    *, in_chans: int = 1, init_weight: float = 0.0
+    *, in_chans: int = 1, init_weight: float = 0.0, **_statistics
 ) -> CountingRegressor:
     """``model_source`` builder for :class:`CountingRegressor`."""
     return CountingRegressor(init_weight=init_weight)
@@ -159,7 +164,7 @@ class TwoRateRegressor(MeanIntensityRegressor):
 
 
 def build_two_rate_regressor(
-    *, in_chans: int = 1, reverse_groups: bool = False
+    *, in_chans: int = 1, reverse_groups: bool = False, **_statistics
 ) -> TwoRateRegressor:
     """``model_source`` builder for :class:`TwoRateRegressor`."""
     return TwoRateRegressor(reverse_groups=reverse_groups)
@@ -180,7 +185,7 @@ class NanEvalRegressor(MeanIntensityRegressor):
 
 
 def build_nan_eval_regressor(
-    *, in_chans: int = 1, init_weight: float = 0.0
+    *, in_chans: int = 1, init_weight: float = 0.0, **_statistics
 ) -> NanEvalRegressor:
     """``model_source`` builder for :class:`NanEvalRegressor`."""
     return NanEvalRegressor(init_weight=init_weight)
@@ -213,8 +218,11 @@ def build_mean_intensity_classifier(
     in_chans: int = 1,
     num_classes: int = 2,
     init_weight: float = 0.0,
+    **_statistics,
 ) -> MeanIntensityClassifier:
-    """``model_source`` builder for :class:`MeanIntensityClassifier`."""
+    """``model_source`` builder for :class:`MeanIntensityClassifier`, which reads raw
+    intensities, not the statistics it is handed.
+    """
     return MeanIntensityClassifier(init_weight=init_weight)
 
 
@@ -233,7 +241,7 @@ class DataScaledGradientModel(MeanIntensityRegressor):
 
 
 def build_data_scaled_gradient_model(
-    *, in_chans: int = 1
+    *, in_chans: int = 1, **_statistics
 ) -> DataScaledGradientModel:
     """``model_source`` builder for :class:`DataScaledGradientModel`."""
     return DataScaledGradientModel()
@@ -251,6 +259,7 @@ def build_always_diverged_model(
     in_chans: int = 1,
     cancel_at_call: int | None = None,
     cancel_output_dir: str | None = None,
+    **_statistics,
 ) -> AlwaysDivergedModel:
     """``model_source`` builder for :class:`AlwaysDivergedModel`."""
     return AlwaysDivergedModel(
@@ -405,25 +414,31 @@ def regressor_config(
     horizon: int = 1,
     *,
     data: dict,
+    project: Path,
     builder: str = MEAN_INTENSITY_REGRESSOR,
     builder_kwargs: dict | None = None,
+    normalization: dict | None = None,
     **overrides,
 ) -> dict:
-    """A :func:`~tests._chain_fixtures.training_config` of the regression ``builder`` (by
-    default the mean-intensity regressor) at ``builder_kwargs`` over the data block ``data``:
-    one unfrozen stage at :data:`REGRESSOR_ADAMW` under a cosine schedule of ``horizon`` epochs,
-    selecting on the loss, no epoch checkpoints, with ``overrides`` in place of their keys.
+    """A :func:`~tests._chain_fixtures.training_config` of ``project`` of the regression
+    ``builder`` (by default the mean-intensity regressor) at ``builder_kwargs`` over the data
+    block ``data``: one unfrozen stage at :data:`REGRESSOR_ADAMW` under a cosine schedule of
+    ``horizon`` epochs, selecting on the loss, no epoch checkpoints, with ``overrides`` in place
+    of their keys. It normalizes by ``normalization``, or with none stated by the statistics of
+    ``data``'s own frames.
     """
-    from tests._chain_fixtures import training_config
+    from tests._chain_fixtures import FRAME_STATISTICS, training_config
 
     source: dict = {
         "builder": builder,
         "source_files": [TINY_TRAINER_FILE],
         "task": "regression",
+        "normalization": normalization or FRAME_STATISTICS,
     }
     if builder_kwargs is not None:
         source["builder_kwargs"] = builder_kwargs
     return training_config(
+        project,
         source,
         data,
         **{
@@ -437,20 +452,31 @@ def regressor_config(
     )
 
 
-def classifier_config(horizon: int, data: dict, **overrides) -> dict:
-    """A :func:`~tests._chain_fixtures.training_config` of the mean-intensity classifier
-    (weight -1) over the data block ``data``: one unfrozen stage in batches of three under a
-    cosine schedule of ``horizon`` epochs, AdamW at 0.2, selecting on the loss, no epoch
-    checkpoints, with ``overrides`` in place of their keys.
+def classifier_config(
+    horizon: int,
+    data: dict,
+    *,
+    project: Path,
+    task: str = "classification",
+    normalization: dict | None = None,
+    **overrides,
+) -> dict:
+    """A :func:`~tests._chain_fixtures.training_config` of ``project`` of the mean-intensity
+    classifier (weight -1) as a ``task`` model over the data block ``data``: one unfrozen stage
+    in batches of three under a cosine schedule of ``horizon`` epochs, AdamW at 0.2, selecting
+    on the loss, no epoch checkpoints, with ``overrides`` in place of their keys. It normalizes
+    by ``normalization``, or with none stated by the statistics of ``data``'s own frames.
     """
-    from tests._chain_fixtures import training_config
+    from tests._chain_fixtures import FRAME_STATISTICS, training_config
 
     return training_config(
+        project,
         {
             "builder": MEAN_INTENSITY_CLASSIFIER,
             "builder_kwargs": {"init_weight": -1.0},
             "source_files": [TINY_TRAINER_FILE],
-            "task": "classification",
+            "task": task,
+            "normalization": normalization or FRAME_STATISTICS,
         },
         data,
         **{
@@ -473,8 +499,8 @@ def capture_model(monkeypatch, sink: list) -> None:
 
     real_build = gt.build_from_model_source
 
-    def build(source, plan, dims):
-        model = real_build(source, plan, dims)
+    def build(source, plan, dims, geometry):
+        model = real_build(source, plan, dims, geometry)
         sink.append(model)
         return model
 
@@ -514,6 +540,7 @@ def build_transiently_diverged_model(
     in_chans: int = 1,
     bad_batches: int = 2,
     init_weight: float = 0.0,
+    **_statistics,
 ) -> TransientlyDivergedModel:
     """``model_source`` builder for :class:`TransientlyDivergedModel`."""
     return TransientlyDivergedModel(
@@ -540,6 +567,7 @@ def build_step_counted_divergence_model(
     in_chans: int = 1,
     finite_at=(),
     init_weight: float = 0.0,
+    **_statistics,
 ) -> StepCountedDivergenceModel:
     """``model_source`` builder for :class:`StepCountedDivergenceModel`."""
     return StepCountedDivergenceModel(
@@ -567,26 +595,30 @@ def build_diverges_after_model(
     good_calls: int,
     in_chans: int = 1,
     init_weight: float = 0.0,
+    **_statistics,
 ) -> DivergesAfterModel:
     """``model_source`` builder for :class:`DivergesAfterModel`."""
     return DivergesAfterModel(good_calls=good_calls, init_weight=init_weight)
 
 
-class PixelSumDivideModel(MeanIntensityRegressor):
-    """Divides its prediction by the batch's own per-sample pixel sum: a real fp32
-    division-by-zero divergence on a batch of zero-intensity images, while a random synthetic
-    smoke batch (never exactly zero) passes the measurement-boundary contract cleanly.
+class PixelSpreadDivideModel(MeanIntensityRegressor):
+    """Divides its prediction by each sample's spread across its bands (their standard deviation
+    at each pixel, averaged): a real fp32 division-by-zero divergence on a batch of gray frames
+    normalized by statistics alike in every band, while a random synthetic smoke batch (never
+    alike across bands) passes the measurement-boundary contract cleanly.
     """
 
     def predict(self, images):
-        return (self.weight + images.mean(dim=(1, 2, 3))) / images.sum(
-            dim=(1, 2, 3)
-        )
+        return (self.weight + images.mean(dim=(1, 2, 3))) / images.std(
+            dim=1
+        ).mean(dim=(1, 2))
 
 
-def build_pixel_sum_divide_model(*, in_chans: int = 1) -> PixelSumDivideModel:
-    """``model_source`` builder for :class:`PixelSumDivideModel`."""
-    return PixelSumDivideModel()
+def build_pixel_spread_divide_model(
+    *, in_chans: int = 1, **_statistics
+) -> PixelSpreadDivideModel:
+    """``model_source`` builder for :class:`PixelSpreadDivideModel`."""
+    return PixelSpreadDivideModel()
 
 
 def write_regression_dataset(
@@ -595,12 +627,12 @@ def write_regression_dataset(
     """Write a small on-disk table-labeled dataset (uint8 RGB PNGs ``img<i>.png`` + a CSV of
     ``stem,value`` rows), a regression's values or a classification's labels.
 
-    Every frame is filled with one uint8 intensity (``round(255 * fraction)``), so
-    ``intensities=[0.0, ...]`` decodes to exactly zero-valued pixels (``pil_to_tensor`` scales a
-    uint8 frame by 255). Returns ``(images_dir, csv_path)``.
+    Every frame is a checkerboard one uint8 level either side of its intensity
+    (``round(255 * fraction)``), toward the inside of the range at either end, so each band
+    varies within the frame while the frame's mean stays within half a level of its intensity
+    and frames keep their intensities' order. Returns ``(images_dir, csv_path)``.
     """
-    from pathlib import Path
-
+    import numpy as np
     from PIL import Image
 
     if len(intensities) != len(values):
@@ -611,10 +643,13 @@ def write_regression_dataset(
     images_dir.mkdir(parents=True, exist_ok=True)
     csv_path = Path(root) / "values.csv"
     rows = ["stem,value"]
+    checker = np.indices((height, width)).sum(axis=0) % 2
     for i, (frac, value) in enumerate(zip(intensities, values)):
         stem = f"img{i}"
         px = round(255 * float(frac))
-        Image.new("RGB", (width, height), (px, px, px)).save(
+        low, high = {0: (0, 1), 255: (254, 255)}.get(px, (px - 1, px + 1))
+        plane = np.where(checker == 1, high, low).astype(np.uint8)
+        Image.fromarray(np.stack([plane] * 3, axis=-1)).save(
             images_dir / f"{stem}.png"
         )
         rows.append(f"{stem},{value}")

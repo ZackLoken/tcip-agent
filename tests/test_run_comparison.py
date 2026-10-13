@@ -27,9 +27,9 @@ def _opened(
     config = detection_config(
         data_dir or fixture_data_dir(project, experiment_id),
         model_source=unbuilt_source("detection"),
+        split=split,
+        project=project,
     )
-    if split is not None:
-        config["data"]["split"] = split
     return opened_run(project, config, experiment_id=experiment_id)
 
 
@@ -55,6 +55,7 @@ def _bound(experiment_id: str, tmp_path, **split):
     return opened_run(
         tmp_path,
         training_config(
+            tmp_path,
             unbuilt_source("detection"),
             {"split": {"selection_dir": str(selection_dir), **split}},
         ),
@@ -80,7 +81,7 @@ def test_same_dataset_fingerprint_is_none_not_true_when_one_id_is_an_error(
     from tests._verified_checkpoint_fixtures import opened_run
     from tests.test_dataset_identity_recording import _config, _make_dataset
 
-    shared = _config(_make_dataset(tmp_path / "shared"))
+    shared = _config(tmp_path, _make_dataset(tmp_path / "shared"))
     opened_run(tmp_path, shared, experiment_id="e1")
     opened_run(tmp_path, shared, experiment_id="e2")
     assert (

@@ -306,7 +306,7 @@ def test_evaluate_model_reads_its_loader_at_the_checkpoints_own_width(
     """
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import (
-        ONE_BAND_DETECTOR,
+        BUILT_DETECTOR,
         registered_checkpoint,
     )
 
@@ -316,7 +316,7 @@ def test_evaluate_model_reads_its_loader_at_the_checkpoints_own_width(
     scope = {"subject": "bud"}
     ckpt = registered_checkpoint(
         tmp_path,
-        model_source=ONE_BAND_DETECTOR,
+        model_source=BUILT_DETECTOR,
         data={"num_channels": 1, "scope": scope},
     )
 
@@ -373,6 +373,7 @@ def _detections_as_ground_truth(
         checkpoint.spec.model_source,
         checkpoint.layout,
         recorded_model_dims(checkpoint.spec),
+        checkpoint.geometry,
     )
     model.load_state_dict(checkpoint.payload[STATE_DICT_KEY])
     model.eval()
@@ -436,9 +437,9 @@ def test_the_scored_model_is_the_one_the_door_already_built(
     build = model_build.build_from_model_source
     builds = []
 
-    def _spy(source, layout, dims):
+    def _spy(source, layout, dims, geometry):
         builds.append(source)
-        return build(source, layout, dims)
+        return build(source, layout, dims, geometry)
 
     monkeypatch.setattr(model_build, "build_from_model_source", _spy)
     monkeypatch.setattr(generic_predictor, "build_from_model_source", _spy)
@@ -470,7 +471,7 @@ def test_the_scored_model_is_the_one_the_door_already_built(
     torch.manual_seed(777)
     dims = model_build.recorded_model_dims(verified.spec)
     independent_model = build(
-        verified.spec.model_source, verified.layout, dims
+        verified.spec.model_source, verified.layout, dims, verified.geometry
     )
     independent_model.load_state_dict(verified.payload[STATE_DICT_KEY])
     independent_model.to(recorded["device"])
@@ -528,7 +529,7 @@ def test_the_three_evaluation_loaders_over_one_truth_and_one_predictor_agree(
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._chain_fixtures import assess, confirm_count_trait
     from tests._verified_checkpoint_fixtures import (
-        ONE_BAND_DETECTOR,
+        BUILT_DETECTOR,
         registered_checkpoint,
     )
 
@@ -562,7 +563,7 @@ def test_the_three_evaluation_loaders_over_one_truth_and_one_predictor_agree(
     confirm_count_trait(tmp_path)
     ckpt = registered_checkpoint(
         tmp_path,
-        model_source=ONE_BAND_DETECTOR,
+        model_source=BUILT_DETECTOR,
         data={"num_channels": 1, "scope": {"subject": "bud"}},
     )
 
@@ -984,9 +985,13 @@ def test_launch_training_persists_effective_tile_geometry(
         lambda *a, **k: {},
     )
 
-    cfg = small_detection_config(images_dir, BLOB_BUILDER)
     # no tile_size: the lattice the ground truth derives must be persisted
-    cfg["data"]["tiling"] = tiling_block(sliver_frac=0.5)
+    cfg = small_detection_config(
+        images_dir,
+        BLOB_BUILDER,
+        project=tmp_path,
+        tiling=tiling_block(sliver_frac=0.5),
+    )
     res = training_tools.launch_training(tmp_path, cfg, actor=None)
     assert res["pid"] != os.getpid()  # a different OS process, not this one
     eid = res["experiment_id"]

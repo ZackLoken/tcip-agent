@@ -16,11 +16,13 @@ np = pytest.importorskip("numpy")
 
 
 def _rgb_image(images_dir: Path) -> str:
-    from tests._producer_fixtures import write_image
+    from tests._producer_fixtures import BRIGHT, painted_frame
 
-    return str(
-        write_image(images_dir / "capture.png", (120, 90), (40, 80, 120))
+    path = images_dir / "capture.png"
+    painted_frame(120, 90, (40, 80, 120), [((10, 10, 40, 40), BRIGHT)]).save(
+        path
     )
+    return str(path)
 
 
 def _five_band_raster(images_dir: Path) -> str:
@@ -30,18 +32,23 @@ def _five_band_raster(images_dir: Path) -> str:
 
 
 def _predicted(
-    tmp_path, images_dir: Path, *, in_chans, builder_kwargs=None, **stated
+    tmp_path, images_dir: Path, *, in_chans, normalization=None, **stated
 ):
-    """The pass of a real checkpoint built at ``in_chans`` over ``images_dir``, and its results."""
+    """The pass of a real checkpoint built at ``in_chans`` over ``images_dir``, normalizing by
+    ``normalization`` when given, and its results.
+    """
     from tests._verified_checkpoint_fixtures import (
         built_detector,
         predicted_over,
         registered_checkpoint,
     )
 
+    source = built_detector()
+    if normalization is not None:
+        source["normalization"] = normalization
     ckpt = registered_checkpoint(
         tmp_path,
-        model_source=built_detector(**(builder_kwargs or {})),
+        model_source=source,
         data={"num_channels": in_chans, "scope": {"subject": "bud"}},
     )
     return predicted_over(
@@ -89,7 +96,7 @@ def test_a_photographic_source_the_model_reads_is_predicted(tmp_path):
         images_dir,
         in_chans=1,
         tile=False,
-        builder_kwargs={"image_mean": stats.mean, "image_std": stats.std},
+        normalization=stats.model_dump(),
     )
 
     assert [Path(r["image"]).name for r in results] == ["capture.png"]

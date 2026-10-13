@@ -97,7 +97,8 @@ class TrainContext:
     def build_model(self) -> Any:
         """This run's model, built from its validated ``model_source``
         (:func:`~tcip_mcp.pipelines.model_build.build_from_model_source`) at the width and count
-        its config records (:func:`~tcip_mcp.pipelines.model_build.recorded_model_dims`).
+        its config records (:func:`~tcip_mcp.pipelines.model_build.recorded_model_dims`) and the
+        geometry its resolution recorded.
         """
         from tcip_mcp.pipelines.model_build import (
             build_from_model_source,
@@ -108,6 +109,7 @@ class TrainContext:
             self.spec.model_source,
             self.run.layout,
             recorded_model_dims(self.spec),
+            self.run.geometry,
         )
 
     def _contract_args(self, **overrides: Any) -> dict:
@@ -277,13 +279,20 @@ class TrainContext:
 
     def build_scheduler(self, optimizer: Any) -> Any:
         """The scheduler the run's validated ``scheduler`` block names, at the block's own
-        settings and horizon.
+        settings and horizon, in the direction of the run's selection metric.
         """
+        from tcip_mcp.pipelines.schemas import selection_of
         from tcip_mcp.pipelines.training.generic_trainer import (
             _build_scheduler,
         )
 
-        return _build_scheduler(optimizer, self._stated("scheduler"))
+        return _build_scheduler(
+            optimizer,
+            self._stated("scheduler"),
+            higher_is_better=selection_of(
+                self.spec.evaluation.selection_metric
+            )[1],
+        )
 
     def apply_stage_freeze(
         self,

@@ -7,7 +7,11 @@ from __future__ import annotations
 
 import pytest
 
-from tests._chain_fixtures import DETECTION_SOURCE, training_config
+from tests._chain_fixtures import (
+    DETECTION_SOURCE,
+    training_config,
+    weights_statistics,
+)
 from tests._training_values import (
     asha_scheduler,
     drawn_split,
@@ -310,7 +314,8 @@ def test_run_hyperparameter_search_refuses_split_draws_when_a_bound_selection_wo
 
     _root, selection_dir = one_foreground_group_selection(tmp_path)
     cfg = training_config(
-        DETECTION_SOURCE,
+        tmp_path,
+        weights_statistics(DETECTION_SOURCE),
         {"split": {"selection_dir": str(selection_dir), "seed": 0}},
     )
     result = tt.run_hyperparameter_search(
@@ -341,11 +346,9 @@ def test_run_hyperparameter_search_refuses_split_draws_over_a_zero_validation_sh
         "tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran)
     )
 
-    cfg = dict(real_hpo_base_config)
-    cfg["data"] = {
-        **cfg["data"],
-        "split": {**cfg["data"]["split"], "val_ratio": 0.0},
-    }
+    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
+
+    cfg = _unheld(tmp_path, BUILT_DETECTOR, real_hpo_base_config["data"])
     result = tt.run_hyperparameter_search(
         tmp_path,
         base_config=cfg,
@@ -358,6 +361,17 @@ def test_run_hyperparameter_search_refuses_split_draws_over_a_zero_validation_sh
 
     assert "error" in result and "val_ratio zero" in result["error"]
     assert not ran
+
+
+def _unheld(project, model_source: dict, data: dict, **keys) -> dict:
+    """A config of ``project`` of ``model_source`` over the data section ``data`` with its
+    validation share stated zero and ``keys`` in that section beside it.
+    """
+    return training_config(
+        project,
+        model_source,
+        {**data, "split": {**data["split"], "val_ratio": 0.0}, **keys},
+    )
 
 
 def test_run_hyperparameter_search_refuses_split_draws_with_a_non_native_search_alg(
@@ -867,9 +881,15 @@ def test_the_seed_axis_refusal_answers_before_a_later_points_schema_error(
 # -- admits valid work -------------------------------------------------------------
 
 
-def _bound_hpo_config(selection_dir) -> dict:
-    data: dict = {"split": {"selection_dir": str(selection_dir), "seed": 42}}
-    return training_config(DETECTION_SOURCE, data)
+def _bound_hpo_config(project, selection_dir) -> dict:
+    """A detection config bound to ``project``'s selection at ``selection_dir``, redrawn at a
+    seed.
+    """
+    return training_config(
+        project,
+        DETECTION_SOURCE,
+        {"split": {"selection_dir": str(selection_dir), "seed": 42}},
+    )
 
 
 def test_run_hyperparameter_search_admits_split_draws_bound_to_a_selection(
@@ -906,7 +926,7 @@ def test_run_hyperparameter_search_admits_split_draws_bound_to_a_selection(
 
     captured = _search(monkeypatch)
 
-    cfg = _bound_hpo_config(selection_dir)
+    cfg = _bound_hpo_config(tmp_path, selection_dir)
     result = tt.run_hyperparameter_search(
         tmp_path,
         base_config=cfg,
@@ -964,6 +984,7 @@ def test_a_bound_sweep_reads_and_redraws_its_selection_once_on_opening(
             grouping="tile_prefix",
         ),
     )
+    config = _bound_hpo_config(tmp_path, selection_dir)
     calls = {"read": 0, "redraw": 0}
     real_read, real_redraw = (
         selection_mod.read_selection,
@@ -982,7 +1003,7 @@ def test_a_bound_sweep_reads_and_redraws_its_selection_once_on_opening(
     monkeypatch.setattr(split_mod, "redrawn_selection", redraw)
     opened = tt.open_sweep(
         tmp_path,
-        _bound_hpo_config(selection_dir),
+        config,
         sweep_space(),
         n_trials=1,
         **fifo_search(),
@@ -1003,7 +1024,7 @@ def test_a_bound_sweep_reads_and_redraws_its_selection_once_on_opening(
 
 def test_run_hyperparameter_search_admits_split_draws_and_derives_seeds_from_the_base_config(
     tmp_path,
-    real_hpo_base_config,
+    hpo_base_config_at,
     monkeypatch,
 ):
     """The default draw seeds are the base config's own data.split.seed plus the draw index, and
@@ -1012,11 +1033,10 @@ def test_run_hyperparameter_search_admits_split_draws_and_derives_seeds_from_the
     import tcip_mcp.tools.training_tools as tt
 
     captured = _search(monkeypatch)
-    real_hpo_base_config["data"]["split"]["seed"] = 42
 
     result = tt.run_hyperparameter_search(
         tmp_path,
-        base_config=real_hpo_base_config,
+        base_config=hpo_base_config_at(42),
         param_space=sweep_space(),
         n_trials=2,
         **fifo_search(),
@@ -1100,16 +1120,22 @@ def test_run_hyperparameter_search_admits_split_draws_for_instance_seg(
 ):
     """instance_seg over polygon ground truth is admitted to split_draws the way detection is."""
     import tcip_mcp.tools.training_tools as tt
-    from tests._verified_checkpoint_fixtures import detection_images
+    from tests._chain_fixtures import training_config
+    from tests._verified_checkpoint_fixtures import (
+        BUILT_DETECTOR,
+        detection_images,
+    )
 
-    cfg = dict(real_hpo_base_config)
-    cfg["model_source"] = {**cfg["model_source"], "task": "instance_seg"}
-    scope = cfg["data"]["scope"]
-    cfg["data"] = {
-        **detection_images(tmp_path / "polygons", scope, polygons=True),
-        "scope": scope,
-        "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
-    }
+    scope = real_hpo_base_config["data"]["scope"]
+    cfg = training_config(
+        tmp_path,
+        {**BUILT_DETECTOR, "task": "instance_seg"},
+        {
+            **detection_images(tmp_path / "polygons", scope, polygons=True),
+            "scope": scope,
+            "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
+        },
+    )
 
     _search(monkeypatch)
 
@@ -1965,18 +1991,21 @@ def test_tune_search_split_draws_end_to_end_pairs_every_point_with_every_seed(
 # -- the single-source spatial-strip leg -----------------------------------------
 
 
-def _one_source_tiled_cfg(images_dir) -> dict:
-    """A base config wrapping a one-source tiled mosaic, the shape ``auto_train_val`` takes
-    into ``spatial_single_source_split`` when tiling is on and fewer than two stems are
-    admitted, given a ``model_source`` block the way ``real_hpo_base_config`` gives its own.
+def _tiled_cfg(project, images_dir, task: str, **split) -> dict:
+    """A config of ``project`` of the bespoke detector's builder as a ``task`` model over every
+    ``bud`` image of ``images_dir``, tiled at 128 px with 0.2 overlap and a stated sliver
+    fraction, its split drawing a fifth onto validation at seed 1 grouped by tile prefix with
+    ``split``'s shares beside it, at the statistics of the frames that split trains on
+    (``_chain_fixtures.training_config``).
     """
     return training_config(
-        DETECTION_SOURCE,
+        project,
+        {**DETECTION_SOURCE, "task": task},
         {
             "images_dir": str(images_dir),
             "scope": {"subject": "bud"},
             "split": drawn_split(
-                val_ratio=0.2, seed=1, grouping="tile_prefix"
+                val_ratio=0.2, seed=1, grouping="tile_prefix", **split
             ),
             # sliver_frac stated: a fixture this small derives no box-size spread.
             "tiling": tiling_block(
@@ -2000,15 +2029,13 @@ def test_run_hyperparameter_search_refuses_split_draws_over_a_single_source_spat
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
     import tcip_mcp.tools.training_tools as tt
-    from tests.test_training_autoval import _big_single_source
+    from tests._producer_fixtures import big_single_source
 
-    images_dir, _stem = _big_single_source(
+    images_dir, _stem = big_single_source(
         tmp_path / "ds", 4000, 3000, polygons=task == "instance_seg"
     )
-    cfg = _one_source_tiled_cfg(images_dir)
-    cfg["model_source"] = {**cfg["model_source"], "task": task}
     # A holdout strip of a tenth, which this mosaic's tile lattice admits.
-    cfg["data"]["split"]["holdout_ratio"] = 0.1
+    cfg = _tiled_cfg(tmp_path, images_dir, task, holdout_ratio=0.1)
 
     ran = []
     monkeypatch.setattr(
@@ -2040,12 +2067,11 @@ def test_run_hyperparameter_search_admits_a_single_source_spatial_config_at_one_
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
     import tcip_mcp.tools.training_tools as tt
-    from tests.test_training_autoval import _big_single_source
+    from tests._producer_fixtures import big_single_source
 
-    images_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
-    cfg = _one_source_tiled_cfg(images_dir)
+    images_dir, _stem = big_single_source(tmp_path / "ds", 4000, 3000)
     # A holdout strip of a tenth, which this mosaic's tile lattice admits.
-    cfg["data"]["split"]["holdout_ratio"] = 0.1
+    cfg = _tiled_cfg(tmp_path, images_dir, "detection", holdout_ratio=0.1)
 
     _search(monkeypatch)
 
@@ -2075,7 +2101,7 @@ def test_run_hyperparameter_search_admits_split_draws_over_a_two_source_tiled_co
     from tests.test_training_autoval import _detection_dataset
 
     images_dir, _stems = _detection_dataset(tmp_path / "ds")
-    cfg = _one_source_tiled_cfg(images_dir)
+    cfg = _tiled_cfg(tmp_path, images_dir, "detection")
 
     _search(monkeypatch)
 
@@ -2104,21 +2130,28 @@ def test_split_draws_over_one_bespoke_source_refuse_the_validation_they_cannot_d
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
     import tcip_mcp.tools.training_tools as tt
+    from tests._producer_fixtures import big_single_source
     from tests.test_dataset_source_seam import BESPOKE_DS, BESPOKE_DS_FILE
-    from tests.test_training_autoval import _big_single_source
 
-    images_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
-    cfg = _one_source_tiled_cfg(images_dir)
-    untiled = {k: v for k, v in cfg["data"].items() if k != "tiling"}
-    cfg["data"] = {
-        **untiled,
-        "dataset_source": {
-            "builder": BESPOKE_DS,
-            "source_files": [BESPOKE_DS_FILE],
+    images_dir, _stem = big_single_source(tmp_path / "ds", 4000, 3000)
+    # A config no run resolves: its statistics are the weights' it names. One source holds
+    # nothing out, so the run selects on its training loss.
+    cfg = training_config(
+        tmp_path,
+        weights_statistics(DETECTION_SOURCE),
+        {
+            "images_dir": str(images_dir),
+            "scope": {"subject": "bud"},
+            "split": drawn_split(
+                val_ratio=0.2, seed=1, grouping="tile_prefix"
+            ),
+            "dataset_source": {
+                "builder": BESPOKE_DS,
+                "source_files": [BESPOKE_DS_FILE],
+            },
         },
-    }
-    # One source holds nothing out, so the run selects on its training loss.
-    cfg["evaluation"] = evaluation_block(selection_metric="loss")
+        evaluation=evaluation_block(selection_metric="loss"),
+    )
 
     _search(monkeypatch)
 
@@ -2154,12 +2187,15 @@ def test_run_hyperparameter_search_reads_an_earlier_legs_reason_before_this_one(
         "tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran)
     )
 
-    cfg = dict(real_hpo_base_config)
-    cfg["data"] = {
-        **cfg["data"],
-        "split": {**cfg["data"]["split"], "val_ratio": 0.0},
-        "tiling": tiling_block(tile_size=128, overlap=0.2),
-    }
+    from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
+
+    # A config no run resolves: its statistics are the weights' it names.
+    cfg = _unheld(
+        tmp_path,
+        weights_statistics(BUILT_DETECTOR),
+        real_hpo_base_config["data"],
+        tiling=tiling_block(tile_size=128, overlap=0.2),
+    )
     result = tt.run_hyperparameter_search(
         tmp_path,
         base_config=cfg,

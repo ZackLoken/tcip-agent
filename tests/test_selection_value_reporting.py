@@ -48,6 +48,7 @@ def _config(
     return regressor_config(
         3,
         data=data,
+        project=tmp_path,
         builder_kwargs={"init_weight": 0.0},
         **(
             {"evaluation": evaluation_block(**evaluation)}
@@ -110,41 +111,40 @@ def test_epoch_record_reports_the_value_the_best_checkpoint_was_chosen_by(
     )
 
 
-def test_the_plateau_scheduler_steps_on_the_validation_loss_under_its_declared_key(
+def test_the_plateau_schedule_reduces_the_rate_where_torch_does_over_the_selection_values(
     tmp_path,
-    monkeypatch,
 ):
-    """The scheduler reads the validation loss by the one declared key, so under another
-    validation prefix it still steps on each epoch's validation loss, never the training loss.
+    """Agreement with torch: a run selecting on a higher-is-better metric reduces its rate at
+    the epochs ``ReduceLROnPlateau`` in ``max`` mode, stepped here over the selection values the
+    run recorded, reduces its own.
     """
-    import tcip_mcp.pipelines.training.generic_trainer as trainer_mod
+    from tests._training_values import SCHEDULE_SETTINGS, schedule, stop_rule
 
-    monkeypatch.setattr(trainer_mod, "VAL_METRIC_PREFIX", "heldout_")
-    monkeypatch.setattr(trainer_mod, "VAL_LOSS_KEY", "heldout_loss")
-    stepped: list[float] = []
-    plateau = torch.optim.lr_scheduler.ReduceLROnPlateau
-    real_step = plateau.step
-
-    def step(self, metrics, *args, **kwargs):
-        stepped.append(float(metrics))
-        return real_step(self, metrics, *args, **kwargs)
-
-    monkeypatch.setattr(plateau, "step", step)
-    from tests._training_values import schedule, stop_rule
-
-    # The holdout loss worsens from the first epoch on, so the plateau ends the stage at three.
+    # The holdout fit worsens from the first epoch on, so the stop rule ends the stage at five.
     config = {
-        **_config(tmp_path),
+        **_config(tmp_path, {"selection_metric": "r_squared"}),
         "scheduler": schedule("plateau"),
-        "early_stopping": stop_rule(2),
+        "early_stopping": stop_rule(4),
     }
     ctx = run_context(tmp_path, config)
     run = train(ctx.run, ctx.train_loader, val_loader=ctx.val_loader)
 
     assert run.status == "completed", run.status_error
-    assert stepped == pytest.approx(
-        [r["heldout_loss"] for r in run.metrics_history]
+    rates = [r["lr"] for r in run.metrics_history]
+    optimizer = torch.optim.SGD(
+        [torch.zeros(1, requires_grad=True)], lr=rates[0]
     )
+    reference = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode="max", **SCHEDULE_SETTINGS["plateau"]
+    )
+    expected = []
+    for row in run.metrics_history:
+        expected.append(optimizer.param_groups[0]["lr"])
+        reference.step(row["selection"])
+    assert len(set(expected)) > 1, (
+        "the series never plateaus, so no mode is told apart"
+    )
+    assert rates == pytest.approx(expected)
 
 
 def test_epoch_record_follows_a_configured_selection_metric(tmp_path):
@@ -185,6 +185,7 @@ def test_a_run_selecting_on_f1_keeps_its_highest_f1_checkpoint(tmp_path):
         classifier_config(
             5,
             separable_classifier_data(tmp_path / "ds"),
+            project=tmp_path,
             evaluation=evaluation_block(selection_metric="f1"),
         ),
     )

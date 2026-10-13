@@ -45,22 +45,25 @@ def recorded_children(monkeypatch):
 
 
 def _canonical_dataset(root: Path, date: str = "2-11-26") -> Path:
-    """A small dataset in the canonical layout, the shape ``dataset_root_of`` resolves; its
-    image directory.
+    """A small dataset in the canonical layout, the shape ``dataset_root_of`` resolves, each
+    frame holding its labeled object bright on a dim ground; its image directory.
     """
-    from PIL import Image
-
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
-    from tests._producer_fixtures import label_image, registry_over
+    from tests._producer_fixtures import (
+        BRIGHT,
+        label_image,
+        painted_frame,
+        registry_over,
+    )
 
     images_dir = root / "images" / date
     images_dir.mkdir(parents=True)
     registry_over(root, SubjectRegistry(subjects=(Subject(name="bud"),)))
     for i in range(2):
-        Image.new("RGB", (96, 64), color=(110, 120, 130)).save(
-            images_dir / f"img_{i}.png"
-        )
+        painted_frame(
+            96, 64, (110, 120, 130), [((8, 6, 40, 22), BRIGHT)]
+        ).save(images_dir / f"img_{i}.png")
         label_image(
             images_dir / f"img_{i}.png",
             [Annotation(subject="bud", geometry=BBox(8, 6, 40, 22))],
@@ -71,24 +74,36 @@ def _canonical_dataset(root: Path, date: str = "2-11-26") -> Path:
 
 
 def _detection_config(
-    images_dir: Path, builder: str = BESPOKE_DETECTION
+    project: Path,
+    images_dir: Path | str,
+    builder: str = BESPOKE_DETECTION,
+    split: dict | None = None,
+    **data,
 ) -> dict:
-    """A one-image-per-batch ``training_config`` of the detection ``builder`` at 64/96 px over
-    every admitted image of ``images_dir``, selecting on its loss since nothing is held out.
+    """A one-image-per-batch ``training_config`` of ``project`` of the detection ``builder``
+    over the admitted images of ``images_dir``, drawing ``split`` (by default holding nothing
+    out), with ``data``'s keys in its data section, at the statistics and geometry its frames
+    and boxes derive, selecting on its loss.
     """
-    from tests._chain_fixtures import BESPOKE_MODELS, training_config
+    from tests._chain_fixtures import (
+        BESPOKE_MODELS,
+        FRAME_STATISTICS,
+        training_config,
+    )
 
     return training_config(
+        project,
         {
             "builder": builder,
-            "builder_kwargs": {"min_size": 64, "max_size": 96},
             "source_files": [BESPOKE_MODELS],
             "task": "detection",
+            "normalization": FRAME_STATISTICS,
         },
         {
             "images_dir": str(images_dir),
             "scope": {"subject": "bud"},
-            "split": drawn_split(val_ratio=0.0),
+            "split": split or drawn_split(val_ratio=0.0),
+            **data,
         },
         batch_size=1,
         evaluation=evaluation_block(selection_metric="loss"),
@@ -118,7 +133,9 @@ def test_the_run_directory_lies_under_its_project_not_the_process_cwd(
     monkeypatch.chdir(server_cwd)
 
     images_dir = _canonical_dataset(project / "ds")
-    res = training_tools_launch(project, _detection_config(images_dir))
+    res = training_tools_launch(
+        project, _detection_config(project, images_dir)
+    )
 
     run_dir = Path(res["output_dir"])
     assert run_dir == experiments_dir(project) / res["experiment_id"]
@@ -144,7 +161,9 @@ def test_launched_run_records_the_datasets_identity_in_its_run_record(
     registered = register_dataset(tmp_path, str(ds_root), crop="currant")
     assert registered["id"] and registered["fingerprint"]
 
-    res = training_tools_launch(tmp_path, _detection_config(images_dir))
+    res = training_tools_launch(
+        tmp_path, _detection_config(tmp_path, images_dir)
+    )
 
     dataset = _launch_record(res)["dataset"]
     assert dataset == {
@@ -165,7 +184,7 @@ def test_launch_records_what_the_smoke_contract_checked(
     project.mkdir()
 
     images_dir = _canonical_dataset(project / "ds")
-    launched_config = _detection_config(images_dir)
+    launched_config = _detection_config(project, images_dir)
     res = training_tools_launch(project, launched_config)
     assert "model_contract" not in launched_config
 
@@ -191,7 +210,9 @@ def test_launch_omitting_overfit_check_records_null(
     project.mkdir()
 
     images_dir = _canonical_dataset(project / "ds")
-    res = training_tools_launch(project, _detection_config(images_dir))
+    res = training_tools_launch(
+        project, _detection_config(project, images_dir)
+    )
     assert res["overfit_check"] is None
 
     assert _launch_record(res)["model_contract"]["overfit_check"] is None
@@ -211,7 +232,10 @@ def test_launch_with_overfit_check_records_the_rendered_report(
 
     images_dir = _canonical_dataset(project / "ds")
     res = training_tools.launch_training(
-        project, _detection_config(images_dir), overfit_check=True, actor=None
+        project,
+        _detection_config(project, images_dir),
+        overfit_check=True,
+        actor=None,
     )
     assert "error" not in res, res
     assert res["overfit_check"] is not None
@@ -238,7 +262,7 @@ def test_launch_with_overfit_check_over_a_diverging_model_proceeds_with_a_json_s
 
     images_dir = _canonical_dataset(project / "ds")
     config = _detection_config(
-        images_dir, "bespoke_models:build_diverging_detection"
+        project, images_dir, "bespoke_models:build_diverging_detection"
     )
     res = training_tools.launch_training(
         project, config, overfit_check=True, actor=None
@@ -271,7 +295,7 @@ def test_the_run_record_the_worker_reads_carries_the_seed_and_the_training_keys(
     project.mkdir()
 
     images_dir = _canonical_dataset(project / "ds")
-    stated = _detection_config(images_dir)
+    stated = _detection_config(project, images_dir)
     res = training_tools_launch(project, stated)
 
     record = _launch_record(res)

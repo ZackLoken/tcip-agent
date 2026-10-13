@@ -7,14 +7,18 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Literal, get_args
 
 if TYPE_CHECKING:
     import numpy as np
 
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
     from tcip_mcp.pipelines.raster_source import Rect
-    from tcip_mcp.pipelines.schemas import ImageStatsSampling
+    from tcip_mcp.pipelines.schemas import (
+        DetectorGeometry,
+        Normalization,
+        PretrainedWeights,
+    )
 
 
 def probe_channels(image_path: str | Path | BandGroupRef) -> int:
@@ -41,29 +45,8 @@ def gt_aspect_ratios(
 
     Returns a small ratio set covering the p10..p90 of GT box aspect ratios (plus 1.0), the two
     quantiles this method's own settings, not measured. ``class_distribution_boxes`` is a list of
-    ``(w, h)`` in pixels. Returns ``None`` when no valid box gives a ratio.
-
-    Wiring (derive, then pass to the builder)::
-
-        from tcip_mcp.pipelines.derivations import gt_aspect_ratios
-        from tcip_mcp.pipelines.components.detectors import build_detector
-
-        ratios = gt_aspect_ratios(
-            [(b.w, b.h) for b in gt_boxes]
-        )  # this dataset's shapes
-        if ratios is None:
-            ratios = [0.5, 1.0, 2.0]  # underivable, yours to stamp
-        names = list(
-            adapter(torch.zeros(1, in_chans, h, w)).keys()
-        )  # this adapter's actual keys
-        model = build_detector(
-            "faster_rcnn",
-            adapter,
-            num_classes=n,
-            featmap_names=names,
-            num_levels=len(names),
-            aspect_ratios=tuple(ratios),
-        )
+    ``(w, h)`` in pixels. Returns ``None`` when no valid box gives a ratio. A detector's ratios
+    come from here through :func:`derive_detector_geometry`.
     """
     import numpy as np
 
@@ -341,6 +324,54 @@ def derive_tile_geometry(
     return edge, float(overlap)
 
 
+DetectorGeometryDerivation = Literal[
+    "the frame's own short and long edges as min_size and max_size, the p10 of the objects' "
+    "characteristic sizes floored to a pixel as the finest level's anchor size, and "
+    "gt_aspect_ratios over their boxes"
+]
+"""The one derived source a ``schemas.DetectorGeometry`` admits, the label of
+:func:`derive_detector_geometry`."""
+DETECTOR_GEOMETRY_DERIVATION: str = get_args(DetectorGeometryDerivation)[0]
+
+
+def derive_detector_geometry(
+    frame: tuple[int, int], regions: Sequence[Region]
+) -> DetectorGeometry:
+    """A torchvision detector's input scale and anchors for inputs of ``frame``, ``(width,
+    height)``, over the objects of ``regions`` (``schemas.DetectorGeometry``,
+    :data:`DETECTOR_GEOMETRY_DERIVATION`): the frame seen at its native scale, the finest pyramid
+    level's anchor size the 10th percentile of the objects' characteristic sizes
+    (:func:`char_sizes`) floored to a pixel, so the levels doubling it cover the spread upward
+    from there, and the aspect ratios :func:`gt_aspect_ratios` derives from their boxes. The
+    percentile is this method's own setting, not measured. Regions holding no object, or none a
+    pixel across at that percentile, leave a value the record's type refuses.
+    """
+    import math
+
+    import numpy as np
+
+    from tcip_mcp.pipelines.schemas import DetectorGeometry
+
+    sizes = char_sizes(r.boxes for r in regions)
+    return DetectorGeometry.model_validate(
+        {
+            "min_size": min(frame),
+            "max_size": max(frame),
+            "anchor_base_size": math.floor(np.quantile(sizes, 0.1))
+            if sizes
+            else None,
+            "aspect_ratios": gt_aspect_ratios(
+                [
+                    (x1 - x0, y1 - y0)
+                    for r in regions
+                    for x0, y0, x1, y1 in r.boxes.tolist()
+                ]
+            ),
+            "source": DETECTOR_GEOMETRY_DERIVATION,
+        }
+    )
+
+
 IOU_MATCH_DERIVATION = (
     "IoU of two equal boxes of the GT's mean characteristic size sqrt(w*h) displaced along one "
     "axis by the trait's jitter, minus its absolute margin"
@@ -509,18 +540,30 @@ def derive_block_scale_px(
     )
 
 
-@dataclass(frozen=True)
-class NormalizationStats:
-    """Per-band ``mean`` and ``std`` in [0, 1] tensor units over a sample of a dataset's rasters,
-    and ``sampling``, the ``model_source.image_stats_sampling`` record naming what was read: each
-    source with the window read from it (``None`` for a whole raster), the cap on rasters drawn
-    and the seed that drew them, the pixel fraction covered, and a windowed read's window size
-    and windows per raster.
+def pretrained_normalization(weights: PretrainedWeights) -> Normalization:
+    """The per-band statistics the pretrained ``weights`` were trained under, as their library
+    publishes them: a timm tag's ``pretrained_cfg`` mean and std
+    (``timm.models.get_pretrained_cfg``), a torchvision weights enum member's preset transform's
+    (``torchvision.models.get_weight(name).transforms()``), sourced by ``weights`` themselves.
+    Refuses as the library does a name it does not publish, and a torchvision preset carrying
+    no statistics (a detection preset) by its missing ``mean``.
     """
+    from tcip_mcp.pipelines.schemas import Normalization
 
-    mean: list[float]
-    std: list[float]
-    sampling: ImageStatsSampling
+    published: Any
+    if weights.library == "timm":
+        from timm.models import get_pretrained_cfg
+
+        published = get_pretrained_cfg(weights.name, allow_unregistered=False)
+    else:
+        from torchvision.models import get_weight
+
+        published = get_weight(weights.name).transforms()
+    return Normalization(
+        image_mean=list(published.mean),
+        image_std=list(published.std),
+        source=weights,
+    )
 
 
 def _drawn(
@@ -544,11 +587,11 @@ def band_normalization_stats(
     *,
     max_images: int,
     seed: int,
-) -> NormalizationStats | None:
+) -> Normalization | None:
     """Per-band mean and std in [0, 1] over at most ``max_images`` of ``image_paths`` drawn from
     ``seed`` (:func:`_drawn`), each read whole at ``num_channels`` bands, or ``None`` when no
-    raster could be read. The sampling names the rasters decoded and accepted, a raster whose band
-    count disagreed dropped.
+    raster could be read. Its source, the sampling, names the rasters decoded and accepted, a
+    raster whose band count disagreed dropped.
     """
     import numpy as np
 
@@ -613,9 +656,9 @@ class _BandMoments:
         pixel_fraction: float,
         window_size: int | None,
         max_windows_per_image: int | None,
-    ) -> NormalizationStats | None:
-        """The per-band mean and std accumulated, beside the ``schemas.ImageStatsSampling`` record
-        of what was read (``windows``, each source the derivation opened with its window or
+    ) -> Normalization | None:
+        """The per-band mean and std accumulated, sourced by the ``schemas.ImageStatsSampling``
+        record of what was read (``windows``, each source the derivation opened with its window or
         ``None``, and the draw's settings), or ``None`` when no pixels were accumulated at all. A
         relative source path refuses there, as the record names each file read.
         """
@@ -626,16 +669,17 @@ class _BandMoments:
         from tcip_mcp.pipelines.schemas import (
             ImageStatsSampling,
             ImageStatsWindow,
+            Normalization,
         )
 
         if not self.pixels:
             return None
         mean = self.sums / self.pixels
         var = np.maximum(self.sqs / self.pixels - mean**2, 0.0)
-        return NormalizationStats(
-            [float(m) for m in mean],
-            [float(s) for s in np.sqrt(var)],
-            ImageStatsSampling(
+        return Normalization(
+            image_mean=[float(m) for m in mean],
+            image_std=[float(s) for s in np.sqrt(var)],
+            source=ImageStatsSampling(
                 windows=[
                     (label, ImageStatsWindow(**asdict(rect)) if rect else None)
                     for label, rect in windows
@@ -657,7 +701,7 @@ def band_normalization_stats_sampled(
     window_size: int,
     max_windows_per_image: int,
     max_images: int,
-) -> NormalizationStats | None:
+) -> Normalization | None:
     """Per-band mean and std in [0, 1] over seeded pixel windows of this dataset's rasters.
 
     The windowed sibling of :func:`band_normalization_stats`: the same statistic in the same unit
@@ -765,6 +809,9 @@ _STATIC_DERIVATION_IMPLEMENTATIONS: dict[str, object] = {
     OBJECT_DENSITY_DERIVATION: "tcip_mcp.pipelines.derivations.derive_object_density",
     TILE_EDGE_DERIVATION: "tcip_mcp.pipelines.derivations.derive_tile_geometry",
     TILE_OVERLAP_DERIVATION: "tcip_mcp.pipelines.derivations.derive_tile_geometry",
+    DETECTOR_GEOMETRY_DERIVATION: (
+        "tcip_mcp.pipelines.derivations.derive_detector_geometry"
+    ),
 }
 """Each derivation label authored here, every one but the count-objective ones, mapped to the
 callable that computes it."""

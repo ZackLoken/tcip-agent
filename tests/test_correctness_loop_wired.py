@@ -17,7 +17,10 @@ from tests._chain_fixtures import (
     BESPOKE_CLASSIFIER,
     BESPOKE_MODELS,
     BESPOKE_SEMANTIC_SEG,
+    FRAME_STATISTICS,
     training_config,
+    weights_normalization,
+    weights_statistics,
 )
 from tests._training_values import (
     drawn_split,
@@ -106,23 +109,21 @@ def _admitted_tree(tmp_path):
     for a bespoke run: a builder does not exempt its run from naming the data the producer
     reads.
     """
-    from PIL import Image
-
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
-    from tests._producer_fixtures import label_image, registry_over
+    from tests._producer_fixtures import labeled_frame, registry_over
 
     root = tmp_path / "ds"
     imgs = root / "images" / UNDATED_BUCKET
     imgs.mkdir(parents=True)
     registry_over(root, SubjectRegistry(subjects=(Subject(name="leaf"),)))
     for stem in ("a", "b", "c", "d"):
-        Image.new("RGB", (32, 32)).save(imgs / f"{stem}.png")
-        label_image(
+        labeled_frame(
             imgs / f"{stem}.png",
             [Annotation(subject="leaf", geometry=BBox(2, 2, 10, 10))],
-            32,
-            32,
+            64,
+            64,
+            (0, 0, 0),
             keep_empty=True,
         )
     return imgs
@@ -156,12 +157,19 @@ def _bespoke_task_model(**_kwargs):
 
 
 def _spec(task: str, data: dict):
-    """A validated config of a ``task`` model over ``data``, drawing a sample split."""
+    """A validated config of a ``task`` model of this repository over ``data``, drawing a sample
+    split, its normalization stated by pretrained weights since no frame of it is ever read.
+    """
     from tcip_mcp.pipelines.schemas import train_config
+    from tests import REPO_ROOT
     from tests._verified_checkpoint_fixtures import unbuilt_source
 
     return train_config(
-        training_config(unbuilt_source(task), {"split": drawn_split(), **data})
+        training_config(
+            REPO_ROOT,
+            weights_statistics(unbuilt_source(task)),
+            {"split": drawn_split(), **data},
+        )
     )
 
 
@@ -171,8 +179,12 @@ def test_resolve_contract_dims_reads_the_frame_the_run_resolved():
     """
     tiled = _spec("detection", {"tiling": tiling_block(tile_size=512)})
     untiled = _spec("detection", {"tiling": None})
-    native = TrainGeometry(native_size=(96, 64), object_density=None)
-    unshared = TrainGeometry(native_size=None, object_density=None)
+    native = TrainGeometry(
+        native_size=(96, 64), object_density=None, detector=None
+    )
+    unshared = TrainGeometry(
+        native_size=None, object_density=None, detector=None
+    )
 
     assert resolve_contract_dims(
         tiled, {"in_chans": 4, "num_classes": 5}, unshared
@@ -200,7 +212,9 @@ def test_model_dims_states_only_what_the_run_holds():
 
     scope = ClassScope()
     frame = {"tiling": None}
-    shared = TrainGeometry(native_size=(32, 32), object_density=None)
+    shared = TrainGeometry(
+        native_size=(32, 32), object_density=None, detector=None
+    )
 
     with pytest.raises(ValueError, match="data.num_channels"):
         model_dims(scope, {})
@@ -260,10 +274,12 @@ def test_preflight_smoke_blocks_broken_builder(tmp_path, monkeypatch):
 
     imgs = _admitted_tree(tmp_path)
     cfg = training_config(
+        tmp_path,
         {
             "builder": f"{Path(__file__).stem}:_broken_builder",
             "source_files": [__file__],
             "task": "detection",
+            "normalization": FRAME_STATISTICS,
         },
         {
             "images_dir": str(imgs),
@@ -280,8 +296,8 @@ def test_preflight_smoke_blocks_broken_builder(tmp_path, monkeypatch):
     assert r["valid"] is False
     assert any("model contract" in i for i in r["issues"])
     assert r["smoke"]["dims"]["img_size"] == (
-        32,
-        32,
+        64,
+        64,
     )  # the frame every source shares
 
 
@@ -306,6 +322,7 @@ def test_preflight_smokes_a_tiled_run_at_the_edge_its_resolution_derived(
         box=(10, 10, 26, 26),
     )
     cfg = training_config(
+        tmp_path,
         BUILT_DETECTOR,
         {
             "images_dir": str(imgs),
@@ -331,13 +348,15 @@ def test_preflight_smokes_an_untiled_run_of_mixed_frames_on_a_real_batch(
     tmp_path, monkeypatch
 ):
     """An untiled run whose frames share no one size records no native frame, so its smoke runs
-    one real batch off its own dataset rather than a synthetic one at a size no frame has.
+    one real batch off its own dataset rather than a synthetic one at a size no frame has, its
+    detector at the geometry its model source states.
     """
     monkeypatch.chdir(tmp_path)
     from PIL import Image
 
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.tools.training_tools import preflight_config
+    from tests._chain_fixtures import stated_detector_geometry
     from tests._producer_fixtures import label_image
     from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
@@ -350,7 +369,8 @@ def test_preflight_smokes_an_untiled_run_of_mixed_frames_on_a_real_batch(
         40,
     )
     cfg = training_config(
-        BUILT_DETECTOR,
+        tmp_path,
+        {**BUILT_DETECTOR, "detector_geometry": stated_detector_geometry()},
         {
             "images_dir": str(imgs),
             "scope": {"subject": "leaf"},
@@ -374,6 +394,7 @@ def test_preflight_smoke_passes_valid_builder(tmp_path, monkeypatch):
 
     imgs = _admitted_tree(tmp_path)
     cfg = training_config(
+        tmp_path,
         BUILT_DETECTOR,
         {
             "images_dir": str(imgs),
@@ -408,10 +429,12 @@ def test_preflight_builds_and_smokes_at_the_count_the_run_resolved(
 
     images_dir, masks_dir = _three_class_masks(tmp_path / "ds")
     cfg = training_config(
+        tmp_path,
         {
             "builder": BESPOKE_SEMANTIC_SEG,
             "source_files": [BESPOKE_MODELS],
             "task": "semantic_seg",
+            "normalization": FRAME_STATISTICS,
         },
         {
             "images_dir": str(images_dir),
@@ -447,18 +470,21 @@ def test_preflight_smokes_a_single_class_run_within_its_own_count(
     )
     images_dir.mkdir(parents=True)
     masks_dir.mkdir(parents=True)
-    for stem in ("a", "b", "c", "d"):
-        Image.new("RGB", (32, 32), (80, 90, 100)).save(
+    for index, stem in enumerate(("a", "b", "c", "d")):
+        shade = 80 + 10 * index
+        Image.new("RGB", (32, 32), (shade, shade, shade)).save(
             images_dir / f"{stem}.png"
         )
         Image.fromarray(np.zeros((32, 32), dtype=np.uint8), mode="L").save(
             masks_dir / f"{stem}.png"
         )
     cfg = training_config(
+        tmp_path,
         {
             "builder": BESPOKE_SEMANTIC_SEG,
             "source_files": [BESPOKE_MODELS],
             "task": "semantic_seg",
+            "normalization": FRAME_STATISTICS,
         },
         {
             "images_dir": str(images_dir),
@@ -486,15 +512,15 @@ def test_preflight_smokes_a_single_class_run_within_its_own_count(
 
     spec = train_config(cfg)
     layout = staged_sources(spec, tmp_path).layout
-    batch, why = _one_real_batch(
-        "semantic_seg", resolve_run(spec, layout, project=tmp_path).train_ds
-    )
+    resolution = resolve_run(spec, layout, project=tmp_path)
+    batch, why = _one_real_batch("semantic_seg", resolution.train_ds)
     assert batch is not None, why
     smoked = synthetic["smoke"]["dims"]
     model = build_from_model_source(
         spec.model_source,
         layout,
         {"in_chans": smoked["in_chans"], "num_classes": smoked["num_classes"]},
+        resolution.geometry,
     )
     assert check_model_contract(model, "semantic_seg", sample_batch=batch)[
         "ok"
@@ -510,10 +536,12 @@ def test_preflight_smokes_bespoke_task_on_a_real_batch(tmp_path, monkeypatch):
 
     imgs = _admitted_tree(tmp_path)
     cfg = training_config(
+        tmp_path,
         {
             "builder": TASK_MODEL,
             "source_files": [__file__],
             "task": "bunch_compactness",
+            "normalization": FRAME_STATISTICS,
         },
         {
             "images_dir": str(imgs),
@@ -564,10 +592,12 @@ def test_preflight_smoke_batch_matches_what_the_run_will_build(
         },
     }
     config = training_config(
+        tmp_path,
         {
             "builder": TASK_MODEL,
             "source_files": [__file__],
             "task": "bunch_compactness",
+            "normalization": FRAME_STATISTICS,
         },
         data,
     )
@@ -591,10 +621,12 @@ def test_preflight_blocks_when_no_batch_can_be_built(tmp_path, monkeypatch):
     imgs = _admitted_tree(tmp_path)
     # Structurally valid, but the dataset cannot produce an item.
     cfg = training_config(
+        tmp_path,
         {
             "builder": TASK_MODEL,
             "source_files": [__file__],
             "task": "bunch_compactness",
+            "normalization": weights_normalization(),
         },
         {
             "images_dir": str(imgs),
@@ -659,10 +691,12 @@ def test_ctx_check_contract_and_overfit_check(tmp_path):
     ctx = run_context(
         tmp_path,
         training_config(
+            tmp_path,
             {
                 "builder": BESPOKE_CLASSIFIER,
                 "source_files": [BESPOKE_MODELS],
                 "task": "classification",
+                "normalization": FRAME_STATISTICS,
             },
             {
                 "images_dir": str(imgs),
@@ -698,10 +732,12 @@ def test_ctx_overfit_check_seeds_at_the_runs_own_seed_and_determinism(
     ctx = run_context(
         tmp_path,
         training_config(
+            tmp_path,
             {
                 "builder": BESPOKE_CLASSIFIER,
                 "source_files": [BESPOKE_MODELS],
                 "task": "classification",
+                "normalization": FRAME_STATISTICS,
             },
             {
                 "images_dir": str(imgs),
@@ -738,10 +774,12 @@ def test_ctx_smokes_a_bespoke_dataset_run_at_the_count_its_data_states(
     ctx = run_context(
         tmp_path,
         training_config(
+            tmp_path,
             {
                 "builder": BESPOKE_CLASSIFIER,
                 "source_files": [BESPOKE_MODELS],
                 "task": "classification",
+                "normalization": FRAME_STATISTICS,
             },
             _bespoke_classification_data(imgs, table, num_classes=3),
             evaluation=evaluation_block(selection_metric="loss"),
@@ -784,6 +822,7 @@ def test_ctx_apply_stage_freeze_matches_trainer_guard(tmp_path):
     ctx = run_context(
         tmp_path,
         training_config(
+            tmp_path,
             unbuilt_source("regression"),
             frames_data(tmp_path / "ds", [0.1, 0.5], [0.2, 1.0]),
             evaluation=evaluation_block(selection_metric="loss"),

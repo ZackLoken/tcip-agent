@@ -37,6 +37,7 @@ def _context(tmp_path, horizon: int, **overrides):
         regressor_config(
             horizon,
             data=data,
+            project=tmp_path,
             builder_kwargs={"init_weight": 0.0},
             **overrides,
         ),

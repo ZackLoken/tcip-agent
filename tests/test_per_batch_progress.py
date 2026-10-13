@@ -60,7 +60,7 @@ def _context(
         if validated
         else frames_data(root, intensities, [2.0 * c for c in intensities])
     )
-    config = regressor_config(2, data=data, **extra)
+    config = regressor_config(2, data=data, project=tmp_path, **extra)
     return run_context(
         tmp_path,
         config,

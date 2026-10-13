@@ -25,6 +25,7 @@ from tcip_mcp.pipelines.execution import Stated
 from tcip_mcp.pipelines.schemas import (
     BoundSplit,
     DrawnSplit,
+    ImageStatsSampling,
     TilingSpec,
     checked_train_config,
     revision_record,
@@ -114,7 +115,8 @@ def _preflight(
 
     Config structure, one placement for everything::
 
-        model_source: {builder, builder_kwargs, task}
+        model_source: {builder, builder_kwargs, task, normalization,
+                       detector_geometry?}
         data: {images_dir, labels_dir?, scope}  # known loaders, or a bespoke
                                                 # {dataset_source: {builder, ...}}
         batch_size, stages, mixed_precision, device, seed, ...   # every key
@@ -149,21 +151,10 @@ def _preflight(
             "selection's calibration side stays untouched."
         )
 
-    # Normalization provenance: per-band builder_kwargs statistics must carry which images
-    # produced them.
-    sampling_record = None
-    if spec is not None:
-        source = spec.model_source
-        bk = source.builder_kwargs or {}
-        if bk.get("image_mean") is not None or bk.get("image_std") is not None:
-            sampling_record = source.image_stats_sampling
-            if sampling_record is None or not sampling_record.windows:
-                issues.append(
-                    "model_source.builder_kwargs carries image_mean/image_std with no "
-                    "model_source.image_stats_sampling beside it: per-band statistics must carry "
-                    "a non-empty 'windows' list and a 'pixel_fraction', naming which images they "
-                    "were derived from (the 'sampling' of derivations.band_normalization_stats)."
-                )
+    source = spec.model_source.normalization.source if spec else None
+    sampling_record = (
+        source if isinstance(source, ImageStatsSampling) else None
+    )
 
     # The run resolved once, the way its launch records it: every leg below reads this.
     resolution: ResolvedRun | None = None
@@ -211,7 +202,7 @@ def _preflight(
             result["image_stats_containment"] = "checked"
             if bad:
                 issues.append(
-                    f"model_source.image_stats_sampling names path(s) {bad} outside this "
+                    f"model_source.normalization.source names path(s) {bad} outside this "
                     f"run's own {len(known)} source(s)."
                 )
 
@@ -245,7 +236,10 @@ def _preflight(
                 resolved_spec, built_at, resolution.geometry
             )
             model = build_from_model_source(
-                resolved_spec.model_source, sources.layout, built_at
+                resolved_spec.model_source,
+                sources.layout,
+                built_at,
+                resolution.geometry,
             )
             report = check_model_contract(model, task, dims=dims)
             batch, why_no_batch = None, None

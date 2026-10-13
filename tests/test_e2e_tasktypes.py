@@ -56,22 +56,26 @@ _save_png = partial(write_noise_image, size=IMG)
 
 
 def _model_source(builder: str, task: str, **kwargs) -> dict:
-    from tests._chain_fixtures import BESPOKE_MODELS
+    from tests._chain_fixtures import BESPOKE_MODELS, FRAME_STATISTICS
 
     return {
         "builder": builder,
         "builder_kwargs": kwargs,
         "source_files": [BESPOKE_MODELS],
         "task": task,
+        "normalization": FRAME_STATISTICS,
     }
 
 
-def _train_config(model_source: dict, data: dict, batch_size: int) -> dict:
+def _train_config(
+    project: Path, model_source: dict, data: dict, batch_size: int
+) -> dict:
     from tests._chain_fixtures import training_config
 
     # No val_loader at any call site below: loss is the only metric coherent to select on
     # without one.
     return training_config(
+        project,
         model_source,
         data,
         optimizer=adamw_optimizer(),
@@ -94,6 +98,7 @@ def _trained(
         worker_run(
             tmp_path,
             _train_config(
+                tmp_path,
                 model_source,
                 {**data, "split": drawn_split(val_ratio=0.0)},
                 batch_size,
@@ -166,12 +171,9 @@ def test_instance_seg_e2e(tmp_path: Path):
     # detector these masks now reach the Mask R-CNN mask loss during training.
     assert dataset[0][1]["masks"].shape[0] > 0
 
-    model_source = _model_source(
-        BESPOKE_INSTANCE_SEG, "instance_seg", min_size=IMG, max_size=IMG * 2
-    )
     _assert_trained(
         _trained(
-            model_source,
+            _model_source(BESPOKE_INSTANCE_SEG, "instance_seg"),
             {"images_dir": str(images_dir), "scope": {"subject": "bud"}},
             tmp_path,
         )

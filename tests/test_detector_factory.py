@@ -11,12 +11,16 @@ from torch import Tensor, nn  # noqa: E402
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
 from tests import bespoke_models  # noqa: E402
+from tests._chain_fixtures import (  # noqa: E402
+    detector_geometry,
+    detector_values,
+)
 
 
 @pytest.mark.parametrize("detector", ["faster_rcnn", "fcos", "retinanet"])
 def test_build_each_builtin_detector(detector):
     model = bespoke_models.build_bespoke_detection(
-        num_classes=1, detector=detector, min_size=64, max_size=128
+        num_classes=1, detector=detector, **detector_values()
     )
     model.eval()
     out = model([torch.rand(3, 64, 64)])
@@ -97,22 +101,21 @@ def _unprobable_adapter(in_chans: int, out_channels: int = 32):
     return adapter
 
 
-def test_a_detector_whose_band_count_cannot_be_read_refuses_rather_than_assuming_rgb():
-    """With no in_chans stated and no conv to read one from, torchvision would normalize with
-    3-element ImageNet statistics over bands nobody has confirmed are RGB. The build refuses by
-    name instead.
+def test_a_detector_stating_no_statistics_is_refused_by_its_signature():
+    """With no statistics stated, torchvision would normalize with 3-element ImageNet statistics
+    over bands nobody has confirmed are RGB. The builder's signature takes them with no default,
+    so the build refuses naming them.
     """
     from tcip_mcp.pipelines.components.detectors import build_detector
 
-    with pytest.raises(ValueError, match="cannot tell how many bands"):
+    with pytest.raises(TypeError, match="image_mean"):
         build_detector(
             "faster_rcnn",
             _unprobable_adapter(5),
             1,
             featmap_names=["0"],
             num_levels=1,
-            min_size=64,
-            max_size=128,
+            **detector_geometry().handed(),
         )
 
 
@@ -121,7 +124,7 @@ def test_a_detector_over_that_backbone_builds_from_its_datasets_own_band_statist
 ):
     """The rail admits valid work: per-band statistics derived from the run's own admitted sources
     build the same detector and reach its transform at the bands they describe, and a caller that
-    states the width builds on torchvision's own three-band default.
+    states the width builds at the three-band statistics it states.
     """
     import numpy as np
     import tifffile
@@ -135,7 +138,7 @@ def test_a_detector_over_that_backbone_builds_from_its_datasets_own_band_statist
     images_dir.mkdir(parents=True)
     for index, stem in enumerate(("a", "b")):
         bands = np.full((32, 32, 5), 20 * (index + 1), dtype=np.uint8)
-        bands[..., 4] = 200
+        bands[..., 4] = np.arange(32, dtype=np.uint8)[None, :] + 150
         tifffile.imwrite(str(images_dir / f"{stem}.tif"), bands)
         label_image(
             images_dir / f"{stem}.tif",
@@ -149,8 +152,9 @@ def test_a_detector_over_that_backbone_builds_from_its_datasets_own_band_statist
         [s.source for s in samples], 5, max_images=2, seed=0
     )
     assert derived is not None
-    mean, std = derived.mean, derived.std
-    assert len(mean) == len(std) == 5 and len(derived.sampling.windows) == 2
+    mean, std = derived.image_mean, derived.image_std
+    assert len(mean) == len(std) == 5
+    assert len(getattr(derived.source, "windows", ())) == 2
 
     model = build_detector(
         "faster_rcnn",
@@ -158,10 +162,9 @@ def test_a_detector_over_that_backbone_builds_from_its_datasets_own_band_statist
         1,
         featmap_names=["0"],
         num_levels=1,
-        min_size=64,
-        max_size=128,
         image_mean=mean,
         image_std=std,
+        **detector_geometry().handed(),
     )
     assert list(model.transform.image_mean) == mean
     assert list(model.transform.image_std) == std
@@ -174,8 +177,7 @@ def test_a_detector_over_that_backbone_builds_from_its_datasets_own_band_statist
         1,
         featmap_names=["0"],
         num_levels=1,
-        min_size=64,
-        max_size=128,
         in_chans=3,
+        **detector_values(),
     )
     assert len(stated.transform.image_mean) == 3

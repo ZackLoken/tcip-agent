@@ -11,11 +11,19 @@ calling it.
             ...
         ],  # the files the run imports, its builder's module among
         # them; a run binds its own snapshot copies
-        "task": "detection",
-    }  # required, the run's task
+        "task": "detection",  # required, the run's task
+        "normalization": {
+            ...
+        },  # required, the statistics handed as image_mean/image_std, and any
+        # pretrained_weights its source names
+        "detector_geometry": {
+            ...
+        },  # a detector's geometry stated where the run resolves no frame
+    }
 
-The builder is also handed the run's width, count and attributes (:func:`model_dims`), never
-stated here.
+The builder is also handed the run's width, count and attributes (:func:`model_dims`) and a
+detector's geometry its resolution recorded (``schemas.TrainGeometry.detector``), never stated
+here.
 """
 
 from __future__ import annotations
@@ -44,10 +52,6 @@ GEOMETRY_KEY = "geometry"
 was selected on, the digest of the source snapshot its run took
 (:attr:`SourceLayout.snapshot`) and the geometry its run's resolution read off its training
 frames (``schemas.TrainGeometry``)."""
-
-RESERVED_DIMS = ("in_chans", "num_classes", "num_ranks", "attributes")
-"""The dimensions the platform hands a model builder (:func:`model_dims`), never its
-``builder_kwargs``."""
 
 
 def _split_dotted(target: str) -> tuple[str, str]:
@@ -377,6 +381,7 @@ def model_dims(scope: ClassScope, sizes: Mapping[str, int]) -> dict[str, Any]:
     """
     from tcip_mcp.pipelines.data.datasets import GROUND_TRUTH_COUNTS
     from tcip_mcp.pipelines.data.selection import DOCUMENT
+    from tcip_mcp.pipelines.schemas import ModelDims
 
     if sizes.get("num_channels") is None:
         raise ValueError(
@@ -384,13 +389,14 @@ def model_dims(scope: ClassScope, sizes: Mapping[str, int]) -> dict[str, Any]:
             "is unknown, and building at a guess would feed it something other than what it "
             "trained on. Build from a run this platform trained, or state data.num_channels."
         )
-    counts = {
+    in_chans = int(sizes["num_channels"])
+    counts: dict[str, Any] = {
         name: int(sizes[name])
         for name in GROUND_TRUTH_COUNTS
         if sizes.get(name) is not None
     }
     if scope.subject is None:
-        return {"in_chans": int(sizes["num_channels"]), **counts}
+        return ModelDims(in_chans=in_chans, **counts).handed()
     if counts:
         raise ValueError(
             f"this run over label documents records {sorted(counts)}: its head sizes are the "
@@ -400,11 +406,9 @@ def model_dims(scope: ClassScope, sizes: Mapping[str, int]) -> dict[str, Any]:
     attributes = scope.admitted_for(
         DOCUMENT, "this run's data.scope"
     ).attributes
-    return {
-        "in_chans": int(sizes["num_channels"]),
-        "num_classes": 1,
-        **({"attributes": attributes} if attributes else {}),
-    }
+    return ModelDims(
+        in_chans=in_chans, num_classes=1, attributes=attributes or None
+    ).handed()
 
 
 def recorded_model_dims(spec: TrainConfigSchema) -> dict[str, Any]:
@@ -431,24 +435,22 @@ def build_from_model_source(
     source: ModelSourceSchema,
     layout: SourceLayout,
     dims: Mapping[str, Any],
+    geometry: TrainGeometry,
 ) -> Any:
     """Import the builder a validated ``model_source`` (``schemas.TrainConfigSchema``'s) names
     from its run's ``layout`` (:func:`import_source_builder`) and call it with its
-    ``builder_kwargs`` and ``dims`` (:func:`model_dims`). Refuses (``ValueError``) by name a
-    ``builder_kwargs`` naming a dimension (:data:`RESERVED_DIMS`), whether or not this run
-    resolved it.
+    ``builder_kwargs``, its normalization's values and weights
+    (``schemas.Normalization.handed``), ``dims`` (:func:`model_dims`) and, for a detector, the
+    geometry its run's resolution recorded (``geometry.detector``).
     """
     fn = import_source_builder(source.builder, layout)
-    kwargs = source.builder_kwargs or {}
-    restated = sorted(set(RESERVED_DIMS) & set(kwargs))
-    if restated:
-        raise ValueError(
-            f"model_source.builder_kwargs restates {restated}: the band count a run reads its "
-            f"sources at and the count its ground truth derives are the platform's to hand the "
-            f"builder, and a second value for one would build a model the run's own record does "
-            f"not describe. Drop {restated} from builder_kwargs."
-        )
-    return fn(**kwargs, **dims)
+    detector = {} if geometry.detector is None else geometry.detector.handed()
+    return fn(
+        **(source.builder_kwargs or {}),
+        **source.normalization.handed(),
+        **detector,
+        **dims,
+    )
 
 
 def resolve_contract_dims(
@@ -459,17 +461,14 @@ def resolve_contract_dims(
     """The dimensions a synthetic smoke batch of a run resolved to ``spec`` and ``geometry`` is
     shaped at: the width, count and attributes the model is built at (``dims``,
     :func:`model_dims`, a rank count carried as ``num_classes``) and the ``img_size``,
-    ``(width, height)``, of the frame it trains on: the square tile its tiling resolved, else
-    ``geometry.native_size``. A run that resolved neither carries no ``img_size``.
+    ``(width, height)``, of the frame it trains on (``schemas.run_frame``). A run that resolved
+    none carries no ``img_size``.
     """
-    from tcip_mcp.pipelines.schemas import run_tiling
+    from tcip_mcp.pipelines.schemas import run_frame
 
     count = dims.get("num_classes", dims.get("num_ranks"))
-    tiler = run_tiling(spec.model_source.task, spec.data.tiling)
-    frame = (
-        (tiler.tile_size, tiler.tile_size)
-        if tiler is not None
-        else geometry.native_size
+    frame = run_frame(
+        spec.model_source.task, spec.data.tiling, geometry.native_size
     )
     return {
         "in_chans": dims["in_chans"],

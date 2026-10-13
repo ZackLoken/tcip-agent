@@ -90,7 +90,7 @@ def predictor_for(tmp_path: Path, builder: str, task: str) -> Any:
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
     from tests import REPO_ROOT
-    from tests._chain_fixtures import BESPOKE_MODELS
+    from tests._chain_fixtures import BESPOKE_MODELS, FRAME_STATISTICS
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     src = {
@@ -101,6 +101,7 @@ def predictor_for(tmp_path: Path, builder: str, task: str) -> Any:
             BESPOKE_MODELS,
         ],
         "task": task,
+        "normalization": FRAME_STATISTICS,
     }
     path = registered_checkpoint(tmp_path, model_source=src)
     return GenericPredictor(

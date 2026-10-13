@@ -120,7 +120,7 @@ def test_differing_checkpoints_across_dates_refuse(tmp_path: Path) -> None:
     )
     assert "error" not in res, res
 
-    config = run_config(tmp_path / "selection", BLOB_BUILDER)
+    config = run_config(tmp_path, tmp_path / "selection", BLOB_BUILDER)
     other = observe(
         worker_run(tmp_path, config, experiment_id="exp-other")
     ).checkpoint

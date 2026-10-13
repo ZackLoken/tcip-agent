@@ -15,7 +15,9 @@ import pytest
 from tests._chain_fixtures import (
     BESPOKE_CLASSIFIER,
     BESPOKE_MODELS,
+    FRAME_STATISTICS,
     GT_ANCHOR_DETECTOR,
+    weights_normalization,
 )
 from tests._training_values import RATIONALE, drawn_split
 
@@ -30,25 +32,26 @@ from tests import bespoke_models  # noqa: E402
 def _model_source() -> dict:
     return {
         "builder": GT_ANCHOR_DETECTOR,
-        "builder_kwargs": {
-            "gt_boxes_wh": [[15, 36], [16, 40], [17, 44]],
-            "min_size": 64,
-            "max_size": 128,
-        },
         "task": "detection",
         "source_files": [__file__, BESPOKE_MODELS],
+        "normalization": FRAME_STATISTICS,
     }
 
 
 def _snapshot(model_source: dict, project: Path) -> tuple[dict, dict]:
     """``snapshot_model_source`` over a run of ``project`` of ``model_source`` over no data
     (:func:`~tests._chain_fixtures.training_config`), validated: its record and its copies.
+    A run over no data normalizes by the weights it names
+    (``_chain_fixtures.weights_normalization``).
     """
     from tcip_mcp.pipelines.schemas import train_config
     from tests._chain_fixtures import training_config
 
+    source = {**model_source, "normalization": weights_normalization()}
     return snapshot_model_source(
-        train_config(training_config(model_source, {"split": drawn_split()})),
+        train_config(
+            training_config(project, source, {"split": drawn_split()})
+        ),
         project,
     )
 
@@ -148,9 +151,11 @@ def test_a_declared_file_of_the_builders_stem_that_is_not_python_holds_no_module
             module_plan(
                 train_config(
                     training_config(
+                        tmp_path,
                         {
                             "builder": "review:build",
                             "task": "detection",
+                            "normalization": weights_normalization(),
                             "source_files": [str(tmp_path / "review.txt")],
                         },
                         {"split": drawn_split()},
@@ -219,11 +224,14 @@ def test_a_project_file_beside_an_external_builder_named_like_the_standard_libra
             *_model_source()["source_files"],
             str(tmp_path / "code.py"),
         ],
+        "normalization": weights_normalization(),
     }
 
     with pytest.raises(ValueError, match="standard-library module code"):
         module_plan(
-            train_config(training_config(source, {"split": drawn_split()})),
+            train_config(
+                training_config(tmp_path, source, {"split": drawn_split()})
+            ),
             tmp_path,
         )
 
@@ -252,6 +260,7 @@ def test_a_preflight_over_a_declared_standard_library_name_imports_nothing(
     )
     config = detection_config(
         tmp_path / "data",
+        project=tmp_path,
         model_source={
             **BUILT_DETECTOR,
             "builder": "agent_model:build",
@@ -283,6 +292,7 @@ def test_a_run_whose_snapshot_refuses_leaves_no_run_directory(tmp_path):
 
     config = detection_config(
         tmp_path / "data",
+        project=tmp_path,
         model_source={
             **BUILT_DETECTOR,
             "source_files": [
@@ -319,6 +329,7 @@ def test_a_declared_file_named_like_the_standard_library_refuses_before_a_run_op
     (tmp_path / "code.py").write_text("", encoding="utf-8")
     config = detection_config(
         tmp_path / "data",
+        project=tmp_path,
         model_source={
             **BUILT_DETECTOR,
             "builder": "agent_model:build",
@@ -436,6 +447,7 @@ def test_predictor_loads_at_the_two_channels_its_run_recorded(tmp_path):
                 "builder": BESPOKE_CLASSIFIER,
                 "source_files": [BESPOKE_MODELS],
                 "task": "classification",
+                "normalization": FRAME_STATISTICS,
             },
             data={
                 "images_dir": str(images),

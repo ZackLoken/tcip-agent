@@ -92,13 +92,14 @@ def test_detection_anchor_count_with_p2():
     with torch.no_grad():
         names = list(adapter(torch.zeros(1, 3, 64, 64)).keys())
     assert len(names) == 5
+    from tests._chain_fixtures import detector_values
+
     det = _build_faster_rcnn(  # must not raise (guards the [..][:5] truncation crash)
         adapter,
         1,
         featmap_names=names,
         num_levels=len(names),
-        min_size=64,
-        max_size=128,
+        **detector_values(),
     )
     assert len(det.rpn.anchor_generator.sizes) == 5
 
@@ -131,6 +132,7 @@ def test_detection_anchor_free_e2e(tmp_path: Path):
 
     # No validation side: loss is the only metric coherent to select on without one.
     cfg = training_config(
+        tmp_path,
         built_detector(detector="fcos"),
         {
             "images_dir": str(images_dir),

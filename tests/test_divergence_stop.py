@@ -57,6 +57,7 @@ def _trained(
     config = regressor_config(
         horizon,
         data=data,
+        project=tmp_path,
         builder=builder,
         builder_kwargs=builder_kwargs,
         batch_size=batch_size,
@@ -208,10 +209,11 @@ def test_cancel_requested_during_the_second_diverged_epoch_still_ends_failed(
 def test_launch_training_real_subprocess_reports_the_diverged_stop(
     tmp_path, monkeypatch
 ):
-    """A model that passes the preflight contract on the synthetic (random, nonzero) batch, then
-    divides by a real batch's zero pixel sum once real training starts, must be caught by a real
-    launch_training subprocess: monitor_training names the diverged stop, not a silent hang
-    or the launch-time placeholder.
+    """A model that passes the preflight contract on the synthetic (random) batch, then divides
+    by a real batch's zero spread across bands once real training starts (gray frames of
+    different intensities, so the data's band statistics exist and are alike), must be caught
+    by a real launch_training subprocess: monitor_training names the diverged stop, not a
+    silent hang or the launch-time placeholder.
     """
     pytest.importorskip("torchvision")
     from tcip_mcp.tools.training_tools import launch_training
@@ -224,7 +226,7 @@ def test_launch_training_real_subprocess_reports_the_diverged_stop(
     )
 
     images_dir, csv_path = write_regression_dataset(
-        tmp_path, intensities=[0.0, 0.0, 0.0, 0.0], values=[0.1, 0.2, 0.3, 0.4]
+        tmp_path, intensities=[0.1, 0.3, 0.5, 0.7], values=[0.1, 0.2, 0.3, 0.4]
     )
 
     cfg = regressor_config(
@@ -234,7 +236,8 @@ def test_launch_training_real_subprocess_reports_the_diverged_stop(
             "labels_dir": str(csv_path),
             "split": drawn_split(val_ratio=0.15),
         },
-        builder="tiny_trainer_fixtures:build_pixel_sum_divide_model",
+        project=tmp_path,
+        builder="tiny_trainer_fixtures:build_pixel_spread_divide_model",
         batch_size=4,
     )
     res = launch_training(tmp_path, cfg, actor=None)

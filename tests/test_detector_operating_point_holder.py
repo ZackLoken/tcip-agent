@@ -18,6 +18,7 @@ from tests._chain_fixtures import (
     BARE_NO_KNOB_DETECTOR,
     BARE_SCORE_THRESH_DETECTOR,
     BESPOKE_MODELS,
+    FRAME_STATISTICS,
 )
 from tests._training_values import drawn_split
 
@@ -31,22 +32,47 @@ _DIMS = {"in_chans": 3, "num_classes": 1}
 
 
 def _built(model_source: dict):
-    """The model ``model_source`` builds at :data:`_DIMS`, imported from the staged sources of a
-    run config over no data with this repository as its project.
+    """The model ``model_source`` builds at :data:`_DIMS` and a 32 px frame's geometry, imported
+    from the staged sources of a run config over one noise frame of its own with this repository
+    as its project.
     """
+    import tempfile
+
     from tcip_mcp.pipelines.model_build import (
         build_from_model_source,
         staged_sources,
     )
-    from tcip_mcp.pipelines.schemas import train_config
+    from tcip_mcp.pipelines.schemas import TrainGeometry, train_config
     from tests import REPO_ROOT
-    from tests._chain_fixtures import training_config
-
-    spec = train_config(
-        training_config(model_source, {"split": drawn_split()})
+    from tests._chain_fixtures import (
+        detector_geometry,
+        frame_statistics,
+        training_config,
     )
+    from tests._image_fixtures import write_noise_image
+
+    with tempfile.TemporaryDirectory() as frames:
+        frame = Path(frames) / "frame.png"
+        write_noise_image(frame, IMG)
+        spec = train_config(
+            training_config(
+                Path(frames),
+                {
+                    **model_source,
+                    "normalization": frame_statistics([str(frame)], 3),
+                },
+                {"images_dir": frames, "split": drawn_split()},
+            )
+        )
     return build_from_model_source(
-        spec.model_source, staged_sources(spec, REPO_ROOT).layout, _DIMS
+        spec.model_source,
+        staged_sources(spec, REPO_ROOT).layout,
+        _DIMS,
+        TrainGeometry(
+            native_size=None,
+            object_density=None,
+            detector=detector_geometry((IMG, IMG)),
+        ),
     )
 
 
@@ -152,6 +178,7 @@ def _checkpoint(tmp_path, builder: str) -> str:
             "builder": builder,
             "source_files": [BESPOKE_MODELS],
             "task": "detection",
+            "normalization": FRAME_STATISTICS,
         },
         data={
             "num_channels": 3,

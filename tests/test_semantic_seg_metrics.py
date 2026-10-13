@@ -129,7 +129,16 @@ def test_evaluate_semantic_seg_surfaces_miou(tmp_path: Path):
     loader = DataLoader(
         dataset, batch_size=2, collate_fn=task_collate("semantic_seg")
     )
-    model = bespoke_models.build_bespoke_semantic_seg(num_classes=2)
+    from tests._chain_fixtures import frame_statistics
+
+    stats = frame_statistics(
+        sorted(str(p) for p in images_dir.glob("*.png")), 3
+    )
+    model = bespoke_models.build_bespoke_semantic_seg(
+        num_classes=2,
+        image_mean=stats["image_mean"],
+        image_std=stats["image_std"],
+    )
 
     result = evaluate(
         model,

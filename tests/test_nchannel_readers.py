@@ -75,6 +75,7 @@ def test_grayscale_classification_end_to_end(tmp_path):
     ctx = run_context(
         tmp_path,
         training_config(
+            tmp_path,
             CLASSIFIER_SOURCE,
             {
                 "images_dir": str(images_dir),

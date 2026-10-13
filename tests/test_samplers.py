@@ -352,9 +352,10 @@ def _table_run(tmp_path, values: list[int], block: dict, task: str):
     data = frames_data(
         tmp_path / "ds", distinct_intensities(len(values)), values
     )
-    config = classifier_config(1, data, sampler=block)
-    config["model_source"]["task"] = task
-    return run_context(tmp_path, config)
+    return run_context(
+        tmp_path,
+        classifier_config(1, data, project=tmp_path, task=task, sampler=block),
+    )
 
 
 def test_build_sampler_builds_tile_locality_through_the_factory(monkeypatch):
@@ -419,10 +420,19 @@ def test_a_sampler_block_its_sampler_refuses_is_refused_at_preflight_by_name(
     supply, refused in a block by name.
     """
     from tcip_mcp.pipelines.schemas import train_config
+    from tests import REPO_ROOT
+    from tests._chain_fixtures import weights_normalization
     from tests.tiny_trainer_fixtures import classifier_config
 
+    config = classifier_config(
+        1,
+        {},
+        project=REPO_ROOT,
+        normalization=weights_normalization(),
+        sampler=block,
+    )
     with pytest.raises(ValueError, match=named):
-        train_config(classifier_config(1, {}, sampler=block)).trainer_reads()
+        train_config(config).trainer_reads()
 
 
 def test_a_stated_oversampler_count_is_the_count_the_train_loader_draws_at(

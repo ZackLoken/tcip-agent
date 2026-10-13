@@ -6,8 +6,17 @@ carrying a ``training`` key is refused by name.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Annotated, Any, Literal, NamedTuple, cast, get_args
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Any,
+    Literal,
+    NamedTuple,
+    cast,
+    get_args,
+)
 
 from pydantic import (
     AfterValidator,
@@ -22,7 +31,11 @@ from pydantic import (
     model_validator,
 )
 
-from tcip_mcp.pipelines.data.selection import ClassScope
+from tcip_mcp.pipelines.data.selection import ClassScope, Sample
+from tcip_mcp.pipelines.derivations import DetectorGeometryDerivation
+
+if TYPE_CHECKING:
+    from tcip_mcp.subject_registry import Attribute
 
 
 def _located(path: str, info: ValidationInfo) -> str:
@@ -144,9 +157,10 @@ class CosineSchedule(HorizonSchedule):
 
 
 class PlateauSchedule(_Stated):
-    """The rate times ``factor`` once the validation loss has not improved, by ``threshold`` in
-    ``threshold_mode``, for ``patience`` epochs, then ``cooldown`` epochs before the count
-    resumes, never below ``min_lr``, a change smaller than ``eps`` not applied
+    """The rate times ``factor`` once the run's selection value has not improved in its
+    metric's direction (:func:`selection_of`), by ``threshold`` in ``threshold_mode``, for
+    ``patience`` epochs, then ``cooldown`` epochs before the count resumes, never below
+    ``min_lr``, a change smaller than ``eps`` not applied
     (``torch.optim.lr_scheduler.ReduceLROnPlateau``).
     """
 
@@ -310,18 +324,19 @@ class ImageStatsWindow(BaseModel):
 
 
 class ImageStatsSampling(BaseModel):
-    """Provenance for ``model_source.builder_kwargs``'s per-band ``image_mean``/``image_std``.
-
-    The ``sampling`` of whichever of ``derivations.band_normalization_stats`` (the exact
-    derivation) or ``band_normalization_stats_sampled`` (the windowed one) produced the
-    statistics. ``windows`` pairs each source's label with the rectangle read from it, or ``None``
-    for the exact derivation's own whole-image read (``pixel_fraction`` is then ``1.0`` and
+    """What band statistics read: the sampling of whichever of
+    ``derivations.band_normalization_stats`` (the exact derivation) or
+    ``band_normalization_stats_sampled`` (the windowed one) produced them. ``windows`` pairs each
+    source's label with the rectangle read from it, or ``None`` for the exact derivation's own
+    whole-image read (``pixel_fraction`` is then ``1.0`` and
     ``window_size``/``max_windows_per_image`` are ``None``); ``max_images`` is the cap on rasters
     drawn and ``seed`` the seed that drew them.
     """
 
     model_config = ConfigDict(extra="forbid")
-    windows: list[tuple[ResolvedPath, ImageStatsWindow | None]]
+    windows: list[tuple[ResolvedPath, ImageStatsWindow | None]] = Field(
+        min_length=1
+    )
     seed: int
     max_images: int
     pixel_fraction: float
@@ -329,9 +344,140 @@ class ImageStatsSampling(BaseModel):
     max_windows_per_image: int | None = None
 
 
+class PretrainedWeights(BaseModel):
+    """Pretrained weights a model's builder loads: the ``library`` publishing them and their
+    ``name`` there, a timm pretrained tag (``resnet18.a1_in1k``) or a torchvision weights enum
+    member (``ResNet18_Weights.IMAGENET1K_V1``).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    library: Literal["timm", "torchvision"]
+    name: str = Field(min_length=1)
+
+
+class StatedBeyondWeights(_Stated):
+    """Per-band statistics stated with ``rationale`` for a model reading more bands than the
+    ``pretrained_weights`` it loads carry statistics for.
+    """
+
+    pretrained_weights: PretrainedWeights
+
+
+def _present(record: Any, names: Sequence[str]) -> dict[str, Any]:
+    """Each of ``names`` whose value on ``record`` is not ``None``, under its own name."""
+    return {
+        name: value
+        for name in names
+        if (value := getattr(record, name)) is not None
+    }
+
+
+class _Sourced(BaseModel):
+    """Values a model builder is handed, beside the ``source`` that gave them."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    @classmethod
+    def handed_names(cls) -> tuple[str, ...]:
+        """The names of the values a builder is handed: every field but ``source``, and every
+        property the class reads off its fields.
+        """
+        return (
+            *(name for name in cls.model_fields if name != "source"),
+            *(
+                name
+                for name, v in vars(cls).items()
+                if isinstance(v, property)
+            ),
+        )
+
+    def handed(self) -> dict[str, Any]:
+        """Each value a builder is handed (:meth:`handed_names`) that is present."""
+        return _present(self, self.handed_names())
+
+
+class Normalization(_Sourced):
+    """The per-band ``image_mean`` and ``image_std``, in [0, 1] tensor units, a model normalizes
+    its input by, and their ``source``: the data's band statistics' own sampling record when no
+    weights load (``derivations.band_normalization_stats``), the pretrained weights whose own
+    statistics they are (``derivations.pretrained_normalization``), or the statement of every
+    band for a model reading more bands than its weights carry statistics for.
+    """
+
+    image_mean: list[float]
+    image_std: list[Annotated[float, Field(gt=0)]]
+    """Each band's std, positive: a band of one value has none to normalize by."""
+    source: ImageStatsSampling | PretrainedWeights | StatedBeyondWeights
+
+    @property
+    def pretrained_weights(self) -> PretrainedWeights | None:
+        """The weights the model's builder loads, read off the source; ``None`` for none."""
+        if isinstance(self.source, StatedBeyondWeights):
+            return self.source.pretrained_weights
+        if isinstance(self.source, PretrainedWeights):
+            return self.source
+        return None
+
+
+class DetectorGeometry(_Sourced):
+    """A detector's input scale and anchors, the four keyword values the platform hands a
+    detection builder: ``min_size`` and ``max_size``, the resize bounds, ``anchor_base_size``,
+    the anchor size of the finest pyramid level, each coarser level doubling it, and
+    ``aspect_ratios`` (h/w), the ratios every level's anchors take; ``source``, the label of the
+    derivation that gave them (``derivations.derive_detector_geometry``) or the statement of
+    them.
+    """
+
+    min_size: PositiveInt
+    max_size: PositiveInt
+    anchor_base_size: PositiveInt
+    aspect_ratios: tuple[float, ...] = Field(min_length=1)
+    source: DetectorGeometryDerivation | _Stated
+
+
+class StatedDetectorGeometry(DetectorGeometry):
+    """A detector geometry a model source states, with its reason."""
+
+    source: _Stated
+
+
+class ModelDims(NamedTuple):
+    """The dimensions a run's model is built at (``model_build.model_dims``): ``in_chans``, the
+    band count its sources are read at; ``num_classes`` or ``num_ranks``, the count its ground
+    truth derives; ``attributes``, the attribute records a document scope declares. ``None``
+    for each the run has none of.
+    """
+
+    in_chans: int
+    num_classes: int | None = None
+    num_ranks: int | None = None
+    attributes: tuple[Attribute, ...] | None = None
+
+    def handed(self) -> dict[str, Any]:
+        """Each dimension the run has, under its own name."""
+        return _present(self, self._fields)
+
+
+def _handed_once(
+    door: str, handed: Sequence[str], kwargs: dict | None, why: str
+) -> None:
+    """Refuse (``ValueError``) a ``door.builder_kwargs`` naming any of ``handed``, the values
+    the platform hands that door's builder, saying ``why`` they are the platform's.
+    """
+    restated = sorted(set(handed) & set(kwargs or {}))
+    if restated:
+        raise ValueError(
+            f"{door}.builder_kwargs restates {restated}: {why}. Drop {restated} from "
+            "builder_kwargs."
+        )
+
+
 class ModelSourceSchema(BaseModel):
-    """The importable-builder reference and the task its model is for; a key outside these
-    fields refuses by name.
+    """The importable-builder reference, the task its model is for, the statistics it
+    normalizes by (whose source names any pretrained weights its builder loads), and a
+    detector's geometry stated for a run that resolves no frame to derive it from. A key
+    outside these fields refuses by name, and so does a ``builder_kwargs`` naming a value the
+    platform hands (:data:`HANDED_TO_BUILDER`).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -340,16 +486,66 @@ class ModelSourceSchema(BaseModel):
     task: str = Field(min_length=1)
     """The run's task (detection, instance_seg, classification, ...)."""
     source_files: list[ResolvedPath] | None = None
-    image_stats_sampling: ImageStatsSampling | None = None
+    normalization: Normalization
+    detector_geometry: StatedDetectorGeometry | None = None
+
+    @model_validator(mode="after")
+    def _model_handed_once(self) -> ModelSourceSchema:
+        _handed_once(
+            "model_source",
+            HANDED_TO_BUILDER,
+            self.builder_kwargs,
+            "the band count and head sizes a run derives, the statistics and weights "
+            "model_source.normalization records and a detector's geometry are the platform's "
+            "to hand the builder",
+        )
+        return self
+
+
+HANDED_TO_BUILDER = (
+    *ModelDims._fields,
+    *Normalization.handed_names(),
+    *DetectorGeometry.handed_names(),
+)
+"""What the platform hands a model builder, never its ``builder_kwargs``, read off each
+producer: the run's dimensions (:class:`ModelDims`), its normalization's values and weights,
+and a detector's geometry (:meth:`_Sourced.handed_names`)."""
+
+
+class DatasetContext(NamedTuple):
+    """What the platform hands a dataset builder, each under its field's name, never its
+    ``builder_kwargs``: the ``task``, the ``samples`` of the side being built, the ``scope``
+    they were admitted under, and the ``transforms``.
+    """
+
+    task: str
+    samples: Sequence[Sample]
+    scope: ClassScope
+    transforms: Any
 
 
 class DatasetSourceSchema(BaseModel):
-    """A bespoke dataset builder; a key outside these fields refuses by name."""
+    """A bespoke dataset builder; a key outside these fields refuses by name, and so does a
+    ``builder_kwargs`` naming a value the platform hands (:class:`DatasetContext`).
+    """
 
     model_config = ConfigDict(extra="forbid")
     builder: str = Field(min_length=1)
     builder_kwargs: dict | None = None
     source_files: list[ResolvedPath] | None = None
+
+    @model_validator(mode="after")
+    def _context_handed_once(self) -> DatasetSourceSchema:
+        _handed_once(
+            "dataset_source",
+            DatasetContext._fields,
+            self.builder_kwargs,
+            "the samples this run trains on, the class space they were admitted under, the "
+            "task and the augmentation are the platform's to state, and a builder given a "
+            "second value for one of them would build over something the run's own record "
+            "does not describe",
+        )
+        return self
 
 
 class BoundSplit(BaseModel):
@@ -472,6 +668,20 @@ def run_tiling(task: str, tiling: TilingSpec | None) -> TilingSpec | None:
     return tiling
 
 
+def run_frame(
+    task: str,
+    tiling: TilingSpec | None,
+    native_size: tuple[int, int] | None,
+) -> tuple[int, int] | None:
+    """The ``(width, height)`` a run of ``task`` trains each input at: the square tile its
+    tiling resolved (:func:`run_tiling`), else ``native_size``, ``None`` for neither.
+    """
+    tiler = run_tiling(task, tiling)
+    if tiler is None or tiler.tile_size is None:
+        return native_size
+    return (tiler.tile_size, tiler.tile_size)
+
+
 class _Recorded(BaseModel):
     """A validated block a run's records hold as :meth:`record` dumps it."""
 
@@ -523,13 +733,15 @@ class DataSpec(_Recorded):
 class TrainGeometry(BaseModel):
     """What a run's resolution read off the frames its train dataset serves: ``native_size``,
     the one ``(width, height)`` every training frame of a run the platform resolved untiled
-    shares (``None`` when sizes differ or the run tiles), and ``object_density``, a detector's
-    objects per pixel over the regions it trains on (``None`` for any other head).
+    shares (``None`` when sizes differ or the run tiles), ``object_density``, a detector's
+    objects per pixel over the regions it trains on, and ``detector``, the geometry its builder
+    is handed (each ``None`` for any other head).
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     native_size: tuple[PositiveInt, PositiveInt] | None
     object_density: float | None
+    detector: DetectorGeometry | None
 
 
 NESTED_TRAINING_SECTION_REFUSAL = (

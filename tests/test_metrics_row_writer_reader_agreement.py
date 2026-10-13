@@ -105,6 +105,7 @@ def test_stream_drains_a_row_that_lands_between_the_read_and_the_terminal_check(
         tmp_path,
         detection_config(
             tmp_path / "data",
+            project=tmp_path,
             training_source=SAVE_BUILT_WEIGHTS,
             fixture_rows=[{"epoch": 2, "loss": 0.2}],
         ),

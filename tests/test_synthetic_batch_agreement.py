@@ -283,9 +283,10 @@ def test_real_models_still_smoke_green_on_the_collated_batch():
     """
     pytest.importorskip("torchvision")
     from tests import bespoke_models
+    from tests._chain_fixtures import detector_values
 
     detector = bespoke_models.build_bespoke_detection(
-        num_classes=1, min_size=64, max_size=128
+        num_classes=1, **detector_values()
     )
     report = check_model_contract(detector, "detection", dims=DET_DIMS)
     assert report["ok"], report["issues"]

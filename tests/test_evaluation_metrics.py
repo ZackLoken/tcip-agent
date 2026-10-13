@@ -12,7 +12,7 @@ from functools import partial
 
 import pytest
 
-from tests._chain_fixtures import BESPOKE_CLASSIFIER
+from tests._chain_fixtures import BESPOKE_CLASSIFIER, FRAME_STATISTICS
 
 torch = pytest.importorskip(
     "torch"
@@ -890,12 +890,14 @@ def test_a_detector_run_selecting_on_the_objective_refuses_unweighted_and_resolv
     from tcip_mcp.pipelines.training.generic_trainer import (
         resolve_trait_revision,
     )
-    from tests._chain_fixtures import training_config
+    from tests._chain_fixtures import training_config, weights_statistics
     from tests._verified_checkpoint_fixtures import unbuilt_source
 
+    source = weights_statistics(unbuilt_source("detection"))
     spec = train_config(
         training_config(
-            unbuilt_source("detection"),
+            tmp_path,
+            source,
             {},
             evaluation=evaluation_block(score_weights=None),
         )
@@ -906,7 +908,8 @@ def test_a_detector_run_selecting_on_the_objective_refuses_unweighted_and_resolv
     weights = {"loss": 1.0, "f1": 0.0, "map50": 0.0}
     spec = train_config(
         training_config(
-            unbuilt_source("detection"),
+            tmp_path,
+            source,
             {},
             evaluation=evaluation_block(score_weights=weights),
         )
@@ -928,13 +931,15 @@ def test_score_weights_missing_a_term_or_stating_another_refuse_at_admission():
     one, and one stating a fourth key refuses naming it; the three terms admit as the block.
     """
     from tcip_mcp.pipelines.schemas import train_config
-    from tests._chain_fixtures import training_config
+    from tests import REPO_ROOT
+    from tests._chain_fixtures import training_config, weights_statistics
     from tests._verified_checkpoint_fixtures import unbuilt_source
 
     def admitted(weights: dict):
         return train_config(
             training_config(
-                unbuilt_source("detection"),
+                REPO_ROOT,
+                weights_statistics(unbuilt_source("detection")),
                 {},
                 evaluation=evaluation_block(score_weights=weights),
             )
@@ -987,6 +992,7 @@ def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts(
     )
     from tcip_store.values import NOT_FINITE_SUFFIX
     from tests import bespoke_models
+    from tests._chain_fixtures import band_statistics, detector_values
     from tests._producer_fixtures import painted_array
 
     device = torch.device("cpu")
@@ -995,11 +1001,15 @@ def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts(
 
     for task in sorted(_SYNTHESIZABLE_TASKS):
         if task == "detection":
-            model = bespoke_models.build_bespoke_detection(num_classes=1)
+            model = bespoke_models.build_bespoke_detection(
+                num_classes=1, **detector_values()
+            )
             images, targets = _detection_batch(img_size=img_size)
             loader = [(images, targets)]
         elif task == "instance_seg":
-            model = bespoke_models.build_bespoke_instance_seg(num_classes=1)
+            model = bespoke_models.build_bespoke_instance_seg(
+                num_classes=1, **detector_values()
+            )
             images, targets = _detection_batch(img_size=img_size)
             for t in targets:
                 t["masks"] = torch.as_tensor(
@@ -1007,25 +1017,31 @@ def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts(
                 )[None]
             loader = [(images, targets)]
         elif task == "classification":
-            model = bespoke_models.build_bespoke_classifier(num_classes=2)
+            model = bespoke_models.build_bespoke_classifier(
+                num_classes=2, **band_statistics()
+            )
             imgs = torch.stack(
                 [torch.rand(3, img_size, img_size) for _ in range(2)]
             )
             loader = [(imgs, {"labels": torch.tensor([0, 1])})]
         elif task == "ordinal":
-            model = bespoke_models.build_bespoke_ordinal(num_ranks=3)
+            model = bespoke_models.build_bespoke_ordinal(
+                num_ranks=3, **band_statistics()
+            )
             imgs = torch.stack(
                 [torch.rand(3, img_size, img_size) for _ in range(2)]
             )
             loader = [(imgs, {"ranks": torch.tensor([0, 2])})]
         elif task == "regression":
-            model = bespoke_models.build_bespoke_regressor()
+            model = bespoke_models.build_bespoke_regressor(**band_statistics())
             imgs = torch.stack(
                 [torch.rand(3, img_size, img_size) for _ in range(2)]
             )
             loader = [(imgs, {"values": torch.tensor([0.2, 0.8])})]
         else:
-            model = bespoke_models.build_bespoke_semantic_seg(num_classes=2)
+            model = bespoke_models.build_bespoke_semantic_seg(
+                num_classes=2, **band_statistics()
+            )
             imgs = torch.stack(
                 [torch.rand(3, img_size, img_size) for _ in range(2)]
             )
@@ -1378,6 +1394,7 @@ def _context(tmp_path, model_source, data: dict, **overrides):
     return run_context(
         tmp_path,
         training_config(
+            tmp_path,
             model_source,
             {**data, "split": drawn_split(val_ratio=0.25)},
             optimizer=adamw_optimizer(),
@@ -1470,6 +1487,7 @@ def test_validate_classification_metrics(tmp_path):
         "builder": BESPOKE_CLASSIFIER,
         "source_files": [BESPOKE_MODELS],
         "task": "classification",
+        "normalization": FRAME_STATISTICS,
     }
     ctx = _context(
         tmp_path,

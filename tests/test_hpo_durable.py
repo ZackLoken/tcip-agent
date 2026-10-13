@@ -12,6 +12,7 @@ from tests._chain_fixtures import (
     BESPOKE_DETECTION,
     BESPOKE_MODELS,
     training_config,
+    weights_normalization,
 )
 from tests._training_values import (
     asha_scheduler,
@@ -195,7 +196,13 @@ def test_run_hyperparameter_search_refuses_before_minting_when_the_base_config_f
     result = tt.run_hyperparameter_search(
         tmp_path,
         base_config=training_config(
-            {"builder": "not.a:real_builder", "task": "detection"}, {}
+            tmp_path,
+            {
+                "builder": "not.a:real_builder",
+                "task": "detection",
+                "normalization": weights_normalization(),
+            },
+            {},
         ),
         param_space=sweep_space(),
         n_trials=1,
@@ -226,6 +233,9 @@ def test_run_hyperparameter_search_checks_a_swept_placeholder_axis_at_its_resolv
                 "builder": "PLACEHOLDER:PLACEHOLDER",
                 "source_files": [BESPOKE_MODELS],
                 "task": "detection",
+                "normalization": real_hpo_base_config["model_source"][
+                    "normalization"
+                ],
             },
         },
         param_space={
@@ -262,6 +272,9 @@ def test_run_hyperparameter_search_refuses_a_swept_axis_any_of_whose_choices_fai
                 "builder": "PLACEHOLDER:PLACEHOLDER",
                 "source_files": [BESPOKE_MODELS],
                 "task": "detection",
+                "normalization": real_hpo_base_config["model_source"][
+                    "normalization"
+                ],
             },
         },
         param_space={
@@ -291,6 +304,9 @@ def test_run_hyperparameter_search_admits_a_swept_axis_whose_every_choice_resolv
                 "builder": "PLACEHOLDER:PLACEHOLDER",
                 "source_files": [BESPOKE_MODELS],
                 "task": "detection",
+                "normalization": real_hpo_base_config["model_source"][
+                    "normalization"
+                ],
             },
         },
         param_space={
