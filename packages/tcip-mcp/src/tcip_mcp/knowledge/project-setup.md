@@ -61,15 +61,20 @@ ingest_images(source="<raw folder or glob>")
   default-domain metadata item you name as `raster_date_item`, which item a stitching engine
   writes being that engine's own convention). A file that states none goes to
   `images/undated/`; each file's entry in the manifest's `files` names, as `date_source`,
-  which item stated its date, `None` for an undated file. Override with `date_from="none"` (all undated) or a literal ISO date
-  (`date_from="2026-02-11"`) when you know the capture date the camera didn't record.
+  which item stated its date, `None` for an undated file. When you know a capture date a file
+  does not state, or the date it states is wrong, state it afterwards as its own act:
+  `state_capture_date(images, date, rationale)` moves those images, with every record keyed
+  by them, into the date's bucket, and the audit line records the date and why it is known.
+- Detects band groups in every bucket the call touched: sibling single-band files one capture
+  wrote (a multispectral rig's) are recorded as one logical image by a `.bandgroup` manifest,
+  reported under `band_groups`.
 - Never overwrites, and refuses a stem collision before copying a byte: two source files
   landing on the same bucket+stem (case-folded), or a source colliding with an existing
   image or `.bandgroup` manifest, refuses the whole call, naming both sides; re-ingesting
   the exact same file already placed is the one exception, skipped and reported in
   `skipped_collisions`. Relay the manifest to the human: its `files` (each with its bucket
   and date source) and `skipped_collisions`, especially a refusal, many files in the undated
-  bucket (dates may need `date_from`), and each file's `date_unreadable`, which separates
+  bucket (their dates may need stating), and each file's `date_unreadable`, which separates
   files whose container could not be read at all from files that simply state no date.
   Every admitted file is ingested either way; the date never gates ingestion.
 

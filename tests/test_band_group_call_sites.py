@@ -28,7 +28,11 @@ def _write_group(images_dir: Path, stem: str, fill=(111, 222)) -> None:
     tifffile.imwrite(str(band_a), np.full((16, 16), fill[0], dtype=np.uint16))
     tifffile.imwrite(str(band_b), np.full((16, 16), fill[1], dtype=np.uint16))
     write_band_group_manifest(
-        images_dir, stem, {"Green": band_a, "Red": band_b}
+        images_dir,
+        stem,
+        {"Green": band_a, "Red": band_b},
+        central_wavelength_nm=None,
+        identity_tolerance={},
     )
 
 
@@ -148,7 +152,11 @@ def test_the_channel_probe_raises_on_a_stale_manifest_instead_of_silently_defaul
     tifffile.imwrite(str(band_a), np.full((8, 8), 1, dtype=np.uint16))
     tifffile.imwrite(str(band_b), np.full((8, 8), 2, dtype=np.uint16))
     manifest = write_band_group_manifest(
-        images_dir, "cap", {"Green": band_a, "Red": band_b}
+        images_dir,
+        "cap",
+        {"Green": band_a, "Red": band_b},
+        central_wavelength_nm=None,
+        identity_tolerance={},
     )
     band_b.unlink()  # the manifest now references a sibling that no longer exists
 

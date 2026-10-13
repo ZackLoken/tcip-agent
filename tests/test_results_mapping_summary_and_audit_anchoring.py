@@ -35,9 +35,17 @@ def _dms(deg: float) -> tuple[float, float, float]:
 
 
 def _write_image(
-    path: Path, when: str, lat: float | None = None, lon: float | None = None
+    path: Path,
+    when: str,
+    lat: float | None = None,
+    lon: float | None = None,
+    h_pos_err: float | None = None,
 ) -> None:
-    """A JPEG carrying EXIF capture time and, unless the fix is missing, a GPS position."""
+    """A JPEG carrying EXIF capture time and, unless the fix is missing, a GPS position with the
+    horizontal positioning error ``h_pos_err`` (meters) it reports.
+    """
+    from PIL import TiffImagePlugin
+
     img = Image.new("RGB", (8, 8), (10, 20, 30))
     exif = img.getexif()
     exif[306] = when
@@ -48,7 +56,14 @@ def _write_image(
         gps[2] = _dms(lat)
         gps[3] = "E" if lon >= 0 else "W"
         gps[4] = _dms(lon)
+    if h_pos_err is not None:
+        exif.get_ifd(0x8825)[31] = TiffImagePlugin.IFDRational(h_pos_err)
     img.save(path, exif=exif)
+
+
+FIRST_DATE_ERRORS = {"a.jpg": 1.5, "b.jpg": 4.0, "c.jpg": 2.0}
+"""The positioning errors (meters) the first date's photographs report, sample data: ``b`` the
+poorer fix, the one that reaches its plant about 3 m off."""
 
 
 def _capture_fixture(root: Path) -> dict:
@@ -66,18 +81,21 @@ def _capture_fixture(root: Path) -> dict:
         "2026:02:11 09:00:00",
         43.20000,
         -90.0000123,
+        FIRST_DATE_ERRORS["a.jpg"],
     )
     _write_image(
         images / "2026-02-11" / "b.jpg",
         "2026:02:11 09:01:00",
         43.200027,
         -90.00015,
+        FIRST_DATE_ERRORS["b.jpg"],
     )
     _write_image(
         images / "2026-02-11" / "c.jpg",
         "2026:02:11 09:02:00",
         43.30000,
         -90.00030,
+        FIRST_DATE_ERRORS["c.jpg"],
     )
     _write_image(images / "2026-02-11" / "e.jpg", "2026:02:11 09:03:00")
     _write_image(
@@ -85,6 +103,7 @@ def _capture_fixture(root: Path) -> dict:
         "2026:02:25 09:00:00",
         43.20000,
         -90.00030,
+        1.0,
     )
     from tcip_mcp.tools.project_tools import register_dataset
     from tcip_mcp.traits import registered_crops
@@ -115,7 +134,6 @@ def test_build_reports_image_count_mapped_count_and_mean_distance_as_three_answe
     that reused one of them for another would read wrong rather than merely coincide.
     """
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
-        NEAREST_MATCH_FACTOR,
         load_mapping_rows,
     )
 
@@ -156,25 +174,23 @@ def test_build_reports_image_count_mapped_count_and_mean_distance_as_three_answe
         "n_unattributed": summary["n_unattributed"] + other["n_unattributed"],
     }
 
-    assert set(body["nn_tolerance_m"]) == {"value", "source"}
-    assert isinstance(body["nn_tolerance_m"]["value"], float)
-    assert body["nn_tolerance_m"]["source"] in {
-        "grid_pitch",
-        "stated",
-        "stated_capped",
+    assert body["match_radius"] == {
+        "2026-02-11": {
+            "value": max(FIRST_DATE_ERRORS.values()),
+            "source": "h_pos_err",
+            "rationale": None,
+        },
+        "2026-02-25": {"value": 1.0, "source": "h_pos_err", "rationale": None},
     }
-    assert body["max_match_distance_m"] == pytest.approx(
-        body["nn_tolerance_m"]["value"] * NEAREST_MATCH_FACTOR
-    )
 
 
-def test_build_without_a_stated_tolerance_derives_it_from_the_plot_grid_pitch(
+def test_build_without_a_stated_radius_derives_each_dates_from_its_photographs(
     client: TestClient,
     tmp_path: Path,
 ) -> None:
-    """A payload naming no ``nn_tolerance_m`` derives the match radius from the plot's own grid
-    pitch, the same as the tool's own default; a route that pinned a numeric default instead
-    would always land on ``stated``/``stated_capped``, never ``grid_pitch``.
+    """A payload naming no ``match_radius`` derives each date's from the positioning errors its
+    photographs report, the same as the tool's own; a route that pinned a numeric default
+    instead would always land on ``stated``.
     """
     from tcip_mcp.pipelines.postprocessing import plant_mapping
 
@@ -184,15 +200,15 @@ def test_build_without_a_stated_tolerance_derives_it_from_the_plot_grid_pitch(
 
     build = plant_mapping.load_mapping(tmp_path, payload["name"])
     assert build is not None
-    assert build.nn_tolerance_m["source"] == "grid_pitch"
+    assert {r.source for r in build.match_radius.values()} == {"h_pos_err"}
 
 
-def test_build_response_carries_the_persisted_record_own_tolerance_dict(
+def test_build_response_carries_the_persisted_record_own_match_radius(
     client: TestClient,
     tmp_path: Path,
 ) -> None:
-    """The response's ``nn_tolerance_m`` equals the persisted record's own value: this cannot
-    prove the route never recomputes it, only that whatever it answers agrees with what
+    """The response's ``match_radius`` equals the persisted record's own: this cannot prove the
+    route never recomputes it, only that whatever it answers agrees with what
     ``persist_mapping`` actually wrote.
     """
     from tcip_mcp.pipelines.postprocessing import plant_mapping
@@ -204,7 +220,7 @@ def test_build_response_carries_the_persisted_record_own_tolerance_dict(
 
     build = plant_mapping.load_mapping(tmp_path, payload["name"])
     assert build is not None
-    assert body["nn_tolerance_m"] == build.nn_tolerance_m
+    assert body["match_radius"] == build.to_record()["match_radius"]
 
 
 def test_the_route_and_the_tool_build_one_mapping_with_one_audit_line_each(

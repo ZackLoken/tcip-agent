@@ -65,11 +65,7 @@ def band_rects(
     )
     out: dict[str, tuple[int, int, int, int]] = {}
     for name in names:
-        rects = spatial.regions.get(name) or []
-        if not rects:
-            continue
-        # stripes_per_split defaults to 1 (never overridden here): one contiguous rect per band.
-        lx0, ly0, lx1, ly1 = rects[0]
+        ((lx0, ly0, lx1, ly1),) = spatial.regions[name]
         out[name] = (lx0 + x0, ly0 + y0, lx1 + x0, ly1 + y0)
     return out
 

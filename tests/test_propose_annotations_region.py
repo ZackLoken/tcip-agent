@@ -272,7 +272,13 @@ def _write_rgb_band_group(
         band_path = images_dir / f"{stem}_{name}.tif"
         tifffile.imwrite(str(band_path), frame[:, :, i])
         bands[name] = band_path
-    return write_band_group_manifest(images_dir, stem, bands)
+    return write_band_group_manifest(
+        images_dir,
+        stem,
+        bands,
+        central_wavelength_nm=None,
+        identity_tolerance={},
+    )
 
 
 class TestRegionFrameIsTheResolvedImageSources:
@@ -339,7 +345,13 @@ class TestRegionFrameIsTheResolvedImageSources:
                 np.full((UPRIGHT_H, UPRIGHT_W), fill, dtype=np.uint16),
             )
             bands[name] = band_path
-        manifest = write_band_group_manifest(images_dir, "cap", bands)
+        manifest = write_band_group_manifest(
+            images_dir,
+            "cap",
+            bands,
+            central_wavelength_nm=None,
+            identity_tolerance={},
+        )
 
         class NeverProposer:
             def propose(self, image_path, **params):

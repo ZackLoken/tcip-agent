@@ -369,6 +369,17 @@ export interface MatchTolerance {
   source: "grid_pitch" | "stated" | "stated_capped";
 }
 
+export interface MatchRadius {
+  value: number;
+  source: "h_pos_err" | "stated";
+  rationale: string | null;
+}
+
+export interface StatedRadius {
+  value: number;
+  rationale: string;
+}
+
 export interface PlantRegistryReference {
   name: string;
   digest: string;
@@ -380,7 +391,7 @@ export interface PlantMappingDisclosure {
   dataset_root: string;
   built_at: string;
   record_sha256: string;
-  nn_tolerance_m: MatchTolerance;
+  match_radius: Record<string, MatchRadius>;
   capture_digests: Record<string, Record<string, string>>;
   captures_unverified: string[];
   plant_csvs_unverified: string[];

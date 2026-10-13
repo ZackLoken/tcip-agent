@@ -26,6 +26,7 @@ from tcip_mcp.traits import registered_crops
 from tests._audit_fixtures import held_by_another_writer
 from tests._image_fixtures import write_geo_image
 from tests._mapping_fixtures import (
+    PHOTO_POSITION_ERROR_M,
     register_plant_registry_for,
     write_plant_csv,
 )
@@ -190,6 +191,7 @@ def _write_scene(
                 plant["lat"],
                 plant["lon"],
                 base_time + timedelta(minutes=j),
+                h_pos_err=PHOTO_POSITION_ERROR_M,
             )
             if stem not in unpredicted:
                 images.append(images_root / date / f"{stem}.jpg")
@@ -336,6 +338,7 @@ def test_deliver_phenology_milestones_refuses_a_date_the_mapping_does_not_cover(
         PLANTS[0]["lat"],
         PLANTS[0]["lon"],
         datetime(2026, 3, 1, 9, 30),
+        h_pos_err=PHOTO_POSITION_ERROR_M,
     )
     preds_by_date[extra_date] = _publish(
         tmp_path, f"live/{extra_date}", [extra_image]
@@ -403,7 +406,7 @@ def test_deliver_phenology_milestones_refuses_a_record_with_provenance_and_no_re
         "built_at": "2026-02-11T00:00:00+00:00",
         "dates_requested": None,
         "dates": list(DATES),
-        "nn_tolerance_m": {"value": 10.0, "source": "stated"},
+        "match_radius": {},
         "plant_registry": {"name": "unregistered", "digest": "0" * 64},
         "capture_digests": {d: {} for d in DATES},
         "unreadable": {d: [] for d in DATES},
@@ -538,6 +541,7 @@ def test_an_unread_captures_bytes_changing_in_place_does_not_refuse_delivery(
         PLANTS[1]["lat"],
         PLANTS[1]["lon"],
         datetime(2026, 2, 11, 10, 45),
+        h_pos_err=PHOTO_POSITION_ERROR_M,
     )
 
     out_csv = tmp_path / "out.csv"
@@ -628,6 +632,7 @@ def test_a_moved_read_capture_refuses_naming_the_file(
         PLANTS[0]["lat"],
         PLANTS[0]["lon"] + 0.0002,
         datetime(2026, 2, 11, 9, 30),
+        h_pos_err=PHOTO_POSITION_ERROR_M,
     )
 
     out_csv = tmp_path / "out.csv"
@@ -675,6 +680,7 @@ def test_full_coverage_still_catches_an_in_place_exif_timestamp_change(
         PLANTS[0]["lat"],
         PLANTS[0]["lon"],
         datetime(2026, 2, 11, 11, 0),
+        h_pos_err=PHOTO_POSITION_ERROR_M,
     )
 
     out_csv = tmp_path / "out.csv"
@@ -723,6 +729,7 @@ def test_an_unmapped_raster_does_not_block_the_whole_date_digest_from_catching_a
         PLANTS[0]["lat"],
         PLANTS[0]["lon"],
         datetime(2026, 2, 11, 11, 0),
+        h_pos_err=PHOTO_POSITION_ERROR_M,
     )
 
     out_csv = tmp_path / "out.csv"
@@ -1201,13 +1208,13 @@ def test_full_round_trip_delivers_and_a_rebuild_reads_back(
     assert "error" not in res2, res2
 
 
-def test_the_delivery_events_plant_mapping_block_carries_the_tolerance_dict(
+def test_the_delivery_events_plant_mapping_block_carries_the_match_radius(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Coverage: the disclosure a phenology delivery records carries the mapping's own
-    ``nn_tolerance_m``, so a delivered milestone states the radius its identities were matched
-    under.
+    per-date ``match_radius``, so a delivered milestone states the radius its identities were
+    matched under.
     """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
@@ -1238,7 +1245,10 @@ def test_the_delivery_events_plant_mapping_block_carries_the_tolerance_dict(
 
     events = _events(tmp_path)
     assert len(events) == 1, events
-    assert events[0]["plant_mapping"]["nn_tolerance_m"] == build.nn_tolerance_m
+    assert (
+        events[0]["plant_mapping"]["match_radius"]
+        == build.to_record()["match_radius"]
+    )
 
 
 # ── rail 12: a moved plant CSV and an archived date deliver, disclosed rather than refused
@@ -1379,6 +1389,7 @@ def test_a_moved_capture_whose_own_csv_is_missing_is_disclosed_under_a_partial_r
         plants3[1]["lat"],
         plants3[1]["lon"] + 0.0002,
         datetime(2026, 2, 11, 9, 31),
+        h_pos_err=PHOTO_POSITION_ERROR_M,
     )
     per_plant_csvs[1].unlink()
 
@@ -1636,10 +1647,9 @@ def test_an_image_ingested_under_a_mapped_date_refuses_the_delivery_naming_the_d
         43.1968,
         -90.0581,
         datetime(2026, 2, 11, 9, 40),
+        h_pos_err=PHOTO_POSITION_ERROR_M,
     )
-    res = ingest_images(
-        dataset_root, source=str(extra_source), date_from=DATES[0]
-    )
+    res = ingest_images(dataset_root, source=str(extra_source))
     assert "error" not in res, res
     assert [f["bucket"] for f in res["files"]] == [DATES[0]]
 
@@ -1684,12 +1694,14 @@ def test_a_band_group_written_under_a_mapped_date_refuses_the_delivery_the_same_
         43.1968,
         -90.0581,
         datetime(2026, 2, 11, 9, 41),
+        h_pos_err=PHOTO_POSITION_ERROR_M,
     )
     write_geo_image(
         date_dir / "aux_b2.jpg",
         43.1968,
         -90.0581,
         datetime(2026, 2, 11, 9, 42),
+        h_pos_err=PHOTO_POSITION_ERROR_M,
     )
 
     build_res = build_plant_mapping(
@@ -1821,12 +1833,14 @@ def test_a_band_group_manifest_rewritten_in_place_refuses_the_delivery_naming_th
         43.1968,
         -90.0581,
         datetime(2026, 2, 11, 9, 41),
+        h_pos_err=PHOTO_POSITION_ERROR_M,
     )
     write_geo_image(
         date_dir / "aux_b2.jpg",
         43.1968,
         -90.0581,
         datetime(2026, 2, 11, 9, 42),
+        h_pos_err=PHOTO_POSITION_ERROR_M,
     )
     grouped = detect_and_write_band_groups(
         date_dir,
@@ -1899,12 +1913,14 @@ def test_a_date_with_an_unreadable_image_a_raster_and_a_band_group_builds_and_de
         43.1968,
         -90.0581,
         datetime(2026, 2, 11, 9, 41),
+        h_pos_err=PHOTO_POSITION_ERROR_M,
     )
     write_geo_image(
         date_dir / "aux_b2.jpg",
         43.1968,
         -90.0581,
         datetime(2026, 2, 11, 9, 42),
+        h_pos_err=PHOTO_POSITION_ERROR_M,
     )
     grouped = detect_and_write_band_groups(
         date_dir,

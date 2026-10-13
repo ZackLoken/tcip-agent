@@ -17,7 +17,7 @@ import pytest
 
 import tcip_store as ts
 from tcip_mcp.pipelines.postprocessing.plant_mapping import (
-    NEAREST_MATCH_FACTOR,
+    StatedRadius,
     plant_mapping_key,
 )
 from tcip_mcp.tools.phenology_tools import build_plant_mapping
@@ -64,7 +64,7 @@ def test_build_plant_mapping_wraps_build_and_persists(tmp_path: Path) -> None:
         name=name,
         images_root=str(images_root),
         plant_registry=registry,
-        nn_tolerance_m=10.0,
+        match_radius=StatedRadius(value=10.0, rationale="the receiver's spec"),
     )
 
     assert "error" not in res, res
@@ -74,10 +74,13 @@ def test_build_plant_mapping_wraps_build_and_persists(tmp_path: Path) -> None:
     assert totals["n_images"] == 1
     assert totals["n_mapped"] + totals["n_unattributed"] == 1
     assert "2026-02-11" in res["summary"]["per_date"]
-    assert res["nn_tolerance_m"] == {"value": 10.0, "source": "stated"}
-    assert res["max_match_distance_m"] == pytest.approx(
-        10.0 * NEAREST_MATCH_FACTOR
-    )
+    assert res["match_radius"] == {
+        "2026-02-11": {
+            "value": 10.0,
+            "source": "stated",
+            "rationale": "the receiver's spec",
+        }
+    }
     persisted = ts.read(plant_mapping_key(tmp_path, name))
     assert list(persisted["assignments"].keys()) == ["2026-02-11"]
     assert persisted["assignments"]["2026-02-11"][0]["stem"] == "img1"

@@ -111,13 +111,16 @@ library call) with plant-GPS mapping; they are unrelated.
 
 ## Plant mapping: why the sequence-anchored matcher
 
-Image GPS (iPhone/handheld EXIF) carries ~5 m error while the plant grid is ~2.8 m between
-adjacent plots, so nearest-neighbor GPS alone is ambiguous. The RTK-collected,
-GIS-rectified plant grid is accurate; the *image* GPS is the fuzzy side. `plant_mapping.py`
-resolves this by ordering each date's images by EXIF capture time (the walker's sequence),
-splitting into row runs on large GPS jumps, and assigning along the row. Each assignment
-records its `source` (`sequence` / `nearest_neighbor` / `unmapped`) and `distance_m`:
-interpretable signals. It records no 0–1 "confidence" value.
+Image GPS (a handheld's EXIF) can carry more error than the spacing between adjacent plots, so
+nearest-neighbor GPS alone is ambiguous. The RTK-collected, GIS-rectified plant grid is
+accurate; the *image* GPS is the fuzzy side. `plant_mapping.py` resolves this by ordering each
+date's images by EXIF capture time (the walker's sequence), splitting into row runs on large
+GPS jumps, and assigning along the row. A capture is matched within its date's radius: a
+`match_radius` stated with its reason governs every date of the build, and without one each
+date's radius is the largest horizontal positioning error its photographs report in their EXIF,
+the build refusing until one is stated when any one positioned photograph of a date reports
+none; the mapping records which per date. Each assignment records its `source` (`sequence` / `nearest_neighbor` /
+`unmapped`) and `distance_m`: interpretable signals. It records no 0–1 "confidence" value.
 
 ## Delivery checklist
 

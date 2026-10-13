@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { StructuredRefusalError } from "@/api/http";
 import { resultsApi, type ServedPlantMapping } from "@/api/inference";
-import type { MatchTolerance } from "@/api/types.generated";
+import type { MatchRadius } from "@/api/types.generated";
 import { useStore } from "@/store";
 import { SetupTab } from "@/tabs/SetupTab";
 import { openTestProject } from "@/test/store";
@@ -145,7 +145,7 @@ describe("SetupTab trait revisions", () => {
   });
 });
 
-describe("SetupTab plant-mapping build: match-tolerance phrase", () => {
+describe("SetupTab plant-mapping build: match radius", () => {
   function fillAndBuild() {
     fireEvent.change(screen.getByPlaceholderText("valley-2026"), {
       target: { value: "valley-2026" },
@@ -156,7 +156,7 @@ describe("SetupTab plant-mapping build: match-tolerance phrase", () => {
     fireEvent.click(screen.getByRole("button", { name: /build \+ save mapping/i }));
   }
 
-  async function buildWithTolerance(nn_tolerance_m: MatchTolerance) {
+  async function buildWithRadius(radius: MatchRadius) {
     vi.spyOn(resultsApi, "buildPlantMapping").mockResolvedValue({
       name: "valley-2026",
       unreadable: {},
@@ -166,8 +166,7 @@ describe("SetupTab plant-mapping build: match-tolerance phrase", () => {
         },
         totals: { n_dates: 1, n_images: 3, n_mapped: 2, n_unattributed: 1 },
       },
-      nn_tolerance_m,
-      max_match_distance_m: nn_tolerance_m.value * 3,
+      match_radius: { "2026-01-01": radius },
     });
 
     render(<SetupTab />);
@@ -176,28 +175,44 @@ describe("SetupTab plant-mapping build: match-tolerance phrase", () => {
     await waitFor(() => expect(resultsApi.buildPlantMapping).toHaveBeenCalled());
   }
 
-  it("names the plot's grid pitch for source grid_pitch", async () => {
-    await buildWithTolerance({ value: 0.75, source: "grid_pitch" });
-    expect(await screen.findByText(/0\.75 m/)).toBeInTheDocument();
-    expect(screen.getByText(/derived from the plot's grid pitch/)).toBeInTheDocument();
-  });
-
-  it("names the stated value for source stated", async () => {
-    await buildWithTolerance({ value: 3, source: "stated" });
+  it("names the photographs' positioning error for source h_pos_err", async () => {
+    await buildWithRadius({ value: 2.5, source: "h_pos_err", rationale: null });
     expect(
       await screen.findByText(
-        "Match tolerance 3.00 m (the stated value); matches accepted out to 9.00 m",
+        /matched within 2\.50 m \(the largest positioning error its photographs report\)/,
       ),
     ).toBeInTheDocument();
   });
 
-  it("names the capped stated value for source stated_capped", async () => {
-    await buildWithTolerance({ value: 2, source: "stated_capped" });
-    expect(await screen.findByText(/capped to the grid pitch/)).toBeInTheDocument();
+  it("names the stated radius with its reason for source stated", async () => {
+    await buildWithRadius({ value: 4, source: "stated", rationale: "the receiver's spec sheet" });
+    expect(
+      await screen.findByText(/matched within 4\.00 m \(stated: the receiver's spec sheet\)/),
+    ).toBeInTheDocument();
+  });
+
+  it("sends a stated radius with its reason, and none until one is typed", async () => {
+    await buildWithRadius({ value: 2.5, source: "h_pos_err", rationale: null });
+    expect(vi.mocked(resultsApi.buildPlantMapping).mock.calls[0][0]).not.toHaveProperty(
+      "match_radius",
+    );
+
+    fireEvent.change(screen.getByLabelText("Match radius (m)"), { target: { value: "4" } });
+    fireEvent.change(screen.getByLabelText("How the radius is known"), {
+      target: { value: "the receiver's spec sheet" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /build \+ save mapping/i }));
+    await waitFor(() =>
+      expect(resultsApi.buildPlantMapping).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          match_radius: { value: 4, rationale: "the receiver's spec sheet" },
+        }),
+      ),
+    );
   });
 
   it("sends supersede only once the checkbox is checked", async () => {
-    await buildWithTolerance({ value: 3, source: "stated" });
+    await buildWithRadius({ value: 3, source: "stated", rationale: "known" });
 
     expect(resultsApi.buildPlantMapping).toHaveBeenCalledWith(
       expect.objectContaining({ supersede: false }),
@@ -272,8 +287,7 @@ describe("SetupTab plant-mapping build: match-tolerance phrase", () => {
           n_unattributed: totalsUnattributed,
         },
       },
-      nn_tolerance_m: { value: 3, source: "stated" },
-      max_match_distance_m: 9,
+      match_radius: {},
     });
   }
 
@@ -327,8 +341,7 @@ describe("SetupTab plant-mapping build: match-tolerance phrase", () => {
       },
       totals: { n_dates: 1, n_images: 4, n_mapped: 4, n_unattributed: 0 },
     },
-    nn_tolerance_m: { value: 2, source: "stated" },
-    max_match_distance_m: 6,
+    match_radius: { "2026-01-01": { value: 2, source: "h_pos_err", rationale: null } },
   };
 
   it("loading an already-built mapping by name shows its own summary", async () => {
@@ -359,7 +372,7 @@ describe("SetupTab plant-mapping build: match-tolerance phrase", () => {
     fireEvent.change(nameInput, { target: { value: "valley-2026-draft" } });
 
     expect(screen.queryByText(/mapped 4 of 4, 0 attributed to no plant/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Match tolerance \d/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/matched within \d/)).not.toBeInTheDocument();
   });
 });
 

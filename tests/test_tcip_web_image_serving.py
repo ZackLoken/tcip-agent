@@ -259,13 +259,9 @@ def test_a_view_of_an_ingested_raster_reads_its_cells_or_one_display_read(
     source = tmp_path / "source"
     source.mkdir()
     _wide_raster(source / "strip_01.tif")
-    ingested = ingest_images(tmp_path / "proj", str(source), date_from="none")
+    ingested = ingest_images(tmp_path / "proj", str(source))
     assert "error" not in ingested, ingested
-    (image,) = (
-        p
-        for p in (Path(ingested["image_root"]) / "undated").iterdir()
-        if p.stem == "strip_01"
-    )
+    (image,) = (Path(f["dest"]) for f in ingested["files"])
 
     def view(x1: int) -> dict:
         resp = client.get(
@@ -1649,7 +1645,11 @@ def test_a_band_group_rewritten_to_name_another_member_is_described_afresh(
     stamp = (d / "cap_a.npy").stat().st_mtime_ns
     os.utime(d / "cap_c.npy", ns=(stamp, stamp))
     manifest = write_band_group_manifest(
-        d, "cap", {"A": d / "cap_a.npy", "B": d / "cap_b.npy"}
+        d,
+        "cap",
+        {"A": d / "cap_a.npy", "B": d / "cap_b.npy"},
+        central_wavelength_nm=None,
+        identity_tolerance={},
     )
     first = client.get(
         "/api/images/bands", params={"path": str(manifest)}
@@ -1657,7 +1657,11 @@ def test_a_band_group_rewritten_to_name_another_member_is_described_afresh(
     assert first["bands"][0]["max"] == 10
 
     write_band_group_manifest(
-        d, "cap", {"A": d / "cap_c.npy", "B": d / "cap_b.npy"}
+        d,
+        "cap",
+        {"A": d / "cap_c.npy", "B": d / "cap_b.npy"},
+        central_wavelength_nm=None,
+        identity_tolerance={},
     )
     again = client.get(
         "/api/images/bands", params={"path": str(manifest)}

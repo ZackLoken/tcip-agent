@@ -19,6 +19,7 @@ from tcip_mcp.pipelines.postprocessing import plant_mapping
 from tcip_mcp.pipelines.postprocessing.plant_mapping import (
     Assignment,
     MappingBuild,
+    MatchRadius,
 )
 from tcip_mcp.tools.phenology_tools import (
     build_plant_mapping,
@@ -26,6 +27,7 @@ from tcip_mcp.tools.phenology_tools import (
 )
 from tests._image_fixtures import write_geo_image as _write_geo_image
 from tests._mapping_fixtures import (
+    PHOTO_POSITION_ERROR_M,
     register_plant_registry_for,
     write_plant_csv,
 )
@@ -223,7 +225,14 @@ def _persist_synthetic_mapping(
         built_at="2026-02-11T00:00:00+00:00",
         dates_requested=None,
         dates=sorted(assignments),
-        nn_tolerance_m={"value": 10.0, "source": "stated"},
+        match_radius={
+            d: MatchRadius(
+                value=10.0,
+                source="stated",
+                rationale="a synthetic mapping's radius",
+            )
+            for d in assignments
+        },
         plant_registry={"name": registry_name, "digest": registry_digest},
         capture_digests={d: {} for d in assignments},
         unreadable={d: [] for d in assignments},
@@ -424,7 +433,7 @@ def test_delivery_refuses_naming_the_match_distance_when_every_position_is_too_f
         dataset_root,
         preds_by_date,
         "valley",
-        "beyond the accepted match",
+        "beyond its date's recorded match radius",
     )
 
 
@@ -468,7 +477,7 @@ def test_a_blank_plant_name_is_unattributed_by_the_one_predicate(
         built_at="2026-02-11T00:00:00+00:00",
         dates_requested=None,
         dates=[DATE],
-        nn_tolerance_m={"value": 10.0, "source": "stated"},
+        match_radius={},
         plant_registry={"name": "unregistered", "digest": "0" * 64},
         capture_digests={DATE: {}},
         unreadable={DATE: []},
@@ -688,7 +697,11 @@ def test_a_capture_at_the_origin_is_admitted_as_positioned(
     dataset_root = _dataset(tmp_path)
     images_root = dataset_root / "images"
     _write_geo_image(
-        images_root / DATE / "P1_a.jpg", 0.0, 0.0, datetime(2026, 2, 11, 9, 30)
+        images_root / DATE / "P1_a.jpg",
+        0.0,
+        0.0,
+        datetime(2026, 2, 11, 9, 30),
+        h_pos_err=PHOTO_POSITION_ERROR_M,
     )
     plant_csv = tmp_path / "plants.csv"
     write_plant_csv(
@@ -702,7 +715,6 @@ def test_a_capture_at_the_origin_is_admitted_as_positioned(
         name="valley",
         images_root=str(images_root),
         plant_registry=registry,
-        nn_tolerance_m=10.0,
     )
     assert "error" not in res, res
     assert res["summary"]["totals"]["n_mapped"] == 1

@@ -1000,6 +1000,8 @@ def test_a_launched_inference_job_is_canceled_by_its_id_naming_the_person(
     ``inference_canceled`` line names the person; an id naming no job refuses by name.
     """
     pytest.importorskip("torch")
+    from datetime import datetime
+
     from PIL import Image
 
     from tcip_mcp.audit import audit_log_key
@@ -1007,14 +1009,15 @@ def test_a_launched_inference_job_is_canceled_by_its_id_naming_the_person(
     from tcip_mcp.tools.ingest_tools import ingest_images
     from tcip_store import read_log
     from tcip_web.routes import inference as inference_routes
+    from tests._image_fixtures import capture_exif
     from tests._verified_checkpoint_fixtures import produced_checkpoint
 
     source = opened_project / "raw"
     source.mkdir()
-    Image.new("RGB", (16, 16)).save(source / "tree_01.jpg")
-    assert "error" not in ingest_images(
-        opened_project, str(source), date_from="2026-02-11"
+    Image.new("RGB", (16, 16)).save(
+        source / "tree_01.jpg", exif=capture_exif(datetime(2026, 2, 11, 9))
     )
+    assert "error" not in ingest_images(opened_project, str(source))
     ckpt = produced_checkpoint(
         opened_project / "m.pt", "cancel fixture weights"
     )

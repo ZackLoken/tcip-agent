@@ -440,7 +440,11 @@ def test_draw_splits_manifest_answers_an_ambiguous_image_stem_as_an_error(
     np.save(band_a, np.zeros((4, 4), dtype=np.uint8))
     np.save(band_b, np.zeros((4, 4), dtype=np.uint8))
     write_band_group_manifest(
-        images_dir, "plotA", {"B1": band_a, "B2": band_b}
+        images_dir,
+        "plotA",
+        {"B1": band_a, "B2": band_b},
+        central_wavelength_nm=None,
+        identity_tolerance={},
     )
     (images_dir / "plotA.jpg").write_bytes(b"\xff\xd8\xff")
     label_image(
@@ -483,7 +487,11 @@ def test_draw_splits_stats_only_answers_an_ambiguous_image_stem_as_an_error(
     np.save(band_a, np.zeros((4, 4), dtype=np.uint8))
     np.save(band_b, np.zeros((4, 4), dtype=np.uint8))
     write_band_group_manifest(
-        images_dir, "plotA", {"B1": band_a, "B2": band_b}
+        images_dir,
+        "plotA",
+        {"B1": band_a, "B2": band_b},
+        central_wavelength_nm=None,
+        identity_tolerance={},
     )
     (images_dir / "plotA.jpg").write_bytes(b"\xff\xd8\xff")
     label_image(
@@ -517,7 +525,11 @@ def test_scan_dataset_answers_an_ambiguous_image_stem_as_an_error(
     np.save(band_a, np.zeros((4, 4), dtype=np.uint8))
     np.save(band_b, np.zeros((4, 4), dtype=np.uint8))
     write_band_group_manifest(
-        images_dir, "plotA", {"B1": band_a, "B2": band_b}
+        images_dir,
+        "plotA",
+        {"B1": band_a, "B2": band_b},
+        central_wavelength_nm=None,
+        identity_tolerance={},
     )
     (images_dir / "plotA.jpg").write_bytes(b"\xff\xd8\xff")
 
@@ -564,7 +576,11 @@ def test_draw_splits_refuses_an_incomplete_band_group_before_writing(
     band_g, band_r = images_dir / "plotA_G.npy", images_dir / "plotA_R.npy"
     np.save(band_g, np.zeros((4, 4), dtype=np.uint8))
     write_band_group_manifest(
-        images_dir, "plotA", {"G": band_g, "R": band_r}
+        images_dir,
+        "plotA",
+        {"G": band_g, "R": band_r},
+        central_wavelength_nm=None,
+        identity_tolerance={},
     )  # R never created
     label_image(
         images_dir / "plotA.bandgroup",

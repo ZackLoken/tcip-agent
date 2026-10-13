@@ -27,7 +27,14 @@ from typing import (
 )
 
 from PIL import ExifTags, Image
-from pydantic import ConfigDict, TypeAdapter
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PositiveFloat,
+    TypeAdapter,
+)
+from pyproj import Geod
 
 import tcip_store
 from tcip_mcp.audit import now_iso
@@ -42,15 +49,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-EARTH_RADIUS_M = 6_378_137.0
-
-SEQUENCE_MATCH_FACTOR = 2
-"""The sequence-anchored gate: a run's nearest unclaimed plant is accepted out to this many times
-nn_tolerance_m before falling through to plain nearest-neighbor."""
-
-NEAREST_MATCH_FACTOR = 3
-"""The plain nearest-neighbor gate, the loosest a match is ever accepted at: this many times
-nn_tolerance_m."""
+WGS84 = Geod(ellps="WGS84")
+"""The datum every plant and capture position is stated in; ``WGS84.inv`` answers the geodesic
+distance in meters between two of them."""
 
 
 @dataclass
@@ -102,7 +103,7 @@ _DECODED = ConfigDict(strict=True, extra="forbid", allow_inf_nan=False)
 
 GpsSource = Literal["sequence", "nearest_neighbor", "unmapped"]
 """Where a GPS assignment's plant came from: the capture sequence, the plain nearest plant, or
-none within the gate."""
+none within the date's match radius."""
 
 UnattributedSegmentSource = Literal[
     "outside_segments",
@@ -124,7 +125,32 @@ UNATTRIBUTED_SEGMENT_SOURCES: tuple[UnattributedSegmentSource, ...] = get_args(
 
 ToleranceSource = Literal["grid_pitch", "stated", "stated_capped"]
 """Where a match tolerance came from (:func:`resolve_nn_tolerance_m`): the plant grid's pitch,
-the stated value, or the stated value capped to the grid pitch."""
+the stated value, or the stated value capped to half the grid pitch."""
+
+RadiusSource = Literal["h_pos_err", "stated"]
+"""Where a date's match radius came from (:func:`date_match_radius`): the positioning error its
+photographs report, or the caller's statement."""
+
+
+class StatedRadius(BaseModel):
+    """A match radius (meters) a mapping build states for its captures, and how it is known."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    value: PositiveFloat
+    rationale: str = Field(min_length=1)
+
+
+class MatchRadius(BaseModel):
+    """How far (meters) from a plant one date's captures were matched to it, and where that came
+    from; ``rationale`` is the stated radius's own, ``None`` for a derived one.
+    """
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    value: float
+    source: RadiusSource
+    rationale: str | None
 
 
 @dataclass
@@ -200,7 +226,9 @@ class MappingBuild:
     ``dataset_id`` is the dataset identity record's minted id; ``dataset_root`` is spelled
     against the owning project by :func:`~tcip_mcp.registry_paths.stored_path`.
     ``capture_digests`` is the identity of the captures each date was built from
-    (:func:`capture_digests`, one entry per stem).
+    (:func:`capture_digests`, one entry per stem), and ``match_radius`` the radius each date's
+    positioned captures were matched within (:func:`date_match_radius`): every date the build
+    walked when one was stated, and a date with no positioned capture has no derived one.
     """
 
     __pydantic_config__ = _DECODED
@@ -211,7 +239,7 @@ class MappingBuild:
     built_at: str
     dates_requested: list[str] | None
     dates: list[str]
-    nn_tolerance_m: dict
+    match_radius: dict[str, MatchRadius]
     plant_registry: dict
     """The named :data:`PLANT_REGISTRY_STORE` record this build's plants were read from:
     ``{"name": ..., "digest": ...}``."""
@@ -316,17 +344,13 @@ class MappingBuild:
 
     def served(self) -> dict:
         """This build as a door answers it: its ``name``, :meth:`summary`, the captures PIL could
-        not open per date, the tolerance record and that tolerance's loosest accepted distance
-        (:func:`match_gates`).
+        not open per date, and each date's recorded match radius.
         """
         return {
             "name": self.name,
             "summary": self.summary(),
             "unreadable": self.unreadable,
-            "nn_tolerance_m": self.nn_tolerance_m,
-            "max_match_distance_m": match_gates(self.nn_tolerance_m["value"])[
-                "max_match_distance_m"
-            ],
+            "match_radius": self.to_record()["match_radius"],
         }
 
     def delivery_disclosure(
@@ -343,7 +367,7 @@ class MappingBuild:
             "dataset_root": self.dataset_root,
             "built_at": self.built_at,
             "record_sha256": self.record_sha256,
-            "nn_tolerance_m": self.nn_tolerance_m,
+            "match_radius": self.to_record()["match_radius"],
             "capture_digests": self.capture_digests,
             "captures_unverified": verified["captures_unverified"],
             "plant_csvs_unverified": verified["plant_csvs_unverified"],
@@ -1025,22 +1049,6 @@ def register_plant_registry_record(
     return record
 
 
-# ── Geometry helpers ───────────────────────────────────────────────────
-
-
-def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    phi1 = math.radians(lat1)
-    phi2 = math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlam = math.radians(lon2 - lon1)
-    a = (
-        math.sin(dphi / 2) ** 2
-        + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
-    )
-    c = 2 * math.asin(min(1.0, math.sqrt(a)))
-    return EARTH_RADIUS_M * c
-
-
 def attr(row: object, name: str) -> Any:
     """One field of an assignment row, an :class:`Assignment` or the plain dict row
     :meth:`MappingBuild.rows` produces; ``None`` when it carries none.
@@ -1075,8 +1083,9 @@ def nearest_plant(
     lon)`` ``position``, and its distance in meters; the index is ``None`` when that plant lies
     farther than ``within_m`` and both are ``None`` when no plant is left to measure.
     """
+    lat, lon = position
     distances = [
-        (haversine_m(*position, p.lat, p.lon), i)
+        (WGS84.inv(lon, lat, p.lon, p.lat)[2], i)
         for i, p in enumerate(plants)
         if i not in skip
     ]
@@ -1150,7 +1159,8 @@ def _segment_runs(stamps: list[ImageStamp]) -> list[list[ImageStamp]]:
     for prev, cur in zip(stamps, stamps[1:]):
         d = None
         if prev.position is not None and cur.position is not None:
-            d = haversine_m(*prev.position, *cur.position)
+            (lat1, lon1), (lat2, lon2) = prev.position, cur.position
+            d = WGS84.inv(lon1, lat1, lon2, lat2)[2]
         pairs.append((cur, d))
 
     threshold = _derive_row_break_threshold(
@@ -1173,30 +1183,58 @@ def _order_by_time(stamps: list[ImageStamp]) -> list[ImageStamp]:
     return ordered
 
 
+class NoMatchRadiusError(ValueError):
+    """A date's positioned captures report no positioning error and no match radius is stated."""
+
+
+def date_match_radius(
+    stamps: list[ImageStamp], stated: StatedRadius | None
+) -> MatchRadius | None:
+    """The radius one date's captures are matched to plants within: ``stated`` when given, else
+    the largest horizontal positioning error (``h_pos_err``) its positioned captures report, each
+    capture's position lying within its own reported error of where it was taken. ``None`` for a
+    date stating none and no capture of which carries a position, which matches none.
+
+    Raises :class:`NoMatchRadiusError` naming ``match_radius`` when nothing is stated and a
+    positioned capture reports no positioning error.
+    """
+    positioned = [s for s in stamps if s.position is not None]
+    if stated is not None:
+        return MatchRadius(
+            value=stated.value, source="stated", rationale=stated.rationale
+        )
+    unreported = sorted(s.name for s in positioned if s.h_pos_err is None)
+    if unreported:
+        raise NoMatchRadiusError(
+            f"{unreported} on {positioned[0].date_folder} report no horizontal positioning "
+            "error, so no match radius derives from them: state match_radius {value, "
+            "rationale} (meters) for the build"
+        )
+    errors = [s.h_pos_err for s in positioned if s.h_pos_err is not None]
+    if not errors:
+        return None
+    return MatchRadius(value=max(errors), source="h_pos_err", rationale=None)
+
+
 def assign_plants(
     stamps: list[ImageStamp],
     plants: list[PlantRecord],
     *,
-    nn_tolerance_m: float,
+    radius: MatchRadius | None,
 ) -> list[Assignment]:
-    """Assign each image to a plant by sequence-anchored NN matching: its nearest unclaimed plant
-    within the sequence gate, else its nearest plant within the loosest gate
-    (:func:`match_gates`), else none. A stamp with no position (a band group or an array raster,
-    or a photograph with no usable EXIF position) is unmapped.
+    """Assign each image to a plant by sequence-anchored NN matching within ``radius``: its
+    nearest unclaimed plant, else its nearest plant, else none. A stamp with no position (a band
+    group or an array raster, or a photograph with no usable EXIF position) is unmapped.
     """
     out: list[Assignment] = []
-    gates = match_gates(nn_tolerance_m)
     claimed: set[int] = set()
     for run in _segment_runs(_order_by_time(stamps)):
         for s in run:
-            if s.position is None or not plants:
+            if s.position is None or radius is None or not plants:
                 out.append(Assignment.of(s, None, "unmapped", None))
                 continue
             index, distance = nearest_plant(
-                s.position,
-                plants,
-                within_m=gates["sequence_match_distance_m"],
-                skip=claimed,
+                s.position, plants, within_m=radius.value, skip=claimed
             )
             if index is not None:
                 claimed.add(index)
@@ -1205,7 +1243,7 @@ def assign_plants(
                 )
                 continue
             index, distance = nearest_plant(
-                s.position, plants, within_m=gates["max_match_distance_m"]
+                s.position, plants, within_m=radius.value
             )
             out.append(
                 Assignment.of(s, None, "unmapped", distance)
@@ -1233,7 +1271,7 @@ def grid_pitch_m(plants: list[PlantRecord]) -> float:
     for i, (la, lo) in enumerate(pts):
         nn.append(
             min(
-                haversine_m(la, lo, la2, lo2)
+                WGS84.inv(lo, la, lo2, la2)[2]
                 for j, (la2, lo2) in enumerate(pts)
                 if j != i
             )
@@ -1252,13 +1290,13 @@ def resolve_nn_tolerance_m(
     """The tolerance (meters) a capture or detection is matched to a plant within, and where it
     came from: ``{"value": float, "source": str}``.
 
-    Derived as the tolerance whose loosest gate (:func:`match_gates`) reaches half a grid cell
-    (:func:`grid_pitch_m`), ``"grid_pitch"``. A stated value is honored (``"stated"``) up to that
-    ceiling and capped at it (``"stated_capped"``). Raises :class:`NoMatchToleranceError` naming
-    ``nn_tolerance_m`` when nothing is stated and the layout carries too few plants to derive a
-    pitch from.
+    Derived as half the grid pitch (:func:`grid_pitch_m`), ``"grid_pitch"``: the farthest a
+    position can lie from a plant and still be nearer it than any neighbor on the grid. A stated
+    value is honored (``"stated"``) up to that ceiling and capped at it (``"stated_capped"``).
+    Raises :class:`NoMatchToleranceError` naming ``nn_tolerance_m`` when nothing is stated and the
+    layout carries too few plants to derive a pitch from.
     """
-    ceiling = grid_pitch_m(plants) / (2 * NEAREST_MATCH_FACTOR)
+    ceiling = grid_pitch_m(plants) / 2
     if stated is None:
         if ceiling <= 0:
             raise NoMatchToleranceError(
@@ -1271,17 +1309,6 @@ def resolve_nn_tolerance_m(
     return {"value": stated, "source": "stated"}
 
 
-def match_gates(nn_tolerance_m: float) -> dict:
-    """The distances a match is accepted out to, given ``nn_tolerance_m``: the tolerance itself,
-    a sequence-anchored match's ceiling, and ``max_match_distance_m``, the loosest any match is.
-    """
-    return {
-        "nn_tolerance_m": nn_tolerance_m,
-        "sequence_match_distance_m": nn_tolerance_m * SEQUENCE_MATCH_FACTOR,
-        "max_match_distance_m": nn_tolerance_m * NEAREST_MATCH_FACTOR,
-    }
-
-
 def build_mapping(
     images_root: Path,
     plant_csv_paths: list[Path],
@@ -1292,7 +1319,7 @@ def build_mapping(
     project: Path | str,
     plant_registry: dict,
     dates: list[str] | None = None,
-    nn_tolerance_m: float | None = None,
+    match_radius: StatedRadius | None = None,
 ) -> MappingBuild:
     """Build one project's named plant mapping: per-date assignments plus the provenance that binds
     the record to the inputs it was built from.
@@ -1303,8 +1330,9 @@ def build_mapping(
     the caller from ``plant_registry``'s own ``name``); ``plant_registry`` is the ``{"name": ...,
     "digest": ...}`` reference stored on the record in their place.
 
-    ``nn_tolerance_m`` resolves through :func:`resolve_nn_tolerance_m`, whose value and source
-    the record carries.
+    Each date's captures are matched within its :func:`date_match_radius`, ``match_radius`` when
+    stated and derived from the date's own positioning errors when not, which the record carries
+    per date; :class:`NoMatchRadiusError` propagates.
 
     A date's captures are enumerated through ``image_utils.list_logical_images``, so a band raster
     or a band group ingested under a mapped date is a capture the identity sees; its
@@ -1320,14 +1348,10 @@ def build_mapping(
     plant_csv_paths = [Path(p) for p in plant_csv_paths]
     plants = read_plant_csvs(plant_csv_paths)
 
-    tolerance = resolve_nn_tolerance_m(plants, nn_tolerance_m)
-    logger.info(
-        "nn_tolerance_m %.2f (%s)", tolerance["value"], tolerance["source"]
-    )
-
     images_root = Path(images_root)
     dates_walked: list[str] = []
     assignments: dict[str, list[Assignment]] = {}
+    radii: dict[str, MatchRadius] = {}
     capture_digests_by_date: dict[str, dict[str, str]] = {}
     unreadable: dict[str, list[str]] = {}
     n_stamps = 0
@@ -1350,9 +1374,10 @@ def build_mapping(
                 for s in stamps
                 if s.kind == "photo" and s.readable is False
             )
-            assignments[date] = assign_plants(
-                stamps, plants, nn_tolerance_m=tolerance["value"]
-            )
+            radius = date_match_radius(stamps, match_radius)
+            if radius is not None:
+                radii[date] = radius
+            assignments[date] = assign_plants(stamps, plants, radius=radius)
 
     if n_stamps == 0:
         raise UngeoreferencedCaptureError(
@@ -1379,7 +1404,7 @@ def build_mapping(
         built_at=now_iso(),
         dates_requested=list(dates) if dates is not None else None,
         dates=sorted(dates_walked),
-        nn_tolerance_m=tolerance,
+        match_radius=radii,
         plant_registry=plant_registry,
         capture_digests=capture_digests_by_date,
         unreadable=unreadable,
@@ -1540,7 +1565,7 @@ def build_plant_mapping(
     plant_registry: str,
     *,
     dates: list[str] | None = None,
-    nn_tolerance_m: float | None = None,
+    match_radius: StatedRadius | None = None,
     supersede: bool = False,
     actor: str | None,
 ) -> MappingBuild:
@@ -1578,7 +1603,7 @@ def build_plant_mapping(
         project=project,
         plant_registry={"name": plant_registry, "digest": registry["digest"]},
         dates=dates,
-        nn_tolerance_m=nn_tolerance_m,
+        match_radius=match_radius,
     )
     persist_mapping(build, project, supersede=supersede, actor=actor)
     return build
@@ -1851,8 +1876,9 @@ def verify_mapping_inputs(
                             "since its assignment would differ"
                         )
                     }
+                lat, lon = s.position
                 distances = [
-                    haversine_m(*s.position, p.lat, p.lon)
+                    WGS84.inv(lon, lat, p.lon, p.lat)[2]
                     for p in verified_plants
                     if p.plot_name == row.plot_name
                 ]
@@ -2035,7 +2061,11 @@ def resolve_delivery_mapping(
                     f"mapping {name!r} (dataset {mapping_build.dataset_root!r})"
                 )
             )
-        gates = match_gates(mapping_build.nn_tolerance_m["value"])
+        radii = {
+            date: f"{r.value} m ({r.source})"
+            for date, r in mapping_build.match_radius.items()
+            if date in buckets
+        }
         n_unpositioned = sum(
             1 for a in delivered_assignments if a.distance_m is None
         )
@@ -2045,11 +2075,9 @@ def resolve_delivery_mapping(
             else ""
         )
         raise MappingDeliveryError(
-            "every positioned capture on the delivered dates lies beyond the accepted match "
-            f"distance ({gates['max_match_distance_m']} m from tolerance "
-            f"{gates['nn_tolerance_m']} m, {mapping_build.nn_tolerance_m['source']}) of every "
-            f"plant in {paths}{unpositioned_note}; check the plant CSV names this block, or "
-            "rebuild the mapping with a stated tolerance"
+            "every positioned capture on the delivered dates lies beyond its date's recorded "
+            f"match radius ({radii}) of every plant in {paths}{unpositioned_note}; check the "
+            "plant CSV names this block, or rebuild the mapping with a stated match_radius"
         )
 
     verified = verify_mapping_inputs(

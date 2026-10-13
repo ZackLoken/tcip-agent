@@ -38,6 +38,7 @@ def _write_group(images_dir: Path, stem: str, base=(111, 222, 333)) -> None:
         stem,
         band_paths,
         central_wavelength_nm={"Green": 560.0, "Red": 650.0, "NIR": 860.0},
+        identity_tolerance={},
     )
 
 

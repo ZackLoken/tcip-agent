@@ -92,7 +92,13 @@ DELIVERY_EVENT_GOLDEN: dict[str, Any] = {
         "dataset_root": "dü",
         "built_at": "2026-03-04T12:00:00+00:00",
         "record_sha256": "0" * 64,
-        "nn_tolerance_m": {"value": 3.0, "source": "stated"},
+        "match_radius": {
+            "2026-03-04": {
+                "value": 3.0,
+                "source": "h_pos_err",
+                "rationale": None,
+            }
+        },
         "capture_digests": {"2026-03-04": {"capture": "0" * 16}},
         "captures_unverified": [],
         "plant_csvs_unverified": [],
@@ -187,9 +193,11 @@ def test_the_delivery_events_golden_carries_every_key_a_delivery_records(
     assert set(golden["buckets"][0]) == set(fresh["buckets"][0])
     assert set(golden["producer"]) == set(fresh["producer"])
     assert set(golden["plant_mapping"]) == set(fresh["plant_mapping"])
-    assert set(golden["plant_mapping"]["nn_tolerance_m"]) == set(
-        fresh["plant_mapping"]["nn_tolerance_m"]
-    )
+    assert fresh["plant_mapping"]["match_radius"]
+    for radius in fresh["plant_mapping"]["match_radius"].values():
+        assert set(radius) == set(
+            next(iter(golden["plant_mapping"]["match_radius"].values()))
+        )
 
 
 def test_the_traits_golden_carries_every_field_the_proposing_and_confirming_producers_write(

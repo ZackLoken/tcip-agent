@@ -7,6 +7,7 @@ operator's real workspace.
 from __future__ import annotations
 
 import os
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -256,33 +257,17 @@ def test_ingest_reports_an_exif_date_it_cannot_read_as_a_date(
     assert "whenever" in reason
 
 
-@pytest.mark.parametrize("date_from", ["none", "2026-05-15"])
-def test_a_date_mode_that_names_its_own_bucket_opens_no_file(
-    project, tmp_path, monkeypatch, date_from
-):
-    """Only the per-file mode reads a file; the modes that name the bucket from the caller's own
-    argument never open one, so an unreadable file costs nothing and reports nothing.
+@pytest.mark.parametrize("stated", ["date_from", "detect_band_groups"])
+def test_ingest_takes_no_bucket_or_detection_choice(project, tmp_path, stated):
+    """A file's bucket is its own date or undated, and band groups are detected in every touched
+    bucket: neither is a choice the call states.
     """
     src = tmp_path / "raw"
     _make_image(src / "a.jpg", exif_date="2026:02:11 10:30:00")
-    (src / "broken.tif").write_bytes(b"this is not an image at all")
 
-    import PIL.Image
-    import rasterio
-
-    opened: list[str] = []
-    monkeypatch.setattr(
-        PIL.Image, "open", lambda *a, **k: opened.append("pil")
-    )
-    monkeypatch.setattr(
-        rasterio, "open", lambda *a, **k: opened.append("gdal")
-    )
-
-    manifest = ingest_images(project, source=str(src), date_from=date_from)
-
-    assert opened == []
-    assert manifest["copied"] == 2
-    assert _unreadable(manifest) == []
+    with pytest.raises(TypeError, match=stated):
+        ingest_images(project, source=str(src), **{stated: "none"})
+    assert not (project / "images").exists()
 
 
 def test_ingest_copies_leave_originals_byte_identical(project, tmp_path):
@@ -350,11 +335,9 @@ def test_ingest_same_stem_different_ext_refuses_the_whole_call(
     # label file: neither has landed yet, so the whole call refuses rather than picking one.
     src = tmp_path / "raw"
     _make_image(src / "IMG_1.jpg", exif_date="2026:02:11 10:00:00")
-    _make_image(
-        src / "IMG_1.png"
-    )  # different ext; PNG has no EXIF → but force same bucket
+    _make_image(src / "IMG_1.png", exif_date="2026:02:11 10:05:00")
 
-    manifest = ingest_images(project, source=str(src), date_from="2026-02-11")
+    manifest = ingest_images(project, source=str(src))
 
     assert "error" in manifest
     assert "IMG_1" in manifest["error"]
@@ -376,8 +359,8 @@ def test_ingest_stem_collision_across_two_calls_refuses_naming_both_files(
     original_bytes = placed.read_bytes()
 
     src2 = tmp_path / "raw2"
-    _make_image(src2 / "foo.png")
-    second = ingest_images(project, source=str(src2), date_from="2026-02-11")
+    _make_image(src2 / "foo.png", exif_date="2026:02:11 11:00:00")
+    second = ingest_images(project, source=str(src2))
 
     assert "error" in second
     assert "foo.jpg" in second["error"] and "foo.png" in second["error"]
@@ -399,8 +382,8 @@ def test_ingest_case_variant_stem_collision_across_two_calls_refuses(
     original_bytes = placed.read_bytes()
 
     src2 = tmp_path / "raw2"
-    _make_image(src2 / "foo.png")
-    second = ingest_images(project, source=str(src2), date_from="2026-02-11")
+    _make_image(src2 / "foo.png", exif_date="2026:02:11 11:00:00")
+    second = ingest_images(project, source=str(src2))
 
     assert "error" in second
     assert "Foo.jpg" in second["error"] and "foo.png" in second["error"]
@@ -428,7 +411,11 @@ def test_ingest_admits_a_source_after_a_band_group_manifest_with_a_different_ste
     band_a.write_bytes(b"a")
     band_b.write_bytes(b"b")
     write_band_group_manifest(
-        bucket_dir, "cap", {"Green": band_a, "Red": band_b}
+        bucket_dir,
+        "cap",
+        {"Green": band_a, "Red": band_b},
+        central_wavelength_nm=None,
+        identity_tolerance={},
     )
 
     src2 = tmp_path / "raw2"
@@ -457,7 +444,11 @@ def test_ingest_after_a_band_group_manifest_refuses_naming_the_manifest(
     band_a.write_bytes(b"a")
     band_b.write_bytes(b"b")
     write_band_group_manifest(
-        bucket_dir, "cap", {"Green": band_a, "Red": band_b}
+        bucket_dir,
+        "cap",
+        {"Green": band_a, "Red": band_b},
+        central_wavelength_nm=None,
+        identity_tolerance={},
     )
 
     src2 = tmp_path / "raw2"
@@ -503,40 +494,380 @@ def test_ingest_reingest_is_idempotent_via_collision_skip(project, tmp_path):
     assert len(second["skipped_collisions"]) == 1
 
 
-def test_ingest_date_from_none_all_undated(project, tmp_path):
+def _undated_labeled(project, tmp_path, name: str = "a.png") -> Path:
+    """One image ingested undated, its label document holding one box; the image's path."""
+    from tests._producer_fixtures import box_annotation, label_image
+
     src = tmp_path / "raw"
-    _make_image(
-        src / "a.jpg", exif_date="2026:02:11 10:30:00"
-    )  # has EXIF but ignored
-    _make_image(src / "b.png")
+    _make_image(src / name)
+    (entry,) = ingest_images(project, source=str(src))["files"]
+    assert entry["bucket"] == dataset_layout.UNDATED_BUCKET
+    label_image(entry["dest"], [box_annotation(2, 2, 10, 10)], 32, 24)
+    return Path(entry["dest"])
 
-    manifest = ingest_images(project, source=str(src), date_from="none")
 
-    assert _entries(manifest) == {
-        "a.jpg": ("undated", None),
-        "b.png": ("undated", None),
+STATED = date(2026, 5, 15)
+"""The capture date the stated-date tests state."""
+
+
+def _image_records(image: Path) -> list:
+    """The keys of every record keyed by ``image``'s capture and stem: its label document, its
+    flags and its staged proposals.
+    """
+    from tcip_annotation.flags import flag_key
+    from tcip_mcp.tools.proposal_tools import proposal_staging_key
+
+    label = dataset_layout.label_key_of(image)
+    return [
+        label,
+        flag_key(label),
+        proposal_staging_key(*dataset_layout.parse_image_path(image)),
+    ]
+
+
+def test_a_stated_date_moves_an_undated_image_with_every_record_keyed_by_it(
+    project, tmp_path, monkeypatch
+):
+    """The label document, the flags record and the staged proposals of the moved image all
+    answer at its new capture, unchanged, and none is left at the old one.
+    """
+    import tcip_mcp.audit as audit_mod
+    import tcip_store as ts
+    from tcip_annotation.flags import FlagRequest
+    from tcip_mcp.pipelines import proposal
+    from tcip_mcp.tools.ingest_tools import state_capture_date
+    from tcip_mcp.tools.proposal_tools import propose_annotations
+    from tests._producer_fixtures import saved_annotations
+
+    image = _undated_labeled(project, tmp_path)
+    dataset_layout.save_label_document(
+        project,
+        dataset_layout.label_key_of(image),
+        [{"subject": "bud", "bbox": [2, 2, 10, 10]}],
+        width=32,
+        height=24,
+        author="user:tester",
+        actor=None,
+        gestures=dataset_layout.Gestures(flag=(FlagRequest(text="check"),)),
+    )
+
+    class _Engine:
+        def propose(self, image_path: str, **params: object) -> list[dict]:
+            return [
+                {
+                    "candidate_id": 0,
+                    "bbox": [4.0, 4.0, 12.0, 12.0],
+                    "area": 64,
+                    "score": 0.9,
+                    "engine": "stub",
+                    "engine_meta": {},
+                    "rings": [
+                        [(4.0, 4.0), (12.0, 4.0), (12.0, 12.0), (4.0, 12.0)]
+                    ],
+                }
+            ]
+
+    monkeypatch.setattr(proposal, "resolve_proposer", lambda engine: _Engine())
+    staged = propose_annotations(project, image_path=str(image), engine="stub")
+    assert "error" not in staged, staged
+    before = saved_annotations(image)
+    records = [ts.read(key) for key in _image_records(image)]
+
+    moved = state_capture_date(
+        project,
+        images=[str(image)],
+        date=STATED,
+        rationale="the field book dates this walk",
+    )
+
+    dest = project / "images" / "2026-05-15" / "a.png"
+    assert moved == {
+        "date": "2026-05-15",
+        "moved": [{"source": str(image), "dest": str(dest)}],
+    }
+    assert dest.is_file() and not image.exists()
+    assert saved_annotations(dest) == before
+    assert [ts.read(key) for key in _image_records(dest)] == records
+    assert not any(ts.exists(key) for key in _image_records(image))
+    (line,) = [
+        e
+        for e in ts.read_log(audit_mod.audit_log_key(project)).records
+        if e["tool"] == "state_capture_date"
+    ]
+    assert line["status"] == "ok"
+    assert line["arguments"] == {
+        "images": [str(image)],
+        "date": "2026-05-15",
+        "rationale": "the field book dates this walk",
     }
 
 
-def test_ingest_date_from_literal_bucket(project, tmp_path):
-    src = tmp_path / "raw"
-    _make_image(src / "a.png")
-    _make_image(src / "b.png")
+def test_a_stated_date_whose_records_fail_to_commit_changes_nothing(
+    project, tmp_path, monkeypatch
+):
+    """A records transaction that raises after the files were copied leaves no copy in the new
+    bucket, the image and its label document where they were, and no audit line.
+    """
+    import tcip_mcp.audit as audit_mod
+    import tcip_store as ts
+    from tcip_mcp.tools.ingest_tools import state_capture_date
+    from tcip_store.sqlite_backend import Txn
 
-    manifest = ingest_images(project, source=str(src), date_from="2026-05-15")
+    image = _undated_labeled(project, tmp_path)
 
-    assert _entries(manifest) == {
-        "a.png": ("2026-05-15", None),
-        "b.png": ("2026-05-15", None),
-    }
-    assert (project / "images" / "2026-05-15" / "a.png").is_file()
+    def refused(self, key, value):
+        raise ts.StoreBusyError(key, 0.0)
+
+    monkeypatch.setattr(Txn, "write", refused)
+    with pytest.raises(ts.StoreBusyError):
+        state_capture_date(
+            project, images=[str(image)], date=STATED, rationale="known"
+        )
+    monkeypatch.undo()
+
+    assert image.is_file()
+    assert not (project / "images" / "2026-05-15").exists()
+    assert ts.exists(dataset_layout.label_key_of(image))
+    assert not any(
+        e["tool"] == "state_capture_date"
+        for e in ts.read_log(audit_mod.audit_log_key(project)).records
+    )
 
 
-def test_ingest_literal_bucket_rejects_traversal(project, tmp_path):
-    src = tmp_path / "raw"
-    _make_image(src / "a.png")
-    manifest = ingest_images(project, source=str(src), date_from="../escape")
-    assert "error" in manifest
+def test_a_failed_stated_date_keeps_another_writers_file_in_the_bucket_it_made(
+    project, tmp_path, monkeypatch
+):
+    """A file another writer lands in the bucket the call made survives the call's cleanup, and
+    so does the bucket; the call's own copy is gone.
+    """
+    import tcip_store as ts
+    from tcip_mcp.tools.ingest_tools import state_capture_date
+    from tcip_store.sqlite_backend import Txn
+
+    image = _undated_labeled(project, tmp_path)
+    bucket_dir = project / "images" / "2026-05-15"
+
+    def refused(self, key, value):
+        (bucket_dir / "stranger.png").write_bytes(b"another writer's")
+        raise ts.StoreBusyError(key, 0.0)
+
+    monkeypatch.setattr(Txn, "write", refused)
+    with pytest.raises(ts.StoreBusyError):
+        state_capture_date(
+            project, images=[str(image)], date=STATED, rationale="known"
+        )
+    monkeypatch.undo()
+
+    assert (bucket_dir / "stranger.png").is_file()
+    assert not (bucket_dir / "a.png").exists()
+    assert image.is_file()
+
+
+def test_a_stated_date_makes_its_bucket_through_the_store_route(
+    project, tmp_path, monkeypatch
+):
+    """The bucket directory the move needs is made by the store's parent-making route, whose
+    answer names it.
+    """
+    import tcip_store as ts
+    from tcip_mcp.tools.ingest_tools import state_capture_date
+
+    image = _undated_labeled(project, tmp_path)
+    route = ts.ensure_parent
+    answers = []
+
+    def recorded(path):
+        answers.append(route(path))
+        return answers[-1]
+
+    monkeypatch.setattr(ts, "ensure_parent", recorded)
+    state_capture_date(
+        project, images=[str(image)], date=STATED, rationale="known"
+    )
+
+    assert answers == [[project / "images" / "2026-05-15"]]
+
+
+def test_a_failed_stated_date_leaves_the_empty_bucket_a_racer_made(
+    project, tmp_path, monkeypatch
+):
+    """A bucket directory another writer makes between the store route's walk and its own
+    ``mkdir`` is not the call's to remove: it survives the call's failure, empty.
+    """
+    import tcip_store as ts
+    from tcip_mcp.tools.ingest_tools import state_capture_date
+    from tcip_store.sqlite_backend import Txn
+
+    image = _undated_labeled(project, tmp_path)
+    bucket_dir = project / "images" / "2026-05-15"
+    make = Path.mkdir
+    raced = []
+
+    def refused(self, key, value):
+        raise ts.StoreBusyError(key, 0.0)
+
+    def racer_first(self, *args, **kwargs):
+        if self == bucket_dir and not raced:
+            raced.append(self)
+            make(self)
+        make(self, *args, **kwargs)
+
+    monkeypatch.setattr(Txn, "write", refused)
+    monkeypatch.setattr(Path, "mkdir", racer_first)
+    with pytest.raises(ts.StoreBusyError):
+        state_capture_date(
+            project, images=[str(image)], date=STATED, rationale="known"
+        )
+    monkeypatch.undo()
+
+    assert bucket_dir.is_dir()
+    assert list(bucket_dir.iterdir()) == []
+    assert image.is_file()
+
+
+def test_a_failed_stated_date_raises_its_cause_when_its_bucket_fills_before_removal(
+    project, tmp_path, monkeypatch
+):
+    """Another writer's file landing in the bucket the call made just before the call removes it
+    keeps the bucket and the file, and the transaction's own error propagates with no removal
+    error in front of it.
+    """
+    import tcip_store as ts
+    from tcip_mcp.tools.ingest_tools import state_capture_date
+    from tcip_store.sqlite_backend import Txn
+
+    image = _undated_labeled(project, tmp_path)
+    bucket_dir = project / "images" / "2026-05-15"
+    remove = Path.rmdir
+
+    def refused(self, key, value):
+        raise ts.StoreBusyError(key, 0.0)
+
+    def landed_first(self):
+        if self == bucket_dir:
+            (bucket_dir / "stranger.png").write_bytes(b"another writer's")
+        remove(self)
+
+    monkeypatch.setattr(Txn, "write", refused)
+    monkeypatch.setattr(Path, "rmdir", landed_first)
+    with pytest.raises(ts.StoreBusyError) as raised:
+        state_capture_date(
+            project, images=[str(image)], date=STATED, rationale="known"
+        )
+    monkeypatch.undo()
+
+    assert raised.value.__context__ is None
+    assert (bucket_dir / "stranger.png").is_file()
+    assert not (bucket_dir / "a.png").exists()
+
+
+def test_a_failed_stated_date_raises_a_refused_bucket_removal(
+    project, tmp_path, monkeypatch
+):
+    """A removal of the bucket the call made refused for any reason but another writer's file
+    propagates, chained to the transaction's error.
+    """
+    import tcip_store as ts
+    from tcip_mcp.tools.ingest_tools import state_capture_date
+    from tcip_store.sqlite_backend import Txn
+
+    image = _undated_labeled(project, tmp_path)
+
+    def refused(self, key, value):
+        raise ts.StoreBusyError(key, 0.0)
+
+    def denied(self):
+        raise PermissionError("access denied")
+
+    monkeypatch.setattr(Txn, "write", refused)
+    monkeypatch.setattr(Path, "rmdir", denied)
+    with pytest.raises(PermissionError) as raised:
+        state_capture_date(
+            project, images=[str(image)], date=STATED, rationale="known"
+        )
+    monkeypatch.undo()
+
+    assert isinstance(raised.value.__context__, ts.StoreBusyError)
+
+
+def test_a_stated_date_whose_first_copy_fails_raises_that_cause(
+    project, tmp_path, monkeypatch
+):
+    """The first copy failing propagates its own error and leaves no bucket behind."""
+    import tcip_store as ts
+    from tcip_mcp.tools.ingest_tools import state_capture_date
+
+    image = _undated_labeled(project, tmp_path)
+
+    def unavailable(*args, **kwargs):
+        raise OSError("disk unavailable")
+
+    monkeypatch.setattr(ts, "put_blob", unavailable)
+    with pytest.raises(OSError, match="disk unavailable"):
+        state_capture_date(
+            project, images=[str(image)], date=STATED, rationale="known"
+        )
+    monkeypatch.undo()
+
+    assert not (project / "images" / "2026-05-15").exists()
+    assert image.is_file()
+
+
+def test_a_stated_date_refuses_an_image_a_published_bucket_names(
+    project, tmp_path
+):
+    from tcip_mcp.buckets import Document, publish
+    from tcip_mcp.pipelines.data.selection import ClassScope
+    from tcip_mcp.tools.ingest_tools import state_capture_date
+
+    image = _undated_labeled(project, tmp_path)
+    publish(
+        project,
+        project,
+        "proposals",
+        [Document(str(image), {"annotations": []})],
+        producer={"proposed_by": "agent:test"},
+        scope=ClassScope(),
+        execution=None,
+        raster_path=None,
+        raster_identity=None,
+        assessment_id=None,
+        actor=None,
+    )
+
+    refused = state_capture_date(
+        project, images=[str(image)], date=STATED, rationale="known"
+    )
+
+    assert "proposals" in refused["error"]
+    assert image.is_file()
+    assert not (project / "images" / "2026-05-15").exists()
+
+
+def test_a_stated_date_is_refused_by_its_type_unless_it_is_a_date():
+    """The MCP call refuses a ``date`` that is no calendar date by the parameter's own type, and
+    admits an ISO date.
+    """
+    import asyncio
+
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from tcip_mcp.server import build_server
+
+    server = build_server(None)
+
+    def called(stated: str) -> str:
+        arguments = {"images": ["a.png"], "date": stated, "rationale": "known"}
+        try:
+            asyncio.run(server.call_tool("state_capture_date", arguments))
+        except ToolError as exc:
+            return str(exc)
+        return ""
+
+    refused = called("../escape")
+    assert "validation error" in refused
+    assert "date" in refused.split("Arguments")[-1]
+    assert "validation error" not in called("2026-05-15")
 
 
 def test_ingest_no_images_found(project, tmp_path):

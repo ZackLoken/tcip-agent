@@ -305,7 +305,13 @@ def test_propose_then_accept_through_a_band_groups_manifest_path(
         band_path = images_dir / f"capture_{name}.tif"
         tifffile.imwrite(str(band_path), np.full((48, 48), 30, dtype=np.uint8))
         bands[name] = band_path
-    manifest = write_band_group_manifest(images_dir, "capture", bands)
+    manifest = write_band_group_manifest(
+        images_dir,
+        "capture",
+        bands,
+        central_wavelength_nm=None,
+        identity_tolerance={},
+    )
 
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
     proposed = propose_annotations(
@@ -350,7 +356,13 @@ def test_propose_on_a_band_groups_member_path_refuses_naming_the_manifest(
         band_path = images_dir / f"capture_{name}.tif"
         tifffile.imwrite(str(band_path), np.full((48, 48), 30, dtype=np.uint8))
         bands[name] = band_path
-    manifest = write_band_group_manifest(images_dir, "capture", bands)
+    manifest = write_band_group_manifest(
+        images_dir,
+        "capture",
+        bands,
+        central_wavelength_nm=None,
+        identity_tolerance={},
+    )
 
     _install_stub(monkeypatch, [_candidate(0, 5.0)])
     member_path = bands["Red"]

@@ -12,11 +12,13 @@ import tcip_store
 from tcip_mcp.pipelines.postprocessing.plant_mapping import (
     MappingBuild,
     PlantRecord,
+    StatedRadius,
     _segment_runs,
     assign_plants,
     build_mapping,
-    haversine_m,
+    date_match_radius,
     load_mapping,
+    nearest_plant,
     persist_mapping,
     plant_mapping_key,
     read_image_stamp,
@@ -27,6 +29,15 @@ from tests._mapping_fixtures import PLOTS, map_captures
 from tests._web_fixtures import named_project
 
 DATE = "2026-02-11"
+WIDE = StatedRadius(value=10.0, rationale="reaches every plant a test places")
+"""A stated radius past every plant the assignment tests place near their photographs."""
+
+
+def _assign(stamps, plants):
+    """``assign_plants`` over ``stamps`` within their date's radius stated as :data:`WIDE`."""
+    return assign_plants(
+        stamps, plants, radius=date_match_radius(stamps, WIDE)
+    )
 
 
 @pytest.fixture
@@ -72,10 +83,16 @@ def _plant(plot: str, accession: str, lat: float, lon: float) -> PlantRecord:
     )
 
 
-def test_haversine_known_distance() -> None:
-    # Two points ~111 km apart at the equator
-    d = haversine_m(0.0, 0.0, 1.0, 0.0)
-    assert 110_500 < d < 112_000
+def test_a_plants_distance_is_the_wgs84_geodesic() -> None:
+    """One degree of longitude along the equator is the WGS84 semi-major axis times pi over 180
+    (6,378,137 m, the datum's own definition), the distance the nearest plant is reported at.
+    """
+    import math
+
+    _index, distance = nearest_plant(
+        (0.0, 0.0), [_plant("P1", "A", 0.0, 1.0)], within_m=0.0
+    )
+    assert distance == pytest.approx(6_378_137.0 * math.pi / 180, abs=1e-3)
 
 
 def test_segment_runs_splits_on_large_jumps(stamp) -> None:
@@ -177,7 +194,7 @@ def test_assign_plants_one_to_one(stamp) -> None:
         stamp("img1", 43.1960, -90.0580, 0),
         stamp("img2", 43.1961, -90.0580, 2),
     ]
-    assignments = assign_plants(stamps, plants, nn_tolerance_m=10.0)
+    assignments = _assign(stamps, plants)
     # Each image should claim a different plant
     assert len({a.plot_name for a in assignments}) == 2
     assert all(a.source == "sequence" for a in assignments)
@@ -191,14 +208,14 @@ def test_assign_plants_handles_missing_gps(tmp_path: Path) -> None:
 
     Image.new("RGB", (8, 8)).save(path)
     stamps = [read_image_stamp(path, DATE)]
-    assignments = assign_plants(stamps, plants, nn_tolerance_m=10.0)
+    assignments = _assign(stamps, plants)
     assert assignments[0].source == "unmapped"
     assert assignments[0].plot_name is None
 
 
 def test_assign_plants_no_plants_returns_unmapped(stamp) -> None:
     stamps = [stamp("img1", 43.1960, -90.0580, 0)]
-    assignments = assign_plants(stamps, [], nn_tolerance_m=10.0)
+    assignments = _assign(stamps, [])
     assert all(a.source == "unmapped" for a in assignments)
 
 
@@ -206,7 +223,7 @@ def test_assign_plants_far_image_falls_back_or_unmapped(stamp) -> None:
     plants = [_plant("P1", "A", 43.1960, -90.0580)]
     # ~111 km away
     stamps = [stamp("img1", 44.1960, -90.0580, 0)]
-    assignments = assign_plants(stamps, plants, nn_tolerance_m=10.0)
+    assignments = _assign(stamps, plants)
     assert assignments[0].source == "unmapped"
 
 
@@ -267,7 +284,6 @@ def test_build_mapping_empty_dir_refuses_naming_no_capture(
             dataset_id="ds-1",
             project=tmp_path,
             plant_registry={"name": "unregistered", "digest": "0" * 64},
-            nn_tolerance_m=10.0,
         )
     assert type(exc.value).__name__ == "UngeoreferencedCaptureError"
 

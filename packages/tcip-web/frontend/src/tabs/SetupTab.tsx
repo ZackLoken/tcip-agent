@@ -2,17 +2,19 @@ import { useCallback, useEffect, useState } from "react";
 
 import { StructuredRefusalError } from "@/api/http";
 import { resultsApi, type PlantMappingSummary } from "@/api/inference";
-import type { MatchTolerance } from "@/api/types.generated";
+import type { MatchRadius } from "@/api/types.generated";
 import { TabHeading } from "@/components/TabHeading";
 import { TraitRevisionPanel } from "@/components/TraitRevisionPanel";
 import { useStore } from "@/store";
 
-// resolve_nn_tolerance_m's own sources, in the breeder's words.
-const TOLERANCE_SOURCE_PHRASES: Record<MatchTolerance["source"], string> = {
-  grid_pitch: "derived from the plot's grid pitch",
-  stated: "the stated value",
-  stated_capped: "the stated value, capped to the grid pitch",
-};
+// A date's match radius as the breeder reads it, from the record's own source.
+function radiusPhrase(radius: MatchRadius): string {
+  const where =
+    radius.source === "h_pos_err"
+      ? "the largest positioning error its photographs report"
+      : `stated: ${radius.rationale}`;
+  return `matched within ${radius.value.toFixed(2)} m (${where})`;
+}
 
 function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
   const [mappingName, setMappingName] = useState("");
@@ -20,12 +22,12 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
   // typed here that isn't in the list is a new mapping this build will create.
   const [mappingNames, setMappingNames] = useState<string[]>([]);
   const [plantRegistry, setPlantRegistry] = useState("");
-  const [nnTolerance, setNnTolerance] = useState<number | "">("");
+  const [statedRadius, setStatedRadius] = useState<number | "">("");
+  const [radiusRationale, setRadiusRationale] = useState("");
   // Off by default: a rebuild a delivery event still cites answers 409 unless this is sent true.
   const [supersedeMapping, setSupersedeMapping] = useState(false);
   const [buildSummary, setBuildSummary] = useState<PlantMappingSummary | null>(null);
-  const [buildTolerance, setBuildTolerance] = useState<MatchTolerance | null>(null);
-  const [buildMaxMatchDistance, setBuildMaxMatchDistance] = useState<number | null>(null);
+  const [buildRadius, setBuildRadius] = useState<Record<string, MatchRadius>>({});
   const [buildMsg, setBuildMsg] = useState<string | null>(null);
   const [building, setBuilding] = useState(false);
 
@@ -40,14 +42,13 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
     refreshMappingNames();
   }, [refreshMappingNames]);
 
-  // Selecting an already-built mapping by name shows its own summary and tolerance, the same way
-  // a fresh build does.
+  // Selecting an already-built mapping by name shows its own summary and radii, the same way a
+  // fresh build does.
   async function loadMapping(name: string) {
     try {
       const res = await resultsApi.loadPlantMapping(name);
       setBuildSummary(res.summary);
-      setBuildTolerance(res.nn_tolerance_m);
-      setBuildMaxMatchDistance(res.max_match_distance_m);
+      setBuildRadius(res.match_radius);
     } catch (e) {
       useStore
         .getState()
@@ -68,20 +69,20 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
     setBuilding(true);
     setBuildMsg(null);
     setBuildSummary(null);
-    setBuildTolerance(null);
-    setBuildMaxMatchDistance(null);
+    setBuildRadius({});
     try {
       const res = await resultsApi.buildPlantMapping({
         name: mappingName,
         images_root: `${datasetRoot}/images`,
         plant_registry: plantRegistry,
         supersede: supersedeMapping,
-        ...(nnTolerance === "" ? {} : { nn_tolerance_m: nnTolerance }),
+        ...(statedRadius === ""
+          ? {}
+          : { match_radius: { value: statedRadius, rationale: radiusRationale } }),
         user: useStore.getState().user,
       });
       setBuildSummary(res.summary);
-      setBuildTolerance(res.nn_tolerance_m);
-      setBuildMaxMatchDistance(res.max_match_distance_m);
+      setBuildRadius(res.match_radius);
       setBuildMsg(`Mapping built + saved as ${mappingName}`);
       refreshMappingNames();
     } catch (e) {
@@ -118,8 +119,7 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
                 void loadMapping(name);
               } else {
                 setBuildSummary(null);
-                setBuildTolerance(null);
-                setBuildMaxMatchDistance(null);
+                setBuildRadius({});
               }
             }}
             placeholder="valley-2026"
@@ -150,21 +150,35 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
           </label>
         </div>
         <div className="flex flex-col gap-2">
-          <label className="tcip-label" htmlFor="plant-mapping-tolerance">
-            Match tolerance (m)
+          <label className="tcip-label" htmlFor="plant-mapping-radius">
+            Match radius (m)
           </label>
           <input
-            id="plant-mapping-tolerance"
+            id="plant-mapping-radius"
             className="tcip-input"
             type="number"
-            step="1"
+            step="0.1"
             min="0"
-            placeholder="derived from grid pitch"
-            value={nnTolerance}
+            placeholder="each photograph's own reported positioning error"
+            value={statedRadius}
             onChange={(e) =>
-              setNnTolerance(e.target.value === "" ? "" : parseFloat(e.target.value) || 0)
+              setStatedRadius(e.target.value === "" ? "" : parseFloat(e.target.value) || 0)
             }
           />
+          {statedRadius !== "" && (
+            <>
+              <label className="tcip-label" htmlFor="plant-mapping-radius-rationale">
+                How the radius is known
+              </label>
+              <input
+                id="plant-mapping-radius-rationale"
+                className="tcip-input"
+                value={radiusRationale}
+                onChange={(e) => setRadiusRationale(e.target.value)}
+                placeholder="the receiver's spec sheet"
+              />
+            </>
+          )}
           <button
             className="tcip-btn-primary"
             onClick={() => void buildMapping()}
@@ -177,19 +191,14 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
       </div>
       {buildSummary && (
         <div className="mt-2 text-[11px] text-tcip-muted tabular-nums">
-          {buildTolerance && buildMaxMatchDistance !== null && (
-            <div className="mb-1">
-              {`Match tolerance ${buildTolerance.value.toFixed(2)} m (${TOLERANCE_SOURCE_PHRASES[buildTolerance.source]}); matches accepted out to ${buildMaxMatchDistance.toFixed(2)} m`}
-            </div>
-          )}
           {Object.entries(buildSummary.per_date).map(([d, s]) => (
             <div key={d}>
-              {`${d}: mapped ${s.n_mapped} of ${s.n_images}, ${s.n_unattributed} attributed to no plant · avg ${s.avg_distance_m === null ? "no distances" : `${s.avg_distance_m.toFixed(1)} m`}`}
+              {`${d}: mapped ${s.n_mapped} of ${s.n_images}, ${s.n_unattributed} attributed to no plant · avg ${s.avg_distance_m === null ? "no distances" : `${s.avg_distance_m.toFixed(1)} m`}${d in buildRadius ? ` · ${radiusPhrase(buildRadius[d])}` : ""}`}
             </div>
           ))}
           {buildSummary.totals.n_unattributed > 0 && (
             <div className="mt-1">
-              {`${buildSummary.totals.n_unattributed} captures across this mapping's dates are attributed to no plant (no readable position, a raster capture, or beyond the accepted match distance)`}
+              {`${buildSummary.totals.n_unattributed} captures across this mapping's dates are attributed to no plant (no readable position, a raster capture, or beyond the date's match radius)`}
             </div>
           )}
         </div>

@@ -85,8 +85,8 @@ def _center_latlon(
     return lat, lon
 
 
-# Plants ~100 m apart in UTM easting: far outside any NN tolerance a grid this dense would
-# derive (pitch/6 ~= 16.7 m), so a stem can only match its own true plant.
+# Plants ~100 m apart in UTM easting: the NN tolerance the grid derives is half that pitch,
+# so a stem can only match its own true plant.
 P1_TIEPOINT = (500_000.0, 4_800_000.0)
 P2_TIEPOINT = (500_100.0, 4_800_000.0)
 P3_TIEPOINT = (500_200.0, 4_800_000.0)

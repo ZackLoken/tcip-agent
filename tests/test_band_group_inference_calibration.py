@@ -40,7 +40,11 @@ def _write_group(images_dir: Path, stem: str, fill=(111, 222)) -> None:
         str(band_b), np.full((TILE, TILE), fill[1], dtype=np.uint16)
     )
     write_band_group_manifest(
-        images_dir, stem, {"Green": band_a, "Red": band_b}
+        images_dir,
+        stem,
+        {"Green": band_a, "Red": band_b},
+        central_wavelength_nm=None,
+        identity_tolerance={},
     )
 
 

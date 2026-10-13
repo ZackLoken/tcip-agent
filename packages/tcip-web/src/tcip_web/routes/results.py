@@ -83,7 +83,7 @@ class BuildMappingPayload(BaseModel):
     images_root: str = Field(min_length=1)
     plant_registry: str
     dates: list[str] | None = None
-    nn_tolerance_m: float | None = None
+    match_radius: plant_mapping.StatedRadius | None = None
     supersede: bool = False
     user: str
 
@@ -112,7 +112,7 @@ def build_plant_mapping(payload: BuildMappingPayload) -> dict:
             images_root,
             payload.plant_registry,
             dates=payload.dates,
-            nn_tolerance_m=payload.nn_tolerance_m,
+            match_radius=payload.match_radius,
             supersede=payload.supersede,
             actor=person,
         ).served()

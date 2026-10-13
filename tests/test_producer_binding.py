@@ -102,8 +102,8 @@ def test_a_capture_outside_the_assessments_reference_answers_for_nothing(
     from tcip_mcp.tools.inference_tools import run_inference
 
     chain = run_the_chain(tmp_path, experiment_id="exp-binding-coverage")
-    other_images = synthetic_capture(chain.root, date="2-25-26")
-    bucket = "chain/2-25-26"
+    other_images = synthetic_capture(chain.root, date="2026-02-25")
+    bucket = "chain/2026-02-25"
     published = run_inference(
         tmp_path,
         checkpoint_path=chain.checkpoint_path,
@@ -117,5 +117,5 @@ def test_a_capture_outside_the_assessments_reference_answers_for_nothing(
     out = tmp_path / "counts.csv"
     delivered = _deliver(tmp_path, chain.root, bucket, out)
     assert "reference does not cover" in delivered["error"]
-    assert "2-25-26" in delivered["error"]
+    assert "2026-02-25" in delivered["error"]
     assert not out.exists()

@@ -247,7 +247,7 @@ def test_a_plant_mapping_missing_a_disclosure_key_raises_and_writes_nothing(
         "dataset_root": "data",
         "built_at": "2026-02-01T00:00:00+00:00",
         "record_sha256": "0" * 64,
-        "nn_tolerance_m": {"value": 3, "source": "stated"},
+        "match_radius": {},
         "capture_digests": {},
         "captures_unverified": [],
         "plant_csvs_unverified": [],

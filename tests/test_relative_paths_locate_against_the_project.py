@@ -133,14 +133,19 @@ def _import_coco(project: Path) -> Path:
 
 
 def _ingest_images(project: Path) -> Path:
+    from datetime import datetime
+
     from PIL import Image
 
     from tcip_mcp.tools.ingest_tools import ingest_images
+    from tests._image_fixtures import capture_exif
 
     raw = project / "more_raw"
     raw.mkdir()
-    Image.new("RGB", (16, 16)).save(raw / "extra.png")
-    result = ingest_images(project, source="more_raw", date_from=DATE)
+    Image.new("RGB", (16, 16)).save(
+        raw / "extra.png", exif=capture_exif(datetime.fromisoformat(DATE))
+    )
+    result = ingest_images(project, source="more_raw")
     assert "error" not in result and result["found"] == 1, result
     return raw
 

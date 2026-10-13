@@ -30,7 +30,6 @@ from tcip_store.errors import (
 )
 from tcip_store.file_backend import (
     DEFAULT_LOCK_TIMEOUT_S,
-    _ensure_parent,
     _filelock_classes,
     _remove_quietly,
     _version_of,
@@ -355,7 +354,6 @@ class SqliteBackend:
         two creators serialize and the loser opens the winner's database.
         """
         timeout = self.lock_timeout_s if timeout_s is None else timeout_s
-        _ensure_parent(db_path)
         started = time.monotonic()
         try:
             held = transition_lock(root, timeout_s=timeout)

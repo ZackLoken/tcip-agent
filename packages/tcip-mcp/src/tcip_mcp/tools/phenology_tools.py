@@ -19,6 +19,7 @@ from pathlib import Path
 
 from tcip_mcp.audit import audited
 from tcip_mcp.pipelines.postprocessing import phenology
+from tcip_mcp.pipelines.postprocessing.plant_mapping import StatedRadius
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
 
@@ -95,15 +96,16 @@ def build_plant_mapping(
     images_root: str,
     plant_registry: str,
     dates: list[str] | None = None,
-    nn_tolerance_m: float | None = None,
+    match_radius: StatedRadius | None = None,
     supersede: bool = False,
 ) -> dict:
     """Assign each geolocated image to a plant, then persist the mapping under this project.
 
     Orders each date's images by EXIF capture time (the walker's sequence), splits into row runs on
     large GPS jumps, and assigns along the row, falling back to nearest-neighbor when the sequence
-    signal is weak. Each assignment records its ``source`` and GPS ``distance_m`` (no fabricated
-    "confidence"). The mapping is project state, persisted under the project by ``name``.
+    signal is weak, both within the date's match radius. Each assignment records its ``source``
+    and GPS ``distance_m`` (no fabricated "confidence"). The mapping is project state, persisted
+    under the project by ``name``.
 
     Args:
         name: The mapping's name within this project (``plant_mapping_key``'s own naming rule). A
@@ -113,9 +115,10 @@ def build_plant_mapping(
         plant_registry: The name of a plant registry already registered under this project by
             ``register_plant_registry``.
         dates: Optional subset of date folders to map (default: all under ``images_root``).
-        nn_tolerance_m: Nearest-neighbor tolerance (m). ``None`` (default) derives it from the
-            plot's grid pitch (pitch/6) so the match radius stays within half a grid cell; an
-            explicit value is honored but still capped at that pitch-derived ceiling.
+        match_radius: ``{value, rationale}``, the radius (meters) every date's captures are
+            matched within and how it is known. Omitted, each date's radius is the largest
+            horizontal positioning error its photographs' EXIF reports; a date whose positioned
+            photographs report none refuses naming this argument.
         supersede: A rebuild under ``name`` whose current record is still cited by a delivery event
             under this project refuses by name, listing the citing events, unless this is ``True``:
             the current record is then archived first (never overwritten), the new record's own
@@ -144,7 +147,7 @@ def build_plant_mapping(
             located(images_root, project),
             plant_registry,
             dates=dates,
-            nn_tolerance_m=nn_tolerance_m,
+            match_radius=match_radius,
             supersede=supersede,
             actor=None,
         ).served()

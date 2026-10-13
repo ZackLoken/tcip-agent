@@ -314,21 +314,14 @@ class SpatialStripSplit:
     strips along one axis, each strip assigned whole to one side, with a buffer band excluded at
     every boundary between differently-assigned strips.
 
-    At ``stripes_per_split=1`` (the default) each side is exactly one contiguous region. Regions
-    are ordered largest-share-first from the axis center outward (:func:`_center_out_order`), and
-    each boundary is shrunk from one side only (enough on its own to guarantee ``>= buffer``
-    separation), so the image-edge-facing side of the outermost two regions is never shrunk.
-    Raising ``stripes_per_split`` asks for that many pieces per side, but the largest share's
-    pieces sort adjacent and merge back into one region, so it is the smaller sides that end up
-    split into pieces flanking it: three names of distinct shares, each cut into three pieces at
-    ``stripes_per_split=3``, land in the order ``C, B, B, A, A, A, B, C, C`` (``A`` the largest
-    share, ``C`` the smallest), five merged regions once adjacent same-name pieces combine.
-    ``discard_ceiling`` caps how many pieces actually get used.
+    Each side is one contiguous region. Regions are ordered largest-share-first from the axis
+    center outward (:func:`_center_out_order`), and each boundary is shrunk from one side only
+    (enough on its own to guarantee ``>= buffer`` separation), so the image-edge-facing side of
+    the outermost two regions is never shrunk.
 
-    ``regions`` maps each split name to its list of half-open pixel rects (already merged where two
-    same-split strips landed adjacent, and buffer-shrunk on any side bordering a different-split
-    neighbor). ``realized_fractions`` is each side's kept tile count over the total kept across
-    every side
+    ``regions`` maps each split name to one half-open pixel rect per side, as a one-entry list
+    (buffer-shrunk on any side bordering a different-split neighbor).
+    ``realized_fractions`` is each side's kept tile count over the total kept across every side
     (post-buffer), not the requested fractions.
     """
 
@@ -340,8 +333,6 @@ class SpatialStripSplit:
     buffer: int
     split_names: tuple[str, ...]
     requested_fractions: tuple[float, ...]
-    stripes_per_split: int
-    discard_ceiling: float
     regions: dict[str, list[tuple[int, int, int, int]]]
     region_bounds: list[tuple[str, int, int]]
     total_tiles: int
@@ -402,33 +393,16 @@ def _strip_regions(
     buffer: int,
     split_names: tuple[str, ...],
     fractions: tuple[float, ...],
-    discard_ceiling: float,
-    stripes_per_split: int,
 ) -> list[tuple[str, int, int]]:
-    """Merged, buffer-shrunk ``(name, start, end)`` pixel regions along one axis, in axis order,
-    cut and shrunk over the lattice's own slice ``spans`` (each slice's ``(start, end)`` on the
-    axis, in order) so every region holds whole slices.
-
-    ``stripes_per_split`` sets how many pieces a side is cut into before adjacent same-name pieces
-    merge (capped by ``discard_ceiling``, the maximum share of the axis a buffer band between
-    differing sides may consume); the fraction each side targets sets its total share of the axis.
-    The piece order is :func:`_center_out_order`'s; see :class:`SpatialStripSplit`.
+    """Buffer-shrunk ``(name, start, end)`` pixel regions along one axis, one per side, in axis
+    order (:func:`_center_out_order`), cut and shrunk over the lattice's own slice ``spans``
+    (each slice's ``(start, end)`` on the axis, in order) so every region holds whole slices. The
+    fraction each side targets sets its share of the axis.
     """
     n = len(spans)
-    axis_span = spans[-1][1] - spans[0][0]
-    n_splits = len(split_names)
-    max_stripes = max(
-        1, int(discard_ceiling * axis_span / max(1, n_splits * buffer))
-    )
-    stripes = max(1, min(stripes_per_split, max_stripes))
-
-    slots: list[tuple[str, float]] = []
-    for name, frac in zip(split_names, fractions):
-        slots.extend([(name, frac / stripes)] * stripes)
-    slots = _center_out_order(slots)
-
     raw: list[tuple[str, int, int]] = []
     cursor = 0.0
+    slots = _center_out_order(list(zip(split_names, fractions)))
     for i, (name, share) in enumerate(slots):
         end_f = n if i == len(slots) - 1 else cursor + share * n
         start_idx, end_idx = (
@@ -437,14 +411,7 @@ def _strip_regions(
         )
         raw.append((name, start_idx, end_idx))
         cursor = end_f
-
-    merged: list[tuple[str, int, int]] = []
-    for name, start_idx, end_idx in raw:
-        if merged and merged[-1][0] == name:
-            merged[-1] = (name, merged[-1][1], end_idx)
-        else:
-            merged.append((name, start_idx, end_idx))
-    merged = [(name, s, e) for name, s, e in merged if e > s]
+    merged = [(name, s, e) for name, s, e in raw if e > s]
 
     # A boundary is shrunk from one side only (the higher-index region's left edge, against
     # its neighbor's raw end): that alone already guarantees >= buffer separation.
@@ -469,8 +436,6 @@ def spatial_strip_split(
     fractions: tuple[float, ...],
     split_names: tuple[str, ...],
     buffer: int | None = None,
-    discard_ceiling: float = 0.05,
-    stripes_per_split: int = 1,
 ) -> SpatialStripSplit:
     """Split one image's own tile lattice into disjoint pixel-space strips, one side per name, for
     the case where there are too few source images to hold one out whole: a strip is train, val, or
@@ -478,9 +443,7 @@ def spatial_strip_split(
 
     The tile lattice is :func:`~tcip_mcp.pipelines.slicing.slice_lattice`'s at this
     ``tile_size``/``overlap``. The split runs along whichever axis (width or height) offers more
-    distinct tile positions. Piece count
-    and order follow :class:`SpatialStripSplit` (``stripes_per_split``, capped by
-    ``discard_ceiling``).
+    distinct tile positions, one strip per side in :class:`SpatialStripSplit`'s order.
 
     ``buffer`` (pixels) is the minimum gap kept around every boundary between two
     differently-assigned strips: an explicit value below ``tile_size`` is refused. Omitted, it
@@ -543,14 +506,12 @@ def spatial_strip_split(
         buffer,
         active_names,
         active_fracs,
-        discard_ceiling,
-        stripes_per_split,
     )
     if len({name for name, _, _ in region_bounds}) < len(active_names):
         raise ValueError(
             f"no strip layout at buffer={buffer} leaves every requested split {active_names} "
             f"with a non-empty region on a {width}x{height} image at tile_size={tile_size}; "
-            "try a smaller buffer, fewer stripes_per_split, fewer splits, or a larger image."
+            "try a smaller buffer, fewer splits, or a larger image."
         )
 
     kept: dict[str, int] = {name: 0 for name in active_names}
@@ -566,7 +527,7 @@ def spatial_strip_split(
         raise ValueError(
             f"the derived strip layout leaves at least one requested split with zero kept "
             f"tiles on a {width}x{height} image at tile_size={tile_size}, buffer={buffer}: "
-            f"kept={kept}. Try a smaller buffer, fewer stripes_per_split, or a larger image."
+            f"kept={kept}. Try a smaller buffer, fewer splits, or a larger image."
         )
 
     regions: dict[str, list[tuple[int, int, int, int]]] = {
@@ -589,8 +550,6 @@ def spatial_strip_split(
         buffer=buffer,
         split_names=split_names,
         requested_fractions=fractions,
-        stripes_per_split=stripes_per_split,
-        discard_ceiling=discard_ceiling,
         regions=regions,
         region_bounds=region_bounds,
         total_tiles=total_tiles,

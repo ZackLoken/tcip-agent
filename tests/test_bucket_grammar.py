@@ -50,37 +50,6 @@ def test_list_dates_admits_a_literal_and_the_undated_bucket(tmp_path):
     )
 
 
-def test_ingest_refuses_a_dot_prefixed_literal_bucket(tmp_path):
-    from tcip_mcp.tools.ingest_tools import ingest_images
-
-    src = tmp_path / "src"
-    src.mkdir()
-    from PIL import Image
-
-    Image.new("RGB", (8, 8)).save(src / "img.jpg")
-
-    result = ingest_images(tmp_path / "proj", str(src), date_from=".hidden")
-
-    assert "error" in result
-    assert not (tmp_path / "proj" / "images" / ".hidden").exists()
-
-
-def test_ingest_admits_a_literal_non_iso_bucket(tmp_path):
-    from tcip_mcp.tools.ingest_tools import ingest_images
-
-    src = tmp_path / "src"
-    src.mkdir()
-    from PIL import Image
-
-    Image.new("RGB", (8, 8)).save(src / "img.jpg")
-
-    result = ingest_images(tmp_path / "proj", str(src), date_from="plot_14")
-
-    assert "error" not in result
-    assert (tmp_path / "proj" / "images" / "plot_14" / "img.jpg").is_file()
-    assert list_dates(tmp_path / "proj") == ["plot_14"]
-
-
 def test_the_tree_and_the_project_summary_agree_on_dates_over_a_hidden_directory(
     client: TestClient, tmp_path: Path
 ) -> None:

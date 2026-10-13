@@ -388,6 +388,42 @@ def test_spatial_strip_split_realized_fractions_stay_near_requested():
         assert abs(split.realized_fractions[name] - requested) < 0.05
 
 
+@pytest.mark.parametrize(
+    ("width", "height", "fractions", "names"),
+    [
+        (4000, 3000, (0.7, 0.3, 0.0), SIDES),
+        (4000, 3000, (0.8, 0.2, 0.0), SIDES),
+        (4160, 3000, (0.6, 0.2, 0.2), ("train", "val", "test")),
+        (8000, 6000, (0.7, 0.2, 0.1), SIDES),
+        (16000, 12000, (0.7, 0.2, 0.1), SIDES),
+    ],
+)
+def test_spatial_strip_split_lays_one_region_per_side(
+    width, height, fractions, names
+):
+    split = spatial_strip_split(
+        width, height, 320, 0.2, fractions=fractions, split_names=names
+    )
+    active = [n for n, f in zip(names, fractions) if f > 0]
+    assert sorted(split.regions) == sorted(active)
+    assert all(len(rects) == 1 for rects in split.regions.values())
+    assert sorted(name for name, _, _ in split.region_bounds) == sorted(active)
+
+
+@pytest.mark.parametrize("stated", ["stripes_per_split", "discard_ceiling"])
+def test_spatial_strip_split_takes_no_layout_parameter(stated):
+    with pytest.raises(TypeError, match=stated):
+        spatial_strip_split(
+            4000,
+            3000,
+            320,
+            0.2,
+            fractions=(0.7, 0.3, 0.0),
+            split_names=SIDES,
+            **{stated: 1},
+        )
+
+
 def test_spatial_strip_identity_roundtrip():
     identity = spatial_strip_identity("mosaic_north_02", "strip_x_1")
     assert identity == "mosaic_north_02::strip_x_1"

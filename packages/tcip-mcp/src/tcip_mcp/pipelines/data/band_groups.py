@@ -7,9 +7,10 @@ belong together and in what band order. Detection strategies, tried in order:
 
 1. Embedded-metadata grouping, a declarative table of (group-id tag, band-id tag) pairs to look for
   in each file's XMP; a sensor with an exact-match, shared group-id-per-capture tag is a new table
-  row. Each row also names secondary identity tags (a timestamp, a GPS fix) that must be present
-  and agree within a tight tolerance across every file claiming that group id; disagreement refuses
-  the group, and so does a candidate where every declared secondary signal is absent.
+  row. Each row also names secondary identity signals (a timestamp, a GPS fix) whose spread across
+  the files claiming one group id must stay below the bucket's own separation between distinct
+  captures; a spread reaching it refuses the group, and so does a candidate where every declared
+  secondary signal is absent.
 2. Explicit manifest, a caller-supplied ``{group_id: {band_name: filename}}`` mapping, for a sensor
   with no embedded correlation metadata at all.
 3. Otherwise every file stays independent; there is no filename-pattern fallback.
@@ -21,9 +22,11 @@ import json
 import os
 import re
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+
+import numpy as np
 
 import tcip_store
 from tcip_store import Version, VersionConflictError, encode_record
@@ -49,24 +52,20 @@ _ELEM_RE = re.compile(r"<([A-Za-z_][\w.-]*:[A-Za-z_][\w.-]*)>([^<]*)</\1>")
 
 @dataclass(frozen=True)
 class _MetadataStrategy:
-    """One (group-id tag, band-id tag) declarative row, plus the secondary identity signal(s) that
-    must independently agree (within a tight tolerance) before files sharing that group-id value
-    are trusted to be the same physical capture.
+    """One (group-id tag, band-id tag) declarative row, plus the secondary identity signals whose
+    values must agree across the files sharing one group-id value before they are trusted to be
+    one physical capture.
 
-    ``identity_checks`` names an ``(tag, kind, tolerance)`` triple per signal, ``kind`` is
-    ``"timestamp"`` (ISO-8601, compared in seconds) or ``"degrees"`` (a plain float, e.g. GPS
-    lat/lon), read from each candidate file's own XMP independently of the group-id tag itself. A
-    tag absent from any one file in the candidate group is skipped for that check; a tag present on
-    every file but disagreeing beyond its tolerance refuses the whole group, and so does a
-    candidate group where every declared check was skipped.
+    ``identity_signals`` names each signal's kind and its tags, read from each candidate file's
+    own XMP independently of the group-id tag: ``"timestamp"``, one ISO-8601 tag compared in
+    seconds, or ``"position"``, a latitude and a longitude tag in decimal degrees compared in
+    meters (:data:`_SIGNAL_KINDS`).
     """
 
     group_id_tag: str
     band_id_tag: str
     wavelength_tag: str | None = None
-    identity_checks: tuple[tuple[str, str, float], ...] = field(
-        default_factory=tuple
-    )
+    identity_signals: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
 
 # DJI's multispectral schema is the first instance of the exact-match-shared-group-id class this
@@ -76,46 +75,82 @@ _EMBEDDED_METADATA_STRATEGIES: list[_MetadataStrategy] = [
         "drone-dji:CaptureUUID",
         "Camera:BandName",
         "Camera:CentralWavelength",
-        identity_checks=(
-            # Measured on a 16-capture DJI sample: siblings within ~0.0007s and ~3e-7 degrees,
-            # captures ~109s apart; engineering bounds between the two, not validated per rig.
-            ("drone-dji:UTCAtExposure", "timestamp", 1.0),
-            ("drone-dji:GpsLatitude", "degrees", 0.0001),
-            ("drone-dji:GpsLongitude", "degrees", 0.0001),
+        identity_signals=(
+            ("timestamp", ("drone-dji:UTCAtExposure",)),
+            ("position", ("drone-dji:GpsLatitude", "drone-dji:GpsLongitude")),
         ),
     ),
 ]
 
 
-def _identity_disagreement(
-    paths: list[Path],
-    tags_by_path: dict[Path, dict[str, str]],
-    checks: tuple[tuple[str, str, float], ...],
-) -> tuple[str | None, bool]:
-    """The first identity-check tag that disagrees beyond its tolerance across ``paths`` (or
-    ``None``), paired with whether any signal was actually checkable at all.
+def _seconds_apart(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Seconds between paired rows of epoch times."""
+    return np.abs(a[:, 0] - b[:, 0])
+
+
+def _meters_apart(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """The WGS84 geodesic, in meters, between paired rows of ``(lat, lon)`` degrees."""
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import WGS84
+
+    return np.asarray(WGS84.inv(a[:, 1], a[:, 0], b[:, 1], b[:, 0])[2])
+
+
+_SIGNAL_KINDS = {
+    "timestamp": (
+        lambda raw: (datetime.fromisoformat(raw[0]).timestamp(),),
+        _seconds_apart,
+        "seconds",
+    ),
+    "position": (
+        lambda raw: tuple(float(v) for v in raw),
+        _meters_apart,
+        "meters",
+    ),
+}
+"""Each identity-signal kind's reading of a file's tag values, the distance between two
+readings, and that distance's unit."""
+
+
+def _signal_values(
+    kind: str, tags: tuple[str, ...], files: list[dict[str, str]]
+) -> list[tuple[float, ...] | None]:
+    """Each file's reading of one identity signal (:data:`_SIGNAL_KINDS`): seconds since the epoch
+    for a timestamp, ``(lat, lon)`` degrees for a position; ``None`` for a file whose tags are
+    absent or do not parse.
     """
-    any_checked = False
-    for tag, kind, tolerance in checks:
-        raw_values = [tags_by_path[p].get(tag) for p in paths]
-        if any(v is None for v in raw_values):
-            continue  # this signal isn't recorded for this candidate group; nothing to cross-check
-        values = [
-            v for v in raw_values if v is not None
-        ]  # none are, by the check just above
+    read = _SIGNAL_KINDS[kind][0]
+    values: list[tuple[float, ...] | None] = []
+    for file_tags in files:
+        raw = [file_tags.get(tag) for tag in tags]
         try:
-            if kind == "timestamp":
-                parsed = [
-                    datetime.fromisoformat(v).timestamp() for v in values
-                ]
-            else:
-                parsed = [float(v) for v in values]
+            values.append(None if None in raw else read(raw))
         except ValueError:
-            continue  # an unparsable value can't be used as a signal; don't refuse on a parse issue
-        any_checked = True
-        if max(parsed) - min(parsed) > tolerance:
-            return tag, any_checked
-    return None, any_checked
+            values.append(None)
+    return values
+
+
+def _gap_and_spreads(
+    values: np.ndarray, group_ids: np.ndarray, kind: str
+) -> tuple[float | None, dict[str, float]]:
+    """The between-capture gap of one identity signal over a bucket's files, and each capture
+    group's own spread, both off one pairwise distance matrix in the signal's own distance
+    (:data:`_SIGNAL_KINDS`), the condensed pairs in ``scipy.spatial.distance.pdist``'s order.
+
+    ``values`` holds one reading per file and ``group_ids`` its group id. The gap is the smallest
+    distance between two files of distinct groups (``None`` when one group holds every file); a
+    group's spread is the largest distance between two of its own files (``0.0`` for one file).
+    """
+    from scipy.spatial.distance import squareform
+
+    i, j = np.triu_indices(len(values), 1)
+    distance = squareform(_SIGNAL_KINDS[kind][1](values[i], values[j]))
+    same = group_ids[:, None] == group_ids[None, :]
+    spread = {
+        str(g): float(distance[np.ix_(group_ids == g, group_ids == g)].max())
+        for g in np.unique(group_ids)
+    }
+    crossing = distance[~same]
+    return (float(crossing.min()) if crossing.size else None), spread
 
 
 @dataclass(frozen=True)
@@ -124,13 +159,14 @@ class BandGroupRef:
 
     ``manifest_path`` is the ``.bandgroup`` file's own path. ``bands`` is ``{band_name:
     file_path}`` in the manifest's declared order (the order pixels are stacked into ``[H, W,
-    C]``).
+    C]``). ``central_wavelength_nm`` is each band's stated wavelength, ``None`` when nothing stated
+    one.
     """
 
     stem: str
     manifest_path: Path
     bands: dict[str, Path]
-    central_wavelength_nm: dict[str, float] | None = None
+    central_wavelength_nm: dict[str, float] | None
 
 
 class BandGroupIncompleteError(FileNotFoundError):
@@ -193,20 +229,59 @@ def _candidate_single_band_files(images_dir: Path) -> list[Path]:
     )
 
 
+def _signal_checks(
+    strategy: _MetadataStrategy,
+    group_of: dict[Path, str],
+    tags_by_path: dict[Path, dict[str, str]],
+) -> list[tuple[str, str, float | None, dict[str, float]]]:
+    """``(tags key, kind, gap, spreads)`` of each of ``strategy``'s identity signals over the
+    files ``group_of`` assigns a group id (:func:`_gap_and_spreads`); a group some file of which
+    lacks the signal takes no part in it and has no spread.
+    """
+    paths = list(group_of)
+    checks = []
+    for kind, tags in strategy.identity_signals:
+        values = _signal_values(kind, tags, [tags_by_path[p] for p in paths])
+        lacking = {group_of[p] for p, v in zip(paths, values) if v is None}
+        kept = [
+            (group_of[p], v)
+            for p, v in zip(paths, values)
+            if group_of[p] not in lacking
+        ]
+        gap, spreads = (
+            _gap_and_spreads(
+                np.array([v for _, v in kept]),
+                np.array([g for g, _ in kept]),
+                kind,
+            )
+            if kept
+            else (None, {})
+        )
+        checks.append((",".join(tags), kind, gap, spreads))
+    return checks
+
+
 def detect_embedded_metadata_groups(
-    candidates: list[Path],
+    candidates: list[Path], reference: list[Path]
 ) -> tuple[list[dict], list[dict]]:
     """Group ``candidates`` by each declarative (group_id_tag, band_id_tag) strategy in turn.
 
     Returns ``(groups, refused)``. ``groups`` is a list of ``{"stem", "bands",
-    "central_wavelength_nm", "source"}`` dicts, not yet written to disk. ``refused`` is a list of
-    ``{"group_id", "band", "files", "reason"}`` for a candidate group where two files claimed the
-    same band identity, OR where files sharing a group id disagree on (or never had) a strategy's
-    own secondary identity signal (:func:`_identity_disagreement`), every case logged, never
-    silently formed (one file overwriting another, or two unrelated captures spliced into one).
+    "central_wavelength_nm", "source", "identity_tolerance"}`` dicts, not yet written to disk.
+    ``refused`` is a list of ``{"group_id", "band", "files", "reason"}`` for a candidate group
+    where two files claimed the same band identity, where its files carry none of the strategy's
+    identity signals, or where its own spread on a signal reaches that signal's between-capture
+    gap, every case logged, never silently formed (one file overwriting another, or two unrelated
+    captures spliced into one).
+
+    The gap and the spreads are derived over ``reference``, every metadata-bearing file of the
+    bucket ``candidates`` sit in, grouped ones included (:func:`_signal_checks`). A formed group's
+    ``identity_tolerance`` holds, per signal it was checked on and keyed by the signal's tags,
+    ``{"value", "source"}``: the gap and how it was derived, or ``None`` with the fact that no
+    other capture group of the bucket carries the signal, so the group formed on its id alone.
     """
     tags_by_path: dict[Path, dict[str, str]] = {}
-    for p in candidates:
+    for p in sorted({*candidates, *reference}):
         tags = _read_xmp_tags(p)
         if tags:
             tags_by_path[p] = tags
@@ -214,54 +289,62 @@ def detect_embedded_metadata_groups(
     groups: list[dict] = []
     refused: list[dict] = []
     grouped_paths: set[Path] = set()
+    offered = set(candidates)
 
     for strategy in _EMBEDDED_METADATA_STRATEGIES:
         group_id_tag, band_id_tag = strategy.group_id_tag, strategy.band_id_tag
         wavelength_tag = strategy.wavelength_tag
+        group_of = {
+            p: tags[group_id_tag]
+            for p, tags in tags_by_path.items()
+            if tags.get(group_id_tag)
+        }
+        checks = _signal_checks(strategy, group_of, tags_by_path)
         by_group: dict[str, list[Path]] = defaultdict(list)
-        for p, tags in tags_by_path.items():
-            if p in grouped_paths:
-                continue
-            gid = tags.get(group_id_tag)
-            if gid:
+        for p, gid in group_of.items():
+            if p in offered and p not in grouped_paths:
                 by_group[gid].append(p)
 
         for gid, paths in by_group.items():
             if len(paths) < 2:
                 continue  # a lone file with a group id is not a sibling group yet
-            if strategy.identity_checks:
-                disagreeing_tag, any_checked = _identity_disagreement(
-                    paths,
-                    tags_by_path,
-                    strategy.identity_checks,
+            checked = [
+                (key, kind, gap, spreads[gid])
+                for key, kind, gap, spreads in checks
+                if gid in spreads
+            ]
+            reached = next(
+                (c for c in checked if c[2] is not None and c[3] >= c[2]), None
+            )
+            if reached is not None:
+                key, kind, gap, spread = reached
+                refused.append(
+                    {
+                        "group_id": gid,
+                        "band": None,
+                        "files": [str(p) for p in sorted(paths)],
+                        "reason": f"files sharing group id {gid!r} spread {spread:.6g} "
+                        f"{_SIGNAL_KINDS[kind][2]} on {key!r}, reaching the {gap:.6g} that "
+                        "separates the nearest two capture groups of this bucket: a shared "
+                        "group id alone is not proof of one physical capture, refusing rather "
+                        "than splicing unrelated captures together",
+                    }
                 )
-                if disagreeing_tag is not None:
-                    refused.append(
-                        {
-                            "group_id": gid,
-                            "band": None,
-                            "files": [str(p) for p in sorted(paths)],
-                            "reason": f"files sharing group id {gid!r} disagree on "
-                            f"{disagreeing_tag!r} beyond its tolerance, a shared group id "
-                            "alone is not proof of one physical capture, refusing rather "
-                            "than splicing unrelated captures together",
-                        }
-                    )
-                    continue
-                if not any_checked:
-                    refused.append(
-                        {
-                            "group_id": gid,
-                            "band": None,
-                            "files": [str(p) for p in sorted(paths)],
-                            "reason": f"files sharing group id {gid!r} carry none of this "
-                            "strategy's independent identity signals (every declared check's "
-                            "tag is missing from at least one file), a shared group id alone is "
-                            "not proof of one physical capture, and there is no secondary signal "
-                            "left to confirm it, so refusing rather than guessing",
-                        }
-                    )
-                    continue
+                continue
+            if strategy.identity_signals and not checked:
+                refused.append(
+                    {
+                        "group_id": gid,
+                        "band": None,
+                        "files": [str(p) for p in sorted(paths)],
+                        "reason": f"files sharing group id {gid!r} carry none of this "
+                        "strategy's independent identity signals (every declared signal's "
+                        "tag is missing from at least one file), a shared group id alone is "
+                        "not proof of one physical capture, and there is no secondary signal "
+                        "left to confirm it, so refusing rather than guessing",
+                    }
+                )
+                continue
             bands: dict[str, Path] = {}
             wavelengths: dict[str, float] = {}
             duplicate = False
@@ -292,12 +375,26 @@ def detect_embedded_metadata_groups(
             if duplicate or len(bands) < 2:
                 continue
             group_paths = list(bands.values())
+            bucket = group_paths[0].parent.name
             groups.append(
                 {
                     "stem": _canonical_stem(group_paths),
                     "bands": bands,
                     "central_wavelength_nm": wavelengths or None,
                     "source": "embedded-metadata",
+                    "identity_tolerance": {
+                        key: {
+                            "value": gap,
+                            "source": f"the smallest separation in {_SIGNAL_KINDS[kind][2]} "
+                            "between two capture groups' values in bucket "
+                            f"{bucket!r}, where the group was detected"
+                            if gap is not None
+                            else f"no other capture group in bucket {bucket!r}, where the "
+                            "group was detected, carries this signal, so the group formed "
+                            "on its group id alone",
+                        }
+                        for key, kind, gap, _spread in checked
+                    },
                 }
             )
             grouped_paths.update(group_paths)
@@ -332,6 +429,7 @@ def groups_from_explicit_mapping(
                 "bands": bands,
                 "central_wavelength_nm": None,
                 "source": "explicit-manifest",
+                "identity_tolerance": {},
             }
         )
         used.update(p.name for p in bands.values())
@@ -340,7 +438,8 @@ def groups_from_explicit_mapping(
 
 def read_band_group_manifest(manifest_path: Path) -> BandGroupRef:
     """Parse a ``.bandgroup`` file into a :class:`BandGroupRef`. Raises ``ValueError`` on a
-    malformed manifest (missing/empty ``bands``).
+    malformed manifest (missing/empty ``bands``) and ``KeyError`` on one carrying no
+    ``central_wavelength_nm``.
     """
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
     bands_field = data.get("bands")
@@ -353,11 +452,11 @@ def read_band_group_manifest(manifest_path: Path) -> BandGroupRef:
         str(name): directory / str(filename)
         for name, filename in bands_field.items()
     }
-    wl_field = data.get("central_wavelength_nm")
+    wl_field = data["central_wavelength_nm"]
     wavelengths = (
-        {str(k): float(v) for k, v in wl_field.items()}
-        if isinstance(wl_field, dict)
-        else None
+        None
+        if wl_field is None
+        else {str(k): float(v) for k, v in wl_field.items()}
     )
     return BandGroupRef(
         stem=manifest_path.stem,
@@ -372,12 +471,15 @@ def write_band_group_manifest(
     stem: str,
     bands: dict[str, Path],
     *,
-    central_wavelength_nm: dict[str, float] | None = None,
+    central_wavelength_nm: dict[str, float] | None,
     source: str = "embedded-metadata",
+    identity_tolerance: dict[str, dict],
     expect: Version | None = None,
 ) -> Path:
-    """Write ``<images_dir>/<stem>.bandgroup`` recording ``bands`` (by filename, not full path,
-    the originals never move) and return its path.
+    """Write ``<images_dir>/<stem>.bandgroup`` recording ``bands`` by filename (so a group moved
+    whole with its band files still resolves), each band's ``central_wavelength_nm`` (``None``
+    when nothing stated one) and the ``identity_tolerance`` each identity signal was checked
+    against, empty for a group no signal was checked on; return its path.
 
     ``expect`` carries the seam's own meaning: ``Version.ABSENT`` records a newly detected group
     only while none is recorded, and raises ``VersionConflictError`` rather than overwriting one a
@@ -386,9 +488,9 @@ def write_band_group_manifest(
     payload: dict = {
         "bands": {name: p.name for name, p in bands.items()},
         "source": source,
+        "identity_tolerance": identity_tolerance,
+        "central_wavelength_nm": central_wavelength_nm,
     }
-    if central_wavelength_nm:
-        payload["central_wavelength_nm"] = central_wavelength_nm
     path = band_group_manifest_path(images_dir, stem)
     tcip_store.put_blob(path, encode_record(payload), expect=expect)
     return path
@@ -433,11 +535,8 @@ def detect_and_write_band_groups(
             continue
         already_claimed.update(p.name for p in ref.bands.values())
 
-    candidates = [
-        p
-        for p in _candidate_single_band_files(d)
-        if p.name not in already_claimed
-    ]
+    bucket_files = _candidate_single_band_files(d)
+    candidates = [p for p in bucket_files if p.name not in already_claimed]
 
     explicit_found: list[dict] = []
     if explicit_groups:
@@ -446,7 +545,9 @@ def detect_and_write_band_groups(
         )
         candidates = [p for p in candidates if p.name not in explicit_used]
 
-    embedded_found, refused = detect_embedded_metadata_groups(candidates)
+    embedded_found, refused = detect_embedded_metadata_groups(
+        candidates, bucket_files
+    )
 
     identities = bucket_logical_identities(d)
 
@@ -482,8 +583,9 @@ def detect_and_write_band_groups(
                 d,
                 stem,
                 group["bands"],
-                central_wavelength_nm=group.get("central_wavelength_nm"),
+                central_wavelength_nm=group["central_wavelength_nm"],
                 source=group["source"],
+                identity_tolerance=group["identity_tolerance"],
                 expect=Version.ABSENT,
             )
         except VersionConflictError:
