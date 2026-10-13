@@ -21,6 +21,7 @@ from tcip_mcp.dataset_layout import UNDATED_BUCKET
 torch = pytest.importorskip("torch")
 
 from tests._chain_fixtures import BESPOKE_DETECTION  # noqa: E402
+from tests._training_values import RATIONALE  # noqa: E402
 
 pytest.importorskip("torchvision")
 
@@ -121,7 +122,7 @@ def test_the_assessments_records_over_grouped_samples_decode_each_capture(
     )
     p = prepare(
         checkpoint,
-        Stated(tile=False, conf=0.0, postprocess="nms"),
+        Stated(tile=False, conf=0.0, postprocess="nms", rationale=RATIONALE),
         device="cpu",
         tile_batch_size=8,
     ).runnable()
@@ -178,7 +179,9 @@ def test_predict_batch_rejects_stringified_band_group_refs(tmp_path):
         _detection_checkpoint(tmp_path), project=tmp_path
     )
     p = prepare(
-        checkpoint, Stated(tile=False, conf=0.0), device="cpu"
+        checkpoint,
+        Stated(tile=False, conf=0.0, rationale=RATIONALE),
+        device="cpu",
     ).runnable()
 
     logical = list_logical_images(images_dir)

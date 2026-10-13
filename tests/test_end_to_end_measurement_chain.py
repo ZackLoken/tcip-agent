@@ -94,7 +94,11 @@ def test_the_tiny_detector_trains_and_finds_one_object_per_frame(
 
     checkpoint = load_registered_checkpoint(checkpoint_path, project=tmp_path)
     p = prepare(
-        checkpoint, Stated(tile=False, conf=0.5), device="cpu"
+        checkpoint,
+        Stated(
+            tile=False, conf=0.5, rationale="a sample reason the test states"
+        ),
+        device="cpu",
     ).runnable()
     results = p.predict(
         [str(images_dir / f"{stem}.png") for stem in STEMS[:3]]
@@ -385,6 +389,7 @@ def test_publishing_the_same_bucket_twice_refuses_the_second_publish(
         images_dir=str(chain.images_dir),
         bucket=chain.bucket,
         assessment_id=chain.assessment["assessment_id"],
+        stated=Stated(),
     )
 
     assert "error" in republished, republished

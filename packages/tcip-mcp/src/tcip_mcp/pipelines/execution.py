@@ -13,7 +13,7 @@ import logging
 from dataclasses import asdict, dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 if TYPE_CHECKING:
     from tcip_mcp.model_registry import VerifiedCheckpoint
@@ -28,8 +28,6 @@ DEFAULT_TILE_BATCH_SIZE = 96
 """Tiles per forward batch: a throughput setting that changes no prediction."""
 DEFAULT_IMAGE_BATCH_SIZE = 16
 """Untiled images per forward batch: a throughput setting that changes no prediction."""
-DEFAULT_POSTPROCESS = "nms"
-"""The cross-tile merge when a caller names none: suppress overlaps rather than union them."""
 CROSS_TILE_MERGES: dict[str, tuple[str, str]] = {
     "nms": ("NMS", "IOU"),
     "nmm": ("NMM", "IOS"),
@@ -64,10 +62,11 @@ class Execution:
     frame) are ``None`` for a checkpoint whose head is not a detector. The tiled fields are
     ``None`` for an untiled pass. A record stating a tile edge without an overlap, a conf without
     a density, or either reverse, refuses (``ValueError``) at construction. ``sources`` names, per
-    field that holds a value, where the value came from, in
+    field whose value can come from more than one place, where it came from, in
     :class:`~tcip_mcp.pipelines.slicing.TileGeometry`'s words (``explicit`` for a value the caller
     stated, ``derived`` for the checkpoint's own recorded one, ``native_ratio``), or the
-    derivation or fit that produced it, by name.
+    derivation or fit that produced it, by name; ``postprocess`` is only ever stated. ``rationale``
+    is why the caller stated what it did, ``None`` when it stated nothing.
     """
 
     conf: float | None
@@ -78,6 +77,7 @@ class Execution:
     postprocess: str | None
     cross_tile_nms: float | None
     sahi_version: str | None
+    rationale: str | None
     sources: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -136,9 +136,10 @@ class Execution:
 
 
 class Stated(BaseModel):
-    """What a caller states of an execution record, every field ``None`` when unstated: whether
+    """What a caller states of an execution record, every value ``None`` when unstated: whether
     the pass is tiled, its tile edge and overlap, the cross-tile merge and its threshold, and the
-    confidence threshold.
+    confidence threshold, with the ``rationale`` for stating them. Refuses (``ValueError``) a
+    value stated without a rationale, and a rationale with no value stated.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -149,6 +150,20 @@ class Stated(BaseModel):
     postprocess: str | None = None
     cross_tile_nms: float | None = None
     conf: float | None = None
+    rationale: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def _reasoned(self) -> Stated:
+        stated = sorted(
+            k for k, v in self if k != "rationale" and v is not None
+        )
+        if bool(stated) != (self.rationale is not None):
+            raise ValueError(
+                f"the execution statement states {stated or 'nothing'} with rationale "
+                f"{self.rationale!r}: a rationale states why the values stated are, so each "
+                "comes with the other"
+            )
+        return self
 
     def differences(self, restored: Execution) -> list[str]:
         """Each stated value, the tiled flag included, that ``restored`` states differently."""
@@ -157,7 +172,7 @@ class Stated(BaseModel):
             if self.tile is not None and self.tile != restored.tiled
             else []
         )
-        for name in Stated.model_fields.keys() - {"tile"}:
+        for name in Stated.model_fields.keys() - {"tile", "rationale"}:
             value = getattr(self, name)
             if value is not None and value != getattr(restored, name):
                 differing.append(
@@ -244,7 +259,7 @@ class Preparation:
 
 def prepare(
     checkpoint: VerifiedCheckpoint,
-    stated: Stated = Stated(),
+    stated: Stated,
     *,
     images_dir: str | None = None,
     device: str | None = None,
@@ -324,12 +339,12 @@ def execution_record(
     the checkpoint recorded of its training regions (its geometry's ``object_density``).
     Tiled at ``geometry``, an edge or overlap it leaves unresolved derives from ``reference``'s
     regions (``derivations.derive_tile_geometry``), each recorded by the derivation that
-    produced it, and it merges across tiles by ``postprocess`` (the documented default when
-    unstated) at the stated ``cross_tile_nms``, else, for a merge comparing by IoU, the
-    threshold ``reference``'s regions derive (``derivations.derive_cross_tile_nms``). Every
-    value left with no statement and no basis
-    refuses (:class:`ExecutionRefusedError`) naming it, and a conf stated for a head that is no
-    detector refuses too.
+    produced it, and it merges across tiles by the stated ``postprocess`` at the stated
+    ``cross_tile_nms``, else, for a merge comparing by IoU, the threshold ``reference``'s regions
+    derive (``derivations.derive_cross_tile_nms``). The record carries the statement's
+    ``rationale``. Every value left with no statement and no basis refuses
+    (:class:`ExecutionRefusedError`) naming it, a tiled pass stating no merge among them, and a
+    conf stated for a head that is no detector refuses too.
     """
     import sahi
 
@@ -380,6 +395,7 @@ def execution_record(
             postprocess=None,
             cross_tile_nms=None,
             sahi_version=None,
+            rationale=stated.rationale,
             sources=sources,
         )
 
@@ -406,11 +422,12 @@ def execution_record(
         else TILE_OVERLAP_DERIVATION
     )
 
-    merge, sources["postprocess"] = (
-        (DEFAULT_POSTPROCESS, "default")
-        if stated.postprocess is None
-        else (stated.postprocess, "explicit")
-    )
+    merge = stated.postprocess
+    if merge is None:
+        raise ExecutionRefusedError(
+            f"a tiled pass of {checkpoint.path} states no postprocess: state the cross-tile "
+            f"merge, one of {sorted(CROSS_TILE_MERGES)}, or run under an assessment's record"
+        )
     match_metric = cross_tile_merge_of(merge)[1]
     threshold = stated.cross_tile_nms
     if threshold is not None:
@@ -442,5 +459,6 @@ def execution_record(
         postprocess=merge,
         cross_tile_nms=float(threshold),
         sahi_version=sahi.__version__,
+        rationale=stated.rationale,
         sources=sources,
     )

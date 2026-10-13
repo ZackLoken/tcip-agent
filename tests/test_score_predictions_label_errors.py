@@ -12,6 +12,7 @@ from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tcip_mcp.tools.annotation_tools import score_predictions
 from tests._producer_fixtures import image_label_key, label_image, write_image
+from tests._training_values import TRIAGE_WEIGHTS
 
 pytest.importorskip("torch")
 
@@ -136,7 +137,7 @@ def test_a_predicted_image_with_no_label_document_is_refused_as_a_reference(
     with pytest.raises(
         UnreadableLabelDocumentError, match="IMG_0000.*has no record"
     ):
-        get_worst_predictions(bucket)
+        get_worst_predictions(bucket, 8, **TRIAGE_WEIGHTS)
 
 
 def test_an_image_the_bucket_names_no_document_for_is_unknown_never_a_miss(
@@ -154,7 +155,7 @@ def test_an_image_the_bucket_names_no_document_for_is_unknown_never_a_miss(
     bucket = _published(tmp_path, "baseline", images / "IMG_0000.jpg")
 
     scored = score_predictions(str(images), "baseline", *SCORED_AT)
-    triaged = get_worst_predictions(bucket)
+    triaged = get_worst_predictions(bucket, 8, **TRIAGE_WEIGHTS)
 
     assert "error" not in scored, scored
     assert (scored["total_tp"], scored["total_fn"], scored["image_count"]) == (

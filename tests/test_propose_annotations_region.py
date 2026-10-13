@@ -140,20 +140,23 @@ def test_region_scoped_proposal_lands_at_the_full_frame_coordinates(
 ) -> None:
     """The load-bearing test: an EXIF-rotated source, cropped to a region, proposed against, and
     offset back, must report the patch at its true upright full-frame location, not a crop-local
-    or a wrongly-re-rotated one.
+    or a wrongly-re-rotated one. The region's grid states its overlap: the same call naming none
+    refuses naming it.
     """
     from tcip_mcp.pipelines import proposal
     from tcip_mcp.tools.proposal_tools import propose_annotations
 
     monkeypatch.setitem(proposal._ENGINES, "patch", PatchProposer())
 
-    result = propose_annotations(
-        tmp_path,
-        image_path=str(exif_rotated_source),
-        engine="patch",
-        grid_cells=["B1", "C1"],
-        tile_size=TILE_SIZE,
-    )
+    region = {
+        "image_path": str(exif_rotated_source),
+        "engine": "patch",
+        "grid_cells": ["B1", "C1"],
+        "tile_size": TILE_SIZE,
+    }
+    refused = propose_annotations(tmp_path, **region)
+    assert "overlap" in refused.get("error", ""), refused
+    result = propose_annotations(tmp_path, **region, overlap=0.0)
     assert "error" not in result, result
     assert result["candidate_count"] == 1
     bbox = result["candidates"][0]["bbox"]
@@ -196,6 +199,7 @@ def test_region_scoped_proposal_cleans_up_temp_crop_on_engine_failure(
             engine="boom",
             grid_cells=["B1", "C1"],
             tile_size=TILE_SIZE,
+            overlap=0.0,
         )
     after = set(Path(tempfile_gettempdir()).glob("tcip_propose_crop_*"))
     assert after - before == set(), (
@@ -304,6 +308,7 @@ class TestRegionFrameIsTheResolvedImageSources:
             engine="patch",
             grid_cells=["B1", "C1"],
             tile_size=TILE_SIZE,
+            overlap=0.0,
         )
         assert "error" not in result, result
         assert result["candidates"][0]["bbox"] == [float(v) for v in PATCH_BOX]
@@ -352,6 +357,7 @@ class TestRegionFrameIsTheResolvedImageSources:
             engine="patch",
             grid_cells=["B1"],
             tile_size=TILE_SIZE,
+            overlap=0.0,
         )
         assert "2 band(s) of uint16" in result.get("error", "")
 
@@ -406,6 +412,7 @@ class TestRegionFrameIsTheResolvedImageSources:
             engine="patch",
             grid_cells=["A1"],
             tile_size=1024,
+            overlap=0.0,
         )
         assert "error" not in result, result
         assert crops == [("RGB", (1024, 1))]

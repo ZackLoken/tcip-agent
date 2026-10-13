@@ -22,6 +22,7 @@ from tests._dense_op_fixtures import (  # noqa: E402
     dense_records,
     toy_records as _records,  # noqa: E402
 )
+from tests._training_values import DISPERSION_QUANTILE  # noqa: E402
 
 
 def test_gt_class_avg_size_derived_from_data():
@@ -34,7 +35,9 @@ def test_count_unbiased_differs_from_f1_max():
         recs
     )  # derived tolerance = half class avg size
     sweep = derive_operating_point_curve(
-        recs, criterion={"kind": "center_match", "tolerance": tol}
+        recs,
+        criterion={"kind": "center_match", "tolerance": tol},
+        dispersion_quantile=DISPERSION_QUANTILE,
     )
 
     cu = pick_count_unbiased(sweep)
@@ -70,6 +73,7 @@ def test_center_match_respects_tolerance():
             "kind": "center_match",
             "tolerance": 0.5 * gt_class_avg_size(recs),
         },
+        dispersion_quantile=DISPERSION_QUANTILE,
     )
     at0 = sweep["curve"][0]  # conf=0.0 is always the first (lowest) grid point
     assert at0["conf"] == pytest.approx(0.0)
@@ -79,8 +83,8 @@ def test_center_match_respects_tolerance():
 
 
 def test_sweep_curve_carries_dispersion_and_reference_size_fields():
-    # Every curve entry also carries count_error_p90 / count_bias_std / n_images, computed from
-    # the same per-image biases list, not a second pass over the data.
+    # Every curve entry also carries count_error_at_quantile / count_bias_std / n_images, computed
+    # from the same per-image biases list, not a second pass over the data.
     recs = dense_records(
         n_images=4,
         objects_per_image=10,
@@ -93,13 +97,15 @@ def test_sweep_curve_carries_dispersion_and_reference_size_fields():
             "kind": "center_match",
             "tolerance": 0.5 * gt_class_avg_size(recs),
         },
+        dispersion_quantile=DISPERSION_QUANTILE,
     )
     at09 = next(c for c in sweep["curve"] if c["conf"] == pytest.approx(0.9))
     # biases = fp - fn per image = [0, -1, 1, -2]
     assert at09["n_images"] == 4
     assert at09["count_bias_mean"] == pytest.approx(-0.5)
     assert at09["count_bias_std"] == pytest.approx(1.2909944, abs=1e-5)
-    assert at09["count_error_p90"] == pytest.approx(1.7, abs=1e-6)
+    assert at09["count_error_at_quantile"] == pytest.approx(1.7, abs=1e-6)
+    assert sweep["dispersion_quantile"] == DISPERSION_QUANTILE
 
 
 # --- the in-model seam ---
@@ -234,10 +240,11 @@ def test_no_overlapping_ground_truth_derives_no_merge_threshold():
 
 
 def _tiled_pass(tmp_path, records, **stated):
-    """The tiled pass of a verified checkpoint at the sample conf, made runnable from
-    ``records``' ground truth.
+    """The tiled pass of a verified checkpoint at the sample conf merging by NMS, made runnable
+    from ``records``' ground truth.
     """
     from tcip_mcp.pipelines.execution import Reference, Stated, prepare
+    from tests._training_values import RATIONALE
     from tests._verified_checkpoint_fixtures import (
         SAMPLE_CONF,
         verified_checkpoint,
@@ -245,7 +252,14 @@ def _tiled_pass(tmp_path, records, **stated):
 
     prep = prepare(
         verified_checkpoint(tmp_path),
-        Stated(tile=True, tile_size=64, conf=SAMPLE_CONF, **stated),
+        Stated(
+            tile=True,
+            tile_size=64,
+            conf=SAMPLE_CONF,
+            postprocess="nms",
+            rationale=RATIONALE,
+            **stated,
+        ),
     )
     return prep.runnable(Reference(regions=_regions(records)))
 

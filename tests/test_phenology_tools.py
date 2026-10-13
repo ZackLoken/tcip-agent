@@ -270,6 +270,7 @@ def test_each_bucket_stands_for_the_date_its_record_states_and_two_on_one_date_r
     buckets recording one date refuse naming both.
     """
     pytest.importorskip("torch")
+    from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.inference_tools import run_inference
     from tests._chain_fixtures import attributed_series
 
@@ -282,6 +283,7 @@ def test_each_bucket_stands_for_the_date_its_record_states_and_two_on_one_date_r
         images_dir=str(series.root / "images" / second),
         bucket=misnamed,
         assessment_id=series.assessment["assessment_id"],
+        stated=Stated(),
     )
     assert "error" not in published, published
     assert published["date"] == second

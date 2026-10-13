@@ -58,6 +58,12 @@ def test_triages_with_the_checkpoint_registered_in_the_named_project(
             str(images),
             "--project",
             str(project),
+            "--low",
+            "0.3",
+            "--high",
+            "0.8",
+            "--rationale",
+            "the band under test",
         ]
     )
 
@@ -65,3 +71,42 @@ def test_triages_with_the_checkpoint_registered_in_the_named_project(
     body = json.loads(capsys.readouterr().out)
     assert "error" not in body
     assert body["total_images"] == 1
+
+
+def test_the_band_and_the_ranking_settings_are_required_on_every_command(
+    tmp_path,
+):
+    """Each console door refuses a call leaving its stated settings out, naming them: triage's
+    band and its reason, the failure-case ranking's top-k and weights, the reference grid's overlap.
+    """
+    cwd = tmp_path / "operator_cwd"
+    cwd.mkdir()
+    for command, args, required in (
+        (
+            "triage-predictions",
+            ["--checkpoint", "x.pt", "--images-dir", ".", "--project", "."],
+            ("--low", "--high", "--rationale"),
+        ),
+        (
+            "render-failure-cases",
+            ["--dataset-root", ".", "--bucket", "b", "--project", "."],
+            (
+                "--top-k",
+                "--shortfall-weight",
+                "--surplus-weight",
+                "--confidence-weight",
+            ),
+        ),
+        (
+            "overlay-reference-grid",
+            ["--image", "a.png", "--project", "."],
+            ("--overlap",),
+        ),
+    ):
+        result = run_tcip(command, args, cwd=cwd)
+        assert result.returncode != 0, (command, result.stdout)
+        refusal = result.stderr.rpartition(
+            "the following arguments are required:"
+        )[2]
+        for flag in required:
+            assert flag in refusal, (command, flag, result.stderr)

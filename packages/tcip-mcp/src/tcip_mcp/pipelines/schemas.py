@@ -312,17 +312,18 @@ class ImageStatsWindow(BaseModel):
 class ImageStatsSampling(BaseModel):
     """Provenance for ``model_source.builder_kwargs``'s per-band ``image_mean``/``image_std``.
 
-    Rendered by ``derivations.image_stats_provenance`` from whichever of
-    ``band_normalization_stats`` (the exact derivation) or ``band_normalization_stats_sampled``
-    (the windowed one) produced the statistics. ``windows`` pairs each source's label with the
-    rectangle read from it, or ``None`` for the exact derivation's own whole-image read
-    (``pixel_fraction`` is then ``1.0`` and ``seed``/``window_size``/``max_windows_per_image``
-    are ``None``).
+    The ``sampling`` of whichever of ``derivations.band_normalization_stats`` (the exact
+    derivation) or ``band_normalization_stats_sampled`` (the windowed one) produced the
+    statistics. ``windows`` pairs each source's label with the rectangle read from it, or ``None``
+    for the exact derivation's own whole-image read (``pixel_fraction`` is then ``1.0`` and
+    ``window_size``/``max_windows_per_image`` are ``None``); ``max_images`` is the cap on rasters
+    drawn and ``seed`` the seed that drew them.
     """
 
     model_config = ConfigDict(extra="forbid")
     windows: list[tuple[ResolvedPath, ImageStatsWindow | None]]
-    seed: int | None = None
+    seed: int
+    max_images: int
     pixel_fraction: float
     window_size: int | None = None
     max_windows_per_image: int | None = None

@@ -61,7 +61,9 @@ def test_the_record_the_publication_writes_is_the_record_the_reader_takes_back(
         tile_size=64,
         overlap=SAMPLE_OVERLAP,
         conf=0.3,
+        postprocess="nms",
         cross_tile_nms=SAMPLE_CROSS_TILE_NMS,
+        rationale="a sample reason the test states",
     )
 
     assert "error" not in result, result

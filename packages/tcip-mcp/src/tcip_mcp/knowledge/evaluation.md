@@ -44,7 +44,7 @@ measurement-agreement/method-comparison contexts specifically because of that de
 | `assess_checkpoint` | Assess a checkpoint for one delivery kind of a confirmed trait against a drawn selection's calibration and holdout sides, recording the assessment a delivery rests on |
 | `assess_reserved_regions` | The same assessment over a mosaic's reserved, attested-complete regions, for a checkpoint trained on a within-image split |
 | `annotation_tools.score_predictions` (library call) / `tcip score-predictions` (command) | Score on-disk predictions vs GT: an image file returns per-box matches (`detail=True` adds a per-detection breakdown); a dataset dir returns aggregate metrics + per-image TP/FP/FN. It scores the object's localization, never an attribute head's call |
-| `tcip render-failure-cases` (command) | Surface + render the N images with highest triage error |
+| `tcip render-failure-cases` (command) | Surface + render the N images with highest triage error, N and the error's shortfall, surplus and confidence weights each stated |
 | `experiment_tools.compare_experiments` (library call) | Side-by-side metrics across experiments |
 | `get_experiment` (`view='lineage'`) | Trace data → model → predictions chain |
 | `list_experiments` | List every run of the project, and every sweep with its trial runs under it |
@@ -65,10 +65,13 @@ started for (`register_model`, explicit mode for a foreign or bespoke checkpoint
 refuses before loading an unregistered one.
 
 The full-frame result records the `execution` record the pass ran under, the one a published
-bucket's record carries: each value beside its source in `sources`, `explicit` when the caller
-stated it; `cross_tile_nms` holds the merge threshold the evaluation ran at, in the metric
-`postprocess` compares over. `evaluate_model` takes what it states of that record as `stated`, as
-`run_inference` does. A detector's `conf` is stated, no default standing behind it. No detection
+bucket's record carries: each value that can come from more than one place beside its source in
+`sources`, `explicit` when the caller stated it (`postprocess`, only ever stated, has none);
+`cross_tile_nms` holds the merge threshold the evaluation ran at, in the metric
+`postprocess` compares over, and `rationale` the reason the caller stated what it did.
+`evaluate_model` takes what it states of that record as `stated`, as `run_inference` does. A
+detector's `conf` is stated, and so is a tiled pass's `postprocess`, no default standing behind
+either; a statement carries its `rationale`. No detection
 cap is stated anywhere: the record carries an object `density` (objects per pixel) and each frame
 keeps at most `ceil(density x its pixels)` detections, every forward of it, training validation
 included, run under that cap set in the model, and a model exposing no cap knob refuses; the cap
@@ -99,9 +102,13 @@ side
 against the revision's authored floors and tolerances, measuring the copy of the reference it
 retains. Every field the kind's criterion reads (its localization, tolerances, floors and,
 for a regression, the statistic) is required when the operationalization is proposed, so a
-revision that leaves one unauthored never exists to assess. `assess_reserved_regions` does the same
-over a mosaic's reserved calibration and holdout regions, refused until those regions are attested
-complete and while the recorded mosaic no longer reads at its recorded size.
+revision that leaves one unauthored never exists to assess. The assessment itself states the test
+a count is held to: `equivalence_z`, the one-sided standard-error multiplier of the bias
+equivalence test, and `dispersion_quantile`, the share of held-out images whose per-image count
+error `count_error_tolerance` bounds, each with the assessment's `rationale`, all recorded with
+it. `assess_reserved_regions` does the same over a mosaic's reserved calibration and holdout
+regions, cut into the `k_cal` and `k_test` bands it states and records, refused until those
+regions are attested complete and while the recorded mosaic no longer reads at its recorded size.
 
 The record states the producer (the checkpoint's digest and producing run), the execution record
 the pass ran under (each value beside its source), the reference (each sample's source digest and
@@ -127,7 +134,7 @@ When metrics are poor, investigate systematically:
 
 1. Data issues: `tcip doctor <root>`'s `check_data_quality`, missing labels, format errors, class imbalance
 2. Worst cases: `tcip render-failure-cases`, surface and visually inspect the worst
-   N images
+   N images under the ranking weights you state
 3. Per-image breakdown: `annotation_tools.score_predictions` (library call, or
    `tcip score-predictions`) on a dataset dir; find images with the highest FP/FN counts
    (no built-in per-class breakdown for detection; use

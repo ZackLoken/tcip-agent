@@ -17,11 +17,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Enough bands to measure a per-band bias spread (the count criterion needs n >= 2 present images
-# per side) without fragmenting a modest region into slivers.
-DEFAULT_K_CAL = 3
-DEFAULT_K_TEST = 3
-
 
 def reserved_spatial_regions(
     spatial: SpatialManifest | None,

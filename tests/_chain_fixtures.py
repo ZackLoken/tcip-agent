@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING, Any
 from tcip_annotation.state import Annotation, BBox
 from tcip_mcp.pipelines.execution import Stated
 from tests._training_values import (
+    DISPERSION_QUANTILE,
+    EQUIVALENCE_Z,
     RATIONALE,
     drawn_split,
     evaluation_block,
@@ -30,7 +32,7 @@ def chain_pass() -> Stated:
     """The untiled pass the chain's detectors publish at without an assessment: the conf their
     one bright square is found at.
     """
-    return Stated(tile=False, conf=0.5)
+    return Stated(tile=False, conf=0.5, rationale=RATIONALE)
 
 
 BESPOKE_MODELS = str(Path(__file__).with_name("bespoke_models.py"))
@@ -271,7 +273,7 @@ def assess(
     **stated: Any,
 ) -> dict:
     """``assess_checkpoint`` of the count trait's per-image count over ``selection_dir`` under the
-    ``stated`` execution values.
+    ``stated`` execution values, at the sample count test settings.
     """
     from tcip_mcp.tools.calibration_tools import assess_checkpoint
     from tests import _trait_fixtures as fx
@@ -282,7 +284,10 @@ def assess(
         trait=fx.COUNT_TRAIT,
         delivery_kind="per_image_count",
         selection_dir=str(selection_dir),
-        stated=Stated(**stated),
+        equivalence_z=EQUIVALENCE_Z,
+        dispersion_quantile=DISPERSION_QUANTILE,
+        rationale=RATIONALE,
+        stated=Stated(**stated, rationale=RATIONALE) if stated else Stated(),
         device=device,
     )
 
@@ -473,7 +478,9 @@ def published(
         if raster_path is not None
         else None
     )
-    p = prepare(checkpoint, Stated(tile=False, conf=SAMPLE_CONF)).runnable()
+    p = prepare(
+        checkpoint, Stated(tile=False, conf=SAMPLE_CONF, rationale=RATIONALE)
+    ).runnable()
     root = source_root(
         [raster_path]
         if raster_path is not None
@@ -784,12 +791,16 @@ def attributed_series(
             trait="bud_opening",
             delivery_kind="state_crossing_dates",
             selection_dir=str(selection_dir),
+            equivalence_z=EQUIVALENCE_Z,
+            dispersion_quantile=DISPERSION_QUANTILE,
+            rationale=RATIONALE,
+            stated=Stated(),
         )
         assert "error" not in assessment, assessment
         assert assessment["passed"] is True, assessment["failures"]
 
-    if stated is None and assessment is None:
-        stated = chain_pass()
+    if stated is None:
+        stated = Stated() if assessment else chain_pass()
     predictions: dict[str, str] = {}
     for date in dates:
         published = run_inference(
@@ -858,6 +869,7 @@ def run_the_chain(
         images_dir=str(images_dir),
         bucket=bucket,
         assessment_id=assessment["assessment_id"],
+        stated=Stated(),
     )
     assert "error" not in published, published
     return Chain(

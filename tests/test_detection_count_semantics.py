@@ -27,6 +27,7 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     gt_record,
     prediction_record,  # noqa: E402
 )
+from tests._training_values import DISPERSION_QUANTILE  # noqa: E402
 
 CENTER_MATCH_TOLERANCE = 10.0
 
@@ -199,6 +200,7 @@ def test_sweep_records_a_doubly_detected_object_as_one_hit_and_one_false_alarm()
             "kind": "center_match",
             "tolerance": CENTER_MATCH_TOLERANCE,
         },
+        dispersion_quantile=DISPERSION_QUANTILE,
     )
     at = {round(c["conf"], 2): c for c in sweep["curve"]}
     assert set(at) == {0.0, 0.5, 0.7, 0.85, 0.9}

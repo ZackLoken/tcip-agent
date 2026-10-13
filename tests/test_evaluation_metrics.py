@@ -54,7 +54,9 @@ from tests._dense_op_fixtures import gt_only  # noqa: E402
 from tests._image_fixtures import write_noise_image  # noqa: E402
 from tests._producer_fixtures import checkpoint_admission  # noqa: E402
 from tests._training_values import (  # noqa: E402
+    DISPERSION_QUANTILE,
     IOU_THRESHOLD,
+    RATIONALE,
     SCORE_WEIGHTS,
     VALIDATION_CONF,
     drawn_split,
@@ -331,7 +333,10 @@ def _points(centers: list[tuple[float, float]]) -> list[dict]:
 
 def test_golden_derive_operating_point_curve():
     sweep = derive_operating_point_curve(
-        _sweep_records(), criterion=CENTER_10, class_id=0
+        _sweep_records(),
+        criterion=CENTER_10,
+        class_id=0,
+        dispersion_quantile=DISPERSION_QUANTILE,
     )
     curve = sweep["curve"]
     assert [round(c["conf"], 2) for c in curve] == [0.0, 0.3, 0.6, 0.9]
@@ -350,7 +355,10 @@ def test_golden_derive_operating_point_curve():
 
 def test_golden_operating_point_pickers():
     sweep = derive_operating_point_curve(
-        _sweep_records(), criterion=CENTER_10, class_id=0
+        _sweep_records(),
+        criterion=CENTER_10,
+        class_id=0,
+        dispersion_quantile=DISPERSION_QUANTILE,
     )
     assert pick_count_unbiased(sweep) == pytest.approx(0.6)  # zero count bias
     assert pick_f1_max(sweep) == pytest.approx(0.0)  # recall-max point
@@ -456,7 +464,9 @@ def test_dt_score_refuses_a_record_without_a_score_or_with_none_by_name():
     ]
     with pytest.raises(ValueError, match="no 'score' field"):
         derive_operating_point_curve(
-            per_image, criterion={"kind": "center_match", "tolerance": 1.0}
+            per_image,
+            criterion={"kind": "center_match", "tolerance": 1.0},
+            dispersion_quantile=DISPERSION_QUANTILE,
         )
 
 
@@ -1266,7 +1276,13 @@ def test_a_full_frame_evaluation_merges_at_the_threshold_its_ground_truth_derive
         ),
     )
     admission = checkpoint_admission(checkpoint, images_dir)
-    stated = Stated(tile_size=32, overlap=0.0, conf=SAMPLE_CONF)
+    stated = Stated(
+        tile_size=32,
+        overlap=0.0,
+        conf=SAMPLE_CONF,
+        postprocess="nms",
+        rationale=RATIONALE,
+    )
     scored = {"iou_threshold": IOU_THRESHOLD, "trait": None}
 
     if not derives:

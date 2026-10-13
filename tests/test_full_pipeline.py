@@ -22,6 +22,7 @@ torchvision = pytest.importorskip("torchvision")
 from tests import REPO_ROOT, bespoke_models  # noqa: E402
 from tests._producer_fixtures import run_over  # noqa: E402
 from tests._training_values import (  # noqa: E402
+    RATIONALE,
     adamw_optimizer,
     drawn_split,
     evaluation_block,
@@ -135,7 +136,9 @@ class TestFullClassificationPipeline:
         checkpoint = load_registered_checkpoint(
             observation.checkpoint["path"], project=tmp_path
         )
-        p = prepare(checkpoint, Stated(tile=False), device="cpu").runnable()
+        p = prepare(
+            checkpoint, Stated(tile=False, rationale=RATIONALE), device="cpu"
+        ).runnable()
 
         # Pick some test images
         test_images = sorted(Path(images_dir).rglob("*.png"))[:4]
@@ -256,7 +259,9 @@ class TestDetectionPipelineRealData:
             observation.checkpoint["path"], project=tmp_path
         )
         detector = prepare(
-            checkpoint, Stated(tile=False, conf=0.01), device="cpu"
+            checkpoint,
+            Stated(tile=False, conf=0.01, rationale=RATIONALE),
+            device="cpu",
         ).runnable()
 
         img_exts = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}

@@ -98,6 +98,7 @@ def test_a_capture_outside_the_assessments_reference_answers_for_nothing(
     """The checkpoint and execution are the assessed ones, but the capture is not among those the
     reference held out, so the assessment says nothing about it.
     """
+    from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.inference_tools import run_inference
 
     chain = run_the_chain(tmp_path, experiment_id="exp-binding-coverage")
@@ -109,6 +110,7 @@ def test_a_capture_outside_the_assessments_reference_answers_for_nothing(
         images_dir=str(other_images),
         bucket=bucket,
         assessment_id=chain.assessment["assessment_id"],
+        stated=Stated(),
     )
     assert "error" not in published, published
 

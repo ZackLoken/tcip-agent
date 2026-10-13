@@ -1,13 +1,36 @@
 """The sample blocks a test config states, since the platform ships no default for any of them:
 the optimizer, schedule, stop rule and evaluation blocks ``_chain_fixtures.training_config``
 builds its run from (and a test states over it as an override), the drawn split and tiling
-blocks a data section states, and a sample search space and search.
+blocks a data section states, and a sample search space and search; beside them the sample
+settings an assessment and a failure-case ranking state.
 """
 
 from typing import Any
 
+from tcip_mcp.pipelines.active_learning import ScorerSpec
+
 RATIONALE = "a sample reason the test states for this block"
 """The reason every sample block here states (``schemas`` requires one per stated block)."""
+
+EQUIVALENCE_Z = 1.645
+"""A sample equivalence multiplier an assessment states: a one-sided 95 percent test."""
+DISPERSION_QUANTILE = 0.9
+"""A sample dispersion quantile an assessment states: the ninetieth percentile."""
+COUNT_TEST = {
+    "equivalence_z": EQUIVALENCE_Z,
+    "dispersion_quantile": DISPERSION_QUANTILE,
+}
+"""The sample count test settings, by ``operating_point.count_criterion`` parameter."""
+TRIAGE_WEIGHTS = {
+    "shortfall_weight": 2.0,
+    "surplus_weight": 1.0,
+    "confidence_weight": 1.0,
+}
+"""Sample failure-case ranking weights a test states, by door parameter."""
+COMBINED_SCORER = ScorerSpec.model_validate(
+    {"name": "combined", "uncertainty_weight": 0.6, "diversity_weight": 0.4}
+)
+"""A sample review-queue scorer block a test states."""
 
 SCHEDULE_SETTINGS: dict[str, dict[str, Any]] = {
     "cosine": {"eta_min": 1e-6, "horizon_epochs": 3},

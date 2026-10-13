@@ -5,7 +5,8 @@ Wraps ``feedback_tools.triage_predictions``, which writes nothing.
 
 Usage:
     tcip triage-predictions --checkpoint <ckpt.pt> --images-dir <dir> \
-        --project <project> [--subject <subject>] [--low 0.3] [--high 0.8]
+        --project <project> --low <conf> --high <conf> --rationale <text> \
+        [--subject <subject>]
 
 The checkpoint must be named by a registry entry under --project (register it with register_model
 first); this command refuses one it is not, naming the digest and the project.
@@ -41,14 +42,18 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser.add_argument(
         "--low",
         type=float,
-        default=0.3,
-        help="Lower confidence bound for the needs-review band.",
+        required=True,
+        help="Lower confidence bound for the needs-review band, inclusive, and a "
+        "detector's pass conf.",
     )
     parser.add_argument(
         "--high",
         type=float,
-        default=0.8,
-        help="Upper confidence bound for the needs-review band.",
+        required=True,
+        help="Upper confidence bound for the needs-review band, exclusive.",
+    )
+    parser.add_argument(
+        "--rationale", required=True, help="Why the band is stated as it is."
     )
     args = parser.parse_args(argv)
 
@@ -62,6 +67,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
         args.images_dir,
         low=args.low,
         high=args.high,
+        rationale=args.rationale,
         subject=args.subject,
     )
     print(json.dumps(result, indent=2))

@@ -26,10 +26,11 @@ from tcip_mcp.server import tool
 
 logger = logging.getLogger(__name__)
 
-
-# Default-domain raster metadata items observed to name a capture date, matched case-insensitively
-# in this order: a Sentera-stitched orthomosaic writes ``capture_date``.
-_GDAL_DATE_ITEMS = ("capture_date",)
+_EXIF_DATE = "EXIF_DateTimeOriginal"
+"""A file's EXIF capture time, as GDAL's EXIF metadata domain names it and as the manifest names
+the date source it answered from."""
+_TIFF_DATE = "TIFFTAG_DATETIME"
+"""A TIFF's ``DateTime`` tag, as GDAL's default metadata domain names it."""
 
 
 def _iso_date(raw: object) -> str | None:
@@ -72,46 +73,59 @@ def _photographic_capture_date(path: Path) -> tuple[str | None, str | None]:
     return iso, None
 
 
-def _gdal_capture_date(path: Path) -> tuple[str | None, str | None]:
-    """The capture date a GDAL-readable raster's metadata states, and why it could not be read.
+def _gdal_capture_date(
+    path: Path, date_item: str | None
+) -> tuple[str | None, str | None, str | None]:
+    """The capture date a GDAL-readable raster's metadata states, why it could not be read, and
+    the metadata item that stated it.
 
     Asks the TIFF ``DateTime`` tag first, then an EXIF IFD if the container exposes one, then the
-    stitching-engine items of :data:`_GDAL_DATE_ITEMS` in the default metadata domain, which is
-    where an orthomosaic states the day it was flown. Metadata only: no pixels are read.
+    stated ``date_item`` in the default metadata domain (matched case-insensitively), where a
+    stitching engine may write the day an orthomosaic was flown. Metadata only: no pixels are
+    read.
     """
     import rasterio
 
     try:
         with rasterio.open(str(path)) as ds:
             tags = ds.tags()
-            raw = tags.get("TIFFTAG_DATETIME")
-            if not raw:
-                raw = ds.tags(ns="EXIF").get("EXIF_DateTimeOriginal")
-            if not raw:
-                items = {k.lower(): v for k, v in tags.items()}
-                raw = next(
+            stated = {
+                _TIFF_DATE: tags.get(_TIFF_DATE),
+                _EXIF_DATE: ds.tags(ns="EXIF").get(_EXIF_DATE),
+            }
+            if date_item:
+                stated[date_item] = next(
                     (
-                        items[name]
-                        for name in _GDAL_DATE_ITEMS
-                        if items.get(name)
+                        v
+                        for k, v in tags.items()
+                        if k.lower() == date_item.lower()
                     ),
                     None,
                 )
     except Exception as exc:  # noqa: BLE001, rasterio raises driver-specific errors
-        return None, f"raster metadata could not be read: {exc}"
+        return None, f"raster metadata could not be read: {exc}", None
+    item, raw = next(((k, v) for k, v in stated.items() if v), (None, None))
     if not raw:
-        return None, None
+        return None, None, None
     iso = _iso_date(raw)
     if iso is None:
-        return None, f"capture date {str(raw)!r} is not a date this reads"
-    return iso, None
+        return (
+            None,
+            f"capture date {str(raw)!r} is not a date this reads",
+            None,
+        )
+    return iso, None, item
 
 
-def _capture_iso_date(path: Path) -> tuple[str | None, str | None]:
-    """``(ISO YYYY-MM-DD or None, why it could not be read or None)`` for one file.
+def _capture_iso_date(
+    path: Path, date_item: str | None
+) -> tuple[str | None, str | None, str | None]:
+    """``(ISO YYYY-MM-DD or None, why it could not be read or None, the item that stated it or
+    None)`` for one file, a raster's ``date_item`` asked after its own tags
+    (:func:`_gdal_capture_date`).
 
-    Both ``None`` is the undated fact: a photo with no EXIF date, a raster with no date item, or
-    an array file or band group, which has nowhere to put one and is not read. A reason is the
+    No date and no reason is the undated fact: a photo with no EXIF date, a raster stating none,
+    or an array file or band group, which has nowhere to put one and is not read. A reason is the
     different fact that the container itself could not be read this far.
     Neither outcome stops the file being ingested. The container family is the file's
     :attr:`~tcip_mcp.pipelines.raster_source.SourceHeader.kind`: EXIF in a photograph, raster
@@ -121,10 +135,11 @@ def _capture_iso_date(path: Path) -> tuple[str | None, str | None]:
 
     kind = SourceHeader(path).kind
     if kind == "photo":
-        return _photographic_capture_date(path)
+        iso, unreadable = _photographic_capture_date(path)
+        return iso, unreadable, _EXIF_DATE if iso else None
     if kind == "tif":
-        return _gdal_capture_date(path)
-    return None, None
+        return _gdal_capture_date(path, date_item)
+    return None, None, None
 
 
 def _iter_source_images(source: str, recursive: bool):
@@ -152,23 +167,26 @@ def _validate_bucket_literal(date_from: str) -> None:
         raise ValueError(f"invalid date_from literal bucket: {date_from!r}")
 
 
-def _bucket_for(path: Path, date_from: str) -> tuple[str, str | None]:
-    """The bucket ``path`` lands in, and why its own capture date could not be read.
+def _bucket_for(
+    path: Path, date_from: str, date_item: str | None
+) -> tuple[str, str | None, str | None]:
+    """The bucket ``path`` lands in, why its own capture date could not be read, and the item that
+    stated it (:func:`_capture_iso_date`).
 
     Only ``"exif"`` asks the file anything at all; the other two modes name the bucket from the
-    caller's own argument and open nothing, so they never have a reason to report.
+    caller's own argument and open nothing, so they never have a reason or an item to report.
     """
     if date_from == "exif":
-        iso, unreadable = _capture_iso_date(path)
-        return iso or dataset_layout.UNDATED_BUCKET, unreadable
+        iso, unreadable, item = _capture_iso_date(path, date_item)
+        return iso or dataset_layout.UNDATED_BUCKET, unreadable, item
     if date_from == "none":
-        return dataset_layout.UNDATED_BUCKET, None
-    return date_from, None  # validated literal bucket
+        return dataset_layout.UNDATED_BUCKET, None, None
+    return date_from, None, None  # validated literal bucket
 
 
 def _collision_refusal(
     dest_root: Path,
-    resolved_sources: list[tuple[Path, str, str | None]],
+    resolved_sources: list[tuple[Path, str, str | None, str | None]],
 ) -> str | None:
     """The whole-call refusal naming every source that would create a second logical image under a
     stem key another source, an existing raw file, or an existing band-group manifest already holds
@@ -179,9 +197,7 @@ def _collision_refusal(
     out of this refusal and out of ``identities``, whether or not its own bytes match that file,
     and is skipped by the copy loop's own ``dest.exists()`` check.
     """
-    buckets = sorted(
-        {bucket for _src, bucket, _unreadable in resolved_sources}
-    )
+    buckets = sorted({bucket for _src, bucket, *_ in resolved_sources})
     collisions: dict[str, dict[str, list[Path]]] = {}
     for bucket in buckets:
         # disk_identities is a fixed pre-call snapshot for the re-ingest carve-out below, never
@@ -192,7 +208,7 @@ def _collision_refusal(
         identities = {
             key: list(paths) for key, paths in disk_identities.items()
         }
-        for src_path, src_bucket, _unreadable in resolved_sources:
+        for src_path, src_bucket, *_ in resolved_sources:
             if src_bucket != bucket:
                 continue
             key = stem_collision_key(src_path.stem)
@@ -233,6 +249,7 @@ def ingest_images(
     date_from: str = "exif",
     recursive: bool = True,
     detect_band_groups: bool = False,
+    raster_date_item: str | None = None,
 ) -> dict:
     """Copy raw images into the project, bucketed by the capture date each file states.
 
@@ -244,8 +261,8 @@ def ingest_images(
     re-ingesting the exact same destination file is skipped instead, recorded in
     ``skipped_collisions``. Does not annotate, split, choose a task, or write ``subjects.json``.
 
-    The capture date never gates ingestion: a file whose date cannot be read is copied and counted
-    like any other, lands in ``undated/``, and is listed in ``unreadable_dates``.
+    The capture date never gates ingestion: a file whose date cannot be read is copied like any
+    other, lands in ``undated/``, and its entry in ``files`` carries why.
 
     Args:
         source: Folder (or glob) of raw images, anywhere on disk.
@@ -260,11 +277,17 @@ def ingest_images(
             manifest for every sibling-single-band-file group found (e.g. a multispectral rig that
             writes one file per band instead of one multi-band file per capture). Default
             ``False``.
+        raster_date_item: The default-domain metadata item a raster's writer states its capture
+            date in (a stitching engine's own item name, matched case-insensitively), asked
+            after the raster's TIFF ``DateTime`` tag and EXIF date. Omitted, a raster stating
+            neither lands in ``undated/``.
 
-    Returns a manifest: ``{image_root, total, found, copied, moved, buckets, undated,
-    skipped_collisions, errors, unreadable_dates, move, band_groups}``, where
-    ``unreadable_dates`` names each ingested file whose capture date could not be read and the
-    reason. ``skipped_collisions`` names only an exact re-ingest.
+    Returns a manifest: ``{image_root, found, copied, moved, files, skipped_collisions, errors,
+    move, band_groups}``, where ``files`` holds one entry per ingested file, ``{source, dest,
+    bucket, date_source, date_unreadable}``: ``date_source`` is the metadata item that dated it
+    (``TIFFTAG_DATETIME``, ``EXIF_DateTimeOriginal`` or ``raster_date_item``), ``None`` for a file
+    no source dated, which lands in ``undated/``, and ``date_unreadable`` why its container could
+    not be read that far, else ``None``. ``skipped_collisions`` names only an exact re-ingest.
 
     """
     try:
@@ -278,23 +301,22 @@ def ingest_images(
         return {"error": f"No images found under {source!r}"}
 
     resolved_sources = [
-        (src_path, *_bucket_for(src_path, date_from)) for src_path in sources
+        (src_path, *_bucket_for(src_path, date_from, raster_date_item))
+        for src_path in sources
     ]
 
     collision_error = _collision_refusal(project, resolved_sources)
     if collision_error is not None:
         return {"error": collision_error}
 
-    buckets: dict[str, int] = {}
-    undated = 0
     copied = 0
     moved = 0
+    files: list[dict] = []
     skipped_collisions: list[dict] = []
     errors: list[dict] = []
-    unreadable_dates: list[dict] = []
     touched_buckets: set[str] = set()
 
-    for src_path, bucket, date_unreadable in resolved_sources:
+    for src_path, bucket, date_unreadable, date_source in resolved_sources:
         dest = dataset_layout.image_path(
             project, bucket, src_path.stem, src_path.suffix
         )
@@ -334,19 +356,15 @@ def ingest_images(
                 copied += 1
 
         touched_buckets.add(bucket)
-        if date_unreadable:
-            unreadable_dates.append(
-                {
-                    "source": str(src_path),
-                    "dest": str(dest),
-                    "bucket": bucket,
-                    "reason": date_unreadable,
-                }
-            )
-        if bucket == dataset_layout.UNDATED_BUCKET:
-            undated += 1
-        else:
-            buckets[bucket] = buckets.get(bucket, 0) + 1
+        files.append(
+            {
+                "source": str(src_path),
+                "dest": str(dest),
+                "bucket": bucket,
+                "date_source": date_source,
+                "date_unreadable": date_unreadable,
+            }
+        )
 
     band_groups_result: dict = {"formed": [], "refused": [], "manifests": []}
     if detect_band_groups:
@@ -365,15 +383,12 @@ def ingest_images(
 
     return {
         "image_root": str(dataset_layout.image_root(project)),
-        "total": copied + moved,
         "found": len(sources),
         "copied": copied,
         "moved": moved,
-        "buckets": dict(sorted(buckets.items())),
-        "undated": undated,
+        "files": files,
         "skipped_collisions": skipped_collisions,
         "errors": errors,
-        "unreadable_dates": unreadable_dates,
         "move": not copy,
         "band_groups": band_groups_result,
     }

@@ -4,7 +4,8 @@
  * routes/terminal.py, routes/projects.py, routes/results.py, tcip_mcp.experiments,
  * tcip_mcp.tools.training_tools, tcip_mcp.traits, tcip_mcp.web_client.GuiState), plus a
  * handful of runtime constants and vocabularies (routes/images.py, tcip_mcp.web_client,
- * tcip_mcp.experiments, tcip_mcp.subject_registry, tcip_mcp.agent_identity,
+ * tcip_mcp.experiments, tcip_mcp.pipelines.execution, tcip_mcp.subject_registry,
+ * tcip_mcp.agent_identity,
  * tcip_mcp.pipelines.training.evaluation, tcip_store.values, tcip_annotation.json_io,
  * tcip_web.jobstore). Do not edit by hand.
  */
@@ -31,6 +32,8 @@ export const PANEL_EVENT_LABELS_WRITTEN = "labels_written";
 export const PANEL_EVENT_ANNOTATE_FOCUS = "annotate_focus";
 export const PANEL_EVENT_CANVAS_STATE_REQUEST = "canvas_state_request";
 
+export const CROSS_TILE_MERGES = ["nms", "nmm", "greedynmm"] as const;
+
 export const TAB_NAMES = ["setup", "annotate", "training", "inference", "results", "meta"] as const;
 
 export const PLATFORM_PANEL_EVENTS = ["labels_written", "annotate_focus", "canvas_state_request"] as const;
@@ -55,8 +58,30 @@ export interface LaunchPriorityQueuePayload {
   checkpoint_path: string;
   images_dir: string;
   subject?: string | null;
-  method?: string;
-  budget?: number;
+  scorer: ScorerSpec;
+  budget: number;
+  rationale: string;
+}
+
+export interface PriorityQueueJob {
+  job_id: string;
+  project: string;
+  checkpoint_path: string;
+  images_dir: string;
+  subject: string | null;
+  scorer: ScorerSpec;
+  budget: number;
+  rationale: string;
+  status: "pending" | "running" | "completed" | "failed" | "canceled";
+  error: string | null;
+  queue: Record<string, unknown>[];
+  total_candidates: number;
+  reviewed_skipped: number;
+}
+
+export interface ScorerSpec {
+  name: string;
+  [key: string]: unknown;
 }
 
 export interface CanvasStatePayload {
@@ -517,6 +542,7 @@ export interface Stated {
   postprocess?: string | null;
   cross_tile_nms?: number | null;
   conf?: number | null;
+  rationale?: string | null;
 }
 
 export interface GuiState {

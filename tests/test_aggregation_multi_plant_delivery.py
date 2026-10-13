@@ -11,9 +11,15 @@ from __future__ import annotations
 
 import pytest
 
+from tcip_mcp.pipelines.execution import Stated
 from tcip_mcp.pipelines.postprocessing.aggregation import _per_plant
 from tcip_mcp.traits import PER_IMAGE_COUNT, PER_PLANT_COUNT_AGGREGATE
 from tests import _trait_fixtures as fx, csv_rows
+from tests._training_values import (
+    DISPERSION_QUANTILE,
+    EQUIVALENCE_Z,
+    RATIONALE,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -272,6 +278,10 @@ def _assessed(project, kind: str, experiment_id: str):
         trait=fx.COUNT_TRAIT,
         delivery_kind=kind,
         selection_dir=str(project / "selection"),
+        equivalence_z=EQUIVALENCE_Z,
+        dispersion_quantile=DISPERSION_QUANTILE,
+        rationale=RATIONALE,
+        stated=Stated(),
     )
     assert assessment.get("passed") is True, assessment
     bucket = f"{kind}/{DATE}"
@@ -281,6 +291,7 @@ def _assessed(project, kind: str, experiment_id: str):
         images_dir=str(images_dir),
         bucket=bucket,
         assessment_id=assessment["assessment_id"],
+        stated=Stated(),
     )
     assert "error" not in published, published
     return read_bucket(root, bucket)

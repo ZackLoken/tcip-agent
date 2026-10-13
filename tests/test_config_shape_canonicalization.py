@@ -607,30 +607,29 @@ def test_model_source_refuses_an_undeclared_key_by_name():
 
 def test_model_source_admits_every_declared_key(tmp_path):
     """Every declared key validates with no issue, image_stats_sampling as the normalization
-    derivation's own producer (``derivations.image_stats_provenance``) renders it.
+    derivation's own producer (``derivations.band_normalization_stats``) records it.
     """
     pytest.importorskip("torch")
     from PIL import Image
 
-    from tcip_mcp.pipelines.derivations import (
-        band_normalization_stats,
-        image_stats_provenance,
-    )
+    from tcip_mcp.pipelines.derivations import band_normalization_stats
 
     image = tmp_path / "a.png"
     Image.new("RGB", (8, 8), (20, 40, 60)).save(image)
-    result = band_normalization_stats([image], 3)
+    result = band_normalization_stats([image], 3, max_images=1, seed=0)
     assert result is not None
-    mean, std, _ = result
     issues = _issues_of(
         {
             **FLAT_CONFIG,
             "model_source": {
                 "builder": "m:f",
-                "builder_kwargs": {"image_mean": mean, "image_std": std},
+                "builder_kwargs": {
+                    "image_mean": result.mean,
+                    "image_std": result.std,
+                },
                 "task": "detection",
                 "source_files": [str(Path(__file__).parent / "m.py")],
-                "image_stats_sampling": image_stats_provenance(result),
+                "image_stats_sampling": result.sampling.model_dump(),
             },
         }
     )

@@ -37,7 +37,7 @@ def test_a_render_command_leaves_no_audit_line_anywhere(tmp_path):
 
     result = run_tcip(
         "overlay-reference-grid",
-        ["--image", str(image), "--project", str(project)],
+        ["--image", str(image), "--project", str(project), "--overlap", "0"],
         cwd=cwd,
     )
 
@@ -55,7 +55,14 @@ def test_a_command_naming_no_project_refuses_and_writes_nothing(tmp_path):
 
     result = run_tcip(
         "overlay-reference-grid",
-        ["--image", str(image), "--project", str(not_a_project)],
+        [
+            "--image",
+            str(image),
+            "--project",
+            str(not_a_project),
+            "--overlap",
+            "0",
+        ],
         cwd=tmp_path,
     )
 

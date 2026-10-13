@@ -2,10 +2,14 @@
 
 import pytest
 
+from tcip_mcp.pipelines.active_learning import ScorerSpec
 from tcip_mcp.pipelines.execution import Stated
 from tests._producer_fixtures import write_image
+from tests._training_values import RATIONALE
 
-STATED = Stated(tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2)
+STATED = Stated(
+    tile=False, conf=0.25, cross_tile_nms=0.7, overlap=0.2, rationale=RATIONALE
+)
 """The execution values every inference job here states."""
 
 
@@ -218,10 +222,14 @@ def test_priority_queue_by_id_reaches_a_job_launched_for_a_previously_open_proje
         checkpoint_path="c",
         images_dir="i",
         subject=None,
-        method="combined",
+        scorer=ScorerSpec(name="uncertainty"),
         budget=50,
+        rationale=RATIONALE,
         status="completed",
+        error=None,
         queue=[{"image": "a.jpg", "score": 0.9}],
+        total_candidates=1,
+        reviewed_skipped=0,
     )
     _pq_registry.register(job.job_id, job)
 
@@ -229,7 +237,7 @@ def test_priority_queue_by_id_reaches_a_job_launched_for_a_previously_open_proje
         open_new_project(tmp_path / "other")
 
         assert _pq_registry.get("pq-under-a") is job
-        assert get_priority_queue_job("pq-under-a")["job_id"] == "pq-under-a"
+        assert get_priority_queue_job("pq-under-a").job_id == "pq-under-a"
 
         with pytest.raises(HTTPException) as miss:
             get_priority_queue_job("pq-never-launched")

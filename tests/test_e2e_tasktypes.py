@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.pipelines.execution import Stated
 
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
@@ -344,6 +345,7 @@ def test_ordinal_evaluate_model_e2e(tmp_path: Path, monkeypatch):
         observation.directory.name,
         str(images_dir),
         str(csv_path),
+        stated=Stated(),
         iou_threshold=IOU_THRESHOLD,
     )
     assert "error" not in result, result
@@ -377,6 +379,7 @@ def test_regression_evaluate_model_e2e(tmp_path: Path, monkeypatch):
         observation.directory.name,
         str(images_dir),
         str(csv_path),
+        stated=Stated(),
         iou_threshold=IOU_THRESHOLD,
     )
     assert "error" not in result, result

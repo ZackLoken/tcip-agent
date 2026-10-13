@@ -28,6 +28,10 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     scaled_to,
 )
 from tests import _trait_fixtures as fx  # noqa: E402
+from tests._training_values import (  # noqa: E402
+    COUNT_TEST,
+    DISPERSION_QUANTILE,
+)
 
 FRAME = 1024  # a frame holding every box the fixtures below lay out
 ENTRY = fx.with_fields(
@@ -44,6 +48,7 @@ def _criterion(cal, hold):
         ENTRY,
         staged_conf_floor=0.05,
         staged_conf_floor_attribute_path="self",
+        **COUNT_TEST,
     )
 
 
@@ -126,6 +131,7 @@ def test_a_single_class_reference_is_unaffected_by_the_conditioning():
         criterion=scaled_to(evidence["localization"], hold),
         class_id=1,
         conf_grid=[conf],
+        dispersion_quantile=DISPERSION_QUANTILE,
     )["curve"][0]
     for key in (
         "tp",
@@ -223,6 +229,7 @@ def test_no_conf_in_the_sweep_escapes_a_wholesale_class_swap():
             "kind": "center_match",
             "tolerance": 0.5 * gt_class_avg_size(recs),
         },
+        dispersion_quantile=DISPERSION_QUANTILE,
     )
     assert len(sweep["curve"]) > 4
     assert [c for c in sweep["curve"] if c["fp"] + c["tp"] < 32], (
@@ -312,6 +319,7 @@ def test_the_pick_serves_the_worst_class_and_a_sparse_reference_still_fails_it()
             "kind": "center_match",
             "tolerance": 0.5 * gt_class_avg_size(recs),
         },
+        dispersion_quantile=DISPERSION_QUANTILE,
     )
     at = {round(c["conf"], 2): c for c in sweep["curve"]}
     assert at[0.95]["count_bias_mean"] == pytest.approx(0.0)

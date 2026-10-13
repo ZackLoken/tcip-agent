@@ -10,7 +10,7 @@ relative --image lies under it.
 
 Usage:
     tcip overlay-reference-grid --image <path> --project <project> \
-        [--tile-size <native_pixels>] [--overlap 0.0]
+        --overlap <fraction> [--tile-size <native_pixels>]
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
     parser.add_argument(
         "--overlap",
         type=float,
-        default=0.0,
+        required=True,
         help="Cell overlap as a fraction of tile_size, training tiling's "
         "semantics.",
     )

@@ -18,7 +18,7 @@ from tests._producer_fixtures import (
     gray_frame,
     painted_array,
 )
-from tests._training_values import tiling_block
+from tests._training_values import RATIONALE, tiling_block
 
 torch = pytest.importorskip("torch")
 
@@ -165,10 +165,17 @@ TILED_PASS = Stated(
     tile_size=TILE,
     overlap=SAMPLE_OVERLAP,
     conf=0.0,
+    postprocess="nms",
     cross_tile_nms=SAMPLE_CROSS_TILE_NMS,
+    rationale=RATIONALE,
 )
 """The execution values a tiled inference pass here states."""
-UNSTATED_LATTICE_PASS = Stated(conf=0.0, cross_tile_nms=SAMPLE_CROSS_TILE_NMS)
+UNSTATED_LATTICE_PASS = Stated(
+    conf=0.0,
+    postprocess="nms",
+    cross_tile_nms=SAMPLE_CROSS_TILE_NMS,
+    rationale=RATIONALE,
+)
 """A pass stating neither whether it tiles nor at what lattice."""
 STRADDLING = [(4.0, 4.0), (124.0, 60.0), (4.0, 60.0)]
 """A stem's triangle, in a frame two :data:`TILE` px tiles wide, crossing the seam at x=64:
@@ -318,7 +325,6 @@ def test_predict_sliced_require_masks_false_returns_boxes_only(
             tile=True,
             tile_size=TILE,
             overlap=0.2,
-            postprocess="nms",
             **SAMPLE_DETECTOR_PASS,
         ),
         device="cpu",

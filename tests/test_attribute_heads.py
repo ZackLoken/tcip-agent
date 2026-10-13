@@ -25,13 +25,18 @@ from tcip_annotation.json_io import UNASSESSED  # noqa: E402
 from tcip_mcp import subject_registry as cr  # noqa: E402
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tests._chain_fixtures import ATTRIBUTE, PLANTS, VALUES, attributed_series  # noqa: E402
-from tests._training_values import IOU_THRESHOLD  # noqa: E402
+from tests._training_values import (  # noqa: E402
+    DISPERSION_QUANTILE,
+    EQUIVALENCE_Z,
+    IOU_THRESHOLD,
+    RATIONALE,
+)
 from tests._verified_checkpoint_fixtures import (  # noqa: E402
     BUILT_DETECTOR,
     SQUARE_64_DETECTOR,
 )
 
-UNFILTERED = Stated(tile=False, conf=0.0)
+UNFILTERED = Stated(tile=False, conf=0.0, rationale=RATIONALE)
 """An untiled pass keeping every box up to the checkpoint's density."""
 SUBJECT = "object"
 COLOR = cr.Attribute("color", "categorical", ("red", "blue"))
@@ -121,6 +126,9 @@ def test_two_attributes_train_two_heads_publish_both_values_and_deliver(
         trait=series.trait,
         delivery_kind="state_crossing_dates",
         selection_dir=str(tmp_path / "selection"),
+        equivalence_z=EQUIVALENCE_Z,
+        dispersion_quantile=DISPERSION_QUANTILE,
+        rationale=RATIONALE,
         stated=UNFILTERED,
     )
     assert "error" not in assessed, assessed
@@ -426,6 +434,7 @@ def test_two_tiles_calling_one_object_differently_merge_into_the_higher_scoring_
             postprocess=postprocess,
             cross_tile_nms=0.3,
             conf=0.0,
+            rationale=RATIONALE,
         ),
         device="cpu",
         tile_batch_size=2,

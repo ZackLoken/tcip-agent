@@ -162,7 +162,7 @@ def _preflight(
                     "model_source.builder_kwargs carries image_mean/image_std with no "
                     "model_source.image_stats_sampling beside it: per-band statistics must carry "
                     "a non-empty 'windows' list and a 'pixel_fraction', naming which images they "
-                    "were derived from (see derivations.image_stats_provenance)."
+                    "were derived from (the 'sampling' of derivations.band_normalization_stats)."
                 )
 
     # The run resolved once, the way its launch records it: every leg below reads this.
@@ -1798,8 +1798,8 @@ def evaluate_model(
     experiment_id_or_ckpt: str,
     images_dir: str,
     labels_dir: str | None = None,
-    stated: Stated | None = None,
     *,
+    stated: Stated,
     iou_threshold: float,
     tiling: TilingSpec | None = None,
     use_tiled_inference: bool = False,
@@ -1835,12 +1835,12 @@ def evaluate_model(
             documents (detection/instance_seg), which the images' own keys address. Admitted once
             with ``images_dir`` (``label_queries.admit``) before any regime runs, a refusal naming
             both. The task is the checkpoint's own.
-        stated: The execution values to state rather than derive (``execution.Stated``): the
-            operating ``conf`` P/R/F1 are reported at, required of a detector, and on the
-            delivery-grade path the ``tile_size``,
-            ``overlap``, ``postprocess`` and ``cross_tile_nms`` (derived from the evaluated
-            ground truth when unstated). The resolved record, each value's source with it, is
-            returned under ``execution``.
+        stated: The execution values to state rather than derive (``execution.Stated``),
+            ``{}`` stating none: the operating ``conf`` P/R/F1 are reported at, required of a
+            detector, and on the delivery-grade path the ``postprocess`` merge, required, and
+            the ``tile_size``, ``overlap`` and ``cross_tile_nms`` (derived from the evaluated
+            ground truth when unstated), with the ``rationale`` for them. The resolved record,
+            each value's source with it, is returned under ``execution``.
         iou_threshold: The IoU a match must reach, stated (the comparability convention is
             ``schemas.COMPARABILITY_IOU``).
         tiling: Optional tiling (``schemas.TilingSpec``: tile_size, overlap, skip_empty, ...) for
@@ -1914,8 +1914,6 @@ def evaluate_model(
             f"only a {sorted(TILING_TASKS)} checkpoint predicts over tiles; drop "
             "use_tiled_inference."
         }
-    stated = stated or Stated()
-
     from tcip_annotation.json_io import UnreadableLabelDocumentError
     from tcip_mcp.pipelines.data.label_queries import admit, require_admitted
 

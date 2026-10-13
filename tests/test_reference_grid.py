@@ -4,6 +4,8 @@ and the serializable geometry dict every consumer echoes.
 
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
 from tcip_mcp.pipelines.display_bounds import VIZ_ARTIFACT_MAX_EDGE
@@ -80,7 +82,7 @@ class TestReferenceCells:
     def test_names_are_column_letter_plus_row(self):
         from tcip_annotation.grid import column_index, column_label
 
-        cells = reference_cells(2800, 200, 100, clamp=True)
+        cells = reference_cells(2800, 200, 100, 0.0, clamp=True)
         assert cells[0].name == "A1"
         for c in cells:
             assert c.name == f"{column_label(c.col)}{c.row + 1}"
@@ -89,11 +91,11 @@ class TestReferenceCells:
 
     def test_refusals_name_the_bad_input(self):
         with pytest.raises(ValueError, match="tile_size"):
-            reference_cells(100, 100, 0)
+            reference_cells(100, 100, 0, 0.0)
         with pytest.raises(ValueError, match="overlap"):
             reference_cells(100, 100, 10, overlap=1.0)
         with pytest.raises(ValueError, match="1x1"):
-            reference_cells(0, 100, 10)
+            reference_cells(0, 100, 10, 0.0)
 
 
 CAP = 2560 * 1440
@@ -115,14 +117,16 @@ class TestDerivations:
     )
     def test_every_serving_cell_fits_the_cap(self, width, height):
         tile = derive_serving_tile_size(width, height, CAP)
-        cells = reference_cells(width, height, tile, clamp=True)
+        cells = reference_cells(width, height, tile, 0.0, clamp=True)
         assert all((c.x1 - c.x0) * (c.y1 - c.y0) <= CAP for c in cells)
         assert len(cells) == 1 or width * height > CAP
 
     def test_image_inside_the_cap_is_one_cell(self):
         for width, height in [(1920, 1000), (5000, 64)]:
             tile = derive_serving_tile_size(width, height, CAP)
-            assert len(reference_cells(width, height, tile, clamp=True)) == 1
+            assert (
+                len(reference_cells(width, height, tile, 0.0, clamp=True)) == 1
+            )
 
     def test_mosaic_scale_geometry(self):
         """The orthomosaic-sized numeric case: 141130 x 239921 under that display derives tile
@@ -130,7 +134,7 @@ class TestDerivations:
         """
         tile = derive_serving_tile_size(141130, 239921, CAP)
         assert tile == 1920
-        geometry = grid_geometry(141130, 239921, tile)
+        geometry = grid_geometry(141130, 239921, tile, 0.0)
         assert geometry["cols"] == 74
         assert geometry["rows"] == 125
 
@@ -184,7 +188,7 @@ class TestDerivations:
 
 class TestGridGeometry:
     def test_round_trips_through_reference_cells(self):
-        geometry = grid_geometry(100, 80, 64)
+        geometry = grid_geometry(100, 80, 64, 0.0)
         cells = reference_cells(
             geometry["width"],
             geometry["height"],
@@ -202,6 +206,11 @@ class TestGridGeometry:
         }
         assert len(cells) == geometry["cols"] * geometry["rows"]
 
-    def test_tile_size_is_required(self):
-        with pytest.raises(TypeError, match="'tile_size'"):
-            grid_geometry(100, 80)  # type: ignore[call-arg]  # the omission is the subject; the raises pins it to tile_size
+    def test_tile_size_and_overlap_are_required(self):
+        with pytest.raises(TypeError, match="'tile_size' and 'overlap'"):
+            grid_geometry(100, 80)  # type: ignore[call-arg]  # the omission is the subject; the raises pins it to both
+        for grid in (grid_geometry, reference_cells):
+            assert (
+                inspect.signature(grid).parameters["overlap"].default
+                is inspect.Parameter.empty
+            )

@@ -175,21 +175,6 @@ def rects_overlap(
     return ax0 < bx1 and bx0 < ax1 and ay0 < by1 and by0 < ay1
 
 
-@dataclass(frozen=True)
-class WindowSampling:
-    """Exactly which pixels a sampled statistic was read from.
-
-    ``windows`` pairs each source label with one rectangle read from it, ``seed`` is the seed that
-    chose them, and ``pixel_fraction`` is the share of those sources' pixels the rectangles cover.
-    A statistic carrying this describes a sample and not the whole raster, so whatever records the
-    statistic records this beside it.
-    """
-
-    windows: tuple[tuple[str, Rect], ...]
-    seed: int
-    pixel_fraction: float
-
-
 def sample_windows(
     width: int, height: int, *, seed: int, window_size: int, max_windows: int
 ) -> list[Rect]:

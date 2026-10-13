@@ -44,7 +44,12 @@ from tests._dense_op_fixtures import (
     good_cal_holdout,  # noqa: E402
     toy_records as _sweep_records,  # noqa: E402
 )
-from tests._training_values import IOU_THRESHOLD  # noqa: E402
+from tests._training_values import (  # noqa: E402
+    COUNT_TEST,
+    DISPERSION_QUANTILE,
+    IOU_THRESHOLD,
+    RATIONALE,
+)
 from tests._trait_fixtures import BUD_OPENING  # noqa: E402
 
 # ── 1. conf operating-point sweep + count-unbiased pick + the count criterion ──
@@ -57,7 +62,9 @@ def test_golden_sweep_curve_exact():
     assert tol == pytest.approx(10.0)
 
     sweep = derive_operating_point_curve(
-        recs, criterion={"kind": "center_match", "tolerance": tol}
+        recs,
+        criterion={"kind": "center_match", "tolerance": tol},
+        dispersion_quantile=DISPERSION_QUANTILE,
     )
     assert sweep["criterion"]["tolerance"] == pytest.approx(10.0)
     assert sweep["class_id"] is None
@@ -118,6 +125,7 @@ def test_golden_pick_count_unbiased_and_f1_max():
             "kind": "center_match",
             "tolerance": 0.5 * gt_class_avg_size(recs),
         },
+        dispersion_quantile=DISPERSION_QUANTILE,
     )
     assert pick_count_unbiased(sweep) == pytest.approx(0.6)
     assert pick_f1_max(sweep) == pytest.approx(0.0)
@@ -146,6 +154,7 @@ def test_golden_count_criterion_over_a_dense_distinct_reference():
         entry,
         staged_conf_floor=0.01,
         staged_conf_floor_attribute_path=None,
+        **COUNT_TEST,
     )
     # count-unbiased pick: bias vanishes once the low-conf FP drops
     assert conf == pytest.approx(0.9)
@@ -302,7 +311,10 @@ def test_golden_execution_record_of_an_untiled_pass_runs_at_what_it_states(
 
     checkpoint = verified_checkpoint(tmp_path)
     record = (
-        prepare(checkpoint, Stated(tile=False, conf=SAMPLE_CONF))
+        prepare(
+            checkpoint,
+            Stated(tile=False, conf=SAMPLE_CONF, rationale=RATIONALE),
+        )
         .runnable()
         .execution.record()
     )
@@ -312,9 +324,10 @@ def test_golden_execution_record_of_an_untiled_pass_runs_at_what_it_states(
         checkpoint.geometry.object_density,
     )
     assert record["sources"] == {"conf": "explicit", "density": "derived"}
+    assert record["rationale"] == RATIONALE
     assert record["tile_size"] is None and record["cross_tile_nms"] is None
     with pytest.raises(ExecutionRefusedError, match="conf"):
-        prepare(checkpoint, Stated(tile=False)).runnable()
+        prepare(checkpoint, Stated(tile=False, rationale=RATIONALE)).runnable()
 
 
 # ── 4. no inference operating-point default, and the stated values each door hands on ──
@@ -371,10 +384,10 @@ def test_golden_no_operating_point_default_survives_and_each_door_takes_stated_v
     for name in ("execution", "tile_batch_size", "require_masks"):
         assert gp_sig.parameters[name].default is inspect.Parameter.empty
 
-    # evaluate_model states nothing when its caller states nothing; each regime then refuses what
-    # a detector leaves unstated, as the two goldens below pin.
+    # evaluate_model takes its statement with no default; each regime then refuses what a
+    # detector leaves unstated, as the two goldens below pin.
     ev_sig = inspect.signature(training_tools_mod.evaluate_model)
-    assert ev_sig.parameters["stated"].default is None
+    assert ev_sig.parameters["stated"].default is inspect.Parameter.empty
     assert not {"conf_threshold", "cross_tile_nms", "max_dets"} & set(
         ev_sig.parameters
     )

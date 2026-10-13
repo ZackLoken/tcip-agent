@@ -155,6 +155,7 @@ def test_a_live_run_refuses_the_removal_and_writes_nothing_then_a_finished_one_a
 
 
 def test_an_unfinished_inference_job_refuses_the_removal(client, tmp_path):
+    from tcip_mcp.pipelines.execution import Stated
     from tcip_web.routes import inference
 
     made = _project(tmp_path.parent, "valley_block", "Valley block")
@@ -166,6 +167,7 @@ def test_an_unfinished_inference_job_refuses_the_removal(client, tmp_path):
         dataset_root="ds",
         images_dir="ds/images",
         bucket="out/2026-01-01",
+        stated=Stated(),
         status="running",
     )
     inference._registry.register(job.job_id, job)

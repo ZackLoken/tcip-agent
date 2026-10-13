@@ -38,7 +38,16 @@ def test_renders_the_overlay_and_echoes_grid_geometry_under_the_named_project(
 
     result = run_tcip(
         "overlay-reference-grid",
-        ["--image", str(img), "--project", str(project), "--tile-size", "80"],
+        [
+            "--image",
+            str(img),
+            "--project",
+            str(project),
+            "--tile-size",
+            "80",
+            "--overlap",
+            "0",
+        ],
         cwd=cwd,
     )
 

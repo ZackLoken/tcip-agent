@@ -51,6 +51,7 @@ def _tiled_pass(tmp_path: Path, ckpt: str):
             postprocess="nms",
             cross_tile_nms=0.3,
             conf=0.0,
+            rationale="a sample reason the test states",
         ),
         device="cpu",
     ).runnable()

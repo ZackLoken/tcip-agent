@@ -127,7 +127,7 @@ def propose_annotations(
     engine_params: dict | None = None,
     grid_cells: list[str] | None = None,
     tile_size: int | None = None,
-    overlap: float = 0.0,
+    overlap: float | None = None,
 ) -> dict:
     """Propose candidate annotations on an image for review, using a named auto-labeling engine.
 
@@ -171,10 +171,11 @@ def propose_annotations(
             defaults.
         grid_cells: Reference-grid cell names bounding the region to propose over (e.g. ['B3',
             'D5']); the engine sees the bounding rect of the named cells, not the whole frame.
-            Requires ``tile_size``. Omit for the whole frame.
+            Requires ``tile_size`` and ``overlap``. Omit for the whole frame.
         tile_size: Cell edge, in native pixels, of the grid the cells were read off. Required with
             ``grid_cells``.
-        overlap: Overlap fraction of the grid the cells were read off.
+        overlap: Overlap fraction of the grid the cells were read off. Required with
+            ``grid_cells``.
 
     """
     from tcip_mcp.pipelines.proposal import resolve_proposer
@@ -208,12 +209,12 @@ def propose_annotations(
                 return {
                     "error": "grid_cells is empty; name at least one cell to scope the region."
                 }
-            if tile_size is None:
+            if tile_size is None or overlap is None:
                 return {
-                    "error": "grid_cells requires tile_size, the cell edge of the grid the "
-                    "cells were read off (overlay_reference_grid echoes it back, "
-                    "with overlap). Without it a cell name resolves against a grid "
-                    "nobody rendered."
+                    "error": "grid_cells requires tile_size and overlap, the geometry of the "
+                    "grid the cells were read off (overlay_reference_grid echoes both "
+                    "back). Without them a cell name resolves against a grid nobody "
+                    "rendered."
                 }
             from tcip_mcp.pipelines.reference_grid import reference_cells
 

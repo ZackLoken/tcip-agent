@@ -13,7 +13,14 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
+from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tcip_mcp.pipelines.model_build import METRICS_KEY, STATE_DICT_KEY  # noqa: E402
+from tests._training_values import (  # noqa: E402
+    COMBINED_SCORER,
+    DISPERSION_QUANTILE,
+    EQUIVALENCE_Z,
+    RATIONALE,
+)
 from tests._verified_checkpoint_fixtures import (  # noqa: E402
     finished_run,
     foreign_checkpoint,
@@ -55,7 +62,6 @@ def _infer(tmp_path: Path, ckpt: str, bucket: str = "preds") -> dict:
     """``run_inference`` of ``ckpt`` over one image, untiled, publishing the bucket named
     ``bucket`` under ``tmp_path``.
     """
-    from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.inference_tools import run_inference
     from tests._verified_checkpoint_fixtures import SAMPLE_CONF
 
@@ -66,7 +72,7 @@ def _infer(tmp_path: Path, ckpt: str, bucket: str = "preds") -> dict:
         images_dir=str(images_dir),
         bucket=bucket,
         device="cpu",
-        stated=Stated(tile=False, conf=SAMPLE_CONF),
+        stated=Stated(tile=False, conf=SAMPLE_CONF, rationale=RATIONALE),
     )
 
 
@@ -101,7 +107,11 @@ def test_evaluate_model_refuses_an_unregistered_checkpoint_by_bare_path(
     from tests._training_values import IOU_THRESHOLD
 
     r = evaluate_model(
-        tmp_path, ckpt, str(images_dir), iou_threshold=IOU_THRESHOLD
+        tmp_path,
+        ckpt,
+        str(images_dir),
+        stated=Stated(),
+        iou_threshold=IOU_THRESHOLD,
     )
     assert "register_model" in r["error"]
 
@@ -118,6 +128,10 @@ def test_assess_checkpoint_refuses_an_unregistered_checkpoint(tmp_path):
         trait=fx.COUNT_TRAIT,
         delivery_kind="per_image_count",
         selection_dir=str(tmp_path / "selection"),
+        equivalence_z=EQUIVALENCE_Z,
+        dispersion_quantile=DISPERSION_QUANTILE,
+        rationale=RATIONALE,
+        stated=Stated(),
     )
 
     assert "register_model" in r["error"]
@@ -156,7 +170,9 @@ def test_triage_predictions_refuses_an_unregistered_checkpoint(tmp_path):
 
     from tcip_mcp.tools.feedback_tools import triage_predictions
 
-    r = triage_predictions(tmp_path, ckpt, str(images_dir))
+    r = triage_predictions(
+        tmp_path, ckpt, str(images_dir), 0.3, 0.8, RATIONALE
+    )
     assert "register_model" in r["error"]
 
 
@@ -174,7 +190,9 @@ def test_triage_predictions_refuses_by_the_project_it_acts_on(tmp_path):
 
     from tcip_mcp.tools.feedback_tools import triage_predictions
 
-    r = triage_predictions(other_root, ckpt, str(images_dir))
+    r = triage_predictions(
+        other_root, ckpt, str(images_dir), 0.3, 0.8, RATIONALE
+    )
     assert "register_model" in r["error"]
     assert repr(str(other_root)) in r["error"]
     assert str(registered_root) not in r["error"]
@@ -194,7 +212,9 @@ def test_triage_predictions_admits_a_checkpoint_registered_under_the_project_it_
 
     from tcip_mcp.tools.feedback_tools import triage_predictions
 
-    r = triage_predictions(registered_root, ckpt, str(images_dir))
+    r = triage_predictions(
+        registered_root, ckpt, str(images_dir), 0.3, 0.8, RATIONALE
+    )
     assert "error" not in r, r
 
 
@@ -210,13 +230,14 @@ def test_review_priority_route_worker_fails_the_job_on_an_unregistered_checkpoin
     ckpt = secondary_checkpoint(tmp_path)
     images_dir, _ = _images(tmp_path)
 
-    job = PriorityQueueJob(
+    job = PriorityQueueJob.launched(
         job_id="rail1-pq",
         checkpoint_path=ckpt,
         images_dir=str(images_dir),
         subject=None,
-        method="combined",
+        scorer=COMBINED_SCORER,
         budget=10,
+        rationale=RATIONALE,
         project=str(tmp_path),
     )
     _pq_worker(job)
@@ -244,18 +265,19 @@ def test_review_priority_route_worker_completes_the_job_with_a_registered_checkp
     monkeypatch.setattr(
         al_scorer,
         "resolve_scorer",
-        lambda method, task: SimpleNamespace(
+        lambda block, task: SimpleNamespace(
             score=lambda sources, predictor: []
         ),
     )
 
-    job = PriorityQueueJob(
+    job = PriorityQueueJob.launched(
         job_id="rail7-pq",
         checkpoint_path=ckpt,
         images_dir=str(images_dir),
         subject=None,
-        method="combined",
+        scorer=COMBINED_SCORER,
         budget=10,
+        rationale=RATIONALE,
         project=str(tmp_path),
     )
     _pq_worker(job)

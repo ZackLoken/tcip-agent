@@ -41,6 +41,7 @@ from tests import bespoke_models  # noqa: E402 (the agent-authored bespoke model
 from tests._image_fixtures import write_noise_image  # noqa: E402
 from tests._producer_fixtures import dataset_over, label_image  # noqa: E402
 from tests._training_values import (  # noqa: E402
+    RATIONALE,
     adamw_optimizer,
     drawn_split,
     schedule,
@@ -149,7 +150,9 @@ def test_bespoke_detector_end_to_end(tmp_path: Path):
 
     checkpoint = load_registered_checkpoint(str(ckpt), project=tmp_path)
     p = prepare(
-        checkpoint, Stated(tile=False, conf=0.0), device="cpu"
+        checkpoint,
+        Stated(tile=False, conf=0.0, rationale=RATIONALE),
+        device="cpu",
     ).runnable()
     predictor = p.predictor
     anchor_gen = predictor.model.detector.rpn.anchor_generator

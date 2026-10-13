@@ -17,7 +17,7 @@ from tests._chain_fixtures import (
     BESPOKE_MODELS,
     GT_ANCHOR_DETECTOR,
 )
-from tests._training_values import drawn_split
+from tests._training_values import RATIONALE, drawn_split
 
 pytest.importorskip("torch")
 pytest.importorskip("torchvision")
@@ -380,7 +380,9 @@ def test_a_pass_rebuilds_a_bespoke_detector_and_predicts(tmp_path):
     )
 
     p = prepare(
-        checkpoint, Stated(tile=False, conf=0.0), device="cpu"
+        checkpoint,
+        Stated(tile=False, conf=0.0, rationale=RATIONALE),
+        device="cpu",
     ).runnable()
     assert (
         type(p.predictor.model).__qualname__
@@ -444,7 +446,9 @@ def test_predictor_loads_at_the_two_channels_its_run_recorded(tmp_path):
         project=tmp_path,
     )
 
-    p = prepare(checkpoint, Stated(tile=False), device="cpu").runnable()
+    p = prepare(
+        checkpoint, Stated(tile=False, rationale=RATIONALE), device="cpu"
+    ).runnable()
     assert p.predictor.in_chans == 2
 
     arr = (np.random.rand(16, 16, 2) * 255).astype(np.uint8)

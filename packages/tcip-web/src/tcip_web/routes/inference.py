@@ -45,7 +45,7 @@ class InferenceJob:
     # The person who launched the job, who publishes its bucket.
     actor: str
     # What the launch stated of the execution record, resolved as run_inference resolves it.
-    stated: Stated = field(default_factory=Stated)
+    stated: Stated
     # The assessment whose execution record the pass runs and the bucket names.
     assessment_id: str | None = None
     total: int = 0
@@ -154,8 +154,8 @@ class LaunchInferencePayload(BaseModel):
     date: str
     # The name to publish the bucket under, beneath dataset_root, as run_inference takes it.
     bucket: str
-    # Unstated where omitted: the pass derives each value as run_inference does.
-    stated: Stated = Stated()
+    # Each value the statement leaves out the pass derives as run_inference does.
+    stated: Stated
     # The assessment whose execution record the pass runs, so the bucket is published under it.
     assessment_id: str | None = None
     user: str

@@ -40,7 +40,7 @@ def infer(
     raster_path: str | None,
     bucket: str,
     assessment_id: str | None,
-    stated: Stated | None,
+    stated: Stated,
     device: str | None,
     tile_batch_size: int,
     dry_run: bool,
@@ -111,7 +111,6 @@ def infer(
             "error": f"resume=True but no raster-pass progress toward bucket {bucket!r} "
             f"under {root} is recorded."
         }
-    stated = stated or Stated()
     if raster_path is not None:
         stated = stated.model_copy(update={"tile": True})
     try:
@@ -280,7 +279,8 @@ def run_inference(
     raster_path: str | None = None,
     bucket: str = "",
     assessment_id: str | None = None,
-    stated: Stated | None = None,
+    *,
+    stated: Stated,
     device: str | None = None,
     tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE,
     dry_run: bool = False,
@@ -302,10 +302,11 @@ def run_inference(
     object density, tile edge, overlap, merge and threshold) and the bucket names the assessment,
     which is what a delivery reads to call its numbers validated; a stated execution value it
     records differently refuses by name. Without one, the bucket is unassessed and the pass runs
-    at the stated values: a detector's ``conf`` and a tiled pass's ``cross_tile_nms`` are
-    required, no reference standing behind either; the object density is the one the checkpoint
-    recorded of the regions it trained on (frames, or tiles for a tiled run), and each frame keeps
-    at most ``ceil(density x its pixels)`` detections, that cap written on its prediction
+    at the stated values: a detector's ``conf`` and a tiled pass's ``postprocess`` and
+    ``cross_tile_nms`` are required, no reference standing behind any; the object density is the
+    one the checkpoint recorded of the regions it trained on (frames, or tiles for a tiled run),
+    and each frame keeps at most ``ceil(density x its pixels)`` detections, that cap written on its
+    prediction
     document; the tile edge and overlap are the stated ones, else the checkpoint's own recorded
     geometry, and a tiled pass with neither refuses naming them.
 
@@ -317,10 +318,11 @@ def run_inference(
         bucket: The name to publish the predictions under, e.g. ``<model>/<date>``.
         assessment_id: The assessment whose execution record the pass runs and whose id the
             bucket records.
-        stated: The execution values to state rather than derive (``execution.Stated``):
-            ``tile`` (tiled inference over ``images_dir``; unstated follows the checkpoint's own
-            training regime), ``tile_size``, ``overlap``, ``postprocess`` (one of
-            ``execution.CROSS_TILE_MERGES``), ``cross_tile_nms`` and ``conf``.
+        stated: The execution values to state rather than derive (``execution.Stated``),
+            ``{}`` stating none: ``tile`` (tiled inference over ``images_dir``; unstated follows
+            the checkpoint's own training regime), ``tile_size``, ``overlap``, ``postprocess``
+            (one of ``execution.CROSS_TILE_MERGES``), ``cross_tile_nms`` and ``conf``, with the
+            ``rationale`` for them, which the execution record carries.
         device: cuda / cpu (auto if omitted).
         tile_batch_size: Tiles per forward batch.
         dry_run: Resolve the execution record and the bucket and report them, with whether the

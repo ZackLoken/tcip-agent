@@ -16,6 +16,7 @@ from __future__ import annotations
 import pytest
 
 from tests import _trait_fixtures as fx
+from tests._training_values import COUNT_TEST
 
 pytest.importorskip("torch")
 
@@ -81,6 +82,7 @@ def _criterion(cal, hold, entry=ENTRY):
         entry,
         staged_conf_floor=0.05,
         staged_conf_floor_attribute_path=None,
+        **COUNT_TEST,
     )
 
 

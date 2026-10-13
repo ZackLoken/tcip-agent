@@ -13,7 +13,7 @@ from PIL import Image
 from tcip_annotation.matching import REVIEW_CONF_FLOOR
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tcip_mcp.pipelines.raster_source import SourceHeader
-from tests._training_values import IOU_THRESHOLD
+from tests._training_values import IOU_THRESHOLD, TRIAGE_WEIGHTS
 
 
 def _display(image_path: str) -> tuple[np.ndarray, tuple[int, int]]:
@@ -1019,11 +1019,27 @@ class TestVisualizeWorstPredictions:
         from tcip_mcp.tools.vision_tools import render_failure_cases
 
         result = render_failure_cases(
-            viz_bucket, str(viz_bucket), PUBLISHED, top_k=3
+            viz_bucket, str(viz_bucket), PUBLISHED, top_k=3, **TRIAGE_WEIGHTS
         )
         assert "error" not in result
         # Should have rendered some cases
         assert len(result.get("case_images", [])) > 0
+
+    def test_the_ranking_takes_its_size_and_weights_with_no_default(self):
+        import inspect
+
+        from tcip_mcp.tools.vision_tools import (
+            get_worst_predictions,
+            render_failure_cases,
+        )
+
+        for door in (get_worst_predictions, render_failure_cases):
+            parameters = inspect.signature(door).parameters
+            for name in ("top_k", *TRIAGE_WEIGHTS):
+                assert parameters[name].default is inspect.Parameter.empty, (
+                    door,
+                    name,
+                )
 
 
 # ── Candidate and grid renders ──────────────────────────────────────────────
@@ -1079,7 +1095,7 @@ def _uniform_cells(width: int, height: int, tile: int) -> list:
     """The clamped reference cells for a frame, the list every cells-in consumer takes."""
     from tcip_mcp.pipelines.reference_grid import reference_cells
 
-    return reference_cells(width, height, tile, clamp=True)
+    return reference_cells(width, height, tile, 0.0, clamp=True)
 
 
 class TestRenderGridOverlay:
@@ -1305,6 +1321,7 @@ class TestVisualizeGridOverlayTool:
             image_path=str(
                 viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg"
             ),
+            overlap=0.0,
         )
         assert "error" not in result
         assert Path(result["image_path"]).is_file()
@@ -1323,6 +1340,7 @@ class TestVisualizeGridOverlayTool:
                 viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg"
             ),
             tile_size=80,
+            overlap=0.0,
         )
         assert "error" not in result
         assert result["tile_size"] == 80
@@ -1333,7 +1351,7 @@ class TestVisualizeGridOverlayTool:
         from tcip_mcp.tools.vision_tools import overlay_reference_grid
 
         result = overlay_reference_grid(
-            tmp_path, image_path="/nonexistent.jpg"
+            tmp_path, image_path="/nonexistent.jpg", overlap=0.0
         )
         assert "error" in result
 
@@ -1346,6 +1364,7 @@ class TestVisualizeGridOverlayTool:
                 viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg"
             ),
             tile_size=0,
+            overlap=0.0,
         )
         assert "error" in result
         assert "tile_size" in result["error"]
@@ -1359,6 +1378,7 @@ class TestVisualizeGridOverlayTool:
                 viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg"
             ),
             tile_size=20,
+            overlap=0.0,
         )
         assert "error" not in result
         assert result["cols"] == 32

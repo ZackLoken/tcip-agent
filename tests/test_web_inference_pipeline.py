@@ -7,7 +7,7 @@ import pytest
 from tcip_mcp.pipelines.execution import Stated
 from tcip_mcp.pipelines.schemas import AugmentationSpec
 from tests._predictor_fixtures import BOX, StubPredictor, install
-from tests._training_values import augmentation
+from tests._training_values import RATIONALE, augmentation
 
 BUCKET = "out/2026-01-01"
 
@@ -137,6 +137,7 @@ def test_web_worker_uses_generic_predictor_and_publishes_its_documents(
             cross_tile_nms=0.7,
             overlap=0.2,
             postprocess="nmm",
+            rationale=RATIONALE,
         ),
     )
     _worker(job)
@@ -201,6 +202,7 @@ def test_web_worker_prefers_the_checkpoints_own_recorded_scope(
             cross_tile_nms=0.7,
             overlap=0.2,
             postprocess="nms",
+            rationale=RATIONALE,
         ),
     )
     _worker(job)
@@ -242,6 +244,7 @@ def test_web_worker_runs_tiled_instance_seg_without_forcing_untiled(
             cross_tile_nms=0.7,
             overlap=0.2,
             postprocess="nms",
+            rationale=RATIONALE,
         ),
     )
     _worker(job)
@@ -253,7 +256,7 @@ def test_web_worker_runs_tiled_instance_seg_without_forcing_untiled(
     assert job.stated.tile is True
     execution = read_bucket(tmp_path, BUCKET).execution
     assert execution.tiled
-    # The stated merge threshold is recorded as stated, never silently overridden to "default".
+    # The stated merge threshold is recorded as the caller's own statement.
     assert execution.sources["cross_tile_nms"] == "explicit"
 
 
@@ -295,6 +298,7 @@ def test_web_worker_runs_a_native_frame_tile_scale_and_forwards_its_recorded_res
             cross_tile_nms=0.7,
             overlap=0.2,
             postprocess="nms",
+            rationale=RATIONALE,
         ),
     )
     _worker(job)
@@ -329,7 +333,12 @@ def test_web_worker_stamps_the_stated_conf_explicit_and_the_checkpoints_density(
         tmp_path,
         ckpt,
         images_dir,
-        Stated(tile=False, conf=SAMPLE_CONF, cross_tile_nms=0.7),
+        Stated(
+            tile=False,
+            conf=SAMPLE_CONF,
+            cross_tile_nms=0.7,
+            rationale=RATIONALE,
+        ),
     )
     _worker(job)
 
@@ -357,7 +366,7 @@ def test_web_worker_fails_a_job_stating_no_conf_naming_it(
         tmp_path,
         ckpt,
         images_dir,
-        Stated(tile=False, cross_tile_nms=0.7),
+        Stated(tile=False, cross_tile_nms=0.7, rationale=RATIONALE),
     )
     _worker(job)
 
@@ -399,6 +408,7 @@ def test_web_worker_dropped_boxes_agree_with_the_published_document_on_a_degener
             cross_tile_nms=0.7,
             overlap=0.2,
             postprocess="nmm",
+            rationale=RATIONALE,
         ),
     )
     _worker(job)
@@ -433,6 +443,7 @@ def test_web_worker_fails_the_job_on_a_stem_collision(tmp_path):
             cross_tile_nms=0.7,
             overlap=0.2,
             postprocess="nms",
+            rationale=RATIONALE,
         ),
     )
     _worker(job)

@@ -20,7 +20,11 @@ from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
 from tcip_mcp.pipelines.execution import ExecutionRefusedError, Stated  # noqa: E402
 from tests import REPO_ROOT  # noqa: E402
-from tests._training_values import drawn_split, tiling_block  # noqa: E402
+from tests._training_values import (  # noqa: E402
+    RATIONALE,
+    drawn_split,
+    tiling_block,
+)
 from tests._verified_checkpoint_fixtures import (
     SAMPLE_CONF,
     SAMPLE_DETECTOR_PASS,
@@ -137,7 +141,9 @@ def test_a_pass_with_no_reference_caps_each_frame_at_the_checkpoints_density_tim
         paths.append(str(tmp_path / f"{name}.png"))
 
     p = prepare(
-        checkpoint, Stated(tile=False, conf=0.0), device="cpu"
+        checkpoint,
+        Stated(tile=False, conf=0.0, rationale=RATIONALE),
+        device="cpu",
     ).runnable()
     forwards = _in_model_caps(p.predictor.model)
     small, large = p.predict(paths)
@@ -193,12 +199,14 @@ def test_a_checkpoint_recording_no_density_refuses_a_detector_pass_naming_the_pr
 
     with pytest.raises(ExecutionRefusedError, match="launch_training"):
         prepare(
-            foreign, Stated(tile=False, conf=SAMPLE_CONF), device="cpu"
+            foreign,
+            Stated(tile=False, conf=SAMPLE_CONF, rationale=RATIONALE),
+            device="cpu",
         ).runnable()
     Image.new("RGB", (64, 48), (120, 120, 120)).save(tmp_path / "frame.png")
     admitted = prepare(
         verified_checkpoint(tmp_path),
-        Stated(tile=False, conf=SAMPLE_CONF),
+        Stated(tile=False, conf=SAMPLE_CONF, rationale=RATIONALE),
         device="cpu",
     ).runnable()
     (result,) = admitted.predict([str(tmp_path / "frame.png")])
@@ -850,7 +858,7 @@ def test_a_bespoke_detector_under_cap_one_keeps_one_through_validation_and_a_pas
     )
     p = prepare(
         checkpoint,
-        Stated(tile=False, conf=0.0),
+        Stated(tile=False, conf=0.0, rationale=RATIONALE),
         images_dir=str(images_dir),
         device="cpu",
     ).runnable()
@@ -954,6 +962,7 @@ def test_a_restored_record_missing_its_overlap_or_density_refuses_and_a_complete
         Execution.of({**record, "density": None})
     restored = prepare(
         checkpoint,
+        Stated(),
         images_dir=images_dir,
         device="cpu",
         restored=Execution.of(record),
@@ -995,7 +1004,7 @@ def test_the_published_cap_reaches_the_row_scoring_its_bucket(
         images_dir=str(image.parent),
         bucket="capped",
         device="cpu",
-        stated=Stated(tile=False, conf=SAMPLE_CONF),
+        stated=Stated(tile=False, conf=SAMPLE_CONF, rationale=RATIONALE),
     )
     assert "error" not in published, published
     staged = stage_proposals(

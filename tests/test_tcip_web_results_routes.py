@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 
 import tcip_store
 from tcip_mcp.audit import audit_log_key
+from tcip_mcp.pipelines.execution import Stated
 from tests import _trait_fixtures as fx
 from tests._audit_fixtures import refuse_audit_appends
 from tests._web_fixtures import BROWSER, acknowledged_post, open_new_project
@@ -985,6 +986,7 @@ def test_inference_launch_missing_checkpoint(
             "date": "2026-02-11",
             "user": "tester",
             "bucket": "baseline/2026-02-11",
+            "stated": {},
         },
     )
     assert resp.status_code == 404
@@ -1025,6 +1027,7 @@ def test_a_launched_inference_job_is_canceled_by_its_id_naming_the_person(
             "date": "2026-02-11",
             "bucket": "baseline/2026-02-11",
             "user": "tester",
+            "stated": {},
         },
     )
     assert launched.status_code == 200, launched.text
@@ -1086,6 +1089,7 @@ def test_inference_list_row_and_stream_frame_are_one_projection(
         dataset_root="",
         images_dir="",
         bucket="",
+        stated=Stated(),
         status="completed",
         dropped_boxes=3,
     )
@@ -1134,6 +1138,7 @@ def test_inference_by_id_job_route_is_retired(client: TestClient) -> None:
         dataset_root="",
         images_dir="",
         bucket="",
+        stated=Stated(),
     )
     inference_routes._register(job)
     try:

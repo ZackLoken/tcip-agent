@@ -39,7 +39,7 @@ def reference_cells(
     width: int,
     height: int,
     tile_size: int,
-    overlap: float = 0.0,
+    overlap: float,
     *,
     clamp: bool = False,
 ) -> list[Cell]:
@@ -127,14 +127,14 @@ def derive_pointing_tile_size(width: int, height: int) -> int:
 
 
 def grid_geometry(
-    width: int, height: int, tile_size: int, overlap: float = 0.0
+    width: int, height: int, tile_size: int, overlap: float
 ) -> dict:
     """The serializable parameter tuple every consumer echoes: ``{width, height, tile_size,
     overlap, cols, rows}``.
 
     Cells are recomputed from this dict via :func:`reference_cells` (clamped or not, the caller's
-    choice). ``tile_size`` is required: :func:`derive_serving_tile_size` and
-    :func:`derive_pointing_tile_size` each derive one for their own grid.
+    choice). ``tile_size`` and ``overlap`` are required: :func:`derive_serving_tile_size` and
+    :func:`derive_pointing_tile_size` each derive an edge for their own grid.
     """
     cells = reference_cells(width, height, tile_size, overlap)
     return {

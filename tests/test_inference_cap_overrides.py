@@ -34,13 +34,16 @@ def _checkpoint(tmp_path: Path):
 
 
 def _pass(tmp_path: Path, reference=None, **stated):
-    """The pass a registered checkpoint of ``tmp_path`` runs under ``stated``, made runnable from
-    ``reference`` when one is given.
+    """The pass a registered checkpoint of ``tmp_path`` runs under ``stated`` and the sample
+    reason, made runnable from ``reference`` when one is given.
     """
     from tcip_mcp.pipelines.execution import Stated, prepare
+    from tests._training_values import RATIONALE
 
     return prepare(
-        _checkpoint(tmp_path), Stated(**stated), device="cpu"
+        _checkpoint(tmp_path),
+        Stated(**{"rationale": RATIONALE, **stated}),
+        device="cpu",
     ).runnable(reference)
 
 
@@ -61,7 +64,9 @@ def test_stated_values_are_recorded_as_explicit(tmp_path):
 
     record = p.execution.record()
     assert {k: record[k] for k in SAMPLE_DETECTOR_PASS} == SAMPLE_DETECTOR_PASS
-    assert {record["sources"][k] for k in SAMPLE_DETECTOR_PASS} == {"explicit"}
+    assert {record["sources"][k] for k in ("conf", "cross_tile_nms")} == {
+        "explicit"
+    }
 
 
 def test_a_reference_derives_the_unstated_merge_threshold_and_the_density_and_keeps_stated_ones(
@@ -91,6 +96,7 @@ def test_a_reference_derives_the_unstated_merge_threshold_and_the_density_and_ke
         tile_size=64,
         overlap=SAMPLE_OVERLAP,
         conf=SAMPLE_CONF,
+        postprocess="nms",
     )
     stated = _pass(
         tmp_path,
@@ -99,6 +105,7 @@ def test_a_reference_derives_the_unstated_merge_threshold_and_the_density_and_ke
         tile_size=64,
         overlap=SAMPLE_OVERLAP,
         conf=SAMPLE_CONF,
+        postprocess="nms",
         cross_tile_nms=0.42,
     )
 
@@ -172,9 +179,9 @@ def test_the_record_a_prediction_is_handed_governs_the_model_it_runs(tmp_path):
     assert (holder.score_thresh, holder.detections_per_img) == (0.01, 5)
 
 
-def test_the_public_inference_and_assessment_tools_agree_that_an_unstated_value_is_none():
-    """One sentinel across the doors: every door takes the one stated mapping, unstated by
-    default, and that mapping leaves every value unstated until a caller states it.
+def test_every_execution_door_takes_its_statement_with_no_default():
+    """Every door that runs a pass takes the statement as a required ``Stated``, so a caller
+    stating nothing says so with the empty statement, which leaves every value unstated.
     """
     from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.calibration_tools import (
@@ -182,12 +189,39 @@ def test_the_public_inference_and_assessment_tools_agree_that_an_unstated_value_
         assess_reserved_regions,
     )
     from tcip_mcp.tools.inference_tools import run_inference
+    from tcip_mcp.tools.training_tools import evaluate_model
 
-    for tool in (run_inference, assess_checkpoint, assess_reserved_regions):
-        assert inspect.signature(tool).parameters["stated"].default is None, (
-            tool.__name__
-        )
-    assert set(Stated().model_dump().values()) == {None}
+    for tool in (
+        run_inference,
+        assess_checkpoint,
+        assess_reserved_regions,
+        evaluate_model,
+    ):
+        assert (
+            inspect.signature(tool).parameters["stated"].default
+            is inspect.Parameter.empty
+        ), tool.__name__
+    assert set(Stated.model_validate({}).model_dump().values()) == {None}
+
+
+def test_a_statement_carries_its_reason_and_nothing_stated_carries_none():
+    """A statement of any execution value carries why it states it, refused by name otherwise;
+    a reason with nothing stated refuses too, and one stating values with a reason is admitted.
+    """
+    from pydantic import ValidationError
+
+    from tcip_mcp.pipelines.execution import Stated
+    from tests._training_values import RATIONALE
+    from tests._verified_checkpoint_fixtures import SAMPLE_CONF
+
+    with pytest.raises(ValidationError, match="'conf'.* with rationale None"):
+        Stated(conf=SAMPLE_CONF)
+    with pytest.raises(ValidationError, match="'tile'.* with rationale None"):
+        Stated(tile=False)
+    with pytest.raises(ValidationError, match="states nothing with rationale"):
+        Stated(rationale=RATIONALE)
+    assert Stated().rationale is None
+    assert Stated(conf=SAMPLE_CONF, rationale=RATIONALE).rationale == RATIONALE
 
 
 def test_the_dry_run_reports_the_stated_values_and_refuses_an_unstated_conf(
@@ -201,6 +235,7 @@ def test_the_dry_run_reports_the_stated_values_and_refuses_an_unstated_conf(
 
     from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.inference_tools import run_inference
+    from tests._training_values import RATIONALE
     from tests._verified_checkpoint_fixtures import (
         SAMPLE_CONF,
         SAMPLE_DETECTOR_PASS,
@@ -223,7 +258,7 @@ def test_the_dry_run_reports_the_stated_values_and_refuses_an_unstated_conf(
         images_dir=str(images_dir),
         bucket="out/2026-01-01",
         dry_run=True,
-        stated=Stated(tile=False, conf=SAMPLE_CONF),
+        stated=Stated(tile=False, conf=SAMPLE_CONF, rationale=RATIONALE),
     )
     over_raster = run_inference(
         tmp_path,
@@ -241,7 +276,7 @@ def test_the_dry_run_reports_the_stated_values_and_refuses_an_unstated_conf(
         images_dir=str(images_dir),
         bucket="out/2026-01-01",
         dry_run=True,
-        stated=Stated(tile=False),
+        stated=Stated(tile=False, rationale=RATIONALE),
     )
 
     import tcip_store

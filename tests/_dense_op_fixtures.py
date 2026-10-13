@@ -6,8 +6,9 @@ about per-image variance and tail behavior across a realistic, dense
 reference (tens to hundreds of objects per image, the density these gate
 conditions are shaped around). ``dense_records`` builds such a reference with
 an exactly hand-verifiable per-image miss/false-positive pattern (deterministic, not randomized) so
-every derived statistic (count_bias_mean/std/p90, precision/recall) can be reasoned about directly
-from ``miss_pattern``/``fp_pattern`` rather than pinned by re-running the code under test.
+every derived statistic (count_bias_mean/std, count_error_at_quantile, precision/recall) can be
+reasoned about directly from ``miss_pattern``/``fp_pattern`` rather than pinned by re-running the
+code under test.
 """
 
 from __future__ import annotations

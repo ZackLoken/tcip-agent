@@ -57,19 +57,21 @@ ingest_images(source="<raw folder or glob>")
 - Copies by default (originals are left byte-identical); pass `copy=False` only when
   the human explicitly wants the source moved.
 - Buckets by the capture date each file itself states → ISO `YYYY-MM-DD`: a photo's EXIF
-  `DateTimeOriginal`, a raster's own date metadata (its `DateTime` tag, an EXIF IFD, or a
-  stitching engine's capture-date item). A file that states none goes to `images/undated/`.
-  Override with `date_from="none"` (all undated) or a literal ISO date
+  `DateTimeOriginal`, a raster's own date metadata (its `DateTime` tag, an EXIF IFD, or the
+  default-domain metadata item you name as `raster_date_item`, which item a stitching engine
+  writes being that engine's own convention). A file that states none goes to
+  `images/undated/`; each file's entry in the manifest's `files` names, as `date_source`,
+  which item stated its date, `None` for an undated file. Override with `date_from="none"` (all undated) or a literal ISO date
   (`date_from="2026-02-11"`) when you know the capture date the camera didn't record.
 - Never overwrites, and refuses a stem collision before copying a byte: two source files
   landing on the same bucket+stem (case-folded), or a source colliding with an existing
   image or `.bandgroup` manifest, refuses the whole call, naming both sides; re-ingesting
   the exact same file already placed is the one exception, skipped and reported in
-  `skipped_collisions`. Relay the manifest to the human: `{total, buckets, undated,
-  skipped_collisions, unreadable_dates}`, especially a refusal, a large `undated` count
-  (dates may need `date_from`), and `unreadable_dates`, which separates files whose
-  container could not be read at all from files that simply state no date. Every admitted
-  file is ingested either way; the date never gates ingestion.
+  `skipped_collisions`. Relay the manifest to the human: its `files` (each with its bucket
+  and date source) and `skipped_collisions`, especially a refusal, many files in the undated
+  bucket (dates may need `date_from`), and each file's `date_unreadable`, which separates
+  files whose container could not be read at all from files that simply state no date.
+  Every admitted file is ingested either way; the date never gates ingestion.
 
 `ingest_images` does not annotate, split, choose a task, or write `subjects.json`; the
 next steps do. After it, `inspect_project` reports the capture dates and image count.

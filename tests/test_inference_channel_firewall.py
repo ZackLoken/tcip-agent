@@ -80,15 +80,16 @@ def test_a_photographic_source_the_model_reads_is_predicted(tmp_path):
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     image = _rgb_image(images_dir)
-    mean, std, _read = band_normalization_stats(
-        [image], 1
+    stats = band_normalization_stats(
+        [image], 1, max_images=1, seed=0
     )  # this capture's own single-band stats
+    assert stats is not None
     _pass, results = _predicted(
         tmp_path,
         images_dir,
         in_chans=1,
         tile=False,
-        builder_kwargs={"image_mean": mean, "image_std": std},
+        builder_kwargs={"image_mean": stats.mean, "image_std": stats.std},
     )
 
     assert [Path(r["image"]).name for r in results] == ["capture.png"]

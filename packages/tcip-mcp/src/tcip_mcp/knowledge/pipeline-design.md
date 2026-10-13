@@ -250,6 +250,7 @@ stage_a = launch_training(config={"model_source": {...}, "data": {...}})
 stage_b = launch_training(config={"model_source": {...}, "data": {...}})
 run_inference(
     checkpoint_path=stage_b_best,
+    stated={"conf": ..., "rationale": "..."},  # {} states nothing
     images_dir=images_dir,
     bucket="stage-b/<date>",
 )

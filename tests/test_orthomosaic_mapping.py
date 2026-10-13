@@ -355,6 +355,7 @@ def _pass(tmp_path: Path, ckpt: str):
             postprocess="nms",
             cross_tile_nms=0.3,
             conf=0.0,
+            rationale="a sample reason the test states",
         ),
         device="cpu",
         tile_batch_size=8,
@@ -414,11 +415,12 @@ def _bespoke_detection_checkpoint(
 
     builder_kwargs: dict = {"min_size": tile_size, "max_size": tile_size * 2}
     if in_chans != 3:
-        stats = band_normalization_stats([str(raster_path)], in_chans)
+        stats = band_normalization_stats(
+            [str(raster_path)], in_chans, max_images=1, seed=0
+        )
         assert stats is not None
-        mean, std, paths_read = stats
-        builder_kwargs["image_mean"] = mean
-        builder_kwargs["image_std"] = std
+        builder_kwargs["image_mean"] = stats.mean
+        builder_kwargs["image_std"] = stats.std
 
     return _raster_checkpoint(
         tmp_path,

@@ -53,6 +53,7 @@ def test_inference_launch_confines_checkpoint_to_image_roots(
             "date": "2026-02-11",
             "bucket": "baseline/2026-02-11",
             "user": "breeder",
+            "stated": {},
         },
     )
     assert resp.status_code == 403
@@ -71,6 +72,7 @@ def test_inference_launch_unconfined_for_a_checkpoint_inside_the_workspace(
             "date": "2026-02-11",
             "bucket": "baseline/2026-02-11",
             "user": "breeder",
+            "stated": {},
         },
     )
     assert resp.status_code == 404
