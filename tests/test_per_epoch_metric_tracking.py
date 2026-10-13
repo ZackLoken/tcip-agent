@@ -35,7 +35,9 @@ def test_classification_training_writes_train_and_val_scalars_every_epoch(
 ):
     ctx = run_context(
         tmp_path,
-        classifier_config(3, separable_classifier_data(tmp_path / "ds")),
+        classifier_config(
+            3, separable_classifier_data(tmp_path / "ds"), project=tmp_path
+        ),
     )
     run = ctx.default_train()
     ctx.tb.close()
@@ -67,6 +69,7 @@ def test_hpo_trial_body_writes_train_and_val_loss_every_epoch(tmp_path):
         height=128,
     )
     base_config = training_config(
+        tmp_path,
         BUILT_DETECTOR,
         {
             "images_dir": str(images_dir),
@@ -100,7 +103,9 @@ def test_the_epoch_console_line_carries_validation_metrics_beyond_loss(
 
     ctx = run_context(
         tmp_path,
-        classifier_config(2, separable_classifier_data(tmp_path / "ds")),
+        classifier_config(
+            2, separable_classifier_data(tmp_path / "ds"), project=tmp_path
+        ),
     )
     with caplog.at_level(
         logging.INFO, logger="tcip_mcp.pipelines.training.generic_trainer"

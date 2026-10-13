@@ -33,12 +33,9 @@ def _write_group(images_dir: Path, stem: str, fill=(111, 222)) -> None:
 
     band_a = images_dir / f"{stem}_G.tif"
     band_b = images_dir / f"{stem}_R.tif"
-    tifffile.imwrite(
-        str(band_a), np.full((TILE, TILE), fill[0], dtype=np.uint16)
-    )
-    tifffile.imwrite(
-        str(band_b), np.full((TILE, TILE), fill[1], dtype=np.uint16)
-    )
+    ramp = np.arange(TILE, dtype=np.uint16)[None, :].repeat(TILE, axis=0)
+    tifffile.imwrite(str(band_a), ramp + fill[0])
+    tifffile.imwrite(str(band_b), ramp + fill[1])
     write_band_group_manifest(
         images_dir,
         stem,
@@ -52,7 +49,7 @@ def _detection_checkpoint(tmp_path: Path) -> str:
     """A 2-channel detector a run in ``tmp_path`` completed over grouped captures of its own,
     registered by completing; its path.
     """
-    from tests._chain_fixtures import BESPOKE_MODELS
+    from tests._chain_fixtures import BESPOKE_MODELS, FRAME_STATISTICS
     from tests._verified_checkpoint_fixtures import (
         fixture_data_dir,
         registered_checkpoint,
@@ -60,14 +57,9 @@ def _detection_checkpoint(tmp_path: Path) -> str:
 
     model_source = {
         "builder": BESPOKE_DETECTION,
-        "builder_kwargs": {
-            "min_size": TILE,
-            "max_size": TILE * 2,
-            "image_mean": [0.5, 0.5],
-            "image_std": [0.25, 0.25],
-        },
         "source_files": [BESPOKE_MODELS],
         "task": "detection",
+        "normalization": FRAME_STATISTICS,
     }
     images_dir = _grouped_dataset(fixture_data_dir(tmp_path, "grouped"))
     return registered_checkpoint(

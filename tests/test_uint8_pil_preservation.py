@@ -419,6 +419,7 @@ def _augmented_run(
 
     images_dir = _detection_project(tmp_path / "data", arr)
     return training_config(
+        tmp_path,
         {**BUILT_DETECTOR, "task": "grape_bunch_count"}
         if bespoke
         else BUILT_DETECTOR,

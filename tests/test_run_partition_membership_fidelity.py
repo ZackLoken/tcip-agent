@@ -12,35 +12,9 @@ from pathlib import Path
 
 import pytest
 
-from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tests._producer_fixtures import big_single_source
 
 pytest.importorskip("torchvision")
-
-
-def _single_source_mosaic(
-    root: Path, width: int = 4000, height: int = 3000
-) -> tuple[Path, str]:
-    """One large detection source with GT spread across its full extent, the shape that resolves
-    to the single-source spatial-strip split; its image directory and stem.
-    """
-    from PIL import Image
-
-    from tcip_annotation.state import Annotation, BBox
-    from tests._producer_fixtures import label_image
-
-    images_dir = root / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True, exist_ok=True)
-    stem = "mosaic"
-    Image.new("RGB", (width, height), color=(70, 90, 60)).save(
-        images_dir / f"{stem}.png"
-    )
-    boxes = [
-        Annotation(subject="bud", geometry=BBox(x, y, x + 20, y + 20))
-        for x in range(20, width - 20, 200)
-        for y in range(20, height - 20, 200)
-    ]
-    label_image(images_dir / f"{stem}.png", boxes, width, height)
-    return images_dir, stem
 
 
 def _data_cfg(images_dir: Path, **split) -> dict:
@@ -80,7 +54,7 @@ def test_spatial_split_records_val_membership_from_the_val_side(
     held different regions, so the record must show different, non-overlapping members: a metric
     reconstructed from a manifest claiming both sides held the same units is unreproducible.
     """
-    images_dir, _ = _single_source_mosaic(tmp_path / "ds")
+    images_dir, _ = big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = _data_cfg(images_dir)
 
     spatial = _persisted_split(tmp_path, "exp_membership", data_cfg)
@@ -109,7 +83,7 @@ def test_persisted_calibration_region_is_reserved_away_from_train(
     from tcip_mcp.pipelines.operating_point import spatial_disjointness
     from tcip_mcp.pipelines.raster_source import rects_overlap
 
-    images_dir, _stem = _single_source_mosaic(tmp_path / "ds")
+    images_dir, _stem = big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = _data_cfg(
         images_dir, val_ratio=0.2, holdout_ratio=0.1, calibration_ratio=0.15
     )

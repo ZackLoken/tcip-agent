@@ -27,7 +27,9 @@ def _ctx(tmp_path) -> tuple[TrainContext, dict]:
     from tests._verified_checkpoint_fixtures import detection_config
     from tests.tiny_trainer_fixtures import run_context
 
-    ctx = run_context(tmp_path, detection_config(tmp_path / "data"))
+    ctx = run_context(
+        tmp_path, detection_config(tmp_path / "data", project=tmp_path)
+    )
     return ctx, ctx.run.spec.record()
 
 
@@ -132,6 +134,7 @@ def test_the_default_trainer_and_a_bespoke_loop_stamp_one_checkpoint_config(
                 "source_files": [BESPOKE_DS_FILE],
             },
         },
+        project=tmp_path,
     )
     ctx = run_context(tmp_path, config)
     observation = observe(ctx.run_dir)

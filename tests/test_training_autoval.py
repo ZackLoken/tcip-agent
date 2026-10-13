@@ -15,13 +15,14 @@ import pytest
 torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
-from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
+from tcip_annotation.state import Annotation, BBox  # noqa: E402
 from tcip_mcp.dataset_layout import UNDATED_BUCKET  # noqa: E402
 from tcip_mcp.pipelines.training.generic_trainer import train  # noqa: E402
 from tests._chain_fixtures import BLOB_BUILDER, training_config  # noqa: E402
 from tests._image_fixtures import write_noise_image  # noqa: E402
-from tests._producer_fixtures import (
-    label_image,  # noqa: E402
+from tests._producer_fixtures import (  # noqa: E402
+    big_single_source,
+    label_image,
     train_val as _train_val,
 )
 from tests._training_values import drawn_split, stage, tiling_block  # noqa: E402
@@ -210,42 +211,11 @@ def test_auto_train_val_single_untiled_source_refuses_validation_and_trains_with
     assert val_ds is None and train_ds.num_samples == 1
 
 
-def _big_single_source(
-    root: Path, width: int, height: int, *, polygons: bool = False
-) -> tuple[Path, str]:
-    """One large source with a scatter of small boxes (``polygons``: squares), real width/height
-    in its label document: a single-image dataset large enough to hold a spatial train/val split;
-    its image tree and stem.
-    """
-    images_dir = root / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True, exist_ok=True)
-    stem = "mosaic"
-    from torchvision.utils import save_image
-
-    save_image(
-        torch.rand(3, height, width) * 0.3, str(images_dir / f"{stem}.png")
-    )
-    boxes = [
-        Annotation(
-            subject="bud",
-            geometry=Polygon(
-                rings=[[(x, y), (x + 20, y), (x + 20, y + 20), (x, y + 20)]]
-            )
-            if polygons
-            else BBox(x, y, x + 20, y + 20),
-        )
-        for x in range(20, width - 20, 200)
-        for y in range(20, height - 20, 200)
-    ]
-    label_image(images_dir / f"{stem}.png", boxes, width, height)
-    return images_dir, stem
-
-
 def test_auto_train_val_single_source_tiled_spatial_split(tmp_path: Path):
     """A single tiled detection source derives a real, disjoint spatial val split instead of
     degrading to no validation, train and val tiles sharing no tile and no strip identity.
     """
-    images_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    images_dir, stem = big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
@@ -278,7 +248,7 @@ def test_a_single_tiled_source_with_no_val_share_refuses_by_name(
     """The spatial geometry lays its validation strip first: a reserved share beside a zero val
     share refuses naming it, before any strip is laid.
     """
-    images_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    images_dir, _stem = big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
@@ -299,7 +269,7 @@ def test_spatial_manifest_tied_val_holdout_fractions_place_by_declared_order(
     test above pins its own regions; the placement half is coverage. The manifest carries no
     ``seed`` key; the assertion guards that absence alone.
     """
-    images_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    images_dir, stem = big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
@@ -325,7 +295,7 @@ def test_spatial_manifest_tied_holdout_calibration_fractions_place_by_declared_o
     the same way the val/holdout tie above pins its own, coverage of the placement, and the
     manifest carries no ``seed`` key; the assertion guards that absence alone.
     """
-    images_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    images_dir, stem = big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
@@ -351,7 +321,7 @@ def test_spatial_manifest_pins_train_val_and_holdout_regions_for_distinct_fracti
     does not run, so the layout comes from the fractions and tile geometry alone. The three
     regions are pinned against this exact width, height, tile_size, overlap and fractions.
     """
-    images_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    images_dir, stem = big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
@@ -373,7 +343,7 @@ def test_spatial_manifest_persists_train_and_val_regions_too(tmp_path: Path):
     just per-region tile identities, so a later geometric disjointness check has real geometry
     for every side, not only the reserved holdout area.
     """
-    images_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    images_dir, stem = big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
@@ -402,7 +372,7 @@ def test_auto_train_val_single_source_spatial_split_ignores_a_stray_keep_regions
     single-source route, which derives its own) must never collide with the derived
     keep_regions kwarg the spatial split passes explicitly.
     """
-    images_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    images_dir, stem = big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
@@ -481,7 +451,7 @@ def test_a_calibration_ratio_of_zero_reserves_no_calibration_region(
     """With calibration_ratio stated at zero, the spatial_manifest carries no calibration_region
     and still holds its train, val and holdout regions.
     """
-    images_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    images_dir, stem = big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
@@ -509,7 +479,7 @@ def test_a_single_source_spatial_run_builds_its_loaders_at_the_stated_band_count
     for one channel indexes its tile lattice and reads its tiles at one channel, rather than
     probing its own source back to three.
     """
-    images_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    images_dir, stem = big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
@@ -538,7 +508,7 @@ def _within_image_context(tmp_path: Path):
     )
     from tests._verified_checkpoint_fixtures import opened_run, unbuilt_source
 
-    images_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    images_dir, stem = big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
@@ -547,7 +517,8 @@ def _within_image_context(tmp_path: Path):
     }
     observation = observe(
         opened_run(
-            tmp_path, training_config(unbuilt_source("detection"), data_cfg)
+            tmp_path,
+            training_config(tmp_path, unbuilt_source("detection"), data_cfg),
         )
     )
     return (
@@ -731,8 +702,9 @@ def test_one_preflight_reads_a_sources_header_once_for_its_sizes(
     from tcip_mcp.tools.training_tools import preflight_config
     from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
 
-    images_dir, _stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    images_dir, _stem = big_single_source(tmp_path / "ds", 4000, 3000)
     cfg = training_config(
+        tmp_path,
         BUILT_DETECTOR,
         {
             "images_dir": str(images_dir),
@@ -778,7 +750,9 @@ def test_a_bound_run_records_the_width_it_read_its_sources_at(tmp_path: Path):
     from tests._verified_checkpoint_fixtures import unbuilt_source
 
     spec = train_config(
-        training_config(unbuilt_source("detection"), resolved.record())
+        training_config(
+            tmp_path, unbuilt_source("detection"), resolved.record()
+        )
     )
     assert recorded_model_dims(spec)["in_chans"] == 5
 
@@ -789,7 +763,7 @@ def test_a_calibration_ratio_adds_a_disjoint_calibration_region(
     """Admits valid work: a reserved calibration region is real, non-empty geometry, disjoint
     from train/val/holdout.
     """
-    images_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    images_dir, stem = big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
@@ -864,7 +838,7 @@ def test_a_spatial_split_raises_on_unresolvable_extent(tmp_path: Path):
     ):
         _split_over(images_dir)
 
-    framed, _stem = _big_single_source(tmp_path / "framed", 4000, 3000)
+    framed, _stem = big_single_source(tmp_path / "framed", 4000, 3000)
     assert _split_over(framed).train_region
 
 
@@ -899,7 +873,7 @@ def test_a_spatial_split_raises_on_infeasible_layout(tmp_path: Path):
     """Reason 2: spatial_strip_split itself cannot lay out 4 non-empty regions at this mosaic
     size/tile size, and the refusal names the shares.
     """
-    images_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    images_dir, stem = big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
@@ -951,7 +925,7 @@ def test_a_spatial_split_records_raster_content_identity(tmp_path: Path):
     """Mechanism 2's training-time recording: a real, decodable single-source raster gets a
     raster_content_identity in the same spatial_manifest a claim-scope check later reads back.
     """
-    images_dir, stem = _big_single_source(tmp_path / "ds", 4000, 3000)
+    images_dir, stem = big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": "bud"},
@@ -982,7 +956,9 @@ def test_train_emits_val_loss_with_autoval(tmp_path: Path):
     }
     from tests.tiny_trainer_fixtures import run_context
 
-    ctx = run_context(tmp_path, training_config(BLOB_BUILDER, data_cfg))
+    ctx = run_context(
+        tmp_path, training_config(tmp_path, BLOB_BUILDER, data_cfg)
+    )
     assert ctx.val_loader is not None
     run = train(ctx.run, ctx.train_loader, val_loader=ctx.val_loader)
 

@@ -487,7 +487,9 @@ class TestTrainingToolOutputSchema:
         )
 
         res = training_tools.launch_training(
-            tmp_path, small_detection_config(images_dir), actor=None
+            tmp_path,
+            small_detection_config(images_dir, project=tmp_path),
+            actor=None,
         )
 
         assert "error" not in res, res
@@ -514,7 +516,7 @@ class TestTrainingToolOutputSchema:
             opened_run,
         )
 
-        config = detection_config(tmp_path / "data")
+        config = detection_config(tmp_path / "data", project=tmp_path)
         early = opened_run(tmp_path, config, experiment_id="event-run-early")
         log_epoch(early, 1, {"loss": 0.81})
         late = opened_run(tmp_path, config, experiment_id="event-run-late")

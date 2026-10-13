@@ -23,7 +23,11 @@ from tests._verified_checkpoint_fixtures import SAMPLE_CROSS_TILE_NMS
 
 torch = pytest.importorskip("torch")
 
-from tests._chain_fixtures import BESPOKE_DETECTION, BESPOKE_MODELS  # noqa: E402
+from tests._chain_fixtures import (  # noqa: E402
+    BESPOKE_DETECTION,
+    BESPOKE_MODELS,
+    FRAME_STATISTICS,
+)
 
 pytest.importorskip("torchvision")
 
@@ -97,9 +101,7 @@ def _write_geo_raster(
     return arr
 
 
-def _bespoke_detection_checkpoint(
-    tmp_path: Path, *, in_chans: int = 3, tile_size: int = TILE
-) -> str:
+def _bespoke_detection_checkpoint(tmp_path: Path, *, in_chans: int = 3) -> str:
     """The checkpoint an untiled bespoke detection run under ``tmp_path`` completed over frames
     of its own, registered in that project's model registry by completing.
     """
@@ -111,10 +113,7 @@ def _bespoke_detection_checkpoint(
             "builder": BESPOKE_DETECTION,
             "task": "detection",
             "source_files": [BESPOKE_MODELS],
-            "builder_kwargs": {
-                "min_size": tile_size,
-                "max_size": tile_size * 2,
-            },
+            "normalization": FRAME_STATISTICS,
         },
         data={
             "num_channels": in_chans,

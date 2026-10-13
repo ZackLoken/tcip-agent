@@ -1064,7 +1064,9 @@ def resolve_run(
         layout,
         tallies_out=tallies_out,
     )
-    geometry = effective_data_geometry(task, data, train_ds)
+    geometry = effective_data_geometry(
+        task, data, train_ds, spec.model_source.detector_geometry
+    )
     if trait_revision is None:
         trait_revision = resolve_trait_revision(
             spec, project=project, has_val_loader=val_ds is not None

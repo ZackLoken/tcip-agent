@@ -22,7 +22,10 @@ from tcip_mcp.pipelines.model_build import (  # noqa: E402
     METRICS_KEY,
     STATE_DICT_KEY,
 )
-from tcip_mcp.pipelines.schemas import SCHEDULER_TYPES  # noqa: E402
+from tcip_mcp.pipelines.schemas import (  # noqa: E402
+    SCHEDULER_TYPES,
+    selection_of,
+)
 from tcip_mcp.pipelines.training import generic_trainer as gt  # noqa: E402
 from tcip_mcp.pipelines.training.generic_trainer import train  # noqa: E402
 from tests._training_values import (  # noqa: E402
@@ -47,16 +50,6 @@ from tests.tiny_trainer_fixtures import (  # noqa: E402
 )
 
 
-def _config(stages: list[dict], data: dict | None = None, **extra) -> dict:
-    """A regression config at seed 3 over ``stages``; ``data`` is filled in by :func:`_train`,
-    and a config never trained states its one band alone.
-    """
-    return regressor_config(
-        data=data or {"num_channels": 1},
-        **{"seed": 3, "stages": stages, **extra},
-    )
-
-
 def _opposed(root: Path) -> dict:
     return opposed_regression_data(root, TRAIN_INTENSITIES, VAL_INTENSITIES)
 
@@ -72,15 +65,41 @@ def _consistent(root: Path) -> dict:
     )
 
 
-def _train(tmp_path, config: dict, name: str, frames=_opposed, **kwargs):
-    """The run ``name`` under ``tmp_path`` over ``config`` with ``frames``' data block, opened by
-    the launcher's own producer and trained over its own loaders with ``kwargs``.
+def _config(
+    project: Path, stages: list[dict], frames=_opposed, **extra
+) -> dict:
+    """A regression config of ``project`` at seed 3 over ``stages`` and the data block
+    ``frames`` writes under ``project`` (by default :func:`_opposed`), normalizing by the
+    statistics of those frames.
     """
-    ctx = run_context(
-        tmp_path,
-        {**config, "data": frames(tmp_path / frames.__name__)},
-        experiment_id=name,
+    return regressor_config(
+        data=frames(project / frames.__name__),
+        project=project,
+        **{"seed": 3, "stages": stages, **extra},
     )
+
+
+def _unrun(**extra) -> dict:
+    """A regression config of this repository at seed 3 over one stage that no run resolves:
+    one band and no data, normalizing by the weights' statistics
+    (``_chain_fixtures.weights_normalization``).
+    """
+    from tests import REPO_ROOT
+    from tests._chain_fixtures import weights_normalization
+
+    return regressor_config(
+        data={"num_channels": 1},
+        project=REPO_ROOT,
+        normalization=weights_normalization(),
+        **{"seed": 3, "stages": [stage(0)], **extra},
+    )
+
+
+def _train(tmp_path, config: dict, name: str, **kwargs):
+    """The run ``name`` under ``tmp_path`` over ``config``, opened by the launcher's own
+    producer and trained over its own loaders with ``kwargs``.
+    """
+    ctx = run_context(tmp_path, config, experiment_id=name)
     return train(
         ctx.run, ctx.train_loader, val_loader=ctx.val_loader, **kwargs
     )
@@ -123,7 +142,7 @@ def test_a_stage_starts_from_the_weights_and_optimizer_state_of_the_prior_stage_
     at_stage_start: list = []
     real_build_scheduler = gt._build_scheduler
 
-    def recording_build_scheduler(optimizer, config):
+    def recording_build_scheduler(optimizer, config, **direction):
         weight = models[0].weight
         at_stage_start.append(
             (
@@ -134,7 +153,7 @@ def test_a_stage_starts_from_the_weights_and_optimizer_state_of_the_prior_stage_
                 models[0].forwards.clone(),
             )
         )
-        return real_build_scheduler(optimizer, config)
+        return real_build_scheduler(optimizer, config, **direction)
 
     monkeypatch.setattr(gt, "_build_scheduler", recording_build_scheduler)
     taken: list = []
@@ -170,6 +189,7 @@ def test_a_stage_starts_from_the_weights_and_optimizer_state_of_the_prior_stage_
     run = _train(
         tmp_path,
         _config(
+            tmp_path,
             [stage(0), stage(0)],
             horizon=3,
             builder=COUNTING_REGRESSOR,
@@ -218,8 +238,8 @@ def test_a_resume_puts_back_the_buffer_and_the_tensor_setting_its_capture_holds(
     ctx = run_context(
         tmp_path,
         _config(
+            tmp_path,
             [stage(0)],
-            _opposed(tmp_path / "ds"),
             builder=COUNTING_REGRESSOR,
         ),
     )
@@ -265,6 +285,7 @@ def test_a_stage_ends_on_its_own_plateau_and_the_next_stage_runs(tmp_path):
     run = _train(
         tmp_path,
         _config(
+            tmp_path,
             [stage(0), stage(0)],
             horizon=4,
             early_stopping=stop_rule(1, 1e-4),
@@ -299,12 +320,13 @@ def test_the_run_ends_with_the_first_stage_that_does_not_improve_on_the_one_befo
     run = _train(
         tmp_path,
         _config(
+            tmp_path,
             [stage(0)] * 3,
+            frames,
             horizon=2,
             early_stopping=stop_rule(min_delta=min_delta),
         ),
         "run-stop",
-        frames=frames,
     )
 
     assert run.status == "completed", run.status_error
@@ -322,12 +344,14 @@ def test_a_stage_under_a_schedule_with_no_horizon_runs_until_its_plateau(
     plateau.
     """
     config = _config(
+        tmp_path,
         [stage(0)],
+        _consistent,
         scheduler=schedule("step", gamma=1.0),
         optimizer=adamw_optimizer(backbone_lr=2e-3, head_lr=2e-3),
         early_stopping=stop_rule(3, 1e-6),
     )
-    run = _train(tmp_path, config, "unbounded", frames=_consistent)
+    run = _train(tmp_path, config, "unbounded")
 
     assert run.status == "completed", run.status_error
     history = run.metrics_history
@@ -347,16 +371,15 @@ def test_a_horizon_bound_schedule_is_built_over_its_horizon_and_ends_the_stage_t
     built: list = []
     real_build_scheduler = gt._build_scheduler
 
-    def recording_build_scheduler(optimizer, config):
-        built.append(real_build_scheduler(optimizer, config))
+    def recording_build_scheduler(optimizer, config, **direction):
+        built.append(real_build_scheduler(optimizer, config, **direction))
         return built[-1]
 
     monkeypatch.setattr(gt, "_build_scheduler", recording_build_scheduler)
     reached = _train(
         tmp_path,
-        _config([stage(0)], scheduler=schedule(kind)),
+        _config(tmp_path, [stage(0)], _consistent, scheduler=schedule(kind)),
         "horizon",
-        frames=_consistent,
     )
     assert reached.status == "completed", reached.status_error
     horizon = schedule(kind)["horizon_epochs"]
@@ -369,6 +392,7 @@ def test_a_horizon_bound_schedule_is_built_over_its_horizon_and_ends_the_stage_t
     plateaued = _train(
         tmp_path,
         _config(
+            tmp_path,
             [stage(0)],
             scheduler=schedule(kind),
             early_stopping=stop_rule(1),
@@ -385,10 +409,16 @@ def test_a_run_with_no_validation_loader_ends_its_stage_on_the_training_loss_pla
     """Selecting on ``loss`` with no validation loader, the training loss is the selection value
     the stop rule reads: a loss that cannot improve ends the stage one epoch after its first.
     """
-    # Zero-intensity frames: the prediction is zero whatever the weight, so the loss is fixed.
+
+    # Zero targets under a weight starting at zero: the prediction already fits them, the
+    # gradient is zero, so the loss is fixed at zero.
+    def flat(root: Path) -> dict:
+        return frames_data(root, [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], [0.0] * 6)
+
     config = _config(
+        tmp_path,
         [stage(0)],
-        frames_data(tmp_path / "flat", [0.0] * 6, [1.0] * 6),
+        flat,
         scheduler=schedule("step"),
         early_stopping=stop_rule(1),
     )
@@ -397,7 +427,14 @@ def test_a_run_with_no_validation_loader_ends_its_stage_on_the_training_loss_pla
     run = train(ctx.run, ctx.train_loader, val_loader=None)
 
     assert run.status == "completed", run.status_error
-    assert [m["selection"] for m in run.metrics_history] == [1.0, 1.0]
+    assert [m["selection"] for m in run.metrics_history] == [0.0, 0.0]
+    # Each epoch stepped over every batch of the six frames, so the plateau is a trained one.
+    batches = len(ctx.train_loader)
+    assert batches > 0
+    assert [m["optimizer_steps"] for m in run.metrics_history] == [
+        batches,
+        batches,
+    ]
 
 
 def test_a_stage_with_no_selectable_epoch_fails_the_run_naming_it(tmp_path):
@@ -405,6 +442,7 @@ def test_a_stage_with_no_selectable_epoch_fails_the_run_naming_it(tmp_path):
     no value that ranks, so no epoch of the first stage is selectable.
     """
     config = _config(
+        tmp_path,
         [stage(0), stage(0)],
         horizon=2,
         evaluation=evaluation_block(selection_metric="mae"),
@@ -424,6 +462,7 @@ def test_a_run_resumed_across_a_stage_boundary_trains_as_the_uninterrupted_run(
     tmp_path, resume_epoch, warmup_epochs, scheduler
 ):
     config = _config(
+        tmp_path,
         [stage(0), stage(0)],
         early_stopping=stop_rule(1, 1e-4),
         checkpoint_every_n_epochs=1,
@@ -475,6 +514,7 @@ def test_a_resume_whose_optimizer_orders_its_groups_differently_warms_up_as_the_
 
     def two_rate_config(**builder_kwargs) -> dict:
         return _config(
+            tmp_path,
             [stage(0), stage(0)],
             optimizer=adamw_optimizer(backbone_lr=0.01, head_lr=0.05),
             scheduler=schedule("step"),
@@ -519,8 +559,16 @@ def _canceled_at(tmp_path, call: int):
     """
     name = f"canceled-at-{call}"
     run_dir = experiment_dir(name, project=tmp_path)
+
+    def unsplit(root: Path) -> dict:
+        return frames_data(
+            root, TRAIN_INTENSITIES, [2.0 * c for c in TRAIN_INTENSITIES]
+        )
+
     config = _config(
+        tmp_path,
         [stage(0)],
+        unsplit,
         horizon=5,
         batch_size=2,
         checkpoint_every_n_epochs=1,
@@ -529,13 +577,7 @@ def _canceled_at(tmp_path, call: int):
             "cancel_output_dir": str(run_dir),
         },
     )
-
-    def unsplit(root: Path) -> dict:
-        return frames_data(
-            root, TRAIN_INTENSITIES, [2.0 * c for c in TRAIN_INTENSITIES]
-        )
-
-    return _train(tmp_path, config, name, frames=unsplit), run_dir
+    return _train(tmp_path, config, name), run_dir
 
 
 def test_a_cancel_inside_an_epoch_leaves_that_epoch_no_row_best_or_checkpoint(
@@ -589,16 +631,16 @@ def test_a_cancel_seen_as_a_stage_starts_saves_its_best_epoch_with_that_epoch_ro
     real_build_scheduler = gt._build_scheduler
     built: list = []
 
-    def cancel_at_the_second_stage(optimizer, config):
+    def cancel_at_the_second_stage(optimizer, config, **direction):
         built.append(config)
         if len(built) == 2:
             request_cancel(run_dir)
-        return real_build_scheduler(optimizer, config)
+        return real_build_scheduler(optimizer, config, **direction)
 
     monkeypatch.setattr(gt, "_build_scheduler", cancel_at_the_second_stage)
     run = _train(
         tmp_path,
-        _config([stage(0), stage(0)], horizon=3),
+        _config(tmp_path, [stage(0), stage(0)], horizon=3),
         name,
     )
 
@@ -622,18 +664,16 @@ def test_a_resumed_run_canceled_at_its_first_poll_saves_the_checkpoint_row(
     """
     from tcip_mcp.experiments import request_cancel
 
-    config = _config([stage(0)], horizon=3, checkpoint_every_n_epochs=1)
+    config = _config(
+        tmp_path, [stage(0)], horizon=3, checkpoint_every_n_epochs=1
+    )
     straight = _train(tmp_path, config, "straight")
     assert straight.status == "completed", straight.status_error
     checkpoint = (
         experiment_dir("straight", project=tmp_path) / "checkpoint_epoch_1.pt"
     )
 
-    ctx = run_context(
-        tmp_path,
-        {**config, "data": _opposed(tmp_path / "resumed-frames")},
-        experiment_id="resumed",
-    )
+    ctx = run_context(tmp_path, config, experiment_id="resumed")
     request_cancel(ctx.run_dir)
     resumed = train(
         ctx.run,
@@ -658,12 +698,14 @@ def test_the_scheduler_steps_every_epoch_outside_a_stage_warmup(
     ramps to its target, holds it through the first epoch after the warmup, then halves.
     """
     config = _config(
+        tmp_path,
         [stage(0), stage(0)],
+        _consistent,
         scheduler=schedule("step", step_size=1, gamma=0.5),
         early_stopping=stop_rule(3, 1e9),
         stage_warmup_epochs=warmup_epochs,
     )
-    run = _train(tmp_path, config, "warmup", frames=_consistent)
+    run = _train(tmp_path, config, "warmup")
     assert run.status == "completed", run.status_error
 
     rates = [
@@ -710,7 +752,7 @@ def test_the_trainer_runs_the_config_its_schema_admits(
     """
     from tcip_mcp.pipelines.schemas import checked_train_config
 
-    config = {**_config([stage(0)], horizon=4), **stated}
+    config = {**_config(tmp_path, [stage(0)], horizon=4), **stated}
     assert checked_train_config(config)[1] == []
     steps: list = []
     run = _train(
@@ -738,9 +780,7 @@ def test_a_worker_run_validates_its_config_once(tmp_path, monkeypatch):
     from tests._verified_checkpoint_fixtures import opened_run
     from tests.tiny_trainer_fixtures import count_validations
 
-    run_dir = opened_run(
-        tmp_path, _config([stage(0)], _opposed(tmp_path / "ds"))
-    )
+    run_dir = opened_run(tmp_path, _config(tmp_path, [stage(0)]))
 
     validations = count_validations(monkeypatch)
     ctx = prepare_run_context(observe(run_dir))
@@ -754,7 +794,7 @@ def test_a_stage_stating_an_epoch_count_is_refused_and_one_stating_none_is_admit
 ):
     from tcip_mcp.pipelines.schemas import checked_train_config
 
-    refused = _config([stage(0, epochs=3)])
+    refused = _config(tmp_path, [stage(0, epochs=3)])
     assert any(
         "stages.0.epochs" in issue
         for issue in checked_train_config(refused)[1]
@@ -762,7 +802,7 @@ def test_a_stage_stating_an_epoch_count_is_refused_and_one_stating_none_is_admit
     with pytest.raises(ValueError, match="stages.0.epochs"):
         _train(tmp_path, refused, "counted")
 
-    admitted = _train(tmp_path, _config([stage(0)]), "one")
+    admitted = _train(tmp_path, _config(tmp_path, [stage(0)]), "one")
     assert admitted.status == "completed", admitted.status_error
 
 
@@ -770,13 +810,14 @@ def test_an_unknown_scheduler_is_refused_and_a_named_one_is_admitted(tmp_path):
     with pytest.raises(ValueError, match="scheduler.*cosine_warm"):
         _train(
             tmp_path,
-            _config([stage(0)], scheduler={"type": "cosine_warm"}),
+            _config(tmp_path, [stage(0)], scheduler={"type": "cosine_warm"}),
             "unknown",
         )
 
     admitted = _train(
         tmp_path,
         _config(
+            tmp_path,
             [stage(0)],
             scheduler=schedule("step"),
             early_stopping=stop_rule(1),
@@ -796,11 +837,7 @@ def test_a_onecycle_schedule_trains_at_the_stated_sgd_momentum():
     from tests._training_values import sgd_optimizer
 
     spec = train_config(
-        _config(
-            [stage(0)],
-            optimizer=sgd_optimizer(),
-            scheduler=schedule("onecycle"),
-        )
+        _unrun(optimizer=sgd_optimizer(), scheduler=schedule("onecycle"))
     )
     assert spec.optimizer is not None and spec.scheduler is not None
     model = nn.Linear(2, 1)
@@ -809,7 +846,11 @@ def test_a_onecycle_schedule_trains_at_the_stated_sgd_momentum():
         lr=spec.optimizer.head_lr,
         momentum=spec.optimizer.momentum,
     )
-    scheduler = gt._build_scheduler(optimizer, spec.scheduler)
+    scheduler = gt._build_scheduler(
+        optimizer,
+        spec.scheduler,
+        higher_is_better=selection_of(spec.evaluation.selection_metric)[1],
+    )
     model(torch.ones(3, 2)).sum().backward()
     optimizer.step()
     scheduler.step()
@@ -819,9 +860,9 @@ def test_a_onecycle_schedule_trains_at_the_stated_sgd_momentum():
     ]
 
 
-def _built(scheduler_block: dict):
-    """The torch scheduler a run whose config states ``scheduler_block`` builds over an SGD
-    optimizer at its stated momentum.
+def _built(scheduler_block: dict, selection_metric: str = "mae"):
+    """The torch scheduler a run whose config states ``scheduler_block`` and selects on
+    ``selection_metric`` builds over an SGD optimizer at its stated momentum.
     """
     from torch import nn
 
@@ -829,8 +870,10 @@ def _built(scheduler_block: dict):
     from tests._training_values import sgd_optimizer
 
     spec = train_config(
-        _config(
-            [stage(0)], optimizer=sgd_optimizer(), scheduler=scheduler_block
+        _unrun(
+            optimizer=sgd_optimizer(),
+            scheduler=scheduler_block,
+            evaluation=evaluation_block(selection_metric=selection_metric),
         )
     )
     assert spec.optimizer is not None and spec.scheduler is not None
@@ -839,11 +882,22 @@ def _built(scheduler_block: dict):
         lr=spec.optimizer.head_lr,
         momentum=spec.optimizer.momentum,
     )
-    return gt._build_scheduler(optimizer, spec.scheduler), optimizer
+    return gt._build_scheduler(
+        optimizer,
+        spec.scheduler,
+        higher_is_better=selection_of(spec.evaluation.selection_metric)[1],
+    ), optimizer
 
 
-def test_a_plateau_schedule_builds_at_every_setting_it_states():
-    """Each setting a plateau block states is the one the torch scheduler holds."""
+@pytest.mark.parametrize(
+    ("selection_metric", "mode"), [("mae", "min"), ("r_squared", "max")]
+)
+def test_a_plateau_schedule_builds_at_every_setting_it_states(
+    selection_metric, mode
+):
+    """Each setting a plateau block states is the one the torch scheduler holds, and it watches
+    in the direction of the run's selection metric.
+    """
     scheduler, _ = _built(
         schedule(
             "plateau",
@@ -854,10 +908,12 @@ def test_a_plateau_schedule_builds_at_every_setting_it_states():
             cooldown=2,
             min_lr=1e-5,
             eps=1e-7,
-        )
+        ),
+        selection_metric,
     )
 
     assert (
+        scheduler.mode,
         scheduler.factor,
         scheduler.patience,
         scheduler.threshold,
@@ -865,7 +921,7 @@ def test_a_plateau_schedule_builds_at_every_setting_it_states():
         scheduler.cooldown,
         scheduler.min_lrs,
         scheduler.eps,
-    ) == (0.4, 5, 1e-3, "abs", 2, [1e-5], 1e-7)
+    ) == (mode, 0.4, 5, 1e-3, "abs", 2, [1e-5], 1e-7)
 
 
 def test_a_onecycle_schedule_builds_at_every_setting_it_states():

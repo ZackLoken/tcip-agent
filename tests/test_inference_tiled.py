@@ -8,7 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from tests._chain_fixtures import BESPOKE_DETECTION, BESPOKE_MODELS
+from tests._chain_fixtures import (
+    BESPOKE_DETECTION,
+    BESPOKE_MODELS,
+    FRAME_STATISTICS,
+)
 from tests._producer_fixtures import gray_frame
 
 torch = pytest.importorskip("torch")
@@ -28,9 +32,9 @@ def _detection_checkpoint(tmp_path: Path) -> str:
         tmp_path,
         model_source={
             "builder": BESPOKE_DETECTION,
-            "builder_kwargs": {"min_size": TILE, "max_size": TILE * 2},
             "source_files": [BESPOKE_MODELS],
             "task": "detection",
+            "normalization": FRAME_STATISTICS,
         },
     )
 
@@ -220,9 +224,9 @@ def test_the_pass_decodes_through_the_checkpoints_own_recorded_attributes(
         tmp_path,
         model_source={
             "builder": BESPOKE_DETECTION,
-            "builder_kwargs": {"min_size": TILE, "max_size": TILE * 2},
             "source_files": [BESPOKE_MODELS],
             "task": "detection",
+            "normalization": FRAME_STATISTICS,
         },
         data={"num_channels": 3, "scope": {"subject": "bud"}},
         registry=cr.SubjectRegistry(

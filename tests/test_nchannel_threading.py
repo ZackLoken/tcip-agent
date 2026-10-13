@@ -6,7 +6,12 @@ carries channel counts and validates them.
 import pytest
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
-from tests._chain_fixtures import CLASSIFIER_SOURCE, training_config
+from tests._chain_fixtures import (
+    CLASSIFIER_SOURCE,
+    detector_geometry,
+    training_config,
+    weights_statistics,
+)
 from tests._producer_fixtures import dataset_over  # noqa: E402
 from tests._training_values import RATIONALE, drawn_split  # noqa: E402
 
@@ -35,8 +40,11 @@ def test_backbone_accepts_in_chans():
 
 def test_compose_and_forward_4_channel_model():
     from tests import bespoke_models
+    from tests._chain_fixtures import band_statistics
 
-    model = bespoke_models.build_bespoke_classifier(num_classes=3, in_chans=4)
+    model = bespoke_models.build_bespoke_classifier(
+        num_classes=3, in_chans=4, **band_statistics(4)
+    )
     out = model(torch.rand(2, 4, 64, 64))
     assert isinstance(out, dict) and len(out) > 0  # forward runs on 4 channels
 
@@ -90,6 +98,7 @@ def test_n_channel_detector_builds_and_trains():
         num_levels=len(names),
         image_mean=[0.4] * 5,
         image_std=[0.2] * 5,
+        **detector_geometry().handed(),
     )
     assert det.transform.image_mean == [0.4] * 5
 
@@ -106,30 +115,16 @@ def test_n_channel_detector_builds_and_trains():
     assert losses and all(torch.isfinite(v) for v in losses.values())
 
 
-def test_n_channel_detector_without_stats_is_refused_by_default():
-    """The refusal fires for an agent who never passed in_chans: the agent it exists for."""
-    from tcip_mcp.pipelines.components.detectors import build_detector
-
-    adapter = _nchan_adapter(5)
-    names = list(adapter(torch.zeros(1, 5, 64, 64)).keys())
-    with pytest.raises(
-        ValueError, match="needs per-band image_mean and image_std of length 5"
-    ):
-        build_detector(
-            "faster_rcnn",
-            adapter,
-            num_classes=1,
-            featmap_names=names,
-            num_levels=len(names),
-        )
-
-
 def test_normalization_length_and_channel_count_are_validated():
     from tcip_mcp.pipelines.components.detectors import build_detector
 
     adapter = _nchan_adapter(5)
     names = list(adapter(torch.zeros(1, 5, 64, 64)).keys())
-    common = {"featmap_names": names, "num_levels": len(names)}
+    common = {
+        "featmap_names": names,
+        "num_levels": len(names),
+        **detector_geometry().handed(),
+    }
     with pytest.raises(ValueError, match="both must be 5"):
         build_detector(
             "faster_rcnn",
@@ -191,32 +186,24 @@ def test_explicit_in_chans_wins_over_the_registration_order_probe():
         featmap_names=names,
         num_levels=len(names),
         in_chans=3,
+        image_mean=[0.4] * 3,
+        image_std=[0.2] * 3,
+        **detector_geometry().handed(),
     )
-    assert det.transform.image_mean == [0.485, 0.456, 0.406]
-
-
-def test_three_channel_detector_still_uses_torchvision_defaults():
-    """Strengthening the N-channel path must not make the ordinary RGB build require stats."""
-    from tcip_mcp.pipelines.components.detectors import build_detector
-
-    adapter = _nchan_adapter(3)
-    names = list(adapter(torch.zeros(1, 3, 64, 64)).keys())
-    det = build_detector(
-        "faster_rcnn",
-        adapter,
-        num_classes=1,
-        featmap_names=names,
-        num_levels=len(names),
-    )
-    assert det.transform.image_mean == [0.485, 0.456, 0.406]
+    assert det.transform.image_mean == [0.4] * 3
 
 
 def test_torchvision_constructor_kwargs_forward_but_typos_raise():
     from tcip_mcp.pipelines.components.detectors import build_detector
+    from tests._chain_fixtures import detector_values
 
     adapter = _nchan_adapter(3)
     names = list(adapter(torch.zeros(1, 3, 64, 64)).keys())
-    common = {"featmap_names": names, "num_levels": len(names)}
+    common = {
+        "featmap_names": names,
+        "num_levels": len(names),
+        **detector_values(),
+    }
     det = build_detector(
         "faster_rcnn", adapter, num_classes=1, **common, box_nms_thresh=0.42
     )
@@ -266,8 +253,8 @@ def test_band_normalization_stats_matches_the_tensors_the_model_is_fed(
 
     stats = band_normalization_stats(paths, 5, max_images=len(paths), seed=0)
     assert stats is not None
-    mean, std = stats.mean, stats.std
-    assert sorted(p for p, _window in stats.sampling.windows) == sorted(
+    mean, std = stats.image_mean, stats.image_std
+    assert sorted(p for p, _window in _sampling(stats).windows) == sorted(
         str(p) for p in paths
     )
     actual = torch.stack(
@@ -283,6 +270,14 @@ def test_band_normalization_stats_matches_the_tensors_the_model_is_fed(
     assert torch.allclose(
         torch.tensor(std, dtype=torch.float32), expected_std, atol=1e-4
     )
+
+
+def _sampling(stats):
+    """The sampling record a band statistics record names as its source."""
+    from tcip_mcp.pipelines.schemas import ImageStatsSampling
+
+    assert isinstance(stats.source, ImageStatsSampling), stats.source
+    return stats.source
 
 
 def test_band_normalization_stats_admits_underivable(tmp_path):
@@ -322,8 +317,9 @@ def test_band_normalization_stats_draw_their_capped_sample_from_the_stated_seed(
     def read(seed: int) -> list[str]:
         stats = band_normalization_stats(paths, 5, max_images=3, seed=seed)
         assert stats is not None
-        assert (stats.sampling.max_images, stats.sampling.seed) == (3, seed)
-        return [p for p, _window in stats.sampling.windows]
+        sampling = _sampling(stats)
+        assert (sampling.max_images, sampling.seed) == (3, seed)
+        return [p for p, _window in sampling.windows]
 
     first = read(0)
     assert len(first) == 3
@@ -381,9 +377,13 @@ def test_sampled_band_normalization_stats_over_full_coverage_match_the_exact_sib
         max_images=1,
     )
     assert exact is not None and sampled is not None
-    assert sampled.sampling.pixel_fraction == 1.0
-    assert sampled.mean == pytest.approx(exact.mean, rel=1e-12, abs=1e-12)
-    assert sampled.std == pytest.approx(exact.std, rel=1e-12, abs=1e-12)
+    assert _sampling(sampled).pixel_fraction == 1.0
+    assert sampled.image_mean == pytest.approx(
+        exact.image_mean, rel=1e-12, abs=1e-12
+    )
+    assert sampled.image_std == pytest.approx(
+        exact.image_std, rel=1e-12, abs=1e-12
+    )
 
 
 def test_sampled_band_normalization_stats_records_the_windows_it_read(
@@ -402,16 +402,17 @@ def test_sampled_band_normalization_stats_records_the_windows_it_read(
 
     sampled = band_normalization_stats_sampled([path], arr.shape[-1], **kwargs)
     assert sampled is not None
-    windows = sampled.sampling.windows
+    sampling = _sampling(sampled)
+    windows = sampling.windows
     assert len(windows) == 3
     assert {label for label, _ in windows} == {str(path)}
     covered = sum(
         (r.x1 - r.x0) * (r.y1 - r.y0) for _, r in windows if r is not None
     )
-    assert sampled.sampling.pixel_fraction == pytest.approx(
+    assert sampling.pixel_fraction == pytest.approx(
         covered / (arr.shape[0] * arr.shape[1])
     )
-    assert sampled.sampling.seed == 4
+    assert sampling.seed == 4
 
     repeat = band_normalization_stats_sampled([path], arr.shape[-1], **kwargs)
     assert repeat == sampled
@@ -552,7 +553,11 @@ def test_a_run_that_states_no_width_records_the_one_its_sources_carry(
     from tcip_mcp.pipelines.model_build import recorded_model_dims
     from tcip_mcp.pipelines.schemas import train_config
 
-    spec = train_config(training_config(CLASSIFIER_SOURCE, data_cfg))
+    spec = train_config(
+        training_config(
+            tmp_path, weights_statistics(CLASSIFIER_SOURCE), data_cfg
+        )
+    )
     assert recorded_model_dims(spec)["in_chans"] == 3
 
 

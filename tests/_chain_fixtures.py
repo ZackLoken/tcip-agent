@@ -52,23 +52,28 @@ BESPOKE_INSTANCE_SEG = "bespoke_models:build_bespoke_instance_seg"
 BESPOKE_ORDINAL = "bespoke_models:build_bespoke_ordinal"
 BESPOKE_REGRESSOR = "bespoke_models:build_bespoke_regressor"
 GT_ANCHOR_DETECTOR = "bespoke_models:build_bespoke_detector"
-"""The GroupNorm detector whose anchors come from the ground truth's own box shapes."""
+"""The GroupNorm detector built at the geometry its model source's record derives."""
 BARE_SCORE_THRESH_DETECTOR = "bespoke_models:build_bare_score_thresh_detector"
 BARE_NO_KNOB_DETECTOR = "bespoke_models:build_bare_no_knob_detector"
 SAVE_BUILT_WEIGHTS = "bespoke_models:save_built_weights"
 """A ``training_source`` that takes no step and saves the weights its model was built with."""
 TRAIN_BESPOKE = "bespoke_models:train_bespoke"
 """A ``training_source`` training through the ``ctx`` sinks."""
+FRAME_STATISTICS = "the band statistics of the config's own frames"
+"""A model source's ``normalization`` standing for the band statistics of the train side its
+config's data section resolves to."""
 DETECTION_SOURCE = {
     "builder": BESPOKE_DETECTION,
     "source_files": [BESPOKE_MODELS],
     "task": "detection",
+    "normalization": FRAME_STATISTICS,
 }
-"""A ``model_source`` of :data:`BESPOKE_DETECTION` at its builder's own sizes."""
+"""A ``model_source`` of :data:`BESPOKE_DETECTION` loading no weights."""
 CLASSIFIER_SOURCE = {
     "builder": BESPOKE_CLASSIFIER,
     "source_files": [BESPOKE_MODELS],
     "task": "classification",
+    "normalization": FRAME_STATISTICS,
 }
 """A ``model_source`` of :data:`BESPOKE_CLASSIFIER`."""
 REGION_BUILDER = {
@@ -76,13 +81,151 @@ REGION_BUILDER = {
     "builder_kwargs": {},
     "source_files": [BESPOKE_MODELS],
     "task": "detection",
+    "normalization": FRAME_STATISTICS,
 }
 BLOB_BUILDER = {
     "builder": "bespoke_models:build_bright_blob_detector",
     "builder_kwargs": {},
     "source_files": [BESPOKE_MODELS],
     "task": "detection",
+    "normalization": FRAME_STATISTICS,
 }
+
+
+def detector_geometry(frame: tuple[int, int] = (64, 64)):
+    """The ``schemas.DetectorGeometry`` ``derivations.derive_detector_geometry`` gives for
+    ``frame`` over objects a quarter and an eighth of its short edge across.
+    """
+    import numpy as np
+
+    from tcip_mcp.pipelines.derivations import Region, derive_detector_geometry
+
+    edge = min(frame)
+    boxes = np.array(
+        [[0, 0, edge / 4, edge / 4], [0, 0, edge / 8, edge / 4]],
+        dtype=np.float32,
+    )
+    return derive_detector_geometry(
+        frame,
+        [Region(boxes, np.ones(2, dtype=np.int64), frame[0] * frame[1])],
+    )
+
+
+def stated_detector_geometry(frame: tuple[int, int] = (64, 64)) -> dict:
+    """A ``model_source.detector_geometry`` a detector over a dataset its own builder serves
+    states: :func:`detector_geometry`'s values with :data:`RATIONALE`.
+    """
+    return {
+        **detector_geometry(frame).handed(),
+        "source": {"rationale": RATIONALE},
+    }
+
+
+def band_statistics(bands: int = 3) -> dict:
+    """The ``image_mean`` and ``image_std`` of the band statistics of :func:`noise_frames` at
+    ``bands``, as their record hands them to a builder.
+    """
+    from tcip_mcp.pipelines.schemas import Normalization
+
+    return Normalization.model_validate(
+        frame_statistics(noise_frames(bands), bands)
+    ).handed()
+
+
+def detector_values(frame: tuple[int, int] = (64, 64), bands: int = 3) -> dict:
+    """The keyword values a direct build of a torchvision detector in a test takes:
+    :func:`detector_geometry`'s and :func:`band_statistics` at ``bands``.
+    """
+    return {**detector_geometry(frame).handed(), **band_statistics(bands)}
+
+
+def frame_statistics(images: list, bands: int) -> dict:
+    """The ``normalization`` record of the band statistics of every one of ``images`` read whole
+    at ``bands`` (``derivations.band_normalization_stats``), in JSON form.
+    """
+    from tcip_mcp.pipelines.derivations import band_normalization_stats
+
+    stats = band_normalization_stats(
+        images, bands, max_images=len(images), seed=0
+    )
+    assert stats is not None, "no fixture frame could be read"
+    return stats.model_dump(mode="json")
+
+
+def weights_normalization() -> dict:
+    """The normalization record, in JSON form, of the pretrained weights of the timm tag
+    ``resnet18.a1_in1k`` (``derivations.pretrained_normalization``), sourced by those weights.
+    """
+    from tcip_mcp.pipelines.derivations import pretrained_normalization
+    from tcip_mcp.pipelines.schemas import PretrainedWeights
+
+    weights = PretrainedWeights(library="timm", name="resnet18.a1_in1k")
+    return pretrained_normalization(weights).model_dump()
+
+
+def weights_statistics(model_source: dict) -> dict:
+    """``model_source`` normalizing by :func:`weights_normalization`."""
+    return {**model_source, "normalization": weights_normalization()}
+
+
+def own_statistics(config: dict, project: Path) -> dict:
+    """``config`` with a :data:`FRAME_STATISTICS` normalization replaced by the band statistics
+    (:func:`frame_statistics`) of the train side of the partition its data section resolves to
+    under ``project``, at the band count that resolution records: the resolution a run's own
+    makes (``split_construction.auto_train_val``, through ``_producer_fixtures.train_val``).
+    Every refusal of the resolution or the derivation propagates. A ``config`` stating any other
+    normalization is returned as it is.
+    """
+    from tests._producer_fixtures import train_val
+
+    source = config["model_source"]
+    if source.get("normalization") != FRAME_STATISTICS:
+        return config
+    _train, _val, partition, resolved = train_val(
+        project, source["task"], config["data"]
+    )
+    statistics = frame_statistics(
+        train_sources(partition), resolved.num_channels
+    )
+    return {**config, "model_source": {**source, "normalization": statistics}}
+
+
+def train_sources(partition: dict) -> list[str]:
+    """The sources of the train side of a resolved ``partition``
+    (``split_construction.partition_samples``), in its order.
+    """
+    from tcip_mcp.pipelines.data.split_construction import partition_samples
+
+    return [
+        str(s.source)
+        for s in partition_samples(partition)
+        if s.side == "train"
+    ]
+
+
+_NOISE: dict = {}
+"""The directory :func:`noise_frames` writes at each band count, held so it is removed at
+exit."""
+
+
+def noise_frames(bands: int = 3) -> list:
+    """The paths of two ``bands``-band frames of seeded uniform noise, written once per session
+    to a temporary directory removed at exit.
+    """
+    import tempfile
+
+    import numpy as np
+    import tifffile
+
+    if bands not in _NOISE:
+        _NOISE[bands] = tempfile.TemporaryDirectory(prefix="tcip-noise-")
+        rng = np.random.default_rng(bands)
+        for index in range(2):
+            tifffile.imwrite(
+                Path(_NOISE[bands].name) / f"noise{index}.tif",
+                rng.integers(0, 256, (32, 32, bands), dtype=np.uint8),
+            )
+    return sorted(str(p) for p in Path(_NOISE[bands].name).glob("*.tif"))
 
 
 def object_at(index: int) -> tuple[int, int, int]:
@@ -166,29 +309,38 @@ def draw_reference_selection(project: Path, root: Path, out: Path):
 
 
 def run_config(
-    selection_dir: Path, model_source: dict = REGION_BUILDER, **overrides: Any
+    project: Path,
+    selection_dir: Path,
+    model_source: dict = REGION_BUILDER,
+    **overrides: Any,
 ) -> dict:
-    """A :func:`training_config` of ``model_source`` with ``overrides`` that binds the drawn
-    selection rather than drawing a partition of its own.
+    """A :func:`training_config` of ``model_source`` with ``overrides`` that binds ``project``'s
+    drawn selection at ``selection_dir`` rather than drawing a partition of its own.
     """
     return training_config(
+        project,
         model_source,
         {"split": {"selection_dir": str(selection_dir)}},
         **overrides,
     )
 
 
-def training_config(model_source: dict, data: dict, **overrides: Any) -> dict:
-    """A one-epoch seeded CPU run of ``model_source`` over the ``data`` section (drawing the sample
-    split of ``tests._training_values.drawn_split`` when it states none), every other key the toy
-    detectors train at (the optimizer, schedule, stop rule and evaluation blocks the sample ones
-    of ``tests._training_values``, the schedule's one-epoch horizon ending the stage), with a
-    copy of each of ``overrides`` in place of its key. Its one stage trains every parameter at
-    one rate, since the toy detectors expose neither a backbone to freeze nor parameter groups.
+def training_config(
+    project: Path, model_source: dict, data: dict, **overrides: Any
+) -> dict:
+    """A one-epoch seeded CPU run of ``project`` of ``model_source`` over the ``data`` section
+    (drawing the sample split of ``tests._training_values.drawn_split`` when it states none),
+    every other key the toy detectors train at (the optimizer, schedule, stop rule and
+    evaluation blocks the sample ones of ``tests._training_values``, the schedule's one-epoch
+    horizon ending the stage), with a copy of each of ``overrides`` in place of its key. Its one
+    stage trains every parameter at one rate, since the toy detectors expose neither a backbone
+    to freeze nor parameter groups. A :data:`FRAME_STATISTICS` normalization becomes the
+    statistics of the frames the run trains on, resolved under ``project``
+    (:func:`own_statistics`).
     """
     import copy
 
-    return {
+    config = {
         "model_source": copy.deepcopy(model_source),
         "data": {"split": drawn_split(), **data},
         "rationale": RATIONALE,
@@ -206,20 +358,22 @@ def training_config(model_source: dict, data: dict, **overrides: Any) -> dict:
         "gradient_accumulation_steps": 1,
         **copy.deepcopy(overrides),
     }
+    return own_statistics(config, project)
 
 
-def built_model(config: dict):
+def built_model(config: dict, detector=None):
     """The model a run over ``config`` builds: its validated ``model_source``, imported from the
     layout its admission stages with this repository as its project
     (``model_build.staged_sources``), at the dims its data block records
-    (``model_build.recorded_model_dims``).
+    (``model_build.recorded_model_dims``) and, for a detector, the geometry ``detector`` (a
+    ``schemas.DetectorGeometry``) a resolution would have recorded.
     """
     from tcip_mcp.pipelines.model_build import (
         build_from_model_source,
         recorded_model_dims,
         staged_sources,
     )
-    from tcip_mcp.pipelines.schemas import train_config
+    from tcip_mcp.pipelines.schemas import TrainGeometry, train_config
     from tests import REPO_ROOT
 
     spec = train_config(config)
@@ -227,6 +381,9 @@ def built_model(config: dict):
         spec.model_source,
         staged_sources(spec, REPO_ROOT).layout,
         recorded_model_dims(spec),
+        TrainGeometry(
+            native_size=None, object_density=None, detector=detector
+        ),
     )
 
 
@@ -242,7 +399,7 @@ def train_on(
     observation = observe(
         worker_run(
             project_root,
-            run_config(selection_dir),
+            run_config(project_root, selection_dir),
             experiment_id=experiment_id,
         )
     )
@@ -784,7 +941,9 @@ def attributed_series(
         ),
     )
     assert "error" not in drawn, drawn
-    config = run_config(selection_dir, model_source or BLOB_BUILDER, seed=2)
+    config = run_config(
+        project, selection_dir, model_source or BLOB_BUILDER, seed=2
+    )
     from tcip_mcp.experiments import observe
 
     checkpoint = observe(

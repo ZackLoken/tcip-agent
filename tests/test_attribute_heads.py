@@ -24,17 +24,20 @@ import torch  # noqa: E402
 from tcip_annotation.json_io import UNASSESSED  # noqa: E402
 from tcip_mcp import subject_registry as cr  # noqa: E402
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
-from tests._chain_fixtures import ATTRIBUTE, PLANTS, VALUES, attributed_series  # noqa: E402
+from tests._chain_fixtures import (  # noqa: E402
+    ATTRIBUTE,
+    FRAME_STATISTICS,
+    PLANTS,
+    VALUES,
+    attributed_series,
+)
 from tests._training_values import (  # noqa: E402
     DISPERSION_QUANTILE,
     EQUIVALENCE_Z,
     IOU_THRESHOLD,
     RATIONALE,
 )
-from tests._verified_checkpoint_fixtures import (  # noqa: E402
-    BUILT_DETECTOR,
-    SQUARE_64_DETECTOR,
-)
+from tests._verified_checkpoint_fixtures import BUILT_DETECTOR  # noqa: E402
 
 UNFILTERED = Stated(tile=False, conf=0.0, rationale=RATIONALE)
 """An untiled pass keeping every box up to the checkpoint's density."""
@@ -97,7 +100,7 @@ def test_two_attributes_train_two_heads_publish_both_values_and_deliver(
         fractions=(0.0, 1.0),
         assessed=False,
         attributes=(OPENING, COLOR),
-        model_source=SQUARE_64_DETECTOR,
+        model_source=BUILT_DETECTOR,
         stated=UNFILTERED,
         experiment_id="exp-two-heads",
     )
@@ -242,17 +245,20 @@ def test_a_document_scope_whose_attributes_were_never_read_sizes_no_model(
     from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tcip_mcp.pipelines.model_build import recorded_model_dims
     from tcip_mcp.pipelines.schemas import train_config
-    from tests._chain_fixtures import training_config
+    from tests._chain_fixtures import training_config, weights_statistics
 
     unread = training_config(
-        BUILT_DETECTOR, {"num_channels": 3, "scope": {"subject": SUBJECT}}
+        tmp_path,
+        weights_statistics(BUILT_DETECTOR),
+        {"num_channels": 3, "scope": {"subject": SUBJECT}},
     )
     with pytest.raises(ValueError, match="records no attributes"):
         recorded_model_dims(train_config(unread))
 
     images_dir = _frames(tmp_path / "ds", {"color": "red"})
     read = training_config(
-        BUILT_DETECTOR,
+        tmp_path,
+        weights_statistics(BUILT_DETECTOR),
         {
             "num_channels": 3,
             "scope": asdict(registry_scope(images_dir, SUBJECT)),
@@ -274,7 +280,11 @@ def test_an_instance_unassessed_for_one_attribute_trains_that_head_on_nothing_an
     color column reads unassessed, the color head's loss is masked to nothing and the grade head
     trains.
     """
-    from tests._chain_fixtures import built_model, training_config
+    from tests._chain_fixtures import (
+        built_model,
+        detector_geometry,
+        training_config,
+    )
     from tests._producer_fixtures import run_over
 
     images_dir = _frames(tmp_path / "ds", {"grade": "high"})
@@ -285,7 +295,12 @@ def test_an_instance_unassessed_for_one_attribute_trains_that_head_on_nothing_an
     image, target = loader[0]
     assert target["attributes"].tolist() == [[UNASSESSED, 2]]
 
-    model = built_model(training_config(BUILT_DETECTOR, data))
+    model = built_model(
+        training_config(
+            tmp_path, BUILT_DETECTOR, {**data, "images_dir": str(images_dir)}
+        ),
+        detector_geometry(),
+    )
     model.train()
     losses = model([image], [target])
     color_head, grade_head = model.detector.attribute_heads
@@ -314,11 +329,12 @@ def test_each_builtin_detector_carries_one_head_per_attribute(name: str):
     from tcip_mcp.pipelines.operating_point import (
         detector_operating_point_holder,
     )
+    from tests._chain_fixtures import detector_values
     from tests.bespoke_models import build_bespoke_detection
 
     torch.manual_seed(0)
     model = build_bespoke_detection(
-        detector=name, min_size=64, max_size=64, attributes=(COLOR, GRADE)
+        detector=name, attributes=(COLOR, GRADE), **detector_values()
     )
     image = torch.rand(3, 64, 64)
     target = {
@@ -414,6 +430,7 @@ def test_two_tiles_calling_one_object_differently_merge_into_the_higher_scoring_
             "builder_kwargs": {},
             "source_files": [BESPOKE_MODELS],
             "task": "detection",
+            "normalization": FRAME_STATISTICS,
         },
         data={"num_channels": 3, "scope": {"subject": SUBJECT}},
         registry=cr.SubjectRegistry(

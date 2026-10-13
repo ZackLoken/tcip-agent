@@ -47,6 +47,7 @@ def _trained(
     config = regressor_config(
         1,
         data=frames_data(tmp_path / "ds", intensities, values),
+        project=tmp_path,
         builder=BUILDER,
         gradient_accumulation_steps=accumulation,
         batch_size=1,
@@ -78,8 +79,8 @@ def _record_steps(monkeypatch, steps: list) -> None:
         gt.build_optimizer,
     )
 
-    def build_model(source, plan, dims):
-        model = real_build_model(source, plan, dims)
+    def build_model(source, plan, dims, geometry):
+        model = real_build_model(source, plan, dims, geometry)
 
         def record(module, args):
             if module.training:

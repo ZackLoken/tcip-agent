@@ -79,6 +79,7 @@ def launch(tmp_path, monkeypatch, children):
                 "labels_dir": str(csv_path),
                 "split": drawn_split(val_ratio=0.15),
             },
+            project=tmp_path,
             **extra,
         )
         return launch_training(
@@ -280,7 +281,9 @@ def test_a_reader_never_sees_a_final_status_before_its_bytes_are_whole(
         opened_run,
     )
 
-    run_dir = opened_run(tmp_path, detection_config(tmp_path / "data"))
+    run_dir = opened_run(
+        tmp_path, detection_config(tmp_path / "data", project=tmp_path)
+    )
     seen: list = []
     real_publish = experiments.publish_once
 
@@ -482,7 +485,7 @@ def test_a_name_is_reserved_by_the_directory_that_takes_it_first(
 
     sweep = opened_sweep(tmp_path, real_hpo_base_config)
     trial = open_trial(sweep, "a", {"optimizer.head_lr": 0.01})
-    config = detection_config(tmp_path.parent / "run-data")
+    config = detection_config(tmp_path.parent / "run-data", project=tmp_path)
     with pytest.raises(RunDirectoryExistsError, match=re.escape(str(sweep))):
         opened_run(tmp_path, config, experiment_id=sweep.name)
     run = opened_run(tmp_path, config, experiment_id="a-free-name")
@@ -511,7 +514,7 @@ def test_the_live_run_conflict_reads_the_projects_one_listing(
 
     opened_run(
         tmp_path,
-        detection_config(tmp_path.parent / "run-data"),
+        detection_config(tmp_path.parent / "run-data", project=tmp_path),
         experiment_id="live-run",
     )
     assert "live-run" in (experiments.live_run_conflict(tmp_path) or "")
@@ -552,6 +555,7 @@ def _trial(
             "labels_dir": str(csv_path),
             "split": drawn_split(val_ratio=0.34, seed=3),
         },
+        project=tmp_path,
         **extra,
     )
     base_config["model_source"]["source_files"].append(__file__)
@@ -690,6 +694,7 @@ def test_a_runs_and_a_sweeps_records_carry_no_metric_and_every_reader_answers_th
             data=opposed_regression_data(
                 single / "ds", TRAIN_INTENSITIES, VAL_INTENSITIES
             ),
+            project=single,
             evaluation=evaluation_block(selection_metric="mae"),
         ),
     )

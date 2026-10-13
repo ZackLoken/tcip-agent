@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from tests._chain_fixtures import BESPOKE_CLASSIFIER
+from tests._chain_fixtures import BESPOKE_CLASSIFIER, FRAME_STATISTICS
 
 torch = pytest.importorskip("torch")
 
@@ -66,10 +66,15 @@ class TestFullClassificationPipeline:
             "builder": BESPOKE_CLASSIFIER,
             "source_files": [bespoke_models.__file__],
             "task": "classification",
+            "normalization": FRAME_STATISTICS,
         }
 
         # --- Step 2: Build the model and verify it runs ---
-        model = bespoke_models.build_bespoke_classifier(num_classes=2)
+        from tests._chain_fixtures import band_statistics
+
+        model = bespoke_models.build_bespoke_classifier(
+            num_classes=2, **band_statistics()
+        )
         dummy = torch.randn(2, 3, 64, 64)
         model.eval()
         with torch.no_grad():
@@ -96,6 +101,7 @@ class TestFullClassificationPipeline:
         from tests._verified_checkpoint_fixtures import worker_run
 
         config = training_config(
+            tmp_path,
             model_source,
             {
                 "images_dir": images_dir,
@@ -186,12 +192,13 @@ class TestDetectionPipelineRealData:
     """End-to-end: build → train → infer using real bud images (nested schema)."""
 
     def test_build_train_infer(self, tmp_path):
+        from tests._chain_fixtures import detector_values
         from tests._verified_checkpoint_fixtures import built_detector
 
         # --- Step 1: A bespoke detection model_source at the real images' larger input sizes ---
-        model_source = built_detector(min_size=320, max_size=512)
+        model_source = built_detector()
         model = bespoke_models.build_bespoke_detection(
-            num_classes=1, min_size=320, max_size=512
+            num_classes=1, **detector_values((512, 320))
         )
         assert isinstance(model, bespoke_models.BespokeDetection)
 
@@ -226,6 +233,7 @@ class TestDetectionPipelineRealData:
         from tests._verified_checkpoint_fixtures import worker_run
 
         config = training_config(
+            tmp_path,
             model_source,
             {
                 **data,

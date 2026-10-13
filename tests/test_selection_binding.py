@@ -25,7 +25,9 @@ from tests._chain_fixtures import (
     BLOB_BUILDER,
     DETECTION_SOURCE,
     run_config,
+    stated_detector_geometry,
     training_config,
+    weights_statistics,
 )
 from tests._producer_fixtures import (
     label_image,
@@ -349,7 +351,9 @@ def test_a_multi_date_selection_trains_without_copying_anything(
     drawn = _draw(tmp_path, root, out)
 
     run_dir = opened_run(
-        tmp_path, run_config(out, BLOB_BUILDER), experiment_id="exp-multi-date"
+        tmp_path,
+        run_config(tmp_path, out, BLOB_BUILDER),
+        experiment_id="exp-multi-date",
     )
 
     from tcip_mcp.pipelines.training.subprocess_worker import run_directory
@@ -418,10 +422,16 @@ def test_a_bound_run_keeps_its_selections_attributes_when_the_registry_is_reorde
         ),
     )
 
-    config = run_config(out, BLOB_BUILDER)
     # The directory a relaunched config still carries beside its binding: exactly what a
     # registry re-read would resolve the wrong map from.
-    config["data"]["images_dir"] = str(root / "images" / DATES[0])
+    config = training_config(
+        tmp_path,
+        BLOB_BUILDER,
+        {
+            "images_dir": str(root / "images" / DATES[0]),
+            "split": {"selection_dir": str(out)},
+        },
+    )
     run_dir = opened_run(tmp_path, config, experiment_id="exp-reordered")
 
     run_directory(run_dir)
@@ -476,7 +486,10 @@ def test_a_ground_truth_place_stated_beside_a_selection_refuses_the_bound_run(
         with pytest.raises(ValueError, match="Drop data.labels_dir"):
             _train_val(tmp_path, "detection", data_cfg)
         issues = preflight_config(
-            tmp_path, _preflight_config(root, out, labels_dir=str(place))
+            tmp_path,
+            training_config(
+                tmp_path, weights_statistics(DETECTION_SOURCE), data_cfg
+            ),
         )["issues"]
         assert any("Drop data.labels_dir" in issue for issue in issues), issues
 
@@ -861,11 +874,18 @@ def test_the_preflight_smoke_batch_is_the_batch_the_bound_run_trains(
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     drawn = _draw(tmp_path, root, out)
-    config = training_config(DETECTION_SOURCE, _run_data_cfg(root, out))
-    config["data"]["dataset_source"] = {
-        "builder": RECORDING_DATASET,
-        "source_files": [__file__],
-    }
+    config = training_config(
+        tmp_path,
+        DETECTION_SOURCE,
+        {
+            **_run_data_cfg(root, out),
+            "dataset_source": {
+                "builder": RECORDING_DATASET,
+                "source_files": [__file__],
+            },
+        },
+    )
+    config["model_source"]["detector_geometry"] = stated_detector_geometry()
     spec = train_config(config)
 
     smoked = resolve_run(
@@ -1060,6 +1080,7 @@ def test_a_bound_split_stating_a_seed_redraws_and_one_stating_none_keeps_the_rec
         ctx = run_context(
             tmp_path,
             training_config(
+                tmp_path,
                 BUILT_DETECTOR,
                 {"split": {"selection_dir": str(out), **split}},
             ),
@@ -1230,8 +1251,11 @@ def test_preflight_flags_a_redraw_whose_members_hold_one_foreground_group(
     from tcip_mcp.tools.training_tools import preflight_config
 
     root, out = one_foreground_group_selection(tmp_path)
-    config = _preflight_config(root, out)
-    config["data"]["split"]["seed"] = 1
+    config = training_config(
+        tmp_path,
+        weights_statistics(DETECTION_SOURCE),
+        {"split": {"selection_dir": str(out), "seed": 1}},
+    )
 
     result = preflight_config(tmp_path, config)
 
@@ -1243,11 +1267,6 @@ def test_preflight_flags_a_redraw_whose_members_hold_one_foreground_group(
 # -- preflight_config's selection-level checks ---------------------------------
 
 
-def _preflight_config(root: Path, selection_dir: Path, **overrides) -> dict:
-    data_cfg = _run_data_cfg(root, selection_dir, **overrides)
-    return training_config(DETECTION_SOURCE, data_cfg)
-
-
 def test_preflight_config_admits_a_bound_selection_with_no_issues(
     tmp_path: Path,
 ):
@@ -1257,7 +1276,10 @@ def test_preflight_config_admits_a_bound_selection_with_no_issues(
     out = tmp_path / "m"
     _draw(tmp_path, root, out)
 
-    result = preflight_config(tmp_path, _preflight_config(root, out))
+    result = preflight_config(
+        tmp_path,
+        training_config(tmp_path, DETECTION_SOURCE, _run_data_cfg(root, out)),
+    )
 
     # A bound config names no images_dir: the selection's samples carry their own sources and
     # ground truth, so the directory checks must not raise an objection against it.
@@ -1270,9 +1292,12 @@ def test_preflight_config_flags_a_selection_with_no_subject(tmp_path: Path):
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(tmp_path, root, out)
+    config = training_config(
+        tmp_path, DETECTION_SOURCE, _run_data_cfg(root, out)
+    )
     _strip_the_recorded_subject(out)
 
-    result = preflight_config(tmp_path, _preflight_config(root, out))
+    result = preflight_config(tmp_path, config)
 
     assert any("records no subject" in i for i in result["issues"])
 
@@ -1285,8 +1310,11 @@ def test_preflight_config_admits_a_redraw_seed_with_a_warning(
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     out = tmp_path / "m"
     _draw(tmp_path, root, out)
-    config = _preflight_config(root, out)
-    config["data"]["split"]["seed"] = 1
+    config = training_config(
+        tmp_path,
+        DETECTION_SOURCE,
+        {"split": {"selection_dir": str(out), "seed": 1}},
+    )
 
     result = preflight_config(tmp_path, config)
 
@@ -1341,7 +1369,7 @@ def test_a_bound_detection_run_stating_the_composite_objective_selects_by_it(
     root = tmp_path / "ds"
     chain.synthetic_capture(root)
     chain.draw_reference_selection(tmp_path, root, tmp_path / "selection")
-    config = chain.run_config(tmp_path / "selection")
+    config = chain.run_config(tmp_path, tmp_path / "selection")
     assert config["evaluation"]["selection_metric"] == "objective"
 
     observation = observe(

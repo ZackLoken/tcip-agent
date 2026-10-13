@@ -62,6 +62,7 @@ def _real_drawn_experiment(
     opened_run(
         project,
         training_config(
+            project,
             unbuilt_source("detection"),
             {
                 "images_dir": str(images_dir),
@@ -126,7 +127,9 @@ def test_freeze_selection_round_trips_through_a_real_bind(tmp_path: Path):
         assert Path(sample.source).parent == root / "images" / DATES[0]
         assert ts.exists(sample.ground_truth)
 
-    second = train_config(run_config(Path(selection_dir), DETECTION_SOURCE))
+    second = train_config(
+        run_config(tmp_path, Path(selection_dir), DETECTION_SOURCE)
+    )
     assert (
         selection_compatibility(second.data, second.data.split, frozen) == []
     )
@@ -356,9 +359,9 @@ def test_freeze_selection_refuses_a_spatial_split(tmp_path: Path):
     its ``spatial`` split, and freeze_selection binds only a stem-keyed partition.
     """
     from tcip_mcp.tools.data_tools import freeze_selection
-    from tests.test_spatial_region_containment import _mosaic_dataset
+    from tests._producer_fixtures import big_single_source
 
-    images_dir = _mosaic_dataset(tmp_path / "ds")
+    images_dir, _stem = big_single_source(tmp_path / "ds", 4000, 3000)
     resolved_run(
         tmp_path,
         {

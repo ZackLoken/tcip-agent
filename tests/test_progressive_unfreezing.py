@@ -224,14 +224,14 @@ def test_an_optimizer_trains_a_built_detectors_backbone_at_backbone_lr_and_the_r
     from tcip_mcp import subject_registry
     from tcip_mcp.pipelines.schemas import OptimizerSpec
     from tcip_mcp.pipelines.training.optimizer_factory import build_optimizer
+    from tests._chain_fixtures import detector_values
     from tests.bespoke_models import build_bespoke_detection
 
     spec = OptimizerSpec.model_validate(
         adamw_optimizer(backbone_lr=1e-4, head_lr=1e-3)
     )
     model = build_bespoke_detection(
-        min_size=64,
-        max_size=128,
+        **detector_values(),
         attributes=tuple(
             subject_registry.Attribute(name, "ordinal", ("low", "high"))
             for name in attributes
@@ -281,7 +281,9 @@ def test_a_stage_freeze_a_model_cannot_apply_refuses_by_name():
         apply_stage_freeze(_NoStageCount(), -1)
     assert apply_stage_freeze(nn.Linear(2, 1), 0) == 3
 
-    model = build_bespoke_classifier(num_classes=2)
+    from tests._chain_fixtures import band_statistics
+
+    model = build_bespoke_classifier(num_classes=2, **band_statistics())
     apply_stage_freeze(model, -1)
     assert not any(p.requires_grad for p in model.backbone.parameters())
     assert all(p.requires_grad for p in model.heads.parameters())
@@ -456,6 +458,7 @@ def _trained(tmp_path: Path, stages, n: int = 6, **extra):
         width=IMG,
     )
     config = training_config(
+        tmp_path,
         dict(CLASSIFIER_SOURCE),
         {
             "images_dir": str(images_dir),

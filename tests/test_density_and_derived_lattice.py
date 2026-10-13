@@ -258,6 +258,9 @@ def _resolved(project: Path, data: dict, monkeypatch) -> tuple:
     from tests._chain_fixtures import training_config
     from tests._verified_checkpoint_fixtures import unbuilt_source
 
+    spec = train_config(
+        training_config(project, unbuilt_source("detection"), data)
+    )
     calls: list = []
     real = derivations.derive_tile_geometry
 
@@ -266,7 +269,6 @@ def _resolved(project: Path, data: dict, monkeypatch) -> tuple:
         return real(*args, **kwargs)
 
     monkeypatch.setattr(derivations, "derive_tile_geometry", counted)
-    spec = train_config(training_config(unbuilt_source("detection"), data))
     run = resolve_run(
         spec, staged_sources(spec, project).layout, project=project
     )
@@ -579,10 +581,12 @@ def test_validation_keeps_every_box_the_cap_admits_whatever_the_builders_own_flo
 
 
 def _frames_config(project: Path, name: str, **data) -> dict:
-    """A one-epoch run of the built detector over four labeled frames of its own, drawing a
-    validation side and selecting on its loss, ``data``'s keys beside its data section's own.
+    """A one-epoch run of the built detector over four labeled 64 by 48 frames of its own,
+    drawing a validation side and selecting on its loss, ``data``'s keys beside its data
+    section's own. A ``dataset_source`` in ``data`` resolves no frame, so the detector states its
+    geometry at that frame.
     """
-    from tests._chain_fixtures import training_config
+    from tests._chain_fixtures import stated_detector_geometry, training_config
     from tests._training_values import evaluation_block
     from tests._verified_checkpoint_fixtures import (
         SCOPED_DATA,
@@ -591,8 +595,14 @@ def _frames_config(project: Path, name: str, **data) -> dict:
         fixture_data_dir,
     )
 
+    stated = (
+        {"detector_geometry": stated_detector_geometry((64, 48))}
+        if "dataset_source" in data
+        else {}
+    )
     return training_config(
-        detector_declaring(THIS_FILE),
+        project,
+        detector_declaring(THIS_FILE) | stated,
         {
             **detection_images(
                 fixture_data_dir(project, name), SCOPED_DATA["scope"], n=4
@@ -915,14 +925,15 @@ def test_an_operating_point_knob_stated_to_the_builder_refuses_by_name(
     """The cap and the score threshold are set at every forward: a detector builder handed
     either refuses naming it, and the same call without it builds at its other keywords.
     """
+    from tests._chain_fixtures import detector_values
     from tests.bespoke_models import build_bespoke_detection
 
     with pytest.raises(ValueError, match=knob):
         build_bespoke_detection(
-            min_size=64, max_size=128, box_nms_thresh=0.4, **{knob: 7}
+            box_nms_thresh=0.4, **{knob: 7}, **detector_values()
         )
     assert (
-        build_bespoke_detection(min_size=64, max_size=128, box_nms_thresh=0.4)
+        build_bespoke_detection(box_nms_thresh=0.4, **detector_values())
         is not None
     )
 

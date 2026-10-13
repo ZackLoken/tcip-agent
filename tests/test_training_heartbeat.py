@@ -33,7 +33,9 @@ def _listed(project) -> dict:
 def test_the_heartbeat_window_decides_running_against_interrupted(tmp_path):
     from tcip_mcp.experiments import HEARTBEAT_STALE_SECONDS, observe
 
-    run_dir = opened_run(tmp_path, detection_config(tmp_path / "data"))
+    run_dir = opened_run(
+        tmp_path, detection_config(tmp_path / "data", project=tmp_path)
+    )
     _beat(run_dir, 0)
     assert observe(run_dir).state == "running"
     _beat(run_dir, HEARTBEAT_STALE_SECONDS - 30)
@@ -45,13 +47,17 @@ def test_the_heartbeat_window_decides_running_against_interrupted(tmp_path):
 def test_listed_runs_read_running_against_interrupted(tmp_path):
     _beat(
         opened_run(
-            tmp_path, detection_config(tmp_path / "data"), experiment_id="live"
+            tmp_path,
+            detection_config(tmp_path / "data", project=tmp_path),
+            experiment_id="live",
         ),
         0,
     )
     _beat(
         opened_run(
-            tmp_path, detection_config(tmp_path / "data"), experiment_id="dead"
+            tmp_path,
+            detection_config(tmp_path / "data", project=tmp_path),
+            experiment_id="dead",
         ),
         2 * 3600,
     )
@@ -69,7 +75,7 @@ def test_a_listed_row_carries_the_heartbeat_instant(tmp_path):
     instant = _beat(
         opened_run(
             tmp_path,
-            detection_config(tmp_path / "data"),
+            detection_config(tmp_path / "data", project=tmp_path),
             experiment_id="beating",
         ),
         180,
@@ -99,7 +105,7 @@ def test_configured_stale_window_agrees_across_run_list_compare_and_status(
     _beat(
         opened_run(
             tmp_path,
-            detection_config(tmp_path / "data"),
+            detection_config(tmp_path / "data", project=tmp_path),
             experiment_id="exp-window",
         ),
         300,

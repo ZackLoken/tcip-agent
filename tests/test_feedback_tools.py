@@ -334,7 +334,10 @@ def _bound_checkpoint(
     run_dir = worker_run(
         project,
         run_config(
-            manifest_dir, BUILT_DETECTOR, training_source=SAVE_BUILT_WEIGHTS
+            project,
+            manifest_dir,
+            BUILT_DETECTOR,
+            training_source=SAVE_BUILT_WEIGHTS,
         ),
         experiment_id=experiment_id,
     )
@@ -470,13 +473,13 @@ def test_the_review_queue_scores_candidates_at_the_checkpoints_own_read_width(
     from PIL import Image
 
     from tests._verified_checkpoint_fixtures import (
-        ONE_BAND_DETECTOR,
+        BUILT_DETECTOR,
         registered_checkpoint,
     )
 
     ckpt = registered_checkpoint(
         tmp_path,
-        model_source=ONE_BAND_DETECTOR,
+        model_source=BUILT_DETECTOR,
         data={"num_channels": 1, "scope": {"subject": "bud"}},
     )
     images = tmp_path / "images" / UNDATED_BUCKET
@@ -570,14 +573,14 @@ _FLAT_STEMS = ("a", "b", "c", "d", "e", "f")
 
 
 def _labeled_flat_image(path: Path) -> None:
-    """A gray image at ``path`` whose label document holds one ``leaf`` box."""
-    from PIL import Image
-
+    """A gray image at ``path`` holding one bright ``leaf`` box its label document names."""
     from tcip_annotation.state import Annotation, BBox
-    from tests._producer_fixtures import label_image
+    from tests._producer_fixtures import BRIGHT, label_image, painted_frame
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (_FLAT_IMG, _FLAT_IMG), color=(128, 128, 128)).save(path)
+    painted_frame(
+        _FLAT_IMG, _FLAT_IMG, (128, 128, 128), [((2, 2, 10, 10), BRIGHT)]
+    ).save(path)
     label_image(
         path,
         [Annotation(subject=_FLAT_SUBJECT, geometry=BBox(2, 2, 10, 10))],

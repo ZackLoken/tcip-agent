@@ -25,6 +25,7 @@ def _opened(
     """A detector run built by ``builder``, its module an empty file of its own, over two frames
     of its own under ``tmp_path``, opened by the launcher's own producer and writer.
     """
+    from tests._chain_fixtures import FRAME_STATISTICS
     from tests._verified_checkpoint_fixtures import (
         detection_config,
         opened_run,
@@ -36,10 +37,12 @@ def _opened(
     code.write_text("", encoding="utf-8")
     config = detection_config(
         tmp_path / f"{experiment_id}-data",
+        project=tmp_path,
         model_source={
             "builder": builder,
             "source_files": [str(code)],
             "task": "detection",
+            "normalization": FRAME_STATISTICS,
         },
     )
     return opened_run(tmp_path, config, experiment_id=experiment_id)
@@ -388,7 +391,7 @@ def test_a_cancel_naming_its_person_is_admitted_and_its_line_names_them(
 
     opened_run(
         tmp_path,
-        detection_config(tmp_path / "gui-data"),
+        detection_config(tmp_path / "gui-data", project=tmp_path),
         experiment_id="exp-gui-cancel",
     )
     before = len(read_log(audit_log_key(tmp_path)).records)
@@ -533,7 +536,9 @@ def test_a_route_launch_shows_its_declaration_from_its_launch_event(
 
     opened_run(
         tmp_path,
-        detection_config(tmp_path / "gui-data", batch_size=1),
+        detection_config(
+            tmp_path / "gui-data", project=tmp_path, batch_size=1
+        ),
         experiment_id="exp-gui-relaunch",
     )
 
@@ -565,21 +570,16 @@ def test_a_route_launch_shows_its_declaration_from_its_launch_event(
 
 def _regression_config(tmp_path: Path) -> dict:
     from tests._training_values import drawn_split
-    from tests.tiny_trainer_fixtures import (
-        regressor_config,
-        write_regression_dataset,
-    )
+    from tests._verified_checkpoint_fixtures import table_images
+    from tests.tiny_trainer_fixtures import regressor_config
 
-    images_dir, csv_path = write_regression_dataset(
-        tmp_path, intensities=[0.0, 1.0], values=[0.1, 0.9]
-    )
     return regressor_config(
         1,
         data={
-            "images_dir": str(images_dir),
-            "labels_dir": str(csv_path),
+            **table_images(tmp_path),
             "split": drawn_split(val_ratio=0.15),
         },
+        project=tmp_path,
     )
 
 

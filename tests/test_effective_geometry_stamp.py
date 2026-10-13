@@ -15,6 +15,7 @@ from tests._chain_fixtures import (  # noqa: E402
     BESPOKE_CLASSIFIER,
     BESPOKE_DETECTION,
     BESPOKE_SEMANTIC_SEG,
+    FRAME_STATISTICS,
     training_config,
 )
 from tests._producer_fixtures import dataset_over, registry_over  # noqa: E402
@@ -43,9 +44,18 @@ class _OpaqueStub:
     """No regions and no source list: nothing can be counted or probed."""
 
 
-def _geometry(data_cfg: dict, train_ds, task: str = "detection"):
-    """The geometry a ``task`` run whose data block is ``data_cfg`` reads off what ``train_ds``
-    serves (``generic_trainer.effective_data_geometry``).
+def _stated():
+    """A detector geometry a model source states with its reason."""
+    from tcip_mcp.pipelines.schemas import StatedDetectorGeometry
+    from tests._chain_fixtures import stated_detector_geometry
+
+    return StatedDetectorGeometry.model_validate(stated_detector_geometry())
+
+
+def _geometry(data_cfg: dict, train_ds, task: str = "detection", stated=None):
+    """The geometry a ``task`` run whose data block is ``data_cfg`` and whose model source states
+    the detector geometry ``stated`` reads off what ``train_ds`` serves
+    (``generic_trainer.effective_data_geometry``).
     """
     from tcip_mcp.pipelines.schemas import DataSpec
     from tcip_mcp.pipelines.training.generic_trainer import (
@@ -56,28 +66,36 @@ def _geometry(data_cfg: dict, train_ds, task: str = "detection"):
         task,
         DataSpec.model_validate({"split": drawn_split(), **data_cfg}),
         train_ds,
+        stated,
     )
 
 
 def test_stamp_tiled_run_records_its_tiles_density_and_no_native_frame():
-    """A tiled run's geometry is the density over the tiles it serves and no native frame."""
+    """A tiled run's geometry is the density over the tiles it serves, no native frame, and the
+    detector geometry derived at its tile edge.
+    """
+    from tcip_mcp.pipelines.derivations import DETECTOR_GEOMETRY_DERIVATION
+
     tiling = tiling_block(tile_size=96, overlap=0.25)
     stamped = _geometry({"tiling": tiling}, _TiledStub())
 
     assert stamped.object_density == pytest.approx(2 / (96 * 96))
     assert stamped.native_size is None
+    assert stamped.detector is not None
+    assert (stamped.detector.min_size, stamped.detector.max_size) == (96, 96)
+    assert stamped.detector.source == DETECTOR_GEOMETRY_DERIVATION
 
 
 def test_a_detector_dataset_records_its_density_whoever_built_it():
     """A bespoke builder's detector dataset exposing regions records their density as a
-    platform-built one does; a detector dataset exposing none refuses naming the interface, and
-    another head's records none.
+    platform-built one does, and the geometry its model source states; a detector dataset
+    exposing none refuses naming the interface, and another head's records none.
     """
     bespoke = {"dataset_source": {"builder": "my_module:build_ds"}}
 
-    assert _geometry(bespoke, _TiledStub()).object_density == pytest.approx(
-        2 / (96 * 96)
-    )
+    stamped = _geometry(bespoke, _TiledStub(), stated=_stated())
+    assert stamped.object_density == pytest.approx(2 / (96 * 96))
+    assert stamped.detector == _stated()
     with pytest.raises(ValueError, match="regions"):
         _geometry(bespoke, _OpaqueStub())
     assert (
@@ -120,15 +138,69 @@ def test_stamp_untiled_uniform_frames_record_their_native_size(tmp_path):
     assert stamped.object_density == pytest.approx(1 / (64 * 48))
 
 
-def test_stamp_untiled_mixed_frames_record_nothing(tmp_path):
+def test_stamp_untiled_mixed_frames_record_no_native_frame(tmp_path):
     """Mixed source sizes have no single native frame; stamping any one of them would be a
-    guess, so no native size is recorded.
+    guess, so no native size is recorded, and a detector over them takes the geometry its model
+    source states.
     """
     stamped = _geometry(
-        {"tiling": None}, _detection_dataset(tmp_path, [(64, 48), (32, 32)])
+        {"tiling": None},
+        _detection_dataset(tmp_path, [(64, 48), (32, 32)]),
+        stated=_stated(),
     )
 
     assert stamped.native_size is None
+    assert stamped.detector == _stated()
+
+
+def test_a_detector_resolving_no_frame_and_stating_no_geometry_refuses_naming_both(
+    tmp_path,
+):
+    """With no one frame to derive at and no stated geometry, a detector's resolution refuses
+    naming the tiling and the model source's statement.
+    """
+    with pytest.raises(ValueError) as refused:
+        _geometry(
+            {"tiling": None},
+            _detection_dataset(tmp_path, [(64, 48), (32, 32)]),
+        )
+
+    assert "data.tiling" in str(refused.value)
+    assert "model_source.detector_geometry" in str(refused.value)
+
+
+def test_a_stated_geometry_beside_a_resolved_frame_refuses_naming_the_derivation(
+    tmp_path,
+):
+    """Frames sharing one size resolve the frame the geometry derives from, so a statement
+    beside them refuses naming the derivation and the field to drop.
+    """
+    with pytest.raises(ValueError) as refused:
+        _geometry(
+            {"tiling": None},
+            _detection_dataset(tmp_path, [(64, 48), (64, 48)]),
+            stated=_stated(),
+        )
+
+    assert "derive_detector_geometry" in str(refused.value)
+    assert "model_source.detector_geometry" in str(refused.value)
+
+
+def test_uniform_frames_derive_the_detector_geometry_at_their_own_frame(
+    tmp_path,
+):
+    """Untiled uniform frames derive the detector geometry at the frame they share, the one
+    ``derivations.derive_detector_geometry`` gives over the same regions.
+    """
+    from tcip_mcp.pipelines.derivations import derive_detector_geometry
+
+    dataset = _detection_dataset(tmp_path, [(64, 48), (64, 48)])
+    stamped = _geometry({"tiling": None}, dataset)
+
+    assert stamped.detector == derive_detector_geometry(
+        (64, 48), dataset.regions
+    )
+    assert (stamped.detector.min_size, stamped.detector.max_size) == (48, 64)
 
 
 @pytest.mark.parametrize(
@@ -165,12 +237,19 @@ def test_a_config_stating_a_resolved_geometry_key_refuses_at_the_door_naming_it(
 # ── the run's resolved record, for a launched run and an HPO trial alike ──
 
 
-def _base_config(tiling, project: Path, *, task: str = "detection"):
+def _base_config(
+    tiling, project: Path, *, task: str = "detection", refused: bool = False
+):
     """A ``task`` run's config over frames of its own under ``project`` (a detection run's
     labeled by documents, a classification run's by a table), stating ``tiling`` (``None`` for
-    a run that tiles nothing).
+    a run that tiles nothing), normalizing by the statistics of the frames it trains on, or by
+    pretrained weights when ``refused``, a config no run resolves.
     """
-    from tests._chain_fixtures import BESPOKE_MODELS, CLASSIFIER_SOURCE
+    from tests._chain_fixtures import (
+        BESPOKE_MODELS,
+        CLASSIFIER_SOURCE,
+        weights_statistics,
+    )
     from tests._verified_checkpoint_fixtures import (
         SCOPED_DATA,
         detection_images,
@@ -184,6 +263,7 @@ def _base_config(tiling, project: Path, *, task: str = "detection"):
             "builder": BESPOKE_DETECTION,
             "source_files": [BESPOKE_MODELS],
             "task": "detection",
+            "normalization": FRAME_STATISTICS,
         }
         frames = {
             **detection_images(where, SCOPED_DATA["scope"], n=4),
@@ -192,7 +272,8 @@ def _base_config(tiling, project: Path, *, task: str = "detection"):
     else:
         source, frames = dict(CLASSIFIER_SOURCE), table_images(where, n=4)
     return training_config(
-        source,
+        project,
+        weights_statistics(source) if refused else source,
         {
             **frames,
             "tiling": tiling,
@@ -224,10 +305,18 @@ def test_a_tiling_stated_on_a_task_that_trains_whole_frames_refuses_at_the_door(
     ignored.
     """
     from tcip_mcp.pipelines.schemas import train_config
-    from tests._chain_fixtures import BESPOKE_MODELS
+    from tests import REPO_ROOT
+    from tests._chain_fixtures import BESPOKE_MODELS, weights_statistics
 
     config = training_config(
-        {"builder": builder, "source_files": [BESPOKE_MODELS], "task": task},
+        REPO_ROOT,
+        weights_statistics(
+            {
+                "builder": builder,
+                "source_files": [BESPOKE_MODELS],
+                "task": task,
+            }
+        ),
         {
             "num_channels": 3,
             "tiling": tiling_block(tile_size=64),
@@ -251,7 +340,8 @@ def test_the_tiling_question_and_the_detector_question_each_read_their_own_set(
     from tcip_mcp.pipelines import model_contract
     from tcip_mcp.pipelines.schemas import train_config
     from tcip_mcp.pipelines.training.collation import task_collate
-    from tests._chain_fixtures import BESPOKE_MODELS
+    from tests import REPO_ROOT
+    from tests._chain_fixtures import BESPOKE_MODELS, weights_statistics
 
     monkeypatch.setattr(
         model_contract,
@@ -261,11 +351,14 @@ def test_the_tiling_question_and_the_detector_question_each_read_their_own_set(
     tiling = tiling_block(tile_size=64)
     spec = train_config(
         training_config(
-            {
-                "builder": BESPOKE_SEMANTIC_SEG,
-                "source_files": [BESPOKE_MODELS],
-                "task": "semantic_seg",
-            },
+            REPO_ROOT,
+            weights_statistics(
+                {
+                    "builder": BESPOKE_SEMANTIC_SEG,
+                    "source_files": [BESPOKE_MODELS],
+                    "task": "semantic_seg",
+                }
+            ),
             {"num_channels": 3, "tiling": tiling, "split": drawn_split()},
             evaluation=evaluation_block(conf_threshold=None),
         )
@@ -330,7 +423,10 @@ def test_a_sweep_over_a_tiling_its_task_never_reads_opens_nothing(tmp_path):
     refused = open_sweep(
         tmp_path,
         _base_config(
-            tiling_block(tile_size=999), tmp_path, task="classification"
+            tiling_block(tile_size=999),
+            tmp_path,
+            task="classification",
+            refused=True,
         ),
         space,
         actor=None,

@@ -429,9 +429,7 @@ def _relative_config(project: Path, where: Path) -> dict:
 
     images_dir = _canonical_dataset(project / where)
     _canonical_dataset(Path.cwd() / where)
-    config = _detection_config(images_dir)
-    config["data"]["images_dir"] = _relative(images_dir, project)
-    return config
+    return _detection_config(project, _relative(images_dir, project))
 
 
 @pytest.mark.parametrize(
@@ -554,9 +552,10 @@ def test_a_sweep_records_the_base_the_caller_stated_never_its_first_corner(
     )
 
     project = tmp_path / "project"
-    config = _detection_config(_canonical_dataset(project / "ds"))
-    config["data"]["split"] = drawn_split(
-        val_ratio=0.2, grouping="tile_prefix"
+    config = _detection_config(
+        project,
+        _canonical_dataset(project / "ds"),
+        split=drawn_split(val_ratio=0.2, grouping="tile_prefix"),
     )
     space = {
         **sweep_space(),
@@ -598,6 +597,7 @@ def test_a_runs_source_files_are_stored_against_its_project_like_its_data(
     (project / "agent_code.py").write_text("", encoding="utf-8")
     config = detection_config(
         project / "ds",
+        project=project,
         model_source={
             **BUILT_DETECTOR,
             "source_files": ["agent_code.py", *BUILT_DETECTOR["source_files"]],
@@ -626,7 +626,7 @@ def test_a_copied_projects_run_and_sweep_trial_read_the_copys_source_files(
     import tcip_store as ts
     from tcip_mcp.experiments import observe
     from tcip_mcp.tools.training_tools import open_trial
-    from tests._chain_fixtures import BESPOKE_MODELS
+    from tests._chain_fixtures import BESPOKE_MODELS, stated_detector_geometry
     from tests._training_values import sweep_space
     from tests._verified_checkpoint_fixtures import opened_run, opened_sweep
     from tests.test_dataset_source_seam import BESPOKE_DS, BESPOKE_DS_FILE
@@ -636,22 +636,25 @@ def test_a_copied_projects_run_and_sweep_trial_read_the_copys_source_files(
     )
 
     project = tmp_path / "project"
-    config = _detection_config(_canonical_dataset(project / "ds"))
+    images_dir = _canonical_dataset(project / "ds")
+    config = _detection_config(project, images_dir)
     for name in ("agent_code.py", "other.py"):
         (project / name).write_text("", encoding="utf-8")
+    bespoke = _detection_config(
+        project,
+        images_dir,
+        dataset_source={
+            "builder": BESPOKE_DS,
+            "source_files": [str(project / "agent_code.py"), BESPOKE_DS_FILE],
+        },
+    )
     run = opened_run(
         project,
         {
-            **config,
-            "data": {
-                **config["data"],
-                "dataset_source": {
-                    "builder": BESPOKE_DS,
-                    "source_files": [
-                        str(project / "agent_code.py"),
-                        BESPOKE_DS_FILE,
-                    ],
-                },
+            **bespoke,
+            "model_source": {
+                **bespoke["model_source"],
+                "detector_geometry": stated_detector_geometry(),
             },
         },
     )
@@ -718,7 +721,7 @@ def test_a_copied_sweeps_whole_mapping_choices_open_a_trial_naming_the_copy(
     )
 
     project = tmp_path / "project"
-    config = _detection_config(_canonical_dataset(project / "ds"))
+    config = _detection_config(project, _canonical_dataset(project / "ds"))
     (project / "agent_code.py").write_text("", encoding="utf-8")
     model_source = {
         **config["model_source"],
@@ -764,13 +767,13 @@ def _authored_checkpoint(project: Path, monkeypatch) -> tuple[str, Path]:
     module = f"builder_{uuid.uuid4().hex[:8]}"
     new_project(project)
     (project / f"{module}_helper.py").write_text(
-        "MIN_SIZE = 64\n", encoding="utf-8"
+        "BOX_NMS_THRESH = 0.4\n", encoding="utf-8"
     )
     (project / f"{module}.py").write_text(
         f"import {module}_helper\n\n\n"
         "def build(**kwargs):\n"
         "    from tests.bespoke_models import build_bespoke_detection\n\n"
-        f"    kwargs['min_size'] = {module}_helper.MIN_SIZE\n"
+        f"    kwargs['box_nms_thresh'] = {module}_helper.BOX_NMS_THRESH\n"
         "    return build_bespoke_detection(**kwargs)\n",
         encoding="utf-8",
     )
@@ -805,7 +808,10 @@ def _built_from(checkpoint, project: Path) -> Path:
     loaded = load_registered_checkpoint(checkpoint, project=project)
     spec = loaded.spec
     build_from_model_source(
-        spec.model_source, loaded.layout, recorded_model_dims(spec)
+        spec.model_source,
+        loaded.layout,
+        recorded_model_dims(spec),
+        loaded.geometry,
     )
     build = import_source_builder(spec.model_source.builder, loaded.layout)
     return Path(build.__code__.co_filename).resolve()
@@ -1055,10 +1061,13 @@ def test_a_config_with_a_relative_path_and_no_project_is_refused_by_name():
     it refuses naming the path, never reading it under the working directory.
     """
     from tcip_mcp.pipelines.schemas import checked_train_config
+    from tests._chain_fixtures import weights_statistics
 
     spec, issues = checked_train_config(
         {
-            "model_source": {"builder": "m:f", "task": "detection"},
+            "model_source": weights_statistics(
+                {"builder": "m:f", "task": "detection"}
+            ),
             "data": {"images_dir": "images/undated"},
         }
     )

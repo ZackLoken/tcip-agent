@@ -14,7 +14,11 @@ import pytest
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests import REPO_ROOT
-from tests._chain_fixtures import BESPOKE_MODELS, GT_ANCHOR_DETECTOR
+from tests._chain_fixtures import (
+    BESPOKE_MODELS,
+    FRAME_STATISTICS,
+    GT_ANCHOR_DETECTOR,
+)
 from tests._training_values import drawn_split, tiling_block
 
 torch = pytest.importorskip("torch")
@@ -141,13 +145,15 @@ def _bespoke(stated: dict):
 
 
 def _admitted_samples(root: Path):
-    """Two samples, admitted the way every run's own membership is."""
-    from PIL import Image
-
+    """Two samples, admitted the way every run's own membership is, each frame its object bright
+    on a dim ground.
+    """
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
     from tests._producer_fixtures import (
+        BRIGHT,
         label_image,
+        painted_frame,
         registry_over,
         samples_over,
     )
@@ -156,7 +162,7 @@ def _admitted_samples(root: Path):
     images_dir.mkdir(parents=True, exist_ok=True)
     registry_over(root, SubjectRegistry(subjects=(Subject(name="leaf"),)))
     for stem in ("s0", "s1"):
-        Image.new("RGB", (16, 16), (40, 60, 80)).save(
+        painted_frame(16, 16, (40, 60, 80), [((2, 2, 8, 8), BRIGHT)]).save(
             images_dir / f"{stem}.png"
         )
         label_image(
@@ -191,11 +197,12 @@ def _ctx(root: Path, task: str, data: dict):
 
     samples = _admitted_samples(root / "ds")
     config = training_config(
+        root,
         {
             "builder": GT_ANCHOR_DETECTOR,
-            "builder_kwargs": {"gt_boxes_wh": [(10, 10)]},
             "source_files": [BESPOKE_MODELS],
             "task": task,
+            "normalization": FRAME_STATISTICS,
         },
         {
             **data,
@@ -294,24 +301,20 @@ def test_a_bodys_door_takes_the_samples_and_the_augmentation_and_nothing_else(
 def test_builder_kwargs_may_not_restate_what_the_producer_named():
     """``samples`` and ``scope`` are the producer's, and ``task``/``transforms`` the run's: a
     builder given a second value for one of them would build over membership or a class space the
-    run's own record does not describe, so the seam refuses it by name.
+    run's own record does not describe, so the dataset source refuses it by name where the config
+    is validated.
     """
-    from tcip_mcp.pipelines.data.datasets import build_from_dataset_source
+    from tcip_mcp.pipelines.schemas import DatasetContext
 
-    for reserved in ("samples", "scope", "task", "transforms"):
+    assert DatasetContext._fields == ("task", "samples", "scope", "transforms")
+    for reserved in DatasetContext._fields:
         stated = {
             "builder": BESPOKE_DS,
             "builder_kwargs": {reserved: "foreign"},
             "source_files": [BESPOKE_DS_FILE],
         }
-        with pytest.raises(ValueError, match="restates"):
-            build_from_dataset_source(
-                _bespoke(stated),
-                samples=[],
-                scope=_scope(),
-                task="detection",
-                transforms=None,
-            )
+        with pytest.raises(ValueError, match=f"restates \\['{reserved}'\\]"):
+            _source(stated)
 
 
 def test_known_task_registry_stays_the_default(tmp_path: Path):
@@ -378,22 +381,6 @@ def test_preflight_requires_the_data_a_bespoke_run_is_still_admitted_from(
         "dataset_source": DATASET_SOURCE,
         "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
     }
-    config = training_config(
-        {
-            "builder": GT_ANCHOR_DETECTOR,
-            "builder_kwargs": {"gt_boxes_wh": [(10, 10)]},
-            "source_files": [BESPOKE_MODELS],
-            "task": "grape_bunch_count",
-        },
-        data,
-        batch_size=1,
-    )
-    result = preflight_config(tmp_path, config, smoke=False)
-    assert not result["valid"]
-    assert result["issues"] == ["Missing 'data.images_dir'"]
-
-    # Admits valid work: the same bespoke source over a real place, whose samples the producer
-    # actually admits, passes with no issue.
     root = tmp_path / "ds"
     _admitted_samples(root)
     located_data = {
@@ -401,6 +388,23 @@ def test_preflight_requires_the_data_a_bespoke_run_is_still_admitted_from(
         "images_dir": str(root / "images" / UNDATED_BUCKET),
         "scope": {"subject": "leaf"},
     }
+    config = training_config(
+        tmp_path,
+        {
+            "builder": GT_ANCHOR_DETECTOR,
+            "source_files": [BESPOKE_MODELS],
+            "task": "grape_bunch_count",
+            "normalization": FRAME_STATISTICS,
+        },
+        located_data,
+        batch_size=1,
+    )
+    result = preflight_config(tmp_path, {**config, "data": data}, smoke=False)
+    assert not result["valid"]
+    assert result["issues"] == ["Missing 'data.images_dir'"]
+
+    # Admits valid work: the same bespoke source over a real place, whose samples the producer
+    # actually admits, passes with no issue.
     admitted = preflight_config(
         tmp_path, {**config, "data": located_data}, smoke=False
     )
@@ -426,15 +430,18 @@ def test_snapshot_copies_the_dataset_builders_module_as_that_module(
     """
     from tcip_mcp.pipelines.model_build import snapshot_model_source
     from tcip_mcp.pipelines.schemas import train_config
-    from tests._chain_fixtures import training_config
+    from tests._chain_fixtures import training_config, weights_statistics
 
-    model_source = {
-        "builder": GT_ANCHOR_DETECTOR,
-        "source_files": [BESPOKE_MODELS],
-        "task": "detection",
-    }
+    model_source = weights_statistics(
+        {
+            "builder": GT_ANCHOR_DETECTOR,
+            "source_files": [BESPOKE_MODELS],
+            "task": "detection",
+        }
+    )
     spec = train_config(
         training_config(
+            tmp_path,
             model_source,
             {"dataset_source": DATASET_SOURCE, "split": drawn_split()},
         )
@@ -446,6 +453,7 @@ def test_snapshot_copies_the_dataset_builders_module_as_that_module(
     assert copies[entry["file"]] == Path(__file__).read_bytes()
     undeclared = train_config(
         training_config(
+            tmp_path,
             model_source,
             {
                 "dataset_source": {"builder": BESPOKE_DS},

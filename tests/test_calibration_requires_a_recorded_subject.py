@@ -96,10 +96,14 @@ def _train_and_register(data_cfg: dict, project_root: Path) -> dict:
     """Train a detector over ``data_cfg`` in a run of ``project_root`` the launcher's own
     producer opened and the child's own entry ran, which registers its checkpoint by completing:
     ``{"checkpoint", "data"}``, the data block the run resolved in the form its record holds
-    it.
+    it. Its builder serves the frames, so the detector states its geometry at theirs.
     """
     from tcip_mcp.experiments import observe
-    from tests._chain_fixtures import REGION_BUILDER, training_config
+    from tests._chain_fixtures import (
+        REGION_BUILDER,
+        stated_detector_geometry,
+        training_config,
+    )
     from tests._training_values import evaluation_block
     from tests._verified_checkpoint_fixtures import worker_run
 
@@ -107,7 +111,9 @@ def _train_and_register(data_cfg: dict, project_root: Path) -> dict:
         worker_run(
             project_root,
             training_config(
-                REGION_BUILDER,
+                project_root,
+                REGION_BUILDER
+                | {"detector_geometry": stated_detector_geometry((IMG, IMG))},
                 data_cfg,
                 evaluation=evaluation_block(selection_metric="loss"),
             ),

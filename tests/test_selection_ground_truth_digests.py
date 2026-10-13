@@ -7,13 +7,12 @@ record.
 from __future__ import annotations
 
 import hashlib
-from functools import partial
 from pathlib import Path
 
 import pytest
 
 import tcip_store
-from tests._producer_fixtures import label_image, write_image
+from tests._producer_fixtures import BRIGHT, label_image, painted_frame
 
 torch = pytest.importorskip("torch")
 
@@ -27,8 +26,6 @@ SUBJECT = "leaf"
 DATES = ("2026-02-11", "2026-02-25")
 _STEMS = ("a", "b", "c", "d", "e", "f", "g", "h")
 
-_save_png = partial(write_image, size=(IMG, IMG))
-
 
 def _dataset(root: Path, stems=_STEMS) -> Path:
     """Two capture dates, eight stems each, enough groups that a three-way draw leaves both
@@ -36,8 +33,11 @@ def _dataset(root: Path, stems=_STEMS) -> Path:
     """
     for date in DATES:
         images_dir = root / "images" / date
+        images_dir.mkdir(parents=True, exist_ok=True)
         for stem in stems:
-            _save_png(images_dir / f"{stem}.jpg")
+            painted_frame(
+                IMG, IMG, (90, 90, 90), [((2, 2, 10, 10), BRIGHT)]
+            ).save(images_dir / f"{stem}.jpg")
             label_image(
                 images_dir / f"{stem}.jpg",
                 [Annotation(subject=SUBJECT, geometry=BBox(2, 2, 10, 10))],

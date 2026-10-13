@@ -31,7 +31,7 @@ def _instance_seg_checkpoint(tmp_path: Path) -> str:
     """The checkpoint a fixed-mask instance_seg run under ``tmp_path`` completed over frames of
     its own, registered by completing.
     """
-    from tests._chain_fixtures import BESPOKE_MODELS
+    from tests._chain_fixtures import BESPOKE_MODELS, FRAME_STATISTICS
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     return registered_checkpoint(
@@ -40,6 +40,7 @@ def _instance_seg_checkpoint(tmp_path: Path) -> str:
             "builder": "bespoke_models:build_fixed_mask_instance_seg",
             "source_files": [BESPOKE_MODELS],
             "task": "instance_seg",
+            "normalization": FRAME_STATISTICS,
         },
     )
 

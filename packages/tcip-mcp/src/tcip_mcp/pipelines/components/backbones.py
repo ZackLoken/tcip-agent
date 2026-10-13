@@ -15,13 +15,14 @@ that is what the module returns. Extract features first, then wrap.
 
 Constructing the backbone, ``out_indices`` included, is the caller's choice (a plain ViT returns
 four maps at one reduction; ``convnext_*`` and ``swin_*`` expose only indices 0-3 and raise on a
-request for 4)::
+request for 4); the weights it loads are the ``pretrained_weights`` its model source's
+normalization names and the platform hands its builder::
 
     import timm
     from tcip_mcp.pipelines.components.backbones import BackboneWrapper
 
     m = timm.create_model(
-        "resnet50",
+        pretrained_weights.name,  # e.g. "resnet50.a1_in1k"
         pretrained=True,
         features_only=True,
         out_indices=(1, 2, 3, 4),

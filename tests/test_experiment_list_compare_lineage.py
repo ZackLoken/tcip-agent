@@ -13,6 +13,7 @@ def _opened(
     its own, over its own two frames, opened by the launcher's own writer; ``facts`` are
     ``open_run``'s other keywords.
     """
+    from tests._chain_fixtures import FRAME_STATISTICS
     from tests._verified_checkpoint_fixtures import (
         detection_config,
         fixture_data_dir,
@@ -24,10 +25,12 @@ def _opened(
     models.write_text("", encoding="utf-8")
     config = detection_config(
         fixture_data_dir(project, experiment_id),
+        project=project,
         model_source={
             "builder": builder,
             "source_files": [str(models)],
             "task": "detection",
+            "normalization": FRAME_STATISTICS,
         },
     )
     return opened_run(project, config, experiment_id=experiment_id, **facts)

@@ -35,7 +35,11 @@ from tcip_mcp.pipelines.model_contract import (  # noqa: E402
     DETECTOR_TASKS,
     TILING_TASKS,
 )
-from tests._producer_fixtures import label_image, train_val, write_image  # noqa: E402
+from tests._producer_fixtures import (  # noqa: E402
+    big_single_source,
+    labeled_frame,
+    train_val,
+)
 from tests._training_values import (  # noqa: E402
     drawn_split,
     evaluation_block,
@@ -59,17 +63,17 @@ def _target_geometry(task: str):
 
 
 def _labeled(root: Path, stems, *, task: str = "detection") -> Path:
-    """One labeled directory: an image and a per-image label document per stem, each carrying the
-    geometry ``task``'s own loader reads; the image directory.
+    """One labeled directory: an image, bright over its object, and a per-image label document
+    per stem, each carrying the geometry ``task``'s own loader reads; the image directory.
     """
     images_dir = root / "images" / UNDATED_BUCKET
     for stem in stems:
-        write_image(images_dir / f"{stem}.png", (IMG, IMG), (70, 90, 60))
-        label_image(
+        labeled_frame(
             images_dir / f"{stem}.png",
             [Annotation(subject=SUBJECT, geometry=_target_geometry(task))],
             IMG,
             IMG,
+            (70, 90, 60),
         )
     return images_dir
 
@@ -85,37 +89,6 @@ def _one_target(ds, task: str) -> None:
     if task == "instance_seg":
         assert target["masks"].shape[0] == 1
         assert int(target["masks"].sum()) > 0
-
-
-def _big_source(
-    root: Path, stem: str, width: int, height: int, *, task: str = "detection"
-) -> Path:
-    """One source large enough to hold a within-image spatial split, with GT across its extent in
-    the geometry ``task``'s own loader reads; the image directory.
-    """
-    from PIL import Image
-
-    images_dir = root / "images" / UNDATED_BUCKET
-    images_dir.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", (width, height), color=(70, 90, 60)).save(
-        images_dir / f"{stem}.png"
-    )
-    squares = [
-        (x, y, x + 20, y + 20)
-        for x in range(20, width - 20, 200)
-        for y in range(20, height - 20, 200)
-    ]
-    boxes = [
-        Annotation(
-            subject=SUBJECT,
-            geometry=Polygon(rings=[[(x0, y0), (x1, y0), (x1, y1), (x0, y1)]])
-            if task == "instance_seg"
-            else BBox(x0, y0, x1, y1),
-        )
-        for x0, y0, x1, y1 in squares
-    ]
-    label_image(images_dir / f"{stem}.png", boxes, width, height)
-    return images_dir
 
 
 def _membership(ds) -> set[str]:
@@ -145,7 +118,7 @@ def _recorded(project: Path, task: str, data_cfg: dict, **config) -> dict:
     run_dir = opened_run(
         project,
         training_config(
-            unbuilt_source(task), copy.deepcopy(data_cfg), **config
+            project, unbuilt_source(task), copy.deepcopy(data_cfg), **config
         ),
     )
     return run_resolution(run_dir.name, project=project).partition
@@ -210,6 +183,7 @@ def test_a_zero_validation_share_trains_on_every_admitted_sample_and_records_the
         opened_run(
             tmp_path,
             training_config(
+                tmp_path,
                 unbuilt_source(task),
                 data_cfg,
                 evaluation=evaluation_block(selection_metric="objective"),
@@ -250,8 +224,9 @@ def test_one_tiled_source_still_splits_spatially_over_its_own_samples(
     partition, and its region identities still name the bare stem every consumer of the manifest
     joins on, for every task that tiles.
     """
-    stem = "mosaic"
-    images_dir = _big_source(tmp_path / "ds", stem, 4000, 3000, task=task)
+    images_dir, stem = big_single_source(
+        tmp_path / "ds", 4000, 3000, polygons=task == "instance_seg"
+    )
     data_cfg = {
         "images_dir": str(images_dir),
         "scope": {"subject": SUBJECT},

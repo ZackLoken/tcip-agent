@@ -242,34 +242,42 @@ def confirmed_count_aggregate(tmp_path: Path) -> None:
 
 
 @pytest.fixture
-def real_hpo_base_config(tmp_path: Path) -> dict:
-    """A base config the sweep door's own preflight admits: an importable builder and a data
-    section over two labeled frames of its subject (``_verified_checkpoint_fixtures.
-    detection_images``), drawn at seed 0, at the sample regime
+def hpo_base_config_at(tmp_path: Path):
+    """The producer of a base config of ``tmp_path`` the sweep door's own preflight admits,
+    given the seed its split draws at: an importable builder and a data section over two
+    labeled frames of its subject (``_verified_checkpoint_fixtures.detection_images``), at the
+    sample regime and the statistics of the frames that draw trains on
     (``_chain_fixtures.training_config``).
     """
-    from tests._chain_fixtures import (
-        BESPOKE_DETECTION,
-        BESPOKE_MODELS,
-        training_config,
-    )
+    from tests._chain_fixtures import training_config
     from tests._training_values import drawn_split
-    from tests._verified_checkpoint_fixtures import detection_images
+    from tests._verified_checkpoint_fixtures import (
+        BUILT_DETECTOR,
+        detection_images,
+    )
 
     scope = {"subject": DATA_DIR_SUBJECT}
-    return training_config(
-        {
-            "builder": BESPOKE_DETECTION,
-            "builder_kwargs": {},
-            "source_files": [BESPOKE_MODELS],
-            "task": "detection",
-        },
-        {
-            **detection_images(tmp_path / "hpo-data", scope),
-            "scope": scope,
-            "split": drawn_split(val_ratio=0.15, grouping="tile_prefix"),
-        },
-    )
+
+    def at(seed: int) -> dict:
+        return training_config(
+            tmp_path,
+            BUILT_DETECTOR,
+            {
+                **detection_images(tmp_path / "hpo-data", scope),
+                "scope": scope,
+                "split": drawn_split(
+                    seed=seed, val_ratio=0.15, grouping="tile_prefix"
+                ),
+            },
+        )
+
+    return at
+
+
+@pytest.fixture
+def real_hpo_base_config(hpo_base_config_at) -> dict:
+    """The base config :func:`hpo_base_config_at` produces at seed 0."""
+    return hpo_base_config_at(0)
 
 
 #: The single detection subject the canonical test dataset declares (``data_dir``).

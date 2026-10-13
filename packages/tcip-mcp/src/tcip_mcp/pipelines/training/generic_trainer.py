@@ -41,15 +41,18 @@ from tcip_mcp.pipelines.schemas import (
     CENTER_MATCH_COMPARABILITY_KEYS,
     CosineSchedule,
     DataSpec,
+    DetectorGeometry,
     HorizonSchedule,
     OneCycleSchedule,
     PlateauSchedule,
     SchedulerSpec,
     ScoreWeights,
     StageSpec,
+    StatedDetectorGeometry,
     TrainConfigSchema,
     TrainGeometry,
     TraitRevisionRef,
+    run_frame,
     selection_of,
 )
 from tcip_mcp.pipelines.training.evaluation import (
@@ -278,7 +281,10 @@ def run_loaders(
 
 
 def effective_data_geometry(
-    task: str, data: DataSpec, train_ds: Any
+    task: str,
+    data: DataSpec,
+    train_ds: Any,
+    stated: StatedDetectorGeometry | None,
 ) -> TrainGeometry:
     """The :class:`~tcip_mcp.pipelines.schemas.TrainGeometry` of a ``task`` run whose resolved
     data block is ``data``, read off what ``train_ds`` serves.
@@ -290,25 +296,52 @@ def effective_data_geometry(
     ``native_size`` when its training frames all share one size; mixed sizes record none, and so
     does a run whose dataset a ``dataset_source`` builds. Probing is header-only for the common
     containers (``image_dimensions``) and needs the dataset's source list.
-    """
-    from tcip_mcp.pipelines.derivations import derive_object_density
-    from tcip_mcp.pipelines.model_contract import DETECTOR_TASKS
 
-    density = None
-    if task in DETECTOR_TASKS:
-        regions = getattr(train_ds, "regions", None)
-        if regions is None:
-            raise ValueError(
-                f"this {task} run's train dataset exposes no regions: a detector's per-frame cap "
-                "scales by the object density of the regions it trains on, so a dataset_source "
-                "builder's dataset exposes regions, a list of derivations.Region, one per frame "
-                "or tile it serves."
-            )
-        density = derive_object_density(regions)
+    A detector's geometry is derived over those regions at its frame (``schemas.run_frame``,
+    ``derivations.derive_detector_geometry``), or for a run resolving no frame taken as
+    ``stated`` (``model_source.detector_geometry``). A statement beside a resolved frame refuses
+    (``ValueError``) naming the derivation, and a run with neither refuses naming both.
+    """
+    from tcip_mcp.pipelines.derivations import (
+        derive_detector_geometry,
+        derive_object_density,
+    )
+
     untiled = data.tiling is None and data.dataset_source is None
+    native_size = _uniform_native_size(train_ds) if untiled else None
+    if task not in DETECTOR_TASKS:
+        return TrainGeometry(
+            native_size=native_size, object_density=None, detector=None
+        )
+    regions = getattr(train_ds, "regions", None)
+    if regions is None:
+        raise ValueError(
+            f"this {task} run's train dataset exposes no regions: a detector's per-frame cap "
+            "scales by the object density of the regions it trains on, so a dataset_source "
+            "builder's dataset exposes regions, a list of derivations.Region, one per frame "
+            "or tile it serves."
+        )
+    frame = run_frame(task, data.tiling, native_size)
+    if frame is not None:
+        if stated is not None:
+            raise ValueError(
+                f"this {task} run resolves its frame {frame}, so its detector's geometry derives "
+                "from it (derivations.derive_detector_geometry); a stated one would stand in "
+                "for the derivation. Drop model_source.detector_geometry."
+            )
+        detector: DetectorGeometry = derive_detector_geometry(frame, regions)
+    elif stated is None:
+        raise ValueError(
+            f"this {task} run resolves no one frame its detector's geometry derives at: its "
+            "frames differ in size or its dataset_source builds them. Tile it (data.tiling) or "
+            "state the geometry with its reason (model_source.detector_geometry)."
+        )
+    else:
+        detector = stated
     return TrainGeometry(
-        native_size=_uniform_native_size(train_ds) if untiled else None,
-        object_density=density,
+        native_size=native_size,
+        object_density=derive_object_density(regions),
+        detector=detector,
     )
 
 
@@ -500,9 +533,12 @@ def _save_checkpoint(
 # ====================================================================
 
 
-def _build_scheduler(optimizer, spec: SchedulerSpec):
+def _build_scheduler(
+    optimizer, spec: SchedulerSpec, *, higher_is_better: bool
+):
     """The scheduler ``spec.type`` names (``schemas.SCHEDULER_TYPES``) at every setting ``spec``
-    carries, a horizon-bound one over the block's own ``horizon_epochs``.
+    carries, a horizon-bound one over the block's own ``horizon_epochs``, a plateau one watching
+    the selection value in its direction, ``higher_is_better`` (``schemas.selection_of``).
     """
     if isinstance(spec, CosineSchedule):
         return torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -511,7 +547,7 @@ def _build_scheduler(optimizer, spec: SchedulerSpec):
     elif isinstance(spec, PlateauSchedule):
         return torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer,
-            mode="min",
+            mode="max" if higher_is_better else "min",
             factor=spec.factor,
             patience=spec.patience,
             threshold=spec.threshold,
@@ -838,7 +874,9 @@ def train(
         task = spec.model_source.task
         evaluated = run.evaluation_arguments
         dims = evaluated["dims"]
-        model = build_from_model_source(spec.model_source, run.layout, dims)
+        model = build_from_model_source(
+            spec.model_source, run.layout, dims, run.geometry
+        )
         model.to(device)
         _validate_input_channels(dims["in_chans"], train_loader)
 
@@ -980,7 +1018,9 @@ def train(
 
             # Inter-stage LR warmup from the handed-off learning rates (default off).
             warmup_n = stage_warmup_epochs if warmup_starts else 0
-            scheduler = _build_scheduler(optimizer, scheduler_spec)
+            scheduler = _build_scheduler(
+                optimizer, scheduler_spec, higher_is_better=higher_is_better
+            )
             is_plateau = isinstance(
                 scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau
             )
@@ -1147,7 +1187,7 @@ def train(
                 # Suppress the scheduler during warmup epochs.
                 if not in_warmup:
                     if is_plateau:
-                        scheduler.step(val_metrics.get(VAL_LOSS_KEY, avg_loss))
+                        scheduler.step(sel)
                     else:
                         scheduler.step()
 

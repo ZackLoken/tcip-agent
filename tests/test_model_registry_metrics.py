@@ -278,6 +278,7 @@ def test_a_completed_runs_metrics_come_from_its_best_checkpoint_not_its_last_epo
                 "labels_dir": str(csv_path),
                 "split": drawn_split(val_ratio=0.0),
             },
+            project=tmp_path,
         ),
         experiment_id="exp-best",
     )

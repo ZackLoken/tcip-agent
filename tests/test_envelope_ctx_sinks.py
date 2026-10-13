@@ -32,7 +32,9 @@ def _context(tmp_path, **kwargs) -> tuple[TrainContext, Path]:
         opened_run,
     )
 
-    run_dir = opened_run(tmp_path, detection_config(tmp_path / "data"))
+    run_dir = opened_run(
+        tmp_path, detection_config(tmp_path / "data", project=tmp_path)
+    )
     return TrainContext(
         run=observed_run(observe(run_dir)), train_loader=None, **kwargs
     ), run_dir

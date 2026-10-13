@@ -53,8 +53,11 @@ class RecordingDetector(BrightRegionDetector):
 
 
 def build_recording_detector(
-    *, in_chans: int = 3, num_classes: int = 1
+    *, in_chans: int = 3, num_classes: int = 1, **_handed
 ) -> RecordingDetector:
+    """``model_source`` builder for :class:`RecordingDetector`, reading none of the detector
+    geometry or statistics the platform hands it.
+    """
     return RecordingDetector(in_chans=in_chans)
 
 
@@ -228,16 +231,18 @@ def test_the_trainer_and_the_validation_loss_hand_the_heads_objects_only(
     withhold every crowd row the loader keeps.
     """
     from tcip_mcp.pipelines.training.generic_trainer import train
-    from tests._chain_fixtures import training_config
+    from tests._chain_fixtures import FRAME_STATISTICS, training_config
     from tests.tiny_trainer_fixtures import capture_model, run_context
 
     built: list = []
     capture_model(monkeypatch, built)
     config = training_config(
+        tmp_path,
         {
             "builder": f"{Path(__file__).stem}:build_recording_detector",
             "source_files": [__file__],
             "task": "detection",
+            "normalization": FRAME_STATISTICS,
         },
         {
             "images_dir": str(_labeled(tmp_path / "ds")),

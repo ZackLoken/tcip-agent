@@ -35,7 +35,9 @@ def test_a_successful_monitor_result_audits_nothing_and_carries_no_refusal_key(
     )
 
     opened_run(
-        tmp_path, detection_config(tmp_path / "ds"), experiment_id="exp-polled"
+        tmp_path,
+        detection_config(tmp_path / "ds", project=tmp_path),
+        experiment_id="exp-polled",
     )
     before = len(_rows(tmp_path))
 
@@ -66,7 +68,9 @@ def test_read_only_doors_leave_no_line(tmp_path: Path) -> None:
     )
 
     opened_run(
-        tmp_path, detection_config(tmp_path / "ds"), experiment_id="exp-read"
+        tmp_path,
+        detection_config(tmp_path / "ds", project=tmp_path),
+        experiment_id="exp-read",
     )
     before = len(_rows(tmp_path))
 

@@ -28,7 +28,7 @@ def test_a_pre_envelope_crash_marks_the_run_failed_and_opens_a_training_run_even
 ):
     run_dir = opened_run(
         tmp_path,
-        detection_config(tmp_path / "data", batch_size=1),
+        detection_config(tmp_path / "data", project=tmp_path, batch_size=1),
         experiment_id="exp-worker-crash",
     )
 
@@ -64,7 +64,7 @@ def test_a_pre_envelope_crash_whose_audit_line_is_refused_names_both_causes(
 
     run_dir = opened_run(
         tmp_path,
-        detection_config(tmp_path / "data", batch_size=1),
+        detection_config(tmp_path / "data", project=tmp_path, batch_size=1),
         experiment_id="exp-worker-crash-unaudited",
     )
 

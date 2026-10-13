@@ -80,7 +80,8 @@ run's last epoch row names the stage that ended it.
 A `cosine` or `onecycle` schedule is built over the `horizon_epochs` its block states, and a
 stage under it ends once the schedule has run that many epochs past the stage's warmup, unless
 its plateau ended it first. A `plateau` or `step` schedule has no horizon, and a stage under it
-ends on its plateau alone. `stage_warmup_epochs` warms each stage after the first up from its
+ends on its plateau alone. A `plateau` schedule watches the same selection value the stop rule
+reads, in its metric's direction, so one run has one plateau quantity. `stage_warmup_epochs` warms each stage after the first up from its
 predecessor's rates with the schedule held, whatever the schedule.
 
 The stop rule and `model_best.pt` share the same selection criterion; there is no separate
@@ -132,13 +133,19 @@ config = {
     "model_source": {  # importable nn.Module builder, see pipeline-design skill
         "builder": "my_module:build_net",
         "builder_kwargs": {
-            "pretrained": False
+            ...
         },  # the builder's own options; the platform hands
         "task": "detection",  # it in_chans and the class count itself
         "source_files": [
             "code/my_module.py"
         ],  # the files the run imports, the builder's
-    },  # module (and a loop's) among them
+        # module (and a loop's) among them
+        "normalization": ...,  # required: the statistics the model normalizes by, from
+        # the derivation that gives them, its source naming any pretrained weights the
+        # builder loads (toolkit-inventory skill)
+        # a detector's geometry derives at the run's frame; one over a dataset its own
+        # builder serves states it with its reason as "detector_geometry"
+    },
     # "training_source": "my_module:train",  # optional custom train(ctx) loop, a bare
     #     dotted string ("module:function"), not a dict, see pipeline-design skill
     "data": {
@@ -338,7 +345,9 @@ run_hyperparameter_search(
   as its `trial_params` and the sweep's trait revision as its own. Ray's own store sits in the same directory
   (also the TensorBoard logdir); auto-launches TensorBoard. Returns the ended sweep as
   `monitor_training` reads it, `{"run", "sweep", "tensorboard_url"}`: the sweep's trial rows and
-  their outcome (`best_params`/`best_value`) under `sweep`.
+  their outcome (`best_params`/`best_value`) under `sweep`, with `best_at_range_end` naming each
+  integer or grid axis whose best sits exactly at the `low` or `high` you stated: a range the
+  search could not look past, a finding to report rather than a tuned value.
 - `monitor_training` on a sweep's id answers the same "how is this sweep doing" question the web
   Training tab shows, for a host with no browser open: the sweep's input, every trial's own row,
   and what they amount to, from its directory alone.

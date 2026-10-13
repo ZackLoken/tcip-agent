@@ -68,6 +68,7 @@ def _bespoke(tmp_path, body: str) -> dict:
     """
     return detection_config(
         tmp_path / "data",
+        project=tmp_path,
         model_source=detector_declaring(__file__),
         training_source=f"{Path(__file__).stem}:{body}",
     )
@@ -97,9 +98,13 @@ def test_envelope_dispatches_to_custom_train_and_guarantees_provenance(
     assert [row["epoch"] for row in read_rows(run_dir / METRICS_FILE)[0]] == [
         1
     ]
+    from tcip_mcp.experiments import CONFIG_PATHS
+    from tcip_mcp.registry_paths import runtime_paths
+
     best = torch.load(run_dir / "model_best.pt", weights_only=False)
     stored = best[CONFIG_KEY]["model_source"]
-    assert {**stored, "source_files": None} == {
+    resolved = runtime_paths(best[CONFIG_KEY], CONFIG_PATHS, tmp_path)
+    assert {**resolved["model_source"], "source_files": None} == {
         **config["model_source"],
         "source_files": None,
     }
@@ -278,6 +283,7 @@ def test_a_resumed_run_records_its_resume_checkpoint_and_completes(tmp_path):
     from tests._chain_fixtures import CLASSIFIER_SOURCE, training_config
 
     launched = training_config(
+        tmp_path,
         CLASSIFIER_SOURCE,
         {
             "images_dir": str(images_dir),
@@ -322,7 +328,7 @@ def test_report_objective_records_a_selection_row_that_reaches_the_epoch_hook(
     seen: list = []
     ctx, run_dir = _context(
         tmp_path,
-        detection_config(tmp_path / "data"),
+        detection_config(tmp_path / "data", project=tmp_path),
         epoch_hook=lambda epoch, metrics: seen.append((epoch, metrics)),
     )
     ctx.log_metrics(2, {"train_loss": 0.5})
@@ -351,7 +357,9 @@ def test_ctx_evaluate_counts_at_the_runs_validated_conf_and_takes_none_of_its_ow
     monkeypatch.setattr(
         evaluation, "evaluate", lambda *a, **k: handed.update(k) or {}
     )
-    ctx, _run_dir = _context(tmp_path, detection_config(tmp_path / "data"))
+    ctx, _run_dir = _context(
+        tmp_path, detection_config(tmp_path / "data", project=tmp_path)
+    )
 
     ctx.evaluate(object(), loader=[])
     assert handed["conf_threshold"] == VALIDATION_CONF
@@ -387,7 +395,9 @@ def test_envelope_default_path_runs_default_train_and_audits(
 
     monkeypatch.setattr(gt, "train", _stub_train)
 
-    ctx, _ = _context(tmp_path, detection_config(tmp_path / "data"))
+    ctx, _ = _context(
+        tmp_path, detection_config(tmp_path / "data", project=tmp_path)
+    )
     run_training_envelope(ctx)
 
     assert captured.get("called") is True  # dispatched to default_train

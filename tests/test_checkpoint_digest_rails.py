@@ -576,7 +576,11 @@ def test_ctx_save_checkpoint_admits_a_state_naming_no_reserved_key(tmp_path):
     )
 
     run = observed_run(
-        observe(opened_run(tmp_path, detection_config(tmp_path / "data")))
+        observe(
+            opened_run(
+                tmp_path, detection_config(tmp_path / "data", project=tmp_path)
+            )
+        )
     )
     ctx = TrainContext(run=run, train_loader=None)
 

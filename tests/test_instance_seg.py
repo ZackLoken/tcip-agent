@@ -10,11 +10,12 @@ pytest.importorskip("torchvision")
 
 def test_mask_rcnn_uses_masks_in_loss_and_predicts_masks():
     from tests import bespoke_models
+    from tests._chain_fixtures import detector_values
 
     # resnet18: loss_mask / predicted-masks are mask-head assertions, independent of backbone
     # depth: the FPN out_channels normalizes the channel difference.
     model = bespoke_models.build_bespoke_instance_seg(
-        num_classes=1, min_size=64, max_size=128
+        num_classes=1, **detector_values()
     )
     assert isinstance(model, bespoke_models.BespokeDetection)
 

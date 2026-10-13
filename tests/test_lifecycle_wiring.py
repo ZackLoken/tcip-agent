@@ -33,7 +33,11 @@ def _stock_run(
         ([0.2, 0.6], [0.4, 1.2]),
     )
     config = regressor_config(
-        horizon, builder=builder, builder_kwargs=builder_kwargs, data=data
+        horizon,
+        builder=builder,
+        builder_kwargs=builder_kwargs,
+        data=data,
+        project=root,
     )
     ctx = run_context(root, config, experiment_id=experiment_id)
     run_training_envelope(ctx)

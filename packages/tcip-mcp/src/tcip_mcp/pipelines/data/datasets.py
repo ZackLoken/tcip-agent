@@ -54,6 +54,7 @@ from tcip_mcp.pipelines.image_utils import (
     to_pil_if_faithful,
 )
 from tcip_mcp.pipelines.schemas import (
+    DatasetContext,
     DatasetSourceSchema,
     DataSpec,
     TilingSpec,
@@ -1005,30 +1006,21 @@ def build_from_dataset_source(
     admitted under, every field ``None`` where the ground truth carries its own classes), ``task``
     and ``transforms``.
 
-    ``builder_kwargs`` configure the builder; a key the context already states refuses by name.
-    Declare ``**kwargs`` on the builder to ignore context keys it doesn't use.
+    The context is a ``schemas.DatasetContext``, each value under its field's name;
+    ``builder_kwargs`` configure the builder (``schemas.DatasetSourceSchema`` refuses one naming
+    a context field). Declare ``**kwargs`` on the builder to ignore context keys it doesn't use.
     """
     from tcip_mcp.pipelines.model_build import import_source_builder
 
     dataset_source, layout = bespoke
     fn = import_source_builder(dataset_source.builder, layout)
-    builder_kwargs = dataset_source.builder_kwargs or {}
-    context = {
-        "task": task,
-        "samples": resolved(samples),
-        "scope": scope,
-        "transforms": transforms,
-    }
-    restated = sorted(set(context) & set(builder_kwargs))
-    if restated:
-        raise ValueError(
-            f"dataset_source.builder_kwargs restates {restated}: the samples this run trains on, "
-            f"the class space they were admitted under, the task and the augmentation are the "
-            f"platform's to state, and a builder given a second value for one of them would build "
-            f"over something the run's own record does not describe. Drop {restated} from "
-            "builder_kwargs."
-        )
-    return fn(**context, **builder_kwargs)
+    context = DatasetContext(
+        task=task,
+        samples=resolved(samples),
+        scope=scope,
+        transforms=transforms,
+    )
+    return fn(**context._asdict(), **(dataset_source.builder_kwargs or {}))
 
 
 def _band_count(samples: Sequence[Sample]) -> int:

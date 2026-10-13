@@ -1,8 +1,8 @@
 """Bespoke builders and a custom training loop the tests name by dotted reference.
 
 (a) a from-scratch ``GroupNorm`` backbone and tiny FPN feeding a torchvision Faster R-CNN whose
-    ``AnchorGenerator`` is built from the dataset's own GT box shapes
-    (``pipelines.derivations.gt_aspect_ratios`` and the GT size distribution); and
+    ``AnchorGenerator`` is built at the geometry the dataset's own GT boxes derive
+    (``pipelines.derivations.derive_detector_geometry``); and
 
 (b) a custom ``train(ctx)`` loop (``train_bespoke``) that trains through the ``ctx`` sinks.
 """
@@ -13,7 +13,6 @@ import torch
 import torch.nn as nn
 from torch.nn import functional
 
-from tcip_mcp.pipelines.derivations import gt_aspect_ratios
 from tcip_mcp.pipelines.model_build import METRICS_KEY, STATE_DICT_KEY
 
 # ---------------------------------------------------------------------------
@@ -108,53 +107,33 @@ class BespokeGNDetector(_HeldDetector):
         self.detector = detector
 
 
-def gt_anchor_sizes(gt_boxes_wh) -> tuple[int, ...]:
-    """Anchor scales from the GT object-size distribution (p10/p50/p90 of sqrt(area)), ``(32,)``
-    for no positive box.
-    """
-    import numpy as np
-
-    scales = [
-        float(np.sqrt(w * h)) for (w, h) in gt_boxes_wh if w > 0 and h > 0
-    ]
-    if not scales:
-        return (32,)
-    qs = np.quantile(scales, [0.1, 0.5, 0.9])
-    return tuple(sorted({int(round(float(s))) for s in qs}))
-
-
 def build_bespoke_detector(
     *,
-    gt_boxes_wh,
+    min_size: int,
+    max_size: int,
+    anchor_base_size: int,
+    aspect_ratios: tuple[float, ...],
+    image_mean: list[float],
+    image_std: list[float],
     num_classes: int = 1,
     in_chans: int = 3,
     out_channels: int = 64,
     gn_groups: int = 8,
-    min_size: int = 64,
-    max_size: int = 128,
 ) -> BespokeGNDetector:
-    """Build the bespoke detector with GT-derived anchors and a GroupNorm backbone/FPN.
-
-    ``gt_boxes_wh`` is a list of ``(w, h)`` in pixels: the dataset's GT box shapes that drive the
-    anchor derivation. Deterministic in its inputs, so re-importing the builder at inference
-    rebuilds the identical architecture and the trained ``state_dict`` loads cleanly.
+    """Build the bespoke detector with a GroupNorm backbone/FPN at the geometry and statistics
+    its model source records, its one fused level's anchors at the base size and its next two
+    doublings. Deterministic in its inputs, so re-importing the builder at inference rebuilds the
+    identical architecture and the trained ``state_dict`` loads cleanly.
     """
     from torchvision.models.detection import FasterRCNN
     from torchvision.models.detection.rpn import AnchorGenerator
     from torchvision.ops import MultiScaleRoIAlign
 
-    derived = gt_aspect_ratios(
-        gt_boxes_wh
-    )  # anchor aspect ratios from the GT box shapes
-    ratios = (
-        tuple(derived) if derived is not None else (0.5, 1.0, 2.0)
-    )  # underivable -> stamped
-    sizes = gt_anchor_sizes(
-        gt_boxes_wh
-    )  # anchor scales from the GT size distribution
     backbone = _GNBackboneFPN(in_chans, out_channels, gn_groups)
-    # single fused level
-    anchor_generator = AnchorGenerator(sizes=(sizes,), aspect_ratios=(ratios,))
+    anchor_generator = AnchorGenerator(
+        sizes=(tuple(anchor_base_size * 2**i for i in range(3)),),
+        aspect_ratios=(aspect_ratios,),
+    )
     roi_pool = MultiScaleRoIAlign(
         featmap_names=["0"], output_size=7, sampling_ratio=2
     )
@@ -165,6 +144,8 @@ def build_bespoke_detector(
         box_roi_pool=roi_pool,
         min_size=min_size,
         max_size=max_size,
+        image_mean=image_mean,
+        image_std=image_std,
     )
     return BespokeGNDetector(detector)
 
@@ -315,17 +296,28 @@ def _resnet18(in_chans: int = 3):
 
 
 class BespokeComposed(_FreezesBackbone, nn.Module):
-    """Backbone + neck + task head: the sibling of the removed ``ComposedModel``."""
+    """Backbone + neck + task head over images normalized by the per-band ``image_mean`` and
+    ``image_std`` its model source records.
+    """
 
     def __init__(
-        self, backbone: nn.Module, neck: nn.Module, head: nn.Module
+        self,
+        backbone: nn.Module,
+        neck: nn.Module,
+        head: nn.Module,
+        image_mean: list[float],
+        image_std: list[float],
     ) -> None:
         super().__init__()
         self.backbone = backbone
         self.neck = neck
         self.heads = nn.ModuleList([head])
+        self.image_mean, self.image_std = image_mean, image_std
 
     def forward(self, images, targets=None):
+        from torchvision.transforms.functional import normalize
+
+        images = normalize(images, self.image_mean, self.image_std)
         feats = self.neck(self.backbone(images))
         out: dict[str, torch.Tensor] = {}
         if self.training and targets is not None:
@@ -374,8 +366,6 @@ class BespokeDetection(_FreezesBackbone, _HeldDetector):
         *,
         in_chans: int = 3,
         detector: str = "faster_rcnn",
-        min_size: int = 800,
-        max_size: int = 1333,
         **det_kwargs,
     ) -> None:
         super().__init__()
@@ -384,20 +374,26 @@ class BespokeDetection(_FreezesBackbone, _HeldDetector):
         adapter = BackboneNeckAdapter(self.backbone, self.neck)
         with torch.no_grad():
             names = list(adapter(torch.zeros(1, in_chans, 64, 64)).keys())
+        if detector == "fcos":
+            det_kwargs.pop("aspect_ratios", None)
         self.detector = build_detector(
             detector,
             adapter,
             num_classes,
+            in_chans=in_chans,
             featmap_names=names,
             num_levels=len(names),
-            min_size=min_size,
-            max_size=max_size,
             **det_kwargs,
         )
 
 
 def build_bespoke_classifier(
-    *, num_classes: int, in_chans: int = 3, dropout: float = 0.0
+    *,
+    num_classes: int,
+    image_mean: list[float],
+    image_std: list[float],
+    in_chans: int = 3,
+    dropout: float = 0.0,
 ):
     bb = _resnet18(in_chans)
     neck = GlobalAvgPoolNeck(bb.out_channels)
@@ -405,60 +401,86 @@ def build_bespoke_classifier(
         bb,
         neck,
         ClassificationHead(neck.out_channels, num_classes, dropout=dropout),
+        image_mean,
+        image_std,
     )
 
 
-def build_bespoke_ordinal(*, num_ranks: int, in_chans: int = 3):
+def build_bespoke_ordinal(
+    *,
+    num_ranks: int,
+    image_mean: list[float],
+    image_std: list[float],
+    in_chans: int = 3,
+):
     bb = _resnet18(in_chans)
     neck = GlobalAvgPoolNeck(bb.out_channels)
-    return BespokeComposed(bb, neck, OrdinalHead(neck.out_channels, num_ranks))
+    return BespokeComposed(
+        bb,
+        neck,
+        OrdinalHead(neck.out_channels, num_ranks),
+        image_mean,
+        image_std,
+    )
 
 
-def build_bespoke_regressor(*, in_chans: int = 3):
+def build_bespoke_regressor(
+    *, image_mean: list[float], image_std: list[float], in_chans: int = 3
+):
     bb = _resnet18(in_chans)
     neck = GlobalAvgPoolNeck(bb.out_channels)
-    return BespokeComposed(bb, neck, RegressionHead(neck.out_channels))
+    return BespokeComposed(
+        bb, neck, RegressionHead(neck.out_channels), image_mean, image_std
+    )
 
 
-def build_bespoke_semantic_seg(*, num_classes: int, in_chans: int = 3):
+def build_bespoke_semantic_seg(
+    *,
+    num_classes: int,
+    image_mean: list[float],
+    image_std: list[float],
+    in_chans: int = 3,
+):
     bb = _resnet18(in_chans)
     neck = FPN(bb.out_channels, out_channels=256)
-    return BespokeComposed(bb, neck, SemanticSegHead(256, num_classes))
+    return BespokeComposed(
+        bb, neck, SemanticSegHead(256, num_classes), image_mean, image_std
+    )
 
 
 def build_bespoke_instance_seg(
     *,
+    image_mean: list[float],
+    image_std: list[float],
     num_classes: int = 1,
     in_chans: int = 3,
-    min_size: int = 800,
-    max_size: int = 1333,
     **det_kwargs,
 ):
     return BespokeDetection(
         num_classes,
         in_chans=in_chans,
         detector="mask_rcnn",
-        min_size=min_size,
-        max_size=max_size,
+        image_mean=image_mean,
+        image_std=image_std,
         **det_kwargs,
     )
 
 
 def build_bespoke_detection(
     *,
+    image_mean: list[float],
+    image_std: list[float],
     num_classes: int = 1,
     in_chans: int = 3,
     detector: str = "faster_rcnn",
-    min_size: int = 800,
-    max_size: int = 1333,
     **det_kwargs,
 ):
     return BespokeDetection(
         num_classes,
         in_chans=in_chans,
         detector=detector,
-        min_size=min_size,
-        max_size=max_size,
+        image_mean=image_mean,
+        image_std=image_std,
         **det_kwargs,
     )
 
@@ -524,7 +546,12 @@ class FixedMaskSegmenter(_OneConvDetector):
         return results
 
 
-def build_fixed_mask_instance_seg(*, num_classes: int = 1, in_chans: int = 3):
+def build_fixed_mask_instance_seg(
+    *, num_classes: int = 1, in_chans: int = 3, **_handed
+):
+    """``model_source`` builder for :class:`FixedMaskSegmenter`, its fixed boxes reading none of
+    the detector geometry or statistics the platform hands it.
+    """
     return FixedMaskSegmenter(in_chans=in_chans)
 
 
@@ -585,12 +612,20 @@ class BareNoKnobDetector(nn.Module):
 
 
 def build_bare_score_thresh_detector(
-    *, in_chans: int = 3, num_classes: int = 1
+    *, in_chans: int = 3, num_classes: int = 1, **_handed
 ):
+    """``model_source`` builder for :class:`BareScoreThreshDetector`, reading none of the
+    detector geometry or statistics the platform hands it.
+    """
     return BareScoreThreshDetector(in_chans=in_chans)
 
 
-def build_bare_no_knob_detector(*, in_chans: int = 3, num_classes: int = 1):
+def build_bare_no_knob_detector(
+    *, in_chans: int = 3, num_classes: int = 1, **_handed
+):
+    """``model_source`` builder for :class:`BareNoKnobDetector`, reading none of the detector
+    geometry or statistics the platform hands it.
+    """
     return BareNoKnobDetector(in_chans=in_chans)
 
 
@@ -726,8 +761,12 @@ def build_bright_region_detector(
     num_classes: int = 1,
     bright: float = 0.5,
     decoy_score: float = 0.03,
+    **_handed,
 ) -> BrightRegionDetector:
-    """``model_source`` builder for :class:`BrightRegionDetector`, deterministic in its inputs."""
+    """``model_source`` builder for :class:`BrightRegionDetector`, deterministic in its inputs,
+    its analytic boxes reading none of the detector geometry or statistics the platform hands
+    it.
+    """
     return BrightRegionDetector(
         in_chans=in_chans, bright=bright, decoy_score=decoy_score
     )
@@ -836,9 +875,10 @@ def build_bright_blob_detector(
     num_classes: int = 1,
     with_masks: bool = False,
     attributes: tuple = (),
+    **_handed,
 ) -> BrightBlobDetector:
     """``model_source`` builder for :class:`BrightBlobDetector`, at the attributes the platform
-    hands it.
+    hands it, its blobs reading none of the detector geometry or statistics.
     """
     return BrightBlobDetector(
         in_chans=in_chans, with_masks=with_masks, attributes=len(attributes)
@@ -864,9 +904,13 @@ class WholeBlobDetector(BrightBlobDetector):
 
 
 def build_whole_blob_detector(
-    *, in_chans: int = 3, num_classes: int = 1, attributes: tuple = ()
+    *,
+    in_chans: int = 3,
+    num_classes: int = 1,
+    attributes: tuple = (),
+    **_handed,
 ) -> WholeBlobDetector:
     """``model_source`` builder for :class:`WholeBlobDetector`, at the attributes the platform
-    hands it.
+    hands it, reading none of the detector geometry or statistics.
     """
     return WholeBlobDetector(in_chans=in_chans, attributes=len(attributes))

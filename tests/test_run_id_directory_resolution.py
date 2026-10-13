@@ -18,7 +18,7 @@ def test_a_custom_named_run_is_monitored_by_its_own_id(tmp_path):
 
     run_dir = opened_run(
         tmp_path,
-        detection_config(tmp_path / "data"),
+        detection_config(tmp_path / "data", project=tmp_path),
         experiment_id="exp-001-bud-det",
     )
     log_epoch(run_dir, 3, {"val_map50": 0.4})
@@ -35,7 +35,7 @@ def test_a_custom_named_run_is_canceled_by_its_own_id(tmp_path):
 
     run_dir = opened_run(
         tmp_path,
-        detection_config(tmp_path / "data"),
+        detection_config(tmp_path / "data", project=tmp_path),
         experiment_id="exp-002-bud-det",
     )
 
@@ -51,7 +51,7 @@ def test_an_id_naming_no_run_resolves_to_nothing(tmp_path):
 
     opened_run(
         tmp_path,
-        detection_config(tmp_path / "data"),
+        detection_config(tmp_path / "data", project=tmp_path),
         experiment_id="exp-004-bud-det",
     )
 

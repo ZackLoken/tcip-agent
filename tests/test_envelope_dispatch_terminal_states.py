@@ -54,6 +54,7 @@ def _start(
         tmp_path,
         detection_config(
             tmp_path / "data",
+            project=tmp_path,
             model_source=detector_declaring(__file__),
             training_source=f"{Path(__file__).stem}:{body_name}",
         ),

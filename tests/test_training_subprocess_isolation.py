@@ -12,21 +12,29 @@ torch = pytest.importorskip("torch")
 
 from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.schemas import train_config
-from tests._chain_fixtures import training_config
+from tests import REPO_ROOT
+from tests._chain_fixtures import (
+    FRAME_STATISTICS,
+    training_config,
+    weights_statistics,
+)
 from tests._training_values import drawn_split, tune_arguments
 
 
-def _config(**keys) -> dict:
-    """A :func:`~tests._chain_fixtures.training_config` of a detection model no body builds,
-    declaring this module for a loop of its own, over no data, with ``keys`` in place of
-    theirs.
+def _config(project: Path, data: dict | None = None, **keys) -> dict:
+    """A :func:`~tests._chain_fixtures.training_config` of ``project`` of a detection model no
+    body builds, declaring this module for a loop of its own, with ``keys`` in place of theirs:
+    over the data section ``data`` at the statistics of its own frames, or over no data and so
+    normalizing by pretrained weights.
     """
     from tests._verified_checkpoint_fixtures import unbuilt_source
 
     source = unbuilt_source("detection")
+    declared = {**source, "source_files": [*source["source_files"], __file__]}
     return training_config(
-        {**source, "source_files": [*source["source_files"], __file__]},
-        {},
+        project,
+        declared if data else weights_statistics(declared),
+        data or {},
         **keys,
     )
 
@@ -201,7 +209,9 @@ def test_the_launch_record_carries_the_resolution_and_the_child_resolves_nothing
         partition_side,
     )
 
-    run_dir = opened_run(tmp_path, detection_config(tmp_path / "data"))
+    run_dir = opened_run(
+        tmp_path, detection_config(tmp_path / "data", project=tmp_path)
+    )
     launch_bytes = (run_dir / RUN_FILE).read_bytes()
     resolved = observe(run_dir).record["resolved"]
     assert set(resolved) == {"data", "geometry", "partition", "trait_revision"}
@@ -249,11 +259,14 @@ def test_launch_training_child_receives_its_own_run_directory(
     fake_popen(monkeypatch, captured_argv)
 
     images_dir = tmp_path / "images" / UNDATED_BUCKET
-    seed_bud_images(images_dir, n=2, size=32, box=(1, 1, 9, 9))
+    seed_bud_images(images_dir, n=2, size=64, box=(1, 1, 9, 9))
 
     res = training_tools.launch_training(
-        tmp_path, small_detection_config(images_dir), actor=None
+        tmp_path,
+        small_detection_config(images_dir, project=tmp_path),
+        actor=None,
     )
+    assert "error" not in res, res
     run_dir = experiment_dir(res["experiment_id"], project=tmp_path)
     children = [argv for argv in captured_argv if "--run-dir" in argv]
     assert children == [children[0]] and children[0][-2:] == [
@@ -288,7 +301,7 @@ def test_ctx_should_cancel_and_dispatch_classification_honor_the_cancellation(
         **SCOPED_DATA,
     }
     ctx = run_context(
-        tmp_path, {**_config(training_source=BESPOKE_LOOP), "data": data}
+        tmp_path, _config(tmp_path, data, training_source=BESPOKE_LOOP)
     )
     request_cancel(ctx.run_dir)
 
@@ -327,7 +340,9 @@ def test_run_summary_reads_the_run_directory(tmp_path):
         opened_run,
     )
 
-    run_dir = opened_run(tmp_path, detection_config(tmp_path / "data"))
+    run_dir = opened_run(
+        tmp_path, detection_config(tmp_path / "data", project=tmp_path)
+    )
     log_epoch(run_dir, 3, {"loss": 0.1})
 
     observation = observe(run_dir)
@@ -368,6 +383,7 @@ def test_the_live_summary_folds_its_rows_in_its_configs_metric_direction(
         tmp_path,
         detection_config(
             tmp_path / "data",
+            project=tmp_path,
             evaluation=evaluation_block(selection_metric=metric),
         ),
     )
@@ -446,7 +462,7 @@ def test_monitor_training_reads_the_run_directory(tmp_path, monkeypatch):
 
     run_dir = opened_run(
         tmp_path,
-        detection_config(tmp_path / "data"),
+        detection_config(tmp_path / "data", project=tmp_path),
         experiment_id="run_delegated",
     )
     log_epoch(run_dir, 7, {"loss": 0.2})
@@ -474,10 +490,12 @@ def test_launched_runs_view_lists_a_run_read_from_its_directory(tmp_path):
         tmp_path,
         detection_config(
             tmp_path / "data",
+            project=tmp_path,
             model_source={
                 "builder": "my_models:chestnut_burr_det",
                 "source_files": [str(models)],
                 "task": "detection",
+                "normalization": FRAME_STATISTICS,
             },
         ),
         experiment_id="exp-no-stamp",
@@ -509,7 +527,7 @@ def test_gpu_device_pinning_round_robins(monkeypatch):
     seen = set()
     for _ in range(4):
         env = training_tools._child_env_for_launch(
-            train_config(_config(device=None))
+            train_config(_config(REPO_ROOT, device=None))
         )
         seen.add(env["CUDA_VISIBLE_DEVICES"])
     assert seen == {"0", "1"}
@@ -534,7 +552,7 @@ def test_gpu_pinning_skipped_when_device_explicit(monkeypatch):
     monkeypatch.setattr(torch, "cuda", _FakeCuda)
 
     env = training_tools._child_env_for_launch(
-        train_config(_config(device="cuda:1"))
+        train_config(_config(REPO_ROOT, device="cuda:1"))
     )
     assert "CUDA_VISIBLE_DEVICES" not in env
 
@@ -553,7 +571,7 @@ def test_gpu_pinning_noop_with_single_gpu(monkeypatch):
 
     monkeypatch.setattr(torch, "cuda", _FakeCuda)
     env = training_tools._child_env_for_launch(
-        train_config(_config(device=None))
+        train_config(_config(REPO_ROOT, device=None))
     )
     assert "CUDA_VISIBLE_DEVICES" not in env
 
@@ -660,7 +678,7 @@ def test_inspect_compute_resources_counts_a_running_run_directory(tmp_path):
 
     opened_run(
         tmp_path,
-        detection_config(tmp_path / "data"),
+        detection_config(tmp_path / "data", project=tmp_path),
         experiment_id="run_other_process",
     )
 

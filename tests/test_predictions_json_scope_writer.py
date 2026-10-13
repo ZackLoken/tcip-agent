@@ -151,7 +151,11 @@ def test_a_regression_pass_publishes_its_own_output_and_the_document_decodes(
     import tcip_store
     from tcip_mcp.buckets import pass_documents, publish
     from tcip_mcp.pipelines.execution import Stated, prepare
-    from tests._chain_fixtures import BESPOKE_MODELS, BESPOKE_REGRESSOR
+    from tests._chain_fixtures import (
+        BESPOKE_MODELS,
+        BESPOKE_REGRESSOR,
+        FRAME_STATISTICS,
+    )
     from tests._verified_checkpoint_fixtures import verified_checkpoint
 
     checkpoint = verified_checkpoint(
@@ -160,6 +164,7 @@ def test_a_regression_pass_publishes_its_own_output_and_the_document_decodes(
             "builder": BESPOKE_REGRESSOR,
             "source_files": [BESPOKE_MODELS],
             "task": "regression",
+            "normalization": FRAME_STATISTICS,
         },
     )
     images = tmp_path / "ds" / "images" / "2026-01-01"

@@ -82,7 +82,9 @@ def test_get_experiment_metrics_pagination(tmp_path):
     )
 
     run_dir = opened_run(
-        tmp_path, detection_config(tmp_path / "run-data"), experiment_id="exp1"
+        tmp_path,
+        detection_config(tmp_path / "run-data", project=tmp_path),
+        experiment_id="exp1",
     )
     for e in range(10):
         log_epoch(run_dir, e, {"loss": float(e)})
@@ -111,7 +113,9 @@ def test_get_experiment_reads_the_rows_of_one_epoch_as_one(tmp_path):
     )
 
     run_dir = opened_run(
-        tmp_path, detection_config(tmp_path / "run-data"), experiment_id="exp2"
+        tmp_path,
+        detection_config(tmp_path / "run-data", project=tmp_path),
+        experiment_id="exp2",
     )
     log_epoch(run_dir, 3, {"loss_train": 0.5})
     log_epoch(run_dir, 3, {"loss_val": 0.4})

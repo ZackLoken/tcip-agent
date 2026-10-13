@@ -13,7 +13,11 @@ from pathlib import Path
 
 import pytest
 
-from tests._chain_fixtures import training_config
+from tests._chain_fixtures import (
+    FRAME_STATISTICS,
+    training_config,
+    weights_normalization,
+)
 from tests._training_values import drawn_split, evaluation_block
 
 TOP_LEVEL_BUILDER = """
@@ -81,10 +85,12 @@ def _layout(builder: str, files: list[str], project: Path):
     return staged_sources(
         train_config(
             training_config(
+                project,
                 {
                     "builder": builder,
                     "task": "classification",
                     "source_files": files,
+                    "normalization": weights_normalization(),
                 },
                 {},
             )
@@ -413,6 +419,7 @@ def test_a_checkpoints_layout_is_its_runs_record_whatever_its_files_are_named(
             model_source={
                 "builder": "agentpkg_owned.model:build",
                 "task": "classification",
+                "normalization": FRAME_STATISTICS,
                 "source_files": [*files, str(settings), BESPOKE_MODELS],
             },
         )
@@ -469,6 +476,7 @@ def test_a_checkpoint_moved_alone_beside_a_run_of_its_paths_but_not_its_sources_
                 model_source={
                     "builder": "marked:build",
                     "task": "classification",
+                    "normalization": FRAME_STATISTICS,
                     "source_files": [
                         str(project / "marked.py"),
                         BESPOKE_MODELS,
@@ -660,9 +668,11 @@ def test_a_module_an_earlier_layout_loaded_is_not_reachable_from_a_later_one(
     issues = preflight_config(
         trees["b"],
         training_config(
+            trees["b"],
             {
                 "builder": builder,
                 "task": "classification",
+                "normalization": weights_normalization(),
                 "source_files": [
                     str(trees["b"] / f"{builder.partition(':')[0]}.py")
                 ],
@@ -754,6 +764,7 @@ def test_the_admissions_import_reads_the_files_its_run_holds(tmp_path):
     (pkg / "helper.py").write_text("SCALE = 2\n", encoding="utf-8")
     config = detection_config(
         tmp_path / "data",
+        project=tmp_path,
         model_source={
             **BUILT_DETECTOR,
             "source_files": [
@@ -900,9 +911,11 @@ def test_a_packaged_builder_outside_the_path_launches_and_trains_in_the_worker(
         tmp_path / "ds", intensities=[0.1, 0.9] * 4, values=[0, 1] * 4
     )
     cfg = training_config(
+        tmp_path,
         {
             "builder": "agentpkg_launch.model:build",
             "task": "classification",
+            "normalization": FRAME_STATISTICS,
             "source_files": files,
         },
         {
@@ -937,9 +950,11 @@ def test_preflight_imports_a_builder_through_its_source_files(
     images_dir = tmp_path / "images"
     images_dir.mkdir()
     cfg = training_config(
+        tmp_path,
         {
             "builder": PROBE_BUILDER,
             "task": "classification",
+            "normalization": weights_normalization(),
             "source_files": [str(src / f"{PROBE_MODULE}.py")],
         },
         {"images_dir": str(images_dir)},

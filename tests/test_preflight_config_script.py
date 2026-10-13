@@ -24,6 +24,7 @@ def _fixture_config(root: Path) -> Path:
     )
 
     config = training_config(
+        root,
         BUILT_DETECTOR,
         {
             **detection_images(root / "data", SCOPED_DATA["scope"]),
