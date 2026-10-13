@@ -37,7 +37,13 @@ def grouped_dir(tmp_path: Path) -> Path:
     band_b = d / "cap_R.tif"
     tifffile.imwrite(str(band_a), np.full((8, 8), 111, dtype=np.uint16))
     tifffile.imwrite(str(band_b), np.full((8, 8), 222, dtype=np.uint16))
-    write_band_group_manifest(d, "cap", {"Green": band_a, "Red": band_b})
+    write_band_group_manifest(
+        d,
+        "cap",
+        {"Green": band_a, "Red": band_b},
+        central_wavelength_nm=None,
+        identity_tolerance={},
+    )
 
     from PIL import Image
 
@@ -150,7 +156,13 @@ def test_list_logical_images_refuses_a_stem_collision_between_a_group_and_a_stan
     tifffile.imwrite(str(band_a), np.full((8, 8), 1, dtype=np.uint16))
     tifffile.imwrite(str(band_b), np.full((8, 8), 2, dtype=np.uint16))
     # The manifest's own canonical stem (commonprefix of "cap_a_G"/"cap_a_R", trimmed) is "cap_a".
-    write_band_group_manifest(d, "cap_a", {"Green": band_a, "Red": band_b})
+    write_band_group_manifest(
+        d,
+        "cap_a",
+        {"Green": band_a, "Red": band_b},
+        central_wavelength_nm=None,
+        identity_tolerance={},
+    )
     # An unrelated standalone file that happens to share that exact stem.
     tifffile.imwrite(str(d / "cap_a.tif"), np.full((8, 8), 3, dtype=np.uint16))
 
@@ -361,7 +373,11 @@ def test_a_band_group_of_channel_first_single_band_arrays_is_admitted_as_it_is_r
     np.save(str(d / "cap_a.npy"), np.full((1, 8, 12), 7, dtype=np.uint8))
     np.savez(str(d / "cap_b.npz"), band=np.full((1, 8, 12), 9, dtype=np.uint8))
     write_band_group_manifest(
-        d, "cap", {"A": d / "cap_a.npy", "B": d / "cap_b.npz"}
+        d,
+        "cap",
+        {"A": d / "cap_a.npy", "B": d / "cap_b.npz"},
+        central_wavelength_nm=None,
+        identity_tolerance={},
     )
 
     header = SourceHeader(resolve_image_path(d / "cap.bandgroup"))
@@ -390,7 +406,11 @@ def test_a_band_group_naming_a_four_dimensional_array_is_refused_at_its_header(
     for name in ("cap_a", "cap_b"):
         save(str(d / f"{name}{ext}"), np.zeros((1, 8, 12, 2), dtype=np.uint8))
     write_band_group_manifest(
-        d, "cap", {"A": d / f"cap_a{ext}", "B": d / f"cap_b{ext}"}
+        d,
+        "cap",
+        {"A": d / f"cap_a{ext}", "B": d / f"cap_b{ext}"},
+        central_wavelength_nm=None,
+        identity_tolerance={},
     )
 
     header = SourceHeader(resolve_image_path(d / "cap.bandgroup"))
@@ -420,7 +440,11 @@ def test_a_band_group_naming_a_multi_band_member_is_refused_at_its_header(
     Image.new("RGB", (8, 8), (255, 0, 0)).save(d / "cap_rgb.png")
     Image.new("L", (8, 8), 123).save(d / "cap_gray.png")
     write_band_group_manifest(
-        d, "cap", {"Red": d / "cap_rgb.png", "Gray": d / "cap_gray.png"}
+        d,
+        "cap",
+        {"Red": d / "cap_rgb.png", "Gray": d / "cap_gray.png"},
+        central_wavelength_nm=None,
+        identity_tolerance={},
     )
 
     header = SourceHeader(resolve_image_path(d / "cap.bandgroup"))

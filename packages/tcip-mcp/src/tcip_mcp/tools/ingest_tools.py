@@ -8,6 +8,8 @@ states. It does not annotate, split, choose a task, or write ``subjects.json`` (
 
 from __future__ import annotations
 
+import datetime
+import errno
 import logging
 from glob import glob
 from pathlib import Path
@@ -15,7 +17,10 @@ from pathlib import Path
 import tcip_store
 from tcip_mcp import dataset_layout
 from tcip_mcp.audit import audited
-from tcip_mcp.pipelines.data.band_groups import MANIFEST_EXT
+from tcip_mcp.pipelines.data.band_groups import (
+    MANIFEST_EXT,
+    detect_and_write_band_groups,
+)
 from tcip_mcp.pipelines.image_utils import (
     IMAGE_EXTS,
     bucket_logical_identities,
@@ -157,33 +162,6 @@ def _iter_source_images(source: str, recursive: bool):
                 yield p
 
 
-def _validate_bucket_literal(date_from: str) -> None:
-    """A literal ``date_from`` becomes a path segment: reject separators/traversal and a
-    dot-prefixed name, the same bucket grammar every listing over ``images/`` enforces.
-    """
-    if date_from in ("exif", "none"):
-        return
-    if not dataset_layout.is_bucket_name(date_from):
-        raise ValueError(f"invalid date_from literal bucket: {date_from!r}")
-
-
-def _bucket_for(
-    path: Path, date_from: str, date_item: str | None
-) -> tuple[str, str | None, str | None]:
-    """The bucket ``path`` lands in, why its own capture date could not be read, and the item that
-    stated it (:func:`_capture_iso_date`).
-
-    Only ``"exif"`` asks the file anything at all; the other two modes name the bucket from the
-    caller's own argument and open nothing, so they never have a reason or an item to report.
-    """
-    if date_from == "exif":
-        iso, unreadable, item = _capture_iso_date(path, date_item)
-        return iso or dataset_layout.UNDATED_BUCKET, unreadable, item
-    if date_from == "none":
-        return dataset_layout.UNDATED_BUCKET, None, None
-    return date_from, None, None  # validated literal bucket
-
-
 def _collision_refusal(
     dest_root: Path,
     resolved_sources: list[tuple[Path, str, str | None, str | None]],
@@ -246,9 +224,7 @@ def ingest_images(
     project: Path,
     source: str,
     copy: bool = True,
-    date_from: str = "exif",
     recursive: bool = True,
-    detect_band_groups: bool = False,
     raster_date_item: str | None = None,
 ) -> dict:
     """Copy raw images into the project, bucketed by the capture date each file states.
@@ -261,22 +237,21 @@ def ingest_images(
     re-ingesting the exact same destination file is skipped instead, recorded in
     ``skipped_collisions``. Does not annotate, split, choose a task, or write ``subjects.json``.
 
-    The capture date never gates ingestion: a file whose date cannot be read is copied like any
-    other, lands in ``undated/``, and its entry in ``files`` carries why.
+    Each file's bucket is the capture date it states (a photo's EXIF ``DateTimeOriginal``, a
+    raster's own date metadata), read from its header only. The capture date never gates
+    ingestion: a file that states none, or whose date cannot be read, is copied like any other and
+    lands in ``undated/``, its entry in ``files`` carrying why; ``state_capture_date`` moves it
+    to the date known for it.
+
+    After copying, the band-group correlation strategies (``pipelines.data.band_groups``) run over
+    each touched bucket, writing a ``.bandgroup`` manifest for every sibling-single-band-file
+    group found (a multispectral rig that writes one file per band instead of one multi-band file
+    per capture).
 
     Args:
         source: Folder (or glob) of raw images, anywhere on disk.
         copy: Copy (True, default) or move (False) the source images.
-        date_from: ``"exif"`` (each file's own capture date -> ISO date, missing -> ``undated/``; a
-            photo's EXIF ``DateTimeOriginal``, a raster's own date metadata), ``"none"`` (all ->
-            ``undated/``), or a literal bucket name (all -> ``images/<literal>/``, e.g. a known ISO
-            capture date). Only ``"exif"`` opens a file at all, and only its header.
         recursive: Recurse into source subfolders.
-        detect_band_groups: After copying, run the band-group correlation strategies
-            (``pipelines.data.band_groups``) over each touched bucket, writing a ``.bandgroup``
-            manifest for every sibling-single-band-file group found (e.g. a multispectral rig that
-            writes one file per band instead of one multi-band file per capture). Default
-            ``False``.
         raster_date_item: The default-domain metadata item a raster's writer states its capture
             date in (a stitching engine's own item name, matched case-insensitively), asked
             after the raster's TIFF ``DateTime`` tag and EXIF date. Omitted, a raster stating
@@ -288,22 +263,20 @@ def ingest_images(
     (``TIFFTAG_DATETIME``, ``EXIF_DateTimeOriginal`` or ``raster_date_item``), ``None`` for a file
     no source dated, which lands in ``undated/``, and ``date_unreadable`` why its container could
     not be read that far, else ``None``. ``skipped_collisions`` names only an exact re-ingest.
+    ``band_groups`` is ``{formed, refused, manifests}`` over the touched buckets.
 
     """
-    try:
-        _validate_bucket_literal(date_from)
-    except ValueError as exc:
-        return {"error": str(exc)}
-
     source = str(located(source, project))
     sources = list(_iter_source_images(source, recursive))
     if not sources:
         return {"error": f"No images found under {source!r}"}
 
-    resolved_sources = [
-        (src_path, *_bucket_for(src_path, date_from, raster_date_item))
-        for src_path in sources
-    ]
+    resolved_sources = []
+    for src_path in sources:
+        iso, unreadable, item = _capture_iso_date(src_path, raster_date_item)
+        resolved_sources.append(
+            (src_path, iso or dataset_layout.UNDATED_BUCKET, unreadable, item)
+        )
 
     collision_error = _collision_refusal(project, resolved_sources)
     if collision_error is not None:
@@ -367,19 +340,14 @@ def ingest_images(
         )
 
     band_groups_result: dict = {"formed": [], "refused": [], "manifests": []}
-    if detect_band_groups:
-        from tcip_mcp.pipelines.data.band_groups import (
-            detect_and_write_band_groups,
-        )
-
-        for bucket in sorted(touched_buckets):
-            bucket_dir = dataset_layout.image_dir(project, bucket)
-            result = detect_and_write_band_groups(bucket_dir)
-            for g in result["formed"]:
-                band_groups_result["formed"].append({**g, "bucket": bucket})
-            for g in result["refused"]:
-                band_groups_result["refused"].append({**g, "bucket": bucket})
-            band_groups_result["manifests"].extend(result["manifests"])
+    for bucket in sorted(touched_buckets):
+        bucket_dir = dataset_layout.image_dir(project, bucket)
+        result = detect_and_write_band_groups(bucket_dir)
+        for g in result["formed"]:
+            band_groups_result["formed"].append({**g, "bucket": bucket})
+        for g in result["refused"]:
+            band_groups_result["refused"].append({**g, "bucket": bucket})
+        band_groups_result["manifests"].extend(result["manifests"])
 
     return {
         "image_root": str(dataset_layout.image_root(project)),
@@ -391,6 +359,158 @@ def ingest_images(
         "errors": errors,
         "move": not copy,
         "band_groups": band_groups_result,
+    }
+
+
+@tool()
+def state_capture_date(
+    project: Path, images: list[str], date: datetime.date, rationale: str
+) -> dict:
+    """Move images into the bucket of a capture date stated for them: one their files do not
+    state, or one correcting the date they state.
+
+    Each of ``images`` names a logical image under one dataset's ``images/`` tree, a plain image's
+    file or a grouped capture's ``.bandgroup`` manifest
+    (:func:`~tcip_mcp.pipelines.image_utils.resolve_image_paths`), and moves whole into
+    ``images/<date>/`` in three phases: its files copied there (a grouped capture's band files
+    beside its manifest), the call making the bucket directory through the store's own route
+    (:func:`tcip_store.ensure_parent`) when it is absent; then every record keyed by its capture
+    and stem (its label document, its flags and its staged proposals) re-keyed unchanged to the
+    new capture in one transaction with the act's audit line, in the dataset root's log, naming
+    the images, the date and the rationale; then the original files deleted. A copy or the
+    transaction that raises removes what the call made (each copy with its lock file, then the
+    directory it made, which stays when another writer's file sits in it) and propagates the
+    cause. An image already in that bucket stays.
+
+    Args:
+        images: The images to move, each as ``ingest_images`` answers its ``dest``.
+        date: The capture date, which names the bucket in ISO ``YYYY-MM-DD``.
+        rationale: How the date is known.
+
+    Refuses with nothing moved: images under more than one dataset root; an image a published
+    prediction bucket names, naming the bucket, whose record states the capture the image was
+    predicted under; a stem the date's bucket already holds, as ``ingest_images`` refuses it; a
+    file or record already at an image's new place; and each refusal of the resolver.
+
+    Returns ``{date, moved}``, ``moved`` holding ``{source, dest}`` per file moved.
+    """
+    from tcip_annotation.flags import flag_key
+    from tcip_mcp.audit import audit_entry, audit_log_key
+    from tcip_mcp.buckets import buckets_under, source_root
+    from tcip_mcp.pipelines.image_utils import (
+        BandGroupRef,
+        resolve_image_paths,
+        stem_of,
+    )
+    from tcip_mcp.tools.proposal_tools import proposal_staging_key
+    from tcip_store.file_backend import lock_file_for
+
+    record_keys = (
+        dataset_layout.label_key,
+        lambda *at: flag_key(dataset_layout.label_key(*at)),
+        proposal_staging_key,
+    )
+    bucket = date.isoformat()
+    try:
+        named = [located(image, project) for image in images]
+        root = source_root(named)
+        logical = resolve_image_paths(named)
+    except (ValueError, FileNotFoundError) as exc:
+        return {"error": str(exc)}
+    files: list[Path] = []
+    rekeyed: list[tuple[tcip_store.Key, tcip_store.Key]] = []
+    bound = {
+        (b.date, stem): b.name
+        for b in buckets_under(root)
+        for stem in b.documents
+    }
+    held = []
+    for path, image in zip(named, logical):
+        capture, stem = (
+            dataset_layout.parse_image_path(path)[1],
+            stem_of(image),
+        )
+        if capture == bucket:
+            continue
+        if (capture, stem) in bound:
+            held.append(f"{capture}/{stem} (bucket {bound[capture, stem]!r})")
+        files += (
+            [image.manifest_path, *image.bands.values()]
+            if isinstance(image, BandGroupRef)
+            else [path]
+        )
+        rekeyed += [
+            (key_of(root, capture, stem), key_of(root, bucket, stem))
+            for key_of in record_keys
+        ]
+    if held:
+        return {
+            "error": f"published prediction buckets name {held}: each bucket's record states "
+            "the capture its images were predicted under, and a published record is never "
+            "rewritten. Publish the predictions again after the date is stated, under a new "
+            "bucket."
+        }
+    bucket_dir = dataset_layout.image_dir(root, bucket)
+    dests = [bucket_dir / f.name for f in files]
+    taken = [str(d) for d in dests if d.exists()] + [
+        str(new.parts) for _old, new in rekeyed if tcip_store.exists(new)
+    ]
+    collision = _collision_refusal(
+        root, [(f, bucket, None, None) for f in files]
+    )
+    if collision or taken:
+        return {
+            "error": collision
+            or f"{taken} already exist under {root}, and a move never overwrites"
+        }
+
+    if not files:
+        return {"date": bucket, "moved": []}
+    audit = audit_log_key(root)
+    minted = bucket_dir in tcip_store.ensure_parent(dests[0])
+    copied: list[Path] = []
+    try:
+        for path, dest in zip(files, dests):
+            tcip_store.put_blob(
+                dest, path.read_bytes(), expect=tcip_store.Version.ABSENT
+            )
+            copied.append(dest)
+        with tcip_store.transaction(
+            audit, *(k for pair in rekeyed for k in pair)
+        ) as txn:
+            for old, new in rekeyed:
+                record = txn.read(old, default=None)
+                if record is not None:
+                    txn.write(new, record)
+                    txn.delete(old)
+            txn.append(
+                audit,
+                audit_entry(
+                    "state_capture_date",
+                    {"images": images, "date": bucket, "rationale": rationale},
+                    None,
+                    "ok",
+                ),
+            )
+    except BaseException:
+        for dest in copied:
+            tcip_store.delete_blob(dest)
+            lock_file_for(dest).unlink(missing_ok=True)
+        if minted:
+            try:
+                bucket_dir.rmdir()
+            except OSError as exc:
+                if exc.errno != errno.ENOTEMPTY:
+                    raise
+        raise
+    for path in files:
+        tcip_store.delete_blob(path)
+    return {
+        "date": bucket,
+        "moved": [
+            {"source": str(path), "dest": str(dest)}
+            for path, dest in zip(files, dests)
+        ],
     }
 
 

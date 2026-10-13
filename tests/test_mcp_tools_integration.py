@@ -178,7 +178,11 @@ class TestEvaluateFolderEnumeration:
         tifffile.imwrite(str(band_a), np.full((8, 8), 111, dtype=np.uint16))
         tifffile.imwrite(str(band_b), np.full((8, 8), 222, dtype=np.uint16))
         write_band_group_manifest(
-            images_dir, "cap", {"Green": band_a, "Red": band_b}
+            images_dir,
+            "cap",
+            {"Green": band_a, "Red": band_b},
+            central_wavelength_nm=None,
+            identity_tolerance={},
         )
         _write_empty_label(images_dir / "cap.bandgroup", 8, 8)
 

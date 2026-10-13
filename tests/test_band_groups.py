@@ -10,6 +10,7 @@ identity, a sensor with no embedded metadata at all).
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 
@@ -230,6 +231,148 @@ def test_real_data_stale_manifest_recovers_by_deleting_it(dji_copy):
     assert sorted(ref.bands) == ["NIR", "Red", "RedEdge"]
 
 
+TIME_TAG = "drone-dji:UTCAtExposure"
+POSITION_TAGS = ("drone-dji:GpsLatitude", "drone-dji:GpsLongitude")
+
+
+def _expected_tolerances(images_dir: Path) -> dict[str, tuple[float, float]]:
+    """Per identity signal, the smallest separation between two distinct captures' files and the
+    largest spread within one capture, recomputed from each file's own tags: seconds by numpy
+    over the sorted capture times, meters by pyproj's geodesic over every pair of files. The
+    platform reads the same geodesic and differs in the reduction: a masked distance matrix.
+    """
+    from datetime import datetime
+    from itertools import combinations
+
+    from pyproj import Geod
+
+    from tcip_mcp.pipelines.data.band_groups import _read_xmp_tags
+
+    tags = [
+        _read_xmp_tags(p) for p in sorted(images_dir.glob("*.[tT][iI][fF]"))
+    ]
+    gids = np.array([t["drone-dji:CaptureUUID"] for t in tags])
+    times = np.array(
+        [datetime.fromisoformat(t[TIME_TAG]).timestamp() for t in tags]
+    )
+    order = np.argsort(times)
+    steps = np.diff(times[order])
+    crossing = gids[order][1:] != gids[order][:-1]
+    time_within = max(np.ptp(times[gids == g]) for g in set(gids))
+
+    lat, lon = (
+        np.array([float(t[tag]) for t in tags]) for tag in POSITION_TAGS
+    )
+    pairs = np.array(list(combinations(range(len(tags)), 2)))
+    _, _, meters = Geod(ellps="WGS84").inv(
+        lon[pairs[:, 0]], lat[pairs[:, 0]], lon[pairs[:, 1]], lat[pairs[:, 1]]
+    )
+    same = gids[pairs[:, 0]] == gids[pairs[:, 1]]
+    return {
+        TIME_TAG: (float(steps[crossing].min()), float(time_within)),
+        ",".join(POSITION_TAGS): (
+            float(meters[~same].min()),
+            float(meters[same].max(initial=0.0)),
+        ),
+    }
+
+
+def _recorded_tolerances(images_dir: Path) -> list[dict]:
+    """Every manifest's recorded identity tolerance in ``images_dir``."""
+    return [
+        json.loads(p.read_text(encoding="utf-8"))["identity_tolerance"]
+        for p in sorted(images_dir.glob("*.bandgroup"))
+    ]
+
+
+def _assert_tolerances_agree(images_dir: Path) -> None:
+    """Every capture's spread sits below its signal's gap, and every manifest records the gap
+    :func:`_expected_tolerances` recomputes.
+    """
+    expected = _expected_tolerances(images_dir)
+    for gap, within in expected.values():
+        assert within < gap
+    for recorded in _recorded_tolerances(images_dir):
+        assert recorded.keys() == expected.keys()
+        for key, (gap, _within) in expected.items():
+            assert recorded[key]["value"] == pytest.approx(gap, rel=1e-4)
+
+
+@requires_real_dji_data
+def test_real_data_tolerance_agrees_with_the_samples_own_gap(dji_copy):
+    from tcip_mcp.pipelines.data.band_groups import (
+        detect_and_write_band_groups,
+    )
+
+    result = detect_and_write_band_groups(dji_copy)
+
+    assert len(result["formed"]) == 16
+    _assert_tolerances_agree(dji_copy)
+
+
+def test_tolerance_agrees_with_a_synthetic_buckets_own_gap(tmp_path):
+    """Three captures a drone took seconds apart along a row, each band's fix jittered as the
+    real sample's are: each forms, recording the separation the test recomputes.
+    """
+    from tcip_mcp.pipelines.data.band_groups import (
+        detect_and_write_band_groups,
+    )
+
+    d = tmp_path / "images"
+    d.mkdir()
+    captures = [
+        ("17:06:28.931", 43.1969463, -90.0580036),
+        ("17:06:31.402", 43.1969471, -90.0579662),
+        ("17:06:33.887", 43.1969458, -90.0579285),
+    ]
+    for c, (clock, lat, lon) in enumerate(captures):
+        for b, (band, wavelength) in enumerate((("Green", 560), ("NIR", 860))):
+            _write_band_file_with_identity(
+                d / f"cap{c}_{band}.tif",
+                f"uuid-{c}",
+                band,
+                wavelength,
+                utc=f"2023-05-23T{clock}{b}4",
+                lat=lat + b * 3e-7,
+                lon=lon - b * 2e-7,
+            )
+
+    result = detect_and_write_band_groups(d)
+
+    assert len(result["formed"]) == 3
+    _assert_tolerances_agree(d)
+
+
+def test_a_lone_capture_forms_recording_that_its_identity_had_no_reference(
+    tmp_path,
+):
+    from tcip_mcp.pipelines.data.band_groups import (
+        detect_and_write_band_groups,
+    )
+
+    d = tmp_path / "images"
+    d.mkdir()
+    for band, wavelength in (("Green", 560), ("NIR", 860)):
+        _write_band_file_with_identity(
+            d / f"solo_{band}.tif",
+            "only-capture",
+            band,
+            wavelength,
+            utc="2023-05-23T17:06:28.931664",
+            lat=43.196946355,
+            lon=-90.058003633,
+        )
+
+    result = detect_and_write_band_groups(d)
+
+    assert [g["stem"] for g in result["formed"]] == ["solo"]
+    (recorded,) = _recorded_tolerances(d)
+    assert set(recorded) == {TIME_TAG, ",".join(POSITION_TAGS)}
+    for entry in recorded.values():
+        assert entry["value"] is None
+        assert "no other capture group" in entry["source"]
+
+
 # ── duplicate-band-identity guard (synthetic, the real sample never hits this case) ──────
 
 
@@ -294,8 +437,8 @@ def test_two_unrelated_captures_sharing_a_group_id_are_refused_not_spliced(
     tmp_path,
 ):
     """Two disjoint-band-name captures (A_G/A_NIR, B_R/B_RE) sharing one fabricated group id,
-    with disagreeing timestamp+GPS, must be refused, not silently merged into one confident,
-    wrong 4-band composite.
+    spread further apart in time than the bucket's genuine capture C sits from them, must be
+    refused, not silently merged into one confident, wrong 4-band composite; C still forms.
     """
     from tcip_mcp.pipelines.data.band_groups import (
         detect_and_write_band_groups,
@@ -342,12 +485,22 @@ def test_two_unrelated_captures_sharing_a_group_id_are_refused_not_spliced(
         lat=43.197026632,
         lon=-90.051619582,
     )
+    # Capture C: a genuine capture of its own id taken between the two.
+    for band, wavelength in (("Green", 560), ("NIR", 860)):
+        _write_band_file_with_identity(
+            d / f"C_{band}.tif",
+            "genuine-capture",
+            band,
+            wavelength,
+            utc="2023-05-23T17:07:20.000000",
+            lat=43.196990000,
+            lon=-90.054800000,
+        )
 
     result = detect_and_write_band_groups(d)
-    assert (
-        result["formed"] == []
-    )  # refused, never spliced into one 4-band group
-    assert not list(d.glob("*.bandgroup"))
+    # refused, never spliced into one 4-band group
+    assert [g["stem"] for g in result["formed"]] == ["C"]
+    assert [p.name for p in d.glob("*.bandgroup")] == ["C.bandgroup"]
     assert len(result["refused"]) == 1
     refusal = result["refused"][0]
     assert refusal["group_id"] == same_gid
@@ -464,9 +617,9 @@ def test_a_lone_file_with_a_group_id_forms_no_group(tmp_path):
 def test_a_group_whose_stem_a_standalone_file_holds_is_refused_through_ingest(
     tmp_path, monkeypatch
 ):
-    """Through ingest_images(detect_band_groups=True): a group whose own canonical stem a raw
-    file already placed in the bucket holds is refused, naming that file; an unrelated group in
-    the same pass, with no such collision, still forms.
+    """Through ingest_images: a group whose own canonical stem a raw file already placed in the
+    bucket holds is refused, naming that file; an unrelated group in the same pass, with no such
+    collision, still forms.
     """
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "workspace"))
     from tcip_mcp.tools.ingest_tools import ingest_images
@@ -494,13 +647,14 @@ def test_a_group_whose_stem_a_standalone_file_holds_is_refused_through_ingest(
     )
     # A standalone raw file whose stem is exactly capA's own canonical stem.
     tifffile.imwrite(str(src / "capA.tif"), np.zeros((4, 4), dtype=np.uint16))
+    later_utc, later_lat = "2023-05-23T17:06:30.931664", 43.196956355
     _write_band_file_with_identity(
         src / "capB_G.tif",
         "gidB",
         "Green",
         560,
-        utc=utc,
-        lat=lat,
+        utc=later_utc,
+        lat=later_lat,
         lon=lon,
     )
     _write_band_file_with_identity(
@@ -508,18 +662,13 @@ def test_a_group_whose_stem_a_standalone_file_holds_is_refused_through_ingest(
         "gidB",
         "Red",
         650,
-        utc=utc,
-        lat=lat,
+        utc=later_utc,
+        lat=later_lat,
         lon=lon,
     )
 
     project = tmp_path / "proj_bandcollide_case"
-    manifest = ingest_images(
-        project,
-        source=str(src),
-        date_from="none",
-        detect_band_groups=True,
-    )
+    manifest = ingest_images(project, source=str(src))
     assert "error" not in manifest
     bg = manifest["band_groups"]
     assert len(bg["refused"]) == 1
@@ -641,7 +790,12 @@ def test_explicit_manifest_groups_a_sensor_with_no_embedded_metadata(tmp_path):
     g = result["formed"][0]
     assert g["stem"] == "cap1"
     assert sorted(g["bands"]) == ["Blue", "Green", "Red"]
-    assert (d / "cap1.bandgroup").is_file()
+    # No identity signal was checked and no wavelength stated on an explicit group, facts its
+    # record states.
+    assert _recorded_tolerances(d) == [{}]
+    (manifest,) = d.glob("*.bandgroup")
+    recorded = json.loads(manifest.read_text(encoding="utf-8"))
+    assert recorded["central_wavelength_nm"] is None
 
 
 def test_explicit_manifest_drops_a_group_missing_files(tmp_path):
@@ -684,6 +838,7 @@ def test_manifest_round_trip(tmp_path):
         {"Red": band_a, "Blue": band_b},
         central_wavelength_nm={"Red": 650.0, "Blue": 470.0},
         source="explicit-manifest",
+        identity_tolerance={},
     )
     assert manifest_path == d / "cap42.bandgroup"
     # Path.stem recovers the canonical stem directly: the whole reason .bandgroup was chosen
@@ -706,7 +861,7 @@ def test_manifest_with_missing_bands_key_is_rejected(tmp_path):
         read_band_group_manifest(bad)
 
 
-# ── ingest_images(detect_band_groups=True) ─────────────────────────────────────────────
+# ── ingest_images ──────────────────────────────────────────────────────────────────────
 
 
 @requires_real_dji_data
@@ -715,43 +870,48 @@ def test_ingest_images_groups_real_dji_bucket(tmp_path, monkeypatch):
     from tcip_mcp.tools.ingest_tools import ingest_images
 
     proj = tmp_path / "ms_valley_farm"
-    manifest = ingest_images(
-        proj,
-        source=str(REAL_DJI_DIR),
-        date_from="2023-05-23",
-        detect_band_groups=True,
-    )
+    manifest = ingest_images(proj, source=str(REAL_DJI_DIR))
     assert "error" not in manifest
     assert manifest["copied"] == 64
     assert len(manifest["band_groups"]["formed"]) == 16
     assert manifest["band_groups"]["refused"] == []
 
-    images_dir = proj / "images" / "2023-05-23"
+    (bucket,) = {f["bucket"] for f in manifest["files"]}
+    images_dir = proj / "images" / bucket
     assert len(list(images_dir.glob("*.bandgroup"))) == 16
     assert (
         len(list(images_dir.glob("*.TIF"))) == 64
     )  # originals untouched, still all present
 
 
-def test_ingest_images_default_skips_band_group_detection(
+def test_an_ingest_of_per_band_captures_forms_their_groups(
     tmp_path, monkeypatch
 ):
-    """``detect_band_groups`` defaults False: an ordinary ingest runs no band-group detection."""
+    """Band groups are a property of the files: an ingest states nothing to have them found."""
     monkeypatch.setenv("TCIP_WORKSPACE", str(tmp_path / "workspace"))
-    from PIL import Image
-
     from tcip_mcp.tools.ingest_tools import ingest_images
 
     src = tmp_path / "raw"
     src.mkdir()
-    Image.new("RGB", (16, 16)).save(src / "a.jpg")
+    for capture, utc in (("capA", "17:06:28.931664"), ("capB", "17:06:30.1")):
+        for band, wavelength in (("Green", 560), ("Red", 650)):
+            _write_band_file_with_identity(
+                src / f"{capture}_{band}.tif",
+                f"gid-{capture}",
+                band,
+                wavelength,
+                utc=f"2023-05-23T{utc}",
+                lat=43.196946355,
+                lon=-90.058003633 if capture == "capA" else -90.057990000,
+            )
 
-    manifest = ingest_images(tmp_path / "plain_proj_default", source=str(src))
-    assert manifest["band_groups"] == {
-        "formed": [],
-        "refused": [],
-        "manifests": [],
-    }
+    manifest = ingest_images(tmp_path / "proj", source=str(src))
+
+    assert sorted(g["stem"] for g in manifest["band_groups"]["formed"]) == [
+        "capA",
+        "capB",
+    ]
+    assert len(manifest["band_groups"]["manifests"]) == 2
 
 
 def test_a_manifest_recorded_mid_detection_is_kept_rather_than_overwritten(
@@ -772,7 +932,10 @@ def test_a_manifest_recorded_mid_detection_is_kept_rather_than_overwritten(
     (images / "a.tif").write_bytes(b"a")
     (images / "b.tif").write_bytes(b"b")
     (images / "c.tif").write_bytes(b"c")
-    recorded = b'{"bands": {"Red": "b.tif", "Blue": "c.tif"}, "source": "explicit-manifest"}\n'
+    recorded = (
+        b'{"bands": {"Red": "b.tif", "Blue": "c.tif"}, "source": "explicit-manifest", '
+        b'"identity_tolerance": {}, "central_wavelength_nm": null}\n'
+    )
 
     manifest_path = band_groups.band_group_manifest_path(images, "cap")
     original = band_groups.write_band_group_manifest

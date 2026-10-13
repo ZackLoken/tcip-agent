@@ -813,11 +813,12 @@ def test_assign_detections_to_plants_maps_near_and_leaves_far_unmapped(
 def test_assign_detections_to_plants_matches_within_the_tolerance_it_is_given(
     tmp_path: Path,
 ) -> None:
+    from pyproj import Geod
+
     from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
         assign_detections_to_plants,
     )
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
-        haversine_m,
         read_plant_csvs,
     )
 
@@ -831,7 +832,9 @@ def test_assign_detections_to_plants_matches_within_the_tolerance_it_is_given(
     det_px = (20.0, 10.0)
     lat, lon = georef.pixel_to_wgs84(*det_px)
     plant0_lat, plant0_lon = georef.pixel_to_wgs84(*_PLANT_PIXELS[0])
-    dist = haversine_m(lat, lon, plant0_lat, plant0_lon)
+    _fwd, _back, dist = Geod(ellps="WGS84").inv(
+        lon, lat, plant0_lon, plant0_lat
+    )
     detections = [[det_px[0] - 1, det_px[1] - 1, det_px[0] + 1, det_px[1] + 1]]
 
     tight = assign_detections_to_plants(

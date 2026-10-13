@@ -376,7 +376,7 @@ def test_derive_block_scale_px_plant_pitch_via_projected_geotransform(
     from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
     from tests._geotiff_fixtures import write_geotiff
 
-    # Two plants 100m apart (haversine-ish at this latitude close enough for a unit test), on a
+    # Two plants about 100m apart (99.80m on the WGS84 geodesic), on a
     # real UTM 15N GeoTIFF at the fixture's default 0.5 m/px.
     plants = [
         PlantRecord("p0", "a0", 0, 0, 0, 45.0, -93.0),
@@ -438,6 +438,8 @@ def test_derive_block_scale_px_converts_a_foot_unit_raster_through_its_crs(
     """A raster in US survey feet (EPSG 2264) converts the plant-pitch meters through the CRS's
     own unit conversion factor, not a naive meter-blind pixel-scale division.
     """
+    from pyproj import Geod
+
     from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
     from tests._geotiff_fixtures import write_geotiff
 
@@ -445,7 +447,7 @@ def test_derive_block_scale_px_converts_a_foot_unit_raster_through_its_crs(
         PlantRecord("p0", "a0", 0, 0, 0, 45.0, -93.0),
         PlantRecord(
             "p1", "a1", 0, 0, 0, 45.000898, -93.0
-        ),  # ~99.96m north (haversine_m)
+        ),  # ~99.80m north (the WGS84 geodesic)
     ]
     raster_path = tmp_path / "mosaic.tif"
     write_geotiff(
@@ -462,9 +464,11 @@ def test_derive_block_scale_px_converts_a_foot_unit_raster_through_its_crs(
     )
     assert "plant grid pitch" in source
     assert "EPSG:2264" in source
-    assert (
-        px == 328
-    )  # 99.96m / 0.3048006 ft-per-m factor; a meter-blind read would give 100
+    _fwd, _back, pitch_m = Geod(ellps="WGS84").inv(
+        -93.0, 45.0, -93.0, 45.000898
+    )
+    # US survey feet (EPSG 2264): 1200/3937 m per foot; a meter-blind read would give 100.
+    assert px == round(pitch_m / (1200 / 3937))
 
 
 def test_derive_block_scale_px_photographic_raster_path_refuses_named(

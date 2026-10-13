@@ -643,7 +643,7 @@ def test_the_delivery_event_discloses_the_registry_raster_and_tolerance_it_match
     assert pm["detections_unattributed_scope"] == "delivered_raster"
     assert pm["plant_attribution"] == "detection"
     assert pm["nn_tolerance_m"] == {
-        "value": grid_pitch_m(plants) / 6,
+        "value": grid_pitch_m(plants) / 2,
         "source": "grid_pitch",
     }
     assert (
@@ -652,7 +652,7 @@ def test_the_delivery_event_discloses_the_registry_raster_and_tolerance_it_match
     )
     assert "dates_delivered" not in pm and "record_sha256" not in pm
 
-    stated = grid_pitch_m(plants) / 12
+    stated = grid_pitch_m(plants) / 4
     assert "error" not in _deliver(
         tmp_path, bucket, registry, _GRID, nn_tolerance_m=stated
     )

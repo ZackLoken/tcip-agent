@@ -38,20 +38,24 @@ def _dataset(tmp_path: Path, stems=STEMS) -> OpenProject:
     ``ingest_images`` under one capture bucket, and a registry declaring the subject, written
     through its own door.
     """
+    from datetime import datetime
+
     from PIL import Image
 
     from tcip_mcp.tools.annotation_tools import write_subject_registry
     from tcip_mcp.tools.ingest_tools import ingest_images
+    from tests._image_fixtures import capture_exif
     from tests._web_fixtures import named_project
 
     raw = tmp_path / "raw"
     raw.mkdir()
     for index, stem in enumerate(stems):
         Image.new("RGB", (IMG, IMG), color=(40 + index, 60, 50)).save(
-            raw / f"{stem}.png"
+            raw / f"{stem}.png",
+            exif=capture_exif(datetime.fromisoformat(DATE)),
         )
     made = named_project(tmp_path / "fruit_count", "Fruit count")
-    ingested = ingest_images(made.root, source=str(raw), date_from=DATE)
+    ingested = ingest_images(made.root, source=str(raw))
     assert "error" not in ingested, ingested
     registered = write_subject_registry(
         made.root,
@@ -839,7 +843,11 @@ def test_a_band_grouped_capture_resolves_by_the_stem_the_document_names(
     tifffile.imwrite(str(band_g), np.full((IMG, IMG), 111, dtype=np.uint16))
     tifffile.imwrite(str(band_r), np.full((IMG, IMG), 222, dtype=np.uint16))
     write_band_group_manifest(
-        images_dir, "plot7", {"Green": band_g, "Red": band_r}
+        images_dir,
+        "plot7",
+        {"Green": band_g, "Red": band_r},
+        central_wavelength_nm=None,
+        identity_tolerance={},
     )
     images = [{"id": 1, "file_name": "plot7.tif", "width": IMG, "height": IMG}]
     annotations = [{"id": 1, "image_id": 1, "category_id": 7, "bbox": BOX}]

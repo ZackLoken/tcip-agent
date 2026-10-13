@@ -245,6 +245,7 @@ def test_export_import_roundtrip(tmp_path: Path):
         bands,
         central_wavelength_nm={"green": 560.0, "red": 668.0},
         source="explicit-manifest",
+        identity_tolerance={},
     )
     # A sensor that writes one multi-band file per capture instead of one file per band. It
     # enumerates as a logical image on its own, so a bundle that drops it drops that capture.

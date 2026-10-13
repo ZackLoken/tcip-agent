@@ -42,7 +42,7 @@ declares under ``model_source.source_files``; a run imports it as the top-level 
 run's plan."""
 IMG = 64
 SUBJECT = "bud"
-DATE = "2-11-26"
+DATE = "2026-02-11"
 STEMS = tuple(f"s{i:02d}" for i in range(40))
 BESPOKE_DETECTION = "bespoke_models:build_bespoke_detection"
 """The torchvision bespoke detector's builder, its sizes left to each caller."""
@@ -99,7 +99,10 @@ def synthetic_capture(root: Path, *, date: str = DATE) -> Path:
     """Ingest one capture date of dim frames through ``ingest_images``, each holding one bright
     square its label document names; the capture's image directory.
     """
+    from datetime import datetime
+
     from tcip_mcp.tools.ingest_tools import ingest_images
+    from tests._image_fixtures import capture_exif
     from tests._producer_fixtures import BRIGHT, label_image, painted_frame
 
     raw = root.parent / f"raw-{date}"
@@ -112,9 +115,12 @@ def synthetic_capture(root: Path, *, date: str = DATE) -> Path:
             IMG,
             (shade, shade, shade),
             [((x0, y0, x0 + size, y0 + size), BRIGHT)],
-        ).save(raw / f"{stem}.png")
+        ).save(
+            raw / f"{stem}.png",
+            exif=capture_exif(datetime.fromisoformat(date).replace(hour=9)),
+        )
 
-    ingested = ingest_images(root, source=str(raw), date_from=date)
+    ingested = ingest_images(root, source=str(raw))
     assert "error" not in ingested, ingested
     assert ingested["copied"] == len(STEMS), ingested
 
@@ -512,6 +518,9 @@ apart."""
 REFERENCE_SITE = (43.20300, -90.05000)
 """Where the labeled reference frames of each date were taken, about 900 m from every plant, so
 the mapping attributes none of them."""
+SERIES_POSITION_ERROR_M = 3.0
+"""The horizontal positioning error (meters) every photograph of the attributed series reports,
+sample data well under the spacing of :data:`PLANTS`."""
 
 
 def blob_boxes(values: list[str], index: int) -> list[tuple[str, BBox]]:
@@ -712,8 +721,9 @@ def attributed_series(
                     capture / f"{plant}_{date}_{i}.jpg",
                     lat,
                     lon,
-                    when + timedelta(minutes=index),
+                    when + timedelta(seconds=index),
                     blob_frame(values, index),
+                    h_pos_err=SERIES_POSITION_ERROR_M,
                 )
         labeled = {}
         for i in range(per_date):
@@ -729,8 +739,9 @@ def attributed_series(
                 *REFERENCE_SITE,
                 when + timedelta(hours=2, minutes=index),
                 blob_frame(frame_values, index),
+                h_pos_err=SERIES_POSITION_ERROR_M,
             )
-        ingested = ingest_images(root, source=str(capture), date_from=date)
+        ingested = ingest_images(root, source=str(capture))
         assert "error" not in ingested, ingested
         for stem, (index, frame_values) in labeled.items():
             label_image(

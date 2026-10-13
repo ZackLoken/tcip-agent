@@ -237,7 +237,13 @@ def test_preflight_admits_the_exact_derivations_record_over_a_band_group_dataset
     band_a, band_b = imgs / "cap_G.tif", imgs / "cap_R.tif"
     tifffile.imwrite(str(band_a), np.full((8, 8), 111, dtype=np.uint16))
     tifffile.imwrite(str(band_b), np.full((8, 8), 222, dtype=np.uint16))
-    write_band_group_manifest(imgs, "cap", {"Green": band_a, "Red": band_b})
+    write_band_group_manifest(
+        imgs,
+        "cap",
+        {"Green": band_a, "Red": band_b},
+        central_wavelength_nm=None,
+        identity_tolerance={},
+    )
     _label(imgs, "cap", width=8, height=8)
 
     builder_kwargs, record = _derived([list_logical_images(imgs)["cap"]], 2)

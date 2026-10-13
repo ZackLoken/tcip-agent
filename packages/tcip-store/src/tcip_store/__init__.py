@@ -11,7 +11,12 @@ from tcip_store.errors import (
     TransactionMisuseError,
     VersionConflictError,
 )
-from tcip_store.file_backend import delete_blob, put_blob, read_blob_versioned
+from tcip_store.file_backend import (
+    delete_blob,
+    ensure_parent,
+    put_blob,
+    read_blob_versioned,
+)
 from tcip_store.model import (
     REQUIRED,
     Key,
@@ -76,6 +81,7 @@ __all__ = [
     "delete_blob",
     "encode_log_line",
     "encode_record",
+    "ensure_parent",
     "exists",
     "finite_number",
     "finite_or_none",

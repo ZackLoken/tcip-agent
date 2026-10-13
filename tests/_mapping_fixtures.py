@@ -16,6 +16,10 @@ POSITION_ERROR_M = 0.5
 """A sample error bound in meters a project states for its registry positions in the canopy
 regime."""
 
+PHOTO_POSITION_ERROR_M = 1.0
+"""A sample horizontal positioning error (meters) a capture's EXIF reports, under the spacing of
+:data:`PLOTS`."""
+
 
 def write_plant_csv(
     path: Path, plants: list[dict], *, extra: tuple[str, ...] = ()
@@ -107,7 +111,13 @@ def map_captures(
                 / date
                 / f"{plot}_{date.replace('-', '')}.jpg"
             )
-            write_geo_image(image, lat, lon, when + timedelta(minutes=j))
+            write_geo_image(
+                image,
+                lat,
+                lon,
+                when + timedelta(minutes=j),
+                h_pos_err=PHOTO_POSITION_ERROR_M,
+            )
             captures[date].append(image)
     plant_csv = write_plant_csv(
         project / f"{name}_plants.csv",

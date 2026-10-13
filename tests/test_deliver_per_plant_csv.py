@@ -32,6 +32,7 @@ def _scene(
     )
     from tcip_mcp.traits import registered_crops
     from tests._image_fixtures import write_geo_image
+    from tests._mapping_fixtures import PHOTO_POSITION_ERROR_M
 
     assert "error" not in initialize_project(
         str(tmp_path), "Orchard", site="orchard block"
@@ -43,6 +44,7 @@ def _scene(
             lat,
             lon,
             datetime(2026, 2, 11, 9, 30 + 5 * i),
+            h_pos_err=PHOTO_POSITION_ERROR_M,
         )
     result = register_dataset(
         tmp_path, str(dataset_root), crop=sorted(registered_crops())[0]
@@ -67,7 +69,7 @@ ONE_PLANT = {"P1": (43.19670, -90.058000)}
 TWO_PLANTS = {**ONE_PLANT, "P2": (43.19680, -90.057000)}
 
 
-def _mapped(tmp_path: Path, plants=ONE_PLANT, **stated) -> tuple[Path, str]:
+def _mapped(tmp_path: Path, plants=ONE_PLANT) -> tuple[Path, str]:
     """:func:`_scene` with the mapping ``valley`` built over it; ``(dataset root, date)``."""
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
     from tests._mapping_fixtures import register_plant_registry_for
@@ -78,7 +80,6 @@ def _mapped(tmp_path: Path, plants=ONE_PLANT, **stated) -> tuple[Path, str]:
         name="valley",
         images_root=str(dataset_root / "images"),
         plant_registry=register_plant_registry_for(tmp_path, [plant_csv]),
-        **stated,
     )
     assert "error" not in mapped, mapped
     return dataset_root, date
@@ -179,7 +180,7 @@ def test_an_unknown_plant_mapping_refuses_by_name(tmp_path):
     """A stated ``plant_mapping`` is a claim the data must positively carry: naming one with no
     stored record refuses by name, before the writer ever runs.
     """
-    dataset_root, date = _mapped(tmp_path, nn_tolerance_m=10.0)
+    dataset_root, date = _mapped(tmp_path)
     bucket = _bucket(tmp_path, dataset_root, date, {"P1": 1})
 
     res = _deliver(
@@ -199,7 +200,7 @@ def test_an_unknown_plant_mapping_refuses_by_name(tmp_path):
 def test_a_delivered_date_the_mapping_does_not_cover_refuses(tmp_path):
     from tests._image_fixtures import write_geo_image
 
-    dataset_root, date = _mapped(tmp_path, nn_tolerance_m=10.0)
+    dataset_root, date = _mapped(tmp_path)
     uncovered = "2026-03-01"
     write_geo_image(
         dataset_root / "images" / uncovered / "P1.jpg",
@@ -228,7 +229,7 @@ def test_predictions_under_another_dataset_than_the_mappings_refuse(tmp_path):
     from tcip_mcp.traits import registered_crops
     from tests._image_fixtures import write_geo_image
 
-    _dataset_root, date = _mapped(tmp_path, nn_tolerance_m=10.0)
+    _dataset_root, date = _mapped(tmp_path)
     other = tmp_path / "ds2"
     write_geo_image(
         other / "images" / date / "P1.jpg",
@@ -300,7 +301,7 @@ def test_a_delivered_plant_the_mapping_never_assigned_refuses_by_name(
     """This door's one added claim: every delivered plant must be one the named mapping assigned
     on the delivered dates.
     """
-    dataset_root, date = _mapped(tmp_path, nn_tolerance_m=10.0)
+    dataset_root, date = _mapped(tmp_path)
     bucket = _bucket(tmp_path, dataset_root, date, {"P1": 1})
 
     res = _deliver(
@@ -322,7 +323,7 @@ def test_a_capture_added_since_the_mapping_was_built_refuses(tmp_path):
     """
     from tests._image_fixtures import write_geo_image
 
-    dataset_root, date = _mapped(tmp_path, nn_tolerance_m=10.0)
+    dataset_root, date = _mapped(tmp_path)
     bucket = _bucket(tmp_path, dataset_root, date, {"P1": 1})
     write_geo_image(
         dataset_root / "images" / date / "P2.jpg",

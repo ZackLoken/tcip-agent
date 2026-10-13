@@ -97,6 +97,10 @@ def declared_models() -> list[type[BaseModel]]:
         SegmentTieDisclosure,
     )
     from tcip_mcp.pipelines.execution import Stated
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        MatchRadius,
+        StatedRadius,
+    )
     from tcip_mcp.traits import (
         Operationalization,
         PositiveState,
@@ -186,6 +190,8 @@ def declared_models() -> list[type[BaseModel]]:
         OrthomosaicPlantCountsDelivery,
         ExportCountCsvPayload,
         MatchTolerance,
+        MatchRadius,
+        StatedRadius,
         PlantRegistryReference,
         PlantMappingDisclosure,
         PlantRegistryDisclosure,

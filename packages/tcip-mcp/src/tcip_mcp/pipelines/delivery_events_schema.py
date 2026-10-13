@@ -12,6 +12,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+    MatchRadius,
     ToleranceSource,
     UnattributedSegmentSource,
 )
@@ -20,7 +21,7 @@ from tcip_mcp.traits import Text
 
 
 class MatchTolerance(BaseModel):
-    """A plant mapping's resolved match radius (meters) and the branch of
+    """A nearest-neighbor attribution's resolved tolerance (meters) and the branch of
     ``plant_mapping.resolve_nn_tolerance_m`` that produced it.
     """
 
@@ -54,7 +55,7 @@ class PlantMappingDisclosure(BaseModel):
     dataset_root: str
     built_at: str
     record_sha256: str
-    nn_tolerance_m: MatchTolerance
+    match_radius: dict[str, MatchRadius]
     capture_digests: dict[str, dict[str, str]]
     captures_unverified: list[str]
     plant_csvs_unverified: list[str]

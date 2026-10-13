@@ -52,6 +52,7 @@ BAND_GROUP_BYTES = (
     '    "Red": "cap_R.tif"\n'
     "  },\n"
     '  "source": "embedded-metadata",\n'
+    '  "identity_tolerance": {},\n'
     '  "central_wavelength_nm": {\n'
     '    "Grün": 560.0,\n'
     '    "Red": 650.0\n'
@@ -159,6 +160,7 @@ def test_a_band_group_manifest_lands_as_the_json_the_image_enumerators_parse(
         bands,
         central_wavelength_nm=BAND_WAVELENGTHS,
         source="embedded-metadata",
+        identity_tolerance={},
         expect=ts.Version.ABSENT,
     )
 

@@ -211,6 +211,7 @@ def _populate_project(src: Path) -> tuple[Path, Path]:
         bands,
         central_wavelength_nm={"green": 560.0, "red": 668.0},
         source="explicit-manifest",
+        identity_tolerance={},
     )
     # A sensor that writes one multi-band file per capture instead of one file per band.
     import numpy as np

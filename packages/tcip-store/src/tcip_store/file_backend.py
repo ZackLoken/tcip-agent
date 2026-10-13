@@ -16,6 +16,7 @@ import threading
 import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
+from itertools import takewhile
 from pathlib import Path
 from typing import Any
 
@@ -158,7 +159,7 @@ def transition_lock(
     is its first act.
     """
     db_path = database_file(root)
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_parent(db_path)
     with path_lock(db_path, timeout_s=timeout_s):
         yield
 
@@ -181,19 +182,30 @@ def _version_of(data: bytes) -> Version:
     return Version(hashlib.sha256(data).hexdigest())
 
 
-def _ensure_parent(path: Path) -> None:
-    """Create ``path``'s parent directory, flushing every directory entry it created."""
+def ensure_parent(path: Path) -> list[Path]:
+    """Create ``path``'s parent directory one level at a time, flushing every directory entry it
+    created, and return the levels this call's own ``mkdir`` made, outermost first; a level
+    another writer made meanwhile is not among them, and a level that exists as a file raises
+    ``FileExistsError``.
+    """
     parent = path.parent
-    if parent.is_dir():
-        return
+    missing = list(
+        takewhile(lambda level: not level.is_dir(), [parent, *parent.parents])
+    )
+    if not missing:
+        return []
     created: list[Path] = []
-    node = parent
-    while not node.exists():
-        created.append(node)
-        node = node.parent
-    parent.mkdir(parents=True, exist_ok=True)
-    for directory in [node, *reversed(created)]:
+    for level in reversed(missing):
+        try:
+            level.mkdir()
+        except FileExistsError:
+            if not level.is_dir():
+                raise
+        else:
+            created.append(level)
+    for directory in [missing[-1].parent, *created]:
         fsync_directory(directory)
+    return created
 
 
 def _stage_bytes(path: Path, data: bytes) -> str:
@@ -249,7 +261,7 @@ def _locked(path: Path) -> Generator[None]:
     out.
     """
     _, timeout_error = _filelock_classes()
-    _ensure_parent(path)
+    ensure_parent(path)
     try:
         with path_lock(path):
             yield

@@ -9,12 +9,13 @@ import type {
   ExportCountCsvPayload,
   ExportCsvPayload,
   JobStatus,
-  MatchTolerance,
+  MatchRadius,
   PhenologyPayload,
   PlantMappingDisclosure,
   PlantRegistryDisclosure,
   RegisteredModels,
   Stated,
+  StatedRadius,
   TraitRevision,
 } from "@/api/types.generated";
 import { createReconnectingSocket, jsonFrameHandlers } from "@/lib/reconnectingSocket";
@@ -99,8 +100,8 @@ export interface ServedPlantMapping {
   name: string;
   summary: PlantMappingSummary;
   unreadable: Record<string, string[]>;
-  nn_tolerance_m: MatchTolerance;
-  max_match_distance_m: number;
+  // Each date's radius, absent for a date no capture of which carries a position.
+  match_radius: Record<string, MatchRadius>;
 }
 
 export interface PerPlantRow {
@@ -309,7 +310,7 @@ export const resultsApi = {
     images_root: string;
     plant_registry: string;
     dates?: string[];
-    nn_tolerance_m?: number;
+    match_radius?: StatedRadius;
     supersede?: boolean;
     user: string;
   }) => postJson<ServedPlantMapping>(ROUTES.postResultsPlantMappingBuild, body),
