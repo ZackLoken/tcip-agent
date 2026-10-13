@@ -699,7 +699,11 @@ def test_a_pass_whose_document_fails_to_encode_publishes_nothing(
             ckpt,
             str(root / "images" / DATE),
             bucket=f"detector/{DATE}",
-            stated=Stated(tile=False, conf=SAMPLE_CONF),
+            stated=Stated(
+                tile=False,
+                conf=SAMPLE_CONF,
+                rationale="a sample reason the test states",
+            ),
         )
 
     assert len(calls) == 2

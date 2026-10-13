@@ -20,7 +20,9 @@ from tests._verified_checkpoint_fixtures import (  # noqa: E402
     project_checkpoint,
 )
 
-UNTILED = Stated(tile=False, conf=SAMPLE_CONF)
+UNTILED = Stated(
+    tile=False, conf=SAMPLE_CONF, rationale="a sample reason the test states"
+)
 """The execution values every untiled run here states."""
 
 BUCKET = "out/2026-01-01"
@@ -226,6 +228,7 @@ def test_a_dry_run_previews_the_both_sources_refusal(tmp_path):
     result = run_inference(
         tmp_path,
         project_checkpoint(tmp_path),
+        stated=Stated(),
         images_dir=str(images_dir),
         raster_path=str(raster_path),
         bucket=BUCKET,

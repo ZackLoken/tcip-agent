@@ -14,6 +14,7 @@ import pytest
 
 import tcip_mcp.audit as audit_module
 import tcip_store as ts
+from tests._training_values import COMBINED_SCORER, RATIONALE
 
 
 def _rows(project: Path) -> list[dict]:
@@ -128,6 +129,9 @@ def test_ranking_a_review_queue_leaves_no_line(
         tmp_path,
         checkpoint_path=ckpt_path,
         images_dir=str(root / "images" / DATES[0]),
+        scorer=COMBINED_SCORER,
+        budget=50,
+        rationale=RATIONALE,
     )
 
     assert "error" not in result, result

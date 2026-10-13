@@ -22,6 +22,10 @@ from tests._dense_op_fixtures import (  # noqa: E402
     dense_records,
     toy_records as _records,  # noqa: E402
 )
+from tests._training_values import (  # noqa: E402
+    DISPERSION_QUANTILE,
+    EQUIVALENCE_Z,
+)
 
 ENTRY = fx.with_fields(
     fx.BUD_OPENING, count_bias_tolerance_frac=0.01, count_error_tolerance=100.0
@@ -30,7 +34,15 @@ ENTRY = fx.with_fields(
 reaches it unless a test states a stricter one."""
 
 
-def _criterion(cal, hold, *, entry=ENTRY, floor=0.01):
+def _criterion(
+    cal,
+    hold,
+    *,
+    entry=ENTRY,
+    floor=0.01,
+    equivalence_z=EQUIVALENCE_Z,
+    dispersion_quantile=DISPERSION_QUANTILE,
+):
     """``count_criterion`` staged at ``floor``: ``(conf, evidence, failures)``."""
     return count_criterion(
         cal,
@@ -38,6 +50,8 @@ def _criterion(cal, hold, *, entry=ENTRY, floor=0.01):
         entry,
         staged_conf_floor=floor,
         staged_conf_floor_attribute_path=None,
+        equivalence_z=equivalence_z,
+        dispersion_quantile=dispersion_quantile,
     )
 
 
@@ -73,6 +87,7 @@ def _nearest_neighbor_bias_comparator(holdout_records, tolerance, conf):
     sweep = derive_operating_point_curve(
         holdout_records,
         criterion={"kind": "center_match", "tolerance": tolerance},
+        dispersion_quantile=DISPERSION_QUANTILE,
     )
     return min(sweep["curve"], key=lambda c: abs(c["conf"] - conf))
 
@@ -187,9 +202,9 @@ def test_tp_zero_bias_zero_holdout_fails_the_localization_floor():
     assert "localization_quality_floor_failed" in failures
 
 
-def test_an_authored_dispersion_tolerance_fails_one_bad_image_among_many():
-    """One image drops 10 objects, none elsewhere: the p90 per-image error (1.0) exceeds an
-    authored 0.5 even though the mean bias is small.
+def _one_bad_image():
+    """Ten images, one dropping 10 objects and none elsewhere: ``(cal, hold, entry)``, the entry's
+    dispersion tolerance 0.5 and its bias tolerance loose.
     """
     n_images, objects_per_image = 10, 50
     cal = dense_records(
@@ -212,11 +227,44 @@ def test_an_authored_dispersion_tolerance_fails_one_bad_image_among_many():
     strict = fx.with_fields(
         ENTRY, count_error_tolerance=0.5, count_bias_tolerance_frac=1.0
     )
+    return cal, hold, strict
+
+
+def test_an_authored_dispersion_tolerance_fails_one_bad_image_among_many():
+    """The ninetieth-percentile per-image error (1.0) exceeds an authored 0.5 even though the mean
+    bias is small.
+    """
+    cal, hold, strict = _one_bad_image()
 
     _conf, evidence, failures = _criterion(cal, hold, entry=strict)
 
-    assert evidence["holdout_at_conf"]["count_error_p90"] == pytest.approx(1.0)
+    assert evidence["holdout_at_conf"][
+        "count_error_at_quantile"
+    ] == pytest.approx(1.0)
     assert "count_error_dispersion_too_high" in failures
+
+
+def test_the_dispersion_check_reads_the_quantile_the_assessment_states():
+    """The per-image error is taken at the stated quantile, numpy's own over the per-image errors,
+    and the curve records that quantile: at the median the one bad image no longer reaches the
+    tolerance.
+    """
+    import numpy as np
+
+    cal, hold, strict = _one_bad_image()
+    errors = [0] * 9 + [10]
+
+    for quantile in (0.5, 0.95):
+        _conf, evidence, failures = _criterion(
+            cal, hold, entry=strict, dispersion_quantile=quantile
+        )
+        assert evidence["holdout_at_conf"][
+            "count_error_at_quantile"
+        ] == pytest.approx(float(np.quantile(errors, quantile)))
+        assert evidence["calibration_curve"]["dispersion_quantile"] == quantile
+        assert ("count_error_dispersion_too_high" in failures) is (
+            quantile == 0.95
+        )
 
 
 # ── Reference sufficiency and the equivalence criterion ─────────────────────
@@ -382,6 +430,33 @@ def test_a_realistic_noisy_detector_passes_at_n_equals_40():
     assert hb["recall"] == pytest.approx(0.97, abs=1e-6)
     assert hb["precision"] == pytest.approx(0.97, abs=1e-6)
     assert failures == []
+
+
+def test_the_equivalence_test_runs_at_the_multiplier_the_assessment_states():
+    """The same noisy detector at n=40 (bias 0, standard error about 0.32 against a tolerance of
+    1.0) passes at 1.645 standard errors and fails at 4, and the evidence records the multiplier
+    applied.
+    """
+    miss, fp = _rotating_noise_pattern(40)
+    for equivalence_z, passes in ((1.645, True), (4.0, False)):
+        cal, hold = (
+            dense_records(
+                n_images=40,
+                objects_per_image=100,
+                id_prefix=prefix,
+                shift=shift,
+                miss_pattern=miss,
+                fp_pattern=fp,
+                score=0.9,
+                fp_score=0.9,
+            )
+            for prefix, shift in (("c", 0.0), ("h", 5.0))
+        )
+        _conf, evidence, failures = _criterion(
+            cal, hold, equivalence_z=equivalence_z
+        )
+        assert evidence["equivalence_z"] == equivalence_z
+        assert ("count_bias_exceeds_tolerance" not in failures) is passes
 
 
 def test_the_same_noisy_detector_on_ten_images_fails_equivalence():

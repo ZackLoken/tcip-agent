@@ -288,7 +288,8 @@ class TraitEntry(BaseModel):
     """Max acceptable mean per-image count bias on the held-out split, relative to the scope's
     typical per-image count; null until the breeder authors it."""
     count_error_tolerance: float | None
-    """Max acceptable p90 per-image count error on the held-out split; null until authored."""
+    """Max acceptable per-image count error on the held-out split at the dispersion quantile the
+    assessment states; null until authored."""
     classifier_agreement_floor: float | None
     """Min acceptable Cohen's kappa for the classifier operating point; null until authored."""
     ordinal_agreement_floor: float | None
@@ -322,8 +323,8 @@ QUESTIONS: dict[str, str] = {
         "before the number is no use to you?"
     ),
     "count_error_tolerance": (
-        "How many objects off may one image's count be, for nine images in ten, before that "
-        "image's number is no use to you?"
+        "How many objects off may one image's count be before that image's number is no use "
+        "to you? Each assessment states the share of images held to this limit."
     ),
     "holdout_match_quality_floor": (
         "What share of the real objects must the model find, and what share of its finds must "

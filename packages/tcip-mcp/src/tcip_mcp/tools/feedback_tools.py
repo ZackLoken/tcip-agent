@@ -7,10 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from tcip_mcp.pipelines.active_learning import (
-    DEFAULT_REVIEW_BUDGET,
-    DEFAULT_SCORER,
-)
+from tcip_mcp.pipelines.active_learning import ScorerSpec
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
 
@@ -131,14 +128,16 @@ def prioritize_review_queue(
     project: Path,
     checkpoint_path: str,
     images_dir: str,
-    method: str = DEFAULT_SCORER,
-    budget: int = DEFAULT_REVIEW_BUDGET,
+    scorer: ScorerSpec,
+    budget: int,
+    rationale: str,
     subject: str | None = None,
 ) -> dict:
     """Rank unfinished images by active-learning informativeness for the next review batch.
 
-    Scores every candidate with ``method`` and returns the most uncertain/diverse frames first,
-    each ``queue`` entry naming its image by its logical name.
+    Scores every candidate with ``scorer`` and returns the ``budget`` most uncertain/diverse frames
+    first, each ``queue`` entry naming its image by its logical name, answered beside the scorer
+    block, the budget and ``rationale``.
 
     When ``checkpoint_path`` names a checkpoint produced by a run bound to a selection, each
     ``queue`` entry carries ``reference_member: bool``, matched against the calibration and holdout
@@ -149,11 +148,14 @@ def prioritize_review_queue(
     Args:
         checkpoint_path: Trained model checkpoint (drives scoring).
         images_dir: Directory of candidate images.
-        method: Informativeness scorer. ``uncertainty`` | ``diversity`` | ``combined`` are the
-            built-in reference implementations: register your own with ``register_scorer``, or pass
-            a dotted ``module:factory`` you wrote, scoring under the checkpoint's own task. An
-            unresolvable name is refused.
+        scorer: The informativeness scorer block, ``{"name": ..., **values}``: ``uncertainty``
+            and ``diversity`` take no values, ``combined`` requires ``uncertainty_weight`` and
+            ``diversity_weight``; register your own factory with ``register_scorer``, or name a
+            dotted ``module:factory`` you wrote, built from the checkpoint's own task and the
+            block's values. An unresolvable name, a required value unstated and a value the
+            factory does not take are refused.
         budget: Number of images to return.
+        rationale: Why the queue is ranked and sized as stated.
         subject: The subject whose finished images (marked complete in their label document)
             are skipped; omitted ranks every candidate image.
 
@@ -162,8 +164,9 @@ def prioritize_review_queue(
         project,
         located(checkpoint_path, project),
         located(images_dir, project),
-        method=method,
+        scorer=scorer,
         budget=budget,
+        rationale=rationale,
         subject=subject,
     )
 
@@ -173,14 +176,17 @@ def ranked_review_queue(
     checkpoint_path: Path,
     images_dir: Path,
     *,
-    method: str,
+    scorer: ScorerSpec,
     budget: int,
+    rationale: str,
     subject: str | None,
 ) -> dict:
-    """The unfinished images under the established location ``images_dir`` ranked by ``method``
-    under the registered checkpoint at the established location ``checkpoint_path``, the top
-    ``budget`` as ``queue`` (each marked ``reference_member`` for a selection-bound run), or the
-    refusal ``{"error": ...}``; ``subject``'s finished images are skipped.
+    """The unfinished images under the established location ``images_dir`` ranked by the scorer
+    ``scorer`` builds (:func:`~tcip_mcp.pipelines.active_learning.scorer.resolve_scorer`) under the
+    registered checkpoint at the established location ``checkpoint_path``, the top ``budget`` as
+    ``queue`` (each marked ``reference_member`` for a selection-bound run) answered beside the
+    scorer block, the budget and ``rationale``, or the refusal ``{"error": ...}``; ``subject``'s
+    finished images are skipped.
     """
     checkpoint, refusal = _load_or_refuse(checkpoint_path, project)
     if refusal is not None:
@@ -195,9 +201,14 @@ def ranked_review_queue(
     except ValueError as exc:
         return {"error": str(exc)}
 
+    stated = {
+        "scorer": scorer.model_dump(),
+        "budget": budget,
+        "rationale": rationale,
+    }
     if not sources:
         return {
-            "method": method,
+            **stated,
             "task": task,
             "total_candidates": 0,
             "reviewed_skipped": reviewed_skipped,
@@ -214,17 +225,15 @@ def ranked_review_queue(
 
     predictor = prep.predictor
     try:
-        scorer = resolve_scorer(method, task)
-    except (
-        ValueError
-    ) as e:  # unknown scorer: refuse rather than silently reordering the queue
+        ranking = resolve_scorer(scorer, task)
+    except (ValueError, TypeError) as e:
         return {"error": str(e)}
 
     from tcip_mcp.pipelines.image_utils import logical_image_name, stem_of
 
     # A scorer answers the candidates it was handed, whatever their type.
     scored: list[tuple[Any, float]] = list(
-        scorer.score(sources, predictor)[:budget]
+        ranking.score(sources, predictor)[:budget]
     )
     reference_stems = _reference_stems(checkpoint, images_dir, project)
     queue = []
@@ -236,23 +245,23 @@ def ranked_review_queue(
         if reference_stems is not None:
             entry["reference_member"] = stem_of(p) in reference_stems
         queue.append(entry)
-    result = {
-        "method": method,
+    return {
+        **stated,
         "task": task,
         "total_candidates": len(sources),
         "reviewed_skipped": reviewed_skipped,
         "selected_count": len(scored),
         "queue": queue,
     }
-    return result
 
 
 def triage_predictions(
     project: Path,
     checkpoint_path: str,
     images_dir: str,
-    low: float = 0.3,
-    high: float = 0.8,
+    low: float,
+    high: float,
+    rationale: str,
     subject: str | None = None,
 ) -> dict:
     """Sort a checkpoint's own predictions by confidence into needs-review and unscoreable
@@ -260,14 +269,18 @@ def triage_predictions(
 
     Routes predictions between ``low`` and ``high`` into the needs-review queue, and separates out
     predictions with no confidence-bearing signal at all (e.g. a regression head's point estimate)
-    into their own ``unscoreable_images`` list. A detector predicts at ``low``, so every box the
-    band can hold exists, each frame capped at the object density its checkpoint recorded.
+    into their own ``unscoreable_images`` list. ``low`` is read twice: as the band's lower edge,
+    and as the conf a detector predicts at, so every box the band can hold exists, each frame
+    capped at the object density its checkpoint recorded. The answer carries ``low``, ``high`` and
+    ``rationale`` beside the queues.
 
     Args:
         checkpoint_path: Trained model checkpoint (drives predictions).
         images_dir: Directory of candidate images.
-        low: Lower confidence bound for the needs-review band.
-        high: Upper confidence bound for the needs-review band.
+        low: Lower confidence bound for the needs-review band, inclusive, and a detector's
+            pass conf.
+        high: Upper confidence bound for the needs-review band, exclusive.
+        rationale: Why the band is stated as it is.
         subject: The subject whose finished images (marked complete in their label document)
             are skipped; omitted triages every candidate image.
 
@@ -288,8 +301,10 @@ def triage_predictions(
         unscoreable,
     )
 
+    stated = {"low": low, "high": high, "rationale": rationale}
     if not sources:
         return {
+            **stated,
             "total_images": 0,
             "reviewed_skipped": reviewed_skipped,
             "needs_review": 0,
@@ -299,9 +314,11 @@ def triage_predictions(
     from tcip_mcp.pipelines.execution import ExecutionRefusedError, Stated
     from tcip_mcp.pipelines.model_contract import DETECTOR_TASKS
 
-    detector = checkpoint.task in DETECTOR_TASKS
     prep, refusal = _untiled(
-        checkpoint, Stated(conf=low if detector else None)
+        checkpoint,
+        Stated(conf=low, rationale=rationale)
+        if checkpoint.task in DETECTOR_TASKS
+        else Stated(),
     )
     if refusal is not None:
         return refusal
@@ -316,6 +333,7 @@ def triage_predictions(
         review_queue(predictions, low=low, high=high) + unscoreable_preds
     )
     return {
+        **stated,
         "total_images": len(predictions),
         "reviewed_skipped": reviewed_skipped,
         "needs_review": len(all_review),

@@ -32,6 +32,7 @@ DOORS = [
             "dataset_root": "d",
             "date": "2026-01-01",
             "bucket": "o",
+            "stated": {},
         },
     ),
     ("/api/inference/jobs/inf-1/cancel", {}),

@@ -580,6 +580,7 @@ def test_a_region_proposal_and_its_accept_each_open_the_image_once(
         engine="stub",
         grid_cells=["A1"],
         tile_size=32,
+        overlap=0.0,
     )
     assert "error" not in proposed, proposed
     assert proposed["staged"] is True

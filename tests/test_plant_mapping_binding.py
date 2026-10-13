@@ -1641,7 +1641,7 @@ def test_an_image_ingested_under_a_mapped_date_refuses_the_delivery_naming_the_d
         dataset_root, source=str(extra_source), date_from=DATES[0]
     )
     assert "error" not in res, res
-    assert res["buckets"].get(DATES[0]) == 1
+    assert [f["bucket"] for f in res["files"]] == [DATES[0]]
 
     out_csv = tmp_path / "out.csv"
     res = _deliver(

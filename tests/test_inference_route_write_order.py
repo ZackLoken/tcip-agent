@@ -10,6 +10,7 @@ import pytest
 
 from tests._audit_fixtures import audit_rows
 from tests._predictor_fixtures import StubPredictor, install
+from tests._training_values import RATIONALE
 from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS
 
 DATE = "2025-06-01"
@@ -36,7 +37,9 @@ def _job(job_id, images_dir, bucket, ckpt, project):
         dataset_root=str(dataset_root_of(images_dir)),
         images_dir=str(images_dir),
         bucket=bucket,
-        stated=Stated(tile=False, conf=0.25, postprocess="nms"),
+        stated=Stated(
+            tile=False, conf=0.25, postprocess="nms", rationale=RATIONALE
+        ),
     )
 
 

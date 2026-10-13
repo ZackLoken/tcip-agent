@@ -27,7 +27,13 @@ from tests._chain_fixtures import (  # noqa: E402
 )
 from tests._mapping_fixtures import write_plant_csv  # noqa: E402
 from tests._producer_fixtures import image_label_key, label_image  # noqa: E402
-from tests._training_values import drawn_split, tiling_block  # noqa: E402
+from tests._training_values import (  # noqa: E402
+    DISPERSION_QUANTILE,
+    EQUIVALENCE_Z,
+    RATIONALE,
+    drawn_split,
+    tiling_block,
+)
 
 TILE = 32
 OVERLAP = 0.2
@@ -196,18 +202,13 @@ def _attested(tmp_path: Path, **kwargs) -> dict:
     return exp
 
 
-def _assess(
-    exp: dict, *, k_cal: int | None = None, k_test: int | None = None, **stated
-) -> dict:
+def _assess(exp: dict, *, k_cal: int = 3, k_test: int = 3, **stated) -> dict:
     """``assess_reserved_regions`` of the count trait's per-image count for ``exp``'s checkpoint
-    under the ``stated`` execution values (the sample merge threshold unless they name one,
-    ``None`` leaving it to the calibration bands), answered as its door answers it.
+    in ``k_cal`` and ``k_test`` bands under the ``stated`` execution values (an NMS merge at the
+    sample threshold unless they name one, ``None`` leaving the threshold to the calibration
+    bands), at the sample count test settings, answered as its door answers it.
     """
     from tcip_mcp.assessment import assess_reserved_regions
-    from tcip_mcp.pipelines.block_calibration import (
-        DEFAULT_K_CAL,
-        DEFAULT_K_TEST,
-    )
     from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.calibration_tools import _answer
     from tests._verified_checkpoint_fixtures import SAMPLE_CROSS_TILE_NMS
@@ -220,10 +221,18 @@ def _assess(
             delivery_kind="per_image_count",
             device="cpu",
             stated=Stated(
-                **{"cross_tile_nms": SAMPLE_CROSS_TILE_NMS, **stated}
+                **{
+                    "postprocess": "nms",
+                    "cross_tile_nms": SAMPLE_CROSS_TILE_NMS,
+                    "rationale": RATIONALE,
+                    **stated,
+                }
             ),
-            k_cal=DEFAULT_K_CAL if k_cal is None else k_cal,
-            k_test=DEFAULT_K_TEST if k_test is None else k_test,
+            k_cal=k_cal,
+            k_test=k_test,
+            equivalence_z=EQUIVALENCE_Z,
+            dispersion_quantile=DISPERSION_QUANTILE,
+            rationale=RATIONALE,
         )
     )
 
@@ -662,6 +671,48 @@ def test_an_unstated_merge_threshold_derives_from_the_calibration_bands(
         record["execution"]["sources"]["cross_tile_nms"]
         == CROSS_TILE_NMS_DERIVATION
     )
+
+
+def test_the_assessment_records_the_band_counts_and_test_settings_it_ran_under(
+    tmp_path: Path,
+):
+    """The band counts, the equivalence multiplier and the dispersion quantile an assessment
+    states are each recorded on it beside its reason, and the door takes none of them by default.
+    """
+    import inspect
+
+    from tcip_mcp.assessment import assess_reserved_regions, read_assessment
+    from tcip_mcp.tools import calibration_tools
+
+    exp = _attested(tmp_path)
+    answered = _assess(exp, k_cal=2, k_test=3)
+    assert "error" not in answered, answered
+    record = read_assessment(exp["project"], answered["assessment_id"])
+
+    count = record.criterion["count"]
+    assert (count["k_cal"], count["k_test"]) == (2, 3)
+    assert count["equivalence_z"] == EQUIVALENCE_Z
+    assert (
+        count["calibration_curve"]["dispersion_quantile"]
+        == DISPERSION_QUANTILE
+    )
+    assert record.rationale == RATIONALE
+    for door in (
+        assess_reserved_regions,
+        calibration_tools.assess_reserved_regions,
+    ):
+        parameters = inspect.signature(door).parameters
+        for name in (
+            "k_cal",
+            "k_test",
+            "equivalence_z",
+            "dispersion_quantile",
+            "rationale",
+        ):
+            assert parameters[name].default is inspect.Parameter.empty, (
+                door,
+                name,
+            )
 
 
 # ── the raster door without an assessment ─────────────────────────────────

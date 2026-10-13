@@ -18,7 +18,13 @@ from pathlib import Path
 
 import pytest
 
-from tests._training_values import IOU_THRESHOLD, drawn_split
+from tests._training_values import (
+    COMBINED_SCORER,
+    IOU_THRESHOLD,
+    RATIONALE,
+    TRIAGE_WEIGHTS,
+    drawn_split,
+)
 from tests.test_coco_import import (
     BOX,
     DATE,
@@ -185,7 +191,7 @@ def _visualize(project: Path) -> Path:
 def _overlay_reference_grid(project: Path) -> Path:
     from tcip_mcp.tools.vision_tools import overlay_reference_grid
 
-    result = overlay_reference_grid(project, IMAGE)
+    result = overlay_reference_grid(project, IMAGE, overlap=0.0)
     assert "error" not in result, result
     return {key: value for key, value in result.items() if key != "image_path"}
 
@@ -217,7 +223,7 @@ def _render_failure_cases(project: Path) -> list[str]:
     from tcip_mcp.tools.vision_tools import render_failure_cases
 
     _published(project)
-    result = render_failure_cases(project, ".", "preds")
+    result = render_failure_cases(project, ".", "preds", 10, **TRIAGE_WEIGHTS)
     assert "error" not in result, result
     return sorted(item["stem"] for item in result.get("worst_images") or [])
 
@@ -261,7 +267,7 @@ def _stated():
     from tcip_mcp.pipelines.execution import Stated
     from tests._verified_checkpoint_fixtures import SAMPLE_CONF
 
-    return Stated(tile=False, conf=SAMPLE_CONF)
+    return Stated(tile=False, conf=SAMPLE_CONF, rationale=RATIONALE)
 
 
 def _published(project: Path) -> None:
@@ -317,7 +323,12 @@ def _prioritize_review_queue(project: Path) -> list[str]:
     from tcip_mcp.tools.feedback_tools import prioritize_review_queue
 
     result = prioritize_review_queue(
-        project, _registered(project), f"images/{DATE}", budget=len(STEMS)
+        project,
+        _registered(project),
+        f"images/{DATE}",
+        scorer=COMBINED_SCORER,
+        budget=len(STEMS),
+        rationale=RATIONALE,
     )
     assert "error" not in result, result
     return sorted(entry["image"] for entry in result["queue"])
@@ -327,7 +338,7 @@ def _triage_predictions(project: Path) -> int:
     from tcip_mcp.tools.feedback_tools import triage_predictions
 
     result = triage_predictions(
-        project, _registered(project), f"images/{DATE}"
+        project, _registered(project), f"images/{DATE}", 0.3, 0.8, RATIONALE
     )
     assert "error" not in result, result
     return result["total_images"]
@@ -906,7 +917,7 @@ def test_a_checkpoint_moved_without_its_run_refuses_before_importing(
     with pytest.raises(ValueError, match="archive_project") as refused:
         prepare(
             load_registered_checkpoint(alone, project=elsewhere),
-            Stated(tile=False),
+            Stated(tile=False, rationale=RATIONALE),
         )
 
     assert checkpoint.parent.name in str(refused.value)
@@ -947,7 +958,9 @@ def test_a_run_missing_its_metrics_log_answers_its_own_error_at_the_checkpoint_d
         stated=_stated(),
         iou_threshold=IOU_THRESHOLD,
     )
-    triaged = triage_predictions(project, spelling, f"images/{DATE}")
+    triaged = triage_predictions(
+        project, spelling, f"images/{DATE}", 0.3, 0.8, RATIONALE
+    )
 
     for answer in (evaluated, triaged):
         assert (

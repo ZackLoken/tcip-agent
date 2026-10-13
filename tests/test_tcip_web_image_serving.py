@@ -283,7 +283,7 @@ def test_a_view_of_an_ingested_raster_reads_its_cells_or_one_display_read(
         return resp.json()
 
     edge = derive_serving_tile_size(5000, 64, SMALL_DISPLAY)
-    cells = reference_cells(5000, 64, edge, clamp=True)
+    cells = reference_cells(5000, 64, edge, 0.0, clamp=True)
     assert [(r["name"], r["level"]) for r in view(300)["reads"]] == [
         (c.name, 0) for c in cells if c.x0 < 300
     ]

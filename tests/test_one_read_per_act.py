@@ -10,7 +10,12 @@ from pathlib import Path
 
 import pytest
 
-from tests._training_values import IOU_THRESHOLD, RATIONALE, drawn_split
+from tests._training_values import (
+    IOU_THRESHOLD,
+    RATIONALE,
+    TRIAGE_WEIGHTS,
+    drawn_split,
+)
 
 torch = pytest.importorskip("torch")
 
@@ -517,7 +522,9 @@ def test_a_failure_render_reads_each_document_and_its_bucket_once(
     frames = _published_frames(tmp_path)
     counts = _counting_reads(monkeypatch)
 
-    result = render_failure_cases(tmp_path, str(tmp_path), "published")
+    result = render_failure_cases(
+        tmp_path, str(tmp_path), "published", 10, **TRIAGE_WEIGHTS
+    )
 
     assert "error" not in result, result
     assert len(result["case_images"]) == len(frames)

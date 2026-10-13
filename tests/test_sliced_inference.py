@@ -10,7 +10,13 @@ import numpy as np
 import pytest
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
-from tests._training_values import drawn_split, tiling_block
+from tests._training_values import (
+    DISPERSION_QUANTILE,
+    EQUIVALENCE_Z,
+    RATIONALE,
+    drawn_split,
+    tiling_block,
+)
 
 torch = pytest.importorskip("torch")
 
@@ -132,6 +138,7 @@ def _pass(checkpoint, reference=None, **stated):
         postprocess="nmm",
         cross_tile_nms=0.5,
         conf=0.0,
+        rationale=RATIONALE,
     )
     values.update(stated)
     return prepare(
@@ -156,7 +163,10 @@ def _whole(p, source) -> dict:
     return p.predictor.predict(
         source,
         execution_record(
-            p.checkpoint, Stated(conf=p.execution.conf), None, None
+            p.checkpoint,
+            Stated(conf=p.execution.conf, rationale=RATIONALE),
+            None,
+            None,
         ),
     )
 
@@ -442,6 +452,22 @@ def test_a_postprocess_outside_the_vocabulary_refuses_by_name(tmp_path):
     )
 
 
+def test_a_tiled_pass_stating_no_merge_refuses_naming_postprocess(tmp_path):
+    """No merge is chosen for a tiled pass: one stating none refuses naming ``postprocess``, and
+    the record of one stating it keeps the merge with no source label beside it.
+    """
+    from tcip_mcp.pipelines.execution import ExecutionRefusedError
+
+    _path, checkpoint = _checkpoint(tmp_path)
+
+    with pytest.raises(ExecutionRefusedError, match="postprocess"):
+        _pass(checkpoint, postprocess=None)
+    admitted = _pass(checkpoint, postprocess="nms")
+    assert admitted.execution.postprocess == "nms"
+    assert "postprocess" not in admitted.execution.sources
+    assert admitted.execution.rationale == RATIONALE
+
+
 def test_the_merge_leaves_the_process_environment_as_it_found_it(
     tmp_path, monkeypatch
 ):
@@ -559,6 +585,7 @@ def test_a_preparation_runs_nothing_and_its_pass_merges_at_the_threshold_it_reso
                 postprocess="nms",
                 cross_tile_nms=cross_tile_nms,
                 conf=0.0,
+                rationale=RATIONALE,
             ),
             device="cpu",
             tile_batch_size=2,
@@ -614,6 +641,7 @@ def test_the_dry_run_reports_the_record_the_bucket_keeps(tmp_path):
         conf=0.2,
         cross_tile_nms=0.4,
         postprocess="greedynmm",
+        rationale=RATIONALE,
     )
 
     dry = run_inference(
@@ -719,6 +747,9 @@ def test_an_assessed_tiled_pass_and_its_bucket_run_one_merge(
         trait=fx.COUNT_TRAIT,
         delivery_kind="per_image_count",
         selection_dir=str(selection),
+        equivalence_z=EQUIVALENCE_Z,
+        dispersion_quantile=DISPERSION_QUANTILE,
+        rationale=RATIONALE,
         device="cpu",
         stated=Stated(
             tile=True,
@@ -726,6 +757,7 @@ def test_an_assessed_tiled_pass_and_its_bucket_run_one_merge(
             overlap=OVERLAP,
             postprocess="nmm",
             cross_tile_nms=0.8,
+            rationale=RATIONALE,
         ),
     )
     assert "error" not in assessment, assessment
@@ -733,6 +765,7 @@ def test_an_assessed_tiled_pass_and_its_bucket_run_one_merge(
     published = run_inference(
         tmp_path,
         ckpt,
+        stated=Stated(),
         images_dir=str(images),
         bucket="blob/2026-01-01",
         assessment_id=assessment["assessment_id"],
@@ -786,7 +819,7 @@ def test_the_bucket_records_the_slice_geometry_the_checkpoint_derived(
             ckpt,
             images_dir=str(images),
             bucket="sliced",
-            stated=Stated(conf=0.0, postprocess=merge),
+            stated=Stated(conf=0.0, postprocess=merge, rationale=RATIONALE),
         )
         assert "cross_tile_nms" in unstated.get("error", ""), (merge, unstated)
 
@@ -795,7 +828,12 @@ def test_the_bucket_records_the_slice_geometry_the_checkpoint_derived(
         ckpt,
         images_dir=str(images),
         bucket="sliced",
-        stated=Stated(conf=0.0, postprocess="nmm", cross_tile_nms=0.6),
+        stated=Stated(
+            conf=0.0,
+            postprocess="nmm",
+            cross_tile_nms=0.6,
+            rationale=RATIONALE,
+        ),
     )
 
     assert "error" not in response, response

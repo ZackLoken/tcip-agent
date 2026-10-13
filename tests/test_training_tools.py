@@ -22,6 +22,7 @@ from tests._chain_fixtures import (
     training_config,
 )
 from tests._training_values import (
+    TRIAGE_WEIGHTS,
     augmentation,
     drawn_split,
     evaluation_block,
@@ -1544,7 +1545,7 @@ def test_get_worst_predictions_reads_canonical_confidence(tmp_path):
         scope={"subject": "bud"},
     )
 
-    out = get_worst_predictions(bucket, top_k=2)
+    out = get_worst_predictions(bucket, top_k=2, **TRIAGE_WEIGHTS)
     by_stem = {w["stem"]: w["error_score"] for w in out["worst_images"]}
     assert by_stem["confident"] == pytest.approx(0.1, abs=1e-3)
     assert by_stem["shaky"] == pytest.approx(0.9, abs=1e-3)

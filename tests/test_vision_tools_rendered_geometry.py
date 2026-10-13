@@ -11,6 +11,7 @@ import pytest
 from PIL import Image
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tests._training_values import TRIAGE_WEIGHTS
 
 #: Plain gray so a drawn color's dominance over the background is unambiguous in either channel.
 BACKGROUND = (100, 100, 100)
@@ -211,7 +212,9 @@ def test_a_failure_case_draws_ground_truth_from_the_label_document(
     from tcip_mcp.tools.vision_tools import render_failure_cases
 
     root = mislocalized_prediction_dataset
-    result = render_failure_cases(root, str(root), "live", top_k=3)
+    result = render_failure_cases(
+        root, str(root), "live", top_k=3, **TRIAGE_WEIGHTS
+    )
     assert "error" not in result, result
     assert len(result["case_images"]) == 1
 

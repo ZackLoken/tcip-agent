@@ -145,10 +145,12 @@ def test_a_detector_over_that_backbone_builds_from_its_datasets_own_band_statist
         )
 
     samples = samples_over(str(images_dir), subject="leaf")
-    derived = band_normalization_stats([s.source for s in samples], 5)
+    derived = band_normalization_stats(
+        [s.source for s in samples], 5, max_images=2, seed=0
+    )
     assert derived is not None
-    mean, std, paths_read = derived
-    assert len(mean) == len(std) == 5 and len(paths_read) == 2
+    mean, std = derived.mean, derived.std
+    assert len(mean) == len(std) == 5 and len(derived.sampling.windows) == 2
 
     model = build_detector(
         "faster_rcnn",

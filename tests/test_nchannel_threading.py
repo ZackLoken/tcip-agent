@@ -8,7 +8,7 @@ import pytest
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._chain_fixtures import CLASSIFIER_SOURCE, training_config
 from tests._producer_fixtures import dataset_over  # noqa: E402
-from tests._training_values import drawn_split  # noqa: E402
+from tests._training_values import RATIONALE, drawn_split  # noqa: E402
 
 torch = pytest.importorskip("torch")
 
@@ -264,8 +264,12 @@ def test_band_normalization_stats_matches_the_tensors_the_model_is_fed(
         np.save(p, arr)
         paths.append(p)
 
-    mean, std, paths_read = band_normalization_stats(paths, 5)
-    assert sorted(paths_read) == sorted(str(p) for p in paths)
+    stats = band_normalization_stats(paths, 5, max_images=len(paths), seed=0)
+    assert stats is not None
+    mean, std = stats.mean, stats.std
+    assert sorted(p for p, _window in stats.sampling.windows) == sorted(
+        str(p) for p in paths
+    )
     actual = torch.stack(
         [pil_to_tensor(load_image(p, 5)) for p in paths]
     )  # [N, C, H, W]
@@ -285,7 +289,55 @@ def test_band_normalization_stats_admits_underivable(tmp_path):
     from tcip_mcp.pipelines.derivations import band_normalization_stats
 
     # Underivable is None, never a stand-in constant.
-    assert band_normalization_stats([tmp_path / "missing.npy"], 5) is None
+    assert (
+        band_normalization_stats(
+            [tmp_path / "missing.npy"], 5, max_images=1, seed=0
+        )
+        is None
+    )
+
+
+def test_band_normalization_stats_draw_their_capped_sample_from_the_stated_seed(
+    tmp_path,
+):
+    """At most the stated number of rasters is read, drawn at random from the stated seed: one
+    seed reads the same rasters twice and another seed others, the record naming the cap and the
+    seed beside what was read; neither sibling takes a cap or a seed by default.
+    """
+    import inspect
+
+    import numpy as np
+
+    from tcip_mcp.pipelines.derivations import (
+        band_normalization_stats,
+        band_normalization_stats_sampled,
+    )
+
+    paths = []
+    for i in range(10):
+        p = tmp_path / f"r{i}.npy"
+        np.save(p, np.full((4, 4, 5), i, dtype=np.uint8))
+        paths.append(p)
+
+    def read(seed: int) -> list[str]:
+        stats = band_normalization_stats(paths, 5, max_images=3, seed=seed)
+        assert stats is not None
+        assert (stats.sampling.max_images, stats.sampling.seed) == (3, seed)
+        return [p for p, _window in stats.sampling.windows]
+
+    first = read(0)
+    assert len(first) == 3
+    assert read(0) == first
+    assert set(read(1)) != set(first)
+    for derivation in (
+        band_normalization_stats,
+        band_normalization_stats_sampled,
+    ):
+        parameters = inspect.signature(derivation).parameters
+        for name in ("max_images", "seed"):
+            assert parameters[name].default is inspect.Parameter.empty
+    with pytest.raises(TypeError, match="max_images"):
+        band_normalization_stats(paths, 5, seed=0)  # type: ignore[call-arg]  # the omission is the subject
 
 
 def _strip_tiff_raster(path, *, height=24, width=20, channels=4):
@@ -317,14 +369,21 @@ def test_sampled_band_normalization_stats_over_full_coverage_match_the_exact_sib
     path = tmp_path / "mosaic.tif"
     arr = _strip_tiff_raster(path)
 
-    exact = band_normalization_stats([path], arr.shape[-1])
+    exact = band_normalization_stats(
+        [path], arr.shape[-1], max_images=1, seed=1
+    )
     sampled = band_normalization_stats_sampled(
-        [path], arr.shape[-1], seed=1, window_size=8, max_windows_per_image=999
+        [path],
+        arr.shape[-1],
+        seed=1,
+        window_size=8,
+        max_windows_per_image=999,
+        max_images=1,
     )
     assert exact is not None and sampled is not None
     assert sampled.sampling.pixel_fraction == 1.0
-    assert sampled.mean == pytest.approx(exact[0], rel=1e-12, abs=1e-12)
-    assert sampled.std == pytest.approx(exact[1], rel=1e-12, abs=1e-12)
+    assert sampled.mean == pytest.approx(exact.mean, rel=1e-12, abs=1e-12)
+    assert sampled.std == pytest.approx(exact.std, rel=1e-12, abs=1e-12)
 
 
 def test_sampled_band_normalization_stats_records_the_windows_it_read(
@@ -334,13 +393,21 @@ def test_sampled_band_normalization_stats_records_the_windows_it_read(
 
     path = tmp_path / "mosaic.tif"
     arr = _strip_tiff_raster(path)
-    kwargs = {"seed": 4, "window_size": 8, "max_windows_per_image": 3}
+    kwargs = {
+        "seed": 4,
+        "window_size": 8,
+        "max_windows_per_image": 3,
+        "max_images": 1,
+    }
 
     sampled = band_normalization_stats_sampled([path], arr.shape[-1], **kwargs)
     assert sampled is not None
-    assert len(sampled.sampling.windows) == 3
-    assert {label for label, _ in sampled.sampling.windows} == {str(path)}
-    covered = sum(r.width * r.height for _, r in sampled.sampling.windows)
+    windows = sampled.sampling.windows
+    assert len(windows) == 3
+    assert {label for label, _ in windows} == {str(path)}
+    covered = sum(
+        (r.x1 - r.x0) * (r.y1 - r.y0) for _, r in windows if r is not None
+    )
     assert sampled.sampling.pixel_fraction == pytest.approx(
         covered / (arr.shape[0] * arr.shape[1])
     )
@@ -360,6 +427,7 @@ def test_sampled_band_normalization_stats_admit_underivable(tmp_path):
             seed=1,
             window_size=8,
             max_windows_per_image=2,
+            max_images=1,
         )
         is None
     )
@@ -459,7 +527,9 @@ def test_a_checkpoint_reads_images_at_the_width_its_run_recorded(tmp_path):
         "img_size": (32, 32),
     }  # the frame its sources share
 
-    p = prepare(checkpoint, Stated(tile=False), device="cpu").runnable()
+    p = prepare(
+        checkpoint, Stated(tile=False, rationale=RATIONALE), device="cpu"
+    ).runnable()
 
     assert p.predictor.in_chans == 1
     assert p.predict([image])[

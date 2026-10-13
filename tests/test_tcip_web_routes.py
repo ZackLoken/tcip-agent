@@ -1238,6 +1238,7 @@ def test_inference_launch_leaves_the_bucket_for_its_publication_to_create(
             "dataset_root": dataset_root,
             "date": date,
             "bucket": BUCKET,
+            "stated": {},
         },
     )
 
@@ -1270,6 +1271,7 @@ def test_inference_launch_refuses_a_second_launch_while_the_first_still_writes(
             "dataset_root": dataset_root,
             "date": date,
             "bucket": BUCKET,
+            "stated": {},
         },
     )
     assert first.status_code == 200, first.text
@@ -1283,6 +1285,7 @@ def test_inference_launch_refuses_a_second_launch_while_the_first_still_writes(
             "dataset_root": dataset_root,
             "date": date,
             "bucket": BUCKET,
+            "stated": {},
         },
     )
     assert second.status_code == 409, second.text
@@ -1311,6 +1314,7 @@ def test_inference_launch_refuses_a_second_launch_while_the_first_still_writes(
             "dataset_root": dataset_root,
             "date": date,
             "bucket": BUCKET,
+            "stated": {},
         },
     )
     assert third.status_code == 200, third.text
@@ -1340,6 +1344,7 @@ def test_inference_launch_in_flight_check_resolves_a_differently_spelled_dataset
             "dataset_root": dataset_root,
             "date": date,
             "bucket": BUCKET,
+            "stated": {},
         },
     )
     assert first.status_code == 200, first.text
@@ -1353,6 +1358,7 @@ def test_inference_launch_in_flight_check_resolves_a_differently_spelled_dataset
             "dataset_root": dataset_root + os.sep,
             "date": date,
             "bucket": BUCKET,
+            "stated": {},
         },
     )
     assert second.status_code == 409, second.text
@@ -1391,7 +1397,10 @@ def test_inference_launch_resolves_explicit_conf_source_from_the_payload(
             "dataset_root": dataset_root,
             "date": date,
             "bucket": BUCKET,
-            "stated": {"conf": SAMPLE_CONF},
+            "stated": {
+                "conf": SAMPLE_CONF,
+                "rationale": "a sample reason the test states",
+            },
         },
     )
     assert resp.status_code == 200, resp.text
@@ -1419,6 +1428,7 @@ def test_inference_launch_carries_an_omitted_conf_as_unstated(
             "dataset_root": dataset_root,
             "date": date,
             "bucket": BUCKET,
+            "stated": {},
         },
     )
     assert resp.status_code == 200, resp.text

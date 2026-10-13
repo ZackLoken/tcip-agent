@@ -18,6 +18,7 @@ torch = pytest.importorskip(
 from tcip_mcp.pipelines.operating_point import _min_dt_score, count_criterion  # noqa: E402
 from tests import _trait_fixtures as fx  # noqa: E402
 from tests._dense_op_fixtures import dense_records, good_cal_holdout  # noqa: E402
+from tests._training_values import COUNT_TEST  # noqa: E402
 
 
 def _criterion(cal, hold, floor):
@@ -27,6 +28,7 @@ def _criterion(cal, hold, floor):
         fx.COUNT_SPEC,
         staged_conf_floor=floor,
         staged_conf_floor_attribute_path="self",
+        **COUNT_TEST,
     )
 
 

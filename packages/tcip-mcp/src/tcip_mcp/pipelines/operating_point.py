@@ -39,9 +39,6 @@ COUNT_OBJECTIVE_PICKERS: dict[
 """The count objectives a calibration can fit, each as the picker it runs over the calibration
 curve and the label its conf is recorded under."""
 
-_EQUIVALENCE_Z = 1.645
-"""The one-sided multiplier of the mean-plus-standard-error equivalence test (about 95 percent)."""
-
 REGRESSION_CRITERIA: dict[
     RegressionCriterion, Callable[[Any, Any], float | None]
 ] = {
@@ -68,17 +65,18 @@ def _bias_equivalence(
     *,
     tolerance_frac: float,
     typical_count: float,
+    equivalence_z: float,
 ) -> tuple[bool, float]:
     """Whether a bias measured over ``n`` present samples is equivalent to zero at the scope's
-    tolerance (mean plus one-sided standard error within it), and that tolerance. ``n == 0`` never
-    passes.
+    tolerance (mean plus ``equivalence_z`` one-sided standard errors within it), and that
+    tolerance. ``n == 0`` never passes.
     """
     tolerance = _effective_count_bias_tolerance(
         tolerance_frac, typical_count, n
     )
     if n == 0:
         return False, tolerance
-    return abs(mean) + _EQUIVALENCE_Z * std / math.sqrt(
+    return abs(mean) + equivalence_z * std / math.sqrt(
         n
     ) <= tolerance, tolerance
 
@@ -195,6 +193,8 @@ def count_criterion(
     *,
     staged_conf_floor: float,
     staged_conf_floor_attribute_path: str | None,
+    equivalence_z: float,
+    dispersion_quantile: float,
 ) -> tuple[float, dict, list[str]]:
     """The conf the trait's count objective picks on the calibration side, and the held-out count
     check at that conf: ``(conf, evidence, failures)``.
@@ -206,10 +206,12 @@ def count_criterion(
     ``localization``) and applied to each side
     (:func:`~tcip_mcp.pipelines.training.evaluation.scaled_to`). The holdout passes when its
     present-scoped mean count bias, pooled and per class, is equivalent to zero at
-    ``count_bias_tolerance_frac`` of that scope's typical count; when every class the calibration
-    side evidences at the conf is evidenced on the holdout; when the held-out precision and recall
-    both clear ``holdout_match_quality_floor``; and when the held-out 90th-percentile per-image
-    count error is within ``count_error_tolerance``. The entry carries every one of those fields.
+    ``count_bias_tolerance_frac`` of that scope's typical count, the bias plus ``equivalence_z``
+    one-sided standard errors; when every class the calibration side evidences at the conf is
+    evidenced on the holdout; when the held-out precision and recall both clear
+    ``holdout_match_quality_floor``; and when the held-out per-image count error at
+    ``dispersion_quantile`` is within ``count_error_tolerance``. The entry carries every one of
+    those fields; the evidence records ``equivalence_z`` and each curve its quantile.
     A conf at or below the floor, applied on the attribute path beside it, fails as
     ``conf_censored``. A calibration curve the objective picks no conf on refuses
     (``ValueError``).
@@ -219,7 +221,9 @@ def count_criterion(
     cal_criterion = scaled_to(criterion, cal_records)
     hold_criterion = scaled_to(criterion, hold_records)
     cal_curve = derive_operating_point_curve(
-        cal_records, criterion=cal_criterion
+        cal_records,
+        criterion=cal_criterion,
+        dispersion_quantile=dispersion_quantile,
     )
     picked = picker(cal_curve)
     if picked is None:
@@ -229,12 +233,18 @@ def count_criterion(
             "that detects the subject, over a reference that holds it."
         )
     conf = float(picked)
-    hb = derive_operating_point_curve(
-        hold_records, criterion=hold_criterion, conf_grid=[conf]
-    )["curve"][0]
-    cb = derive_operating_point_curve(
-        cal_records, criterion=cal_criterion, conf_grid=[conf]
-    )["curve"][0]
+    hb, cb = (
+        derive_operating_point_curve(
+            records,
+            criterion=side_criterion,
+            dispersion_quantile=dispersion_quantile,
+            conf_grid=[conf],
+        )["curve"][0]
+        for records, side_criterion in (
+            (hold_records, hold_criterion),
+            (cal_records, cal_criterion),
+        )
+    )
     tolerance_frac = cast(float, entry.count_bias_tolerance_frac)
     pooled_typical = gt_class_typical_count(hold_records)
     pooled_ok, pooled_tolerance = _bias_equivalence(
@@ -243,6 +253,7 @@ def count_criterion(
         hb["n_present"],
         tolerance_frac=tolerance_frac,
         typical_count=pooled_typical,
+        equivalence_z=equivalence_z,
     )
     per_class: dict[str, dict] = {}
     for cid, s in hb["per_class"].items():
@@ -253,6 +264,7 @@ def count_criterion(
             s["n_present"],
             tolerance_frac=tolerance_frac,
             typical_count=typical,
+            equivalence_z=equivalence_z,
         )
         per_class[cid] = {
             "bias": s["count_bias_mean_present"],
@@ -284,7 +296,9 @@ def count_criterion(
         failures.append("holdout_missing_class")
     if hb["precision"] < floor or hb["recall"] < floor:
         failures.append("localization_quality_floor_failed")
-    if hb["count_error_p90"] > cast(float, entry.count_error_tolerance):
+    if hb["count_error_at_quantile"] > cast(
+        float, entry.count_error_tolerance
+    ):
         failures.append("count_error_dispersion_too_high")
 
     observed_min = _min_dt_score(cal_records + hold_records)
@@ -300,7 +314,7 @@ def count_criterion(
         "pooled_count_bias_tolerance": pooled_tolerance,
         "per_class": per_class,
         "holdout_missing_classes": missing_classes,
-        "equivalence_z": _EQUIVALENCE_Z,
+        "equivalence_z": equivalence_z,
         "staged_conf_floor": staged_conf_floor,
         "staged_conf_floor_attribute_path": staged_conf_floor_attribute_path,
         "observed_min_score": observed_min,
@@ -338,7 +352,11 @@ def _classification_kappa(items: list[dict]) -> float | None:
 
 
 def classifier_criterion(
-    cal_items: list[dict], hold_items: list[dict], entry: TraitEntry
+    cal_items: list[dict],
+    hold_items: list[dict],
+    entry: TraitEntry,
+    *,
+    equivalence_z: float,
 ) -> tuple[dict, list[str]]:
     """The held-out agreement of a positive-state call over matched instances:
     ``(evidence, failures)``.
@@ -347,8 +365,8 @@ def classifier_criterion(
     "is_true_positive", "is_pred_positive"}``. The holdout passes when Cohen's kappa over its items
     is above zero and above ``classifier_agreement_floor``, and when its present-scoped per-image
     positive-count bias is equivalent to zero at ``count_bias_tolerance_frac`` of the typical
-    positive count. Both sides must carry positive evidence and the holdout at least two items over
-    at least two images.
+    positive count, at ``equivalence_z`` one-sided standard errors. Both sides must carry positive
+    evidence and the holdout at least two items over at least two images.
     """
     by_image: dict[str, list[dict]] = {}
     for it in hold_items:
@@ -370,6 +388,7 @@ def classifier_criterion(
         len(biases),
         tolerance_frac=cast(float, entry.count_bias_tolerance_frac),
         typical_count=typical,
+        equivalence_z=equivalence_z,
     )
     kappa = _classification_kappa(hold_items)
     floor = cast(float, entry.classifier_agreement_floor)

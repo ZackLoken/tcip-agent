@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 
 from tests import _trait_fixtures as fx
+from tests._training_values import COUNT_TEST
 
 pytest.importorskip("torch")
 
@@ -66,6 +67,7 @@ def test_every_conf_label_the_registered_pickers_can_record_has_a_registered_imp
             fx.with_fields(ENTRY, count_objective=objective),
             staged_conf_floor=0.05,
             staged_conf_floor_attribute_path=None,
+            **COUNT_TEST,
         )
         labels.add(evidence["conf_derived_from"])
 
@@ -92,6 +94,7 @@ def test_a_floor_mismatch_across_the_reference_is_surfaced_and_never_fails_it():
         ENTRY,
         staged_conf_floor=0.05,
         staged_conf_floor_attribute_path=None,
+        **COUNT_TEST,
     )
 
     assert evidence["observed_min_score"] == pytest.approx(0.05)
@@ -105,6 +108,7 @@ def test_a_floor_mismatch_across_the_reference_is_surfaced_and_never_fails_it():
         ENTRY,
         staged_conf_floor=0.05,
         staged_conf_floor_attribute_path=None,
+        **COUNT_TEST,
     )
     assert evidence["observed_min_score"] == pytest.approx(0.9)
     assert evidence["conf_floor_mismatch"] is True

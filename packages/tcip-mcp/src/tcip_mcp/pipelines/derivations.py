@@ -13,7 +13,8 @@ if TYPE_CHECKING:
     import numpy as np
 
     from tcip_mcp.pipelines.data.band_groups import BandGroupRef
-    from tcip_mcp.pipelines.raster_source import WindowSampling
+    from tcip_mcp.pipelines.raster_source import Rect
+    from tcip_mcp.pipelines.schemas import ImageStatsSampling
 
 
 def probe_channels(image_path: str | Path | BandGroupRef) -> int:
@@ -508,16 +509,46 @@ def derive_block_scale_px(
     )
 
 
+@dataclass(frozen=True)
+class NormalizationStats:
+    """Per-band ``mean`` and ``std`` in [0, 1] tensor units over a sample of a dataset's rasters,
+    and ``sampling``, the ``model_source.image_stats_sampling`` record naming what was read: each
+    source with the window read from it (``None`` for a whole raster), the cap on rasters drawn
+    and the seed that drew them, the pixel fraction covered, and a windowed read's window size
+    and windows per raster.
+    """
+
+    mean: list[float]
+    std: list[float]
+    sampling: ImageStatsSampling
+
+
+def _drawn(
+    image_paths: Sequence[str | Path | BandGroupRef],
+    max_images: int,
+    seed: int,
+) -> list[str | Path | BandGroupRef]:
+    """At most ``max_images`` of ``image_paths``, drawn at random without replacement from
+    ``seed`` (``numpy.random.default_rng``), in drawn order.
+    """
+    import numpy as np
+
+    paths = list(image_paths)
+    order = np.random.default_rng(seed).permutation(len(paths))[:max_images]
+    return [paths[i] for i in order]
+
+
 def band_normalization_stats(
     image_paths: Sequence[str | Path | BandGroupRef],
     num_channels: int,
     *,
-    max_images: int = 50,
-) -> tuple[list[float], list[float], list[str]] | None:
-    """Per-band ``(mean, std, paths_read)`` in [0, 1] over at most ``max_images`` of
-    ``image_paths`` read at ``num_channels`` bands, or ``None`` when no raster could be read.
-    ``paths_read`` names the rasters decoded and accepted, a raster whose band count disagreed
-    dropped; :func:`image_stats_provenance` renders it into ``model_source.image_stats_sampling``.
+    max_images: int,
+    seed: int,
+) -> NormalizationStats | None:
+    """Per-band mean and std in [0, 1] over at most ``max_images`` of ``image_paths`` drawn from
+    ``seed`` (:func:`_drawn`), each read whole at ``num_channels`` bands, or ``None`` when no
+    raster could be read. The sampling names the rasters decoded and accepted, a raster whose band
+    count disagreed dropped.
     """
     import numpy as np
 
@@ -529,7 +560,7 @@ def band_normalization_stats(
 
     moments = _BandMoments(num_channels)
     paths_read: list[str] = []
-    for path in list(image_paths)[:max_images]:
+    for path in _drawn(image_paths, max_images, seed):
         try:
             arr = (
                 pil_to_tensor(load_image(path, num_channels))
@@ -540,11 +571,14 @@ def band_normalization_stats(
             continue
         if moments.add(arr):
             paths_read.append(source_path_of(path))
-    result = moments.result()
-    if result is None:
-        return None
-    mean, std = result
-    return mean, std, paths_read
+    return moments.stats(
+        [(path, None) for path in paths_read],
+        seed=seed,
+        max_images=max_images,
+        pixel_fraction=1.0,
+        window_size=None,
+        max_windows_per_image=None,
+    )
 
 
 class _BandMoments:
@@ -570,27 +604,49 @@ class _BandMoments:
         self.pixels += flat.shape[1]
         return True
 
-    def result(self) -> tuple[list[float], list[float]] | None:
-        """Per-band ``(mean, std)``, or ``None`` when no pixels were accumulated at all."""
+    def stats(
+        self,
+        windows: Sequence[tuple[str, Rect | None]],
+        *,
+        seed: int,
+        max_images: int,
+        pixel_fraction: float,
+        window_size: int | None,
+        max_windows_per_image: int | None,
+    ) -> NormalizationStats | None:
+        """The per-band mean and std accumulated, beside the ``schemas.ImageStatsSampling`` record
+        of what was read (``windows``, each source the derivation opened with its window or
+        ``None``, and the draw's settings), or ``None`` when no pixels were accumulated at all. A
+        relative source path refuses there, as the record names each file read.
+        """
+        from dataclasses import asdict
+
         import numpy as np
+
+        from tcip_mcp.pipelines.schemas import (
+            ImageStatsSampling,
+            ImageStatsWindow,
+        )
 
         if not self.pixels:
             return None
         mean = self.sums / self.pixels
         var = np.maximum(self.sqs / self.pixels - mean**2, 0.0)
-        return [float(m) for m in mean], [float(s) for s in np.sqrt(var)]
-
-
-@dataclass(frozen=True)
-class SampledNormalizationStats:
-    """Per-band ``(mean, std)`` in [0, 1] tensor units over a sample of a dataset's pixels.
-    ``sampling`` names the windows read, the seed that chose them and the pixel fraction they
-    cover.
-    """
-
-    mean: list[float]
-    std: list[float]
-    sampling: WindowSampling
+        return NormalizationStats(
+            [float(m) for m in mean],
+            [float(s) for s in np.sqrt(var)],
+            ImageStatsSampling(
+                windows=[
+                    (label, ImageStatsWindow(**asdict(rect)) if rect else None)
+                    for label, rect in windows
+                ],
+                seed=seed,
+                max_images=max_images,
+                pixel_fraction=pixel_fraction,
+                window_size=window_size,
+                max_windows_per_image=max_windows_per_image,
+            ),
+        )
 
 
 def band_normalization_stats_sampled(
@@ -600,19 +656,20 @@ def band_normalization_stats_sampled(
     seed: int,
     window_size: int,
     max_windows_per_image: int,
-    max_images: int = 50,
-) -> SampledNormalizationStats | None:
-    """Per-band ``(mean, std)`` in [0, 1] over seeded pixel windows of this dataset's rasters.
+    max_images: int,
+) -> NormalizationStats | None:
+    """Per-band mean and std in [0, 1] over seeded pixel windows of this dataset's rasters.
 
     The windowed sibling of :func:`band_normalization_stats`: the same statistic in the same unit
-    system, for a source whose full decode is unaffordable (an orthomosaic, say). Each raster is
-    opened through ``raster_source`` and only ``max_windows_per_image`` windows of ``window_size``
-    pixels are read from it, chosen by ``raster_source.sample_windows`` from ``seed``; a
+    system, for a source whose full decode is unaffordable (an orthomosaic, say). At most
+    ``max_images`` rasters are drawn from ``seed`` (:func:`_drawn`), each opened through
+    ``raster_source``, and only ``max_windows_per_image`` windows of ``window_size`` pixels are
+    read from it, chosen by ``raster_source.sample_windows`` from ``seed``; a
     ``max_windows_per_image`` covering every cell of a raster's grid reads all of it and gives the
     exact sibling's own answer.
 
-    Pixels are scaled by ``image_utils.pil_to_tensor``. ``seed`` is required. Returns ``None`` when
-    no raster could be read.
+    Pixels are scaled by ``image_utils.pil_to_tensor``. Returns ``None`` when no raster could be
+    read.
     """
     import numpy as np
 
@@ -623,7 +680,7 @@ def band_normalization_stats_sampled(
     read: list[tuple[str, raster_source.Rect]] = []
     covered = 0
     total = 0
-    for path in list(image_paths)[:max_images]:
+    for path in _drawn(image_paths, max_images, seed):
         try:
             with raster_source.open_raster(path, num_channels) as src:
                 total += src.width * src.height
@@ -644,51 +701,14 @@ def band_normalization_stats_sampled(
                     covered += rect.width * rect.height
         except Exception:  # noqa: BLE001, an unreadable raster is skipped, not fatal
             continue
-    stats = moments.result()
-    if stats is None:
-        return None
-    mean, std = stats
-    sampling = raster_source.WindowSampling(
-        tuple(read), int(seed), covered / total if total else 0.0
+    return moments.stats(
+        read,
+        seed=seed,
+        max_images=max_images,
+        pixel_fraction=covered / total if total else 0.0,
+        window_size=window_size,
+        max_windows_per_image=max_windows_per_image,
     )
-    return SampledNormalizationStats(mean, std, sampling)
-
-
-def image_stats_provenance(
-    result: tuple[list[float], list[float], list[str]]
-    | SampledNormalizationStats,
-    *,
-    window_size: int | None = None,
-    max_windows_per_image: int | None = None,
-) -> dict:
-    """Render either band-normalization result into ``model_source.image_stats_sampling``.
-
-    Accepts :func:`band_normalization_stats`'s ``(mean, std, paths_read)`` tuple or
-    :func:`band_normalization_stats_sampled`'s :class:`SampledNormalizationStats`, and returns the
-    mapping that rides beside ``builder_kwargs``. ``window_size``/``max_windows_per_image`` are the
-    sampled call's own parameters, not carried on ``WindowSampling`` itself; they are ignored for
-    the exact result.
-    """
-    if isinstance(result, SampledNormalizationStats):
-        sampling = result.sampling
-        return {
-            "windows": [
-                [label, {"x0": r.x0, "y0": r.y0, "x1": r.x1, "y1": r.y1}]
-                for label, r in sampling.windows
-            ],
-            "seed": sampling.seed,
-            "pixel_fraction": sampling.pixel_fraction,
-            "window_size": window_size,
-            "max_windows_per_image": max_windows_per_image,
-        }
-    _, _, paths_read = result
-    return {
-        "windows": [[path, None] for path in paths_read],
-        "seed": None,
-        "pixel_fraction": 1.0,
-        "window_size": None,
-        "max_windows_per_image": None,
-    }
 
 
 CROSS_TILE_NMS_DERIVATION = "p99 of the GT neighbor-IoU tail plus 0.05"

@@ -74,7 +74,9 @@ def _run(
             conf=conf,
             tile_size=TILE,
             overlap=0.0,
+            postprocess="nms",
             cross_tile_nms=SAMPLE_CROSS_TILE_NMS,
+            rationale="a sample reason the test states",
         ),
         "tile_batch_size": 1,
         "device": "cpu",
@@ -161,6 +163,7 @@ def _as_produced(raster_path: Path, bucket: str) -> list[tuple]:
 
 
 def test_resume_refuses_with_images_dir(tmp_path):
+    from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.inference_tools import run_inference
 
     images_dir = tmp_path / "images"
@@ -169,6 +172,7 @@ def test_resume_refuses_with_images_dir(tmp_path):
     result = run_inference(
         tmp_path,
         str(tmp_path / "m.pt"),
+        stated=Stated(),
         images_dir=str(images_dir),
         bucket="out/2026-01-01",
         resume=True,
@@ -406,6 +410,7 @@ def test_an_interrupted_pass_under_an_assessment_resumes_under_that_assessment(
     another assessment refuses by name.
     """
     from tcip_mcp.buckets import read_bucket
+    from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.inference_tools import run_inference
     from tests import _trait_fixtures as fx
     from tests.test_block_calibration import (
@@ -423,6 +428,7 @@ def test_an_interrupted_pass_under_an_assessment_resumes_under_that_assessment(
         "tile_batch_size": 50,
         "device": "cpu",
         "assessment_id": assessment["assessment_id"],
+        "stated": Stated(),
     }
     interrupted = "interrupted/2026-01-01"
     _interrupt_after_one_batch(monkeypatch)

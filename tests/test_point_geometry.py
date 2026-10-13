@@ -32,6 +32,7 @@ from tests._producer_fixtures import (
     label_image,
     saved_annotations,
 )
+from tests._training_values import TRIAGE_WEIGHTS
 
 BOX = BBox(10.0, 10.0, 30.0, 30.0)
 RING = [(50.0, 50.0), (70.0, 50.0), (70.0, 70.0)]
@@ -276,7 +277,9 @@ def test_worst_predictions_does_not_count_a_point_as_a_detection(
         80,
     )
 
-    res = get_worst_predictions(read_bucket(bucket.root, bucket.name))
+    res = get_worst_predictions(
+        read_bucket(bucket.root, bucket.name), 8, **TRIAGE_WEIGHTS
+    )
     # 1 GT box vs 1 predicted box: no shortfall, no surplus, full confidence -> a zero error score.
     # Counting the point as a surplus prediction would score this perfect frame as wrong.
     assert res["worst_images"][0]["error_score"] == 0.0

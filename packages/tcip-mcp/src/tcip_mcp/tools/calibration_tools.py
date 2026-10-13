@@ -6,14 +6,18 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
-from tcip_mcp.pipelines.block_calibration import DEFAULT_K_CAL, DEFAULT_K_TEST
+from pydantic import Field
+
 from tcip_mcp.pipelines.execution import Stated
 from tcip_mcp.server import tool
 
 if TYPE_CHECKING:
     from tcip_mcp.assessment import Assessment
+
+Quantile = Annotated[float, Field(ge=0, le=1)]
+"""A share of held-out images in [0, 1]: 0 takes the smallest per-image error, 1 the largest."""
 
 
 def _refusals() -> tuple[type[Exception], ...]:
@@ -54,7 +58,10 @@ def assess_checkpoint(
     trait: str,
     delivery_kind: str,
     selection_dir: str,
-    stated: Stated | None = None,
+    equivalence_z: float,
+    dispersion_quantile: Quantile,
+    rationale: str,
+    stated: Stated,
     device: str | None = None,
 ) -> dict:
     """Assess a checkpoint against the calibration and holdout sides of a selection, for one
@@ -78,8 +85,14 @@ def assess_checkpoint(
             ``per_plant_count_aggregate``, ``state_crossing_dates``,
             ``per_plant_ordinal_aggregate``, ``per_plant_regression_aggregate``).
         selection_dir: A selection drawn with calibration and holdout sides (``draw_splits``).
+        equivalence_z: The one-sided standard-error multiplier of a count's bias equivalence
+            test (1.645 is a one-sided 95 percent test).
+        dispersion_quantile: The share of held-out images whose per-image count error
+            ``count_error_tolerance`` bounds (:data:`Quantile`: 0 holds the smallest error to it,
+            1 the largest).
+        rationale: Why the assessment states these settings, recorded with it.
         stated: Execution values to state rather than derive (``execution.Stated``), as
-            ``run_inference`` takes them.
+            ``run_inference`` takes them; ``{}`` states none.
         device: cuda / cpu (auto if omitted).
 
     """
@@ -93,7 +106,10 @@ def assess_checkpoint(
                 trait=trait,
                 delivery_kind=delivery_kind,
                 selection_dir=selection_dir,
-                stated=stated or Stated(),
+                stated=stated,
+                equivalence_z=equivalence_z,
+                dispersion_quantile=dispersion_quantile,
+                rationale=rationale,
                 device=device,
             )
         )
@@ -107,9 +123,12 @@ def assess_reserved_regions(
     checkpoint_path: str,
     trait: str,
     delivery_kind: str,
-    k_cal: int = DEFAULT_K_CAL,
-    k_test: int = DEFAULT_K_TEST,
-    stated: Stated | None = None,
+    k_cal: int,
+    k_test: int,
+    equivalence_z: float,
+    dispersion_quantile: Quantile,
+    rationale: str,
+    stated: Stated,
     device: str | None = None,
 ) -> dict:
     """Assess a checkpoint trained on one mosaic against that mosaic's own reserved calibration and
@@ -125,7 +144,10 @@ def assess_reserved_regions(
         checkpoint_path: A checkpoint registered in this project, produced by a run of it.
         trait: The trait whose latest confirmed revision states the criterion's floors.
         delivery_kind: ``per_image_count`` or ``per_plant_count_aggregate``.
-        k_cal / k_test: Bands per reserved region.
+        k_cal / k_test: Bands per reserved region, recorded with the assessment; the count
+            criterion needs at least two bands carrying ground truth per side.
+        equivalence_z / dispersion_quantile: As :func:`assess_checkpoint` takes them.
+        rationale: Why the assessment states these settings, recorded with it.
         stated: Execution values to state rather than derive (``execution.Stated``); the pass is
             always tiled.
         device: cuda / cpu (auto if omitted).
@@ -142,7 +164,10 @@ def assess_reserved_regions(
                 delivery_kind=delivery_kind,
                 k_cal=k_cal,
                 k_test=k_test,
-                stated=stated or Stated(),
+                stated=stated,
+                equivalence_z=equivalence_z,
+                dispersion_quantile=dispersion_quantile,
+                rationale=rationale,
                 device=device,
             )
         )

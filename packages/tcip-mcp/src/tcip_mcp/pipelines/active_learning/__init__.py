@@ -1,9 +1,14 @@
-"""Active learning pipeline: scorer and selector modules."""
+"""Active learning pipeline: scorer and selector modules, and the scorer block a review queue
+states.
+"""
 
-DEFAULT_SCORER = "combined"
-"""The scorer a review queue ranks with when none is named: the one ``scorer.SCORER_REGISTRY``
-registers combining every signal."""
+from pydantic import BaseModel, ConfigDict
 
-DEFAULT_REVIEW_BUDGET = 50
-"""How many images a review queue returns when no budget is named: an engineering bound on one
-queue's length, a sitting's worth of review, which a caller naming a budget replaces."""
+
+class ScorerSpec(BaseModel):
+    """A review queue's scorer: the factory ``name`` names (``scorer.resolve_scorer``), its own
+    values kept as stated and handed to the factory beside the checkpoint's task.
+    """
+
+    model_config = ConfigDict(extra="allow", frozen=True)
+    name: str

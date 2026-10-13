@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 
 from tests import _trait_fixtures as fx
+from tests._training_values import EQUIVALENCE_Z
 
 torch = pytest.importorskip("torch")
 
@@ -19,6 +20,8 @@ ENTRY = fx.with_fields(
     count_bias_tolerance_frac=0.01,
     classifier_agreement_floor=0.41,
 )
+Z = {"equivalence_z": EQUIVALENCE_Z}
+"""The equivalence multiplier the positive-count bias is tested at."""
 
 
 def _flipped_items(n: int, flips: set[int]) -> list[dict]:
@@ -85,7 +88,7 @@ def test_a_single_image_holdout_cannot_pass_on_its_zero_dispersion():
         for i in range(20)
     ]
 
-    _evidence, failures = classifier_criterion(cal, hold, ENTRY)
+    _evidence, failures = classifier_criterion(cal, hold, ENTRY, **Z)
 
     assert "insufficient_holdout_images" in failures
 
@@ -122,7 +125,7 @@ def test_the_positive_count_bias_is_scoped_to_images_carrying_a_positive():
     ]
 
     evidence, failures = classifier_criterion(
-        _flipped_items(20, set()), hold, ENTRY
+        _flipped_items(20, set()), hold, ENTRY, **Z
     )
 
     assert evidence["typical_positive_count"] == pytest.approx(100.0)
@@ -142,11 +145,13 @@ def test_the_same_miscall_fails_a_sparse_class_and_passes_a_dense_one():
         _classifier_items("c", 20, 1),
         _classifier_items("h", 20, 1, miscall_images=[0]),
         entry,
+        **Z,
     )
     dense, dense_failures = classifier_criterion(
         _classifier_items("c", 20, 150),
         _classifier_items("h", 20, 150, miscall_images=[0]),
         entry,
+        **Z,
     )
 
     assert "positive_count_bias_exceeds_tolerance" in sparse_failures
@@ -169,9 +174,9 @@ def test_the_trait_authored_agreement_floor_is_the_floor_applied():
 
     cal, hold = _flipped_items(20, set()), _flipped_items(100, set(range(10)))
 
-    lenient, lenient_failures = classifier_criterion(cal, hold, ENTRY)
+    lenient, lenient_failures = classifier_criterion(cal, hold, ENTRY, **Z)
     strict, strict_failures = classifier_criterion(
-        cal, hold, fx.with_fields(ENTRY, classifier_agreement_floor=0.9)
+        cal, hold, fx.with_fields(ENTRY, classifier_agreement_floor=0.9), **Z
     )
 
     assert 0.75 < lenient["kappa"] < 0.85

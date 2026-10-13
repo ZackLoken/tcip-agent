@@ -17,7 +17,6 @@ from operator import methodcaller
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from tcip_mcp.pipelines.block_calibration import DEFAULT_K_CAL, DEFAULT_K_TEST
 from tcip_mcp.pipelines.data.selection import (
     GROUND_TRUTH_PATHS,
     ground_truth_of,
@@ -178,10 +177,11 @@ class Reference:
 class Assessment:
     """One finished assessment, as its ``assessment.json`` states it.
 
-    ``delivery_kind``, ``producer`` (:attr:`~tcip_mcp.model_registry.VerifiedCheckpoint.producer`)
-    and ``execution`` are ``None`` for a physical-scale assessment. ``disjointness`` and
-    ``criterion`` are the evidence the failures were read from, ``scale`` the scale a
-    physical-scale assessment derived. ``revision`` is the trait revision it was judged under.
+    ``delivery_kind``, ``producer`` (:attr:`~tcip_mcp.model_registry.VerifiedCheckpoint.producer`),
+    ``execution`` and ``rationale`` are ``None`` for a physical-scale assessment. ``disjointness``
+    and ``criterion`` are the evidence the failures were read from, ``scale`` the scale a
+    physical-scale assessment derived. ``revision`` is the trait revision it was judged under, and
+    ``rationale`` why the assessment states the test settings it does.
     """
 
     assessment_id: str
@@ -189,6 +189,7 @@ class Assessment:
     revision: TraitRevisionRef
     producer: dict[str, str | None] | None
     execution: Execution | None
+    rationale: str | None
     reference: Reference
     disjointness: dict[str, Any]
     criterion: dict[str, Any]
@@ -567,7 +568,10 @@ def assess(
     trait: str,
     delivery_kind: str,
     selection_dir: str,
-    stated: Stated = Stated(),
+    stated: Stated,
+    equivalence_z: float,
+    dispersion_quantile: float,
+    rationale: str,
     device: str | None = None,
     tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE,
 ) -> Assessment:
@@ -579,7 +583,10 @@ def assess(
     ``stated`` is what the caller states of the execution record; the rest is the checkpoint's own
     geometry, a derivation over the calibration side's ground truth (the object density, any tile
     geometry the checkpoint does not record, the merge threshold), or the operating point the
-    trait's count objective fits there (the conf).
+    trait's count objective fits there (the conf). A count delivery's held-out check runs at the
+    stated ``equivalence_z`` and ``dispersion_quantile``
+    (:func:`~tcip_mcp.pipelines.operating_point.count_criterion`); the record carries
+    ``rationale``, why the assessment states them.
 
     Refuses before any inference when the selection holds no calibration or no holdout side, when
     the checkpoint's head does not produce what the kind measures, and when a state-crossing
@@ -624,7 +631,14 @@ def assess(
     m_cal, m_hold = measured[: len(cal)], measured[len(cal) :]
     if delivery_kind in DETECTOR_KINDS:
         p, criterion, criterion_failures = _detection(
-            prep, m_cal, m_hold, revision.entry, delivery_kind, digest_of
+            prep,
+            m_cal,
+            m_hold,
+            revision.entry,
+            delivery_kind,
+            digest_of,
+            equivalence_z=equivalence_z,
+            dispersion_quantile=dispersion_quantile,
         )
     else:
         p = prep.runnable()
@@ -639,6 +653,7 @@ def assess(
             "delivery_kind": delivery_kind,
             "producer": p.checkpoint.producer,
             "execution": p.execution.record(),
+            "rationale": rationale,
             "reference": _reference_record(
                 str(selection_dir), None, cal + hold, digest_of, retained
             ),
@@ -654,10 +669,13 @@ def _count_fit(
     p: Pass,
     entry: TraitEntry,
     collect: Callable[[Execution], tuple[list[dict], list[dict]]],
+    *,
+    equivalence_z: float,
+    dispersion_quantile: float,
 ) -> tuple[dict, list[str], list[dict], list[dict]]:
-    """The count criterion over a reference: the calibration and holdout records ``collect``
-    predicts under the pass's record, which :func:`_prepared` stated at the staged conf floor, and
-    the conf the count objective fits there
+    """The count criterion over a reference at ``equivalence_z`` and ``dispersion_quantile``: the
+    calibration and holdout records ``collect`` predicts under the pass's record, which
+    :func:`_prepared` stated at the staged conf floor, and the conf the count objective fits there
     (:func:`~tcip_mcp.pipelines.operating_point.count_criterion`) written into the pass's record.
     ``(evidence, failures, calibration records, holdout records)``.
     """
@@ -675,6 +693,8 @@ def _count_fit(
         entry,
         staged_conf_floor_attribute_path=path,
         staged_conf_floor=STAGED_CONF_FLOOR,
+        equivalence_z=equivalence_z,
+        dispersion_quantile=dispersion_quantile,
     )
     p.execution = p.execution.with_value(
         "conf", conf, evidence["conf_derived_from"]
@@ -716,10 +736,14 @@ def _detection(
     entry: TraitEntry,
     delivery_kind: str,
     digest_of: dict[str, str],
+    *,
+    equivalence_z: float,
+    dispersion_quantile: float,
 ) -> tuple[Pass, dict, list[str]]:
     """The pass made runnable from the calibration side's ground truth (its frames' object
     density, and its merge threshold and tile geometry where unstated and unrecorded), the count
-    criterion over the reference (:func:`_count_fit`), each
+    criterion over the reference at ``equivalence_z`` and ``dispersion_quantile``
+    (:func:`_count_fit`), each
     side's loader built once, every fitted value from the calibration side, plus the classifier
     agreement over matched instances for a state-fraction delivery. ``digest_of`` is keyed by each
     sample's location, which reading the retained copies leaves unchanged.
@@ -741,6 +765,8 @@ def _detection(
             _records(p, cal_ds, digest_of, execution),
             _records(p, hold_ds, digest_of, execution),
         ),
+        equivalence_z=equivalence_z,
+        dispersion_quantile=dispersion_quantile,
     )
     measured: dict[str, Any] = {"count": evidence}
     if delivery_kind == STATE_CROSSING_DATES:
@@ -762,6 +788,7 @@ def _detection(
                 evidence["conf"],
             ),
             entry,
+            equivalence_z=equivalence_z,
         )
         measured["classifier"] = classifier
         failures = [*failures, *classifier_failures]
@@ -865,20 +892,24 @@ def assess_reserved_regions(
     checkpoint_path: str,
     trait: str,
     delivery_kind: str,
-    k_cal: int = DEFAULT_K_CAL,
-    k_test: int = DEFAULT_K_TEST,
-    stated: Stated = Stated(),
+    k_cal: int,
+    k_test: int,
+    stated: Stated,
+    equivalence_z: float,
+    dispersion_quantile: float,
+    rationale: str,
     device: str | None = None,
     tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE,
 ) -> Assessment:
     """Assess a checkpoint trained on one mosaic against that mosaic's own reserved calibration
     and holdout regions (its run's within-image split with ``calibration_ratio``), cut
     into ``k_cal`` and ``k_test`` buffered bands, for a count delivery of ``trait``; record the
-    result as a new assessment and return it.
+    result as a new assessment, the band counts and ``rationale`` with it, and return it.
 
     The bands are laid at the lattice the run trained at (its ``data.tiling``) and predicted
     through the tiled pass the whole mosaic is later published under, the count criterion fitted
-    as :func:`assess` fits it, every derived value from the calibration region alone, the object
+    as :func:`assess` fits it at ``equivalence_z`` and ``dispersion_quantile``, every derived
+    value from the calibration region alone, the object
     density among them, which caps each frame a pass under it predicts at that frame's own
     pixels. Each band is a reference sample of the mosaic, its region named. The reference's
     scope is the training mosaic's recorded content identity. Refuses
@@ -1066,7 +1097,13 @@ def assess_reserved_regions(
                 ),
             )
 
-    evidence, failures, _cal, _hold = _count_fit(p, revision.entry, collect)
+    evidence, failures, _cal, _hold = _count_fit(
+        p,
+        revision.entry,
+        collect,
+        equivalence_z=equivalence_z,
+        dispersion_quantile=dispersion_quantile,
+    )
     disjointness, disjoint_failures = _disjointness(
         digest_of,
         [s for s in samples if s.side == "calibration"],
@@ -1081,6 +1118,7 @@ def assess_reserved_regions(
             "delivery_kind": delivery_kind,
             "producer": p.checkpoint.producer,
             "execution": p.execution.record(),
+            "rationale": rationale,
             "reference": _reference_record(
                 None,
                 spatial.raster_content_identity,
@@ -1094,6 +1132,8 @@ def assess_reserved_regions(
                     **evidence,
                     "block_scale_px": buffer_px,
                     "block_scale_source": scale_source,
+                    "k_cal": k_cal,
+                    "k_test": k_test,
                     "band_gt_counts": band_counts,
                     "density_uniformity_flags": sorted(
                         f
@@ -1373,6 +1413,7 @@ def assess_physical_scale(
             "delivery_kind": None,
             "producer": None,
             "execution": None,
+            "rationale": None,
             "reference": _reference_record(
                 str(selection_dir), None, cal + hold, digest_of, retained
             ),

@@ -13,6 +13,12 @@ from pathlib import Path
 import pytest
 
 import tcip_store as ts
+from tcip_mcp.pipelines.execution import Stated
+from tests._training_values import (
+    DISPERSION_QUANTILE,
+    EQUIVALENCE_Z,
+    RATIONALE,
+)
 
 
 def _rows(tmp_path: Path) -> list[dict]:
@@ -117,6 +123,10 @@ def _assess_an_unregistered_checkpoint(tmp_path: Path):
         "cyme count",
         "per_image_count",
         str(tmp_path / "selection"),
+        EQUIVALENCE_Z,
+        DISPERSION_QUANTILE,
+        RATIONALE,
+        Stated(),
     )
 
 
@@ -124,7 +134,16 @@ def _assess_the_reserved_regions_of_an_unregistered_checkpoint(tmp_path: Path):
     from tcip_mcp.tools.calibration_tools import assess_reserved_regions
 
     return assess_reserved_regions(
-        tmp_path, str(tmp_path / "m.pt"), "cyme count", "per_image_count"
+        tmp_path,
+        str(tmp_path / "m.pt"),
+        "cyme count",
+        "per_image_count",
+        3,
+        3,
+        EQUIVALENCE_Z,
+        DISPERSION_QUANTILE,
+        RATIONALE,
+        Stated(),
     )
 
 

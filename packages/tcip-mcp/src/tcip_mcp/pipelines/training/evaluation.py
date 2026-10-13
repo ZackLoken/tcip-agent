@@ -382,12 +382,12 @@ def counted(
     """tp/fp/fn/precision/recall/f1 from the per-image matchings ``by_image`` under
     ``criterion``, for ``class_id`` or every class.
     """
-    m = _count_stats(by_image, class_id)
+    tp, fp, fn, _biases, _present = _tally(by_image, class_id)
     return {
-        "tp": int(m["tp"]),
-        "fp": int(m["fp"]),
-        "fn": int(m["fn"]),
-        **{k: round(m[k], 6) for k in ("precision", "recall", "f1")},
+        "tp": tp,
+        "fp": fp,
+        "fn": fn,
+        **{k: round(v, 6) for k, v in precision_recall_f1(tp, fp, fn).items()},
         "criterion": criterion,
     }
 
@@ -431,23 +431,21 @@ def _count_stats_at_conf(
     criterion: dict,
     conf: float,
     class_id: int | None,
+    dispersion_quantile: float,
 ) -> dict:
     """:func:`_count_stats` of ``per_image`` matched once at ``conf`` (:func:`matched`)."""
-    return _count_stats(matched(per_image, criterion, conf=conf), class_id)
+    return _count_stats(
+        matched(per_image, criterion, conf=conf), class_id, dispersion_quantile
+    )
 
 
-def _count_stats(matched: list[dict[int, Any]], class_id: int | None) -> dict:
-    """Counting statistics over each image's per-class matchings ``matched``, for one class or,
-    for ``None``, each image's counts summed over its classes: a curve entry.
-
-    Two scopes of the same per-image bias travel side by side. The whole-reference statistics
-    (``count_bias_mean``/``count_bias_std`` over ``n_images``) are what a conf picker compares
-    across the grid: ``n_images`` is the same at every conf, so minimizing ``count_bias_mean``
-    minimizes the reference's total signed miscount. The present-scoped statistics
-    (``count_bias_mean_present``/``count_bias_std_present`` over ``n_present``) are what an
-    equivalence gate compares against a relative tolerance scaled by a density measured over
-    present images only (:func:`mean_of_present_counts`): an image with no GT and no surviving
-    detection is excluded from them.
+def _tally(
+    matched: list[dict[int, Any]], class_id: int | None
+) -> tuple[int, int, int, list[int], list[int]]:
+    """``(tp, fp, fn, biases, present_biases)`` over each image's per-class matchings
+    ``matched``, for one class or, for ``None``, each image's counts summed over its classes: each
+    image's count bias (fp minus fn), and the same over the images holding a counted object or
+    detection (one ignored in a crowd region is neither).
     """
     tp = fp = fn = 0
     biases: list[int] = []
@@ -463,10 +461,31 @@ def _count_stats(matched: list[dict[int, Any]], class_id: int | None) -> dict:
         fp += f
         fn += n
         biases.append(f - n)
-        if (
-            t + n + f
-        ):  # a counted object or detection; one ignored in a crowd region is neither
+        if t + n + f:
             present_biases.append(f - n)
+    return tp, fp, fn, biases, present_biases
+
+
+def _count_stats(
+    matched: list[dict[int, Any]],
+    class_id: int | None,
+    dispersion_quantile: float,
+) -> dict:
+    """Counting statistics over each image's per-class matchings ``matched`` (:func:`_tally`), for
+    one class or, for ``None``, each image's counts summed over its classes: a curve entry.
+    ``count_error_at_quantile`` is the ``dispersion_quantile`` quantile of the per-image absolute
+    count error (``numpy.quantile``, which refuses a quantile outside [0, 1]).
+
+    Two scopes of the same per-image bias travel side by side. The whole-reference statistics
+    (``count_bias_mean``/``count_bias_std`` over ``n_images``) are what a conf picker compares
+    across the grid: ``n_images`` is the same at every conf, so minimizing ``count_bias_mean``
+    minimizes the reference's total signed miscount. The present-scoped statistics
+    (``count_bias_mean_present``/``count_bias_std_present`` over ``n_present``) are what an
+    equivalence gate compares against a relative tolerance scaled by a density measured over
+    present images only (:func:`mean_of_present_counts`): an image with no GT and no surviving
+    detection is excluded from them.
+    """
+    tp, fp, fn, biases, present_biases = _tally(matched, class_id)
     abs_biases = [abs(b) for b in biases]
     return {
         "tp": tp,
@@ -475,10 +494,10 @@ def _count_stats(matched: list[dict[int, Any]], class_id: int | None) -> dict:
         **precision_recall_f1(tp, fp, fn),
         "count_bias_mean": float(np.mean(biases)) if biases else 0.0,
         "abs_count_error_mean": float(np.mean(abs_biases)) if biases else 0.0,
-        # Tail dispersion, a p90 of |bias|, not another mean, since a mean can hide one
-        # badly-off image among many. Reference-sufficiency terms, computed here, once,
-        # so the gate never re-derives a second matcher over the same per-image biases.
-        "count_error_p90": float(np.quantile(abs_biases, 0.9))
+        # Tail dispersion, not another mean, since a mean can hide one badly-off image among many.
+        "count_error_at_quantile": float(
+            np.quantile(abs_biases, dispersion_quantile)
+        )
         if abs_biases
         else 0.0,
         "count_bias_std": float(np.std(biases, ddof=1))
@@ -505,6 +524,7 @@ def derive_operating_point_curve(
     per_image: list[dict],
     *,
     criterion: dict,
+    dispersion_quantile: float,
     class_id: int | None = None,
     conf_grid: list[float] | None = None,
     max_thresholds: int = 80,
@@ -514,10 +534,11 @@ def derive_operating_point_curve(
     One model pass produces ``per_image`` (unfiltered dt with scores); this sweeps conf in Python,
     no re-forwarding. For each conf: aggregate TP/FP/FN and per-image count bias (FP-FN). An
     explicit ``conf_grid`` (e.g. a single-element ``[conf]``) evaluates exactly those points.
-    Returns ``{criterion, class_id, curve:[{conf, tp, fp, fn, precision, recall, f1,
-    count_bias_mean, abs_count_error_mean, count_error_p90, count_bias_std, n_images, n_present,
-    count_bias_mean_present, count_bias_std_present, per_class}]}``. See
-    :func:`_count_stats_at_conf` for the two bias scopes.
+    Returns ``{criterion, dispersion_quantile, class_id, curve:[{conf, tp, fp, fn, precision,
+    recall, f1, count_bias_mean, abs_count_error_mean, count_error_at_quantile, count_bias_std,
+    n_images, n_present, count_bias_mean_present, count_bias_std_present, per_class}]}``, the
+    per-image absolute count error taken at ``dispersion_quantile``. See :func:`_count_stats` for
+    the two bias scopes.
 
     ``per_class`` carries the same statistics within each class the records carry, keyed by
     ``str(category_id)`` (string keys so an in-memory sweep and one round-tripped through a stored
@@ -544,13 +565,19 @@ def derive_operating_point_curve(
         curve.append(
             {
                 "conf": float(conf),
-                **_count_stats(by_image, class_id),
+                **_count_stats(by_image, class_id, dispersion_quantile),
                 "per_class": {
-                    str(cid): _count_stats(by_image, cid) for cid in class_ids
+                    str(cid): _count_stats(by_image, cid, dispersion_quantile)
+                    for cid in class_ids
                 },
             }
         )
-    return {"criterion": criterion, "class_id": class_id, "curve": curve}
+    return {
+        "criterion": criterion,
+        "dispersion_quantile": dispersion_quantile,
+        "class_id": class_id,
+        "curve": curve,
+    }
 
 
 def worst_class_count_bias(entry: dict) -> float:

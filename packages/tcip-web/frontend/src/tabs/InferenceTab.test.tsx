@@ -53,7 +53,7 @@ function mockTree(dates: string[]) {
 }
 
 function selectBaseline() {
-  fireEvent.change(screen.getByRole("combobox"), {
+  fireEvent.change(screen.getByRole("combobox", { name: "Model checkpoint" }), {
     target: { value: "C:/proj/.tcip/models/baseline/best.pt" },
   });
   fireEvent.change(screen.getByLabelText("Bucket name"), {
@@ -148,7 +148,7 @@ describe("InferenceTab date selection", () => {
     ]);
   });
 
-  it("states the conf and cross-tile merge threshold the breeder enters, and no cap", async () => {
+  it("states the conf, cross-tile merge and threshold the breeder enters with their reason, and no cap", async () => {
     mockTree(["2026-01-01"]);
     vi.spyOn(resultsApi, "registeredModels").mockResolvedValue({
       models: [BASELINE_MODEL],
@@ -166,6 +166,12 @@ describe("InferenceTab date selection", () => {
     fireEvent.change(screen.getByLabelText(/cross-tile merge threshold/i), {
       target: { value: "0.45" },
     });
+    fireEvent.change(screen.getByLabelText(/cross-tile merge \(/i), {
+      target: { value: "nmm" },
+    });
+    fireEvent.change(screen.getByLabelText(/why these values/i), {
+      target: { value: "the breeder's own reason" },
+    });
     fireEvent.click(screen.getByRole("checkbox", { name: "2026-01-01" }));
     fireEvent.click(screen.getByRole("button", { name: /launch inference/i }));
 
@@ -173,6 +179,8 @@ describe("InferenceTab date selection", () => {
     expect(launchSpy.mock.calls[0][0].stated).toEqual({
       conf: 0.35,
       cross_tile_nms: 0.45,
+      postprocess: "nmm",
+      rationale: "the breeder's own reason",
     });
   });
 
@@ -427,7 +435,7 @@ describe("InferenceTab bucket refusals", () => {
     await launchOneRefused();
     expect(await screen.findByText("Refused launches")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByRole("combobox"), {
+    fireEvent.change(screen.getByRole("combobox", { name: "Model checkpoint" }), {
       target: { value: "C:/proj/.tcip/models/other/best.pt" },
     });
     expect(screen.queryByText("Refused launches")).not.toBeInTheDocument();

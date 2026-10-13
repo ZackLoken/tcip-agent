@@ -100,7 +100,25 @@ def test_list_dates(tmp_path):
 # ── ingest_images ───────────────────────────────────────────────────────
 
 
+def _entries(manifest: dict) -> dict[str, tuple[str, str | None]]:
+    """Each ingested file's bucket and date source, keyed by its source file name."""
+    return {
+        Path(f["source"]).name: (f["bucket"], f["date_source"])
+        for f in manifest["files"]
+    }
+
+
+def _unreadable(manifest: dict) -> list[str]:
+    """Each ingested file's reason its capture date could not be read, where it has one."""
+    return [
+        f["date_unreadable"] for f in manifest["files"] if f["date_unreadable"]
+    ]
+
+
 def test_ingest_exif_buckets_and_undated(project, tmp_path):
+    """Each ingested file has one entry naming its bucket and what dated it, a file no source
+    dated in the undated bucket with no source.
+    """
     src = tmp_path / "raw"
     _make_image(src / "a.jpg", exif_date="2026:02:11 10:30:00")
     _make_image(src / "b.jpg", exif_date="2026:02:11 11:00:00")
@@ -110,9 +128,12 @@ def test_ingest_exif_buckets_and_undated(project, tmp_path):
     manifest = ingest_images(project, source=str(src))
 
     assert "error" not in manifest
-    assert manifest["buckets"] == {"2026-02-11": 2, "2026-03-01": 1}
-    assert manifest["undated"] == 1
-    assert manifest["total"] == 4
+    assert _entries(manifest) == {
+        "a.jpg": ("2026-02-11", "EXIF_DateTimeOriginal"),
+        "b.jpg": ("2026-02-11", "EXIF_DateTimeOriginal"),
+        "c.jpg": ("2026-03-01", "EXIF_DateTimeOriginal"),
+        "no_exif.png": ("undated", None),
+    }
     assert manifest["copied"] == 4
     assert manifest["moved"] == 0
     assert Path(manifest["image_root"]) == project / "images"
@@ -143,18 +164,24 @@ def test_ingested_bytes_read_back_through_the_image_path(project, tmp_path):
 def test_ingest_buckets_a_raster_by_the_capture_date_its_metadata_states(
     project, tmp_path
 ):
-    """A raster states its capture date in raster metadata, not in EXIF: an orthomosaic lands in a
-    real date bucket the same as a photo does.
+    """A raster whose writer states its capture date in a metadata item the ingest names lands in
+    that date's bucket, the manifest naming the item that answered; the same raster with no item
+    named states no date the ingest reads, so it lands undated, unreported.
     """
     src = tmp_path / "raw"
     _make_raster(src / "mosaic.tif", capture_date="2025-09-16")
 
-    manifest = ingest_images(project, source=str(src))
+    manifest = ingest_images(
+        project, source=str(src), raster_date_item="capture_date"
+    )
 
-    assert manifest["buckets"] == {"2025-09-16": 1}
-    assert manifest["undated"] == 0
-    assert manifest["unreadable_dates"] == []
+    assert _entries(manifest) == {"mosaic.tif": ("2025-09-16", "capture_date")}
+    assert _unreadable(manifest) == []
     assert (project / "images" / "2025-09-16" / "mosaic.tif").is_file()
+
+    unnamed = ingest_images(project, source=str(src))
+    assert _entries(unnamed) == {"mosaic.tif": ("undated", None)}
+    assert _unreadable(unnamed) == []
 
 
 def test_ingest_buckets_a_tiff_by_its_own_datetime_tag(project, tmp_path):
@@ -163,8 +190,10 @@ def test_ingest_buckets_a_tiff_by_its_own_datetime_tag(project, tmp_path):
 
     manifest = ingest_images(project, source=str(src))
 
-    assert manifest["buckets"] == {"2026-04-05": 1}
-    assert manifest["unreadable_dates"] == []
+    assert _entries(manifest) == {
+        "plot.tif": ("2026-04-05", "TIFFTAG_DATETIME")
+    }
+    assert _unreadable(manifest) == []
 
 
 def test_ingest_leaves_a_raster_that_states_no_date_undated_and_unreported(
@@ -176,9 +205,8 @@ def test_ingest_leaves_a_raster_that_states_no_date_undated_and_unreported(
 
     manifest = ingest_images(project, source=str(src))
 
-    assert manifest["undated"] == 1
-    assert manifest["buckets"] == {}
-    assert manifest["unreadable_dates"] == []
+    assert _entries(manifest) == {"plain.tif": ("undated", None)}
+    assert _unreadable(manifest) == []
 
 
 def test_ingest_leaves_a_photo_without_an_exif_date_undated_and_unreported(
@@ -189,8 +217,8 @@ def test_ingest_leaves_a_photo_without_an_exif_date_undated_and_unreported(
 
     manifest = ingest_images(project, source=str(src))
 
-    assert manifest["undated"] == 1
-    assert manifest["unreadable_dates"] == []
+    assert _entries(manifest) == {"no_exif.png": ("undated", None)}
+    assert _unreadable(manifest) == []
 
 
 @pytest.mark.parametrize("name", ["broken.jpg", "broken.tif"])
@@ -208,16 +236,11 @@ def test_ingest_still_ingests_a_file_whose_capture_date_cannot_be_read(
     manifest = ingest_images(project, source=str(src))
 
     assert manifest["copied"] == 1
-    assert manifest["total"] == 1
-    assert manifest["undated"] == 1
     assert manifest["errors"] == []
     assert (project / "images" / "undated" / name).is_file()
 
-    assert len(manifest["unreadable_dates"]) == 1
-    entry = manifest["unreadable_dates"][0]
-    assert entry["source"].endswith(name)
-    assert entry["bucket"] == "undated"
-    assert entry["reason"]
+    assert _entries(manifest) == {name: ("undated", None)}
+    assert len(_unreadable(manifest)) == 1
 
 
 def test_ingest_reports_an_exif_date_it_cannot_read_as_a_date(
@@ -228,9 +251,9 @@ def test_ingest_reports_an_exif_date_it_cannot_read_as_a_date(
 
     manifest = ingest_images(project, source=str(src))
 
-    assert manifest["undated"] == 1
-    assert len(manifest["unreadable_dates"]) == 1
-    assert "whenever" in manifest["unreadable_dates"][0]["reason"]
+    assert _entries(manifest) == {"odd.jpg": ("undated", None)}
+    (reason,) = _unreadable(manifest)
+    assert "whenever" in reason
 
 
 @pytest.mark.parametrize("date_from", ["none", "2026-05-15"])
@@ -259,7 +282,7 @@ def test_a_date_mode_that_names_its_own_bucket_opens_no_file(
 
     assert opened == []
     assert manifest["copied"] == 2
-    assert manifest["unreadable_dates"] == []
+    assert _unreadable(manifest) == []
 
 
 def test_ingest_copies_leave_originals_byte_identical(project, tmp_path):
@@ -489,8 +512,10 @@ def test_ingest_date_from_none_all_undated(project, tmp_path):
 
     manifest = ingest_images(project, source=str(src), date_from="none")
 
-    assert manifest["undated"] == 2
-    assert manifest["buckets"] == {}
+    assert _entries(manifest) == {
+        "a.jpg": ("undated", None),
+        "b.png": ("undated", None),
+    }
 
 
 def test_ingest_date_from_literal_bucket(project, tmp_path):
@@ -500,8 +525,10 @@ def test_ingest_date_from_literal_bucket(project, tmp_path):
 
     manifest = ingest_images(project, source=str(src), date_from="2026-05-15")
 
-    assert manifest["buckets"] == {"2026-05-15": 2}
-    assert manifest["undated"] == 0
+    assert _entries(manifest) == {
+        "a.png": ("2026-05-15", None),
+        "b.png": ("2026-05-15", None),
+    }
     assert (project / "images" / "2026-05-15" / "a.png").is_file()
 
 
@@ -527,7 +554,7 @@ def test_ingest_non_recursive_skips_subfolders(project, tmp_path):
 
     manifest = ingest_images(project, source=str(src), recursive=False)
 
-    assert manifest["total"] == 1  # only top.png
+    assert list(_entries(manifest)) == ["top.png"]
 
 
 def test_ingest_writes_audit_entry(project, tmp_path):

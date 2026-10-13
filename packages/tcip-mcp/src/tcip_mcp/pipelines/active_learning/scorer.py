@@ -1,8 +1,9 @@
 """Active learning scorers: rank unlabeled images by informativeness.
 
-Scorers resolve through a small dict registry (``resolve_scorer``) the agent can extend with
-``register_scorer``, composing a new acquisition function (e.g. margin, least-confidence). The
-built-in reference scorers:
+Scorers resolve from a scorer block through a small dict registry of factories taking
+``(task, **settings)`` (``resolve_scorer``) the agent can extend with ``register_scorer``,
+composing a new acquisition function (e.g. margin, least-confidence). The built-in reference
+scorers:
   - UncertaintyScorer: prediction entropy / confidence spread
   - DiversityScorer: embedding distance from labeled set
   - CombinedScorer: weighted combination of uncertainty + diversity
@@ -19,10 +20,10 @@ import numpy as np
 import torch
 from torch.nn import functional
 
-from tcip_mcp.pipelines.active_learning import DEFAULT_SCORER
 from tcip_mcp.pipelines.model_contract import DETECTOR_TASKS
 
 if TYPE_CHECKING:
+    from tcip_mcp.pipelines.active_learning import ScorerSpec
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
 
 logger = logging.getLogger(__name__)
@@ -176,13 +177,13 @@ class DiversityScorer(BaseScorer):
 
 
 class CombinedScorer(BaseScorer):
-    """Weighted combination of uncertainty and diversity scores."""
+    """Weighted combination of uncertainty and diversity scores, each normalized to [0, 1]."""
 
     def __init__(
         self,
         task: str,
-        uncertainty_weight: float = 0.6,
-        diversity_weight: float = 0.4,
+        uncertainty_weight: float,
+        diversity_weight: float,
         labeled_embeddings: np.ndarray | None = None,
     ) -> None:
         self.unc = UncertaintyScorer(task)
@@ -215,28 +216,31 @@ class CombinedScorer(BaseScorer):
         return combined
 
 
-SCORER_REGISTRY: dict[str, Callable[[str], BaseScorer]] = {
-    "uncertainty": lambda task: UncertaintyScorer(task=task),
+SCORER_REGISTRY: dict[str, Callable[..., BaseScorer]] = {
+    "uncertainty": UncertaintyScorer,
     "diversity": lambda task: DiversityScorer(),
-    DEFAULT_SCORER: lambda task: CombinedScorer(task=task),
+    "combined": CombinedScorer,
 }
+"""Each scorer a block may name, as its factory taking ``(task, **settings)``."""
 
 
-def register_scorer(name: str, factory: Callable[[str], BaseScorer]) -> None:
-    """Register an acquisition-function scorer under ``name`` so ``method=<name>`` resolves to
-    it.
+def register_scorer(name: str, factory: Callable[..., BaseScorer]) -> None:
+    """Register an acquisition-function scorer's factory, taking ``(task, **settings)``, under
+    ``name`` so a scorer block naming it resolves to it.
     """
     SCORER_REGISTRY[name] = factory
 
 
-def resolve_scorer(method: str, task: str) -> BaseScorer:
-    """The scorer the factory registered under ``method``, or the dotted ``module:factory`` it
-    names, builds for ``task`` (:func:`~tcip_mcp.pipelines.model_build.resolve_named`, whose
-    refusals propagate).
+def resolve_scorer(block: ScorerSpec, task: str) -> BaseScorer:
+    """The scorer the factory registered under ``block.name``, or the dotted ``module:factory``
+    it names, builds for ``task`` from the block's own values
+    (:func:`~tcip_mcp.pipelines.model_build.resolve_named`, whose refusals propagate). The
+    factory's own signature refuses (``TypeError``) a value it requires that the block leaves
+    unstated, and one the block states that it does not take, naming each.
     """
     from tcip_mcp.pipelines.model_build import resolve_named
 
     target = resolve_named(
-        method, SCORER_REGISTRY, kind="scorer", register="register_scorer"
+        block.name, SCORER_REGISTRY, kind="scorer", register="register_scorer"
     )
-    return target(task) if callable(target) else target
+    return target(task, **(block.model_extra or {}))

@@ -26,7 +26,11 @@ def test_the_raster_door_records_the_execution_its_prepared_pass_states(
     from tests.test_block_calibration import _build_experiment
 
     exp = _build_experiment(tmp_path)
-    stated = {"cross_tile_nms": SAMPLE_CROSS_TILE_NMS}
+    stated = {
+        "postprocess": "nms",
+        "cross_tile_nms": SAMPLE_CROSS_TILE_NMS,
+        "rationale": "a sample reason the test states",
+    }
     result = run_inference(
         tmp_path,
         exp["checkpoint_path"],
@@ -75,7 +79,9 @@ def test_a_raster_pass_records_the_frame_its_predictions_are_in(tmp_path):
             conf=0.0,
             tile_size=TILE,
             overlap=0.2,
+            postprocess="nms",
             cross_tile_nms=SAMPLE_CROSS_TILE_NMS,
+            rationale="a sample reason the test states",
         ),
     )
     assert "error" not in result, result

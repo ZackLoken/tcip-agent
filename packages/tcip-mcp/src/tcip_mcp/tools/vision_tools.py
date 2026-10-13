@@ -579,13 +579,20 @@ def _viz_comparison(
     }
 
 
-def get_worst_predictions(bucket: Bucket, top_k: int = 8) -> dict:
+def get_worst_predictions(
+    bucket: Bucket,
+    top_k: int,
+    shortfall_weight: float,
+    surplus_weight: float,
+    confidence_weight: float,
+) -> dict:
     """Return the ``top_k`` images ranked worst by a count-mismatch + low-confidence triage
     heuristic.
 
     This is a cheap triage signal, not a quality metric: it does no IoU matching and computes
-    no loss. The score is ``2·|n_gt−n_pred as a shortfall| + |surplus| + (1−avg_conf)``, purely
-    the difference in box *counts* plus mean confidence, so an image with the right count but
+    no loss. The score is ``shortfall_weight * max(0, n_gt - n_pred) + surplus_weight *
+    max(0, n_pred - n_gt) + confidence_weight * (1 - avg_conf)``, purely the difference in box
+    counts plus mean confidence, so an image with the right count but
     every box mislocated scores as good. Use it to surface likely-bad frames for a human to look
     at; for true TP/FP/FN ranking use ``score_predictions`` (``detail=True``, IoU-matched). Only
     the documents the bucket's record names are ranked, each against the label document of its
@@ -598,16 +605,24 @@ def get_worst_predictions(bucket: Bucket, top_k: int = 8) -> dict:
     Args:
         bucket: The published bucket whose recorded documents are ranked.
         top_k: Number of worst images to return.
+        shortfall_weight: Weight of each ground-truth object the predictions fall short of.
+        surplus_weight: Weight of each prediction beyond the ground-truth count.
+        confidence_weight: Weight of one minus the predictions' mean confidence.
 
     """
-    return _ranked(bucket, top_k)[0]
+    return _ranked(
+        bucket, top_k, (shortfall_weight, surplus_weight, confidence_weight)
+    )[0]
 
 
-def _ranked(bucket: Bucket, top_k: int) -> tuple[dict, dict[str, tuple]]:
+def _ranked(
+    bucket: Bucket, top_k: int, weights: tuple[float, float, float]
+) -> tuple[dict, dict[str, tuple]]:
     """The ``top_k`` worst-scoring images of ``bucket`` by the count-mismatch and confidence
-    heuristic (its capture, the ranked stems with their scores, how many were scored and the
-    capture's labeled stems the bucket holds no document for), beside the read the ranking was
-    made over: each stem's source, ground truth and predictions.
+    heuristic under ``weights`` (shortfall, surplus, confidence; :func:`get_worst_predictions`)
+    (its capture, the ranked stems with their scores, how many were scored and the capture's
+    labeled stems the bucket holds no document for), beside the read the ranking was made over:
+    each stem's source, ground truth and predictions.
     """
     from tcip_annotation.json_io import detection_annotations
     from tcip_mcp.dataset_layout import capture_label_keys, image_dir
@@ -636,6 +651,7 @@ def _ranked(bucket: Bucket, top_k: int) -> tuple[dict, dict[str, tuple]]:
         for src, gt, document in read
     }
     # Both sides counted as a count counts: objects with a box, a crowd region and a Point none.
+    shortfall_weight, surplus_weight, confidence_weight = weights
     scores: list[tuple[str, float]] = []
     for stem, (_img, gt, predicted) in by_stem.items():
         preds = detection_annotations(predicted)
@@ -644,7 +660,6 @@ def _ranked(bucket: Bucket, top_k: int) -> tuple[dict, dict[str, tuple]]:
         n_pred = len(preds)
         n_gt = len(gt_anns)
 
-        # Simple error heuristic: |pred - gt| + missed + extra + low confidence
         missed = max(0, n_gt - n_pred)
         extra = max(0, n_pred - n_gt)
         avg_conf = (
@@ -652,7 +667,11 @@ def _ranked(bucket: Bucket, top_k: int) -> tuple[dict, dict[str, tuple]]:
         )
 
         # Higher score = worse prediction
-        error_score = missed * 2.0 + extra * 1.0 + (1.0 - avg_conf)
+        error_score = (
+            missed * shortfall_weight
+            + extra * surplus_weight
+            + (1.0 - avg_conf) * confidence_weight
+        )
         scores.append((stem, error_score))
 
     scores.sort(key=lambda x: x[1], reverse=True)
@@ -676,8 +695,11 @@ def render_failure_cases(
     project: Path,
     dataset_root: str,
     bucket: str,
+    top_k: int,
+    shortfall_weight: float,
+    surplus_weight: float,
+    confidence_weight: float,
     task: str = "detect",
-    top_k: int = 10,
     class_names: str = "",
 ) -> dict:
     """Find and render the worst predictions for failure analysis.
@@ -693,8 +715,10 @@ def render_failure_cases(
     Args:
         dataset_root: The dataset root the bucket is published under.
         bucket: The published bucket whose documents are ranked and rendered.
-        task: 'detect' or 'segment'.
         top_k: Number of worst cases to render.
+        shortfall_weight / surplus_weight / confidence_weight: The ranking's weights, as
+            :func:`get_worst_predictions` takes them.
+        task: 'detect' or 'segment'.
         class_names: Comma-separated class names.
 
     """
@@ -702,7 +726,9 @@ def render_failure_cases(
 
     try:
         worst, by_stem = _ranked(
-            read_bucket(located(dataset_root, project), bucket), top_k
+            read_bucket(located(dataset_root, project), bucket),
+            top_k,
+            (shortfall_weight, surplus_weight, confidence_weight),
         )
     except (
         UnreadableLabelDocumentError,
@@ -1041,8 +1067,8 @@ def capture_live_canvas(
 def overlay_reference_grid(
     project: Path,
     image_path: str,
+    overlap: float,
     tile_size: int | None = None,
-    overlap: float = 0.0,
 ) -> dict:
     """Render image with a labeled reference-grid overlay for spatial referencing.
 
@@ -1062,8 +1088,8 @@ def overlay_reference_grid(
     Args:
         image_path: The image file (:func:`~tcip_mcp.registry_paths.located` against
             ``project``).
-        tile_size: Cell edge in native pixels; omitted derives a legible default.
         overlap: Cell overlap as a fraction of tile_size, training tiling's semantics.
+        tile_size: Cell edge in native pixels; omitted derives a legible default.
 
     """
     from tcip_mcp.pipelines.image_utils import resolve_image_path

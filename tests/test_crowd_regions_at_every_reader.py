@@ -23,6 +23,10 @@ from tcip_annotation import json_io  # noqa: E402
 from tcip_annotation.state import Annotation, BBox, Polygon  # noqa: E402
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key  # noqa: E402
 from tests._producer_fixtures import label_image, labeled_frame  # noqa: E402
+from tests._training_values import (  # noqa: E402
+    DISPERSION_QUANTILE,
+    TRIAGE_WEIGHTS,
+)
 from tests.bespoke_models import BrightRegionDetector  # noqa: E402
 
 SUBJECT = "bur"
@@ -513,7 +517,11 @@ def test_an_ignored_detection_is_no_present_image_observation(tmp_path: Path):
     from tcip_mcp.pipelines.training.evaluation import _count_stats_at_conf
 
     stats = _count_stats_at_conf(
-        _center_records(tmp_path), criterion=CENTER, conf=0.5, class_id=None
+        _center_records(tmp_path),
+        criterion=CENTER,
+        conf=0.5,
+        class_id=None,
+        dispersion_quantile=DISPERSION_QUANTILE,
     )
     assert (stats["tp"], stats["fp"], stats["fn"]) == (0, 0, 1)
     assert stats["n_present"] == 1
@@ -543,7 +551,11 @@ def test_the_governing_center_count_is_the_count_statistics_own(
         }
     )
     stats = _count_stats_at_conf(
-        records, criterion=CENTER, conf=0.5, class_id=None
+        records,
+        criterion=CENTER,
+        conf=0.5,
+        class_id=None,
+        dispersion_quantile=DISPERSION_QUANTILE,
     )
     counts = governing_counts(records, CENTER, conf_threshold=0.5)
     assert {k: counts[k] for k in ("tp", "fp", "fn")} == {
@@ -611,7 +623,7 @@ def test_the_worst_predictions_triage_counts_objects_not_crowd_regions(
         IMG,
     )
 
-    result = get_worst_predictions(bucket)
+    result = get_worst_predictions(bucket, 8, **TRIAGE_WEIGHTS)
     assert result["worst_images"] == [{"stem": "a", "error_score": 0.1}]
     assert result["not_predicted"] == ["b"]
 

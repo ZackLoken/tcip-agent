@@ -14,6 +14,8 @@ import tifffile
 from fastapi.testclient import TestClient
 from PIL import Image
 
+from tests._training_values import RATIONALE
+
 
 def _write_group(images_dir: Path, stem: str, base=(111, 222, 333)) -> None:
     """Each band gets a distinct base level plus a horizontal gradient (never a flat fill): a
@@ -315,6 +317,7 @@ def test_inference_worker_predicts_on_the_correctly_decoded_grouped_capture(
             cross_tile_nms=0.7,
             overlap=0.2,
             postprocess="nms",
+            rationale=RATIONALE,
         ),
     )
     _worker(job)

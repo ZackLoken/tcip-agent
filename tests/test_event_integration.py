@@ -564,6 +564,7 @@ class TestInferenceToolOutputSchema:
                 conf=0.17,
                 cross_tile_nms=0.55,
                 postprocess="nmm",
+                rationale="a sample reason the test states",
             ),
         )
 

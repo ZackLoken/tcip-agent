@@ -34,6 +34,12 @@ from tests._chain_fixtures import (  # noqa: E402
     train_on,
 )
 from tests._dense_op_fixtures import dense_records, good_cal_holdout  # noqa: E402
+from tests._training_values import (  # noqa: E402
+    COUNT_TEST,
+    DISPERSION_QUANTILE,
+    EQUIVALENCE_Z,
+    RATIONALE,
+)
 from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS  # noqa: E402
 
 
@@ -271,6 +277,7 @@ def test_an_accurate_reference_passes_the_count_criterion():
         _count_entry(count_error_tolerance=2.0),
         staged_conf_floor=0.01,
         staged_conf_floor_attribute_path="self",
+        **COUNT_TEST,
     )
 
     assert failures == [], failures
@@ -292,6 +299,7 @@ def test_a_known_count_bias_fails_the_outcome_tolerance_with_no_dispersion_at_al
         _count_entry(count_error_tolerance=20.0),
         staged_conf_floor=0.01,
         staged_conf_floor_attribute_path="self",
+        **COUNT_TEST,
     )
 
     assert evidence["holdout_at_conf"]["count_bias_std_present"] == 0.0
@@ -310,7 +318,9 @@ def test_an_agreeing_classifier_passes_the_classifier_criterion():
 
     calls = [(True, True), (True, True), (False, False), (False, False)]
     hold = _items("a", calls) + _items("b", calls)
-    evidence, failures = classifier_criterion(hold, hold, _count_entry())
+    evidence, failures = classifier_criterion(
+        hold, hold, _count_entry(), equivalence_z=EQUIVALENCE_Z
+    )
 
     assert failures == [], (failures, evidence)
 
@@ -323,7 +333,9 @@ def test_compensating_classification_errors_cannot_validate_through_pooled_count
 
     calls = [(True, False), (True, False), (False, True), (False, True)]
     hold = _items("a", calls) + _items("b", calls)
-    evidence, failures = classifier_criterion(hold, hold, _count_entry())
+    evidence, failures = classifier_criterion(
+        hold, hold, _count_entry(), equivalence_z=EQUIVALENCE_Z
+    )
 
     assert evidence["positive_count_bias"] == 0.0
     assert "classifier_agreement_below_floor" in failures, (failures, evidence)
@@ -671,7 +683,9 @@ def test_an_instance_segmentation_assessment_reads_its_reference_through_polygon
         return assessment._detection(
             prepare(
                 checkpoint,
-                Stated(tile=False, conf=STAGED_CONF_FLOOR),
+                Stated(
+                    tile=False, conf=STAGED_CONF_FLOOR, rationale=RATIONALE
+                ),
                 device="cpu",
             ),
             samples[:2],
@@ -679,12 +693,89 @@ def test_an_instance_segmentation_assessment_reads_its_reference_through_polygon
             fx.COUNT_SPEC,
             "per_image_count",
             source_digests(samples),
+            **COUNT_TEST,
         )
 
     _pass, measured, _failures = fit(polygons=True)
     assert "count" in measured
     with pytest.raises(ValueError, match="instance_seg loader does not read"):
         fit(polygons=False)
+
+
+def test_an_assessment_records_the_test_settings_and_the_reason_it_states(
+    tmp_path,
+):
+    """The equivalence multiplier and the dispersion quantile a count assessment states are the
+    ones its record carries beside its reason, and neither door holds a value for any of them.
+    """
+    import inspect
+
+    from tcip_mcp import assessment
+    from tcip_mcp.tools import calibration_tools
+
+    chain = run_the_chain(tmp_path, experiment_id="exp-stated-test")
+    recorded = assessment.read_assessment(
+        tmp_path, chain.assessment["assessment_id"]
+    )
+
+    count = recorded.criterion["count"]
+    assert count["equivalence_z"] == EQUIVALENCE_Z
+    assert (
+        count["calibration_curve"]["dispersion_quantile"]
+        == DISPERSION_QUANTILE
+    )
+    assert recorded.rationale == RATIONALE
+    for door in (assessment.assess, calibration_tools.assess_checkpoint):
+        parameters = inspect.signature(door).parameters
+        for name in ("equivalence_z", "dispersion_quantile", "rationale"):
+            assert parameters[name].default is inspect.Parameter.empty, (
+                door,
+                name,
+            )
+
+
+@pytest.mark.parametrize(
+    ("tool", "bands"),
+    [
+        ("assess_checkpoint", {"selection_dir": "s"}),
+        ("assess_reserved_regions", {"k_cal": 3, "k_test": 3}),
+    ],
+)
+def test_the_assess_tools_take_a_dispersion_quantile_within_zero_and_one(
+    tool, bands
+):
+    """The MCP call refuses a dispersion quantile outside [0, 1] by the parameter's own type,
+    and admits either end.
+    """
+    import asyncio
+
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from tcip_mcp.server import build_server
+
+    server = build_server(None)
+
+    def called(quantile: float) -> str:
+        arguments = {
+            "checkpoint_path": "absent.pt",
+            "trait": fx.COUNT_TRAIT,
+            "delivery_kind": "per_image_count",
+            **bands,
+            "equivalence_z": EQUIVALENCE_Z,
+            "dispersion_quantile": quantile,
+            "rationale": RATIONALE,
+            "stated": {},
+        }
+        try:
+            asyncio.run(server.call_tool(tool, arguments))
+        except ToolError as exc:
+            return str(exc)
+        return ""
+
+    for outside in (-0.1, 1.5):
+        assert "dispersion_quantile" in called(outside), outside
+    for end in (0.0, 1.0):
+        assert "dispersion_quantile" not in called(end), end
 
 
 # -- a restored execution record runs exactly as recorded ---------------------------------
@@ -694,46 +785,30 @@ def test_a_restored_record_runs_as_recorded_and_a_changed_overlap_or_merge_refus
     tmp_path,
 ):
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.execution import (
-        DEFAULT_POSTPROCESS,
-        ExecutionRefusedError,
-        prepare,
-    )
+    from tcip_mcp.pipelines.execution import ExecutionRefusedError, prepare
 
     _images, _drawn, _sel, checkpoint_path = _trained(tmp_path, "exp-restore")
     checkpoint = load_registered_checkpoint(checkpoint_path, project=tmp_path)
-    recorded = (
-        prepare(
-            checkpoint, Stated(tile=True, overlap=0.2, **SAMPLE_DETECTOR_PASS)
+
+    def tiled(**merge) -> Stated:
+        return Stated(
+            tile=True, overlap=0.2, **{**SAMPLE_DETECTOR_PASS, **merge}
         )
-        .runnable()
-        .execution
-    )
+
+    recorded = prepare(checkpoint, tiled()).runnable().execution
     assert recorded.tiled, recorded
-    assert (recorded.postprocess, recorded.sources["postprocess"]) == (
-        DEFAULT_POSTPROCESS,
-        "default",
-    )
+    assert recorded.postprocess == "nms"
     stated_merge = (
-        prepare(
-            checkpoint,
-            Stated(
-                tile=True,
-                overlap=0.2,
-                postprocess="nmm",
-                **SAMPLE_DETECTOR_PASS,
-            ),
-        )
-        .runnable()
-        .execution
+        prepare(checkpoint, tiled(postprocess="nmm")).runnable().execution
     )
-    assert (stated_merge.postprocess, stated_merge.sources["postprocess"]) == (
-        "nmm",
-        "explicit",
-    )
+    assert stated_merge.postprocess == "nmm"
 
     assert (
-        prepare(checkpoint, Stated(overlap=0.2), restored=recorded)
+        prepare(
+            checkpoint,
+            Stated(overlap=0.2, rationale="a restored pass's own reason"),
+            restored=recorded,
+        )
         .runnable()
         .execution
         == recorded
@@ -741,18 +816,19 @@ def test_a_restored_record_runs_as_recorded_and_a_changed_overlap_or_merge_refus
     with pytest.raises(
         ExecutionRefusedError, match="overlap stated 0.5, recorded 0.2"
     ):
-        prepare(checkpoint, Stated(overlap=0.5), restored=recorded).runnable()
+        prepare(
+            checkpoint,
+            Stated(overlap=0.5, rationale=RATIONALE),
+            restored=recorded,
+        ).runnable()
     with pytest.raises(
         ExecutionRefusedError, match="postprocess stated 'nmm', recorded 'nms'"
     ):
         prepare(
-            checkpoint, Stated(postprocess="nmm"), restored=recorded
-        ).runnable()
-    # A blank merge is a name the vocabulary refuses, never the default an omitted one takes.
-    with pytest.raises(ValueError, match="Unknown cross-tile merge ''.*nms"):
-        prepare(
             checkpoint,
-            Stated(
-                tile=True, overlap=0.2, postprocess="", **SAMPLE_DETECTOR_PASS
-            ),
+            Stated(postprocess="nmm", rationale=RATIONALE),
+            restored=recorded,
         ).runnable()
+    # A blank merge is a name the vocabulary refuses.
+    with pytest.raises(ValueError, match="Unknown cross-tile merge ''.*nms"):
+        prepare(checkpoint, tiled(postprocess="")).runnable()

@@ -1,8 +1,9 @@
 """Generate the browser's backend-declared types from the pydantic models that declare them.
 
 ``routes/images.py`` declares a served image's stats source and the reads a view is served by;
-``routes/annotate.py`` the review queue's launch and ``routes/sessions.py`` the annotation timing
-entries and the sessions they amount to;
+``routes/annotate.py`` the review queue's launch, the scorer block it states
+(``tcip_mcp.pipelines.active_learning``) and the job record both its routes answer, and
+``routes/sessions.py`` the annotation timing entries and the sessions they amount to;
 ``tcip_mcp.experiments`` declares a run's row, a sweep's group, the listing of both and the detail
 of one; ``routes/training.py`` and ``routes/terminal.py`` declare their WebSocket frame
 vocabularies, and ``routes/terminal.py`` the provider status, the session launch request and
@@ -21,8 +22,9 @@ single-member ``Literal`` discriminator rendered as its literal type, and a free
 (``additionalProperties`` true, no ``properties``) rendered as ``Record<string, unknown>``);
 annotation keywords such as ``title`` and ``default`` are ignored rather than mapped, a typed
 mapping (``dict[str, T]``, ``additionalProperties`` a schema rather than a bare ``true``) renders
-``Record<string, T>``, and any other shape (including an object with its own fixed, non-``$ref``
-property set) refuses by name.
+``Record<string, T>``, a model keeping undeclared keys (``extra="allow"``) gains a string index
+signature beside its declared fields, and any other shape (including an object with its own
+fixed, non-``$ref`` property set) refuses by name.
 Each of ``web_client``'s own named ``PANEL_EVENT_*`` constants, the strings
 :func:`string_constants` names, and the vocabularies :func:`tuple_constants` names are projected
 alongside the models as runtime constants, and those :func:`literal_aliases` names as bare union
@@ -56,7 +58,8 @@ HEADER = """/**
  * routes/terminal.py, routes/projects.py, routes/results.py, tcip_mcp.experiments,
  * tcip_mcp.tools.training_tools, tcip_mcp.traits, tcip_mcp.web_client.GuiState), plus a
  * handful of runtime constants and vocabularies (routes/images.py, tcip_mcp.web_client,
- * tcip_mcp.experiments, tcip_mcp.subject_registry, tcip_mcp.agent_identity,
+ * tcip_mcp.experiments, tcip_mcp.pipelines.execution, tcip_mcp.subject_registry,
+ * tcip_mcp.agent_identity,
  * tcip_mcp.pipelines.training.evaluation, tcip_store.values, tcip_annotation.json_io,
  * tcip_web.jobstore). Do not edit by hand.
  */
@@ -79,6 +82,7 @@ def declared_models() -> list[type[BaseModel]]:
         TrainingDetail,
         TrainingListing,
     )
+    from tcip_mcp.pipelines.active_learning import ScorerSpec
     from tcip_mcp.pipelines.delivery_events_schema import (
         Acknowledgment,
         BucketFinding,
@@ -99,7 +103,10 @@ def declared_models() -> list[type[BaseModel]]:
         TraitEntry,
         TraitRevision,
     )
-    from tcip_web.routes.annotate import LaunchPriorityQueuePayload
+    from tcip_web.routes.annotate import (
+        LaunchPriorityQueuePayload,
+        PriorityQueueJob,
+    )
     from tcip_web.routes.canvas import CanvasStatePayload
     from tcip_web.routes.images import ServingCell, ViewReads
     from tcip_web.routes.projects import (
@@ -141,6 +148,8 @@ def declared_models() -> list[type[BaseModel]]:
 
     return [
         LaunchPriorityQueuePayload,
+        PriorityQueueJob,
+        ScorerSpec,
         CanvasStatePayload,
         ImageEntry,
         ImageEventPayload,
@@ -231,10 +240,12 @@ def tuple_constants() -> dict[str, tuple[str, ...]]:
     from tcip_annotation.json_io import FINISHED_STATES
     from tcip_mcp.agent_identity import RECORD_FIELDS
     from tcip_mcp.experiments import TERMINAL_STATES
+    from tcip_mcp.pipelines.execution import CROSS_TILE_MERGES
     from tcip_mcp.subject_registry import ATTR_TYPES
     from tcip_mcp.web_client import PLATFORM_PANEL_EVENTS, TAB_NAMES
 
     return {
+        "CROSS_TILE_MERGES": tuple(CROSS_TILE_MERGES),
         "TAB_NAMES": TAB_NAMES,
         "PLATFORM_PANEL_EVENTS": PLATFORM_PANEL_EVENTS,
         "TERMINAL_STATES": tuple(sorted(TERMINAL_STATES)),
@@ -343,6 +354,9 @@ def _interface(name: str, schema: dict) -> str:
         lines.append(
             f"  {prop}{optional}: {_ts_type(prop_schema, f'{name}.{prop}')};\n"
         )
+    if schema.get("additionalProperties") is True:
+        # A model keeping undeclared keys as stated (a named block's own values).
+        lines.append("  [key: string]: unknown;\n")
     lines.append("}\n")
     return "".join(lines)
 

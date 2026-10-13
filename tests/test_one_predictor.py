@@ -13,6 +13,7 @@ pytest.importorskip("torch")
 
 def test_a_checkpoint_without_kind_predicts_and_ranks(tmp_path: Path) -> None:
     from tcip_mcp.model_registry import load_registered_checkpoint
+    from tcip_mcp.pipelines.active_learning import ScorerSpec
     from tcip_mcp.pipelines.active_learning.scorer import resolve_scorer
     from tcip_mcp.pipelines.execution import Stated, execution_record
     from tcip_mcp.pipelines.image_utils import list_logical_images
@@ -36,11 +37,18 @@ def test_a_checkpoint_without_kind_predicts_and_ranks(tmp_path: Path) -> None:
     ]
     result = predictor.predict(
         images[0],
-        execution_record(checkpoint, Stated(conf=SAMPLE_CONF), None, None),
+        execution_record(
+            checkpoint,
+            Stated(
+                conf=SAMPLE_CONF, rationale="a sample reason the test states"
+            ),
+            None,
+            None,
+        ),
     )
     assert {"boxes", "scores", "labels", "count", "cap"} <= set(result)
 
-    ranked = resolve_scorer("uncertainty", checkpoint.task).score(
-        images, predictor
-    )
+    ranked = resolve_scorer(
+        ScorerSpec(name="uncertainty"), checkpoint.task
+    ).score(images, predictor)
     assert sorted(path for path, _score in ranked) == sorted(images)

@@ -89,6 +89,7 @@ def _propose_over_the_region(project: Path, image: Path) -> dict:
         engine="patch",
         grid_cells=REGION_CELLS,
         tile_size=TILE_SIZE,
+        overlap=0.0,
     )
     assert "error" not in result, result
     assert result["candidate_count"] == 1

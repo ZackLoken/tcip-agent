@@ -35,7 +35,12 @@ PIXEL_SCALE = 0.5  # native-CRS units (m) per pixel
 
 TILE = 32
 RASTER_PASS = Stated(
-    conf=0.0, tile_size=TILE, overlap=0.2, cross_tile_nms=SAMPLE_CROSS_TILE_NMS
+    conf=0.0,
+    tile_size=TILE,
+    overlap=0.2,
+    postprocess="nms",
+    cross_tile_nms=SAMPLE_CROSS_TILE_NMS,
+    rationale="a sample reason the test states",
 )
 """The execution values every raster pass here states."""
 SCOPE = {"subject": fx.COUNT_SUBJECT}
@@ -354,12 +359,14 @@ def test_a_missing_checkpoint_or_raster_refuses_cleanly_with_nothing_written(
     no_checkpoint = run_inference(
         tmp_path,
         str(tmp_path / "missing.pt"),
+        stated=RASTER_PASS,
         bucket="preds/2026-01-01",
         raster_path=str(raster_path),
     )
     no_raster = run_inference(
         tmp_path,
         _bespoke_detection_checkpoint(tmp_path),
+        stated=RASTER_PASS,
         bucket="preds/2026-01-01",
         raster_path=str(raster_path.parent / "missing.tif"),
     )

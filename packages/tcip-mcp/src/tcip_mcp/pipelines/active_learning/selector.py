@@ -30,14 +30,12 @@ def unscoreable(predictions: list[dict]) -> list[dict]:
 
 
 def review_queue(
-    predictions: list[dict],
-    low: float = 0.3,
-    high: float = 0.8,
+    predictions: list[dict], low: float, high: float
 ) -> list[dict]:
     """Select predictions needing human review (medium confidence).
 
     Returns predictions whose least-confident detection or head confidence
-    falls between low and high, sorted by lowest confidence first
+    falls in ``[low, high)``, sorted by lowest confidence first
     (most uncertain = review first).
     """
     queue = []

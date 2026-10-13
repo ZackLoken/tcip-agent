@@ -11,7 +11,6 @@ from __future__ import annotations
 import logging
 import threading
 import uuid
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -26,10 +25,7 @@ from tcip_annotation.json_io import (
     read_document_versioned,
 )
 from tcip_annotation.state import Annotation
-from tcip_mcp.pipelines.active_learning import (
-    DEFAULT_REVIEW_BUDGET,
-    DEFAULT_SCORER,
-)
+from tcip_mcp.pipelines.active_learning import ScorerSpec
 from tcip_store import Key, Version, VersionConflictError
 from tcip_web import jobstore
 from tcip_web.paths import allowed_image, allowed_path
@@ -298,22 +294,57 @@ def load_proposals(image_path: str, bucket: str) -> dict:
     }
 
 
-@dataclass
-class PriorityQueueJob:
+class PriorityQueueJob(BaseModel):
+    """A review-queue job's record, as its launch and its poll both answer it: what it was
+    launched under, its state, and once completed its ``queue`` (``{image, score,
+    reference_member?}``, highest first) with the candidate and skipped counts.
+    """
+
     job_id: str
-    # The project open when the job launched, which it runs for.
     project: str
     checkpoint_path: str
     images_dir: str
     subject: str | None
-    method: str
+    scorer: ScorerSpec
     budget: int
-    status: jobstore.JobStatus = "pending"
-    error: str | None = None
-    # [{image, score, reference_member?}], highest first.
-    queue: list[dict] = field(default_factory=list)
-    total_candidates: int = 0
-    reviewed_skipped: int = 0
+    rationale: str
+    status: jobstore.JobStatus
+    error: str | None
+    queue: list[dict]
+    total_candidates: int
+    reviewed_skipped: int
+
+    @classmethod
+    def launched(
+        cls,
+        *,
+        job_id: str,
+        project: str,
+        checkpoint_path: str,
+        images_dir: str,
+        subject: str | None,
+        scorer: ScorerSpec,
+        budget: int,
+        rationale: str,
+    ) -> PriorityQueueJob:
+        """The record of a job just launched under these values: pending, with no error, no
+        queue and zero counts, the state its worker takes over from.
+        """
+        return cls(
+            job_id=job_id,
+            project=project,
+            checkpoint_path=checkpoint_path,
+            images_dir=images_dir,
+            subject=subject,
+            scorer=scorer,
+            budget=budget,
+            rationale=rationale,
+            status="pending",
+            error=None,
+            queue=[],
+            total_candidates=0,
+            reviewed_skipped=0,
+        )
 
 
 _pq_registry = jobstore.JobRegistry()
@@ -329,8 +360,9 @@ def _pq_worker(job: PriorityQueueJob) -> None:
             Path(job.project),
             Path(job.checkpoint_path),
             Path(job.images_dir),
-            method=job.method,
+            scorer=job.scorer,
             budget=job.budget,
+            rationale=job.rationale,
             subject=job.subject,
         )
         if "error" in result:
@@ -349,15 +381,19 @@ class LaunchPriorityQueuePayload(BaseModel):
     checkpoint_path: str
     images_dir: str
     subject: str | None = None
-    method: str = DEFAULT_SCORER
-    budget: int = DEFAULT_REVIEW_BUDGET
+    scorer: ScorerSpec
+    budget: int
+    rationale: str
 
 
 @router.post("/queue/launch")
-def launch_priority_queue(payload: LaunchPriorityQueuePayload) -> dict:
+def launch_priority_queue(
+    payload: LaunchPriorityQueuePayload,
+) -> PriorityQueueJob:
     """Launch :func:`~tcip_mcp.tools.feedback_tools.ranked_review_queue` for the open project
-    on a background thread; a checkpoint or images directory outside the allowed roots is refused
-    and a missing one answers 404.
+    on a background thread, answering the job's record as it stands before the thread starts; a
+    checkpoint or images directory outside the allowed roots is refused and a missing one
+    answers 404.
     """
     checkpoint_path = allowed_path(payload.checkpoint_path)
     images_dir = allowed_path(payload.images_dir)
@@ -367,33 +403,29 @@ def launch_priority_queue(payload: LaunchPriorityQueuePayload) -> dict:
         )
     if not images_dir.is_dir():
         raise HTTPException(404, f"images_dir not found: {payload.images_dir}")
-    job = PriorityQueueJob(
+    job = PriorityQueueJob.launched(
         job_id=f"pq-{uuid.uuid4().hex[:8]}",
         project=str(store.held().root),
         checkpoint_path=str(checkpoint_path),
         images_dir=str(images_dir),
         subject=payload.subject,
-        method=payload.method,
+        scorer=payload.scorer,
         budget=payload.budget,
+        rationale=payload.rationale,
     )
     _pq_registry.register(job.job_id, job)
+    launched = job.model_copy(deep=True)
     threading.Thread(target=_pq_worker, args=(job,), daemon=True).start()
-    return {"status": "launched", "job_id": job.job_id}
+    return launched
 
 
 @router.get("/queue/{job_id}")
-def get_priority_queue_job(job_id: str) -> dict:
-    """The queue job ``job_id``'s state and, once completed, its ranked images; an unknown job
+def get_priority_queue_job(job_id: str) -> PriorityQueueJob:
+    """The queue job ``job_id``'s record: what it was launched under (the scorer block, budget
+    and reason among it), its state and, once completed, its ranked images; an unknown job
     answers 404.
     """
     job = _pq_registry.get(job_id)
     if job is None:
         raise HTTPException(404, f"job not found: {job_id}")
-    return {
-        "job_id": job.job_id,
-        "status": job.status,
-        "error": job.error,
-        "queue": job.queue,
-        "total_candidates": job.total_candidates,
-        "reviewed_skipped": job.reviewed_skipped,
-    }
+    return job

@@ -9,9 +9,13 @@ from pathlib import Path
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tcip_mcp.pipelines.data.selection import REFERENCE_SIDES
 from tcip_mcp.tools.feedback_tools import prioritize_review_queue
-from tests._training_values import drawn_split
+from tests._training_values import COMBINED_SCORER, RATIONALE, drawn_split
 
 DATE = "2026-03-04"
+QUEUE = {"scorer": COMBINED_SCORER, "budget": 50, "rationale": RATIONALE}
+"""What a test's review queue states: its scorer block, its budget and their reason."""
+BAND = {"low": 0.3, "high": 0.8, "rationale": RATIONALE}
+"""The needs-review band a test's triage states, with its reason."""
 
 
 def _dataset(tmp_path: Path, *, marked: tuple[str, ...]) -> Path:
@@ -38,7 +42,7 @@ def _dataset(tmp_path: Path, *, marked: tuple[str, ...]) -> Path:
 
 def test_prioritize_review_queue_checkpoint_missing(tmp_path):
     r = prioritize_review_queue(
-        tmp_path, str(tmp_path / "nope.pt"), str(tmp_path)
+        tmp_path, str(tmp_path / "nope.pt"), str(tmp_path), **QUEUE
     )
     assert "error" in r  # early guard, no torch import needed
 
@@ -53,7 +57,11 @@ def test_prioritize_review_queue_skips_the_images_marked_finished(tmp_path):
     ckpt = registered_checkpoint(tmp_path)
 
     r = prioritize_review_queue(
-        tmp_path, checkpoint_path=ckpt, images_dir=str(images), subject="bud"
+        tmp_path,
+        checkpoint_path=ckpt,
+        images_dir=str(images),
+        subject="bud",
+        **QUEUE,
     )
     assert r["reviewed_skipped"] == 2
     assert r["total_candidates"] == 0
@@ -89,6 +97,7 @@ def test_triage_predictions_skips_only_the_images_marked_finished(
         checkpoint_path=str(ckpt),
         images_dir=str(images),
         subject="bud",
+        **BAND,
     )
     assert r["reviewed_skipped"] == 1
     assert r["review_images"] == ["imgB.png"]
@@ -98,6 +107,7 @@ def test_triage_predictions_skips_only_the_images_marked_finished(
         checkpoint_path=str(ckpt),
         images_dir=str(images),
         subject="leaf",
+        **BAND,
     )
     assert other["reviewed_skipped"] == 0
     assert other["review_images"] == ["imgA.png", "imgB.png"]
@@ -132,7 +142,7 @@ def test_triage_predictions_surfaces_unscoreable(tmp_path, monkeypatch):
     )
 
     r = triage_predictions(
-        tmp_path, checkpoint_path=str(ckpt), images_dir=str(images)
+        tmp_path, checkpoint_path=str(ckpt), images_dir=str(images), **BAND
     )
     assert r["needs_review"] == 1
     assert r["review_images"] == ["a.jpg"]
@@ -166,7 +176,10 @@ def _stubbed_triage_predictions(
     )
 
     return triage_predictions(
-        tmp_path, checkpoint_path=str(ckpt), images_dir=str(images), **kwargs
+        tmp_path,
+        checkpoint_path=str(ckpt),
+        images_dir=str(images),
+        **{**BAND, **kwargs},
     )
 
 
@@ -199,7 +212,8 @@ def _triage_over_one_image(tmp_path, monkeypatch) -> tuple[str, str, list]:
 
 def test_triage_predicts_a_detector_at_its_low_bound(tmp_path, monkeypatch):
     """Every box the band can hold exists: a detector predicts at ``low`` itself, never at a
-    default above it, each frame capped at the density its checkpoint recorded.
+    default above it, each frame capped at the density its checkpoint recorded; the answer
+    carries the band and its reason.
     """
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.tools.feedback_tools import triage_predictions
@@ -207,7 +221,7 @@ def test_triage_predicts_a_detector_at_its_low_bound(tmp_path, monkeypatch):
     ckpt, images, ran_at = _triage_over_one_image(tmp_path, monkeypatch)
 
     triaged = triage_predictions(
-        tmp_path, checkpoint_path=ckpt, images_dir=images, low=0.3
+        tmp_path, checkpoint_path=ckpt, images_dir=images, **BAND
     )
 
     density = load_registered_checkpoint(
@@ -215,6 +229,7 @@ def test_triage_predicts_a_detector_at_its_low_bound(tmp_path, monkeypatch):
     ).geometry.object_density
     assert [(e.conf, e.density) for e in ran_at] == [(0.3, density)]
     assert triaged["review_images"] == ["a.jpg"]
+    assert {name: triaged[name] for name in BAND} == BAND
 
 
 def test_triage_predictions_routes_the_band_and_the_unscoreable_and_accepts_nothing(
@@ -230,6 +245,7 @@ def test_triage_predictions_routes_the_band_and_the_unscoreable_and_accepts_noth
     ]
     r = _stubbed_triage_predictions(tmp_path, monkeypatch, predictions)
     assert r == {
+        **BAND,
         "total_images": 3,
         "reviewed_skipped": 0,
         "needs_review": 2,
@@ -244,12 +260,49 @@ def test_unresolvable_scorer_raises_valueerror_not_an_import_error():
     """
     import pytest
 
+    from tcip_mcp.pipelines.active_learning import ScorerSpec
     from tcip_mcp.pipelines.active_learning.scorer import resolve_scorer
 
     with pytest.raises(ValueError):
-        resolve_scorer("no_such_scorer", "detection")
+        resolve_scorer(ScorerSpec(name="no_such_scorer"), "detection")
     with pytest.raises(ValueError, match="Could not import scorer"):
-        resolve_scorer("not_a_module.at_all:make", "detection")
+        resolve_scorer(
+            ScorerSpec(name="not_a_module.at_all:make"), "detection"
+        )
+
+
+def test_a_scorer_block_states_every_value_its_factory_requires_and_nothing_else():
+    """A ``combined`` block without its weights refuses naming each missing one, a value the
+    factory does not take refuses naming it, and a stated block builds its scorer with the values
+    it states.
+    """
+    import pytest
+
+    from tcip_mcp.pipelines.active_learning import ScorerSpec
+    from tcip_mcp.pipelines.active_learning.scorer import (
+        CombinedScorer,
+        resolve_scorer,
+    )
+
+    with pytest.raises(TypeError, match="uncertainty_weight"):
+        resolve_scorer(ScorerSpec(name="combined"), "detection")
+    with pytest.raises(TypeError, match="diversity_weight"):
+        resolve_scorer(
+            ScorerSpec.model_validate(
+                {"name": "combined", "uncertainty_weight": 0.5}
+            ),
+            "detection",
+        )
+    with pytest.raises(TypeError, match="uncertainty_weight"):
+        resolve_scorer(
+            ScorerSpec.model_validate(
+                {"name": "uncertainty", "uncertainty_weight": 0.5}
+            ),
+            "detection",
+        )
+    built = resolve_scorer(COMBINED_SCORER, "detection")
+    assert isinstance(built, CombinedScorer)
+    assert (built.uw, built.dw) == (0.6, 0.4)
 
 
 def test_unresolvable_proposal_engine_raises_valueerror():
@@ -302,7 +355,7 @@ def _stub_scorer(monkeypatch) -> None:
             return [(s, 1.0) for s in sources]
 
     monkeypatch.setattr(
-        al_scorer, "resolve_scorer", lambda method, task: _Scorer()
+        al_scorer, "resolve_scorer", lambda block, task: _Scorer()
     )
 
 
@@ -345,6 +398,7 @@ def test_prioritize_review_queue_marks_a_bound_runs_reference_sides(
         tmp_path,
         checkpoint_path=ckpt_path,
         images_dir=str(root / "images" / date),
+        **QUEUE,
     )
     assert "error" not in r, r
     assert r["queue"], r
@@ -397,6 +451,7 @@ def test_the_review_queue_marks_the_runs_frozen_calibration_side_after_the_selec
         tmp_path,
         checkpoint_path=ckpt_path,
         images_dir=str(root / "images" / date),
+        **QUEUE,
     )
     assert "error" not in r, r
     marked = {
@@ -433,7 +488,7 @@ def test_the_review_queue_scores_candidates_at_the_checkpoints_own_read_width(
         tmp_path,
         checkpoint_path=ckpt,
         images_dir=str(images),
-        method="combined",
+        **QUEUE,
     )
 
     assert "error" not in r, r
@@ -456,7 +511,7 @@ def test_prioritize_review_queue_unbound_run_carries_no_marks(
     _stub_scorer(monkeypatch)
 
     r = prioritize_review_queue(
-        tmp_path, checkpoint_path=ckpt, images_dir=str(images)
+        tmp_path, checkpoint_path=ckpt, images_dir=str(images), **QUEUE
     )
     assert "error" not in r, r
     assert r["queue"], r
@@ -488,12 +543,23 @@ def test_the_queue_operation_reads_the_locations_its_arrival_established(
         monkeypatch.setattr(module, "located", located)
 
     r = feedback_tools.ranked_review_queue(
-        tmp_path, ckpt, images, method="combined", budget=5, subject=None
+        tmp_path,
+        ckpt,
+        images,
+        scorer=COMBINED_SCORER,
+        budget=5,
+        rationale=RATIONALE,
+        subject=None,
     )
 
     assert "error" not in r, r
     assert r["queue"], r
     assert located_again == []
+    assert (r["scorer"], r["budget"], r["rationale"]) == (
+        COMBINED_SCORER.model_dump(),
+        5,
+        RATIONALE,
+    )
 
 
 # -- rail: calibration marks are decided by each sample's own recorded source ------------------
@@ -583,6 +649,7 @@ def test_prioritize_review_queue_marks_an_undated_capture_correctly(
         tmp_path,
         checkpoint_path=ckpt_path,
         images_dir=str(root / "images" / UNDATED_BUCKET),
+        **QUEUE,
     )
     assert "error" not in r, r
     assert r["queue"], r
@@ -629,6 +696,7 @@ def test_prioritize_review_queue_a_bound_run_never_marks_another_dates_calibrati
         tmp_path,
         checkpoint_path=ckpt_path,
         images_dir=str(root / "images" / UNDATED_BUCKET),
+        **QUEUE,
     )
     assert "error" not in r, r
     assert r["queue"], r
@@ -652,17 +720,46 @@ def test_prioritize_review_queue_signature_drops_the_triage_only_parameters():
     assert "auto_threshold" not in params
 
 
-def test_triage_predictions_signature_carries_the_triage_only_parameters():
-    """triage_predictions carries the confidence-triage band, low and high, and accepts
-    nothing.
+def test_the_review_queue_takes_its_scorer_budget_and_reason_with_no_default():
+    """The queue's scorer block, budget and reason are each stated: neither the door, the
+    operation nor the web payload holds a value for any.
     """
     import inspect
 
+    from tcip_mcp.tools.feedback_tools import ranked_review_queue
+    from tcip_web.routes.annotate import LaunchPriorityQueuePayload
+
+    for door in (prioritize_review_queue, ranked_review_queue):
+        params = inspect.signature(door).parameters
+        for name in ("scorer", "budget", "rationale"):
+            assert params[name].default is inspect.Parameter.empty, (
+                door,
+                name,
+            )
+    fields = LaunchPriorityQueuePayload.model_fields
+    assert all(
+        fields[name].is_required()
+        for name in ("scorer", "budget", "rationale")
+    )
+
+
+def test_triage_predictions_signature_carries_the_triage_only_parameters():
+    """triage_predictions carries the confidence-triage band, low and high, and its reason, each
+    stated with no default, and accepts nothing.
+    """
+    import inspect
+
+    from tcip_mcp.pipelines.active_learning.selector import review_queue
     from tcip_mcp.tools.feedback_tools import triage_predictions
 
     params = inspect.signature(triage_predictions).parameters
-    assert "low" in params
-    assert "high" in params
+    for door in (triage_predictions, review_queue):
+        for name in ("low", "high"):
+            assert (
+                inspect.signature(door).parameters[name].default
+                is inspect.Parameter.empty
+            ), (door, name)
+    assert params["rationale"].default is inspect.Parameter.empty
     assert "auto_threshold" not in params
 
 

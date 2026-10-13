@@ -14,14 +14,24 @@ pytest.importorskip("pycocotools")
 
 from tcip_mcp.pipelines.execution import Stated  # noqa: E402
 from tests._predictor_fixtures import StubPredictor, install  # noqa: E402
-from tests._training_values import IOU_THRESHOLD, tiling_block  # noqa: E402
+from tests._training_values import (  # noqa: E402
+    IOU_THRESHOLD,
+    RATIONALE,
+    tiling_block,
+)
 from tests._verified_checkpoint_fixtures import (
     SAMPLE_CONF,
     SAMPLE_CROSS_TILE_NMS,
 )  # noqa: E402
 
-CONF_AND_MERGE = {"conf": SAMPLE_CONF, "cross_tile_nms": SAMPLE_CROSS_TILE_NMS}
-"""The conf and merge threshold a tiled pass over these single-object references states."""
+CONF_AND_MERGE = {
+    "conf": SAMPLE_CONF,
+    "postprocess": "nms",
+    "cross_tile_nms": SAMPLE_CROSS_TILE_NMS,
+    "rationale": RATIONALE,
+}
+"""The conf, merge and merge threshold a tiled pass over these single-object references states,
+with their reason."""
 
 SCORED = {"iou_threshold": IOU_THRESHOLD, "trait": None}
 """What the full-frame runner scores these references under: the sample IoU and no trait."""
@@ -118,7 +128,7 @@ def test_diagnostic_path_runs_at_the_checkpoints_own_density(
         tmp_path,
         str(ckpt),
         str(images_dir),
-        stated=Stated(conf=SAMPLE_CONF),
+        stated=Stated(conf=SAMPLE_CONF, rationale=RATIONALE),
         iou_threshold=IOU_THRESHOLD,
     )
     density = load_registered_checkpoint(
@@ -166,6 +176,7 @@ def test_bare_checkpoint_path_reuses_its_own_stamped_tiling_and_subject(
         tmp_path,
         str(ckpt),
         str(images_dir),
+        stated=Stated(),
         use_tiled_inference=True,
         iou_threshold=IOU_THRESHOLD,
     )
@@ -210,6 +221,7 @@ def test_gate_translates_geometry_refusal_to_error_dict(tmp_path, monkeypatch):
         tmp_path,
         str(ckpt),
         str(images_dir),
+        stated=Stated(),
         use_tiled_inference=True,
         iou_threshold=IOU_THRESHOLD,
     )
@@ -240,6 +252,7 @@ def test_gate_translates_unreadable_label_to_error_dict(tmp_path, monkeypatch):
         tmp_path,
         str(ckpt),
         str(images_dir),
+        stated=Stated(),
         use_tiled_inference=True,
         iou_threshold=IOU_THRESHOLD,
     )
@@ -267,6 +280,7 @@ def test_both_regimes_refuse_a_stray_labels_dir_by_name(
         str(ckpt),
         str(images_dir),
         labels_dir=str(stray),
+        stated=Stated(),
         use_tiled_inference=use_tiled_inference,
         iou_threshold=IOU_THRESHOLD,
     )
@@ -302,6 +316,7 @@ def test_tiled_inference_on_a_checkpoint_whose_task_does_not_tile_refuses_by_nam
             ckpt,
             str(trained_on.images_dir),
             str(trained_on.labels_dir),
+            stated=Stated(),
             iou_threshold=IOU_THRESHOLD,
             **flag,
         )
@@ -410,9 +425,9 @@ def test_the_gate_reads_its_references_at_the_predictors_own_width(
 def test_run_full_frame_evaluation_records_merge_and_execution(
     tmp_path, monkeypatch
 ):
-    """The runner's record carries the execution record the pass ran under: its conf and merge
-    threshold each the stated one, recorded ``explicit``, the merge threshold the one the
-    predictor merged at.
+    """The runner's record carries the execution record the pass ran under: its conf, merge and
+    merge threshold each the stated one, the conf and threshold recorded ``explicit``, the merge
+    threshold the one the predictor merged at, and the statement's reason.
     """
     from tcip_mcp.pipelines.training.eval_runners import (
         run_full_frame_evaluation,
@@ -438,6 +453,7 @@ def test_run_full_frame_evaluation_records_merge_and_execution(
         SAMPLE_CROSS_TILE_NMS
     ]
     assert r["execution"]["postprocess"] == "nms"
+    assert r["execution"]["rationale"] == RATIONALE
     assert (r["execution"]["conf"], r["execution"]["cross_tile_nms"]) == (
         SAMPLE_CONF,
         SAMPLE_CROSS_TILE_NMS,

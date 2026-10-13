@@ -63,19 +63,20 @@ def _label(images_dir, *stems, width=16, height=16):
 def _derived(paths, num_channels: int = 3) -> tuple[dict, dict]:
     """The ``builder_kwargs`` statistics and their ``image_stats_sampling`` record, both from the
     exact normalization derivation (``derivations.band_normalization_stats``) over ``paths``,
-    every one of which it must read, rendered by ``derivations.image_stats_provenance``.
+    every one of which it must read.
     """
-    from tcip_mcp.pipelines.derivations import (
-        band_normalization_stats,
-        image_stats_provenance,
-    )
+    from tcip_mcp.pipelines.derivations import band_normalization_stats
 
-    result = band_normalization_stats(paths, num_channels)
-    assert result is not None and len(result[2]) == len(paths), result
-    mean, std, _ = result
-    return {"image_mean": mean, "image_std": std}, image_stats_provenance(
+    result = band_normalization_stats(
+        paths, num_channels, max_images=len(paths), seed=0
+    )
+    assert result is not None and len(result.sampling.windows) == len(paths), (
         result
     )
+    return {
+        "image_mean": result.mean,
+        "image_std": result.std,
+    }, result.sampling.model_dump()
 
 
 def test_preflight_refuses_statistics_with_no_provenance(tmp_path):
@@ -153,8 +154,8 @@ def test_preflight_records_not_checked_when_no_membership_resolved(tmp_path):
 
 
 def test_preflight_admits_the_exact_derivations_own_record(tmp_path):
-    """derivations.image_stats_provenance renders the exact sibling's (mean, std, paths_read)
-    tuple over an image the run admits into a record preflight admits as contained.
+    """The exact derivation's own sampling over an image the run admits is a record preflight
+    admits as contained.
     """
     pytest.importorskip("torch")
     from PIL import Image
@@ -180,17 +181,13 @@ def test_preflight_admits_the_exact_derivations_own_record(tmp_path):
 
 
 def test_preflight_admits_the_sampled_derivations_own_record(tmp_path):
-    """image_stats_provenance's sampled branch renders SampledNormalizationStats, carrying the
-    caller's own window_size/max_windows_per_image beside the seed WindowSampling itself does not
-    keep, into the same record shape the exact sibling renders.
+    """The windowed derivation's own sampling, its window size and windows per raster beside the
+    seed and cap, is the same record shape the exact sibling's is, and preflight admits it.
     """
     pytest.importorskip("torch")
     from PIL import Image
 
-    from tcip_mcp.pipelines.derivations import (
-        band_normalization_stats_sampled,
-        image_stats_provenance,
-    )
+    from tcip_mcp.pipelines.derivations import band_normalization_stats_sampled
     from tcip_mcp.tools.training_tools import preflight_config
 
     imgs = tmp_path / "images" / UNDATED_BUCKET
@@ -200,15 +197,17 @@ def test_preflight_admits_the_sampled_derivations_own_record(tmp_path):
     _label(imgs, "a")
 
     result = band_normalization_stats_sampled(
-        [a], 3, seed=1, window_size=8, max_windows_per_image=4
+        [a], 3, seed=1, window_size=8, max_windows_per_image=4, max_images=1
     )
     assert result is not None
+    assert (
+        result.sampling.window_size,
+        result.sampling.max_windows_per_image,
+    ) == (8, 4)
     cfg = _cfg(
         imgs,
         builder_kwargs={"image_mean": result.mean, "image_std": result.std},
-        image_stats_sampling=image_stats_provenance(
-            result, window_size=8, max_windows_per_image=4
-        ),
+        image_stats_sampling=result.sampling.model_dump(),
     )
 
     r = preflight_config(tmp_path, cfg)
@@ -344,7 +343,12 @@ def test_preflight_refuses_a_record_naming_no_window(tmp_path):
     cfg = _cfg(
         imgs,
         builder_kwargs={"image_mean": [0.1, 0.2], "image_std": [0.1, 0.1]},
-        image_stats_sampling={"windows": [], "pixel_fraction": 1.0},
+        image_stats_sampling={
+            "windows": [],
+            "seed": 0,
+            "max_images": 1,
+            "pixel_fraction": 1.0,
+        },
     )
 
     r = preflight_config(tmp_path, cfg)

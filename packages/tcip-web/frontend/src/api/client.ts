@@ -12,6 +12,7 @@ import {
   type OpenRequest,
   type ProjectSummary,
   type RemovalRequest,
+  type PriorityQueueJob,
   type RenameRequest,
   type ViewReads,
 } from "@/api/types.generated";
@@ -325,17 +326,8 @@ export const api = {
 
     // Launch the review queue as a background job; poll its job_id via queueJob until terminal.
     launchQueue: (body: LaunchPriorityQueuePayload) =>
-      postJson<{ status: string; job_id: string }>(ROUTES.postAnnotateQueueLaunch, body),
+      postJson<PriorityQueueJob>(ROUTES.postAnnotateQueueLaunch, body),
 
-    // reference_member is present only when the run was bound to a selection.
-    queueJob: (jobId: string) =>
-      getJson<{
-        job_id: string;
-        status: JobStatus;
-        error: string | null;
-        queue: { image: string; score: number; reference_member?: boolean }[];
-        total_candidates: number;
-        reviewed_skipped: number;
-      }>(ROUTES.getAnnotateQueueByJobId(jobId)),
+    queueJob: (jobId: string) => getJson<PriorityQueueJob>(ROUTES.getAnnotateQueueByJobId(jobId)),
   },
 };

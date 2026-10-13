@@ -10,7 +10,7 @@ import {
   type InferenceJob,
   type InferenceStatus,
 } from "@/api/inference";
-import type { RegisteredModel } from "@/api/types.generated";
+import { CROSS_TILE_MERGES, type RegisteredModel, type Stated } from "@/api/types.generated";
 import { TabHeading } from "@/components/TabHeading";
 import { useStore } from "@/store";
 import { selectProjectRoot } from "@/store/slices/gui";
@@ -103,6 +103,10 @@ export function InferenceTab() {
     conf: "",
     cross_tile_nms: "",
   });
+  // The cross-tile merge a tiled run without an assessment states; empty for none stated.
+  const [merge, setMerge] = useState("");
+  // Why the run states the values above, carried on its execution record.
+  const [rationale, setRationale] = useState("");
   const [jobs, setJobs] = useState<InferenceJob[]>([]);
   const [jobsError, setJobsError] = useState<string | null>(null);
   const [activeJob, setActiveJob] = useState<InferenceJob | null>(null);
@@ -250,6 +254,19 @@ export function InferenceTab() {
     });
   }
 
+  // What the run states of its execution record: each filled value, the chosen merge, and the
+  // reason for them.
+  function statement(): Stated {
+    const stated: Stated = Object.fromEntries(
+      Object.entries(statedInputs)
+        .filter(([, value]) => value.trim() !== "")
+        .map(([field, value]) => [field, Number(value)]),
+    );
+    if (merge) stated.postprocess = merge;
+    if (rationale.trim()) stated.rationale = rationale.trim();
+    return stated;
+  }
+
   // One date's launch body: its bucket is the named bucket's ``<name>/<date>``.
   async function launchOne(checkpointPath: string, date: string) {
     if (!datasetRoot) return;
@@ -259,11 +276,7 @@ export function InferenceTab() {
         dataset_root: datasetRoot,
         date,
         bucket: `${bucketName.replace(/\/+$/, "")}/${date}`,
-        stated: Object.fromEntries(
-          Object.entries(statedInputs)
-            .filter(([, value]) => value.trim() !== "")
-            .map(([field, value]) => [field, Number(value)]),
-        ),
+        stated: statement(),
         assessment_id: assessmentId.trim() || null,
         user: useStore.getState().user,
       });
@@ -466,14 +479,43 @@ export function InferenceTab() {
           </div>
         ))}
 
+        <label className="tcip-label mb-1" htmlFor="inference-merge">
+          Cross-tile merge (a tiled run without an assessment)
+        </label>
+        <select
+          id="inference-merge"
+          className="tcip-select w-full mb-3"
+          value={merge}
+          onChange={(e) => setMerge(e.target.value)}
+        >
+          <option value="">None stated</option>
+          {CROSS_TILE_MERGES.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+
+        <label className="tcip-label mb-1" htmlFor="inference-rationale">
+          Why these values (a statement and its reason go together)
+        </label>
+        <input
+          id="inference-rationale"
+          className="tcip-input w-full mb-3"
+          value={rationale}
+          onChange={(e) => setRationale(e.target.value)}
+          placeholder="the reason this run states the values above"
+        />
+
         <p className="text-[11px] text-tcip-muted mb-3">
           Every execution value (conf, object density, tiling, cross-tile merge) is the named
           assessment&apos;s own. Without one, a detector&apos;s run states its conf above, and a
-          tiled run its merge threshold, since no reference stands behind either; the density is the
-          one this checkpoint recorded, each image keeping at most its density times its pixels,
-          rounded up, and the tiling follows this checkpoint as the agent-facing door resolves it.
-          Only predictions published under an assessment can deliver validated numbers. Each date
-          publishes once, as its own bucket under the name above.
+          tiled run its merge and merge threshold, since no reference stands behind either, with the
+          reason it states them; the density is the one this checkpoint recorded, each image keeping
+          at most its density times its pixels, rounded up, and the tiling follows this checkpoint
+          as the agent-facing door resolves it. Only predictions published under an assessment can
+          deliver validated numbers. Each date publishes once, as its own bucket under the name
+          above.
         </p>
 
         <button

@@ -18,7 +18,7 @@ from tests._chain_fixtures import (
     SAVE_BUILT_WEIGHTS,
     training_config,
 )
-from tests._training_values import drawn_split, sweep_space
+from tests._training_values import RATIONALE, drawn_split, sweep_space
 
 torch = pytest.importorskip("torch")
 
@@ -503,7 +503,9 @@ SAMPLE_OVERLAP = 0.25
 """A sample tile overlap a test's tiled pass states."""
 SAMPLE_DETECTOR_PASS = {
     "conf": SAMPLE_CONF,
+    "postprocess": "nms",
     "cross_tile_nms": SAMPLE_CROSS_TILE_NMS,
+    "rationale": RATIONALE,
 }
 """The execution values a test's detector pass states, by ``execution.Stated`` field."""
 
@@ -555,7 +557,10 @@ def tiled_record(
         tile_resize=tile_resize,
     )
     stated = Stated(
-        conf=conf, postprocess="nms", cross_tile_nms=cross_tile_nms
+        conf=conf,
+        postprocess="nms",
+        cross_tile_nms=cross_tile_nms,
+        rationale=RATIONALE,
     )
     reference = Reference(
         regions=[

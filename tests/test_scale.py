@@ -60,7 +60,12 @@ def test_predict_batch_detection_uses_one_forward_per_batch(tmp_path):
     )
     results = pred.predict_batch(
         paths,
-        execution_record(detector, Stated(conf=0.0), None, reference),
+        execution_record(
+            detector,
+            Stated(conf=0.0, rationale="a sample reason the test states"),
+            None,
+            reference,
+        ),
         batch_size=2,
     )
     assert [r["count"] for r in results] == [0] * 5  # one result per image

@@ -122,7 +122,7 @@ you bring a model. An empty or unregistered name refuses, listing the registered
 neutral (`candidate_id` / `bbox` / `area` / `rings` / `score`), engine signals under `engine_meta`
 (`rings` is `Polygon.rings`, one contour per connected region of the proposed mask, so an
 occlusion-split object stays split from proposal through accept).
-That bespoke proposer may be classical-analysis-based (an OpenCV / scikit-image pipeline the agent
+That bespoke proposer may be classical-analysis-based (an OpenCV pipeline the agent
 writes), one option among engines, not a prescribed step; its proposals are soft and prove out only
 by surviving review.
 
@@ -162,20 +162,21 @@ viewport, and unsaved or in-progress shapes), so the agent can comment on work i
 before they save.
 
 Corrective loop (for missed objects):
-1. `vision_tools.overlay_reference_grid(image_path)` (library call, or `tcip overlay-reference-grid`) → labeled reference grid ('A1' top-left) for spatial reference
+1. `vision_tools.overlay_reference_grid(image_path, overlap=)` (library call, or `tcip overlay-reference-grid`) → labeled reference grid ('A1' top-left) for spatial reference
 2. Agent reads the grid overlay with its own image-capable read tool → identifies missed regions by grid cell
-3. `propose_annotations(image_path, engine=<name>, grid_cells=["B3", "D5"], tile_size=<echoed>)`
+3. `propose_annotations(image_path, engine=<name>, grid_cells=["B3", "D5"], tile_size=<echoed>, overlap=<echoed>)`
    → the engine proposes over those cells' bounding rect
 4. Stage the right candidates with `stage_proposals(assignments=...)` for the person to accept
 
 Grid cell system:
-- `vision_tools.overlay_reference_grid(image_path, tile_size=, overlap=)` renders square cells of `tile_size`
-  native pixels (omitted, it derives a legible default from the image dims) and echoes the full
-  grid geometry back in every response: `tile_size`, `overlap`, `cols`, `rows`, `width`, `height`
+- `vision_tools.overlay_reference_grid(image_path, overlap=, tile_size=)` renders square cells of
+  `tile_size` native pixels (omitted, it derives a legible default from the image dims) stepping
+  by the stated `overlap`, and echoes the full grid geometry back in every response:
+  `tile_size`, `overlap`, `cols`, `rows`, `width`, `height`
 - Agent references cells like "B3" or "F5" instead of pixel coordinates
 - A cell name is meaningless without its grid, so `propose_annotations(grid_cells=...)` requires
-  the explicit `tile_size` (plus `overlap` if nonzero) the overlay echoed; it refuses rather than
-  assume a grid, and recomputes the identical cells through the shared reference-grid geometry
+  the explicit `tile_size` and `overlap` the overlay echoed; it refuses rather than assume a
+  grid, and recomputes the identical cells through the shared reference-grid geometry
 - `tcip_annotation.grid.grid_to_rect()` looks a cell name up in a supplied cell list and returns
   its native-pixel rect
 
@@ -275,6 +276,9 @@ person to the weakest/flagged frames → they accept on the canvas → only then
 
 `prioritize_review_queue` ranks images by model uncertainty/diversity:
 - High uncertainty = model unsure = most valuable to annotate
-- Supports uncertainty, diversity, and combined scoring; with a `subject` named it skips the images
-  whose label document marks that subject finished
-- `prioritize_review_queue` returns a prioritized list for the annotator
+- The scorer is a stated block, `{"name": ..., **values}`: the built-in `uncertainty` and
+  `diversity` take no values and `combined` requires `uncertainty_weight` and
+  `diversity_weight`; the budget and the `rationale` for both are stated beside it. With a
+  `subject` named it skips the images whose label document marks that subject finished
+- `prioritize_review_queue` returns a prioritized list for the annotator, beside the scorer block,
+  budget and rationale it ranked under
