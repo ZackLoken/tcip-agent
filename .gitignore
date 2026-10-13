@@ -69,6 +69,8 @@ VISION_AGENT_PLAN.md
 htmlcov/
 .coverage
 packages/tcip-web/frontend/coverage/
+# vitest writes its results under the directory `npm --prefix` runs from, the repo root.
+.vite/
 
 # ── Rust (if agent shell is rebuilt) ─────────────────────────────────────
 /tcip-agent/target/
