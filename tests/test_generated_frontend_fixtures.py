@@ -4,35 +4,33 @@
 records ``GET /api/results/delivery-events`` serves for them to
 ``frontend/src/test/deliveryEvents.json``; this test regenerates them and holds the checked-in
 file to what a regeneration serves, every value compared but those a run mints. The trait
-listings ``tools/generate_trait_fixture.py`` writes are held the same way.
+listings ``tools/generate_trait_fixture.py`` writes and the project fixtures
+``tools/generate_project_fixture.py`` writes are held the same way, and the scratch session
+every generator makes its scenes in (``tools/fixture_session.py``) is held to leaving nothing
+behind.
 """
 
 from __future__ import annotations
 
 import copy
-import importlib.util
+import importlib
 import json
 from typing import Any
 
 import pytest
 
-from tests import FRONTEND_SRC, REPO_ROOT
+from tests import FRONTEND_SRC
+from tests._web_fixtures import named_project
+from tools.fixture_session import opened, replaced, scratch_session
 
 GENERATED = FRONTEND_SRC / "test" / "deliveryEvents.json"
-GENERATOR = REPO_ROOT / "tools" / "generate_delivery_fixture.py"
 
 
-def _generator():
-    """The fixture generator loaded as a module, so the test regenerates the way the tool
-    does.
+def _generator(name: str):
+    """The fixture generator module ``tools.<name>``, so the test regenerates the way
+    ``python -m tools.<name>`` does.
     """
-    spec = importlib.util.spec_from_file_location(
-        "tcip_delivery_fixture_generator", GENERATOR
-    )
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return importlib.import_module(f"tools.{name}")
 
 
 PER_RUN = frozenset(
@@ -76,11 +74,7 @@ def _normalized(fixture: dict[str, dict]) -> dict[str, dict]:
 
     seen: dict[str, str] = {}
 
-    def walk(value: Any, key: str | None = None) -> Any:
-        if isinstance(value, dict):
-            return {k: walk(v, k) for k, v in value.items()}
-        if isinstance(value, list):
-            return [walk(v) for v in value]
+    def leaf(key: str | None, value: Any) -> Any:
         if key in PER_RUN and isinstance(value, str):
             return seen.setdefault(value, f"<{key} {len(seen)}>")
         if isinstance(value, float):
@@ -89,7 +83,7 @@ def _normalized(fixture: dict[str, dict]) -> dict[str, dict]:
 
     out: dict[str, dict] = {}
     for name, record in fixture.items():
-        normalized = walk(record)
+        normalized = replaced(record, leaf)
         pm, resolved = (
             record["plant_mapping"],
             record.get("plant_mapping_resolved_key"),
@@ -165,30 +159,23 @@ def test_the_comparison_keeps_every_value_a_run_does_not_mint() -> None:
     assert _normalized(reminted) == _normalized(checked)
 
 
-def test_the_trait_listing_fixture_is_what_a_regeneration_serves(
-    tmp_path,
+@pytest.mark.parametrize(
+    "name", ["generate_trait_fixture", "generate_project_fixture"]
+)
+def test_the_fixture_is_what_a_regeneration_serves_value_for_value(
+    name: str,
 ) -> None:
-    """The checked-in trait listings are what ``tools/generate_trait_fixture.py`` serves: an entry
-    field added to the schema and not to the fixture, or a stale hash, fails this.
+    """The checked-in trait listings and project fixtures are what their generators serve,
+    after each generator's own normalization: a field added to a served record and not to the
+    fixture, or a stale hash, fails this.
     """
-    spec = importlib.util.spec_from_file_location(
-        "tcip_trait_fixture_generator",
-        REPO_ROOT / "tools" / "generate_trait_fixture.py",
-    )
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    workspace = (tmp_path / "workspace").resolve()
-    workspace.mkdir()
+    module = _generator(name)
 
-    served = module.listings(workspace)
+    served = module.produce()
 
     assert (
         json.loads(module.GENERATED_PATH.read_text(encoding="utf-8")) == served
-    ), (
-        "packages/tcip-web/frontend/src/test/traitListings.json is out of date; "
-        "run python tools/generate_trait_fixture.py"
-    )
+    ), f"{module.GENERATED_PATH} is out of date; run python -m tools.{name}"
 
 
 def test_the_delivery_fixture_is_what_a_regeneration_serves() -> None:
@@ -197,9 +184,41 @@ def test_the_delivery_fixture_is_what_a_regeneration_serves() -> None:
     another type, or a scene that no longer delivers what it did, fails this.
     """
     pytest.importorskip("torch")
-    produced = _generator().produce()
+    produced = _generator("generate_delivery_fixture").produce()
     checked = json.loads(GENERATED.read_text(encoding="utf-8"))
     assert _normalized(checked) == _normalized(produced), (
         "packages/tcip-web/frontend/src/test/deliveryEvents.json is out of date; "
-        "run python tools/generate_delivery_fixture.py"
+        "run python -m tools.generate_delivery_fixture"
     )
+
+
+def test_a_scratch_session_whose_body_raises_releases_store_and_directory():
+    """A scratch session whose body raises closes every store connection it opened and removes
+    its directory, and the body's own exception is the one that reaches the caller.
+    """
+    from tcip_store import store as seam
+
+    class BodyFailedError(Exception):
+        pass
+
+    with pytest.raises(BodyFailedError):
+        with scratch_session() as (workspace, _client):
+            named_project(workspace / "valley", "valley")
+            backend, scratch = seam._bound, workspace.parent
+            assert backend is not None and backend._connections
+            raise BodyFailedError
+
+    assert backend._connections == {}
+    assert not scratch.exists()
+
+
+def test_a_scratch_session_holds_no_project_an_earlier_session_opened():
+    """A second scratch session in the same interpreter lists no open project, though the first
+    left the project it opened open when its body ended.
+    """
+    with scratch_session() as (workspace, client):
+        opened(client, named_project(workspace / "valley", "valley"))
+    with scratch_session() as (_workspace, client):
+        listing = client.get("/api/projects")
+
+    assert listing.json()["open_id"] is None

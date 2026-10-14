@@ -1,9 +1,12 @@
-"""The workspace's projects: listing them, opening one, removing one and renaming one.
+"""The workspace's projects: listing them, opening one, removing one, renaming one and correcting
+its capture invariances.
 
 Lists the projects under the backend's workspace by each one's own record
 (:mod:`tcip_mcp.project_record`). Opening a project makes it the backend's open
-project and points the workspace's last-opened pointer at its id; removal and rename are
-:func:`tcip_mcp.workspace.remove_project` and :func:`tcip_mcp.project_record.rename_project`.
+project and points the workspace's last-opened pointer at its id; removal, rename and the
+invariances' correction are :func:`tcip_mcp.workspace.remove_project`,
+:func:`tcip_mcp.project_record.rename_project` and
+:func:`tcip_mcp.project_record.replace_invariances`.
 """
 
 from __future__ import annotations
@@ -19,7 +22,12 @@ from pydantic import BaseModel
 from tcip_mcp import dataset_layout, workspace
 from tcip_mcp.buckets import buckets_by_date
 from tcip_mcp.identity import actor
-from tcip_mcp.project_record import CaptureInvariances, rename_project
+from tcip_mcp.project_record import (
+    CaptureInvariances,
+    InvariancesCorrection,
+    rename_project,
+    replace_invariances,
+)
 from tcip_web.state import OpenProject, store
 
 logger = logging.getLogger(__name__)
@@ -251,3 +259,21 @@ def rename_project_route(req: RenameRequest) -> dict:
         return rename_project(project, req.display_name, actor=person)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+class InvariancesRequest(BaseModel):
+    id: str
+    invariances: CaptureInvariances
+    user: str
+
+
+@router.post("/invariances")
+def replace_invariances_route(
+    req: InvariancesRequest,
+) -> InvariancesCorrection:
+    """Correct the capture invariances the project ``req.id`` names records. 404 for no such
+    project, 400 for a request naming no one, and 422 for a block the record's type refuses.
+    """
+    person = actor(req.user)
+    project, _ = workspace_project(req.id)
+    return replace_invariances(project, req.invariances, actor=person)

@@ -27,7 +27,14 @@ export async function decodeRefusal(r: Response, fallback = ""): Promise<Error> 
   const status = fallback || `${r.status} ${r.statusText}`;
   if (typeof detail === "object" && detail !== null) {
     const parsed = detail as Record<string, unknown>;
-    const message = typeof parsed.message === "string" ? parsed.message : "";
+    // A list is a request model's own refusal: one entry per field it refused, naming its place.
+    const message = Array.isArray(detail)
+      ? (detail as { loc: (string | number)[]; msg: string }[])
+          .map((issue) => `${issue.loc.slice(1).join(".")}: ${issue.msg}`)
+          .join("; ")
+      : typeof parsed.message === "string"
+        ? parsed.message
+        : "";
     return new StructuredRefusalError(parsed, r.status, message || status);
   }
   // A string detail still carries a status a caller may branch on; a body with no detail at

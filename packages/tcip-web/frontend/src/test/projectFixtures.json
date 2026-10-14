@@ -1,0 +1,91 @@
+{
+  "listing": {
+    "workspace": "<workspace>",
+    "open_id": null,
+    "last_opened_problem": null,
+    "projects": [
+      {
+        "id": "<other id>",
+        "display_name": "other",
+        "site": "north orchard",
+        "invariances": {
+          "horizontal_flip": true,
+          "vertical_flip": true,
+          "rotation": 180.0,
+          "color": true,
+          "intensity": true,
+          "scale": true
+        },
+        "record_problem": null,
+        "path": "<workspace>/other",
+        "created": 0.0,
+        "modified": 0.0,
+        "dates": [],
+        "subjects": [],
+        "subjects_by_date": {},
+        "buckets_by_date": {},
+        "image_count": 0,
+        "label_problem": null
+      },
+      {
+        "id": "<valley id>",
+        "display_name": "valley",
+        "site": "north orchard",
+        "invariances": {
+          "horizontal_flip": true,
+          "vertical_flip": false,
+          "rotation": 5.0,
+          "color": true,
+          "intensity": true,
+          "scale": true
+        },
+        "record_problem": null,
+        "path": "<workspace>/valley",
+        "created": 0.0,
+        "modified": 0.0,
+        "dates": [],
+        "subjects": [],
+        "subjects_by_date": {},
+        "buckets_by_date": {},
+        "image_count": 0,
+        "label_problem": null
+      }
+    ]
+  },
+  "correction": {
+    "id": "<valley id>",
+    "invariances": {
+      "horizontal_flip": true,
+      "vertical_flip": true,
+      "rotation": 10.0,
+      "color": true,
+      "intensity": true,
+      "scale": true
+    },
+    "previous_invariances": {
+      "horizontal_flip": true,
+      "vertical_flip": false,
+      "rotation": 5.0,
+      "color": true,
+      "intensity": true,
+      "scale": true
+    }
+  },
+  "refusal": {
+    "detail": [
+      {
+        "type": "less_than_equal",
+        "loc": [
+          "body",
+          "invariances",
+          "rotation"
+        ],
+        "msg": "Input should be less than or equal to 180",
+        "input": 400,
+        "ctx": {
+          "le": 180.0
+        }
+      }
+    ]
+  }
+}

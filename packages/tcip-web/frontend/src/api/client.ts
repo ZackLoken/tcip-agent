@@ -7,6 +7,8 @@ import { getJson, postJson, StructuredRefusalError } from "@/api/http";
 import { ROUTES } from "@/api/routes";
 import {
   RENDER_CACHE_VERSION,
+  type InvariancesCorrection,
+  type InvariancesRequest,
   type JobStatus,
   type LaunchPriorityQueuePayload,
   type OpenRequest,
@@ -185,6 +187,8 @@ export const api = {
         ROUTES.postProjectsRename,
         body,
       ),
+    invariances: (body: InvariancesRequest) =>
+      postJson<InvariancesCorrection>(ROUTES.postProjectsInvariances, body),
   },
 
   dataset: {

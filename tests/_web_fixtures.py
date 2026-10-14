@@ -1,14 +1,21 @@
-"""Making a test directory a project, and opening it in the web backend the way the picker does."""
+"""Starting the web backend over a scratch workspace, making a test directory a project, and
+opening it in the web backend the way the picker does.
+"""
 
 from __future__ import annotations
 
 import asyncio
+import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from tcip_mcp.project_record import CaptureInvariances
 
 if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
+
     from tcip_mcp.workspace import BoundProject
     from tcip_web.state import OpenProject
 
@@ -25,20 +32,61 @@ so every augmentation a test states is admitted unless the test states another a
 """
 
 
-def named_project(path: Path, display_name: str) -> OpenProject:
+def named_project(
+    path: Path,
+    display_name: str,
+    *,
+    invariances: CaptureInvariances = INVARIANCES,
+) -> OpenProject:
     """Make ``path`` a project named ``display_name`` through the platform's own creation door
-    (``initialize_project``), its record holding an id, that name, a site and
-    :data:`INVARIANCES`; the project as the backend's open takes it. Refuses (by assertion) when
-    ``path`` already records another name, site or invariances.
+    (``initialize_project``), its record holding an id, that name, a site and ``invariances``
+    (the sample :data:`INVARIANCES` unless stated); the project as the backend's open takes it.
+    Refuses (by assertion) when ``path`` already records another name, site or invariances.
     """
     from tcip_mcp.tools.project_tools import initialize_project
     from tcip_web.state import OpenProject
 
     result = initialize_project(
-        str(path), display_name, "north orchard", INVARIANCES
+        str(path), display_name, "north orchard", invariances
     )
     assert "error" not in result, result
     return OpenProject(path, result["id"])
+
+
+@contextmanager
+def backend_session(workspace: Path) -> Iterator[TestClient]:
+    """The web backend serving ``workspace`` as a process entry point starts it, and a loopback
+    client of it: the store bound, ``TCIP_WORKSPACE`` naming ``workspace`` and
+    ``TCIP_IMAGE_ROOTS`` unset, the backend configured with the workspace and no additive image
+    roots. On every exit, however the body ends, the open project is closed, the bound store's
+    connections are closed and both environment variables are restored.
+    """
+    from fastapi.testclient import TestClient
+
+    import tcip_store
+    from tcip_web.app import app
+    from tcip_web.state import store
+
+    names = ("TCIP_WORKSPACE", "TCIP_IMAGE_ROOTS")
+    saved = {name: os.environ.get(name) for name in names}
+    backend = tcip_store.bind()
+    os.environ["TCIP_WORKSPACE"] = str(workspace)
+    os.environ.pop("TCIP_IMAGE_ROOTS", None)
+    store.configure(workspace, ())
+    try:
+        yield TestClient(app, base_url="http://127.0.0.1")
+    finally:
+        try:
+            opened = store.opened
+            if opened is not None:
+                asyncio.run(store.close_project(opened.id))
+        finally:
+            backend.close()
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
 
 
 def bound_to(project: OpenProject) -> BoundProject:

@@ -34,8 +34,11 @@ block`.
 
 The site (field/orchard) is the breeder's own words too, recorded once on the record and shown
 in the picker. Ask the human for both rather than guessing them from a path or filename; a project
-that already records a different site or display name refuses the call rather than silently
-overwriting it (`tcip write-project-site` corrects a site typed wrong once).
+that already records a different site, display name or invariances refuses the call rather than
+silently overwriting it. A site or an invariance answer typed wrong once is corrected by `tcip
+write-project-record` (its `site` or `invariances` form, naming the person with `--user`), and the
+invariances also from the Setup tab, which shows the six answers the record carries; each
+correction leaves one `project_record_corrected` line in the project's log.
 
 The invariances are six facts the breeder answers at creation, each how far a transform of the
 image leaves the trait's measurement what it was: whether a horizontal flip (`horizontal_flip`),

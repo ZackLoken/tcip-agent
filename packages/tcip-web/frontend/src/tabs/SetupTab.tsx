@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { api } from "@/api/client";
 import { StructuredRefusalError } from "@/api/http";
 import { resultsApi, type PlantMappingSummary } from "@/api/inference";
-import type { MatchRadius } from "@/api/types.generated";
+import type { CaptureInvariances, MatchRadius } from "@/api/types.generated";
 import { TabHeading } from "@/components/TabHeading";
 import { TraitRevisionPanel } from "@/components/TraitRevisionPanel";
 import { useStore } from "@/store";
@@ -207,8 +208,130 @@ function PlantMappingPanel({ datasetRoot }: { datasetRoot: string | null }) {
   );
 }
 
+type Answer = [keyof CaptureInvariances, boolean | number];
+
+// An invariance as the breeder reads it, named by its record field.
+function invarianceName(name: keyof CaptureInvariances): string {
+  return name.replaceAll("_", " ");
+}
+
+// An invariance answer as the breeder reads it: yes or no, or a rotation in degrees.
+function answerPhrase(value: boolean | number): string {
+  return typeof value === "boolean" ? (value ? "yes" : "no") : `${value} degrees`;
+}
+
+/** The capture invariances the open project's record carries, read from the project listing and
+ *  corrected as one block through the record's correction door. */
+function InvariancesPanel({ projectId }: { projectId: string }) {
+  const user = useStore((s) => s.user);
+  const [recorded, setRecorded] = useState<CaptureInvariances | null>(null);
+  const [draft, setDraft] = useState<CaptureInvariances | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    void api.projects
+      .list()
+      .then((res) => {
+        const invariances = res.projects.find((p) => p.id === projectId)?.invariances ?? null;
+        setRecorded(invariances);
+        setDraft(invariances);
+      })
+      .catch((e: unknown) => setProblem(e instanceof Error ? e.message : String(e)));
+  }, [projectId]);
+
+  if (!recorded || !draft) {
+    return problem ? (
+      <div className="tcip-panel p-4 text-[11px] text-tcip-fp">{problem}</div>
+    ) : null;
+  }
+  const answers = Object.entries(draft) as Answer[];
+  const unchanged = answers.every(([name, value]) => recorded[name] === value);
+
+  async function correct(invariances: CaptureInvariances) {
+    setSubmitting(true);
+    setProblem(null);
+    try {
+      const res = await api.projects.invariances({ id: projectId, invariances, user });
+      const changed = (Object.entries(res.invariances) as Answer[])
+        .filter(([name, value]) => res.previous_invariances[name] !== value)
+        .map(
+          ([name, value]) =>
+            `${invarianceName(name)} ${answerPhrase(res.previous_invariances[name])} to ${answerPhrase(value)}`,
+        );
+      setRecorded(res.invariances);
+      setDraft(res.invariances);
+      useStore
+        .getState()
+        .pushToast(`Capture invariances corrected: ${changed.join(", ")}.`, "success");
+    } catch (e) {
+      setProblem(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="tcip-panel p-4">
+      <div className="tcip-heading mb-1">Capture invariances</div>
+      <p className="mb-3 text-[11px] text-tcip-muted">
+        Whether each transform of an image leaves the trait&apos;s measurement what it was; every
+        augmentation a training run states is judged against these answers.
+      </p>
+      <div className="grid grid-cols-3 gap-3">
+        {answers.map(([name, value]) => {
+          const id = `invariance-${name}`;
+          const label = invarianceName(name);
+          return (
+            <div key={name} className="flex flex-col gap-1">
+              <label className="tcip-label" htmlFor={id}>
+                {typeof value === "boolean" ? label : `${label} (largest angle, degrees)`}
+              </label>
+              {typeof value === "boolean" ? (
+                <select
+                  id={id}
+                  className="tcip-input"
+                  value={answerPhrase(value)}
+                  onChange={(e) =>
+                    setDraft({ ...draft, [name]: e.target.value === answerPhrase(true) })
+                  }
+                >
+                  {[true, false].map((answer) => (
+                    <option key={answerPhrase(answer)}>{answerPhrase(answer)}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  id={id}
+                  className="tcip-input"
+                  type="number"
+                  value={Number.isNaN(value) ? "" : value}
+                  onChange={(e) => setDraft({ ...draft, [name]: e.target.valueAsNumber })}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <button
+        className="tcip-btn-primary mt-3"
+        onClick={() => void correct(draft)}
+        disabled={unchanged || submitting}
+      >
+        {submitting ? "Correcting…" : "Correct invariances"}
+      </button>
+      {problem && (
+        <div className="mt-2 text-[11px] text-tcip-fp" aria-live="polite">
+          {problem}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** What a project is set up with before anything is measured: each trait's revisions for the
- *  breeder to confirm, and the plant mapping a phenology delivery reads. */
+ *  breeder to confirm, the capture invariances augmentations are judged against, and the plant
+ *  mapping a phenology delivery reads. */
 export function SetupTab() {
   const projectId = useStore((s) => s.openProject?.id ?? null);
   const datasetRoot = useStore((s) => s.gui.dataset.dataset_root);
@@ -217,6 +340,7 @@ export function SetupTab() {
     <div className="flex-1 overflow-auto p-4 flex flex-col gap-4">
       <TabHeading tab="setup" />
       <TraitRevisionPanel key={projectId} />
+      <InvariancesPanel key={`invariances-${projectId}`} projectId={projectId} />
       <PlantMappingPanel key={`mapping-${projectId}`} datasetRoot={datasetRoot} />
     </div>
   );

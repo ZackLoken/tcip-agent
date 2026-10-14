@@ -46,6 +46,7 @@ export const ROUTES = {
   postInferenceJobsByJobIdCancel: (jobId: string) =>
     `/api/inference/jobs/${encodeURIComponent(jobId)}/cancel`,
   postInferenceLaunch: "/api/inference/launch",
+  postProjectsInvariances: "/api/projects/invariances",
   postProjectsOpen: "/api/projects/open",
   postProjectsRemove: "/api/projects/remove",
   postProjectsRename: "/api/projects/rename",

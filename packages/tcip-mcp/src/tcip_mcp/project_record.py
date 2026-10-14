@@ -111,10 +111,11 @@ class CaptureInvariances(BaseModel):
 
 
 class ProjectRecord(BaseModel):
-    """The project's record as stored: ``id``, minted once at creation; ``display_name``, the
-    name the picker shows, changed only by :func:`rename_project`; ``site``, the breeder's own
-    name for the orchard or station the project's plants stand in; ``invariances``, stated at
-    creation. The display name and the site are each stored as :func:`validate_text` stores them.
+    """The project's record as stored: ``id``, minted once at creation and kept by every
+    correction; ``display_name``, the name the picker shows; ``site``, the breeder's own name for
+    the orchard or station the project's plants stand in; ``invariances``, how far each capture
+    transform leaves the trait's measurement what it was. The display name and the site are each
+    stored as :func:`validate_text` stores them.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -208,7 +209,7 @@ def create_record(
         raise SiteConflictError(
             f"{project_path} already records site {existing.site!r}; the offered site "
             f"{record.site!r} does not match, so nothing was written. Run tcip "
-            "write-project-site to correct it deliberately."
+            "write-project-record site to correct it deliberately."
         )
     if existing.display_name != record.display_name:
         raise ValueError(
@@ -219,63 +220,106 @@ def create_record(
         raise ValueError(
             f"{project_path} already records the capture invariances "
             f"{existing.invariances!r}; the offered {record.invariances!r} do not "
-            "match, so nothing was written"
+            "match, so nothing was written. Run tcip write-project-record invariances, or "
+            "correct them in the Setup tab, to correct them deliberately."
         )
     return existing
 
 
 def _update(
-    project_path: str | Path, field: str, value: str
+    project_path: str | Path, field: str, value: object, *, actor: str
 ) -> tuple[ProjectRecord, ProjectRecord]:
-    """Replace one field of a readable record under compare-and-swap, the replacement
-    validated as a :class:`ProjectRecord`; return the record written and the one it replaced.
+    """Replace ``field`` of a readable record with ``value`` under compare-and-swap, the whole
+    replacement validated as a :class:`ProjectRecord`, then record one
+    ``project_record_corrected`` line by ``actor`` in the project's log carrying the record's
+    ``id``, the ``field``, the ``value`` written and the ``previous_value`` it replaced, each as
+    the record dumps it. Returns the record written and the one it replaced.
+
+    Refuses what :func:`read_record` and the model refuse, with nothing written and no line; a
+    line that cannot be appended after the write raises ``AuditEntryNotWrittenError``.
     """
+    from tcip_mcp.audit import record_event_or_raise
+
     key = project_record_key(project_path)
     while True:
         stored = tcip_store.read_versioned(key, default=None)
         current = _checked(project_path, stored.value)
         updated = ProjectRecord.model_validate(
-            current.model_dump() | {field: value}
+            current.model_copy(update={field: value}).model_dump()
         )
+        written = updated.model_dump()
         try:
-            tcip_store.replace(
-                key, updated.model_dump(), expect=stored.version
-            )
+            tcip_store.replace(key, written, expect=stored.version)
         except VersionConflictError:
             continue
-        return updated, current
+        break
+    record_event_or_raise(
+        "project_record_corrected",
+        {
+            "id": updated.id,
+            "field": field,
+            "value": written[field],
+            "previous_value": current.model_dump()[field],
+        },
+        actor=actor,
+        scope=project_path,
+    )
+    return updated, current
 
 
-def replace_site(project_path: str | Path, site: str) -> dict:
-    """Correct the site a readable record holds; its id and display name are kept. Returns
-    ``{"site", "previous_site"}``.
+def replace_site(project_path: str | Path, site: str, *, actor: str) -> dict:
+    """Correct the site a readable record holds, by ``actor``, through :func:`_update`; every
+    other field is kept. Returns ``{"site", "previous_site"}``. Refuses what
+    :func:`validate_text` and :func:`_update` refuse.
     """
     record, previous = _update(
-        project_path, "site", validate_text("site", site)
+        project_path, "site", validate_text("site", site), actor=actor
     )
     return {"site": record.site, "previous_site": previous.site}
 
 
 def rename_project(project: Path, display_name: str, *, actor: str) -> dict:
-    """Change the project's display name and record one ``project_renamed`` line by ``actor`` in
-    its own log; its directory and every other record are left as they are. Returns ``{"id",
-    "display_name", "previous_display_name"}``. Refuses what :func:`validate_text` and
-    :func:`read_record` refuse.
+    """Change the project's display name, by ``actor``, through :func:`_update`; its directory
+    and every other record are left as they are. Returns ``{"id", "display_name",
+    "previous_display_name"}``. Refuses what :func:`validate_text` and :func:`_update` refuse.
     """
-    from tcip_mcp.audit import record_event_or_raise
-
     record, previous = _update(
-        project, "display_name", validate_text("display name", display_name)
+        project,
+        "display_name",
+        validate_text("display name", display_name),
+        actor=actor,
     )
-    renamed = {
+    return {
         "id": record.id,
         "display_name": record.display_name,
         "previous_display_name": previous.display_name,
     }
-    record_event_or_raise(
-        "project_renamed", renamed, actor=actor, scope=project
+
+
+class InvariancesCorrection(BaseModel):
+    """What :func:`replace_invariances` wrote: the record's ``id``, the ``invariances`` it now
+    holds and the ``previous_invariances`` they replaced.
+    """
+
+    id: str
+    invariances: CaptureInvariances
+    previous_invariances: CaptureInvariances
+
+
+def replace_invariances(
+    project_path: str | Path, invariances: CaptureInvariances, *, actor: str
+) -> InvariancesCorrection:
+    """Correct the capture invariances a readable record holds, by ``actor``, through
+    :func:`_update`; every other field is kept. Refuses what :func:`_update` refuses.
+    """
+    record, previous = _update(
+        project_path, "invariances", invariances, actor=actor
     )
-    return renamed
+    return InvariancesCorrection(
+        id=record.id,
+        invariances=record.invariances,
+        previous_invariances=previous.invariances,
+    )
 
 
 def record_fields(project_path: str | Path) -> dict:

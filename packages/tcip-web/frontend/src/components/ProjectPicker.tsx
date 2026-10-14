@@ -367,7 +367,8 @@ export function ProjectPicker() {
               Ask the agent to structure your images into a project; it creates one with{" "}
               <span className="font-mono">initialize_project</span>, given a name, a site, whether a
               flip, a color, intensity or scale change leaves your trait&apos;s measurement the
-              same, and the largest rotation in degrees that does.
+              same, and the largest rotation in degrees that does. The Setup tab shows those answers
+              and corrects them.
             </span>
           </div>
         )}
