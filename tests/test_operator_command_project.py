@@ -25,12 +25,10 @@ def test_a_render_command_leaves_no_audit_line_anywhere(tmp_path):
     """
     import tcip_store as ts
     from tcip_mcp.audit import audit_log_key
-    from tcip_mcp.tools.project_tools import initialize_project
+    from tests._web_fixtures import named_project
 
     project = tmp_path / "project"
-    assert "error" not in initialize_project(
-        str(project), "Grid project", "east block"
-    )
+    named_project(project, "Grid project")
     image = _image(tmp_path)
     cwd = tmp_path / "operator_cwd"
     cwd.mkdir()

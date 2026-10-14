@@ -7,6 +7,7 @@ import { GUI_STATE_DEFAULTS } from "@/api/types.generated";
 import { ProjectPicker } from "@/components/ProjectPicker";
 import { startOpen } from "@/lib/openProject";
 import { useStore } from "@/store";
+import { INVARIANCES } from "@/test/projectRecords";
 
 vi.mock("@/api/client", () => {
   return {
@@ -29,6 +30,7 @@ const PROJECTS: ProjectSummary[] = [
     id: "a1b2c3d4e5f6",
     display_name: "Valley farm",
     site: "north orchard",
+    invariances: INVARIANCES,
     record_problem: null,
     path: "/ws/valley",
     created: 1_700_000_000,
@@ -45,6 +47,7 @@ const PROJECTS: ProjectSummary[] = [
     id: null,
     display_name: null,
     site: null,
+    invariances: null,
     record_problem: "/ws/stray is not a project yet: create it with initialize_project",
     path: "/ws/stray",
     created: 1_700_000_000,

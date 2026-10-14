@@ -39,13 +39,11 @@ def test_absent_registry_answers_empty_for_a_fresh_project(tmp_path: Path):
 def test_archive_project_carries_a_registered_checkpoint_outside_models(
     tmp_path: Path,
 ):
-    from tcip_mcp.tools.project_tools import (
-        archive_project,
-        initialize_project,
-    )
+    from tcip_mcp.tools.project_tools import archive_project
+    from tests._web_fixtures import new_project
 
     project = tmp_path / "proj"
-    initialize_project(str(project), "Test project", "north orchard")
+    new_project(project)
     weights_dir = project / "weights"
     weights_dir.mkdir()
     ckpt = weights_dir / "m.pt"
@@ -200,11 +198,11 @@ def test_a_completed_runs_registry_entry_answers_its_checkpoint_resolved_absolut
     listing of that run answers the path resolved absolute.
     """
     from tcip_mcp.experiments import experiment_dir
-    from tcip_mcp.tools.project_tools import initialize_project
     from tests._verified_checkpoint_fixtures import finished_run
+    from tests._web_fixtures import new_project
 
     project = tmp_path / "proj"
-    initialize_project(str(project), "Test project", "north orchard")
+    new_project(project)
     finished_run(project, experiment_id="exp1")
 
     (entry,) = [

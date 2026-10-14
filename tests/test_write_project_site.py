@@ -49,5 +49,5 @@ def test_write_project_site_refuses_a_record_that_does_not_read(project: Path):
     result = run_tcip("write-project-site", [str(project), "south orchard"])
 
     assert result.returncode == 2
-    assert "does not hold an id, a display name and a site" in result.stdout
+    assert "is not a project record" in result.stdout
     assert tcip_store.read(key) == {"not_site": "x"}

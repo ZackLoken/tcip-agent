@@ -1,9 +1,5 @@
-"""The project record: the one record every project carries, holding its identity and its site.
-
-It holds ``id`` (minted once at creation, never derived from a path), ``display_name`` (the name
-the picker shows, changed only by :func:`rename_project`) and ``site`` (the breeder's own name for
-the orchard or station the project's plants stand in, never guessed from a directory name or a
-filename).
+"""The project record (:class:`ProjectRecord`): the one record every project carries, holding its
+identity, its site and the capture invariances its trait's measurement holds under.
 """
 
 from __future__ import annotations
@@ -11,13 +7,20 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    ValidationInfo,
+    field_validator,
+)
+
 import tcip_store
 from tcip_store import Key, StoreError, Version, VersionConflictError
 
 PROJECT_RECORD_STORE = "project_record"
 _PROJECT_RECORD_PARTS = ("project",)
-
-_RECORD_FIELDS = ("id", "display_name", "site")
 
 _MAX_TEXT_LENGTH = 200
 """The most characters a site or display name holds; tentative, stated by no source."""
@@ -28,7 +31,7 @@ class ProjectRecordMissingError(Exception):
 
 
 class ProjectRecordInvalidError(ValueError):
-    """A project's record decodes but does not hold an id, a display name and a site."""
+    """A project's record decodes but is not a :class:`ProjectRecord`."""
 
 
 class SiteConflictError(ValueError):
@@ -77,13 +80,56 @@ def validate_text(label: str, value: object) -> str:
     return text
 
 
+class CaptureInvariances(BaseModel):
+    """Whether each capture transform leaves the project's trait measurement what it was, as the
+    breeder states it when the project is created.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, use_attribute_docstrings=True
+    )
+    horizontal_flip: bool
+    """A left-right mirror of the image."""
+    vertical_flip: bool
+    """A top-bottom mirror of the image."""
+    rotation: bool
+    """A rotation of the image about its center."""
+    color: bool
+    """A shift in hue or saturation."""
+    intensity: bool
+    """A shift in brightness or contrast."""
+    scale: bool
+    """A change in the size the objects appear at in the frame."""
+
+
+class ProjectRecord(BaseModel):
+    """The project's record as stored: ``id``, minted once at creation; ``display_name``, the
+    name the picker shows, changed only by :func:`rename_project`; ``site``, the breeder's own
+    name for the orchard or station the project's plants stand in; ``invariances``, stated at
+    creation. The display name and the site are each stored as :func:`validate_text` stores them.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(min_length=1)
+    display_name: str
+    site: str
+    invariances: CaptureInvariances
+
+    @field_validator("display_name", "site")
+    @classmethod
+    def _stored_as_text(cls, value: str, info: ValidationInfo) -> str:
+        if validate_text(str(info.field_name), value) != value:
+            raise ValueError("not stored as its text")
+        return value
+
+
 def read_record(project_path: str | Path) -> dict:
-    """The project's record: ``{"id", "display_name", "site"}``, each a non-empty string.
+    """The project's record, a :class:`ProjectRecord` dumped.
 
     Raises :class:`ProjectRecordMissingError` for a project with no record yet, and
-    :class:`ProjectRecordInvalidError` for a document that decodes but does not hold all three. A
-    document that does not decode raises the store's own ``DecodeError``, and a root the store
-    refuses raises its ``StoreError``. Never creates a store.
+    :class:`ProjectRecordInvalidError` for a document that decodes but is not one. A document
+    that does not decode raises the store's own ``DecodeError``, and a root the store refuses
+    raises its ``StoreError``. Never creates a store.
     """
     return _checked(
         project_path,
@@ -106,8 +152,7 @@ def existing_project(value: str | Path) -> tuple[Path, dict]:
 
 
 def _checked(project_path: str | Path, raw: object) -> dict:
-    """``raw``, a record read from ``project_path``, when it holds a non-empty id and a display
-    name and a site each as :func:`validate_text` would store it. Raises
+    """``raw``, a record read from ``project_path``, when it is a :class:`ProjectRecord`. Raises
     ``ProjectRecordMissingError`` for an absent record and ``ProjectRecordInvalidError`` naming
     what the record lacks otherwise.
     """
@@ -116,39 +161,32 @@ def _checked(project_path: str | Path, raw: object) -> dict:
             f"{project_path} is not a project yet: create it with initialize_project"
         )
     try:
-        if (
-            not isinstance(raw, dict)
-            or not isinstance(raw.get("id"), str)
-            or not raw["id"]
-        ):
-            raise ValueError("no id")
-        for field, label in (
-            ("display_name", "display name"),
-            ("site", "site"),
-        ):
-            if validate_text(label, raw.get(field)) != raw[field]:
-                raise ValueError(f"the {label} is not stored as its text")
-    except ValueError as exc:
+        return ProjectRecord.model_validate(raw).model_dump()
+    except ValidationError as exc:
         raise ProjectRecordInvalidError(
-            f"{project_path}'s record does not hold an id, a display name and a site ({exc}; "
-            f"found {raw!r})"
+            f"{project_path}'s record is not a project record ({exc}; found {raw!r})"
         ) from exc
-    return raw
 
 
 def create_record(
-    project_path: str | Path, display_name: str, site: str
+    project_path: str | Path,
+    display_name: str,
+    site: str,
+    invariances: CaptureInvariances,
 ) -> dict:
     """Write a new project's record with a freshly minted id, its one creator, and return it.
 
-    A project already recording the same display name and site is returned as it stands, its id
-    kept. A present record with a different site raises :class:`SiteConflictError`, and one with a
-    different display name raises ``ValueError`` naming both; an unreadable one raises what
-    :func:`read_record` raises.
+    A project already recording the same display name, site and invariances is returned as it
+    stands, its id kept. A present record with a different site raises
+    :class:`SiteConflictError`, and one with a different display name or invariances raises
+    ``ValueError`` naming both; an unreadable one raises what :func:`read_record` raises.
     """
-    name = validate_text("display name", display_name)
-    text = validate_text("site", site)
-    document = {"id": mint_id(), "display_name": name, "site": text}
+    document = ProjectRecord(
+        id=mint_id(),
+        display_name=validate_text("display name", display_name),
+        site=validate_text("site", site),
+        invariances=invariances,
+    ).model_dump()
     try:
         tcip_store.replace(
             project_record_key(project_path), document, expect=Version.ABSENT
@@ -156,16 +194,22 @@ def create_record(
         return document
     except VersionConflictError:
         existing = read_record(project_path)
-    if existing["site"] != text:
+    if existing["site"] != document["site"]:
         raise SiteConflictError(
             f"{project_path} already records site {existing['site']!r}; the offered site "
-            f"{text!r} does not match, so nothing was written. Run tcip write-project-site to "
-            "correct it deliberately."
+            f"{document['site']!r} does not match, so nothing was written. Run tcip "
+            "write-project-site to correct it deliberately."
         )
-    if existing["display_name"] != name:
+    if existing["display_name"] != document["display_name"]:
         raise ValueError(
             f"{project_path} is already the project {existing['display_name']!r}; rename it "
-            f"rather than creating it again as {name!r}"
+            f"rather than creating it again as {document['display_name']!r}"
+        )
+    if existing["invariances"] != document["invariances"]:
+        raise ValueError(
+            f"{project_path} already records the capture invariances "
+            f"{existing['invariances']!r}; the offered {document['invariances']!r} do not "
+            "match, so nothing was written"
         )
     return existing
 
@@ -227,8 +271,9 @@ def rename_project(project: Path, display_name: str, *, actor: str) -> dict:
 
 
 def record_fields(project_path: str | Path) -> dict:
-    """``{"id", "display_name", "site", "record_problem"}``: the record's three fields and ``None``,
-    or three ``None`` beside the text of why the record would not read. Never raises.
+    """The record's fields (:class:`ProjectRecord`) and ``record_problem``: the fields and
+    ``None``, or each field ``None`` beside the text of why the record would not read. Never
+    raises.
     """
     try:
         record = read_record(project_path)
@@ -238,8 +283,8 @@ def record_fields(project_path: str | Path) -> dict:
         StoreError,
         OSError,
     ) as exc:
-        return {**dict.fromkeys(_RECORD_FIELDS), "record_problem": str(exc)}
-    return {
-        **{field: record[field] for field in _RECORD_FIELDS},
-        "record_problem": None,
-    }
+        return {
+            **dict.fromkeys(ProjectRecord.model_fields),
+            "record_problem": str(exc),
+        }
+    return {**record, "record_problem": None}

@@ -33,9 +33,10 @@ def _scene(
     from tcip_mcp.traits import registered_crops
     from tests._image_fixtures import write_geo_image
     from tests._mapping_fixtures import PHOTO_POSITION_ERROR_M
+    from tests._web_fixtures import INVARIANCES
 
     assert "error" not in initialize_project(
-        str(tmp_path), "Orchard", site="orchard block"
+        str(tmp_path), "Orchard", site="orchard block", invariances=INVARIANCES
     )
     dataset_root, date = tmp_path / "ds", "2026-02-11"
     for i, (plant, (lat, lon)) in enumerate(plants.items()):

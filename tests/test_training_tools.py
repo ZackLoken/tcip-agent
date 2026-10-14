@@ -33,6 +33,7 @@ from tests._training_values import (
     stage,
     tiling_block,
 )
+from tests._web_fixtures import INVARIANCES, new_project
 
 pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
@@ -1357,6 +1358,7 @@ def test_run_hpo_trial_uses_base_augmentation_and_model(monkeypatch, tmp_path):
         return run
 
     _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=captured)
+    new_project(tmp_path)
     base = _classifier_base(
         tmp_path, augmentation=augmentation(horizontal_flip={"p": 0.5})
     )
@@ -1797,6 +1799,267 @@ def test_a_sweep_opens_over_a_base_omitting_what_its_space_sweeps_and_refuses_an
 
     assert isinstance(opened, Path), opened
     assert experiments.sweep_dirs(tmp_path) == [opened]
+
+
+def _project_answering(project: Path, **answers: bool) -> None:
+    """``project`` made a project through ``initialize_project``, its capture invariances the
+    sample answer (``_web_fixtures.INVARIANCES``) with ``answers`` over it.
+    """
+    from tcip_mcp.tools.project_tools import initialize_project
+
+    result = initialize_project(
+        str(project),
+        "Test project",
+        "north orchard",
+        INVARIANCES.model_copy(update=answers),
+    )
+    assert "error" not in result, result
+
+
+def _door_issues(door: str, project: Path, config: dict, monkeypatch) -> list:
+    """The issues ``door`` answers ``config`` with over ``project``: ``preflight_config``'s
+    report, or the issues ``launch_training`` hands its preflight (stubbed so nothing runs).
+    """
+    from tcip_mcp.tools import training_tools
+
+    if door == "preflight_config":
+        return training_tools.preflight_config(project, config)["issues"]
+    seen: list = []
+
+    def stub_preflight(project, spec, sources, issues, *, smoke, overfit):
+        seen.append(issues)
+        return {"valid": False, "issues": ["stub"]}, None
+
+    monkeypatch.setattr(training_tools, "_preflight", stub_preflight)
+    training_tools.launch_training(project, config, actor=None)
+    (issues,) = seen
+    return issues
+
+
+_EVERY_INVARIANCE_FALSE = {
+    "horizontal_flip": False,
+    "vertical_flip": False,
+    "rotation": False,
+    "color": False,
+    "intensity": False,
+    "scale": False,
+}
+"""A record stating no capture transform leaves the trait's measurement unchanged."""
+
+_BRIGHTNESS_ALONE = {
+    "color_jitter": {"brightness": 0.2, "contrast": 0.0, "saturation": 0.0}
+}
+"""A color jitter shifting brightness and leaving contrast and saturation unchanged."""
+
+
+@pytest.mark.parametrize("door", ["preflight_config", "launch_training"])
+@pytest.mark.parametrize(
+    "answers, transforms, refused",
+    [
+        (
+            {"horizontal_flip": False},
+            {"horizontal_flip": {"p": 0.5}},
+            ["horizontal_flip"],
+        ),
+        ({}, {"horizontal_flip": {"p": 0.5}}, []),
+        ({"horizontal_flip": False}, {"horizontal_flip": {"p": 0.0}}, []),
+        ({"rotation": False}, {"rotation": {"degrees": 30, "p": 0.0}}, []),
+        (
+            {"rotation": False},
+            {"rotation": {"degrees": 30, "p": 0.5}},
+            ["rotation"],
+        ),
+        (
+            {"scale": False},
+            {
+                "random_crop": {
+                    "size": [20, 20],
+                    "min_scale": 0.5,
+                    "max_scale": 0.5,
+                }
+            },
+            ["scale"],
+        ),
+        (
+            _EVERY_INVARIANCE_FALSE,
+            {
+                "gaussian_blur": {"p": 0.5, "radius": 1.0},
+                "resize": {"size": [20, 20]},
+            },
+            [],
+        ),
+        ({"color": False}, _BRIGHTNESS_ALONE, []),
+        ({"intensity": False}, _BRIGHTNESS_ALONE, ["intensity"]),
+    ],
+    ids=[
+        "a-flip-stated-invalid",
+        "a-flip-stated-valid",
+        "a-flip-never-taken-under-no-flip",
+        "a-rotation-never-taken-under-no-rotation",
+        "a-rotation-taken-under-no-rotation",
+        "a-crop-under-no-scale",
+        "blur-and-resize-under-every-record",
+        "brightness-alone-under-no-color",
+        "brightness-alone-under-no-intensity",
+    ],
+)
+def test_the_launch_doors_judge_each_augmentation_by_the_invariance_the_project_records(
+    tmp_path, monkeypatch, door, answers, transforms, refused
+):
+    """A transform relying on an invariance the record states false is refused naming the
+    transform, the invariance and the door that states it; the same transform under a record
+    stating it true is admitted, a flip or a rotation stated at probability zero relies on
+    nothing, a crop relies on scale whatever its bounds, a blur and a resize rely on none, and a
+    color jitter whose saturation is zero relies on intensity alone.
+    """
+    pytest.importorskip("torch")
+
+    _project_answering(tmp_path, **answers)
+    config = training_config(
+        tmp_path,
+        DETECTION_SOURCE,
+        _labeled(tmp_path),
+        augmentation=augmentation(**transforms),
+    )
+
+    issues = _door_issues(door, tmp_path, config, monkeypatch)
+
+    if not refused:
+        assert issues == [], issues
+    named = [issue for issue in issues if "capture invariance" in issue]
+    assert len(named) == len(refused), issues
+    for fact, issue in zip(refused, named, strict=True):
+        assert repr(next(iter(transforms))) in issue, issue
+        assert repr(fact) in issue and "initialize_project" in issue, issue
+
+
+@pytest.mark.parametrize(
+    "transforms, field, refusal",
+    [
+        ({"horizontal_flip": {"p": -0.5}}, "p", "greater than or equal to 0"),
+        (
+            {
+                "color_jitter": {
+                    "brightness": -0.2,
+                    "contrast": 0.0,
+                    "saturation": 0.0,
+                }
+            },
+            "brightness",
+            "greater than or equal to 0",
+        ),
+        (
+            {"rotation": {"degrees": "inf", "p": 1.0}},
+            "degrees",
+            "finite number",
+        ),
+        (
+            {"rotation": {"degrees": 181, "p": 1.0}},
+            "degrees",
+            "less than or equal to 180",
+        ),
+        (
+            {
+                "color_jitter": {
+                    "brightness": 1.5,
+                    "contrast": 0.0,
+                    "saturation": 0.0,
+                }
+            },
+            "brightness",
+            "less than or equal to 1",
+        ),
+    ],
+    ids=[
+        "a-negative-flip-probability",
+        "a-negative-brightness",
+        "an-infinite-rotation",
+        "a-rotation-past-a-half-turn",
+        "a-brightness-past-1",
+    ],
+)
+def test_preflight_refuses_an_augmentation_value_outside_its_range_naming_the_field(
+    tmp_path, transforms, field, refusal
+):
+    """A stated value outside its transform's range is refused by the transform's type, naming
+    the entry and the field, under a record admitting every transform.
+    """
+    pytest.importorskip("torch")
+    from tcip_mcp.tools.training_tools import preflight_config
+
+    _project_answering(tmp_path)
+    config = training_config(
+        tmp_path,
+        DETECTION_SOURCE,
+        _labeled(tmp_path),
+        augmentation=augmentation(**transforms),
+    )
+
+    report = preflight_config(tmp_path, config)
+
+    assert report["valid"] is False
+    (name,) = transforms
+    assert any(
+        repr(name) in issue and f"\n{field}\n" in issue and refusal in issue
+        for issue in report["issues"]
+    ), report["issues"]
+
+
+def test_a_sweep_refuses_the_point_its_augmentation_axis_samples_against_the_record(
+    tmp_path, monkeypatch
+):
+    """An axis over an augmentation value is judged at each point it samples: a saturation of
+    zero relies on no invariance and a nonzero one on color, so a record stating color false
+    refuses the nonzero corner by its label with nothing opened, and one stating it true opens.
+    """
+    from tcip_mcp import experiments
+    from tcip_mcp.tools import training_tools
+    from tests._verified_checkpoint_fixtures import SWEEP_ARGUMENTS
+
+    monkeypatch.chdir(tmp_path)
+    base = training_config(
+        tmp_path,
+        DETECTION_SOURCE,
+        _labeled(tmp_path),
+        augmentation=augmentation(
+            color_jitter={
+                "brightness": 0.0,
+                "contrast": 0.0,
+                "saturation": 0.0,
+            }
+        ),
+    )
+    arguments = {
+        k: v for k, v in SWEEP_ARGUMENTS.items() if k != "param_space"
+    }
+    space = {
+        "augmentation.color_jitter.saturation": {
+            "type": "categorical",
+            "choices": [0.0, 0.3],
+        }
+    }
+
+    forbidding = tmp_path / "forbidding"
+    _project_answering(forbidding, color=False)
+    refused = training_tools.open_sweep(
+        forbidding, base, space, actor=None, **arguments
+    )
+
+    assert isinstance(refused, dict), refused
+    assert refused["error"] == (
+        "the sweep's base config fails preflight at "
+        "augmentation.color_jitter.saturation=0.3"
+    ), refused
+    assert any("'color'" in issue for issue in refused["issues"]), refused
+    assert experiments.sweep_dirs(forbidding) == []
+
+    admitting = tmp_path / "admitting"
+    _project_answering(admitting)
+    opened = training_tools.open_sweep(
+        admitting, base, space, actor=None, **arguments
+    )
+
+    assert isinstance(opened, Path), opened
 
 
 def test_preflight_names_a_missing_task_where_the_config_is_validated(

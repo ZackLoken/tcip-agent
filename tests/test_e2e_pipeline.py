@@ -32,6 +32,7 @@ from tcip_mcp.tools.project_tools import (
     inspect_project,
 )
 from tcip_mcp.workspace import BoundProject, workspace_from_environment
+from tests._web_fixtures import INVARIANCES
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -109,7 +110,10 @@ class TestE2EPipeline:
 
         # ── Step 1: Init project ─────────────────────────────────────
         created = initialize_project(
-            root, "North orchard", site="north orchard"
+            root,
+            "North orchard",
+            site="north orchard",
+            invariances=INVARIANCES,
         )
         assert (project_dir / ".tcip").is_dir()
         assert (project_dir / ".tcip" / "artifacts").is_dir()

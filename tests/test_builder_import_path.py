@@ -516,10 +516,11 @@ def test_a_checkpoint_registered_by_name_builds_beside_its_run_and_where_the_run
         initialize_project,
     )
     from tests._verified_checkpoint_fixtures import foreign_checkpoint
+    from tests._web_fixtures import INVARIANCES
 
     source, carried = tmp_path / "source", tmp_path / "carried"
     assert "error" not in initialize_project(
-        str(source), "Source project", "north orchard"
+        str(source), "Source project", "north orchard", INVARIANCES
     )
     checkpoint = Path(foreign_checkpoint(source))
     loaded = load_registered_checkpoint(checkpoint, project=source)

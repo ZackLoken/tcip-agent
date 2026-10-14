@@ -6,21 +6,37 @@ import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from tcip_mcp.project_record import CaptureInvariances
+
 if TYPE_CHECKING:
     from tcip_mcp.workspace import BoundProject
     from tcip_web.state import OpenProject
 
+INVARIANCES = CaptureInvariances(
+    horizontal_flip=True,
+    vertical_flip=True,
+    rotation=True,
+    color=True,
+    intensity=True,
+    scale=True,
+)
+"""A sample breeder's answer: every capture transform leaves the trait's measurement unchanged,
+so every augmentation a test states is admitted unless the test states another answer.
+"""
+
 
 def named_project(path: Path, display_name: str) -> OpenProject:
     """Make ``path`` a project named ``display_name`` through the platform's own creation door
-    (``initialize_project``), its record holding an id, that name and a site; the project as
-    the backend's open takes it. Refuses (by assertion) when ``path`` already records another
-    name or site.
+    (``initialize_project``), its record holding an id, that name, a site and
+    :data:`INVARIANCES`; the project as the backend's open takes it. Refuses (by assertion) when
+    ``path`` already records another name, site or invariances.
     """
     from tcip_mcp.tools.project_tools import initialize_project
     from tcip_web.state import OpenProject
 
-    result = initialize_project(str(path), display_name, "north orchard")
+    result = initialize_project(
+        str(path), display_name, "north orchard", INVARIANCES
+    )
     assert "error" not in result, result
     return OpenProject(path, result["id"])
 

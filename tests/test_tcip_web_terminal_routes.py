@@ -20,6 +20,7 @@ from tcip_web.app import app
 from tcip_web.routes import terminal as terminal_routes
 from tcip_web.state import OpenProject
 from tests._audit_fixtures import audit_rows
+from tests._web_fixtures import INVARIANCES
 
 FAKE = Path(__file__).parent / "fake_terminal_app.py"
 LAUNCH = {"provider": pty_host.PROVIDERS[0].id, "user": "tester"}
@@ -752,7 +753,12 @@ def test_a_doctor_line_argument_holding_a_refused_character_is_refused_by_name(
         "tcip_mcp.project_record.existing_project",
         lambda _p: (
             project,
-            {"id": "abc", "display_name": "Valley", "site": "s"},
+            {
+                "id": "abc",
+                "display_name": "Valley",
+                "site": "s",
+                "invariances": INVARIANCES.model_dump(),
+            },
         ),
     )
     monkeypatch.setattr(pty_host, "backend_interpreter", lambda: interpreter)

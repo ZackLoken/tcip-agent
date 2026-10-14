@@ -82,6 +82,7 @@ def main(
 
     from fastapi.testclient import TestClient
 
+    from tcip_mcp.project_record import CaptureInvariances
     from tcip_mcp.tools.project_tools import initialize_project
     from tcip_mcp.workspace import workspace_from_environment
     from tcip_web.app import app
@@ -105,8 +106,20 @@ def main(
     project = tempfile.mkdtemp(
         prefix="terminal-smoke-project-", dir=store.workspace
     )
+    # A sample answer for the scratch project; nothing in the smoke trains under it.
+    invariances = CaptureInvariances(
+        horizontal_flip=True,
+        vertical_flip=True,
+        rotation=True,
+        color=True,
+        intensity=True,
+        scale=True,
+    )
     record = initialize_project(
-        project, "Terminal smoke", "the terminal smoke's scratch workspace"
+        project,
+        "Terminal smoke",
+        "the terminal smoke's scratch workspace",
+        invariances,
     )
     if "error" in record:
         print(f"FAIL: the scratch project was refused: {record['error']}")

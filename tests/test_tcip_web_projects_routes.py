@@ -259,6 +259,7 @@ def test_list_reports_record_fields_across_four_project_states(
     from tcip_mcp.project_record import project_record_key
     from tcip_store.file_backend import database_file
     from tests._record_damage_fixtures import damage_record
+    from tests._web_fixtures import INVARIANCES
 
     recorded = _make_project(workspace_dir, "currant_bud_recorded").root
 
@@ -287,13 +288,15 @@ def test_list_reports_record_fields_across_four_project_states(
         None,
     )
     assert len(good["id"]) == 12
+    assert good["invariances"] == INVARIANCES.model_dump()
 
     missing = by_path[str(recordless.resolve())]
-    assert (missing["id"], missing["display_name"], missing["site"]) == (
-        None,
-        None,
-        None,
-    )
+    assert (
+        missing["id"],
+        missing["display_name"],
+        missing["site"],
+        missing["invariances"],
+    ) == (None, None, None, None)
     assert "initialize_project" in missing["record_problem"]
     assert not database_file(str(recordless)).is_file()
 
@@ -302,7 +305,7 @@ def test_list_reports_record_fields_across_four_project_states(
         in by_path[str(undecodable.resolve())]["record_problem"]
     )
     assert (
-        "does not hold an id, a display name and a site"
+        "is not a project record"
         in (by_path[str(invalid.resolve())]["record_problem"])
     )
 

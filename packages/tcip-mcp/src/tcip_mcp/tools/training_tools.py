@@ -83,10 +83,15 @@ def _admitted(
     config: dict, point: dict, project: Path
 ) -> tuple[TrainConfigSchema | None, StagedSources | None, list[str]]:
     """``config`` with ``point`` applied (:func:`_apply_hpo_params`), admitted: validated once
-    against ``project`` (``schemas.checked_train_config``) and, when it validates, its structure
-    (:func:`_structural_issues`). The spec, ``None`` when it did not validate, its staged
-    sources, ``None`` when none were taken, and every issue.
+    against ``project`` (``schemas.checked_train_config``) and, when it validates, its
+    augmentation judged against the project record's capture invariances
+    (``augmentations.forbidden_transforms``) and its structure (:func:`_structural_issues`). The
+    spec, ``None`` when it did not validate, its staged sources, ``None`` when none were taken,
+    and every issue.
     """
+    from tcip_mcp.pipelines.data.augmentations import forbidden_transforms
+    from tcip_mcp.project_record import ProjectRecordMissingError, read_record
+
     try:
         spec, issues = checked_train_config(
             _apply_hpo_params(config, point), project
@@ -95,7 +100,15 @@ def _admitted(
         return None, None, [str(exc)]
     if spec is None:
         return None, None, issues
-    return spec, *_structural_issues(spec, project)
+    if spec.augmentation is not None:
+        try:
+            issues = forbidden_transforms(
+                spec.augmentation, read_record(project)["invariances"]
+            )
+        except (ValueError, ProjectRecordMissingError) as exc:
+            issues = [str(exc)]
+    sources, structural = _structural_issues(spec, project)
+    return spec, sources, [*issues, *structural]
 
 
 def _preflight(

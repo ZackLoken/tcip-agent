@@ -23,7 +23,6 @@ from tcip_store import stored_number
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.schemas import (
-        AugmentationSpec,
         SamplerSpec,
         SpatialManifest,
         TrainConfigSchema,
@@ -242,10 +241,13 @@ class TrainContext:
             block, dataset, num_workers=num_workers, batch_size=batch_size
         )
 
-    def build_augmentation(self, cfg: AugmentationSpec) -> Any:
+    def build_augmentation(self) -> Any:
+        """The augmentation chain the run's validated ``augmentation`` block states, the block
+        its launch admitted against the project's capture invariances.
+        """
         from tcip_mcp.pipelines.data.augmentations import build_augmentation
 
-        return build_augmentation(cfg)
+        return build_augmentation(self._stated("augmentation"))
 
     def compute_class_weights(self, *args: Any, **kwargs: Any) -> Any:
         from tcip_mcp.pipelines.components.losses import compute_class_weights

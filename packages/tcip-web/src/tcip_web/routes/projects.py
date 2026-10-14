@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from tcip_mcp import dataset_layout, workspace
 from tcip_mcp.buckets import buckets_by_date
 from tcip_mcp.identity import actor
-from tcip_mcp.project_record import rename_project
+from tcip_mcp.project_record import CaptureInvariances, rename_project
 from tcip_web.state import OpenProject, store
 
 logger = logging.getLogger(__name__)
@@ -28,10 +28,11 @@ router = APIRouter(prefix="/api/projects", tags=["projects"])
 
 
 class ProjectSummary(BaseModel):
-    # The record's three fields, each null beside record_problem when the record will not read.
+    # The record's fields, each null beside record_problem when the record will not read.
     id: str | None
     display_name: str | None
     site: str | None
+    invariances: CaptureInvariances | None
     record_problem: str | None
     path: str
     created: float
