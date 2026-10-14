@@ -97,16 +97,26 @@ def listings(workspace: Path) -> dict[str, dict]:
     from fastapi.testclient import TestClient
 
     from tcip_mcp import traits
+    from tcip_mcp.project_record import CaptureInvariances
     from tcip_mcp.tools.project_tools import initialize_project
     from tcip_web.app import app
     from tcip_web.state import store
 
     store.configure(workspace, ())
     client = TestClient(app, base_url="http://127.0.0.1")
+    # A sample answer for each scratch project; the trait listings written here never read it.
+    invariances = CaptureInvariances(
+        horizontal_flip=True,
+        vertical_flip=True,
+        rotation=True,
+        color=True,
+        intensity=True,
+        scale=True,
+    )
 
     def opened(name: str) -> Path:
         created = initialize_project(
-            str(workspace / name), name, "fixture orchard"
+            str(workspace / name), name, "fixture orchard", invariances
         )
         response = client.post(
             "/api/projects/open", json={"id": created["id"], "user": "grower"}

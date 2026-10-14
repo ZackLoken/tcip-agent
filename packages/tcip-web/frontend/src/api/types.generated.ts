@@ -267,10 +267,20 @@ export interface SubmitRequest {
   text: string;
 }
 
+export interface CaptureInvariances {
+  horizontal_flip: boolean;
+  vertical_flip: boolean;
+  rotation: boolean;
+  color: boolean;
+  intensity: boolean;
+  scale: boolean;
+}
+
 export interface ProjectSummary {
   id: string | null;
   display_name: string | null;
   site: string | null;
+  invariances: CaptureInvariances | null;
   record_problem: string | null;
   path: string;
   created: number;

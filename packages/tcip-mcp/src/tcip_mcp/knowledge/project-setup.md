@@ -1,6 +1,6 @@
 ---
 name: project-setup
-description: "The front-door arc: turn a breeder's raw pile of photos plus a stated goal into a structured, trainable TCIP project. Covers creating the project (its id, display name and site), ingest_images (capture-date bucketing), translating a goal into a trait/task/subjects.json, model-proposed bootstrap annotation, splitting, bespoke model design, training, inference, and review handoff. Load this when someone arrives with unstructured images and a phenotyping goal rather than a prepared dataset."
+description: "The front-door arc: turn a breeder's raw pile of photos plus a stated goal into a structured, trainable TCIP project. Covers creating the project (its id, display name, site and capture invariances), ingest_images (capture-date bucketing), translating a goal into a trait/task/subjects.json, model-proposed bootstrap annotation, splitting, bespoke model design, training, inference, and review handoff. Load this when someone arrives with unstructured images and a phenotyping goal rather than a prepared dataset."
 ---
 
 # Project setup: from raw photos to a trainable project
@@ -24,9 +24,10 @@ it (ambiguous goal, unconfirmed format).
 ## 1. Create the project
 
 Projects live under the workspace `TCIP_WORKSPACE` names (every process refuses to start without
-it), one folder per project. `initialize_project(project_path, display_name, site)` creates one: its
-`.tcip/` scaffold and its record (`tcip_mcp.project_record`), which holds a freshly minted `id`,
-the `display_name` the picker shows, and the `site`. The id is the project's identity; the
+it), one folder per project. `initialize_project(project_path, display_name, site, invariances)`
+creates one: its `.tcip/` scaffold and its record (`tcip_mcp.project_record`), which holds a
+freshly minted `id`, the `display_name` the picker shows, the `site`, and the capture
+`invariances`. The id is the project's identity; the
 folder's name and the display name are neither of them identity, so a display name is the
 breeder's own words, for example (hazelnut, one marked example) `Hazelnut catkin counts, north
 block`.
@@ -35,6 +36,13 @@ The site (field/orchard) is the breeder's own words too, recorded once on the re
 in the picker. Ask the human for both rather than guessing them from a path or filename; a project
 that already records a different site or display name refuses the call rather than silently
 overwriting it (`tcip write-project-site` corrects a site typed wrong once).
+
+The invariances are six facts the breeder answers at creation, each whether a transform of the
+image leaves the trait's measurement what it was: a horizontal flip (`horizontal_flip`), a
+vertical flip (`vertical_flip`), a rotation (`rotation`), a shift in hue or saturation (`color`),
+a shift in brightness or contrast (`intensity`), and a change in the size objects appear at
+(`scale`). Ask each one; none is guessed from the crop or the trait's name. A training run's
+augmentation is refused at launch when it relies on one the record states false.
 
 This MCP server acts on the one project it was started for (`--project <path>`); every tool that
 acts on a project takes that one, never a path you pass. A project you create here is worked on

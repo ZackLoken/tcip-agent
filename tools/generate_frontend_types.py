@@ -101,6 +101,7 @@ def declared_models() -> list[type[BaseModel]]:
         MatchRadius,
         StatedRadius,
     )
+    from tcip_mcp.project_record import CaptureInvariances
     from tcip_mcp.traits import (
         Operationalization,
         PositiveState,
@@ -177,6 +178,7 @@ def declared_models() -> list[type[BaseModel]]:
         ProviderStatus,
         TerminalStatus,
         SubmitRequest,
+        CaptureInvariances,
         ProjectSummary,
         OpenRequest,
         RemovalRequest,

@@ -222,8 +222,35 @@ def test_build_augmentation_builds_each_transform_at_the_values_its_entry_states
     """
     chain = _built(augmentation(**EVERY_TRANSFORM)).transforms
 
-    assert [vars(t) for t in chain[:-1]] == list(EVERY_TRANSFORM.values())
+    assert [t.model_dump(mode="json") for t in chain[:-1]] == list(
+        EVERY_TRANSFORM.values()
+    )
     assert isinstance(chain[-1], ToTensor)
+
+
+def test_every_invariance_a_registered_transform_relies_on_is_a_field_of_the_record():
+    """Under a record stating every capture invariance false, every registered transform at
+    nonzero values is refused once per invariance it relies on, together naming each field of
+    the record's own model once; the blur and the resize rely on none.
+    """
+    from tcip_mcp.pipelines.data.augmentations import forbidden_transforms
+    from tcip_mcp.pipelines.schemas import AugmentationSpec
+    from tcip_mcp.project_record import CaptureInvariances
+
+    fields = list(CaptureInvariances.model_fields)
+    none_hold = CaptureInvariances(**dict.fromkeys(fields, False))
+
+    issues = forbidden_transforms(
+        AugmentationSpec.model_validate(augmentation(**EVERY_TRANSFORM)),
+        none_hold.model_dump(),
+    )
+
+    assert len(issues) == len(fields), issues
+    for field in fields:
+        assert any(
+            f"capture invariance {field!r}" in issue for issue in issues
+        ), (field, issues)
+    assert not any("'gaussian_blur'" in i or "'resize'" in i for i in issues)
 
 
 @pytest.mark.parametrize(
@@ -238,7 +265,7 @@ def test_build_augmentation_builds_each_transform_at_the_values_its_entry_states
             augmentation(
                 color_jitter={**EVERY_TRANSFORM["color_jitter"], "hue": 0.1}
             ),
-            "'hue'",
+            r"'color_jitter'(.|\n)*hue",
         ),
         (augmentation(rotation={"degrees": 90}), "'rotation'"),
         (augmentation(horizontal_flip={"p": 0.5}, mosaic={}), "mosaic"),

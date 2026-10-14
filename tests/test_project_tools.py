@@ -20,6 +20,7 @@ from tcip_mcp.tools.project_tools import (
     upsert_dataset,
 )
 from tests._record_damage_fixtures import damage_record
+from tests._web_fixtures import INVARIANCES
 
 
 def _make_dataset(root: Path) -> None:
@@ -41,7 +42,9 @@ def _make_dataset(root: Path) -> None:
 
 def _initialized(path: Path) -> dict:
     """``path`` made a project through the platform's own creation door; its record."""
-    result = initialize_project(str(path), "Test project", "north orchard")
+    result = initialize_project(
+        str(path), "Test project", "north orchard", INVARIANCES
+    )
     assert "error" not in result, result
     return result
 
@@ -827,7 +830,7 @@ def test_initializing_twice_leaves_what_the_first_run_created(tmp_path: Path):
 # ── the project record ────────────────────────────────────────────────────────
 
 
-def test_initialize_project_records_the_id_display_name_and_site(
+def test_initialize_project_records_the_id_display_name_site_and_invariances(
     tmp_path: Path,
 ):
     from tcip_mcp.project_record import read_record
@@ -838,7 +841,75 @@ def test_initialize_project_records_the_id_display_name_and_site(
         "id": result["id"],
         "display_name": "Test project",
         "site": "north orchard",
+        "invariances": INVARIANCES.model_dump(),
     }
+
+
+def _called_through_the_server(arguments: dict) -> str:
+    """``initialize_project`` called as an MCP client calls it; the tool error's text, or ``""``
+    when the call was admitted.
+    """
+    import asyncio
+
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    from tcip_mcp.server import build_server
+
+    try:
+        asyncio.run(
+            build_server(None).call_tool("initialize_project", arguments)
+        )
+    except ToolError as exc:
+        return str(exc)
+    return ""
+
+
+def test_initialize_project_refuses_unstated_invariances_and_one_unstated_invariance_by_type(
+    tmp_path: Path,
+):
+    """The invariances are required by the door's signature and each of the six by the
+    record's model; a stated block is read back whole by ``inspect_project`` and
+    ``record_fields``.
+    """
+    from tcip_mcp.project_record import record_fields
+
+    stated = {
+        "project_path": str(tmp_path / "stated"),
+        "display_name": "Test project",
+        "site": "north orchard",
+    }
+    answers = {**INVARIANCES.model_dump(), "vertical_flip": False}
+    one_unstated = {k: v for k, v in answers.items() if k != "scale"}
+
+    unstated = _called_through_the_server(stated)
+    assert "validation error" in unstated and "invariances" in unstated
+    missing = _called_through_the_server(
+        {**stated, "invariances": one_unstated}
+    )
+    assert "validation error" in missing and "scale" in missing
+    assert not (tmp_path / "stated").exists()
+
+    assert _called_through_the_server({**stated, "invariances": answers}) == ""
+    assert inspect_project(tmp_path / "stated")["invariances"] == answers
+    assert record_fields(tmp_path / "stated")["invariances"] == answers
+
+
+def test_initialize_project_refuses_different_invariances_than_the_ones_already_recorded(
+    tmp_path: Path,
+):
+    from tcip_mcp.project_record import read_record
+
+    _initialized(tmp_path)
+
+    result = initialize_project(
+        str(tmp_path),
+        "Test project",
+        "north orchard",
+        INVARIANCES.model_copy(update={"rotation": False}),
+    )
+
+    assert "error" in result and "invariances" in result["error"]
+    assert read_record(tmp_path)["invariances"] == INVARIANCES.model_dump()
 
 
 def test_initialize_project_refuses_a_different_site_than_the_one_already_recorded(
@@ -848,7 +919,9 @@ def test_initialize_project_refuses_a_different_site_than_the_one_already_record
 
     _initialized(tmp_path)
 
-    result = initialize_project(str(tmp_path), "Test project", "south orchard")
+    result = initialize_project(
+        str(tmp_path), "Test project", "south orchard", INVARIANCES
+    )
 
     assert "error" in result
     assert "north orchard" in result["error"]
@@ -863,7 +936,9 @@ def test_initialize_project_refuses_a_different_display_name_than_the_one_alread
 
     _initialized(tmp_path)
 
-    result = initialize_project(str(tmp_path), "Another name", "north orchard")
+    result = initialize_project(
+        str(tmp_path), "Another name", "north orchard", INVARIANCES
+    )
 
     assert "error" in result
     assert "rename" in result["error"]
@@ -878,7 +953,7 @@ def test_initialize_project_refuses_an_empty_site_leaving_nothing_on_disk(
     """
     dest = tmp_path / "fresh_project"
 
-    result = initialize_project(str(dest), "Test project", "   ")
+    result = initialize_project(str(dest), "Test project", "   ", INVARIANCES)
 
     assert "error" in result
     assert not dest.exists()
@@ -889,7 +964,7 @@ def test_initialize_project_refuses_an_empty_display_name_leaving_nothing_on_dis
 ):
     dest = tmp_path / "fresh_project"
 
-    result = initialize_project(str(dest), "  ", "north orchard")
+    result = initialize_project(str(dest), "  ", "north orchard", INVARIANCES)
 
     assert "error" in result and "display name" in result["error"]
     assert not dest.exists()
@@ -904,7 +979,7 @@ def test_initialize_project_refuses_a_relative_path_and_scaffolds_nothing(
     monkeypatch.chdir(tmp_path)
 
     result = initialize_project(
-        "relative_proj", "Test project", "north orchard"
+        "relative_proj", "Test project", "north orchard", INVARIANCES
     )
 
     assert "absolute path" in result["error"]
@@ -922,10 +997,12 @@ def test_initialize_project_refuses_a_present_but_invalid_record(
         key, {"not_site": "whatever"}, expect=tcip_store.Version.ABSENT
     )
 
-    result = initialize_project(str(tmp_path), "Test project", "north orchard")
+    result = initialize_project(
+        str(tmp_path), "Test project", "north orchard", INVARIANCES
+    )
 
     assert "error" in result
-    assert "does not hold an id, a display name and a site" in result["error"]
+    assert "is not a project record" in result["error"]
 
 
 def test_initialize_project_refuses_an_undecodable_record(tmp_path: Path):
@@ -936,7 +1013,7 @@ def test_initialize_project_refuses_an_undecodable_record(tmp_path: Path):
     damage_record(project_record_key(tmp_path), b"{not valid json")
 
     result = initialize_project(
-        str(tmp_path), record["display_name"], record["site"]
+        str(tmp_path), record["display_name"], record["site"], INVARIANCES
     )
 
     assert "error" in result
@@ -1000,7 +1077,7 @@ def test_inspect_project_reports_an_invalid_record(tmp_path: Path):
     status = inspect_project(tmp_path)
 
     assert status["site"] is None
-    assert "does not hold an id" in status["record_problem"]
+    assert "is not a project record" in status["record_problem"]
 
 
 def test_archive_and_import_carry_the_project_record(tmp_path: Path):

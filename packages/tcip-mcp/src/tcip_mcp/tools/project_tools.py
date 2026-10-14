@@ -10,6 +10,7 @@ from pathlib import Path
 
 import tcip_store
 from tcip_mcp.audit import audited
+from tcip_mcp.project_record import CaptureInvariances
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
 from tcip_store import Key, VersionConflictError, encode_record
@@ -140,20 +141,25 @@ def register_dataset(project: Path, dataset_root: str, crop: str) -> dict:
 
 @tool()
 def initialize_project(
-    project_path: str, display_name: str, site: str
+    project_path: str,
+    display_name: str,
+    site: str,
+    invariances: CaptureInvariances,
 ) -> dict:
     """Create a TCIP project: ``.tcip/`` with its artifacts and models directories, and its record
-    holding a freshly minted id, ``display_name`` and ``site``, then one ``project_created`` line
-    in its own log.
+    holding a freshly minted id, ``display_name``, ``site`` and ``invariances``, then one
+    ``project_created`` line in its own log.
 
-    Creating a project that already records the same display name and site answers it as it
-    stands; one recording a different site or display name refuses rather than overwriting it.
-    A refused record leaves nothing on disk.
+    Creating a project that already records the same display name, site and invariances answers
+    it as it stands; one recording a different site, display name or invariances refuses rather
+    than overwriting it. A refused record leaves nothing on disk.
 
     Args:
         project_path: Root directory of the project.
         display_name: The name the project picker shows; renaming later changes only this.
         site: The orchard or station this project's plants stand in, in the breeder's own words.
+        invariances: For each capture transform, whether it leaves the trait's measurement what
+            it was, as the breeder answers it; a training run's augmentation is judged against it.
 
     """
     from tcip_mcp.audit import record_event_or_raise
@@ -162,7 +168,7 @@ def initialize_project(
 
     try:
         project = located(Path(project_path).expanduser(), None)
-        record = create_record(project, display_name, site)
+        record = create_record(project, display_name, site, invariances)
     except (ValueError, StoreError) as exc:
         return {"error": str(exc)}
     tcip = _project_dir(str(project))
@@ -198,9 +204,10 @@ def view_gui_state(project: Path) -> dict:
 def inspect_project(project: Path) -> dict:
     """Get an overview of the project.
 
-    Carries the record's ``id``, ``display_name`` and ``site`` beside ``record_problem`` from
-    ``tcip_mcp.project_record.record_fields``: the three are set, or ``record_problem`` names why
-    they are not (a damaged record, or a root the store refuses to read). ``plant_mappings``
+    Carries the record's fields (``id``, ``display_name``, ``site`` and ``invariances``) beside
+    ``record_problem`` from ``tcip_mcp.project_record.record_fields``: the fields are set, or
+    ``record_problem`` names why they are not (a damaged record, or a root the store refuses to
+    read). ``plant_mappings``
     carries every mapping name persisted under the project, the same shape:
     ``plant_mappings_problem`` names why the listing came back empty when the store refuses to
     read the root. ``recent_activity`` is :func:`_recent_activity`'s.

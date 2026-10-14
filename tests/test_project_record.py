@@ -1,5 +1,5 @@
-"""Tests for the project record: its minted id, display name and site, its create-only write, and
-its readers.
+"""Tests for the project record: its minted id, display name, site and capture invariances, its
+create-only write, and its readers.
 """
 
 from __future__ import annotations
@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 import tcip_store as ts
+from tests._web_fixtures import INVARIANCES
 
 # ── text validation ─────────────────────────────────────────────────────────────
 
@@ -54,7 +55,9 @@ def test_validate_text_refuses_a_value_over_the_length_bound_and_admits_one_at_i
 def test_create_record_mints_an_id_and_writes_an_absent_record(tmp_path: Path):
     from tcip_mcp.project_record import create_record, read_record
 
-    record = create_record(tmp_path, "  Valley block ", "north orchard")
+    record = create_record(
+        tmp_path, "  Valley block ", "north orchard", INVARIANCES
+    )
 
     assert (
         record["display_name"] == "Valley block"
@@ -67,12 +70,19 @@ def test_create_record_mints_an_id_and_writes_an_absent_record(tmp_path: Path):
 def test_create_record_answers_the_existing_record_when_offered_it_again(
     tmp_path: Path,
 ):
-    """Creating a project that already records the same name and site keeps its id."""
+    """Creating a project that already records the same name, site and invariances keeps its
+    id.
+    """
     from tcip_mcp.project_record import create_record
 
-    first = create_record(tmp_path, "Valley block", "north orchard")
+    first = create_record(
+        tmp_path, "Valley block", "north orchard", INVARIANCES
+    )
 
-    assert create_record(tmp_path, "Valley block", "north orchard  ") == first
+    assert (
+        create_record(tmp_path, "Valley block", "north orchard  ", INVARIANCES)
+        == first
+    )
 
 
 def test_create_record_refuses_a_different_site_naming_both(tmp_path: Path):
@@ -82,10 +92,10 @@ def test_create_record_refuses_a_different_site_naming_both(tmp_path: Path):
         read_record,
     )
 
-    create_record(tmp_path, "Valley block", "north orchard")
+    create_record(tmp_path, "Valley block", "north orchard", INVARIANCES)
 
     with pytest.raises(SiteConflictError) as raised:
-        create_record(tmp_path, "Valley block", "south orchard")
+        create_record(tmp_path, "Valley block", "south orchard", INVARIANCES)
 
     assert "north orchard" in str(raised.value) and "south orchard" in str(
         raised.value
@@ -98,10 +108,10 @@ def test_create_record_refuses_a_different_display_name_naming_rename(
 ):
     from tcip_mcp.project_record import create_record, read_record
 
-    create_record(tmp_path, "Valley block", "north orchard")
+    create_record(tmp_path, "Valley block", "north orchard", INVARIANCES)
 
     with pytest.raises(ValueError, match="rename"):
-        create_record(tmp_path, "Hill block", "north orchard")
+        create_record(tmp_path, "Hill block", "north orchard", INVARIANCES)
 
     assert read_record(tmp_path)["display_name"] == "Valley block"
 
@@ -121,8 +131,32 @@ def test_create_record_refuses_a_present_record_missing_a_field(
         expect=ts.Version.ABSENT,
     )
 
-    with pytest.raises(ProjectRecordInvalidError, match="does not hold an id"):
-        create_record(tmp_path, "Valley block", "north orchard")
+    with pytest.raises(
+        ProjectRecordInvalidError, match="is not a project record"
+    ):
+        create_record(tmp_path, "Valley block", "north orchard", INVARIANCES)
+
+
+def test_read_record_refuses_a_record_stating_no_invariances(tmp_path: Path):
+    from tcip_mcp.project_record import (
+        ProjectRecordInvalidError,
+        create_record,
+        project_record_key,
+        read_record,
+    )
+
+    record = create_record(
+        tmp_path, "Valley block", "north orchard", INVARIANCES
+    )
+    stored = ts.read_versioned(project_record_key(tmp_path))
+    ts.replace(
+        project_record_key(tmp_path),
+        {k: v for k, v in record.items() if k != "invariances"},
+        expect=stored.version,
+    )
+
+    with pytest.raises(ProjectRecordInvalidError, match="invariances"):
+        read_record(tmp_path)
 
 
 def test_create_record_lets_a_decode_error_through_for_an_undecodable_record(
@@ -131,11 +165,11 @@ def test_create_record_lets_a_decode_error_through_for_an_undecodable_record(
     from tcip_mcp.project_record import create_record, project_record_key
     from tests._record_damage_fixtures import damage_record
 
-    create_record(tmp_path, "Valley block", "north orchard")
+    create_record(tmp_path, "Valley block", "north orchard", INVARIANCES)
     damage_record(project_record_key(tmp_path), b"{not valid json")
 
     with pytest.raises(ts.DecodeError):
-        create_record(tmp_path, "Valley block", "north orchard")
+        create_record(tmp_path, "Valley block", "north orchard", INVARIANCES)
 
 
 # ── replace_site: the one deliberate correction ─────────────────────────────────
@@ -150,7 +184,9 @@ def test_replace_site_corrects_the_site_keeping_the_id_and_display_name(
         replace_site,
     )
 
-    record = create_record(tmp_path, "Valley block", "north orchard")
+    record = create_record(
+        tmp_path, "Valley block", "north orchard", INVARIANCES
+    )
 
     assert replace_site(tmp_path, "south orchard") == {
         "site": "south orchard",
@@ -185,7 +221,9 @@ def test_read_record_raises_missing_and_publishes_no_database_for_a_root_with_no
 def test_record_fields_reports_the_record(tmp_path: Path):
     from tcip_mcp.project_record import create_record, record_fields
 
-    record = create_record(tmp_path, "Valley block", "north orchard")
+    record = create_record(
+        tmp_path, "Valley block", "north orchard", INVARIANCES
+    )
 
     assert record_fields(tmp_path) == {**record, "record_problem": None}
 
@@ -207,7 +245,7 @@ def test_record_fields_names_an_undecodable_record(tmp_path: Path):
     )
     from tests._record_damage_fixtures import damage_record
 
-    create_record(tmp_path, "Valley block", "north orchard")
+    create_record(tmp_path, "Valley block", "north orchard", INVARIANCES)
     damage_record(project_record_key(tmp_path), b"{not valid json")
 
     fields = record_fields(tmp_path)
@@ -226,6 +264,8 @@ def test_existing_project_resolves_a_project_and_refuses_a_directory_with_no_rec
     with pytest.raises(ValueError, match="names no readable project"):
         existing_project(bare)
 
-    created = create_record(tmp_path, "Valley block", "north orchard")
+    created = create_record(
+        tmp_path, "Valley block", "north orchard", INVARIANCES
+    )
     root, record = existing_project(tmp_path)
     assert (root, record["id"]) == (tmp_path.resolve(), created["id"])

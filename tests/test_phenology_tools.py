@@ -28,20 +28,16 @@ from tests._chain_fixtures import deliver_milestones
 def test_build_plant_mapping_wraps_build_and_persists(tmp_path: Path) -> None:
     from datetime import datetime
 
-    from tcip_mcp.tools.project_tools import (
-        initialize_project,
-        register_dataset,
-    )
+    from tcip_mcp.tools.project_tools import register_dataset
     from tcip_mcp.traits import registered_crops
     from tests._image_fixtures import write_geo_image
     from tests._mapping_fixtures import (
         register_plant_registry_for,
         write_plant_csv,
     )
+    from tests._web_fixtures import named_project
 
-    assert "error" not in initialize_project(
-        str(tmp_path), "Orchard", site="orchard block"
-    )
+    named_project(tmp_path, "Orchard")
     images_root = tmp_path / "images"
     write_geo_image(
         images_root / "2026-02-11" / "img1.jpg",
@@ -88,11 +84,9 @@ def test_build_plant_mapping_wraps_build_and_persists(tmp_path: Path) -> None:
 
 
 def test_build_plant_mapping_missing_images_root(tmp_path: Path) -> None:
-    from tcip_mcp.tools.project_tools import initialize_project
+    from tests._web_fixtures import named_project
 
-    assert "error" not in initialize_project(
-        str(tmp_path), "Orchard", site="orchard block"
-    )
+    named_project(tmp_path, "Orchard")
     res = build_plant_mapping(
         tmp_path,
         images_root=str(tmp_path / "nope"),
@@ -104,15 +98,11 @@ def test_build_plant_mapping_missing_images_root(tmp_path: Path) -> None:
 
 
 def test_build_plant_mapping_missing_registry(tmp_path: Path) -> None:
-    from tcip_mcp.tools.project_tools import (
-        initialize_project,
-        register_dataset,
-    )
+    from tcip_mcp.tools.project_tools import register_dataset
     from tcip_mcp.traits import registered_crops
+    from tests._web_fixtures import named_project
 
-    assert "error" not in initialize_project(
-        str(tmp_path), "Orchard", site="orchard block"
-    )
+    named_project(tmp_path, "Orchard")
     images_root = tmp_path / "images"
     (images_root / "2026-02-11").mkdir(parents=True)
     register_dataset(

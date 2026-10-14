@@ -192,7 +192,8 @@ config = {
     "device": "cuda",
     "seed": ...,  # every stream's seed, recorded on the run
     "deterministic": ...,  # cuDNN deterministic algorithms (slower)
-    # optional; each transform states every value its constructor takes
+    # optional; each transform states every value its constructor takes, and the launch
+    # refuses one relying on a capture invariance the project's record states false
     "augmentation": {
         "rationale": ...,
         "horizontal_flip": {"p": ...},

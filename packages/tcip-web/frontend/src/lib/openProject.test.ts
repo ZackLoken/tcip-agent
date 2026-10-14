@@ -4,6 +4,7 @@ import { api, type ProjectSummary } from "@/api/client";
 import { GUI_STATE_DEFAULTS, type SessionWrite } from "@/api/types.generated";
 import { openWithDefaults, startOpen } from "@/lib/openProject";
 import { useStore } from "@/store";
+import { INVARIANCES } from "@/test/projectRecords";
 
 vi.mock("@/api/client", () => ({
   api: {
@@ -18,6 +19,7 @@ function project(overrides: Partial<ProjectSummary> & { id: string }): ProjectSu
   return {
     display_name: `Project ${overrides.id}`,
     site: "north orchard",
+    invariances: INVARIANCES,
     record_problem: null,
     path: `/ws/${overrides.id}`,
     created: 1,

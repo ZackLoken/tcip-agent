@@ -7,6 +7,7 @@ import { GUI_STATE_DEFAULTS } from "@/api/types.generated";
 import App from "@/App";
 import { useActiveTabSync } from "@/hooks/useActiveTabSync";
 import { useStore } from "@/store";
+import { INVARIANCES } from "@/test/projectRecords";
 
 // App's own socket/tab-sync effects reach the network; only the tab/panel wiring is under
 // test here, so both are stubbed rather than left to hit a backend that isn't running.
@@ -58,6 +59,7 @@ const VALLEY: ProjectSummary = {
   id: "a1b2c3d4e5f6",
   display_name: "Valley farm",
   site: null,
+  invariances: INVARIANCES,
   record_problem: null,
   path: "/ws/valley",
   created: 1_700_000_000,

@@ -6,6 +6,7 @@ import { GUI_STATE_DEFAULTS } from "@/api/types.generated";
 import { ProjectBreadcrumb } from "@/components/ProjectBreadcrumb";
 import { openWithDefaults } from "@/lib/openProject";
 import { useStore } from "@/store";
+import { INVARIANCES } from "@/test/projectRecords";
 
 vi.mock("@/api/client", () => {
   return {
@@ -30,6 +31,7 @@ function summary(id: string, displayName: string): ProjectSummary {
     id,
     display_name: displayName,
     site: "north orchard",
+    invariances: INVARIANCES,
     record_problem: null,
     path: `/w/${id}`,
     created: 1,

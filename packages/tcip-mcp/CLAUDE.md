@@ -41,7 +41,7 @@ src/tcip_mcp/
   buckets.py               # a published bucket: its record and its documents, one commit, once
   assessment.py            # the assessment a delivered number rests on, written once
   delivery.py              # the one delivery gate and the delivery event
-  project_record.py       # a project's own record: its id, display name and site
+  project_record.py       # a project's own record: its id, display name, site and invariances
   workspace.py            # the workspace root, its project directories and last-opened pointer
   project_paths.py        # paths under one project's .tcip/ (state, viz) and the repo root
   experiments.py, model_registry.py   # runs and sweeps with their trial runs, side by side in

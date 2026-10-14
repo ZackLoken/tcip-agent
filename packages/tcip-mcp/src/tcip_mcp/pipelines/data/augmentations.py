@@ -13,15 +13,43 @@ Usage:
 from __future__ import annotations
 
 import random
-from typing import TYPE_CHECKING
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Annotated
 
 import torch
 from PIL import Image, ImageEnhance, ImageFilter
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    NonNegativeFloat,
+    PositiveInt,
+    ValidationError,
+    model_validator,
+)
 
 from tcip_mcp.pipelines.image_utils import pil_to_tensor
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.schemas import AugmentationSpec
+
+Probability = Annotated[float, Field(ge=0, le=1)]
+CropFraction = Annotated[float, Field(gt=0, le=1)]
+Size = tuple[PositiveInt, PositiveInt]
+
+
+class _Transform(BaseModel, ABC):
+    """A transform built from exactly the values an augmentation entry states, each in its
+    type's range and finite.
+    """
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    @abstractmethod
+    def relies_on(self) -> set[str]:
+        """The capture invariances (fields of ``project_record.CaptureInvariances``) this
+        transform as stated relies on.
+        """
 
 
 class Compose:
@@ -38,7 +66,7 @@ class Compose:
         return img, target
 
     def __repr__(self) -> str:
-        lines = [f"  {t}" for t in self.transforms]
+        lines = [f"  {t!r}" for t in self.transforms]
         return "Compose([\n" + "\n".join(lines) + "\n])"
 
 
@@ -75,11 +103,14 @@ def _keep_rows(target: dict, valid: torch.Tensor) -> None:
             target[key] = value[valid]
 
 
-class RandomHorizontalFlip:
+class RandomHorizontalFlip(_Transform):
     """Flip image, boxes, and masks horizontally with probability p."""
 
-    def __init__(self, *, p: float) -> None:
-        self.p = p
+    p: Probability
+
+    def relies_on(self) -> set[str]:
+        """The capture invariances this transform relies on: the horizontal flip unless p is 0."""
+        return {"horizontal_flip"} if self.p else set()
 
     def __call__(
         self, img: Image.Image, target: dict
@@ -101,11 +132,14 @@ class RandomHorizontalFlip:
         return img, target
 
 
-class RandomVerticalFlip:
+class RandomVerticalFlip(_Transform):
     """Flip image, boxes, and masks vertically with probability p."""
 
-    def __init__(self, *, p: float) -> None:
-        self.p = p
+    p: Probability
+
+    def relies_on(self) -> set[str]:
+        """The capture invariances this transform relies on: the vertical flip unless p is 0."""
+        return {"vertical_flip"} if self.p else set()
 
     def __call__(
         self, img: Image.Image, target: dict
@@ -125,17 +159,24 @@ class RandomVerticalFlip:
         return img, target
 
 
-class ColorJitter:
+class ColorJitter(_Transform):
     """Random brightness, contrast and saturation perturbations, each a factor drawn uniformly
-    from ``[1 - value, 1 + value]``; a value of 0 leaves that property unchanged.
+    from ``[1 - value, 1 + value]``; a value of 0 leaves that property unchanged, and each value
+    is at most 1, where the factor's lower end reaches 0 and stays non-negative.
     """
 
-    def __init__(
-        self, *, brightness: float, contrast: float, saturation: float
-    ) -> None:
-        self.brightness = brightness
-        self.contrast = contrast
-        self.saturation = saturation
+    brightness: Annotated[float, Field(ge=0, le=1)]
+    contrast: Annotated[float, Field(ge=0, le=1)]
+    saturation: Annotated[float, Field(ge=0, le=1)]
+
+    def relies_on(self) -> set[str]:
+        """The capture invariances this transform relies on: intensity when it shifts brightness
+        or contrast, color when it shifts saturation.
+        """
+        relied = {"color"} if self.saturation else set()
+        if self.brightness or self.contrast:
+            relied.add("intensity")
+        return relied
 
     def __call__(
         self, img: Image.Image, target: dict
@@ -152,15 +193,28 @@ class ColorJitter:
         return img, target
 
 
-class RandomResizedCrop:
-    """Crop a random region and resize to target size. Adjusts boxes and masks accordingly."""
+class RandomResizedCrop(_Transform):
+    """Crop a random region and resize to target size. Adjusts boxes and masks accordingly.
+    ``min_scale`` is at most ``max_scale``.
+    """
 
-    def __init__(
-        self, *, size: tuple[int, int], min_scale: float, max_scale: float
-    ) -> None:
-        self.size = size
-        self.min_scale = min_scale
-        self.max_scale = max_scale
+    size: Size
+    min_scale: CropFraction
+    max_scale: CropFraction
+
+    @model_validator(mode="after")
+    def _ordered(self) -> RandomResizedCrop:
+        if self.min_scale > self.max_scale:
+            raise ValueError(
+                f"min_scale {self.min_scale} exceeds max_scale {self.max_scale}"
+            )
+        return self
+
+    def relies_on(self) -> set[str]:
+        """The capture invariances this transform relies on: scale, since every crop it states
+        resizes a region to ``size``.
+        """
+        return {"scale"}
 
     def __call__(
         self, img: Image.Image, target: dict
@@ -209,12 +263,16 @@ class RandomResizedCrop:
         return img, target
 
 
-class GaussianBlur:
+class GaussianBlur(_Transform):
     """Apply Gaussian blur with probability p."""
 
-    def __init__(self, *, p: float, radius: float) -> None:
-        self.p = p
-        self.radius = radius
+    p: Probability
+    radius: NonNegativeFloat
+    """The Gaussian's radius in pixels."""
+
+    def relies_on(self) -> set[str]:
+        """No capture invariance: a blur perturbs the sensor."""
+        return set()
 
     def __call__(
         self, img: Image.Image, target: dict
@@ -224,11 +282,14 @@ class GaussianBlur:
         return img, target
 
 
-class Resize:
+class Resize(_Transform):
     """Resize image to fixed size. Adjusts boxes and masks accordingly."""
 
-    def __init__(self, *, size: tuple[int, int]) -> None:
-        self.size = size
+    size: Size
+
+    def relies_on(self) -> set[str]:
+        """No capture invariance: a resize fixes the input size."""
+        return set()
 
     def __call__(
         self, img: Image.Image, target: dict
@@ -249,7 +310,7 @@ class Resize:
         return img, target
 
 
-class RandomRotation:
+class RandomRotation(_Transform):
     """Rotate image (and detection boxes/masks) by a uniform angle in
     ``[-degrees, degrees]`` with probability ``p``.
 
@@ -260,9 +321,13 @@ class RandomRotation:
     (classification/ordinal/regression) pass through untouched.
     """
 
-    def __init__(self, *, degrees: float, p: float) -> None:
-        self.degrees = degrees
-        self.p = p
+    degrees: Annotated[float, Field(ge=0, le=180)]
+    """At most 180: the draw over ``[-180, 180]`` already covers every rotation."""
+    p: Probability
+
+    def relies_on(self) -> set[str]:
+        """The capture invariances this transform relies on: rotation unless p or degrees is 0."""
+        return {"rotation"} if self.p and self.degrees else set()
 
     def __call__(
         self, img: Image.Image, target: dict
@@ -337,7 +402,7 @@ class RandomRotation:
 # ── Registry and builder ────────────────────────────────────────────────
 
 
-_AUGMENTATION_REGISTRY: dict[str, type] = {
+_AUGMENTATION_REGISTRY: dict[str, type[_Transform]] = {
     "horizontal_flip": RandomHorizontalFlip,
     "vertical_flip": RandomVerticalFlip,
     "color_jitter": ColorJitter,
@@ -346,6 +411,46 @@ _AUGMENTATION_REGISTRY: dict[str, type] = {
     "resize": Resize,
     "rotation": RandomRotation,
 }
+"""Every transform an augmentation block names."""
+
+
+def _stated_transforms(
+    config: AugmentationSpec,
+) -> list[tuple[str, _Transform]]:
+    """Each transform ``config`` states, in its order: its name and the transform its stated
+    values validate to. Refuses (``ValueError``) an unknown transform, and, naming the entry, one
+    whose values its transform's type refuses.
+    """
+    from tcip_mcp.pipelines.model_build import resolve_named
+
+    stated = []
+    for name, params in (config.model_extra or {}).items():
+        cls = resolve_named(name, _AUGMENTATION_REGISTRY, kind="augmentation")
+        try:
+            stated.append((name, cls.model_validate(params)))
+        except ValidationError as exc:
+            raise ValueError(f"augmentation {name!r}: {exc}") from exc
+    return stated
+
+
+def forbidden_transforms(
+    config: AugmentationSpec, invariances: dict[str, bool]
+) -> list[str]:
+    """One issue for each invariance a transform ``config`` states relies on (its
+    ``relies_on()``) that ``invariances``, a project record's, states false, naming the
+    transform, the invariance and ``initialize_project``, where it is stated. Refuses what
+    :func:`build_augmentation` refuses.
+    """
+    issues: list[str] = []
+    for name, transform in _stated_transforms(config):
+        issues.extend(
+            f"augmentation {name!r} relies on the capture invariance {fact!r}, which this "
+            "project's record states false: the trait's measurement does not hold under it "
+            "(the invariances are stated through initialize_project)"
+            for fact in sorted(transform.relies_on())
+            if not invariances[fact]
+        )
+    return issues
 
 
 def recorded_resize(config: AugmentationSpec | None) -> tuple[int, int] | None:
@@ -374,24 +479,10 @@ def build_augmentation(config: AugmentationSpec) -> Compose:
 
     ``config`` maps each transform's name (:data:`_AUGMENTATION_REGISTRY`) to a dict stating
     every value that transform's constructor takes, e.g. ``{"rationale": "...",
-    "horizontal_flip": {"p": 0.5}, "resize": {"size": [512, 512]}}``. Refuses (``ValueError``)
-    an unknown transform, and by name an entry that is not a dict stating exactly its
-    transform's values.
+    "horizontal_flip": {"p": 0.5}, "resize": {"size": [512, 512]}}``. Refuses what
+    :func:`_stated_transforms` refuses.
     """
-    from tcip_mcp.pipelines.model_build import (
-        keyword_parameters,
-        resolve_named,
+    return Compose(
+        [transform for _name, transform in _stated_transforms(config)]
+        + [ToTensor()]
     )
-
-    transforms: list = []
-    for name, params in (config.model_extra or {}).items():
-        cls = resolve_named(name, _AUGMENTATION_REGISTRY, kind="augmentation")
-        values = keyword_parameters(cls)[0]
-        if not isinstance(params, dict) or set(params) != values:
-            raise ValueError(
-                f"augmentation {name!r} states {params!r}; it takes a dict stating "
-                f"each of {sorted(values)}"
-            )
-        transforms.append(cls(**params))
-    transforms.append(ToTensor())
-    return Compose(transforms)

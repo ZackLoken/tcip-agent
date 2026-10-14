@@ -380,11 +380,15 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(
     )
     from tcip_mcp.traits import read_trait
     from tests._trait_fixtures import COUNT_TRAIT, seed_confirmed_count
+    from tests._web_fixtures import INVARIANCES
 
     root = tmp_path / "source"
     _annotated_dataset(root, 4)
     assert "error" not in initialize_project(
-        str(root), "North orchard", site="north orchard"
+        str(root),
+        "North orchard",
+        site="north orchard",
+        invariances=INVARIANCES,
     )
     assert "error" not in register_dataset(root, str(root), crop="currant")
     confirmed = seed_confirmed_count(root)

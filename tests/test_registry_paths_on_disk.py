@@ -18,15 +18,15 @@ def test_archive_then_import_lands_a_registry_naming_the_restored_files(
     from tcip_mcp.tools.project_tools import (
         archive_project,
         import_project,
-        initialize_project,
     )
     from tests._verified_checkpoint_fixtures import (
         finished_run,
         produced_checkpoint,
     )
+    from tests._web_fixtures import named_project
 
     src = tmp_path / "src_project"
-    initialize_project(str(src), "Source project", "north orchard")
+    named_project(src, "Source project")
     finished_run(src, experiment_id="exp1")
     foreign = produced_checkpoint(
         src / ".tcip" / "models" / "foreign.pt",
