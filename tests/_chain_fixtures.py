@@ -6,7 +6,7 @@ trait, assess the checkpoint and publish its predictions under the assessment.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -15,7 +15,9 @@ from tcip_mcp.pipelines.execution import Stated
 from tests._training_values import (
     DISPERSION_QUANTILE,
     EQUIVALENCE_Z,
+    MASK_CUT,
     RATIONALE,
+    collection_pass,
     drawn_split,
     evaluation_block,
     schedule,
@@ -331,7 +333,8 @@ def training_config(
     """A one-epoch seeded CPU run of ``project`` of ``model_source`` over the ``data`` section
     (drawing the sample split of ``tests._training_values.drawn_split`` when it states none),
     every other key the toy detectors train at (the optimizer, schedule, stop rule and
-    evaluation blocks the sample ones of ``tests._training_values``, the schedule's one-epoch
+    evaluation blocks the sample ones of ``tests._training_values``, an instance segmentation
+    run's evaluation cutting its masks at the sample threshold, the schedule's one-epoch
     horizon ending the stage), with a copy of each of ``overrides`` in place of its key. Its one
     stage trains every parameter at one rate, since the toy detectors expose neither a backbone
     to freeze nor parameter groups. A :data:`FRAME_STATISTICS` normalization becomes the
@@ -352,7 +355,13 @@ def training_config(
         "device": "cpu",
         "checkpoint_every_n_epochs": 1,
         "early_stopping": stop_rule(),
-        "evaluation": evaluation_block(),
+        "evaluation": evaluation_block(
+            **(
+                {"mask_cut": asdict(MASK_CUT)}
+                if model_source.get("task") == "instance_seg"
+                else {}
+            )
+        ),
         "optimizer": sgd_optimizer(backbone_lr=1e-2),
         "scheduler": schedule("cosine", horizon_epochs=1),
         "gradient_accumulation_steps": 1,
@@ -436,7 +445,8 @@ def assess(
     **stated: Any,
 ) -> dict:
     """``assess_checkpoint`` of the count trait's per-image count over ``selection_dir`` under the
-    ``stated`` execution values, at the sample count test settings.
+    sample collection pass with the ``stated`` execution values over it, at the sample count test
+    settings.
     """
     from tcip_mcp.tools.calibration_tools import assess_checkpoint
     from tests import _trait_fixtures as fx
@@ -450,7 +460,7 @@ def assess(
         equivalence_z=EQUIVALENCE_Z,
         dispersion_quantile=DISPERSION_QUANTILE,
         rationale=RATIONALE,
-        stated=Stated(**stated, rationale=RATIONALE) if stated else Stated(),
+        stated=collection_pass(**stated),
         device=device,
     )
 
@@ -964,7 +974,7 @@ def attributed_series(
             equivalence_z=EQUIVALENCE_Z,
             dispersion_quantile=DISPERSION_QUANTILE,
             rationale=RATIONALE,
-            stated=Stated(),
+            stated=collection_pass(),
         )
         assert "error" not in assessment, assessment
         assert assessment["passed"] is True, assessment["failures"]

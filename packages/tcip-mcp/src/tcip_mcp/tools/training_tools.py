@@ -1815,7 +1815,8 @@ def evaluate_model(
     """Evaluate a trained checkpoint on a (held-out) dataset and return the result.
 
     Computes the same per-task metrics as validation: detection/instance_seg get the one
-    matcher's precision/recall/F1 and average precision (by mask for instance_seg);
+    matcher's precision/recall/F1 and average precision (by mask for an instance_seg pass that
+    collects and cuts masks, by box for one stating ``masks`` false);
     classification/ordinal/regression get the in-house scalar metrics. Writes
     nothing: the training run's directory is never touched. The reference is read under the class
     space the checkpoint records, its map included.
@@ -1844,9 +1845,11 @@ def evaluate_model(
             both. The task is the checkpoint's own.
         stated: The execution values to state rather than derive (``execution.Stated``),
             ``{}`` stating none: the operating ``conf`` P/R/F1 are reported at, required of a
-            detector, and on the delivery-grade path the ``postprocess`` merge, required, and
-            the ``tile_size``, ``overlap`` and ``cross_tile_nms`` (derived from the evaluated
-            ground truth when unstated), with the ``rationale`` for them. The resolved record,
+            detector, whether an instance segmentation pass collects ``masks`` and, when it does,
+            the ``mask_cut`` it cuts them by (``execution.MaskCut``), and on the delivery-grade
+            path the ``postprocess`` merge, required, and the ``tile_size``, ``overlap`` and
+            ``cross_tile_nms`` (derived from the evaluated ground truth when unstated), with the
+            ``rationale`` for them. The resolved record,
             each value's source with it, is returned under ``execution``.
         iou_threshold: The IoU a match must reach, stated (the comparability convention is
             ``schemas.COMPARABILITY_IOU``).

@@ -44,7 +44,6 @@ def infer(
     device: str | None,
     tile_batch_size: int,
     dry_run: bool,
-    require_masks: bool,
     resume: bool,
     progress: Callable[[int, int], None] | None = None,
     canceled: Callable[[], bool] | None = None,
@@ -162,7 +161,6 @@ def infer(
             **checkpoint.producer,
             "assessment_id": assessment_id,
             "tile_batch_size": tile_batch_size,
-            "require_masks": require_masks,
         }
         if recorded is not None:
             differing = sorted(
@@ -198,7 +196,6 @@ def infer(
                         reader,
                         str(raster_path),
                         {**pass_identity, "execution": p.execution.record()},
-                        require_masks=require_masks,
                         resumed=recorded is not None,
                     )
                 ]
@@ -284,7 +281,6 @@ def run_inference(
     device: str | None = None,
     tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE,
     dry_run: bool = False,
-    require_masks: bool = True,
     resume: bool = False,
 ) -> dict:
     """Run a trained model over images or a raster, and publish the predictions as a bucket.
@@ -299,11 +295,14 @@ def run_inference(
     bucket.
 
     With ``assessment_id`` the pass runs exactly that assessment's execution record (its conf,
-    object density, tile edge, overlap, merge and threshold) and the bucket names the assessment,
-    which is what a delivery reads to call its numbers validated; a stated execution value it
-    records differently refuses by name. Without one, the bucket is unassessed and the pass runs
-    at the stated values: a detector's ``conf`` and a tiled pass's ``postprocess`` and
-    ``cross_tile_nms`` are required, no reference standing behind any; the object density is the
+    object density, mask cut, tile edge, overlap, merge and threshold)
+    and the bucket names
+    the assessment, which is what a delivery reads to call its numbers validated; a stated
+    execution value it records differently refuses by name. Without one, the bucket is unassessed
+    and the pass runs at the stated values: a detector's ``conf``, an instance segmentation
+    pass's ``masks`` and, when it collects them, its ``mask_cut``, and a
+    tiled pass's ``postprocess`` and ``cross_tile_nms`` are required, no reference standing
+    behind any; the object density is the
     one the checkpoint recorded of the regions it trained on (frames, or tiles for a tiled run),
     and each frame keeps at most ``ceil(density x its pixels)`` detections, that cap written on its
     prediction
@@ -321,17 +320,19 @@ def run_inference(
         stated: The execution values to state rather than derive (``execution.Stated``),
             ``{}`` stating none: ``tile`` (tiled inference over ``images_dir``; unstated follows
             the checkpoint's own training regime), ``tile_size``, ``overlap``, ``postprocess``
-            (one of ``execution.CROSS_TILE_MERGES``), ``cross_tile_nms`` and ``conf``, with the
-            ``rationale`` for them, which the execution record carries.
+            (one of ``execution.CROSS_TILE_MERGES``), ``cross_tile_nms``, ``conf``, ``masks``
+            (whether an instance segmentation pass collects masks), ``mask_cut``
+            (``execution.MaskCut``: ``mask_binarize``, the probability a mask pixel is foreground
+            at, and ``epsilon_frac``, the fraction of each ring's perimeter its mask rings are
+            simplified at), with the ``rationale`` for them, which the execution record carries.
         device: cuda / cpu (auto if omitted).
         tile_batch_size: Tiles per forward batch.
         dry_run: Resolve the execution record and the bucket and report them, with whether the
             bucket already exists, predicting and publishing nothing.
-        require_masks: Collect masks for an ``instance_seg`` checkpoint over a raster.
         resume: ``raster_path`` only: continue a raster pass toward ``bucket`` whose progress
             the project records, under the execution record that progress recorded; a stated
             value it records differently refuses by name, and so does a different checkpoint,
-            raster, assessment, tile batch size or mask choice.
+            raster, assessment or tile batch size.
 
     """
     return infer(
@@ -345,7 +346,6 @@ def run_inference(
         device=device,
         tile_batch_size=tile_batch_size,
         dry_run=dry_run,
-        require_masks=require_masks,
         resume=resume,
         actor=None,
     )
@@ -383,7 +383,6 @@ def _raster_pass(
     label: str,
     pass_identity: dict,
     *,
-    require_masks: bool,
     resumed: bool,
 ) -> dict:
     """The one tiled pass over the open raster ``reader`` (``label`` naming it): its identity
@@ -420,7 +419,6 @@ def _raster_pass(
         reader,
         execution=p.execution,
         tile_batch_size=p.tile_batch_size,
-        require_masks=require_masks,
         source_label=label,
         prior=prior,
         progress=record,

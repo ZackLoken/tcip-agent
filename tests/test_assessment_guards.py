@@ -38,7 +38,9 @@ from tests._training_values import (  # noqa: E402
     COUNT_TEST,
     DISPERSION_QUANTILE,
     EQUIVALENCE_Z,
+    MASK_CUT,
     RATIONALE,
+    collection_pass,
 )
 from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS  # noqa: E402
 
@@ -651,7 +653,6 @@ def test_an_instance_segmentation_assessment_reads_its_reference_through_polygon
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.data.selection import source_digests
     from tcip_mcp.pipelines.execution import prepare
-    from tcip_mcp.pipelines.operating_point import STAGED_CONF_FLOOR
     from tests._chain_fixtures import (
         BESPOKE_INSTANCE_SEG,
         BESPOKE_MODELS,
@@ -687,8 +688,10 @@ def test_an_instance_segmentation_assessment_reads_its_reference_through_polygon
         return assessment._detection(
             prepare(
                 checkpoint,
-                Stated(
-                    tile=False, conf=STAGED_CONF_FLOOR, rationale=RATIONALE
+                collection_pass(
+                    tile=False,
+                    masks=True,
+                    mask_cut=MASK_CUT,
                 ),
                 device="cpu",
             ),
@@ -736,6 +739,50 @@ def test_an_assessment_records_the_test_settings_and_the_reason_it_states(
                 door,
                 name,
             )
+
+
+def test_a_detector_assessment_collects_at_the_conf_it_states_and_records_it_as_the_floor(
+    tmp_path, monkeypatch
+):
+    """Guard. Every prediction a detector assessment collects runs at the conf its statement
+    carries, that conf is the floor its evidence records, and a statement carrying no conf
+    refuses naming the field.
+    """
+    from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+    from tcip_mcp.tools.calibration_tools import assess_checkpoint
+
+    _images, _drawn, selection_dir, checkpoint = _trained(
+        tmp_path, "exp-floor"
+    )
+    confirm_count_trait(tmp_path)
+    stated_conf = 0.05
+    collected: set[float] = set()
+    real = GenericPredictor.predict_batch
+
+    def recording(self, sources, execution, **kwargs):
+        collected.add(execution.conf)
+        return real(self, sources, execution, **kwargs)
+
+    monkeypatch.setattr(GenericPredictor, "predict_batch", recording)
+
+    record = assess(tmp_path, checkpoint, selection_dir, conf=stated_conf)
+
+    assert "error" not in record, record
+    assert collected == {stated_conf}
+    assert record["criterion"]["count"]["staged_conf_floor"] == stated_conf
+    assert record["criterion"]["count"]["observed_min_score"] >= stated_conf
+    unstated = assess_checkpoint(
+        tmp_path,
+        checkpoint_path=checkpoint,
+        trait=fx.COUNT_TRAIT,
+        delivery_kind="per_image_count",
+        selection_dir=str(selection_dir),
+        equivalence_z=EQUIVALENCE_Z,
+        dispersion_quantile=DISPERSION_QUANTILE,
+        rationale=RATIONALE,
+        stated=Stated(),
+    )
+    assert "states no conf" in unstated["error"], unstated
 
 
 @pytest.mark.parametrize(

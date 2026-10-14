@@ -5,6 +5,7 @@ sources its tiles from a windowed raster read.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -340,24 +341,30 @@ def test_pixel_to_native_returns_plain_floats(tmp_path: Path) -> None:
 TILE = 32
 
 
-def _pass(tmp_path: Path, ckpt: str):
+def _pass(tmp_path: Path, ckpt: str, **stated: Any):
     """The pass the registered ``ckpt`` runs at this module's lattice: ``TILE`` edge, 0.2
-    overlap, NMS at 0.3, every detection kept up to the checkpoint's density.
+    overlap, NMS at 0.3, every detection kept up to the checkpoint's density, an instance
+    segmentation checkpoint's masks cut at the sample threshold, with ``stated`` over those.
     """
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.execution import Stated, prepare
+    from tests._training_values import MASK_CUT
 
+    checkpoint = load_registered_checkpoint(ckpt, project=tmp_path)
+    values: dict[str, Any] = dict(
+        tile=True,
+        tile_size=TILE,
+        overlap=0.2,
+        postprocess="nms",
+        cross_tile_nms=0.3,
+        conf=0.0,
+        rationale="a sample reason the test states",
+    )
+    if checkpoint.task == "instance_seg" and stated.get("masks", True):
+        values.update(masks=True, mask_cut=MASK_CUT)
     return prepare(
-        load_registered_checkpoint(ckpt, project=tmp_path),
-        Stated(
-            tile=True,
-            tile_size=TILE,
-            overlap=0.2,
-            postprocess="nms",
-            cross_tile_nms=0.3,
-            conf=0.0,
-            rationale="a sample reason the test states",
-        ),
+        checkpoint,
+        Stated(**{**values, **stated}),
         device="cpu",
         tile_batch_size=8,
     ).runnable()
@@ -373,14 +380,10 @@ def _bare_execution():
 
 
 def _sliced(predictor, execution, source, **kwargs) -> dict:
-    """``predict_sliced`` under ``execution``, eight tiles a batch, masks collected unless
-    ``kwargs`` says otherwise.
-    """
-    call: dict = dict(
-        execution=execution, tile_batch_size=8, require_masks=True
+    """``predict_sliced`` under ``execution``, eight tiles a batch."""
+    return predictor.predict_sliced(
+        source, execution=execution, tile_batch_size=8, **kwargs
     )
-    call.update(kwargs)
-    return predictor.predict_sliced(source, **call)
 
 
 def _windowed_multiband_tiff(
@@ -573,7 +576,7 @@ def test_predict_sliced_windowed_and_full_array_sources_produce_matching_masks(
     ]
 
 
-def test_predict_sliced_windowed_source_require_masks_false_carries_no_masks_key(
+def test_a_windowed_pass_stating_no_masks_carries_no_masks_key(
     tmp_path: Path,
 ) -> None:
     """The boxes-only opt-out still works on the windowed path: no ``masks`` key at all, not an
@@ -586,9 +589,9 @@ def test_predict_sliced_windowed_source_require_masks_false_carries_no_masks_key
     _windowed_multiband_tiff(path, channels=3)
     ckpt = _bespoke_instance_seg_checkpoint(tmp_path)
 
-    p = _pass(tmp_path, ckpt)
+    p = _pass(tmp_path, ckpt, masks=False)
     with open_raster(path, 3) as reader:
-        result = _sliced(p.predictor, p.execution, reader, require_masks=False)
+        result = _sliced(p.predictor, p.execution, reader)
     assert "masks" not in result
     assert {"boxes", "scores", "labels", "count", "tiles"} <= set(result)
 
@@ -663,13 +666,15 @@ def test_windowed_predict_sliced_reaches_real_slicing_for_instance_seg_with_and_
     None
 ):
     """instance_seg masks thread through the windowed-read path the same as the full-array
-    ``predict_sliced`` path: neither ``require_masks=True`` (masks collected) nor
-    ``require_masks=False`` (the boxes-only opt-out) refuses outright, both reach the real slice
-    loop, which then fails on the fake reader's own ``AssertionError`` rather than anything raised
-    by ``predict_sliced`` itself.
+    ``predict_sliced`` path: neither a record collecting masks nor one collecting none (the
+    boxes-only opt-out) refuses outright, both reach the real slice loop, which then fails on the
+    fake reader's own ``AssertionError`` rather than anything raised by ``predict_sliced`` itself.
     """
+    from dataclasses import replace
+
     torch = pytest.importorskip("torch")
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
+    from tests._training_values import MASK_CUT
 
     class _FakeReader:
         height, width, num_channels = 64, 64, 3
@@ -684,11 +689,12 @@ def test_windowed_predict_sliced_reaches_real_slicing_for_instance_seg_with_and_
     p.model = torch.nn.Identity()
     p.device = torch.device("cpu")
 
+    masked = replace(_bare_execution(), masks=True, mask_cut=MASK_CUT)
     with pytest.raises(AssertionError):
-        _sliced(p, _bare_execution(), _FakeReader())
+        _sliced(p, masked, _FakeReader())
 
     with pytest.raises(AssertionError):
-        _sliced(p, _bare_execution(), _FakeReader(), require_masks=False)
+        _sliced(p, _bare_execution(), _FakeReader())
 
 
 def test_predict_sliced_windowed_source_refuses_non_detection_task() -> None:

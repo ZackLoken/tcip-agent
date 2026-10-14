@@ -53,13 +53,20 @@ def _read_coco(document: Path) -> tuple[dict, str]:
 
 
 def import_coco_document(
-    document: str | Path, dataset_root: str | Path, *, date: str, project: Path
+    document: str | Path,
+    dataset_root: str | Path,
+    *,
+    date: str,
+    epsilon_frac: float,
+    rationale: str,
+    project: Path,
 ) -> dict:
     """Write one per-image label document for every image ``document`` lists, keyed under the
     capture ``date`` of ``dataset_root`` (both :func:`~tcip_mcp.registry_paths.located` against
-    ``project``), and record the import on the dataset's audit log with
-    the document's path and the digest of the one read of its bytes, in one commit with the
-    documents: an import that writes nothing leaves no line.
+    ``project``), and record the import on the dataset's audit log with the document's path, the
+    digest of the one read of its bytes, the ``epsilon_frac`` a run-length mask's rings are
+    simplified at and the ``rationale`` for it, in one commit with the documents: an import that
+    writes nothing leaves no line.
 
     ``date`` names the capture ``images/<date>/``; one :func:`~tcip_mcp.dataset_layout.list_dates`
     does not list refuses. Each declared category must be a
@@ -95,7 +102,7 @@ def import_coco_document(
     source = str(document)
     coco, digest = _read_coco(document)
     categories, by_image, problems = parse_coco_annotations(
-        coco, decode_rle=_rle_mask
+        coco, decode_rle=_rle_mask, epsilon_frac=epsilon_frac
     )
 
     dates = dataset_layout.list_dates(root)
@@ -187,6 +194,8 @@ def import_coco_document(
     arguments = {
         "document": source,
         "capture": date,
+        "epsilon_frac": epsilon_frac,
+        "rationale": rationale,
         "written": sorted(key.parts[-1] for key in writes),
     }
     if writes:

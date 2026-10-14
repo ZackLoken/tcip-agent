@@ -7,7 +7,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, get_args
+from typing import TYPE_CHECKING, Any, Literal, TypeAlias, get_args
 
 if TYPE_CHECKING:
     import numpy as np
@@ -793,6 +793,188 @@ def derive_cross_tile_nms(regions: Sequence[Region]) -> float | None:
     return threshold
 
 
+MaskPair: TypeAlias = "tuple[np.ndarray, tuple[int, int], list]"
+"""One detection matched to one ground-truth object: the detection's uncut soft mask over the part
+of its frame it spans, that part's ``(x, y)`` origin, and the object's rings in frame pixels."""
+
+MASK_BINARIZE_DERIVATION = (
+    "of the cuts each matched calibration pair's own pixel IoU peaks at, the one at which the "
+    "pairs' mean rings IoU is highest, the lowest on a tie"
+)
+"""The label an execution record names a mask threshold :func:`derive_mask_binarize` derived
+by."""
+
+
+def mask_rings_iou(pairs: Sequence[MaskPair], threshold: float) -> float:
+    """The mean, over ``pairs``, of the region IoU (``matching.rings_iou_matrix``) between each
+    object's rings and the rings its detection's soft mask cuts into at ``threshold``
+    (``mask_contours.mask_to_polygon_rings`` at ``epsilon_frac`` zero, the region the cut draws
+    unsimplified), placed at the mask's origin.
+    """
+    import numpy as np
+
+    from tcip_annotation.mask_contours import mask_to_polygon_rings
+    from tcip_annotation.matching import rings_iou_matrix
+
+    return float(
+        np.mean(
+            [
+                rings_iou_matrix(
+                    [rings],
+                    [
+                        [
+                            [(px + x, py + y) for px, py in ring]
+                            for ring in mask_to_polygon_rings(
+                                soft, threshold=threshold, epsilon_frac=0.0
+                            )
+                        ]
+                    ],
+                )[0, 0]
+                for soft, (x, y), rings in pairs
+            ]
+        )
+    )
+
+
+def _pixel_iou_peak(pair: MaskPair) -> float | None:
+    """The distinct positive value of one pair's soft mask whose cut overlaps the object, filled
+    as a training mask is (``datasets.instance_masks``), best by pixel IoU over the window
+    spanning both (``sklearn.metrics.metric_at_thresholds`` of ``jaccard_score``), the lowest on
+    a tie; ``None`` for a mask holding no positive value.
+    """
+    import numpy as np
+    from sklearn.metrics import jaccard_score, metric_at_thresholds
+
+    from tcip_annotation.state import Polygon
+    from tcip_mcp.pipelines.data.datasets import instance_masks
+
+    soft, (x, y), rings = pair
+    points = np.concatenate([np.asarray(r, dtype=np.float64) for r in rings])
+    x0 = min(x, int(np.floor(points[:, 0].min())))
+    y0 = min(y, int(np.floor(points[:, 1].min())))
+    x1 = max(x + soft.shape[1], int(np.ceil(points[:, 0].max())) + 1)
+    y1 = max(y + soft.shape[0], int(np.ceil(points[:, 1].max())) + 1)
+    window = np.zeros((y1 - y0, x1 - x0), dtype=np.float64)
+    window[
+        y - y0 : y - y0 + soft.shape[0], x - x0 : x - x0 + soft.shape[1]
+    ] = soft
+    filled = (
+        instance_masks(
+            [Polygon([[(px - x0, py - y0) for px, py in r] for r in rings])],
+            (x1 - x0, y1 - y0),
+        )[0]
+        .numpy()
+        .ravel()
+    )
+    ious, cuts = metric_at_thresholds(
+        filled,
+        window.ravel(),
+        jaccard_score,
+        metric_params={"zero_division": 0},
+    )
+    best = max(
+        ((float(iou), float(cut)) for iou, cut in zip(ious, cuts) if cut > 0),
+        key=lambda scored: (scored[0], -scored[1]),
+        default=None,
+    )
+    return None if best is None else best[1]
+
+
+def derive_mask_binarize(pairs: Sequence[MaskPair]) -> float:
+    """The probability an instance segmentation head's masks are cut at, from the calibration
+    side's detections matched one to one with ground-truth objects
+    (:data:`MASK_BINARIZE_DERIVATION`): each pair's own pixel-IoU peak
+    (:func:`_pixel_iou_peak`) is a candidate, and the candidate whose cuts best match the
+    objects' rings on average over every pair (:func:`mask_rings_iou`) is the threshold, the
+    lowest on a tie. No candidate, no pair's mask holding a positive value, refuses
+    (``ValueError``) naming ``mask_binarize``.
+    """
+    candidates = sorted(
+        {t for t in map(_pixel_iou_peak, pairs) if t is not None}
+    )
+    if not candidates:
+        raise ValueError(
+            "no calibration detection matched to a ground-truth object at the fitted conf holds "
+            "a positive mask value, so no mask threshold derives; state mask_binarize"
+        )
+    return max(candidates, key=lambda t: (mask_rings_iou(pairs, t), -t))
+
+
+EPSILON_FRAC_DERIVATION = (
+    "the median over matched calibration pairs of the least fraction of the prediction's "
+    "contour perimeter at which approxPolyDP leaves its ground truth's vertex count"
+)
+"""The label an execution record names a ring simplification :func:`derive_epsilon_frac`
+derived by."""
+
+
+def _vertex_count_fraction(pair: MaskPair, threshold: float) -> float | None:
+    """The least fraction of the perimeter (``cv2.arcLength``) of one pair's prediction contour,
+    its soft mask's largest region cut at ``threshold`` (``mask_contours.mask_contours``), at
+    which ``cv2.approxPolyDP`` leaves exactly as many vertices as the object's largest ring
+    holds: zero when the unsimplified contour already holds it, otherwise the upper end of the
+    bracket ``scipy.optimize.elementwise.find_root`` narrows over ``[0, 1]`` to adjacent floats
+    around where the count first falls to it; ``None`` for a mask cutting to nothing and for a pair
+    whose count the simplification never leaves exactly.
+    """
+    import cv2
+    import numpy as np
+    from scipy.optimize.elementwise import find_root
+
+    from tcip_annotation.mask_contours import mask_contours
+
+    soft, _origin, rings = pair
+    contours = mask_contours(soft, threshold=threshold)
+    if not contours:
+        return None
+    (contour, *_rest) = contours
+    vertices = len(
+        max(rings, key=lambda r: cv2.contourArea(np.asarray(r, np.float32)))
+    )
+    perimeter = cv2.arcLength(contour, True)
+
+    def kept(frac: float) -> int:
+        return len(cv2.approxPolyDP(contour, frac * perimeter, True))
+
+    def adjacent(res: Any) -> None:
+        low, high = res.bracket
+        if np.nextafter(low, high) >= high:
+            raise StopIteration
+
+    if (unsimplified := kept(0.0)) <= vertices:
+        return 0.0 if unsimplified == vertices else None
+    _low, high = find_root(
+        np.vectorize(lambda frac: 1.0 if kept(frac) > vertices else -1.0),
+        (0.0, 1.0),
+        tolerances={"xatol": 0, "xrtol": 0, "fatol": 0, "frtol": 0},
+        callback=adjacent,
+    ).bracket
+    return float(high) if kept(float(high)) == vertices else None
+
+
+def derive_epsilon_frac(pairs: Sequence[MaskPair], threshold: float) -> float:
+    """The fraction of each ring's perimeter an instance segmentation head's mask rings are
+    simplified at, from the calibration side's detections matched one to one with ground-truth
+    objects, their masks cut at ``threshold`` (:data:`EPSILON_FRAC_DERIVATION`): the median of
+    each pair's own fraction (:func:`_vertex_count_fraction`), a pair yielding none contributing
+    nothing. No pair yielding one refuses (``ValueError``) naming ``epsilon_frac``.
+    """
+    import numpy as np
+
+    fractions = [
+        f
+        for f in (_vertex_count_fraction(pair, threshold) for pair in pairs)
+        if f is not None
+    ]
+    if not fractions:
+        raise ValueError(
+            "no calibration detection matched to a ground-truth object at the fitted conf "
+            "simplifies to its object's vertex count, so no ring simplification derives; state "
+            "epsilon_frac"
+        )
+    return float(np.median(fractions))
+
+
 _STATIC_DERIVATION_IMPLEMENTATIONS: dict[str, object] = {
     "probed bands of": "tcip_mcp.pipelines.derivations.probe_channels",  # f-string prefix
     "max class id + 1 in the label set": (
@@ -812,6 +994,8 @@ _STATIC_DERIVATION_IMPLEMENTATIONS: dict[str, object] = {
     DETECTOR_GEOMETRY_DERIVATION: (
         "tcip_mcp.pipelines.derivations.derive_detector_geometry"
     ),
+    MASK_BINARIZE_DERIVATION: "tcip_mcp.pipelines.derivations.derive_mask_binarize",
+    EPSILON_FRAC_DERIVATION: "tcip_mcp.pipelines.derivations.derive_epsilon_frac",
 }
 """Each derivation label authored here, every one but the count-objective ones, mapped to the
 callable that computes it."""

@@ -92,7 +92,9 @@ def assess_checkpoint(
             1 the largest).
         rationale: Why the assessment states these settings, recorded with it.
         stated: Execution values to state rather than derive (``execution.Stated``), as
-            ``run_inference`` takes them; ``{}`` states none.
+            ``run_inference`` takes them: a detector's ``conf``, the one its predictions are
+            collected at and the floor its fitted conf is censored at, and an instance
+            segmentation checkpoint's ``masks`` among them.
         device: cuda / cpu (auto if omitted).
 
     """
@@ -148,8 +150,8 @@ def assess_reserved_regions(
             criterion needs at least two bands carrying ground truth per side.
         equivalence_z / dispersion_quantile: As :func:`assess_checkpoint` takes them.
         rationale: Why the assessment states these settings, recorded with it.
-        stated: Execution values to state rather than derive (``execution.Stated``); the pass is
-            always tiled.
+        stated: Execution values to state rather than derive (``execution.Stated``), its
+            ``conf`` as :func:`assess_checkpoint` takes it; the pass is always tiled.
         device: cuda / cpu (auto if omitted).
 
     """

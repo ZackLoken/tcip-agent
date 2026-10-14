@@ -13,7 +13,9 @@ from tcip_mcp.dataset_layout import UNDATED_BUCKET
 from tests._training_values import (
     DISPERSION_QUANTILE,
     EQUIVALENCE_Z,
+    MASK_CUT,
     RATIONALE,
+    collection_pass,
     drawn_split,
     tiling_block,
 )
@@ -126,7 +128,8 @@ def _frame(bands: int = 3, *, value=255, blobs=BLOBS) -> np.ndarray:
 
 def _pass(checkpoint, reference=None, **stated):
     """The tiled pass ``checkpoint`` runs at the fixture's tile edge and overlap, merging by NMM
-    at 0.5 and keeping every score, with ``stated`` over those, made runnable from ``reference``
+    at 0.5, keeping every score and, for an instance segmentation checkpoint, collecting masks
+    cut at the sample threshold, with ``stated`` over those, made runnable from ``reference``
     when one is given.
     """
     from tcip_mcp.pipelines.execution import prepare
@@ -140,31 +143,40 @@ def _pass(checkpoint, reference=None, **stated):
         conf=0.0,
         rationale=RATIONALE,
     )
+    if checkpoint.task == "instance_seg":
+        values.update(masks=True, mask_cut=MASK_CUT)
     values.update(stated)
     return prepare(
         checkpoint, Stated(**values), device="cpu", tile_batch_size=2
     ).runnable(reference)
 
 
-def _sliced(p, source, *, require_masks: bool = True, **kwargs):
+def _sliced(p, source, **kwargs):
     return p.predictor.predict_sliced(
         source,
         execution=p.execution,
         tile_batch_size=p.tile_batch_size,
-        require_masks=require_masks,
         **kwargs,
     )
 
 
 def _whole(p, source) -> dict:
-    """The untiled record of ``source`` under the pass's own conf and the checkpoint's density."""
+    """The untiled record of ``source`` under the pass's own conf, mask collection and mask cut
+    and the checkpoint's density.
+    """
     from tcip_mcp.pipelines.execution import execution_record
 
+    masks = p.execution.masks if p.checkpoint.task == "instance_seg" else None
     return p.predictor.predict(
         source,
         execution_record(
             p.checkpoint,
-            Stated(conf=p.execution.conf, rationale=RATIONALE),
+            Stated(
+                conf=p.execution.conf,
+                masks=masks,
+                mask_cut=p.execution.mask_cut,
+                rationale=RATIONALE,
+            ),
             None,
             None,
         ),
@@ -300,7 +312,6 @@ def test_an_untiled_record_carries_the_polygons_the_sliced_record_does(
     assert _mask_extents(whole) == _mask_extents(sliced)
     assert sorted(whole["boxes"]) == sorted(sliced["boxes"])
     assert whole["cap"] == sliced["cap"] > whole["count"]
-    assert whole["mask_binarize"] == sliced["mask_binarize"]
 
 
 def test_a_predicted_mask_carries_the_rings_the_shared_extractor_draws(
@@ -320,7 +331,9 @@ def test_a_predicted_mask_carries_the_rings_the_shared_extractor_draws(
     )
     expected = [
         [c for point in ring for c in point]
-        for ring in mask_to_polygon_rings(disk)
+        for ring in mask_to_polygon_rings(
+            disk, threshold=None, epsilon_frac=MASK_CUT.epsilon_frac
+        )
     ]
 
     record = _whole(_pass(checkpoint), path)
@@ -328,28 +341,66 @@ def test_a_predicted_mask_carries_the_rings_the_shared_extractor_draws(
     assert [m["segmentation"] for m in record["masks"]] == [expected]
 
 
-def test_masks_are_cut_at_the_platform_binarize_threshold_the_record_names(
-    tmp_path, monkeypatch
-):
-    import importlib
+def test_masks_are_cut_at_the_stated_threshold_the_record_names(tmp_path):
+    """Guard. A pass cuts every mask at the ``mask_binarize`` its statement's ``mask_cut``
+    carries, and its execution record names the block's values as stated: cut at zero, every
+    detection's mask covers the whole frame, so all share one ring the blobs' own cut does not.
+    """
+    from tcip_mcp.pipelines.execution import MaskCut
 
     _path, checkpoint = _checkpoint(tmp_path, with_masks=True)
-    p = _pass(checkpoint)
     path = _png(tmp_path, _frame())
-    # The package attribute of this name is a same-named function, so the module comes from
-    # sys.modules.
-    mask_geometry = importlib.import_module(
-        "tcip_mcp.pipelines.measurement.mask_geometry"
+    every_pixel = MaskCut(
+        mask_binarize=0.0, epsilon_frac=MASK_CUT.epsilon_frac
     )
-    real = mask_geometry.resolve_binarize_threshold
+    at_zero = _pass(checkpoint, mask_cut=every_pixel)
 
-    assert all(m["segmentation"] for m in _whole(p, path)["masks"])
-    monkeypatch.setattr(
-        mask_geometry, "resolve_binarize_threshold", lambda *a, **k: real(1.5)
-    )
-    record = _whole(p, path)
-    assert [m["segmentation"] for m in record["masks"]] == [[]] * len(BLOBS)
-    assert record["mask_binarize"]["value"] == 1.5
+    kept = _whole(_pass(checkpoint), path)
+    cut = _whole(at_zero, path)
+
+    def rings(record: dict) -> list[str]:
+        return [repr(m["segmentation"]) for m in record["masks"]]
+
+    assert len(set(rings(kept))) == len(BLOBS)
+    assert len(set(rings(cut))) == 1 and not set(rings(cut)) & set(rings(kept))
+    assert (
+        at_zero.execution.mask_cut,
+        at_zero.execution.sources["mask_binarize"],
+        at_zero.execution.sources["epsilon_frac"],
+    ) == (every_pixel, "explicit", "explicit")
+
+
+def test_an_instance_segmentation_pass_collecting_no_masks_evaluates_by_box(
+    tmp_path,
+):
+    """Guard. An instance segmentation checkpoint evaluated under a statement collecting no
+    masks scores its boxes by box, the choice its execution record carries, and one collecting
+    them scores by mask.
+    """
+    from tcip_mcp.tools.training_tools import evaluate_model
+    from tests._training_values import IOU_THRESHOLD, collection_pass
+    from tests._verified_checkpoint_fixtures import fixture_data_dir
+
+    ckpt, _checkpoint_record = _checkpoint(tmp_path, with_masks=True)
+    images = fixture_data_dir(tmp_path, "blobs") / "images" / UNDATED_BUCKET
+
+    def evaluated(**stated) -> dict:
+        result = evaluate_model(
+            tmp_path,
+            ckpt,
+            str(images),
+            stated=collection_pass(**stated),
+            iou_threshold=IOU_THRESHOLD,
+        )
+        assert "error" not in result, result
+        return result
+
+    boxes = evaluated(masks=False)
+    masks = evaluated(masks=True, mask_cut=MASK_CUT)
+
+    assert boxes["execution"]["masks"] is False
+    assert boxes["governing_criterion"]["kind"] == "iou_match"
+    assert masks["governing_criterion"]["kind"] == "mask_iou_match"
 
 
 def test_an_untiled_detector_record_carries_no_masks(tmp_path):
@@ -432,7 +483,6 @@ def test_training_and_inference_slice_one_frame_on_one_lattice(tmp_path):
         _sliced(
             _pass(checkpoint),
             reader,
-            require_masks=False,
             progress=lambda _s, _e, batch: recorded.extend(batch["slices"]),
         )
 
@@ -479,7 +529,7 @@ def test_the_merge_leaves_the_process_environment_as_it_found_it(
     monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
     _path, checkpoint = _checkpoint(tmp_path)
 
-    _sliced(_pass(checkpoint), _png(tmp_path, _frame()), require_masks=False)
+    _sliced(_pass(checkpoint), _png(tmp_path, _frame()))
 
     assert "CUDA_VISIBLE_DEVICES" not in os.environ
 
@@ -760,13 +810,12 @@ def test_an_assessed_tiled_pass_and_its_bucket_run_one_merge(
         dispersion_quantile=DISPERSION_QUANTILE,
         rationale=RATIONALE,
         device="cpu",
-        stated=Stated(
+        stated=collection_pass(
             tile=True,
             tile_size=TILE,
             overlap=OVERLAP,
             postprocess="nmm",
             cross_tile_nms=0.8,
-            rationale=RATIONALE,
         ),
     )
     assert "error" not in assessment, assessment
@@ -821,6 +870,7 @@ def test_the_bucket_records_the_slice_geometry_the_checkpoint_derived(
     images = tmp_path / "images" / UNDATED_BUCKET
     images.mkdir(parents=True)
     _png(images, _frame())
+    cut = {"masks": True, "mask_cut": MASK_CUT} if with_masks else {}
 
     for merge in ("nms", "nmm"):
         unstated = run_inference(
@@ -828,7 +878,9 @@ def test_the_bucket_records_the_slice_geometry_the_checkpoint_derived(
             ckpt,
             images_dir=str(images),
             bucket="sliced",
-            stated=Stated(conf=0.0, postprocess=merge, rationale=RATIONALE),
+            stated=Stated(
+                conf=0.0, postprocess=merge, rationale=RATIONALE, **cut
+            ),
         )
         assert "cross_tile_nms" in unstated.get("error", ""), (merge, unstated)
 
@@ -842,6 +894,7 @@ def test_the_bucket_records_the_slice_geometry_the_checkpoint_derived(
             postprocess="nmm",
             cross_tile_nms=0.6,
             rationale=RATIONALE,
+            **cut,
         ),
     )
 

@@ -15,6 +15,12 @@ from __future__ import annotations
 
 import inspect
 
+from tcip_mcp.pipelines.training.evaluation import (
+    dt_record,
+    gt_record,
+    prediction_record,
+)
+
 
 def _box(cx: float, cy: float, s: float = 20.0) -> list[float]:
     return [cx - s / 2, cy - s / 2, s, s]
@@ -74,53 +80,41 @@ def dense_records(
             row, col = divmod(k, cols)
             cx, cy = 50.0 + col * spacing, 50.0 + row * spacing
             # only GT shifts, not the det
-            gt.append(
-                {"category_id": 0, "bbox": _box(cx + shift, cy), "iscrowd": 0}
-            )
+            gt.append(gt_record(_box(cx + shift, cy), 0, 0))
             if k < miss_pattern[i]:
                 continue
-            dt.append({"category_id": 0, "bbox": _box(cx, cy), "score": score})
+            dt.append(dt_record(_box(cx, cy), 0, score))
         for j in range(fp_pattern[i]):
             fx, fy = 50.0 + j * spacing, 50.0 + (far_row + i) * spacing
-            dt.append(
-                {"category_id": 0, "bbox": _box(fx, fy), "score": fp_score}
-            )
+            dt.append(dt_record(_box(fx, fy), 0, fp_score))
         records.append(
-            {
-                "width": width,
-                "height": height,
-                "image_id": f"{id_prefix}_{i}",
-                "gt": gt,
-                "dt": dt,
-                "count": len(dt),
-                "cap": len(dt) + 1,
-            }
+            prediction_record(
+                dt,
+                gt,
+                width=width,
+                height=height,
+                cap=len(dt) + 1,
+                count=len(dt),
+                image_id=f"{id_prefix}_{i}",
+            )
         )
     return records
 
 
 def gt_only(boxes: list[tuple[float, float, float, float]]) -> list[dict]:
     """One record holding ``boxes`` as ground truth and nothing else."""
-    return [
-        {
-            "gt": [
-                {"bbox": list(b), "category_id": 0, "iscrowd": 0}
-                for b in boxes
-            ]
-        }
-    ]
+    return [{"gt": [gt_record(list(b), 0, 0) for b in boxes]}]
 
 
 def ann(
     cx: float, cy: float, cid: int = 0, score: float | None = None
 ) -> dict:
-    """A 20px square annotation of category ``cid`` centered at (``cx``, ``cy``), scored when
-    ``score`` is given.
+    """A 20px square of category ``cid`` centered at (``cx``, ``cy``): a detection record
+    scored ``score`` when one is given, else a ground-truth record.
     """
-    a = {"category_id": cid, "bbox": _box(cx, cy), "iscrowd": 0}
     if score is not None:
-        a["score"] = score
-    return a
+        return dt_record(_box(cx, cy), cid, score)
+    return gt_record(_box(cx, cy), cid, 0)
 
 
 def toy_records(id_prefix: str = "c", *, shift: float = 0.0) -> list[dict]:
@@ -129,24 +123,24 @@ def toy_records(id_prefix: str = "c", *, shift: float = 0.0) -> list[dict]:
     detections at 0.9 and 0.3. ``shift`` offsets every GT center by that many px, inside the
     center-match tolerance, leaving the detections in place.
     """
-    a = {
-        "width": 400,
-        "height": 400,
-        "image_id": f"{id_prefix}_a",
-        "gt": [ann(100 + shift, 100)],
-        "dt": [ann(100, 100, score=0.9), ann(300, 300, score=0.6)],
-        "count": 2,
-        "cap": 3,
-    }
-    b = {
-        "width": 400,
-        "height": 400,
-        "image_id": f"{id_prefix}_b",
-        "gt": [ann(100 + shift, 100), ann(200 + shift, 200)],
-        "dt": [ann(100, 100, score=0.9), ann(200, 200, score=0.3)],
-        "count": 2,
-        "cap": 3,
-    }
+    a = prediction_record(
+        [ann(100, 100, score=0.9), ann(300, 300, score=0.6)],
+        [ann(100 + shift, 100)],
+        width=400,
+        height=400,
+        cap=3,
+        count=2,
+        image_id=f"{id_prefix}_a",
+    )
+    b = prediction_record(
+        [ann(100, 100, score=0.9), ann(200, 200, score=0.3)],
+        [ann(100 + shift, 100), ann(200 + shift, 200)],
+        width=400,
+        height=400,
+        cap=3,
+        count=2,
+        image_id=f"{id_prefix}_b",
+    )
     return [a, b]
 
 

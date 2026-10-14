@@ -20,6 +20,7 @@ import tcip_store as ts
 from tcip_annotation import json_io
 from tcip_mcp.dataset_layout import capture_label_keys, label_key
 from tests._audit_fixtures import audit_rows
+from tests._training_values import EPSILON_FRAC, RATIONALE
 from tests._web_fixtures import bound_to
 
 if TYPE_CHECKING:
@@ -127,7 +128,9 @@ def _written(root: Path) -> list[str]:
 def _import(document: Path, root: Path) -> dict:
     from tcip_mcp.tools.ingest_tools import import_coco
 
-    return import_coco(root, str(document), str(root), DATE)
+    return import_coco(
+        root, str(document), str(root), DATE, EPSILON_FRAC, RATIONALE
+    )
 
 
 def _loader(task: str, root: Path):
@@ -315,6 +318,10 @@ def test_the_import_leaves_one_row_with_the_documents_path_and_digest(
     (event,) = rows
     assert event["arguments"]["document"] == str(document.resolve())
     assert event["arguments"]["written"] == ["tree_01", "tree_02"]
+    assert (
+        event["arguments"]["epsilon_frac"],
+        event["arguments"]["rationale"],
+    ) == (EPSILON_FRAC, RATIONALE)
     assert (
         event["document_digest"]
         == hashlib.sha256(document.read_bytes()).hexdigest()
@@ -655,7 +662,14 @@ def test_an_import_whose_second_document_conflicts_leaves_no_document_written(
     with pytest.raises(
         ValueError, match=r"already holds a label document for \['tree_02'\]"
     ):
-        import_coco_document(document, root, date=DATE, project=root)
+        import_coco_document(
+            document,
+            root,
+            date=DATE,
+            epsilon_frac=EPSILON_FRAC,
+            rationale=RATIONALE,
+            project=root,
+        )
 
     (kept,) = json_io.read_label_document(_label(root, "tree_02")).annotations
     assert (kept.subject, kept.created_by) == ("leaf", "user:breeder")
@@ -750,6 +764,8 @@ def test_an_import_that_committed_no_document_leaves_no_event(
             _document(tmp_path / "external.json"),
             root,
             date=DATE,
+            epsilon_frac=EPSILON_FRAC,
+            rationale=RATIONALE,
             project=root,
         )
     assert _written(root) == ["tree_01"]
@@ -788,7 +804,12 @@ def test_a_date_that_names_no_capture_refuses(tmp_path: Path, date: str):
 
     root = _dataset(tmp_path).root
     result = import_coco(
-        root, str(_document(tmp_path / "external.json")), str(root), date
+        root,
+        str(_document(tmp_path / "external.json")),
+        str(root),
+        date,
+        EPSILON_FRAC,
+        RATIONALE,
     )
     assert "error" in result and "names no capture" in result["error"]
 
@@ -945,7 +966,12 @@ def test_a_crowd_region_imports_and_reaches_training_and_evaluation_as_one(
         "scores": torch.zeros((0,)),
     }
     from_detector = records_from_detector(
-        target, no_detections, width=IMG, height=IMG, cap=1
+        target,
+        no_detections,
+        width=IMG,
+        height=IMG,
+        cap=1,
+        mask_cut=None,
     )
     assert [g["iscrowd"] for g in from_annotations["gt"]] == [0, 1]
     assert [g["iscrowd"] for g in from_detector["gt"]] == [0, 1]
@@ -1001,7 +1027,9 @@ def test_a_run_length_mask_imports_as_the_rings_its_mask_yields(
 
     assert "error" not in result, result
     (ann,) = json_io.read_label_document(_label(root, "tree_01")).annotations
-    assert ann.geometry.rings == mask_to_polygon_rings(mask)
+    assert ann.geometry.rings == mask_to_polygon_rings(
+        mask, threshold=None, epsilon_frac=EPSILON_FRAC
+    )
     assert len(ann.geometry.rings) == 2
 
 

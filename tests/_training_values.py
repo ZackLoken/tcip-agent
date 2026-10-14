@@ -8,6 +8,7 @@ settings an assessment and a failure-case ranking state.
 from typing import Any
 
 from tcip_mcp.pipelines.active_learning import ScorerSpec
+from tcip_mcp.pipelines.execution import MaskCut, Stated
 
 RATIONALE = "a sample reason the test states for this block"
 """The reason every sample block here states (``schemas`` requires one per stated block)."""
@@ -21,6 +22,20 @@ COUNT_TEST = {
     "dispersion_quantile": DISPERSION_QUANTILE,
 }
 """The sample count test settings, by ``operating_point.count_criterion`` parameter."""
+COLLECTION_CONF = 0.01
+"""A sample conf a detector assessment states its predictions are collected at, low enough that
+hesitant detections survive to be swept."""
+
+
+def collection_pass(**stated: Any) -> Stated:
+    """A detector assessment's execution statement: its predictions collected at
+    :data:`COLLECTION_CONF`, stating :data:`RATIONALE`, with ``stated`` over it.
+    """
+    return Stated(
+        **{"conf": COLLECTION_CONF, "rationale": RATIONALE, **stated}
+    )
+
+
 TRIAGE_WEIGHTS = {
     "shortfall_weight": 2.0,
     "surplus_weight": 1.0,
@@ -153,6 +168,17 @@ def sampler(name: str, **values) -> dict:
 
 VALIDATION_CONF = 0.35
 """A sample confidence a detector run's validation counts boxes at."""
+
+MASK_BINARIZE = 0.5
+"""A sample probability an instance segmentation pass or validation states its masks are cut
+at."""
+
+EPSILON_FRAC = 0.005
+"""A sample fraction of each ring's perimeter an instance segmentation pass, validation or COCO
+import states its mask rings are simplified at."""
+
+MASK_CUT = MaskCut(mask_binarize=MASK_BINARIZE, epsilon_frac=EPSILON_FRAC)
+"""The sample mask cut an instance segmentation pass or validation states."""
 
 
 IOU_THRESHOLD = 0.5

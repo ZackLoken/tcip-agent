@@ -44,7 +44,12 @@ def test_a_prediction_off_the_stored_grid_is_put_on_it_before_scoring():
 
     target, output = _detector_pass([ON_GRID_BOX], [SUB_QUANTUM_BOX])
     record = records_from_detector(
-        target, output, width=200, height=200, cap=2
+        target,
+        output,
+        width=200,
+        height=200,
+        cap=2,
+        mask_cut=None,
     )
 
     assert record["dt"][0]["bbox"] == QUANTIZED_BOX
@@ -58,7 +63,12 @@ def test_ground_truth_already_on_the_stored_grid_is_unchanged():
 
     target, output = _detector_pass([ON_GRID_BOX], [])
     record = records_from_detector(
-        target, output, width=200, height=200, cap=1
+        target,
+        output,
+        width=200,
+        height=200,
+        cap=1,
+        mask_cut=None,
     )
 
     x1, y1, x2, y2 = ON_GRID_BOX

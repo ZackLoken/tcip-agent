@@ -164,11 +164,6 @@ def governed_forward(
     return outputs
 
 
-STAGED_CONF_FLOOR = 0.01
-"""The conf an assessment collects its reference predictions at, so hesitant detections survive to
-be swept; the floor applied is recorded beside the criterion."""
-
-
 def _min_dt_score(records: list[dict]) -> float | None:
     """Lowest detection score across a reference, or None if it holds no detections."""
     scores = [d["score"] for rec in records for d in rec["dt"]]
@@ -195,6 +190,7 @@ def count_criterion(
     staged_conf_floor_attribute_path: str | None,
     equivalence_z: float,
     dispersion_quantile: float,
+    held: dict | None = None,
 ) -> tuple[float, dict, list[str]]:
     """The conf the trait's count objective picks on the calibration side, and the held-out count
     check at that conf: ``(conf, evidence, failures)``.
@@ -211,7 +207,9 @@ def count_criterion(
     evidenced on the holdout; when the held-out precision and recall both clear
     ``holdout_match_quality_floor``; and when the held-out per-image count error at
     ``dispersion_quantile`` is within ``count_error_tolerance``. The entry carries every one of
-    those fields; the evidence records ``equivalence_z`` and each curve its quantile.
+    those fields; the evidence records ``equivalence_z`` and each curve its quantile and the
+    criterion it matched under. Every matching is kept in ``held`` where one is given
+    (:func:`~tcip_mcp.pipelines.training.evaluation.matched`).
     A conf at or below the floor, applied on the attribute path beside it, fails as
     ``conf_censored``. A calibration curve the objective picks no conf on refuses
     (``ValueError``).
@@ -224,6 +222,7 @@ def count_criterion(
         cal_records,
         criterion=cal_criterion,
         dispersion_quantile=dispersion_quantile,
+        held=held,
     )
     picked = picker(cal_curve)
     if picked is None:
@@ -239,6 +238,7 @@ def count_criterion(
             criterion=side_criterion,
             dispersion_quantile=dispersion_quantile,
             conf_grid=[conf],
+            held=held,
         )["curve"][0]
         for records, side_criterion in (
             (hold_records, hold_criterion),
@@ -301,7 +301,6 @@ def count_criterion(
     ):
         failures.append("count_error_dispersion_too_high")
 
-    observed_min = _min_dt_score(cal_records + hold_records)
     evidence = {
         "conf": conf,
         "conf_derived_from": conf_label,
@@ -317,11 +316,7 @@ def count_criterion(
         "equivalence_z": equivalence_z,
         "staged_conf_floor": staged_conf_floor,
         "staged_conf_floor_attribute_path": staged_conf_floor_attribute_path,
-        "observed_min_score": observed_min,
-        "conf_floor_mismatch": (
-            observed_min is not None
-            and observed_min > staged_conf_floor + 0.05
-        ),
+        "observed_min_score": _min_dt_score(cal_records + hold_records),
         "calibration_cap_saturated_frac": cap_saturated_frac(cal_records),
         "holdout_cap_saturated_frac": cap_saturated_frac(hold_records),
     }

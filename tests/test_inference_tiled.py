@@ -67,7 +67,6 @@ def _sliced(p, source, execution=None, **kwargs) -> dict:
         source,
         execution=execution or p.execution,
         tile_batch_size=8,
-        require_masks=True,
         **kwargs,
     )
 

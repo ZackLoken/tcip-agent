@@ -30,6 +30,7 @@ from tests._producer_fixtures import (
     label_image,
     registry_over,
 )
+from tests._training_values import EPSILON_FRAC, RATIONALE
 
 DATE = "2026-03-02"
 SIZE = 64
@@ -194,8 +195,9 @@ def test_a_coco_import_writes_every_document_or_none(
         lambda *a, **k: {**real_entry(*a, **k), "unencodable": float("nan")},
     )
 
+    stated = {"epsilon_frac": EPSILON_FRAC, "rationale": RATIONALE}
     with pytest.raises(ts.StoreError):
-        import_coco_document(document, root, date=DATE, project=root)
+        import_coco_document(document, root, date=DATE, project=root, **stated)
 
     assert [ts.exists(image_label_key(p)) for p in images] == [False] * len(
         images
@@ -203,7 +205,9 @@ def test_a_coco_import_writes_every_document_or_none(
     assert "coco_document_imported" not in _audit_tools(root)
 
     monkeypatch.setattr(audit, "audit_entry", real_entry)
-    imported = import_coco_document(document, root, date=DATE, project=root)
+    imported = import_coco_document(
+        document, root, date=DATE, project=root, **stated
+    )
 
     assert imported["written"] == list(STEMS)
     assert [
@@ -229,7 +233,12 @@ def test_an_import_refuses_over_a_present_record_whatever_it_holds(
         ValueError, match=r"already holds a label document for \['c'\]"
     ):
         import_coco_document(
-            _coco(tmp_path, images), root, date=DATE, project=root
+            _coco(tmp_path, images),
+            root,
+            date=DATE,
+            epsilon_frac=EPSILON_FRAC,
+            rationale=RATIONALE,
+            project=root,
         )
 
     assert ts.read(image_label_key(images[-1])) is None

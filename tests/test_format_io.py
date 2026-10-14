@@ -8,6 +8,7 @@ import pytest
 
 from tcip_annotation.format_io import coco_categories, parse_coco_annotations
 from tcip_annotation.state import Polygon
+from tests._training_values import EPSILON_FRAC
 
 
 def _no_run_length(segmentation):
@@ -17,7 +18,9 @@ def _no_run_length(segmentation):
 
 
 def _parse(coco):
-    return parse_coco_annotations(coco, decode_rle=_no_run_length)
+    return parse_coco_annotations(
+        coco, decode_rle=_no_run_length, epsilon_frac=EPSILON_FRAC
+    )
 
 
 def _sample_coco_detect():

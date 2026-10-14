@@ -13,8 +13,9 @@ long axis is not its statistically dominant one has the two axes swapped outrigh
 keys name the axis, not ``length``/``width``.
 
 Conventions:
-- Foreground is ``mask >= threshold`` (default 0.5), so a 0/1, bool, 0/255, or soft-probability
-  mask all binarize correctly.
+- Foreground is ``mask >= threshold``, the threshold the caller states or the pass's execution
+  record carries, so a 0/1, bool, 0/255, or soft-probability mask binarizes at a value chosen
+  for it.
 - ``principal_axis_extent_px`` / ``secondary_axis_extent_px`` are pixel-inclusive extents along the
   PCA principal / secondary axis (extent + 1 px), so a solid ``W x H`` rectangle reports exactly
   ``W`` and ``H``.
@@ -25,19 +26,6 @@ Conventions:
 from __future__ import annotations
 
 from typing import Any
-
-DEFAULT_MASK_BINARIZE_THRESHOLD = 0.5
-"""A documented engineering default for the mask-binarization threshold, not a derivation; a
-bucket records it with its source beside every mask it cut."""
-
-
-def resolve_binarize_threshold(value: float | None = None) -> dict:
-    """The mask-binarization threshold, ``{"value", "source"}``: a stated ``value`` (``explicit``),
-    else :data:`DEFAULT_MASK_BINARIZE_THRESHOLD` (``default``).
-    """
-    if value is None:
-        return {"value": DEFAULT_MASK_BINARIZE_THRESHOLD, "source": "default"}
-    return {"value": float(value), "source": "explicit"}
 
 
 def _to_numpy(mask: Any):
@@ -212,9 +200,10 @@ def mask_geometry(
     *,
     scale: float | None = None,
     unit: str,
-    threshold: float = DEFAULT_MASK_BINARIZE_THRESHOLD,
+    threshold: float,
 ) -> dict:
-    """Dimensional geometry of a single validated 2D mask (``[H, W]`` or ``[1, H, W]``).
+    """Dimensional geometry of a single validated 2D mask (``[H, W]`` or ``[1, H, W]``), its
+    foreground the pixels at or above ``threshold``.
 
     ``scale`` is a plain float (per-pixel, in ``unit``).
 
@@ -287,7 +276,7 @@ def instance_geometries(
     *,
     scale: float | None = None,
     unit: str,
-    threshold: float = DEFAULT_MASK_BINARIZE_THRESHOLD,
+    threshold: float,
 ) -> list[dict]:
     """Per-instance :func:`mask_geometry` over an ``[N, H, W]`` mask stack (or a single
     ``[H, W]``).

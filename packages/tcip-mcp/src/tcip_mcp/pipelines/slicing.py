@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 from sahi.models.base import DetectionModel
@@ -263,41 +263,36 @@ class TcipDetectionModel(DetectionModel):
     """A platform predictor as a SAHI detection model.
 
     Each slice, an ``[H, W, C]`` array at whatever band count the source carries, reaches the model
-    through the predictor's own tensor conversion; ``tile_resize`` stretches a slice PIL represents
-    faithfully to that ``(width, height)`` and maps its boxes and masks back per axis, and refuses
-    a slice PIL does not represent (``datasets.unchained``). Each slice runs
-    under the detection cap ``cap_of`` gives it, which ``caps`` keeps per slice of the last batch,
-    and the in-model score threshold ``conf``
+    through the predictor's own tensor conversion; the ``execution`` record's ``tile_resize``
+    stretches a slice PIL represents faithfully to that ``(width, height)`` and maps its boxes and
+    masks back per axis, and refuses a slice PIL does not represent (``datasets.unchained``). Each
+    slice runs under the detection cap ``cap_of`` gives it, which ``caps`` keeps per slice of the
+    last batch, and the record's in-model score threshold ``conf``
     (:func:`~tcip_mcp.pipelines.operating_point.governed_forward`). Its detections become
     ``ObjectPrediction``s clipped to the slice, each carrying its label and its ``attributes`` ids
-    under the predictor's ``attribute_sizes`` as one :func:`packed_category`, each mask cut at
-    ``mask_binarize``'s value into the rings
-    :func:`~tcip_annotation.mask_contours.mask_to_polygon_rings` extracts when ``collect_masks``.
-    ``mask_binarize`` is the threshold's provenance, kept whole on the model it cut masks for.
+    under the predictor's ``attribute_sizes`` as one :func:`packed_category`; where the record
+    collects masks, each mask cut by its ``mask_cut`` into the rings
+    :func:`~tcip_annotation.mask_contours.mask_to_polygon_rings` extracts, or, for an
+    :attr:`~tcip_mcp.pipelines.execution.Execution.uncut` record, kept in :attr:`soft_masks` as
+    the part of its frame its nonzero pixels span and that part's ``(x, y)`` origin, one list per
+    image in prediction order.
     """
 
     def __init__(
         self,
         predictor: GenericPredictor,
         *,
-        conf: float,
+        execution: Execution,
         cap_of: Callable[[np.ndarray], int],
-        tile_resize: tuple[int, int] | None,
         band_interpretations: tuple[str, ...] | None,
-        collect_masks: bool,
-        mask_binarize: dict,
     ) -> None:
         self._predictor = predictor
-        self._conf = conf
+        self.execution = execution
         self._cap_of = cap_of
         self.caps: list[int] = []
-        self._tile_resize = tile_resize
         self._band_interpretations = band_interpretations
-        self.collect_masks = collect_masks
-        self.mask_binarize = mask_binarize
-        super().__init__(
-            model=predictor.model, mask_threshold=mask_binarize["value"]
-        )
+        self.soft_masks: list[list[tuple[np.ndarray, tuple[int, int]]]] = []
+        super().__init__(model=predictor.model)
 
     def set_device(self, device: str | None = None) -> None:
         """The predictor's own device."""
@@ -320,15 +315,16 @@ class TcipDetectionModel(DetectionModel):
         from tcip_mcp.pipelines.operating_point import governed_forward
 
         tensors, meta = [], []
+        resize = self.execution.tile_resize
         for arr in images:
             h, w = arr.shape[:2]
             model_input: Any = arr
             scale = (1.0, 1.0)
-            if self._tile_resize is not None:
+            if resize is not None:
                 from tcip_mcp.pipelines.data.augmentations import Resize
                 from tcip_mcp.pipelines.data.datasets import unchained
 
-                target = (int(self._tile_resize[0]), int(self._tile_resize[1]))
+                target = (int(resize[0]), int(resize[1]))
                 pil = to_pil_if_faithful(
                     arr, band_interpretations=self._band_interpretations
                 )
@@ -347,7 +343,10 @@ class TcipDetectionModel(DetectionModel):
         self._original_predictions = list(
             zip(
                 governed_forward(
-                    self.model, tensors, self.caps, conf=self._conf
+                    self.model,
+                    tensors,
+                    self.caps,
+                    conf=cast(float, self.execution.conf),
                 ),
                 meta,
             )
@@ -358,10 +357,12 @@ class TcipDetectionModel(DetectionModel):
         shift_amount_list: list[list[int | float]] | None = None,
         full_shape_list: list[list[int | float]] | None = None,
     ) -> None:
+        import cv2
         import torch
 
         assert shift_amount_list is not None and full_shape_list is not None
         per_image: list[list[ObjectPrediction]] = []
+        self.soft_masks = []
         for (out, ((sx, sy), h, w)), shift, full in zip(
             self._original_predictions, shift_amount_list, full_shape_list
         ):
@@ -381,7 +382,8 @@ class TcipDetectionModel(DetectionModel):
                 )
             ]
             segmentations: list = [None] * len(scores)
-            if self.collect_masks:
+            soft: list[tuple[np.ndarray, tuple[int, int]]] = []
+            if self.execution.masks:
                 masks = out["masks"]
                 if masks.dim() == 4 and masks.shape[1] == 1:
                     masks = masks[:, 0]
@@ -392,16 +394,28 @@ class TcipDetectionModel(DetectionModel):
                         mode="bilinear",
                         align_corners=False,
                     ).squeeze(1)
-                segmentations = [
-                    [
-                        [c for point in ring for c in point]
-                        for ring in mask_to_polygon_rings(
-                            m, threshold=self.mask_threshold
+                arrays = masks.cpu().numpy()
+                cut = self.execution.mask_cut
+                if cut is None:
+                    for m in arrays:
+                        x, y, mw, mh = cv2.boundingRect(
+                            (m > 0).astype(np.uint8)
                         )
+                        soft.append((m[y : y + mh, x : x + mw].copy(), (x, y)))
+                else:
+                    segmentations = [
+                        [
+                            [c for point in ring for c in point]
+                            for ring in mask_to_polygon_rings(
+                                m,
+                                threshold=cut.mask_binarize,
+                                epsilon_frac=cut.epsilon_frac,
+                            )
+                        ]
+                        or None
+                        for m in arrays
                     ]
-                    or None
-                    for m in masks.cpu().numpy()
-                ]
+            self.soft_masks.append(soft)
             per_image.append(
                 [
                     ObjectPrediction(

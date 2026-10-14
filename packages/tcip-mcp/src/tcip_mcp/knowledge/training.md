@@ -100,6 +100,9 @@ comparability metrics are rejected:
 evaluation:
   trait: catkin
   conf_threshold: ...    # a detector's: the confidence its validation counts boxes at
+  mask_cut:              # instance segmentation's: how its validation cuts masks into rings
+    mask_binarize: ...   # the probability a mask pixel is foreground at
+    epsilon_frac: ...    # the fraction of each ring's perimeter its rings simplify at
   selection_metric: f1   # required: the metric model_best.pt and the stop rule rank by
   rationale: ...
 ```
@@ -117,7 +120,9 @@ stage_warmup_epochs/gradient_accumulation_steps/
 checkpoint_every_n_epochs/log_every_n_batches/early_stopping). Read that docstring rather than assuming this
 example is complete. The tuned values ship no default: a launch (`preflight_config`,
 `launch_training`, a sweep's every checked point and every trial) requires `batch_size`, a detector's
-`evaluation.conf_threshold` under any trainer, and the `DefaultTrainerRegime` blocks (what the
+`evaluation.conf_threshold` and an instance segmentation run's `evaluation.mask_cut` (both of its
+values) under
+any trainer, and the `DefaultTrainerRegime` blocks (what the
 default trainer reads when no `training_source` names a loop of your own), each stated by the
 config or swept by a search, and refuses a config leaving one unstated, naming it. The schema
 itself requires `model_source`, `data` with its `split`, `seed`, `deterministic`,

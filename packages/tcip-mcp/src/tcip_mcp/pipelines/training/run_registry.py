@@ -63,12 +63,12 @@ class TrainRun:
     @cached_property
     def evaluation_arguments(self) -> dict:
         """The keywords ``evaluation.evaluate`` reads off this run, resolved once: the dims its
-        config records (``model_build.recorded_model_dims``), the confidence it reads
-        (:attr:`reads`), its stated ``evaluation.iou_threshold`` and ``score_weights``, the trait
-        entry at its :attr:`trait_revision` (read from :attr:`project`, ``None``
-        for a run naming no trait; a revision whose entry no longer carries the recorded hash
-        refuses with ``traits.RevisionMovedError``), and its :attr:`geometry`'s
-        ``object_density``.
+        config records (``model_build.recorded_model_dims``), the confidence and the mask cut it
+        reads (:attr:`reads`), its stated
+        ``evaluation.iou_threshold`` and ``score_weights``, the trait entry at its
+        :attr:`trait_revision` (read from :attr:`project`, ``None`` for a run naming no trait; a
+        revision whose entry no longer carries the recorded hash refuses with
+        ``traits.RevisionMovedError``), and its :attr:`geometry`'s ``object_density``.
         """
         from tcip_mcp.pipelines.model_build import recorded_model_dims
         from tcip_mcp.traits import read_trait
@@ -77,6 +77,7 @@ class TrainRun:
         return {
             "dims": recorded_model_dims(spec),
             "conf_threshold": self.reads.conf_threshold,
+            "mask_cut": self.reads.mask_cut,
             "iou_threshold": spec.evaluation.iou_threshold,
             "score_weights": spec.evaluation.score_weights,
             "trait": None

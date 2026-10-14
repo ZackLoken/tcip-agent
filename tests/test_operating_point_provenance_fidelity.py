@@ -25,28 +25,37 @@ ENTRY = fx.with_fields(
 
 
 def _records(
-    prefix: str, offset: float, n_images: int = N_IMAGES
+    prefix: str, offset: float, *, stray: tuple[dict, ...] = ()
 ) -> list[dict]:
-    """One record per image, every object matched exactly by one detection at score 0.9. Boxes sit
+    """One record per image (``evaluation.prediction_record``), every object matched exactly by
+    one detection at score 0.9, the first image also holding the detections ``stray``. Boxes sit
     100 px apart, well outside the tolerance this GT derives.
     """
+    from tcip_mcp.pipelines.training.evaluation import (
+        dt_record,
+        gt_record,
+        prediction_record,
+    )
+
     recs = []
-    for i in range(n_images):
-        gt, dt = [], []
-        for k in range(OBJECTS_PER_IMAGE):
-            box = [offset + 100.0 * k, 50.0 + 10.0 * i, 40.0, 40.0]
-            gt.append({"bbox": box, "category_id": 1, "iscrowd": 0})
-            dt.append({"bbox": box, "category_id": 1, "score": 0.9})
+    for i in range(N_IMAGES):
+        boxes = [
+            [offset + 100.0 * k, 50.0 + 10.0 * i, 40.0, 40.0]
+            for k in range(OBJECTS_PER_IMAGE)
+        ]
+        dt = [dt_record(box, 1, 0.9) for box in boxes] + list(
+            stray if i == 0 else ()
+        )
         recs.append(
-            {
-                "image_id": f"{prefix}{i}",
-                "width": 4000,
-                "height": 1000,
-                "gt": gt,
-                "dt": dt,
-                "count": len(dt),
-                "cap": len(dt) + 1,
-            }
+            prediction_record(
+                dt,
+                [gt_record(box, 1, 0) for box in boxes],
+                width=4000,
+                height=1000,
+                cap=len(dt) + 1,
+                count=len(dt),
+                image_id=f"{prefix}{i}",
+            )
         )
     return recs
 
@@ -78,14 +87,17 @@ def test_every_conf_label_the_registered_pickers_can_record_has_a_registered_imp
     assert len(labels) == 2  # two pickers
 
 
-def test_a_floor_mismatch_across_the_reference_is_surfaced_and_never_fails_it():
+def test_the_lowest_score_across_the_reference_is_surfaced_and_never_fails_it():
     """The reference's lowest observed score sits right at the floor it was collected at only on
-    the holdout; the mismatch reads over both sides and is evidence, never a failure.
+    the holdout; the observed minimum reads over both sides and is evidence, never a failure.
     """
+    from tcip_mcp.pipelines.training.evaluation import dt_record
+
     cal = _records("c", 0.0)
-    hold = _records("h", 100000.0)
-    hold[0]["dt"].append(
-        {"bbox": [900000.0, 50.0, 40.0, 40.0], "category_id": 1, "score": 0.05}
+    hold = _records(
+        "h",
+        100000.0,
+        stray=(dt_record([900000.0, 50.0, 40.0, 40.0], 1, 0.05),),
     )
 
     _conf, evidence, failures = count_criterion(
@@ -99,7 +111,6 @@ def test_a_floor_mismatch_across_the_reference_is_surfaced_and_never_fails_it():
 
     assert evidence["observed_min_score"] == pytest.approx(0.05)
     assert evidence["staged_conf_floor"] == pytest.approx(0.05)
-    assert evidence["conf_floor_mismatch"] is False
     assert failures == []
 
     _conf, evidence, _failures = count_criterion(
@@ -111,4 +122,3 @@ def test_a_floor_mismatch_across_the_reference_is_surfaced_and_never_fails_it():
         **COUNT_TEST,
     )
     assert evidence["observed_min_score"] == pytest.approx(0.9)
-    assert evidence["conf_floor_mismatch"] is True

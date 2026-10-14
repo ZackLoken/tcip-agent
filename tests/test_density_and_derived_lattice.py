@@ -508,6 +508,7 @@ def test_validation_runs_every_frame_under_the_cap_its_density_gives_it(
         score_weights=None,
         trait=None,
         density=1 / (128 * 128),
+        mask_cut=None,
     )
 
     assert len(kept) == 2 and max(kept) <= 1
@@ -573,6 +574,7 @@ def test_validation_keeps_every_box_the_cap_admits_whatever_the_builders_own_flo
         score_weights=None,
         trait=None,
         density=density,
+        mask_cut=None,
     )
 
     assert [row["count"] for row in rows] == [
@@ -906,6 +908,7 @@ def test_a_bespoke_detector_under_cap_one_keeps_one_through_validation_and_a_pas
         score_weights=None,
         trait=None,
         density=one,
+        mask_cut=None,
     )
     assert kept == [1, 1]
 

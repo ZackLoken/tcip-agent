@@ -137,7 +137,6 @@ def _sliced(pred, source, *, tile_resize, **kwargs) -> dict:
             tile_size=TILE, overlap=0.0, conf=0.0, tile_resize=tile_resize
         ),
         tile_batch_size=8,
-        require_masks=True,
         **kwargs,
     )
 
@@ -685,7 +684,6 @@ def test_delivery_grade_evaluation_admits_a_native_frame_basis_and_reproduces_th
             str(images_dir / "a.png"),
             execution=execution_record(checkpoint, unfiltered, geo, None),
             tile_batch_size=8,
-            require_masks=False,
         )
         for predictor, geo in (
             (persisted_predictor, p_geo),

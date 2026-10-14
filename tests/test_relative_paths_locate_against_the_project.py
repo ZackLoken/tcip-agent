@@ -20,6 +20,7 @@ import pytest
 
 from tests._training_values import (
     COMBINED_SCORER,
+    EPSILON_FRAC,
     IOU_THRESHOLD,
     RATIONALE,
     TRIAGE_WEIGHTS,
@@ -101,7 +102,9 @@ def _labeled(project: Path) -> None:
         for i in range(1, len(STEMS) + 1)
     ]
     document = _document(project / "labels.json", annotations=annotations)
-    result = import_coco(project, str(document), str(project), DATE)
+    result = import_coco(
+        project, str(document), str(project), DATE, EPSILON_FRAC, RATIONALE
+    )
     assert "error" not in result, result
 
 
@@ -127,7 +130,9 @@ def _import_coco(project: Path) -> Path:
     from tcip_mcp.tools.ingest_tools import import_coco
 
     _document(project / "external.json")
-    result = import_coco(project, "external.json", ".", DATE)
+    result = import_coco(
+        project, "external.json", ".", DATE, EPSILON_FRAC, RATIONALE
+    )
     assert "error" not in result, result
     return Path(result["document"])
 

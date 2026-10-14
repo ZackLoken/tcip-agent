@@ -32,6 +32,7 @@ from tests._training_values import (  # noqa: E402
     DISPERSION_QUANTILE,
     EQUIVALENCE_Z,
     RATIONALE,
+    collection_pass,
     drawn_split,
     tiling_block,
 )
@@ -208,12 +209,12 @@ def _attested(tmp_path: Path, **kwargs) -> dict:
 
 def _assess(exp: dict, *, k_cal: int = 3, k_test: int = 3, **stated) -> dict:
     """``assess_reserved_regions`` of the count trait's per-image count for ``exp``'s checkpoint
-    in ``k_cal`` and ``k_test`` bands under the ``stated`` execution values (an NMS merge at the
-    sample threshold unless they name one, ``None`` leaving the threshold to the calibration
-    bands), at the sample count test settings, answered as its door answers it.
+    in ``k_cal`` and ``k_test`` bands under the sample collection pass with the ``stated``
+    execution values over it (an NMS merge at the sample threshold unless they name one, ``None``
+    leaving the threshold to the calibration bands), at the sample count test settings, answered
+    as its door answers it.
     """
     from tcip_mcp.assessment import assess_reserved_regions
-    from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.calibration_tools import _answer
     from tests._verified_checkpoint_fixtures import SAMPLE_CROSS_TILE_NMS
 
@@ -224,11 +225,10 @@ def _assess(exp: dict, *, k_cal: int = 3, k_test: int = 3, **stated) -> dict:
             trait=fx.COUNT_TRAIT,
             delivery_kind="per_image_count",
             device="cpu",
-            stated=Stated(
+            stated=collection_pass(
                 **{
                     "postprocess": "nms",
                     "cross_tile_nms": SAMPLE_CROSS_TILE_NMS,
-                    "rationale": RATIONALE,
                     **stated,
                 }
             ),

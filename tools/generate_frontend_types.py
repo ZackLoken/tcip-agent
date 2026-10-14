@@ -96,7 +96,7 @@ def declared_models() -> list[type[BaseModel]]:
         Producer,
         SegmentTieDisclosure,
     )
-    from tcip_mcp.pipelines.execution import Stated
+    from tcip_mcp.pipelines.execution import MaskCut, Stated
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         MatchRadius,
         StatedRadius,
@@ -209,6 +209,7 @@ def declared_models() -> list[type[BaseModel]]:
         TraitEntry,
         TraitRevision,
         ConfirmRevisionPayload,
+        MaskCut,
         Stated,
     ]
 

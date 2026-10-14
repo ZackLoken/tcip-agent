@@ -19,7 +19,12 @@ from tests._chain_fixtures import (
     SAVE_BUILT_WEIGHTS,
     training_config,
 )
-from tests._training_values import RATIONALE, drawn_split, sweep_space
+from tests._training_values import (
+    MASK_CUT,
+    RATIONALE,
+    drawn_split,
+    sweep_space,
+)
 
 torch = pytest.importorskip("torch")
 
@@ -513,6 +518,13 @@ SAMPLE_DETECTOR_PASS = {
     "rationale": RATIONALE,
 }
 """The execution values a test's detector pass states, by ``execution.Stated`` field."""
+SAMPLE_INSTANCE_SEG_PASS = {
+    **SAMPLE_DETECTOR_PASS,
+    "masks": True,
+    "mask_cut": MASK_CUT,
+}
+"""The execution values a test's instance segmentation pass states: a detector's, that it
+collects masks, and the mask cut it cuts them by."""
 
 
 def objects_over(boxes: list[list[float]], area: float):

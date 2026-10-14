@@ -381,7 +381,7 @@ def test_golden_no_operating_point_default_survives_and_each_door_takes_stated_v
     gp_sig = inspect.signature(
         generic_predictor_mod.GenericPredictor.predict_sliced
     )
-    for name in ("execution", "tile_batch_size", "require_masks"):
+    for name in ("execution", "tile_batch_size"):
         assert gp_sig.parameters[name].default is inspect.Parameter.empty
 
     # evaluate_model takes its statement with no default; each regime then refuses what a

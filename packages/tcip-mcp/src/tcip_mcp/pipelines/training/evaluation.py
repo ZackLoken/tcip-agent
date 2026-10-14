@@ -21,6 +21,7 @@ from tcip_mcp.pipelines.schemas import AP_IOU_THRESHOLDS, COMPARABILITY_IOU
 from tcip_store import stored_number, stored_numbers
 
 if TYPE_CHECKING:
+    from tcip_mcp.pipelines.execution import MaskCut
     from tcip_mcp.pipelines.schemas import ScoreWeights
     from tcip_mcp.traits import TraitEntry
 
@@ -527,13 +528,15 @@ def derive_operating_point_curve(
     dispersion_quantile: float,
     class_id: int | None = None,
     conf_grid: list[float] | None = None,
-    max_thresholds: int = 80,
+    held: dict | None = None,
 ) -> dict:
-    """Sweep the confidence threshold over ``per_image`` records, matched under ``criterion``.
+    """Sweep the confidence threshold over ``per_image`` records, matched under ``criterion``
+    (:func:`matched`, each matching kept in ``held`` where one is given).
 
     One model pass produces ``per_image`` (unfiltered dt with scores); this sweeps conf in Python,
-    no re-forwarding. For each conf: aggregate TP/FP/FN and per-image count bias (FP-FN). An
-    explicit ``conf_grid`` (e.g. a single-element ``[conf]``) evaluates exactly those points.
+    no re-forwarding. For each conf: aggregate TP/FP/FN and per-image count bias (FP-FN). The
+    grid is ``0.0`` and every distinct detection score the records hold; an explicit
+    ``conf_grid`` (e.g. a single-element ``[conf]``) evaluates exactly those points.
     Returns ``{criterion, dispersion_quantile, class_id, curve:[{conf, tp, fp, fn, precision,
     recall, f1, count_bias_mean, abs_count_error_mean, count_error_at_quantile, count_bias_std,
     n_images, n_present, count_bias_mean_present, count_bias_std_present, per_class}]}``, the
@@ -545,18 +548,13 @@ def derive_operating_point_curve(
     JSON record have the same shape), from the one matching per conf the pooled entry sums. Class
     ids come from the records themselves.
     """
-    scores = sorted({_dt_score(d) for rec in per_image for d in rec["dt"]})
     if conf_grid is None:
-        if len(scores) > max_thresholds:
-            conf_grid = list(
-                np.linspace(scores[0], scores[-1], max_thresholds)
-            )
-        else:
-            conf_grid = list(scores)
-        conf_grid = sorted(set([0.0, *conf_grid]))
+        conf_grid = sorted(
+            {0.0, *(_dt_score(d) for rec in per_image for d in rec["dt"])}
+        )
     curve: list[dict] = []
     for conf in conf_grid:
-        by_image = matched(per_image, criterion, conf=conf)
+        by_image = matched(per_image, criterion, conf=conf, held=held)
         class_ids = (
             [class_id]
             if class_id is not None
@@ -625,8 +623,9 @@ def pick_f1_max(sweep: dict) -> float:
     return max(sweep["curve"], key=lambda c: c["f1"])["conf"]
 
 
-def _mask_rings(mask: Any, threshold: float | None) -> list:
-    """A binary (``threshold`` ``None``) or soft mask's regions as rings
+def _mask_rings(mask: Any, cut: MaskCut, *, soft: bool) -> list:
+    """A binary or, with ``soft``, a soft mask cut at ``cut.mask_binarize``, its regions as rings
+    simplified at ``cut.epsilon_frac``
     (:func:`~tcip_annotation.mask_contours.mask_to_polygon_rings`), for a mask match.
     """
     from tcip_annotation.mask_contours import mask_to_polygon_rings
@@ -636,7 +635,11 @@ def _mask_rings(mask: Any, threshold: float | None) -> list:
         if hasattr(mask, "detach")
         else np.asarray(mask)
     )
-    return mask_to_polygon_rings(m, threshold=threshold)
+    return mask_to_polygon_rings(
+        m,
+        threshold=cut.mask_binarize if soft else None,
+        epsilon_frac=cut.epsilon_frac,
+    )
 
 
 def gt_record(bbox: list[float], category_id: int, crowd: Any) -> dict:
@@ -691,10 +694,11 @@ def result_record(
     region: tuple[int, int, int, int] | None = None,
 ) -> dict:
     """A detection result (its frame's ``width`` and ``height``, the ``cap`` and ``count`` of its
-    forward, corner ``boxes``, ``scores``, ``labels``, and ``attributes`` and ``masks`` where it
-    carries them) and its ground-truth records ``gt`` as the :func:`prediction_record` they make,
-    each mask's polygons as its detection's ``rings``. Boxes, scores, labels and masks differing
-    in length refuse (``ValueError``).
+    forward, corner ``boxes``, ``scores``, ``labels``, and ``attributes``, ``masks`` and
+    ``soft_masks`` where it carries them) and its ground-truth records ``gt`` as the
+    :func:`prediction_record` they make, each mask's polygons as its detection's ``rings`` and
+    each uncut mask as its ``soft_mask``. Boxes, scores, labels and masks differing in length
+    refuse (``ValueError``).
     """
     dt = _with_attributes(
         [
@@ -714,6 +718,10 @@ def result_record(
         record["rings"] = [
             list(zip(p[0::2], p[1::2])) for p in mask["segmentation"]
         ]
+    for record, soft in zip(
+        dt, result.get("soft_masks", ()), strict="soft_masks" in result
+    ):
+        record["soft_mask"] = soft
     return prediction_record(
         dt,
         gt,
@@ -792,14 +800,13 @@ def records_from_detector(
     width: int,
     height: int,
     cap: int,
-    include_masks: bool = False,
+    mask_cut: MaskCut | None,
 ) -> dict:
     """A torchvision target and a detector's output, run on a ``width`` x ``height`` frame under
-    ``cap``, as the per-image record :func:`prediction_record` makes of them. With
-    ``include_masks`` (instance segmentation) every ground-truth and detection record also
-    carries its mask's ``rings``, the predicted masks cut at the platform's binarize threshold
-    (:func:`~tcip_mcp.pipelines.measurement.mask_geometry.resolve_binarize_threshold`), for a mask
-    match.
+    ``cap``, as the per-image record :func:`prediction_record` makes of them. With a ``mask_cut``
+    (instance segmentation; ``None`` for a pass cutting no mask) every ground-truth and detection
+    record also carries its mask's ``rings`` as the cut draws them (:func:`_mask_rings`), for a
+    mask match.
     """
     gt = gt_records(target)
     record = result_record(
@@ -821,16 +828,11 @@ def records_from_detector(
         gt,
         image_id=target.get("image_id"),
     )
-    if include_masks:
-        from tcip_mcp.pipelines.measurement.mask_geometry import (
-            resolve_binarize_threshold,
-        )
-
-        cut = resolve_binarize_threshold()["value"]
+    if mask_cut is not None:
         for ann, mask in zip(gt, target["masks"], strict=True):
-            ann["rings"] = _mask_rings(mask, None)
+            ann["rings"] = _mask_rings(mask, mask_cut, soft=False)
         for res, mask in zip(record["dt"], output["masks"], strict=True):
-            res["rings"] = _mask_rings(mask, cut)
+            res["rings"] = _mask_rings(mask, mask_cut, soft=True)
     return record
 
 
@@ -1331,18 +1333,21 @@ def evaluate(
     score_weights: ScoreWeights | None,
     trait: TraitEntry | None,
     density: float | None,
+    mask_cut: MaskCut | None,
 ) -> dict:
     """Compute per-task validation/test metrics. Returns bare metric keys. ``conf_threshold`` is
     the confidence a detector's boxes are counted at, read from the run's validated
     ``evaluation.conf_threshold`` or the pass's execution record; ``None`` for any other head.
     A detector predicts each image at no score floor, every box the cap ``density`` gives its
     frame admits (``derivations.detection_cap``, through ``operating_point.governed_forward``);
-    ``density`` is ``None`` for any other head. A detector handed ``None`` for either refuses
-    (``ValueError``) naming it, before any batch is read.
+    ``density`` is ``None`` for any other head. ``mask_cut`` is how an instance segmentation
+    head's masks are cut into rings (:func:`records_from_detector`), read from the run's
+    ``evaluation.mask_cut`` or the pass's execution record; ``None`` where no mask is cut, an
+    instance segmentation pass collecting none included, which then scores by box.
 
     ``dims`` is what the model was built at (:func:`~tcip_mcp.pipelines.model_build.model_dims`);
     a class or rank count is read from it, never off the half being scored. A detector's metrics
-    are :func:`detection_metrics` (by mask for instance segmentation) beside, when the run states
+    are :func:`detection_metrics` (by mask where masks are cut) beside, when the run states
     ``score_weights``, the composite ``objective`` they weight
     (:func:`compute_composite_objective`); one whose dims carry ``attributes`` also reports
     ``attribute_agreement``: per
@@ -1356,23 +1361,7 @@ def evaluate(
     from tcip_mcp.pipelines.operating_point import governed_forward
 
     is_detection = task in DETECTOR_TASKS
-    is_instance_seg = task == "instance_seg"
-    if is_detection:
-        if conf_threshold is None or density is None:
-            unstated = [
-                name
-                for name, value in (
-                    ("conf_threshold", conf_threshold),
-                    ("density", density),
-                )
-                if value is None
-            ]
-            raise ValueError(
-                f"a {task} evaluation counts its boxes at a stated conf_threshold and caps "
-                "each frame at its run's recorded density (derivations.detection_cap); it "
-                f"was handed None for {unstated}."
-            )
-        conf, cap_density = conf_threshold, density
+    conf, cap_density = cast(float, conf_threshold), cast(float, density)
 
     model.eval()
     total_loss = 0.0
@@ -1438,7 +1427,7 @@ def evaluate(
                         width=w,
                         height=h,
                         cap=cap,
-                        include_masks=is_instance_seg,
+                        mask_cut=mask_cut,
                     )
                 )
         else:
@@ -1499,7 +1488,7 @@ def evaluate(
             trait=trait,
             conf_threshold=conf,
             iou_threshold=iou_threshold,
-            by_mask=is_instance_seg,
+            by_mask=mask_cut is not None,
         )
         result.update(
             {

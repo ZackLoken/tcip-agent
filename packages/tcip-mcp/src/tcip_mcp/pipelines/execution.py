@@ -1,9 +1,10 @@
 """The execution record a pass runs under, and the pass prepared from a checkpoint and that record.
 
 One record states everything that decides which predictions a pass produces: the confidence
-threshold and the object density each frame's detection cap scales by, and for a tiled pass the
-tile edge, overlap, per-tile resize, the cross-tile merge by name (its SAHI type and match
-metric resolved from the name where they are read) and the threshold it merges at. The record a
+threshold and the object density each frame's detection cap scales by, how masks are cut into
+rings, and for a tiled pass the tile edge, overlap, per-tile resize, the cross-tile merge by name
+(its SAHI type and match metric resolved from the name where they are read) and the threshold it
+merges at. The record a
 pass executes is the record a bucket or an assessment stamps.
 """
 
@@ -14,6 +15,7 @@ from dataclasses import asdict, dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic.dataclasses import dataclass as pydantic_dataclass
 
 if TYPE_CHECKING:
     from tcip_mcp.model_registry import VerifiedCheckpoint
@@ -47,6 +49,18 @@ def cross_tile_merge_of(name: str) -> tuple[str, str]:
     return resolve_named(name, CROSS_TILE_MERGES, kind="cross-tile merge")
 
 
+@pydantic_dataclass(frozen=True, config=ConfigDict(extra="forbid"))
+class MaskCut:
+    """How an instance segmentation head's soft masks become rings: ``mask_binarize``, the
+    probability a mask pixel is foreground at, and ``epsilon_frac``, the fraction of each ring's
+    own perimeter its rings are simplified at (``mask_contours.mask_to_polygon_rings``). Both are
+    required, and each refuses a value outside ``[0, 1]``.
+    """
+
+    mask_binarize: float = Field(ge=0, le=1)
+    epsilon_frac: float = Field(ge=0, le=1)
+
+
 class ExecutionRefusedError(ValueError):
     """A pass that cannot run as stated: a tile edge the checkpoint contradicts, a pass with no
     basis for its scale or its density, or a stated value that differs from the record being
@@ -59,7 +73,10 @@ class Execution:
     """One pass's complete execution record.
 
     ``conf`` and ``density`` (objects per pixel, which ``derivations.detection_cap`` scales to a
-    frame) are ``None`` for a checkpoint whose head is not a detector. The tiled fields are
+    frame) are ``None`` for a checkpoint whose head is not a detector. ``masks`` is whether the
+    pass collects each detection's mask and ``mask_cut`` how they become rings (:class:`MaskCut`),
+    ``None`` for a pass collecting no mask and, for one collecting them, until an assessment's
+    calibration side derives it (:attr:`uncut`). The tiled fields are
     ``None`` for an untiled pass. A record stating a tile edge without an overlap, a conf without
     a density, or either reverse, refuses (``ValueError``) at construction. ``sources`` names, per
     field whose value can come from more than one place, where it came from, in
@@ -71,6 +88,8 @@ class Execution:
 
     conf: float | None
     density: float | None
+    masks: bool
+    mask_cut: MaskCut | None
     tile_size: int | None
     overlap: float | None
     tile_resize: tuple[int, int] | None
@@ -102,6 +121,13 @@ class Execution:
     def tiled(self) -> bool:
         return self.tile_size is not None
 
+    @property
+    def uncut(self) -> bool:
+        """Whether the pass collects masks and keeps them uncut, its :class:`MaskCut` left for
+        its calibration side to derive.
+        """
+        return self.masks and self.mask_cut is None
+
     def record(self) -> dict[str, Any]:
         """The record as JSON values."""
         out = asdict(self)
@@ -119,10 +145,11 @@ class Execution:
                 f"the execution record carries no {missing}: it states only part of "
                 "a pass, so no pass can be restored from it."
             )
-        resize = record["tile_resize"]
+        resize, cut = record["tile_resize"], record["mask_cut"]
         return cls(
             **{
                 **{k: record[k] for k in cls.__dataclass_fields__},
+                "mask_cut": MaskCut(**cut) if cut is not None else None,
                 "tile_resize": tuple(resize) if resize is not None else None,
                 "sources": dict(record["sources"]),
             }
@@ -137,9 +164,10 @@ class Execution:
 
 class Stated(BaseModel):
     """What a caller states of an execution record, every value ``None`` when unstated: whether
-    the pass is tiled, its tile edge and overlap, the cross-tile merge and its threshold, and the
-    confidence threshold, with the ``rationale`` for stating them. Refuses (``ValueError``) a
-    value stated without a rationale, and a rationale with no value stated.
+    the pass is tiled, its tile edge and overlap, the cross-tile merge and its threshold, the
+    confidence threshold, whether the pass collects masks and how it cuts them into rings
+    (:class:`MaskCut`), with the ``rationale`` for stating them. Refuses
+    (``ValueError``) a value stated without a rationale, and a rationale with no value stated.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -150,6 +178,8 @@ class Stated(BaseModel):
     postprocess: str | None = None
     cross_tile_nms: float | None = None
     conf: float | None = None
+    masks: bool | None = None
+    mask_cut: MaskCut | None = None
     rationale: str | None = Field(default=None, min_length=1)
 
     @model_validator(mode="after")
@@ -336,7 +366,11 @@ def execution_record(
     """The one complete execution record a fresh pass of ``checkpoint`` runs under, each value's
     source recorded. A detector's ``conf`` is the stated one; its ``density`` the one
     ``reference``'s regions derive (``derivations.derive_object_density``), else the one
-    the checkpoint recorded of its training regions (its geometry's ``object_density``).
+    the checkpoint recorded of its training regions (its geometry's ``object_density``). An
+    instance segmentation pass collects masks as its stated ``masks`` says, and cuts them as its
+    stated ``mask_cut`` says, each of the block's values recorded as ``explicit`` in ``sources``,
+    else leaves them uncut for an untiled pass holding ``reference`` to derive the block over its
+    calibration side's soft masks.
     Tiled at ``geometry``, an edge or overlap it leaves unresolved derives from ``reference``'s
     regions (``derivations.derive_tile_geometry``), each recorded by the derivation that
     produced it, and it merges across tiles by the stated ``postprocess`` at the stated
@@ -344,7 +378,8 @@ def execution_record(
     derive (``derivations.derive_cross_tile_nms``). The record carries the statement's
     ``rationale``. Every value left with no statement and no basis refuses
     (:class:`ExecutionRefusedError`) naming it, a tiled pass stating no merge among them, and a
-    conf stated for a head that is no detector refuses too.
+    conf stated for a head that is no detector, ``masks`` unstated for an instance segmentation
+    head or stated for any other, or a ``mask_cut`` for a pass collecting no mask, refuses too.
     """
     import sahi
 
@@ -365,7 +400,8 @@ def execution_record(
         if stated.conf is None:
             raise ExecutionRefusedError(
                 f"{checkpoint.path} is a detector and this pass states no conf: state the "
-                "confidence its boxes are kept at, or run under an assessment's record"
+                "confidence its boxes are kept at (an assessment collects its predictions at "
+                "it), or publish under an assessment's record"
             )
         values["conf"], sources["conf"] = float(stated.conf), "explicit"
         if reference is not None:
@@ -385,10 +421,34 @@ def execution_record(
             f"{checkpoint.path} is a {checkpoint.task!r} checkpoint: a confidence threshold "
             "governs a detector's boxes and nothing this head produces."
         )
+    if (stated.masks is None) == (checkpoint.task == "instance_seg"):
+        raise ExecutionRefusedError(
+            f"{checkpoint.path} is a {checkpoint.task!r} checkpoint and this pass states masks "
+            f"{stated.masks!r}: an instance segmentation pass states whether it collects its "
+            "head's masks, and a pass of a head producing none states nothing of them"
+        )
+    masks, cut = bool(stated.masks), stated.mask_cut
+    if cut is not None and not masks:
+        raise ExecutionRefusedError(
+            f"this pass of {checkpoint.path} collects no mask and states mask_cut: it governs "
+            "the masks a pass collects."
+        )
+    if cut is not None:
+        sources |= dict.fromkeys(("mask_binarize", "epsilon_frac"), "explicit")
+    elif masks and (reference is None or geometry is not None):
+        raise ExecutionRefusedError(
+            f"{checkpoint.path} collects masks and this pass states no mask_cut: state the "
+            "probability a mask pixel is foreground at and the fraction of each ring's perimeter "
+            "it is simplified at, state masks False for a pass that reads none, or assess it "
+            "untiled, whose calibration side's soft masks derive both (a tiled pass merges its "
+            "masks as polygons, so none survives to derive them over)"
+        )
     if geometry is None:
         return Execution(
             conf=values.get("conf"),
             density=values.get("density"),
+            masks=masks,
+            mask_cut=cut,
             tile_size=None,
             overlap=None,
             tile_resize=None,
@@ -453,6 +513,8 @@ def execution_record(
     return Execution(
         conf=values.get("conf"),
         density=values.get("density"),
+        masks=masks,
+        mask_cut=cut,
         tile_size=edge,
         overlap=overlap,
         tile_resize=geometry.tile_resize,
