@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from tcip_web.app import app
 from tests import REFUSED_NAMES
+from tests._web_fixtures import INVARIANCES
 
 if TYPE_CHECKING:
     from tcip_web.state import OpenProject
@@ -316,7 +317,6 @@ def test_the_listing_reads_a_stated_rotation_angle_back_as_degrees(
     """A project created stating its rotation invariance as 5 degrees lists it as 5.0."""
     from tcip_mcp.project_record import CaptureInvariances
     from tcip_mcp.tools.project_tools import initialize_project
-    from tests._web_fixtures import INVARIANCES
 
     project = workspace_dir / "currant_bud_rotation"
     answers = INVARIANCES.model_dump() | {"rotation": 5}
@@ -347,3 +347,80 @@ def test_a_last_opened_pointer_naming_a_missing_project_is_named_and_opens_nothi
         body = started.get("/api/projects").json()
     assert body["open_id"] is None
     assert "000000000000" in body["last_opened_problem"]
+
+
+def _correction(project_id: str, user: str = "tester") -> dict:
+    """An invariances correction request built by the route's own model: no vertical flip, and
+    rotation up to 5 degrees.
+    """
+    from tcip_mcp.project_record import CaptureInvariances
+    from tcip_web.routes.projects import InvariancesRequest
+
+    corrected = CaptureInvariances.model_validate(
+        INVARIANCES.model_dump() | {"vertical_flip": False, "rotation": 5.0}
+    )
+    return InvariancesRequest(
+        id=project_id, invariances=corrected, user=user
+    ).model_dump()
+
+
+def test_correcting_the_invariances_answers_the_typed_correction_and_the_record_rereads_it(
+    client, workspace_dir
+):
+    from tcip_mcp.identity import actor
+    from tcip_mcp.project_record import read_record
+    from tests._audit_fixtures import audit_rows
+
+    made = _make_project(workspace_dir, "valley_block")
+    body = _correction(made.id)
+
+    resp = client.post("/api/projects/invariances", json=body)
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {
+        "id": made.id,
+        "invariances": body["invariances"],
+        "previous_invariances": INVARIANCES.model_dump(),
+    }
+    written = body["invariances"]
+    assert read_record(made.root).invariances.model_dump() == written
+    assert _listed(client)["valley_block"]["invariances"] == written
+    (line,) = audit_rows(made.root, "project_record_corrected")
+    assert line["actor"] == actor("tester")
+
+
+def test_an_invariances_correction_for_an_id_no_project_holds_is_404(
+    client, workspace_dir
+):
+    _make_project(workspace_dir, "valley_block")
+
+    resp = client.post("/api/projects/invariances", json=_correction("0" * 12))
+
+    assert resp.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("change", "status"),
+    [
+        ({"user": ""}, 400),
+        ({"invariances": {"horizontal_flip": False}}, 422),
+        ({"invariances": INVARIANCES.model_dump() | {"rotation": 181.0}}, 422),
+    ],
+    ids=["naming-no-one", "half-filled", "out-of-range"],
+)
+def test_a_refused_invariances_correction_writes_nothing(
+    client, workspace_dir, change, status
+):
+    from tcip_mcp.project_record import read_record
+    from tests._audit_fixtures import audit_rows
+
+    made = _make_project(workspace_dir, "valley_block")
+    before, lines = read_record(made.root), audit_rows(made.root)
+
+    resp = client.post(
+        "/api/projects/invariances", json=_correction(made.id) | change
+    )
+
+    assert resp.status_code == status, resp.text
+    assert read_record(made.root) == before
+    assert audit_rows(made.root) == lines

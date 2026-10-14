@@ -12,6 +12,7 @@ from pathlib import Path
 
 import tcip_store as ts
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
+from tcip_mcp.identity import actor
 from tests import REFUSED_NAMES
 from tests._audit_fixtures import audit_rows
 from tests._web_fixtures import named_project
@@ -96,9 +97,14 @@ def test_a_rename_changes_the_display_name_and_leaves_the_directory_and_records_
     assert run_rows(project) == runs
     assert read_datasets(project) == datasets
     assert audit_rows(project)[:-1] == audit_lines
-    (line,) = audit_rows(project, "project_renamed")
-    assert line["arguments"]["previous_display_name"] == "Valley block"
-    assert line["actor"] == "user:tester"
+    (line,) = audit_rows(project, "project_record_corrected")
+    assert line["arguments"] == {
+        "id": made.id,
+        "field": "display_name",
+        "value": "Valley block, north half",
+        "previous_value": "Valley block",
+    }
+    assert line["actor"] == actor("tester")
     listed = {
         p["id"]: p for p in client.get("/api/projects").json()["projects"]
     }
@@ -119,7 +125,7 @@ def test_a_display_name_the_record_refuses_answers_400_and_changes_nothing(
 
     assert resp.status_code == 400
     assert read_record(made.root).display_name == "Valley block"
-    assert audit_rows(made.root, "project_renamed") == []
+    assert audit_rows(made.root, "project_record_corrected") == []
 
 
 def test_a_rename_naming_no_one_changes_nothing(client, tmp_path):
@@ -134,7 +140,7 @@ def test_a_rename_naming_no_one_changes_nothing(client, tmp_path):
         )
         assert resp.status_code == 400, (name, resp.text)
     assert read_record(made.root).display_name == "Valley block"
-    assert audit_rows(made.root, "project_renamed") == []
+    assert audit_rows(made.root, "project_record_corrected") == []
 
 
 def test_an_id_no_project_holds_answers_404(client, tmp_path):

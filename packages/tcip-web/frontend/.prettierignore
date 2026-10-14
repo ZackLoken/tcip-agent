@@ -7,3 +7,4 @@ package-lock.json
 src/api/types.generated.ts
 src/test/traitListings.json
 src/test/deliveryEvents.json
+src/test/projectFixtures.json

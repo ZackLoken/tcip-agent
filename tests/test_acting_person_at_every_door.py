@@ -18,6 +18,7 @@ from tcip_annotation.json_io import PERSON_IDENTITY_PREFIX, is_person
 from tcip_mcp.identity import NoActorError, actor
 from tests import ADMITTED_NAMES, FRONTEND_SRC, REFUSED_NAMES
 from tests._audit_fixtures import audit_rows
+from tests._web_fixtures import INVARIANCES
 
 NO_PROJECT = "0" * 12
 """A project id the workspace holds no project under."""
@@ -103,6 +104,10 @@ DOORS = [
     ("/api/projects/open", {"id": NO_PROJECT}),
     ("/api/projects/remove", {"id": NO_PROJECT, "confirm_name": "p"}),
     ("/api/projects/rename", {"id": NO_PROJECT, "display_name": "p"}),
+    (
+        "/api/projects/invariances",
+        {"id": NO_PROJECT, "invariances": INVARIANCES.model_dump()},
+    ),
 ]
 
 _RULE_EXPORT = re.compile(r"^export const PERSON_NAME_RULE = (\".*\");$", re.M)

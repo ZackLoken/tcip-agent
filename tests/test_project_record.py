@@ -9,7 +9,9 @@ from pathlib import Path
 import pytest
 
 import tcip_store as ts
-from tests._web_fixtures import INVARIANCES
+from tcip_mcp.project_record import CaptureInvariances
+from tests._audit_fixtures import audit_rows
+from tests._web_fixtures import INVARIANCES, named_project
 
 # ── text validation ─────────────────────────────────────────────────────────────
 
@@ -172,36 +174,125 @@ def test_create_record_lets_a_decode_error_through_for_an_undecodable_record(
         create_record(tmp_path, "Valley block", "north orchard", INVARIANCES)
 
 
-# ── replace_site: the one deliberate correction ─────────────────────────────────
-
-
-def test_replace_site_corrects_the_site_keeping_the_id_and_display_name(
+def test_create_record_refuses_different_invariances_naming_the_correction_door(
     tmp_path: Path,
 ):
-    from tcip_mcp.project_record import (
-        create_record,
-        read_record,
-        replace_site,
+    from tcip_mcp.project_record import create_record, read_record
+
+    create_record(tmp_path, "Valley block", "north orchard", INVARIANCES)
+    offered = CaptureInvariances.model_validate(
+        INVARIANCES.model_dump() | {"rotation": 5.0}
     )
 
-    record = create_record(
-        tmp_path, "Valley block", "north orchard", INVARIANCES
+    with pytest.raises(ValueError) as raised:
+        create_record(tmp_path, "Valley block", "north orchard", offered)
+
+    assert "tcip write-project-record invariances" in str(raised.value)
+    assert "Setup tab" in str(raised.value)
+    assert read_record(tmp_path).invariances == INVARIANCES
+
+
+# ── the record's corrections: one audited route, one line each ──────────────────
+
+
+def _corrections(project: Path) -> list[dict]:
+    return audit_rows(project, "project_record_corrected")
+
+
+def test_replace_invariances_writes_the_block_and_records_one_correction_line(
+    tmp_path: Path,
+):
+    from tcip_mcp.identity import actor
+    from tcip_mcp.project_record import read_record, replace_invariances
+
+    project = named_project(tmp_path / "valley_block", "Valley block").root
+    before, lines = read_record(project), audit_rows(project)
+    corrected = CaptureInvariances.model_validate(
+        INVARIANCES.model_dump() | {"vertical_flip": False, "rotation": 5.0}
     )
 
-    assert replace_site(tmp_path, "south orchard") == {
+    answer = replace_invariances(project, corrected, actor=actor("tester"))
+
+    assert answer.model_dump() == {
+        "id": before.id,
+        "invariances": corrected.model_dump(),
+        "previous_invariances": INVARIANCES.model_dump(),
+    }
+    assert read_record(project) == before.model_copy(
+        update={"invariances": corrected}
+    )
+    assert audit_rows(project)[:-1] == lines
+    (line,) = _corrections(project)
+    assert line["actor"] == actor("tester")
+    assert line["arguments"] == {
+        "id": before.id,
+        "field": "invariances",
+        "value": corrected.model_dump(),
+        "previous_value": INVARIANCES.model_dump(),
+    }
+
+
+def test_replace_invariances_refuses_a_block_the_type_refuses_writing_nothing(
+    tmp_path: Path,
+):
+    from pydantic import ValidationError
+
+    from tcip_mcp.identity import actor
+    from tcip_mcp.project_record import read_record, replace_invariances
+
+    project = named_project(tmp_path / "valley_block", "Valley block").root
+    before, lines = read_record(project), audit_rows(project)
+    unvalidated = INVARIANCES.model_copy(update={"rotation": 400.0})
+
+    with pytest.raises(ValidationError, match="rotation"):
+        replace_invariances(project, unvalidated, actor=actor("tester"))
+
+    assert read_record(project) == before
+    assert audit_rows(project) == lines
+
+
+def test_replace_site_corrects_the_site_and_records_one_correction_line(
+    tmp_path: Path,
+):
+    from tcip_mcp.identity import actor
+    from tcip_mcp.project_record import read_record, replace_site
+
+    project = named_project(tmp_path / "valley_block", "Valley block").root
+    before = read_record(project)
+
+    assert replace_site(project, "south orchard", actor=actor("tester")) == {
         "site": "south orchard",
         "previous_site": "north orchard",
     }
-    assert read_record(tmp_path) == record.model_copy(
+    assert read_record(project) == before.model_copy(
         update={"site": "south orchard"}
     )
+    (line,) = _corrections(project)
+    assert line["actor"] == actor("tester")
+    assert line["arguments"] == {
+        "id": before.id,
+        "field": "site",
+        "value": "south orchard",
+        "previous_value": "north orchard",
+    }
+
+
+def test_replace_site_requires_an_actor_by_signature(tmp_path: Path):
+    from tcip_mcp.project_record import replace_site
+
+    project = named_project(tmp_path / "valley_block", "Valley block").root
+
+    with pytest.raises(TypeError, match="actor"):
+        replace_site(project, "south orchard")  # type: ignore[call-arg]
+    assert _corrections(project) == []
 
 
 def test_replace_site_refuses_a_project_with_no_record(tmp_path: Path):
+    from tcip_mcp.identity import actor
     from tcip_mcp.project_record import ProjectRecordMissingError, replace_site
 
     with pytest.raises(ProjectRecordMissingError):
-        replace_site(tmp_path, "south orchard")
+        replace_site(tmp_path, "south orchard", actor=actor("tester"))
 
 
 # ── read_record and record_fields ───────────────────────────────────────────────

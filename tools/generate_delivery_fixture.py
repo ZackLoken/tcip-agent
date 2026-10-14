@@ -1,7 +1,8 @@
 """Write the delivery events the frontend tests read, produced by the platform itself.
 
-In scratch projects, each created through ``initialize_project``, deliveries are made through the
-platform's own producers and the test suite's own scenes for them: a per-image count delivery
+In a scratch session (``tools/fixture_session.py``), in projects each created through
+``tests._web_fixtures.named_project``, deliveries are made through the platform's own producers
+and the test suite's own scenes for them: a per-image count delivery
 over a bucket its assessment validates, a phenology delivery through a plant mapping shipped
 under a breeder's acknowledgment, and the orthomosaic door's nearest-plant and canopy-segment
 deliveries. Each project is opened through ``POST /api/projects/open`` and its records served by
@@ -9,17 +10,23 @@ deliveries. Each project is opened through ``POST /api/projects/open`` and its r
 superseding rebuild archives the mapping it cites. The served records are written,
 :func:`rebased`, to ``frontend/src/test/deliveryEvents.json`` under the names the tests import.
 
-    python tools/generate_delivery_fixture.py
+    python -m tools.generate_delivery_fixture
 """
 
 from __future__ import annotations
 
-import json
-import os
-import sys
-import tempfile
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from tools.fixture_session import (
+    opened,
+    replaced,
+    scratch_session,
+    write_fixture,
+)
+
+if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 GENERATED_PATH = (
@@ -40,27 +47,23 @@ def rebased(value: Any, scratch: Path) -> Any:
     """``value`` with every spelling of the ``scratch`` directory in its strings replaced by
     :data:`SCRATCH_ROOT`, the one fact that differs with where a run was made.
     """
-    if isinstance(value, dict):
-        return {k: rebased(v, scratch) for k, v in value.items()}
-    if isinstance(value, list):
-        return [rebased(v, scratch) for v in value]
-    if isinstance(value, str):
+
+    def leaf(_key: str | None, text: Any) -> Any:
+        if not isinstance(text, str):
+            return text
         for spelling in (str(scratch), scratch.as_posix()):
-            value = value.replace(spelling, SCRATCH_ROOT)
-        return value.replace("\\", "/") if SCRATCH_ROOT in value else value
-    return value
+            text = text.replace(spelling, SCRATCH_ROOT)
+        return text.replace("\\", "/") if SCRATCH_ROOT in text else text
+
+    return replaced(value, leaf)
 
 
-def deliveries(workspace: Path) -> dict[str, dict]:
+def deliveries(workspace: Path, client: TestClient) -> dict[str, dict]:
     """The served delivery events of the scenes this module names, made in projects created
-    under ``workspace``, by fixture name.
+    under ``workspace`` and served through ``client``, by fixture name.
     """
-    from fastapi.testclient import TestClient
-
     from tcip_mcp.tools.inference_tools import deliver_per_image_counts
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
-    from tcip_web.app import app
-    from tcip_web.state import store
     from tests import (
         _trait_fixtures as fx,
         test_orthomosaic_tools as ortho,
@@ -74,14 +77,8 @@ def deliveries(workspace: Path) -> dict[str, dict]:
     from tests._web_fixtures import named_project
     from tests.test_second_trait_acceptance import _seed_currant_bloom_trait
 
-    store.configure(workspace, ())
-    client = TestClient(app, base_url="http://127.0.0.1")
-
     def served(project) -> dict:
-        response = client.post(
-            "/api/projects/open", json={"id": project.id, "user": "grower"}
-        )
-        response.raise_for_status()
+        opened(client, project)
         response = client.get("/api/results/delivery-events")
         response.raise_for_status()
         (record,) = response.json()["records"]
@@ -223,45 +220,13 @@ def deliveries(workspace: Path) -> dict[str, dict]:
 
 
 def produce() -> dict[str, dict]:
-    """The fixture's content, made in a scratch workspace (``TCIP_WORKSPACE`` and
-    ``TCIP_STATE_ROOT`` pointed into it, and the working directory moved to it, while the scenes
-    run), :func:`rebased`.
+    """The fixture's content, made in a scratch session, :func:`rebased` against the scratch
+    directory holding its workspace.
     """
-    import tcip_store
-
-    sys.path.insert(0, str(_REPO_ROOT))
-    with tempfile.TemporaryDirectory() as scratch:
-        scratch_root = Path(scratch).resolve()
-        workspace = scratch_root / "workspace"
-        workspace.mkdir()
-        saved = {
-            k: os.environ.get(k) for k in ("TCIP_WORKSPACE", "TCIP_STATE_ROOT")
-        }
-        saved_cwd = Path.cwd()
-        os.environ["TCIP_WORKSPACE"] = str(workspace)
-        os.environ["TCIP_STATE_ROOT"] = str(scratch_root / "state")
-        os.chdir(scratch_root)
-        try:
-            tcip_store.bind()
-            served = deliveries(workspace)
-            tcip_store.release_root(workspace)
-        finally:
-            os.chdir(saved_cwd)
-            for key, value in saved.items():
-                if value is None:
-                    os.environ.pop(key, None)
-                else:
-                    os.environ[key] = value
-    return rebased(served, scratch_root)
-
-
-def main() -> int:
-    GENERATED_PATH.write_text(
-        json.dumps(produce(), indent=2) + "\n", encoding="utf-8", newline="\n"
-    )
-    print(f"wrote {GENERATED_PATH}")
-    return 0
+    with scratch_session() as (workspace, client):
+        served = deliveries(workspace, client)
+    return rebased(served, workspace.parent)
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(write_fixture(GENERATED_PATH, produce()))

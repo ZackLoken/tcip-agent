@@ -1,21 +1,94 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { StructuredRefusalError } from "@/api/http";
+import { api } from "@/api/client";
+import { decodeRefusal, StructuredRefusalError } from "@/api/http";
 import { resultsApi, type ServedPlantMapping } from "@/api/inference";
-import type { MatchRadius } from "@/api/types.generated";
+import type { CaptureInvariances, MatchRadius } from "@/api/types.generated";
 import { useStore } from "@/store";
 import { SetupTab } from "@/tabs/SetupTab";
+import { PROJECT_FIXTURES } from "@/test/projectRecords";
 import { openTestProject } from "@/test/store";
 import { TRAIT_LISTINGS } from "@/test/traitRecords";
 
 const initialStoreState = useStore.getState();
+
+const { listing: LISTING, correction: CORRECTION, refusal: REFUSAL } = PROJECT_FIXTURES;
+const CORRECTED = LISTING.projects.find((p) => p.id === CORRECTION.id)!;
+/** An invariances block's answers, field by field. */
+const answers = (block: CaptureInvariances) =>
+  Object.entries(block) as [string, boolean | number][];
 
 beforeEach(() => {
   useStore.setState(initialStoreState, true);
   openTestProject({ dataset_root: "C:/data" });
   vi.spyOn(resultsApi, "traits").mockResolvedValue({ traits: [], unreadable: [], definitions: {} });
   vi.spyOn(resultsApi, "listPlantMappings").mockResolvedValue({ names: [] });
+  vi.spyOn(api.projects, "list").mockResolvedValue(LISTING);
+});
+
+describe("SetupTab capture invariances", () => {
+  const ROTATION = "rotation (largest angle, degrees)";
+
+  beforeEach(() => {
+    useStore.setState({ openProject: { id: CORRECTION.id, path: CORRECTED.path } });
+  });
+
+  it("shows the six answers the open project's record carries", async () => {
+    render(<SetupTab />);
+
+    await screen.findByLabelText(ROTATION);
+    for (const [name, value] of answers(CORRECTED.invariances!)) {
+      if (typeof value === "boolean") {
+        expect(screen.getByLabelText(name.replaceAll("_", " "))).toHaveValue(value ? "yes" : "no");
+      } else {
+        expect(screen.getByLabelText(ROTATION)).toHaveValue(value);
+      }
+    }
+    expect(screen.getByRole("button", { name: "Correct invariances" })).toBeDisabled();
+  });
+
+  it("posts the whole block with the person's name and names what changed", async () => {
+    const correct = vi.spyOn(api.projects, "invariances").mockResolvedValue(CORRECTION);
+    useStore.setState({ user: "breeder" });
+
+    render(<SetupTab />);
+    await screen.findByLabelText(ROTATION);
+    for (const [name, value] of answers(CORRECTION.invariances)) {
+      fireEvent.change(
+        screen.getByLabelText(typeof value === "boolean" ? name.replaceAll("_", " ") : ROTATION),
+        { target: { value: typeof value === "boolean" ? (value ? "yes" : "no") : String(value) } },
+      );
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Correct invariances" }));
+
+    await waitFor(() =>
+      expect(correct).toHaveBeenCalledWith({
+        id: CORRECTION.id,
+        invariances: CORRECTION.invariances,
+        user: "breeder",
+      }),
+    );
+    await waitFor(() =>
+      expect(useStore.getState().toasts.map((t) => t.message)).toContain(
+        "Capture invariances corrected: vertical flip no to yes, rotation 5 degrees to 10 degrees.",
+      ),
+    );
+  });
+
+  it("shows the door's refusal text in the panel", async () => {
+    vi.spyOn(api.projects, "invariances").mockRejectedValue(
+      await decodeRefusal(new Response(JSON.stringify(REFUSAL), { status: 422 })),
+    );
+
+    render(<SetupTab />);
+    fireEvent.change(await screen.findByLabelText(ROTATION), { target: { value: "400" } });
+    fireEvent.click(screen.getByRole("button", { name: "Correct invariances" }));
+
+    expect(
+      await screen.findByText("invariances.rotation: Input should be less than or equal to 180"),
+    ).toBeInTheDocument();
+  });
 });
 
 afterEach(() => {

@@ -18,7 +18,7 @@ COMMANDS: dict[str, str] = {
     "archive-project": "tcip_mcp.cli.archive_project",
     "import-project": "tcip_mcp.cli.import_project",
     "check-dataset-identity": "tcip_mcp.cli.check_dataset_identity",
-    "write-project-site": "tcip_mcp.cli.write_project_site",
+    "write-project-record": "tcip_mcp.cli.write_project_record",
     "distill-learnings": "tcip_web.cli.distill_learnings",
     "scan-dataset": "tcip_mcp.cli.scan_dataset",
     "score-predictions": "tcip_mcp.cli.score_predictions",

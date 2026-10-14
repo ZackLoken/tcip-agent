@@ -6,9 +6,14 @@ import os
 import re
 import shutil
 import sys
+from collections.abc import Iterator
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
 
 from tests.hung_test_watchdog import pytest_timeout_set_timer
 from tests.ray_cluster_lock import pytest_configure, pytest_runtest_protocol
@@ -43,18 +48,6 @@ def _import_ray_before_any_popen_substitute():
         return
 
 
-@pytest.fixture(autouse=True)
-def _bind_storage_backend():
-    """Bind the storage backend before every test, the way a process entry point does, and close
-    it after the test.
-    """
-    import tcip_store
-
-    backend = tcip_store.bind()
-    yield
-    backend.close()
-
-
 @pytest.fixture(scope="session", autouse=True)
 def _stop_leaked_tensorboards():
     """Stop every TensorBoard process the session started, when the manager module is loaded."""
@@ -82,34 +75,25 @@ def pytest_collection_modifyitems(config, items):
 
 
 @pytest.fixture
-def tmp_path(
-    tmp_path_factory: pytest.TempPathFactory,
-    request: pytest.FixtureRequest,
-    monkeypatch: pytest.MonkeyPatch,
-) -> Path:
-    """Each test's ``tmp_path`` is ``<workspace>/project`` inside its own fresh workspace, which
-    ``TCIP_WORKSPACE`` names and the web backend is started with, no additive image roots.
-    The workspace's contents are removed after a test that passed under the ``failed``
-    retention policy, the way pytest's own ``tmp_path`` is, and kept after one that failed; the
-    emptied root itself stays, so a numbered name is never handed to a second test in the
-    session.
-
-    A refusal case uses a directory beside the workspace (``tmp_path_factory.mktemp``); a test of
-    the additive roots starts the backend with them itself.
+def _backend(
+    tmp_path_factory: pytest.TempPathFactory, request: pytest.FixtureRequest
+) -> Iterator[tuple[Path, TestClient]]:
+    """Each test's own fresh workspace and a client of the web backend serving it
+    (``tests._web_fixtures.backend_session``). The workspace's root is removed of its contents
+    after a test that passed under the ``failed`` retention policy, the way pytest's own
+    ``tmp_path`` is, and kept after one that failed; the emptied root itself stays, so a
+    numbered name is never handed to a second test in the session.
     """
     from _pytest.tmpdir import tmppath_result_key
 
-    from tcip_web.state import store
+    from tests._web_fixtures import backend_session
 
     name = re.sub(r"[\W]", "_", request.node.name)[:30]
     root = tmp_path_factory.mktemp(name, numbered=True).resolve()
     workspace = root / "workspace"
-    project = workspace / "project"
-    project.mkdir(parents=True)
-    monkeypatch.setenv("TCIP_WORKSPACE", str(workspace))
-    monkeypatch.delenv("TCIP_IMAGE_ROOTS", raising=False)
-    store.configure(workspace, ())
-    yield project
+    workspace.mkdir()
+    with backend_session(workspace) as client:
+        yield workspace, client
     policy = request.config.getini("tmp_path_retention_policy")
     outcome = request.node.stash.get(tmppath_result_key, {})
     if policy == "failed" and outcome.get("call", True):
@@ -118,6 +102,18 @@ def tmp_path(
                 shutil.rmtree(entry, ignore_errors=True)
             else:
                 entry.unlink(missing_ok=True)
+
+
+@pytest.fixture
+def tmp_path(_backend: tuple[Path, TestClient]) -> Path:
+    """Each test's ``tmp_path`` is ``<workspace>/project`` inside its own workspace
+    (:func:`_backend`). A refusal case uses a directory beside the workspace
+    (``tmp_path_factory.mktemp``); a test of the additive roots starts the backend with them
+    itself.
+    """
+    project = _backend[0] / "project"
+    project.mkdir()
+    return project
 
 
 @pytest.fixture(autouse=True)
@@ -169,13 +165,11 @@ def opened_project(opened) -> Path:
 
 
 @pytest.fixture
-def client():
-    """A client of the web backend at the loopback address a browser on this machine uses."""
-    from fastapi.testclient import TestClient
-
-    from tcip_web.app import app
-
-    return TestClient(app, base_url="http://127.0.0.1")
+def client(_backend: tuple[Path, TestClient]) -> TestClient:
+    """A client of the web backend serving this test's workspace (:func:`_backend`), at the
+    loopback address a browser on this machine uses.
+    """
+    return _backend[1]
 
 
 @pytest.fixture
@@ -205,18 +199,6 @@ def tb_launches(monkeypatch) -> list[str]:
         fake_launch,
     )
     return calls
-
-
-@pytest.fixture(autouse=True)
-def _close_open_project():
-    """Leave the web layer's process-wide state store with no project open after each test."""
-    yield
-    state = sys.modules.get("tcip_web.state")
-    opened = None if state is None else state.store.opened
-    if opened is not None:
-        import asyncio
-
-        asyncio.run(state.store.close_project(opened.id))
 
 
 @pytest.fixture
