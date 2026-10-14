@@ -35,7 +35,9 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     concordance_correlation_coefficient,
     derive_operating_point_curve,
     detection_metrics,
+    dt_record,
     gt_class_avg_size,
+    gt_record,
     ordinal_metrics,
     pick_count_unbiased,
     pick_f1_max,
@@ -50,12 +52,13 @@ from tcip_mcp.pipelines.training.generic_trainer import (  # noqa: E402
     resolve_selection_metric,
 )
 from tests import _trait_fixtures as fx  # noqa: E402
-from tests._dense_op_fixtures import gt_only  # noqa: E402
+from tests._dense_op_fixtures import gt_only, toy_records  # noqa: E402
 from tests._image_fixtures import write_noise_image  # noqa: E402
 from tests._producer_fixtures import checkpoint_admission  # noqa: E402
 from tests._training_values import (  # noqa: E402
     DISPERSION_QUANTILE,
     IOU_THRESHOLD,
+    MASK_CUT,
     RATIONALE,
     SCORE_WEIGHTS,
     VALIDATION_CONF,
@@ -110,9 +113,35 @@ def _rec(gt, dt, w=100, h=100):
     )
 
 
+def _gt(*boxes: list[float]) -> list[dict]:
+    """One class-1 object per ``[x, y, w, h]`` box, each as ``gt_record`` makes it."""
+    return [gt_record(box, 1, 0) for box in boxes]
+
+
+def _dt(*scored: tuple[list[float], float]) -> list[dict]:
+    """One class-1 detection per ``([x, y, w, h], score)``, each as ``dt_record`` makes it."""
+    return [dt_record(box, 1, score) for box, score in scored]
+
+
+def _masked(gt_ring: list, dt_ring: list) -> dict:
+    """The ``records_from_annotation`` record of a 100 x 100 frame holding one object of region
+    ``gt_ring`` and one detection at 0.9 of region ``dt_ring``.
+    """
+    from tcip_annotation.state import Annotation, Polygon
+    from tcip_mcp.pipelines.training.evaluation import records_from_annotation
+
+    return records_from_annotation(
+        [Annotation(subject="bud", geometry=Polygon([gt_ring]))],
+        [Annotation(subject="bud", geometry=Polygon([dt_ring]), score=0.9)],
+        width=100,
+        height=100,
+        cap=None,
+    )
+
+
 def test_detection_map50_perfect():
-    gt = [{"category_id": 1, "bbox": [10, 10, 20, 20], "iscrowd": 0}]
-    dt = [{"category_id": 1, "bbox": [10, 10, 20, 20], "score": 0.9}]
+    gt = _gt([10, 10, 20, 20])
+    dt = _dt(([10, 10, 20, 20], 0.9))
     m = detection_metrics(
         [_rec(gt, dt)],
         trait=None,
@@ -125,14 +154,8 @@ def test_detection_map50_perfect():
 
 
 def test_detection_operating_point_tp_fp_fn():
-    gt = [
-        {"category_id": 1, "bbox": [10, 10, 20, 20], "iscrowd": 0},
-        {"category_id": 1, "bbox": [50, 50, 10, 10], "iscrowd": 0},
-    ]
-    dt = [
-        {"category_id": 1, "bbox": [10, 10, 20, 20], "score": 0.9},  # TP
-        {"category_id": 1, "bbox": [80, 80, 10, 10], "score": 0.7},  # FP
-    ]
+    gt = _gt([10, 10, 20, 20], [50, 50, 10, 10])
+    dt = _dt(([10, 10, 20, 20], 0.9), ([80, 80, 10, 10], 0.7))  # a TP, an FP
     m = detection_metrics(
         [_rec(gt, dt)],
         trait=None,
@@ -148,15 +171,9 @@ def test_detection_operating_point_tp_fp_fn():
 
 
 def test_detection_conf_threshold_filters():
-    gt = [{"category_id": 1, "bbox": [10, 10, 20, 20], "iscrowd": 0}]
-    dt = [
-        {"category_id": 1, "bbox": [10, 10, 20, 20], "score": 0.9},  # TP
-        {
-            "category_id": 1,
-            "bbox": [80, 80, 10, 10],
-            "score": 0.7,
-        },  # FP, below 0.8
-    ]
+    gt = _gt([10, 10, 20, 20])
+    # A TP, and an FP below 0.8.
+    dt = _dt(([10, 10, 20, 20], 0.9), ([80, 80, 10, 10], 0.7))
     m = detection_metrics(
         [_rec(gt, dt)],
         trait=None,
@@ -169,8 +186,8 @@ def test_detection_conf_threshold_filters():
 
 
 def test_detection_metrics_write_nothing_to_stdout(capsys):
-    gt = [{"category_id": 1, "bbox": [10, 10, 20, 20], "iscrowd": 0}]
-    dt = [{"category_id": 1, "bbox": [10, 10, 20, 20], "score": 0.9}]
+    gt = _gt([10, 10, 20, 20])
+    dt = _dt(([10, 10, 20, 20], 0.9))
     detection_metrics(
         [_rec(gt, dt)],
         trait=None,
@@ -184,24 +201,8 @@ def test_detection_metrics_write_nothing_to_stdout(capsys):
 
 def test_detection_mask_path():
     ring = [(10.0, 10.0), (30.0, 10.0), (30.0, 30.0), (10.0, 30.0)]
-    gt = [
-        {
-            "category_id": 1,
-            "bbox": [10, 10, 20, 20],
-            "iscrowd": 0,
-            "rings": [ring],
-        }
-    ]
-    dt = [
-        {
-            "category_id": 1,
-            "bbox": [10, 10, 20, 20],
-            "score": 0.9,
-            "rings": [ring],
-        }
-    ]
     m = detection_metrics(
-        [_rec(gt, dt)],
+        [_masked(ring, ring)],
         trait=None,
         conf_threshold=0.25,
         iou_threshold=0.5,
@@ -212,8 +213,8 @@ def test_detection_mask_path():
 
 
 def test_a_mask_match_counts_by_region_where_the_box_match_would_not():
-    """An L-shaped object whose box a detection's box covers exactly, but whose region the
-    detection's region overlaps under half: matched by box, missed by mask.
+    """An L-shaped object whose box the box of a detection filling its inner corner overlaps at
+    IoU 0.5625, while their regions do not overlap: matched by box, missed by mask.
     """
     l_shape = [
         (0.0, 0.0),
@@ -224,25 +225,9 @@ def test_a_mask_match_counts_by_region_where_the_box_match_would_not():
         (0.0, 40.0),
     ]
     corner = [(10.0, 10.0), (40.0, 10.0), (40.0, 40.0), (10.0, 40.0)]
-    gt = [
-        {
-            "category_id": 1,
-            "bbox": [0, 0, 40, 40],
-            "iscrowd": 0,
-            "rings": [l_shape],
-        }
-    ]
-    dt = [
-        {
-            "category_id": 1,
-            "bbox": [0, 0, 40, 40],
-            "score": 0.9,
-            "rings": [corner],
-        }
-    ]
     by_box, by_mask = (
         detection_metrics(
-            [_rec(gt, dt)],
+            [_masked(l_shape, corner)],
             trait=None,
             conf_threshold=0.25,
             iou_threshold=0.5,
@@ -255,8 +240,8 @@ def test_a_mask_match_counts_by_region_where_the_box_match_would_not():
 
 
 def test_detection_metrics_over_an_empty_side():
-    gt = [{"category_id": 1, "bbox": [10, 10, 20, 20], "iscrowd": 0}]
-    dt = [{"category_id": 1, "bbox": [10, 10, 20, 20], "score": 0.9}]
+    gt = _gt([10, 10, 20, 20])
+    dt = _dt(([10, 10, 20, 20], 0.9))
 
     def metrics(gt, dt):
         return detection_metrics(
@@ -284,40 +269,8 @@ def test_detection_metrics_over_an_empty_side():
 # --------------------------------------------------------------------------
 
 
-def _sweep_records():
-    """Two images with hand-verifiable center-match outcomes at tolerance 10.
-
-    All boxes are 20x20 (char size 20 → gt_class_avg_size 20; half = 10 tolerance).
-    """
-
-    def box(cx, cy, s=20.0):
-        return [cx - s / 2, cy - s / 2, s, s]
-
-    def ann(cx, cy, score=None):
-        a = {"category_id": 0, "bbox": box(cx, cy), "iscrowd": 0}
-        if score is not None:
-            a["score"] = score
-        return a
-
-    a = {
-        "width": 400,
-        "height": 400,
-        "gt": [ann(100, 100)],
-        "dt": [ann(100, 100, 0.9), ann(300, 300, 0.6)],
-    }  # 1 TP + 1 far FP
-    b = {
-        "width": 400,
-        "height": 400,
-        "gt": [ann(100, 100), ann(200, 200)],
-        "dt": [ann(100, 100, 0.9), ann(200, 200, 0.3)],
-    }  # 2 TP (one low-conf)
-    return [a, b]
-
-
 def test_golden_gt_class_avg_size():
-    assert gt_class_avg_size(_sweep_records(), class_id=0) == pytest.approx(
-        20.0
-    )
+    assert gt_class_avg_size(toy_records(), class_id=0) == pytest.approx(20.0)
 
 
 CENTER_10 = {"kind": "center_match", "tolerance": 10.0}
@@ -333,7 +286,7 @@ def _points(centers: list[tuple[float, float]]) -> list[dict]:
 
 def test_golden_derive_operating_point_curve():
     sweep = derive_operating_point_curve(
-        _sweep_records(),
+        toy_records(),
         criterion=CENTER_10,
         class_id=0,
         dispersion_quantile=DISPERSION_QUANTILE,
@@ -355,7 +308,7 @@ def test_golden_derive_operating_point_curve():
 
 def test_golden_operating_point_pickers():
     sweep = derive_operating_point_curve(
-        _sweep_records(),
+        toy_records(),
         criterion=CENTER_10,
         class_id=0,
         dispersion_quantile=DISPERSION_QUANTILE,
@@ -577,8 +530,8 @@ def test_resolve_match_criterion_iou_match_refuses_a_reference_with_no_box_to_de
 
 
 def test_golden_box_and_mask_map():
-    gt = [{"category_id": 1, "bbox": [10, 10, 20, 20], "iscrowd": 0}]
-    dt_perfect = [{"category_id": 1, "bbox": [10, 10, 20, 20], "score": 0.9}]
+    gt = _gt([10, 10, 20, 20])
+    dt_perfect = _dt(([10, 10, 20, 20], 0.9))
     m = detection_metrics(
         [_rec(gt, dt_perfect)],
         trait=None,
@@ -593,14 +546,8 @@ def test_golden_box_and_mask_map():
     assert (m["tp"], m["fp"], m["fn"]) == (1, 0, 0)
 
     # 1 TP + 1 FP against 2 GT → P=R=F1=0.5, counts 1/1/1.
-    gt2 = [
-        {"category_id": 1, "bbox": [10, 10, 20, 20], "iscrowd": 0},
-        {"category_id": 1, "bbox": [50, 50, 10, 10], "iscrowd": 0},
-    ]
-    dt2 = [
-        {"category_id": 1, "bbox": [10, 10, 20, 20], "score": 0.9},
-        {"category_id": 1, "bbox": [80, 80, 10, 10], "score": 0.7},
-    ]
+    gt2 = _gt([10, 10, 20, 20], [50, 50, 10, 10])
+    dt2 = _dt(([10, 10, 20, 20], 0.9), ([80, 80, 10, 10], 0.7))
     m2 = detection_metrics(
         [_rec(gt2, dt2)],
         trait=None,
@@ -615,24 +562,8 @@ def test_golden_box_and_mask_map():
 
     # segm: a perfect mask match scores map50 = 1.0.
     ring = [(10.0, 10.0), (30.0, 10.0), (30.0, 30.0), (10.0, 30.0)]
-    gt_s = [
-        {
-            "category_id": 1,
-            "bbox": [10, 10, 20, 20],
-            "iscrowd": 0,
-            "rings": [ring],
-        }
-    ]
-    dt_s = [
-        {
-            "category_id": 1,
-            "bbox": [10, 10, 20, 20],
-            "score": 0.9,
-            "rings": [ring],
-        }
-    ]
     ms = detection_metrics(
-        [_rec(gt_s, dt_s)],
+        [_masked(ring, ring)],
         trait=None,
         conf_threshold=0.25,
         iou_threshold=0.5,
@@ -1075,29 +1006,18 @@ def test_higher_is_better_by_metric_matches_evaluate_and_governing_counts(
             iou_threshold=IOU_THRESHOLD,
             score_weights=WEIGHTS if detector else None,
             density=1.0 if detector else None,
+            mask_cut=MASK_CUT if task == "instance_seg" else None,
         )
         returned.update(result)
 
     per_image = [
-        {
-            "width": 64,
-            "height": 64,
-            "gt": [
-                {
-                    "category_id": 1,
-                    "bbox": [10.0, 10.0, 30.0, 30.0],
-                    "iscrowd": 0,
-                }
-            ],
-            "dt": [
-                {
-                    "category_id": 1,
-                    "bbox": [11.0, 11.0, 29.0, 29.0],
-                    "score": 0.9,
-                }
-            ],
-        },
-        {"width": 64, "height": 64, "gt": [], "dt": []},
+        _rec(
+            _gt([10.0, 10.0, 30.0, 30.0]),
+            _dt(([11.0, 11.0, 29.0, 29.0], 0.9)),
+            w=64,
+            h=64,
+        ),
+        _rec([], [], w=64, h=64),
     ]
     returned.update(
         governing_counts(
@@ -1536,19 +1456,10 @@ def _crowd_records() -> list[dict]:
     """One image whose object a detection matches and whose crowd region holds another
     detection, and one image holding only a crowd region no detection matches.
     """
-    from tcip_mcp.pipelines.training.evaluation import gt_record
-
     return [
         _rec(
             [gt_record(_OBJECT, 1, 0), gt_record(_CROWD, 1, 1)],
-            [
-                {"category_id": 1, "bbox": _OBJECT, "score": 0.9},
-                {
-                    "category_id": 1,
-                    "bbox": [55.0, 55.0, 30.0, 30.0],
-                    "score": 0.9,
-                },
-            ],
+            _dt((_OBJECT, 0.9), ([55.0, 55.0, 30.0, 30.0], 0.9)),
         ),
         _rec([gt_record(_CROWD, 1, 1)], []),
     ]
@@ -1638,14 +1549,28 @@ def test_a_detector_output_stating_no_boxes_refuses_rather_than_reading_as_no_de
         "iscrowd": torch.zeros((0,), dtype=torch.int64),
     }
     with pytest.raises(KeyError, match="boxes"):
-        records_from_detector(target, {}, width=10, height=10, cap=1)
+        records_from_detector(
+            target,
+            {},
+            width=10,
+            height=10,
+            cap=1,
+            mask_cut=None,
+        )
     empty = {
         "boxes": torch.zeros((0, 4)),
         "labels": torch.zeros((0,), dtype=torch.int64),
         "scores": torch.zeros((0,)),
     }
     assert (
-        records_from_detector(target, empty, width=10, height=10, cap=1)["dt"]
+        records_from_detector(
+            target,
+            empty,
+            width=10,
+            height=10,
+            cap=1,
+            mask_cut=None,
+        )["dt"]
         == []
     )
 
@@ -1717,7 +1642,12 @@ def test_a_detectors_record_reads_both_sides_on_the_stored_grid(tmp_path):
         "scores": torch.tensor([0.9]),
     }
     record = records_from_detector(
-        target_tensors(listed), output, width=100, height=100, cap=2
+        target_tensors(listed),
+        output,
+        width=100,
+        height=100,
+        cap=2,
+        mask_cut=None,
     )
     assert [g["bbox"] for g in record["gt"]] == [[10.3, 20.7, 29.8, 40.2]]
     assert [d["bbox"] for d in record["dt"]] == [[10.1, 10.1, 30.2, 20.2]]

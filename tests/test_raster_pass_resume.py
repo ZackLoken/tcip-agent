@@ -19,6 +19,8 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("torchvision")
 
 import tcip_store  # noqa: E402
+from tcip_mcp.pipelines.execution import MaskCut  # noqa: E402
+from tests._training_values import MASK_CUT  # noqa: E402
 from tests.test_orthomosaic_tools import (  # noqa: E402
     TILE,
     _bespoke_detection_checkpoint,
@@ -29,15 +31,22 @@ from tests.test_orthomosaic_tools import (  # noqa: E402
 
 def _instance_seg_checkpoint(tmp_path: Path) -> str:
     """The checkpoint a fixed-mask instance_seg run under ``tmp_path`` completed over frames of
-    its own, registered by completing.
+    its own, registered by completing: each :data:`TILE` px slice it predicts holds one detection
+    over the slice's central half, its mask filling that half.
     """
     from tests._chain_fixtures import BESPOKE_MODELS, FRAME_STATISTICS
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
+    central = [TILE // 4, TILE // 4, 3 * TILE // 4, 3 * TILE // 4]
     return registered_checkpoint(
         tmp_path,
         model_source={
             "builder": "bespoke_models:build_fixed_mask_instance_seg",
+            "builder_kwargs": {
+                "regions": [central],
+                "value": 1.0,
+                "box": central,
+            },
             "source_files": [BESPOKE_MODELS],
             "task": "instance_seg",
             "normalization": FRAME_STATISTICS,
@@ -62,6 +71,8 @@ def _run(
     bucket: str,
     *,
     conf: float = 0.0,
+    masks: bool | None = None,
+    mask_cut: MaskCut | None = None,
     **kwargs,
 ) -> dict:
     from tcip_mcp.pipelines.execution import Stated
@@ -73,6 +84,8 @@ def _run(
         "bucket": bucket,
         "stated": Stated(
             conf=conf,
+            masks=masks,
+            mask_cut=mask_cut,
             tile_size=TILE,
             overlap=0.0,
             postprocess="nms",
@@ -207,7 +220,12 @@ def test_an_interrupted_instance_segmentation_pass_resumes_to_the_uninterrupted_
     )
 
     baseline = _run(
-        tmp_path, ckpt, raster_path, uninterrupted, require_masks=True
+        tmp_path,
+        ckpt,
+        raster_path,
+        uninterrupted,
+        masks=True,
+        mask_cut=MASK_CUT,
     )
     assert "error" not in baseline, baseline
     _interrupted(
@@ -216,15 +234,17 @@ def test_an_interrupted_instance_segmentation_pass_resumes_to_the_uninterrupted_
         interrupted,
         ckpt,
         raster_path,
-        require_masks=True,
+        masks=True,
+        mask_cut=MASK_CUT,
     )
     resumed = _run(
         tmp_path,
         ckpt,
         raster_path,
         interrupted,
+        masks=True,
+        mask_cut=MASK_CUT,
         resume=True,
-        require_masks=True,
     )
     assert "error" not in resumed, resumed
 

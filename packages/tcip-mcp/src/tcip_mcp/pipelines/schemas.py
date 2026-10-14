@@ -33,6 +33,7 @@ from pydantic import (
 
 from tcip_mcp.pipelines.data.selection import ClassScope, Sample
 from tcip_mcp.pipelines.derivations import DetectorGeometryDerivation
+from tcip_mcp.pipelines.execution import MaskCut
 
 if TYPE_CHECKING:
     from tcip_mcp.subject_registry import Attribute
@@ -298,6 +299,9 @@ class EvaluationSpec(_Stated):
     selection_metric: SelectionMetric
     conf_threshold: float | None = Field(None, ge=0, le=1)
     """The confidence a detector's validation counts boxes at."""
+    mask_cut: MaskCut | None = None
+    """How an instance segmentation run's validation cuts its predicted masks and simplifies its
+    predicted and ground-truth mask rings."""
     iou_threshold: float = COMPARABILITY_IOU
     """The IoU a match must reach where no trait's criterion governs; unstated,
     :data:`COMPARABILITY_IOU`."""
@@ -763,12 +767,14 @@ class DefaultTrainerRegime(NamedTuple):
 
 class TrainerReads(NamedTuple):
     """What training under a config reads (:meth:`TrainConfigSchema.trainer_reads`): the loaders'
-    batch size, the config's ``evaluation.conf_threshold`` (stated for a detector), and the
-    default trainer's regime (``None`` for a config naming its own ``training_source``).
+    batch size, the config's ``evaluation.conf_threshold`` (stated for a detector),
+    ``evaluation.mask_cut`` (stated for instance segmentation), and the default trainer's regime
+    (``None`` for a config naming its own ``training_source``).
     """
 
     batch_size: int
     conf_threshold: float | None
+    mask_cut: MaskCut | None
     regime: DefaultTrainerRegime | None
 
 
@@ -843,10 +849,12 @@ class TrainConfigSchema(_Recorded):
 
     def trainer_reads(self) -> TrainerReads:
         """What training under this config reads, each stated: the loaders' ``batch_size``, a
-        detector's ``evaluation.conf_threshold``, and, when the config names no
-        ``training_source``, the default trainer's regime (:meth:`default_trainer_regime`).
-        Refuses (``ValueError``) naming every one of them the config leaves unstated, and a
-        ``sampler`` block its sampler refuses (``samplers.sampler_settings``).
+        detector's ``evaluation.conf_threshold``, an instance segmentation run's
+        ``evaluation.mask_cut``, and, when the config names no ``training_source``, the default
+        trainer's regime (:meth:`default_trainer_regime`). Refuses (``ValueError``) naming every
+        one of them the config leaves unstated, a ``mask_cut`` stated for a run cutting no mask,
+        and a ``sampler`` block its sampler refuses
+        (``samplers.sampler_settings``).
         """
         from tcip_mcp.pipelines.data.samplers import sampler_settings
         from tcip_mcp.pipelines.model_contract import DETECTOR_TASKS
@@ -870,6 +878,13 @@ class TrainConfigSchema(_Recorded):
                 "evaluation.conf_threshold unstated: a detector's validation counts "
                 "its boxes at a confidence the run states, under any trainer"
             )
+        cut = self.evaluation.mask_cut
+        if (self.model_source.task == "instance_seg") != (cut is not None):
+            unstated.append(
+                f"evaluation.mask_cut {cut!r} for a {self.model_source.task} run: an instance "
+                "segmentation run's validation cuts its masks and simplifies their rings as the "
+                "run states, and no other run's validation cuts a mask"
+            )
         regime = None
         if self.training_source is None:
             try:
@@ -879,7 +894,10 @@ class TrainConfigSchema(_Recorded):
         if unstated:
             raise ValueError("; ".join(unstated))
         return TrainerReads(
-            cast(int, self.batch_size), self.evaluation.conf_threshold, regime
+            cast(int, self.batch_size),
+            self.evaluation.conf_threshold,
+            cut,
+            regime,
         )
 
 

@@ -133,7 +133,6 @@ class GenericPredictor:
         *,
         tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE,
         batch_size: int = DEFAULT_IMAGE_BATCH_SIZE,
-        require_masks: bool = True,
     ) -> list[dict]:
         """Run inference on multiple images under ``execution``, sliced when it is a tiled record.
 
@@ -142,7 +141,7 @@ class GenericPredictor:
 
         Each element of ``image_paths`` may be a plain path/string or a :class:`BandGroupRef` (see
         :meth:`predict`). Under a tiled ``execution`` every image runs through
-        :meth:`predict_sliced`; untiled, ``instance_seg`` always carries masks.
+        :meth:`predict_sliced`; masks are carried where the record collects them.
         """
         if execution.tiled:
             return [
@@ -150,7 +149,6 @@ class GenericPredictor:
                     p,
                     execution=execution,
                     tile_batch_size=tile_batch_size,
-                    require_masks=require_masks,
                 )
                 for p in image_paths
             ]
@@ -165,50 +163,25 @@ class GenericPredictor:
             )
         ]
 
-    def _detection_model(
-        self,
-        execution: Execution,
-        cap_of: Callable[[np.ndarray], int],
-        *,
-        tile_resize: tuple[int, int] | None,
-        band_interpretations: tuple[str, ...] | None,
-        collect_masks: bool,
-    ) -> TcipDetectionModel:
-        """This predictor wrapped as the SAHI detection model a prediction runs through, each
-        input under the cap ``cap_of`` gives it and ``execution``'s conf, masks cut at the
-        platform's binarize threshold.
-        """
-        from tcip_mcp.pipelines.measurement.mask_geometry import (
-            resolve_binarize_threshold,
-        )
-        from tcip_mcp.pipelines.slicing import TcipDetectionModel
-
-        return TcipDetectionModel(
-            self,
-            conf=cast(float, execution.conf),
-            cap_of=cap_of,
-            tile_resize=tile_resize,
-            band_interpretations=band_interpretations,
-            collect_masks=collect_masks,
-            mask_binarize=resolve_binarize_threshold(),
-        )
-
     def _predict_whole(
         self, sources: list[str | Path | BandGroupRef], execution: Execution
     ) -> list[dict]:
         """``sources`` under ``execution``, each decoded whole as one slice the size of its frame
         at shift zero and run under its own frame's cap, each result built by
-        :meth:`_detection_record` under the cap its forward ran at.
+        :meth:`_detection_record` under the cap its forward ran at; under an
+        :attr:`~tcip_mcp.pipelines.execution.Execution.uncut` record each carries
+        ``soft_masks``, each detection's uncut mask as the model kept it
+        (``slicing.TcipDetectionModel.soft_masks``).
         """
         from tcip_mcp.pipelines.derivations import detection_cap
+        from tcip_mcp.pipelines.slicing import TcipDetectionModel
 
         density = cast(float, execution.density)
-        model = self._detection_model(
-            execution,
-            lambda a: detection_cap(density, a.shape[0] * a.shape[1]),
-            tile_resize=None,
+        model = TcipDetectionModel(
+            self,
+            execution=execution,
+            cap_of=lambda a: detection_cap(density, a.shape[0] * a.shape[1]),
             band_interpretations=None,
-            collect_masks=self.task == "instance_seg",
         )
         arrays = [
             pixel_array(load_image(s, self.in_chans))[0] for s in sources
@@ -218,15 +191,24 @@ class GenericPredictor:
             shift_amount=[[0, 0]] * len(arrays),
             full_shape=[list(a.shape[:2]) for a in arrays],
         )
+        uncut = execution.uncut
         return [
-            self._detection_record(
-                preds, source_path_of(s), *frame_size(a), model=model, cap=cap
-            )
-            for preds, s, a, cap in zip(
+            {
+                **self._detection_record(
+                    preds,
+                    source_path_of(s),
+                    *frame_size(a),
+                    model=model,
+                    cap=cap,
+                ),
+                **({"soft_masks": soft} if uncut else {}),
+            }
+            for preds, s, a, cap, soft in zip(
                 model.object_prediction_list_per_image,
                 sources,
                 arrays,
                 model.caps,
+                model.soft_masks,
                 strict=True,
             )
         ]
@@ -246,9 +228,9 @@ class GenericPredictor:
         ``height`` frame: ``image``, ``width``, ``height``, ``boxes`` (xyxy), ``scores``,
         ``labels`` (1-indexed), ``count`` (their number) and ``cap``; where the
         checkpoint carries attributes, ``attributes``, one id per attribute per detection; where
-        ``model`` collected masks, ``masks`` as one ``{"segmentation": [[x0, y0, x1, y1, ...],
-        ...]}`` per detection, empty where the mask binarized to nothing, and ``mask_binarize``,
-        the provenance of the threshold ``model`` cut them at.
+        ``model``'s record collects masks and cuts them, ``masks`` as one
+        ``{"segmentation": [[x0, y0, x1, y1, ...], ...]}`` per detection, empty where the mask
+        binarized to nothing.
         """
         from tcip_mcp.pipelines.slicing import prediction_rows
 
@@ -265,11 +247,10 @@ class GenericPredictor:
         }
         if self.attribute_sizes:
             record["attributes"] = [row["attributes"] for row in kept]
-        if model.collect_masks:
+        if model.execution.mask_cut is not None:
             record["masks"] = [
                 {"segmentation": row["segmentation"] or []} for row in kept
             ]
-            record["mask_binarize"] = model.mask_binarize
         return record
 
     @torch.no_grad()
@@ -279,7 +260,6 @@ class GenericPredictor:
         *,
         execution: Execution,
         tile_batch_size: int,
-        require_masks: bool,
         source_label: str = "",
         prior: dict | None = None,
         progress: Callable[[int, int, dict], None] | None = None,
@@ -301,10 +281,9 @@ class GenericPredictor:
         reader.
 
         The record's ``tile_resize`` stretches each slice and maps the result back; a slice PIL
-        does not represent faithfully refuses (``ValueError``). ``require_masks`` on an
-        ``instance_seg`` checkpoint adds ``masks``, one
-        ``{"segmentation": [[x0, y0, x1, y1, ...], ...]}`` per detection: the merged SAHI polygons
-        in full-frame pixels, empty where the mask binarized to nothing.
+        does not represent faithfully refuses (``ValueError``). A record collecting masks adds
+        ``masks``, one ``{"segmentation": [[x0, y0, x1, y1, ...], ...]}`` per detection: the
+        merged SAHI polygons in full-frame pixels, empty where the mask binarized to nothing.
 
         ``prior`` seeds a reader's pass with the ``slices`` and shifted ``predictions``
         (:func:`~tcip_mcp.pipelines.slicing.prediction_rows`) an interrupted pass recorded, and
@@ -363,25 +342,21 @@ class GenericPredictor:
                 "refusing to silently truncate/pad the band count the model was trained on."
             )
 
-        tile_size, tile_resize = (
-            cast(int, execution.tile_size),
-            execution.tile_resize,
-        )
-        collect_masks = self.task == "instance_seg" and require_masks
+        tile_size = cast(int, execution.tile_size)
         merge = cross_tile_merge(execution)
         from tcip_mcp.pipelines.derivations import detection_cap
+        from tcip_mcp.pipelines.slicing import TcipDetectionModel
 
         # Every tile runs under the frame's cap: a tile denser than the density keeps its objects
         # until the merged frame is capped.
         frame_cap = detection_cap(
             cast(float, execution.density), width * height
         )
-        model = self._detection_model(
-            execution,
-            lambda _tile: frame_cap,
-            tile_resize=tile_resize,
+        model = TcipDetectionModel(
+            self,
+            execution=execution,
+            cap_of=lambda _tile: frame_cap,
             band_interpretations=interpretations,
-            collect_masks=collect_masks,
         )
         slices = slice_lattice(
             height, width, tile_size, cast(float, execution.overlap)

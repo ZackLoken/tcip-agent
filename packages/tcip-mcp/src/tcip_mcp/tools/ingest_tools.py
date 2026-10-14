@@ -516,7 +516,12 @@ def state_capture_date(
 
 @tool()
 def import_coco(
-    project: Path, document: str, dataset_root: str, date: str
+    project: Path,
+    document: str,
+    dataset_root: str,
+    date: str,
+    epsilon_frac: float,
+    rationale: str,
 ) -> dict:
     """Convert an external dataset-level COCO document into the dataset's per-image label
     documents.
@@ -538,16 +543,24 @@ def import_coco(
         date: The capture under ``images/`` the images sit in, which the documents are keyed
             under; one ``list_dates`` does not list refuses. A COCO document states no capture,
             so it is named.
+        epsilon_frac: The fraction of each ring's own perimeter a run-length mask's rings are
+            simplified at (``cv2.approxPolyDP``), recorded on the import's audit line.
+        rationale: Why the import simplifies at ``epsilon_frac``, recorded beside it.
 
-    Returns ``{document, capture, written}``, ``written`` the stem of every label document
-    written.
+    Returns ``{document, capture, epsilon_frac, rationale, written}``, ``written`` the stem of
+    every label document written.
 
     """
     from tcip_mcp.pipelines.data.coco_import import import_coco_document
 
     try:
         return import_coco_document(
-            document, dataset_root, date=date, project=project
+            document,
+            dataset_root,
+            date=date,
+            epsilon_frac=epsilon_frac,
+            rationale=rationale,
+            project=project,
         )
     except (ValueError, FileNotFoundError) as exc:
         return {"error": str(exc)}

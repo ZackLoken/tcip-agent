@@ -19,6 +19,7 @@ from tests._training_values import (
     DISPERSION_QUANTILE,
     EQUIVALENCE_Z,
     RATIONALE,
+    collection_pass,
 )
 
 
@@ -281,7 +282,7 @@ def _assessed(project, kind: str, experiment_id: str):
         equivalence_z=EQUIVALENCE_Z,
         dispersion_quantile=DISPERSION_QUANTILE,
         rationale=RATIONALE,
-        stated=Stated(),
+        stated=collection_pass(),
     )
     assert assessment.get("passed") is True, assessment
     bucket = f"{kind}/{DATE}"

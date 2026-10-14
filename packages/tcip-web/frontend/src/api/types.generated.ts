@@ -556,6 +556,11 @@ export interface ConfirmRevisionPayload {
   confirmed: boolean;
 }
 
+export interface MaskCut {
+  mask_binarize: number;
+  epsilon_frac: number;
+}
+
 export interface Stated {
   tile?: boolean | null;
   tile_size?: number | null;
@@ -563,6 +568,8 @@ export interface Stated {
   postprocess?: string | null;
   cross_tile_nms?: number | null;
   conf?: number | null;
+  masks?: boolean | null;
+  mask_cut?: MaskCut | null;
   rationale?: string | null;
 }
 

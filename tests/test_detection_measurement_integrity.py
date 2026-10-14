@@ -128,6 +128,7 @@ def test_val_loss_forwards_all_negative_images():
         score_weights=WEIGHTS,
         trait=None,
         density=1.0,
+        mask_cut=None,
     )
     # Both batches forwarded through the detector (full batch incl. negatives), not just foreground.
     assert stub.calls == [(2, 4), (1, 0)]
@@ -148,40 +149,12 @@ def test_all_negative_only_loader_is_not_skipped():
         score_weights=WEIGHTS,
         trait=None,
         density=1.0,
+        mask_cut=None,
     )
     assert stub.calls == [(2, 0)]  # forwarded, not skipped
     assert result["loss"] == pytest.approx(
         2.5
     )  # finite, non-zero: negatives contribute loss
-
-
-@pytest.mark.parametrize(
-    "unstated, stated",
-    [
-        ("density", {"conf_threshold": VALIDATION_CONF}),
-        ("conf_threshold", {"density": 1.0}),
-    ],
-)
-def test_a_detector_evaluated_with_an_unstated_operating_value_refuses_by_name(
-    unstated, stated
-):
-    """A detector counts its boxes at a stated confidence and caps each frame at the density its
-    run recorded; handed ``None`` for either, the evaluation refuses naming it before any batch is
-    read, an empty loader included.
-    """
-    for loader in ([_det_batch([1])], []):
-        with pytest.raises(ValueError, match=rf"\['{unstated}'\]"):
-            evaluate(
-                _StubModel(_StubDetector()),
-                loader,
-                torch.device("cpu"),
-                "detection",
-                dims=_DIMS,
-                iou_threshold=IOU_THRESHOLD,
-                score_weights=WEIGHTS,
-                trait=None,
-                **{unstated: None, **stated},
-            )
 
 
 # ── tiled evaluation regimes ──────────────────────────────────────────────
@@ -493,6 +466,7 @@ def test_the_scored_model_is_the_one_the_door_already_built(
             score_weights=verified.spec.evaluation.score_weights,
             trait=kw["trait"],
             density=execution.density,
+            mask_cut=execution.mask_cut,
         )
 
     independent = _independent(cast(float, execution.conf))

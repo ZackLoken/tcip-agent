@@ -8,27 +8,14 @@ from typing import Any
 
 from tcip_annotation.state import is_ring
 
-#: Simplification tolerance as a fraction of each ring's own perimeter, so the deviation a ring is
-#: allowed is proportional to that ring's size: a small fragment is not flattened by the same
-#: absolute tolerance that suits a large one.
-DEFAULT_EPSILON_FRAC = 0.005
 
-
-def mask_to_polygon_rings(
-    mask: Any,
-    *,
-    threshold: float | None = None,
-    epsilon_frac: float = DEFAULT_EPSILON_FRAC,
-) -> list[list[tuple[float, float]]]:
-    """One simplified polygon ring per connected component of ``mask``, in pixel coords.
+def mask_contours(mask: Any, *, threshold: float | None) -> list[Any]:
+    """Each connected component of ``mask``'s outer contour (``cv2.findContours``), in pixel
+    coords, largest contour area first; ``[]`` when nothing is foreground.
 
     ``threshold=None`` treats the mask as already binary (any nonzero pixel is foreground): what a
     SAM boolean mask is. A soft/probability mask passes the binarization threshold its caller
-    resolved.
-
-    Rings are ordered largest-contour-area first. Each ring is simplified with ``cv2.approxPolyDP``
-    at ``epsilon_frac`` of its own perimeter, and a ring left that is no ring
-    (:func:`~tcip_annotation.state.is_ring`) is dropped. Returns ``[]`` when nothing is foreground.
+    states or derives.
     """
     import cv2
     import numpy as np
@@ -44,8 +31,22 @@ def mask_to_polygon_rings(
     contours, _ = cv2.findContours(
         binary.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
     )
+    return sorted(contours, key=cv2.contourArea, reverse=True)
+
+
+def mask_to_polygon_rings(
+    mask: Any, *, threshold: float | None, epsilon_frac: float
+) -> list[list[tuple[float, float]]]:
+    """One simplified polygon ring per connected component of ``mask``
+    (:func:`mask_contours` at ``threshold``), in pixel coords, largest first: each simplified
+    with ``cv2.approxPolyDP`` at ``epsilon_frac`` of its own perimeter (``cv2.arcLength``), and a
+    ring left that is no ring (:func:`~tcip_annotation.state.is_ring`) dropped. Returns ``[]``
+    when nothing is foreground.
+    """
+    import cv2
+
     rings: list[list[tuple[float, float]]] = []
-    for c in sorted(contours, key=cv2.contourArea, reverse=True):
+    for c in mask_contours(mask, threshold=threshold):
         approx = cv2.approxPolyDP(
             c, epsilon_frac * cv2.arcLength(c, True), True
         )

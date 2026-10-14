@@ -32,8 +32,8 @@ the loss of its marks are one write of one document; another subject's marks are
 
 Nothing here trains or calibrates on a dataset-level COCO file (an `images` or `categories`
 key): it is never a per-image document, and the only way in is the import. An external COCO
-export becomes per-image documents through `import_coco(document, dataset_root, date)`, over
-images `ingest_images` already placed. `date` names the capture: the dated folder under
+export becomes per-image documents through `import_coco(document, dataset_root, date, epsilon_frac,
+rationale)`, over images `ingest_images` already placed. `date` names the capture: the dated folder under
 `images/`, or the flat `images/` root for a dataset with no dated folders. Every declared category
 must be a subject the dataset's registry declares. An ordinary image is the capture's image with
 exactly the document's `file_name`; a `.bandgroup` capture is tied by stem. An image with no
@@ -44,9 +44,12 @@ can report both), an image id that is not an integer or is listed twice, an imag
 capture, a stated frame the image does not have, or an existing per-image document. Every
 document and the import's audit event then commit together, or none does: a label placed
 meanwhile refuses the whole import. A crowd region keeps its `iscrowd` flag, and a run-length mask
-becomes the rings `mask_contours.mask_to_polygon_rings` extracts from it. The records keep the
-provenance the COCO carried and gain none. The audit event records the COCO file's path, the
-digest of the bytes read and the documents written; an import that writes no document, whether
+becomes the rings `mask_contours.mask_to_polygon_rings` extracts from it, simplified at the
+stated `epsilon_frac`: `cv2.approxPolyDP` keeps a subset of the contour's own vertices such that
+no point of the contour lies farther from the approximation than that fraction of the ring's
+perimeter, so 0 allows no approximation distance at all. The records keep the provenance the COCO carried and gain none. The
+audit event records the COCO file's path, the digest of the bytes read, the stated fraction with
+its rationale and the documents written; an import that writes no document, whether
 refused or carrying no annotations, changes nothing and leaves no line.
 
 A record carrying `iscrowd` is a region of unseparated objects, never one instance: the built-in

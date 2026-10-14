@@ -271,8 +271,8 @@ def triage_predictions(
     predictions with no confidence-bearing signal at all (e.g. a regression head's point estimate)
     into their own ``unscoreable_images`` list. ``low`` is read twice: as the band's lower edge,
     and as the conf a detector predicts at, so every box the band can hold exists, each frame
-    capped at the object density its checkpoint recorded. The answer carries ``low``, ``high`` and
-    ``rationale`` beside the queues.
+    capped at the object density its checkpoint recorded and no mask collected. The answer
+    carries ``low``, ``high`` and ``rationale`` beside the queues.
 
     Args:
         checkpoint_path: Trained model checkpoint (drives predictions).
@@ -316,7 +316,11 @@ def triage_predictions(
 
     prep, refusal = _untiled(
         checkpoint,
-        Stated(conf=low, rationale=rationale)
+        Stated(
+            conf=low,
+            masks=False if checkpoint.task == "instance_seg" else None,
+            rationale=rationale,
+        )
         if checkpoint.task in DETECTOR_TASKS
         else Stated(),
     )

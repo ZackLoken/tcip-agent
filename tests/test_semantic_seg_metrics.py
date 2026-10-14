@@ -151,6 +151,7 @@ def test_evaluate_semantic_seg_surfaces_miou(tmp_path: Path):
         score_weights=None,
         trait=None,
         density=None,
+        mask_cut=None,
     )
 
     assert "loss" in result

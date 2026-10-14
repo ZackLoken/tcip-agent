@@ -118,7 +118,6 @@ def _worker(job: InferenceJob) -> None:
             device=None,
             tile_batch_size=DEFAULT_TILE_BATCH_SIZE,
             dry_run=False,
-            require_masks=True,
             resume=False,
             progress=progress,
             canceled=job.cancel_event.is_set,

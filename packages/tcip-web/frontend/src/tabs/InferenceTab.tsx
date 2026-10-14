@@ -10,7 +10,12 @@ import {
   type InferenceJob,
   type InferenceStatus,
 } from "@/api/inference";
-import { CROSS_TILE_MERGES, type RegisteredModel, type Stated } from "@/api/types.generated";
+import {
+  CROSS_TILE_MERGES,
+  type MaskCut,
+  type RegisteredModel,
+  type Stated,
+} from "@/api/types.generated";
 import { TabHeading } from "@/components/TabHeading";
 import { useStore } from "@/store";
 import { selectProjectRoot } from "@/store/slices/gui";
@@ -18,15 +23,27 @@ import { selectProjectRoot } from "@/store/slices/gui";
 // A job can still be stopped only while it is pending/running.
 const CANCELLABLE: ReadonlySet<InferenceStatus> = new Set(["pending", "running"]);
 
-type StatedField = "conf" | "cross_tile_nms";
+type StatedField = "conf" | "cross_tile_nms" | keyof MaskCut;
+
+const MASK_CUT_FIELDS: ReadonlySet<StatedField> = new Set(["mask_binarize", "epsilon_frac"]);
 
 /** The execution values a run without an assessment states, one input each, every one a
- *  fraction in [0, 1]. */
+ *  fraction in [0, 1]; the two mask cut inputs are stated together as its one ``mask_cut``. */
 const STATED_INPUTS: { field: StatedField; label: string; placeholder: string }[] = [
   {
     field: "conf",
     label: "Confidence threshold (a detector run without an assessment)",
     placeholder: "the score a box is kept at",
+  },
+  {
+    field: "mask_binarize",
+    label: "Mask threshold (an instance segmentation run without an assessment)",
+    placeholder: "the probability a mask pixel is foreground at",
+  },
+  {
+    field: "epsilon_frac",
+    label: "Mask ring simplification (an instance segmentation run without an assessment)",
+    placeholder: "the fraction of each ring's perimeter it is simplified at",
   },
   {
     field: "cross_tile_nms",
@@ -101,10 +118,15 @@ export function InferenceTab() {
   const [assessmentId, setAssessmentId] = useState("");
   const [statedInputs, setStatedInputs] = useState<Record<StatedField, string>>({
     conf: "",
+    mask_binarize: "",
+    epsilon_frac: "",
     cross_tile_nms: "",
   });
   // The cross-tile merge a tiled run without an assessment states; empty for none stated.
   const [merge, setMerge] = useState("");
+  // Whether an instance segmentation run without an assessment collects masks; empty for none
+  // stated.
+  const [masks, setMasks] = useState("");
   // Why the run states the values above, carried on its execution record.
   const [rationale, setRationale] = useState("");
   const [jobs, setJobs] = useState<InferenceJob[]>([]);
@@ -254,15 +276,19 @@ export function InferenceTab() {
     });
   }
 
-  // What the run states of its execution record: each filled value, the chosen merge, and the
-  // reason for them.
+  // What the run states of its execution record: each filled value, the mask cut's filled values
+  // as its one block, the chosen merge, and the reason for them.
   function statement(): Stated {
+    const filled = Object.entries(statedInputs)
+      .filter(([, value]) => value.trim() !== "")
+      .map(([field, value]) => [field, Number(value)] as const);
     const stated: Stated = Object.fromEntries(
-      Object.entries(statedInputs)
-        .filter(([, value]) => value.trim() !== "")
-        .map(([field, value]) => [field, Number(value)]),
+      filled.filter(([field]) => !MASK_CUT_FIELDS.has(field as StatedField)),
     );
+    const cut = filled.filter(([field]) => MASK_CUT_FIELDS.has(field as StatedField));
+    if (cut.length) stated.mask_cut = Object.fromEntries(cut) as unknown as MaskCut;
     if (merge) stated.postprocess = merge;
+    if (masks) stated.masks = masks === "true";
     if (rationale.trim()) stated.rationale = rationale.trim();
     return stated;
   }
@@ -496,6 +522,20 @@ export function InferenceTab() {
           ))}
         </select>
 
+        <label className="tcip-label mb-1" htmlFor="inference-masks">
+          Collect masks (an instance segmentation run without an assessment)
+        </label>
+        <select
+          id="inference-masks"
+          className="tcip-select w-full mb-3"
+          value={masks}
+          onChange={(e) => setMasks(e.target.value)}
+        >
+          <option value="">None stated</option>
+          <option value="true">Collect masks</option>
+          <option value="false">Boxes only</option>
+        </select>
+
         <label className="tcip-label mb-1" htmlFor="inference-rationale">
           Why these values (a statement and its reason go together)
         </label>
@@ -509,13 +549,14 @@ export function InferenceTab() {
 
         <p className="text-[11px] text-tcip-muted mb-3">
           Every execution value (conf, object density, tiling, cross-tile merge) is the named
-          assessment&apos;s own. Without one, a detector&apos;s run states its conf above, and a
-          tiled run its merge and merge threshold, since no reference stands behind either, with the
-          reason it states them; the density is the one this checkpoint recorded, each image keeping
-          at most its density times its pixels, rounded up, and the tiling follows this checkpoint
-          as the agent-facing door resolves it. Only predictions published under an assessment can
-          deliver validated numbers. Each date publishes once, as its own bucket under the name
-          above.
+          assessment&apos;s own. Without one, a detector&apos;s run states its conf above, an
+          instance segmentation run whether it collects masks and, when it does, the threshold it
+          cuts them at and the simplification of their rings, and a tiled run its merge and merge
+          threshold, since no reference stands behind any, with the reason it states them; the
+          density is the one this checkpoint recorded, each image keeping at most its density times
+          its pixels, rounded up, and the tiling follows this checkpoint as the agent-facing door
+          resolves it. Only predictions published under an assessment can deliver validated numbers.
+          Each date publishes once, as its own bucket under the name above.
         </p>
 
         <button

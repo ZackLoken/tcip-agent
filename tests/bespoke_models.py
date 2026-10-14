@@ -513,9 +513,16 @@ class _OneConvDetector(nn.Module):
 
 
 class FixedMaskSegmenter(_OneConvDetector):
-    """An instance segmenter whose eval forward returns, per image, one box over its central half
-    scored 0.9 and a mask of ones filling that box, so every pass carries a real mask.
+    """An instance segmenter whose eval forward returns, per image, one detection scored 0.9 over
+    ``box`` (``[x0, y0, x1, y1]``), its mask holding ``value`` over each of ``regions`` (rects of
+    the same shape) and nothing elsewhere, nothing at all for an empty list.
     """
+
+    def __init__(
+        self, *, in_chans: int, regions: list, value: float, box: list
+    ) -> None:
+        super().__init__(in_chans=in_chans)
+        self.regions, self.value, self.box = regions, value, box
 
     def forward(self, images, targets=None):
         from tests._producer_fixtures import painted_array
@@ -525,10 +532,14 @@ class FixedMaskSegmenter(_OneConvDetector):
         results = []
         for im in images:
             h, w = int(im.shape[-2]), int(im.shape[-1])
-            y0, y1, x0, x1 = h // 4, 3 * h // 4, w // 4, 3 * w // 4
+            x0, y0, x1, y1 = self.box
             mask = torch.as_tensor(
                 painted_array(
-                    w, h, [((x0, y0, x1, y1), 1.0)], background=0.0, mode="F"
+                    w,
+                    h,
+                    [(tuple(r), self.value) for r in self.regions],
+                    background=0.0,
+                    mode="F",
                 )
             )[None, None]
             results.append(
@@ -547,12 +558,21 @@ class FixedMaskSegmenter(_OneConvDetector):
 
 
 def build_fixed_mask_instance_seg(
-    *, num_classes: int = 1, in_chans: int = 3, **_handed
+    *,
+    num_classes: int = 1,
+    in_chans: int = 3,
+    regions: list,
+    value: float,
+    box: list,
+    **_handed,
 ):
-    """``model_source`` builder for :class:`FixedMaskSegmenter`, its fixed boxes reading none of
-    the detector geometry or statistics the platform hands it.
+    """``model_source`` builder for :class:`FixedMaskSegmenter` at ``regions``, ``value`` and
+    ``box``, its fixed boxes reading none of the detector geometry or statistics the platform
+    hands it.
     """
-    return FixedMaskSegmenter(in_chans=in_chans)
+    return FixedMaskSegmenter(
+        in_chans=in_chans, regions=regions, value=value, box=box
+    )
 
 
 # A non-torchvision detector, no .detector to route through.

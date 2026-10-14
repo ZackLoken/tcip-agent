@@ -58,8 +58,11 @@ def _named_annotation(
     ann: dict,
     categories: dict[int, str],
     decode_rle: Callable[[dict], Any],
+    epsilon_frac: float,
 ) -> Annotation:
-    """One COCO record as the :class:`Annotation` its ``category_id`` names, or ``ValueError``."""
+    """One COCO record as the :class:`Annotation` its ``category_id`` names, a run-length mask's
+    rings simplified at ``epsilon_frac``, or ``ValueError``.
+    """
     cid: Any = ann.get("category_id")
     if not is_coco_id(cid) or cid not in categories:
         raise ValueError(
@@ -68,7 +71,9 @@ def _named_annotation(
         )
     segmentation = ann.get("segmentation")
     if isinstance(segmentation, dict):
-        rings = mask_to_polygon_rings(decode_rle(segmentation))
+        rings = mask_to_polygon_rings(
+            decode_rle(segmentation), threshold=None, epsilon_frac=epsilon_frac
+        )
         segmentation = [[c for point in ring for c in point] for ring in rings]
     return annotation_of_record(
         {**ann, "subject": categories[cid], "segmentation": segmentation}
@@ -79,6 +84,7 @@ def parse_coco_annotations(
     coco: dict,
     *,
     decode_rle: Callable[[dict], Any],
+    epsilon_frac: float,
 ) -> tuple[dict[int, str], dict[int, list[Annotation]], list[str]]:
     """The document's valid category declarations, every record it holds as a name-based
     :class:`Annotation` keyed by the integer ``image_id`` its record names, and every fault found.
@@ -91,7 +97,8 @@ def parse_coco_annotations(
     and its decoding are checked independently, so one record can report both, and only a record
     whose ``image_id`` is valid is associated with an image. A run-length ``segmentation`` (a dict
     with ``counts`` and ``size``) is decoded to a mask by ``decode_rle`` and converted to rings by
-    :func:`~tcip_annotation.mask_contours.mask_to_polygon_rings`; a mask that yields no ring is
+    :func:`~tcip_annotation.mask_contours.mask_to_polygon_rings` at ``epsilon_frac`` of each
+    ring's perimeter; a mask that yields no ring is
     refused by the decoder like any other segmentation with no ring.
     """
     if "images" not in coco and "categories" not in coco:
@@ -119,7 +126,9 @@ def parse_coco_annotations(
                 f"record {i} names image_id {image_id!r}, not an integer image id"
             )
         try:
-            annotation = _named_annotation(ann, categories, decode_rle)
+            annotation = _named_annotation(
+                ann, categories, decode_rle, epsilon_frac
+            )
         except ValueError as exc:
             problems.append(f"record {i} {exc}")
             continue

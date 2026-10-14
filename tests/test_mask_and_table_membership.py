@@ -779,6 +779,7 @@ def test_a_runs_metrics_are_reported_over_the_class_space_it_trains_in(
         score_weights=None,
         trait=None,
         density=None,
+        mask_cut=None,
     )
 
     assert sorted(result["per_class_iou"]) == [0, 1, 2]

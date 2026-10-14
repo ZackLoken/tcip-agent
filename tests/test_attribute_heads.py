@@ -460,7 +460,6 @@ def test_two_tiles_calling_one_object_differently_merge_into_the_higher_scoring_
         str(source),
         execution=p.execution,
         tile_batch_size=p.tile_batch_size,
-        require_masks=False,
     )
 
     assert result["boxes"] == [[100.0, 20.0, 150.0, 60.0]], result
@@ -538,6 +537,7 @@ def test_evaluate_reports_each_attributes_agreement_over_the_pairs_it_assesses(
         score_weights=None,
         trait=None,
         density=1.0,
+        mask_cut=None,
     )
 
     agreement = metrics["attribute_agreement"]

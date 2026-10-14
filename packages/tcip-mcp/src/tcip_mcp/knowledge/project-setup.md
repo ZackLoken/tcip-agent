@@ -135,7 +135,7 @@ There must be something to train on. Three paths (see
   label document itself), so an empty document you write reads as unannotated until then. Never
   delete or skip them.
 - Human path: hand off to the GUI Annotate tab for the breeder to label a seed set.
-- Existing labels in an external dataset-level COCO: `import_coco(document, dataset_root, date)`
+- Existing labels in an external dataset-level COCO: `import_coco(document, dataset_root, date, epsilon_frac, rationale)`
   converts them into per-image documents over the images `ingest_images` placed under that date.
   Nothing trains on the COCO file itself.
 

@@ -1,6 +1,6 @@
 """Instance masks reach inference and export: ``check_model_contract`` requires them, the
 predictor's detection record carries them as polygons, ``encode_predictions`` converts each to a
-(possibly multi-ring) ``Polygon``, and ``require_masks=False`` answers boxes alone.
+(possibly multi-ring) ``Polygon``, and a pass stating ``masks`` false answers boxes alone.
 """
 
 from __future__ import annotations
@@ -8,7 +8,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import cast
 
-import numpy as np
 import pytest
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
@@ -21,9 +20,8 @@ from tests._chain_fixtures import (
 from tests._producer_fixtures import (
     checkpoint_admission,
     gray_frame,
-    painted_array,
 )
-from tests._training_values import RATIONALE, tiling_block
+from tests._training_values import MASK_CUT, RATIONALE, tiling_block
 
 torch = pytest.importorskip("torch")
 
@@ -38,6 +36,7 @@ from tests import bespoke_models  # noqa: E402
 from tests._verified_checkpoint_fixtures import (  # noqa: E402
     SAMPLE_CROSS_TILE_NMS,
     SAMPLE_DETECTOR_PASS,
+    SAMPLE_INSTANCE_SEG_PASS,
     SAMPLE_OVERLAP,
 )
 
@@ -114,14 +113,13 @@ def _bare_predictor(task: str) -> GenericPredictor:
 # predict_sliced: instance_seg and detection reach one slicing path, masks or not.
 
 
-def _sliced_kwargs(require_masks: bool = True) -> dict:
+def _sliced_kwargs() -> dict:
     """``predict_sliced``'s arguments for a tiled record at ``TILE``, overlap 0.2, NMS at 0.3."""
     from tests._verified_checkpoint_fixtures import tiled_record
 
     return dict(
         execution=tiled_record(tile_size=TILE, overlap=0.2, conf=0.5),
         tile_batch_size=8,
-        require_masks=require_masks,
     )
 
 
@@ -145,20 +143,6 @@ def test_predict_sliced_detection_reaches_real_slicing_path(tmp_path):
         p.predict_sliced(str(missing), **_sliced_kwargs())
 
 
-def test_predict_sliced_require_masks_false_reaches_real_slicing_path_for_instance_seg(
-    tmp_path,
-):
-    """``require_masks=False`` reaches the same real slicing logic as the default (masks-collecting)
-    path: the boxes-only opt-out is a lighter-weight rail, not a different one.
-    """
-    p = _bare_predictor("instance_seg")
-    with pytest.raises(FileNotFoundError):
-        p.predict_sliced(
-            str(tmp_path / "missing.jpg"),
-            **_sliced_kwargs(require_masks=False),
-        )
-
-
 # --------------------------------------------------------------------------
 # The rail admits valid work: a real Mask R-CNN checkpoint through the
 # boxes-only opt-out, the two MCP doors, and the delivery-gating eval
@@ -170,6 +154,8 @@ TILED_PASS = Stated(
     tile_size=TILE,
     overlap=SAMPLE_OVERLAP,
     conf=0.0,
+    masks=True,
+    mask_cut=MASK_CUT,
     postprocess="nms",
     cross_tile_nms=SAMPLE_CROSS_TILE_NMS,
     rationale=RATIONALE,
@@ -177,6 +163,8 @@ TILED_PASS = Stated(
 """The execution values a tiled inference pass here states."""
 UNSTATED_LATTICE_PASS = Stated(
     conf=0.0,
+    masks=True,
+    mask_cut=MASK_CUT,
     postprocess="nms",
     cross_tile_nms=SAMPLE_CROSS_TILE_NMS,
     rationale=RATIONALE,
@@ -312,14 +300,16 @@ def test_an_instance_seg_run_trains_over_its_instances_clipped_to_each_tile(
     assert recorded.model_dump(exclude_none=True) == TRAINED_LATTICE
 
 
-def test_predict_sliced_require_masks_false_returns_boxes_only(
+def test_a_pass_stating_no_masks_returns_boxes_only(
     instance_seg_ckpt, tmp_path
 ):
-    """The opt-out tiles normally and returns no masks key at all, never a partial one, while the
-    same predictor's untiled path still carries masks (an opt-out, not a global downgrade).
+    """A pass stating ``masks`` false tiles normally and returns no masks key at all, never a
+    partial one, needing no mask threshold, while the same predictor's pass collecting masks
+    still carries them (an opt-out, not a global downgrade), and one stating neither refuses
+    naming ``masks``.
     """
     from tcip_mcp.model_registry import load_registered_checkpoint
-    from tcip_mcp.pipelines.execution import prepare
+    from tcip_mcp.pipelines.execution import ExecutionRefusedError, prepare
 
     checkpoint = load_registered_checkpoint(
         instance_seg_ckpt, project=tmp_path
@@ -330,6 +320,7 @@ def test_predict_sliced_require_masks_false_returns_boxes_only(
             tile=True,
             tile_size=TILE,
             overlap=0.2,
+            masks=False,
             **SAMPLE_DETECTOR_PASS,
         ),
         device="cpu",
@@ -342,7 +333,6 @@ def test_predict_sliced_require_masks_false_returns_boxes_only(
         img,
         execution=tiled_pass.execution,
         tile_batch_size=8,
-        require_masks=False,
     )
     assert "masks" not in tiled
     assert {"boxes", "scores", "labels", "count", "tiles"} <= set(tiled)
@@ -352,9 +342,18 @@ def test_predict_sliced_require_masks_false_returns_boxes_only(
     assert tiled["count"] == len(tiled["boxes"]) == len(tiled["scores"])
 
     untiled = prepare(
-        checkpoint, Stated(tile=False, **SAMPLE_DETECTOR_PASS), device="cpu"
+        checkpoint,
+        Stated(tile=False, **SAMPLE_INSTANCE_SEG_PASS),
+        device="cpu",
     ).runnable()
     assert "masks" in untiled.predict([img])[0]
+
+    # Whether the pass collects masks is its statement, never read off the head.
+    unstated = prepare(
+        checkpoint, Stated(tile=False, **SAMPLE_DETECTOR_PASS), device="cpu"
+    )
+    with pytest.raises(ExecutionRefusedError, match="masks None"):
+        unstated.runnable()
 
 
 def test_run_inference_instance_seg_explicit_tile_true_runs_tiled_with_masks(
@@ -375,6 +374,8 @@ def test_run_inference_instance_seg_explicit_tile_true_runs_tiled_with_masks(
         tile_size=TILE,
         overlap=SAMPLE_OVERLAP,
         conf=0.0,
+        masks=True,
+        mask_cut=MASK_CUT,
     )
     assert p.execution.tiled
     assert len(results) == 1
@@ -562,7 +563,7 @@ def test_run_full_frame_evaluation_tiled_instance_seg_scores_masks(
         checkpoint,
         admitted,
         stated=Stated(
-            tile=True, tile_size=TILE, overlap=0.2, **SAMPLE_DETECTOR_PASS
+            tile=True, tile_size=TILE, overlap=0.2, **SAMPLE_INSTANCE_SEG_PASS
         ),
         iou_threshold=IOU_THRESHOLD,
         trait=None,
@@ -583,7 +584,7 @@ def test_run_full_frame_evaluation_tiled_instance_seg_scores_masks(
     implicit = run_full_frame_evaluation(
         checkpoint,
         admitted,
-        stated=Stated(**SAMPLE_DETECTOR_PASS),
+        stated=Stated(**SAMPLE_INSTANCE_SEG_PASS),
         iou_threshold=IOU_THRESHOLD,
         trait=None,
     )
@@ -605,40 +606,54 @@ def _encoded(result: dict) -> tuple[list, int]:
     return label_document(data).annotations, dropped
 
 
-def _mask_record(mask: np.ndarray) -> dict:
-    """``mask`` as the predictor's record carries it: the shared extractor's rings of the mask
-    binarized at the platform's threshold, each flattened to SAHI's ``[x0, y0, x1, y1, ...]``.
+def _predicted(
+    tmp_path: Path, size: int, regions: list, *, box: list, masks: bool
+) -> dict:
+    """The record the predictor makes of a black ``size`` x ``size`` frame under a registered
+    segmenter whose one detection, over ``box``, holds a 0.9 soft mask over each of ``regions``
+    (:class:`~tests.bespoke_models.FixedMaskSegmenter`), collecting its masks cut at the sample
+    threshold when ``masks``, boxes alone otherwise.
     """
-    from tcip_annotation.mask_contours import mask_to_polygon_rings
-    from tcip_mcp.pipelines.measurement.mask_geometry import (
-        resolve_binarize_threshold,
+    from PIL import Image
+
+    from tcip_mcp.model_registry import load_registered_checkpoint
+    from tcip_mcp.pipelines.execution import prepare
+    from tests._verified_checkpoint_fixtures import registered_checkpoint
+
+    checkpoint = load_registered_checkpoint(
+        registered_checkpoint(
+            tmp_path,
+            model_source={
+                "builder": "bespoke_models:build_fixed_mask_instance_seg",
+                "builder_kwargs": {
+                    "regions": regions,
+                    "value": 0.9,
+                    "box": box,
+                },
+                "source_files": [BESPOKE_MODELS],
+                "task": "instance_seg",
+                "normalization": FRAME_STATISTICS,
+            },
+        ),
+        project=tmp_path,
     )
+    frame = tmp_path / "frame.png"
+    Image.new("RGB", (size, size)).save(frame)
+    stated = (
+        Stated(tile=False, **SAMPLE_INSTANCE_SEG_PASS)
+        if masks
+        else Stated(tile=False, masks=False, **SAMPLE_DETECTOR_PASS)
+    )
+    p = prepare(checkpoint, stated, device="cpu").runnable()
+    return p.predict([str(frame)])[0]
 
-    threshold = resolve_binarize_threshold()["value"]
-    return {
-        "segmentation": [
-            [c for point in ring for c in point]
-            for ring in mask_to_polygon_rings(mask, threshold=threshold)
-        ]
-    }
 
-
-def test_export_single_component_mask_writes_polygon():
+def test_export_single_component_mask_writes_polygon(tmp_path):
     from tcip_annotation.state import Polygon
 
-    mask = painted_array(
-        32, 32, [((5, 5, 20, 20), 0.9)], background=0.0, mode="F"
+    result = _predicted(
+        tmp_path, 32, [[5, 5, 20, 20]], box=[5, 5, 19, 19], masks=True
     )
-    result = {
-        "image": "img.jpg",
-        "width": 32,
-        "height": 32,
-        "cap": 2,
-        "boxes": [[5.0, 5.0, 19.0, 19.0]],
-        "scores": [0.9],
-        "labels": [1],
-        "masks": [_mask_record(mask)],
-    }
     anns, _dropped = _encoded(result)
     assert len(anns) == 1
     assert isinstance(anns[0].geometry, Polygon)
@@ -651,19 +666,9 @@ def test_export_does_not_pollute_annotation_attributes_with_binarize_threshold(
     """Under a scope declaring no attribute, an exported mask annotation carries no attributes:
     the binarize threshold never lands in ``Annotation.attributes``.
     """
-    mask = painted_array(
-        32, 32, [((5, 5, 20, 20), 0.9)], background=0.0, mode="F"
+    result = _predicted(
+        tmp_path, 32, [[5, 5, 20, 20]], box=[5, 5, 19, 19], masks=True
     )
-    result = {
-        "image": "img.jpg",
-        "width": 32,
-        "height": 32,
-        "cap": 2,
-        "boxes": [[5.0, 5.0, 19.0, 19.0]],
-        "scores": [0.9],
-        "labels": [1],
-        "masks": [_mask_record(mask)],
-    }
     anns, _dropped = _encoded(result)
     assert anns[0].attributes == {}
 
@@ -675,45 +680,24 @@ def test_export_multi_component_mask_writes_multi_ring_polygon(tmp_path):
     """
     from tcip_annotation.state import Polygon
 
-    mask = painted_array(
+    result = _predicted(
+        tmp_path,
         64,
-        64,
-        [((5, 5, 15, 15), 0.9), ((40, 40, 55, 55), 0.9)],
-        background=0.0,
-        mode="F",
+        [[5, 5, 15, 15], [40, 40, 55, 55]],
+        box=[5, 5, 54, 54],
+        masks=True,
     )
-    result = {
-        "image": "img.jpg",
-        "width": 64,
-        "height": 64,
-        "cap": 2,
-        "boxes": [[5.0, 5.0, 54.0, 54.0]],
-        "scores": [0.9],
-        "labels": [1],
-        "masks": [_mask_record(mask)],
-    }
     anns, _dropped = _encoded(result)
     assert len(anns) == 1
     assert isinstance(anns[0].geometry, Polygon)
     assert len(anns[0].geometry.rings) == 2
 
 
-def test_export_empty_mask_falls_back_to_bbox():
+def test_export_empty_mask_falls_back_to_bbox(tmp_path):
     from tcip_annotation.state import BBox
 
-    mask = np.zeros(
-        (16, 16), dtype=np.float32
-    )  # binarizes to nothing at the default threshold
-    result = {
-        "image": "img.jpg",
-        "width": 16,
-        "height": 16,
-        "cap": 2,
-        "boxes": [[1.0, 1.0, 5.0, 5.0]],
-        "scores": [0.9],
-        "labels": [1],
-        "masks": [_mask_record(mask)],
-    }
+    # A mask holding nothing binarizes to nothing at any threshold.
+    result = _predicted(tmp_path, 16, [], box=[1, 1, 5, 5], masks=True)
     anns, _dropped = _encoded(result)
     assert len(anns) == 1
     assert isinstance(anns[0].geometry, BBox)
@@ -783,21 +767,16 @@ def test_export_drops_a_polygon_whose_vertices_all_round_to_one_point(
     assert anns == []
 
 
-def test_export_no_masks_key_writes_bbox_as_before():
-    """Regression guard: a plain detection result (no masks key at all) must still export BBox
-    as before; masks are additive, not a behavior change for non-instance_seg.
+def test_export_no_masks_key_writes_bbox_as_before(tmp_path):
+    """Regression guard: a result carrying no masks key at all, a pass collecting none, must
+    still export BBox as before; masks are additive, not a behavior change for a boxes-only pass.
     """
     from tcip_annotation.state import BBox
 
-    result = {
-        "image": "img.jpg",
-        "width": 32,
-        "height": 32,
-        "cap": 2,
-        "boxes": [[1.0, 1.0, 5.0, 5.0]],
-        "scores": [0.9],
-        "labels": [1],
-    }
+    result = _predicted(
+        tmp_path, 32, [[1, 1, 5, 5]], box=[1, 1, 5, 5], masks=False
+    )
+    assert "masks" not in result
     anns, _dropped = _encoded(result)
     assert len(anns) == 1
     assert isinstance(anns[0].geometry, BBox)

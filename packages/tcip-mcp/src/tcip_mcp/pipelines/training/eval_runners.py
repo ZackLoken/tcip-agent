@@ -83,6 +83,7 @@ def run_test_evaluation(
         score_weights=checkpoint.spec.evaluation.score_weights,
         trait=trait,
         density=execution.density,
+        mask_cut=execution.mask_cut,
     )
     tiled = run_tiling(task, tiling) is not None
     common = {
@@ -111,8 +112,8 @@ def run_full_frame_evaluation(
     (:func:`~tcip_mcp.pipelines.execution.execution_record`, whose refusals propagate), matched
     to the full-frame ground truth of the detection loader a run over ``admitted`` builds, under
     ``trait``'s criterion when given. Returns
-    :func:`~tcip_mcp.pipelines.training.evaluation.detection_metrics`, by mask for an
-    instance-segmentation checkpoint and by box otherwise, beside the reference's object and
+    :func:`~tcip_mcp.pipelines.training.evaluation.detection_metrics`, by mask for a pass
+    collecting masks and by box otherwise, beside the reference's object and
     detection counts and the pass's ``execution`` record. An empty admission, and a document
     carrying the subject only in geometry a detector cannot read, refuse by name.
     """
@@ -129,7 +130,6 @@ def run_full_frame_evaluation(
         checkpoint, stated.model_copy(update={"tile": True}), device=device
     )
     predictor = prep.predictor
-    by_mask = predictor.task == "instance_seg"
 
     from tcip_mcp.pipelines.data.datasets import DocumentDataset
     from tcip_mcp.pipelines.data.label_queries import require_admitted
@@ -161,7 +161,6 @@ def run_full_frame_evaluation(
                 measured.image_of(key),
                 execution=execution,
                 tile_batch_size=pass_.tile_batch_size,
-                require_masks=by_mask,
             ),
             gt,
             image_id=measured.sample_of(key).member,
@@ -184,7 +183,7 @@ def run_full_frame_evaluation(
         trait=trait,
         conf_threshold=execution.conf,
         iou_threshold=iou_threshold,
-        by_mask=by_mask,
+        by_mask=execution.masks,
     )
     del metrics["matchings"]
     return evaluation_result(

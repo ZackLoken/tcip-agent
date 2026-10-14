@@ -25,6 +25,7 @@ from tcip_mcp.pipelines.data.selection import (
 from tcip_mcp.pipelines.execution import (
     DEFAULT_TILE_BATCH_SIZE,
     Execution,
+    MaskCut,
     Stated,
 )
 from tcip_mcp.pipelines.schemas import TraitRevisionRef
@@ -440,14 +441,13 @@ def _prepared(
 ) -> tuple[TraitRevision, Preparation]:
     """``trait``'s latest confirmed revision stating a ``delivery_kind`` operationalization, and the
     registered checkpoint at ``checkpoint_path`` (``registry_paths.located`` against ``project``)
-    readied for a pass under ``stated``, a detector's at the staged conf
-    floor the count fit collects at (``operating_point.STAGED_CONF_FLOOR``). A checkpoint whose
-    head does not produce what the kind measures refuses (:class:`AssessmentRefusedError`).
+    readied for a pass under ``stated``, a detector's at the stated conf the count fit collects
+    at. A checkpoint whose head does not produce what the kind measures refuses
+    (:class:`AssessmentRefusedError`).
     """
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.operationalization import confirmed_revision
     from tcip_mcp.pipelines.execution import prepare
-    from tcip_mcp.pipelines.operating_point import STAGED_CONF_FLOOR
 
     revision = confirmed_revision(delivery_kind, project=project, trait=trait)
     checkpoint = load_registered_checkpoint(
@@ -467,8 +467,6 @@ def _prepared(
             f"{checkpoint_path} is a {checkpoint.task!r} checkpoint, and a "
             f"{delivery_kind} delivery is measured off a {expected} head."
         )
-    if delivery_kind in DETECTOR_KINDS:
-        stated = stated.model_copy(update={"conf": STAGED_CONF_FLOOR})
     return revision, prepare(
         checkpoint, stated, device=device, tile_batch_size=tile_batch_size
     )
@@ -580,7 +578,8 @@ def assess(
     and record the result as a new assessment; return it. Each path is
     :func:`~tcip_mcp.registry_paths.located` against ``project``.
 
-    ``stated`` is what the caller states of the execution record; the rest is the checkpoint's own
+    ``stated`` is what the caller states of the execution record, a detector's the conf its
+    predictions are collected at; the rest is the checkpoint's own
     geometry, a derivation over the calibration side's ground truth (the object density, any tile
     geometry the checkpoint does not record, the merge threshold), or the operating point the
     trait's count objective fits there (the conf). A count delivery's held-out check runs at the
@@ -674,31 +673,36 @@ def _count_fit(
     dispersion_quantile: float,
 ) -> tuple[dict, list[str], list[dict], list[dict]]:
     """The count criterion over a reference at ``equivalence_z`` and ``dispersion_quantile``: the
-    calibration and holdout records ``collect`` predicts under the pass's record, which
-    :func:`_prepared` stated at the staged conf floor, and the conf the count objective fits there
-    (:func:`~tcip_mcp.pipelines.operating_point.count_criterion`) written into the pass's record.
+    calibration and holdout records ``collect`` predicts under the pass's record, at the conf its
+    statement carries, and the conf the count objective fits there, that stated conf its floor
+    (:func:`~tcip_mcp.pipelines.operating_point.count_criterion`), written into the pass's record;
+    an :attr:`~tcip_mcp.pipelines.execution.Execution.uncut` record then takes the mask cut its
+    calibration side derives over the matching that fit made (:func:`_mask_fit`).
     ``(evidence, failures, calibration records, holdout records)``.
     """
     from tcip_mcp.pipelines.operating_point import (
-        STAGED_CONF_FLOOR,
         count_criterion,
         detector_operating_point_holder,
     )
 
     cal_records, hold_records = collect(p.execution)
     _, path = detector_operating_point_holder(p.predictor.model)
+    held: dict = {}
     conf, evidence, failures = count_criterion(
         cal_records,
         hold_records,
         entry,
         staged_conf_floor_attribute_path=path,
-        staged_conf_floor=STAGED_CONF_FLOOR,
+        staged_conf_floor=cast(float, p.execution.conf),
         equivalence_z=equivalence_z,
         dispersion_quantile=dispersion_quantile,
+        held=held,
     )
     p.execution = p.execution.with_value(
         "conf", conf, evidence["conf_derived_from"]
     )
+    if p.execution.uncut:
+        p.execution = _mask_fit(p.execution, cal_records, evidence, held)
     return evidence, failures, cal_records, hold_records
 
 
@@ -743,7 +747,7 @@ def _detection(
     """The pass made runnable from the calibration side's ground truth (its frames' object
     density, and its merge threshold and tile geometry where unstated and unrecorded), the count
     criterion over the reference at ``equivalence_z`` and ``dispersion_quantile``
-    (:func:`_count_fit`), each
+    (:func:`_count_fit`, which derives an uncut pass's mask cut), each
     side's loader built once, every fitted value from the calibration side, plus the classifier
     agreement over matched instances for a state-fraction delivery. ``digest_of`` is keyed by each
     sample's location, which reading the retained copies leaves unchanged.
@@ -793,6 +797,56 @@ def _detection(
         measured["classifier"] = classifier
         failures = [*failures, *classifier_failures]
     return p, measured, failures
+
+
+def _mask_fit(
+    execution: Execution, cal_records: list[dict], evidence: dict, held: dict
+) -> Execution:
+    """``execution`` with its ``mask_cut`` derived over the calibration records, each
+    detection's uncut ``soft_mask`` beside the rings of the object it matched at the fitted conf,
+    under the calibration curve's own criterion (the matching the count criterion's sweep made,
+    taken from ``held``): the ``mask_binarize``
+    (:func:`~tcip_mcp.pipelines.derivations.derive_mask_binarize`), then the ``epsilon_frac`` of
+    the masks cut at it (:func:`~tcip_mcp.pipelines.derivations.derive_epsilon_frac`), each
+    field's derivation label recorded as its own ``sources`` entry.
+    """
+    from dataclasses import replace
+
+    from tcip_mcp.pipelines.derivations import (
+        EPSILON_FRAC_DERIVATION,
+        MASK_BINARIZE_DERIVATION,
+        derive_epsilon_frac,
+        derive_mask_binarize,
+    )
+    from tcip_mcp.pipelines.training.evaluation import matched
+
+    pairs = [
+        (*rec["dt"][d]["soft_mask"], rec["gt"][g]["rings"])
+        for rec, by_class in zip(
+            cal_records,
+            matched(
+                cal_records,
+                evidence["calibration_curve"]["criterion"],
+                conf=evidence["conf"],
+                held=held,
+            ),
+        )
+        for m in by_class.values()
+        for g, d in m.pairs
+    ]
+    threshold = derive_mask_binarize(pairs)
+    return replace(
+        execution,
+        mask_cut=MaskCut(
+            mask_binarize=threshold,
+            epsilon_frac=derive_epsilon_frac(pairs, threshold),
+        ),
+        sources={
+            **execution.sources,
+            "mask_binarize": MASK_BINARIZE_DERIVATION,
+            "epsilon_frac": EPSILON_FRAC_DERIVATION,
+        },
+    )
 
 
 def _classification_items(
@@ -1204,7 +1258,6 @@ def _band_records(
             _RegionView(reader, Rect(hx0, hy0, hx1, hy1)),
             execution=execution,
             tile_batch_size=p.tile_batch_size,
-            require_masks=False,
             source_label=name,
         )
         region = (ix0 - hx0, iy0 - hy0, ix1 - hx0, iy1 - hy0)

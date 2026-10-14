@@ -105,6 +105,7 @@ def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(
         score_weights=None,
         trait=None,
         density=None,
+        mask_cut=None,
     )
     on_training = evaluate(
         model,
@@ -117,6 +118,7 @@ def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(
         score_weights=None,
         trait=None,
         density=None,
+        mask_cut=None,
     )
     # The two loaders must be distinguishable at all, or nothing below can discriminate.
     assert on_holdout["loss"] > 3.0 * on_training["loss"] > 0.0

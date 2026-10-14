@@ -15,6 +15,7 @@ import numpy as np
 import pytest
 
 from tcip_mcp.pipelines.measurement import instance_geometries, mask_geometry
+from tests._training_values import MASK_BINARIZE
 
 # ── rectangle: every pixel quantity is exact ─────────────────────────────
 
@@ -28,7 +29,7 @@ def _rect_mask(h=64, w=64, r0=5, r1=24, c0=10, c1=49):
 
 def test_rectangle_pixel_measurements_exact():
     m = _rect_mask()  # 40 wide (cols 10..49), 20 tall (rows 5..24)
-    g = mask_geometry(m, unit="mm")
+    g = mask_geometry(m, unit="mm", threshold=MASK_BINARIZE)
     assert g["empty"] is False
     assert g["area_px"] == 40 * 20
     assert (
@@ -46,7 +47,7 @@ def test_rectangle_pixel_measurements_exact():
 
 def test_rectangle_physical_scale_converts_px_to_mm():
     m = _rect_mask()
-    g = mask_geometry(m, scale=0.5, unit="mm")
+    g = mask_geometry(m, scale=0.5, unit="mm", threshold=MASK_BINARIZE)
     assert g["mm_per_px"] == 0.5
     # area scales by the square of the linear scale
     assert g["area_mm2"] == pytest.approx(800 * 0.25)
@@ -63,7 +64,7 @@ def test_scale_unit_is_the_callers_fact_never_assumed_to_be_mm():
     mm/px synonym: every dimensional number came out 10x wrong under an ``_mm`` label.
     """
     m = _rect_mask()
-    g = mask_geometry(m, scale=0.5, unit="cm")
+    g = mask_geometry(m, scale=0.5, unit="cm", threshold=MASK_BINARIZE)
     assert g["cm_per_px"] == 0.5
     assert g["area_cm2"] == pytest.approx(800 * 0.25)
     assert g["principal_axis_extent_cm"] == pytest.approx(20.0)
@@ -108,8 +109,10 @@ def test_no_length_or_width_key_survives_under_any_alias():
     )
 
     for g in (
-        mask_geometry(_rect_mask(), unit="mm"),
-        mask_geometry(_rect_mask(), scale=0.5, unit="mm"),
+        mask_geometry(_rect_mask(), unit="mm", threshold=MASK_BINARIZE),
+        mask_geometry(
+            _rect_mask(), scale=0.5, unit="mm", threshold=MASK_BINARIZE
+        ),
     ):
         assert not [k for k in g if k.startswith(("length", "width"))], sorted(
             g
@@ -134,7 +137,7 @@ def test_ellipse_area_and_axes():
     )  # semi-axes: 30 along x (major), 15 along y (minor)
     yy, xx = np.ogrid[:h, :w]
     m = (((xx - cx) / a) ** 2 + ((yy - cy) / b) ** 2 <= 1.0).astype(np.uint8)
-    g = mask_geometry(m, unit="mm")
+    g = mask_geometry(m, unit="mm", threshold=MASK_BINARIZE)
     assert g["area_px"] == pytest.approx(math.pi * a * b, rel=0.05)
     assert g["principal_axis_extent_px"] == pytest.approx(2 * a, abs=2.0)
     assert g["secondary_axis_extent_px"] == pytest.approx(2 * b, abs=2.0)
@@ -145,7 +148,12 @@ def test_ellipse_area_and_axes():
 
 
 def test_empty_mask_is_handled_without_inventing_a_measurement():
-    g = mask_geometry(np.zeros((32, 32), dtype=np.uint8), scale=2.0, unit="mm")
+    g = mask_geometry(
+        np.zeros((32, 32), dtype=np.uint8),
+        scale=2.0,
+        unit="mm",
+        threshold=MASK_BINARIZE,
+    )
     assert g["empty"] is True
     assert g["area_px"] == 0.0
     assert (
@@ -160,7 +168,7 @@ def test_single_row_line_is_1px_wide():
     m = _rect_mask(
         h=16, w=16, r0=8, r1=8, c0=3, c1=12
     )  # a 10 px horizontal line
-    g = mask_geometry(m, unit="mm")
+    g = mask_geometry(m, unit="mm", threshold=MASK_BINARIZE)
     assert g["area_px"] == 10.0
     assert (
         g["principal_axis_extent_px"] == 10.0
@@ -172,18 +180,17 @@ def test_single_row_line_is_1px_wide():
 # ── input shapes: [1,H,W], torch tensor, and [N,H,W] instance stacks ──────
 
 
-def test_accepts_chw_and_soft_masks():
-    m = _rect_mask().astype(np.float32)[None]  # [1, H, W], float
-    soft = m * 0.9  # soft probabilities, still >= 0.5 in-shape
-    assert mask_geometry(soft, unit="mm")["area_px"] == 40 * 20
-    assert (
-        mask_geometry(m * 0.4, unit="mm")["empty"] is True
-    )  # all below threshold -> empty
+def test_accepts_chw_and_soft_masks_cut_at_the_stated_threshold():
+    soft = _rect_mask().astype(np.float32)[None] * 0.6
+    assert mask_geometry(soft, unit="mm", threshold=0.6)["area_px"] == 40 * 20
+    assert mask_geometry(soft, unit="mm", threshold=0.7)["empty"] is True
 
 
 def test_accepts_torch_tensor():
     torch = pytest.importorskip("torch")
-    g = mask_geometry(torch.from_numpy(_rect_mask()), unit="mm")
+    g = mask_geometry(
+        torch.from_numpy(_rect_mask()), unit="mm", threshold=MASK_BINARIZE
+    )
     assert g["area_px"] == 40 * 20 and g["principal_axis_extent_px"] == 40.0
 
 
@@ -191,32 +198,26 @@ def test_instance_geometries_over_a_stack():
     stack = np.stack(
         [_rect_mask(), np.zeros((64, 64), dtype=np.uint8)]
     )  # one real, one empty
-    out = instance_geometries(stack, scale=0.5, unit="mm")
+    out = instance_geometries(
+        stack, scale=0.5, unit="mm", threshold=MASK_BINARIZE
+    )
     assert len(out) == 2
     assert out[0]["area_mm2"] == pytest.approx(200.0)
     assert out[1]["empty"] is True
 
 
 def test_instance_geometries_carries_the_callers_unit():
-    out = instance_geometries(_rect_mask()[None], scale=0.5, unit="cm")
+    out = instance_geometries(
+        _rect_mask()[None], scale=0.5, unit="cm", threshold=MASK_BINARIZE
+    )
     assert out[0]["area_cm2"] == pytest.approx(200.0)
     assert "area_mm2" not in out[0]
 
 
-# ── the binarize threshold the record names ───────────────────────────────
+# ── the binarize threshold the caller states ──────────────────────────────
 
 
-def test_the_binarize_threshold_records_its_value_and_source():
-    from tcip_mcp.pipelines.measurement.mask_geometry import (
-        DEFAULT_MASK_BINARIZE_THRESHOLD,
-        resolve_binarize_threshold,
-    )
-
-    assert resolve_binarize_threshold() == {
-        "value": DEFAULT_MASK_BINARIZE_THRESHOLD,
-        "source": "default",
-    }
-    assert resolve_binarize_threshold(0.3) == {
-        "value": 0.3,
-        "source": "explicit",
-    }
+def test_an_unstated_threshold_is_refused_by_the_signatures():
+    for measure in (mask_geometry, instance_geometries):
+        with pytest.raises(TypeError, match="threshold"):
+            measure(_rect_mask(), unit="mm")  # type: ignore[call-arg]

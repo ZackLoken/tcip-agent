@@ -25,8 +25,9 @@ criterion per trait/data; keep mAP@50 alongside only as the comparability label 
 
 Detection/instance-seg metrics (`detection_metrics`) come from the platform's one matcher: the
 counts at the operating conf under the governing criterion, and average precision (`map50`, `map`
-over IoU 0.50 to 0.95) from the same matcher over the confidence sweep, matched by mask for
-instance segmentation. They are aggregate only; no per-class AP is reported. Per-class precision/recall/F1 is real for classification (`evaluate_model`); ordinal and
+over IoU 0.50 to 0.95) from the same matcher over the confidence sweep, matched by mask where an
+instance segmentation pass collects and cuts masks and by box where it states `masks` false.
+They are aggregate only; no per-class AP is reported. Per-class precision/recall/F1 is real for classification (`evaluate_model`); ordinal and
 regression get only the scalar metrics in the table above, no per-class breakdown. Change
 detection is not a built task type; see README's Roadmap.
 
@@ -106,7 +107,19 @@ revision that leaves one unauthored never exists to assess. The assessment itsel
 a count is held to: `equivalence_z`, the one-sided standard-error multiplier of the bias
 equivalence test, and `dispersion_quantile`, the share of held-out images whose per-image count
 error `count_error_tolerance` bounds, each with the assessment's `rationale`, all recorded with
-it. `assess_reserved_regions` does the same over a mosaic's reserved calibration and holdout
+it. A detector's assessment collects its predictions at the `conf` its `stated` block carries,
+with that block's `rationale`, and a conf the objective picks at or below it fails as censored.
+An instance segmentation assessment states in `stated` whether its pass collects masks
+(`masks`). One collecting them cuts them by the `mask_cut` `stated` carries (its `mask_binarize`
+and its `epsilon_frac`, both required), or, stating none, derives the whole block over the
+calibration side's detections matched at the fitted conf: the `mask_binarize` they are cut at,
+then the `epsilon_frac` their rings are simplified at over the same pairs cut at that threshold
+(the median of each pair's least perimeter fraction at which `cv2.approxPolyDP` leaves its
+object's vertex count), each recorded under its own derivation in the record's `sources`; a
+tiled pass, whose merge leaves no uncut mask to sweep, states the block. One stating `masks`
+false, tiled or
+untiled, collects none, derives none, and records that its published passes collect none.
+`assess_reserved_regions` does the same over a mosaic's reserved calibration and holdout
 regions, cut into the `k_cal` and `k_test` bands it states and records, refused until those
 regions are attested complete and while the recorded mosaic no longer reads at its recorded size.
 

@@ -41,7 +41,6 @@ from tests._training_values import (  # noqa: E402
     IOU_THRESHOLD,
     adamw_optimizer,
     drawn_split,
-    evaluation_block,
 )
 from tests.tiny_trainer_fixtures import write_regression_dataset  # noqa: E402
 
@@ -74,14 +73,15 @@ def _train_config(
 
     # No val_loader at any call site below: loss is the only metric coherent to select on
     # without one.
-    return training_config(
+    config = training_config(
         project,
         model_source,
         data,
         optimizer=adamw_optimizer(),
         batch_size=batch_size,
-        evaluation=evaluation_block(selection_metric="loss"),
     )
+    config["evaluation"]["selection_metric"] = "loss"
+    return config
 
 
 def _trained(

@@ -16,6 +16,7 @@ import tcip_store as ts
 from tcip_mcp.pipelines.execution import Stated
 from tests._training_values import (
     DISPERSION_QUANTILE,
+    EPSILON_FRAC,
     EQUIVALENCE_Z,
     RATIONALE,
 )
@@ -54,7 +55,14 @@ def _import_coco(tmp_path: Path):
     document.write_text(
         '{"images": [], "annotations": [], "categories": []}', encoding="utf-8"
     )
-    return import_coco(tmp_path, str(document), str(tmp_path), "2025-09-14")
+    return import_coco(
+        tmp_path,
+        str(document),
+        str(tmp_path),
+        "2025-09-14",
+        EPSILON_FRAC,
+        RATIONALE,
+    )
 
 
 def _build_plant_mapping(tmp_path: Path):

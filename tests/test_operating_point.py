@@ -17,7 +17,6 @@ from tcip_mcp.pipelines.training.evaluation import (  # noqa: E402
     pick_f1_max,
 )
 from tests._dense_op_fixtures import (  # noqa: E402
-    _box,
     ann as _ann,  # noqa: E402
     dense_records,
     toy_records as _records,  # noqa: E402
@@ -59,13 +58,17 @@ def test_count_unbiased_differs_from_f1_max():
 
 def test_center_match_respects_tolerance():
     # a correct detection just outside tolerance must not count as a hit
+    from tcip_mcp.pipelines.training.evaluation import prediction_record
+
     recs = [
-        {
-            "width": 400,
-            "height": 400,
-            "gt": [_ann(100, 100)],
-            "dt": [_ann(100 + 100, 100, score=0.9)],
-        }
+        prediction_record(
+            [_ann(100 + 100, 100, score=0.9)],
+            [_ann(100, 100)],
+            width=400,
+            height=400,
+            cap=None,
+            count=1,
+        )
     ]  # 100px off, tolerance ~10
     sweep = derive_operating_point_curve(
         recs,
@@ -106,6 +109,34 @@ def test_sweep_curve_carries_dispersion_and_reference_size_fields():
     assert at09["count_bias_std"] == pytest.approx(1.2909944, abs=1e-5)
     assert at09["count_error_at_quantile"] == pytest.approx(1.7, abs=1e-6)
     assert sweep["dispersion_quantile"] == DISPERSION_QUANTILE
+
+
+def test_the_curve_evaluates_every_distinct_calibration_score():
+    from tcip_mcp.pipelines.training.evaluation import prediction_record
+
+    scores = [round(0.01 + 0.0097 * i, 6) for i in range(101)]
+    recs = [
+        prediction_record(
+            [
+                _ann(20 + 30 * (i % 50), 100, 1, score=s)
+                for i, s in enumerate(scores)
+            ],
+            [_ann(20 + 30 * i, 100, 1) for i in range(50)],
+            width=4000,
+            height=400,
+            cap=None,
+            count=len(scores),
+        )
+    ]
+    sweep = derive_operating_point_curve(
+        recs,
+        criterion={
+            "kind": "center_match",
+            "tolerance": 0.5 * gt_class_avg_size(recs),
+        },
+        dispersion_quantile=DISPERSION_QUANTILE,
+    )
+    assert [c["conf"] for c in sweep["curve"]] == pytest.approx([0.0, *scores])
 
 
 # --- the in-model seam ---
@@ -187,23 +218,19 @@ def test_the_object_density_is_its_quantile_over_the_object_bearing_regions():
 
 def _overlap_records(idp="d"):
     """Records whose GT boxes overlap (20px, offset 8px), so the merge threshold is derivable."""
-    boxes = [
-        _box(100, 100),
-        _box(108, 100),
-        _box(116, 100),
-    ]  # neighbor IoU ~0.43
+    from tcip_mcp.pipelines.training.evaluation import prediction_record
+
+    centers = [100, 108, 116]  # neighbor IoU ~0.43
     return [
-        {
-            "width": 400,
-            "height": 400,
-            "image_id": f"{idp}_{i}",
-            "gt": [
-                {"category_id": 1, "bbox": bx, "iscrowd": 0} for bx in boxes
-            ],
-            "dt": [
-                {"category_id": 1, "bbox": bx, "score": 0.9} for bx in boxes
-            ],
-        }
+        prediction_record(
+            [_ann(x, 100, 1, score=0.9) for x in centers],
+            [_ann(x, 100, 1) for x in centers],
+            width=400,
+            height=400,
+            cap=None,
+            count=len(centers),
+            image_id=f"{idp}_{i}",
+        )
         for i in range(2)
     ]
 
@@ -285,23 +312,20 @@ def test_a_tiled_passs_derived_merge_threshold_is_the_method_its_label_names(
 
     import numpy as np
 
+    from tcip_mcp.pipelines.training.evaluation import prediction_record
     from tests.test_derivations import _label_percentile
 
     offsets = range(1, 16)
     records = [
-        {
-            "width": 400,
-            "height": 400,
-            "image_id": f"o_{d}",
-            "gt": [
-                {"category_id": 1, "bbox": [100, 100, 20, 20], "iscrowd": 0},
-                {
-                    "category_id": 1,
-                    "bbox": [100 + d, 100, 20, 20],
-                    "iscrowd": 0,
-                },
-            ],
-        }
+        prediction_record(
+            [],
+            [_ann(110, 110, 1), _ann(110 + d, 110, 1)],
+            width=400,
+            height=400,
+            cap=None,
+            count=0,
+            image_id=f"o_{d}",
+        )
         for d in offsets
     ]
     p = _tiled_pass(tmp_path, records)

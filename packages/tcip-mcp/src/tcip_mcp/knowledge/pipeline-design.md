@@ -232,7 +232,8 @@ trust it).
 Dimensional traits: mask geometry is a supported measurement. `pipelines.measurement.mask_geometry`
 (also `ctx.mask_geometry`) computes area, perimeter, centroid and the extents along the mask's own PCA
 principal/secondary axes on a *validated* mask, in pixels and in the caller's stated unit when given a
-scale. Geometry on a validated mask is a valid measurement, subject to the same
+scale, its foreground the pixels at or above the `threshold` the caller states (a pass's
+`mask_cut.mask_binarize`, which no default supplies). Geometry on a validated mask is a valid measurement, subject to the same
 validate-before-you-trust rule as any other. An axis extent is a straight chord of the mask's
 footprint, not an anatomical span: it answers the trait's dimension only when the structure is
 straight and its visual long axis is the statistically dominant one. When the definition calls for a

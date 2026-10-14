@@ -46,6 +46,7 @@ def test_segm_metrics_score_mask_overlap():
         records_from_detector,
     )
     from tests._producer_fixtures import painted_array
+    from tests._training_values import MASK_CUT
 
     mask = torch.as_tensor(painted_array(32, 32, [((8, 8, 24, 24), 1)]))[None]
     target = {
@@ -62,7 +63,12 @@ def test_segm_metrics_score_mask_overlap():
     }  # [N, 1, H, W] soft masks
 
     rec = records_from_detector(
-        target, output, width=32, height=32, cap=2, include_masks=True
+        target,
+        output,
+        width=32,
+        height=32,
+        cap=2,
+        mask_cut=MASK_CUT,
     )
     m = detection_metrics(
         [rec], trait=None, conf_threshold=0.25, iou_threshold=0.5, by_mask=True
