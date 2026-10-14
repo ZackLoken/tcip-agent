@@ -56,6 +56,7 @@ def _install_fake_ray(monkeypatch, entered: list, release: list) -> ModuleType:
 
     The nth ``Tuner`` built sets ``entered[n]`` when its ``fit`` starts and returns only
     once ``release[n]`` is set, so a test can hold a sweep open across another's exit.
+    ``ray.tune.schedulers`` carries the one class the sample sweep's scheduler names.
 
     ``ray._private.worker.global_worker.node.all_processes`` mirrors the real attribute path
     ``_kill_ray_daemons_before_shutdown`` reads, holding one fake daemon per Ray process type;
@@ -67,6 +68,9 @@ def _install_fake_ray(monkeypatch, entered: list, release: list) -> ModuleType:
     would otherwise be walked and its children killed.
     """
     import psutil
+
+    from tcip_mcp.pipelines.training.hpo import _SCHEDULERS
+    from tests._training_values import tune_arguments
 
     def fake_psutil_process(pid):
         raise psutil.NoSuchProcess(pid)
@@ -157,6 +161,11 @@ def _install_fake_ray(monkeypatch, entered: list, release: list) -> ModuleType:
     search.Searcher = Searcher
     search.basic_variant = basic_variant
     tune.search = search
+
+    scheduler_class = _SCHEDULERS[tune_arguments()["scheduler"]["name"]]
+    schedulers = ModuleType("ray.tune.schedulers")
+    setattr(schedulers, scheduler_class, type(scheduler_class, (), {}))
+    tune.schedulers = schedulers
     ray.tune = tune
 
     for name, module in (
@@ -164,6 +173,7 @@ def _install_fake_ray(monkeypatch, entered: list, release: list) -> ModuleType:
         ("ray.tune", tune),
         ("ray.tune.search", search),
         ("ray.tune.search.basic_variant", basic_variant),
+        ("ray.tune.schedulers", schedulers),
     ):
         monkeypatch.setitem(sys.modules, name, module)
     return ray
