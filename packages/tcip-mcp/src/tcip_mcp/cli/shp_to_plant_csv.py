@@ -7,9 +7,10 @@ the rows written, which excludes the null-geometry features ``skipped_null_geome
 Validates its own output by reading it back through ``read_plant_csvs`` before reporting success.
 
 Usage:
-    tcip shp-to-plant-csv <plants.shp> <plants.csv> \
-        [--plot-name-field FIELD] [--accession-name-field FIELD] \
-        [--plot-number-field FIELD] [--row-number-field FIELD] [--col-number-field FIELD]
+    tcip shp-to-plant-csv <plants.shp> <plants.csv> [--<field>-field FIELD ...]
+
+One ``--<field>-field`` per pass-through record field, its underscores as hyphens, names the
+source attribute that field is read from.
 """
 
 from __future__ import annotations
@@ -92,26 +93,22 @@ def convert_shp_to_plant_csv(
 
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        SHAPEFILE_FIELD_DEFAULTS,
+    )
+
     parser = argparse.ArgumentParser(description=__doc__, prog=prog)
     parser.add_argument("shp_path")
     parser.add_argument("csv_path")
-    parser.add_argument("--plot-name-field", default=None)
-    parser.add_argument("--accession-name-field", default=None)
-    parser.add_argument("--plot-number-field", default=None)
-    parser.add_argument("--row-number-field", default=None)
-    parser.add_argument("--col-number-field", default=None)
+    for field in SHAPEFILE_FIELD_DEFAULTS:
+        parser.add_argument(f"--{field.replace('_', '-')}-field", default=None)
     args = parser.parse_args(argv)
 
-    field_map = {}
-    for csv_col, cli_value in (
-        ("plot_name", args.plot_name_field),
-        ("accession_name", args.accession_name_field),
-        ("plot_number", args.plot_number_field),
-        ("row_number", args.row_number_field),
-        ("col_number", args.col_number_field),
-    ):
-        if cli_value:
-            field_map[csv_col] = cli_value
+    field_map = {
+        field: value
+        for field in SHAPEFILE_FIELD_DEFAULTS
+        if (value := getattr(args, f"{field}_field"))
+    }
 
     try:
         result = convert_shp_to_plant_csv(

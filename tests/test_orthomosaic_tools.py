@@ -144,7 +144,7 @@ def _plant_registry(
 def _plants_csv_at(
     tmp_path: Path, raster_path: Path, rows: list[tuple[str, float, float]]
 ) -> Path:
-    """A registry CSV naming ``rows`` (plot_name, pixel_x, pixel_y) each projected to WGS84
+    """A registry CSV naming ``rows`` (plant_id, pixel_x, pixel_y) each projected to WGS84
     through this raster's own georeferencing.
     """
     entries = []
@@ -754,9 +754,9 @@ def test_a_plant_outside_the_raster_is_named_and_an_edge_detection_is_not_given_
     [
         (
             [("plotA", 10.0, 10.0), ("plotA", 50.0, 50.0)],
-            "duplicate plot_name",
+            "duplicate plant_id",
         ),
-        ([("", 10.0, 10.0)], "blank plot_name"),
+        ([("", 10.0, 10.0)], "blank plant_id"),
     ],
     ids=["duplicate", "blank"],
 )
@@ -886,7 +886,7 @@ def test_canopy_segments_attribute_by_containment_and_name_every_gap(tmp_path):
         "segment_without_plant": 1,
         "segment_plant_within_position_error": 0,
     }
-    assert {t["plot_name"] for t in pm["segment_ties"]} == {"plot0", "plot2"}
+    assert {t["plant_id"] for t in pm["segment_ties"]} == {"plot0", "plot2"}
     assert all(t["clearance_m"] > 0 for t in pm["segment_ties"])
 
     refused = _deliver(

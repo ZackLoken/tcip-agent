@@ -281,7 +281,7 @@ by_stem = {row["stem"]: row for rows in build.rows().values() for row in rows}
 records = [
     {
         **r,
-        "plant_id": row["plot_name"],
+        "plant_id": row["plant_id"],
         **{k: row[k] for k in ("source", "distance_m", "plant_attribution")},
     }
     for r in read_stage_b_preds_as_image_results(

@@ -23,7 +23,7 @@ def _point_shapefile(tmp_path: Path) -> Path:
     path = tmp_path / "plants.shp"
     schema = {
         "geometry": "Point",
-        "properties": {"plot_name": "str", "accession_name": "str"},
+        "properties": {"plant_id": "str", "accession_name": "str"},
     }
     with fiona.open(
         str(path),
@@ -35,7 +35,7 @@ def _point_shapefile(tmp_path: Path) -> Path:
         dst.write(
             {
                 "geometry": {"type": "Point", "coordinates": POINT_NATIVE},
-                "properties": {"plot_name": "P1", "accession_name": "acc-A"},
+                "properties": {"plant_id": "P1", "accession_name": "acc-A"},
             }
         )
         dst.write(
@@ -44,7 +44,7 @@ def _point_shapefile(tmp_path: Path) -> Path:
                     "type": "Point",
                     "coordinates": (POINT_NATIVE[0] + 5, POINT_NATIVE[1]),
                 },
-                "properties": {"plot_name": "P2", "accession_name": "acc-B"},
+                "properties": {"plant_id": "P2", "accession_name": "acc-B"},
             }
         )
     return path

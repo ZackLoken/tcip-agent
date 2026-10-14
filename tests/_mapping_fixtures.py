@@ -32,7 +32,7 @@ def write_plant_csv(
         w = csv.writer(f)
         w.writerow(
             [
-                "plot_name",
+                "plant_id",
                 "accession_name",
                 "WGS84_centroid_x",
                 "WGS84_centroid_y",

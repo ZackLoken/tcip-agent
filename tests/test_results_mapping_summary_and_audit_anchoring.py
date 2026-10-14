@@ -142,7 +142,7 @@ def test_build_reports_image_count_mapped_count_and_mean_distance_as_three_answe
 
     rows = load_mapping_rows(tmp_path, payload["name"])["2026-02-11"]
     assert len(rows) == 4
-    assert {r["plot_name"] for r in rows if r["plot_name"]} == {
+    assert {r["plant_id"] for r in rows if r["plant_id"]} == {
         "PLOT1",
         "PLOT2",
     }

@@ -49,6 +49,37 @@ def test_the_csv_row_count_equals_the_population(tmp_path: Path) -> None:
     assert by_plant["PLANT_UNMAPPED"]["bud_50per_date"] == ""
 
 
+def test_the_delivered_plant_ids_are_the_registrys_plant_ids(
+    tmp_path: Path,
+) -> None:
+    """A registry CSV's ``plant_id`` column, read by the registry, assigned by the mapping and
+    delivered by the phenology door, is the delivered ``plant_id`` column: every registry plant
+    is delivered under its own identity with an image on every date.
+    """
+    from tcip_mcp.pipelines.postprocessing.plant_mapping import load_mapping
+    from tests._chain_fixtures import (
+        PLANTS,
+        attributed_series,
+        deliver_milestones,
+    )
+
+    series = attributed_series(tmp_path)
+    out_csv = tmp_path / "out" / "bud.csv"
+
+    res = deliver_milestones(tmp_path, series.body(), out_csv)
+
+    assert "error" not in res, res
+    build = load_mapping(tmp_path, series.mapping_name)
+    assert build is not None
+    assigned = {
+        a.plant_id for rows in build.assignments.values() for a in rows
+    }
+    rows = csv_rows(out_csv)
+    assert [r["plant_id"] for r in rows] == list(PLANTS)
+    assert {r["plant_id"] for r in rows} <= assigned
+    assert all(r["n_dates_missing_images"] == "0" for r in rows)
+
+
 def test_an_empty_population_refuses_naming_the_argument(
     tmp_path: Path,
 ) -> None:

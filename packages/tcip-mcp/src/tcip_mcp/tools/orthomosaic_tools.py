@@ -187,16 +187,16 @@ def orthomosaic_plant_counts(
             registered, georef, width=width, height=height
         )
         uncountable = {
-            p.plot_name: "outside the raster's frame" for p in outside
+            p.plant_id: "outside the raster's frame" for p in outside
         }
         tolerance = resolve_nn_tolerance_m(in_frame, nn_tolerance_m)
         assignments = assign_detections_to_plants(
             boxes, georef, in_frame, nn_tolerance_m=tolerance["value"]
         )
         attributed = [a for a in assignments if assignment_is_attributed(a)]
-        counts = {p.plot_name: 0 for p in in_frame}
+        counts = {p.plant_id: 0 for p in in_frame}
         for a in attributed:
-            counts[cast(str, a.plot_name)] += 1
+            counts[cast(str, a.plant_id)] += 1
         attribution = DetectionAssignment.plant_attribution
         disclosure = {
             "plant_registry": registry_ref,
@@ -205,7 +205,7 @@ def orthomosaic_plant_counts(
             "detections_unattributed": len(assignments) - len(attributed),
             "detections_unattributed_scope": "delivered_raster",
             "plant_attribution": attribution,
-            "plants_outside_raster": sorted(p.plot_name for p in outside),
+            "plants_outside_raster": sorted(p.plant_id for p in outside),
         }
     refused = {
         p: uncountable.get(p, "not in the registry")
@@ -320,12 +320,12 @@ def _segment_counts(
     }
     tied = {t.segment_index: t for t in tie.tied}
     ambiguous = sorted(
-        tied[i].plot_name for i in ambiguous_segments & set(tied)
+        tied[i].plant_id for i in ambiguous_segments & set(tied)
     )
-    counts = {t.plot_name: 0 for t in tie.tied if t.plot_name not in ambiguous}
+    counts = {t.plant_id: 0 for t in tie.tied if t.plant_id not in ambiguous}
     for a in assignments:
-        if a.source == "segment_containment" and a.plot_name in counts:
-            counts[a.plot_name] += 1
+        if a.source == "segment_containment" and a.plant_id in counts:
+            counts[a.plant_id] += 1
     by_source = {
         source: sum(a.source == source for a in assignments)
         for source in UNATTRIBUTED_SEGMENT_SOURCES
@@ -343,7 +343,7 @@ def _segment_counts(
         "segment_ties": [
             {
                 "segment_index": t.segment_index,
-                "plot_name": t.plot_name,
+                "plant_id": t.plant_id,
                 "clearance_m": t.clearance_m,
             }
             for t in tie.tied

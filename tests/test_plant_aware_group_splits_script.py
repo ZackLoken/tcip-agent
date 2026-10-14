@@ -345,7 +345,7 @@ def test_draw_splits_keeps_every_plants_stems_on_one_split_side(
 
     drawn = read_selection(out_dir, project=tmp_path)
     stem_side = {Path(s.source).stem: s.side for s in drawn.samples}
-    # Every group's members (same plot_name) land on the identical side.
+    # Every group's members (same plant_id) land on the identical side.
     for plot in ("p1", "p2", "p3", "p4"):
         group_stems = [f"{plot}_{d}" for d in ("2026-02-01", "2026-03-01")]
         sides = {stem_side[s] for s in group_stems}

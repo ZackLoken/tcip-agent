@@ -95,13 +95,13 @@ def test_a_dates_radius_is_the_largest_error_its_photographs_report(
         radius > grid_pitch_m(read_plant_csvs([tmp_path / "plants.csv"])) / 2
     )
     by_image = {a.image: a for a in build.assignments[DATE]}
-    assert [by_image[f"photo_{i}.jpg"].plot_name for i in range(3)] == [
+    assert [by_image[f"photo_{i}.jpg"].plant_id for i in range(3)] == [
         "P0",
         "P1",
         "P2",
     ]
     stray = by_image["photo_3.jpg"]
-    assert stray.plot_name is None
+    assert stray.plant_id is None
     assert stray.distance_m == pytest.approx(STRAY_NORTH_M, abs=1e-3)
     assert stray.distance_m > radius
 
@@ -144,7 +144,7 @@ def test_a_stated_radius_is_recorded_as_stated_with_its_reason(
         )
     }
     stray = {a.image: a for a in build.assignments[DATE]}["photo_3.jpg"]
-    assert stray.plot_name == "P3"
+    assert stray.plant_id == "P3"
 
 
 def test_a_stated_radius_is_recorded_on_a_date_with_no_positioned_capture(

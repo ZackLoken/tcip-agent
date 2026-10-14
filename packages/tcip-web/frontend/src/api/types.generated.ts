@@ -431,7 +431,7 @@ export interface CanopySegmentsDocument {
 
 export interface SegmentTieDisclosure {
   segment_index: number;
-  plot_name: string;
+  plant_id: string;
   clearance_m: number;
 }
 

@@ -31,9 +31,9 @@ REGISTRY = cr.SubjectRegistry(
 
 
 class _Assignment:
-    def __init__(self, stem: str, plot_name: str, accession_name: str) -> None:
+    def __init__(self, stem: str, plant_id: str, accession_name: str) -> None:
         self.stem = stem
-        self.plot_name = plot_name
+        self.plant_id = plant_id
         self.accession_name = accession_name
 
 
