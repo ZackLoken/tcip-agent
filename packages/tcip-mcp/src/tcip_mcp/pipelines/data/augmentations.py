@@ -2,8 +2,7 @@
 
 Provides composable augmentation transforms that work with both detection
 (image, target dict with 'boxes') and classification (image, target dict)
-pipelines. Implemented directly on PIL and torch, with no torchvision
-dependency.
+pipelines, implemented on PIL and torch.
 
 Usage:
     transforms = build_augmentation(config)
@@ -29,6 +28,7 @@ from pydantic import (
 )
 
 from tcip_mcp.pipelines.image_utils import pil_to_tensor
+from tcip_mcp.project_record import CaptureInvariances, RotationDegrees
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.schemas import AugmentationSpec
@@ -36,6 +36,9 @@ if TYPE_CHECKING:
 Probability = Annotated[float, Field(ge=0, le=1)]
 CropFraction = Annotated[float, Field(gt=0, le=1)]
 Size = tuple[PositiveInt, PositiveInt]
+Refusals = dict[str, bool | float]
+"""Capture invariances (fields of ``CaptureInvariances``), each mapped to the value a record
+states for it."""
 
 
 class _Transform(BaseModel, ABC):
@@ -46,9 +49,9 @@ class _Transform(BaseModel, ABC):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
     @abstractmethod
-    def relies_on(self) -> set[str]:
-        """The capture invariances (fields of ``project_record.CaptureInvariances``) this
-        transform as stated relies on.
+    def refused_under(self, invariances: CaptureInvariances) -> Refusals:
+        """Each capture invariance under which ``invariances`` says the measurement does not hold
+        for this transform as stated.
         """
 
 
@@ -108,9 +111,10 @@ class RandomHorizontalFlip(_Transform):
 
     p: Probability
 
-    def relies_on(self) -> set[str]:
-        """The capture invariances this transform relies on: the horizontal flip unless p is 0."""
-        return {"horizontal_flip"} if self.p else set()
+    def refused_under(self, invariances: CaptureInvariances) -> Refusals:
+        """The horizontal flip, unless ``p`` is 0 or ``invariances`` holds under it."""
+        held = invariances.horizontal_flip
+        return {} if held or not self.p else {"horizontal_flip": held}
 
     def __call__(
         self, img: Image.Image, target: dict
@@ -137,9 +141,10 @@ class RandomVerticalFlip(_Transform):
 
     p: Probability
 
-    def relies_on(self) -> set[str]:
-        """The capture invariances this transform relies on: the vertical flip unless p is 0."""
-        return {"vertical_flip"} if self.p else set()
+    def refused_under(self, invariances: CaptureInvariances) -> Refusals:
+        """The vertical flip, unless ``p`` is 0 or ``invariances`` holds under it."""
+        held = invariances.vertical_flip
+        return {} if held or not self.p else {"vertical_flip": held}
 
     def __call__(
         self, img: Image.Image, target: dict
@@ -169,14 +174,16 @@ class ColorJitter(_Transform):
     contrast: Annotated[float, Field(ge=0, le=1)]
     saturation: Annotated[float, Field(ge=0, le=1)]
 
-    def relies_on(self) -> set[str]:
-        """The capture invariances this transform relies on: intensity when it shifts brightness
-        or contrast, color when it shifts saturation.
+    def refused_under(self, invariances: CaptureInvariances) -> Refusals:
+        """Color when it shifts saturation and intensity when it shifts brightness or contrast,
+        each unless ``invariances`` holds under it.
         """
-        relied = {"color"} if self.saturation else set()
-        if self.brightness or self.contrast:
-            relied.add("intensity")
-        return relied
+        refused: Refusals = {}
+        if self.saturation and not invariances.color:
+            refused["color"] = invariances.color
+        if (self.brightness or self.contrast) and not invariances.intensity:
+            refused["intensity"] = invariances.intensity
+        return refused
 
     def __call__(
         self, img: Image.Image, target: dict
@@ -210,11 +217,11 @@ class RandomResizedCrop(_Transform):
             )
         return self
 
-    def relies_on(self) -> set[str]:
-        """The capture invariances this transform relies on: scale, since every crop it states
-        resizes a region to ``size``.
+    def refused_under(self, invariances: CaptureInvariances) -> Refusals:
+        """Scale, since every crop it states resizes a region to ``size``, unless
+        ``invariances`` holds under it.
         """
-        return {"scale"}
+        return {} if invariances.scale else {"scale": invariances.scale}
 
     def __call__(
         self, img: Image.Image, target: dict
@@ -270,9 +277,9 @@ class GaussianBlur(_Transform):
     radius: NonNegativeFloat
     """The Gaussian's radius in pixels."""
 
-    def relies_on(self) -> set[str]:
+    def refused_under(self, invariances: CaptureInvariances) -> Refusals:
         """No capture invariance: a blur perturbs the sensor."""
-        return set()
+        return {}
 
     def __call__(
         self, img: Image.Image, target: dict
@@ -287,9 +294,9 @@ class Resize(_Transform):
 
     size: Size
 
-    def relies_on(self) -> set[str]:
+    def refused_under(self, invariances: CaptureInvariances) -> Refusals:
         """No capture invariance: a resize fixes the input size."""
-        return set()
+        return {}
 
     def __call__(
         self, img: Image.Image, target: dict
@@ -321,13 +328,15 @@ class RandomRotation(_Transform):
     (classification/ordinal/regression) pass through untouched.
     """
 
-    degrees: Annotated[float, Field(ge=0, le=180)]
-    """At most 180: the draw over ``[-180, 180]`` already covers every rotation."""
+    degrees: RotationDegrees
     p: Probability
 
-    def relies_on(self) -> set[str]:
-        """The capture invariances this transform relies on: rotation unless p or degrees is 0."""
-        return {"rotation"} if self.p and self.degrees else set()
+    def refused_under(self, invariances: CaptureInvariances) -> Refusals:
+        """Rotation, when ``p`` is not 0 and ``degrees`` exceeds the largest rotation
+        ``invariances`` holds under.
+        """
+        held = invariances.rotation
+        return {"rotation": held} if self.p and self.degrees > held else {}
 
     def __call__(
         self, img: Image.Image, target: dict
@@ -434,23 +443,20 @@ def _stated_transforms(
 
 
 def forbidden_transforms(
-    config: AugmentationSpec, invariances: dict[str, bool]
+    config: AugmentationSpec, invariances: CaptureInvariances
 ) -> list[str]:
-    """One issue for each invariance a transform ``config`` states relies on (its
-    ``relies_on()``) that ``invariances``, a project record's, states false, naming the
-    transform, the invariance and ``initialize_project``, where it is stated. Refuses what
+    """One issue for each invariance ``invariances``, a project record's, refuses a transform
+    ``config`` states under (its ``refused_under``), naming the transform, the invariance, the
+    value the record states for it and ``initialize_project``, where it is stated. Refuses what
     :func:`build_augmentation` refuses.
     """
-    issues: list[str] = []
-    for name, transform in _stated_transforms(config):
-        issues.extend(
-            f"augmentation {name!r} relies on the capture invariance {fact!r}, which this "
-            "project's record states false: the trait's measurement does not hold under it "
-            "(the invariances are stated through initialize_project)"
-            for fact in sorted(transform.relies_on())
-            if not invariances[fact]
-        )
-    return issues
+    return [
+        f"augmentation {name!r} relies on the capture invariance {fact!r} beyond what this "
+        f"project's record states for it ({stated!r}): the trait's measurement does not hold "
+        "under the transform as stated (the invariances are stated through initialize_project)"
+        for name, transform in _stated_transforms(config)
+        for fact, stated in transform.refused_under(invariances).items()
+    ]
 
 
 def recorded_resize(config: AugmentationSpec | None) -> tuple[int, int] | None:

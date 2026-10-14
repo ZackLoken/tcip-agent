@@ -229,20 +229,22 @@ def test_build_augmentation_builds_each_transform_at_the_values_its_entry_states
 
 
 def test_every_invariance_a_registered_transform_relies_on_is_a_field_of_the_record():
-    """Under a record stating every capture invariance false, every registered transform at
-    nonzero values is refused once per invariance it relies on, together naming each field of
-    the record's own model once; the blur and the resize rely on none.
+    """Under a record stating every capture invariance false and the rotation at 0 degrees,
+    every registered transform at nonzero values is refused once per invariance it relies on,
+    together naming each field of the record's own model once; the blur and the resize rely on
+    none.
     """
     from tcip_mcp.pipelines.data.augmentations import forbidden_transforms
     from tcip_mcp.pipelines.schemas import AugmentationSpec
     from tcip_mcp.project_record import CaptureInvariances
 
     fields = list(CaptureInvariances.model_fields)
-    none_hold = CaptureInvariances(**dict.fromkeys(fields, False))
+    answers = dict.fromkeys(fields, False) | {"rotation": 0}
+    none_hold = CaptureInvariances.model_validate(answers)
 
     issues = forbidden_transforms(
         AugmentationSpec.model_validate(augmentation(**EVERY_TRANSFORM)),
-        none_hold.model_dump(),
+        none_hold,
     )
 
     assert len(issues) == len(fields), issues

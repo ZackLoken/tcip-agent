@@ -163,7 +163,7 @@ def _save_annotations(project: Path) -> Path:
     from tcip_mcp.workspace import BoundProject, workspace_from_environment
 
     bound = BoundProject(
-        project, read_record(project)["id"], workspace_from_environment()
+        project, read_record(project).id, workspace_from_environment()
     )
     result = save_annotations(
         bound, IMAGE, [{"subject": SUBJECT, "bbox": BOX}]
@@ -220,7 +220,7 @@ def _focus_human_attention(project: Path) -> Path:
     from tcip_mcp.workspace import BoundProject, workspace_from_environment
 
     bound = BoundProject(
-        project, read_record(project)["id"], workspace_from_environment()
+        project, read_record(project).id, workspace_from_environment()
     )
     result = focus_human_attention(
         bound, ".", SUBJECT, DATE, image_index=0, mode="box"

@@ -23,7 +23,7 @@ def test_write_project_site_replaces_the_site_and_keeps_the_id_and_name(
     assert result.returncode == 0, result.stdout + result.stderr
     assert "written" in result.stdout
     after = read_record(project)
-    assert after == {**before, "site": "south orchard"}
+    assert after == before.model_copy(update={"site": "south orchard"})
 
 
 def test_write_project_site_refuses_a_directory_holding_no_project_record(

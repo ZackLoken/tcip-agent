@@ -837,7 +837,7 @@ def test_initialize_project_records_the_id_display_name_site_and_invariances(
 
     result = _initialized(tmp_path)
 
-    assert read_record(tmp_path) == {
+    assert read_record(tmp_path).model_dump() == {
         "id": result["id"],
         "display_name": "Test project",
         "site": "north orchard",
@@ -869,7 +869,7 @@ def test_initialize_project_refuses_unstated_invariances_and_one_unstated_invari
 ):
     """The invariances are required by the door's signature and each of the six by the
     record's model; a stated block is read back whole by ``inspect_project`` and
-    ``record_fields``.
+    ``record_fields``, a rotation stated as 5 read back as 5.0 degrees.
     """
     from tcip_mcp.project_record import record_fields
 
@@ -878,7 +878,11 @@ def test_initialize_project_refuses_unstated_invariances_and_one_unstated_invari
         "display_name": "Test project",
         "site": "north orchard",
     }
-    answers = {**INVARIANCES.model_dump(), "vertical_flip": False}
+    answers = {
+        **INVARIANCES.model_dump(),
+        "vertical_flip": False,
+        "rotation": 5,
+    }
     one_unstated = {k: v for k, v in answers.items() if k != "scale"}
 
     unstated = _called_through_the_server(stated)
@@ -890,26 +894,70 @@ def test_initialize_project_refuses_unstated_invariances_and_one_unstated_invari
     assert not (tmp_path / "stated").exists()
 
     assert _called_through_the_server({**stated, "invariances": answers}) == ""
-    assert inspect_project(tmp_path / "stated")["invariances"] == answers
-    assert record_fields(tmp_path / "stated")["invariances"] == answers
+    for read in (inspect_project, record_fields):
+        invariances = read(tmp_path / "stated")["invariances"]
+        assert invariances == answers, read
+        assert isinstance(invariances["rotation"], float), read
+
+
+@pytest.mark.parametrize(
+    "angle, refusal",
+    [
+        (181, "less than or equal to 180"),
+        (-1, "greater than or equal to 0"),
+        (float("inf"), "less than or equal to 180"),
+        (float("nan"), "less than or equal to 180"),
+        ("inf", "valid number"),
+        ("nan", "valid number"),
+        (True, "valid number"),
+    ],
+    ids=[
+        "past-a-half-turn",
+        "negative",
+        "infinite",
+        "not-a-number",
+        "infinite-as-text",
+        "not-a-number-as-text",
+        "a-yes",
+    ],
+)
+def test_initialize_project_refuses_a_rotation_angle_outside_its_range_by_type(
+    tmp_path: Path, angle, refusal
+):
+    """A rotation invariance that is not a finite angle from 0 to 180 degrees is refused by the
+    record's type naming the field, and nothing is written.
+    """
+    project = tmp_path / "refused"
+    arguments = {
+        "project_path": str(project),
+        "display_name": "Test project",
+        "site": "north orchard",
+        "invariances": INVARIANCES.model_dump() | {"rotation": angle},
+    }
+
+    error = _called_through_the_server(arguments)
+
+    assert "rotation" in error and refusal in error, error
+    assert not project.exists()
 
 
 def test_initialize_project_refuses_different_invariances_than_the_ones_already_recorded(
     tmp_path: Path,
 ):
-    from tcip_mcp.project_record import read_record
+    from tcip_mcp.project_record import CaptureInvariances, read_record
 
     _initialized(tmp_path)
+    answers = INVARIANCES.model_dump() | {"rotation": 5}
 
     result = initialize_project(
         str(tmp_path),
         "Test project",
         "north orchard",
-        INVARIANCES.model_copy(update={"rotation": False}),
+        CaptureInvariances.model_validate(answers),
     )
 
     assert "error" in result and "invariances" in result["error"]
-    assert read_record(tmp_path)["invariances"] == INVARIANCES.model_dump()
+    assert read_record(tmp_path).invariances == INVARIANCES
 
 
 def test_initialize_project_refuses_a_different_site_than_the_one_already_recorded(
@@ -926,7 +974,7 @@ def test_initialize_project_refuses_a_different_site_than_the_one_already_record
     assert "error" in result
     assert "north orchard" in result["error"]
     assert "south orchard" in result["error"]
-    assert read_record(tmp_path)["site"] == "north orchard"
+    assert read_record(tmp_path).site == "north orchard"
 
 
 def test_initialize_project_refuses_a_different_display_name_than_the_one_already_recorded(
@@ -942,7 +990,7 @@ def test_initialize_project_refuses_a_different_display_name_than_the_one_alread
 
     assert "error" in result
     assert "rename" in result["error"]
-    assert read_record(tmp_path)["display_name"] == "Test project"
+    assert read_record(tmp_path).display_name == "Test project"
 
 
 def test_initialize_project_refuses_an_empty_site_leaving_nothing_on_disk(
@@ -1104,7 +1152,7 @@ def test_archive_and_import_carry_the_project_record(tmp_path: Path):
     from tcip_mcp.project_record import read_record
 
     restored = read_record(dest)
-    assert (restored["id"], restored["site"]) == (
+    assert (restored.id, restored.site) == (
         record["id"],
         "north orchard",
     )

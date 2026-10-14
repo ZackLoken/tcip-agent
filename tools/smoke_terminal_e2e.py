@@ -110,7 +110,7 @@ def main(
     invariances = CaptureInvariances(
         horizontal_flip=True,
         vertical_flip=True,
-        rotation=True,
+        rotation=180,
         color=True,
         intensity=True,
         scale=True,

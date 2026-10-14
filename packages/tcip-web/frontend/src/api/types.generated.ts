@@ -270,7 +270,7 @@ export interface SubmitRequest {
 export interface CaptureInvariances {
   horizontal_flip: boolean;
   vertical_flip: boolean;
-  rotation: boolean;
+  rotation: number;
   color: boolean;
   intensity: boolean;
   scale: boolean;

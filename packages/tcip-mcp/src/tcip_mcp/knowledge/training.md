@@ -198,7 +198,7 @@ config = {
     "seed": ...,  # every stream's seed, recorded on the run
     "deterministic": ...,  # cuDNN deterministic algorithms (slower)
     # optional; each transform states every value its constructor takes, and the launch
-    # refuses one relying on a capture invariance the project's record states false
+    # refuses one the project's capture invariances do not hold under
     "augmentation": {
         "rationale": ...,
         "horizontal_flip": {"p": ...},

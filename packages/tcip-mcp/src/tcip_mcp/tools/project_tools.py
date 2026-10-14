@@ -159,7 +159,9 @@ def initialize_project(
         display_name: The name the project picker shows; renaming later changes only this.
         site: The orchard or station this project's plants stand in, in the breeder's own words.
         invariances: For each capture transform, whether it leaves the trait's measurement what
-            it was, as the breeder answers it; a training run's augmentation is judged against it.
+            it was, and for a rotation the largest angle in degrees at which it does (0 for
+            none, 180 for any), as the breeder answers it; a training run's augmentation is
+            judged against it.
 
     """
     from tcip_mcp.audit import record_event_or_raise
@@ -168,15 +170,15 @@ def initialize_project(
 
     try:
         project = located(Path(project_path).expanduser(), None)
-        record = create_record(project, display_name, site, invariances)
+        record = create_record(
+            project, display_name, site, invariances
+        ).model_dump()
     except (ValueError, StoreError) as exc:
         return {"error": str(exc)}
     tcip = _project_dir(str(project))
     (tcip / "artifacts").mkdir(exist_ok=True)
     (tcip / "models").mkdir(exist_ok=True)
-    record_event_or_raise(
-        "project_created", dict(record), actor=None, scope=project
-    )
+    record_event_or_raise("project_created", record, actor=None, scope=project)
     return {"project_path": str(project), **record}
 
 
@@ -451,8 +453,8 @@ def _extract_zip(zp: Path, staging: Path) -> int:
     """Extract every member of ``zp`` into ``staging``, refusing a path that would escape it.
 
     ``staging`` is this run's own private directory (a fresh uuid under ``.imports``), so a refusal
-    here leaves the destination untouched. Escape is decided by containment (``Path.relative_to``),
-    never a string prefix.
+    here leaves the destination untouched. Escape is decided by containment
+    (``Path.relative_to``).
     """
     files_extracted = 0
     with zipfile.ZipFile(str(zp), "r") as zf:

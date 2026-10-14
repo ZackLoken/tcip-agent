@@ -37,12 +37,14 @@ in the picker. Ask the human for both rather than guessing them from a path or f
 that already records a different site or display name refuses the call rather than silently
 overwriting it (`tcip write-project-site` corrects a site typed wrong once).
 
-The invariances are six facts the breeder answers at creation, each whether a transform of the
-image leaves the trait's measurement what it was: a horizontal flip (`horizontal_flip`), a
-vertical flip (`vertical_flip`), a rotation (`rotation`), a shift in hue or saturation (`color`),
-a shift in brightness or contrast (`intensity`), and a change in the size objects appear at
-(`scale`). Ask each one; none is guessed from the crop or the trait's name. A training run's
-augmentation is refused at launch when it relies on one the record states false.
+The invariances are six facts the breeder answers at creation, each how far a transform of the
+image leaves the trait's measurement what it was: whether a horizontal flip (`horizontal_flip`),
+a vertical flip (`vertical_flip`), a shift in hue or saturation (`color`), a shift in brightness
+or contrast (`intensity`) or a change in the size objects appear at (`scale`) does, and the
+largest rotation about the image's center, in degrees, under which it does (`rotation`; 0 for
+none, 180 for any). Ask each one; none is guessed from the crop or the trait's name. At launch
+each transform a training run's augmentation states is judged against the record, and one the
+recorded answers do not hold under, as stated, is refused naming the invariance.
 
 This MCP server acts on the one project it was started for (`--project <path>`); every tool that
 acts on a project takes that one, never a path you pass. A project you create here is worked on

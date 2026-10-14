@@ -87,7 +87,7 @@ def test_a_rename_changes_the_display_name_and_leaves_the_directory_and_records_
         "display_name": "Valley block, north half",
         "previous_display_name": "Valley block",
     }
-    assert read_record(project)["display_name"] == "Valley block, north half"
+    assert read_record(project).display_name == "Valley block, north half"
     assert sorted(p.name for p in ws.iterdir() if (p / ".tcip").is_dir()) == [
         "valley_block"
     ]
@@ -118,7 +118,7 @@ def test_a_display_name_the_record_refuses_answers_400_and_changes_nothing(
     )
 
     assert resp.status_code == 400
-    assert read_record(made.root)["display_name"] == "Valley block"
+    assert read_record(made.root).display_name == "Valley block"
     assert audit_rows(made.root, "project_renamed") == []
 
 
@@ -133,7 +133,7 @@ def test_a_rename_naming_no_one_changes_nothing(client, tmp_path):
             json={"id": made.id, "display_name": "Hill block", "user": name},
         )
         assert resp.status_code == 400, (name, resp.text)
-    assert read_record(made.root)["display_name"] == "Valley block"
+    assert read_record(made.root).display_name == "Valley block"
     assert audit_rows(made.root, "project_renamed") == []
 
 

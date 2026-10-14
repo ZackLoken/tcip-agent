@@ -459,7 +459,7 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(
 
     from tcip_mcp.project_record import read_record
 
-    assert read_record(str(dest))["site"] == "north orchard"
+    assert read_record(str(dest)).site == "north orchard"
 
     entries = read_datasets(dest)
     assert entries[0]["path"] == "."
