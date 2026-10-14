@@ -44,7 +44,7 @@ def register_plant_registry(
     Args:
         name: The registry's name within this project (``plant_mapping.NAME_SEGMENT``:
             lowercase letters, digits, single hyphens).
-        csv_paths: One or more plant-locations CSVs (columns ``plot_name``, ``accession_name``,
+        csv_paths: One or more plant-locations CSVs (columns ``plant_id``, ``accession_name``,
             ``WGS84_centroid_x/y``, …).
         crop: The crop these plants are of. The expert's fact, never inferred.
         site: The site or block these plants are of. The expert's fact, never inferred.
@@ -104,7 +104,7 @@ def build_plant_mapping(
     Orders each date's images by EXIF capture time (the walker's sequence), splits into row runs on
     large GPS jumps, and assigns along the row, falling back to nearest-neighbor when the sequence
     signal is weak, both within the date's match radius. Each assignment records its ``source``
-    and GPS ``distance_m`` (no fabricated "confidence"). The mapping is project state, persisted
+    and GPS ``distance_m``. The mapping is project state, persisted
     under the project by ``name``.
 
     Args:
@@ -192,8 +192,8 @@ def deliver_phenology_milestones(
         buckets: The name of the published bucket of each delivered date, one per date; each
             stands for the capture date its own record states.
         output_csv_path: Where to write the CSV.
-        plants: The delivery's population, the plant ids (the mapping's ``plot_name`` values) it
-            is for; an empty list refuses.
+        plants: The delivery's population, the mapping's ``plant_id`` values it is for; an empty
+            list refuses.
         acknowledgment_id: A breeder's recorded acknowledgment of this unvalidated result.
 
     """

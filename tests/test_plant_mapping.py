@@ -73,7 +73,7 @@ def _one_build(project: Path) -> MappingBuild:
 
 def _plant(plot: str, accession: str, lat: float, lon: float) -> PlantRecord:
     return PlantRecord(
-        plot_name=plot,
+        plant_id=plot,
         accession_name=accession,
         plot_number=None,
         row_number=None,
@@ -196,7 +196,7 @@ def test_assign_plants_one_to_one(stamp) -> None:
     ]
     assignments = _assign(stamps, plants)
     # Each image should claim a different plant
-    assert len({a.plot_name for a in assignments}) == 2
+    assert len({a.plant_id for a in assignments}) == 2
     assert all(a.source == "sequence" for a in assignments)
 
 
@@ -210,7 +210,7 @@ def test_assign_plants_handles_missing_gps(tmp_path: Path) -> None:
     stamps = [read_image_stamp(path, DATE)]
     assignments = _assign(stamps, plants)
     assert assignments[0].source == "unmapped"
-    assert assignments[0].plot_name is None
+    assert assignments[0].plant_id is None
 
 
 def test_assign_plants_no_plants_returns_unmapped(stamp) -> None:
@@ -230,7 +230,7 @@ def test_assign_plants_far_image_falls_back_or_unmapped(stamp) -> None:
 def test_read_plant_csvs(tmp_path: Path) -> None:
     csv_path = tmp_path / "plants.csv"
     csv_path.write_text(
-        "plot_name,accession_name,plot_number,block_number,is_a_control,rep_number,range_number,"
+        "plant_id,accession_name,plot_number,block_number,is_a_control,rep_number,range_number,"
         "row_number,col_number,seedlot_name,num_seed_per_plot,weight_gram_seed_per_plot,entry_number,"
         "WGS84_centroid_x,WGS84_centroid_y\n"
         "2026_VF_MWxMW_PLOT1,MN_20_0305_602,1101002001.0,1.0,,1.0,,2,1,,,,,"
@@ -240,7 +240,7 @@ def test_read_plant_csvs(tmp_path: Path) -> None:
     records = read_plant_csvs([csv_path])
     assert len(records) == 1
     r = records[0]
-    assert r.plot_name == "2026_VF_MWxMW_PLOT1"
+    assert r.plant_id == "2026_VF_MWxMW_PLOT1"
     assert r.lat == 43.19684267700006
     assert r.lon == -90.05808906799996
 
@@ -252,7 +252,7 @@ def test_persist_and_load_mapping_round_trip(tmp_path: Path) -> None:
     assert loaded is not None
     assert loaded.assignments == build.assignments
     assert loaded.capture_digests == build.capture_digests
-    assert {a.plot_name for a in loaded.assignments[DATE]} == set(PLOTS)
+    assert {a.plant_id for a in loaded.assignments[DATE]} == set(PLOTS)
 
 
 def test_load_mapping_refuses_a_record_missing_capture_digests(
@@ -297,7 +297,7 @@ def test_persisting_a_mapping_into_a_directory_that_does_not_exist_yet_still_lan
     build = _one_build(tmp_path)
 
     assert tcip_store.exists(plant_mapping_key(tmp_path, "mapping"))
-    assert {a.plot_name for a in build.assignments[DATE]} == set(PLOTS)
+    assert {a.plant_id for a in build.assignments[DATE]} == set(PLOTS)
 
 
 def test_persisting_a_mapping_waits_on_the_lock_its_record_is_written_under(

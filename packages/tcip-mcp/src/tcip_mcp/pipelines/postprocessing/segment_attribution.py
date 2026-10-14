@@ -168,7 +168,7 @@ class TiedSegment:
 
     segment_index: int
     polygon: Polygon
-    plot_name: str
+    plant_id: str
     accession_name: str
     clearance_m: float
 
@@ -251,7 +251,7 @@ def tie_segments_to_plants(
 
     Refuses by name: a ``position_error_m`` that is not a finite, nonnegative distance; a raster
     whose CRS states no meters per unit; a registry with a blank or duplicate
-    ``plot_name`` (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.require_named_plants`);
+    ``plant_id`` (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.require_named_plants`);
     a plant inside more than one segment; a segment containing more than one plant; no in-frame
     plant in the registry at all. Plants are partitioned first through
     :func:`~tcip_mcp.pipelines.postprocessing.orthomosaic_mapping.plants_in_frame`, so a plant
@@ -275,24 +275,24 @@ def tie_segments_to_plants(
         )
 
     plant_pixel = {
-        p.plot_name: georef.wgs84_to_pixel(p.lat, p.lon) for p in in_frame
+        p.plant_id: georef.wgs84_to_pixel(p.lat, p.lon) for p in in_frame
     }
-    plant_segments: dict[str, list[int]] = {p.plot_name: [] for p in in_frame}
+    plant_segments: dict[str, list[int]] = {p.plant_id: [] for p in in_frame}
     segment_plants: dict[int, list[PlantRecord]] = {
         s.segment_index: [] for s in segments
     }
     for s in segments:
         for p in in_frame:
-            px, py = plant_pixel[p.plot_name]
+            px, py = plant_pixel[p.plant_id]
             if point_in_polygon(px, py, s.polygon):
                 segment_plants[s.segment_index].append(p)
-                plant_segments[p.plot_name].append(s.segment_index)
+                plant_segments[p.plant_id].append(s.segment_index)
 
     for p in in_frame:
-        containing = plant_segments[p.plot_name]
+        containing = plant_segments[p.plant_id]
         if len(containing) > 1:
             raise ValueError(
-                f"plant {p.plot_name!r} lies inside more than one canopy segment "
+                f"plant {p.plant_id!r} lies inside more than one canopy segment "
                 f"{sorted(containing)}; a segment tie requires exactly one containing segment per "
                 "plant"
             )
@@ -301,7 +301,7 @@ def tie_segments_to_plants(
         if len(contained) > 1:
             raise ValueError(
                 f"canopy segment {s.segment_index} contains more than one plant "
-                f"({sorted(p.plot_name for p in contained)}); a segment tied to more than one "
+                f"({sorted(p.plant_id for p in contained)}); a segment tied to more than one "
                 "plant cannot attribute detections to a single identity"
             )
 
@@ -327,7 +327,7 @@ def tie_segments_to_plants(
                 UntiedSegment(
                     segment_index=s.segment_index,
                     polygon=s.polygon,
-                    plant_within_position_error=p.plot_name,
+                    plant_within_position_error=p.plant_id,
                 )
             )
             continue
@@ -335,16 +335,16 @@ def tie_segments_to_plants(
             TiedSegment(
                 segment_index=s.segment_index,
                 polygon=s.polygon,
-                plot_name=p.plot_name,
+                plant_id=p.plant_id,
                 accession_name=p.accession_name,
                 clearance_m=clearance_m,
             )
         )
 
     plants_without_segment = sorted(
-        p.plot_name for p in in_frame if not plant_segments[p.plot_name]
+        p.plant_id for p in in_frame if not plant_segments[p.plant_id]
     )
-    plants_outside_raster = sorted(p.plot_name for p in outside)
+    plants_outside_raster = sorted(p.plant_id for p in outside)
 
     return SegmentTie(
         tied=tied,
@@ -371,7 +371,7 @@ class SegmentAssignment:
     pixel_x: float
     pixel_y: float
     segment_index: int | None
-    plot_name: str | None
+    plant_id: str | None
     accession_name: str | None
     source: SegmentSource
     distance_m: None
@@ -413,7 +413,7 @@ def assign_detections_to_segments(
                 pixel_x=cx,
                 pixel_y=cy,
                 segment_index=hit.segment_index if hit is not None else None,
-                plot_name=tied.plot_name if tied else None,
+                plant_id=tied.plant_id if tied else None,
                 accession_name=tied.accession_name if tied else None,
                 source=source,
                 distance_m=None,

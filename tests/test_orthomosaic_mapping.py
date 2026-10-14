@@ -259,7 +259,7 @@ def test_plants_in_frame_partitions_by_the_rasters_own_recorded_dimensions(
     )  # negative column: outside
     plants = [
         PlantRecord(
-            plot_name="in",
+            plant_id="in",
             accession_name="a",
             plot_number=0,
             row_number=0,
@@ -268,7 +268,7 @@ def test_plants_in_frame_partitions_by_the_rasters_own_recorded_dimensions(
             lon=inside_lon,
         ),
         PlantRecord(
-            plot_name="out",
+            plant_id="out",
             accession_name="b",
             plot_number=1,
             row_number=0,
@@ -279,8 +279,8 @@ def test_plants_in_frame_partitions_by_the_rasters_own_recorded_dimensions(
     ]
 
     in_frame, outside = plants_in_frame(plants, georef, width=64, height=64)
-    assert [p.plot_name for p in in_frame] == ["in"]
-    assert [p.plot_name for p in outside] == ["out"]
+    assert [p.plant_id for p in in_frame] == ["in"]
+    assert [p.plant_id for p in outside] == ["out"]
 
 
 def test_plants_in_frame_edge_pixel_at_width_or_height_is_outside(
@@ -299,7 +299,7 @@ def test_plants_in_frame_edge_pixel_at_width_or_height_is_outside(
     height_edge_lat, height_edge_lon = georef.pixel_to_wgs84(10.0, 64.0)
     plants = [
         PlantRecord(
-            plot_name="width_edge",
+            plant_id="width_edge",
             accession_name="a",
             plot_number=0,
             row_number=0,
@@ -308,7 +308,7 @@ def test_plants_in_frame_edge_pixel_at_width_or_height_is_outside(
             lon=width_edge_lon,
         ),
         PlantRecord(
-            plot_name="height_edge",
+            plant_id="height_edge",
             accession_name="b",
             plot_number=1,
             row_number=0,
@@ -320,7 +320,7 @@ def test_plants_in_frame_edge_pixel_at_width_or_height_is_outside(
 
     in_frame, outside = plants_in_frame(plants, georef, width=64, height=64)
     assert in_frame == []
-    assert {p.plot_name for p in outside} == {"width_edge", "height_edge"}
+    assert {p.plant_id for p in outside} == {"width_edge", "height_edge"}
 
 
 # ── GeoTransform composes with plain floats (no bespoke point type) ─────
@@ -788,13 +788,13 @@ def test_assign_detections_to_plants_maps_near_and_leaves_far_unmapped(
     near, far = assignments
     assert near.detection_index == 0
     assert near.source == "nearest_neighbor"
-    assert near.plot_name == "plot0"
+    assert near.plant_id == "plot0"
     assert near.accession_name == "acc0"
     assert near.distance_m is not None and near.distance_m < 1.0
 
     assert far.detection_index == 1
     assert far.source == "unmapped"
-    assert far.plot_name is None
+    assert far.plant_id is None
     assert far.accession_name is None
     assert (
         far.distance_m is not None
@@ -836,7 +836,7 @@ def test_assign_detections_to_plants_matches_within_the_tolerance_it_is_given(
         detections, georef, plants, nn_tolerance_m=dist * 2
     )
     assert loose[0].source == "nearest_neighbor"
-    assert loose[0].plot_name == "plot0"
+    assert loose[0].plant_id == "plot0"
 
 
 def test_assign_detections_to_plants_no_boxes_returns_empty(

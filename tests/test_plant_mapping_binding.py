@@ -871,7 +871,7 @@ def test_a_capture_unreadable_at_build_is_never_read_so_replacing_it_only_disclo
 ) -> None:
     """A capture unreadable when the mapping was built has no GPS, so ``assign_plants`` records it
     unmapped, and an unmapped row's stem is never among what a delivery reads
-    (``stems_delivery_reads`` requires a truthy ``plot_name``): replacing it with a readable,
+    (``stems_delivery_reads`` requires a truthy ``plant_id``): replacing it with a readable,
     geotagged image later is never examined for a readability flip at all, coverage of that dead
     path rather than a guard, and under a partial read (another mapped plant's prediction absent)
     it surfaces only as this capture's own disclosure.
@@ -899,7 +899,7 @@ def test_a_capture_unreadable_at_build_is_never_read_so_replacing_it_only_disclo
     assert build is not None
     assert f"{stem}.jpg" in build.unreadable[DATES[0]]
     by_stem = {a.stem: a for a in build.assignments[DATES[0]]}
-    assert by_stem[stem].plot_name is None
+    assert by_stem[stem].plant_id is None
     _seed_currant_bloom_trait(tmp_path)
 
     target.write_bytes(original_bytes)
@@ -1152,7 +1152,7 @@ def test_full_round_trip_delivers_and_a_rebuild_reads_back(
     assert set(build.dates) == set(DATES)
     for date in DATES:
         assert len(build.assignments[date]) == len(PLANTS)
-        assert {a.plot_name for a in build.assignments[date]} == {
+        assert {a.plant_id for a in build.assignments[date]} == {
             p["plot"] for p in PLANTS
         }
 

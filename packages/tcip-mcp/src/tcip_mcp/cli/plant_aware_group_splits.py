@@ -37,7 +37,7 @@ def derive_plant_group_key_map(
     *,
     nn_tolerance_m: float | None = None,
 ) -> dict[str, str]:
-    """``{identity: plot_name}`` for every key in ``stem_to_raster``, resolved by GPS
+    """``{identity: plant_id}`` for every key in ``stem_to_raster``, resolved by GPS
     nearest-neighbor.
 
     Each raster's own center pixel is its representative location, converted to WGS84 via that
@@ -54,6 +54,7 @@ def derive_plant_group_key_map(
         OrthomosaicGeoreference,
     )
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
+        assignment_is_attributed,
         nearest_plant,
         resolve_nn_tolerance_m,
     )
@@ -91,13 +92,13 @@ def derive_plant_group_key_map(
             )
             continue
         plant = plants[index]
-        if not plant.plot_name:
+        if not assignment_is_attributed(plant):
             failures.append(
-                f"{stem} ({path}): the matched plant record has no plot_name"
+                f"{stem} ({path}): the matched plant record has no plant_id"
             )
             continue
 
-        group_key_map[stem] = plant.plot_name
+        group_key_map[stem] = plant.plant_id
 
     if failures:
         preview = "\n  ".join(failures[:20])

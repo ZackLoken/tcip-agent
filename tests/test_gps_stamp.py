@@ -62,7 +62,7 @@ def test_a_latitude_with_no_longitude_is_unattributed_never_measured_at_longitud
 
     # A plant at longitude 0 beside the latitude: a defaulted longitude would match it.
     plant = PlantRecord(
-        plot_name="P1",
+        plant_id="P1",
         accession_name="A",
         plot_number=None,
         row_number=None,
@@ -78,4 +78,4 @@ def test_a_latitude_with_no_longitude_is_unattributed_never_measured_at_longitud
         ),
     )
     assert assignment.source == "unmapped"
-    assert assignment.plot_name is None and assignment.distance_m is None
+    assert assignment.plant_id is None and assignment.distance_m is None

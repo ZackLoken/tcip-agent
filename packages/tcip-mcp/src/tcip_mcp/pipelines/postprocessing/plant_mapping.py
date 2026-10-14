@@ -13,8 +13,9 @@ import logging
 import math
 import re
 import statistics
+from collections import Counter
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, replace
 from datetime import datetime
 from pathlib import Path
 from typing import (
@@ -90,7 +91,7 @@ class ImageStamp:
 class PlantRecord:
     """One plant from a plant_locations CSV."""
 
-    plot_name: str
+    plant_id: str
     accession_name: str
     plot_number: float | None
     row_number: float | None
@@ -165,7 +166,7 @@ class Assignment:
     image: str
     stem: str
     date_folder: str
-    plot_name: str | None
+    plant_id: str | None
     accession_name: str | None
     source: GpsSource
     distance_m: float | None
@@ -183,7 +184,7 @@ class Assignment:
             image=stamp.name,
             stem=stamp.stem,
             date_folder=stamp.date_folder,
-            plot_name=plant.plot_name if plant else None,
+            plant_id=plant.plant_id if plant else None,
             accession_name=plant.accession_name if plant else None,
             source=source,
             distance_m=distance_m,
@@ -191,30 +192,30 @@ class Assignment:
 
 
 def assignment_is_attributed(assignment: object) -> bool:
-    """Whether ``assignment`` (any assignment record, or the plain dict row ``MappingBuild.rows``
-    produces) names a real plant: a non-empty ``plot_name``, the rule a plant CSV's own blank name
-    column and an unmapped capture (``plot_name=None``) both fail by.
+    """Whether ``assignment`` (a :class:`PlantRecord`, any assignment record, or the plain dict
+    row ``MappingBuild.rows`` produces) names a real plant: a non-empty ``plant_id``, the rule a
+    plant CSV's own blank column and an unmapped capture (``plant_id=None``) both fail by.
     """
-    plot_name = attr(assignment, "plot_name")
-    return isinstance(plot_name, str) and plot_name != ""
+    plant_id = attr(assignment, "plant_id")
+    return isinstance(plant_id, str) and plant_id != ""
 
 
 def require_named_plants(plants: list[PlantRecord]) -> None:
-    """Refuse (``ValueError``) a registry carrying a blank ``plot_name``
+    """Refuse (``ValueError``) a registry carrying a blank ``plant_id``
     (:func:`assignment_is_attributed`'s rule) or a duplicate one, naming the offending accession
     or names.
     """
     for p in plants:
-        if not assignment_is_attributed({"plot_name": p.plot_name}):
+        if not assignment_is_attributed(p):
             raise ValueError(
-                f"the plant registry carries a blank plot_name (accession {p.accession_name!r}); "
-                "every plant this delivery attributes detections to must carry a plot_name"
+                f"the plant registry carries a blank plant_id (accession {p.accession_name!r}); "
+                "every plant this delivery attributes detections to must carry a plant_id"
             )
-    names = [p.plot_name for p in plants]
-    duplicates = sorted({n for n in names if names.count(n) > 1})
+    counts = Counter(p.plant_id for p in plants)
+    duplicates = sorted(n for n, k in counts.items() if k > 1)
     if duplicates:
         raise ValueError(
-            f"the plant registry carries duplicate plot_name(s) {duplicates}; two rows sharing "
+            f"the plant registry carries duplicate plant_id(s) {duplicates}; two rows sharing "
             "one identity would merge two trees' detections into one aggregation row"
         )
 
@@ -576,16 +577,14 @@ def capture_digests(stamps: list[ImageStamp]) -> dict[str, str]:
 # ── Plant CSV parsing ───────────────────────────────────────────────────
 
 
+_COORDINATE_COLUMNS = {"lon": "WGS84_centroid_x", "lat": "WGS84_centroid_y"}
+
 PLANT_CSV_COLUMN_FOR_FIELD = {
-    "plot_name": "plot_name",
-    "accession_name": "accession_name",
-    "plot_number": "plot_number",
-    "row_number": "row_number",
-    "col_number": "col_number",
-    "lon": "WGS84_centroid_x",
-    "lat": "WGS84_centroid_y",
+    f.name: _COORDINATE_COLUMNS.get(f.name, f.name)
+    for f in fields(PlantRecord)
 }
-"""Which CSV column carries each :class:`PlantRecord` field, in header order."""
+"""Which CSV column carries each :class:`PlantRecord` field, in the record's field order: each
+field under its own name, the two coordinates under :data:`_COORDINATE_COLUMNS`."""
 
 PLANT_CSV_COLUMNS = list(PLANT_CSV_COLUMN_FOR_FIELD.values())
 """The seven column names in header order."""
@@ -609,7 +608,7 @@ def read_plant_csv_bytes(data: bytes) -> list[PlantRecord]:
             continue
         records.append(
             PlantRecord(
-                plot_name=row.get(column["plot_name"], ""),
+                plant_id=row.get(column["plant_id"], ""),
                 accession_name=row.get(column["accession_name"], ""),
                 plot_number=_maybe_float(row.get(column["plot_number"])),
                 row_number=_maybe_float(row.get(column["row_number"])),
@@ -652,14 +651,12 @@ class ShapefileRows(NamedTuple):
     skipped_null_geometry: int
 
 
-_DEFAULT_SHAPEFILE_FIELD_MAP = {
-    "plot_name": "plot_name",
-    "accession_name": "accession_name",
-    "plot_number": "plot_number",
-    "row_number": "row_number",
-    "col_number": "col_number",
+SHAPEFILE_FIELD_DEFAULTS = {
+    field: column
+    for field, column in PLANT_CSV_COLUMN_FOR_FIELD.items()
+    if field not in _COORDINATE_COLUMNS
 }
-"""Optional pass-through columns' default source-attribute field names, overridable per
+"""Every pass-through field's default source-attribute name, its CSV column, overridable per
 shapefile through :func:`read_plant_shapefile`'s own ``field_map``: an ESRI Shapefile DBF caps
 field names at 10 characters, so a source rarely matches these exactly."""
 
@@ -696,9 +693,9 @@ def read_plant_shapefile(
     from shapely.geometry import shape
 
     shp_path = Path(path)
-    fields = dict(_DEFAULT_SHAPEFILE_FIELD_MAP)
+    source_fields = dict(SHAPEFILE_FIELD_DEFAULTS)
     if field_map:
-        fields.update(field_map)
+        source_fields.update(field_map)
 
     geom_kinds: set[str] = set()
     rows: list[dict[str, object]] = []
@@ -727,7 +724,7 @@ def read_plant_shapefile(
 
         available = set(layer.schema["properties"])
         resolved_fields: dict[str, str | None] = {}
-        for csv_col, shp_field in fields.items():
+        for csv_col, shp_field in source_fields.items():
             if shp_field in available:
                 resolved_fields[csv_col] = shp_field
             elif shp_field[:10] in available:
@@ -769,13 +766,7 @@ def read_plant_shapefile(
                 column[field]: _shapefile_field_value(
                     properties, resolved_fields[field]
                 )
-                for field in (
-                    "plot_name",
-                    "accession_name",
-                    "plot_number",
-                    "row_number",
-                    "col_number",
-                )
+                for field in SHAPEFILE_FIELD_DEFAULTS
             }
             row[column["lon"]] = lon
             row[column["lat"]] = lat
@@ -998,7 +989,7 @@ def parse_plant_registry_csvs(
     if failed:
         raise NoGeoreferencedPlantsError(
             f"{failed} parsed no georeferenced, named plant, or is not UTF-8 text (need columns "
-            "plot_name, WGS84_centroid_x, WGS84_centroid_y with usable values); register only "
+            "plant_id, WGS84_centroid_x, WGS84_centroid_y with usable values); register only "
             "files that carry at least one",
             paths=failed,
         )
@@ -1880,7 +1871,7 @@ def verify_mapping_inputs(
                 distances = [
                     WGS84.inv(lon, lat, p.lon, p.lat)[2]
                     for p in verified_plants
-                    if p.plot_name == row.plot_name
+                    if p.plant_id == row.plant_id
                 ]
                 if not distances:
                     # The plant's own CSV is among plant_csvs_unverified: disclose this capture's
@@ -1891,7 +1882,7 @@ def verify_mapping_inputs(
                     return {
                         "refusal": (
                             f"{s.name} (date {date}) has moved since this mapping was built: "
-                            f"no plant named {row.plot_name!r} is {row.distance_m} m away now; "
+                            f"no plant named {row.plant_id!r} is {row.distance_m} m away now; "
                             "rebuild, since its assignment would differ"
                         )
                     }
@@ -2102,7 +2093,7 @@ def plant_mapping_disclosure(
     """
     build, verified = resolve_delivery_mapping(project, name, buckets)
     assigned = {
-        a.plot_name
+        a.plant_id
         for d in buckets
         for a in build.assignments.get(d, [])
         if assignment_is_attributed(a)

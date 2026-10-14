@@ -107,7 +107,7 @@ class SegmentTieDisclosure(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     segment_index: int
-    plot_name: str
+    plant_id: str
     clearance_m: float
 
 

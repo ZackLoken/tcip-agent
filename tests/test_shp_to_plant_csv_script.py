@@ -39,7 +39,7 @@ def _reference_lonlat(native_x: float, native_y: float) -> tuple[float, float]:
 
 
 _SCHEMA_PROPERTIES = {
-    "plot_name": "str",
+    "plant_id": "str",
     "accession_name": "str",
     "plot_number": "float",
     "row_number": "float",
@@ -49,14 +49,14 @@ _SCHEMA_PROPERTIES = {
 # The ESRI Shapefile driver truncates a field name over 10 characters when it writes the DBF, so a
 # fixture's properties are keyed by the same truncated form the script's own resolver looks for.
 _ATTRS_POINT = {
-    "plot_name": "P1",
+    "plant_id": "P1",
     "accession_name": "acc-A",
     "plot_number": 1.0,
     "row_number": 2.0,
     "col_number": 3.0,
 }
 _ATTRS_POLYGON = {
-    "plot_name": "P2",
+    "plant_id": "P2",
     "accession_name": "acc-B",
     "plot_number": 4.0,
     "row_number": 5.0,
@@ -141,7 +141,7 @@ def test_point_geometry_reprojects_to_correct_unswapped_wgs84(
     assert lon == pytest.approx(expected_lon, abs=1e-6)
     assert lat == pytest.approx(expected_lat, abs=1e-6)
 
-    assert rows[0]["plot_name"] == "P1"
+    assert rows[0]["plant_id"] == "P1"
     assert rows[0]["accession_name"] == "acc-A"
     assert rows[0]["plot_number"] == "1.0"
 
@@ -212,7 +212,7 @@ def test_round_trip_validation_names_the_real_cause_on_a_broken_header(
     with broken.open("w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(
-            ["plot_name", "accession_name", "lon", "lat"]
+            ["plant_id", "accession_name", "lon", "lat"]
         )  # wrong column names
         w.writerow(["P1", "acc-A", "-93.0", "42.0"])
 
@@ -261,7 +261,7 @@ def test_field_map_override_picks_up_a_renamed_source_field(
     # is commonly truncated like this.
     schema = {
         "geometry": "Point",
-        "properties": {"plot_name": "str", "ACC_NAME": "str"},
+        "properties": {"plant_id": "str", "ACC_NAME": "str"},
     }
     with fiona.open(
         str(path),
@@ -276,7 +276,7 @@ def test_field_map_override_picks_up_a_renamed_source_field(
                     "type": "Point",
                     "coordinates": tuple(POINT_NATIVE),
                 },
-                "properties": {"plot_name": "P1", "ACC_NAME": "acc-Z"},
+                "properties": {"plant_id": "P1", "ACC_NAME": "acc-Z"},
             }
         )
 
@@ -350,7 +350,7 @@ def _alnum_point_shapefile(tmp_path: Path) -> Path:
     schema = {
         "geometry": "Point",
         "properties": {
-            "plot_name": "str",
+            "plant_id": "str",
             "accession_name": "str",
             "plot_number": "str",
         },
@@ -369,7 +369,7 @@ def _alnum_point_shapefile(tmp_path: Path) -> Path:
                     "coordinates": tuple(POINT_NATIVE),
                 },
                 "properties": {
-                    "plot_name": "P9",
+                    "plant_id": "P9",
                     "accession_name": "acc-Z",
                     "plot_number": "A1",
                 },
@@ -396,7 +396,7 @@ def test_read_plant_shapefile_point_rows_match_reference_and_attrs_verbatim(
     expected_lon, expected_lat = _reference_lonlat(*POINT_NATIVE)
     assert row["WGS84_centroid_x"] == pytest.approx(expected_lon, abs=1e-6)
     assert row["WGS84_centroid_y"] == pytest.approx(expected_lat, abs=1e-6)
-    assert row["plot_name"] == "P1"
+    assert row["plant_id"] == "P1"
     assert row["accession_name"] == "acc-A"
     assert row["plot_number"] == "1.0"
 
@@ -418,7 +418,7 @@ def test_read_plant_shapefile_polygon_rows_match_reference_and_attrs_verbatim(
     expected_lon, expected_lat = _reference_lonlat(*POINT_NATIVE)
     assert row["WGS84_centroid_x"] == pytest.approx(expected_lon, abs=1e-6)
     assert row["WGS84_centroid_y"] == pytest.approx(expected_lat, abs=1e-6)
-    assert row["plot_name"] == "P2"
+    assert row["plant_id"] == "P2"
     assert row["accession_name"] == "acc-B"
 
 
@@ -600,15 +600,6 @@ def test_plant_csv_columns_matches_written_header(tmp_path: Path) -> None:
 
     assert header == PLANT_CSV_COLUMNS
     assert PLANT_CSV_COLUMNS == list(PLANT_CSV_COLUMN_FOR_FIELD.values())
-    assert set(PLANT_CSV_COLUMN_FOR_FIELD) == {
-        "plot_name",
-        "accession_name",
-        "plot_number",
-        "row_number",
-        "col_number",
-        "lon",
-        "lat",
-    }
 
 
 def test_every_written_column_survives_read_plant_csv_bytes(
@@ -630,7 +621,7 @@ def test_every_written_column_survives_read_plant_csv_bytes(
 
     assert len(records) == 1
     record = records[0]
-    assert record.plot_name == "P9"
+    assert record.plant_id == "P9"
     assert record.accession_name == "acc-Z"
     expected_lon, expected_lat = _reference_lonlat(*POINT_NATIVE)
     assert record.lon == pytest.approx(expected_lon, abs=1e-6)

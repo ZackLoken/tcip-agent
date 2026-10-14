@@ -304,16 +304,14 @@ class DetectionAssignment:
     pixel_y: float
     lat: float
     lon: float
-    plot_name: str | None
+    plant_id: str | None
     accession_name: str | None
     source: GpsSource
     distance_m: float | None
 
     plant_attribution: ClassVar[str] = "detection"
-    """The granularity at which this mapper attributes objects to plants: one detection per
-    object, a whole-mosaic frame carrying no capture sequence to attribute at image granularity
-    the way ``plant_mapping.MappingBuild`` does. A class attribute, like that one, so it names one
-    mapper-wide fact rather than a per-assignment value nothing here computes differently."""
+    """The granularity at which this mapper attributes objects to plants, one fact for every
+    assignment it makes: each detection on its own."""
 
 
 def detection_location(box: Sequence[float]) -> tuple[float, float]:
@@ -377,7 +375,7 @@ def assign_detections_to_plants(
                 pixel_y=cy,
                 lat=lat,
                 lon=lon,
-                plot_name=plant.plot_name if plant else None,
+                plant_id=plant.plant_id if plant else None,
                 accession_name=plant.accession_name if plant else None,
                 source="nearest_neighbor" if plant else "unmapped",
                 distance_m=distance_m,

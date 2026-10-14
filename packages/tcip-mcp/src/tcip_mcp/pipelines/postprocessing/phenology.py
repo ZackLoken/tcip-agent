@@ -338,7 +338,7 @@ def per_plant_series(
     list).
 
     ``mapping`` is ``{date: [assignment, ...]}`` where each assignment has ``.stem`` /
-    ``.plot_name`` / ``.accession_name`` (attributes or dict keys); ``buckets`` is each delivered
+    ``.plant_id`` / ``.accession_name`` (attributes or dict keys); ``buckets`` is each delivered
     date's published bucket, by its recorded date. ``plants`` is the delivery's population: every
     plant in it gets an entry, in the order given, and a plant the mapping names that is not in it
     is never read. Every population plant has a series point on every date the mapping names, one
@@ -372,7 +372,7 @@ def per_plant_series(
             plant_id: [0, 0, 0, 0, 0] for plant_id in plants
         }
         for a in mapping[date_str]:
-            plant_id = attr(a, "plot_name")
+            plant_id = attr(a, "plant_id")
             if not assignment_is_attributed(a) or plant_id not in per_plant:
                 continue
             acc = by_plant[plant_id]

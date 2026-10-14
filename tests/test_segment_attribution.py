@@ -63,12 +63,12 @@ def _square(x0: float, y0: float, x1: float, y1: float) -> Polygon:
 
 
 def _plant(
-    georef: OrthomosaicGeoreference, plot_name: str, px: float, py: float
+    georef: OrthomosaicGeoreference, plant_id: str, px: float, py: float
 ) -> PlantRecord:
     lat, lon = georef.pixel_to_wgs84(px, py)
     return PlantRecord(
-        plot_name=plot_name,
-        accession_name=f"acc-{plot_name}",
+        plant_id=plant_id,
+        accession_name=f"acc-{plant_id}",
         plot_number=None,
         row_number=None,
         col_number=None,
@@ -426,7 +426,7 @@ def test_tie_segments_to_plants_ties_two_disjoint_segments_each_to_one_plant(
         position_error_m=POSITION_ERROR_M,
     )
 
-    assert {t.plot_name for t in tie.tied} == {"plot0", "plot1"}
+    assert {t.plant_id for t in tie.tied} == {"plot0", "plot1"}
     assert tie.untied == []
     assert tie.plants_without_segment == []
     assert tie.plants_outside_raster == []
@@ -472,8 +472,8 @@ def test_tie_segments_to_plants_leaves_a_plant_within_the_position_error_untied(
         height=HEIGHT,
         position_error_m=POSITION_ERROR_M,
     )
-    safe = next(t for t in tie.tied if t.plot_name == "plot0").clearance_m
-    tight = next(t for t in tie.tied if t.plot_name == "plot1").clearance_m
+    safe = next(t for t in tie.tied if t.plant_id == "plot0").clearance_m
+    tight = next(t for t in tie.tied if t.plant_id == "plot1").clearance_m
     assert tight < safe
 
     bounded = tie_segments_to_plants(
@@ -484,7 +484,7 @@ def test_tie_segments_to_plants_leaves_a_plant_within_the_position_error_untied(
         height=HEIGHT,
         position_error_m=(tight + safe) / 2,
     )
-    assert [t.plot_name for t in bounded.tied] == ["plot0"]
+    assert [t.plant_id for t in bounded.tied] == ["plot0"]
     assert bounded.plants_within_position_error == ["plot1"]
     assert [s.segment_index for s in bounded.untied] == [1]
     assert bounded.plants_without_segment == []
@@ -493,7 +493,7 @@ def test_tie_segments_to_plants_leaves_a_plant_within_the_position_error_untied(
     (inside,) = assign_detections_to_segments(
         [[38.0, 38.0, 42.0, 42.0]], bounded
     )
-    assert (inside.source, inside.plot_name) == (
+    assert (inside.source, inside.plant_id) == (
         "segment_plant_within_position_error",
         None,
     )
@@ -635,7 +635,7 @@ def test_tie_segments_to_plants_leaves_a_plantless_segment_untied(
         position_error_m=POSITION_ERROR_M,
     )
 
-    assert [t.plot_name for t in tie.tied] == ["plot0"]
+    assert [t.plant_id for t in tie.tied] == ["plot0"]
     assert [s.segment_index for s in tie.untied] == [1]
     assert tie.segments_without_plant == 1
 
@@ -733,7 +733,7 @@ def test_tie_segments_to_plants_refuses_a_blank_named_plant(
     )
     plants = [_plant(georef, "", 10, 10)]
 
-    with pytest.raises(ValueError, match="blank plot_name"):
+    with pytest.raises(ValueError, match="blank plant_id"):
         tie_segments_to_plants(
             segments,
             plants,
@@ -744,7 +744,7 @@ def test_tie_segments_to_plants_refuses_a_blank_named_plant(
         )
 
 
-def test_tie_segments_to_plants_refuses_a_duplicate_plot_name(
+def test_tie_segments_to_plants_refuses_a_duplicate_plant_id(
     tmp_path: Path,
 ) -> None:
     _, raster_path, georef, _identity = _setup(tmp_path)
@@ -771,7 +771,7 @@ def test_tie_segments_to_plants_refuses_a_duplicate_plot_name(
     )
     plants = [_plant(georef, "plot0", 10, 10), _plant(georef, "plot0", 40, 40)]
 
-    with pytest.raises(ValueError, match="duplicate plot_name"):
+    with pytest.raises(ValueError, match="duplicate plant_id"):
         tie_segments_to_plants(
             segments,
             plants,
@@ -850,7 +850,7 @@ def test_tie_segments_to_plants_names_a_plant_outside_the_raster(
     )
 
     assert tie.plants_outside_raster == ["plot1"]
-    assert [t.plot_name for t in tie.tied] == ["plot0"]
+    assert [t.plant_id for t in tie.tied] == ["plot0"]
 
 
 def test_tie_segments_to_plants_names_an_in_frame_plant_with_no_segment(
@@ -885,7 +885,7 @@ def test_tie_segments_to_plants_names_an_in_frame_plant_with_no_segment(
     )
 
     assert tie.plants_without_segment == ["plot1"]
-    assert [t.plot_name for t in tie.tied] == ["plot0"]
+    assert [t.plant_id for t in tie.tied] == ["plot0"]
 
 
 # ── assign_detections_to_segments ─────────────────────────────────────────
@@ -942,18 +942,18 @@ def test_assign_detections_to_segments_attributes_a_containment_and_names_the_re
     assignments = assign_detections_to_segments(detections, tie)
 
     assert assignments[0].source == "segment_containment"
-    assert assignments[0].plot_name == "plot0"
+    assert assignments[0].plant_id == "plot0"
     assert assignments[0].segment_index == 0
     assert assignments[0].distance_m is None
     assert assignments[0].plant_attribution == "segment"
 
     assert assignments[1].source == "outside_segments"
     assert assignments[1].segment_index is None
-    assert assignments[1].plot_name is None
+    assert assignments[1].plant_id is None
 
     assert assignments[2].source == "segment_without_plant"
     assert assignments[2].segment_index == 1
-    assert assignments[2].plot_name is None
+    assert assignments[2].plant_id is None
 
 
 def test_assign_detections_to_segments_attributes_an_overlap_to_neither(
@@ -998,7 +998,7 @@ def test_assign_detections_to_segments_attributes_an_overlap_to_neither(
 
     assert assignments[0].source == "overlapping_segments"
     assert assignments[0].segment_index is None
-    assert assignments[0].plot_name is None
+    assert assignments[0].plant_id is None
     assert set(assignments[0].overlapping_segment_indices) == {0, 1}
 
 

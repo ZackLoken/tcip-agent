@@ -345,9 +345,9 @@ def test_count_by_class_foreign_record_within_attributed_bucket_refuses(
 
 
 class _Assignment:
-    def __init__(self, stem, plot_name, accession_name):
+    def __init__(self, stem, plant_id, accession_name):
         self.stem = stem
-        self.plot_name = plot_name
+        self.plant_id = plant_id
         self.accession_name = accession_name
 
 
@@ -512,7 +512,7 @@ def test_per_plant_series_accepts_dict_assignments(tmp_path):
     }
     mapping = {
         "2024-05-01": [
-            {"stem": "P1_a", "plot_name": "P1", "accession_name": "acc-9"}
+            {"stem": "P1_a", "plant_id": "P1", "accession_name": "acc-9"}
         ]
     }
     per_plant = phenology.per_plant_series(mapping, buckets, OPENED, ["P1"])
@@ -668,7 +668,7 @@ def test_per_plant_series_counts_the_images_the_mapping_names(tmp_path):
 def test_per_plant_series_excludes_unattributed_assignments_from_coverage(
     tmp_path,
 ):
-    """An assignment with no ``plot_name`` (an image the plant-mapping step could not assign) is
+    """An assignment with no ``plant_id`` (an image the plant-mapping step could not assign) is
     dropped from every plant's coverage; how often that happens is disclosed once, at delivery
     scope, by ``plant_mapping.MappingBuild.unattributed``, never recomputed here.
     """
@@ -680,7 +680,7 @@ def test_per_plant_series_excludes_unattributed_assignments_from_coverage(
             _Assignment("P1_a", "P1", "acc-9"),
             _Assignment(
                 "STRAY", None, None
-            ),  # no plot_name: never assigned to any plant
+            ),  # no plant_id: never assigned to any plant
         ]
     }
     per_plant = phenology.per_plant_series(mapping, buckets, OPENED, ["P1"])
