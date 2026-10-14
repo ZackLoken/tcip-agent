@@ -405,24 +405,6 @@ DOORS: dict[str, Callable[[Path], object]] = {
 }
 
 
-def _stub_child(monkeypatch) -> None:
-    """Launches spawn no training process and start no TensorBoard."""
-    import subprocess
-
-    class _StubChild:
-        def __init__(self, *args, **kwargs) -> None:
-            self.pid = 4242
-
-        def __class_getitem__(cls, item):
-            return cls
-
-    monkeypatch.setattr(subprocess, "Popen", _StubChild)
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard",
-        lambda *a, **k: {},
-    )
-
-
 def _relative_config(project: Path, where: Path) -> dict:
     """A detection config over a dataset at ``project / where`` whose ``images_dir`` is spelled
     relative to ``project``, and the same dataset laid under the working directory as a decoy.
@@ -1035,13 +1017,14 @@ def test_a_resumed_run_records_the_project_rooted_checkpoint(
     from tcip_mcp.experiments import observe
     from tcip_mcp.tools.training_tools import launch_training
     from tests._audit_fixtures import audit_rows
+    from tests._producer_fixtures import fake_popen
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     project = tmp_path / "project"
     project.mkdir()
     checkpoint = Path(registered_checkpoint(project))
     expected = str(checkpoint.resolve())
-    _stub_child(monkeypatch)
+    fake_popen(monkeypatch, [])
     cwd = tmp_path / "cwd"
     cwd.mkdir()
     monkeypatch.chdir(cwd)

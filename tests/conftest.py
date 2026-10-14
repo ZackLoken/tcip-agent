@@ -31,6 +31,18 @@ def _pin_torch_single_thread():
     torch.set_num_threads(1)
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _import_ray_before_any_popen_substitute():
+    """Import Ray's process launcher, when Ray is installed, before the session's first test
+    replaces ``subprocess.Popen``, so the ``Popen`` subclass it defines at import binds the
+    real class for the rest of the worker.
+    """
+    try:
+        import ray._private.services  # noqa: F401
+    except ImportError:
+        return
+
+
 @pytest.fixture(autouse=True)
 def _bind_storage_backend():
     """Bind the storage backend before every test, the way a process entry point does, and close

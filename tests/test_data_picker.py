@@ -22,6 +22,7 @@ from tests._chain_fixtures import (
     training_config,
     weights_statistics,
 )
+from tests._producer_fixtures import fake_popen
 from tests._training_values import RATIONALE, drawn_split
 from tests._verified_checkpoint_fixtures import BUILT_DETECTOR, opened_run
 from tests.test_selection_binding import (
@@ -96,25 +97,6 @@ def _chosen(config: dict, selection_dir: str, project: Path) -> dict:
             _data(config), selection_dir, project
         ).record(),
     }
-
-
-def _stub_child(monkeypatch) -> None:
-    """Launches spawn no training process and start no TensorBoard."""
-    import subprocess
-
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard",
-        lambda *a, **k: {},
-    )
-
-    class _StubChild:
-        def __init__(self, *a, **k) -> None:
-            self.pid = 4242
-
-        def __class_getitem__(cls, item):
-            return cls
-
-    monkeypatch.setattr(subprocess, "Popen", _StubChild)
 
 
 # -- selection_compatibility ---------------------------------------------------
@@ -364,7 +346,7 @@ def test_list_split_choices_offers_every_recorded_partition_with_the_bindings_ow
     ``splits`` whose record will not decode (listed disabled, never absent).
     """
     monkeypatch.chdir(tmp_path)
-    _stub_child(monkeypatch)
+    fake_popen(monkeypatch, [])
 
     from tcip_mcp.pipelines.data.selection import selection_key
     from tcip_mcp.tools.training_tools import (
@@ -849,7 +831,7 @@ def test_relaunch_route_launches_a_new_run_with_the_chosen_partition(
     dropped, and names the run it was relaunched from, whose own record is untouched.
     """
     monkeypatch.chdir(tmp_path)
-    _stub_child(monkeypatch)
+    fake_popen(monkeypatch, [])
     from tcip_mcp.experiments import RUN_FILE, experiment_dir, read_record
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
@@ -894,11 +876,8 @@ def test_relaunch_route_admits_a_symlinked_spelling_of_an_offered_split_director
     symlinked or differently cased spelling of an offered directory is accepted.
     """
     monkeypatch.chdir(tmp_path)
-    _stub_child(monkeypatch)
+    fake_popen(monkeypatch, [])
     from tcip_mcp.tools.training_tools import list_split_choices
-
-    def identity(p: str) -> str:
-        return os.path.normcase(str(Path(p).resolve()))
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
     splits_dir = root / "splits"
@@ -925,7 +904,7 @@ def test_relaunch_route_admits_a_symlinked_spelling_of_an_offered_split_director
     other_spelling = (
         str(real_dir) if offered == str(link_dir) else str(link_dir)
     )
-    assert identity(other_spelling) == identity(offered)
+    assert ts.canonical_path(other_spelling) == ts.canonical_path(offered)
 
     resp = client.post(
         "/api/training/runs",
@@ -939,7 +918,9 @@ def test_relaunch_route_admits_a_symlinked_spelling_of_an_offered_split_director
 
     recorded = _relaunched_config(tmp_path, resp)["config"]["data"]["split"]
     assert set(recorded) == {"selection_dir"}
-    assert identity(recorded["selection_dir"]) == identity(other_spelling)
+    assert ts.canonical_path(recorded["selection_dir"]) == ts.canonical_path(
+        other_spelling
+    )
 
 
 def test_a_chosen_selection_binds_and_the_runs_own_resolved_record_names_it(
