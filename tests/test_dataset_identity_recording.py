@@ -210,25 +210,13 @@ def test_a_launch_records_the_identity_of_the_dataset_it_trains_on(
     launch record before the child starts; the child's resolved partition names the samples
     beside it.
     """
-    import subprocess
-
     pytest.importorskip("torch")
     from tcip_mcp.experiments import RUN_FILE, read_record
     from tcip_mcp.tools.project_tools import register_dataset
     from tcip_mcp.tools.training_tools import launch_training
+    from tests._producer_fixtures import fake_popen
 
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard",
-        lambda *a, **k: {},
-    )
-
-    class _StubChild:
-        pid = 4242
-
-        def __init__(self, *a, **k) -> None:
-            pass
-
-    monkeypatch.setattr(subprocess, "Popen", _StubChild)
+    fake_popen(monkeypatch, [])
 
     images_dir = _make_dataset(tmp_path)
     registered = register_dataset(tmp_path, str(tmp_path), crop="currant")

@@ -8,40 +8,13 @@ writes and hands to it.
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 import pytest
 
 from tests._chain_fixtures import BESPOKE_DETECTION
+from tests._producer_fixtures import fake_popen
 from tests._training_values import drawn_split, evaluation_block
-
-
-@pytest.fixture
-def recorded_children(monkeypatch):
-    """Stand in for the training subprocess, recording the argv each launch hands it.
-
-    The child's own training body is another module's contract; what the parent resolves, writes
-    and passes across the process boundary is this module's.
-    """
-    children: list = []
-
-    class _RecordedChild:
-        def __init__(self, argv, **kwargs):
-            self.argv = list(argv)
-            self.pid = 4242
-            children.append(self)
-
-        def __class_getitem__(cls, item):
-            # subprocess.Popen carries subscripted annotations elsewhere in the environment.
-            return cls
-
-    monkeypatch.setattr(subprocess, "Popen", _RecordedChild)
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard",
-        lambda *a, **k: {},
-    )
-    return children
 
 
 def _canonical_dataset(root: Path, date: str = "2-11-26") -> Path:
@@ -118,7 +91,7 @@ def _launch_record(res: dict) -> dict:
 
 
 def test_the_run_directory_lies_under_its_project_not_the_process_cwd(
-    tmp_path: Path, monkeypatch, recorded_children
+    tmp_path: Path, monkeypatch
 ) -> None:
     """The run directory handed to the child and the run record written into it resolve under the
     project's experiments directory, never under the launching process's cwd.
@@ -126,6 +99,8 @@ def test_the_run_directory_lies_under_its_project_not_the_process_cwd(
     pytest.importorskip("torchvision")
     from tcip_mcp.experiments import RUN_FILE, experiments_dir
 
+    started: list[list[str]] = []
+    fake_popen(monkeypatch, started)
     project = tmp_path / "project"
     server_cwd = tmp_path / "server_cwd"
     project.mkdir()
@@ -142,12 +117,12 @@ def test_the_run_directory_lies_under_its_project_not_the_process_cwd(
     assert (run_dir / RUN_FILE).is_file()
     assert list(server_cwd.iterdir()) == []
 
-    [argv] = [c.argv for c in recorded_children if "--run-dir" in c.argv]
+    [argv] = [argv for argv in started if "--run-dir" in argv]
     assert argv[argv.index("--run-dir") + 1] == str(run_dir)
 
 
 def test_launched_run_records_the_datasets_identity_in_its_run_record(
-    tmp_path: Path, recorded_children
+    tmp_path: Path, monkeypatch
 ) -> None:
     """The run record carries the identity of the data section's dataset, so the metric this run
     produces can be traced back to the exact content it trained on. A registered dataset's minted
@@ -155,6 +130,8 @@ def test_launched_run_records_the_datasets_identity_in_its_run_record(
     """
     pytest.importorskip("torchvision")
     from tcip_mcp.tools.project_tools import register_dataset
+
+    fake_popen(monkeypatch, [])
 
     ds_root = tmp_path / "ds"
     images_dir = _canonical_dataset(ds_root)
@@ -173,13 +150,14 @@ def test_launched_run_records_the_datasets_identity_in_its_run_record(
 
 
 def test_launch_records_what_the_smoke_contract_checked(
-    tmp_path: Path, monkeypatch, recorded_children
+    tmp_path: Path, monkeypatch
 ) -> None:
     """launch_training records a model_contract (subject/gating/batch_source/dims/issues/
     gradient_magnitudes) on the run record, what the launch-time smoke actually checked, and the
     caller's own config dict is never the one mutated to carry it.
     """
     pytest.importorskip("torchvision")
+    fake_popen(monkeypatch, [])
     project = tmp_path / "project"
     project.mkdir()
 
@@ -202,10 +180,11 @@ def test_launch_records_what_the_smoke_contract_checked(
 
 
 def test_launch_omitting_overfit_check_records_null(
-    tmp_path: Path, monkeypatch, recorded_children
+    tmp_path: Path, monkeypatch
 ) -> None:
     """The flag defaults off: the record carries overfit_check: null, never a missing key."""
     pytest.importorskip("torchvision")
+    fake_popen(monkeypatch, [])
     project = tmp_path / "project"
     project.mkdir()
 
@@ -219,13 +198,15 @@ def test_launch_omitting_overfit_check_records_null(
 
 
 def test_launch_with_overfit_check_records_the_rendered_report(
-    tmp_path: Path, monkeypatch, recorded_children
+    tmp_path: Path, monkeypatch
 ) -> None:
     """``launch_training(overfit_check=True)`` runs the diagnostic on the contract's own batch
     and records the rendered report on both the returned dict and the persisted config.
     """
     pytest.importorskip("torchvision")
     from tcip_mcp.tools import training_tools
+
+    fake_popen(monkeypatch, [])
 
     project = tmp_path / "project"
     project.mkdir()
@@ -246,7 +227,7 @@ def test_launch_with_overfit_check_records_the_rendered_report(
 
 
 def test_launch_with_overfit_check_over_a_diverging_model_proceeds_with_a_json_safe_record(
-    tmp_path: Path, monkeypatch, recorded_children
+    tmp_path: Path, monkeypatch
 ) -> None:
     """A model whose loss diverges to nan under the overfit diagnostic never blocks the launch,
     since the check is voluntary and non-gating: the run proceeds, and the persisted report
@@ -257,6 +238,7 @@ def test_launch_with_overfit_check_over_a_diverging_model_proceeds_with_a_json_s
     from tcip_mcp.tools import training_tools
     from tcip_store import check_json_value
 
+    fake_popen(monkeypatch, [])
     project = tmp_path / "project"
     project.mkdir()
 
@@ -282,15 +264,16 @@ def test_launch_with_overfit_check_over_a_diverging_model_proceeds_with_a_json_s
 
 
 def test_the_run_record_the_worker_reads_carries_the_seed_and_the_training_keys(
-    tmp_path: Path, monkeypatch, recorded_children
+    tmp_path: Path, monkeypatch
 ) -> None:
-    """The writer is the real launch_training (Popen and TensorBoard stubbed by
-    recorded_children so no subprocess actually spawns); the reader is the one the training
-    child performs, the run directory's own ``run.json``. The trainer's keys and the seed the
-    caller states sit at the config's top level, so the config the worker reads carries both,
-    in the directory the run's own id names.
+    """The writer is the real launch_training (Popen and TensorBoard stubbed by ``fake_popen``
+    so no subprocess actually spawns); the reader is the one the training child performs, the
+    run directory's own ``run.json``. The trainer's keys and the seed the caller states sit at
+    the config's top level, so the config the worker reads carries both, in the directory the
+    run's own id names.
     """
     pytest.importorskip("torchvision")
+    fake_popen(monkeypatch, [])
     project = tmp_path / "project"
     project.mkdir()
 

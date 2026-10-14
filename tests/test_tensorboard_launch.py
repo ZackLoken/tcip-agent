@@ -17,15 +17,13 @@ import subprocess
 import sys
 
 
-def test_launch_reports_the_failure_when_the_process_exits_immediately(
-    monkeypatch, tmp_path
-):
-    from tcip_mcp.pipelines.training import tensorboard_manager as tb
+class DyingChild(subprocess.Popen):
+    """A real child that writes a missing-install message and exits at once, in place of the
+    command it was handed; construction returns once it has exited.
+    """
 
-    real_popen = subprocess.Popen
-
-    def dying_popen(cmd, **kwargs):
-        proc = real_popen(
+    def __init__(self, cmd, **kwargs) -> None:
+        super().__init__(
             [
                 sys.executable,
                 "-c",
@@ -33,10 +31,24 @@ def test_launch_reports_the_failure_when_the_process_exits_immediately(
             ],
             **kwargs,
         )
-        proc.wait(timeout=30)
-        return proc
+        self.wait(timeout=30)
 
-    monkeypatch.setattr(tb.subprocess, "Popen", dying_popen)
+
+class LivingChild(subprocess.Popen):
+    """A real child that sleeps for thirty seconds, in place of the command it was handed."""
+
+    def __init__(self, cmd, **kwargs) -> None:
+        super().__init__(
+            [sys.executable, "-c", "import time; time.sleep(30)"], **kwargs
+        )
+
+
+def test_launch_reports_the_failure_when_the_process_exits_immediately(
+    monkeypatch, tmp_path
+):
+    from tcip_mcp.pipelines.training import tensorboard_manager as tb
+
+    monkeypatch.setattr(tb.subprocess, "Popen", DyingChild)
 
     info = tb.launch_tensorboard(str(tmp_path))
 
@@ -187,14 +199,7 @@ def test_launch_returns_a_url_for_a_process_that_stays_up(
 ):
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
 
-    real_popen = subprocess.Popen
-
-    def living_popen(cmd, **kwargs):
-        return real_popen(
-            [sys.executable, "-c", "import time; time.sleep(30)"], **kwargs
-        )
-
-    monkeypatch.setattr(tb.subprocess, "Popen", living_popen)
+    monkeypatch.setattr(tb.subprocess, "Popen", LivingChild)
 
     from tcip_mcp.web_client import LOOPBACK_HOST
 

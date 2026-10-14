@@ -5,6 +5,8 @@ and after its directory exists.
 
 from __future__ import annotations
 
+import subprocess
+
 import pytest
 
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
@@ -25,6 +27,13 @@ def _forget_agent_identity_between_tests():
     agent_identity.end()
     yield
     agent_identity.end()
+
+
+class NoExecutableChild:
+    """A ``Popen`` stand-in whose construction raises ``OSError``, as a missing executable does."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        raise OSError("no such executable")
 
 
 def _launch_record(project, experiment_id: str) -> dict:
@@ -161,8 +170,6 @@ def test_a_spawn_failure_leaves_a_directory_that_reads_interrupted(
     """A Popen failure after the launch record propagates out of launch_training, and the one
     directory it opened reads interrupted once its heartbeat window has passed.
     """
-    import subprocess
-
     from tcip_mcp import experiments as experiments_mod
     from tcip_mcp.experiments import observe, run_dirs
     from tcip_mcp.tools import training_tools
@@ -170,10 +177,7 @@ def test_a_spawn_failure_leaves_a_directory_that_reads_interrupted(
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     seed_bud_images(images_dir, n=2, size=64, box=(1, 1, 9, 9))
 
-    def _raise_popen(*args, **kwargs):
-        raise OSError("no such executable")
-
-    monkeypatch.setattr(subprocess, "Popen", _raise_popen)
+    monkeypatch.setattr(subprocess, "Popen", NoExecutableChild)
 
     with pytest.raises(OSError):
         training_tools.launch_training(

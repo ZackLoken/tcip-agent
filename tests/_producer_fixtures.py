@@ -491,24 +491,25 @@ def dataset_over(task: str, images_dir, ground_truth=None, **kwargs: Any):
     return run_over(task, images_dir, ground_truth, **kwargs)[0]
 
 
-def fake_popen(monkeypatch, captured: list[list[str]]) -> None:
-    """Replace ``subprocess.Popen`` with one recording each argv into ``captured`` and starting
-    nothing, and ``launch_tensorboard`` with one starting no TensorBoard, so a launch door is
-    driven through its own records without a child process.
+def fake_popen(monkeypatch, captured: list[list[str]]) -> type:
+    """Replace ``subprocess.Popen`` with a class recording each argv into ``captured`` and
+    starting nothing, and ``launch_tensorboard`` with one starting no TensorBoard, so a launch
+    door is driven through its own records without a child process. Returns the stand-in
+    class, whose ``pid`` every launch it answers reports.
     """
     import subprocess
 
     import tcip_mcp.tools.training_tools  # noqa: F401  # imported before Popen is replaced
 
-    class _FakeProc:
+    class _RecordedChild:
         pid = 424242
 
-    def _popen(argv, **kwargs):
-        captured.append(argv)
-        return _FakeProc()
+        def __init__(self, argv, **kwargs) -> None:
+            captured.append(argv)
 
-    monkeypatch.setattr(subprocess, "Popen", _popen)
+    monkeypatch.setattr(subprocess, "Popen", _RecordedChild)
     monkeypatch.setattr(
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard",
         lambda *a, **k: {},
     )
+    return _RecordedChild

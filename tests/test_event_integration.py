@@ -459,9 +459,9 @@ class TestTrainingToolOutputSchema:
         monkeypatch.chdir(tmp_path)
 
         from tcip_mcp.experiments import experiment_dir, find_run
-        from tcip_mcp.pipelines.training import tensorboard_manager
         from tcip_mcp.tools import training_tools
         from tests._producer_fixtures import (
+            fake_popen,
             seed_bud_images,
             small_detection_config,
         )
@@ -473,18 +473,7 @@ class TestTrainingToolOutputSchema:
             box=(10, 10, 40, 40),
         )
 
-        class _NoChild:
-            """Stands in for the training subprocess; no child is spawned."""
-
-            pid = 4242
-
-            def __init__(self, *args, **kwargs):
-                pass
-
-        monkeypatch.setattr(training_tools.subprocess, "Popen", _NoChild)
-        monkeypatch.setattr(
-            tensorboard_manager, "launch_tensorboard", lambda *a, **k: {}
-        )
+        child = fake_popen(monkeypatch, [])
 
         res = training_tools.launch_training(
             tmp_path,
@@ -500,7 +489,7 @@ class TestTrainingToolOutputSchema:
         assert Path(res["output_dir"]) == experiment_dir(
             res["experiment_id"], project=tmp_path
         )
-        assert res["pid"] == _NoChild.pid
+        assert res["pid"] == child.pid
 
     def test_monitor_training_answers_for_the_run_it_was_asked_about(
         self,
