@@ -310,6 +310,30 @@ def test_list_reports_record_fields_across_four_project_states(
     )
 
 
+def test_the_listing_reads_a_stated_rotation_angle_back_as_degrees(
+    client, workspace_dir
+):
+    """A project created stating its rotation invariance as 5 degrees lists it as 5.0."""
+    from tcip_mcp.project_record import CaptureInvariances
+    from tcip_mcp.tools.project_tools import initialize_project
+    from tests._web_fixtures import INVARIANCES
+
+    project = workspace_dir / "currant_bud_rotation"
+    answers = INVARIANCES.model_dump() | {"rotation": 5}
+    created = initialize_project(
+        str(project),
+        "currant_bud_rotation",
+        "north orchard",
+        CaptureInvariances.model_validate(answers),
+    )
+    assert "error" not in created, created
+
+    (listed,) = client.get("/api/projects").json()["projects"]
+
+    rotation = listed["invariances"]["rotation"]
+    assert isinstance(rotation, float) and rotation == 5.0, listed
+
+
 def test_a_last_opened_pointer_naming_a_missing_project_is_named_and_opens_nothing(
     client, workspace_dir, monkeypatch
 ):

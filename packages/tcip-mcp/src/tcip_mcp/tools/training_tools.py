@@ -103,7 +103,7 @@ def _admitted(
     if spec.augmentation is not None:
         try:
             issues = forbidden_transforms(
-                spec.augmentation, read_record(project)["invariances"]
+                spec.augmentation, read_record(project).invariances
             )
         except (ValueError, ProjectRecordMissingError) as exc:
             issues = [str(exc)]
@@ -1456,8 +1456,7 @@ def run_sweep(directory: Path) -> SweepGroup:
 def _apply_hpo_params(base_config: dict, params: dict) -> dict:
     """Apply HPO params onto a deep copy of ``base_config``, which may leave unstated a value
     ``params`` names: a dotted key (``optimizer.head_lr``) at the nested field it names, any other
-    key (``batch_size``) at the top level. The result is a trial's config, validated by its
-    caller.
+    key (``batch_size``) at the top level.
     """
     import copy
 

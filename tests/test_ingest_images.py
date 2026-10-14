@@ -944,6 +944,6 @@ def test_ingest_after_import_admits_a_second_date(tmp_path):
     _make_image(src2 / "b.jpg", exif_date="2026:03:01 10:30:00")
     second = ingest_images(dest, source=str(src2))
     assert "error" not in second
-    assert read_record(dest)["id"] == made.id
+    assert read_record(dest).id == made.id
 
     assert (dest / "images" / "2026-03-01" / "b.jpg").is_file()

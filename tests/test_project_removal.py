@@ -266,7 +266,7 @@ def test_the_archive_restores_through_import_project_with_its_identity(
     imported = import_project(resp.json()["archive_path"], str(restored))
 
     assert "error" not in imported, imported
-    assert read_record(restored)["id"] == made.id
+    assert read_record(restored).id == made.id
 
 
 def test_a_move_the_filesystem_denies_removes_the_archive_and_leaves_the_project(

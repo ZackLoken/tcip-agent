@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import uuid
 from pathlib import Path
+from typing import Annotated
 
 from pydantic import (
     BaseModel,
@@ -80,9 +81,15 @@ def validate_text(label: str, value: object) -> str:
     return text
 
 
+RotationDegrees = Annotated[float, Field(ge=0, le=180, strict=True)]
+"""A rotation of the image about its center in degrees, at most 180, since a rotation by 180 in
+either direction already reaches every orientation."""
+
+
 class CaptureInvariances(BaseModel):
-    """Whether each capture transform leaves the project's trait measurement what it was, as the
-    breeder states it when the project is created.
+    """How far each capture transform leaves the project's trait measurement what it was, as the
+    breeder states it when the project is created: whether it does, or for a rotation the
+    largest angle at which it does.
     """
 
     model_config = ConfigDict(
@@ -92,8 +99,9 @@ class CaptureInvariances(BaseModel):
     """A left-right mirror of the image."""
     vertical_flip: bool
     """A top-bottom mirror of the image."""
-    rotation: bool
-    """A rotation of the image about its center."""
+    rotation: RotationDegrees
+    """The largest rotation of the image about its center under which the measurement holds; 0
+    for none, 180 for any."""
     color: bool
     """A shift in hue or saturation."""
     intensity: bool
@@ -123,8 +131,8 @@ class ProjectRecord(BaseModel):
         return value
 
 
-def read_record(project_path: str | Path) -> dict:
-    """The project's record, a :class:`ProjectRecord` dumped.
+def read_record(project_path: str | Path) -> ProjectRecord:
+    """The project's record.
 
     Raises :class:`ProjectRecordMissingError` for a project with no record yet, and
     :class:`ProjectRecordInvalidError` for a document that decodes but is not one. A document
@@ -151,7 +159,7 @@ def existing_project(value: str | Path) -> tuple[Path, dict]:
     return project, fields
 
 
-def _checked(project_path: str | Path, raw: object) -> dict:
+def _checked(project_path: str | Path, raw: object) -> ProjectRecord:
     """``raw``, a record read from ``project_path``, when it is a :class:`ProjectRecord`. Raises
     ``ProjectRecordMissingError`` for an absent record and ``ProjectRecordInvalidError`` naming
     what the record lacks otherwise.
@@ -161,7 +169,7 @@ def _checked(project_path: str | Path, raw: object) -> dict:
             f"{project_path} is not a project yet: create it with initialize_project"
         )
     try:
-        return ProjectRecord.model_validate(raw).model_dump()
+        return ProjectRecord.model_validate(raw)
     except ValidationError as exc:
         raise ProjectRecordInvalidError(
             f"{project_path}'s record is not a project record ({exc}; found {raw!r})"
@@ -173,7 +181,7 @@ def create_record(
     display_name: str,
     site: str,
     invariances: CaptureInvariances,
-) -> dict:
+) -> ProjectRecord:
     """Write a new project's record with a freshly minted id, its one creator, and return it.
 
     A project already recording the same display name, site and invariances is returned as it
@@ -181,34 +189,36 @@ def create_record(
     :class:`SiteConflictError`, and one with a different display name or invariances raises
     ``ValueError`` naming both; an unreadable one raises what :func:`read_record` raises.
     """
-    document = ProjectRecord(
+    record = ProjectRecord(
         id=mint_id(),
         display_name=validate_text("display name", display_name),
         site=validate_text("site", site),
         invariances=invariances,
-    ).model_dump()
+    )
     try:
         tcip_store.replace(
-            project_record_key(project_path), document, expect=Version.ABSENT
+            project_record_key(project_path),
+            record.model_dump(),
+            expect=Version.ABSENT,
         )
-        return document
+        return record
     except VersionConflictError:
         existing = read_record(project_path)
-    if existing["site"] != document["site"]:
+    if existing.site != record.site:
         raise SiteConflictError(
-            f"{project_path} already records site {existing['site']!r}; the offered site "
-            f"{document['site']!r} does not match, so nothing was written. Run tcip "
+            f"{project_path} already records site {existing.site!r}; the offered site "
+            f"{record.site!r} does not match, so nothing was written. Run tcip "
             "write-project-site to correct it deliberately."
         )
-    if existing["display_name"] != document["display_name"]:
+    if existing.display_name != record.display_name:
         raise ValueError(
-            f"{project_path} is already the project {existing['display_name']!r}; rename it "
-            f"rather than creating it again as {document['display_name']!r}"
+            f"{project_path} is already the project {existing.display_name!r}; rename it "
+            f"rather than creating it again as {record.display_name!r}"
         )
-    if existing["invariances"] != document["invariances"]:
+    if existing.invariances != record.invariances:
         raise ValueError(
             f"{project_path} already records the capture invariances "
-            f"{existing['invariances']!r}; the offered {document['invariances']!r} do not "
+            f"{existing.invariances!r}; the offered {record.invariances!r} do not "
             "match, so nothing was written"
         )
     return existing
@@ -216,20 +226,24 @@ def create_record(
 
 def _update(
     project_path: str | Path, field: str, value: str
-) -> tuple[dict, str]:
-    """Replace one field of a readable record under compare-and-swap; return the record written
-    and the value it replaced.
+) -> tuple[ProjectRecord, ProjectRecord]:
+    """Replace one field of a readable record under compare-and-swap, the replacement
+    validated as a :class:`ProjectRecord`; return the record written and the one it replaced.
     """
     key = project_record_key(project_path)
     while True:
         stored = tcip_store.read_versioned(key, default=None)
         current = _checked(project_path, stored.value)
-        updated = {**current, field: value}
+        updated = ProjectRecord.model_validate(
+            current.model_dump() | {field: value}
+        )
         try:
-            tcip_store.replace(key, updated, expect=stored.version)
+            tcip_store.replace(
+                key, updated.model_dump(), expect=stored.version
+            )
         except VersionConflictError:
             continue
-        return updated, current[field]
+        return updated, current
 
 
 def replace_site(project_path: str | Path, site: str) -> dict:
@@ -239,7 +253,7 @@ def replace_site(project_path: str | Path, site: str) -> dict:
     record, previous = _update(
         project_path, "site", validate_text("site", site)
     )
-    return {"site": record["site"], "previous_site": previous}
+    return {"site": record.site, "previous_site": previous.site}
 
 
 def rename_project(project: Path, display_name: str, *, actor: str) -> dict:
@@ -253,21 +267,15 @@ def rename_project(project: Path, display_name: str, *, actor: str) -> dict:
     record, previous = _update(
         project, "display_name", validate_text("display name", display_name)
     )
-    record_event_or_raise(
-        "project_renamed",
-        {
-            "id": record["id"],
-            "display_name": record["display_name"],
-            "previous_display_name": previous,
-        },
-        actor=actor,
-        scope=project,
-    )
-    return {
-        "id": record["id"],
-        "display_name": record["display_name"],
-        "previous_display_name": previous,
+    renamed = {
+        "id": record.id,
+        "display_name": record.display_name,
+        "previous_display_name": previous.display_name,
     }
+    record_event_or_raise(
+        "project_renamed", renamed, actor=actor, scope=project
+    )
+    return renamed
 
 
 def record_fields(project_path: str | Path) -> dict:
@@ -287,4 +295,4 @@ def record_fields(project_path: str | Path) -> dict:
             **dict.fromkeys(ProjectRecord.model_fields),
             "record_problem": str(exc),
         }
-    return {**record, "record_problem": None}
+    return {**record.model_dump(), "record_problem": None}

@@ -365,9 +365,9 @@ export function ProjectPicker() {
             <span className="text-tcip-fg font-medium">No projects yet</span>
             <span>
               Ask the agent to structure your images into a project; it creates one with{" "}
-              <span className="font-mono">initialize_project</span>, given a name, a site, and
-              whether a flip, a rotation, a color, intensity or scale change leaves your
-              trait&apos;s measurement the same.
+              <span className="font-mono">initialize_project</span>, given a name, a site, whether a
+              flip, a color, intensity or scale change leaves your trait&apos;s measurement the
+              same, and the largest rotation in degrees that does.
             </span>
           </div>
         )}

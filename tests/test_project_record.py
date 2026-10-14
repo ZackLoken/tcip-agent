@@ -59,11 +59,11 @@ def test_create_record_mints_an_id_and_writes_an_absent_record(tmp_path: Path):
         tmp_path, "  Valley block ", "north orchard", INVARIANCES
     )
 
-    assert (
-        record["display_name"] == "Valley block"
-        and record["site"] == "north orchard"
+    assert (record.display_name, record.site) == (
+        "Valley block",
+        "north orchard",
     )
-    assert len(record["id"]) == 12
+    assert len(record.id) == 12
     assert read_record(tmp_path) == record
 
 
@@ -100,7 +100,7 @@ def test_create_record_refuses_a_different_site_naming_both(tmp_path: Path):
     assert "north orchard" in str(raised.value) and "south orchard" in str(
         raised.value
     )
-    assert read_record(tmp_path)["site"] == "north orchard"
+    assert read_record(tmp_path).site == "north orchard"
 
 
 def test_create_record_refuses_a_different_display_name_naming_rename(
@@ -113,7 +113,7 @@ def test_create_record_refuses_a_different_display_name_naming_rename(
     with pytest.raises(ValueError, match="rename"):
         create_record(tmp_path, "Hill block", "north orchard", INVARIANCES)
 
-    assert read_record(tmp_path)["display_name"] == "Valley block"
+    assert read_record(tmp_path).display_name == "Valley block"
 
 
 def test_create_record_refuses_a_present_record_missing_a_field(
@@ -151,7 +151,7 @@ def test_read_record_refuses_a_record_stating_no_invariances(tmp_path: Path):
     stored = ts.read_versioned(project_record_key(tmp_path))
     ts.replace(
         project_record_key(tmp_path),
-        {k: v for k, v in record.items() if k != "invariances"},
+        record.model_dump(exclude={"invariances"}),
         expect=stored.version,
     )
 
@@ -192,7 +192,9 @@ def test_replace_site_corrects_the_site_keeping_the_id_and_display_name(
         "site": "south orchard",
         "previous_site": "north orchard",
     }
-    assert read_record(tmp_path) == {**record, "site": "south orchard"}
+    assert read_record(tmp_path) == record.model_copy(
+        update={"site": "south orchard"}
+    )
 
 
 def test_replace_site_refuses_a_project_with_no_record(tmp_path: Path):
@@ -225,7 +227,10 @@ def test_record_fields_reports_the_record(tmp_path: Path):
         tmp_path, "Valley block", "north orchard", INVARIANCES
     )
 
-    assert record_fields(tmp_path) == {**record, "record_problem": None}
+    assert record_fields(tmp_path) == {
+        **record.model_dump(),
+        "record_problem": None,
+    }
 
 
 def test_record_fields_names_the_absent_record(tmp_path: Path):
@@ -268,4 +273,4 @@ def test_existing_project_resolves_a_project_and_refuses_a_directory_with_no_rec
         tmp_path, "Valley block", "north orchard", INVARIANCES
     )
     root, record = existing_project(tmp_path)
-    assert (root, record["id"]) == (tmp_path.resolve(), created["id"])
+    assert (root, record["id"]) == (tmp_path.resolve(), created.id)

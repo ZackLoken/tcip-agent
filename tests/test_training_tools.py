@@ -1801,17 +1801,20 @@ def test_a_sweep_opens_over_a_base_omitting_what_its_space_sweeps_and_refuses_an
     assert experiments.sweep_dirs(tmp_path) == [opened]
 
 
-def _project_answering(project: Path, **answers: bool) -> None:
+def _project_answering(project: Path, **answers: bool | float) -> None:
     """``project`` made a project through ``initialize_project``, its capture invariances the
-    sample answer (``_web_fixtures.INVARIANCES``) with ``answers`` over it.
+    sample answer (``_web_fixtures.INVARIANCES``) with ``answers`` over it, validated by the
+    record's model.
     """
+    from tcip_mcp.project_record import CaptureInvariances
     from tcip_mcp.tools.project_tools import initialize_project
 
+    stated = INVARIANCES.model_dump() | answers
     result = initialize_project(
         str(project),
         "Test project",
         "north orchard",
-        INVARIANCES.model_copy(update=answers),
+        CaptureInvariances.model_validate(stated),
     )
     assert "error" not in result, result
 
@@ -1839,12 +1842,18 @@ def _door_issues(door: str, project: Path, config: dict, monkeypatch) -> list:
 _EVERY_INVARIANCE_FALSE = {
     "horizontal_flip": False,
     "vertical_flip": False,
-    "rotation": False,
+    "rotation": 0,
     "color": False,
     "intensity": False,
     "scale": False,
 }
 """A record stating no capture transform leaves the trait's measurement unchanged."""
+
+
+def _rotation(degrees: float, p: float) -> dict:
+    """A rotation entry stating ``degrees`` and ``p``."""
+    return {"rotation": {"degrees": degrees, "p": p}}
+
 
 _BRIGHTNESS_ALONE = {
     "color_jitter": {"brightness": 0.2, "contrast": 0.0, "saturation": 0.0}
@@ -1863,12 +1872,12 @@ _BRIGHTNESS_ALONE = {
         ),
         ({}, {"horizontal_flip": {"p": 0.5}}, []),
         ({"horizontal_flip": False}, {"horizontal_flip": {"p": 0.0}}, []),
-        ({"rotation": False}, {"rotation": {"degrees": 30, "p": 0.0}}, []),
-        (
-            {"rotation": False},
-            {"rotation": {"degrees": 30, "p": 0.5}},
-            ["rotation"],
-        ),
+        ({"rotation": 5}, _rotation(5, 0.5), []),
+        ({"rotation": 5}, _rotation(5.5, 0.5), ["rotation"]),
+        ({"rotation": 5}, _rotation(30, 0.0), []),
+        ({"rotation": 0}, _rotation(0, 1.0), []),
+        ({"rotation": 0}, _rotation(1, 1.0), ["rotation"]),
+        ({"rotation": 180}, _rotation(180, 1.0), []),
         (
             {"scale": False},
             {
@@ -1895,8 +1904,12 @@ _BRIGHTNESS_ALONE = {
         "a-flip-stated-invalid",
         "a-flip-stated-valid",
         "a-flip-never-taken-under-no-flip",
-        "a-rotation-never-taken-under-no-rotation",
-        "a-rotation-taken-under-no-rotation",
+        "a-rotation-at-the-stated-angle",
+        "a-rotation-past-the-stated-angle",
+        "a-rotation-past-the-stated-angle-never-taken",
+        "no-rotation-under-no-rotation",
+        "a-rotation-under-no-rotation",
+        "any-rotation-under-any-rotation",
         "a-crop-under-no-scale",
         "blur-and-resize-under-every-record",
         "brightness-alone-under-no-color",
@@ -1906,15 +1919,18 @@ _BRIGHTNESS_ALONE = {
 def test_the_launch_doors_judge_each_augmentation_by_the_invariance_the_project_records(
     tmp_path, monkeypatch, door, answers, transforms, refused
 ):
-    """A transform relying on an invariance the record states false is refused naming the
-    transform, the invariance and the door that states it; the same transform under a record
-    stating it true is admitted, a flip or a rotation stated at probability zero relies on
-    nothing, a crop relies on scale whatever its bounds, a blur and a resize rely on none, and a
-    color jitter whose saturation is zero relies on intensity alone.
+    """A transform relying on an invariance the record states false, or a rotation past the
+    record's angle, is refused naming the transform, the invariance, the record's stated value
+    and the door that states it; the same transform under a record stating it true is admitted,
+    a rotation at or under the record's angle is admitted, a flip or a rotation stated at
+    probability zero relies on nothing, a crop relies on scale whatever its bounds, a blur and a
+    resize rely on none, and a color jitter whose saturation is zero relies on intensity alone.
     """
     pytest.importorskip("torch")
+    from tcip_mcp.project_record import read_record
 
     _project_answering(tmp_path, **answers)
+    stated = read_record(tmp_path).invariances
     config = training_config(
         tmp_path,
         DETECTION_SOURCE,
@@ -1931,6 +1947,7 @@ def test_the_launch_doors_judge_each_augmentation_by_the_invariance_the_project_
     for fact, issue in zip(refused, named, strict=True):
         assert repr(next(iter(transforms))) in issue, issue
         assert repr(fact) in issue and "initialize_project" in issue, issue
+        assert f"({getattr(stated, fact)!r})" in issue, issue
 
 
 @pytest.mark.parametrize(
@@ -1949,7 +1966,7 @@ def test_the_launch_doors_judge_each_augmentation_by_the_invariance_the_project_
             "greater than or equal to 0",
         ),
         (
-            {"rotation": {"degrees": "inf", "p": 1.0}},
+            {"rotation": {"degrees": float("inf"), "p": 1.0}},
             "degrees",
             "finite number",
         ),
