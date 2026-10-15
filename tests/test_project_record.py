@@ -13,42 +13,45 @@ from tcip_mcp.project_record import CaptureInvariances
 from tests._audit_fixtures import audit_rows
 from tests._web_fixtures import INVARIANCES, named_project
 
-# ── text validation ─────────────────────────────────────────────────────────────
+# ── the record's text fields ────────────────────────────────────────────────────
 
 
-def test_validate_text_refuses_a_non_string():
-    from tcip_mcp.project_record import validate_text
+def test_a_record_refuses_a_non_string_site():
+    from pydantic import ValidationError
 
-    with pytest.raises(ValueError, match="must be a string"):
-        validate_text("site", 42)
+    from tcip_mcp.project_record import ProjectRecord
 
-
-def test_validate_text_refuses_an_empty_or_whitespace_only_value():
-    from tcip_mcp.project_record import validate_text
-
-    with pytest.raises(ValueError, match="empty"):
-        validate_text("display name", "   ")
-
-
-def test_validate_text_strips_surrounding_whitespace():
-    from tcip_mcp.project_record import validate_text
-
-    assert validate_text("site", "  north orchard  ") == "north orchard"
+    with pytest.raises(ValidationError, match="site"):
+        ProjectRecord.model_validate(
+            {
+                "id": "abc123def456",
+                "display_name": "Valley block",
+                "site": 42,
+                "invariances": INVARIANCES.model_dump(),
+            }
+        )
 
 
-def test_validate_text_refuses_a_non_printable_character_naming_the_code_point_and_offset():
-    from tcip_mcp.project_record import validate_text
+def test_create_record_refuses_a_non_printable_character_naming_the_code_point_and_offset(
+    tmp_path: Path,
+):
+    from tcip_mcp.project_record import create_record
 
     with pytest.raises(ValueError, match=r"U\+0009 at offset 5"):
-        validate_text("site", "north\torchard")
+        create_record(tmp_path, "Valley block", " north\torchard", INVARIANCES)
 
 
-def test_validate_text_refuses_a_value_over_the_length_bound_and_admits_one_at_it():
-    from tcip_mcp.project_record import validate_text
+def test_create_record_refuses_a_site_over_the_length_bound_and_admits_one_at_it(
+    tmp_path: Path,
+):
+    from tcip_mcp.project_record import create_record
 
-    with pytest.raises(ValueError, match="201 characters"):
-        validate_text("site", "a" * 201)
-    assert validate_text("site", "a" * 200) == "a" * 200
+    with pytest.raises(ValueError, match="at most 200 characters"):
+        create_record(tmp_path, "Valley block", "a" * 201, INVARIANCES)
+    assert (
+        create_record(tmp_path, "Valley block", "a" * 200, INVARIANCES).site
+        == "a" * 200
+    )
 
 
 # ── create_record: the states of the create-only write ──────────────────────────

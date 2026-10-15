@@ -1014,7 +1014,7 @@ def test_initialize_project_refuses_an_empty_display_name_leaving_nothing_on_dis
 
     result = initialize_project(str(dest), "  ", "north orchard", INVARIANCES)
 
-    assert "error" in result and "display name" in result["error"]
+    assert "display_name" in result["error"]
     assert not dest.exists()
 
 
