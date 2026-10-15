@@ -9,15 +9,15 @@ from pathlib import Path
 from typing import Annotated
 
 from pydantic import (
+    AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
     ValidationError,
-    ValidationInfo,
-    field_validator,
 )
 
 import tcip_store
+from tcip_mcp.traits import Text
 from tcip_store import Key, StoreError, Version, VersionConflictError
 
 PROJECT_RECORD_STORE = "project_record"
@@ -49,36 +49,25 @@ def project_record_key(project_path: str | Path) -> Key:
     return Key(PROJECT_RECORD_STORE, str(project_path), _PROJECT_RECORD_PARTS)
 
 
-def validate_text(label: str, value: object) -> str:
-    """``value`` as it will be stored: stripped text, or the refusal naming ``label`` and exactly
-    what is wrong.
-
-    No case folding and no slug normalization. A non-string, an empty string (after stripping), one
-    carrying any non-printable character (``str.isprintable``, which also catches non-breaking and
-    zero-width characters a paste from a document can carry), or one over
-    :data:`_MAX_TEXT_LENGTH` characters refuses by name.
+def _printable(text: str) -> str:
+    """``text`` when every character is printable (``str.isprintable``, which also refuses the
+    non-breaking and zero-width characters a paste from a document can carry); otherwise the
+    refusal naming the first other character's code point and its offset.
     """
-    if not isinstance(value, str):
-        raise ValueError(
-            f"{label} must be a string, got {type(value).__name__}"
-        )
-    text = value.strip()
-    if not text:
-        raise ValueError(
-            f"{label} is empty (after stripping surrounding whitespace)"
-        )
     for offset, ch in enumerate(text):
         if not ch.isprintable():
             raise ValueError(
-                f"{label} contains a non-printable character U+{ord(ch):04X} at offset {offset} "
+                f"contains a non-printable character U+{ord(ch):04X} at offset {offset} "
                 "of the stripped text"
             )
-    if len(text) > _MAX_TEXT_LENGTH:
-        raise ValueError(
-            f"{label} is {len(text)} characters long, over the {_MAX_TEXT_LENGTH}-character "
-            "rendering bound (a picker line, a doctor finding, an audit argument)"
-        )
     return text
+
+
+RecordText = Annotated[
+    Text, Field(max_length=_MAX_TEXT_LENGTH), AfterValidator(_printable)
+]
+"""A site or display name as stored: stripped of surrounding whitespace, non-empty, at most
+:data:`_MAX_TEXT_LENGTH` characters and every one printable; never case folded or slugged."""
 
 
 RotationDegrees = Annotated[float, Field(ge=0, le=180, strict=True)]
@@ -115,21 +104,14 @@ class ProjectRecord(BaseModel):
     correction; ``display_name``, the name the picker shows; ``site``, the breeder's own name for
     the orchard or station the project's plants stand in; ``invariances``, how far each capture
     transform leaves the trait's measurement what it was. The display name and the site are each
-    stored as :func:`validate_text` stores them.
+    :data:`RecordText`.
     """
 
     model_config = ConfigDict(extra="forbid")
     id: str = Field(min_length=1)
-    display_name: str
-    site: str
+    display_name: RecordText
+    site: RecordText
     invariances: CaptureInvariances
-
-    @field_validator("display_name", "site")
-    @classmethod
-    def _stored_as_text(cls, value: str, info: ValidationInfo) -> str:
-        if validate_text(str(info.field_name), value) != value:
-            raise ValueError("not stored as its text")
-        return value
 
 
 def read_record(project_path: str | Path) -> ProjectRecord:
@@ -192,8 +174,8 @@ def create_record(
     """
     record = ProjectRecord(
         id=mint_id(),
-        display_name=validate_text("display name", display_name),
-        site=validate_text("site", site),
+        display_name=display_name,
+        site=site,
         invariances=invariances,
     )
     try:
@@ -269,25 +251,21 @@ def _update(
 
 def replace_site(project_path: str | Path, site: str, *, actor: str) -> dict:
     """Correct the site a readable record holds, by ``actor``, through :func:`_update`; every
-    other field is kept. Returns ``{"site", "previous_site"}``. Refuses what
-    :func:`validate_text` and :func:`_update` refuse.
+    other field is kept. Returns ``{"site", "previous_site"}``. Refuses what :func:`_update`
+    refuses, a site that is not :data:`RecordText` among it.
     """
-    record, previous = _update(
-        project_path, "site", validate_text("site", site), actor=actor
-    )
+    record, previous = _update(project_path, "site", site, actor=actor)
     return {"site": record.site, "previous_site": previous.site}
 
 
 def rename_project(project: Path, display_name: str, *, actor: str) -> dict:
     """Change the project's display name, by ``actor``, through :func:`_update`; its directory
     and every other record are left as they are. Returns ``{"id", "display_name",
-    "previous_display_name"}``. Refuses what :func:`validate_text` and :func:`_update` refuse.
+    "previous_display_name"}``. Refuses what :func:`_update` refuses, a display name that is not
+    :data:`RecordText` among it.
     """
     record, previous = _update(
-        project,
-        "display_name",
-        validate_text("display name", display_name),
-        actor=actor,
+        project, "display_name", display_name, actor=actor
     )
     return {
         "id": record.id,
