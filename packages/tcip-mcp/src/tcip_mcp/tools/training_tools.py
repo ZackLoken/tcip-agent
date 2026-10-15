@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import threading
+from collections import Counter
 from collections.abc import Sized
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple, cast
@@ -1635,12 +1636,8 @@ def _split_draws_refusal(
             f"split_draw_seeds has {len(split_draw_seeds)} seed(s) but split_draws="
             f"{split_draws}: one seed per draw."
         )
-    if split_draw_seeds is not None and len(set(split_draw_seeds)) != len(
-        split_draw_seeds
-    ):
-        repeated = sorted(
-            {s for s in split_draw_seeds if split_draw_seeds.count(s) > 1}
-        )
+    repeated = sorted(s for s, n in Counter(split_draw_seeds).items() if n > 1)
+    if repeated:
         return (
             f"split_draw_seeds repeats {repeated}: a spread over the same partition drawn "
             "twice is not a spread, and group_split_draws only counts a point eligible on "
