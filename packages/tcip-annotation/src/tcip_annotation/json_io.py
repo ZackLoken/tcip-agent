@@ -789,8 +789,8 @@ def xywh(
     anything comparing a stored box against another box has to be on. ``on_grid=False`` is for a
     box on no pixel grid at all (a record kept on the normalized unit square).
 
-    The inverse, reading such a record back, is ``BBox(x, y, x + w, y + h)`` in
-    :func:`_annotations_of`.
+    The inverse reads a stored ``[x, y, w, h]`` back in corner form as
+    ``BBox(x, y, x + w, y + h)``.
     """
     box = [x1, y1, x2 - x1, y2 - y1]
     return [round(v, 2) for v in box] if on_grid else box
