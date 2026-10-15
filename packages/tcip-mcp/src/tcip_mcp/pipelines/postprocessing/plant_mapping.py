@@ -24,6 +24,7 @@ from typing import (
     ClassVar,
     Literal,
     NamedTuple,
+    cast,
     get_args,
 )
 
@@ -1252,23 +1253,17 @@ def assign_plants(
 
 
 def grid_pitch_m(plants: list[PlantRecord]) -> float:
-    """Median nearest-neighbor spacing of the plant centroids, the planting grid pitch (m); 0.0
-    for fewer than two plants.
+    """The planting grid pitch (m): the median over the plants of each one's geodesic distance
+    to its nearest neighbor, the mean of the two middle values for an even count; 0.0 for fewer
+    than two plants.
     """
-    pts = [(p.lat, p.lon) for p in plants]
-    if len(pts) < 2:
+    if len(plants) < 2:
         return 0.0
-    nn = []
-    for i, (la, lo) in enumerate(pts):
-        nn.append(
-            min(
-                WGS84.inv(lo, la, lo2, la2)[2]
-                for j, (la2, lo2) in enumerate(pts)
-                if j != i
-            )
-        )
-    nn.sort()
-    return nn[len(nn) // 2]
+    nearest = (
+        nearest_plant((p.lat, p.lon), plants, within_m=math.inf, skip={i})
+        for i, p in enumerate(plants)
+    )
+    return statistics.median(cast(float, distance) for _, distance in nearest)
 
 
 class NoMatchToleranceError(ValueError):
