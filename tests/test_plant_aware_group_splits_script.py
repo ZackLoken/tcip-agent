@@ -578,3 +578,27 @@ def test_main_cli_reports_refusal_and_nonzero_exit(
     )
 
     assert rc == 1
+
+
+def test_main_cli_exits_one_naming_a_plant_csv_with_zero_rows(
+    tmp_path: Path, project: Path, capsys
+) -> None:
+    dataset_root = _four_plant_dataset(tmp_path)
+
+    rc = main(
+        [
+            str(dataset_root),
+            "--project",
+            str(project),
+            "--plant-csv",
+            str(write_plant_csv(tmp_path / "empty.csv", [])),
+            "--subject",
+            SUBJECT,
+            "--seed",
+            "0",
+            *DRAW_ARGS,
+        ]
+    )
+
+    assert rc == 1
+    assert "zero rows" in capsys.readouterr().err

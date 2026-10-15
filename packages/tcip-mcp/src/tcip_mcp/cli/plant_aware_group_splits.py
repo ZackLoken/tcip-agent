@@ -209,12 +209,6 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
         return 1
 
     plants = read_plant_csvs(located(p, project) for p in args.plant_csv_paths)
-    if not plants:
-        print(
-            f"error: {args.plant_csv_paths} parsed to zero plant records",
-            file=sys.stderr,
-        )
-        return 1
 
     try:
         group_key_map = derive_plant_group_key_map(
