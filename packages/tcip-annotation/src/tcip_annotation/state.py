@@ -27,9 +27,13 @@ class BBox:
         )
 
 
+RING_MIN_POINTS = 3
+"""The fewest points a ring encloses an area with."""
+
+
 def is_ring(ring) -> bool:
-    """Whether ``ring`` can be a shape: three or more points."""
-    return len(ring) >= 3
+    """Whether ``ring`` can be a shape: :data:`RING_MIN_POINTS` or more points."""
+    return len(ring) >= RING_MIN_POINTS
 
 
 @dataclass
@@ -37,7 +41,7 @@ class Polygon:
     """One or more simple closed contours (rings) in pixel coordinates; an occlusion-split instance
     holds several.
 
-    At least one ring, every ring three or more points, or ``ValueError``.
+    At least one ring, every ring one :func:`is_ring` admits, or ``ValueError``.
     """
 
     rings: list[list[tuple[float, float]]]
@@ -45,8 +49,8 @@ class Polygon:
     def __post_init__(self) -> None:
         if not self.rings or not all(is_ring(ring) for ring in self.rings):
             raise ValueError(
-                f"a polygon needs at least one ring of three or more points; got rings of "
-                f"{[len(ring) for ring in self.rings]} points"
+                f"a polygon needs at least one ring of {RING_MIN_POINTS} or more points; got "
+                f"rings of {[len(ring) for ring in self.rings]} points"
             )
 
 

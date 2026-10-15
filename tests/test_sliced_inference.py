@@ -332,7 +332,7 @@ def test_a_predicted_mask_carries_the_rings_the_shared_extractor_draws(
     expected = [
         [c for point in ring for c in point]
         for ring in mask_to_polygon_rings(
-            disk, threshold=None, epsilon_frac=MASK_CUT.epsilon_frac
+            disk, threshold=None, vertex_spacing=MASK_CUT.vertex_spacing
         )
     ]
 
@@ -351,7 +351,7 @@ def test_masks_are_cut_at_the_stated_threshold_the_record_names(tmp_path):
     _path, checkpoint = _checkpoint(tmp_path, with_masks=True)
     path = _png(tmp_path, _frame())
     every_pixel = MaskCut(
-        mask_binarize=0.0, epsilon_frac=MASK_CUT.epsilon_frac
+        mask_binarize=0.0, vertex_spacing=MASK_CUT.vertex_spacing
     )
     at_zero = _pass(checkpoint, mask_cut=every_pixel)
 
@@ -366,7 +366,7 @@ def test_masks_are_cut_at_the_stated_threshold_the_record_names(tmp_path):
     assert (
         at_zero.execution.mask_cut,
         at_zero.execution.sources["mask_binarize"],
-        at_zero.execution.sources["epsilon_frac"],
+        at_zero.execution.sources["vertex_spacing"],
     ) == (every_pixel, "explicit", "explicit")
 
 

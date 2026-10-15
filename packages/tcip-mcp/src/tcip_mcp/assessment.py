@@ -806,17 +806,17 @@ def _mask_fit(
     detection's uncut ``soft_mask`` beside the rings of the object it matched at the fitted conf,
     under the calibration curve's own criterion (the matching the count criterion's sweep made,
     taken from ``held``): the ``mask_binarize``
-    (:func:`~tcip_mcp.pipelines.derivations.derive_mask_binarize`), then the ``epsilon_frac`` of
-    the masks cut at it (:func:`~tcip_mcp.pipelines.derivations.derive_epsilon_frac`), each
+    (:func:`~tcip_mcp.pipelines.derivations.derive_mask_binarize`), then the ``vertex_spacing``
+    of the masks cut at it (:func:`~tcip_mcp.pipelines.derivations.derive_vertex_spacing`), each
     field's derivation label recorded as its own ``sources`` entry.
     """
     from dataclasses import replace
 
     from tcip_mcp.pipelines.derivations import (
-        EPSILON_FRAC_DERIVATION,
         MASK_BINARIZE_DERIVATION,
-        derive_epsilon_frac,
+        VERTEX_SPACING_DERIVATION,
         derive_mask_binarize,
+        derive_vertex_spacing,
     )
     from tcip_mcp.pipelines.training.evaluation import matched
 
@@ -835,17 +835,18 @@ def _mask_fit(
         for g, d in m.pairs
     ]
     threshold = derive_mask_binarize(pairs)
+    derived = {
+        "mask_binarize": (threshold, MASK_BINARIZE_DERIVATION),
+        "vertex_spacing": (
+            derive_vertex_spacing(pairs, threshold),
+            VERTEX_SPACING_DERIVATION,
+        ),
+    }
     return replace(
         execution,
-        mask_cut=MaskCut(
-            mask_binarize=threshold,
-            epsilon_frac=derive_epsilon_frac(pairs, threshold),
-        ),
-        sources={
-            **execution.sources,
-            "mask_binarize": MASK_BINARIZE_DERIVATION,
-            "epsilon_frac": EPSILON_FRAC_DERIVATION,
-        },
+        mask_cut=MaskCut(**{k: value for k, (value, _) in derived.items()}),
+        sources=execution.sources
+        | {k: label for k, (_, label) in derived.items()},
     )
 
 

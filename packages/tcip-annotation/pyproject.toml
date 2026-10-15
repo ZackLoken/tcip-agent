@@ -8,6 +8,8 @@ dependencies = [
     "numpy>=1.24",
     "opencv-python>=4.12.0.88",
     "pillow>=9.0",
+    # scipy.optimize.elementwise (added in 1.15), read by the ring simplification.
+    "scipy>=1.15",
     "shapely>=2.0",
     "tcip-store",
 ]

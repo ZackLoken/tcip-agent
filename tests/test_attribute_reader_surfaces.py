@@ -15,7 +15,7 @@ from tcip_mcp import subject_registry as cr
 from tcip_mcp.pipelines.data.selection import ClassScope
 from tcip_mcp.pipelines.postprocessing import phenology
 from tcip_mcp.traits import PositiveState
-from tests._training_values import EPSILON_FRAC
+from tests._training_values import VERTEX_SPACING
 
 SUBJECT = "object"
 COLOR = cr.Attribute("color", "categorical", ("red", "blue"))
@@ -183,7 +183,7 @@ def test_the_coco_reader_keeps_a_records_attribute_values() -> None:
     (restored,) = parse_coco_annotations(
         coco,
         decode_rle=lambda segmentation: pytest.fail("no run-length mask here"),
-        epsilon_frac=EPSILON_FRAC,
+        vertex_spacing=VERTEX_SPACING,
     )[1][1]
     assert restored.subject == SUBJECT
     assert restored.attributes == {"color": "blue"}

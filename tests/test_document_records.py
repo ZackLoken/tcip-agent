@@ -30,7 +30,7 @@ from tests._producer_fixtures import (
     label_image,
     registry_over,
 )
-from tests._training_values import EPSILON_FRAC, RATIONALE
+from tests._training_values import RATIONALE, VERTEX_SPACING
 
 DATE = "2026-03-02"
 SIZE = 64
@@ -195,7 +195,7 @@ def test_a_coco_import_writes_every_document_or_none(
         lambda *a, **k: {**real_entry(*a, **k), "unencodable": float("nan")},
     )
 
-    stated = {"epsilon_frac": EPSILON_FRAC, "rationale": RATIONALE}
+    stated = {"vertex_spacing": VERTEX_SPACING, "rationale": RATIONALE}
     with pytest.raises(ts.StoreError):
         import_coco_document(document, root, date=DATE, project=root, **stated)
 
@@ -236,7 +236,7 @@ def test_an_import_refuses_over_a_present_record_whatever_it_holds(
             _coco(tmp_path, images),
             root,
             date=DATE,
-            epsilon_frac=EPSILON_FRAC,
+            vertex_spacing=VERTEX_SPACING,
             rationale=RATIONALE,
             project=root,
         )

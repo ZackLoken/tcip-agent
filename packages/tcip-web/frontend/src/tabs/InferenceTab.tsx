@@ -25,10 +25,10 @@ const CANCELLABLE: ReadonlySet<InferenceStatus> = new Set(["pending", "running"]
 
 type StatedField = "conf" | "cross_tile_nms" | keyof MaskCut;
 
-const MASK_CUT_FIELDS: ReadonlySet<StatedField> = new Set(["mask_binarize", "epsilon_frac"]);
+const MASK_CUT_FIELDS: ReadonlySet<StatedField> = new Set(["mask_binarize", "vertex_spacing"]);
 
-/** The execution values a run without an assessment states, one input each, every one a
- *  fraction in [0, 1]; the two mask cut inputs are stated together as its one ``mask_cut``. */
+/** The execution values a run without an assessment states, one input each, their ranges the
+ *  server's to refuse; the two mask cut inputs are stated together as its one ``mask_cut``. */
 const STATED_INPUTS: { field: StatedField; label: string; placeholder: string }[] = [
   {
     field: "conf",
@@ -41,9 +41,9 @@ const STATED_INPUTS: { field: StatedField; label: string; placeholder: string }[
     placeholder: "the probability a mask pixel is foreground at",
   },
   {
-    field: "epsilon_frac",
-    label: "Mask ring simplification (an instance segmentation run without an assessment)",
-    placeholder: "the fraction of each ring's perimeter it is simplified at",
+    field: "vertex_spacing",
+    label: "Mask ring vertex spacing (an instance segmentation run without an assessment)",
+    placeholder: "the pixels of each ring's perimeter per vertex, 0 for every vertex",
   },
   {
     field: "cross_tile_nms",
@@ -119,7 +119,7 @@ export function InferenceTab() {
   const [statedInputs, setStatedInputs] = useState<Record<StatedField, string>>({
     conf: "",
     mask_binarize: "",
-    epsilon_frac: "",
+    vertex_spacing: "",
     cross_tile_nms: "",
   });
   // The cross-tile merge a tiled run without an assessment states; empty for none stated.
@@ -495,8 +495,6 @@ export function InferenceTab() {
               id={`inference-${field}`}
               className="tcip-input w-full mb-3 font-mono"
               type="number"
-              min={0}
-              max={1}
               step="any"
               value={statedInputs[field]}
               onChange={(e) => setStatedInputs((prev) => ({ ...prev, [field]: e.target.value }))}

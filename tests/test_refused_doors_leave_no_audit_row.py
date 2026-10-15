@@ -16,9 +16,9 @@ import tcip_store as ts
 from tcip_mcp.pipelines.execution import Stated
 from tests._training_values import (
     DISPERSION_QUANTILE,
-    EPSILON_FRAC,
     EQUIVALENCE_Z,
     RATIONALE,
+    VERTEX_SPACING,
 )
 
 
@@ -60,7 +60,7 @@ def _import_coco(tmp_path: Path):
         str(document),
         str(tmp_path),
         "2025-09-14",
-        EPSILON_FRAC,
+        VERTEX_SPACING,
         RATIONALE,
     )
 

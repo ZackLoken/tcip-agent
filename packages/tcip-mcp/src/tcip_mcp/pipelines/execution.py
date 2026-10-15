@@ -11,7 +11,7 @@ pass executes is the record a bucket or an assessment stamps.
 from __future__ import annotations
 
 import logging
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import asdict, dataclass, field, fields, replace
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -52,13 +52,14 @@ def cross_tile_merge_of(name: str) -> tuple[str, str]:
 @pydantic_dataclass(frozen=True, config=ConfigDict(extra="forbid"))
 class MaskCut:
     """How an instance segmentation head's soft masks become rings: ``mask_binarize``, the
-    probability a mask pixel is foreground at, and ``epsilon_frac``, the fraction of each ring's
-    own perimeter its rings are simplified at (``mask_contours.mask_to_polygon_rings``). Both are
-    required, and each refuses a value outside ``[0, 1]``.
+    probability a mask pixel is foreground at, refusing a value outside ``[0, 1]``, and
+    ``vertex_spacing``, the pixels of each ring's perimeter per vertex its rings are simplified to
+    (``mask_contours.mask_to_polygon_rings``, zero keeping every contour vertex), refusing a
+    negative or non-finite value. Both are required.
     """
 
     mask_binarize: float = Field(ge=0, le=1)
-    epsilon_frac: float = Field(ge=0, le=1)
+    vertex_spacing: float = Field(ge=0, allow_inf_nan=False)
 
 
 class ExecutionRefusedError(ValueError):
@@ -167,7 +168,8 @@ class Stated(BaseModel):
     the pass is tiled, its tile edge and overlap, the cross-tile merge and its threshold, the
     confidence threshold, whether the pass collects masks and how it cuts them into rings
     (:class:`MaskCut`), with the ``rationale`` for stating them. Refuses
-    (``ValueError``) a value stated without a rationale, and a rationale with no value stated.
+    (``ValueError``) a value stated without a rationale, a rationale with no value stated, and a
+    cross-tile threshold or confidence outside ``[0, 1]``.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -176,8 +178,8 @@ class Stated(BaseModel):
     tile_size: int | None = None
     overlap: float | None = None
     postprocess: str | None = None
-    cross_tile_nms: float | None = None
-    conf: float | None = None
+    cross_tile_nms: float | None = Field(default=None, ge=0, le=1)
+    conf: float | None = Field(default=None, ge=0, le=1)
     masks: bool | None = None
     mask_cut: MaskCut | None = None
     rationale: str | None = Field(default=None, min_length=1)
@@ -434,12 +436,12 @@ def execution_record(
             "the masks a pass collects."
         )
     if cut is not None:
-        sources |= dict.fromkeys(("mask_binarize", "epsilon_frac"), "explicit")
+        sources |= dict.fromkeys(asdict(cut), "explicit")
     elif masks and (reference is None or geometry is not None):
         raise ExecutionRefusedError(
-            f"{checkpoint.path} collects masks and this pass states no mask_cut: state the "
-            "probability a mask pixel is foreground at and the fraction of each ring's perimeter "
-            "it is simplified at, state masks False for a pass that reads none, or assess it "
+            f"{checkpoint.path} collects masks and this pass states no mask_cut: state its "
+            f"{' and '.join(f.name for f in fields(MaskCut))}, state masks False for a pass that "
+            "reads none, or assess it "
             "untiled, whose calibration side's soft masks derive both (a tiled pass merges its "
             "masks as polygons, so none survives to derive them over)"
         )

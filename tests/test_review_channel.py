@@ -14,7 +14,7 @@ import pytest
 
 import tcip_store
 from tcip_annotation import json_io
-from tcip_annotation.state import BBox, Polygon
+from tcip_annotation.state import RING_MIN_POINTS, BBox, Polygon
 from tcip_mcp.dataset_layout import (
     LABEL_DOCUMENTS,
     bucket_key,
@@ -506,7 +506,7 @@ def test_stage_proposals_rejects_bad_polygon(tmp_path: Path) -> None:
     date = "2026-02-11"
     _image(root, date, "IMG_0001")
     image_path = _img_path(root, date, "IMG_0001")
-    # Fewer than 3 points is not a polygon.
+    # A two-point ring is not a polygon.
     res = stage_proposals(
         tmp_path,
         image_path,
@@ -519,7 +519,7 @@ def test_stage_proposals_rejects_bad_polygon(tmp_path: Path) -> None:
             }
         ],
     )
-    assert "error" in res and "three or more points" in res["error"]
+    assert "error" in res and f"{RING_MIN_POINTS} or more" in res["error"]
     # Un-normalized (pixel) points must be caught.
     res = stage_proposals(
         tmp_path,
@@ -882,7 +882,7 @@ def test_stage_proposals_refuses_a_short_ring_under_rings(
         ],
     )
 
-    assert "error" in res and "three or more points" in res["error"]
+    assert "error" in res and f"{RING_MIN_POINTS} or more" in res["error"]
     assert not tcip_store.exists(
         bucket_key(root, _staged_name("sam", date, "IMG_0204"))
     )

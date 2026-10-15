@@ -57,14 +57,14 @@ def import_coco_document(
     dataset_root: str | Path,
     *,
     date: str,
-    epsilon_frac: float,
+    vertex_spacing: float,
     rationale: str,
     project: Path,
 ) -> dict:
     """Write one per-image label document for every image ``document`` lists, keyed under the
     capture ``date`` of ``dataset_root`` (both :func:`~tcip_mcp.registry_paths.located` against
     ``project``), and record the import on the dataset's audit log with the document's path, the
-    digest of the one read of its bytes, the ``epsilon_frac`` a run-length mask's rings are
+    digest of the one read of its bytes, the ``vertex_spacing`` a run-length mask's rings are
     simplified at and the ``rationale`` for it, in one commit with the documents: an import that
     writes nothing leaves no line.
 
@@ -102,7 +102,7 @@ def import_coco_document(
     source = str(document)
     coco, digest = _read_coco(document)
     categories, by_image, problems = parse_coco_annotations(
-        coco, decode_rle=_rle_mask, epsilon_frac=epsilon_frac
+        coco, decode_rle=_rle_mask, vertex_spacing=vertex_spacing
     )
 
     dates = dataset_layout.list_dates(root)
@@ -194,7 +194,7 @@ def import_coco_document(
     arguments = {
         "document": source,
         "capture": date,
-        "epsilon_frac": epsilon_frac,
+        "vertex_spacing": vertex_spacing,
         "rationale": rationale,
         "written": sorted(key.parts[-1] for key in writes),
     }

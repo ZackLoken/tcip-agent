@@ -32,7 +32,7 @@ the loss of its marks are one write of one document; another subject's marks are
 
 Nothing here trains or calibrates on a dataset-level COCO file (an `images` or `categories`
 key): it is never a per-image document, and the only way in is the import. An external COCO
-export becomes per-image documents through `import_coco(document, dataset_root, date, epsilon_frac,
+export becomes per-image documents through `import_coco(document, dataset_root, date, vertex_spacing,
 rationale)`, over images `ingest_images` already placed. `date` names the capture: the dated folder under
 `images/`, or the flat `images/` root for a dataset with no dated folders. Every declared category
 must be a subject the dataset's registry declares. An ordinary image is the capture's image with
@@ -45,10 +45,11 @@ capture, a stated frame the image does not have, or an existing per-image docume
 document and the import's audit event then commit together, or none does: a label placed
 meanwhile refuses the whole import. A crowd region keeps its `iscrowd` flag, and a run-length mask
 becomes the rings `mask_contours.mask_to_polygon_rings` extracts from it, simplified at the
-stated `epsilon_frac`: `cv2.approxPolyDP` keeps a subset of the contour's own vertices such that
-no point of the contour lies farther from the approximation than that fraction of the ring's
-perimeter, so 0 allows no approximation distance at all. The records keep the provenance the COCO carried and gain none. The
-audit event records the COCO file's path, the digest of the bytes read, the stated fraction with
+stated `vertex_spacing`, pixels of perimeter per vertex: each ring keeps at most the vertex count
+its own perimeter implies at that spacing (the nearest integer, at least `state.RING_MIN_POINTS`), as the subset of
+the contour's own vertices `cv2.approxPolyDP` keeps at the least tolerance reaching it, so 0 keeps
+every contour vertex. The records keep the provenance the COCO carried and gain none. The
+audit event records the COCO file's path, the digest of the bytes read, the stated spacing with
 its rationale and the documents written; an import that writes no document, whether
 refused or carrying no annotations, changes nothing and leaves no line.
 
@@ -68,7 +69,7 @@ document, a completion mark missing any of its fields, an `annotations` value th
 that is not a dict,
 a record with no string subject, and a record carrying a value that is not what the schema states,
 whichever geometry the record resolves to (a `bbox` that is not four numbers or has no positive
-extent, a `segmentation` that is not rings of three or more points, a `point` that is not two
+extent, a `segmentation` that is not rings `state.is_ring` admits, a `point` that is not two
 numbers, a `score` that is not a number, an attribute value that is not a non-empty name, an
 `iscrowd` that is not 0, 1, true or false). An absent or `null` value reads as absent, for every
 optional field. A shape `save_annotations` or the Annotate tab saves is translated into this

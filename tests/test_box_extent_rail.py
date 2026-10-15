@@ -30,14 +30,14 @@ def test_the_encoding_keeps_only_what_has_extent_on_the_stored_grid(tmp_path):
     from tcip_annotation.mask_contours import mask_to_polygon_rings
     from tcip_mcp.pipelines.postprocessing.export import encode_predictions
     from tests._producer_fixtures import painted_array
-    from tests._training_values import EPSILON_FRAC
+    from tests._training_values import VERTEX_SPACING
 
     solid = painted_array(40, 40, [((5, 5, 30, 30), 1)])
     blob = {
         "segmentation": [
             [c for point in ring for c in point]
             for ring in mask_to_polygon_rings(
-                solid, threshold=None, epsilon_frac=EPSILON_FRAC
+                solid, threshold=None, vertex_spacing=VERTEX_SPACING
             )
         ]
     }

@@ -173,11 +173,11 @@ MASK_BINARIZE = 0.5
 """A sample probability an instance segmentation pass or validation states its masks are cut
 at."""
 
-EPSILON_FRAC = 0.005
-"""A sample fraction of each ring's perimeter an instance segmentation pass, validation or COCO
-import states its mask rings are simplified at."""
+VERTEX_SPACING = 4.0
+"""A sample number of pixels of each ring's perimeter per vertex an instance segmentation pass,
+validation or COCO import states its mask rings are simplified to."""
 
-MASK_CUT = MaskCut(mask_binarize=MASK_BINARIZE, epsilon_frac=EPSILON_FRAC)
+MASK_CUT = MaskCut(mask_binarize=MASK_BINARIZE, vertex_spacing=VERTEX_SPACING)
 """The sample mask cut an instance segmentation pass or validation states."""
 
 

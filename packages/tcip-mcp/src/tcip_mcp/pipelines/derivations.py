@@ -808,7 +808,7 @@ by."""
 def mask_rings_iou(pairs: Sequence[MaskPair], threshold: float) -> float:
     """The mean, over ``pairs``, of the region IoU (``matching.rings_iou_matrix``) between each
     object's rings and the rings its detection's soft mask cuts into at ``threshold``
-    (``mask_contours.mask_to_polygon_rings`` at ``epsilon_frac`` zero, the region the cut draws
+    (``mask_contours.mask_to_polygon_rings`` at ``vertex_spacing`` zero, the region the cut draws
     unsimplified), placed at the mask's origin.
     """
     import numpy as np
@@ -825,7 +825,7 @@ def mask_rings_iou(pairs: Sequence[MaskPair], threshold: float) -> float:
                         [
                             [(px + x, py + y) for px, py in ring]
                             for ring in mask_to_polygon_rings(
-                                soft, threshold=threshold, epsilon_frac=0.0
+                                soft, threshold=threshold, vertex_spacing=0.0
                             )
                         ]
                     ],
@@ -900,79 +900,48 @@ def derive_mask_binarize(pairs: Sequence[MaskPair]) -> float:
     return max(candidates, key=lambda t: (mask_rings_iou(pairs, t), -t))
 
 
-EPSILON_FRAC_DERIVATION = (
-    "the median over matched calibration pairs of the least fraction of the prediction's "
-    "contour perimeter at which approxPolyDP leaves its ground truth's vertex count"
+VERTEX_SPACING_DERIVATION = (
+    "the median over matched calibration pairs of the prediction contour's perimeter over its "
+    "ground truth's vertex count"
 )
-"""The label an execution record names a ring simplification :func:`derive_epsilon_frac`
-derived by."""
+"""The label an execution record names a vertex spacing :func:`derive_vertex_spacing` derived
+by."""
 
 
-def _vertex_count_fraction(pair: MaskPair, threshold: float) -> float | None:
-    """The least fraction of the perimeter (``cv2.arcLength``) of one pair's prediction contour,
-    its soft mask's largest region cut at ``threshold`` (``mask_contours.mask_contours``), at
-    which ``cv2.approxPolyDP`` leaves exactly as many vertices as the object's largest ring
-    holds: zero when the unsimplified contour already holds it, otherwise the upper end of the
-    bracket ``scipy.optimize.elementwise.find_root`` narrows over ``[0, 1]`` to adjacent floats
-    around where the count first falls to it; ``None`` for a mask cutting to nothing and for a pair
-    whose count the simplification never leaves exactly.
+def derive_vertex_spacing(
+    pairs: Sequence[MaskPair], threshold: float
+) -> float:
+    """The pixels of perimeter per vertex an instance segmentation head's mask rings are simplified
+    at, from the calibration side's detections matched one to one with ground-truth objects
+    (:data:`VERTEX_SPACING_DERIVATION`): per pair, the perimeter (``cv2.arcLength``, closed) of
+    the largest region its soft mask cuts into at ``threshold`` (``mask_contours.mask_contours``)
+    over the vertex count of the object's largest ring, and the median across pairs. A pair whose
+    mask cuts to nothing or whose object holds no ring contributes nothing; no pair contributing
+    refuses (``ValueError``) naming ``vertex_spacing``.
     """
     import cv2
     import numpy as np
-    from scipy.optimize.elementwise import find_root
 
     from tcip_annotation.mask_contours import mask_contours
 
-    soft, _origin, rings = pair
-    contours = mask_contours(soft, threshold=threshold)
-    if not contours:
-        return None
-    (contour, *_rest) = contours
-    vertices = len(
-        max(rings, key=lambda r: cv2.contourArea(np.asarray(r, np.float32)))
-    )
-    perimeter = cv2.arcLength(contour, True)
-
-    def kept(frac: float) -> int:
-        return len(cv2.approxPolyDP(contour, frac * perimeter, True))
-
-    def adjacent(res: Any) -> None:
-        low, high = res.bracket
-        if np.nextafter(low, high) >= high:
-            raise StopIteration
-
-    if (unsimplified := kept(0.0)) <= vertices:
-        return 0.0 if unsimplified == vertices else None
-    _low, high = find_root(
-        np.vectorize(lambda frac: 1.0 if kept(frac) > vertices else -1.0),
-        (0.0, 1.0),
-        tolerances={"xatol": 0, "xrtol": 0, "fatol": 0, "frtol": 0},
-        callback=adjacent,
-    ).bracket
-    return float(high) if kept(float(high)) == vertices else None
-
-
-def derive_epsilon_frac(pairs: Sequence[MaskPair], threshold: float) -> float:
-    """The fraction of each ring's perimeter an instance segmentation head's mask rings are
-    simplified at, from the calibration side's detections matched one to one with ground-truth
-    objects, their masks cut at ``threshold`` (:data:`EPSILON_FRAC_DERIVATION`): the median of
-    each pair's own fraction (:func:`_vertex_count_fraction`), a pair yielding none contributing
-    nothing. No pair yielding one refuses (``ValueError``) naming ``epsilon_frac``.
-    """
-    import numpy as np
-
-    fractions = [
-        f
-        for f in (_vertex_count_fraction(pair, threshold) for pair in pairs)
-        if f is not None
-    ]
-    if not fractions:
-        raise ValueError(
-            "no calibration detection matched to a ground-truth object at the fitted conf "
-            "simplifies to its object's vertex count, so no ring simplification derives; state "
-            "epsilon_frac"
+    spacings = [
+        cv2.arcLength(contour, True)
+        / len(
+            max(
+                rings, key=lambda r: cv2.contourArea(np.asarray(r, np.float32))
+            )
         )
-    return float(np.median(fractions))
+        for soft, _origin, rings in pairs
+        if rings
+        for contour in mask_contours(soft, threshold=threshold)[:1]
+    ]
+    if not spacings:
+        raise ValueError(
+            "no calibration detection matched to a ground-truth object at the fitted conf cuts "
+            "to a region beside an object ring, so no vertex spacing derives; state "
+            "vertex_spacing"
+        )
+    return float(np.median(spacings))
 
 
 _STATIC_DERIVATION_IMPLEMENTATIONS: dict[str, object] = {
@@ -995,7 +964,7 @@ _STATIC_DERIVATION_IMPLEMENTATIONS: dict[str, object] = {
         "tcip_mcp.pipelines.derivations.derive_detector_geometry"
     ),
     MASK_BINARIZE_DERIVATION: "tcip_mcp.pipelines.derivations.derive_mask_binarize",
-    EPSILON_FRAC_DERIVATION: "tcip_mcp.pipelines.derivations.derive_epsilon_frac",
+    VERTEX_SPACING_DERIVATION: "tcip_mcp.pipelines.derivations.derive_vertex_spacing",
 }
 """Each derivation label authored here, every one but the count-objective ones, mapped to the
 callable that computes it."""
