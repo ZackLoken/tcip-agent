@@ -181,6 +181,37 @@ def test_the_nn_tolerance_derives_as_half_the_grid_pitch(
     assert tolerance["value"] == pytest.approx(PLANT_SPACING_M / 2, rel=1e-3)
 
 
+def test_the_grid_pitch_is_numpys_median_of_unequal_neighbor_distances(
+    tmp_path: Path,
+) -> None:
+    """Four plants 0, 1, 10 and 30 meters east of the origin, whose nearest-neighbor distances
+    are about 1, 1, 9 and 20 meters: the pitch is their median, 5.
+    """
+    plants = _plants(
+        tmp_path,
+        [
+            {"plot": f"P{i}", "accession": f"acc-{i}", "lat": lat, "lon": lon}
+            for i, (lat, lon) in enumerate(
+                _east(m) for m in (0.0, 1.0, 10.0, 30.0)
+            )
+        ],
+    )
+    nearest = [
+        min(
+            GEOD.inv(p.lon, p.lat, q.lon, q.lat)[2]
+            for q in plants
+            if q is not p
+        )
+        for p in plants
+    ]
+
+    pitch = grid_pitch_m(plants)
+
+    assert pitch == pytest.approx(float(np.median(nearest)), rel=1e-9)
+    assert pitch == pytest.approx(5.0, rel=1e-3)
+    assert resolve_nn_tolerance_m(plants)["value"] == pytest.approx(pitch / 2)
+
+
 def test_the_nn_tolerance_refuses_naming_the_parameter_without_a_pitch(
     tmp_path: Path,
 ) -> None:
