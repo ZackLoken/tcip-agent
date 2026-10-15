@@ -323,8 +323,9 @@ def run_inference(
             (one of ``execution.CROSS_TILE_MERGES``), ``cross_tile_nms``, ``conf``, ``masks``
             (whether an instance segmentation pass collects masks), ``mask_cut``
             (``execution.MaskCut``: ``mask_binarize``, the probability a mask pixel is foreground
-            at, and ``epsilon_frac``, the fraction of each ring's perimeter its mask rings are
-            simplified at), with the ``rationale`` for them, which the execution record carries.
+            at, and ``vertex_spacing``, the pixels of each ring's perimeter per vertex its mask
+            rings are simplified to), with the ``rationale`` for them, which the execution
+            record carries.
         device: cuda / cpu (auto if omitted).
         tile_batch_size: Tiles per forward batch.
         dry_run: Resolve the execution record and the bucket and report them, with whether the

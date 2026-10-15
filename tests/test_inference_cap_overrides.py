@@ -224,6 +224,24 @@ def test_a_statement_carries_its_reason_and_nothing_stated_carries_none():
     assert Stated(conf=SAMPLE_CONF, rationale=RATIONALE).rationale == RATIONALE
 
 
+@pytest.mark.parametrize("value", [-1.0, 1.5])
+@pytest.mark.parametrize("name", ["conf", "cross_tile_nms"])
+def test_a_stated_threshold_outside_the_unit_interval_is_refused_by_the_type(
+    name, value
+):
+    """Guard. A stated confidence or cross-tile merge threshold below 0 or above 1 is refused at
+    the statement, naming the field; the stated sample pass runs through ``prepare`` as
+    :func:`test_stated_values_are_recorded_as_explicit` shows.
+    """
+    from pydantic import ValidationError
+
+    from tcip_mcp.pipelines.execution import Stated
+    from tests._training_values import RATIONALE
+
+    with pytest.raises(ValidationError, match=name):
+        Stated.model_validate({name: value, "rationale": RATIONALE})
+
+
 def test_the_dry_run_reports_the_stated_values_and_refuses_an_unstated_conf(
     tmp_path,
 ):

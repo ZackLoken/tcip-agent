@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
+from tcip_annotation.state import RING_MIN_POINTS
 from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
 
@@ -609,7 +610,9 @@ class TestWholeFrameDefaultIsUnaffected:
             tmp_path, image_path=str(img_path), engine="stub"
         )
 
-        assert "three or more points" in result.get("error", ""), result
+        assert f"{RING_MIN_POINTS} or more points" in result.get(
+            "error", ""
+        ), result
         assert (
             ts.read(
                 proposal_tools._staging_key_for(str(img_path)), default=None

@@ -102,7 +102,7 @@ evaluation:
   conf_threshold: ...    # a detector's: the confidence its validation counts boxes at
   mask_cut:              # instance segmentation's: how its validation cuts masks into rings
     mask_binarize: ...   # the probability a mask pixel is foreground at
-    epsilon_frac: ...    # the fraction of each ring's perimeter its rings simplify at
+    vertex_spacing: ...  # the pixels of each ring's perimeter per vertex its rings keep
   selection_metric: f1   # required: the metric model_best.pt and the stop rule rank by
   rationale: ...
 ```

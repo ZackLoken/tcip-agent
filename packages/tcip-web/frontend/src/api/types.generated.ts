@@ -571,7 +571,7 @@ export interface ConfirmRevisionPayload {
 
 export interface MaskCut {
   mask_binarize: number;
-  epsilon_frac: number;
+  vertex_spacing: number;
 }
 
 export interface Stated {

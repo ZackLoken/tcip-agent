@@ -15,7 +15,7 @@ def test_parse_coco_annotations_decodes_names():
     """
     from tcip_annotation.format_io import parse_coco_annotations
     from tcip_annotation.state import Polygon
-    from tests._training_values import EPSILON_FRAC
+    from tests._training_values import VERTEX_SPACING
 
     coco = {
         "images": [
@@ -34,7 +34,7 @@ def test_parse_coco_annotations_decodes_names():
     anns = parse_coco_annotations(
         coco,
         decode_rle=lambda segmentation: pytest.fail("no run-length mask here"),
-        epsilon_frac=EPSILON_FRAC,
+        vertex_spacing=VERTEX_SPACING,
     )[1][1]
     assert len(anns) == 1
     assert (

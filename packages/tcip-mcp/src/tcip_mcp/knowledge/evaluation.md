@@ -111,11 +111,11 @@ it. A detector's assessment collects its predictions at the `conf` its `stated` 
 with that block's `rationale`, and a conf the objective picks at or below it fails as censored.
 An instance segmentation assessment states in `stated` whether its pass collects masks
 (`masks`). One collecting them cuts them by the `mask_cut` `stated` carries (its `mask_binarize`
-and its `epsilon_frac`, both required), or, stating none, derives the whole block over the
+and its `vertex_spacing`, both required), or, stating none, derives the whole block over the
 calibration side's detections matched at the fitted conf: the `mask_binarize` they are cut at,
-then the `epsilon_frac` their rings are simplified at over the same pairs cut at that threshold
-(the median of each pair's least perimeter fraction at which `cv2.approxPolyDP` leaves its
-object's vertex count), each recorded under its own derivation in the record's `sources`; a
+then the `vertex_spacing` their rings are simplified at over the same pairs cut at that threshold
+(the median of each pair's contour perimeter over its object's vertex count, so each ring keeps
+at most the count its own perimeter implies at that spacing, whatever its size), each recorded under its own derivation in the record's `sources`; a
 tiled pass, whose merge leaves no uncut mask to sweep, states the block. One stating `masks`
 false, tiled or
 untiled, collects none, derives none, and records that its published passes collect none.

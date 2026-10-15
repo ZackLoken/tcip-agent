@@ -520,7 +520,7 @@ def import_coco(
     document: str,
     dataset_root: str,
     date: str,
-    epsilon_frac: float,
+    vertex_spacing: float,
     rationale: str,
 ) -> dict:
     """Convert an external dataset-level COCO document into the dataset's per-image label
@@ -543,11 +543,12 @@ def import_coco(
         date: The capture under ``images/`` the images sit in, which the documents are keyed
             under; one ``list_dates`` does not list refuses. A COCO document states no capture,
             so it is named.
-        epsilon_frac: The fraction of each ring's own perimeter a run-length mask's rings are
-            simplified at (``cv2.approxPolyDP``), recorded on the import's audit line.
-        rationale: Why the import simplifies at ``epsilon_frac``, recorded beside it.
+        vertex_spacing: The pixels of each ring's perimeter per vertex a run-length mask's rings
+            are simplified to (``mask_contours.mask_to_polygon_rings``, zero keeping every contour
+            vertex), recorded on the import's audit line.
+        rationale: Why the import simplifies at ``vertex_spacing``, recorded beside it.
 
-    Returns ``{document, capture, epsilon_frac, rationale, written}``, ``written`` the stem of
+    Returns ``{document, capture, vertex_spacing, rationale, written}``, ``written`` the stem of
     every label document written.
 
     """
@@ -558,7 +559,7 @@ def import_coco(
             document,
             dataset_root,
             date=date,
-            epsilon_frac=epsilon_frac,
+            vertex_spacing=vertex_spacing,
             rationale=rationale,
             project=project,
         )

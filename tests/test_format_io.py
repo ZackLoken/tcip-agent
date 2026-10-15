@@ -7,8 +7,8 @@ import json
 import pytest
 
 from tcip_annotation.format_io import coco_categories, parse_coco_annotations
-from tcip_annotation.state import Polygon
-from tests._training_values import EPSILON_FRAC
+from tcip_annotation.state import RING_MIN_POINTS, Polygon
+from tests._training_values import VERTEX_SPACING
 
 
 def _no_run_length(segmentation):
@@ -19,7 +19,7 @@ def _no_run_length(segmentation):
 
 def _parse(coco):
     return parse_coco_annotations(
-        coco, decode_rle=_no_run_length, epsilon_frac=EPSILON_FRAC
+        coco, decode_rle=_no_run_length, vertex_spacing=VERTEX_SPACING
     )
 
 
@@ -193,7 +193,11 @@ def test_parse_coco_names_a_malformed_annotations_container(
         ("attributes", {"stage": ""}, "record 1 attributes"),
         ("bbox", [100, 200, 0, 60], "no positive extent"),
         ("score", "0.8", "record 1 score"),
-        ("segmentation", [[1.0, 2.0, 3.0, 4.0]], "three or more points"),
+        (
+            "segmentation",
+            [[1.0, 2.0, 3.0, 4.0]],
+            f"{RING_MIN_POINTS} or more points",
+        ),
     ],
 )
 def test_parse_coco_decodes_every_record_through_the_per_image_decoder(

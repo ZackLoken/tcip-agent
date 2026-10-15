@@ -409,7 +409,7 @@ class TcipDetectionModel(DetectionModel):
                             for ring in mask_to_polygon_rings(
                                 m,
                                 threshold=cut.mask_binarize,
-                                epsilon_frac=cut.epsilon_frac,
+                                vertex_spacing=cut.vertex_spacing,
                             )
                         ]
                         or None

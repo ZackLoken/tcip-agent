@@ -268,13 +268,13 @@ def annotation_of_record(o) -> Annotation:
     is no crowd region. A key that is present with a value that is not what the schema states
     raises ``ValueError`` naming the key, never reads as absent, whichever geometry wins
     precedence: a ``bbox`` that is not four numbers or has no positive extent
-    (:func:`check_box_extent`), a ``segmentation`` that is not rings of three or more points
-    (:func:`_polygon_of`), a ``point`` that is not two numbers, a ``score`` that is not a number,
-    attributes that are not value names (:func:`attributes_of`), a crowd flag that is not one
-    (:func:`iscrowd_of`). So does a record that is not an object (:func:`annotation_object`) or
-    that :class:`Annotation` refuses to construct (no non-empty string ``subject``). Geometry
-    precedence is rings, then box, then point, over the keys present: a polygon is the source of
-    truth and its box is derived from it.
+    (:func:`check_box_extent`), a ``segmentation`` that is not rings
+    :func:`~tcip_annotation.state.is_ring` admits (:func:`_polygon_of`), a ``point`` that is not
+    two numbers, a ``score`` that is not a number, attributes that are not value names
+    (:func:`attributes_of`), a crowd flag that is not one (:func:`iscrowd_of`). So does a record
+    that is not an object (:func:`annotation_object`) or that :class:`Annotation` refuses to
+    construct (no non-empty string ``subject``). Geometry precedence is rings, then box, then
+    point, over the keys present: a polygon is the source of truth and its box is derived from it.
     """
     o = annotation_object(o)
     subject = o.get("subject")

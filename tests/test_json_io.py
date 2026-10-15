@@ -25,7 +25,13 @@ from tcip_annotation.json_io import (
     require_reference_ground_truth,
     write_label_document,
 )
-from tcip_annotation.state import Annotation, BBox, Polygon, bbox_of
+from tcip_annotation.state import (
+    RING_MIN_POINTS,
+    Annotation,
+    BBox,
+    Polygon,
+    bbox_of,
+)
 from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
 
 # Coordinates use binary-exact values (.0/.25/.5/.75) so the writer's 2-decimal rounding
@@ -405,7 +411,7 @@ def test_polygon_gt_round_trip(tmp_path: Path) -> None:
     )
 
     data = tcip_store.read(key)
-    # segmentation is [[flat pixel coords]] with >= 3 points.
+    # segmentation is [[flat pixel coords]].
     assert data["annotations"][0]["segmentation"] == [
         [10.0, 20.0, 110.0, 20.0, 110.0, 220.0, 10.0, 220.0]
     ]
@@ -474,7 +480,7 @@ def test_a_polygon_with_a_ring_that_is_no_shape_cannot_be_made(rings) -> None:
     """A ring that cannot be a shape is refused where the polygon is made, never carried to a
     writer that would drop it and write back fewer rings than were stated.
     """
-    with pytest.raises(ValueError, match="three or more points"):
+    with pytest.raises(ValueError, match=f"{RING_MIN_POINTS} or more points"):
         Polygon(rings)
     assert Polygon([LEFT_LOBE, RIGHT_LOBE]).rings == [LEFT_LOBE, RIGHT_LOBE]
 
@@ -482,7 +488,7 @@ def test_a_polygon_with_a_ring_that_is_no_shape_cannot_be_made(rings) -> None:
 @pytest.mark.parametrize(
     "bad_ring",
     [
-        [1.0, 2.0, 3.0, 4.0],  # < 3 points
+        [1.0, 2.0, 3.0, 4.0],  # a two-point ring
         [1, 2, 3, 4, 5, 6, 7],  # odd coord count
         {
             "counts": "RLE",
@@ -897,7 +903,7 @@ def test_stored_box_with_no_positive_extent_raises(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "segmentation",
     [
-        [[1.0, 2.0, 3.0, 4.0]],  # < 3 points
+        [[1.0, 2.0, 3.0, 4.0]],  # a two-point ring
         [[1, 2, 3, 4, 5, 6, 7]],  # odd coord count
         {
             "counts": "RLE",

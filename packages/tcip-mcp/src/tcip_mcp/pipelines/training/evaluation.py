@@ -625,7 +625,7 @@ def pick_f1_max(sweep: dict) -> float:
 
 def _mask_rings(mask: Any, cut: MaskCut, *, soft: bool) -> list:
     """A binary or, with ``soft``, a soft mask cut at ``cut.mask_binarize``, its regions as rings
-    simplified at ``cut.epsilon_frac``
+    simplified at ``cut.vertex_spacing``
     (:func:`~tcip_annotation.mask_contours.mask_to_polygon_rings`), for a mask match.
     """
     from tcip_annotation.mask_contours import mask_to_polygon_rings
@@ -638,7 +638,7 @@ def _mask_rings(mask: Any, cut: MaskCut, *, soft: bool) -> list:
     return mask_to_polygon_rings(
         m,
         threshold=cut.mask_binarize if soft else None,
-        epsilon_frac=cut.epsilon_frac,
+        vertex_spacing=cut.vertex_spacing,
     )
 
 

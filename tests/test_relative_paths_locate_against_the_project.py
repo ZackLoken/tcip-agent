@@ -20,10 +20,10 @@ import pytest
 
 from tests._training_values import (
     COMBINED_SCORER,
-    EPSILON_FRAC,
     IOU_THRESHOLD,
     RATIONALE,
     TRIAGE_WEIGHTS,
+    VERTEX_SPACING,
     drawn_split,
 )
 from tests.test_coco_import import (
@@ -103,7 +103,7 @@ def _labeled(project: Path) -> None:
     ]
     document = _document(project / "labels.json", annotations=annotations)
     result = import_coco(
-        project, str(document), str(project), DATE, EPSILON_FRAC, RATIONALE
+        project, str(document), str(project), DATE, VERTEX_SPACING, RATIONALE
     )
     assert "error" not in result, result
 
@@ -131,7 +131,7 @@ def _import_coco(project: Path) -> Path:
 
     _document(project / "external.json")
     result = import_coco(
-        project, "external.json", ".", DATE, EPSILON_FRAC, RATIONALE
+        project, "external.json", ".", DATE, VERTEX_SPACING, RATIONALE
     )
     assert "error" not in result, result
     return Path(result["document"])
