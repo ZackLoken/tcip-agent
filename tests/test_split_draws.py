@@ -713,12 +713,12 @@ def test_run_hyperparameter_search_refuses_repeated_split_draw_seeds(
         param_space=sweep_space(),
         n_trials=1,
         **fifo_search(),
-        split_draws=2,
-        split_draw_seeds=[7, 7],
+        split_draws=3,
+        split_draw_seeds=[3, 7, 7],
         search_seed=0,
     )
 
-    assert "error" in result and "[7]" in result["error"]
+    assert "split_draw_seeds repeats [7]:" in result["error"]
     assert not ran
 
 
