@@ -1,6 +1,7 @@
-"""Tiled inference over the ``sahi`` library: the tile geometry a pass runs at, the slice lattice,
-a platform checkpoint wrapped as a SAHI detection model, and the one cross-tile merge every tiled
-path runs.
+"""Tiled inference over the ``sahi`` library.
+
+It holds the tile geometry a pass runs at, the slice lattice, a platform checkpoint wrapped as a
+SAHI detection model, and a cross-tile merge.
 """
 
 from __future__ import annotations
@@ -31,9 +32,10 @@ logger = logging.getLogger(__name__)
 def _native_ratio_tile_size(
     native_size: tuple[int, int] | None,
 ) -> int | None:
-    """The tile edge a checkpoint's own uniform untiled training frame justifies: the frame's edge
-    when every training frame shared one square size (its geometry's ``native_size``), else
-    ``None``.
+    """Return the tile edge a checkpoint's own uniform untiled training frame justifies.
+
+    That is the frame's edge when every training frame shared one square size (its geometry's
+    ``native_size``), else ``None``.
     """
     if native_size is None:
         return None
@@ -56,13 +58,13 @@ class TileEdgeContradictionError(ValueError):
 
 @dataclass(frozen=True)
 class TileGeometry:
-    """A pass's tile edge and overlap, each beside the source it came from, and the resize each
-    tile runs through.
+    """A pass's tile edge and overlap, each beside the source it came from, and its tile resize.
 
-    ``tile_size_source`` is ``"explicit"``, ``"derived"`` (the checkpoint's persisted training
-    geometry), ``"native_ratio"`` (the square frame the checkpoint trained untiled at) or
-    ``"unavailable"`` (``tile_size`` ``None``). ``overlap_source`` is ``"explicit"``,
-    ``"derived"`` or ``"unavailable"`` (``overlap`` ``None``).
+    The resize is the one each tile runs through. ``tile_size_source`` is ``"explicit"``,
+    ``"derived"`` (the checkpoint's persisted training geometry), ``"native_ratio"`` (the square
+    frame the checkpoint trained untiled at) or ``"unavailable"`` (``tile_size`` ``None``).
+    ``overlap_source`` is ``"explicit"``, ``"derived"`` or ``"unavailable"`` (``overlap``
+    ``None``).
     """
 
     tile_size: int | None
@@ -79,15 +81,15 @@ def resolve_tile_geometry(
     tile_size: int | None,
     overlap: float | None,
 ) -> TileGeometry:
-    """The tile geometry a pass of ``predictor`` runs at, each value by precedence: stated, then
-    the checkpoint's persisted training geometry (``train_tile_size``/``train_overlap``), then for
-    the edge the square frame it trained untiled at (``train_native_size``), else ``None``.
+    """Resolve the tile geometry a pass of ``predictor`` runs at.
 
-    A stated edge on a tiled pass that differs from the checkpoint's recorded edge (persisted, else
-    native) raises :class:`TileEdgeContradictionError` naming both. A tiled pass whose edge came
-    from the native frame runs each tile through the resize the run's recorded augmentation chain
-    applied (:func:`~tcip_mcp.pipelines.data.augmentations.recorded_resize`); every other pass
-    runs none.
+    Each value is taken by precedence: stated, then the checkpoint's persisted training geometry
+    (``train_tile_size``/``train_overlap``), then for the edge the square frame it trained untiled
+    at (``train_native_size``), else ``None``. A stated edge on a tiled pass that differs from the
+    checkpoint's recorded edge (persisted, else native) raises :class:`TileEdgeContradictionError`
+    naming both. A tiled pass whose edge came from the native frame runs each tile through the
+    resize the run's recorded augmentation chain applied
+    (:func:`~tcip_mcp.pipelines.data.augmentations.recorded_resize`); every other pass runs none.
     """
     persisted = predictor.train_tile_size
     native = _native_ratio_tile_size(predictor.train_native_size)
@@ -137,9 +139,10 @@ def resolve_tile_geometry(
 def packed_category(
     label: int, ids: Sequence[int], sizes: Sequence[int]
 ) -> int:
-    """One detection's label and attribute ids as the one integer a SAHI category carries: mixed
-    radix, the first attribute's id least significant, each attribute's radix its value count
-    ``sizes``, the label most significant; the label alone for no attributes.
+    """Pack one detection's label and attribute ids into the one integer a SAHI category carries.
+
+    The packing is mixed radix, the first attribute's id least significant, each attribute's radix
+    its value count ``sizes``, the label most significant; the label alone for no attributes.
     """
     packed = int(label)
     for value, size in zip(reversed(ids), reversed(sizes), strict=True):
@@ -150,7 +153,7 @@ def packed_category(
 def unpacked_category(
     packed: int, sizes: Sequence[int]
 ) -> tuple[int, list[int]]:
-    """``(label, attribute ids)`` from a :func:`packed_category` integer."""
+    """Unpack ``(label, attribute ids)`` from a :func:`packed_category` integer."""
     ids = []
     for size in sizes:
         packed, value = divmod(packed, size)
@@ -164,11 +167,12 @@ def slice_lattice(
     tile_size: int,
     overlap: float,
 ) -> list[tuple[int, int, int, int]]:
-    """The half-open ``(x0, y0, x1, y1)`` slices SAHI's ``get_slice_bboxes`` lays over a ``height``
-    x ``width`` frame at ``tile_size`` and ``overlap``, every slice parameter stated and automatic
-    slice sizing off. A slice past the far edge is pulled back to end at it, so no slice is padded
-    and none exceeds the frame; a frame shorter than ``tile_size`` on an axis gets slices that
-    short on it.
+    """Return the half-open ``(x0, y0, x1, y1)`` slices over a ``height`` x ``width`` frame.
+
+    The slices are SAHI's ``get_slice_bboxes``' at ``tile_size`` and ``overlap``, every slice
+    parameter stated and automatic slice sizing off. A slice past the far edge is pulled back to
+    end at it, so no slice is padded and none exceeds the frame; a frame shorter than
+    ``tile_size`` on an axis gets slices that short on it.
     """
     return [
         (int(x0), int(y0), int(x1), int(y1))
@@ -185,16 +189,18 @@ def slice_lattice(
 
 
 def overlap_ratio(tile_size: int, pixels: int) -> float:
-    """The ``overlap`` under which :func:`slice_lattice` lays neighboring ``tile_size`` slices
-    overlapping by at least ``pixels`` (a slice snapped back to the frame's far edge overlaps
-    more), SAHI truncating ``overlap x tile_size`` to whole pixels.
+    """Return the ``overlap`` at which neighboring slices overlap by at least ``pixels``.
+
+    The slices are :func:`slice_lattice`'s at ``tile_size`` (a slice snapped back to the frame's
+    far edge overlaps more), SAHI truncating ``overlap x tile_size`` to whole pixels.
     """
     return (pixels + 0.5) / tile_size
 
 
 def is_full_slice(box: tuple[int, int, int, int], tile_size: int) -> bool:
-    """Whether a lattice slice spans the whole ``tile_size`` on both axes, which it does unless
-    the frame is shorter than the tile on that axis.
+    """Return whether a lattice slice spans the whole ``tile_size`` on both axes.
+
+    It does unless the frame is shorter than the tile on that axis.
     """
     x0, y0, x1, y1 = box
     return x1 - x0 == tile_size and y1 - y0 == tile_size
@@ -203,9 +209,11 @@ def is_full_slice(box: tuple[int, int, int, int], tile_size: int) -> bool:
 def prediction_rows(
     predictions: list[ObjectPrediction], sizes: Sequence[int]
 ) -> list[dict]:
-    """Full-frame predictions as plain rows (xyxy ``bbox``, ``category_id`` the label, the
-    ``attributes`` ids :func:`unpacked_category` reads off the category under the value counts
-    ``sizes``, ``score``, ``segmentation`` polygons or ``None``).
+    """Return full-frame predictions as plain rows.
+
+    Each row holds an xyxy ``bbox``, ``category_id`` the label, the ``attributes`` ids
+    :func:`unpacked_category` reads off the category under the value counts ``sizes``, ``score``,
+    and ``segmentation`` polygons or ``None``.
     """
     rows = []
     for p in predictions:
@@ -225,7 +233,7 @@ def prediction_rows(
 def predictions_from_rows(
     rows: list[dict], full_shape: list[int], sizes: Sequence[int]
 ) -> list[ObjectPrediction]:
-    """The predictions :func:`prediction_rows` recorded, over a ``[height, width]`` frame."""
+    """Rebuild the predictions :func:`prediction_rows` recorded over a ``[height, width]`` frame."""
     return [
         ObjectPrediction(
             bbox=r["bbox"],
@@ -241,12 +249,12 @@ def predictions_from_rows(
 
 
 def cross_tile_merge(execution: Execution) -> PostprocessPredictions:
-    """The SAHI postprocess a tiled execution record's merge names, at its threshold over that
-    postprocess's match metric (:func:`~tcip_mcp.pipelines.execution.cross_tile_merge_of`),
-    class-agnostic over the one subject so two slices' calls of one object merge whatever
-    their attribute values (a merged box keeps the category of the member SAHI keeps, the
-    higher-scoring), on SAHI's numpy backend, so the merge leaves the process environment as it
-    found it.
+    """Build the SAHI postprocess a tiled execution record's merge names.
+
+    It runs at the record's threshold over that postprocess's match metric
+    (:func:`~tcip_mcp.pipelines.execution.cross_tile_merge_of`), class-agnostic over the one
+    subject so two slices' calls of one object merge whatever their attribute values (a merged box
+    keeps the category of the member SAHI keeps, the higher-scoring), on SAHI's numpy backend.
     """
     # SAHI's torchvision backend picks its device by writing CUDA_VISIBLE_DEVICES for the process.
     set_postprocess_backend("numpy")
@@ -267,8 +275,7 @@ class TcipDetectionModel(DetectionModel):
     stretches a slice PIL represents faithfully to that ``(width, height)`` and maps its boxes and
     masks back per axis, and refuses a slice PIL does not represent (``datasets.unchained``). Each
     slice runs under the detection cap ``cap_of`` gives it, which ``caps`` keeps per slice of the
-    last batch, and the record's in-model score threshold ``conf``
-    (:func:`~tcip_mcp.pipelines.operating_point.governed_forward`). Its detections become
+    last batch, and the record's in-model score threshold ``conf``. Its detections become
     ``ObjectPrediction``s clipped to the slice, each carrying its label and its ``attributes`` ids
     under the predictor's ``attribute_sizes`` as one :func:`packed_category`; where the record
     collects masks, each mask cut by its ``mask_cut`` into the rings
@@ -286,6 +293,7 @@ class TcipDetectionModel(DetectionModel):
         cap_of: Callable[[np.ndarray], int],
         band_interpretations: tuple[str, ...] | None,
     ) -> None:
+        """Wrap ``predictor`` to run each slice under ``execution`` at the cap ``cap_of`` gives."""
         self._predictor = predictor
         self.execution = execution
         self._cap_of = cap_of
@@ -295,17 +303,19 @@ class TcipDetectionModel(DetectionModel):
         super().__init__(model=predictor.model)
 
     def set_device(self, device: str | None = None) -> None:
-        """The predictor's own device."""
+        """Take the predictor's own device; ``device`` is not read."""
         self.device = self._predictor.device
 
     def set_model(self, model: Any, **kwargs: Any) -> None:
+        """Hold ``model`` as the model the slices run through; ``kwargs`` are not read."""
         self.model = model
 
     def perform_inference(self, image: np.ndarray) -> None:
+        """Predict one ``image`` through :meth:`perform_batch_inference`."""
         self.perform_batch_inference([image])
 
     def perform_batch_inference(self, images: list[np.ndarray]) -> None:
-        """``images`` predicted, one forward per distinct cap among them."""
+        """Predict ``images``, one forward per distinct cap among them."""
         from PIL import Image
 
         from tcip_mcp.pipelines.image_utils import (

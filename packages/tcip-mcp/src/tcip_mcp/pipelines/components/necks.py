@@ -1,8 +1,4 @@
-"""Neck modules: adapt backbone features for downstream heads.
-
-Necks sit between the backbone and head(s), transforming multi-scale
-feature maps into the format each head expects.
-"""
+"""Neck modules: adapt a backbone's multi-scale feature maps."""
 
 from __future__ import annotations
 
@@ -26,6 +22,11 @@ class FPN(nn.Module):
         out_channels: int = 256,
         add_p2: bool = False,
     ) -> None:
+        """Build a lateral and an output conv per level of ``in_channels_list``.
+
+        Every output carries ``out_channels``; ``add_p2`` adds a finer level upsampled 2x from the
+        finest lateral.
+        """
         super().__init__()
         self.out_channels = out_channels
         self.add_p2 = add_p2
@@ -44,6 +45,7 @@ class FPN(nn.Module):
     def forward(
         self, features: dict[str, torch.Tensor]
     ) -> dict[str, torch.Tensor]:
+        """Return the pyramid ``p0`` (finest) onward for ``features`` read in sorted key order."""
         keys = sorted(features.keys())
         feat_list = [features[k] for k in keys]
 
@@ -81,6 +83,7 @@ class PAN(nn.Module):
         out_channels: int = 256,
         add_p2: bool = False,
     ) -> None:
+        """Build an :class:`FPN` over ``in_channels_list`` and a stride-2 conv per level step."""
         super().__init__()
         self.out_channels = out_channels
         self.fpn = FPN(in_channels_list, out_channels, add_p2=add_p2)
@@ -93,6 +96,7 @@ class PAN(nn.Module):
     def forward(
         self, features: dict[str, torch.Tensor]
     ) -> dict[str, torch.Tensor]:
+        """Return the FPN pyramid of ``features`` with the bottom-up pathway added, ``p0`` on."""
         fpn_out = self.fpn(features)
         keys = sorted(fpn_out.keys())
         feat_list = [fpn_out[k] for k in keys]
@@ -107,19 +111,17 @@ class PAN(nn.Module):
 
 
 class IdentityNeck(nn.Module):
-    """Pass-through: returns features unchanged.
-
-    Use when the head directly consumes backbone features (e.g. when
-    only the final feature map is needed).
-    """
+    """Pass-through: returns features unchanged."""
 
     def __init__(self, in_channels_list: list[int], **_: Any) -> None:
+        """Take the last level's channel count, 0 for none; other keywords are not read."""
         super().__init__()
         self.out_channels = in_channels_list[-1] if in_channels_list else 0
 
     def forward(
         self, features: dict[str, torch.Tensor]
     ) -> dict[str, torch.Tensor]:
+        """Return ``features`` unchanged."""
         return features
 
 
@@ -127,14 +129,16 @@ class GlobalAvgPoolNeck(nn.Module):
     """Global average pooling: produces a flat feature vector.
 
     Takes the last-stage feature map from backbone and pools it to
-    [B, C].  Used for classification, ordinal, and regression heads.
+    [B, C].
     """
 
     def __init__(self, in_channels_list: list[int], **_: Any) -> None:
+        """Take the last level's channel count, 0 for none; other keywords are not read."""
         super().__init__()
         self.out_channels = in_channels_list[-1] if in_channels_list else 0
 
     def forward(self, features: dict[str, torch.Tensor]) -> torch.Tensor:
+        """Return the last sorted key's feature map pooled to ``[B, C]``."""
         # Take highest-level features
         keys = sorted(features.keys())
         x = features[keys[-1]]

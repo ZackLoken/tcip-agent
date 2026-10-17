@@ -17,13 +17,14 @@ from tcip_mcp.pipelines.operating_point import DETECTIONS_PER_IMG, SCORE_THRESH
 
 ROI_OUTPUT_SIZE = 7
 """The edge, in feature cells, every box's pooled features are resampled to: torchvision's own
-box-head pool edge, the value these builders' RoI pools already used."""
+box-head pool edge."""
 
 
 class BackboneNeckAdapter(nn.Module):
     """Wrap a backbone+neck so a torchvision detector can consume it as its backbone."""
 
     def __init__(self, backbone: nn.Module, neck: nn.Module) -> None:
+        """Hold ``backbone`` and ``neck``, taking the neck's last channel count as its own."""
         super().__init__()
         self.backbone = backbone
         self.neck = neck
@@ -37,6 +38,7 @@ class BackboneNeckAdapter(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> OrderedDict:
+        """Return the neck's features of ``x`` in sorted key order, a lone map under ``"0"``."""
         features = self.backbone(x)
         neck_out = self.neck(features)
         if isinstance(neck_out, dict):
@@ -45,17 +47,17 @@ class BackboneNeckAdapter(nn.Module):
 
 
 def _anchor_sizes(num_levels: int, base: int) -> tuple[tuple[int, ...], ...]:
-    """One anchor size per pyramid level, ``base`` at the finest, doubling each level.
+    """Return one anchor size per pyramid level, ``base`` at the finest, doubling each level.
 
-    ``base=8, num_levels=4`` -> ``((8,),(16,),(32,),(64,))``. Generated for ``num_levels`` so
-    ``add_p2`` (5+ levels) doesn't crash.
+    ``base=8, num_levels=4`` -> ``((8,),(16,),(32,),(64,))``.
     """
     return tuple((base * 2**i,) for i in range(num_levels))
 
 
 def _probe_in_chans(adapter: Any) -> int | None:
-    """The ``in_channels`` of ``adapter``'s first ``Conv2d`` in registration order, or ``None``
-    when it holds no conv.
+    """Return the ``in_channels`` of ``adapter``'s first ``Conv2d`` in registration order.
+
+    ``None`` when it holds no conv.
     """
     for module in adapter.modules():
         if isinstance(module, nn.Conv2d):
@@ -66,9 +68,10 @@ def _probe_in_chans(adapter: Any) -> int | None:
 def _normalization(
     adapter: Any, in_chans: int | None, image_mean, image_std, detector: str
 ) -> dict:
-    """Validated ``image_mean``/``image_std`` kwargs for a torchvision detector at ``in_chans``
-    (probed from ``adapter`` when ``None``), one value per band. Refuses (``ValueError``)
-    statistics of another length than the band count, naming the stated route.
+    """Validate ``image_mean``/``image_std`` kwargs for a torchvision detector at ``in_chans``.
+
+    ``in_chans`` is probed from ``adapter`` when ``None``; one value per band. Refuses
+    (``ValueError``) statistics of another length than the band count, naming the stated route.
     """
     mean, std = [float(v) for v in image_mean], [float(v) for v in image_std]
     # The caller is authoritative: only they know the band count, and the probe is a registration-
@@ -92,8 +95,9 @@ def _rcnn_anchors_and_box_pool(
     anchor_base_size: int,
     aspect_ratios: tuple[float, ...],
 ) -> tuple[Any, Any]:
-    """The anchor generator and box RoI pool a two-stage R-CNN reads its feature levels with,
-    ``aspect_ratios`` at every level.
+    """Build the anchor generator and box RoI pool a two-stage R-CNN reads its levels with.
+
+    Every level takes ``aspect_ratios``.
     """
     from torchvision.models.detection.rpn import AnchorGenerator
     from torchvision.ops import MultiScaleRoIAlign
@@ -281,8 +285,10 @@ _BUILDER_SUPPLIED = frozenset(
 
 
 def _accepted_kwargs(name: str) -> set[str]:
-    """Every keyword the detector ``name`` accepts: its builder's own named parameters plus its
-    torchvision class's, less what the builder supplies itself.
+    """Return every keyword the detector ``name`` accepts.
+
+    That is its builder's own named parameters plus its torchvision class's, less what the builder
+    supplies itself.
     """
     import torchvision.models.detection as detection
 
@@ -300,9 +306,7 @@ def _accepted_kwargs(name: str) -> set[str]:
 
 
 def _held(name: str) -> property:
-    """A property reading and writing ``name`` on the detector an :class:`AttributeDetector`
-    holds.
-    """
+    """Return a property reading and writing ``name`` on the detector an attribute model holds."""
     return property(
         lambda self: getattr(self.detector, name),
         lambda self, value: setattr(self.detector, name, value),
@@ -310,11 +314,11 @@ def _held(name: str) -> property:
 
 
 class AttributeDetector(nn.Module):
-    """A torchvision detector with one per-instance head per attribute of its subject, each over
-    the channel means of the features :class:`~torchvision.ops.MultiScaleRoIAlign` pools at a box.
+    """A torchvision detector with one per-instance head per attribute of its subject.
 
-    ``attributes`` are the scope's attribute records, each carrying ``name``, ``type`` and
-    ``values``: a categorical one gets a :class:`~tcip_mcp.pipelines.components.heads.
+    Each head reads the channel means of the features :class:`~torchvision.ops.MultiScaleRoIAlign`
+    pools at a box. ``attributes`` are the scope's attribute records, each carrying ``name``,
+    ``type`` and ``values``: a categorical one gets a :class:`~tcip_mcp.pipelines.components.heads.
     ClassificationHead` trained by cross-entropy, an ordinal one an :class:`~tcip_mcp.pipelines.
     components.heads.OrdinalHead` trained by its CORN loss. Forward hooks on the detector's
     ``backbone`` and ``transform`` hold the feature maps, resized images and resized targets of
@@ -339,6 +343,11 @@ class AttributeDetector(nn.Module):
         featmap_names: list[str],
         in_channels: int,
     ) -> None:
+        """Hold ``detector`` and build one head per record of ``attributes``.
+
+        Each head reads ``in_channels`` pooled channel means off ``featmap_names``; the hooks that
+        hold one forward's features and resized inputs are registered on ``detector``.
+        """
         from torchvision.ops import MultiScaleRoIAlign
 
         from tcip_mcp.pipelines.components.heads import (
@@ -385,6 +394,11 @@ class AttributeDetector(nn.Module):
     def forward(
         self, images: list[torch.Tensor], targets: list[dict] | None = None
     ) -> Any:
+        """Run the detector and its attribute heads over ``images``.
+
+        In train mode, return the detector's losses joined by each head's loss over its assessed
+        target rows; in eval mode, return the detector's outputs, each carrying ``attributes``.
+        """
         from tcip_annotation.json_io import UNASSESSED
 
         out = self.detector(images, targets)
@@ -439,17 +453,17 @@ def build_detector(
     attributes: Any = (),
     **kwargs: Any,
 ) -> Any:
-    """Instantiate a detector builder by name, held by an :class:`AttributeDetector` carrying one
-    head per record of ``attributes`` when it names any.
+    """Instantiate a detector builder by name, held by an :class:`AttributeDetector` if need be.
 
-    Raises ``ValueError`` for an unknown name and ``TypeError`` for an unrecognized kwarg, naming
-    the detectors that do take it. Accepted keys are the builder's own plus the torchvision
+    The :class:`AttributeDetector` carries one head per record of ``attributes`` when it names
+    any. Raises ``ValueError`` for an unknown name and ``TypeError`` for an unrecognized kwarg,
+    naming the detectors that do take it. Accepted keys are the builder's own plus the torchvision
     detector class's, which the builder forwards, but an operating-point knob (a detection cap,
     ``box_detections_per_img`` or ``detections_per_img``, or a score threshold,
-    ``box_score_thresh`` or ``score_thresh``), which refuses (``ValueError``): both are set at
-    every forward. Every build requires ``anchor_base_size``, ``min_size``, ``max_size`` and,
-    but for ``fcos``, ``aspect_ratios`` (``schemas.DetectorGeometry``), and ``image_mean`` and
-    ``image_std`` of the band count's length (``_normalization``).
+    ``box_score_thresh`` or ``score_thresh``), which refuses (``ValueError``). Every build
+    requires ``anchor_base_size``, ``min_size``, ``max_size`` and, but for ``fcos``,
+    ``aspect_ratios`` (``schemas.DetectorGeometry``), and ``image_mean`` and ``image_std`` of the
+    band count's length.
     """
     from tcip_mcp.pipelines.model_build import resolve_named
 

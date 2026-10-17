@@ -1,12 +1,14 @@
-"""Active learning selector: review-queue (medium-confidence) and unscoreable partitioning over a
-checkpoint's own prediction dicts.
+"""Active learning selector: review-queue and unscoreable partitioning of predictions.
+
+The review queue is the medium-confidence predictions; both partition a checkpoint's own
+prediction dicts.
 """
 
 from __future__ import annotations
 
 
 def _confidence_values(pred: dict) -> list[float]:
-    """Flat image-level confidences from a GenericPredictor prediction dict.
+    """Return flat image-level confidences from a GenericPredictor prediction dict.
 
     Classification/ordinal heads emit per-image confidences under ``head{i}_confidences``; matching
     the suffix covers a model with any number of heads. ``*_probabilities`` is not matched.
@@ -19,8 +21,10 @@ def _confidence_values(pred: dict) -> list[float]:
 
 
 def unscoreable(predictions: list[dict]) -> list[dict]:
-    """Predictions with no confidence-bearing signal: no ``scores`` key (checked by presence;
-    ``scores: []`` is a scored negative) and no ``*_confidences`` head output.
+    """Return the predictions with no confidence-bearing signal.
+
+    That is no ``scores`` key (checked by presence; ``scores: []`` is a scored negative) and no
+    ``*_confidences`` head output.
     """
     return [
         pred

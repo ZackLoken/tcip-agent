@@ -1,12 +1,7 @@
 """External overview pyramids (.ovr sidecars) for large rasters.
 
-GDAL serves a reduced-resolution read from the nearest overview level at or above the requested
-resolution, so a display-scale read of a huge raster costs the overview's pixels instead of the
-native ones. :func:`build_overviews` writes the GDAL-standard external ``.ovr`` next to the raster
-(GDAL's ``TIFF_USE_OVR`` option directs the build to the sidecar; the raster itself is never
-rewritten);
-:func:`overview_dims` and :func:`sidecar_valid` are the checks a caller holding no reader gates
-on first.
+:func:`build_overviews` writes the GDAL-standard external ``.ovr`` next to the raster (GDAL's
+``TIFF_USE_OVR`` option directs the build to the sidecar; the raster itself is never rewritten).
 """
 
 from __future__ import annotations
@@ -21,9 +16,8 @@ from typing import NoReturn
 from tcip_mcp.pipelines.raster_source import SourceHeader
 
 PYRAMID_FLOOR_EDGE = 1024
-"""Longest edge of a pyramid's deepest level, and the edge a raster too large to sample natively
-has its display statistics read at, so that read always has a level to come off: an engineering
-bound, a level small enough to read whole in one native pass, chosen and not measured."""
+"""Longest edge of a pyramid's deepest level: an engineering bound, a level small enough to read
+whole in one native pass, chosen and not measured."""
 
 # How often the parent samples the growing sidecar to report progress and honor a cancel.
 _BUILD_POLL_SECONDS = 0.2
@@ -51,25 +45,26 @@ with rasterio.Env(TIFF_USE_OVR=True):
 
 
 def overview_sidecar(path: str | Path) -> Path:
-    """The external overview sidecar GDAL pairs with ``path``: the full filename plus ``.ovr``."""
+    """Return the external overview sidecar GDAL pairs with ``path``, its filename plus ``.ovr``."""
     return Path(str(path) + ".ovr")
 
 
 def overview_dims(path: str | Path) -> list[tuple[int, int]]:
-    """The levels of ``path``'s physical pyramid
-    (:meth:`~tcip_mcp.pipelines.raster_source.SourceHeader.gdal`'s ``level_dims``). Raises what
-    its header read and GDAL's open raise.
+    """Return the levels of ``path``'s physical pyramid.
+
+    They are :meth:`~tcip_mcp.pipelines.raster_source.SourceHeader.gdal`'s ``level_dims``. Raises
+    what its header read and GDAL's open raise.
     """
     with SourceHeader(path).gdal() as source:
         return source.level_dims()
 
 
 def plan_overview_build(ds) -> dict:
-    """The build of the pyramid of the raster the open GDAL dataset ``ds`` is (``ds.name``),
-    planned over ``ds`` and the raster's TIFF header: ``{"refusal": why}`` when the raster already
-    carries internal overviews or has no
-    level to build, else its ``levels`` (:func:`overview_levels`) and whether it is a ``palette``
-    raster (whose indices are resampled by nearest, never averaged).
+    """Plan the pyramid build of the raster the open GDAL dataset ``ds`` is (``ds.name``).
+
+    The plan is read off ``ds`` and the raster's TIFF header: ``{"refusal": why}`` when the raster
+    already carries internal overviews or has no level to build, else its ``levels``
+    (:func:`overview_levels`) and whether it is a ``palette`` raster.
     """
     path = ds.name
     if ds.overviews(1):
@@ -89,9 +84,10 @@ def plan_overview_build(ds) -> dict:
 
 
 def sidecar_valid(path: str | Path) -> bool:
-    """Whether ``path``'s external sidecar exists and every tile in it was actually written, read
-    off its header (tile byte counts, no pixel decode): a zero-length tile, which reads back as
-    silent zeros, or a header tifffile cannot parse marks the sidecar invalid.
+    """Return whether ``path``'s external sidecar exists with every tile in it actually written.
+
+    The answer is read off its header (tile byte counts, no pixel decode): a zero-length tile or a
+    header tifffile cannot parse marks the sidecar invalid.
     """
     sidecar = overview_sidecar(path)
     if not sidecar.is_file():
@@ -109,11 +105,11 @@ def sidecar_valid(path: str | Path) -> bool:
 
 
 def overview_levels(width: int, height: int) -> list[int]:
-    """Power-of-2 decimation levels down to the first whose longest edge, in the whole pixels
-    GDAL sizes a level with (the edge over the factor, rounded up), is at most
-    :data:`PYRAMID_FLOOR_EDGE`.
+    """Return the power-of-2 decimation levels down to the first within the floor edge.
 
-    Empty when the raster's own longest edge already is.
+    That first level is the one whose longest edge, in the whole pixels GDAL sizes a level with
+    (the edge over the factor, rounded up), is at most :data:`PYRAMID_FLOOR_EDGE`. Empty when the
+    raster's own longest edge already is.
     """
     levels: list[int] = []
     factor = 1
@@ -126,23 +122,20 @@ def overview_levels(width: int, height: int) -> list[int]:
 def build_overviews(
     path: str | Path, *, progress_cb: Callable[[int], object] | None = None
 ) -> Path:
-    """Build ``path``'s external ``.ovr`` pyramid as :func:`plan_overview_build` plans it and
-    return the sidecar's path. The raster is read once, in the child process the build runs in:
-    its header and one GDAL open plan and write the levels.
+    """Build ``path``'s external ``.ovr`` pyramid and return the sidecar's path.
+
+    The build follows :func:`plan_overview_build`'s plan. The raster is read once, in the child
+    process the build runs in: its header and one GDAL open plan and write the levels.
 
     Refuses (``ValueError``) when a valid sidecar already exists, and with the plan's refusal
-    when internal overviews exist or there is no level to build (an empty level list would clear
-    existing overviews instead of building any). An invalid sidecar (see :func:`sidecar_valid`)
-    is deleted and rebuilt. On any build failure or cancellation the sidecar is deleted: an
-    interrupted build otherwise leaves a valid-looking file whose unwritten tiles read back as
-    silent zeros.
+    when internal overviews exist or there is no level to build. An invalid sidecar (see
+    :func:`sidecar_valid`) is deleted and rebuilt. On any build failure or cancellation the
+    sidecar is deleted.
 
     ``progress_cb``, when given, receives the sidecar's size in bytes at each poll, ``0`` before
     the child starts, and the finished sidecar's size once the build succeeds; returning ``False``
-    while the build runs cancels it. It is consulted once before the child starts, so a caller that
-    cancels immediately is honored whatever the raster's size. The child process is what makes a
-    running build cancelable: rasterio's ``build_overviews`` takes no progress or cancel
-    callback, so progress is the sidecar's growth and a cancel terminates the child.
+    while the build runs cancels it. It is consulted once before the child starts. Progress is the
+    sidecar's growth, and a cancel terminates the child.
     """
     import json
 

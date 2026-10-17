@@ -1,7 +1,7 @@
 """Active learning scorers: rank unlabeled images by informativeness.
 
 Scorers resolve from a scorer block through a small dict registry of factories taking
-``(task, **settings)`` (``resolve_scorer``) the agent can extend with ``register_scorer``,
+``(task, **settings)`` (``resolve_scorer``), extensible with ``register_scorer``,
 composing a new acquisition function (e.g. margin, least-confidence). The built-in reference
 scorers:
   - UncertaintyScorer: prediction entropy / confidence spread
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 def _entropy(logits: torch.Tensor) -> float:
-    """Mean softmax entropy of a ``[B, C]`` logits tensor (classification uncertainty)."""
+    """Return the mean softmax entropy of a ``[B, C]`` logits tensor."""
     probs = functional.softmax(logits, dim=-1)
     return -(probs * probs.clamp(min=1e-8).log()).sum(-1).mean().item()
 
@@ -42,9 +42,10 @@ class BaseScorer(ABC):
     def score(
         self, image_paths: list[str], predictor: GenericPredictor
     ) -> list[tuple[str, float]]:
-        """Return (path, score) pairs sorted descending (highest = most valuable), reading each
-        candidate through the loaded checkpoint ``predictor``: its model, its device and its
-        ``in_chans`` travel together.
+        """Return (path, score) pairs sorted descending (highest = most valuable).
+
+        Each candidate is read through the loaded checkpoint ``predictor``: its model, its device
+        and its ``in_chans`` travel together.
         """
         ...
 
@@ -57,12 +58,19 @@ class UncertaintyScorer(BaseScorer):
     """
 
     def __init__(self, task: str) -> None:
+        """Hold the ``task`` whose model outputs the scorer reads."""
         self.task = task
 
     @torch.no_grad()
     def score(
         self, image_paths: list[str], predictor: GenericPredictor
     ) -> list[tuple[str, float]]:
+        """Return (path, uncertainty) pairs sorted descending.
+
+        A detector's uncertainty is one minus its mean detection score, 0.0 for no detection;
+        any other model's is the mean softmax entropy over its heads' logits. Raises
+        ``ValueError`` for an output carrying no class logits.
+        """
         model = predictor.model
         model.eval()
         scored: list[tuple[str, float]] = []
@@ -113,15 +121,22 @@ class DiversityScorer(BaseScorer):
     """
 
     def __init__(self, labeled_embeddings: np.ndarray | None = None) -> None:
+        """Hold the labeled set's ``[N, D]`` embeddings, if any."""
         self._labeled = labeled_embeddings  # [N, D] numpy array
 
     def set_labeled_embeddings(self, embeddings: np.ndarray) -> None:
+        """Replace the labeled set's embeddings with ``embeddings``."""
         self._labeled = embeddings
 
     @torch.no_grad()
     def score(
         self, image_paths: list[str], predictor: GenericPredictor
     ) -> list[tuple[str, float]]:
+        """Return (path, cosine distance to the nearest labeled embedding) pairs, descending.
+
+        With no labeled embeddings every path scores 1.0, with a warning. Raises
+        ``RuntimeError`` for a model exposing no ``backbone``.
+        """
         model = predictor.model
         if not hasattr(model, "backbone"):
             # No silent random-noise embeddings: diversity needs real backbone features.
@@ -186,6 +201,7 @@ class CombinedScorer(BaseScorer):
         diversity_weight: float,
         labeled_embeddings: np.ndarray | None = None,
     ) -> None:
+        """Combine an uncertainty scorer for ``task`` and a diversity scorer at their weights."""
         self.unc = UncertaintyScorer(task)
         self.div = DiversityScorer(labeled_embeddings)
         self.uw = uncertainty_weight
@@ -194,6 +210,7 @@ class CombinedScorer(BaseScorer):
     def score(
         self, image_paths: list[str], predictor: GenericPredictor
     ) -> list[tuple[str, float]]:
+        """Return (path, weighted sum of the normalized scores) pairs sorted descending."""
         unc_scores = dict(self.unc.score(image_paths, predictor))
         div_scores = dict(self.div.score(image_paths, predictor))
 
@@ -225,16 +242,18 @@ SCORER_REGISTRY: dict[str, Callable[..., BaseScorer]] = {
 
 
 def register_scorer(name: str, factory: Callable[..., BaseScorer]) -> None:
-    """Register an acquisition-function scorer's factory, taking ``(task, **settings)``, under
-    ``name`` so a scorer block naming it resolves to it.
+    """Register an acquisition-function scorer's factory under ``name``.
+
+    The factory takes ``(task, **settings)``; a scorer block naming ``name`` resolves to it.
     """
     SCORER_REGISTRY[name] = factory
 
 
 def resolve_scorer(block: ScorerSpec, task: str) -> BaseScorer:
-    """The scorer the factory registered under ``block.name``, or the dotted ``module:factory``
-    it names, builds for ``task`` from the block's own values
-    (:func:`~tcip_mcp.pipelines.model_build.resolve_named`, whose refusals propagate). The
+    """Build the scorer ``block`` names for ``task`` from the block's own values.
+
+    The factory is the one registered under ``block.name``, or the dotted ``module:factory`` it
+    names (:func:`~tcip_mcp.pipelines.model_build.resolve_named`, whose refusals propagate). The
     factory's own signature refuses (``TypeError``) a value it requires that the block leaves
     unstated, and one the block states that it does not take, naming each.
     """

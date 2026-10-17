@@ -1,7 +1,6 @@
 """Loss functions for bespoke models: plain importable classes + a name->class map.
 
-Bespoke model code imports a loss class directly or calls ``build_loss(name)``; the
-``a+b`` syntax composes a ``CombinedLoss`` from multiple terms.
+The ``a+b`` syntax composes a ``CombinedLoss`` from multiple terms.
 """
 
 from __future__ import annotations
@@ -21,14 +20,16 @@ class BaseLoss(nn.Module):
     def forward(
         self, predictions: torch.Tensor, targets: torch.Tensor
     ) -> torch.Tensor:
+        """Return the loss of ``predictions`` against ``targets``; each subclass provides it."""
         raise NotImplementedError
 
 
 def dice_loss(
     probs: torch.Tensor, targets: torch.Tensor, smooth: float = 1e-6
 ) -> torch.Tensor:
-    """One minus the Dice coefficient of ``probs`` against ``targets`` of the same shape, each
-    summed over its last axis and the result averaged over every other axis.
+    """Return one minus the Dice coefficient of ``probs`` against ``targets`` of the same shape.
+
+    Each is summed over its last axis and the result averaged over every other axis.
     """
     intersection = (probs * targets).sum(-1)
     return (
@@ -41,10 +42,11 @@ def dice_loss(
 def corn_loss(
     logits: torch.Tensor, ranks: torch.Tensor, num_ranks: int
 ) -> torch.Tensor:
-    """The CORN loss of ``[B, num_ranks - 1]`` conditional ``logits`` against ``[B]`` 0-indexed
-    ``ranks``: for each rank ``k``, binary cross-entropy of classifier ``k`` on the samples with
-    a rank of at least ``k`` predicting a rank above ``k``, averaged over the classifiers that saw
-    any sample, accumulated in the logits' own dtype.
+    """Return the CORN loss of ``[B, num_ranks - 1]`` conditional ``logits`` against ``ranks``.
+
+    ``ranks`` are ``[B]`` and 0-indexed. For each rank ``k``, the loss is the binary cross-entropy
+    of classifier ``k`` on the samples with a rank of at least ``k`` predicting a rank above
+    ``k``, averaged over the classifiers that saw any sample, accumulated in the logits' own dtype.
     """
     loss = torch.tensor(0.0, device=logits.device, dtype=logits.dtype)
     n_tasks = 0
@@ -60,21 +62,27 @@ def corn_loss(
 
 
 class CrossEntropyLoss(BaseLoss):
+    """Cross-entropy over class logits (``nn.CrossEntropyLoss``)."""
+
     name = "cross_entropy"
 
     def __init__(
         self, weight: torch.Tensor | None = None, label_smoothing: float = 0.0
     ):
+        """Take an optional per-class ``weight`` and the ``label_smoothing`` to apply."""
         super().__init__()
         self.ce = nn.CrossEntropyLoss(
             weight=weight, label_smoothing=label_smoothing
         )
 
     def forward(self, predictions, targets):
+        """Return the cross-entropy of ``predictions`` logits against class ``targets``."""
         return self.ce(predictions, targets)
 
 
 class FocalLoss(BaseLoss):
+    """Focal loss over class logits: cross-entropy scaled by ``(1 - p_t) ** gamma``."""
+
     name = "focal"
 
     def __init__(
@@ -84,6 +92,10 @@ class FocalLoss(BaseLoss):
         weight: torch.Tensor | list | None = None,
         reduction: str = "mean",
     ):
+        """Take ``alpha``, ``gamma``, an optional per-class ``weight`` and the ``reduction``.
+
+        A ``weight`` given as a list is held as a float32 tensor buffer.
+        """
         super().__init__()
         self.alpha = alpha
         self.gamma = gamma
@@ -96,6 +108,11 @@ class FocalLoss(BaseLoss):
         self.register_buffer("weight", weight)
 
     def forward(self, predictions, targets):
+        """Return the focal loss of ``predictions`` against ``targets`` under ``reduction``.
+
+        A per-class ``weight`` replaces the scalar ``alpha``. ``"mean"`` averages, ``"sum"`` sums,
+        and any other reduction returns the per-sample losses.
+        """
         if self.weight is not None:
             # Per-class weight subsumes the scalar alpha: no double balance.
             ce = functional.cross_entropy(
@@ -117,35 +134,47 @@ class FocalLoss(BaseLoss):
 
 
 class SmoothL1Loss(BaseLoss):
+    """Smooth L1 loss (``nn.SmoothL1Loss``)."""
+
     name = "smooth_l1"
 
     def __init__(self, beta: float = 1.0):
+        """Take the ``beta`` at which the loss turns from quadratic to linear."""
         super().__init__()
         self.loss = nn.SmoothL1Loss(beta=beta)
 
     def forward(self, predictions, targets):
+        """Return the smooth L1 loss of ``predictions`` against ``targets``."""
         return self.loss(predictions, targets)
 
 
 class HuberLoss(BaseLoss):
+    """Huber loss (``nn.HuberLoss``)."""
+
     name = "huber"
 
     def __init__(self, delta: float = 1.0):
+        """Take the ``delta`` at which the loss turns from quadratic to linear."""
         super().__init__()
         self.loss = nn.HuberLoss(delta=delta)
 
     def forward(self, predictions, targets):
+        """Return the Huber loss of ``predictions`` against ``targets``."""
         return self.loss(predictions, targets)
 
 
 class BCEWithLogitsLoss(BaseLoss):
+    """Binary cross-entropy over logits (``nn.BCEWithLogitsLoss``)."""
+
     name = "bce"
 
     def __init__(self, pos_weight: torch.Tensor | None = None):
+        """Take an optional ``pos_weight`` on the positive class."""
         super().__init__()
         self.loss = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
     def forward(self, predictions, targets):
+        """Return the binary cross-entropy of ``predictions`` logits against ``targets``."""
         return self.loss(predictions, targets.float())
 
 
@@ -155,10 +184,12 @@ class DiceLoss(BaseLoss):
     name = "dice"
 
     def __init__(self, smooth: float = 1e-6):
+        """Take the ``smooth`` term added to the Dice numerator and denominator."""
         super().__init__()
         self.smooth = smooth
 
     def forward(self, predictions, targets):
+        """Return :func:`dice_loss` of sigmoid ``predictions``, each sample flattened."""
         return dice_loss(
             torch.sigmoid(predictions).flatten(1),
             targets.float().flatten(1),
@@ -167,9 +198,12 @@ class DiceLoss(BaseLoss):
 
 
 class GIoULoss(BaseLoss):
+    """Generalized IoU loss over xyxy boxes."""
+
     name = "giou"
 
     def forward(self, predictions, targets):
+        """Return the mean GIoU loss of ``predictions`` boxes against ``targets`` boxes."""
         return _generalized_box_iou_loss(predictions, targets)
 
 
@@ -179,25 +213,31 @@ class CORNLoss(BaseLoss):
     name = "corn"
 
     def __init__(self, num_ranks: int):
+        """Take the rank count ``num_ranks``."""
         super().__init__()
         self.num_ranks = num_ranks
 
     def forward(self, predictions, targets):
+        """Return :func:`corn_loss` of ``predictions`` against ``targets`` ranks."""
         return corn_loss(predictions, targets, self.num_ranks)
 
 
 class CORALLoss(BaseLoss):
-    """Consistent rank logits loss: binary cross-entropy of ``[B, K-1]`` cumulative logits against
-    each sample's rank levels.
+    """Consistent rank logits loss.
+
+    The loss is the binary cross-entropy of ``[B, K-1]`` cumulative logits against each sample's
+    rank levels.
     """
 
     name = "coral"
 
     def __init__(self, num_ranks: int):
+        """Take the rank count ``num_ranks``."""
         super().__init__()
         self.num_ranks = num_ranks
 
     def forward(self, predictions, targets):
+        """Return the binary cross-entropy of ``predictions`` against each sample's rank levels."""
         levels = torch.zeros_like(predictions)
         for i in range(predictions.size(0)):
             levels[i, : targets[i]] = 1.0
@@ -212,11 +252,16 @@ class CombinedLoss(BaseLoss):
     def __init__(
         self, losses: list[BaseLoss], weights: list[float] | None = None
     ):
+        """Take the ``losses`` and their ``weights``, each weight 1.0 when none are given."""
         super().__init__()
         self.losses = nn.ModuleList(losses)
         self.weights = weights or [1.0] * len(losses)
 
     def forward(self, predictions, targets):
+        """Return the weighted sum of the losses of ``predictions`` against ``targets``.
+
+        Each loss is paired with the weight at its position; the sum runs over those pairs.
+        """
         total = torch.tensor(
             0.0,
             device=predictions.device
@@ -231,7 +276,7 @@ class CombinedLoss(BaseLoss):
 def _generalized_box_iou_loss(
     pred_boxes: torch.Tensor, gt_boxes: torch.Tensor
 ) -> torch.Tensor:
-    """GIoU loss for bounding box regression. Boxes in xyxy format."""
+    """Return the GIoU loss for bounding box regression; boxes are in xyxy format."""
     from tcip_annotation.matching import box_areas
 
     x1 = torch.max(pred_boxes[:, 0], gt_boxes[:, 0])
@@ -261,7 +306,7 @@ def compute_class_weights(
     beta: float = 0.999,
     normalize: bool = True,
 ) -> torch.Tensor:
-    """Per-class loss weights from a class-count distribution.
+    """Compute per-class loss weights from a class-count distribution.
 
     Schemes: ``balanced`` (``total/(n_present*count)``), ``inverse`` (``1/count``), or
     ``effective`` (``(1-beta)/(1-beta**count)``). Zero-count classes get weight 1.0. When

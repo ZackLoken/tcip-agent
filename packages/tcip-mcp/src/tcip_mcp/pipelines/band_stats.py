@@ -1,11 +1,8 @@
-"""Display band statistics, the 8-bit stretch every band render goes through, and the RGB composite
-it stacks into.
+"""Display band statistics, the 8-bit band stretch, and the RGB composite.
 
-Every number here is in the raster's own dtype units: a uint16 band's minimum is a raw digital
-number, and a ``percent_clip`` bound is one too. That is a different unit system from
-``derivations.band_normalization_stats``, whose per-band mean/std are the [0, 1] tensor units a
-detector normalizes with, and the two never stand in for each other: these describe what a viewer
-sees on screen, those describe what the model is fed.
+The composite is what the stretched bands stack into. Every number here is in the raster's own
+dtype units: a uint16 band's minimum is a raw digital number, and a ``percent_clip`` bound is one
+too.
 """
 
 from __future__ import annotations
@@ -45,7 +42,7 @@ class SampledBandRanges:
     the reservoir held every pixel the windows covered, the cut points are that sample's exact
     percentiles; below that they are estimates of them. ``seed`` reproduces the window draw and
     ``pixel_fraction`` is the share of the raster's pixels the windows covered (1.0 when they
-    covered every pixel), so a caller can say what the numbers describe.
+    covered every pixel).
     """
 
     ranges: list[BandRange]
@@ -55,7 +52,7 @@ class SampledBandRanges:
 
 
 def band_ranges(pixels) -> list[BandRange]:
-    """Exact per-band min/max of an ``[H, W, C]`` array (or of one 2-D band), in its dtype units."""
+    """Return exact per-band min/max of an ``[H, W, C]`` array (or one 2-D band), in dtype units."""
     from tcip_mcp.pipelines.raster_source import hwc_array
 
     arr = hwc_array(pixels)
@@ -68,7 +65,7 @@ def band_ranges(pixels) -> list[BandRange]:
 def clip_bounds(
     band, percentiles: tuple[float, float] = DISPLAY_CLIP_PERCENTILES
 ) -> tuple[float, float]:
-    """The values ``percentiles`` cuts a band at, in the band's own dtype units."""
+    """Return the values ``percentiles`` cuts a band at, in the band's own dtype units."""
     import numpy as np
 
     lo, hi = np.percentile(
@@ -84,12 +81,11 @@ def full_scale_denominator(
     sampled_maximum: float | None = None,
     sampled_minimum: float | None = None,
 ) -> float:
-    """The divisor that puts a band on its own full scale with no data-range stretch applied.
+    """Return the divisor putting a band on its own full scale with no data-range stretch.
 
-    An integer raster divides by its dtype's maximum, the scale ``image_utils.pil_to_tensor``
-    applies for training; a float raster has no such ceiling and divides by its own maximum. A band
-    with no positive data divides by the magnitude of its minimum instead; a band whose whole range
-    is exactly zero divides by 1.0.
+    An integer raster divides by its dtype's maximum; a float raster has no such ceiling and
+    divides by its own maximum. A band with no positive data divides by the magnitude of its
+    minimum instead; a band whose whole range is exactly zero divides by 1.0.
 
     ``sampled_maximum``/``sampled_minimum`` are the whole raster's sampled statistics, used in
     place of ``band``'s own range for a float raster. They never displace the dtype ceiling an
@@ -111,9 +107,9 @@ def full_scale_denominator(
 
 
 def _stretch_between(raw, low: float, high: float):
-    """``raw`` (float64) rescaled so ``low``..``high`` spans the 8-bit display range.
+    """Rescale ``raw`` (float64) so ``low``..``high`` spans the 8-bit display range.
 
-    A band with no spread (``high <= low``) renders black rather than dividing by zero.
+    A band with no spread (``high <= low``) maps to zeros.
     """
     import numpy as np
 
@@ -125,7 +121,7 @@ def _stretch_between(raw, low: float, high: float):
 def stretch_band(
     band, mode: str, source_dtype, bounds: tuple[float, float] | None = None
 ):
-    """One band as ``uint8`` display pixels, stretched by ``mode``.
+    """Return one band as ``uint8`` display pixels, stretched by ``mode``.
 
     ``minmax`` spans the band's own data range, ``percent_clip`` spans
     :data:`DISPLAY_CLIP_PERCENTILES` of it, and ``none`` applies no data-range stretch at all,
@@ -133,7 +129,7 @@ def stretch_band(
     only ``none`` reads.
 
     ``bounds`` is the ``(low, high)`` those same modes would otherwise derive from ``band``, taken
-    from a wider view of the raster (the whole raster's bounds when rendering one region).
+    from a wider view of the raster.
     ``minmax`` and ``percent_clip`` take the pair as their span; ``none`` reads both ends as the
     sampled minimum and maximum a float raster's divisor comes from, and an integer raster ignores
     the pair for its dtype ceiling. Omitting it derives the bounds from ``band``.
@@ -176,7 +172,7 @@ def composite_display_rgb(
     stretch: str,
     bounds: list[tuple[float, float]] | None = None,
 ):
-    """Three of ``pixels``' bands stretched independently and stacked into ``uint8 [H, W, 3]``.
+    """Stretch three of ``pixels``' bands independently and stack them into ``uint8 [H, W, 3]``.
 
     ``pixels`` is ``[H, W, C]`` (a 2-D array reads as one band) and ``band_indices`` names exactly
     three of its bands, in display order, repeats allowed; the stretch reads the array's own dtype,
@@ -213,14 +209,14 @@ def composite_display_rgb(
 
 
 def _reservoir_take(reservoir, seen: int, values, size: int, rng):
-    """Fold ``values`` (``[N, C]`` pixels, in stream order) into a reservoir of at most ``size``,
-    returning the reservoir and how many pixels the stream has offered.
+    """Fold ``values`` (``[N, C]`` pixels, in stream order) into a reservoir of at most ``size``.
 
-    Classic reservoir sampling over pixels rather than over per-band values: one draw decides
-    whether a whole pixel is kept, so every band's retained values come from the same pixels and
-    each band's reservoir is a uniform sample of that band. ``seen`` is how many pixels the stream
-    has already offered; the first ``size`` are kept outright, after which the i-th pixel replaces
-    a uniformly chosen slot with probability ``size / i``.
+    Returns the reservoir and how many pixels the stream has offered. Classic reservoir sampling
+    over pixels rather than over per-band values: one draw decides whether a whole pixel is kept,
+    so every band's retained values come from the same pixels and each band's reservoir is a
+    uniform sample of that band. ``seen`` is how many pixels the stream has already offered; the
+    first ``size`` are kept outright, after which the i-th pixel replaces a uniformly chosen slot
+    with probability ``size / i``.
     """
     import numpy as np
 
@@ -253,15 +249,15 @@ def sampled_band_ranges(
     reservoir_size: int,
     percentiles: tuple[float, float] = DISPLAY_CLIP_PERCENTILES,
 ) -> SampledBandRanges:
-    """Per-band display bounds from a seeded sample of the open reader ``src``'s pixel windows,
-    in one pass.
+    """Read per-band display bounds from a seeded sample of ``src``'s windows, in one pass.
+
+    ``src`` is an open reader.
 
     A raster far too large to decode whole is described from the windows
     ``raster_source.sample_windows`` picks and from nothing else. One walk of those windows
     produces each band's min/max and each band's ``percentiles`` cut points off a bounded
     reservoir of the pixels walked. The result is a sample's bounds, never the raster's, and
-    says so through its :class:`SampledBandRanges` type, seed and covered fraction;
-    :func:`band_ranges` gives the exact range of decoded pixels.
+    says so through its :class:`SampledBandRanges` type, seed and covered fraction.
 
     ``seed`` and ``reservoir_size`` are required; the reservoir holds at most ``reservoir_size`` x
     the reader's channel count values whatever the raster's size. Two calls with the same seed

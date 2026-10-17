@@ -1,5 +1,6 @@
-"""The resolver from a raster's georeferencing tags to a real-world pixel size in meters
-(:func:`resolve_pixel_size`).
+"""The resolver from a raster's georeferencing tags to a real-world pixel size in meters.
+
+The resolver is :func:`resolve_pixel_size`.
 """
 
 from __future__ import annotations
@@ -14,7 +15,8 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class PixelSize:
-    """One raster's own real-world pixel size, resolved from its georeferencing tags alone:
+    """One raster's own real-world pixel size, resolved from its georeferencing tags alone.
+
     ``meters_per_px`` is the isotropic pixel edge in meters, ``source_clause`` the one-clause
     description of the geotransform it came from.
     """
@@ -34,13 +36,14 @@ anisotropy still refuses."""
 
 
 def meters_per_crs_unit(epsg: int) -> tuple[float | None, str]:
-    """The meters one unit of the projected CRS ``epsg`` spans, as ``(factor, reason)``:
-    ``reason`` the empty string on success and the first failing condition's clause otherwise.
+    """Return the meters one unit of the projected CRS ``epsg`` spans, as ``(factor, reason)``.
+
+    ``reason`` is the empty string on success and the first failing condition's clause otherwise.
     ``pyproj.CRS.from_epsg`` resolves it (a :class:`pyproj.exceptions.CRSError`, raised for a
-    user-defined or unknown code, is the reason); it is not compound, checked before any unit code
-    since a compound CRS reports an empty ``unit_code`` on its horizontal axes too; it is
-    projected; and every axis reports the same ``unit_code`` from ``{"9001", "9002", "9003"}``
-    (meter, foot, US survey foot), the factor that axis's own ``unit_conversion_factor``.
+    user-defined or unknown code, is the reason); it is not compound, checked before any unit
+    code; it is projected; and every axis reports the same ``unit_code`` from
+    ``{"9001", "9002", "9003"}`` (meter, foot, US survey foot), the factor that axis's own
+    ``unit_conversion_factor``.
     """
     import pyproj
 
@@ -62,8 +65,9 @@ def meters_per_crs_unit(epsg: int) -> tuple[float | None, str]:
 
 
 def resolve_pixel_size(header: SourceHeader) -> tuple[PixelSize | None, str]:
-    """``header``'s source's own real-world pixel size from its georeferencing tags alone, as
-    ``(pixel_size, reason)``: ``reason`` the empty string on success and the first failing
+    """Resolve ``header``'s source's real-world pixel size from its georeferencing tags alone.
+
+    Returns ``(pixel_size, reason)``: ``reason`` the empty string on success and the first failing
     condition's clause otherwise, checked in this order:
 
     1. The source is a raster at all (its header's ``kind`` an array container's); a

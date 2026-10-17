@@ -1,5 +1,6 @@
-"""Tier-A derivations: compute a parameter (channels, num_classes, anchor ratios) from the artifact
-in hand.
+"""Tier-A derivations: compute a parameter from the artifact in hand.
+
+Parameters such as channels, num_classes and anchor ratios.
 """
 
 from __future__ import annotations
@@ -22,8 +23,9 @@ if TYPE_CHECKING:
 
 
 def probe_channels(image_path: str | Path | BandGroupRef) -> int:
-    """Band count of a raster read from disk, as its own header states it
-    (:attr:`~tcip_mcp.pipelines.raster_source.SourceHeader.channels`): a grouped capture's
+    """Return the band count of a raster read from disk, as its own header states it.
+
+    Read off :attr:`~tcip_mcp.pipelines.raster_source.SourceHeader.channels`: a grouped capture's
     one band per member.
     """
     from tcip_mcp.pipelines.raster_source import SourceHeader
@@ -32,7 +34,7 @@ def probe_channels(image_path: str | Path | BandGroupRef) -> int:
 
 
 def num_classes_from_distribution(class_distribution: dict[int, int]) -> int:
-    """Number of classes implied by the label set = max class id + 1 (ids are 0-indexed)."""
+    """Return the class count the label set implies, max class id + 1 (ids are 0-indexed)."""
     if not class_distribution:
         return 0
     return int(max(class_distribution)) + 1
@@ -41,12 +43,11 @@ def num_classes_from_distribution(class_distribution: dict[int, int]) -> int:
 def gt_aspect_ratios(
     class_distribution_boxes: list[tuple[float, float]],
 ) -> list[float] | None:
-    """Aspect ratios (h/w) spanning the GT box-shape distribution, for anchor coverage.
+    """Return aspect ratios (h/w) spanning the GT box-shape distribution, for anchor coverage.
 
     Returns a small ratio set covering the p10..p90 of GT box aspect ratios (plus 1.0), the two
     quantiles this method's own settings, not measured. ``class_distribution_boxes`` is a list of
-    ``(w, h)`` in pixels. Returns ``None`` when no valid box gives a ratio. A detector's ratios
-    come from here through :func:`derive_detector_geometry`.
+    ``(w, h)`` in pixels. Returns ``None`` when no valid box gives a ratio.
     """
     import numpy as np
 
@@ -63,8 +64,9 @@ def _validate_gt_boxes_per_image(
     *,
     fn_name: str,
 ) -> list[list[tuple[float, float, float, float]]]:
-    """Validate and normalize ``gt_boxes_per_image`` into concrete ``(x, y, w, h)`` float tuples,
-    or raise ``ValueError`` naming exactly what was wrong.
+    """Validate and normalize ``gt_boxes_per_image`` into ``(x, y, w, h)`` float tuples.
+
+    Raises ``ValueError`` naming exactly what was wrong.
     """
     if not isinstance(gt_boxes_per_image, Sequence) or isinstance(
         gt_boxes_per_image, (str, bytes)
@@ -106,8 +108,9 @@ def _validate_gt_boxes_per_image(
 def _validate_char_sizes(
     char_sizes: Sequence[float], *, fn_name: str
 ) -> list[float]:
-    """Validate and normalize ``char_sizes`` into concrete floats, or raise ``ValueError`` naming
-    exactly what was wrong, the same contract as ``_validate_gt_boxes_per_image``.
+    """Validate and normalize ``char_sizes`` into concrete floats.
+
+    Raises ``ValueError`` naming exactly what was wrong.
     """
     if not isinstance(char_sizes, Sequence) or isinstance(
         char_sizes, (str, bytes)
@@ -127,8 +130,9 @@ def _validate_char_sizes(
 
 
 def _neighbor_max_ious(boxes: np.ndarray) -> list[float]:
-    """Each box's max IoU with any other box in the same region (xyxy px); fewer than 2 boxes ->
-    [].
+    """Return each box's max IoU with any other box in the same region (xyxy px).
+
+    Fewer than 2 boxes -> [].
     """
     import numpy as np
 
@@ -142,8 +146,9 @@ def _neighbor_max_ious(boxes: np.ndarray) -> list[float]:
 
 
 def _neighbor_min_center_distances(boxes: np.ndarray) -> list[float]:
-    """Each box's distance to its nearest same-image neighbor's center (xyxy px); fewer than 2
-    boxes -> [].
+    """Return each box's distance to its nearest same-image neighbor's center (xyxy px).
+
+    Fewer than 2 boxes -> [].
     """
     import numpy as np
 
@@ -168,9 +173,9 @@ by."""
 def derive_localization_tolerance_frac(
     gt_boxes_per_image: Sequence[Sequence[Sequence[float]]],
 ) -> float | None:
-    """Center-match tolerance, as a fraction of the class's characteristic size, from the GT's own
-    nearest-neighbor spacing, or ``None`` if underivable.
+    """Derive the center-match tolerance from the GT's own nearest-neighbor spacing.
 
+    The tolerance is a fraction of the class's characteristic size, or ``None`` if underivable.
     Takes each GT box's distance to its nearest same-image neighbor, pools that across images,
     takes half its 10th percentile, and normalizes by the characteristic size
     ``gt_class_avg_size`` measures (:data:`LOCALIZATION_TOLERANCE_DERIVATION`); the percentile
@@ -213,8 +218,10 @@ def derive_localization_tolerance_frac(
 
 @dataclass(frozen=True)
 class Region:
-    """One counted region of ground truth: the objects in it (crowd regions excluded), ``boxes``
-    in xyxy pixels beside their 1-indexed ``labels``, and its pixel ``area``.
+    """One counted region of ground truth.
+
+    It holds the objects in it (crowd regions excluded), ``boxes`` in xyxy pixels beside their
+    1-indexed ``labels``, and its pixel ``area``.
     """
 
     boxes: np.ndarray
@@ -223,8 +230,9 @@ class Region:
 
 
 def char_sizes(boxes: Iterable[np.ndarray]) -> list[float]:
-    """The positive characteristic sizes (:func:`~tcip_annotation.matching.box_sizes`) of every
-    xyxy box of every array of ``boxes``.
+    """Return the positive characteristic sizes of every xyxy box of every array of ``boxes``.
+
+    Sizes are :func:`~tcip_annotation.matching.box_sizes`'s.
     """
     from tcip_annotation.matching import box_sizes
 
@@ -239,12 +247,11 @@ OBJECT_DENSITY_DERIVATION = (
 
 
 def derive_object_density(regions: Sequence[Region]) -> float:
-    """The object density (objects per pixel) a frame's detection cap scales by
-    (:func:`detection_cap`): the 0.99 quantile of the densities of the ``regions`` holding at
-    least one object, each its object count over its area. The quantile is this method's own
-    setting, not measured; a frame denser than it can still exceed its cap. Refuses
-    (``ValueError``) regions none of which holds an object, no regions included, which no
-    frame's cap could rest on.
+    """Derive the object density (objects per pixel) of ``regions``.
+
+    The density is the 0.99 quantile of the densities of the ``regions`` holding at least one
+    object, each its object count over its area. The quantile is this method's own setting, not
+    measured. Refuses (``ValueError``) regions none of which holds an object, no regions included.
     """
     import numpy as np
 
@@ -258,8 +265,9 @@ def derive_object_density(regions: Sequence[Region]) -> float:
 
 
 def detection_cap(density: float, pixels: float) -> int:
-    """The most detections a frame of ``pixels`` keeps at ``density``: ``ceil(density x
-    pixels)``.
+    """Return the most detections a frame of ``pixels`` keeps at ``density``.
+
+    That is ``ceil(density x pixels)``.
     """
     import math
 
@@ -281,11 +289,13 @@ by."""
 def derive_tile_geometry(
     regions: Sequence[Region], *, tile_size: int | None, overlap: float | None
 ) -> tuple[int, float]:
-    """A tile lattice's ``(edge, overlap)``: a stated value as given; else, with the extent the
-    99th percentile of the larger side of the ``regions``' boxes rounded up to a pixel, the edge
-    five times the extent (:data:`TILE_EDGE_DERIVATION`) and the overlap the ratio under which
+    """Return a tile lattice's ``(edge, overlap)``, each stated value as given.
+
+    An unstated value is derived, with the extent the 99th percentile of the larger side of the
+    ``regions``' boxes rounded up to a pixel: the edge five times the extent
+    (:data:`TILE_EDGE_DERIVATION`) and the overlap the ratio under which
     :func:`~tcip_mcp.pipelines.slicing.slice_lattice` lays neighboring tiles overlapping by at
-    least the extent (:data:`TILE_OVERLAP_DERIVATION`, ``slicing.overlap_ratio``), so an object no
+    least the extent (:data:`TILE_OVERLAP_DERIVATION`), so an object no
     longer than the extent lies whole in some tile. The percentile and the five are this method's
     own settings, not measured. Refuses (``ValueError``) a value to derive from regions holding no
     object, and an extent at or past the edge, which no overlap fits.
@@ -337,14 +347,15 @@ DETECTOR_GEOMETRY_DERIVATION: str = get_args(DetectorGeometryDerivation)[0]
 def derive_detector_geometry(
     frame: tuple[int, int], regions: Sequence[Region]
 ) -> DetectorGeometry:
-    """A torchvision detector's input scale and anchors for inputs of ``frame``, ``(width,
-    height)``, over the objects of ``regions`` (``schemas.DetectorGeometry``,
-    :data:`DETECTOR_GEOMETRY_DERIVATION`): the frame seen at its native scale, the finest pyramid
-    level's anchor size the 10th percentile of the objects' characteristic sizes
-    (:func:`char_sizes`) floored to a pixel, so the levels doubling it cover the spread upward
-    from there, and the aspect ratios :func:`gt_aspect_ratios` derives from their boxes. The
-    percentile is this method's own setting, not measured. Regions holding no object, or none a
-    pixel across at that percentile, leave a value the record's type refuses.
+    """Derive a torchvision detector's input scale and anchors for inputs of ``frame``.
+
+    ``frame`` is ``(width, height)``; the geometry is derived over the objects of ``regions``
+    (``schemas.DetectorGeometry``, :data:`DETECTOR_GEOMETRY_DERIVATION`): the frame seen at its
+    native scale, the finest pyramid level's anchor size the 10th percentile of the objects'
+    characteristic sizes (:func:`char_sizes`) floored to a pixel, so the levels doubling it cover
+    the spread upward from there, and the aspect ratios :func:`gt_aspect_ratios` derives from
+    their boxes. The percentile is this method's own setting, not measured. Regions holding no
+    object, or none a pixel across at that percentile, leave a value the record's type refuses.
     """
     import math
 
@@ -385,14 +396,14 @@ def derive_iou_match_threshold(
     jitter_px: float,
     margin: float,
 ) -> float | None:
-    """The IoU threshold for an ``iou_match`` trait, from the GT's own characteristic box size, or
-    ``None`` if underivable.
+    """Derive the IoU threshold for an ``iou_match`` trait from the GT's characteristic box size.
 
-    Models two equal boxes of the GT's mean characteristic size ``s`` (``sqrt(w*h)``) displaced
-    by ``jitter_px`` along one axis, whose IoU is ``(s - jitter_px) / (s + jitter_px)``; the
-    threshold is that less the absolute IoU ``margin``. Refuses (``ValueError``) a ``jitter_px``
-    at or past ``s``, where the displaced boxes no longer overlap and the model states nothing,
-    and a ``margin`` that leaves the threshold at or below zero.
+    ``None`` if underivable. Models two equal boxes of the GT's mean characteristic size ``s``
+    (``sqrt(w*h)``) displaced by ``jitter_px`` along one axis, whose IoU is
+    ``(s - jitter_px) / (s + jitter_px)``; the threshold is that less the absolute IoU ``margin``.
+    Refuses (``ValueError``) a ``jitter_px`` at or past ``s``, where the displaced boxes no longer
+    overlap and the model states nothing, and a ``margin`` that leaves the threshold at or below
+    zero.
 
     ``jitter_px``, the repeat-annotation displacement on the reference grid in pixels, and
     ``margin`` are the trait's own authored values (``TraitEntry.iou_jitter_px``,
@@ -428,18 +439,16 @@ def derive_iou_match_threshold(
 
 
 def derive_sliver_frac(char_sizes: Sequence[float]) -> float | None:
-    """Tile-seam sliver cutoff, as a fraction of the class's characteristic size, from the GT's own
-    size spread, or ``None`` if underivable.
+    """Derive the tile-seam sliver cutoff from the GT's own size spread.
 
-    Takes the 10th percentile of this dataset's own characteristic-size distribution over its
-    mean, so a class with wide natural size variation gets a lower cutoff. The ratio is positive
-    for any positive sizes and can exceed 1 when a few small boxes drag the mean below the low
-    percentile; the consumer multiplies it back by that mean, so it stays a size cutoff either way.
+    The cutoff is a fraction of the class's characteristic size, or ``None`` if underivable. Takes
+    the 10th percentile of this dataset's own characteristic-size distribution over its mean, so a
+    class with wide natural size variation gets a lower cutoff. The ratio is positive for any
+    positive sizes and can exceed 1 when a few small boxes drag the mean below the low percentile.
     Fewer than five positive sizes -> ``None``. The percentile and the five are this method's own
     settings, not measured.
 
-    ``char_sizes`` is ``sqrt(w*h)`` per GT box (px), already filtered to the trait's own class; see
-    :func:`char_sizes`.
+    ``char_sizes`` is ``sqrt(w*h)`` per GT box (px), already filtered to the trait's own class.
     """
     import numpy as np
 
@@ -457,13 +466,13 @@ def derive_block_scale_px(
     plants: list | None = None,
     raster_path: str | Path | None = None,
 ) -> tuple[int, str]:
-    """The pixel buffer/block scale for block-aware calibration's recursive sub-banding, floored at
-    ``tile_size`` (:func:`~tcip_mcp.pipelines.data.splits.spatial_strip_split`'s own floor for a
-    boundary buffer).
+    """Derive the pixel buffer/block scale for block-aware calibration's recursive sub-banding.
+
+    The scale is floored at ``tile_size``.
 
     Two derivation paths:
 
-    - Plant-spacing-derived, only attempted when ``plants`` is supplied: this dataset's own
+    - Plant-spacing-derived, only attempted when ``plants`` is a nonempty list: this dataset's own
       planting-grid pitch (``plant_mapping.grid_pitch_m``) converted to pixels through the raster's
       own pixel size in meters, resolved by
       :func:`~tcip_mcp.pipelines.pixel_size.resolve_pixel_size` (the CRS unit read from the EPSG
@@ -471,13 +480,13 @@ def derive_block_scale_px(
       (rotated, incomplete tags, unprojected, a user-defined or compound CRS, a unit other than
       meter or foot, a zero, negative or anisotropic scale) falls back to the GT-object-spacing
       path below. A ``raster_path`` that is not a raster file, or one this derivation cannot open
-      (truncated, corrupt, or otherwise unreadable), is refused by name. A ``plants`` list with
-      fewer than two georeferenced plants (``grid_pitch_m`` returns ``0.0``) is refused by name.
-    - GT-object-spacing-derived (``plants`` omitted, or the raster's pixel size unresolvable): the
-      median nearest-neighbor spacing of the centers of ``objects``' boxes.
+      (truncated, corrupt, or otherwise unreadable), is refused by name. A nonempty ``plants``
+      list with fewer than two georeferenced plants is refused by name.
+    - GT-object-spacing-derived (``plants`` omitted or empty, or the raster's pixel size
+      unresolvable): the median nearest-neighbor spacing of the centers of ``objects``' boxes.
 
-    Raises ``ValueError`` naming exactly why when neither path can derive a scale (no ``plants``
-    and fewer than two objects to measure a spacing from).
+    Raises ``ValueError`` naming exactly why when neither path can derive a scale (no or empty
+    ``plants`` and fewer than two objects to measure a spacing from).
     """
     import statistics
 
@@ -541,12 +550,13 @@ def derive_block_scale_px(
 
 
 def pretrained_normalization(weights: PretrainedWeights) -> Normalization:
-    """The per-band statistics the pretrained ``weights`` were trained under, as their library
-    publishes them: a timm tag's ``pretrained_cfg`` mean and std
-    (``timm.models.get_pretrained_cfg``), a torchvision weights enum member's preset transform's
-    (``torchvision.models.get_weight(name).transforms()``), sourced by ``weights`` themselves.
-    Refuses as the library does a name it does not publish, and a torchvision preset carrying
-    no statistics (a detection preset) by its missing ``mean``.
+    """Return the per-band statistics the pretrained ``weights`` were trained under.
+
+    They are read as the weights' library publishes them: a timm tag's ``pretrained_cfg`` mean and
+    std (``timm.models.get_pretrained_cfg``), a torchvision weights enum member's preset
+    transform's (``torchvision.models.get_weight(name).transforms()``), sourced by ``weights``
+    themselves. Refuses as the library does a name it does not publish, and a torchvision preset
+    carrying no statistics (a detection preset) by its missing ``mean``.
     """
     from tcip_mcp.pipelines.schemas import Normalization
 
@@ -571,8 +581,9 @@ def _drawn(
     max_images: int,
     seed: int,
 ) -> list[str | Path | BandGroupRef]:
-    """At most ``max_images`` of ``image_paths``, drawn at random without replacement from
-    ``seed`` (``numpy.random.default_rng``), in drawn order.
+    """Draw at most ``max_images`` of ``image_paths`` at random without replacement from ``seed``.
+
+    The draw is ``numpy.random.default_rng``'s, returned in drawn order.
     """
     import numpy as np
 
@@ -588,10 +599,11 @@ def band_normalization_stats(
     max_images: int,
     seed: int,
 ) -> Normalization | None:
-    """Per-band mean and std in [0, 1] over at most ``max_images`` of ``image_paths`` drawn from
-    ``seed`` (:func:`_drawn`), each read whole at ``num_channels`` bands, or ``None`` when no
-    raster could be read. Its source, the sampling, names the rasters decoded and accepted, a
-    raster whose band count disagreed dropped.
+    """Compute per-band mean and std in [0, 1] over at most ``max_images`` of ``image_paths``.
+
+    The images are drawn from ``seed`` (:func:`_drawn`), each read whole at ``num_channels`` bands;
+    ``None`` when no raster could be read. Its source, the sampling, names the rasters decoded and
+    accepted, a raster whose band count disagreed dropped.
     """
     import numpy as np
 
@@ -636,8 +648,10 @@ class _BandMoments:
         self.pixels = 0
 
     def add(self, tensor_pixels) -> bool:
-        """Accumulate one ``[C, H, W]`` float64 block; returns whether it was accepted (its band
-        count disagreeing with this accumulator's means the pixels are not the same bands).
+        """Accumulate one ``[C, H, W]`` float64 block and return whether it was accepted.
+
+        A band count disagreeing with this accumulator's means the pixels are not the same bands,
+        and the block is not accepted.
         """
         if tensor_pixels.shape[0] != self.num_channels:
             return False
@@ -657,10 +671,12 @@ class _BandMoments:
         window_size: int | None,
         max_windows_per_image: int | None,
     ) -> Normalization | None:
-        """The per-band mean and std accumulated, sourced by the ``schemas.ImageStatsSampling``
-        record of what was read (``windows``, each source the derivation opened with its window or
-        ``None``, and the draw's settings), or ``None`` when no pixels were accumulated at all. A
-        relative source path refuses there, as the record names each file read.
+        """Return the per-band mean and std accumulated, with the sampling record as their source.
+
+        The source is the ``schemas.ImageStatsSampling`` record of what was read (``windows``, each
+        source the derivation opened with its window or ``None``, and the draw's settings);
+        ``None`` when no pixels were accumulated at all. A relative source path refuses there, as
+        the record names each file read.
         """
         from dataclasses import asdict
 
@@ -702,15 +718,12 @@ def band_normalization_stats_sampled(
     max_windows_per_image: int,
     max_images: int,
 ) -> Normalization | None:
-    """Per-band mean and std in [0, 1] over seeded pixel windows of this dataset's rasters.
+    """Compute per-band mean and std in [0, 1] over seeded pixel windows of the rasters.
 
-    The windowed sibling of :func:`band_normalization_stats`: the same statistic in the same unit
-    system, for a source whose full decode is unaffordable (an orthomosaic, say). At most
-    ``max_images`` rasters are drawn from ``seed`` (:func:`_drawn`), each opened through
+    At most ``max_images`` rasters are drawn from ``seed`` (:func:`_drawn`), each opened through
     ``raster_source``, and only ``max_windows_per_image`` windows of ``window_size`` pixels are
     read from it, chosen by ``raster_source.sample_windows`` from ``seed``; a
-    ``max_windows_per_image`` covering every cell of a raster's grid reads all of it and gives the
-    exact sibling's own answer.
+    ``max_windows_per_image`` covering every cell of a raster's grid reads all of it.
 
     Pixels are scaled by ``image_utils.pil_to_tensor``. Returns ``None`` when no raster could be
     read.
@@ -756,24 +769,21 @@ def band_normalization_stats_sampled(
 
 
 CROSS_TILE_NMS_DERIVATION = "p99 of the GT neighbor-IoU tail plus 0.05"
-"""The ``derived_from`` label :func:`derive_cross_tile_nms`'s value is stamped under. A merge
-comparing detections by IoS has no derivation: its threshold is the project's to state."""
+"""The ``derived_from`` label :func:`derive_cross_tile_nms`'s value is stamped under."""
 
 
 def derive_cross_tile_nms(regions: Sequence[Region]) -> float | None:
-    """Cross-tile merge threshold for a merge comparing detections by IoU, from the GT
-    neighbor-IoU distribution, or None if underivable.
+    """Derive the cross-tile merge threshold for an IoU merge from the GT neighbor-IoU tail.
 
-    The merge joins two detections whose overlap exceeds this threshold, so it sits just above how
-    much real neighboring GT objects overlap: per region each object's max overlap with any other
-    object, the nonzero tail pooled across ``regions``, its 99th percentile plus 0.05
+    The merge compares detections by IoU; None if underivable.
+
+    The threshold is taken over each region's objects' max overlap with any other object, the
+    nonzero tail pooled across ``regions``: its 99th percentile plus 0.05
     (:data:`CROSS_TILE_NMS_DERIVATION`). No two objects of one region overlapping returns None.
     Refuses (``ValueError``) a result at or above 1: the margin added to the neighbors' own tail
     exhausts the IoU interval, so this method states no threshold for this reference.
 
-    The percentile takes the overlap nearly every real neighboring pair stays under, and the
-    margin the step above it a seam duplicate must clear; both are this method's own chosen
-    settings, not measured.
+    The percentile and the margin are this method's own chosen settings, not measured.
     """
     import numpy as np
 
@@ -806,10 +816,11 @@ by."""
 
 
 def mask_rings_iou(pairs: Sequence[MaskPair], threshold: float) -> float:
-    """The mean, over ``pairs``, of the region IoU (``matching.rings_iou_matrix``) between each
-    object's rings and the rings its detection's soft mask cuts into at ``threshold``
-    (``mask_contours.mask_to_polygon_rings`` at ``vertex_spacing`` zero, the region the cut draws
-    unsimplified), placed at the mask's origin.
+    """Return the mean region IoU over ``pairs`` of each object's rings and its mask's cut.
+
+    The IoU is ``matching.rings_iou_matrix``'s, between each object's rings and the rings its
+    detection's soft mask cuts into at ``threshold`` (``mask_contours.mask_to_polygon_rings`` at
+    ``vertex_spacing`` zero, the region the cut draws unsimplified), placed at the mask's origin.
     """
     import numpy as np
 
@@ -837,10 +848,12 @@ def mask_rings_iou(pairs: Sequence[MaskPair], threshold: float) -> float:
 
 
 def _pixel_iou_peak(pair: MaskPair) -> float | None:
-    """The distinct positive value of one pair's soft mask whose cut overlaps the object, filled
-    as a training mask is (``datasets.instance_masks``), best by pixel IoU over the window
-    spanning both (``sklearn.metrics.metric_at_thresholds`` of ``jaccard_score``), the lowest on
-    a tie; ``None`` for a mask holding no positive value.
+    """Return the positive value of one pair's soft mask whose cut best overlaps the object.
+
+    The object is filled through ``datasets.instance_masks``; the value is the
+    distinct one best by pixel IoU over the window spanning both
+    (``sklearn.metrics.metric_at_thresholds`` of ``jaccard_score``), the lowest on a tie; ``None``
+    for a mask holding no positive value.
     """
     import numpy as np
     from sklearn.metrics import jaccard_score, metric_at_thresholds
@@ -881,13 +894,14 @@ def _pixel_iou_peak(pair: MaskPair) -> float | None:
 
 
 def derive_mask_binarize(pairs: Sequence[MaskPair]) -> float:
-    """The probability an instance segmentation head's masks are cut at, from the calibration
-    side's detections matched one to one with ground-truth objects
-    (:data:`MASK_BINARIZE_DERIVATION`): each pair's own pixel-IoU peak
-    (:func:`_pixel_iou_peak`) is a candidate, and the candidate whose cuts best match the
-    objects' rings on average over every pair (:func:`mask_rings_iou`) is the threshold, the
-    lowest on a tie. No candidate, no pair's mask holding a positive value, refuses
-    (``ValueError``) naming ``mask_binarize``.
+    """Derive the probability an instance segmentation head's masks are cut at.
+
+    The derivation reads the calibration side's detections matched one to one with ground-truth
+    objects (:data:`MASK_BINARIZE_DERIVATION`): each pair's own pixel-IoU peak
+    (:func:`_pixel_iou_peak`) is a candidate, and the candidate whose cuts best match the objects'
+    rings on average over every pair (:func:`mask_rings_iou`) is the threshold, the lowest on a
+    tie. No candidate, no pair's mask holding a positive value, refuses (``ValueError``) naming
+    ``mask_binarize``.
     """
     candidates = sorted(
         {t for t in map(_pixel_iou_peak, pairs) if t is not None}
@@ -911,13 +925,15 @@ by."""
 def derive_vertex_spacing(
     pairs: Sequence[MaskPair], threshold: float
 ) -> float:
-    """The pixels of perimeter per vertex an instance segmentation head's mask rings are simplified
-    at, from the calibration side's detections matched one to one with ground-truth objects
-    (:data:`VERTEX_SPACING_DERIVATION`): per pair, the perimeter (``cv2.arcLength``, closed) of
-    the largest region its soft mask cuts into at ``threshold`` (``mask_contours.mask_contours``)
-    over the vertex count of the object's largest ring, and the median across pairs. A pair whose
-    mask cuts to nothing or whose object holds no ring contributes nothing; no pair contributing
-    refuses (``ValueError``) naming ``vertex_spacing``.
+    """Derive the pixels of perimeter per vertex an instance segmentation head's rings keep.
+
+    The rings are simplified at that spacing. The derivation reads the calibration side's
+    detections matched one to one with ground-truth objects (:data:`VERTEX_SPACING_DERIVATION`):
+    per pair, the perimeter (``cv2.arcLength``, closed) of the largest region its soft mask cuts
+    into at ``threshold`` (``mask_contours.mask_contours``) over the vertex count of the object's
+    largest ring, and the median across pairs. A pair whose mask cuts to nothing or whose object
+    holds no ring contributes nothing; no pair contributing refuses (``ValueError``) naming
+    ``vertex_spacing``.
     """
     import cv2
     import numpy as np
@@ -975,8 +991,10 @@ _CURVE_IMPLEMENTATION = (
 
 
 def _derivation_implementations() -> dict[str, object]:
-    """Every registered derivation label mapped to its implementation, the count-objective ones
-    read from the picker registry (``operating_point.COUNT_OBJECTIVE_PICKERS``) when called.
+    """Return every registered derivation label mapped to its implementation.
+
+    The count-objective ones are read from the picker registry
+    (``operating_point.COUNT_OBJECTIVE_PICKERS``) when called.
     """
     from tcip_mcp.pipelines.operating_point import COUNT_OBJECTIVE_PICKERS
 

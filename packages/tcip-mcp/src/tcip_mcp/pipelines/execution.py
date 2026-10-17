@@ -3,9 +3,7 @@
 One record states everything that decides which predictions a pass produces: the confidence
 threshold and the object density each frame's detection cap scales by, how masks are cut into
 rings, and for a tiled pass the tile edge, overlap, per-tile resize, the cross-tile merge by name
-(its SAHI type and match metric resolved from the name where they are read) and the threshold it
-merges at. The record a
-pass executes is the record a bucket or an assessment stamps.
+and the threshold it merges at.
 """
 
 from __future__ import annotations
@@ -40,9 +38,10 @@ metric that type compares over (intersection over union, or over the smaller box
 
 
 def cross_tile_merge_of(name: str) -> tuple[str, str]:
-    """The SAHI postprocess type and match metric the cross-tile merge ``name`` runs
-    (:data:`CROSS_TILE_MERGES`); a name it does not hold refuses (``ValueError``) naming the
-    ones it does.
+    """Return the SAHI postprocess type and match metric the cross-tile merge ``name`` runs.
+
+    The merges are :data:`CROSS_TILE_MERGES`; a name it does not hold refuses (``ValueError``)
+    naming the ones it does.
     """
     from tcip_mcp.pipelines.model_build import resolve_named
 
@@ -51,11 +50,12 @@ def cross_tile_merge_of(name: str) -> tuple[str, str]:
 
 @pydantic_dataclass(frozen=True, config=ConfigDict(extra="forbid"))
 class MaskCut:
-    """How an instance segmentation head's soft masks become rings: ``mask_binarize``, the
-    probability a mask pixel is foreground at, refusing a value outside ``[0, 1]``, and
-    ``vertex_spacing``, the pixels of each ring's perimeter per vertex its rings are simplified to
-    (``mask_contours.mask_to_polygon_rings``, zero keeping every contour vertex), refusing a
-    negative or non-finite value. Both are required.
+    """How an instance segmentation head's soft masks become rings.
+
+    ``mask_binarize`` is the probability a mask pixel is foreground at, refusing a value outside
+    ``[0, 1]``, and ``vertex_spacing`` the pixels of each ring's perimeter per vertex its rings are
+    simplified to (``mask_contours.mask_to_polygon_rings``, zero keeping every contour vertex),
+    refusing a negative or non-finite value. Both are required.
     """
 
     mask_binarize: float = Field(ge=0, le=1)
@@ -63,9 +63,10 @@ class MaskCut:
 
 
 class ExecutionRefusedError(ValueError):
-    """A pass that cannot run as stated: a tile edge the checkpoint contradicts, a pass with no
-    basis for its scale or its density, or a stated value that differs from the record being
-    restored.
+    """A pass that cannot run as stated.
+
+    That is a tile edge the checkpoint contradicts, a pass with no basis for its scale or its
+    density, or a stated value that differs from the record being restored.
     """
 
 
@@ -76,15 +77,15 @@ class Execution:
     ``conf`` and ``density`` (objects per pixel, which ``derivations.detection_cap`` scales to a
     frame) are ``None`` for a checkpoint whose head is not a detector. ``masks`` is whether the
     pass collects each detection's mask and ``mask_cut`` how they become rings (:class:`MaskCut`),
-    ``None`` for a pass collecting no mask and, for one collecting them, until an assessment's
-    calibration side derives it (:attr:`uncut`). The tiled fields are
-    ``None`` for an untiled pass. A record stating a tile edge without an overlap, a conf without
-    a density, or either reverse, refuses (``ValueError``) at construction. ``sources`` names, per
-    field whose value can come from more than one place, where it came from, in
-    :class:`~tcip_mcp.pipelines.slicing.TileGeometry`'s words (``explicit`` for a value the caller
-    stated, ``derived`` for the checkpoint's own recorded one, ``native_ratio``), or the
-    derivation or fit that produced it, by name; ``postprocess`` is only ever stated. ``rationale``
-    is why the caller stated what it did, ``None`` when it stated nothing.
+    ``None`` for a pass collecting no mask and for one keeping its masks uncut (:attr:`uncut`).
+    The tiled fields are ``None`` for an untiled pass. A record stating a tile edge without an
+    overlap, a conf without a density, or either reverse, refuses (``ValueError``) at
+    construction. ``sources`` names, per field whose value can come from more than one place,
+    where it came from, in :class:`~tcip_mcp.pipelines.slicing.TileGeometry`'s words
+    (``explicit`` for a value the caller stated, ``derived`` for the checkpoint's own recorded
+    one, ``native_ratio``), or the derivation or fit that produced it, by name; ``postprocess`` is
+    only ever stated. ``rationale`` is why the caller stated what it did, ``None`` when it stated
+    nothing.
     """
 
     conf: float | None
@@ -101,6 +102,7 @@ class Execution:
     sources: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        """Refuse a tile edge without an overlap, a conf without a density, or either reverse."""
         for first, second, whole in (
             ("tile_size", "overlap", "a tiled pass runs on one lattice"),
             (
@@ -120,17 +122,16 @@ class Execution:
 
     @property
     def tiled(self) -> bool:
+        """Whether the pass is tiled, which a stated tile edge is."""
         return self.tile_size is not None
 
     @property
     def uncut(self) -> bool:
-        """Whether the pass collects masks and keeps them uncut, its :class:`MaskCut` left for
-        its calibration side to derive.
-        """
+        """Whether the pass collects masks and keeps them uncut."""
         return self.masks and self.mask_cut is None
 
     def record(self) -> dict[str, Any]:
-        """The record as JSON values."""
+        """Return the record as JSON values."""
         out = asdict(self)
         out["tile_resize"] = (
             list(self.tile_resize) if self.tile_resize is not None else None
@@ -139,7 +140,10 @@ class Execution:
 
     @classmethod
     def of(cls, record: dict[str, Any]) -> Execution:
-        """The execution a :meth:`record` states. A record missing a field refuses naming it."""
+        """Restore the execution a :meth:`record` states.
+
+        A record missing a field refuses (``ValueError``) naming the missing fields.
+        """
         missing = sorted(set(cls.__dataclass_fields__) - set(record))
         if missing:
             raise ValueError(
@@ -157,17 +161,18 @@ class Execution:
         )
 
     def with_value(self, name: str, value: Any, source: str) -> Execution:
-        """This record with ``name`` set to ``value`` from ``source``."""
+        """Return this record with ``name`` set to ``value`` from ``source``."""
         return replace(
             self, **{name: value}, sources={**self.sources, name: source}
         )
 
 
 class Stated(BaseModel):
-    """What a caller states of an execution record, every value ``None`` when unstated: whether
-    the pass is tiled, its tile edge and overlap, the cross-tile merge and its threshold, the
-    confidence threshold, whether the pass collects masks and how it cuts them into rings
-    (:class:`MaskCut`), with the ``rationale`` for stating them. Refuses
+    """What a caller states of an execution record, every value ``None`` when unstated.
+
+    The values are whether the pass is tiled, its tile edge and overlap, the cross-tile merge and
+    its threshold, the confidence threshold, whether the pass collects masks and how it cuts them
+    into rings (:class:`MaskCut`), with the ``rationale`` for stating them. Refuses
     (``ValueError``) a value stated without a rationale, a rationale with no value stated, and a
     cross-tile threshold or confidence outside ``[0, 1]``.
     """
@@ -198,7 +203,7 @@ class Stated(BaseModel):
         return self
 
     def differences(self, restored: Execution) -> list[str]:
-        """Each stated value, the tiled flag included, that ``restored`` states differently."""
+        """Name each stated value, the tiled flag included, that ``restored`` states differently."""
         differing = (
             [f"tile stated {self.tile!r}, recorded {restored.tiled!r}"]
             if self.tile is not None and self.tile != restored.tiled
@@ -215,10 +220,11 @@ class Stated(BaseModel):
 
 @dataclass(frozen=True)
 class Reference:
-    """The ground truth a caller holding a calibration reference supplies a pass's unstated
-    values from: its ``regions`` (``derivations.Region``, each its objects and its pixel area),
-    the basis of the density, the cross-tile merge threshold and a tile geometry the checkpoint
-    does not record.
+    """The ground truth a pass's unstated values are derived from.
+
+    Its ``regions`` (``derivations.Region``, each its objects and its pixel area) are the basis of
+    the density, the cross-tile merge threshold and a tile geometry the checkpoint does not
+    record.
     """
 
     regions: list[Region]
@@ -226,8 +232,9 @@ class Reference:
 
 @dataclass
 class Pass:
-    """A predictor built from a verified checkpoint and running under one complete execution
-    record, the images it runs over and the class scope its labels decode under.
+    """A predictor built from a verified checkpoint, running under one complete execution record.
+
+    It holds the images it runs over and the class scope its labels decode under.
     """
 
     checkpoint: VerifiedCheckpoint
@@ -240,8 +247,9 @@ class Pass:
     def predict(
         self, sources: list[Any], execution: Execution | None = None
     ) -> list[dict]:
-        """One result per source under the pass's own execution record, or under ``execution``
-        where one is given.
+        """Predict one result per source under the pass's own execution record.
+
+        Under ``execution`` instead where one is given.
         """
         return self.predictor.predict_batch(
             sources,
@@ -252,11 +260,12 @@ class Pass:
 
 @dataclass
 class Preparation:
-    """A checkpoint readied for a pass and holding no execution record yet: its predictor, the
-    class scope its labels decode under, the tile geometry stated or recorded for a tiled pass
-    (``None`` untiled; a value neither states left for :func:`execution_record`), what the caller
-    stated, the record being restored where one is, and the images the
-    pass runs over. :meth:`runnable` constructs the pass.
+    """A checkpoint readied for a pass and holding no execution record yet.
+
+    It holds its predictor, the class scope its labels decode under, the tile geometry stated or
+    recorded for a tiled pass (``None`` untiled; a value neither states left unresolved), what
+    the caller stated, the record being restored where one is,
+    and the images the pass runs over. :meth:`runnable` constructs the pass.
     """
 
     checkpoint: VerifiedCheckpoint
@@ -269,8 +278,10 @@ class Preparation:
     paths: list[Any]
 
     def runnable(self, reference: Reference | None = None) -> Pass:
-        """The pass under the restored record, or under the record :func:`execution_record`
-        resolves from what was stated and ``reference``.
+        """Construct the pass under the restored record, or under a freshly resolved one.
+
+        A fresh record is the one :func:`execution_record` resolves from what was stated and
+        ``reference``.
         """
         execution = (
             self.restored
@@ -298,13 +309,14 @@ def prepare(
     tile_batch_size: int = DEFAULT_TILE_BATCH_SIZE,
     restored: Execution | None = None,
 ) -> Preparation:
-    """``checkpoint`` readied for a pass over ``images_dir``'s logical images (none for a raster
-    pass). With ``restored`` the pass will run exactly that record, and a value ``stated`` states
-    differently refuses (:class:`ExecutionRefusedError`) naming each. Otherwise the pass is tiled
-    as stated, else as the checkpoint trained; its tile edge and overlap are the stated ones,
-    else the checkpoint's own recorded geometry (:func:`~tcip_mcp.pipelines.slicing.
-    resolve_tile_geometry`), else left for :func:`execution_record` to derive, a stated edge the
-    checkpoint's geometry contradicts refusing.
+    """Ready ``checkpoint`` for a pass over ``images_dir``'s logical images.
+
+    A raster pass names no ``images_dir``. With ``restored`` the pass will run exactly that
+    record, and a value ``stated`` states differently refuses (:class:`ExecutionRefusedError`)
+    naming each. Otherwise the pass is tiled as stated, else as the checkpoint trained; its tile
+    edge and overlap are the stated ones, else the checkpoint's own recorded geometry
+    (:func:`~tcip_mcp.pipelines.slicing.resolve_tile_geometry`), else left unresolved, a stated
+    edge the checkpoint's geometry contradicts refusing.
     """
     import sahi
 
@@ -365,14 +377,14 @@ def execution_record(
     geometry: TileGeometry | None,
     reference: Reference | None,
 ) -> Execution:
-    """The one complete execution record a fresh pass of ``checkpoint`` runs under, each value's
-    source recorded. A detector's ``conf`` is the stated one; its ``density`` the one
-    ``reference``'s regions derive (``derivations.derive_object_density``), else the one
-    the checkpoint recorded of its training regions (its geometry's ``object_density``). An
+    """Resolve the complete execution record a fresh pass of ``checkpoint`` runs under.
+
+    Each value's source is recorded. A detector's ``conf`` is the stated one; its ``density`` the
+    one ``reference``'s regions derive (``derivations.derive_object_density``), else the one the
+    checkpoint recorded of its training regions (its geometry's ``object_density``). An
     instance segmentation pass collects masks as its stated ``masks`` says, and cuts them as its
     stated ``mask_cut`` says, each of the block's values recorded as ``explicit`` in ``sources``,
-    else leaves them uncut for an untiled pass holding ``reference`` to derive the block over its
-    calibration side's soft masks.
+    else leaves them uncut for an untiled pass holding ``reference``.
     Tiled at ``geometry``, an edge or overlap it leaves unresolved derives from ``reference``'s
     regions (``derivations.derive_tile_geometry``), each recorded by the derivation that
     produced it, and it merges across tiles by the stated ``postprocess`` at the stated

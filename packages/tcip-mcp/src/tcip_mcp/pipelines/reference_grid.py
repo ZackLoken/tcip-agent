@@ -1,7 +1,8 @@
-"""Named reference grid over a raster's native pixel frame: cells recomputed from the serializable
-geometry dict (:func:`grid_geometry`) by :func:`reference_cells`, each named spreadsheet-style, a
-bijective base-26 column letter plus a 1-based row number ("B3", ``tcip_annotation.grid``'s
-``column_label``).
+"""Named reference grid over a raster's native pixel frame.
+
+Cells are recomputed from the serializable geometry dict (:func:`grid_geometry`) by
+:func:`reference_cells`, each named spreadsheet-style, a bijective base-26 column letter plus a
+1-based row number ("B3", ``tcip_annotation.grid``'s ``column_label``).
 """
 
 from __future__ import annotations
@@ -21,9 +22,10 @@ cover most of the cell."""
 
 @dataclass(frozen=True)
 class Cell:
-    """One grid cell: its name plus its half-open native-pixel rect (``x0 <= x < x1``,
-    ``y0 <= y < y1``, the same convention as ``raster_source.Rect``). ``col``/``row`` are
-    0-based grid coordinates; ``name`` is ``column_label(col)`` + 1-based row.
+    """One grid cell: its name plus its half-open native-pixel rect.
+
+    The rect is ``x0 <= x < x1``, ``y0 <= y < y1``.
+    ``col``/``row`` are 0-based grid coordinates; ``name`` is ``column_label(col)`` + 1-based row.
     """
 
     name: str
@@ -43,11 +45,11 @@ def reference_cells(
     *,
     clamp: bool = False,
 ) -> list[Cell]:
-    """Named square cells of ``tile_size`` native pixels over a ``width`` x ``height`` frame.
+    """Return named square cells of ``tile_size`` native pixels over a ``width`` x ``height`` frame.
 
     Cell origins step by ``int(tile_size * (1 - overlap))`` (at least 1) from 0 while they lie
-    inside the frame, so with ``overlap`` 0 they sit at multiples of ``tile_size``; this grid is
-    its own, not the tiled-inference lattice. ``clamp=False`` lets a far-edge rect run past the
+    inside the frame, so with ``overlap`` 0 they sit at multiples of ``tile_size``.
+    ``clamp=False`` lets a far-edge rect run past the
     extent; ``clamp=True`` clips each rect to the extent (edge cells truncate, never shift), so
     with ``overlap`` 0 the cells are an exact partition: every pixel belongs to exactly one cell.
     A clamped edge cell keeps whatever remainder the extent leaves, down to one pixel.
@@ -85,17 +87,18 @@ def reference_cells(
 def derive_serving_tile_size(
     width: int, height: int, max_pixels: int, max_edge: int | None = None
 ) -> int:
-    """Cell edge for region serving: a near-uniform square grid whose every cell, served at its
-    grid's own resolution and clipped to the extent (``reference_cells(..., clamp=True)``), is at
-    most ``max_pixels`` pixels and, when ``max_edge`` is given (the edge limit of the encoding the
-    cells are served in), no edge longer than it. This grid is not claimed to be the coarsest.
+    """Derive the cell edge for region serving, a near-uniform square grid within the caps.
 
-    The edge bound is the long edge for an image of at most ``max_pixels``, ``isqrt(max_pixels)``
-    for any other, and never past ``max_edge``. The grid has ``n = ceil(long_edge / bound)``
-    cells along the long edge, an edge of ``ceil(long_edge / n) <= bound``. Under the
-    ``isqrt(max_pixels)`` bound even an unclipped cell is within the cap; under the long-edge
-    bound an unclipped square can exceed it, and the clipped cell lies inside the extent, which is
-    within the cap. An image within both bounds is one cell spanning it.
+    Every cell, served at its grid's own resolution and clipped to the extent
+    (``reference_cells(..., clamp=True)``), is at most ``max_pixels`` pixels and, when
+    ``max_edge`` is given (the edge limit of the encoding the cells are served in), no edge longer
+    than it. This grid is not claimed to be the coarsest. The edge bound is the long edge for an
+    image of at most ``max_pixels``, ``isqrt(max_pixels)`` for any other, and never past
+    ``max_edge``. The grid has ``n = ceil(long_edge / bound)`` cells along the long edge, an edge
+    of ``ceil(long_edge / n) <= bound``. Under the ``isqrt(max_pixels)`` bound even an unclipped
+    cell is within the cap; under the long-edge bound an unclipped square can exceed it, and the
+    clipped cell lies inside the extent, which is within the cap. An image within both bounds is
+    one cell spanning it.
     """
     long_edge = max(width, height)
     bound = (
@@ -110,15 +113,13 @@ def derive_serving_tile_size(
 
 
 def derive_pointing_tile_size(width: int, height: int) -> int:
-    """Cell edge for the agent pointing grid, sized so labels stay legible on the overlay
-    artifact.
+    """Derive the cell edge for the agent pointing grid, legible on the overlay artifact.
 
-    The overlay renders at most ``VIZ_ARTIFACT_MAX_EDGE`` on its long edge and never
-    upscales, so the grain is chosen for that render: ``n = ceil(long_rendered /
-    POINTING_LEGIBLE_EDGE)`` cells along the long edge, returned as ``ceil(long_native /
-    n)``. Deterministic in the image dims, the artifact bound
-    (``display_bounds.VIZ_ARTIFACT_MAX_EDGE``) and the measured legibility floor
-    (:data:`POINTING_LEGIBLE_EDGE`), nothing else.
+    The edge is sized so labels stay legible. With ``long_rendered`` the long edge capped at
+    ``VIZ_ARTIFACT_MAX_EDGE`` and never upscaled, ``n = ceil(long_rendered /
+    POINTING_LEGIBLE_EDGE)`` cells lie along the long edge, returned as ``ceil(long_native / n)``.
+    Deterministic in the image dims, the artifact bound (``display_bounds.VIZ_ARTIFACT_MAX_EDGE``)
+    and the measured legibility floor (:data:`POINTING_LEGIBLE_EDGE`), nothing else.
     """
     long_native = max(width, height)
     long_rendered = min(long_native, VIZ_ARTIFACT_MAX_EDGE)
@@ -129,12 +130,10 @@ def derive_pointing_tile_size(width: int, height: int) -> int:
 def grid_geometry(
     width: int, height: int, tile_size: int, overlap: float
 ) -> dict:
-    """The serializable parameter tuple every consumer echoes: ``{width, height, tile_size,
-    overlap, cols, rows}``.
+    """Return the serializable grid parameters.
 
-    Cells are recomputed from this dict via :func:`reference_cells` (clamped or not, the caller's
-    choice). ``tile_size`` and ``overlap`` are required: :func:`derive_serving_tile_size` and
-    :func:`derive_pointing_tile_size` each derive an edge for their own grid.
+    They are ``{width, height, tile_size, overlap, cols, rows}``. ``tile_size`` and ``overlap``
+    are required.
     """
     cells = reference_cells(width, height, tile_size, overlap)
     return {
