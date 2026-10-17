@@ -20,6 +20,10 @@ from tcip_mcp.cli import bound_project
 
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    """Preflight the configuration named in ``argv`` and print the result as JSON.
+
+    Returns 2 when the result lists any issue, else 0.
+    """
     parser = argparse.ArgumentParser(description=__doc__, prog=prog)
     parser.add_argument(
         "--config",

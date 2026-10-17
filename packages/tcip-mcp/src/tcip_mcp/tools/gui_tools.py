@@ -22,8 +22,10 @@ from tcip_mcp.workspace import BoundProject
 
 
 def _logical_image_names(images_dir) -> list[str]:
-    """Every logical image's on-disk display name under ``images_dir``: a plain file's own name, or
-    (for a ``.bandgroup``-grouped capture) its manifest's filename.
+    """Return every logical image's on-disk display name under ``images_dir``.
+
+    The name is a plain file's own name, or (for a ``.bandgroup``-grouped capture) its manifest's
+    filename.
     """
     from tcip_mcp.pipelines.image_utils import (
         list_logical_images,
@@ -40,8 +42,10 @@ def _logical_image_names(images_dir) -> list[str]:
 def push_panel_event(
     bound: BoundProject, panel: str, event_type: str, data: dict
 ) -> dict:
-    """Push structured data to a TCIP GUI panel via the tcip-web backend serving the bound
-    project's workspace, which delivers it only while it has this project open.
+    """Push structured data to a TCIP GUI panel via the tcip-web backend.
+
+    The backend is the one serving the bound project's workspace, which delivers it only while it
+    has this project open.
 
     Sends an HTTP POST to the running FastAPI server (see :mod:`tcip_mcp.web_client`); the backend
     broadcasts to any connected browsers via WebSocket, or answers ``delivered: false`` naming the
@@ -82,9 +86,10 @@ def focus_human_attention(
     bucket: str | None = None,
     proposal: int | None = None,
 ) -> dict:
-    """Drive the live Annotate tab to a (subject, date) frame in the right mode, showing the
-    proposals of the bucket named ``bucket`` under ``dataset_root`` when one is named (emits
-    ``annotate_focus``).
+    """Drive the live Annotate tab to a (subject, date) frame in the right mode.
+
+    Shows the proposals of the bucket named ``bucket`` under ``dataset_root`` when one is named
+    (emits ``annotate_focus``).
 
     It lands on ``image_index``, else on the first frame holding ``subject``: in the bucket's
     document for it when a bucket is named, in its label document otherwise. The result is the
@@ -201,8 +206,10 @@ def focus_human_attention(
 
 
 def _subject_task(anns: list[Annotation], subject: str) -> str | None:
-    """ "segment" if ``subject`` has a polygon here, "detect" if it has a box, "point" if its only
-    geometry here is a point, else None (no geometry-bearing annotation of ``subject``).
+    """Return the task ``subject``'s geometry in ``anns`` implies, or None.
+
+    The task is "segment" if ``subject`` has a polygon here, "detect" if it has a box, "point" if
+    its only geometry here is a point, else None (no geometry-bearing annotation of ``subject``).
     """
     scoped = [
         a for a in anns if a.subject == subject and a.geometry is not None

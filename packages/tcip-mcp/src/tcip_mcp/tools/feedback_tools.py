@@ -1,5 +1,6 @@
-"""Review-queue MCP tools: ``prioritize_review_queue`` and ``triage_predictions``, each skipping
-the images whose label document marks the named subject finished.
+"""Review-queue doors: ``prioritize_review_queue`` and ``triage_predictions``.
+
+Each skips the images whose label document marks the named subject finished.
 """
 
 from __future__ import annotations
@@ -13,11 +14,12 @@ from tcip_mcp.server import tool
 
 
 def _load_or_refuse(checkpoint_path: Path, project: Path):
-    """``(checkpoint, refusal)``: the verified checkpoint at the established location
-    ``checkpoint_path`` (``model_registry.load_registered_checkpoint``) and
-    ``None``, or ``None`` and the ``{"error": ...}`` of each refusal that load raises: no file at
-    the location, a checkpoint ``project``'s registry names no entry for, or a project record
-    that will not read.
+    """Load the registered checkpoint at ``checkpoint_path``, or answer the load's refusal.
+
+    Returns ``(checkpoint, refusal)``: the verified checkpoint at the established location
+    ``checkpoint_path`` (``model_registry.load_registered_checkpoint``) and ``None``, or ``None``
+    and the ``{"error": ...}`` of each refusal that load raises: no file at the location, a
+    checkpoint ``project``'s registry names no entry for, or a project record that will not read.
     """
     from tcip_mcp.model_registry import (
         CheckpointNotFoundError,
@@ -35,7 +37,9 @@ def _load_or_refuse(checkpoint_path: Path, project: Path):
 def _reference_stems(
     checkpoint, images_dir: Path, project: Path
 ) -> set[str] | None:
-    """The reference-side member stems (``selection.REFERENCE_SIDES``) the producing run of
+    """Return the reference-side member stems of ``checkpoint``'s run that sit in ``images_dir``.
+
+    The stems are the reference-side members (``selection.REFERENCE_SIDES``) the producing run of
     ``checkpoint`` in ``project`` froze in its partition (``experiments.run_resolution``) whose own
     image sits in ``images_dir``, or ``None`` for a checkpoint no run of this project produced
     (``checkpoint.experiment_id``) and for a run that bound no selection. A reference sample from
@@ -63,9 +67,11 @@ def _reference_stems(
 
 
 def _prepare_queue_sources(images_dir: str, subject: str | None):
-    """The candidate images of the absolute ``images_dir``, in order: images directory, logical
-    image enumeration, then, with a ``subject`` named, dropping each image whose label document
-    marks it finished (:meth:`~tcip_annotation.json_io.LabelDocument.finished`).
+    """List the candidate images of the absolute ``images_dir``.
+
+    The steps, in order: images directory, logical image enumeration, then, with a ``subject``
+    named, dropping each image whose label document marks it finished
+    (:meth:`~tcip_annotation.json_io.LabelDocument.finished`).
 
     Returns ``(sources, reviewed_skipped, error)``; ``error`` is a ready ``{"error": ...}`` dict
     and the other two are ``None``/``0`` when it is set. With a ``subject`` named, an image
@@ -109,9 +115,10 @@ def _prepare_queue_sources(images_dir: str, subject: str | None):
 
 
 def _untiled(checkpoint, stated: Any) -> tuple[Any, dict | None]:
-    """``checkpoint`` readied untiled under ``stated``
+    """Ready ``checkpoint`` untiled under ``stated``.
+
+    Returns ``(preparation, refusal)``: the preparation
     (:func:`~tcip_mcp.pipelines.execution.prepare`), or the refusal when torch is not installed.
-    Returns ``(preparation, refusal)``.
     """
     try:
         from tcip_mcp.pipelines.execution import prepare
@@ -133,7 +140,7 @@ def prioritize_review_queue(
     rationale: str,
     subject: str | None = None,
 ) -> dict:
-    """Rank unfinished images by active-learning informativeness for the next review batch.
+    """Rank unfinished images by active-learning informativeness into a review queue.
 
     Scores every candidate with ``scorer`` and returns the ``budget`` most uncertain/diverse frames
     first, each ``queue`` entry naming its image by its logical name, answered beside the scorer
@@ -141,9 +148,8 @@ def prioritize_review_queue(
 
     When ``checkpoint_path`` names a checkpoint produced by a run bound to a selection, each
     ``queue`` entry carries ``reference_member: bool``, matched against the calibration and holdout
-    samples that run's partition froze whose own source sits in ``images_dir``: reviewing that
-    image edits a label inside the bound run's own assessment reference. An unbound run carries no
-    mark on any entry.
+    samples that run's partition froze whose own source sits in ``images_dir``. An unbound run
+    carries no mark on any entry.
 
     Args:
         checkpoint_path: Trained model checkpoint (drives scoring).
@@ -181,8 +187,10 @@ def ranked_review_queue(
     rationale: str,
     subject: str | None,
 ) -> dict:
-    """The unfinished images under the established location ``images_dir`` ranked by the scorer
-    ``scorer`` builds (:func:`~tcip_mcp.pipelines.active_learning.scorer.resolve_scorer`) under the
+    """Rank the unfinished images under ``images_dir`` by the scorer ``scorer`` builds.
+
+    The images under the established location ``images_dir`` are ranked by the scorer
+    (:func:`~tcip_mcp.pipelines.active_learning.scorer.resolve_scorer`) under the
     registered checkpoint at the established location ``checkpoint_path``, the top ``budget`` as
     ``queue`` (each marked ``reference_member`` for a selection-bound run) answered beside the
     scorer block, the budget and ``rationale``, or the refusal ``{"error": ...}``; ``subject``'s
@@ -264,8 +272,9 @@ def triage_predictions(
     rationale: str,
     subject: str | None = None,
 ) -> dict:
-    """Sort a checkpoint's own predictions by confidence into needs-review and unscoreable
-    queues; this door writes nothing.
+    """Sort a checkpoint's own predictions by confidence into needs-review and unscoreable queues.
+
+    This door writes nothing.
 
     Routes predictions between ``low`` and ``high`` into the needs-review queue, and separates out
     predictions with no confidence-bearing signal at all (e.g. a regression head's point estimate)

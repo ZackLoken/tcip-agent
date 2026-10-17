@@ -32,18 +32,20 @@ RETROSPECTIVE_STORE = "retrospectives"
 
 
 def friction_report_key(project_path: str, report_id: str) -> Key:
-    """One friction report."""
+    """Return the key of one friction report."""
     return Key(FRICTION_REPORT_STORE, str(project_path), (report_id,))
 
 
 def retrospective_key(project_path: str, project_id: str) -> Key:
-    """One project's retrospective document, its markdown text."""
+    """Return the key of one project's retrospective document, its markdown text."""
     return Key(RETROSPECTIVE_STORE, str(project_path), (project_id,))
 
 
 def read_report(project_path: str, report_id: str) -> dict:
-    """One friction report's decoded document. Raises ``NotFoundError`` when nothing is recorded
-    under that id and ``DecodeError`` for a report that will not read as a JSON object.
+    """Read one friction report's decoded document.
+
+    Raises ``NotFoundError`` when nothing is recorded under that id and ``DecodeError`` for a
+    report that will not read as a JSON object.
     """
     key = friction_report_key(project_path, report_id)
     entry = tcip_store.read(key)
@@ -55,7 +57,7 @@ def read_report(project_path: str, report_id: str) -> dict:
 
 
 def read_retrospective(project_path: str, project_id: str) -> str:
-    """One project's retrospective text, or ``""`` when it has none."""
+    """Read one project's retrospective text, or return ``""`` when it has none."""
     return tcip_store.read(
         retrospective_key(project_path, project_id), default=""
     )
@@ -64,6 +66,7 @@ def read_retrospective(project_path: str, project_id: str) -> str:
 @dataclass(frozen=True)
 class MemoryDocument:
     """One project-memory document: the key part naming it, its value, and the time it states.
+
     ``timestamp`` is the document's own, read out of what it holds, and empty for a document that
     states none.
     """
@@ -74,8 +77,9 @@ class MemoryDocument:
 
 
 def _newest_first(documents: list[MemoryDocument]) -> list[MemoryDocument]:
-    """Documents ordered by the timestamp each states, newest first, undated ones last by name, in
-    one deterministic order.
+    """Sort ``documents`` in place by the timestamp each states, newest first, and return them.
+
+    Undated ones come last by name, in one deterministic order.
     """
     documents.sort(key=lambda document: document.name)
     documents.sort(key=lambda document: document.timestamp, reverse=True)
@@ -83,8 +87,10 @@ def _newest_first(documents: list[MemoryDocument]) -> list[MemoryDocument]:
 
 
 def report_documents(project_path: str) -> list[MemoryDocument]:
-    """Every friction report under a project, newest stated timestamp first. A report that will not
-    decode is carried with the ``DecodeError`` its reader raised as its value, stating no time.
+    """Return every friction report under a project, newest stated timestamp first.
+
+    A report that will not decode is carried with the ``DecodeError`` its reader raised as its
+    value, stating no time.
     """
     documents: list[MemoryDocument] = []
     for key in tcip_store.keys(FRICTION_REPORT_STORE, str(project_path)):
@@ -99,9 +105,11 @@ def report_documents(project_path: str) -> list[MemoryDocument]:
 
 
 def report_row(document: MemoryDocument) -> dict:
-    """One friction report as a listing shows it: its id, its time and every field its writer
-    records, or its id and the reason it will not decode (``malformed``) for a report that will
-    not. A decoded report lacking a field its writer records raises ``KeyError``.
+    """Return one friction report as a row of its id and its recorded fields.
+
+    The row is its id, its time and every field its writer records, or its id and the reason it
+    will not decode (``malformed``) for a report that will not. A decoded report lacking a field
+    its writer records raises ``KeyError``.
     """
     entry = document.value
     if isinstance(entry, DecodeError):
@@ -122,7 +130,7 @@ own dates are recorded."""
 
 
 def _latest_section(content: str) -> str:
-    """The most recent time a retrospective's own section headers state, or ``""`` for none.
+    """Return the most recent time a retrospective's own section headers state, or ``""`` for none.
 
     The headers carry the writer's UTC ``isoformat``, one fixed-width spelling, so the greatest
     string is the latest moment. A document whose headers do not parse states no time and is
@@ -136,7 +144,7 @@ def _latest_section(content: str) -> str:
 
 
 def retrospective_documents(project_path: str) -> list[MemoryDocument]:
-    """Every retrospective under a project, latest stated section first."""
+    """Return every retrospective under a project, latest stated section first."""
     documents: list[MemoryDocument] = []
     for key in tcip_store.keys(RETROSPECTIVE_STORE, str(project_path)):
         name = key.parts[0]
@@ -236,8 +244,9 @@ def load_project_memory(
 def _parse_audit_bound(
     label: str, value: str, *, end_of_day: bool = False
 ) -> datetime:
-    """Parse a caller-supplied ``since``/``until`` bound (ISO-8601, a trailing ``Z`` accepted, a
-    naive value read as UTC), or raise naming which bound and why.
+    """Parse a caller-supplied ``since``/``until`` bound, or raise naming which bound and why.
+
+    The bound is ISO-8601, a trailing ``Z`` accepted, a naive value read as UTC.
 
     A date-only bound (no ``T`` separator) names a whole day, not an instant: ``since`` already
     starts at that day's midnight once parsed, and ``until`` with ``end_of_day=True`` is pushed
@@ -268,8 +277,7 @@ def read_audit_log(
     status: str | None = None,
     limit: int = 200,
 ) -> dict:
-    """Read one audit log's own entries: which door touched a dataset or project, when, with what
-    status.
+    """Read one audit log: which door touched a dataset or project, when, with what status.
 
     ``scope`` resolves through ``tcip_mcp.audit.dataset_scope_of``: a path under a dataset's
     ``images/`` tree resolves up to its dataset root, and a bare directory counts as a root only
@@ -367,9 +375,11 @@ def _memory_page(
     limit: int,
     row: Callable[[MemoryDocument], dict | None],
 ) -> dict:
-    """Up to ``limit`` rows ``row`` makes of ``documents`` in order (a ``None`` row is skipped)
-    under ``corpus``, with their count and how many documents exist; with no documents, a note
-    naming ``noun``.
+    """Page the rows ``row`` makes of ``documents`` under ``corpus``.
+
+    Rows are made in order (a ``None`` row is skipped), stopping once their count reaches
+    ``limit``, and answered with their count and how many documents exist; with no documents, a
+    note naming ``noun``.
     """
     if not documents:
         return {
@@ -428,8 +438,9 @@ def write_retrospective(
     missing_or_hard_tools: str = "",
     would_do_differently: str = "",
 ) -> dict:
-    """Write a retrospective under ``project_id``; when one exists under that name, a new dated
-    section is appended rather than overwriting it.
+    """Write a retrospective under ``project_id``.
+
+    When one exists under that name, a new dated section is appended rather than overwriting it.
 
     Args:
         project_id: Short identifier for this retrospective (e.g. '<crop>-<trait>-trial'), not
@@ -439,9 +450,9 @@ def write_retrospective(
         did_not_work: What went badly. Dead ends, failures, confusion.
         assumptions_wrong: Things you assumed that turned out to be false.
         knowledge_for_future: Breeder / trait / domain knowledge a future
-            session would benefit from having. Candidates for new skill files.
+            session would benefit from having.
         missing_or_hard_tools: Tools that did not exist, or existed but were
-            unusable. Candidates for tool changes.
+            unusable.
         would_do_differently: With hindsight, what would you change about
             your approach?
 
@@ -510,8 +521,9 @@ def write_retrospective(
 @tool()
 @audited
 def record_distillation_pass(project: Path) -> dict:
-    """Record, as this door's audit line, that this project's friction reports and retrospectives
-    were reviewed; records nothing else.
+    """Record that this project's friction reports and retrospectives were reviewed.
+
+    The record is this door's audit line; it records nothing else.
     """
     return {"status": "recorded"}
 

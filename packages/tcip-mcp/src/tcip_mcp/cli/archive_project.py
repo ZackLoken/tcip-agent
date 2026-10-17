@@ -1,8 +1,7 @@
-"""Export an annotation project as a portable bundle: a ZIP archive, or, with --output-dir, the
-identical bundle written as a directory tree.
+"""Export an annotation project as a portable bundle, a ZIP archive or a directory tree.
 
-The operator/agent entry point for packaging a project's tree, its store databases copied
-consistently, into one bundle an ``import-project`` run can restore from elsewhere. Wraps
+With --output-dir the identical bundle is written as a directory tree instead of a ZIP. The
+bundle packages the project's tree, its store databases copied consistently. Wraps
 ``tcip_mcp.tools.project_tools.archive_project`` with no MCP tool registration.
 
     tcip archive-project <project_path> --output-path PATH [--include-models]
@@ -22,6 +21,10 @@ from tcip_mcp.cli import bound_project
 
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    """Archive the project named in ``argv`` and print the result as JSON.
+
+    Returns 0, or 1 after printing the error when the archive refuses.
+    """
     from tcip_mcp.tools.project_tools import (
         TreeBundle,
         ZipBundle,

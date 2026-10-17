@@ -16,9 +16,10 @@ def register_model(
     metrics: dict | None = None,
     tags: list[str] | None = None,
 ) -> dict:
-    """Register a foreign checkpoint in the project model registry: one no run of this project
-    produced (a run registers its own final weights on completion), or a second checkpoint of a
-    run under a name of its own. The entry's ``metrics_source`` is ``"caller"`` when ``metrics``
+    """Register a foreign checkpoint in the project model registry.
+
+    A foreign checkpoint is one no run of this project produced, or a second checkpoint of a run
+    under a name of its own. The entry's ``metrics_source`` is ``"caller"`` when ``metrics``
     is non-empty, ``None`` otherwise; nothing here verifies a caller-asserted metric. Returns the
     entry that owns the checkpoint's bytes: this one, or the completed run whose final status
     names the same bytes.
@@ -37,7 +38,7 @@ def register_model(
 
 
 def _labeled_available_metrics(models: list[dict]) -> list[dict]:
-    """Every metric key any registered model carries, each with what is known about it.
+    """List the metric keys carried by ``models``, with their roles, directions and sources.
 
     ``direction`` is ``"higher"``/``"lower"`` when :mod:`schemas`'s declaration names the bare
     (``val_``-stripped) key, else ``None``: an undeclared metric still shows up here, it just needs
@@ -136,7 +137,7 @@ def rank_registered_models(
 def _narrowed(
     models: list[dict], experiment_ids: list[str] | None
 ) -> list[dict]:
-    """``models`` narrowed to ``experiment_ids`` when given."""
+    """Return ``models`` narrowed to ``experiment_ids`` when given."""
     if experiment_ids is None:
         return models
     return [m for m in models if m["experiment_id"] in set(experiment_ids)]
@@ -148,9 +149,10 @@ def registered_listing(
     tag: str | None = None,
     experiment_ids: list[str] | None = None,
 ) -> dict:
-    """``{"models", "count", "available_metrics"}`` over the project's registered models under
-    ``tag``, narrowed to ``experiment_ids`` when given; an empty registry or narrowing lists
-    nothing.
+    """List the project's registered models under ``tag`` with their available metrics.
+
+    Returns ``{"models", "count", "available_metrics"}``, narrowed to ``experiment_ids`` when
+    given; an empty registry or narrowing lists nothing.
     """
     models = _narrowed(
         ModelRegistry(str(project)).list_models(tag), experiment_ids
@@ -171,10 +173,12 @@ def ranked_registered_model(
     experiment_ids: list[str] | None,
     tag: str | None,
 ) -> dict:
-    """The registered model ``metric`` ranks best under ``tag``, among ``experiment_ids`` when
-    given, with the direction used, its source and the unverified exclusions; or the error dict
-    naming why none ranks: an empty ``metric``, nothing registered, nothing registered by the
-    marked experiments, an undeclared direction, every carrier unverified, no carrier.
+    """Return the registered model ``metric`` ranks best under ``tag``, or why none ranks.
+
+    The ranking is among ``experiment_ids`` when given, answered with the direction used, its
+    source and the unverified exclusions; or the error dict naming why none ranks: an empty
+    ``metric``, nothing registered, nothing registered by the marked experiments, an undeclared
+    direction, every carrier unverified, no carrier.
     """
     from tcip_mcp.pipelines.schemas import HIGHER_IS_BETTER_BY_METRIC
     from tcip_mcp.pipelines.training.evaluation import VAL_METRIC_PREFIX

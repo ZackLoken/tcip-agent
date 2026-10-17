@@ -1,4 +1,4 @@
-"""Phenology MCP tools, the agent-facing surface for the per-plant phenology pipeline.
+"""Phenology MCP tools for per-plant phenology delivery.
 
 Three tools over the canonical ``pipelines.postprocessing`` modules:
 
@@ -8,9 +8,6 @@ Three tools over the canonical ``pipelines.postprocessing`` modules:
     deliver_phenology_milestones   that mapping + prediction buckets whose scope declares the
                                    positive state's attribute →
                                    <phenology_prefix>_phenology.csv
-
-See the ``phenology`` skill for the whole pattern (isolate → detect → classify state → per-plant
-fraction → crossings).
 """
 
 from __future__ import annotations
@@ -29,7 +26,7 @@ from tcip_mcp.server import tool
 def register_plant_registry(
     project: Path, name: str, csv_paths: list[str], *, crop: str, site: str
 ) -> dict:
-    """Register a plant-locations CSV set under a name that later doors cite instead of file paths.
+    """Register a plant-locations CSV set under a name in this project.
 
     Reads every path in ``csv_paths`` through ``read_plant_csvs``, one file at a time, and refuses
     naming any file that parses to no georeferenced, named plant. The stored, frozen,
@@ -123,7 +120,7 @@ def build_plant_mapping(
             under this project refuses by name, listing the citing events, unless this is ``True``:
             the current record is then archived first (never overwritten), the new record's own
             ``supersedes`` names the archived digest, and the archived record stays readable by
-            that digest. An uncited rebuild replaces as it always has, ignoring this.
+            that digest. An uncited rebuild replaces, ignoring this.
 
     Refuses (a plain ``{"error": ...}``) with each refusal of
     :func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.build_plant_mapping`; a rebuild a
@@ -172,8 +169,9 @@ def deliver_phenology_milestones(
     plants: list[str],
     acknowledgment_id: str | None = None,
 ) -> dict:
-    """Per-plant phenology milestones from prediction buckets whose scope declares the positive
-    state's attribute, and a plant mapping.
+    """Deliver per-plant phenology milestones from prediction buckets and a plant mapping.
+
+    The buckets are ones whose scope declares the positive state's attribute.
 
     A phenology milestone is a crossing of the fraction of a plant's detected objects a classifier
     calls the trait's positive class, read under the crossing rule the trait's latest confirmed

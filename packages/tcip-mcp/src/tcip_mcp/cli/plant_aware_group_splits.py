@@ -37,18 +37,20 @@ def derive_plant_group_key_map(
     *,
     nn_tolerance_m: float | None = None,
 ) -> dict[str, str]:
-    """``{identity: plant_id}`` for every key in ``stem_to_raster``, resolved by GPS
-    nearest-neighbor.
+    """Map every key in ``stem_to_raster`` to its nearest plant's ``plant_id`` by GPS.
 
-    Each raster's own center pixel is its representative location, converted to WGS84 via that
-    raster's own :class:`OrthomosaicGeoreference` (built per file, since two stems can carry
-    different tiepoints or even different CRSes), then matched to the nearest plant in ``plants``.
+    Returns ``{identity: plant_id}``. Each raster's own center pixel is its representative
+    location, converted to WGS84 via that raster's own :class:`OrthomosaicGeoreference` (built per
+    file, since two stems can carry different tiepoints or even different CRSes), then matched to
+    the nearest plant in ``plants``.
 
     ``nn_tolerance_m`` resolves through ``plant_mapping.resolve_nn_tolerance_m``.
 
-    Every stem must resolve: raises ``ValueError`` naming every stem whose raster can't be
-    georeferenced or whose nearest plant falls outside tolerance, with its cause, once all stems
-    have been checked.
+    Every stem must resolve: once all stems have been checked, raises ``ValueError`` counting the
+    stems whose raster can't be georeferenced, whose nearest plant falls outside tolerance, or
+    whose matched plant record has no ``plant_id``, naming the first twenty with their causes and
+    counting the rest. Raises ``ValueError`` when
+    ``plants`` is empty.
     """
     from tcip_mcp.pipelines.postprocessing.orthomosaic_mapping import (
         OrthomosaicGeoreference,
@@ -113,6 +115,11 @@ def derive_plant_group_key_map(
 
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    """Draw the dataset's splits grouped by the plant each image resolves to; print the result.
+
+    Returns 0, or 1 after printing the error when the dataset holds no images, a stem does not
+    resolve to a plant, or ``draw_splits`` refuses.
+    """
     parser = argparse.ArgumentParser(description=__doc__, prog=prog)
     parser.add_argument(
         "dataset_root", help="Dataset root (canonical images/ layout)."

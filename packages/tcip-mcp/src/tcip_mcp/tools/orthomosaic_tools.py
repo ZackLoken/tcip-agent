@@ -1,7 +1,8 @@
-"""Orthomosaic MCP tools: per-plant delivery from a published whole-raster prediction bucket plus a
-registered plant registry.
+"""Orthomosaic MCP tools: per-plant delivery from a whole-raster bucket and a plant registry.
 
-``deliver_orthomosaic_plant_counts`` reads that bucket and registry into a per-plant count CSV.
+The bucket is a published whole-raster prediction bucket and the registry a registered plant
+registry. ``deliver_orthomosaic_plant_counts`` reads that bucket and registry into a per-plant
+count CSV.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _PER_PLANT_VALUE_KEY = "count"
-"""The quantity every row of this delivery holds, named once for its records and their delivery."""
+"""The quantity every row of this delivery holds."""
 
 
 def orthomosaic_plant_counts(
@@ -39,12 +40,12 @@ def orthomosaic_plant_counts(
     door: str,
     actor: str | None,
 ) -> dict:
-    """Per-plant detection counts from the whole-raster prediction bucket ``bucket`` published under
-    ``dataset_root``, for exactly the
+    """Deliver per-plant detection counts from a whole-raster prediction bucket as a CSV.
+
+    The counts come from the bucket ``bucket`` published under ``dataset_root``, for exactly the
     plants ``plants`` names, delivered as a ``per_plant_count_aggregate`` CSV at
-    ``output_csv_path`` (both locations their caller's arrival established) under ``project`` by
-    ``actor`` through the door ``door`` names, over the registered plant registry
-    ``registry_record``
+    ``output_csv_path`` (both established locations) under ``project`` by ``actor`` through the
+    door ``door`` names, over the registered plant registry ``registry_record``
     (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.load_registry`).
 
     The raster is the one the bucket's record names; it must still be the raster its recorded
@@ -264,10 +265,12 @@ def _segment_counts(
     registry_ref: dict,
     position_error_m: float,
 ) -> tuple[dict[str, int], dict, dict[str, str]]:
-    """Per-plant counts under the segment regime: each detection counted to the tied plant whose
-    canopy segment contains its centroid, a tie standing only with ``position_error_m`` of
-    clearance. Returns the counts, the ``CanopySegmentDisclosure`` and each registry plant that
-    regime leaves uncounted, with why. The canopy document is the raster's own label document
+    """Count detections per plant under the segment regime.
+
+    Each detection is counted to the tied plant whose canopy segment contains its centroid, a tie
+    standing only with ``position_error_m`` of clearance. Returns the counts, the
+    ``CanopySegmentDisclosure`` and each registry plant that regime leaves uncounted, with why.
+    The canopy document is the raster's own label document
     (:func:`~tcip_mcp.dataset_layout.label_key_of`).
     """
     from tcip_annotation.json_io import (
@@ -388,8 +391,10 @@ def deliver_orthomosaic_plant_counts(
     position_error_m: float | None = None,
     acknowledgment_id: str | None = None,
 ) -> dict:
-    """Per-plant detection counts from a published whole-raster prediction bucket plus a registered
-    plant registry, for the plants ``plants`` names.
+    """Deliver per-plant detection counts from a whole-raster bucket and a plant registry.
+
+    The bucket is a published whole-raster prediction bucket and the registry a registered plant
+    registry; the counts are for the plants ``plants`` names.
 
     The MCP door over :func:`orthomosaic_plant_counts`, which carries the full contract:
     ``canopy_subject`` attribution states ``position_error_m``, the registry positions' error

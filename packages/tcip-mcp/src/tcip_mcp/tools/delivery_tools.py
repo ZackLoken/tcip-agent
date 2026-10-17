@@ -24,12 +24,12 @@ def deliver_per_plant_csv(
     scale_assessment_id: str | None = None,
     acknowledgment_id: str | None = None,
 ) -> dict:
-    """The general per-plant CSV door: per-image ``results`` aggregated per plant under the
-    trait's confirmed ``plant_aggregation`` and delivered over the published buckets they came
-    from, for exactly the plants ``plants`` names.
+    """Deliver per-image ``results`` aggregated per plant as a CSV for the plants ``plants`` names.
 
-    The aggregation, every check a delivered number has to pass (the meaning, the population, the
-    units, the one gate over the buckets and, for a dimensional value, the physical-scale
+    The general per-plant CSV door: the results are aggregated under the trait's confirmed
+    ``plant_aggregation`` and delivered over the published buckets they came from. The
+    aggregation, every check a delivered number has to pass (the meaning, the population, the
+    units, the gate over the buckets and, for a dimensional value, the physical-scale
     assessment) and the delivered schema are
     :func:`~tcip_mcp.pipelines.postprocessing.aggregation.deliver_per_plant_aggregate`'s. An
     unvalidated delivery ships only under ``acknowledgment_id``, a breeder's recorded

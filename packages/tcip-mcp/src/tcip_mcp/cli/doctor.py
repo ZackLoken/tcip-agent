@@ -2,7 +2,7 @@
 
 Checks empty label documents nobody marked complete, registry entries pointing at
 missing/test-fixture checkpoints, provenance smells, orphaned labels, and verdict shards that will
-not read. Read-only. Run at session start:
+not read. Read-only:
 
     tcip doctor <project_root>
 
@@ -18,14 +18,16 @@ from pathlib import Path
 
 
 def _named(key) -> str:
-    """A label document's key as a finding names it: ``<capture>/<stem>``."""
+    """Return a label document's key as a finding names it, ``<capture>/<stem>``."""
     return "/".join(key.parts)
 
 
 def _census(root: Path, findings: list) -> dict | None:
-    """The dataset census (``data_tools._scan_dataset``) with ``label_reads``, each label key's
+    """Take the dataset census with every label document read.
+
+    Returns the census (``data_tools._scan_dataset``) with ``label_reads``, each label key's
     document or the ``UnreadableLabelDocumentError`` it raised; ``None`` with an error finding for
-    an ``images/`` stem collision or an unreadable ``.bandgroup`` manifest.
+    an ``images/`` stem collision.
     """
     from tcip_annotation.json_io import (
         UnreadableLabelDocumentError,
@@ -51,12 +53,13 @@ def _census(root: Path, findings: list) -> dict | None:
 def check_data_quality(
     root: Path, findings: list, *, census: dict | None
 ) -> None:
-    """Per-document annotation quality, each document read on its own so one bad document never
-    hides the findings about the rest, each named by its capture and stem: a label with no
-    matching image, a label the one per-image reader refuses (undecodable, an unrecognized shape,
-    a malformed mark), an empty label no live mark finishes for any subject, and one line counting
-    the images with no label record. Reads the run's one dataset census (``census``, ``None`` when
-    it could not be taken).
+    """Append the annotation quality findings, one document at a time.
+
+    Each document is read on its own so one bad document never hides the findings about the
+    rest, each named by its capture and stem: a label with no matching image, a label the
+    per-image reader refuses (undecodable, an unrecognized shape, a malformed mark), an empty
+    label no live mark finishes for any subject, and one line counting the images with no label
+    record. Reads the dataset census ``census`` (``None`` when it could not be taken).
     """
     from tcip_annotation.json_io import LabelDocument
     from tcip_mcp.pipelines.data.label_queries import admits
@@ -110,8 +113,10 @@ TEMP_TREE_MARKERS = ("pytest-of-", "\\Temp\\", "/Temp/")
 
 
 def check_registry(root: Path, findings: list) -> None:
-    """Flag registered models whose checkpoint is missing or points into a test/temp tree, and
-    every published bucket whose record names a checkpoint digest no registry entry carries.
+    """Flag registered models whose checkpoint is missing or points into a test or temp tree.
+
+    Also flags every published bucket whose record names a checkpoint digest no registry entry
+    carries.
 
     A checkpoint resolving under the project root never triggers the temp-tree marker scan, even
     when the root itself sits under one; only a checkpoint the root does not contain is scanned.
@@ -202,6 +207,12 @@ def check_registry(root: Path, findings: list) -> None:
 def check_provenance(
     root: Path, findings: list, *, census: dict | None
 ) -> None:
+    """Append the provenance findings over the census's readable label documents.
+
+    Warns of every annotation carrying ``accepted_by`` without ``created_by``, and, when any
+    annotation carries no ``created_by``, adds one info finding counting them. Appends nothing
+    when ``census`` is ``None``.
+    """
     from tcip_annotation.json_io import LabelDocument
 
     unstamped = 0
@@ -226,11 +237,12 @@ def check_provenance(
 
 
 def check_state(root: Path, findings: list) -> None:
-    """Warn of every verdict shard that will not read through the one decoder
-    (:func:`~tcip_annotation.verdicts.read_verdicts`), every one naming an image its bucket's
+    """Warn of every unreadable flags record or verdict shard and every shard naming no document.
+
+    Warns of every verdict shard that will not read through
+    :func:`~tcip_annotation.verdicts.read_verdicts`, every one naming an image its bucket's
     record names no document for (:func:`~tcip_mcp.buckets.read_bucket`), and every flags record
-    that will not read (:func:`~tcip_annotation.flags.read_flags`), which the editor refuses to
-    load its image over.
+    that will not read (:func:`~tcip_annotation.flags.read_flags`).
     """
     import tcip_store
     from tcip_annotation.flags import REVIEW_FLAGS_STORE, read_flags
@@ -269,8 +281,10 @@ def check_state(root: Path, findings: list) -> None:
 
 
 def check_traits(root: Path, findings: list) -> None:
-    """An error for every trait record the store or its schema refuses to read, and a warning for
-    every trait whose latest revision the breeder has not confirmed.
+    """Append an error for every unreadable trait record and a warning for every unconfirmed one.
+
+    An unreadable record is one the store or its schema refuses to read; an unconfirmed one is a
+    trait whose latest revision the breeder has not confirmed.
     """
     from pydantic import ValidationError
 
@@ -295,9 +309,7 @@ def check_traits(root: Path, findings: list) -> None:
 
 
 def check_project_record(root: Path, findings: list) -> None:
-    """An error for a project record that is absent, damaged, or on a root the store refuses to
-    read.
-    """
+    """Append an error when the project record is absent, damaged, or on an unreadable root."""
     from tcip_mcp.project_record import record_fields
 
     problem = record_fields(root)["record_problem"]
@@ -306,6 +318,11 @@ def check_project_record(root: Path, findings: list) -> None:
 
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    """Run every check over the project named in ``argv`` and print the findings, errors first.
+
+    Returns 2 when any finding is an error or the root is not a directory, 1 when the worst is a
+    warning, and 0 otherwise.
+    """
     ap = argparse.ArgumentParser(
         description=__doc__.splitlines()[0], prog=prog
     )

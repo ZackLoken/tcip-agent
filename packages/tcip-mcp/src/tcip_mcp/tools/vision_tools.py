@@ -1,5 +1,6 @@
-"""Vision tools: render annotations and predictions to an image under the project's
-``.tcip/artifacts/viz/`` and return its path.
+"""Vision tools: render annotations and predictions to an image and return its path.
+
+The image is written under the project's ``.tcip/artifacts/viz/``.
 """
 
 from __future__ import annotations
@@ -42,12 +43,11 @@ if TYPE_CHECKING:
 
 
 class DisplayRead(NamedTuple):
-    """Display pixels for a renderer, with the frame facts that place annotations on them.
+    """Display pixels, with the frame facts that place annotations on them.
 
     ``pixels`` is uint8 RGB; ``rect`` is the region of the raster they were read from, so the
-    pixels' own size against it is the served resolution on each axis, what a renderer drawing a
-    crop needs; ``native_size`` is the raster's own ``(width, height)``, the frame annotation
-    coordinates are measured in.
+    pixels' own size against it is the served resolution on each axis; ``native_size`` is the
+    raster's own ``(width, height)``, the frame annotation coordinates are measured in.
     """
 
     pixels: np.ndarray
@@ -58,9 +58,7 @@ class DisplayRead(NamedTuple):
 def _clamped_rect(
     region: tuple[float, float, float, float], width: int, height: int
 ) -> Rect:
-    """An ``(x, y, w, h)`` region clamped to a non-empty rect inside a ``width`` x ``height``
-    raster.
-    """
+    """Clamp an ``(x, y, w, h)`` region to a non-empty rect in a ``width`` x ``height`` raster."""
     from tcip_mcp.pipelines.raster_source import Rect
 
     def clamp(v: float, low: int, high: int) -> int:
@@ -82,7 +80,7 @@ def _read_for_display(
     max_edge: int = VIZ_ARTIFACT_MAX_EDGE,
     region: tuple[float, float, float, float] | None = None,
 ) -> DisplayRead:
-    """Read the open ``raster`` as display pixels a renderer can draw on.
+    """Read the open ``raster`` as display pixels.
 
     The raster layer serves the region (an ``(x, y, w, h)`` rectangle in the raster's own grid, or
     the whole frame) at or under ``max_edge`` through ``display_bounds.plan_read``, off the
@@ -127,18 +125,20 @@ def _display_of(
     max_edge: int = VIZ_ARTIFACT_MAX_EDGE,
     region: tuple[float, float, float, float] | None = None,
 ) -> DisplayRead:
-    """:func:`_read_for_display` of the source ``header`` describes, opened once at the image
-    route's count (:meth:`~tcip_mcp.pipelines.raster_source.SourceHeader.open_at_route_count`).
+    """Read the source ``header`` describes for display, opened once at the image route's count.
+
+    Returns :func:`_read_for_display` of the source, opened through
+    :meth:`~tcip_mcp.pipelines.raster_source.SourceHeader.open_at_route_count`.
     """
     with header.open_at_route_count() as raster:
         return _read_for_display(raster, max_edge=max_edge, region=region)
 
 
 def _subject_indexer() -> tuple[dict[str, int], Callable[[str], int]]:
-    """A stable subject-name → color-index map for the (int-keyed) renderers, plus its indexer.
+    """Build an empty name-to-index map and the indexer that fills it.
 
-    Labels are name-based; the viz layer colors by an integer and labels from a ``{index: name}``
-    map, so each distinct subject in one render gets a stable index and its own name in the legend.
+    The indexer returns a name's index, giving each new name the next integer in first-seen order
+    and recording it in the map.
     """
     idx: dict[str, int] = {}
 
@@ -155,7 +155,7 @@ def _name_map(idx: dict[str, int]) -> dict[int, str]:
 
 
 def _boxable(anns: list[Annotation]) -> list[Annotation]:
-    """The annotations a box renderer can draw: geometry-bearing, with a Point excluded."""
+    """Return the annotations whose geometry derives a box: geometry-bearing, a Point excluded."""
     return [a for a in anns if box_derivable(a.geometry)]
 
 
@@ -172,10 +172,12 @@ def _point_note(n: int) -> str:
 
 
 def _legend_name(a: Annotation, *, scope) -> str:
-    """The name a render's legend shows for ``a``: its subject followed by each value it carries
-    under ``scope``'s attributes, in declared order (:func:`~tcip_annotation.json_io.
-    attribute_ids` and its inverse), its subject alone under no scope, a scope naming no subject
-    or declaring no attribute, or for a record of another subject.
+    """Return the name a render's legend shows for ``a``.
+
+    The name is its subject followed by each value it carries under ``scope``'s attributes, in
+    declared order (:func:`~tcip_annotation.json_io.attribute_ids` and its inverse), its subject
+    alone under no scope, a scope naming no subject or declaring no attribute, or for a record of
+    another subject.
     """
     from tcip_annotation.json_io import attribute_ids, attribute_values
     from tcip_mcp.pipelines.data.selection import DOCUMENT
@@ -240,8 +242,7 @@ def visualize(
 ) -> dict:
     """Render annotations, predictions, a GT-vs-prediction comparison, or a sample grid.
 
-    Saves under ``project``'s ``.tcip/artifacts/viz/`` and returns ``image_path`` for the agent's
-    own image-capable read tool.
+    Saves under ``project``'s ``.tcip/artifacts/viz/`` and returns its path as ``image_path``.
 
     Rendering conventions, shared across every source: boxes/masks color by class through the
     20-class palette in ``tcip_annotation.viz``, indexed by first-seen order within one render
@@ -320,7 +321,7 @@ def visualize(
 
 
 def _labels_at(key: ts.Key) -> list[Annotation] | None:
-    """The annotations of the label document ``key``, ``None`` when there is none."""
+    """Return the annotations of the label document ``key``, ``None`` when there is none."""
     document, version = read_document_versioned(key)
     return None if version == ts.Version.ABSENT else document.annotations
 
@@ -331,9 +332,10 @@ def _viz_annotations(
     task: str = "detect",
     class_names: str = "",
 ) -> dict:
-    """Render ground-truth annotations on the logical image ``image_path`` names
-    (:func:`~tcip_mcp.pipelines.image_utils.resolve_image_path`, whose refusals answer as an
-    error), read from its own label document.
+    """Render ground-truth annotations on the logical image ``image_path`` names.
+
+    The image is resolved by :func:`~tcip_mcp.pipelines.image_utils.resolve_image_path`, whose
+    refusals answer as an error, and its annotations are read from its own label document.
     """
     img = Path(image_path)
     if not img.is_file():
@@ -411,9 +413,10 @@ def _viz_predictions(
     class_names: str = "",
     conf_threshold: float = 0.0,
 ) -> dict:
-    """Render a bucket's predictions on the logical image ``image_path`` names
-    (:func:`~tcip_mcp.pipelines.image_utils.resolve_image_path`, whose refusals answer as an
-    error), read from the bucket's document for it.
+    """Render a bucket's predictions on the logical image ``image_path`` names.
+
+    The image is resolved by :func:`~tcip_mcp.pipelines.image_utils.resolve_image_path`, whose
+    refusals answer as an error, and its predictions are read from the bucket's document for it.
 
     The legend keys each detection by its subject and the values it carries under the attributes
     the bucket's recorded scope declares (:func:`_legend_name`).
@@ -586,15 +589,14 @@ def get_worst_predictions(
     surplus_weight: float,
     confidence_weight: float,
 ) -> dict:
-    """Return the ``top_k`` images ranked worst by a count-mismatch + low-confidence triage
-    heuristic.
+    """Return the ``top_k`` images ranked worst by a count-mismatch + low-confidence heuristic.
 
     This is a cheap triage signal, not a quality metric: it does no IoU matching and computes
     no loss. The score is ``shortfall_weight * max(0, n_gt - n_pred) + surplus_weight *
     max(0, n_pred - n_gt) + confidence_weight * (1 - avg_conf)``, purely the difference in box
     counts plus mean confidence, so an image with the right count but
-    every box mislocated scores as good. Use it to surface likely-bad frames for a human to look
-    at; for true TP/FP/FN ranking use ``score_predictions`` (``detail=True``, IoU-matched). Only
+    every box mislocated scores as good. For true TP/FP/FN ranking use ``score_predictions``
+    (``detail=True``, IoU-matched). Only
     the documents the bucket's record names are ranked, each against the label document of its
     image in the bucket's capture (answered as ``capture``); a labeled image of that capture it
     names none for was not predicted, and is listed under ``not_predicted`` rather than scored. A
@@ -618,11 +620,13 @@ def get_worst_predictions(
 def _ranked(
     bucket: Bucket, top_k: int, weights: tuple[float, float, float]
 ) -> tuple[dict, dict[str, tuple]]:
-    """The ``top_k`` worst-scoring images of ``bucket`` by the count-mismatch and confidence
-    heuristic under ``weights`` (shortfall, surplus, confidence; :func:`get_worst_predictions`)
-    (its capture, the ranked stems with their scores, how many were scored and the capture's
-    labeled stems the bucket holds no document for), beside the read the ranking was made over:
-    each stem's source, ground truth and predictions.
+    """Rank the ``top_k`` worst-scoring images of ``bucket`` by the count-mismatch heuristic.
+
+    The heuristic is the count-mismatch and confidence one under ``weights`` (shortfall, surplus,
+    confidence; :func:`get_worst_predictions`). Returns the ranking (its capture, the ranked stems
+    with their scores, how many were scored and the capture's labeled stems the bucket holds no
+    document for), beside the read the ranking was made over: each stem's source, ground truth
+    and predictions.
     """
     from tcip_annotation.json_io import detection_annotations
     from tcip_mcp.dataset_layout import capture_label_keys, image_dir
@@ -705,9 +709,8 @@ def render_failure_cases(
     """Find and render the worst predictions for failure analysis.
 
     Ranks by a count-mismatch + low-confidence heuristic (`get_worst_predictions`); no IoU
-    matching, so an image with the right box count but every box mislocated scores as good. Not a
-    substitute for `score_predictions`(`detail=True`)'s IoU-matched TP/FP/FN when mislocalization
-    itself is the question. Each case renders its image of the bucket's capture against the label
+    matching, so an image with the right box count but every box mislocated scores as good. Each
+    case renders its image of the bucket's capture against the label
     document of that image.
 
     Returns a grid image and individual failure case images.
@@ -884,8 +887,9 @@ def _viz_dataset_sample(
 
 
 def _received_at(document: dict, name: str) -> datetime:
-    """The instant the backend received the canvas document ``name``. Refuses (``ValueError``) a
-    document that carries none.
+    """Return the instant the backend received the canvas document ``name``.
+
+    Refuses (``ValueError``) a document that carries none.
     """
     if "received_at" not in document:
         raise ValueError(f"the canvas document {name} carries no received_at")
@@ -901,14 +905,12 @@ def capture_live_canvas(
 ) -> dict:
     """Render exactly what the human's GUI canvas showed for this project: image, shapes, viewport.
 
-    Reads the canvas state the GUI pushes into the project's store: the meta record (image,
-    viewport, classes, counts, tab, mode, active_subject, cut_armed, dirty and user) and the
-    geometry record (the full display-resolved geometry,
-    including unsaved edits and an in-progress drawing). The backend writes a push only under the
-    project it has open, so these documents are always this project's own. Renders the region
-    being shown at up to ``max_edge`` and returns the artifact path for the agent's own
-    image-capable read tool, plus the classes schema, per-tag/per-creator counts,
-    and the state's age. A canvas document that will not read raises the store's own error.
+    Reads the canvas state pushed into the project's store: the meta record (image, viewport,
+    classes, counts, tab, mode, active_subject, cut_armed, dirty and user) and the geometry record
+    (the full display-resolved geometry, including unsaved edits and an in-progress drawing).
+    Renders the region being shown at up to ``max_edge`` and returns the artifact path, plus the
+    classes schema, per-tag/per-creator counts, and the state's age. A canvas document that will
+    not read raises the store's own error.
 
     Args:
         refresh: Ping the GUI (via the panel-event hub) to push fresh state first, waiting briefly
