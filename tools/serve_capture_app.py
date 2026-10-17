@@ -1,4 +1,4 @@
-"""Start or stop the served web app under a scratch environment, for a GUI capture harness.
+"""Start or stop the served web app under a scratch environment.
 
 ``start`` launches ``python -m tcip_web`` with ``TCIP_WORKSPACE`` pointed at a scratch directory
 under a caller-named harness root, waits until the projects route answers, and records pid and

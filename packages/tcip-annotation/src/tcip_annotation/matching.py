@@ -1,4 +1,4 @@
-"""The platform's one matcher of detections to ground truth, and geometry helpers.
+"""The matcher of detections to ground truth, and geometry helpers.
 
 The helpers work over :class:`~tcip_annotation.state.Annotation` geometries: box and polygon IoU
 as matrices and polygon containment.
@@ -260,7 +260,7 @@ def pair_detections(
     *,
     policy: str = "score_first",
 ) -> Matching:
-    """Match one image's detections to its ground truth: the platform's one matcher.
+    """Match one image's detections to its ground truth.
 
     ``dt`` records (``{"bbox": xywh}``, pre-sorted by score descending) are paired under
     ``policy`` (:func:`match_pairs`) to ``gt``'s objects (``{"bbox": xywh, "iscrowd"}``,
@@ -293,7 +293,7 @@ def pair_detections(
 
 
 def match_record(a: Annotation) -> dict:
-    """Return one annotation as the record the matcher reads.
+    """Return one annotation as a ``bbox``, ``iscrowd`` and ``rings`` record.
 
     The record holds its box as ``[x, y, w, h]`` on the stored grid, its crowd flag, and its rings
     (a box's own rectangle, for a box).
@@ -309,7 +309,7 @@ def match_record(a: Annotation) -> dict:
 
 
 def geometry_rings(geometry: BBox | Polygon) -> Rings:
-    """Return the region a box or polygon covers, as the rings a mask match reads.
+    """Return the region a box or polygon covers, as rings.
 
     A polygon's own rings, or a box's rectangle as one ring.
     """
@@ -321,7 +321,7 @@ def geometry_rings(geometry: BBox | Polygon) -> Rings:
 
 
 _MATCHED_BY = ("kind", "iou_threshold", "tolerance")
-"""The criterion fields :func:`match_pairs` reads; a criterion's provenance fields match nothing."""
+"""The criterion fields that decide a match: its kind, IoU threshold and center tolerance."""
 
 
 def class_matchings(
@@ -455,5 +455,5 @@ def box_ring(bbox: BBox) -> list[tuple[float, float]]:
 
 
 def point_in_polygon(x: float, y: float, polygon: Polygon) -> bool:
-    """Whether a point lies inside any ring of ``polygon`` (:func:`shapely_geometry`)."""
+    """Return whether a point lies inside any ring of ``polygon`` (:func:`shapely_geometry`)."""
     return shapely_geometry(polygon.rings).contains(ShapelyPoint(x, y))

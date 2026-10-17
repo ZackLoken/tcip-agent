@@ -1,4 +1,4 @@
-"""Write the delivery events the frontend tests read, produced by the platform itself.
+"""Write served delivery events as a fixture file, produced by the platform itself.
 
 In a scratch session (``tools/fixture_session.py``), in projects each created through
 ``tests._web_fixtures.named_project``, deliveries are made through the platform's own producers
@@ -8,7 +8,7 @@ under a breeder's acknowledgment, and the orthomosaic door's nearest-plant and c
 deliveries. Each project is opened through ``POST /api/projects/open`` and its records served by
 ``GET /api/results/delivery-events``; the phenology project's record is served again after a
 superseding rebuild archives the mapping it cites. The served records are written,
-:func:`rebased`, to ``frontend/src/test/deliveryEvents.json`` under the names the tests import.
+:func:`rebased`, to ``frontend/src/test/deliveryEvents.json``, keyed by fixture name.
 
     python -m tools.generate_delivery_fixture
 """
@@ -46,7 +46,7 @@ SCRATCH_ROOT = "/scratch"
 def rebased(value: Any, scratch: Path) -> Any:
     """Return ``value`` with every spelling of ``scratch`` in its strings made :data:`SCRATCH_ROOT`.
 
-    The scratch directory is the one fact that differs with where a run was made.
+    The scratch directory differs with where a run was made.
     """
 
     def leaf(_key: str | None, text: Any) -> Any:

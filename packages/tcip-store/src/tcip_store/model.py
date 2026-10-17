@@ -125,10 +125,9 @@ REQUIRED: Any = _Required()
 
 
 def canonical_path(path: str | Path) -> str:
-    """One spelling for a filesystem path, so two spellings of one directory compare equal.
+    """Return one spelling for a filesystem path, so two spellings of one directory compare equal.
 
     Resolution collapses the relative segments and the links; the case rule is the platform's own.
-    A relative path resolves against the process's current directory, so a caller that must refuse
-    one refuses before canonicalizing.
+    A relative path resolves against the process's current directory.
     """
     return os.path.normcase(str(Path(path).resolve()))

@@ -1,4 +1,4 @@
-"""Mask -> polygon rings: the contour extractor behind every mask-derived shape.
+"""Mask -> polygon rings.
 
 Every external contour becomes its own ring, largest-area first; nothing is reduced to the
 largest component.

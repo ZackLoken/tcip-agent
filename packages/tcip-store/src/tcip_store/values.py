@@ -31,7 +31,7 @@ def encode_record(value: Any) -> bytes:
 def encode_log_line(value: Any) -> bytes:
     """Return a log entry's bytes: UTF-8 JSON on one line, keys in their authored order.
 
-    Refuses as :func:`encode_record` does.
+    Refuses what :func:`check_json_value` refuses, before anything is spelled.
     """
     check_json_value(value)
     return json.dumps(
@@ -54,12 +54,12 @@ NOT_FINITE_SUFFIX = "_state"
 
 
 def scalar_number(value: Any) -> bool:
-    """Whether ``value`` is a number other than a boolean."""
+    """Return whether ``value`` is a number other than a boolean."""
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def finite_number(value: Any) -> bool:
-    """Whether ``value`` is a finite :func:`scalar_number`."""
+    """Return whether ``value`` is a finite :func:`scalar_number`."""
     return scalar_number(value) and math.isfinite(value)
 
 
@@ -75,7 +75,7 @@ def non_finite_state(value: float) -> str | None:
 
 
 def stored_number(field: str, value: Any) -> dict[str, Any]:
-    """One numeric field as a record carries it, with a state field when it is not a number.
+    """Return one numeric field as a record carries it, with a state field when it is not a number.
 
     A finite number, or None, is carried as itself. A non-finite one becomes null plus
     ``<field>_state``.
@@ -91,8 +91,7 @@ def stored_number(field: str, value: Any) -> dict[str, Any]:
 def stored_numbers(values: Mapping[str, Any]) -> dict[str, Any]:
     """Return a flat mapping of measurements as a record carries it, each via :func:`stored_number`.
 
-    For a metrics row, where every entry is one named number and a state field can sit
-    beside the value it explains.
+    Each entry of ``values`` is one named number; a state field sits beside the value it explains.
     """
     row: dict[str, Any] = {}
     for name, value in values.items():
@@ -101,7 +100,7 @@ def stored_numbers(values: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def finite_or_none(value: Any) -> Any:
-    """``None`` for a non-finite float, ``value`` otherwise; no state companion is written."""
+    """Return ``None`` for a non-finite float, else ``value``; no state companion is written."""
     if isinstance(value, float) and non_finite_state(value) is not None:
         return None
     return value

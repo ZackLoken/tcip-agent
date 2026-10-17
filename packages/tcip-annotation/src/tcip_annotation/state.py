@@ -32,7 +32,7 @@ RING_MIN_POINTS = 3
 
 
 def is_ring(ring) -> bool:
-    """Whether ``ring`` can be a shape: :data:`RING_MIN_POINTS` or more points."""
+    """Return whether ``ring`` can be a shape: :data:`RING_MIN_POINTS` or more points."""
     return len(ring) >= RING_MIN_POINTS
 
 
@@ -60,7 +60,7 @@ class Point:
     """A single labeled location in pixel coordinates.
 
     It is a placed prompt (human- or agent-supplied, for a promptable method like SAM) or a
-    keypoint/landmark. Has no bounding box and no area; :func:`bbox_of` refuses one.
+    keypoint/landmark. Has no bounding box and no area.
     """
 
     x: float
@@ -125,7 +125,7 @@ def instances(
 def box_derivable(
     geometry: BBox | Polygon | Point | None,
 ) -> TypeGuard[BBox | Polygon]:
-    """Whether a geometry yields a box: a rect or a polygon, never a point and never nothing."""
+    """Return whether a geometry yields a box: a rect or a polygon, never a point or nothing."""
     return geometry is not None and not isinstance(geometry, Point)
 
 
@@ -147,7 +147,7 @@ def prediction_score(a: Annotation) -> float:
 
 
 def polygonal(geometry: BBox | Polygon | Point | None) -> TypeGuard[Polygon]:
-    """Whether a geometry is a polygon, the one shape an instance mask is rasterized from."""
+    """Return whether a geometry is a polygon."""
     return isinstance(geometry, Polygon)
 
 

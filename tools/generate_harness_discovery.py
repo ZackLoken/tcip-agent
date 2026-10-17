@@ -35,9 +35,8 @@ def _render_skill_md(
 ) -> str:
     """Return one knowledge document's SKILL.md text.
 
-    The text is its own frontmatter, verbatim, plus a body that points at the canonical content
-    instead of duplicating it, phrased per `read_instruction` for the harness the tree is
-    generated for.
+    The text is its own frontmatter, verbatim, plus a body that points at the canonical content,
+    phrased per `read_instruction` for the harness the tree is generated for.
     """
     import yaml
 
@@ -129,7 +128,7 @@ def stale_skills(skills_dir: Path, render, documents) -> list[str]:
 
 
 def stray_skill_directories(skills_dir: Path, documents) -> set[str]:
-    """Directory names directly under `skills_dir` that name no document in `documents`."""
+    """Return the directory names directly under `skills_dir` naming no document in `documents`."""
     documented_names = {document.name for document in documents}
     on_disk = {entry.name for entry in skills_dir.iterdir() if entry.is_dir()}
     return on_disk - documented_names

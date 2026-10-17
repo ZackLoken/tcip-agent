@@ -24,12 +24,12 @@ from tcip_annotation.state import Annotation
 
 
 def is_coco_id(value: Any) -> bool:
-    """Whether ``value`` is a COCO identity: an integer, never a float, a string or a bool."""
+    """Return whether ``value`` is a COCO identity: an integer, never a float, string or bool."""
     return isinstance(value, int) and not isinstance(value, bool)
 
 
 def coco_categories(coco: dict, *, problems: list[str]) -> dict[int, str]:
-    """``{category_id: name}`` from the document's own ``categories``, checked without coercion.
+    """Return ``{category_id: name}`` from the document's own ``categories``, without coercion.
 
     A declaration that is not an object with an integer ``id``, and a second declaration of one id,
     is appended to ``problems`` by index rather than read.

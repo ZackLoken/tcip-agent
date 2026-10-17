@@ -2,9 +2,7 @@
 
     python tools/line_delta.py <repo> <rev | --cached | <rev1>..<rev2>>
 
-The one measurement a contraction change reports before it is landed (CLAUDE.md, "Working a
-change"): package code that grew names a mechanism that survived beside its replacement. Reads
-`git diff --numstat` or `git show --numstat` for the target and prints one line per area.
+Reads `git diff --numstat` or `git show --numstat` for the target and prints one line per area.
 """
 
 from __future__ import annotations
@@ -23,7 +21,7 @@ def area_of(path: str) -> str:
 
 
 def line_delta(repo: str, target: str) -> dict[str, tuple[int, int]]:
-    """``{area: (insertions, deletions)}`` for ``target`` in ``repo``.
+    """Return ``{area: (insertions, deletions)}`` for ``target`` in ``repo``.
 
     ``target`` is a commit, a ``rev1..rev2`` range, ``<rev>..`` for the whole working tree against
     ``rev`` (staged and unstaged alike, the form a worktree measures itself with), or ``--cached``
