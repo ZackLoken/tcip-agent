@@ -21,8 +21,10 @@ PACKAGE_SRC_DIRS = ("tcip-store", "tcip-annotation", "tcip-mcp", "tcip-web")
 
 
 def build_environ(worktree: Path) -> dict[str, str]:
-    """The environment every gate runs under: PYTHONPATH set to the worktree's own four package
-    `src` directories, never appended to whatever the caller's own PYTHONPATH already names.
+    """Return the environment every gate runs under.
+
+    PYTHONPATH is set to the worktree's own four package `src` directories, never appended to
+    whatever the caller's own PYTHONPATH already names.
     """
     env = dict(os.environ)
     src_dirs = [
@@ -35,8 +37,10 @@ def build_environ(worktree: Path) -> dict[str, str]:
 
 
 def prove_resolution(worktree: Path, env: dict[str, str]) -> Path:
-    """Confirm `tcip_mcp` resolves inside `worktree` under `env`, refusing before any gate runs
-    if it instead resolves to the editable install's real target (another checkout).
+    """Confirm `tcip_mcp` resolves inside `worktree` under `env` and return where it resolves.
+
+    Refuses before any gate runs if it instead resolves to the editable install's real target
+    (another checkout).
     """
     proc = subprocess.run(
         [sys.executable, "-c", "import tcip_mcp; print(tcip_mcp.__file__)"],
@@ -59,6 +63,7 @@ def prove_resolution(worktree: Path, env: dict[str, str]) -> Path:
 
 
 def run_ruff(worktree: Path, env: dict[str, str]) -> int:
+    """Run ``ruff check packages tests tools`` in the worktree and return its exit code."""
     # This repository has no scripts/ directory at HEAD; when one exists, add it to this list.
     print("== ruff check packages tests tools ==")
     return subprocess.run(
@@ -69,6 +74,7 @@ def run_ruff(worktree: Path, env: dict[str, str]) -> int:
 
 
 def run_mypy(worktree: Path, env: dict[str, str]) -> int:
+    """Run mypy in the worktree with a fresh cache directory and return its exit code."""
     cache_dir = tempfile.mkdtemp(prefix="worktree-gate-mypy-")
     try:
         print(f"== mypy --cache-dir {cache_dir} ==")
@@ -82,6 +88,7 @@ def run_mypy(worktree: Path, env: dict[str, str]) -> int:
 
 
 def run_pytest(worktree: Path, env: dict[str, str], files: list[str]) -> int:
+    """Run pytest over ``files`` in the worktree and return its exit code."""
     print(f"== pytest {' '.join(files)} ==")
     return subprocess.run(
         [
@@ -99,6 +106,7 @@ def run_pytest(worktree: Path, env: dict[str, str], files: list[str]) -> int:
 
 
 def main() -> int:
+    """Prove resolution, then run the gates named in order; return the first failing code or 0."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("worktree", type=Path)
     parser.add_argument("--ruff", action="store_true")

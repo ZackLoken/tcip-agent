@@ -1,7 +1,9 @@
-"""Generate the files that project the domain-knowledge documents
-(`tcip_mcp.knowledge.list_documents()`): a `SKILL.md` per document under `.claude/skills/` and
-`.agents/skills/`, the generated block of `AGENTS.md`, and the `WebFetch(domain:...)` grants of
-Claude Code's row settings file from the hosts the `cv-research` document's source list names.
+"""Generate the files that project the domain-knowledge documents to each harness.
+
+The documents are `tcip_mcp.knowledge.list_documents()`'s. The files are a `SKILL.md` per
+document under `.claude/skills/` and `.agents/skills/`, the generated block of `AGENTS.md`, and
+the `WebFetch(domain:...)` grants of Claude Code's row settings file from the hosts the
+`cv-research` document's source list names.
 
     python tools/generate_harness_discovery.py
 """
@@ -31,9 +33,11 @@ AGENTS_BLOCK_MAX_BYTES = 16 * 1024
 def _render_skill_md(
     name: str, description: str, document_path: Path, read_instruction: str
 ) -> str:
-    """One knowledge document's SKILL.md text: its own frontmatter, verbatim, plus a body that
-    points at the canonical content instead of duplicating it, phrased per `read_instruction`
-    for the harness the tree is generated for.
+    """Return one knowledge document's SKILL.md text.
+
+    The text is its own frontmatter, verbatim, plus a body that points at the canonical content
+    instead of duplicating it, phrased per `read_instruction` for the harness the tree is
+    generated for.
     """
     import yaml
 
@@ -50,7 +54,7 @@ def _render_skill_md(
 
 
 def render_skill(name: str, description: str, document_path: Path) -> str:
-    """The generated Claude Code SKILL.md text for one knowledge document."""
+    """Return the generated Claude Code SKILL.md text for one knowledge document."""
     return _render_skill_md(
         name,
         description,
@@ -62,8 +66,9 @@ def render_skill(name: str, description: str, document_path: Path) -> str:
 def render_agents_skill(
     name: str, description: str, document_path: Path
 ) -> str:
-    """The generated Codex/Antigravity SKILL.md text for one knowledge document, phrased for a
-    harness with its own file reader rather than a Claude tool.
+    """Return the generated Codex/Antigravity SKILL.md text for one knowledge document.
+
+    It is phrased for a harness with its own file reader rather than a Claude tool.
     """
     return _render_skill_md(
         name,
@@ -74,8 +79,10 @@ def render_agents_skill(
 
 
 def render_agents_block(documents) -> str:
-    """The generated block for `AGENTS.md`'s root: what TCIP is, the document index, and how a
-    harness with no skill mechanism reaches the same corpus.
+    """Return the generated block for `AGENTS.md`'s root.
+
+    The block states what TCIP is, the document index, and how a harness with no skill mechanism
+    reaches the same corpus.
     """
     lines = [
         AGENTS_BLOCK_START,
@@ -105,8 +112,9 @@ def render_agents_block(documents) -> str:
 
 
 def stale_skills(skills_dir: Path, render, documents) -> list[str]:
-    """Document names whose `SKILL.md` under `skills_dir` is missing or does not equal
-    `render(name, description, path)`.
+    """Return the document names whose `SKILL.md` under `skills_dir` is missing or stale.
+
+    Stale is not equal to `render(name, description, path)`.
     """
     stale = []
     for document in documents:
@@ -128,8 +136,9 @@ def stray_skill_directories(skills_dir: Path, documents) -> set[str]:
 
 
 def _write_skill_tree(skills_dir: Path, render, documents) -> list[Path]:
-    """Render every document into one `SKILL.md` under its own subdirectory of `skills_dir`,
-    and return the paths written.
+    """Render every document into a `SKILL.md` under `skills_dir`; return the paths written.
+
+    Each document's file sits in its own subdirectory.
     """
     written = []
     for document in documents:
@@ -146,9 +155,9 @@ def _write_skill_tree(skills_dir: Path, render, documents) -> list[Path]:
 
 
 def write_agents_block(documents=None, path: Path = AGENTS_MD_PATH) -> Path:
-    """Rewrite `AGENTS.md`'s generated block in place, creating the file if it is absent and
-    leaving any text outside the markers untouched.
+    """Rewrite `AGENTS.md`'s generated block in place and return the path.
 
+    The file is created if it is absent, and any text outside the markers is left untouched.
     Raises `ValueError` when the rendered block exceeds the byte budget Codex's combined
     `AGENTS.md` reader allows, when the file carries a start marker with no matching end marker
     or the reverse, and when both markers are present but the end marker sits above the start.
@@ -195,8 +204,9 @@ _WEBFETCH = "WebFetch(domain:"
 
 
 def research_hosts(document_text: str) -> list[str]:
-    """The backticked hosts of the research document's source list, in order. Raises
-    `ValueError` when the document carries no source list.
+    """Return the backticked hosts of the research document's source list, in order.
+
+    Raises `ValueError` when the document carries no source list.
     """
     block = _SOURCE_LIST.search(document_text)
     if block is None:
@@ -207,8 +217,9 @@ def research_hosts(document_text: str) -> list[str]:
 
 
 def render_claude_settings(settings_text: str, hosts: list[str]) -> str:
-    """`settings_text` with its allow list's `WebFetch` grants replaced by one per host in
-    `hosts`, after every other allow entry.
+    """Return `settings_text` with its allow list's `WebFetch` grants replaced, one per host.
+
+    The grants for `hosts` come after every other allow entry.
     """
     settings = json.loads(settings_text)
     permissions = settings["permissions"]
@@ -220,7 +231,7 @@ def render_claude_settings(settings_text: str, hosts: list[str]) -> str:
 
 
 def expected_claude_settings() -> str:
-    """What Claude Code's row settings file holds with the research document's hosts granted."""
+    """Return Claude Code's row settings file text with the research document's hosts granted."""
     from tcip_mcp.knowledge import document_path
     from tcip_web.terminal import CLAUDE_SETTINGS
 
@@ -233,8 +244,9 @@ def expected_claude_settings() -> str:
 
 
 def generate(root: Path = REPO_ROOT) -> list[Path]:
-    """Write every generated file at its repository-relative place under `root`, and return the
-    paths written.
+    """Write every generated file at its repository-relative place under `root`.
+
+    Returns the paths written.
     """
     from tcip_mcp.knowledge import list_documents
     from tcip_web.terminal import CLAUDE_SETTINGS
@@ -255,6 +267,7 @@ def generate(root: Path = REPO_ROOT) -> list[Path]:
 
 
 def main() -> int:
+    """Generate every file, print each path written, and return 0."""
     for path in generate():
         print(f"wrote {path.relative_to(REPO_ROOT)}")
     return 0

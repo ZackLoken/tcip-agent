@@ -44,8 +44,9 @@ SCRATCH_ROOT = "/scratch"
 
 
 def rebased(value: Any, scratch: Path) -> Any:
-    """``value`` with every spelling of the ``scratch`` directory in its strings replaced by
-    :data:`SCRATCH_ROOT`, the one fact that differs with where a run was made.
+    """Return ``value`` with every spelling of ``scratch`` in its strings made :data:`SCRATCH_ROOT`.
+
+    The scratch directory is the one fact that differs with where a run was made.
     """
 
     def leaf(_key: str | None, text: Any) -> Any:
@@ -59,8 +60,9 @@ def rebased(value: Any, scratch: Path) -> Any:
 
 
 def deliveries(workspace: Path, client: TestClient) -> dict[str, dict]:
-    """The served delivery events of the scenes this module names, made in projects created
-    under ``workspace`` and served through ``client``, by fixture name.
+    """Return the served delivery events of the scenes this module names, by fixture name.
+
+    The scenes are made in projects created under ``workspace`` and served through ``client``.
     """
     from tcip_mcp.tools.inference_tools import deliver_per_image_counts
     from tcip_mcp.tools.phenology_tools import build_plant_mapping
@@ -220,8 +222,9 @@ def deliveries(workspace: Path, client: TestClient) -> dict[str, dict]:
 
 
 def produce() -> dict[str, dict]:
-    """The fixture's content, made in a scratch session, :func:`rebased` against the scratch
-    directory holding its workspace.
+    """Return the fixture's content, made in a scratch session.
+
+    The content is :func:`rebased` against the scratch directory holding its workspace.
     """
     with scratch_session() as (workspace, client):
         served = deliveries(workspace, client)

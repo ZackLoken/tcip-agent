@@ -20,8 +20,9 @@ _open_transaction = threading.local()
 
 
 def refuse_inside_transaction(operation: str) -> None:
-    """Refuse (``TransactionMisuseError``) ``operation`` while this thread holds a transaction,
-    since it would commit apart from it: a record or log write, or a file write.
+    """Refuse (``TransactionMisuseError``) ``operation`` while this thread holds a transaction.
+
+    The operation, a record or log write or a file write, would commit apart from it.
     """
     if getattr(_open_transaction, "held", False):
         raise TransactionMisuseError(
@@ -33,8 +34,9 @@ def refuse_inside_transaction(operation: str) -> None:
 
 @contextmanager
 def held_transaction() -> Generator[None]:
-    """Mark this thread as holding a transaction for the body. Refuses
-    (``TransactionMisuseError``) a second one on the same thread.
+    """Mark this thread as holding a transaction for the body.
+
+    Refuses (``TransactionMisuseError``) a second one on the same thread.
     """
     refuse_inside_transaction("a second transaction")
     _open_transaction.held = True
@@ -58,6 +60,7 @@ class Key:
     parts: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+        """Refuse (``BadKeyError``) no root, or a store or part not a non-empty string."""
         if not isinstance(self.store, str) or not self.store:
             raise BadKeyError(
                 f"a key's store must be a non-empty string; got {self.store!r}"
@@ -75,9 +78,10 @@ class Key:
 
 @dataclass(frozen=True)
 class Version:
-    """What the caller believes is currently stored, as an opaque token derived from the stored
-    bytes. ``Version.ABSENT`` asserts that no entry exists yet, which is how a create-only write is
-    expressed.
+    """What the caller believes is currently stored.
+
+    The token is opaque, derived from the stored bytes. ``Version.ABSENT`` asserts that no entry
+    exists yet, which is how a create-only write is expressed.
     """
 
     token: str
@@ -98,8 +102,10 @@ class Versioned:
 
 @dataclass(frozen=True)
 class LogPage:
-    """Entries read from a log, the cursor to resume from, and the positions of the entries in
-    this page that would not decode, which ``records`` leaves out.
+    """Entries read from a log, the cursor to resume from, and the undecodable positions.
+
+    ``corrupt`` holds the positions of the entries in this page that would not decode, which
+    ``records`` leaves out.
     """
 
     records: list[Mapping[str, Any]]

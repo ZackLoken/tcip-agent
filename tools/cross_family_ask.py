@@ -66,11 +66,10 @@ CLAUDE = resolve_harness("claude", "TCIP_CLAUDE_BIN")
 
 
 def load_tcip_mcp_config() -> dict:
-    """The ``tcip`` MCP server block, read from the repo's own ``.mcp.json`` rather than
-    restated here, so a change to that launch config is what a run actually sees.
+    """Return the ``tcip`` MCP server block, read from the repo's own ``.mcp.json``.
 
-    Raised at the point of use rather than at import, so a missing file or block fails the one
-    run that needed it instead of a script nothing else in this condition requires can even load.
+    A change to that launch config is what a run actually sees. A missing or unreadable file, or
+    one with no ``mcpServers.tcip`` block, raises ``SystemExit`` when this is called.
     """
     mcp_path = REPO_ROOT / ".mcp.json"
     try:
@@ -139,8 +138,10 @@ ANTIGRAVITY_ID_EFFORTS = ("low", "medium", "high")
 
 
 def model_id_effort(family: str, model: str | None) -> str | None:
-    """The effort a model id states in its own suffix, for a family whose harness takes effort
-    that way (antigravity's `gemini-3.1-pro-high`); None for every other id or family.
+    """Return the effort a model id states in its own suffix, or None.
+
+    Only a family whose harness takes effort that way (antigravity's `gemini-3.1-pro-high`) has
+    one; every other id or family answers None.
     """
     if family == "antigravity" and model:
         suffix = model.rsplit("-", 1)[-1]
@@ -152,7 +153,7 @@ def model_id_effort(family: str, model: str | None) -> str | None:
 def effective_effort(
     family: str, model: str | None, effort: str | None
 ) -> str | None:
-    """The effort a run records and, where the harness takes one, passes.
+    """Return the effort a run records and, where the harness takes one, passes.
 
     A model id that states its own effort is the effort, whatever `--effort` said beside it, so
     one invocation naming every family can carry one flag; Claude Code is refused an effort it
@@ -192,12 +193,7 @@ def resolve_codex_model(requested: str | None) -> tuple[str, str]:
 
 
 def claude_model_used(stdout: str) -> str | None:
-    """The model Claude Code reports it ran, from the JSON result's ``modelUsage`` keys.
-
-    The harness is the one party that knows: under ``--permission-mode plan`` the ``haiku``
-    alias was observed to run on Sonnet while the full Haiku id and the ``opus``, ``sonnet``
-    and ``fable`` aliases ran as named, so the request is never trusted over this field.
-    """
+    """Return the model Claude Code reports it ran, from the JSON result's ``modelUsage`` keys."""
     stripped = stdout.strip()
     start = stripped.find("{")
     if start < 0:
@@ -210,8 +206,9 @@ def claude_model_used(stdout: str) -> str | None:
 
 
 def model_matches(requested: str, used: str) -> bool:
-    """Whether the model the harness reports corresponds to the one requested: a full id must
-    appear as itself, an alias must appear inside every reported id.
+    """Return whether the model the harness reports corresponds to the one requested.
+
+    A full id must appear as itself, an alias must appear inside every reported id.
     """
     return all(
         requested == name or requested in name for name in used.split(",")
@@ -225,10 +222,11 @@ GUIDANCE_PREFIX = (
 
 
 def as_text(stream: object) -> str:
-    """A captured stream as text. ``None`` and bytes are both real, and neither is an error.
+    """Return a captured stream as text.
 
-    ``subprocess.run`` yields ``None`` for a stream a harness never wrote, and
-    ``TimeoutExpired`` carries raw bytes even under ``text=True``.
+    ``None`` and bytes are both real, and neither is an error. ``subprocess.run`` yields ``None``
+    for a stream a harness never wrote, and ``TimeoutExpired`` carries raw bytes even under
+    ``text=True``.
     """
     if stream is None:
         return ""
@@ -238,7 +236,7 @@ def as_text(stream: object) -> str:
 
 
 def failed_run_meta(family: str, exc: BaseException) -> dict:
-    """A metadata row for a run that raised, shaped like a real one so the summary still prints."""
+    """Return a metadata row for a run that raised, shaped like a real one for the summary."""
     meta = {
         "question_id": None,
         "condition": None,
@@ -265,10 +263,12 @@ def failed_run_meta(family: str, exc: BaseException) -> dict:
 
 
 def now() -> str:
+    """Return the local time now as an ISO 8601 string to the second."""
     return datetime.datetime.now().astimezone().isoformat(timespec="seconds")
 
 
 def harness_version(exe: str | pathlib.Path, flag: str = "--version") -> str:
+    """Return the first line ``exe`` prints for ``flag``, or ``"unknown"`` when it cannot."""
     try:
         out = subprocess.run(
             [str(exe), flag],
@@ -283,12 +283,11 @@ def harness_version(exe: str | pathlib.Path, flag: str = "--version") -> str:
 
 
 def image_preface(family: str, images: tuple[pathlib.Path, ...]) -> str:
-    """The line that hands attached images to one family, placed ahead of the question.
+    """Return the line that hands attached images to one family, placed ahead of the question.
 
     Every family is vision-capable, and each takes an image its own way: codex attaches files
     through ``exec -i`` and is told their names, antigravity reads a file the prompt names as
-    ``@path``, and Claude Code reads a named path with its own image-capable file reader. The
-    question text after this preface stays byte-identical across families.
+    ``@path``, and Claude Code reads a named path with its own image-capable file reader.
     """
     if not images:
         return ""
@@ -322,6 +321,12 @@ def build_claude(
     timeout: int,
     images: tuple[pathlib.Path, ...] = (),
 ) -> tuple[list[str], pathlib.Path | None]:
+    """Build a headless Claude Code invocation, writing its MCP config into ``run_dir``.
+
+    The prompt goes on stdin. The run is in plan permission mode with ``cwd`` added; the MCP
+    config holds the ``tcip`` server block under a ``tcip`` condition and no server otherwise.
+    Returns the argv and no final-message file.
+    """
     argv = [
         CLAUDE,
         "--print",
@@ -493,13 +498,12 @@ def print_verdict(faults: list[tuple[str, str]], total: int) -> None:
 
 
 def denied_write_text(payload: object) -> str:
-    """The longest document a harness tried to write and was refused, or an empty string.
+    """Return the longest document a harness tried to write and was refused, or an empty string.
 
     A read-only run can still make the model compose its answer as a file rather than as a reply:
     Claude Code under ``--permission-mode plan`` drafts into a plan file, is denied, and then
     replies with a short pointer to a document that was never saved. The draft survives in the
     refusal record, so the answer is recoverable without relaxing the sandbox that produced it.
-    Without this the run reports success while the recorded answer is a sentence of apology.
     """
     if not isinstance(payload, dict):
         return ""
@@ -612,6 +616,11 @@ def run_one(
     images: list[pathlib.Path] | None = None,
     prompt_source: str | None = None,
 ) -> dict:
+    """Run one family on one question under one condition and return its metadata row.
+
+    The run's directory under ``out_root`` receives the prompt, the argv, stdout, stderr, the
+    extracted response and ``meta.json``.
+    """
     condition = CONDITIONS[condition_name]
     run_dir = out_root / question_id / condition_name / family
     # A prior meta.json here is this family's own earlier run under the same question and condition.
@@ -746,6 +755,7 @@ def run_one(
 
 
 def main() -> int:
+    """Run the families the command line names; return 0 when every one answered, else 1."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--question-id", required=True)
     parser.add_argument("--prompt-file", type=pathlib.Path, required=True)

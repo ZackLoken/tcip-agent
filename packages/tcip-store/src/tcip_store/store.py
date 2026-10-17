@@ -25,6 +25,7 @@ _bound: SqliteBackend | None = None
 
 def bind(backend: SqliteBackend | None = None) -> SqliteBackend:
     """Bind this process's backend and return it: ``backend``, or a new :class:`SqliteBackend`.
+
     Construction refuses with ``BackendUnavailableError`` when cross-process exclusion is
     unavailable.
     """
@@ -50,17 +51,18 @@ def _backend() -> SqliteBackend:
 
 
 def release_root(root: str | Path) -> None:
-    """Close every connection the bound backend holds on ``root`` or on a root under it, on every
-    thread, so the tree can be moved; every other root's connections stay open. Waits for every
-    operation using one of those connections to return. Refuses with ``TransactionMisuseError``
-    inside an open transaction.
+    """Close every connection the bound backend holds on ``root`` or on a root under it.
+
+    Connections close on every thread, so the tree can be moved; every other root's connections
+    stay open. Waits for every operation using one of those connections to return. Refuses with
+    ``TransactionMisuseError`` inside an open transaction.
     """
     refuse_inside_transaction("release_root")
     _backend().release(canonical_path(root))
 
 
 def read(key: Key, *, default: Any = REQUIRED) -> Any:
-    """The record's decoded value.
+    """Return the record's decoded value.
 
     Raises ``NotFoundError`` when the record is absent and no ``default`` was given, and
     ``DecodeError`` when the record exists but will not decode, whatever ``default`` says.
@@ -69,8 +71,9 @@ def read(key: Key, *, default: Any = REQUIRED) -> Any:
 
 
 def read_versioned(key: Key, *, default: Any = REQUIRED) -> Versioned:
-    """Value plus version token, read together so the pair cannot straddle a write. The token is
-    the input to ``replace(expect=...)``.
+    """Return value plus version token, read together so the pair cannot straddle a write.
+
+    The token is the input to ``replace(expect=...)``.
     """
     return _backend().read_versioned(key, default=default)
 
@@ -94,6 +97,7 @@ def replace(key: Key, value: Any, *, expect: Version | None = None) -> Version:
 
 def delete(key: Key, *, expect: Version | None = None) -> bool:
     """Remove the record and answer whether one was there to remove; absence is not an error.
+
     Same ``expect`` and transaction rules as ``replace``.
     """
     refuse_inside_transaction("delete")
@@ -129,8 +133,9 @@ def transaction(*keys: Key, timeout_s: float | None = None) -> Generator[Txn]:
 
 
 def keys(store: str, root: str, prefix: tuple[str, ...] = ()) -> list[Key]:
-    """Every record or log key in ``store`` under ``root`` whose parts begin with ``prefix``,
-    sorted.
+    """Return every record or log key in ``store`` under ``root`` whose parts begin with ``prefix``.
+
+    The keys are sorted.
     """
     return _backend().keys(store, root, prefix)
 
@@ -141,8 +146,10 @@ def stores(root: str) -> list[str]:
 
 
 def append(key: Key, record: Mapping[str, Any]) -> None:
-    """Append one entry to a log, committed before returning; concurrent appenders from any
-    process are serialized. Raises ``TransactionMisuseError`` inside an open transaction.
+    """Append one entry to a log, committed before returning.
+
+    Concurrent appenders from any process are serialized. Raises ``TransactionMisuseError``
+    inside an open transaction.
     """
     refuse_inside_transaction("append")
     _backend().append(key, record)
@@ -154,8 +161,9 @@ def read_log(key: Key, *, after: str | None = None) -> LogPage:
 
 
 def clear_log(key: Key) -> int:
-    """Remove every entry from a log and report how many it held. Raises ``TransactionMisuseError``
-    inside an open transaction.
+    """Remove every entry from a log and report how many it held.
+
+    Raises ``TransactionMisuseError`` inside an open transaction.
     """
     refuse_inside_transaction("clear_log")
     return _backend().clear_log(key)

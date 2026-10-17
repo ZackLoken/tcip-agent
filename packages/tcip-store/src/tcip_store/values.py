@@ -1,10 +1,10 @@
-"""What a value must be before a store will carry it, its two stored spellings, and how a
-producer says a number is not finite.
+"""What a value must be before a store will carry it, and its two stored spellings.
 
-A record is spelled by :func:`encode_record` and a log line by :func:`encode_log_line`; both are
-read back by :func:`decode_value`. :func:`check_json_value` refuses, naming the field, an object
-JSON has no type for or a non-finite number. :func:`stored_number` keeps a non-finite number as a
-JSON null beside a sibling field naming the state.
+The module also states how a producer says a number is not finite. A record is spelled by
+:func:`encode_record` and a log line by :func:`encode_log_line`; both are read back by
+:func:`decode_value`. :func:`check_json_value` refuses, naming the field, an object JSON has no
+type for or a non-finite number. :func:`stored_number` keeps a non-finite number as a JSON null
+beside a sibling field naming the state.
 """
 
 from __future__ import annotations
@@ -16,8 +16,10 @@ from typing import Any
 
 
 def encode_record(value: Any) -> bytes:
-    """A record's bytes: UTF-8 JSON indented by two, keys in their authored order, a trailing
-    newline. Refuses what :func:`check_json_value` refuses, before anything is spelled.
+    """Return a record's bytes: UTF-8 JSON indented by two, keys in their authored order.
+
+    The bytes end in a trailing newline. Refuses what :func:`check_json_value` refuses, before
+    anything is spelled.
     """
     check_json_value(value)
     text = json.dumps(
@@ -27,8 +29,9 @@ def encode_record(value: Any) -> bytes:
 
 
 def encode_log_line(value: Any) -> bytes:
-    """A log entry's bytes: UTF-8 JSON on one line, keys in their authored order. Refuses as
-    :func:`encode_record` does.
+    """Return a log entry's bytes: UTF-8 JSON on one line, keys in their authored order.
+
+    Refuses as :func:`encode_record` does.
     """
     check_json_value(value)
     return json.dumps(
@@ -37,7 +40,10 @@ def encode_log_line(value: Any) -> bytes:
 
 
 def decode_value(data: bytes) -> Any:
-    """The value a record's or a log entry's bytes spell; ``ValueError`` when they do not decode."""
+    """Return the value a record's or a log entry's bytes spell.
+
+    Raises ``ValueError`` when they do not decode.
+    """
     return json.loads(data.decode("utf-8"))
 
 
@@ -58,7 +64,7 @@ def finite_number(value: Any) -> bool:
 
 
 def non_finite_state(value: float) -> str | None:
-    """The token naming why a float cannot be stored, or None when it can."""
+    """Return the token naming why a float cannot be stored, or None when it can."""
     if math.isnan(value):
         return "nan"
     if value == math.inf:
@@ -83,7 +89,7 @@ def stored_number(field: str, value: Any) -> dict[str, Any]:
 
 
 def stored_numbers(values: Mapping[str, Any]) -> dict[str, Any]:
-    """A flat mapping of measurements as a record carries it, each through :func:`stored_number`.
+    """Return a flat mapping of measurements as a record carries it, each via :func:`stored_number`.
 
     For a metrics row, where every entry is one named number and a state field can sit
     beside the value it explains.

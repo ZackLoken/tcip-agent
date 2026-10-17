@@ -72,18 +72,19 @@ _FULL = 2
 
 
 def encode_parts(parts: tuple[str, ...]) -> str:
-    """The one JSON spelling (ASCII, no whitespace) of a key's parts in the database."""
+    """Return the one JSON spelling (ASCII, no whitespace) of a key's parts in the database."""
     return json.dumps(list(parts), ensure_ascii=True, separators=(",", ":"))
 
 
 def decode_parts(text: str) -> tuple[str, ...]:
-    """The parts a stored spelling names."""
+    """Return the parts a stored spelling names."""
     return tuple(json.loads(text))
 
 
 def _schema_of(conn: sqlite3.Connection) -> tuple[tuple[str, str, str], ...]:
-    """Every schema object a database holds, with its stored sql normalized for comparison against
-    the DDL executed afresh.
+    """Return every schema object a database holds, its stored sql whitespace-normalized.
+
+    The normalized sql compares against the DDL executed afresh.
     """
     rows = conn.execute(
         "select type, name, sql from sqlite_master order by type, name"
@@ -98,7 +99,7 @@ _reference: tuple[tuple[str, str, str], ...] | None = None
 
 
 def reference_schema() -> tuple[tuple[str, str, str], ...]:
-    """The schema the DDL produces, read back out of a database that ran it."""
+    """Return the schema the DDL produces, read back out of a database that ran it."""
     global _reference
     with _reference_lock:
         if _reference is None:
@@ -112,8 +113,9 @@ def reference_schema() -> tuple[tuple[str, str, str], ...]:
 
 
 def _fsync_path(path: Path) -> None:
-    """Flush one file's bytes and metadata to the device, through a read-write handle (Windows
-    flushes only a handle with write access).
+    """Flush one file's bytes and metadata to the device, through a read-write handle.
+
+    Windows flushes only a handle with write access.
     """
     fd = os.open(path, os.O_RDWR)
     try:
@@ -123,8 +125,9 @@ def _fsync_path(path: Path) -> None:
 
 
 def _install_without_clobbering(temp: Path, destination: Path) -> None:
-    """Publish the built database, refusing rather than replacing an existing one (``os.rename`` on
-    Windows, a hard link then an unlink on POSIX).
+    """Publish the built database, refusing rather than replacing an existing one.
+
+    The primitive is ``os.rename`` on Windows, a hard link then an unlink on POSIX.
     """
     if os.name == "nt":
         os.rename(temp, destination)
@@ -134,8 +137,9 @@ def _install_without_clobbering(temp: Path, destination: Path) -> None:
 
 
 def verify_identity(conn: sqlite3.Connection, db_path: Path) -> None:
-    """Refuse (``StoreError``) a database that is not this module's, before a single row is read:
-    a file that is not a SQLite database, or one whose schema is not this module's DDL.
+    """Refuse (``StoreError``) a database that is not this module's, before a single row is read.
+
+    Refused are a file that is not a SQLite database, or one whose schema is not this module's DDL.
     """
     try:
         found = _schema_of(conn)
@@ -165,8 +169,10 @@ def verify_identity(conn: sqlite3.Connection, db_path: Path) -> None:
 
 
 def _set_wal(conn: sqlite3.Connection) -> str:
-    """Put one connection's database into WAL, returning the mode it reports afterwards. Only safe
-    under the transition lock: changing the journal mode does not wait on a busy database.
+    """Put one connection's database into WAL, returning the mode it reports afterwards.
+
+    Only safe under the transition lock: changing the journal mode does not wait on a busy
+    database.
     """
     return str(conn.execute("pragma journal_mode = wal").fetchone()[0]).lower()
 
@@ -182,8 +188,9 @@ def _refuse_rollback_journal(db_path: Path, mode: str) -> None:
 def open_verified(
     db_path: Path, root: str, timeout_s: float = DEFAULT_LOCK_TIMEOUT_S
 ) -> sqlite3.Connection:
-    """Open a published database, verify it, and leave it in WAL at full synchronous; a database
-    not already in WAL is converted under ``root``'s transition lock.
+    """Open a published database, verify it, and leave it in WAL at full synchronous.
+
+    A database not already in WAL is converted under ``root``'s transition lock.
     """
     conn = sqlite3.connect(
         str(db_path), isolation_level=None, check_same_thread=False
@@ -209,8 +216,10 @@ def open_verified(
 
 
 def copy_database(source: Path, destination: Path) -> None:
-    """Write a consistent copy of the database at ``source`` to ``destination`` through SQLite's
-    own backup, whatever another connection is committing meanwhile.
+    """Write a consistent copy of the database at ``source`` to ``destination``.
+
+    The copy goes through SQLite's own backup, whatever another connection is committing
+    meanwhile.
     """
     src = sqlite3.connect(str(source))
     try:
@@ -224,8 +233,9 @@ def copy_database(source: Path, destination: Path) -> None:
 
 
 def _encoded(key: Key, encode: Callable[[Any], bytes], value: Any) -> bytes:
-    """``value`` through ``encode``, or a ``StoreError`` naming the entry and what would not
-    encode.
+    """Return ``value`` through ``encode``.
+
+    Raises a ``StoreError`` naming the entry and what would not encode.
     """
     try:
         return encode(value)
@@ -238,7 +248,7 @@ def _encoded(key: Key, encode: Callable[[Any], bytes], value: Any) -> bytes:
 
 
 def _decoded(key: Key, data: bytes) -> Any:
-    """A stored entry's value, or ``DecodeError`` naming the entry."""
+    """Return a stored entry's value; ``DecodeError`` naming the entry when it will not decode."""
     try:
         return decode_value(data)
     except ValueError as exc:
@@ -248,8 +258,9 @@ def _decoded(key: Key, data: bytes) -> Any:
 
 
 def _versioned(key: Key, data: bytes | None, default: Any) -> Versioned:
-    """A stored record as :func:`~tcip_store.file_backend.versioned` answers it, its bytes
-    decoded through :func:`_decoded`.
+    """Return a stored record as :func:`~tcip_store.file_backend.versioned` answers it.
+
+    Its bytes are decoded through :func:`_decoded`.
     """
     return versioned(
         data,
@@ -265,6 +276,7 @@ class SqliteBackend:
     def __init__(
         self, *, lock_timeout_s: float = DEFAULT_LOCK_TIMEOUT_S
     ) -> None:
+        """Take the lock wait in seconds; ``BackendUnavailableError`` without ``filelock``."""
         _, timeout_error = _filelock_classes()
         self.lock_timeout_s = lock_timeout_s
         self._timeout_error = timeout_error
@@ -282,9 +294,10 @@ class SqliteBackend:
             self._connections.clear()
 
     def release(self, root: str) -> None:
-        """Close every connection this backend holds on the canonical ``root`` or on a root under
-        it, on every thread, once every operation using one of them has returned; every other
-        root's connections stay open and in use.
+        """Close every connection this backend holds on the canonical ``root`` or a root under it.
+
+        Connections close on every thread, once every operation using one of them has returned;
+        every other root's connections stay open and in use.
         """
         prefix = os.path.join(root, "")
 
@@ -309,9 +322,10 @@ class SqliteBackend:
         *,
         create: bool,
     ) -> Generator[sqlite3.Connection | None]:
-        """This process, thread and root's connection, held in use (so :meth:`release` waits for
-        it) until the block returns. With no database at ``root``, a write (``create``) builds one
-        and a read is answered with None.
+        """Yield this process, thread and root's connection, held in use until the block returns.
+
+        While held, :meth:`release` waits for it. With no database at ``root``, a write
+        (``create``) builds one and a read is answered with None.
 
         One connection per (pid, thread, root): a forked worker never reuses the parent's handles,
         and a write on one thread never joins another thread's read.
@@ -401,8 +415,9 @@ class SqliteBackend:
 
     @contextmanager
     def _mapped(self, keys: tuple[Key, ...]) -> Generator[None]:
-        """Turn a driver error raised inside into this layer's own refusal: contention names the
-        first key the call named.
+        """Turn a driver error raised inside into this layer's own refusal.
+
+        Contention raises ``StoreBusyError`` naming the first key the call named.
         """
         started = time.monotonic()
         try:
@@ -427,8 +442,9 @@ class SqliteBackend:
     def _write(
         self, keys: tuple[Key, ...], *, timeout_s: float | None = None
     ) -> Generator[sqlite3.Connection]:
-        """One ``begin immediate`` transaction over the single root a call names, the write lock
-        taken up front rather than upgraded from a read.
+        """Hold one ``begin immediate`` transaction over the single root a call names.
+
+        The write lock is taken up front rather than upgraded from a read.
         """
         timeout = self.lock_timeout_s if timeout_s is None else timeout_s
         with ExitStack() as held:
@@ -485,6 +501,10 @@ class SqliteBackend:
     def read_versioned(
         self, key: Key, *, default: Any = REQUIRED
     ) -> Versioned:
+        """Return a record and its version read together, without creating a database.
+
+        Absence answers ``default`` at ``Version.ABSENT`` or raises ``NotFoundError``.
+        """
         data = None
         with (
             self._mapped((key,)),
@@ -495,6 +515,7 @@ class SqliteBackend:
         return _versioned(key, data, default)
 
     def exists(self, key: Key) -> bool:
+        """Return whether the record exists, without decoding it."""
         with (
             self._mapped((key,)),
             self._connection(key.root, create=False) as conn,
@@ -504,6 +525,11 @@ class SqliteBackend:
     def replace(
         self, key: Key, value: Any, *, expect: Version | None = None
     ) -> Version:
+        """Replace one record whole in one write transaction and return its new version.
+
+        ``expect``, when given, is compared against the stored version inside the write: a
+        mismatch raises ``VersionConflictError`` with nothing written.
+        """
         data = _encoded(key, encode_record, value)
         with self._write((key,)) as conn:
             if expect is not None:
@@ -512,6 +538,7 @@ class SqliteBackend:
         return _version_of(data)
 
     def delete(self, key: Key, *, expect: Version | None = None) -> bool:
+        """Remove one record and return whether one was there; ``expect`` compares as in replace."""
         with self._write((key,)) as conn:
             if expect is not None:
                 require_version(key, self._stored(conn, key), expect)
@@ -521,12 +548,21 @@ class SqliteBackend:
     def transaction(
         self, keys: Sequence[Key], *, timeout_s: float | None = None
     ) -> Generator[Txn]:
+        """Yield a :class:`Txn` over ``keys`` inside one write transaction on the first key's root.
+
+        A clean exit commits every change at once and an exception rolls back every one.
+        """
         with self._write(tuple(keys), timeout_s=timeout_s) as conn:
             yield Txn(self, conn, tuple(keys))
 
     def keys(
         self, store: str, root: str, prefix: tuple[str, ...] = ()
     ) -> list[Key]:
+        """Return every key in ``store`` under ``root`` whose parts begin with ``prefix``, sorted.
+
+        The keys are record and log keys, sorted by their parts; a root with no database answers
+        an empty list.
+        """
         with self._mapped(()), self._connection(root, create=False) as conn:
             if conn is None:
                 return []
@@ -543,7 +579,7 @@ class SqliteBackend:
         return sorted(found, key=lambda k: k.parts)
 
     def stores(self, root: str) -> list[str]:
-        """Every store name ``root``'s database holds a record or a log entry under, sorted."""
+        """Return every store name ``root``'s database holds a record or log entry under, sorted."""
         with self._mapped(()), self._connection(root, create=False) as conn:
             if conn is None:
                 return []
@@ -555,14 +591,16 @@ class SqliteBackend:
     # ── logs ────────────────────────────────────────────────────────────────────
 
     def append(self, key: Key, record: Mapping[str, Any]) -> None:
+        """Append one entry to a log in its own write transaction."""
         data = _encoded(key, encode_log_line, record)
         with self._write((key,)) as conn:
             self._append(conn, key, data)
 
     def read_log(self, key: Key, *, after: str | None = None) -> LogPage:
-        """Entries committed after the cursor, in commit order. The cursor is the last returned
-        row's id, which autoincrement never reuses; an entry that will not decode is reported
-        through ``corrupt``.
+        """Return the entries committed after the cursor, in commit order.
+
+        The cursor is the last returned row's id, which autoincrement never reuses; an entry that
+        will not decode is reported through ``corrupt``.
         """
         start = int(after) if after else 0
         with (
@@ -599,8 +637,10 @@ class SqliteBackend:
 
 
 class Txn:
-    """A transaction's handle over the keys it names: reads and writes inside one commit, a read
-    seeing this transaction's own writes. A key the transaction does not name is refused.
+    """A transaction's handle over the keys it names.
+
+    Reads and writes land inside one commit, a read seeing this transaction's own writes. A key
+    the transaction does not name is refused.
     """
 
     def __init__(
@@ -609,6 +649,7 @@ class Txn:
         conn: sqlite3.Connection,
         keys: tuple[Key, ...],
     ) -> None:
+        """Take the backend, the connection whose transaction is open, and the keys it holds."""
         self._backend = backend
         self._conn = conn
         self._keys = keys
@@ -623,14 +664,15 @@ class Txn:
     def read_versioned(
         self, key: Key, *, default: Any = REQUIRED
     ) -> Versioned:
-        """One of the transaction's records and its version; absence answers ``default`` at
-        ``Version.ABSENT`` or raises ``NotFoundError``.
+        """Return one of the transaction's records and its version.
+
+        Absence answers ``default`` at ``Version.ABSENT`` or raises ``NotFoundError``.
         """
         self._held(key)
         return _versioned(key, self._backend._stored(self._conn, key), default)
 
     def read(self, key: Key, *, default: Any = REQUIRED) -> Any:
-        """One of the transaction's records (:meth:`read_versioned`'s value)."""
+        """Return one of the transaction's records (:meth:`read_versioned`'s value)."""
         return self.read_versioned(key, default=default).value
 
     def write(self, key: Key, value: Any) -> Version:

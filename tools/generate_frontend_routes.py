@@ -1,5 +1,4 @@
-"""Generate the browser's route-path module and the dev server's proxy from the backend's
-registered routes.
+"""Generate the browser's route-path module and the dev server's proxy from the backend's routes.
 
 The FastAPI app is the one declaration of what paths and methods exist. This script walks the
 routes the app has actually registered and emits ``frontend/src/api/routes.ts``, so the browser
@@ -9,13 +8,9 @@ every call site that still asks for the old one. It also emits
 ``frontend/src/api/devProxy.generated.ts``: one dev-proxy prefix per distinct first path segment
 of a registered HTTP or WebSocket route, ``ws`` true wherever a socket is mounted under it,
 excluding the paths ``tcip_web.app.FRONTEND_SERVING_PATHS`` names (the app's own frontend and
-health routes), so Vite keeps serving its own root, modules and HMR under those paths itself;
-``vite.config.ts`` imports the module by a relative path, since its ``@`` alias is not available
-at config load.
+health routes), so Vite keeps serving its own root, modules and HMR under those paths itself.
 
 Run it after adding or renaming a route; it rewrites both modules in place.
-``tests/test_frontend_route_paths.py`` fails when either checked-in module is not what the current
-routes produce, so a stale module does not reach a browser.
 """
 
 from __future__ import annotations
@@ -59,7 +54,7 @@ def _camel(token: str, *, upper_first: bool) -> str:
 
 
 def route_name(path: str, method: str) -> str:
-    """The exported name for one (path, method): its method, then its segments, then its params."""
+    """Return the exported name for one (path, method): method, then segments, then params."""
     prefix = "socket" if method == "WEBSOCKET" else method.lower()
     segments = [s for s in path.strip("/").split("/") if s]
     if segments and segments[0] == "api":
@@ -143,7 +138,7 @@ def _entry(name: str, path: str) -> str:
 
 
 def render(app) -> str:
-    """The full text of the generated module."""
+    """Return the full text of the generated module."""
     return (
         HEADER
         + "".join(_entry(name, path) for name, path, _ in collect_routes(app))
@@ -152,11 +147,11 @@ def render(app) -> str:
 
 
 def collect_proxy_entries(app) -> list[tuple[str, bool]]:
-    """One dev-proxy prefix per distinct first path segment of a registered route, sorted, each
-    paired with whether a websocket is mounted under it.
+    """Return one dev-proxy prefix per distinct first path segment of a registered route, sorted.
 
-    Excludes the paths ``tcip_web.app.FRONTEND_SERVING_PATHS`` names: the app's own frontend and
-    health routes, which the dev server must keep serving itself rather than forward.
+    Each is paired with whether a websocket is mounted under it. Excludes the paths
+    ``tcip_web.app.FRONTEND_SERVING_PATHS`` names: the app's own frontend and health routes, which
+    the dev server must keep serving itself rather than forward.
     """
     from tcip_web.app import FRONTEND_SERVING_PATHS
 
@@ -191,8 +186,10 @@ PROXY_FOOTER = "];\n"
 
 
 def render_proxy(app) -> str:
-    """The full text of the generated dev-proxy module, with the one loopback host the backend
-    binds and answers to (``tcip_mcp.web_client.LOOPBACK_HOST``) for the dev server to serve on.
+    """Return the full text of the generated dev-proxy module.
+
+    The module carries the one loopback host the backend binds and answers to
+    (``tcip_mcp.web_client.LOOPBACK_HOST``) for the dev server to serve on.
     """
     from tcip_mcp.web_client import LOOPBACK_HOST
 
@@ -209,6 +206,7 @@ def render_proxy(app) -> str:
 
 
 def main() -> int:
+    """Write the route module and the dev-proxy module from the app's routes; return 0."""
     from tcip_web.app import app
 
     GENERATED_PATH.write_text(render(app), encoding="utf-8", newline="\n")

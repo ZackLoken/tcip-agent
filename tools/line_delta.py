@@ -14,7 +14,7 @@ import sys
 
 
 def area_of(path: str) -> str:
-    """The area a changed path counts under: ``packages``, ``tests`` or ``other``."""
+    """Return the area a changed path counts under: ``packages``, ``tests`` or ``other``."""
     if path.startswith("packages/"):
         return "packages"
     if path.startswith("tests/"):
@@ -58,6 +58,7 @@ def line_delta(repo: str, target: str) -> dict[str, tuple[int, int]]:
 
 
 def main() -> int:
+    """Print one line per area for the repository and target the command line names; return 0."""
     repo, target = sys.argv[1], sys.argv[2]
     for area, (added, removed) in line_delta(repo, target).items():
         print(f"{area:9} +{added} -{removed} net {added - removed:+d}")

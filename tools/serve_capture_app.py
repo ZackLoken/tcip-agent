@@ -26,8 +26,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def _existing_workspace_conflict(root: Path) -> str | None:
-    """``None`` when ``root`` looks safe to seed a fresh harness workspace under; otherwise the
-    reason it does not: ``root`` itself already carries a ``.tcip`` directory (it is already a
+    """Return why ``root`` is unsafe to seed a fresh harness workspace under, or ``None``.
+
+    It is unsafe when ``root`` itself already carries a ``.tcip`` directory (it is already a
     project root), or an immediate child of it does (a project already lives directly under
     ``root``). Either means real state already sits where a scratch workspace would be built.
     """
@@ -41,11 +42,12 @@ def _existing_workspace_conflict(root: Path) -> str | None:
 
 
 def _refuse_unsafe_root(root: Path) -> None:
-    """A harness root is never inside this repository. When this process is itself bound to a
+    """Refuse (``SystemExit``) a harness root that would point a scratch server at real state.
+
+    A harness root is never inside this repository. When this process is itself bound to a
     ``TCIP_WORKSPACE``, the root must alias it in neither direction (under it, or containing it);
     when no ``TCIP_WORKSPACE`` is bound, the root must not already look like a workspace, by
-    :func:`_existing_workspace_conflict`. Any of these would point a scratch server at real
-    state.
+    :func:`_existing_workspace_conflict`.
     """
     resolved = root.resolve()
     if resolved.is_relative_to(REPO_ROOT):
@@ -72,9 +74,11 @@ def _refuse_unsafe_root(root: Path) -> None:
 
 
 def build_environ(root: Path, port: int) -> dict[str, str]:
-    """The environment ``start`` launches ``python -m tcip_web`` under: a scratch workspace
-    beneath ``root``, the port to bind, unbuffered output, and the repository root prefixed onto
-    ``PYTHONPATH``. Refuses an unsafe root before building anything.
+    """Return the environment the web app, ``python -m tcip_web``, is launched under.
+
+    It names a scratch workspace beneath ``root``, the port to bind, unbuffered output, and the
+    repository root prefixed onto ``PYTHONPATH``. Refuses an unsafe root before building
+    anything.
     """
     _refuse_unsafe_root(root)
     workspace = root / "workspace"
@@ -90,6 +94,11 @@ def build_environ(root: Path, port: int) -> dict[str, str]:
 
 
 def start(root: Path, port: int) -> None:
+    """Launch the web app under ``root`` on ``port``, wait for it, and record its pid and port.
+
+    Refuses when ``server_info.json`` already exists under ``root``, when the server exits early,
+    or when the projects route does not answer within 120 seconds.
+    """
     info_path = root / "server_info.json"
     if info_path.exists():
         raise SystemExit(f"{info_path} exists; stop first")
@@ -126,8 +135,9 @@ def start(root: Path, port: int) -> None:
 
 
 def stop(root: Path) -> None:
-    """Kill the recorded process tree with ``taskkill /T`` and remove its record; refuses on a
-    host other than Windows.
+    """Kill the recorded process tree with ``taskkill /T`` and remove its record.
+
+    Refuses on a host other than Windows.
     """
     if sys.platform != "win32":
         raise SystemExit(
@@ -148,6 +158,7 @@ def stop(root: Path) -> None:
 
 
 def main() -> int:
+    """Run the ``start`` or ``stop`` action the command line names and return 0."""
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
 

@@ -33,8 +33,9 @@ class BackendUnavailableError(StoreError):
 
 
 class TransactionMisuseError(StoreError):
-    """A transaction was nested, named no key, spanned two roots, or was bypassed by a write
-    inside it.
+    """A transaction was misused.
+
+    It was nested, named no key, spanned two roots, or was bypassed by a write inside it.
     """
 
 
@@ -44,6 +45,7 @@ class VersionConflictError(StoreError):
     def __init__(
         self, entry: Key | str, expected: Version, actual: Version
     ) -> None:
+        """Take the entry, a key or a file path, and the expected and found versions."""
         named = (
             entry
             if isinstance(entry, str)
@@ -60,11 +62,13 @@ class VersionConflictError(StoreError):
 
 
 class StoreBusyError(StoreError):
-    """A lock was not acquired within the timeout, so nothing was written. ``blocked_on`` names
-    the first key or file the refused call named.
+    """A lock was not acquired within the timeout, so nothing was written.
+
+    ``blocked_on`` names the first key or file the refused call named.
     """
 
     def __init__(self, blocked_on: Key | str, waited_s: float) -> None:
+        """Take the key or file waited on and the seconds waited."""
         named = (
             blocked_on
             if isinstance(blocked_on, str)

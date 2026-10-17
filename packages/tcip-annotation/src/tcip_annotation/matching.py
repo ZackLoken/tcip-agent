@@ -1,6 +1,7 @@
-"""The platform's one matcher of detections to ground truth, and geometry helpers over
-:class:`~tcip_annotation.state.Annotation` geometries: box and polygon IoU as matrices and polygon
-containment.
+"""The platform's one matcher of detections to ground truth, and geometry helpers.
+
+The helpers work over :class:`~tcip_annotation.state.Annotation` geometries: box and polygon IoU
+as matrices and polygon containment.
 """
 
 from __future__ import annotations
@@ -38,8 +39,10 @@ Rings = list[list[tuple[float, float]]]
 
 
 def _boxes(boxes):
-    """``boxes`` as an ``m x 4`` array: an array or tensor as given (so a tensor keeps its
-    autograd), anything else as float64.
+    """Return ``boxes`` as an ``m x 4`` array.
+
+    An array or tensor is kept as given (so a tensor keeps its autograd), anything else becomes
+    float64.
     """
     if getattr(boxes, "ndim", None) == 2:
         return boxes
@@ -47,22 +50,24 @@ def _boxes(boxes):
 
 
 def xywh_corners(boxes) -> np.ndarray:
-    """The ``[x, y, w, h]`` ``boxes`` as an ``m x 4`` float64 array of corner boxes."""
+    """Return the ``[x, y, w, h]`` ``boxes`` as an ``m x 4`` float64 array of corner boxes."""
     b = np.asarray(boxes, dtype=np.float64).reshape(-1, 4)
     return np.concatenate([b[:, :2], b[:, :2] + b[:, 2:]], axis=1)
 
 
 def box_areas(boxes):
-    """The area of each corner box of ``boxes`` (``m x 4``, an array or a tensor, in which the
-    areas are answered).
+    """Return the area of each corner box of ``boxes``.
+
+    ``boxes`` is ``m x 4``, an array or a tensor, in which the areas are answered.
     """
     b = _boxes(boxes)
     return (b[:, 2] - b[:, 0]) * (b[:, 3] - b[:, 1])
 
 
 def box_sizes(boxes) -> np.ndarray:
-    """The characteristic size ``sqrt(w * h)`` of each corner box of ``boxes``, a negative
-    extent counting as zero.
+    """Return the characteristic size ``sqrt(w * h)`` of each corner box of ``boxes``.
+
+    A negative extent counts as zero.
     """
     b = _boxes(boxes)
     return np.sqrt(
@@ -71,15 +76,17 @@ def box_sizes(boxes) -> np.ndarray:
 
 
 def box_centers(boxes) -> np.ndarray:
-    """The center of each corner box of ``boxes`` (``m x 4``), as an ``m x 2`` array."""
+    """Return the center of each corner box of ``boxes`` (``m x 4``), as an ``m x 2`` array."""
     b = _boxes(boxes)
     return (b[:, :2] + b[:, 2:]) / 2.0
 
 
 def iou_matrix(a, b, *, over: str = "union") -> np.ndarray:
-    """The pairwise intersection of the corner boxes ``a`` (``m x 4``) and ``b`` (``k x 4``) over
-    their union, or with ``over="smaller"`` over the smaller box, as an ``m x k`` float64 array;
-    a pair whose denominator has no area is ``0``.
+    """Return the pairwise intersection over union of the corner boxes ``a`` and ``b``.
+
+    ``a`` is ``m x 4`` and ``b`` is ``k x 4``; with ``over="smaller"`` the denominator is the
+    smaller box. The result is an ``m x k`` float64 array; a pair whose denominator has no area is
+    ``0``.
     """
     a = np.asarray(a, dtype=np.float64).reshape(-1, 4)
     b = np.asarray(b, dtype=np.float64).reshape(-1, 4)
@@ -106,8 +113,10 @@ def iou_matrix(a, b, *, over: str = "union") -> np.ndarray:
 
 
 def shapely_geometry(rings: Rings):
-    """One or more closed rings as one valid Shapely geometry: a polygon for one ring, a
-    multipolygon for several, every ring contributing, repaired by ``make_valid`` when invalid.
+    """Return one or more closed rings as one valid Shapely geometry.
+
+    A polygon for one ring, a multipolygon for several, every ring contributing, repaired by
+    ``make_valid`` when invalid.
     """
     geom = (
         ShapelyPolygon(rings[0])
@@ -118,9 +127,10 @@ def shapely_geometry(rings: Rings):
 
 
 def rings_iou_matrix(a: Sequence[Rings], b: Sequence[Rings]) -> np.ndarray:
-    """The pairwise IoU of the regions ``a`` against ``b``, each a list of rings
-    (:func:`shapely_geometry`), as a ``len(a) x len(b)`` float64 array; a region with no ring
-    overlaps nothing.
+    """Return the pairwise IoU of the regions ``a`` against ``b``.
+
+    Each region is a list of rings (:func:`shapely_geometry`). The result is a
+    ``len(a) x len(b)`` float64 array; a region with no ring overlaps nothing.
     """
     ga = [shapely_geometry(r) if r else None for r in a]
     gb = [shapely_geometry(r) if r else None for r in b]
@@ -141,10 +151,11 @@ def _corners(records: list[dict]) -> np.ndarray:
 def _cost_matrix(
     gt: list[dict], dt: list[dict], criterion: dict
 ) -> tuple[np.ndarray, float]:
-    """How far each ground-truth record is from each detection record under ``criterion``, and
-    the farthest a match may be: the distance between box centers within ``tolerance`` for a
-    center match; one minus the box IoU within one minus ``iou_threshold`` for an IoU match, or
-    one minus the region IoU of the records' ``rings`` for a mask IoU match.
+    """Return each ground-truth to detection distance under ``criterion``, and the match limit.
+
+    The distance is between box centers within ``tolerance`` for a center match; one minus the
+    box IoU within one minus ``iou_threshold`` for an IoU match, or one minus the region IoU of
+    the records' ``rings`` for a mask IoU match.
     """
     if criterion["kind"] == "center_match":
         cg, cd = box_centers(_corners(gt)), box_centers(_corners(dt))
@@ -163,10 +174,11 @@ def _cost_matrix(
 def match_pairs(
     gt: list[dict], dt: list[dict], criterion: dict, *, policy: str
 ) -> list[tuple[int, int]]:
-    """A greedy 1:1 matcher of ``{"bbox": xywh}`` records (carrying ``rings`` too under a mask
-    criterion) under ``criterion`` (a center match's ``tolerance`` or an IoU or mask IoU match's
-    ``iou_threshold``), the limit inclusive, under one of two stated policies. Returns
-    ``(gt_index, dt_index)`` pairs.
+    """Match ``{"bbox": xywh}`` records greedily 1:1 and return ``(gt_index, dt_index)`` pairs.
+
+    The records carry ``rings`` too under a mask criterion. The limit comes from ``criterion`` (a
+    center match's ``tolerance`` or an IoU or mask IoU match's ``iou_threshold``), inclusive,
+    under one of two stated policies.
 
     ``policy="score_first"`` walks ``dt`` in the order given, each claiming its nearest unused
     ground truth; among equally near unused ground truths the last index wins.
@@ -210,7 +222,8 @@ def match_pairs(
 
 @dataclass(frozen=True)
 class Matching:
-    """One image's detections matched to its ground truth, by index into the lists matched:
+    """One image's detections matched to its ground truth, by index into the lists matched.
+
     ``pairs`` as ``(gt index, detection index)``, ``unpaired`` the detections that pair nothing
     and no crowd region ignores (the false positives), ``ignored`` those a crowd region ignores,
     and ``missed`` the ground-truth objects nothing pairs (the false negatives).
@@ -228,9 +241,10 @@ class Matching:
 
 
 def objects_of(records: list[dict], *, crowd: bool = False) -> list[int]:
-    """The indices of the ground-truth records (``{"iscrowd", ...}``) that are each one object:
-    every one but a crowd region (:func:`~tcip_annotation.state.object_rows`); with ``crowd``,
-    the crowd regions instead.
+    """Return the indices of the ground-truth records (``{"iscrowd", ...}``) that are one object.
+
+    That is every one but a crowd region (:func:`~tcip_annotation.state.object_rows`); with
+    ``crowd``, the crowd regions instead.
     """
     return [
         i
@@ -246,9 +260,10 @@ def pair_detections(
     *,
     policy: str = "score_first",
 ) -> Matching:
-    """The platform's one matcher of detections to ground truth on one image: ``dt`` records
-    (``{"bbox": xywh}``, pre-sorted by score descending) paired under ``policy``
-    (:func:`match_pairs`) to ``gt``'s objects (``{"bbox": xywh, "iscrowd"}``,
+    """Match one image's detections to its ground truth: the platform's one matcher.
+
+    ``dt`` records (``{"bbox": xywh}``, pre-sorted by score descending) are paired under
+    ``policy`` (:func:`match_pairs`) to ``gt``'s objects (``{"bbox": xywh, "iscrowd"}``,
     :func:`objects_of`) under ``criterion``. An unpaired detection whose center lies inside a
     crowd region's box is ignored, and a crowd region is no object to miss.
     """
@@ -278,8 +293,10 @@ def pair_detections(
 
 
 def match_record(a: Annotation) -> dict:
-    """One annotation as the record the matcher reads: its box as ``[x, y, w, h]`` on the stored
-    grid, its crowd flag, and its rings (a box's own rectangle, for a box).
+    """Return one annotation as the record the matcher reads.
+
+    The record holds its box as ``[x, y, w, h]`` on the stored grid, its crowd flag, and its rings
+    (a box's own rectangle, for a box).
     """
     from tcip_annotation.json_io import xywh
 
@@ -292,8 +309,9 @@ def match_record(a: Annotation) -> dict:
 
 
 def geometry_rings(geometry: BBox | Polygon) -> Rings:
-    """The region a box or polygon covers, as the rings a mask match reads: a polygon's own rings,
-    a box's rectangle as one ring.
+    """Return the region a box or polygon covers, as the rings a mask match reads.
+
+    A polygon's own rings, or a box's rectangle as one ring.
     """
     return (
         geometry.rings
@@ -315,13 +333,13 @@ def class_matchings(
     policy: str = "score_first",
     held: dict | None = None,
 ) -> dict[Any, Matching]:
-    """One image's records matched class by class, the one class partition every count, curve,
-    average precision, attribute pair and displayed pair derives from: for each ``category_id``
-    ``gt`` or ``dt`` carries, that class's detections scoring at least ``conf``, highest first,
-    paired to that class's ground truth (:func:`pair_detections` under ``policy``), indices into
-    ``gt`` and ``dt``. ``held`` keeps each class's matching by its exact inputs, so a second
-    request under the same criterion over the same detections takes the matching already
-    made.
+    """Match one image's records class by class.
+
+    For each ``category_id`` ``gt`` or ``dt`` carries, that class's detections scoring at least
+    ``conf``, highest first, are paired to that class's ground truth (:func:`pair_detections`
+    under ``policy``), indices into ``gt`` and ``dt``. ``held`` keeps each class's matching by its
+    exact inputs, so a second request under the same criterion over the same detections takes
+    the matching already made.
     """
     out: dict[Any, Matching] = {}
     for cid in sorted({r["category_id"] for r in (*gt, *dt)}):
@@ -363,8 +381,10 @@ def class_matchings(
 
 
 def merged(by_class: dict[Any, Matching]) -> Matching:
-    """One image's per-class matchings (:func:`class_matchings`) as one matching, ordered by
-    detection index.
+    """Merge one image's per-class matchings (:func:`class_matchings`) into one matching.
+
+    Pairs and unpaired detections are ordered by detection index, missed objects by
+    ground-truth index.
     """
     ms = list(by_class.values())
     return Matching(
@@ -384,10 +404,11 @@ def pair_proposals(
     *,
     conf_threshold: float | None = None,
 ) -> Matching:
-    """``annotations`` and the ``proposals`` that are detections
+    """Match ``annotations`` to the detection ``proposals`` by subject.
+
+    The proposals matched are those that are detections
     (:func:`~tcip_annotation.state.is_detection`) scoring at least ``conf_threshold`` (every one
-    for ``None``) matched by subject (:func:`class_matchings`), indices into the two lists
-    given.
+    for ``None``), matched through :func:`class_matchings`, indices into the two lists given.
     """
     gt = [i for i, a in enumerate(annotations) if box_derivable(a.geometry)]
     dt = [i for i, p in enumerate(proposals) if is_detection(p)]
@@ -421,8 +442,9 @@ def pair_proposals(
 
 
 def box_ring(bbox: BBox) -> list[tuple[float, float]]:
-    """``bbox``'s four corners as one closed ring, in a fixed order (x1,y1 -> x2,y1 -> x2,y2 ->
-    x1,y2).
+    """Return ``bbox``'s four corners as one closed ring, in a fixed order.
+
+    The order is x1,y1 -> x2,y1 -> x2,y2 -> x1,y2.
     """
     return [
         (bbox.x1, bbox.y1),

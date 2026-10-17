@@ -1,5 +1,6 @@
-"""Write the project listing and the invariances correction the frontend tests read, produced by
-the platform itself.
+"""Write the project listing and invariances correction the frontend tests read.
+
+Both are produced by the platform itself.
 
 In a scratch session (``tools/fixture_session.py``), two projects are created through
 ``tests._web_fixtures.named_project`` and left unopened; the listing ``GET /api/projects`` serves
@@ -30,10 +31,11 @@ GENERATED_PATH = (
 
 
 def normalized(served: dict, workspace: Path, ids: dict[str, str]) -> dict:
-    """``served`` with the values a run fills differently replaced by what they stand for: each
-    minted project id in ``ids`` by its project's name, each listed path by the workspace
-    placeholder and its folder name, the workspace by the placeholder, and each listed time by
-    zero; the listed projects ordered by display name.
+    """Return ``served`` with the values a run fills differently replaced by what they stand for.
+
+    Each minted project id in ``ids`` becomes its project's name, each listed path the workspace
+    placeholder and its folder name, the workspace the placeholder, and each listed time zero;
+    the listed projects are ordered by display name.
     """
 
     def leaf(key: str | None, value: Any) -> Any:
@@ -53,8 +55,10 @@ def normalized(served: dict, workspace: Path, ids: dict[str, str]) -> dict:
 
 
 def produce() -> dict:
-    """Create the fixture projects in a scratch session, list them, correct the second's
-    invariances and have the route refuse an out-of-range block, :func:`normalized`.
+    """Create, list and correct the fixture projects in a scratch session; return the answers.
+
+    The second project's invariances are corrected and the route refuses an out-of-range block;
+    the answers are :func:`normalized`.
     """
     from tcip_mcp.project_record import CaptureInvariances
     from tcip_web.routes.projects import InvariancesRequest

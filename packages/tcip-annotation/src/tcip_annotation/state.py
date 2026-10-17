@@ -17,7 +17,7 @@ class BBox:
 
     @classmethod
     def from_normalized_center(cls, box, img_w: float, img_h: float) -> BBox:
-        """A normalized center-form ``[cx, cy, w, h]`` scaled to an ``img_w`` x ``img_h`` image."""
+        """Scale a normalized center-form ``[cx, cy, w, h]`` to an ``img_w`` x ``img_h`` image."""
         cx, cy, w, h = (float(v) for v in box)
         return cls(
             (cx - w / 2) * img_w,
@@ -38,15 +38,16 @@ def is_ring(ring) -> bool:
 
 @dataclass
 class Polygon:
-    """One or more simple closed contours (rings) in pixel coordinates; an occlusion-split instance
-    holds several.
+    """One or more simple closed contours (rings) in pixel coordinates.
 
-    At least one ring, every ring one :func:`is_ring` admits, or ``ValueError``.
+    An occlusion-split instance holds several. At least one ring, every ring one :func:`is_ring`
+    admits, or ``ValueError``.
     """
 
     rings: list[list[tuple[float, float]]]
 
     def __post_init__(self) -> None:
+        """Refuse (``ValueError``) no ring, or a ring :func:`is_ring` does not admit."""
         if not self.rings or not all(is_ring(ring) for ring in self.rings):
             raise ValueError(
                 f"a polygon needs at least one ring of {RING_MIN_POINTS} or more points; got "
@@ -56,10 +57,10 @@ class Polygon:
 
 @dataclass
 class Point:
-    """A single labeled location in pixel coordinates: a placed prompt (human- or agent-supplied,
-    for a promptable method like SAM) or a keypoint/landmark.
+    """A single labeled location in pixel coordinates.
 
-    Has no bounding box and no area; :func:`bbox_of` refuses one.
+    It is a placed prompt (human- or agent-supplied, for a promptable method like SAM) or a
+    keypoint/landmark. Has no bounding box and no area; :func:`bbox_of` refuses one.
     """
 
     x: float
@@ -90,6 +91,7 @@ class Annotation:
     accepted_at: str | None = None
 
     def __post_init__(self) -> None:
+        """Refuse (``ValueError``) a ``subject`` that is not a non-empty string."""
         if not isinstance(self.subject, str) or not self.subject:
             raise ValueError(
                 f"an annotation needs a non-empty string subject; got {self.subject!r}"
@@ -97,8 +99,9 @@ class Annotation:
 
 
 def object_rows(iscrowd) -> list[bool]:
-    """For each of the crowd flags ``iscrowd`` (a list, an array or a tensor, one per row),
-    whether its row is one object rather than a crowd region.
+    """Return, for each crowd flag, whether its row is one object rather than a crowd region.
+
+    ``iscrowd`` is a list, an array or a tensor, one flag per row.
     """
     return [not bool(flag) for flag in iscrowd]
 
@@ -106,8 +109,9 @@ def object_rows(iscrowd) -> list[bool]:
 def instances(
     annotations: list[Annotation], *, crowd: bool = False
 ) -> list[Annotation]:
-    """The annotations that are each one object (:func:`object_rows`): every one but a crowd
-    region; with ``crowd``, the crowd regions instead.
+    """Return the annotations that are each one object (:func:`object_rows`).
+
+    That is every one but a crowd region; with ``crowd``, the crowd regions instead.
     """
     return [
         a
@@ -126,14 +130,15 @@ def box_derivable(
 
 
 def is_detection(a: Annotation) -> bool:
-    """Whether ``a`` is one detected object: one object (:func:`instances`) with a box or region
-    (:func:`box_derivable`). The one selection every match and detection count reads.
+    """Return whether ``a`` is one detected object.
+
+    That is one object (:func:`instances`) with a box or region (:func:`box_derivable`).
     """
     return bool(instances([a])) and box_derivable(a.geometry)
 
 
 def prediction_score(a: Annotation) -> float:
-    """A prediction's confidence, or ``ValueError`` naming a record that states none."""
+    """Return a prediction's confidence; ``ValueError`` naming a record that states none."""
     if a.score is None:
         raise ValueError(
             f"a prediction states its 'score'; this {a.subject!r} record states none"
@@ -147,9 +152,10 @@ def polygonal(geometry: BBox | Polygon | Point | None) -> TypeGuard[Polygon]:
 
 
 def bbox_of(geometry: BBox | Polygon) -> BBox:
-    """The axis-aligned bounding box of a geometry: the box itself, or a polygon's enclosing box
-    (over every ring, so a multi-ring instance's box covers all of its parts). Raises for a
-    :class:`Point`.
+    """Return the axis-aligned bounding box of a geometry.
+
+    That is the box itself, or a polygon's enclosing box (over every ring, so a multi-ring
+    instance's box covers all of its parts). Raises for a :class:`Point`.
     """
     if isinstance(geometry, BBox):
         return geometry

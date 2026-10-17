@@ -34,7 +34,7 @@ ANSWER_TIMEOUT_S = 240
 
 
 def terminal_ws_url(client: Any, session_id: str) -> str:
-    """The absolute ``ws://`` URL of ``session_id``'s socket on the host ``client`` serves."""
+    """Return the absolute ``ws://`` URL of ``session_id``'s socket on ``client``'s host."""
     parts = urlsplit(str(client.base_url))
     scheme = "wss" if parts.scheme == "https" else "ws"
     return urlunsplit(
@@ -47,7 +47,7 @@ REQUESTED_CATEGORY = "unexpected_behavior"
 
 
 def request_for(token: str) -> str:
-    """The request asking the harness for one ``report_friction`` call carrying ``token``."""
+    """Return the request asking the harness for one ``report_friction`` call with ``token``."""
     return (
         f"This is a smoke test of the agent terminal. Call the tcip report_friction tool "
         f"exactly once, with category {REQUESTED_CATEGORY} and detail {token}, then stop."
@@ -55,8 +55,9 @@ def request_for(token: str) -> str:
 
 
 def reported(client: Any, token: str) -> bool:
-    """Whether exactly one friction report of the open project carries ``token`` in its detail,
-    and that report has the requested category.
+    """Return whether exactly one friction report of the open project carries ``token``.
+
+    The token is looked for in its detail, and that report must have the requested category.
     """
     reports = client.get("/api/meta/reports").json()["reports"]
     matching = [
@@ -72,9 +73,10 @@ def main(
     workspace: str | None = None,
     answer_timeout_s: float = ANSWER_TIMEOUT_S,
 ) -> int:
-    """Drive the smoke for the ``provider`` row with ``TCIP_WORKSPACE`` set to ``workspace`` (a
-    fresh temp directory when omitted) and the backend started on it, waiting
-    ``answer_timeout_s`` for the report. Returns 0 on a pass.
+    """Drive the smoke for the ``provider`` row and return 0 on a pass.
+
+    ``TCIP_WORKSPACE`` is set to ``workspace`` (a fresh temp directory when omitted) and the
+    backend started on it, waiting ``answer_timeout_s`` for the report.
     """
     os.environ["TCIP_WORKSPACE"] = workspace or tempfile.mkdtemp(
         prefix="terminal-smoke-ws-"
