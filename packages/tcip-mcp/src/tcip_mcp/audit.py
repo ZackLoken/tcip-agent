@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TypeVar, overload
 
+from pydantic import BaseModel
+
 from tcip_mcp import agent_identity
 from tcip_mcp.registry_paths import located
 from tcip_store import Key, append
@@ -207,16 +209,18 @@ def audited(
     *,
     scope_arg: str | None = None,
 ) -> Callable:
-    """Decorate a door taking a ``project`` parameter (refused without one) so each call leaves one
-    line in one log: the project's, or with ``scope_arg`` the dataset root that argument resolves
-    to at call time (:func:`dataset_scope_of`; no root means the project's). A set ``scope_arg``
+    """Decorate a door taking a ``project`` parameter (refused without one) so a call that returns
+    a result leaves one ``ok`` line, a call that raises leaves one ``exception`` line, and a call
+    returning its error dict leaves none, in one log: the project's, or with ``scope_arg`` the
+    dataset root that argument resolves to at call time (:func:`dataset_scope_of`; no root means
+    the project's). A set ``scope_arg``
     reaches the door as the location it names against ``project``
     (:func:`~tcip_mcp.registry_paths.located`), and the entry keeps the caller's spelling.
-    ``project`` and ``workspace`` are not recorded as arguments; an ``actor`` parameter is
-    recorded as the entry's actor. A failed append after a return raises
-    :class:`MutationCommittedWithoutAuditLineError`; after a raise the body's exception
-    propagates and the failed append is logged. A declared scope that cannot be resolved refuses
-    the call.
+    ``project`` and ``workspace`` are not recorded as arguments, a model argument is recorded as
+    its JSON dump, and an ``actor`` parameter is recorded as the entry's actor. A failed append
+    after a return raises :class:`MutationCommittedWithoutAuditLineError`; after a raise the
+    body's exception propagates and the failed append is logged. A declared scope that cannot be
+    resolved refuses the call.
     """
 
     def decorate(func: Callable) -> Callable:
@@ -237,7 +241,10 @@ def audited(
             t0 = time.monotonic()
             bound = sig.bind(*args, **kwargs)
             bound.apply_defaults()
-            logged_args: dict[str, Any] = dict(bound.arguments)
+            logged_args: dict[str, Any] = {
+                k: v.model_dump(mode="json") if isinstance(v, BaseModel) else v
+                for k, v in bound.arguments.items()
+            }
             project = logged_args.pop("project")
             logged_args.pop("workspace", None)
             entry = audit_entry(
@@ -258,8 +265,8 @@ def audited(
                     entry,
                 )
 
-            # One entry per call by construction: the two paths are exclusive, and neither
-            # writer sits inside a handler that could run the other.
+            # At most one entry per call by construction: the two writing paths are exclusive,
+            # and neither writer sits inside a handler that could run the other.
             try:
                 result = func(*bound.args, **bound.kwargs)
             except Exception as body_exc:
