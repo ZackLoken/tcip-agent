@@ -1,4 +1,4 @@
-"""The platform's recorded-actor convention, in one place.
+"""The platform's recorded-actor convention.
 
 A stamped fact says who or what produced it: a person is ``user:<name>``, a tool producer stays
 bare (``model:<checkpoint>``, an agent's own name).
@@ -14,9 +14,11 @@ class NoActorError(ValueError):
 
 
 def actor(name: str) -> str:
-    """A person's recorded identity, ``user:<name>``, idempotent, from the ``name`` a request
-    states, with or without the prefix (:func:`~tcip_annotation.json_io.person_name`). Refuses
-    (:class:`NoActorError`) when ``name`` names no person.
+    """Return a person's recorded identity, ``user:<name>``.
+
+    Idempotent: ``name`` is the name a request states, with or without the prefix
+    (:func:`~tcip_annotation.json_io.person_name`). Refuses (:class:`NoActorError`) when ``name``
+    names no person.
     """
     person = person_name(name)
     if person is None:

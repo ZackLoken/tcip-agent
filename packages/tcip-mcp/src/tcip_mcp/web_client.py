@@ -1,6 +1,7 @@
-"""HTTP client for MCP tools to push state to the tcip-web backend (``post_panel_event``), and the
-declarations of the stores, the GUI state shape and the tab vocabulary (``ActiveTab``) the web
-package owns.
+"""HTTP client pushing state to the tcip-web backend, and the web package's shared declarations.
+
+The push is ``post_panel_event``; the declarations are the stores, the GUI state shape and the tab
+vocabulary (``ActiveTab``) the web package owns.
 """
 
 from __future__ import annotations
@@ -21,12 +22,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 LOOPBACK_HOST = "127.0.0.1"
-"""The loopback address every server the platform starts binds and is reached at: the backend,
-TensorBoard and Ray's dashboard."""
+"""The IPv4 loopback address."""
 
 
 def free_port(requested: int) -> int:
-    """``requested`` if it is free on :data:`LOOPBACK_HOST`, else a free port the OS assigns."""
+    """Return ``requested`` if free on :data:`LOOPBACK_HOST`, else a free port the OS assigns."""
     import socket
 
     for candidate in (requested, 0):
@@ -44,7 +44,7 @@ _PORT_PARTS = ("web_port",)
 
 
 def backend_port_key(workspace: Path) -> Key:
-    """The port the backend serving ``workspace`` bound, as a JSON string."""
+    """Return the key of the port the backend serving ``workspace`` bound, as a JSON string."""
     return Key(BACKEND_PORT_STORE, str(workspace), _PORT_PARTS)
 
 
@@ -53,7 +53,7 @@ _SNAPSHOT_PARTS = ("gui",)
 
 
 def gui_snapshot_key(project: str | Path) -> Key:
-    """This project's persisted GUI snapshot."""
+    """Return the key of this project's persisted GUI snapshot."""
     return Key(GUI_SNAPSHOT_STORE, str(project), _SNAPSHOT_PARTS)
 
 
@@ -64,12 +64,12 @@ _GEOMETRY_PARTS = ("canvas_shapes",)
 
 
 def canvas_meta_key(project: str) -> Key:
-    """The canvas meta document a push writes."""
+    """Return the key of the project's canvas meta document."""
     return Key(CANVAS_META_STORE, project, _META_PARTS)
 
 
 def canvas_geometry_key(project: str) -> Key:
-    """The display-resolved geometry a full push writes."""
+    """Return the key of the project's display-resolved canvas geometry."""
     return Key(CANVAS_GEOMETRY_STORE, project, _GEOMETRY_PARTS)
 
 
@@ -78,17 +78,14 @@ _ANNOTATION_STATS_PARTS = ("annotation_stats",)
 
 
 def annotation_stats_key(project: str) -> Key:
-    """The project's per-image annotation timings and session rollups, written in one
-    transaction.
-    """
+    """Return the key of the project's per-image annotation timings and session rollups."""
     return Key(ANNOTATION_STATS_STORE, project, _ANNOTATION_STATS_PARTS)
 
 
 ActiveTab = Literal[
     "setup", "annotate", "training", "inference", "results", "meta"
 ]
-"""The GUI's tabs: the vocabulary ``GuiState.active_tab`` holds and ``POST /api/state/tab`` and
-the canvas push validate against."""
+"""The GUI's tabs: the vocabulary ``GuiState.active_tab`` holds."""
 
 TAB_NAMES = get_args(ActiveTab)
 
@@ -105,8 +102,9 @@ what they serialize to."""
 
 
 class DatasetSelection(BaseModel):
-    """Which dataset the GUI is looking at inside the open project: the capture, its image list,
-    and the name of the bucket under the dataset root whose proposals the canvas shows.
+    """Which dataset the GUI is looking at inside the open project.
+
+    It holds the capture, its image list, and the name of a bucket under the dataset root.
     """
 
     model_config = _TRANSPORT
@@ -131,9 +129,7 @@ class ViewState(BaseModel):
 
 
 class _GuiFields(BaseModel):
-    """The GUI state's fields other than its dataset, the same in the broadcast and the
-    persisted form.
-    """
+    """The GUI state's fields other than its dataset."""
 
     active_tab: ActiveTab = "annotate"
     view: ViewState = Field(default_factory=ViewState)
@@ -142,8 +138,9 @@ class _GuiFields(BaseModel):
 
 
 class GuiState(_GuiFields):
-    """The GUI state the backend holds for its open project and broadcasts to browsers; only
-    ``dataset`` is the backend's own, the rest advisory.
+    """The GUI state the backend holds for its open project.
+
+    Only ``dataset`` is the backend's own, the rest advisory.
     """
 
     model_config = _TRANSPORT
@@ -152,8 +149,10 @@ class GuiState(_GuiFields):
 
 
 class _DatasetChoice(BaseModel):
-    """The chosen part of a selection, the only part the GUI snapshot holds; ``dataset_root``
-    spelled by :func:`tcip_mcp.registry_paths.stored_path` against the project.
+    """The chosen part of a selection, the only part the GUI snapshot holds.
+
+    ``dataset_root`` is spelled by :func:`tcip_mcp.registry_paths.stored_path` against the
+    project.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -174,8 +173,9 @@ class _PersistedGuiState(_GuiFields):
 
 
 def require_whole(model: BaseModel, where: str) -> None:
-    """Refuse (``ValueError``, naming it under ``where``) a field of ``model``, or of a model
-    nested in it, that the input it was validated from did not state: a GUI record decodes as its
+    """Refuse a field of ``model``, or of a model nested in it, its input did not state.
+
+    The refusal is ``ValueError``, naming the field under ``where``: a GUI record decodes as its
     producer's whole shape, never with a default standing in for a missing field.
     """
     missing = sorted(set(type(model).model_fields) - model.model_fields_set)
@@ -194,10 +194,12 @@ def selection_for(
     bucket: str | None,
     current_image_index: int,
 ) -> DatasetSelection:
-    """The selection a choice names: the image list of capture ``date`` and the name of the
-    bucket under ``dataset_root`` whose proposals the canvas shows. ``current_image_index`` is
-    clamped to the list. Raises ``AmbiguousImageStemError`` for a capture holding two images of one
-    stem, and ``ValueError`` for a ``date`` that is no capture name.
+    """Return the selection a choice names.
+
+    It holds the image list of capture ``date`` and the name of a bucket under ``dataset_root``.
+    ``current_image_index`` is clamped to the list. Raises
+    ``AmbiguousImageStemError`` for a capture holding two images of one stem, and ``ValueError``
+    for a ``date`` that is no capture name.
     """
     from tcip_mcp.dataset_layout import image_dir
     from tcip_mcp.pipelines.image_utils import logical_images_by_name
@@ -221,8 +223,9 @@ def selection_for(
 
 
 def current_image(selection: DatasetSelection) -> str | None:
-    """The image the selection's index names, under its images directory, or ``None`` when it
-    names none.
+    """Return the image the selection's index names, under its images directory, or ``None``.
+
+    ``None`` when the selection has no images directory or no images.
     """
     if selection.images_dir is None or not selection.image_list:
         return None
@@ -257,10 +260,11 @@ def write_gui_snapshot(project: Path, state: GuiState) -> None:
 
 
 def read_gui_snapshot(project: Path) -> GuiState | None:
-    """``project``'s persisted GUI state, its selection rebuilt through :func:`selection_for`, or
-    ``None`` when it has none. A snapshot that does not decode as its whole shape raises
-    (``ValidationError``, ``ValueError`` from :func:`require_whole`, or the store's own error), as
-    does a selection that will not build.
+    """Return ``project``'s persisted GUI state, or ``None`` when it has none.
+
+    Its selection is rebuilt through :func:`selection_for`. A snapshot that does not decode as its
+    whole shape raises (``ValidationError``, ``ValueError`` from :func:`require_whole`, or the
+    store's own error), as does a selection that will not build.
     """
     from tcip_mcp.registry_paths import resolved_registry_path
 
@@ -308,9 +312,10 @@ class NoBackendPortError(LookupError):
 
 
 def resolve_web_port(workspace: Path) -> int:
-    """The port the backend serving ``workspace`` recorded under it. Refuses
-    (:class:`NoBackendPortError`) when none is recorded, and (``ValueError``) a recorded port
-    that is not an integer.
+    """Return the port the backend serving ``workspace`` recorded under it.
+
+    Refuses (:class:`NoBackendPortError`) when none is recorded, and (``ValueError``) a recorded
+    port that is not an integer.
     """
     recorded = tcip_store.read(backend_port_key(workspace), default=None)
     if recorded is None:
@@ -343,12 +348,13 @@ def post_panel_event(
     *,
     timeout: float = 2.0,
 ) -> dict[str, Any]:
-    """POST a panel event for the project ``bound`` names to the tcip-web backend serving its
-    workspace, delivered only when that project is the one it has open. Every answer carries
-    ``delivered``: on a 2xx, ``status`` ``"ok"`` and ``response`` (the JSON body, ``None`` when
-    it does not decode); with the backend down, ``status`` ``"no_subscribers"``; otherwise
-    ``error`` naming why: with ``open_project_id`` when another project is open, the backend's
-    none-open message when none is.
+    """POST a panel event for the project ``bound`` names to the backend serving its workspace.
+
+    The event is delivered only when that project is the one the backend has open. Every answer
+    carries ``delivered``: on a 2xx, ``status`` ``"ok"`` and ``response`` (the JSON body,
+    ``None`` when it does not decode); with the backend down, ``status`` ``"no_subscribers"``;
+    otherwise ``error`` naming why: with ``open_project_id`` when another project is open, the
+    backend's none-open message when none is.
     """
     import json
     import urllib.error

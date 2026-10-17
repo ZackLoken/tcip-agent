@@ -1,1 +1,1 @@
-"""Postprocessing pipeline: temporal aggregation and CSV export."""
+"""Postprocessing pipeline: plant attribution, phenology, per-plant aggregation and CSV export."""

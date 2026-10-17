@@ -1,9 +1,8 @@
-"""The workspace: the folder whose child directories are the projects the GUI lists.
+"""The workspace: the folder whose child directories are the projects.
 
 A workspace root holds one directory per project, and beside them only the backend's port record
 and the last-opened pointer, the id of the project the backend opened last. A removed project
-moves into its ``.removed/``. Every function here takes the workspace a process resolved once at
-its entry (:func:`workspace_from_environment`).
+moves into its ``.removed/``.
 """
 
 from __future__ import annotations
@@ -30,8 +29,9 @@ denies; a process still holding the project's database open is not transient."""
 
 
 def workspace_from_environment() -> Path:
-    """The workspace root ``TCIP_WORKSPACE`` names (``~`` expanded), created and resolved, its path
-    logged. Read once, at a process's entry. Refuses (``ValueError``) a variable that is unset or
+    """Return the workspace root ``TCIP_WORKSPACE`` names, created and resolved.
+
+    ``~`` is expanded and the path logged. Refuses (``ValueError``) a variable that is unset or
     blank.
     """
     raw = os.environ.get("TCIP_WORKSPACE", "").strip()
@@ -48,7 +48,9 @@ def workspace_from_environment() -> Path:
 
 
 class BoundProject(NamedTuple):
-    """The project a process was started for: its directory, the id its record held at start
+    """The project a process was started for.
+
+    It holds the project's directory, the id its record held at start
     (:func:`~tcip_mcp.project_record.existing_project`), and the workspace naming the backend
     that serves it.
     """
@@ -59,7 +61,7 @@ class BoundProject(NamedTuple):
 
 
 def is_valid_name(name: str) -> bool:
-    """True if ``name`` is a single, safe path segment."""
+    """Return whether ``name`` is a single, safe path segment."""
     seg = (name or "").strip()
     return (
         bool(seg)
@@ -75,15 +77,18 @@ _POINTER_PARTS = ("last_opened",)
 
 
 def last_opened_key(workspace: Path) -> Key:
-    """The workspace's last-opened pointer: the id of the project the backend opened last, a JSON
-    string replaced whole on every open.
+    """Return the store key of the workspace's last-opened pointer.
+
+    The pointer is the id of the project the backend opened last, a JSON string.
     """
     return Key(LAST_OPENED_STORE, str(workspace), _POINTER_PARTS)
 
 
 def read_last_opened(workspace: Path) -> str | None:
-    """The id the last-opened pointer holds, as stored, or ``None`` when the backend has opened
-    nothing in this workspace yet. A pointer the store cannot read raises the store's own error.
+    """Return the id the last-opened pointer holds, as stored, or ``None`` when it is unset.
+
+    ``None`` means the backend has opened nothing in this workspace yet. A pointer the store
+    cannot read raises the store's own error.
     """
     return tcip_store.read(last_opened_key(workspace), default=None)
 
@@ -97,15 +102,16 @@ def write_last_opened(workspace: Path, project_id: str) -> None:
 
 
 def project_dirs(workspace: Path) -> list[Path]:
-    """Every child directory of the workspace carrying a ``.tcip`` directory, sorted by name."""
+    """Return every child directory of the workspace carrying a ``.tcip`` directory, by name."""
     return sorted(
         p for p in workspace.iterdir() if p.is_dir() and (p / ".tcip").is_dir()
     )
 
 
 def project_records(workspace: Path) -> list[tuple[Path, dict]]:
-    """Every workspace project (:func:`project_dirs`) with its record's fields as
-    :func:`tcip_mcp.project_record.record_fields` reads them.
+    """Return every workspace project (:func:`project_dirs`) with its record's fields.
+
+    The fields are as :func:`tcip_mcp.project_record.record_fields` reads them.
     """
     from tcip_mcp.project_record import record_fields
 
@@ -118,10 +124,11 @@ def project_records(workspace: Path) -> list[tuple[Path, dict]]:
 def project_by_id(
     records: Iterable[tuple[Path, dict]], project_id: str
 ) -> tuple[Path, dict]:
-    """The project among ``records`` (:func:`project_records`) whose record holds ``project_id``,
-    with its fields. Raises ``LookupError`` naming the id when no project holds it, with every
-    project whose record would not read and why; and naming both directories when two hold it (a
-    copied project).
+    """Return the project among ``records`` whose record holds ``project_id``, with its fields.
+
+    ``records`` is as :func:`project_records` returns. Raises ``LookupError`` naming the id when
+    no project holds it, with every project whose record would not read and why; and naming the
+    directories when more than one holds it (a copied project).
     """
     found: list[tuple[Path, dict]] = []
     unreadable: list[str] = []
@@ -150,9 +157,10 @@ def project_by_id(
 def remove_project(
     workspace: Path, project: Path, *, actor: str, release: Callable[[], None]
 ) -> dict:
-    """Archive a workspace project, models included, into the workspace's ``.removed/``, then move
-    its directory there, and record one ``project_removed`` line by ``actor`` in the moved
-    project's own log.
+    """Archive a workspace project into the workspace's ``.removed/`` and move it there.
+
+    The archive includes models; once the directory is moved, one ``project_removed`` line by
+    ``actor`` is recorded in the moved project's own log.
 
     Refuses (``ValueError``) while a run or sweep of the project is live, and when the archive
     refuses; nothing is written and ``release`` is not called then. Once admitted and archived,

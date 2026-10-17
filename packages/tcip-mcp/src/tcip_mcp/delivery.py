@@ -1,11 +1,10 @@
-"""Delivering a measurement: the one gate every delivery function calls, the result a breeder's
-recorded acknowledgment binds to, and the one writer each delivers its CSV and delivery
-event through.
+"""Delivering a measurement: the gate, the result an acknowledgment binds to, and the writer.
 
-The gate reads each bucket's record and the assessment it was published under, each assessment
-once, and refuses outright what no acknowledgment can ship; a delivery with any other finding
-ships only under an acknowledgment recorded for the digest of exactly the rows and disclosure the
-writer is about to write.
+The writer writes a delivery's CSV and its delivery event; the acknowledgment is the breeder's,
+recorded. The gate reads each bucket's record and the assessment it was published under, each
+assessment once, and refuses outright what no acknowledgment can ship; a delivery with any other
+finding ships only under an acknowledgment recorded for the digest of exactly the rows and
+disclosure the writer is about to write.
 """
 
 from __future__ import annotations
@@ -45,17 +44,19 @@ if TYPE_CHECKING:
 
 
 class DeliveryRefusedError(ValueError):
-    """A delivery the gate refused, one sentence per reason. ``result_sha256`` is the digest of
-    the result an acknowledgment would ship (:func:`result_digest`), ``None`` for a delivery no
-    acknowledgment can ship.
+    """A delivery the gate refused, one sentence per reason.
+
+    ``result_sha256`` is the digest of the result an acknowledgment would ship
+    (:func:`result_digest`), ``None`` for a delivery no acknowledgment can ship.
     """
 
     def __init__(self, message: str, result_sha256: str | None = None) -> None:
+        """Take the refusal's message and the digest an acknowledgment would ship, if any."""
         super().__init__(message)
         self.result_sha256 = result_sha256
 
     def as_detail(self) -> dict[str, Any]:
-        """The structured refusal body a web door raises."""
+        """Return the structured refusal body: its kind, message and ``result_sha256``."""
         return {
             "kind": "delivery",
             "message": str(self),
@@ -75,9 +76,10 @@ DELIVERY_COLUMNS = (
 
 @dataclass(frozen=True)
 class Clearance:
-    """What the gate found: whether every bucket is validated, each bucket's own finding, the one
-    producer, the scale assessment, and the acknowledgment the delivery ships under when it is not
-    validated.
+    """What the gate found.
+
+    It holds whether every bucket is validated, each bucket's own finding, the buckets' producer,
+    the scale assessment, and the acknowledgment the delivery ships under when it is not validated.
     """
 
     validated: bool
@@ -89,8 +91,9 @@ class Clearance:
 
 @dataclass(frozen=True)
 class Result:
-    """A delivery's measured result and disclosure as it is shown and written: the CSV's columns
-    and rows, its population and its plant-mapping disclosure.
+    """A delivery's measured result and disclosure.
+
+    It holds the CSV's columns and rows, its population and its plant-mapping disclosure.
     """
 
     columns: Sequence[str]
@@ -99,7 +102,10 @@ class Result:
     plant_mapping: dict | None = None
 
     def encoded(self, cells: dict[str, Any]) -> bytes:
-        """The CSV of the rows under the columns, each row carrying ``cells`` beside its own."""
+        """Return the CSV of the rows under the columns.
+
+        Each row carries ``cells`` beside its own.
+        """
         text = io.StringIO(newline="")
         writer = csv.DictWriter(
             text, fieldnames=list(self.columns), extrasaction="ignore"
@@ -117,9 +123,10 @@ def _assessment_finding(
     revision: TraitRevision,
     delivery_kind: str | None,
 ) -> str | None:
-    """Why ``assessment`` answers for no delivery of ``delivery_kind`` under ``revision``, in one
-    sentence, or ``None`` when it answers: it passed, at this kind, under this revision whole
-    (number and content hash), over a reference that has not changed since.
+    """Return why ``assessment`` answers for no ``delivery_kind`` delivery under ``revision``.
+
+    The reason is one sentence, or ``None`` when it answers: it passed, at this kind, under this
+    revision whole (number and content hash), over a reference that has not changed since.
     """
     from tcip_mcp.assessment import assessment_dir
 
@@ -149,7 +156,7 @@ def _assessment_finding(
 
 
 def _covers(assessment: Assessment, bucket: Bucket) -> bool:
-    """Whether ``assessment``'s reference spans ``bucket``'s capture."""
+    """Return whether ``assessment``'s reference spans ``bucket``'s capture."""
     return assessment.reference.covers(
         dataset_id=bucket.dataset_id,
         date=bucket.date,
@@ -162,11 +169,12 @@ def _bucket_reason(
     assessment: Assessment | None,
     finding: str | None,
 ) -> str | None:
-    """Why ``bucket`` is not validated, given the assessment it was published under (``None``
-    for none or one that could not be read, ``finding`` then saying why) and that assessment's
-    own :func:`_assessment_finding`; ``None`` when it is validated: the assessment answers, and it
-    measured the bucket's own producer under its own execution record over a reference covering
-    its capture.
+    """Return why ``bucket`` is not validated, or ``None`` when it is.
+
+    ``assessment`` is the one it was published under (``None`` for none or one that could not be
+    read, ``finding`` then saying why) and ``finding`` that assessment's own
+    :func:`_assessment_finding`. It is validated when the assessment answers, and it measured the
+    bucket's own producer under its own execution record over a reference covering its capture.
     """
     if bucket.assessment_id is None:
         return (
@@ -199,10 +207,11 @@ def _assessments(
     revision: TraitRevision | None,
     delivery_kind: str | None,
 ) -> dict[str | None, tuple[Assessment | None, str | None]]:
-    """Each distinct assessment id among ``ids`` read once, beside its
-    :func:`_assessment_finding` under ``revision`` (the assessment's own trait's latest confirmed
-    revision for ``None``) at ``delivery_kind`` (its own kind for ``None``); an id naming none
-    carries the sentence saying so, and ``None`` itself no assessment.
+    """Read each distinct assessment id among ``ids`` once, beside its finding.
+
+    The finding is :func:`_assessment_finding` under ``revision`` (the assessment's own trait's
+    latest confirmed revision for ``None``) at ``delivery_kind`` (its own kind for ``None``); an id
+    naming none carries the sentence saying so, and ``None`` itself no assessment.
     """
     from tcip_mcp.assessment import read_assessment
     from tcip_mcp.operationalization import latest_confirmed
@@ -231,10 +240,11 @@ def _assessments(
 
 
 def admitted_conf(project: Path, bucket: Bucket) -> tuple[float | None, str]:
-    """The conf a review may accept ``bucket``'s predictions at on its assessment's authority: its
-    execution record's conf when the assessment it was published under validates it at its own
-    kind under that trait's latest confirmed revision, else ``None`` and the sentence saying
-    why.
+    """Return the conf ``bucket``'s assessment admits its predictions at, and why not when none.
+
+    The conf is the bucket's execution record's conf, on its assessment's authority, when the
+    assessment it was published under validates it at its own kind under that trait's latest
+    confirmed revision; else ``None`` and the sentence saying why.
     """
     assessment, finding = _assessments(
         project, [bucket.assessment_id], revision=None, delivery_kind=None
@@ -258,10 +268,11 @@ def result_digest(
     buckets: Sequence[BucketFinding],
     scale_finding: str | None,
 ) -> str:
-    """The digest of the result a breeder's acknowledgment binds to: ``result``'s rows as the CSV
-    writes them (without the delivery's own cells, which are receipt), its population and
-    plant-mapping disclosure, beside the kind, the trait revision, the
-    producer, each bucket's finding and the scale assessment's.
+    """Return the digest of the result a breeder's acknowledgment binds to.
+
+    It covers ``result``'s rows as the CSV writes them (without the delivery's own cells, which
+    are receipt), its population and plant-mapping disclosure, beside the kind, the trait
+    revision, the producer, each bucket's finding and the scale assessment's.
     """
     return hashlib.sha256(
         encode_record(
@@ -293,20 +304,20 @@ def gate(
     scale_assessment_id: str | None = None,
     unit: str | None = None,
 ) -> Clearance:
-    """Clear ``buckets`` for a ``delivery_kind`` delivery under ``revision``. ``unit`` is the
-    linear physical unit the delivered values are in (``None`` for none); a detector delivery in a
-    unit rests on the physical-scale assessment ``scale_assessment_id``, which must have passed in
-    ``unit``, under ``revision``, over a reference that has not changed, covering every bucket's
-    capture.
+    """Clear ``buckets`` for a ``delivery_kind`` delivery under ``revision``.
 
-    Refuses (:class:`DeliveryRefusedError`) outright no buckets at all, buckets naming more than one
-    producer or proposing rather than predicting, (``ValueError``) buckets under more than one
-    dataset root (:func:`~tcip_mcp.buckets.shared_root`), a state-crossing delivery over a
-    bucket that
+    ``unit`` is the linear physical unit the delivered values are in (``None`` for none); a
+    detector delivery in a unit rests on the physical-scale assessment ``scale_assessment_id``,
+    which must have passed in ``unit``, under ``revision``, over a reference that has not changed,
+    covering every bucket's capture.
+
+    Refuses (:class:`DeliveryRefusedError`) outright no buckets at all, buckets naming more than
+    one producer or proposing rather than predicting, a state-crossing delivery over a bucket that
     classifies no positive state, a scale assessment named for a value in no unit, and a detector
-    delivery in a unit naming none; refuses
-    (:class:`~tcip_mcp.operationalization.OperationalizationRefusedError`) a detector delivery whose
-    buckets do not count the operationalization's measured subject. A delivery with any
+    delivery in a unit naming none; refuses (``ValueError``) buckets under more than one dataset
+    root (:func:`~tcip_mcp.buckets.shared_root`), and
+    (:class:`~tcip_mcp.operationalization.OperationalizationRefusedError`) a detector delivery
+    whose buckets do not count the operationalization's measured subject. A delivery with any
     unvalidated finding ships only under ``acknowledgment_id``, a recorded acknowledgment
     (:func:`read_acknowledgment`) of exactly ``result``, the rows and disclosure about to be
     written (:func:`result_digest`); otherwise it refuses with one sentence per finding, carrying
@@ -468,10 +479,11 @@ def _acknowledgment_key(project: str | Path, acknowledgment_id: str) -> Key:
 def record_acknowledgment(
     project: Path, *, acknowledged_by: str, reason: str, result_sha256: str
 ) -> Acknowledgment:
-    """Record ``acknowledged_by``'s acknowledgment of shipping the unvalidated result
-    ``result_sha256`` names (:func:`result_digest`), once, with its one audit line by that person,
-    ``delivery_acknowledged``, in the project's log; a blank name or reason refuses
-    (``ValueError``).
+    """Record ``acknowledged_by``'s acknowledgment of shipping an unvalidated result, once.
+
+    The result is the one ``result_sha256`` names (:func:`result_digest`); the acknowledgment's
+    one audit line by that person, ``delivery_acknowledged``, lands in the project's log. A blank
+    name or reason refuses (``ValueError``).
     """
     acknowledgment = Acknowledgment(
         acknowledgment_id=uuid.uuid4().hex,
@@ -500,8 +512,9 @@ def record_acknowledgment(
 def read_acknowledgment(
     project: Path, acknowledgment_id: str
 ) -> Acknowledgment:
-    """The acknowledgment ``acknowledgment_id`` names; one recorded under no such id refuses
-    (:class:`DeliveryRefusedError`).
+    """Return the acknowledgment ``acknowledgment_id`` names.
+
+    An id under which none is recorded refuses (:class:`DeliveryRefusedError`).
     """
     raw = tcip_store.read(
         _acknowledgment_key(project, acknowledgment_id), default=None
@@ -528,7 +541,7 @@ DELIVERY_EVENT_PATHS: PathFields = (
 
 
 def delivery_event_key(project: str | Path, event_id: str) -> Key:
-    """One delivery event's record."""
+    """Return the delivery event's record key."""
     return Key(
         DELIVERY_EVENTS_STORE, str(project_state_dir(project)), (event_id,)
     )
@@ -545,15 +558,17 @@ def deliver_csv(
     delivery_kind: str,
     actor: str | None,
 ) -> dict[str, Any]:
-    """Compose ``result`` as a CSV (each row carrying the :data:`DELIVERY_COLUMNS` cells of this
+    """Write ``result`` as a CSV at ``output_path`` with its one delivery event and audit line.
+
+    ``result`` is composed as a CSV (each row carrying the :data:`DELIVERY_COLUMNS` cells of this
     delivery) and its one delivery event (the door, the kind, the trait revision it ships under,
     the delivered file and its sha256, the producer, each bucket's finding, the scale assessment,
     whether it is validated, the acknowledgment it ships under, and the result's population and
-    plant-mapping disclosure), validating the event before anything is
-    written; then write the CSV at ``output_path``, the event, and its one audit line by
-    ``actor``, ``delivery_event``, in the log of the dataset root the buckets are published
-    under. Returns what was delivered: ``csv_path``, ``validated``, ``delivery_event_id``,
-    ``trait_revision``, ``producer`` and ``acknowledged_by``.
+    plant-mapping disclosure), the event validated before anything is written; then the CSV is
+    written at ``output_path``, the event, and its one audit line by ``actor``,
+    ``delivery_event``, in the log of the dataset root the buckets are published under. Returns
+    what was delivered: ``csv_path``, ``validated``, ``delivery_event_id``, ``trait_revision``,
+    ``producer`` and ``acknowledged_by``.
     """
     event_id = uuid.uuid4().hex
     data = result.encoded(
@@ -608,8 +623,9 @@ def deliver_csv(
 
 
 def read_delivery_events(project: str | Path) -> list[DeliveryEventRecord]:
-    """Every delivery event recorded under ``project``, decoded through its declared shape, its
-    paths resolved against the project.
+    """Return every delivery event recorded under ``project``, decoded through its declared shape.
+
+    Its paths are resolved against the project.
     """
     scope = project_state_dir(project)
     return [

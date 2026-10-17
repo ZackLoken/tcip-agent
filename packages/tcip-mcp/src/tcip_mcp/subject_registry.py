@@ -38,9 +38,10 @@ ATTR_TYPES = ("categorical", "ordinal")
 
 @dataclass(frozen=True)
 class Attribute:
-    """One classification axis of a subject's instances. ``values`` are ordered; for an ``ordinal``
-    attribute that order is the rank (severity 0 < 1 < 2). A known ``type`` and a non-empty list of
-    distinct names are enforced here.
+    """One classification axis of a subject's instances.
+
+    ``values`` are ordered; for an ``ordinal`` attribute that order is the rank (severity 0 < 1 <
+    2). A known ``type`` and a non-empty list of distinct names are enforced here.
     """
 
     name: str
@@ -48,6 +49,7 @@ class Attribute:
     values: tuple[str, ...]
 
     def __post_init__(self) -> None:
+        """Refuse (``ValueError``) an unknown ``type`` and empty, unnamed or duplicate values."""
         if self.type not in ATTR_TYPES:
             raise ValueError(f"type {self.type!r} not in {ATTR_TYPES}")
         if not self.values or not all(
@@ -67,7 +69,7 @@ _N = TypeVar("_N", bound=_Named)
 
 
 def named(records: Iterable[_N], name: str) -> _N | None:
-    """The one of ``records`` (subjects or attributes) named ``name``, or ``None`` when none is."""
+    """Return the first of ``records`` named ``name``, or ``None`` when none is."""
     return next((r for r in records if r.name == name), None)
 
 
@@ -83,7 +85,7 @@ class Subject:
     attributes: tuple[Attribute, ...] = ()
 
     def attribute(self, name: str) -> Attribute | None:
-        """:func:`named` over this subject's attributes."""
+        """Return the named attribute of this subject (:func:`named`), or ``None``."""
         return named(self.attributes, name)
 
 
@@ -94,22 +96,20 @@ class SubjectRegistry:
     subjects: tuple[Subject, ...] = ()
 
     def subject(self, name: str) -> Subject | None:
-        """:func:`named` over this registry's subjects."""
+        """Return the named subject of this registry (:func:`named`), or ``None``."""
         return named(self.subjects, name)
 
 
 class RegistryError(ValueError):
-    """A registry that cannot be read as a valid subject registry, or a scope it does not
-    contain.
-    """
+    """A registry that cannot be read as a valid subject registry, or a scope it lacks."""
 
 
 def registry_from_dict(data: object) -> SubjectRegistry:
-    """Parse the nested registry mapping into a :class:`SubjectRegistry`, preserving declared
-    order.
+    """Parse the nested registry mapping into a :class:`SubjectRegistry`, in declared order.
 
-    Refuses a malformed shape: an attribute whose ``type`` is unknown, or whose ``values`` are
-    absent/empty/non-string/duplicated.
+    Refuses (:class:`RegistryError`) a malformed shape: a non-object registry, subject or
+    attribute, a subject with no description string, or an attribute whose ``type`` is unknown or
+    whose ``values`` are absent/empty/non-string/duplicated.
     """
     if not isinstance(data, dict):
         raise RegistryError(
@@ -171,8 +171,9 @@ def registry_from_dict(data: object) -> SubjectRegistry:
 
 
 def registry_from_request(subjects: object) -> SubjectRegistry:
-    """:func:`registry_from_dict` over an authoring request, in which a subject stating no
-    ``description`` is one described by nothing yet.
+    """Parse an authoring request's subjects through :func:`registry_from_dict`.
+
+    A subject stating no ``description`` is one described by nothing yet.
     """
     if isinstance(subjects, dict):
         subjects = {
@@ -185,8 +186,9 @@ def registry_from_request(subjects: object) -> SubjectRegistry:
 
 
 def registry_to_dict(registry: SubjectRegistry) -> dict:
-    """Serialize a :class:`SubjectRegistry` back to the nested mapping (inverse of
-    :func:`registry_from_dict`; an empty description is still written).
+    """Serialize a :class:`SubjectRegistry` back to the nested mapping.
+
+    The inverse of :func:`registry_from_dict`; an empty description is still written.
     """
     out: dict[str, dict] = {}
     for s in registry.subjects:
@@ -201,8 +203,9 @@ def registry_to_dict(registry: SubjectRegistry) -> dict:
 
 
 def _checked_registry_document(data: bytes, *, path: str | Path) -> dict:
-    """The stored registry's decoded document. Raises :class:`RegistryError` for bytes that do
-    not decode as JSON.
+    """Return the stored registry's decoded document.
+
+    Raises :class:`RegistryError` for bytes that do not decode as JSON.
     """
     import tcip_store
 
@@ -215,8 +218,9 @@ def _checked_registry_document(data: bytes, *, path: str | Path) -> dict:
 def read_versioned_registry(
     dataset_root: str | Path,
 ) -> tuple[SubjectRegistry, Version]:
-    """Read ``dataset_root``'s subject registry into a :class:`SubjectRegistry`, beside the
-    version of the bytes it decoded, both from one read.
+    """Read ``dataset_root``'s subject registry and the version of the bytes it decoded.
+
+    Both come from one read; the registry is a :class:`SubjectRegistry`.
 
     No registry raises ``FileNotFoundError``, and a registry whose bytes are present but will not
     decode raises :class:`RegistryError`, the same refusal a structurally invalid registry raises.
@@ -234,15 +238,16 @@ def read_versioned_registry(
 
 
 def read_registry(dataset_root: str | Path) -> SubjectRegistry:
-    """:func:`read_versioned_registry`'s registry alone."""
+    """Return :func:`read_versioned_registry`'s registry alone."""
     return read_versioned_registry(dataset_root)[0]
 
 
 def _dropped_names(
     outgoing: SubjectRegistry, incoming: SubjectRegistry
 ) -> list[str]:
-    """Every subject, attribute or attribute value ``outgoing`` declares that ``incoming`` does
-    not, dotted (``subject``, ``subject.attribute``, ``subject.attribute=value``).
+    """Return every subject, attribute or value ``outgoing`` declares that ``incoming`` does not.
+
+    Each is dotted: ``subject``, ``subject.attribute``, ``subject.attribute=value``.
     """
     dropped: list[str] = []
     for s in outgoing.subjects:
@@ -285,15 +290,14 @@ def replace_registry(
     set.
 
     ``expect`` is compare-and-set against the blob's actual version at write time
-    (``tcip_store.VersionConflictError`` on a mismatch, nothing written): pass the version the
-    caller read, or ``Version.ABSENT`` for a caller asserting no registry exists yet.
-    ``None`` checks
-    against the version this call read.
+    (``tcip_store.VersionConflictError`` on a mismatch, nothing written): a version read before,
+    or ``Version.ABSENT`` asserting no registry exists yet; ``None`` checks against the version
+    this call read.
 
     The write's one audit line by ``actor`` follows it in the dataset's log
-    (``AuditEntryNotWrittenError`` when it
-    cannot be appended, carrying that line's arguments). Returns the committed save as its audit
-    line records it: ``{"subjects_path", "n_subjects", "version"}`` (the new token).
+    (``AuditEntryNotWrittenError`` when it cannot be appended, carrying that line's arguments).
+    Returns the committed save as its audit line records it: ``{"subjects_path", "n_subjects",
+    "version"}`` (the new token).
     """
     import tcip_store
     from tcip_mcp.audit import record_event_or_raise
@@ -361,9 +365,10 @@ def replace_registry(
 
 
 def copy_registry(source: str | Path, destination: str | Path) -> None:
-    """Place dataset root ``source``'s registry beside dataset root ``destination``'s data, once:
-    the stored document byte-for-byte, written create-only (``expect=Version.ABSENT``), refusing
-    when the destination already holds a registry.
+    """Place dataset root ``source``'s registry beside dataset root ``destination``'s data, once.
+
+    The stored document is copied byte-for-byte, written create-only (``expect=Version.ABSENT``),
+    refusing (:class:`RegistryError`) when the destination already holds a registry.
     """
     import tcip_store
     from tcip_mcp.dataset_layout import subjects_path
@@ -384,8 +389,10 @@ def copy_registry(source: str | Path, destination: str | Path) -> None:
 def positive_state_problem(
     registry: SubjectRegistry, subject_name: str, state: PositiveState
 ) -> str | None:
-    """Why ``state`` cannot be ``subject_name``'s positive state in ``registry``, or ``None`` when
-    that subject declares ``state``'s attribute and the attribute lists ``state``'s value.
+    """Return why ``state`` cannot be ``subject_name``'s positive state in ``registry``.
+
+    Returns ``None`` when it can: that subject declares ``state``'s attribute and the attribute
+    lists ``state``'s value.
     """
     subject = registry.subject(subject_name)
     if subject is None:
@@ -410,8 +417,9 @@ def positive_state_problem(
 def registry_for_dataset_root(
     dataset_root: str | Path,
 ) -> SubjectRegistry | None:
-    """The registry at ``dataset_root``, or ``None`` when no ``subjects.json`` has been written
-    there yet (a dataset with no registry is not corrupt, only unregistered so far).
+    """Return the registry at ``dataset_root``, or ``None`` when none has been written there yet.
+
+    A dataset with no ``subjects.json`` is not corrupt, only unregistered so far.
     """
     try:
         return read_registry(dataset_root)

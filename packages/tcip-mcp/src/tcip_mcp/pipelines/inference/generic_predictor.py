@@ -1,5 +1,7 @@
-"""Generic predictor for any bespoke ``model_source`` checkpoint: task read from the saved
-``model_source``, prediction over one image, a batch, or a sliced source.
+"""Generic predictor for any bespoke ``model_source`` checkpoint.
+
+The task is read from the saved ``model_source``; prediction runs over one image, a batch, or a
+sliced source.
 """
 
 from __future__ import annotations
@@ -40,38 +42,40 @@ from tcip_mcp.pipelines.model_contract import DETECTOR_TASKS, TILING_TASKS
 
 
 class WindowedRasterReader(Protocol):
-    """A source read window by window: full-raster pixel dimensions, band count, and a windowed
-    decode.
+    """A source read window by window.
+
+    It carries full-raster pixel dimensions, a band count, and a windowed decode.
     """
 
     height: int
     width: int
     num_channels: int
 
-    def read_window(
-        self, y0: int, y1: int, x0: int, x1: int
-    ) -> np.ndarray: ...
+    def read_window(self, y0: int, y1: int, x0: int, x1: int) -> np.ndarray:
+        """Return the pixel window ``[y0:y1, x0:x1]``, rows first."""
 
 
 class GenericPredictor:
-    """Load any bespoke ``model_source`` checkpoint and run inference under the execution record
-    each call is given, which alone decides the confidence threshold and each frame's detection
-    cap.
+    """Load any bespoke ``model_source`` checkpoint and run inference under an execution record.
 
-    The checkpoint must carry its run config, whose ``model_source`` names the builder and the
-    task, and the weights (``model_build``'s ``STATE_DICT_KEY``).
+    The execution record each call is given alone decides the confidence threshold and each
+    frame's detection cap. The checkpoint must carry its run config, whose ``model_source`` names
+    the builder and the task, and the weights (``model_build``'s ``STATE_DICT_KEY``).
 
     The input geometry the run trained at travels on the checkpoint and is exposed as-recorded:
     ``train_tile_size``/``train_overlap`` (a tiled run's tile lattice, off its config),
     ``train_native_size`` (its recorded geometry's ``native_size``), and ``train_augmentation``
-    (the augmentation config that run declared). ``dims``
-    are the dimensions the model was built at
-    (:func:`~tcip_mcp.pipelines.model_build.recorded_model_dims`).
+    (the augmentation config that run declared). ``dims`` are the dimensions the model was built
+    at (:func:`~tcip_mcp.pipelines.model_build.recorded_model_dims`).
     """
 
     def __init__(
         self, checkpoint: VerifiedCheckpoint, device: str | None = None
     ) -> None:
+        """Build ``checkpoint``'s model with its weights, in eval mode on ``device``.
+
+        ``device`` defaults to CUDA when available, else the CPU.
+        """
         from tcip_mcp.pipelines.schemas import run_tiling
 
         self.device = torch.device(
@@ -106,8 +110,9 @@ class GenericPredictor:
     def model_input(
         self, image_path: str | Path | BandGroupRef
     ) -> tuple[torch.Tensor, int, int]:
-        """One source as this model reads it: EXIF-oriented at the model's own width, as a
-        tensor on its device, with the source's ``(width, height)``.
+        """Return one source as this model reads it, with the source's width and height.
+
+        The source is EXIF-oriented at the model's own channel width, as a tensor on its device.
         """
         img = load_image(image_path, self.in_chans)
         return pil_to_tensor(img).to(self.device), *frame_size(img)
@@ -116,8 +121,9 @@ class GenericPredictor:
     def predict(
         self, image_path: str | Path | BandGroupRef, execution: Execution
     ) -> dict:
-        """Run inference on a single image, a plain path/string or a :class:`BandGroupRef`, under
-        the untiled ``execution`` record.
+        """Run inference on a single image under the untiled ``execution`` record.
+
+        The image is a plain path/string or a :class:`BandGroupRef`.
         """
         if self.task in DETECTOR_TASKS:
             return self._predict_whole([image_path], execution)[0]
@@ -166,11 +172,12 @@ class GenericPredictor:
     def _predict_whole(
         self, sources: list[str | Path | BandGroupRef], execution: Execution
     ) -> list[dict]:
-        """``sources`` under ``execution``, each decoded whole as one slice the size of its frame
-        at shift zero and run under its own frame's cap, each result built by
-        :meth:`_detection_record` under the cap its forward ran at; under an
-        :attr:`~tcip_mcp.pipelines.execution.Execution.uncut` record each carries
-        ``soft_masks``, each detection's uncut mask as the model kept it
+        """Return the detection record of each of ``sources`` under ``execution``.
+
+        Each source is decoded whole as one slice the size of its frame at shift zero and run
+        under its own frame's cap, each result built by :meth:`_detection_record` under the cap
+        its forward ran at; under an :attr:`~tcip_mcp.pipelines.execution.Execution.uncut` record
+        each carries ``soft_masks``, each detection's uncut mask as the model kept it
         (``slicing.TcipDetectionModel.soft_masks``).
         """
         from tcip_mcp.pipelines.derivations import detection_cap
@@ -223,12 +230,13 @@ class GenericPredictor:
         model: TcipDetectionModel,
         cap: int,
     ) -> dict:
-        """The platform's detection record from ``ObjectPrediction``s in full-frame pixels, as
-        the forward or the merge that capped them at ``cap`` left them, of the ``width`` x
-        ``height`` frame: ``image``, ``width``, ``height``, ``boxes`` (xyxy), ``scores``,
-        ``labels`` (1-indexed), ``count`` (their number) and ``cap``; where the
-        checkpoint carries attributes, ``attributes``, one id per attribute per detection; where
-        ``model``'s record collects masks and cuts them, ``masks`` as one
+        """Return the platform's detection record from ``ObjectPrediction``s in full-frame pixels.
+
+        The predictions are as the forward or the merge that capped them at ``cap`` left them, of
+        the ``width`` x ``height`` frame. The record holds ``image``, ``width``, ``height``,
+        ``boxes`` (xyxy), ``scores``, ``labels`` (1-indexed), ``count`` (their number) and ``cap``;
+        where the checkpoint carries attributes, ``attributes``, one id per attribute per
+        detection; where ``model``'s record collects masks and cuts them, ``masks`` as one
         ``{"segmentation": [[x0, y0, x1, y1, ...], ...]}`` per detection, empty where the mask
         binarized to nothing.
         """
@@ -264,14 +272,15 @@ class GenericPredictor:
         prior: dict | None = None,
         progress: Callable[[int, int, dict], None] | None = None,
     ) -> dict:
-        """Sliced detection over one source under a tiled ``execution`` record: SAHI's lattice
-        (:func:`~tcip_mcp.pipelines.slicing.slice_lattice`) at its tile edge and overlap over the
-        whole frame, each slice cut by array indexing and predicted through
-        :class:`~tcip_mcp.pipelines.slicing.TcipDetectionModel` ``tile_batch_size`` at a time with
-        its shift and the frame's shape, then the record's one SAHI merge
-        (:func:`~tcip_mcp.pipelines.slicing.cross_tile_merge`) over every slice's shifted
-        detections and the cap the record gives the whole frame, highest score first, each slice
-        running under that same cap.
+        """Run sliced detection over one source under a tiled ``execution`` record.
+
+        The source is cut on SAHI's lattice (:func:`~tcip_mcp.pipelines.slicing.slice_lattice`) at
+        its tile edge and overlap over the whole frame, each slice cut by array indexing and
+        predicted through :class:`~tcip_mcp.pipelines.slicing.TcipDetectionModel`
+        ``tile_batch_size`` at a time with its shift and the frame's shape, then the record's one
+        SAHI merge (:func:`~tcip_mcp.pipelines.slicing.cross_tile_merge`) over every slice's
+        shifted detections and the cap the record gives the whole frame, highest score first, each
+        slice running under that same cap.
 
         A :class:`WindowedRasterReader` (has ``.read_window``) serves each slice from its own
         window and names the result by ``source_label``; any other source decodes whole once. Its

@@ -1,6 +1,8 @@
-"""A trait: one entry holding its spec fields and the operationalization text for each delivery kind
-it delivers, kept per project as an appended list of revisions: ``propose_trait`` appends one,
-``confirm_revision`` confirms or withdraws one by its number and content hash.
+"""A trait: its spec fields and operationalizations, kept per project as appended revisions.
+
+One entry holds the trait's spec fields and the operationalization text for each delivery kind it
+delivers. ``propose_trait`` appends a revision, ``confirm_revision`` confirms or withdraws one by
+its number and content hash.
 """
 
 from __future__ import annotations
@@ -108,9 +110,11 @@ LOCALIZATION_FIELDS: dict[Localization, tuple[str, ...]] = {
 
 
 def criterion_fields(entry: TraitEntry, kind: str) -> tuple[str, ...]:
-    """The spec fields an operationalization of ``kind`` rests on for ``entry``: the kind's own
-    (:data:`CONSTITUTING_FIELDS`) and, where it rests on ``localization``, the fields the
-    selected localization compares by (:data:`LOCALIZATION_FIELDS`).
+    """Return the spec fields an operationalization of ``kind`` rests on for ``entry``.
+
+    They are the kind's own (:data:`CONSTITUTING_FIELDS`) and, where it rests on
+    ``localization``, the fields the selected localization compares by
+    (:data:`LOCALIZATION_FIELDS`).
     """
     fields = CONSTITUTING_FIELDS[kind]
     if "localization" not in fields:
@@ -146,14 +150,14 @@ class TraitUnknownError(KeyError):
 
 
 def crops_yml_path() -> Path:
-    """Where the crops.yml controlled vocabulary lives, stated once for every reader of it."""
+    """Return the crops.yml controlled vocabulary file's path."""
     from tcip_mcp.knowledge import crops_yml_path as _knowledge_crops_yml_path
 
     return _knowledge_crops_yml_path()
 
 
 def _crops_traits() -> list[dict]:
-    """crops.yml's trait records, read whole; a file that is missing or will not parse raises."""
+    """Read crops.yml's trait records whole; a file that is missing or will not parse raises."""
     import yaml
 
     return yaml.safe_load(crops_yml_path().read_text(encoding="utf-8"))[
@@ -162,13 +166,14 @@ def _crops_traits() -> list[dict]:
 
 
 def registered_crops() -> set[str]:
-    """Every crop name crops.yml declares (the union of each trait's own ``crops`` list)."""
+    """Return every crop name crops.yml declares (the union of each trait's ``crops`` list)."""
     return {c for t in _crops_traits() for c in t.get("crops", [])}
 
 
 def crops_units() -> dict[str, str]:
-    """Trait name -> crops.yml's declared physical unit, for every trait that declares one; a
-    count or ordinal trait with no physical unit is absent from this mapping.
+    """Return crops.yml's declared physical unit by trait name, for every trait declaring one.
+
+    A count or ordinal trait with no physical unit is absent from this mapping.
     """
     return {
         t["name"]: t["units"]
@@ -183,12 +188,12 @@ the symbols that never grows or shrinks with what crops.yml declares."""
 
 
 def crops_length_units() -> set[str]:
-    """The subset of :func:`crops_units`'s declared units that are linear length units."""
+    """Return the subset of :func:`crops_units`'s declared units that are linear length units."""
     return {u for u in crops_units().values() if u in _METRIC_LENGTH_UNITS}
 
 
 def crops_definitions() -> dict[str, str]:
-    """Trait name -> crops.yml's declared definition, for every trait that carries one."""
+    """Return crops.yml's declared definition by trait name, for every trait that carries one."""
     return {
         t["name"]: t["definition"]
         for t in _crops_traits()
@@ -221,9 +226,7 @@ class Operationalization(BaseModel):
 
 
 class PositiveState(BaseModel):
-    """The state a fraction counts: one attribute of the measured subject, and its value that is
-    positive.
-    """
+    """The state a fraction counts: one attribute of the measured subject and its positive value."""
 
     model_config = ConfigDict(
         extra="forbid", frozen=True, use_attribute_docstrings=True
@@ -235,13 +238,14 @@ class PositiveState(BaseModel):
     """The value of that attribute that is the positive state."""
 
     def __str__(self) -> str:
+        """Return the state as ``attribute='value'``."""
         return f"{self.attribute}={self.value!r}"
 
 
 class TraitEntry(BaseModel):
     """One trait's complete entry: its spec fields and its operationalization per delivery kind.
-    Every field is required; a field not yet decided is stated as empty or null. A proposal is
-    checked by :func:`check_proposed_entry`.
+
+    Every field is required; a field not yet decided is stated as empty or null.
     """
 
     model_config = ConfigDict(
@@ -385,8 +389,10 @@ class UnauthoredFieldError(ValueError):
 
 
 def authored(entry: TraitEntry, names: tuple[str, ...]) -> None:
-    """Refuse (:class:`UnauthoredFieldError`) ``entry`` when any of the spec fields ``names`` is
-    unauthored, naming each field and asking the breeder its question.
+    """Refuse ``entry`` when any of the spec fields ``names`` is unauthored.
+
+    Raises :class:`UnauthoredFieldError` naming each such field and asking the breeder its
+    question.
     """
     missing = [n for n in names if getattr(entry, n) in (None, "", ())]
     if missing:
@@ -399,11 +405,12 @@ def authored(entry: TraitEntry, names: tuple[str, ...]) -> None:
 
 
 def check_proposed_entry(entry: TraitEntry) -> None:
-    """Refuse (``ValueError``) an entry a proposal may not append: ``delivers`` empty or naming
-    anything outside crops.yml, or an operationalization that leaves a spec field its kind rests
-    on (:func:`criterion_fields`) unauthored (:func:`authored`, asking the breeder), covers a
-    phenotype the entry does not deliver, or names phenotypes or value keys where its kind
-    carries none (or none where it carries them).
+    """Refuse (``ValueError``) an entry a proposal may not append.
+
+    Refused are ``delivers`` empty or naming anything outside crops.yml, or an operationalization
+    that leaves a spec field its kind rests on (:func:`criterion_fields`) unauthored
+    (:func:`authored`, asking the breeder), covers a phenotype the entry does not deliver, or
+    names phenotypes or value keys where its kind carries none (or none where it carries them).
     """
     vocab = {t["name"] for t in _crops_traits()}
     off_vocab = [d for d in entry.delivers if d not in vocab]
@@ -445,7 +452,7 @@ def check_proposed_entry(entry: TraitEntry) -> None:
 
 
 def entry_sha256(entry: TraitEntry) -> str:
-    """The content hash of ``entry``: SHA-256 over its canonical JSON form."""
+    """Return the content hash of ``entry``: SHA-256 over its canonical JSON form."""
     encoded = json.dumps(
         entry.model_dump(mode="json"),
         sort_keys=True,
@@ -456,9 +463,10 @@ def entry_sha256(entry: TraitEntry) -> str:
 
 
 class TraitRevision(BaseModel):
-    """One proposed entry, as appended: its number, the entry, the entry's content hash, why it
-    was proposed, and the breeder's confirmation or withdrawal once made. Who proposed it is the
-    ``propose_trait`` audit line's identity.
+    """One proposed entry, as appended.
+
+    It holds its number, the entry, the entry's content hash, why it was proposed, and the
+    breeder's confirmation or withdrawal once made.
     """
 
     model_config = ConfigDict(
@@ -487,7 +495,7 @@ class TraitRevision(BaseModel):
 
     @property
     def ref(self) -> TraitRevisionRef:
-        """This revision as every record and delivered file names it."""
+        """This revision's reference: its trait name, revision number and entry content hash."""
         return TraitRevisionRef(
             trait=self.entry.name,
             trait_revision=self.number,
@@ -509,15 +517,14 @@ class TraitRecord(BaseModel):
 
     @property
     def latest_confirmed(self) -> TraitRevision | None:
-        """The highest-numbered revision the breeder confirmed and has not withdrawn, or
-        ``None``.
-        """
+        """The highest-numbered revision confirmed and not withdrawn, or ``None``."""
         return next((r for r in reversed(self.revisions) if r.confirmed), None)
 
     def revision(self, number: int, entry_sha256: str) -> TraitRevision:
-        """Revision ``number``, which must hold the entry ``entry_sha256`` hashes. Refuses
-        (``ValueError``) a number no revision holds, and (:class:`RevisionMovedError`) a revision
-        whose entry hash is another.
+        """Return revision ``number``, which must hold the entry ``entry_sha256`` hashes.
+
+        Refuses (``ValueError``) a number no revision holds, and (:class:`RevisionMovedError`) a
+        revision whose entry hash is another.
         """
         name = self.latest.entry.name
         if not 1 <= number <= len(self.revisions):
@@ -539,14 +546,14 @@ TRAITS_STORE = "traits"
 
 
 def trait_key(project: str | Path, trait: str) -> Key:
-    """One trait's record in a project's state."""
+    """Return the key of one trait's record in a project's state."""
     from tcip_mcp.project_paths import project_state_dir
 
     return Key(TRAITS_STORE, str(project_state_dir(project)), (trait,))
 
 
 def trait_names(project: str | Path) -> list[str]:
-    """Every trait with a record in the project, sorted."""
+    """Return every trait with a record in the project, sorted."""
     from tcip_mcp.project_paths import project_state_dir
 
     return sorted(
@@ -558,8 +565,10 @@ def trait_names(project: str | Path) -> list[str]:
 def _record(
     trait: str, project: str | Path, value: dict | None
 ) -> TraitRecord:
-    """``trait``'s stored ``value`` read through its schema. An absent value raises
-    :class:`TraitUnknownError` naming the project's traits; a value the schema refuses raises.
+    """Return ``trait``'s stored ``value`` read through its schema.
+
+    An absent value raises :class:`TraitUnknownError` naming the project's traits; a value the
+    schema refuses raises.
     """
     if value is None:
         raise TraitUnknownError(
@@ -569,7 +578,7 @@ def _record(
 
 
 def read_trait(trait: str, project: str | Path) -> TraitRecord:
-    """One trait's record, read through its schema; refuses as :func:`_record` does."""
+    """Read one trait's record through its schema; refuses as :func:`_record` does."""
     return _record(
         trait, project, ts.read(trait_key(project, trait), default=None)
     )
@@ -581,14 +590,14 @@ def read_trait(trait: str, project: str | Path) -> TraitRecord:
 def resolve_statement_registry(
     project: str | Path, dataset_root: str
 ) -> SubjectRegistry:
-    """The registry a ``state_crossing_dates`` operationalization's positive state is checked
-    against.
+    """Return the registry a ``state_crossing_dates`` positive state is checked against.
 
     ``dataset_root`` given: that dataset's own registry (:func:`~tcip_mcp.registry_paths.located`
-    against ``project``). Empty: the project root's own registry,
-    served when ``project`` is unambiguously the one dataset the project uses (its own
-    ``subjects.json`` exists, and the project's dataset registry names at most one dataset).
-    Otherwise refuses by name, naming the registered datasets and the ``dataset_root`` parameter.
+    against ``project``), refusing (``ValueError``) when it carries none. Empty: the project
+    root's own registry, served when ``project`` is unambiguously the one dataset the project
+    uses (its own ``subjects.json`` exists, and the project's dataset registry names at most one
+    dataset). Otherwise refuses (``ValueError``), naming the registered datasets and the
+    ``dataset_root`` parameter.
     """
     from tcip_mcp.registry_paths import located
     from tcip_mcp.subject_registry import read_registry
@@ -628,8 +637,10 @@ def propose_trait(
     relayed_note: str,
     dataset_root: str = "",
 ) -> TraitRevision:
-    """Append ``entry`` to its trait's record as a new, unconfirmed revision, creating the record
-    for a trait the project does not have yet, then write the proposal's audit line.
+    """Append ``entry`` to its trait's record as a new, unconfirmed revision.
+
+    The record is created for a trait the project does not have yet; the proposal's audit line is
+    written after it.
 
     Refuses an entry :func:`check_proposed_entry` refuses, and a ``state_crossing_dates``
     operationalization whose positive state names an attribute the registry
@@ -708,16 +719,18 @@ def confirm_revision(
     actor: str,
     confirmed: bool,
 ) -> TraitRevision:
-    """Record the breeder's confirmation of revision ``number`` of ``trait`` (``confirmed``), or
-    the withdrawal of one they gave (not ``confirmed``), by ``actor``
-    (:func:`~tcip_mcp.identity.actor`'s spelling). Neither edits the entry.
+    """Record the breeder's confirmation of a trait revision, or its withdrawal, by ``actor``.
 
-    ``entry_sha256`` is the hash of the entry the surface showed; one that is not the revision's
+    ``confirmed`` confirms revision ``number`` of ``trait``; not ``confirmed`` withdraws a
+    confirmation they gave. ``actor`` is in :func:`~tcip_mcp.identity.actor`'s spelling. Neither
+    edits the entry.
+
+    ``entry_sha256`` is the hash of the entry being confirmed; one that is not the revision's
     own raises :class:`RevisionMovedError`. Refuses a revision that does not exist, a
-    confirmation of a revision already confirmed or withdrawn, and a withdrawal of a revision
-    not confirmed. Writes
-    the audit line after the record; one that cannot be written raises ``AuditEntryNotWrittenError``
-    with the record already written. Returns the revision as written.
+    confirmation of a revision already confirmed or withdrawn, and a withdrawal of a revision not
+    confirmed. Writes the audit line after the record; one that cannot be written raises
+    ``AuditEntryNotWrittenError`` with the record already written. Returns the revision as
+    written.
     """
     from tcip_mcp.audit import record_event_or_raise
 

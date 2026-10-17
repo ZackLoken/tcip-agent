@@ -1,6 +1,7 @@
-"""Measurement primitives: morphology on a validated mask (area / perimeter / centroid / PCA axis
-extents). An axis extent is a chord of the mask's footprint; see ``mask_geometry``'s module
-docstring.
+"""Measurement primitives: morphology on a validated mask.
+
+The measurements are area, perimeter, centroid and PCA axis extents. An axis extent is a chord of
+the mask's footprint; see ``mask_geometry``'s module docstring.
 """
 
 from __future__ import annotations
