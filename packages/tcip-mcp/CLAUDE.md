@@ -13,10 +13,10 @@ src/tcip_mcp/
                   # for the generated Claude Code, Codex and Antigravity skills, AGENTS.md's
                   # generated block, and the serve_domain_knowledge tool
   tools/          # domain tools, one module per area: annotation, calibration (the assessment
-                  # doors), data, experiment, feedback, gui, inference, ingest, knowledge, meta,
-                  # model, orthomosaic, phenology, project, proposal, trait, training, vision
-  pipelines/      # composable ML: active_learning, components, data, feedback, inference,
-                  # measurement, postprocessing, training (submodules), plus:
+                  # doors), data, delivery, experiment, feedback, gui, inference, ingest, knowledge,
+                  # meta, model, orthomosaic, phenology, project, proposal, trait, training, vision
+  pipelines/      # composable ML: active_learning, components, data, inference, measurement,
+                  # postprocessing, training (submodules), plus:
     derivations.py        # Tier-A derivations: compute a parameter (channels, num_classes,
                            # anchor ratios) from the artifact in hand instead of pinning it
     pixel_size.py          # the one raster-georeferencing-to-meters-per-pixel resolver, read
