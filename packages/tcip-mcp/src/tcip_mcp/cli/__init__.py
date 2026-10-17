@@ -1,5 +1,6 @@
-"""Operator command sub-package: each module is one ``tcip`` subcommand's implementation, exposing
-``main(argv)`` and returning the exit code.
+"""Operator command sub-package, one module per ``tcip`` subcommand.
+
+Each module exposes ``main(argv)``, which returns the exit code.
 """
 
 from __future__ import annotations
@@ -8,8 +9,9 @@ from pathlib import Path
 
 
 def bound_project(value: str) -> Path:
-    """Bind this process's store and return the project at ``value``, resolved; exits naming the
-    path when it holds no readable project record.
+    """Bind this process's store and return the project at ``value``, resolved.
+
+    Exits naming the path when it holds no readable project record.
     """
     from tcip_mcp.project_record import existing_project
     from tcip_store import bind

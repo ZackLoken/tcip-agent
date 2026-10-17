@@ -1,5 +1,7 @@
-"""Assessment tools: assess a checkpoint against a held-out reference, against a mosaic's own
-reserved regions, and a physical scale against a breeder's reference measurements.
+"""Assessment tools for a checkpoint and for a physical scale.
+
+A checkpoint is assessed against a held-out reference or against a mosaic's own reserved regions,
+and a physical scale against a breeder's reference measurements.
 """
 
 from __future__ import annotations
@@ -21,7 +23,11 @@ Quantile = Annotated[float, Field(ge=0, le=1)]
 
 
 def _refusals() -> tuple[type[Exception], ...]:
-    """What an assessment door answers ``{"error": ...}`` for rather than raising."""
+    """Return the exception types an assessment refuses with.
+
+    They are ``ValueError``, ``UnreadableLabelDocumentError``, ``UnregisteredCheckpointError``,
+    ``TraitUnknownError`` and ``FileNotFoundError``.
+    """
     from tcip_annotation.json_io import UnreadableLabelDocumentError
     from tcip_mcp.model_registry import UnregisteredCheckpointError
     from tcip_mcp.traits import TraitUnknownError
@@ -36,8 +42,10 @@ def _refusals() -> tuple[type[Exception], ...]:
 
 
 def _answer(assessment: Assessment) -> dict[str, Any]:
-    """An assessment as a door answers it: everything but the reference's sample list, which stays
-    in ``assessment.json``, counted instead.
+    """Return an assessment as a dict, its reference's sample list replaced by its count.
+
+    The dict carries every field of the assessment, its revision dumped and its execution as its
+    record, with the reference's ``samples`` replaced by ``n_samples``.
     """
     answer = asdict(assessment)
     samples = answer["reference"].pop("samples")
@@ -64,19 +72,16 @@ def assess_checkpoint(
     stated: Stated,
     device: str | None = None,
 ) -> dict:
-    """Assess a checkpoint against the calibration and holdout sides of a selection, for one
-    delivered kind of a trait, and record the result as an assessment.
+    """Assess a checkpoint on a selection's calibration and holdout sides and record it.
 
-    The operating point is fitted on the calibration side (the trait's count objective picks the
-    conf; its ground truth derives the object density each frame's detection cap scales by, and
-    an unstated merge threshold) and the
+    The assessment is for one delivered kind of a trait. The operating point is fitted on the
+    calibration side (the trait's count objective picks the conf; its ground truth derives the
+    object density each frame's detection cap scales by, and an unstated merge threshold) and the
     criterion the kind rests on is measured over the holdout side: the held-out count bias, pooled
     and per class, localization and dispersion for a count; that plus the classifier's agreement
     over matched instances for ``state_crossing_dates``; the scalar skill for an ordinal or
     regression aggregate, a regression scored by the revision's own ``regression_criterion``. The
     reference must share no group or image with the producing run's training or selection side.
-    Predictions published under the assessment (``run_inference(assessment_id=...)``) run exactly
-    its execution record; a delivery reads its ``passed``.
 
     Args:
         checkpoint_path: A checkpoint registered in this project.
@@ -133,14 +138,13 @@ def assess_reserved_regions(
     stated: Stated,
     device: str | None = None,
 ) -> dict:
-    """Assess a checkpoint trained on one mosaic against that mosaic's own reserved calibration and
-    holdout regions, for a count delivery of a trait, and record the result as an assessment.
+    """Assess a checkpoint against its own mosaic's reserved regions and record it.
 
-    The checkpoint's run must have drawn a within-image split with
-    ``data.split.calibration_ratio`` set; the regions are cut into ``k_cal`` and
-    ``k_test`` buffered bands, predicted through the tiled pass at the split's own tile edge, and
-    the count criterion is measured as for :func:`assess_checkpoint`. A raster published under the
-    assessment is validated only when it is the same mosaic.
+    The checkpoint is one trained on one mosaic, assessed against that mosaic's own reserved
+    calibration and holdout regions for a count delivery of a trait. The checkpoint's run must
+    have drawn a within-image split with ``data.split.calibration_ratio`` set; the regions are cut
+    into ``k_cal`` and ``k_test`` buffered bands, predicted through the tiled pass at the split's
+    own tile edge, and the count criterion is measured as for :func:`assess_checkpoint`.
 
     Args:
         checkpoint_path: A checkpoint registered in this project, produced by a run of it.
@@ -186,12 +190,12 @@ def calibrate_physical_scale(
     unit: str,
     reference_subject: str,
 ) -> dict:
-    """Derive a per-pixel physical scale on a selection's calibration side and check it against
-    its holdout side, recorded as an assessment a dimensional delivery names.
+    """Derive a per-pixel physical scale on a selection's calibration side and check it on holdout.
 
-    Each reference image carries exactly one ``reference_subject`` polygon or mask; the breeder's
-    ``reference_csv`` (``image_stem, physical_extent, unit``) states each one's physical extent in
-    ``unit`` and is retained with the assessment. The scale passes when the holdout's relative
+    The result is recorded as an assessment. Each reference image carries exactly one
+    ``reference_subject`` polygon or mask; the breeder's ``reference_csv`` (``image_stem,
+    physical_extent, unit``) states each one's physical extent in ``unit`` and is retained with
+    the assessment. The scale passes when the holdout's relative
     dispersion and the scale's deviation from the holdout mean are within the trait revision's
     ``scale_tolerance_frac``.
 

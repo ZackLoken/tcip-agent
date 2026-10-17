@@ -34,14 +34,14 @@ _DATASET_REGISTRY_PARTS = ("datasets",)
 
 
 def dataset_registry_key(project: str | Path) -> Key:
-    """The project's record of which datasets it uses, keyed by dataset id."""
+    """Return the key of the project's record of which datasets it uses, keyed by dataset id."""
     return Key(
         DATASET_REGISTRY_STORE, str(Path(project)), _DATASET_REGISTRY_PARTS
     )
 
 
 def read_datasets(project: str | Path) -> list[dict]:
-    """The project's dataset registry (``[{id, path}]``), or [] when absent.
+    """Read the project's dataset registry (``[{id, path}]``), or [] when absent.
 
     A registry present but undecodable raises rather than reading as empty.
     """
@@ -49,8 +49,9 @@ def read_datasets(project: str | Path) -> list[dict]:
 
 
 def dataset_entry_path(project: str | Path, entry: dict) -> Path:
-    """The absolute path a dataset registry ``entry`` names, resolved through
-    :func:`~tcip_mcp.registry_paths.resolved_registry_path`.
+    """Return the absolute path a dataset registry ``entry`` names.
+
+    The path is resolved through :func:`~tcip_mcp.registry_paths.resolved_registry_path`.
     """
     from tcip_mcp.registry_paths import resolved_registry_path
 
@@ -58,8 +59,10 @@ def dataset_entry_path(project: str | Path, entry: dict) -> Path:
 
 
 def upsert_dataset(project: str | Path, entry: dict) -> None:
-    """Add or refresh a dataset in the project's registry, matched by ``id``: a moved dataset
-    updates the ``path`` of its existing id rather than duplicating, so identity survives a move.
+    """Add or refresh a dataset in the project's registry, matched by ``id``.
+
+    A moved dataset updates the ``path`` of its existing id rather than duplicating, so identity
+    survives a move.
 
     The read and the write are one transaction, so two registrations running at once cannot
     each write a list assembled from the state before the other's entry landed.
@@ -74,9 +77,11 @@ def upsert_dataset(project: str | Path, entry: dict) -> None:
 @tool()
 @audited(scope_arg="dataset_root")
 def register_dataset(project: Path, dataset_root: str, crop: Text) -> dict:
-    """Record a dataset's identity, ``{crop, id, fingerprint}``, with the dataset, and its id and
-    path (:func:`~tcip_mcp.registry_paths.stored_path`) in the project's dataset registry. ``id``
-    is minted once and kept across re-runs and moves, ``fingerprint`` is
+    """Record a dataset's identity with the dataset, and its id and path in the project's registry.
+
+    The identity is ``{crop, id, fingerprint}``, and the path the registry holds is
+    :func:`~tcip_mcp.registry_paths.stored_path`'s. ``id`` is minted once and kept across re-runs
+    and moves, ``fingerprint`` is
     :func:`~tcip_mcp.pipelines.data.dataset_fingerprint.dataset_fingerprint` now, and the identity
     write is compare-and-set against the version this call read, a conflict keeping the id that
     committed.
@@ -145,8 +150,10 @@ def initialize_project(
     site: str,
     invariances: CaptureInvariances,
 ) -> dict:
-    """Create a TCIP project: ``.tcip/`` with its artifacts and models directories, and its record
-    holding a freshly minted id, ``display_name``, ``site`` and ``invariances``, then one
+    """Create a TCIP project: its ``.tcip/`` directories, its record and one creation log line.
+
+    The project gets ``.tcip/`` with its artifacts and models directories, and its record holding
+    a freshly minted id, ``display_name``, ``site`` and ``invariances``, then one
     ``project_created`` line in its own log.
 
     Creating a project that already records the same display name, site and invariances answers
@@ -155,12 +162,11 @@ def initialize_project(
 
     Args:
         project_path: Root directory of the project.
-        display_name: The name the project picker shows; renaming later changes only this.
+        display_name: The project's display name.
         site: The orchard or station this project's plants stand in, in the breeder's own words.
         invariances: For each capture transform, whether it leaves the trait's measurement what
             it was, and for a rotation the largest angle in degrees at which it does (0 for
-            none, 180 for any), as the breeder answers it; a training run's augmentation is
-            judged against it.
+            none, 180 for any), as the breeder answers it.
 
     """
     from tcip_mcp.audit import record_event_or_raise
@@ -183,10 +189,12 @@ def initialize_project(
 
 @tool()
 def view_gui_state(project: Path) -> dict:
-    """The GUI state the human last left in this project, from its GUI snapshot
-    (``web_client.read_gui_snapshot``): the tab, the mode and the dataset selection, with
-    ``current_image``, the image the selection's index names. A ``note`` stands in for all of it
-    when the GUI has persisted nothing for this project; a snapshot that will not read raises.
+    """Read the GUI state the human last left in this project.
+
+    The state comes from its GUI snapshot (``web_client.read_gui_snapshot``): the tab, the mode
+    and the dataset selection, with ``current_image``, the image the selection's index names. A
+    ``note`` stands in for all of it when the GUI has persisted nothing for this project; a
+    snapshot that will not read raises.
     """
     from tcip_mcp.web_client import current_image, read_gui_snapshot
 
@@ -260,11 +268,13 @@ _ACTIVITY_TOOLS = (
 
 
 def _recent_activity(project: Path) -> dict:
-    """The project's recent memory activity, derived from its audit log's ``report_friction``,
-    ``write_retrospective`` and ``record_distillation_pass`` lines in the order they landed: the
-    reports since the last retrospective and since the last distillation pass, the retrospectives
-    since that pass, the last retrospective's ``project_id`` and time, the last pass's time, and
-    the time of the last report or retrospective. A log carrying undecodable entries answers
+    """Derive the project's recent memory activity from its audit log.
+
+    The activity is read from the log's ``report_friction``, ``write_retrospective`` and
+    ``record_distillation_pass`` lines in the order they landed: the reports since the last
+    retrospective and since the last distillation pass, the retrospectives since that pass, the
+    last retrospective's ``project_id`` and time, the last pass's time, and the time of the last
+    report or retrospective. A log carrying undecodable entries answers
     ``status_unavailable`` naming how many.
     """
     from tcip_mcp.audit import acts_of
@@ -318,8 +328,9 @@ def archive_project(
     destination: ZipBundle | TreeBundle,
     include_models: bool = False,
 ) -> dict:
-    """Export ``project`` as a portable bundle (:func:`write_archive`, on its terms) and record
-    the export in the project's log.
+    """Export ``project`` as a portable bundle and record the export in the project's log.
+
+    The bundle is :func:`write_archive`'s, on its terms.
     """
     return write_archive(project, destination, include_models=include_models)
 
@@ -330,10 +341,12 @@ def write_archive(
     *,
     include_models: bool = False,
 ) -> dict:
-    """Export ``project``, an established project root
-    (:func:`~tcip_mcp.project_record.existing_project`), as a portable bundle written where
-    ``destination`` names (:func:`~tcip_mcp.registry_paths.located` against ``project``): a ZIP
-    file for a :class:`ZipBundle`, the identical bundle as a tree for a :class:`TreeBundle`.
+    """Export ``project`` as a portable bundle written where ``destination`` names.
+
+    ``project`` is an established project root
+    (:func:`~tcip_mcp.project_record.existing_project`) and ``destination`` is resolved by
+    :func:`~tcip_mcp.registry_paths.located` against it: a ZIP file for a :class:`ZipBundle`, the
+    identical bundle as a tree for a :class:`TreeBundle`.
 
     The bundle is every file under the project but the store's own bookkeeping
     (:func:`tcip_store.file_backend.is_bookkeeping`), each under its path relative to the
@@ -484,9 +497,11 @@ def _stage_bundle(source: Path, staging: Path) -> int:
 
 
 def _sweep_free_locked_leftovers(imports_root: Path) -> None:
-    """Remove a crash leftover from an earlier run: a staging sibling whose lock this process
-    can take without blocking. A sibling still locked is a concurrent import's live work
-    (including one in its own rename window) and is left alone, its lock file included.
+    """Remove every staging sibling under ``imports_root`` whose lock is free.
+
+    Such a sibling, one whose lock this process can take without blocking, is a crash leftover
+    from an earlier run. A sibling still locked is a concurrent import's live work (including one
+    in its own rename window) and is left alone, its lock file included.
     """
     from filelock import Timeout as _LockTimeout
 
@@ -528,13 +543,14 @@ def _move_staging_onto_destination(
 
 
 class StoreRuntimeError(RuntimeError):
-    """Raised inside the retried move body; caught outside the retry as a tool refusal."""
+    """An import destination became non-empty before the staged tree could replace it."""
 
 
 def import_project(bundle_path: str, destination: str) -> dict:
-    """Import an annotation project from a bundle ``archive_project`` wrote: a ZIP archive, or a
-    directory tree written by its ``output_dir`` mode, and record one ``import_project`` line in
-    the imported project's own log.
+    """Import an annotation project from a bundle ``archive_project`` wrote.
+
+    The bundle is a ZIP archive, or a directory tree written by its ``output_dir`` mode. A
+    successful import records one ``import_project`` line in the imported project's own log.
 
     A directory bundle is staged through the identical walker a ZIP bundle is
     (:func:`_stage_bundle`), so the two are read back exactly alike below this point.
@@ -623,9 +639,9 @@ def import_project(bundle_path: str, destination: str) -> dict:
 
 
 def _run_import_into_staging(bp: Path, staging: Path, dest: Path) -> dict:
-    """Everything the import door does while it holds the staging lock: stage, refuse the store's
-    own bookkeeping, then move. Returns the tool's own response dict, an ``{"error": ...}`` on any
-    refusal.
+    """Stage the bundle, refuse the store's own bookkeeping, then move it onto ``dest``.
+
+    Returns the import's response dict, an ``{"error": ...}`` on any refusal.
     """
     from tcip_mcp.model_registry import registry_checkpoint_disclosures
     from tcip_store.file_backend import DEFAULT_LOCK_TIMEOUT_S, is_bookkeeping
@@ -665,7 +681,7 @@ def _run_import_into_staging(bp: Path, staging: Path, dest: Path) -> dict:
 
 
 def _external_dataset_paths(project: Path) -> list[str]:
-    """The imported project's own registered dataset entries that stay absolute (external)."""
+    """Return the project's own registered dataset paths that stay absolute (external), sorted."""
     from tcip_mcp.registry_paths import is_external_form
 
     return sorted(

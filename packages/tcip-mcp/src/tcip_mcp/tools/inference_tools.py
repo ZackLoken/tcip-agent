@@ -1,5 +1,7 @@
-"""Inference MCP tools: running a checkpoint and publishing its predictions as a bucket, and
-delivering a bucket's per-image counts.
+"""Inference MCP tools: run a checkpoint into a published bucket, and deliver its counts.
+
+Running a checkpoint publishes its predictions as a bucket; a bucket's per-image counts are
+delivered.
 """
 
 from __future__ import annotations
@@ -49,16 +51,17 @@ def infer(
     canceled: Callable[[], bool] | None = None,
     actor: str | None,
 ) -> dict:
-    """Run the registered checkpoint at ``checkpoint_path``'s pass over the capture
-    ``images_dir`` (:func:`~tcip_mcp.dataset_layout.parse_capture_dir`, which refuses any other
-    directory) or ``raster_path``, each a location its caller's arrival established, and
-    publish its predictions as the bucket named
-    ``bucket`` under their dataset root (:func:`~tcip_mcp.buckets.source_root`) by ``actor``,
-    answering the publication's result or
-    the error dict naming a refusal. ``progress`` is called with ``(done, total)`` images once the
-    pass is prepared and after each image, and ``canceled`` asked before each image: once it
-    answers true the pass stops at that image boundary and publishes the documents predicted, or
-    publishes nothing when it predicted none.
+    """Run the registered checkpoint's pass and publish its predictions as the bucket ``bucket``.
+
+    The pass of the checkpoint at ``checkpoint_path`` runs over the capture ``images_dir``
+    (:func:`~tcip_mcp.dataset_layout.parse_capture_dir`, which refuses any other directory) or
+    ``raster_path``, each an established location, and its predictions are published as the
+    bucket named ``bucket`` under their dataset root (:func:`~tcip_mcp.buckets.source_root`) by
+    ``actor``, answering the publication's result or the error dict naming a refusal.
+    ``progress`` is called with ``(done, total)`` images once the pass is prepared and after each
+    image, and ``canceled`` asked before each image: once it answers true the pass stops at that
+    image boundary and publishes the documents predicted, or publishes nothing when it predicted
+    none.
     """
     from tcip_mcp.assessment import read_assessment
     from tcip_mcp.buckets import pass_documents, publish, source_root
@@ -254,8 +257,9 @@ def _image_results(
     progress: Callable[[int, int], None] | None,
     canceled: Callable[[], bool] | None,
 ):
-    """The pass's prediction per image, one image at a time, reporting each and stopping at the
-    image boundary a cancel is first seen at.
+    """Yield the pass's prediction per image, one image at a time.
+
+    Reports each image's progress and stops at the image boundary a cancel is first seen at.
     """
     total = len(p.paths)
     if progress is not None:
@@ -296,8 +300,7 @@ def run_inference(
 
     With ``assessment_id`` the pass runs exactly that assessment's execution record (its conf,
     object density, mask cut, tile edge, overlap, merge and threshold)
-    and the bucket names
-    the assessment, which is what a delivery reads to call its numbers validated; a stated
+    and the bucket names the assessment; a stated
     execution value it records differently refuses by name. Without one, the bucket is unassessed
     and the pass runs at the stated values: a detector's ``conf``, an instance segmentation
     pass's ``masks`` and, when it collects them, its ``mask_cut``, and a
@@ -353,9 +356,10 @@ def run_inference(
 
 
 def _progress_key(project: Path, root: Path, bucket: str, segment: str) -> Key:
-    """One raster pass's progress record toward the bucket ``bucket`` under the dataset ``root``,
-    kept under ``project``: the identity (``segment="identity"``) or one flushed tile batch
-    (``segment=f"batch-{index:06d}"``).
+    """Return the key of one raster pass's progress record toward ``bucket`` under ``root``.
+
+    The record is kept under ``project``: the identity (``segment="identity"``) or one flushed tile
+    batch (``segment=f"batch-{index:06d}"``).
     """
     return Key(
         RASTER_PASS_PROGRESS_STORE,
@@ -365,8 +369,9 @@ def _progress_key(project: Path, root: Path, bucket: str, segment: str) -> Key:
 
 
 def _progress_keys(project: Path, root: Path, bucket: str) -> list[Key]:
-    """Every progress record a raster pass toward ``bucket`` under ``root`` left under
-    ``project``.
+    """Return the key of every progress record a pass toward ``bucket`` left in ``project``.
+
+    The pass is a raster pass over the dataset ``root``.
     """
     return store.keys(
         RASTER_PASS_PROGRESS_STORE,
@@ -386,9 +391,10 @@ def _raster_pass(
     *,
     resumed: bool,
 ) -> dict:
-    """The one tiled pass over the open raster ``reader`` (``label`` naming it): its identity
-    recorded first on a fresh pass, each flushed tile batch recorded as it lands, the batches
-    already recorded fed back in on a resumed one.
+    """Run the tiled pass over the open raster ``reader``, ``label`` naming it.
+
+    The pass's identity is recorded first on a fresh pass, each flushed tile batch recorded as it
+    lands, the batches already recorded fed back in on a resumed one.
     """
     prior: dict[str, list] | None = None
     if resumed:
@@ -429,8 +435,9 @@ def _raster_pass(
 def _clear_raster_pass_progress(
     project: Path, root: Path, bucket: str
 ) -> None:
-    """Delete every progress record a raster pass toward ``bucket`` under ``root`` left, in one
-    transaction: a published pass has nothing left to resume.
+    """Delete every progress record a raster pass toward ``bucket`` under ``root`` left.
+
+    The records go in one transaction.
     """
     keys = _progress_keys(project, root, bucket)
     if not keys:
@@ -454,7 +461,7 @@ def deliver_per_image_counts(
 
     Each row is one of the bucket's documents, in stem order: its source image's file name, its
     detection count and mean confidence, and the delivery's ``validated``, ``trait_revision`` and
-    ``delivery_event_id``. The bucket clears the one delivery gate when the assessment it was
+    ``delivery_event_id``. The bucket clears the delivery gate when the assessment it was
     published under answers for a ``per_image_count`` delivery of ``trait``'s latest confirmed
     revision; an unvalidated bucket ships only under ``acknowledgment_id``, a breeder's recorded
     acknowledgment of exactly this result, which this door executes and never records. Every

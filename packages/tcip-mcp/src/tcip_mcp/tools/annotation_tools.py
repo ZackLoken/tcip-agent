@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 
 def _summary(annotations: list[Annotation]) -> dict:
-    """A document's annotations as a read returns them: their count, subjects and records."""
+    """Return a document's annotations as their count, sorted subjects and client records."""
     return {
         "count": len(annotations),
         "subjects": sorted({a.subject for a in annotations}),
@@ -35,11 +35,11 @@ def _summary(annotations: list[Annotation]) -> dict:
 
 
 def read_annotations(image_path: str, bucket: str | None = None) -> dict:
-    """Load the ground-truth labels for a single image and, given a bucket published under the
-    image's dataset root, its predictions.
+    """Load the ground-truth labels for a single image and, given a bucket, its predictions.
 
-    Both are the name-based per-image schema, one document per image, all subjects. A present
-    document this schema cannot read returns an ``error``.
+    The bucket is one published under the image's dataset root. Both are the name-based
+    per-image schema, one document per image, all subjects. A present document this schema cannot
+    read returns an ``error``.
 
     Args:
         image_path: Absolute path to the image file (:func:`~tcip_mcp.registry_paths.located`
@@ -81,19 +81,19 @@ def save_annotations(
     image_path: str,
     annotations: list[dict],
 ) -> dict:
-    """Write an image's annotations as its single per-image label document (all subjects, one
-    document), keyed by the image's dataset root, capture and stem
-    (:func:`~tcip_mcp.dataset_layout.label_key`), through the one label save
-    (:func:`~tcip_mcp.dataset_layout.save_label_document`) as the author ``save_annotations``:
+    """Write an image's annotations as its single per-image label document, all subjects in one.
+
+    The document is keyed by the image's dataset root, capture and stem
+    (:func:`~tcip_mcp.dataset_layout.label_key`) and written through
+    :func:`~tcip_mcp.dataset_layout.save_label_document` as the author ``save_annotations``:
     each annotation takes the provenance of one stored record of the same content not yet
     claimed by another (:func:`~tcip_annotation.json_io.stamped`), and every other one is this
     tool's own. Each annotation is a dict carrying a ``subject`` (required, refused when
-    absent), an
-    optional geometry (``bbox`` = [x1,y1,x2,y2], ``points`` = [[x,y],...] for a single-ring
-    polygon contour, ``rings`` = [[[x,y],...], ...] for a multi-ring polygon, whose ring vertices
-    may be ``{x,y}`` dicts or ``[x,y]`` pairs, ``point`` = [x,y] for a single prompt/keypoint
-    location, or none of them for an image-level label), and optional ``attributes`` (attribute
-    name -> value name).
+    absent), an optional geometry (``bbox`` = [x1,y1,x2,y2], ``points`` = [[x,y],...] for a
+    single-ring polygon contour, ``rings`` = [[[x,y],...], ...] for a multi-ring polygon, whose
+    ring vertices may be ``{x,y}`` dicts or ``[x,y]`` pairs, ``point`` = [x,y] for a single
+    prompt/keypoint location, or none of them for an image-level label), and optional
+    ``attributes`` (attribute name -> value name).
 
     Args:
         image_path: The image file (:func:`~tcip_mcp.registry_paths.located` against the
@@ -145,12 +145,12 @@ def save_annotations(
 
 
 def _counts(m: Matching) -> dict:
-    """One matching's TP, FP and FN."""
+    """Return the matching's TP, FP and FN counts."""
     return dict(zip(("tp", "fp", "fn"), m.counts))
 
 
 def _totals(metrics: dict) -> dict:
-    """The TP/FP/FN a scoring's ``metrics`` report with the precision, recall and F1 they give."""
+    """Return the TP/FP/FN a scoring's ``metrics`` report with their precision, recall and F1."""
     return {
         k: metrics[k] for k in ("tp", "fp", "fn", "precision", "recall", "f1")
     }
@@ -159,9 +159,10 @@ def _totals(metrics: dict) -> dict:
 def _detection_breakdown(
     m: Matching, gt: list[Annotation], preds: list[Annotation]
 ) -> list[dict]:
-    """Per-detection records from the one matcher's matching ``m``: each projected as every read
-    door projects one (:func:`~tcip_annotation.json_io.client_annotation`), tagged ``tp`` for a
-    pair, ``fp`` for an unpaired detection and ``fn`` for a missed object, with its indices.
+    """Build the per-detection records of the matching ``m``.
+
+    Each is projected through :func:`~tcip_annotation.json_io.client_annotation`, tagged ``tp``
+    for a pair, ``fp`` for an unpaired detection and ``fn`` for a missed object, with its indices.
     """
     return (
         [
@@ -185,7 +186,7 @@ def _detection_breakdown(
 
 
 def _rounded(totals: dict) -> dict:
-    """``totals`` with its precision, recall and F1 rounded to four places."""
+    """Return ``totals`` with precision, recall and F1 rounded to four places."""
     return {
         k: round(v, 4) if k in ("precision", "recall", "f1") else v
         for k, v in totals.items()
@@ -200,9 +201,10 @@ def _evaluate_image(
     detail: bool,
     trait: TraitEntry | None,
 ) -> dict:
-    """``bucket``'s predictions for one image matched against its ground truth
-    (:func:`~tcip_mcp.pipelines.training.evaluation.score_bucket`), with ``matches``, the
-    ``[gt_idx, pred_idx]`` pairs the one matcher draws per subject over the predictions at or above
+    """Score ``bucket``'s predictions for one image against its ground truth.
+
+    Scored by :func:`~tcip_mcp.pipelines.training.evaluation.score_bucket`, with ``matches``, the
+    ``[gt_idx, pred_idx]`` pairs the matcher draws per subject over the predictions at or above
     ``conf_threshold`` under the scoring's criterion, ordered by prediction index, the same
     matching its TP/FP/FN count. An image the bucket's record names no document for refuses
     (``ValueError``): it was not predicted, so there is nothing to score.
@@ -248,9 +250,10 @@ def _evaluate_folder(
     conf_threshold: float,
     trait: TraitEntry | None,
 ) -> dict:
-    """Aggregate detection metrics across the logical images of one images directory against
-    ``bucket``'s documents for them
-    (:func:`~tcip_mcp.pipelines.training.evaluation.score_bucket`), the images it names no
+    """Aggregate detection metrics across one images directory against ``bucket``'s documents.
+
+    Every logical image of the directory is scored
+    (:func:`~tcip_mcp.pipelines.training.evaluation.score_bucket`), the images the bucket names no
     document for listed under ``not_predicted`` and left out of every count.
 
     A ``.bandgroup``-grouped capture scores as one logical image, and a nested folder is not
@@ -308,8 +311,7 @@ def score_predictions(
     *,
     project: Path | None = None,
 ) -> dict:
-    """Score a published bucket's predictions against the images' own label documents through the
-    platform's one matcher.
+    """Score a published bucket's predictions against the images' own label documents.
 
     Dispatches on the input: a single image file returns per-box ``matches`` (plus an optional
     per-detection ``detections`` breakdown with ``img_w`` / ``img_h`` when ``detail=True``); an
@@ -364,8 +366,10 @@ def write_subject_registry(
     allow_removals: bool = False,
     allow_type_changes: bool = False,
 ) -> dict:
-    """Write the dataset's subject registry: ``subjects``, each subject's ``description`` and
-    ``attributes`` (each ``categorical`` or ``ordinal`` with ordered ``values``), validated
+    """Write the dataset's subject registry.
+
+    The registry is ``subjects``, each subject's ``description`` and ``attributes`` (each
+    ``categorical`` or ``ordinal`` with ordered ``values``), validated
     (:func:`subject_registry.registry_from_request`) and written
     (:func:`subject_registry.replace_registry`), whose refusals answer as errors: an empty
     registry; a dropped subject, attribute or value, or a stored registry that will not decode,

@@ -1,10 +1,9 @@
 """Find and render the worst predictions for failure analysis.
 
 Ranks by a count-mismatch + low-confidence heuristic (``get_worst_predictions``); no IoU matching,
-so an image with the right box count but every box mislocated scores as good. Not a substitute for
-``score_predictions(detail=True)``'s IoU-matched TP/FP/FN when mislocalization itself is the
-question. Wraps ``tcip_mcp.tools.vision_tools.render_failure_cases`` and prints the grid image's
-path.
+so an image with the right box count but every box mislocated scores as good. Wraps
+``tcip_mcp.tools.vision_tools.render_failure_cases`` and prints its whole result as JSON, or its
+error on stderr.
 
     tcip render-failure-cases --dataset-root <root> --bucket <name> --project <project>
         --top-k N --shortfall-weight W --surplus-weight W --confidence-weight W
@@ -25,6 +24,10 @@ from tcip_mcp.cli import bound_project
 
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    """Render the worst cases of the bucket named in ``argv`` and print the result as JSON.
+
+    Returns 0, or 1 after printing the error when the render refuses.
+    """
     parser = argparse.ArgumentParser(description=__doc__, prog=prog)
     parser.add_argument(
         "--dataset-root",

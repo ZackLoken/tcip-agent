@@ -1,9 +1,8 @@
-r"""Score a published bucket's predictions against the images' own label documents through the
-platform's one matcher, from the command line.
+r"""Score a published bucket's predictions against the images' own label documents.
 
-Wraps ``annotation_tools.score_predictions``: a single image file returns per-box matches (plus an
-optional per-detection breakdown with ``detail``); an images directory returns aggregate metrics
-plus per-image TP/FP/FN.
+Wraps ``annotation_tools.score_predictions``: a single image file returns per-box matches (plus
+an optional per-detection breakdown with ``detail``); an images directory returns aggregate
+metrics plus per-image TP/FP/FN.
 
 Usage:
     tcip score-predictions --path <image_or_images_dir> --bucket <name> \
@@ -23,6 +22,11 @@ from tcip_mcp.cli import bound_project
 
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    """Score the bucket named in ``argv`` and print the result as JSON.
+
+    Exits through the parser when ``--trait`` comes without ``--project``. Returns 1 when the
+    result is an error, else 0.
+    """
     parser = argparse.ArgumentParser(description=__doc__, prog=prog)
     parser.add_argument(
         "--path",

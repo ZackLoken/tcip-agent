@@ -1,11 +1,9 @@
-"""Proposal-workflow tools: turn a chosen auto-labeling engine's output into predictions for
-canvas review.
+"""Proposal-workflow tools: turn an auto-labeling engine's output into staged predictions.
 
 propose_annotations asks a named engine (one registered, or a 'module:factory' the agent brings)
 to look at pixels and offer candidates. stage_proposals publishes either an engine's reviewed
 candidates or explicit boxes/polygons once as a proposal bucket under the image's dataset root,
-refusing one already published, for a human to accept, reject or correct on the Annotate canvas.
-It never writes ground truth.
+refusing one already published. It never writes ground truth.
 """
 
 from __future__ import annotations
@@ -40,7 +38,7 @@ PROPOSAL_STAGING_STORE = "proposal_staging"
 
 
 class _StatedSubject(BaseModel):
-    """One staged input's own ``subject``, required; the entry's other keys are its door's own."""
+    """One staged input's own ``subject``, required; the entry's other keys are allowed as given."""
 
     model_config = ConfigDict(extra="allow")
 
@@ -50,15 +48,19 @@ class _StatedSubject(BaseModel):
 def proposal_staging_key(
     dataset_root: str | Path, capture: str, stem: str
 ) -> ts.Key:
-    """The candidates the latest proposal run produced for one dataset image, whole, under the
-    dataset root, by the image's capture and stem.
+    """Return the key of the candidates the latest proposal run produced for one dataset image.
+
+    The record holds the candidates whole, under the dataset root, by the image's capture and
+    stem.
     """
     return ts.Key(PROPOSAL_STAGING_STORE, str(dataset_root), (capture, stem))
 
 
 def _staging_key_for(image_path: str) -> ts.Key:
-    """The :func:`proposal_staging_key` of the dataset image at ``image_path``; ``ValueError``,
-    :func:`~tcip_mcp.dataset_layout.parse_image_path`'s own, for an image of no capture.
+    """Return the :func:`proposal_staging_key` of the dataset image at ``image_path``.
+
+    Raises ``ValueError``, :func:`~tcip_mcp.dataset_layout.parse_image_path`'s own, for an image of
+    no capture.
     """
     from tcip_mcp.dataset_layout import parse_image_path
 
@@ -66,7 +68,7 @@ def _staging_key_for(image_path: str) -> ts.Key:
 
 
 def _region_rect_from_cells(cells: list, names: list[str]) -> Rect:
-    """The bounding rect, in the grid's native-pixel frame, of the named reference-grid cells.
+    """Return the bounding rect, in the grid's native-pixel frame, of the named grid cells.
 
     Each name resolves through ``grid.grid_to_rect``, so a malformed or out-of-grid name is
     refused here, and the matched cells union to their combined bounding box.
@@ -83,11 +85,10 @@ def _region_rect_from_cells(cells: list, names: list[str]) -> Rect:
 
 
 def _write_region_crop(pixels: np.ndarray) -> Path:
-    """Save an RGB region crop to a fresh temp PNG file; the caller deletes it once the engine has
-    read it.
+    """Save an RGB region crop to a fresh temp PNG file and return its path.
 
     The crop is taken from the raster layer's already-``auto_orient_image``'d frame, so it carries
-    no EXIF orientation tag once saved.
+    no EXIF orientation tag once saved. The returned temporary file is not removed here.
     """
     import os
     import tempfile
@@ -103,8 +104,10 @@ def _write_region_crop(pixels: np.ndarray) -> Path:
 def _offset_candidates(
     candidates: list[dict], origin: tuple[float, float]
 ) -> list[dict]:
-    """Candidates proposed against a region crop's own pixels, translated into the source image's
-    full-frame native coordinates by the crop's own origin.
+    """Translate candidates from a region crop's own pixels into the source image's full frame.
+
+    Each candidate's box and rings are shifted into the source image's native coordinates by the
+    crop's own origin.
     """
     ox, oy = origin
     shifted = []
@@ -141,27 +144,24 @@ def propose_annotations(
     the same id ``stage_proposals``' ``assignments`` parameter names.
 
     On an image under a dataset's ``images/`` tree, the candidates are staged keyed by the dataset,
-    capture date and stem, alongside the content identity of the pixels the engine ran on:
-    ``stage_proposals``'s assignments regime reads the record back by that same address and refuses
-    if the image's content no longer matches it. On a path outside any dataset's ``images/`` tree
-    the engine still runs and the render and candidates are returned the same way, but nothing is
-    staged (the response's ``staged`` is ``false``, naming why), so such a call cannot later be
-    accepted. A path naming no logical image (a band of a grouped capture, which names its
-    manifest) refuses (:func:`~tcip_mcp.pipelines.image_utils.resolve_image_path`). Writing or
-    clearing the staged record leaves one audit line in the dataset's log; a call that writes
-    neither leaves none.
+    capture date and stem, alongside the content identity of the pixels the engine ran on. On a
+    path outside any dataset's ``images/`` tree the engine still runs and the render and
+    candidates are returned the same way, but nothing is staged (the response's ``staged`` is
+    ``false``, naming why). A path naming no logical image (a band of a grouped capture, which
+    names its manifest) refuses (:func:`~tcip_mcp.pipelines.image_utils.resolve_image_path`).
+    Writing or clearing the staged record leaves one audit line in the dataset's log; a call that
+    writes neither leaves none.
 
     ``engine`` names one registered (``register_proposal_engine``) or a dotted 'module:factory'.
     An empty or unknown name refuses, naming the registered ones.
 
     ``grid_cells`` restricts the pass to a region instead of the whole frame: name the
     reference-grid cells the region spans (e.g. ``['B3', 'C3', 'B4', 'C4']``), and the engine
-    proposes only over their bounding rect. Useful on a large or crowded frame where a whole-image
-    pass returns too many or too coarse candidates to review, or where only part of the frame
-    matters right now. The crop is taken and the results offset back to full-frame coordinates on
-    this side of the engine seam; an engine that keys behavior off the image path itself (a cache,
-    a sidecar lookup keyed by the original file) receives the temp crop's path, which it cannot
-    resolve back to the source image. Omitting ``grid_cells`` runs the whole frame.
+    proposes only over their bounding rect. The crop is taken and the results offset back to
+    full-frame coordinates on this side of the engine seam; an engine that keys behavior off the
+    image path itself (a cache, a sidecar lookup keyed by the original file) receives the temp
+    crop's path, which it cannot resolve back to the source image. Omitting ``grid_cells`` runs
+    the whole frame.
 
     Args:
         image_path: The image file (:func:`~tcip_mcp.registry_paths.located` against the
@@ -361,9 +361,10 @@ def _stage_assignments_regime(
     address: ts.Key,
     assignments: list[dict],
 ) -> dict:
-    """Stage the candidates ``assignments`` names, each with its subject, from the record staged
-    at ``address`` for ``img``; refuses when that record is absent or the image's content no
-    longer matches the content identity it recorded.
+    """Stage the candidates ``assignments`` names, each with its subject, for ``img``.
+
+    The candidates come from the record staged at ``address``; refuses when that record is absent
+    or the image's content no longer matches the content identity it recorded.
     """
     try:
         source = resolve_image_path(img)
@@ -484,12 +485,13 @@ def _stage_document(
     img_w: int,
     img_h: int,
 ) -> str | None:
-    """Publish ``annotations`` as the bucket of one staged proposal for ``image``, named
-    ``<producer>/<capture>/<stem>`` under the image's dataset root (both read off the image's
-    staging key ``address``)
-    (:func:`~tcip_mcp.buckets.publish`), its record naming ``producer`` as what proposed them, and
-    return the bucket's name; no annotations publishes nothing and returns ``None``. A bucket of
-    that name already published refuses (:class:`~tcip_mcp.buckets.BucketExistsError`).
+    """Publish ``annotations`` as the bucket of one staged proposal for ``image``; return its name.
+
+    The bucket is named ``<producer>/<capture>/<stem>`` under the image's dataset root (both read
+    off the image's staging key ``address``) (:func:`~tcip_mcp.buckets.publish`), its record
+    naming ``producer`` as what proposed them; no annotations publishes nothing and returns
+    ``None``. A bucket of that name already published refuses
+    (:class:`~tcip_mcp.buckets.BucketExistsError`).
     """
     from tcip_annotation import json_io
     from tcip_mcp.buckets import Document, publish
@@ -524,8 +526,9 @@ def _stage_explicit_regime(
     boxes: list[dict],
     polygons: list[dict],
 ) -> dict:
-    """Stage explicit boxes and polygons, each carrying a ``subject``, as one staged proposal of
-    ``model_name`` for the image (:func:`_stage_document`).
+    """Stage explicit boxes and polygons, each carrying a ``subject``, as one staged proposal.
+
+    The proposal is ``model_name``'s for the image (:func:`_stage_document`).
     """
     from tcip_annotation.json_io import ring_vertex
     from tcip_mcp.workspace import is_valid_name
@@ -717,8 +720,9 @@ def stage_proposals(
     polygons: list[dict] | None = None,
     model_name: str | None = None,
 ) -> dict:
-    """Stage model-/agent-proposed shapes as predictions for canvas review. Never writes ground
-    truth.
+    """Stage model-/agent-proposed shapes as an image's proposal bucket of predictions.
+
+    Never writes ground truth.
 
     Exactly one input regime per call:
 
@@ -735,15 +739,15 @@ def stage_proposals(
       ``[{subject, conf, points|rings}]``, exactly one of two frames per proposal: ``points``, one
       ring of ``[x, y]`` pairs normalized to [0, 1]; or ``rings``, a list of rings in pixel
       coordinates, each vertex an ``[x, y]`` pair or an ``{"x":, "y":}`` mapping. Both build the
-      same ``Polygon`` through the ground-truth door's own vertex parser.
+      same ``Polygon`` through ``json_io.ring_vertex``.
 
     Either regime resolves the dataset root, capture date and stem from ``image_path`` itself, and
     publishes the image's proposal once as its own bucket named ``<producer>/<date>/<stem>`` under
     that root, returned as ``bucket``, its record naming the engine or ``model_name`` as
     what proposed it and no checkpoint, execution record or class scope: a proposal already staged
     for the image under the same producer refuses, so a re-run never overwrites reviewed
-    predictions or orphans their verdicts, and no delivery ships one. Pair with
-    ``focus_human_attention(tab='annotate')`` to send the human straight to the result.
+    predictions or orphans their verdicts. Pair with ``focus_human_attention`` to send the human
+    straight to the result.
 
     A staged annotation's ``subject`` is whatever ``assignments``/``boxes``/``polygons`` named;
     the platform validates no subject name.

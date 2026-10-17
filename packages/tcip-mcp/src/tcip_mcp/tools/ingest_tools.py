@@ -39,9 +39,10 @@ _TIFF_DATE = "TIFFTAG_DATETIME"
 
 
 def _iso_date(raw: object) -> str | None:
-    """A capture-date value in any spelling
-    :func:`~tcip_mcp.pipelines.image_utils.parse_capture_time` reads, as ISO ``YYYY-MM-DD``;
-    ``None`` if none fits.
+    """Return a capture-date value as ISO ``YYYY-MM-DD``, or ``None`` if no spelling fits.
+
+    The value may be in any spelling :func:`~tcip_mcp.pipelines.image_utils.parse_capture_time`
+    reads.
     """
     from tcip_mcp.pipelines.image_utils import parse_capture_time
 
@@ -50,8 +51,9 @@ def _iso_date(raw: object) -> str | None:
 
 
 def _photographic_capture_date(path: Path) -> tuple[str | None, str | None]:
-    """EXIF ``DateTimeOriginal`` from a photographic container
-    (:func:`~tcip_mcp.pipelines.image_utils.exif_capture_time`), and why it could not be read.
+    """Read EXIF ``DateTimeOriginal`` from a photographic container, and why it could not be read.
+
+    The tag is read through :func:`~tcip_mcp.pipelines.image_utils.exif_capture_time`.
     ``Image.open`` decodes the header only and never the pixels.
     """
     from PIL import Image
@@ -81,8 +83,9 @@ def _photographic_capture_date(path: Path) -> tuple[str | None, str | None]:
 def _gdal_capture_date(
     path: Path, date_item: str | None
 ) -> tuple[str | None, str | None, str | None]:
-    """The capture date a GDAL-readable raster's metadata states, why it could not be read, and
-    the metadata item that stated it.
+    """Read the capture date a GDAL-readable raster's metadata states.
+
+    Returns the date, why it could not be read, and the metadata item that stated it.
 
     Asks the TIFF ``DateTime`` tag first, then an EXIF IFD if the container exposes one, then the
     stated ``date_item`` in the default metadata domain (matched case-insensitively), where a
@@ -125,16 +128,16 @@ def _gdal_capture_date(
 def _capture_iso_date(
     path: Path, date_item: str | None
 ) -> tuple[str | None, str | None, str | None]:
-    """``(ISO YYYY-MM-DD or None, why it could not be read or None, the item that stated it or
-    None)`` for one file, a raster's ``date_item`` asked after its own tags
-    (:func:`_gdal_capture_date`).
+    """Read one file's capture date, why it could not be read, and the item that stated it.
+
+    Returns ``(ISO YYYY-MM-DD or None, why it could not be read or None, the item that stated it
+    or None)``, a raster's ``date_item`` asked after its own tags (:func:`_gdal_capture_date`).
 
     No date and no reason is the undated fact: a photo with no EXIF date, a raster stating none,
     or an array file or band group, which has nowhere to put one and is not read. A reason is the
-    different fact that the container itself could not be read this far.
-    Neither outcome stops the file being ingested. The container family is the file's
-    :attr:`~tcip_mcp.pipelines.raster_source.SourceHeader.kind`: EXIF in a photograph, raster
-    metadata in a TIFF, nothing in any other.
+    different fact that the container itself could not be read this far. The container family is
+    the file's :attr:`~tcip_mcp.pipelines.raster_source.SourceHeader.kind`: EXIF in a
+    photograph, raster metadata in a TIFF, nothing in any other.
     """
     from tcip_mcp.pipelines.raster_source import SourceHeader
 
@@ -166,14 +169,15 @@ def _collision_refusal(
     dest_root: Path,
     resolved_sources: list[tuple[Path, str, str | None, str | None]],
 ) -> str | None:
-    """The whole-call refusal naming every source that would create a second logical image under a
-    stem key another source, an existing raw file, or an existing band-group manifest already holds
-    in its bucket; ``None`` when every source either names a new stem or names the same destination
-    filename an existing raw identity already holds at its key.
+    """Return the whole-call refusal naming every source that would collide on a stem key.
+
+    A source collides when it would create a second logical image under a stem key another
+    source, an existing raw file, or an existing band-group manifest already holds in its bucket;
+    ``None`` when every source either names a new stem or names the same destination filename an
+    existing raw identity already holds at its key.
 
     The carve-out tests the destination filename only, not the source bytes: such a source is left
-    out of this refusal and out of ``identities``, whether or not its own bytes match that file,
-    and is skipped by the copy loop's own ``dest.exists()`` check.
+    out of this refusal and out of ``identities``, whether or not its own bytes match that file.
     """
     buckets = sorted({bucket for _src, bucket, *_ in resolved_sources})
     collisions: dict[str, dict[str, list[Path]]] = {}
@@ -366,8 +370,9 @@ def ingest_images(
 def state_capture_date(
     project: Path, images: list[str], date: datetime.date, rationale: str
 ) -> dict:
-    """Move images into the bucket of a capture date stated for them: one their files do not
-    state, or one correcting the date they state.
+    """Move images into the bucket of a capture date stated for them.
+
+    The date is one their files do not state, or one correcting the date they state.
 
     Each of ``images`` names a logical image under one dataset's ``images/`` tree, a plain image's
     file or a grouped capture's ``.bandgroup`` manifest
@@ -523,19 +528,19 @@ def import_coco(
     vertex_spacing: float,
     rationale: str,
 ) -> dict:
-    """Convert an external dataset-level COCO document into the dataset's per-image label
-    documents.
+    """Convert an external COCO document into the dataset's per-image label documents.
 
-    Run it after ``ingest_images`` has placed the images it names. Every declared category must be
-    a subject the dataset's registry declares, and each image is the capture's image of that exact
-    file name (a ``.bandgroup`` capture by stem). Every fault found before writing is named
-    together and refuses the import with nothing written: a malformed or unregistered category, a
-    malformed record, a duplicate id or image, an image not in the capture, or a frame that
-    disagrees with the image. The documents and the import's audit line then commit as one store
-    transaction, each document checked absent inside it, so a label already there refuses the
-    whole import with nothing written; an import that writes no document leaves no event. A crowd
-    region keeps its flag and a run-length mask becomes rings. An image with no annotations writes
-    nothing.
+    The COCO document is a dataset-level one.
+
+    Every declared category must be a subject the dataset's registry declares, and each image is
+    the capture's image of that exact file name (a ``.bandgroup`` capture by stem). Every fault
+    found before writing is named together and refuses the import with nothing written: a
+    malformed or unregistered category, a malformed record, a duplicate id or image, an image not
+    in the capture, or a frame that disagrees with the image. The documents and the import's audit
+    line then commit as one store transaction, each document checked absent inside it, so a label
+    already there refuses the whole import with nothing written; an import that writes no document
+    leaves no event. A crowd region keeps its flag and a run-length mask becomes rings. An image
+    with no annotations writes nothing.
 
     Args:
         document: Path to the COCO ``.json`` (an ``images``/``categories`` key).

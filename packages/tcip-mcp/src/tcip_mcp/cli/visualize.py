@@ -1,5 +1,4 @@
-r"""Render annotations, predictions, a GT-vs-prediction comparison, or a sample grid, from the
-command line.
+r"""Render annotations, predictions, a GT-vs-prediction comparison, or a sample grid.
 
 Wraps ``vision_tools.visualize``: saved under the project's ``.tcip/artifacts/viz/``, path
 returned. --project is required: the artifact lands under it and a relative --path lies under it.
@@ -23,6 +22,10 @@ from tcip_mcp.cli import bound_project
 
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    """Render what ``argv`` names and print the result as JSON.
+
+    Returns 1 when the result is an error, else 0.
+    """
     parser = argparse.ArgumentParser(description=__doc__, prog=prog)
     parser.add_argument(
         "--source",

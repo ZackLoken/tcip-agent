@@ -20,6 +20,11 @@ from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets
 
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    """Check the dataset named in ``argv`` against its recorded identity and print the verdicts.
+
+    Returns 0 when unchanged or when the dataset yields no fingerprint, 1 when it carries no
+    identity, 2 when its content changed, and 4 when no fingerprint was ever recorded.
+    """
     ap = argparse.ArgumentParser(description=__doc__, prog=prog)
     ap.add_argument("dataset_root")
     ap.add_argument(

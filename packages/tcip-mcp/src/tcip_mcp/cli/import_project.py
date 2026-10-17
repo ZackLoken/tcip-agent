@@ -1,8 +1,8 @@
-"""Import an annotation project from a bundle ``tcip archive-project`` wrote: a ZIP archive, or a
-directory tree written by its ``--output-dir`` mode.
+"""Import an annotation project from a bundle ``tcip archive-project`` wrote.
 
-The operator/agent entry point for restoring a project ``tcip archive-project`` bundled: extracts
-the bundle onto ``destination``, refusing a member that is the store's own bookkeeping or that
+The bundle is a ZIP archive, or a directory tree written by its ``--output-dir`` mode. The
+operator/agent entry point for restoring a project ``tcip archive-project`` bundled: extracts the
+bundle onto ``destination``, refusing a member that is the store's own bookkeeping or that
 escapes the destination. Wraps ``tcip_mcp.tools.project_tools.import_project`` with no MCP tool
 registration.
 
@@ -20,6 +20,10 @@ import sys
 
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    """Import the bundle named in ``argv`` onto its destination and print the result as JSON.
+
+    Returns 0, or 1 after printing the error when the import refuses.
+    """
     parser = argparse.ArgumentParser(description=__doc__, prog=prog)
     parser.add_argument(
         "bundle_path",

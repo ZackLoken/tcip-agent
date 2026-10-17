@@ -4,9 +4,8 @@
     tcip write-project-record invariances <project> --[no-]horizontal-flip ... --rotation <degrees>
         --user <name>
 
-The project's record is written by ``initialize_project`` when the project is created; each
-correction replaces one field, keeping the record's id and every other field, records one line
-naming the person in the project's log, and refuses a project whose record does not read.
+Each correction replaces one field, keeping the record's id and every other field, records one
+line naming the person in the project's log, and refuses a project whose record does not read.
 
 Exit codes: 0 written, 2 refused (nothing written).
 """
@@ -26,6 +25,11 @@ from tcip_mcp.project_record import (
 
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    """Replace the record field ``argv`` names and print the previous and written values.
+
+    Returns 0 when written, or 2 after printing the refusal when the project, the person or the
+    value is refused.
+    """
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("project", help="the project directory")
     common.add_argument(

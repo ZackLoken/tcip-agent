@@ -1,5 +1,4 @@
-r"""Sort a checkpoint's own predictions by confidence into needs-review and unscoreable queues,
-from the command line.
+r"""Sort a checkpoint's own predictions by confidence into needs-review and unscoreable queues.
 
 Wraps ``feedback_tools.triage_predictions``, which writes nothing.
 
@@ -21,6 +20,10 @@ from tcip_mcp.cli import bound_project
 
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    """Triage the predictions named in ``argv`` and print the result as JSON.
+
+    Returns 1 when the result is an error, else 0.
+    """
     parser = argparse.ArgumentParser(description=__doc__, prog=prog)
     parser.add_argument(
         "--checkpoint", required=True, help="Trained model checkpoint."

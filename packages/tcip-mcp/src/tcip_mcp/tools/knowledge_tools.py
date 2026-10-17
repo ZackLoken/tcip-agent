@@ -1,7 +1,4 @@
-"""The ``serve_domain_knowledge`` MCP tool: the route to the platform's domain knowledge documents
-for a client with no skill or instruction-file mechanism of its own. Its client-visible description
-is composed at import time from the knowledge corpus (``tcip_mcp.knowledge.list_documents``).
-"""
+"""The ``serve_domain_knowledge`` MCP tool, serving the platform's domain knowledge documents."""
 
 from __future__ import annotations
 
@@ -11,16 +8,16 @@ from tcip_mcp.server import tool
 
 
 def _repo_relative_path(document) -> str:
-    """A document's path relative to the repository root, for a tool-only client with no
-    checkout-relative context of its own to resolve the bare filename against.
-    """
+    """Return a document's path relative to the repository root, as a POSIX string."""
     return (
         document.path.resolve().relative_to(repo_root_from_here()).as_posix()
     )
 
 
 def _description() -> str:
-    """A lead sentence naming what the tool is, a sentence stating its two call forms, then one
+    """Compose the tool's client-visible description from the knowledge corpus.
+
+    A lead sentence naming what the tool is, a sentence stating its two call forms, then one
     ``name: description`` line per knowledge document, so the tool's own description is the
     selection index.
     """
@@ -39,8 +36,7 @@ def _description() -> str:
 
 @tool(description=_description())
 def serve_domain_knowledge(name: str | None = None) -> dict:
-    """Read the platform's domain knowledge: trait semantics, workflow patterns, and per-crop
-    biology.
+    """Read the platform's domain knowledge: trait semantics, workflow patterns, crop biology.
 
     Args:
         name: One document's name, from this tool's own description. Omitted or empty returns the

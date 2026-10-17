@@ -59,9 +59,10 @@ def get_experiment(
 
 @tool()
 def list_experiments(project: Path) -> dict:
-    """Every run and sweep of the project (``experiments.training_listing``):
-    ``{"runs", "sweeps"}``, each run launched on its own as its row and each sweep with its trial
-    rows under it.
+    """List every run and sweep of the project.
+
+    Returns ``experiments.training_listing``'s ``{"runs", "sweeps"}``, each run launched on its
+    own as its row and each sweep with its trial rows under it.
     """
     from tcip_mcp.experiments import training_listing
 

@@ -49,16 +49,17 @@ def convert_shp_to_plant_csv(
     *,
     field_map: dict[str, str] | None = None,
 ) -> dict:
-    """Convert ``shp_path`` (a point or polygon plant-locations shapefile) to ``csv_path`` in
-    ``read_plant_csvs``' schema, reprojecting every feature's own coordinate to WGS84. Both paths
-    are :func:`~tcip_mcp.registry_paths.located` with no project, so absolute.
+    """Convert a plant-locations shapefile to a CSV in ``read_plant_csvs``' schema.
+
+    ``shp_path`` is a point or polygon shapefile, and every feature's own coordinate is reprojected
+    to WGS84 in ``csv_path``. Both paths are :func:`~tcip_mcp.registry_paths.located` with no
+    project, so absolute.
 
     Returns ``{csv_path, n_features, n_parsed, geometry_kinds, missing_fields,
     skipped_null_geometry}``. Raises ``ValueError`` for a relative path, if the source has no
-    resolvable CRS
-    (``ShapefileCrsUnknownError``), a feature's geometry is neither point, polygon nor multipolygon,
-    has zero features with readable geometry, or if the written CSV fails to round-trip through
-    ``read_plant_csvs``.
+    resolvable CRS (``ShapefileCrsUnknownError``), a feature's geometry is neither point, polygon
+    nor multipolygon, has zero features with readable geometry, or if the written CSV fails to
+    round-trip through ``read_plant_csvs``.
     """
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         PLANT_CSV_COLUMNS,
@@ -93,6 +94,10 @@ def convert_shp_to_plant_csv(
 
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    """Convert the shapefile named in ``argv`` to its plant CSV and print what was written.
+
+    Returns 0, or 1 after printing the error when the conversion refuses.
+    """
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         SHAPEFILE_FIELD_DEFAULTS,
     )

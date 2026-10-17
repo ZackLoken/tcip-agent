@@ -1,4 +1,4 @@
-"""The agent-facing door for proposing a trait's entry; the breeder confirms it in the Setup tab."""
+"""The door for proposing a trait's entry as a new unconfirmed revision."""
 
 from __future__ import annotations
 
@@ -16,9 +16,10 @@ def propose_trait(
     relayed_note: str = "",
     dataset_root: str = "",
 ) -> dict:
-    """Propose a trait's complete entry, its spec fields and what its delivered number means per
-    delivery kind, as a new unconfirmed revision of that trait in this project. The whole entry is
-    proposed every time, carrying forward whatever is unchanged.
+    """Propose a trait's complete entry as a new unconfirmed revision of that trait in this project.
+
+    The entry is its spec fields and what its delivered number means per delivery kind. The whole
+    entry is proposed every time, carrying forward whatever is unchanged.
 
     Args:
         entry: The complete entry; its schema states every field and which kinds require what.

@@ -16,8 +16,7 @@ from tcip_mcp.server import tool
 def freeze_selection(
     project: Path, experiment_id: str, output_path: str | None = None
 ) -> dict:
-    """Freeze a finished run's own drawn train/val partition into a selection, so a later run can
-    bind to the identical partition instead of drawing its own.
+    """Freeze a finished run's own drawn train/val partition into a selection.
 
     A run of any task freezes, whatever shape its ground truth is: the selection is the run's own
     train and val samples as its resolved partition records them, each carrying the digest its
@@ -149,7 +148,9 @@ def freeze_selection(
 
 
 def _scan_dataset(root: str) -> dict:
-    """A dataset's census: ``images``, every logical image of every capture
+    """Take a dataset's census of images, label documents and prediction documents.
+
+    The census holds ``images``, every logical image of every capture
     (:func:`~tcip_mcp.dataset_layout.list_dates`, each listed through
     :func:`~tcip_mcp.pipelines.image_utils.list_logical_images`, a grouped capture once as its
     manifest) mapped to the key of its own label document
@@ -189,8 +190,10 @@ def _scan_dataset(root: str) -> dict:
 
 
 def scan_dataset(folder_path: str) -> dict:
-    """Count a dataset's images, label documents and prediction documents
-    (:func:`_scan_dataset`), and how many images their own label document pairs with.
+    """Count a dataset's images, label documents and prediction documents.
+
+    The counts come from :func:`_scan_dataset`, beside how many images their own label document
+    pairs with.
 
     Args:
         folder_path: Path to the dataset root directory
@@ -245,9 +248,7 @@ def draw_splits(
     the side, and the project's audit log records the write; without one it answers the same
     draw's statistics and writes nothing, the log included. Sibling tiles
     of one source image are kept in the same split, and, when ``stratify_foreground`` is set,
-    splits are balanced by annotation count. Groups whole source images; a within-image split for
-    a folder holding a single source is a training run's own route (``data.tiling`` in the run
-    config).
+    splits are balanced by annotation count. Groups whole source images.
 
     The draw is :func:`~tcip_mcp.pipelines.data.split_construction.admitted_membership` over
     whichever ground truth the place it is pointed at holds, then
@@ -334,8 +335,9 @@ def draw_splits_at(
     subject: str | None,
     ground_truth: str | None,
 ) -> dict:
-    """The selection the drawn split ``draw`` draws over the dataset root ``folder_path`` as
-    :func:`draw_splits` states it, written at ``output_path`` and read against
+    """Draw the selection ``draw`` states over the dataset root ``folder_path``.
+
+    The draw is as :func:`draw_splits` states it, written at ``output_path`` and read against
     ``ground_truth``, each a location already established (absolute).
     """
     if not Path(folder_path).is_dir():

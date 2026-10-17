@@ -14,6 +14,10 @@ import sys
 
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    """Scan the dataset root named in ``argv`` and print the census as JSON.
+
+    Returns 0, or 1 after printing the error when the scan refuses.
+    """
     parser = argparse.ArgumentParser(description=__doc__, prog=prog)
     parser.add_argument("folder_path", help="Dataset root directory to scan.")
     args = parser.parse_args(argv)
