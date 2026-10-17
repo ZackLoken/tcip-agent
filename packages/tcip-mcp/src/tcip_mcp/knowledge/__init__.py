@@ -1,4 +1,4 @@
-"""The one canonical domain-knowledge directory and its one reader.
+"""The domain-knowledge directory and its reader.
 
 Every document a client reaches is a file under :data:`KNOWLEDGE_DIR`: the domain documents beside
 this module and the per-crop documents plus ``crops.yml`` (the trait authority) under ``crops/``.
@@ -18,9 +18,7 @@ _NAME_SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*$")
 
 @dataclasses.dataclass(frozen=True)
 class DocumentInfo:
-    """One knowledge document's selection metadata: enough to choose it without reading its
-    body.
-    """
+    """One knowledge document's selection metadata: its name, description and path."""
 
     name: str
     description: str
@@ -32,13 +30,12 @@ def _iter_markdown_paths() -> list[Path]:
 
 
 def _parse_frontmatter(path: Path) -> tuple[dict, str]:
-    """A document's frontmatter mapping and its body, the text after the closing ``---``.
+    """Return a document's frontmatter mapping and its body, the text after the closing ``---``.
 
     Raises ``ValueError`` naming the file for anything that does not parse: a document that is not
     valid UTF-8, a missing or unclosed frontmatter block, a non-mapping result, a missing/blank
     ``name`` or ``description``, a ``name`` that is not a single safe path segment (letters,
-    digits, hyphen), or a ``description`` carrying a newline (the composed tool description is one
-    line per document).
+    digits, hyphen), or a ``description`` carrying a newline.
     """
     import yaml
 
@@ -78,11 +75,11 @@ def _parse_frontmatter(path: Path) -> tuple[dict, str]:
 
 
 def list_documents() -> list[DocumentInfo]:
-    """Every knowledge document's name, description and path, one entry per ``.md`` file under
-    :data:`KNOWLEDGE_DIR`.
+    """List every knowledge document's name, description and path.
 
-    Raises ``ValueError`` naming the file for a document whose frontmatter is missing or malformed,
-    and the same error for a document whose name duplicates an earlier one.
+    One entry per ``.md`` file under :data:`KNOWLEDGE_DIR`. Raises ``ValueError`` naming the file
+    for a document whose frontmatter is missing or malformed, and the same error for a document
+    whose name duplicates an earlier one.
     """
     documents: list[DocumentInfo] = []
     seen: dict[str, Path] = {}
@@ -104,12 +101,12 @@ def list_documents() -> list[DocumentInfo]:
 
 
 def document_paths() -> list[Path]:
-    """Every knowledge document's path."""
+    """Return every knowledge document's path."""
     return [document.path for document in list_documents()]
 
 
 def document_path(name: str) -> Path:
-    """The whole file for one named document, frontmatter included.
+    """Return the path of one named document's whole file, frontmatter included.
 
     Raises ``KeyError`` for a name no document declares.
     """
@@ -120,7 +117,7 @@ def document_path(name: str) -> Path:
 
 
 def read_document(name: str) -> str:
-    """One document's body, with its frontmatter stripped.
+    """Return one named document's body, its frontmatter stripped.
 
     Raises ``KeyError`` for a name no document declares.
     """
@@ -129,5 +126,5 @@ def read_document(name: str) -> str:
 
 
 def crops_yml_path() -> Path:
-    """Where ``crops.yml`` lives."""
+    """Return the path of ``crops.yml``."""
     return KNOWLEDGE_DIR / "crops" / "crops.yml"
