@@ -1,23 +1,12 @@
-"""Run the quality gate CI actually declares, so a local pass means CI would pass too.
+"""Run the quality gate CI declares, locally.
 
-The stages below are parsed from ``.github/workflows/ci.yml``, not restated by hand, so a step
-CI adds, drops, or reorders reaches this gate the next time it runs rather than waiting for
-someone to notice the drift. Every stage runs even if an earlier one fails, so one red stage
-does not hide the timing of the rest.
+The stages are parsed from ``.github/workflows/ci.yml``: every step of the jobs
+:data:`PARSED_JOBS` names, per matrix leg, in workflow order. :data:`OUT_OF_SCOPE_JOBS` names the
+jobs left out, each with its reason. Every selected, unskipped stage runs even if an earlier one
+fails.
 
-Three jobs are out of scope. ``environment`` creates the conda environment this gate's own
-process already runs inside, so there is nothing local to run in its place; ``docker``
-builds and answers the container image, which needs a Docker daemon this gate does not
-assume, and CI's own build is the proof of that image; ``ray-exit-windows`` also creates that
-same conda environment, and its one test file (``tests/test_hpo_ray_detached_exit.py``) is
-Windows-only, so a Windows host's own suite already covers it and any other host has nothing
-local to run in its place, the same shape as the ``environment`` job.
-
-Each step's ``run:`` text goes through bash, never through PowerShell or cmd, since that is the
-shell GitHub's own Linux runners give the same text. On a Linux or macOS host the bash on
-``PATH`` is that shell. On Windows a bare ``bash`` resolved from ``PATH`` can be a WSL launcher
-or a System32 shim, reading Windows paths differently, so the path this script resolves there is
-Git's own bash.exe, derived from the ``git`` on this machine's PATH.
+Each step's ``run:`` text goes through bash. On a Linux or macOS host that is the bash on
+``PATH``; on Windows it is Git's own bash.exe, derived from the ``git`` on this machine's PATH.
 """
 
 from __future__ import annotations
@@ -155,8 +144,7 @@ def _skip_reason(step: dict[str, Any]) -> str | None:
 def build_plan() -> list[Stage]:
     """Return the full stage list, one entry per step per matrix leg, in workflow order.
 
-    Building this never touches a subprocess: it is safe to call from a test that wants to
-    check what would run without actually running any of it. Each key is prefixed with its job
+    Building this never touches a subprocess. Each key is prefixed with its job
     name and matrix leg, so the same step name in two jobs (both carry an unnamed
     ``actions/checkout@v4``) never collides.
     """
@@ -217,18 +205,17 @@ def mypy_pin() -> str | None:
 
 
 def _host_is_windows() -> bool:
-    """Whether this host resolves bash the Windows way."""
+    """Return whether this host resolves bash the Windows way."""
     return os.name == "nt"
 
 
 def _resolve_git_bash() -> str:
     """Return the bash that runs each step's ``run:`` text.
 
-    On a non-Windows host that is the ``bash`` on ``PATH``, the same shell the CI runner gives
-    the text. On Windows it is Git Bash's own ``bash.exe``, derived from ``git --exec-path``
-    (whose parent's parent is the Git installation root); the default install paths are the
-    stated fallback when the derivation finds nothing there. Refuses by name on either host when
-    no bash is found.
+    On a non-Windows host that is the ``bash`` on ``PATH``. On Windows it is Git Bash's own
+    ``bash.exe``, derived from ``git --exec-path`` (whose parent's parent is the Git installation
+    root); the default install paths are the stated fallback when the derivation finds nothing
+    there. Refuses by name on either host when no bash is found.
     """
     if not _host_is_windows():
         found = shutil.which("bash")

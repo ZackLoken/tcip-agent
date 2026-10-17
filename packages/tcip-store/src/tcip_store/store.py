@@ -71,15 +71,12 @@ def read(key: Key, *, default: Any = REQUIRED) -> Any:
 
 
 def read_versioned(key: Key, *, default: Any = REQUIRED) -> Versioned:
-    """Return value plus version token, read together so the pair cannot straddle a write.
-
-    The token is the input to ``replace(expect=...)``.
-    """
+    """Return value plus version token, read together so the pair cannot straddle a write."""
     return _backend().read_versioned(key, default=default)
 
 
 def exists(key: Key) -> bool:
-    """Whether the record exists, without decoding it."""
+    """Return whether the record exists, without decoding it."""
     return _backend().exists(key)
 
 
@@ -98,7 +95,9 @@ def replace(key: Key, value: Any, *, expect: Version | None = None) -> Version:
 def delete(key: Key, *, expect: Version | None = None) -> bool:
     """Remove the record and answer whether one was there to remove; absence is not an error.
 
-    Same ``expect`` and transaction rules as ``replace``.
+    Refuses (``TransactionMisuseError``) inside an open transaction. ``expect``, when given, is
+    compared against the stored version inside the write: a mismatch raises
+    ``VersionConflictError`` with nothing removed.
     """
     refuse_inside_transaction("delete")
     return _backend().delete(key, expect=expect)
@@ -106,7 +105,7 @@ def delete(key: Key, *, expect: Version | None = None) -> bool:
 
 @contextmanager
 def transaction(*keys: Key, timeout_s: float | None = None) -> Generator[Txn]:
-    """One commit over the records and logs ``keys`` name, all under one root.
+    """Hold one commit over the records and logs ``keys`` name, all under one root.
 
     The body reads, writes, deletes and appends through the yielded :class:`Txn`; a clean exit
     commits every change at once and an exception commits none. Refuses with
@@ -141,7 +140,7 @@ def keys(store: str, root: str, prefix: tuple[str, ...] = ()) -> list[Key]:
 
 
 def stores(root: str) -> list[str]:
-    """Every store name ``root`` holds a record or a log entry under, sorted."""
+    """Return every store name ``root`` holds a record or a log entry under, sorted."""
     return _backend().stores(root)
 
 
@@ -156,7 +155,7 @@ def append(key: Key, record: Mapping[str, Any]) -> None:
 
 
 def read_log(key: Key, *, after: str | None = None) -> LogPage:
-    """Entries after the cursor ``after`` (from the start when None), plus a new cursor."""
+    """Return the entries after the cursor ``after`` (from the start when None) and a new cursor."""
     return _backend().read_log(key, after=after)
 
 

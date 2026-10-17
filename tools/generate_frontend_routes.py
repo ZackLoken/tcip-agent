@@ -1,14 +1,11 @@
-"""Generate the browser's route-path module and the dev server's proxy from the backend's routes.
+"""Generate the TypeScript route-path and dev-proxy modules from the backend's routes.
 
-The FastAPI app is the one declaration of what paths and methods exist. This script walks the
-routes the app has actually registered and emits ``frontend/src/api/routes.ts``, so the browser
-references a path by name instead of writing the string a second time. A route renamed, moved or
-switched to another method changes the exported name, which fails the frontend type check at
-every call site that still asks for the old one. It also emits
+This script walks the routes the FastAPI app has actually registered and emits
+``frontend/src/api/routes.ts``, one exported name per path and method. It also emits
 ``frontend/src/api/devProxy.generated.ts``: one dev-proxy prefix per distinct first path segment
 of a registered HTTP or WebSocket route, ``ws`` true wherever a socket is mounted under it,
 excluding the paths ``tcip_web.app.FRONTEND_SERVING_PATHS`` names (the app's own frontend and
-health routes), so Vite keeps serving its own root, modules and HMR under those paths itself.
+health routes).
 
 Run it after adding or renaming a route; it rewrites both modules in place.
 """
@@ -73,12 +70,10 @@ def route_name(path: str, method: str) -> str:
 
 
 def iter_api_routes(app) -> Iterator[APIRoute | APIWebSocketRoute]:
-    """Every ``APIRoute``/``APIWebSocketRoute`` the app has actually registered.
+    """Yield every ``APIRoute``/``APIWebSocketRoute`` the app has actually registered.
 
     Routers are included through wrapper objects rather than flattened onto the app, so this
-    descends into whatever a registered entry carries its own routes under. The one walk of the
-    app's real route tree; anything that needs to enumerate the app's routes calls this rather
-    than re-descending the router tree itself.
+    descends into whatever a registered entry carries its own routes under.
     """
     for route in app.routes:
         if isinstance(route, (APIRoute, APIWebSocketRoute)):
@@ -88,7 +83,7 @@ def iter_api_routes(app) -> Iterator[APIRoute | APIWebSocketRoute]:
 
 
 def collect_routes(app) -> list[tuple[str, str, str]]:
-    """Every (name, path, method) the app has registered, sorted by name."""
+    """Return every (name, path, method) the app has registered, sorted by name."""
     found: list[tuple[str, str, str]] = []
     for route in iter_api_routes(app):
         if isinstance(route, APIRoute):
@@ -117,7 +112,7 @@ def collect_routes(app) -> list[tuple[str, str, str]]:
 
 
 def _entry(name: str, path: str) -> str:
-    """One ROUTES member: a plain string, or an arrow taking the path's parameters."""
+    """Return one ROUTES member: a plain string, or an arrow taking the path's parameters."""
     params = _PARAM_RE.findall(path)
     if not params:
         return f'  {name}: "{path}",\n'
@@ -150,8 +145,7 @@ def collect_proxy_entries(app) -> list[tuple[str, bool]]:
     """Return one dev-proxy prefix per distinct first path segment of a registered route, sorted.
 
     Each is paired with whether a websocket is mounted under it. Excludes the paths
-    ``tcip_web.app.FRONTEND_SERVING_PATHS`` names: the app's own frontend and health routes, which
-    the dev server must keep serving itself rather than forward.
+    ``tcip_web.app.FRONTEND_SERVING_PATHS`` names: the app's own frontend and health routes.
     """
     from tcip_web.app import FRONTEND_SERVING_PATHS
 
@@ -188,8 +182,8 @@ PROXY_FOOTER = "];\n"
 def render_proxy(app) -> str:
     """Return the full text of the generated dev-proxy module.
 
-    The module carries the one loopback host the backend binds and answers to
-    (``tcip_mcp.web_client.LOOPBACK_HOST``) for the dev server to serve on.
+    The module also carries the loopback host the backend binds and answers to
+    (``tcip_mcp.web_client.LOOPBACK_HOST``).
     """
     from tcip_mcp.web_client import LOOPBACK_HOST
 

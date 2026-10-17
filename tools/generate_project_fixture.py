@@ -1,4 +1,4 @@
-"""Write the project listing and invariances correction the frontend tests read.
+"""Write a served project listing and invariances correction as a fixture file.
 
 Both are produced by the platform itself.
 

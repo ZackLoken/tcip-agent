@@ -1,34 +1,22 @@
 #!/usr/bin/env python
 """Guardrail: hold every tool name in agent-facing prose to the registry.
 
-Two independent checks, mirroring `tools/verify_skill_traits.py`'s split between a
-fabrication check and a membership check, for tool names instead of trait names:
+Two independent checks:
 
 - `fabricated_tool_names` (fabrication detection) reads every Tools table (a table whose
   header's first column is literally "Tool") and extracts the name from the first backticked
   token of each row's first cell (the identifier up to the first `(`, space or backtick, so a
   documented call signature or a keyword note still yields the plain name). A name that is not
   in `list_registered_tools()` is fabricated or retired. A first cell whose backticked token
-  is not a plain identifier (`tools/`) is skipped rather than reported, since it never claimed
-  to be a tool name.
+  is not a plain identifier (`tools/`) is skipped rather than reported.
 - `orphan_tool_names` (rename/omission detection) searches every surface's whole text for each
   registered tool name as `` `name` `` or `` `name( `` (tools are documented with their call
-  form). A registered tool no surface names this way is an orphan: usually a rename whose old
-  docs were fixed but whose new name was never written down anywhere.
+  form). A registered tool no surface names this way is an orphan.
 
-Reach, stated plainly, two gaps: the fabrication check only reads Tools tables, so a fabricated
-or retired name in running prose outside a table is invisible to it; and a table documenting
-tools under another header is also invisible to it, since header text is how a table is
-recognized as one at all. The phenology skill's piece inventory (headed "Piece", not "Tool") is
-that second case: it names real tools (`build_plant_mapping`, `deliver_phenology_milestones`)
-alongside internal module names in the same first column, and a fabricated or retired name
-there would go unchecked. Matching by content instead of header (treating a table as a tool
-table once any data row's first cell names a registered tool) would flag that table's
-module-name rows as fabrications, rejecting valid prose rather than only catching a real
-problem, so it is not used. Widening to the call/chain position (a token followed by `(`, or
-named in a `->` chain) mostly catches legitimate non-tool identifiers (`train(ctx)`,
-`grid_to_pixel`, `plant_id`, ...) rather than real fabrications, so it also stays out of scope;
-the orphan check is what catches a rename missed everywhere, table or prose alike.
+Reach, two gaps: the fabrication check only reads Tools tables, so a fabricated or retired name
+in running prose outside a table is invisible to it; and a table documenting tools under another
+header is also invisible to it, since header text is how a table is recognized as one at all.
+The orphan check reads every surface's whole text, table or prose alike.
 
 CLI: `python tools/verify_skill_tools.py`, exit 0 clean, 1 fabricated or orphaned names found.
 """
@@ -51,7 +39,7 @@ _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def prose_surfaces() -> list[Path]:
-    """Every agent-facing surface a tool name is documented (or fabricated) in.
+    """Return every agent-facing surface a tool name is documented (or fabricated) in.
 
     A tool module's own docstrings and runtime return strings (`vision_tools.py`, `viz.py`) are
     not among these surfaces: a retired tool name surviving there is invisible to this checker.
@@ -120,7 +108,7 @@ def extract_tool_name(cell: str) -> str | None:
 def fabricated_tool_names(
     surfaces: list[Path] | None = None,
 ) -> dict[str, list[str]]:
-    """Every Tools-table cell naming a tool the registry does not hold, by surface."""
+    """Return every Tools-table cell naming a tool the registry does not hold, by surface."""
     from tcip_mcp.server import list_registered_tools
 
     registered = set(list_registered_tools())
@@ -139,7 +127,7 @@ def fabricated_tool_names(
 
 
 def orphan_tool_names(surfaces: list[Path] | None = None) -> list[str]:
-    """Every registered tool no surface names as `` `name` `` or `` `name( ``."""
+    """Return every registered tool no surface names as `` `name` `` or `` `name( ``."""
     from tcip_mcp.server import list_registered_tools
 
     registered = set(list_registered_tools())

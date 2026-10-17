@@ -1,12 +1,8 @@
-"""The shared session pieces the frontend fixture generators build their scenes with.
+"""Scratch-session utilities for producing served JSON as fixture files.
 
-They are the scratch workspace the scenes are made in, the opening of a project through the
-picker's route, the one walk that replaces what a run fills differently in what a scene serves,
-and the write of a fixture file.
-
-A generator creates its projects through ``tests._web_fixtures.named_project`` inside
-:func:`scratch_session`, sends its own requests through the session's client, states its own
-replacement policy to :func:`replaced` and writes the result with :func:`write_fixture`.
+They are a scratch workspace with a web-backend client serving it (:func:`scratch_session`), the
+opening of a project through the picker's route (:func:`opened`), a walk that replaces each leaf
+of a served value (:func:`replaced`), and the write of a fixture file (:func:`write_fixture`).
 """
 
 from __future__ import annotations

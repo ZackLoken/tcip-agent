@@ -9,7 +9,7 @@ from typing import Any
 def column_label(index: int) -> str:
     """Return the spreadsheet-style label for 0-based column ``index``: A-Z, then AA, AB, ....
 
-    Bijective base-26; :func:`column_index` is the inverse.
+    Bijective base-26. A negative ``index`` raises ``ValueError``.
     """
     if index < 0:
         raise ValueError(f"Column index must be non-negative, got {index}")
@@ -22,7 +22,10 @@ def column_label(index: int) -> str:
 
 
 def column_index(label: str) -> int:
-    """0-based column index for a spreadsheet-style ``label``; inverse of :func:`column_label`."""
+    """Return the 0-based column index of a spreadsheet-style ``label``.
+
+    A label that is empty or not all letters A-Z raises ``ValueError``.
+    """
     if not label or not all("A" <= ch <= "Z" for ch in label):
         raise ValueError(
             f"Invalid column label: {label!r}. Expected letters A-Z."
@@ -62,10 +65,10 @@ def grid_to_rect(
     """Resolve a grid cell reference (e.g. 'B3') to the named cell's half-open native-pixel rect.
 
     The rect is ``(x0, y0, x1, y1)``. ``cells`` is the caller's own cell list (see
-    :func:`cell_fields` for the accepted shapes), the same list the overlay was rendered with.
-    Matching is case-insensitive and whitespace-stripped. A reference that is not a cell name at
-    all raises ValueError naming the expected format; one that names no cell in this grid raises
-    ValueError naming the grid's valid range.
+    :func:`cell_fields` for the accepted shapes). Matching is case-insensitive and
+    whitespace-stripped. A reference that is not a cell name at all raises ValueError naming the
+    expected format; one that names no cell in this grid raises ValueError naming the grid's valid
+    range.
     """
     wanted = cell.strip().upper()
     if re.fullmatch(r"[A-Z]+[0-9]+", wanted) is None:

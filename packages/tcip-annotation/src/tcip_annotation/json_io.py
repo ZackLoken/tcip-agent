@@ -151,15 +151,15 @@ def iscrowd_of(raw) -> bool:
 
 
 def box_extent_ok(bbox: BBox) -> bool:
-    """Whether ``bbox`` has real extent: ``x2 > x1`` and ``y2 > y1``, on the raw corners."""
+    """Return whether ``bbox`` has real extent: ``x2 > x1`` and ``y2 > y1``, on the raw corners."""
     return bbox.x2 > bbox.x1 and bbox.y2 > bbox.y1
 
 
 def stored_box_extent_ok(bbox: BBox) -> bool:
     """Return whether ``bbox`` still has positive extent once rounded to the stored grid.
 
-    The grid is the 2-decimal quantum :func:`xywh` stores: a box can pass :func:`box_extent_ok` on
-    its raw corners and still round to zero width or height there.
+    The grid is the stored 2-decimal quantum (:func:`xywh`): a box can pass :func:`box_extent_ok`
+    on its raw corners and still round to zero width or height there.
     """
     _, _, w, h = xywh(bbox.x1, bbox.y1, bbox.x2, bbox.y2)
     return w > 0 and h > 0
@@ -193,7 +193,7 @@ def ring_vertex(vertex) -> tuple:
 
 
 def annotation_from_payload(payload: Mapping) -> Annotation:
-    """One client payload dict's content as an :class:`Annotation`, carrying no provenance.
+    """Return one client payload dict's content as an :class:`Annotation`, with no provenance.
 
     The payload is translated into the document's own record shape and decoded by
     :func:`annotation_of_record`, so a supplied value that route refuses raises ``ValueError`` here
@@ -201,7 +201,7 @@ def annotation_from_payload(payload: Mapping) -> Annotation:
     h]``; ``rings`` (a list of rings) and ``points`` (one ring) become ``segmentation``, ``rings``
     winning when both are given, each vertex an ``[x, y]`` pair or an ``{"x", "y"}`` mapping;
     ``point`` (a single placed prompt or keypoint) is kept as it is. A polygon then wins over a box
-    and a box over a point, as in a stored record. A payload's provenance keys and ``score`` are
+    and a box over a point. A payload's provenance keys and ``score`` are
     not read. A payload box quantizes to the stored two-decimal grid (:func:`xywh`).
     """
     payload = annotation_object(payload)
@@ -261,19 +261,22 @@ def stamped(
 
 
 def _content_key(a: Annotation) -> str:
-    """``a``'s stored content as one canonical string."""
+    """Return ``a``'s stored content as one canonical string."""
     return json.dumps(stored_content(a), sort_keys=True)
 
 
 def annotation_object(o) -> dict:
-    """``o`` when it is an annotation object (a JSON object), else ``ValueError`` naming it."""
+    """Return ``o`` when it is an annotation object (a JSON object), else raise ``ValueError``.
+
+    The ``ValueError`` names ``o``.
+    """
     if not isinstance(o, dict):
         raise ValueError(f"is {o!r}, not an annotation object")
     return o
 
 
 def annotation_of_record(o) -> Annotation:
-    """One record of a per-image document as an :class:`Annotation`: the one per-record decoder.
+    """Return one record of a per-image document as an :class:`Annotation`.
 
     A key that is absent or ``null`` reads as absent, for every optional field: a ground-truth
     record has no ``score``, an image-level label has no geometry, a record with no ``iscrowd``
@@ -382,7 +385,7 @@ _STATE_OF: dict[tuple[bool, bool], SubjectState] = {
 FINISHED_STATES = frozenset(
     s for (finished, _), s in _STATE_OF.items() if finished
 )
-"""The states :meth:`LabelDocument.state` answers for a subject :meth:`LabelDocument.finished`."""
+"""The subject states whose subject is finished."""
 
 
 @dataclass(frozen=True)
@@ -424,7 +427,7 @@ def subject_digest(annotations: Iterable[Annotation], subject: str) -> str:
 def _live(
     marks: Mapping[str, list[CompletionMark]], annotations: list[Annotation]
 ) -> dict[str, list[CompletionMark]]:
-    """Each subject's marks whose digest still names that subject's annotations."""
+    """Return each subject's marks whose digest still names that subject's annotations."""
     live = {}
     for subject, held in marks.items():
         digest = subject_digest(annotations, subject)
@@ -480,14 +483,14 @@ def completion_marks(
 
 
 def _text(value, key: str) -> str:
-    """``value`` when it is a non-empty string, else ``ValueError`` naming ``key``."""
+    """Return ``value`` when it is a non-empty string, else ``ValueError`` naming ``key``."""
     if not isinstance(value, str) or not value:
         raise ValueError(f"{key} {value!r} is not a non-empty string")
     return value
 
 
 def _flag(value) -> bool:
-    """``value`` when it is a boolean, else ``ValueError``."""
+    """Return ``value`` when it is a boolean, else ``ValueError``."""
     if not isinstance(value, bool):
         raise ValueError(f"proposals_hidden {value!r} is not true or false")
     return value
@@ -534,7 +537,7 @@ class LabelDocument:
     cap: int | None
 
     def finished(self, subject: str) -> bool:
-        """Whether this document's live marks for ``subject`` cover the whole image."""
+        """Return whether this document's live marks for ``subject`` cover the whole image."""
         return bool(
             self.width
             and self.height
@@ -583,7 +586,7 @@ def label_document(data: dict) -> LabelDocument:
 NO_DOCUMENT = LabelDocument(
     annotations=[], width=None, height=None, marks={}, cap=None
 )
-"""What :func:`read_document_versioned` answers for a key holding no record."""
+"""The empty label document standing for an absent record."""
 
 
 # ── reader ─────────────────────────────────────────────────────────────────
@@ -682,13 +685,11 @@ PERSON_NAME_RULE = (
     f"(?:{PERSON_IDENTITY_PREFIX})?[{_BLANKS}]*"
     rf"([^{_BLANKS}](?:[\d\D]*[^{_BLANKS}])?)[{_BLANKS}]*$"
 )
-"""The one rule for a string that names a person, with or without :data:`PERSON_IDENTITY_PREFIX`
+"""The rule for a string that names a person, with or without :data:`PERSON_IDENTITY_PREFIX`
 in front: the name is what stands between the optional prefix and the end once blanks (the
 whitespace JavaScript's ``trim`` cuts, the byte-order mark included) are cut from both sides, and
 it must hold something; a line break inside it is part of the name. Its one group captures the
-name. Spelled with explicit character classes and escapes so it reads the same under Python's
-``re`` and JavaScript's ``RegExp``, and the browser's name field tests the rule the backend's
-doors refuse on."""
+name."""
 
 
 def person_name(text: str) -> str | None:
@@ -821,12 +822,9 @@ def xywh(
 ) -> list[float]:
     """Return a box in corner form as this schema's ``bbox``: COCO ``[x, y, w, h]``.
 
-    A pixel box is put on the 2-decimal quantum, the grid the stored document lives on and the grid
-    anything comparing a stored box against another box has to be on. ``on_grid=False`` is for a
-    box on no pixel grid at all (a record kept on the normalized unit square).
-
-    The inverse reads a stored ``[x, y, w, h]`` back in corner form as
-    ``BBox(x, y, x + w, y + h)``.
+    A pixel box is put on the 2-decimal quantum, the grid the stored document lives on.
+    ``on_grid=False`` is for a box on no pixel grid at all (a record kept on the normalized unit
+    square).
     """
     box = [x1, y1, x2 - x1, y2 - y1]
     return [round(v, 2) for v in box] if on_grid else box
@@ -858,8 +856,7 @@ def _rounded_rings(
 def geometry_extent_ok(geometry: BBox | Polygon) -> bool:
     """Return whether ``geometry`` still has positive extent once written to its stored grid.
 
-    A :class:`Polygon`'s vertices round to two decimals before its box is derived, the same order
-    :func:`document_payload` stores them in.
+    A :class:`Polygon`'s vertices round to two decimals before its box is derived.
     """
     if polygonal(geometry):
         return stored_box_extent_ok(
@@ -910,7 +907,7 @@ def _held_provenance(a: Annotation) -> dict:
 
 
 def client_annotation(a: Annotation) -> dict:
-    """Return ``a`` as the dict a client reads.
+    """Return ``a`` as a plain dict with its box in corner form.
 
     ``bbox`` in corner form ``[x1, y1, x2, y2]``; ``rings`` for a polygon, every ring; ``point``
     for a placed prompt or keypoint, the stored key; ``attributes``; ``score`` for a prediction;
@@ -995,9 +992,9 @@ def write_label_document(
 
     The completion ``marks`` still live over them are written with them
     (:func:`document_payload`). An empty list writes an empty document under ``keep_empty``, else
-    removes the document. ``expect`` (a version :func:`read_document_versioned` answered) makes
-    the write a compare-and-set raising ``VersionConflictError`` with nothing written. Returns the
-    new version, or ``None`` when the document was removed.
+    removes the document. ``expect`` (a version token) makes the write a compare-and-set raising
+    ``VersionConflictError`` with nothing written. Returns the new version, or ``None`` when the
+    document was removed.
     """
     payload = document_payload(
         annotations, width, height, keep_empty=keep_empty, marks=marks
@@ -1064,7 +1061,7 @@ def attribute_values(
 ) -> dict[str, str]:
     """Return ``{name: value}`` for each of ``attributes`` the id row ``ids`` assesses.
 
-    This is the inverse of :func:`attribute_ids`.
+    ``ids`` and ``attributes`` of unequal length raise ``ValueError``.
     """
     return {
         attribute.name: attribute.values[int(i)]

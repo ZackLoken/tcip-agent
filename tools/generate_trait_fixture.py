@@ -1,10 +1,10 @@
-"""Write the trait listings the frontend tests read, produced by the platform itself.
+"""Write served trait listings as a fixture file, produced by the platform itself.
 
 In projects created through ``tests._web_fixtures.named_project`` and opened through the picker's
 route in a scratch session (``tools/fixture_session.py``), each trait entry is proposed through
 ``traits.propose_trait``, confirmed through ``POST /api/results/traits/confirm`` and served by
 ``GET /api/results/traits``; the served listings are written, :func:`normalized`, to
-``frontend/src/test/traitListings.json`` under the names the tests import.
+``frontend/src/test/traitListings.json``, keyed by fixture name.
 
     python -m tools.generate_trait_fixture
 """

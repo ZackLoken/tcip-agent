@@ -1,21 +1,19 @@
-"""Pose one identical question to several agent harnesses and record comparable answers.
+"""Pose one question to several agent harnesses and record comparable answers.
 
 Each run writes a directory holding the exact prompt, the exact argv, the harness's
 stdout and stderr, the extracted final response, and metadata describing what the
-harness was and how long it took. Answers are only comparable when the conditions
-they ran under are recorded alongside them, so nothing here is optional.
+harness was and how long it took.
 
-Conditions control what the harness could reach, not what it was asked. The question
-text is byte-identical across families in every condition; an attached image adds one
-family-specific preface line ahead of it, since each harness takes an image differently.
+Conditions control what the harness could reach, not what it was asked. An attached image adds
+one family-specific preface line ahead of the question, since each harness takes an image
+differently.
 
 Antigravity in headless mode auto-denies shell commands, so a prompt sent to it must be
 answerable by file reads alone, with any material to review given as files inside the
 working tree it is pointed at.
 
-Runs on the standard library alone, so it needs no project environment and should be invoked as
-``python tools/cross_family_ask.py``. Wrapping it in ``conda run`` buys nothing and fails
-outright wherever conda is absent from PATH, which reports a launched-nothing run as exit 0.
+Runs on the standard library alone, so it needs no project environment and is invoked as
+``python tools/cross_family_ask.py``.
 """
 
 from __future__ import annotations
@@ -41,7 +39,7 @@ LOCAL_APP_DATA = pathlib.Path(
 
 
 def resolve_harness(name: str, env_var: str, *fallbacks: pathlib.Path) -> str:
-    """Find a harness executable by PATH, then an explicit override, then install defaults."""
+    """Find a harness executable by the explicit override, then PATH, then install defaults."""
     override = os.environ.get(env_var)
     if override:
         return override
@@ -109,26 +107,7 @@ PARITY: dict[str, dict[str, str | None]] = {
     "codex": {"model": None, "effort": "high"},
     "antigravity": {"model": "gemini-3.1-pro-high", "effort": None},
 }
-"""Frontier tier at the highest available reasoning effort, per family.
-
-Parity here is approximate and the recorded metadata, not this table, is what a
-comparison should be read against. Each harness takes effort differently, verified by
-execution against each one: Claude Code through `--effort` (low, medium, high, xhigh, max;
-an unknown value is ignored with a warning and the run proceeds on the default, so the
-runner refuses one before launching); Codex through the `model_reasoning_effort` config
-key, which the API rejects by name when unknown; Antigravity baked into the model id
-(`gemini-3.1-pro-high`, `gemini-3.1-pro-low`), and its separate `--effort` flag conflicts
-with a suffixed id and fails the run, so it is never passed with one. Antigravity can also
-serve Claude and GPT-OSS models, which must never be selected for a cross-family run:
-doing so compares harnesses while appearing to compare families. Claude Code names the
-model it used in its JSON result (`modelUsage`); Codex and Antigravity echo neither the
-model nor the effort, so for them the recorded values are what the argv passed, and a
-bogus model or effort fails the run by name rather than running on a default.
-
-A codex model of None never reaches the harness: `resolve_codex_model` names it from the
-user's config so the run records the model it used (with `--ignore-user-config` the harness
-would otherwise fall back to an unrecorded built-in default).
-"""
+"""The default model and reasoning effort per family, used where the command line names none."""
 
 CODEX_CONFIG = pathlib.Path.home() / ".codex" / "config.toml"
 CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
@@ -155,10 +134,9 @@ def effective_effort(
 ) -> str | None:
     """Return the effort a run records and, where the harness takes one, passes.
 
-    A model id that states its own effort is the effort, whatever `--effort` said beside it, so
-    one invocation naming every family can carry one flag; Claude Code is refused an effort it
-    would silently ignore and run on its default, which would record an effort the run did not
-    use.
+    A model id that states its own effort (:func:`model_id_effort`) is the effort, whatever
+    ``effort`` says. For claude, a supplied, nonempty ``effort`` not in :data:`CLAUDE_EFFORTS`
+    raises ``SystemExit``.
     """
     stated = model_id_effort(family, model)
     if stated is not None:
@@ -174,10 +152,8 @@ def effective_effort(
 def resolve_codex_model(requested: str | None) -> tuple[str, str]:
     """Return the codex model name to pass explicitly and where it came from.
 
-    An explicit request wins. Otherwise the `model` key of ~/.codex/config.toml is read,
-    because the no-tools condition runs codex with `--ignore-user-config` and the harness's
-    own fallback is not reported anywhere. A run with no resolvable name is refused rather
-    than recorded as model None.
+    An explicit request wins. Otherwise the `model` key of ~/.codex/config.toml is read. No
+    resolvable name raises ``SystemExit``.
     """
     if requested:
         return requested, "flag"
@@ -224,9 +200,7 @@ GUIDANCE_PREFIX = (
 def as_text(stream: object) -> str:
     """Return a captured stream as text.
 
-    ``None`` and bytes are both real, and neither is an error. ``subprocess.run`` yields ``None``
-    for a stream a harness never wrote, and ``TimeoutExpired`` carries raw bytes even under
-    ``text=True``.
+    ``None`` becomes the empty string and bytes decode as UTF-8 with replacement.
     """
     if stream is None:
         return ""
@@ -236,7 +210,7 @@ def as_text(stream: object) -> str:
 
 
 def failed_run_meta(family: str, exc: BaseException) -> dict:
-    """Return a metadata row for a run that raised, shaped like a real one for the summary."""
+    """Return a metadata row for a run that raised."""
     meta = {
         "question_id": None,
         "condition": None,
@@ -283,12 +257,7 @@ def harness_version(exe: str | pathlib.Path, flag: str = "--version") -> str:
 
 
 def image_preface(family: str, images: tuple[pathlib.Path, ...]) -> str:
-    """Return the line that hands attached images to one family, placed ahead of the question.
-
-    Every family is vision-capable, and each takes an image its own way: codex attaches files
-    through ``exec -i`` and is told their names, antigravity reads a file the prompt names as
-    ``@path``, and Claude Code reads a named path with its own image-capable file reader.
-    """
+    """Return the line that hands attached images to one family, placed ahead of the question."""
     if not images:
         return ""
     names = [str(path) for path in images]
@@ -367,17 +336,11 @@ def build_codex(
     timeout: int,
     images: tuple[pathlib.Path, ...] = (),
 ) -> tuple[list[str], pathlib.Path | None]:
-    """Build a headless Codex invocation.
+    """Build a headless Codex invocation; return its argv and its final-message file.
 
-    Headless `codex exec` does not load locally spawned stdio MCP servers, verified
-    against a server that is registered, enabled, and answers an initialize handshake
-    when launched directly. Hosted servers do load. A `tcip` condition therefore yields
-    a run with repository access and no TCIP tools, which is a real result to record
-    rather than a failure to hide, but it is not a like-for-like MCP comparison.
-
-    Images attach through ``-i``, one flag per file and each followed by another flag: the
-    option is variadic, so a bare ``-i a b`` would also swallow the trailing ``-`` that names
-    stdin as the prompt.
+    The prompt goes on stdin (the trailing ``-``). Each image attaches through its own ``-i``
+    flag, placed before the other options. The run is read-only in ``cwd``, with
+    ``--ignore-user-config`` outside a ``tcip`` condition.
     """
     last = run_dir / "final_message.txt"
     argv = [str(CODEX), "exec"]
@@ -413,15 +376,11 @@ def build_agy(
     timeout: int,
     images: tuple[pathlib.Path, ...] = (),
 ) -> tuple[list[str], pathlib.Path | None]:
-    """Build a headless Antigravity invocation.
+    """Build a headless Antigravity invocation; return its argv and no final-message file.
 
-    MCP servers come from `~/.gemini/config/mcp_config.json` and are global, so the
-    no-tools condition cannot be expressed per run the way it can for the others.
-    Headless mode also cannot prompt for tool permission and auto-denies, so each
-    tool must be named under `permissions.allow` in the CLI settings before it will
-    run. That allow-list names individual read-only TCIP tools and everything
-    unlisted stays auto-denied; if it is ever widened toward mutating tools, point
-    runs at scratch project state only.
+    The prompt file's text is passed as ``--print``, with JSON output, the sandbox, a print
+    timeout of ``timeout`` seconds and ``cwd`` added; ``condition`` is not read, so a run's MCP
+    servers are whatever the harness's own configuration names.
     """
     argv = [
         str(AGY),
@@ -452,15 +411,11 @@ STDIN_FAMILIES = {"claude", "codex"}
 
 
 def describe_fault(meta: dict) -> str:
-    """Why this run does not count as an answer, or an empty string when it does.
+    """Return why this run does not count as an answer, or an empty string when it does.
 
-    Computed once, at the point ``meta.json`` is written, and carried in the record itself under
-    ``fault`` rather than re-derived later from ``response_source``/``exit_code`` at the aggregate
-    table: a run whose captured response is empty once stripped of whitespace is never a
-    successful answer, whatever code path emptied it out (a harness that writes nothing at all,
-    an answer field present but blank, a stream whose only agent message is whitespace), so the
-    check is on the stripped character count itself rather than a list of the response-source
-    names known to produce one today.
+    A nonzero exit code, a captured response that is empty once stripped of whitespace
+    (``response_chars`` of zero), or a model mismatch each make a run no answer, whatever code
+    path emptied the response out.
     """
     if meta["exit_code"] != 0:
         return f"the harness exited {meta['exit_code']}"
@@ -475,12 +430,10 @@ def describe_fault(meta: dict) -> str:
 
 
 def print_verdict(faults: list[tuple[str, str]], total: int) -> None:
-    """State the run's outcome as the last thing printed, on stdout and stderr both.
+    """State the run's outcome as the last thing printed.
 
-    The exit code alone is not enough. A caller that pipes this script into another command takes
-    the pipeline's status from that command, so a refused run reads as a clean one and the only
-    remaining signal is a zero in the chars column of a table that otherwise looks ordinary. This
-    says the verdict in words at the end of the output, where it survives both a pipe and a tail.
+    With no faults, one ``RUN OK`` line goes to stdout. Otherwise a ``RUN FAILED`` line, one line
+    per faulted family and a closing line go to stdout and stderr both.
     """
     if not faults:
         print(f"\nRUN OK: {total} of {total} families answered.")
@@ -500,10 +453,8 @@ def print_verdict(faults: list[tuple[str, str]], total: int) -> None:
 def denied_write_text(payload: object) -> str:
     """Return the longest document a harness tried to write and was refused, or an empty string.
 
-    A read-only run can still make the model compose its answer as a file rather than as a reply:
-    Claude Code under ``--permission-mode plan`` drafts into a plan file, is denied, and then
-    replies with a short pointer to a document that was never saved. The draft survives in the
-    refusal record, so the answer is recoverable without relaxing the sandbox that produced it.
+    The documents are the string ``content`` of each ``tool_input`` under the payload's
+    ``permission_denials``; the longest is returned stripped.
     """
     if not isinstance(payload, dict):
         return ""
@@ -532,9 +483,7 @@ def extract_response(
 ) -> tuple[str, str]:
     """Pull the final assistant text out of whatever shape the harness emitted.
 
-    Returns the text and the route it came from. The route is recorded per run because an answer
-    recovered from a refused write is not the same evidence as one the harness returned directly,
-    and a comparison that cannot tell them apart is reading two different things as one.
+    Returns the text and the route it came from.
     """
     if last_message and last_message.exists():
         text = last_message.read_text(

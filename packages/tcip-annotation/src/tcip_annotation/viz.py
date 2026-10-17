@@ -78,7 +78,7 @@ def _color_for_class(class_id: int) -> tuple[int, int, int]:
 
 
 def _saved(img: Image.Image, output_path: str, **options) -> str:
-    """``img`` written to ``output_path``, its directory made first; the path."""
+    """Write ``img`` to ``output_path``, making its directory first, and return the path."""
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     img.save(output_path, **options)
     return output_path
@@ -92,7 +92,7 @@ def _label(
     background,
     fill=(255, 255, 255),
 ) -> None:
-    """``text`` at ``xy`` over a ``background`` box padded two pixels each side."""
+    """Draw ``text`` at ``xy`` over a ``background`` box padded two pixels each side."""
     x, y = xy
     left, top, right, bottom = font.getbbox(text)
     draw.rectangle(
@@ -438,8 +438,8 @@ def render_grid_overlay(
 
     ``cells`` is the caller's own cell list, each entry a mapping or an object carrying ``name``
     plus the half-open native-pixel rect ``x0, y0, x1, y1`` (see ``grid.cell_fields``).
-    Rects scale by the rendered/native ratio like the other renderers, so the lines land on the
-    true cell boundaries, which under a clamped grid are non-uniform at the edges.
+    Rects scale by the rendered/native ratio, so the lines land on the true cell boundaries, which
+    under a clamped grid are non-uniform at the edges.
 
     Boundaries always draw. A cell's name draws only when the rendered cell is at least 24 px on
     its short edge and wide enough to hold the label's own backing box.
@@ -522,7 +522,7 @@ def _hex_rgb(color: str) -> tuple[int, int, int]:
 def _dashed_segment(
     draw, p1, p2, fill, width: int, dash: float, gap: float
 ) -> None:
-    """Draw p1→p2 as dashes (PIL has no native dashed lines)."""
+    """Draw p1→p2 as dashes."""
     x1, y1 = p1
     x2, y2 = p2
     length = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5

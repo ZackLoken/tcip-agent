@@ -135,12 +135,12 @@ def path_lock(
 
 
 def database_file(root: str) -> Path:
-    """Where a root's database sits, whether or not one exists."""
+    """Return where a root's database sits, whether or not one exists."""
     return require_absolute_root(root) / ".tcip" / DATABASE_FILENAME
 
 
 def database_roots(tree: Path) -> list[Path]:
-    """Every root at or under the absolute ``tree`` whose database exists, sorted."""
+    """Return every root at or under the absolute ``tree`` whose database exists, sorted."""
     return sorted(
         db.parent.parent
         for db in tree.rglob(DATABASE_FILENAME)
@@ -331,7 +331,9 @@ def put_blob(
 def delete_blob(path: Path, *, expect: Version | None = None) -> None:
     """Remove a file under its lock; absence is not an error.
 
-    It compares ``expect`` and refuses inside an open transaction as :func:`put_blob` does.
+    Refuses (``TransactionMisuseError``) inside an open transaction. ``expect``, when given, is
+    compared against the stored version re-read under the lock: a mismatch raises
+    ``VersionConflictError`` with nothing removed.
     """
     refuse_inside_transaction("delete_blob")
     with _locked(path):
@@ -365,7 +367,7 @@ conflicts with the access asked for, a conflict that may last only until that ha
 
 
 def is_sharing_violation(exc: PermissionError) -> bool:
-    """Whether ``exc`` is a Windows sharing violation (:data:`SHARING_VIOLATION`)."""
+    """Return whether ``exc`` is a Windows sharing violation (:data:`SHARING_VIOLATION`)."""
     return getattr(exc, "winerror", None) == SHARING_VIOLATION
 
 

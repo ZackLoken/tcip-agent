@@ -538,7 +538,11 @@ class SqliteBackend:
         return _version_of(data)
 
     def delete(self, key: Key, *, expect: Version | None = None) -> bool:
-        """Remove one record and return whether one was there; ``expect`` compares as in replace."""
+        """Remove one record in one write transaction and return whether one was there.
+
+        ``expect``, when given, is compared against the stored version inside the write: a
+        mismatch raises ``VersionConflictError`` with nothing dropped.
+        """
         with self._write((key,)) as conn:
             if expect is not None:
                 require_version(key, self._stored(conn, key), expect)

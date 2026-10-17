@@ -29,7 +29,8 @@ Four verdicts, each its own exit code:
                        baseline could not collect the file, the baseline's own source was not what
                        got imported, pytest never reported an outcome, or every failure is
                        fixture-shaped so the code under test was never reached. A setup or
-                       teardown failure is always fixture-shaped, whatever raised it; a call-phase
+                       teardown failure that is neither a missing import or file nor a
+                       pytest-timeout report is fixture-shaped, whatever raised it; a call-phase
                        failure is fixture-shaped only when it is a ``TypeError`` raised inside
                        ``tests/`` whose message is CPython's own wording for a call-signature
                        mismatch (an unexpected keyword, a missing required argument, too many
@@ -185,16 +186,14 @@ def pytest_sessionfinish(session, exitstatus):
 
 
 def _test_file_relative_to_repo(raw: str) -> tuple[str | None, str]:
-    """``raw`` normalized to a repo-relative, forward-slash path under ``tests/``.
+    """Return ``raw`` normalized to a repo-relative, forward-slash path under ``tests/``.
 
     Accepts a relative path as always, or an absolute one naming a file inside this repository;
-    either way the return is a tree-relative path, so pytest collects the target inside whichever
-    tree gets materialized rather than an absolute path that names the working checkout's file
-    regardless of ``cwd``. A relative path is resolved against the repository root, never the
-    caller's ``cwd``, and either spelling's ``..`` segments are collapsed before the ``tests/``
-    check, so a path that only reads as inside ``tests/`` before normalizing (``tests/../tools/
-    x.py``) is refused rather than admitted. Returns ``(None, reason)`` when ``raw`` resolves
-    outside ``tests/``.
+    either way the return is a tree-relative path. A relative path is resolved against the
+    repository root, never the caller's ``cwd``, and either spelling's ``..`` segments are
+    collapsed before the ``tests/`` check, so a path that only reads as inside ``tests/`` before
+    normalizing (``tests/../tools/x.py``) is refused rather than admitted. Returns
+    ``(None, reason)`` when ``raw`` resolves outside ``tests/``.
     """
     path = Path(raw)
     anchored = path if path.is_absolute() else REPO / path
@@ -371,7 +370,7 @@ def _snapshot_via_stash_create() -> str | None:
     """Snapshot through ``git stash create``; ``None`` when it produces nothing.
 
     The fallback when the temporary-index form fails here: covers tracked changes only, and
-    touches neither the tree, the index, nor the stash list, same as the form it falls back from.
+    touches neither the tree, the index, nor the stash list.
     """
     out = subprocess.run(
         [
@@ -473,8 +472,8 @@ def prove_tree_imports(
 ) -> tuple[bool, dict[str, str]]:
     """Confirm each package resolves inside the baseline tree, not the editable-installed checkout.
 
-    The three packages are installed editable pointing at the working checkout, so a run that
-    resolves them there measures the current source while reporting a baseline verdict.
+    Returns whether every package under ``tree``'s ``packages/*/src`` imported from inside
+    ``tree`` under ``env``, and each package's resolved path or import failure.
     """
     names = sorted(
         {p.parent.name for p in tree.glob("packages/*/src/*/__init__.py")}
@@ -572,9 +571,8 @@ _TIMEOUT_HEADLINE = re.compile(
 def _is_timeout(headline: str) -> bool:
     """Return whether this failure is pytest-timeout's own signal-method report.
 
-    That report is its literal ``PYTEST_FAILURE_MESSAGE``, never behavioral evidence and never
-    confused with a hang the thread method reports through the ``FAIL_BEFORE_CURRENT_TEST``
-    marker instead.
+    That report is its literal ``PYTEST_FAILURE_MESSAGE``; a hang the thread method reports
+    through the ``FAIL_BEFORE_CURRENT_TEST`` marker is not one.
 
     The leading exception class is optional because pytest writes the headline both ways: bare
     where the timeout is the whole report, and prefixed ``Failed: `` where pytest-timeout's
@@ -587,11 +585,8 @@ def _is_timeout(headline: str) -> bool:
 def _is_unreached(headline: str, crash_path: str | None, tree: Path) -> bool:
     """Return whether a failure never reached the code under test.
 
-    Such a failure carries the same weight as a collection error: a missing module or import
-    always counts. A missing file counts only when its crash frame sits outside ``tests/``
-    (:func:`_crash_outside_test_tree`); a test's own assertion reading back a file the fixed code
-    under test was supposed to write raises ``FileNotFoundError`` at the test's own line, and that
-    is behavioral evidence, never a fixture-shaped discount.
+    A missing module or import always counts. A missing file counts only when its crash frame sits
+    outside ``tests/`` (:func:`_crash_outside_test_tree`).
     """
     if headline.startswith(("ModuleNotFoundError", "ImportError")):
         return True
@@ -601,11 +596,11 @@ def _is_unreached(headline: str, crash_path: str | None, tree: Path) -> bool:
 
 
 def _crash_outside_test_tree(crash_path: str | None, tree: Path) -> bool:
-    """Whether the failure's crash frame sits outside ``tests/`` inside the materialized tree.
+    """Return whether the failure's crash frame sits outside ``tests/`` in the materialized tree.
 
     A frame under ``tests/`` is the test's own body or a fixture; one outside it is the code
     under test raising. An unresolvable or missing path (a report with no exception repr) is
-    never treated as outside, since that would count silence as evidence.
+    never treated as outside.
     """
     if not crash_path:
         return False
@@ -628,8 +623,7 @@ def _is_call_signature_mismatch(headline: str) -> bool:
 
     The mismatch is a call supplying the wrong arguments to a callable's signature: an unexpected
     keyword, a missing required argument (positional or keyword-only), or too many positional
-    arguments. This is the shape a fixture or test calling a constructor with an argument the
-    baseline lacks takes, never wording the code under test composes on its own.
+    arguments.
     """
     return any(p.search(headline) for p in _CALL_SIGNATURE_MISMATCH_PATTERNS)
 
@@ -641,16 +635,14 @@ def _failure_kind(entry: dict, tree: Path) -> str:
 
     ``unreached``: the import never resolved, always; or a needed file was missing and the crash
     frame sits outside ``tests/`` (:func:`_is_unreached`). A missing file whose crash frame sits
-    inside the test's own body is left to the rest of this function instead, since that shape is
-    the test's own assertion reading back something the code under test was supposed to produce.
+    inside the test's own body is left to the rest of this function instead.
 
     ``timeout``: pytest-timeout's own signal-method report (:func:`_is_timeout`), checked before
-    the phase split below since a timeout can fire during setup as easily as during the call, and
-    either way it is a hang to redo, never fixture-shaped evidence and never a passing assertion.
+    the phase split below, so a timeout during setup is ``timeout`` too.
 
-    A setup or teardown failure (``entry["phase"]`` is not ``"call"``) is always ``fixture``: the
-    test body never ran, whatever raised it, wherever the crash frame sits. The rest applies only
-    to a call-phase failure:
+    After those two checks, a setup or teardown failure (``entry["phase"]`` is not ``"call"``) is
+    ``fixture``, whatever raised it, wherever the crash frame sits. The rest applies only to a
+    call-phase failure:
 
     ``behavioral``: the test's own ``assert`` or ``pytest.fail``/``pytest.raises`` failed (the
     raised exception's own class is ``AssertionError`` or ``Failed``, read from

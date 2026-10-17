@@ -190,12 +190,12 @@ def flags_of(record: Mapping | None) -> list[Flag]:
 
 
 def flags_record(flags: list[Flag]) -> dict:
-    """Return ``flags`` as the record :func:`flags_of` reads back."""
+    """Return ``flags`` as a ``{"flags": [...]}`` record, each through :func:`encode_flag`."""
     return {"flags": [encode_flag(flag) for flag in flags]}
 
 
 def read_flags(key: Key) -> list[Flag]:
-    """Every flag the record ``key`` names holds (:func:`flags_of`)."""
+    """Return every flag the record ``key`` names holds (:func:`flags_of`)."""
     import tcip_store
 
     return flags_of(tcip_store.read(key, default=None))

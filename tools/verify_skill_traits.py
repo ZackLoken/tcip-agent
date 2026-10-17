@@ -26,7 +26,7 @@ from tcip_mcp import traits as registry
 
 
 def load_vocab() -> tuple[set[str], dict[str, set[str]]]:
-    """Every crops.yml trait name, and the names each crop declares.
+    """Return every crops.yml trait name, and the names each crop declares.
 
     Raises ``ValueError`` when a record carries no crop list; a crops.yml that will not read
     raises from the registry's own read.
@@ -96,7 +96,7 @@ def extract_backtick_snake(md_text: str) -> set[str]:
 
 
 def mentioned_trait_names(md_text: str, names: set[str]) -> set[str]:
-    """Every name in ``names`` that appears backtick-quoted, literally, in ``md_text``."""
+    """Return every name in ``names`` that appears backtick-quoted, literally, in ``md_text``."""
     return {n for n in names if f"`{n}`" in md_text}
 
 
@@ -114,7 +114,7 @@ def unknown_trait_tokens(md_text: str, allnames: set[str]) -> list[str]:
 def off_crop_tokens(
     md_text: str, allnames: set[str], crop_names: set[str]
 ) -> list[str]:
-    """Names in ``allnames`` that ``md_text`` backticks and ``crop_names`` does not hold."""
+    """Return the names in ``allnames`` that ``md_text`` backticks and ``crop_names`` lacks."""
     return sorted(
         t
         for t in mentioned_trait_names(md_text, allnames)

@@ -33,7 +33,7 @@ class Verdict:
 
 
 def encode_verdict(verdict: Verdict) -> dict:
-    """``verdict`` as the entry its shard stores."""
+    """Return ``verdict`` as the entry its shard stores."""
     return asdict(verdict)
 
 

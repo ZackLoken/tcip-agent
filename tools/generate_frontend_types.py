@@ -1,4 +1,4 @@
-"""Generate the browser's backend-declared types from the pydantic models that declare them.
+"""Generate TypeScript types and constants from the backend's pydantic models and constants.
 
 ``routes/images.py`` declares a served image's stats source and the reads a view is served by;
 ``routes/annotate.py`` the review queue's launch, the scorer block it states
@@ -234,7 +234,7 @@ def render_cache_version() -> int:
 
 
 def string_constants() -> dict[str, str]:
-    """Each backend string the frontend matches at runtime, by its constant's name."""
+    """Return the backend string constants this module emits, by each constant's name."""
     from tcip_annotation.json_io import PERSON_NAME_RULE
     from tcip_mcp.experiments import EPOCH_KEY, STEP_KEY, TIMESTAMP_KEY
     from tcip_mcp.pipelines.training.evaluation import VAL_METRIC_PREFIX
@@ -254,7 +254,7 @@ def string_constants() -> dict[str, str]:
 
 
 def tuple_constants() -> dict[str, tuple[str, ...]]:
-    """Each backend vocabulary the frontend iterates at runtime, by its constant's name."""
+    """Return the backend tuple vocabularies this module emits, by each constant's name."""
     from tcip_annotation.json_io import FINISHED_STATES
     from tcip_mcp.agent_identity import RECORD_FIELDS
     from tcip_mcp.experiments import TERMINAL_STATES
@@ -288,7 +288,7 @@ def platform_panel_event_constants() -> list[tuple[str, str]]:
 
 
 def literal_aliases() -> dict[str, tuple[str, ...]]:
-    """Each server vocabulary the frontend names as a type, by its TypeScript alias name."""
+    """Return each backend ``Literal`` vocabulary's values, by its TypeScript alias name."""
     from typing import get_args
 
     from tcip_annotation.json_io import SubjectState
@@ -305,7 +305,7 @@ def literal_aliases() -> dict[str, tuple[str, ...]]:
 
 
 def _ts_type(schema: dict, where: str) -> str:
-    """One schema fragment as a TypeScript type expression, or a refusal naming ``where``."""
+    """Return one schema fragment as a TypeScript type expression; refuse naming ``where``."""
     if "$ref" in schema:
         return schema["$ref"].rsplit("/", 1)[-1]
     if "anyOf" in schema or "oneOf" in schema:
@@ -365,7 +365,7 @@ def _ts_type(schema: dict, where: str) -> str:
 
 
 def _interface(name: str, schema: dict) -> str:
-    """One ``export interface`` block for a model's own JSON schema."""
+    """Return one ``export interface`` block for a model's own JSON schema."""
     required = set(schema.get("required", []))
     lines = [f"export interface {name} {{\n"]
     for prop, prop_schema in schema.get("properties", {}).items():
