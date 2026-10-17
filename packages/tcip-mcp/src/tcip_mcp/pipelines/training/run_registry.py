@@ -21,6 +21,8 @@ if TYPE_CHECKING:
 
 @dataclass
 class TrainRun:
+    """The state of one run's body in the process running it."""
+
     id: str
     # The run's validated config.
     spec: TrainConfigSchema
@@ -55,16 +57,18 @@ class TrainRun:
 
     @cached_property
     def reads(self) -> TrainerReads:
-        """What training this run reads, its spec admitted once (``trainer_reads``, which
-        refuses naming whatever is unstated).
+        """What training this run reads, its spec admitted once.
+
+        The admission is ``trainer_reads``, which refuses naming whatever is unstated.
         """
         return self.spec.trainer_reads()
 
     @cached_property
     def evaluation_arguments(self) -> dict:
-        """The keywords ``evaluation.evaluate`` reads off this run, resolved once: the dims its
-        config records (``model_build.recorded_model_dims``), the confidence and the mask cut it
-        reads (:attr:`reads`), its stated
+        """The run's resolved evaluation keywords.
+
+        They are the dims its config records (``model_build.recorded_model_dims``), the
+        confidence and the mask cut it reads (:attr:`reads`), its stated
         ``evaluation.iou_threshold`` and ``score_weights``, the trait entry at its
         :attr:`trait_revision` (read from :attr:`project`, ``None`` for a run naming no trait; a
         revision whose entry no longer carries the recorded hash refuses with
@@ -94,8 +98,10 @@ class TrainRun:
         return self.deadline is not None and time.time() > self.deadline
 
     def should_cancel(self) -> bool:
-        """True once a cancellation of the run's own directory or, for an HPO trial, of its
-        sweep's directory is requested (``experiments.cancel_requested``), or once
+        """Return whether the run should stop, canceled or over its wall clock.
+
+        True once a cancellation of the run's own directory or, for an HPO trial, of its sweep's
+        directory is requested (``experiments.cancel_requested``), or once
         :attr:`wall_clock_exceeded`.
         """
         from tcip_mcp.experiments import cancel_requested
@@ -116,12 +122,14 @@ class TrainRun:
 def observed_run(
     observation: RunObservation, *, origin: str = "training"
 ) -> TrainRun:
-    """The :class:`TrainRun` of an observed run, of ``origin``: named for its directory, training
-    under its validated launch config (``RunObservation.spec``) with the data block its launch
-    resolved (``RunObservation.resolved_data``) laid over it and its source files bound to the
-    run's own snapshot (``model_build.snapshot_bound``), which it imports from as the record
-    states it (``model_build.run_layout``), under the trait revision and at the geometry that
-    resolution carries. A run whose input resolved to nothing ended at its opening and has none.
+    """Return the :class:`TrainRun` of an observed run, of ``origin``.
+
+    The run is named for its directory and trains under its validated launch config
+    (``RunObservation.spec``) with the data block its launch resolved
+    (``RunObservation.resolved_data``) laid over it and its source files bound to the run's own
+    snapshot (``model_build.snapshot_bound``), which it imports from as the record states it
+    (``model_build.run_layout``), under the trait revision and at the geometry that resolution
+    carries. A run whose input resolved to nothing ended at its opening and has none.
     """
     from tcip_mcp.experiments import project_of_run
     from tcip_mcp.pipelines.model_build import run_layout, snapshot_bound

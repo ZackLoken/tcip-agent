@@ -1,9 +1,9 @@
 """Task-aware data samplers: class-imbalance handling plus read-locality ordering.
 
-The imbalance samplers wrap torch samplers but compute weights from dataset.class_distribution
-over each example's class (dataset.sample_classes); a config's ``sampler`` block names one beside
-its own values. The locality sampler orders a tiled dataset's reads to stay inside GDAL's block
-cache.
+The imbalance samplers draw by each example's class over the dataset's distribution
+(``dataset.class_distribution``, ``dataset.sample_classes``); a config's ``sampler`` block names
+one beside its own values. The locality sampler orders a tiled dataset's reads to stay inside
+GDAL's block cache.
 """
 
 from __future__ import annotations
@@ -30,9 +30,10 @@ logger = logging.getLogger(__name__)
 def _classes(
     sampler: Sampler, dataset: BaseDataset
 ) -> tuple[dict[int, int], list[int | None]]:
-    """``dataset``'s class distribution and each example's class (``dataset.sample_classes``).
-    Refuses (``ValueError``) naming ``sampler`` and the dataset's task when the dataset states no
-    class distribution.
+    """Return ``dataset``'s class distribution and each example's class.
+
+    The classes are ``dataset.sample_classes``'. Refuses (``ValueError``) naming ``sampler`` and
+    the dataset's task when the dataset states no class distribution.
     """
     dist = dataset.class_distribution
     if not dist:
@@ -46,7 +47,9 @@ def _classes(
 
 
 def _class_weights(sampler: Sampler, dataset: BaseDataset) -> torch.Tensor:
-    """Each example's draw weight: its class's balanced weight
+    """Return each example's draw weight.
+
+    The weight is its class's balanced weight
     (:func:`~tcip_mcp.pipelines.components.losses.compute_class_weights`) over the dataset's
     distribution (:func:`_classes`, whose refusal propagates), 1.0 for an example with no class
     or one outside it.
@@ -60,17 +63,20 @@ def _class_weights(sampler: Sampler, dataset: BaseDataset) -> torch.Tensor:
 
 
 class ClassBalancedSampler(Sampler):
-    """Over-/under-samples so each class appears equally often per epoch."""
+    """Draw with replacement, each example weighted by its class's balanced weight."""
 
     def __init__(self, dataset: BaseDataset) -> None:
+        """Weigh each of ``dataset``'s examples by its class (:func:`_class_weights`)."""
         self._weights = _class_weights(self, dataset)
         self._length = len(dataset)
 
     def __iter__(self):
+        """Draw one epoch's indices, as many as the dataset holds, with replacement."""
         idx = torch.multinomial(self._weights, self._length, replacement=True)
         return iter(idx.tolist())
 
     def __len__(self) -> int:
+        """Return the number of indices one epoch draws."""
         return self._length
 
 
@@ -78,6 +84,11 @@ class OverSampler(Sampler):
     """Duplicate minority-class samples so all classes have >= min_count."""
 
     def __init__(self, dataset: BaseDataset, min_count: int) -> None:
+        """Hold every index of ``dataset`` plus repeats of each class short of ``min_count``.
+
+        A class with ``n`` examples, ``0 < n < min_count``, adds its indices
+        ``ceil(min_count / n)`` more times; :func:`_classes`' refusal propagates.
+        """
         dist, classes = _classes(self, dataset)
         self._indices: list[int] = list(range(len(dataset)))
 
@@ -96,11 +107,13 @@ class OverSampler(Sampler):
         self._indices.extend(extras)
 
     def __iter__(self):
+        """Yield every held index once, in an order drawn per epoch."""
         # The global RNG: the order varies per epoch and set_seed() governs it.
         perm = torch.randperm(len(self._indices))
         return iter([self._indices[i] for i in perm])
 
     def __len__(self) -> int:
+        """Return the number of held indices, repeats included."""
         return len(self._indices)
 
 
@@ -108,6 +121,7 @@ class WeightedRandomSampler(Sampler):
     """Thin wrapper around torch's WeightedRandomSampler with auto-weights."""
 
     def __init__(self, dataset: BaseDataset) -> None:
+        """Construct a class-weighted sampler drawing as many examples as the dataset holds."""
         # torch's own stub types weights as Sequence[float]; a Tensor is what it accepts.
         self._sampler = _TorchWeightedRandom(
             cast(Sequence[float], _class_weights(self, dataset)),
@@ -116,15 +130,19 @@ class WeightedRandomSampler(Sampler):
         )
 
     def __iter__(self):
+        """Iterate the wrapped torch sampler's indices."""
         return iter(self._sampler)
 
     def __len__(self) -> int:
+        """Return the wrapped torch sampler's length."""
         return len(self._sampler)
 
 
 def _interleave_lanes(lanes: list[list[int]], batch_size: int) -> list[int]:
-    """Interleave per-lane index sequences at ``batch_size`` granularity: one chunk from each
-    lane in rotation, dropping a lane from the rotation once it is exhausted.
+    """Interleave per-lane index sequences at ``batch_size`` granularity.
+
+    One chunk comes from each lane in rotation, a lane dropping from the rotation once it is
+    exhausted.
     """
     order: list[int] = []
     positions = [0] * len(lanes)
@@ -142,11 +160,13 @@ def _interleave_lanes(lanes: list[list[int]], batch_size: int) -> list[int]:
 
 
 class TileLocalitySampler(Sampler):
-    """A tiled dataset's tiles in bands of contiguous tile rows, sources, bands and tiles within
-    a band each shuffled per epoch; with ``num_workers > 1`` bands are dealt round-robin onto one
-    lane per worker and the lanes interleaved ``batch_size`` tiles at a time. The band height is
-    derived at construction from half the per-reader GDAL cache share over the costliest windowed
-    source's decoded row bytes, and logged.
+    """A tiled dataset's tiles in bands of contiguous tile rows, read in a locality order.
+
+    Sources, bands and tiles within a band are each shuffled per epoch; with ``num_workers > 1``
+    bands are dealt round-robin onto one lane per worker and the lanes interleaved
+    ``batch_size`` tiles at a time. The band height is derived at construction from half the
+    per-reader GDAL cache share over the costliest windowed source's decoded row bytes, and
+    logged.
 
     Requires a dataset exposing ``tile_entries`` (index-ordered ``(stem, (x0, y0, x1, y1))``)
     and ``source_frames`` (per-stem frame facts including ``windowed``), at least one
@@ -160,6 +180,10 @@ class TileLocalitySampler(Sampler):
         num_workers: int | None = None,
         batch_size: int | None = None,
     ) -> None:
+        """Derive the band height and group ``dataset``'s tiles into bands of tile rows.
+
+        Refuses, naming why, every dataset and loader context the class does not admit.
+        """
         tile_entries = getattr(dataset, "tile_entries", None)
         source_frames = getattr(dataset, "source_frames", None)
         if tile_entries is None or source_frames is None:
@@ -259,8 +283,9 @@ class TileLocalitySampler(Sampler):
         self._length = len(tile_entries)
 
     def _draw_bands(self) -> list[list[int]]:
-        """One epoch's globally shuffled band sequence, drawn from the global RNG (like
-        OverSampler): order varies per epoch and is controlled by set_seed().
+        """Return one epoch's globally shuffled band sequence, drawn from the global RNG.
+
+        The order varies per epoch and set_seed() governs it.
         """
         out: list[list[int]] = []
         stems = list(self._bands_by_stem)
@@ -274,6 +299,7 @@ class TileLocalitySampler(Sampler):
         return out
 
     def __iter__(self):
+        """Yield one epoch's tile indices, band by band or interleaved across worker lanes."""
         bands = self._draw_bands()
         if self._lane_count <= 1:
             return iter([idx for band in bands for idx in band])
@@ -286,6 +312,7 @@ class TileLocalitySampler(Sampler):
         return iter(_interleave_lanes(lanes, self._batch_size))
 
     def __len__(self) -> int:
+        """Return the number of tiles the dataset holds."""
         return self._length
 
 
@@ -307,8 +334,9 @@ sampler block."""
 
 
 def sampler_settings(block: SamplerSpec) -> tuple[type, dict]:
-    """The sampler class ``block.name`` names and the block's own values. Refuses
-    (``ValueError``) an unknown name, and by name a value its constructor requires that
+    """Return the sampler class ``block.name`` names and the block's own values.
+
+    Refuses (``ValueError``) an unknown name, and by name a value its constructor requires that
     ``block`` leaves unstated, one it states that the constructor does not take, or one of
     :data:`LOADER_CONTEXT`, which the loader supplies.
     """
@@ -338,12 +366,11 @@ def build_sampler(
     num_workers: int | None = None,
     batch_size: int | None = None,
 ) -> Sampler:
-    """The sampler ``block`` states (:func:`sampler_settings`) over ``dataset``.
+    """Build the sampler ``block`` states (:func:`sampler_settings`) over ``dataset``.
 
     ``num_workers``/``batch_size`` are the loader context (:data:`LOADER_CONTEXT`), handed to a
-    sampler whose constructor takes them; a sampler that needs one and was built without it
-    refuses, naming what to pass. A sampler whose constructor takes neither is built without
-    them.
+    sampler whose constructor takes them. A sampler whose constructor takes neither is built
+    without them.
     """
     from tcip_mcp.pipelines.model_build import keyword_parameters
 

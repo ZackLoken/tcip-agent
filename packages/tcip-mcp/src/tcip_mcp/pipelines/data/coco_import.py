@@ -1,6 +1,4 @@
-"""An external dataset-level COCO document, converted into the dataset's per-image label
-documents.
-"""
+"""An external dataset-level COCO document, converted into per-image label documents."""
 
 from __future__ import annotations
 
@@ -9,7 +7,10 @@ from typing import Any
 
 
 def _rle_mask(segmentation: dict) -> Any:
-    """A COCO run-length ``segmentation``, compressed or uncompressed ``counts``, as a mask."""
+    """Decode a COCO run-length ``segmentation``, compressed or uncompressed, as a mask.
+
+    A segmentation that does not decode refuses (``ValueError``).
+    """
     from pycocotools import mask as mask_utils
 
     try:
@@ -28,10 +29,11 @@ def _rle_mask(segmentation: dict) -> Any:
 
 
 def _read_coco(document: Path) -> tuple[dict, str]:
-    """The external COCO file's parsed object and the digest of the one read of its bytes
-    (:func:`tcip_store.read_blob_versioned`'s version). A file that is absent, not UTF-8 (a
-    leading byte-order mark accepted), not JSON or not an object refuses (``ValueError``) naming
-    it.
+    """Return the external COCO file's parsed object and the digest of the one read of its bytes.
+
+    The digest is :func:`tcip_store.read_blob_versioned`'s version. A file that is absent, not
+    UTF-8 (a leading byte-order mark accepted), not JSON or not an object refuses
+    (``ValueError``) naming it.
     """
     import json
 
@@ -61,12 +63,14 @@ def import_coco_document(
     rationale: str,
     project: Path,
 ) -> dict:
-    """Write one per-image label document for every image ``document`` lists, keyed under the
-    capture ``date`` of ``dataset_root`` (both :func:`~tcip_mcp.registry_paths.located` against
-    ``project``), and record the import on the dataset's audit log with the document's path, the
-    digest of the one read of its bytes, the ``vertex_spacing`` a run-length mask's rings are
-    simplified at and the ``rationale`` for it, in one commit with the documents: an import that
-    writes nothing leaves no line.
+    """Write one per-image label document for every image ``document`` lists, and audit it.
+
+    The documents are keyed under the capture ``date`` of ``dataset_root`` (both
+    :func:`~tcip_mcp.registry_paths.located` against ``project``), and the import is recorded on
+    the dataset's audit log with the document's path, the digest of the one read of its bytes,
+    the ``vertex_spacing`` a run-length mask's rings are simplified at and the ``rationale`` for
+    it, in one commit with the documents: an import that writes nothing leaves no line. The
+    answer is the audited arguments.
 
     ``date`` names the capture ``images/<date>/``; one :func:`~tcip_mcp.dataset_layout.list_dates`
     does not list refuses. Each declared category must be a

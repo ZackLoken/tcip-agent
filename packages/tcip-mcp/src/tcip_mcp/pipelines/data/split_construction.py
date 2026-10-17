@@ -1,8 +1,9 @@
 """Constructing training splits from a data config, beside ``splits.py``.
 
 Resolves a run once at launch (:func:`resolve_run`): its data section, the partition its record
-holds (a bound selection, an auto group-aware draw, or a single-source spatial-strip split) and
-its objective, and builds ``(train_ds, val_ds)`` from that record (:func:`recorded_datasets`).
+holds (a bound selection, an auto group-aware draw, or a single-source spatial-strip split), its
+geometry and its trait revision, and builds ``(train_ds, val_ds)`` from that record
+(:func:`recorded_datasets`).
 """
 
 from __future__ import annotations
@@ -39,10 +40,12 @@ SPATIAL_SIDE_ORDER = ("train", "val", "holdout", "calibration")
 
 
 def data_dir_issues(data: DataSpec) -> list[str]:
-    """Every objection to the data locations an unbound run's producer reads: ``data.images_dir``
-    missing or naming a path that does not exist, and a stated ``data.labels_dir`` that is not a
-    mask directory or a table (:func:`~tcip_mcp.pipelines.data.label_queries.ground_truth_shape`).
-    Empty for a config bound to a selection (:func:`selection_compatibility`).
+    """Return every objection to the data locations an unbound run's producer reads.
+
+    The objections are ``data.images_dir`` missing or naming a path that does not exist, and a
+    stated ``data.labels_dir`` that is not a mask directory or a table
+    (:func:`~tcip_mcp.pipelines.data.label_queries.ground_truth_shape`). Empty for a config bound
+    to a selection.
     """
     from tcip_mcp.pipelines.data.label_queries import ground_truth_shape
     from tcip_mcp.pipelines.schemas import BoundSplit
@@ -66,10 +69,12 @@ def selection_compatibility(
     split: BoundSplit,
     selection: Selection | None,
 ) -> list[str]:
-    """Every objection binding a run's data block ``data`` through its bound ``split`` to
-    ``selection`` (``None`` when it would not read) raises: a stated ``data.labels_dir`` (each
-    sample names its own ground truth), and, with a selection in hand, a stated ``data.scope``
-    (the selection records its own class space) and an empty train or val side.
+    """Return every objection binding ``data`` through its bound ``split`` to ``selection`` raises.
+
+    ``data`` is a run's data block and ``selection`` is ``None`` when it would not read. The
+    objections are a stated ``data.labels_dir`` (each sample names its own ground truth), and,
+    with a selection in hand, a stated ``data.scope`` (the selection records its own class
+    space) and an empty train or val side.
     """
     issues: list[str] = []
     if data.labels_dir is not None:
@@ -96,10 +101,12 @@ def selection_compatibility(
 
 
 class Membership(NamedTuple):
-    """Every member the places of one draw admit, keyed by its identity (``<capture>/<stem>``),
-    each a sample on the ``train`` side under its group key and carrying the digest its admission
-    read; the class space they were admitted in, the recorded grouping policy and the admissions'
-    summed tallies.
+    """Every member the places of one draw admit, with their scope, grouping and tallies.
+
+    Each member is keyed by its identity (``<capture>/<stem>``), a sample on the ``train`` side
+    under its group key and carrying the digest its admission read; beside them sit the class
+    space they were admitted in, the recorded grouping policy and the admissions' summed
+    tallies.
     """
 
     samples: dict[str, Sample]
@@ -114,12 +121,13 @@ def admitted_membership(
     scope: ClassScope,
     grouping: str | Mapping[str, str],
 ) -> Membership:
-    """Admit each place ``(name, images_dir, ground_truth)``, ``ground_truth`` ``None`` for the
-    images' own label documents
-    (:func:`~tcip_mcp.pipelines.data.label_queries.admit`, under ``scope``, read from the images'
-    registry when it carries no attributes yet,
-    :func:`~tcip_mcp.pipelines.data.label_queries.registry_scope`) and group every admitted member
-    (:func:`~tcip_mcp.pipelines.data.splits.resolve_group_key_fn` over the identities).
+    """Admit each place ``(name, images_dir, ground_truth)`` and group every admitted member.
+
+    ``ground_truth`` is ``None`` for the images' own label documents. Each place is admitted by
+    :func:`~tcip_mcp.pipelines.data.label_queries.admit` under ``scope``, read from the images'
+    registry when it carries no attributes yet
+    (:func:`~tcip_mcp.pipelines.data.label_queries.registry_scope`), and the members are grouped
+    by :func:`~tcip_mcp.pipelines.data.splits.resolve_group_key_fn` over the identities.
 
     Raises ``ValueError`` when nothing is admitted (the admission's own reason, naming every
     place searched and the tallies) and for a ``grouping`` that does not cover the members;
@@ -186,10 +194,11 @@ def admitted_membership(
 
 
 def run_membership(data: DataSpec, split: DrawnSplit) -> Membership:
-    """:func:`admitted_membership` over a run's data block naming its locations
-    (:func:`data_dir_issues`): its one place (``images_dir`` and the ``labels_dir`` a mask or
-    table run names), under the ``scope`` it states (the empty one when it states none), grouped
-    by its drawn ``split``'s grouping.
+    """Return :func:`admitted_membership` over a run's data block naming its locations.
+
+    The locations (:func:`data_dir_issues`) are its one place (``images_dir`` and the
+    ``labels_dir`` a mask or table run names), admitted under the ``scope`` it states (the empty
+    one when it states none) and grouped by its drawn ``split``'s grouping.
     """
     from tcip_mcp.pipelines.data.selection import ClassScope
 
@@ -202,9 +211,11 @@ def run_membership(data: DataSpec, split: DrawnSplit) -> Membership:
 
 
 def check_shares(sides: Mapping[str, float]) -> dict[str, float]:
-    """``sides``, the share each side but ``train`` is drawn at, with ``train`` the remainder; a
-    side stated at zero is not drawn. Refuses (``ValueError``) a side outside the selection's
-    sides or ``train`` itself, a share outside ``[0, 1)``, and shares leaving ``train`` nothing.
+    """Return the share each side is drawn at, ``train`` taking the remainder of ``sides``.
+
+    ``sides`` is the share each side but ``train`` is drawn at; a side stated at zero is not
+    drawn. Refuses (``ValueError``) a side outside the selection's sides or ``train`` itself, a
+    share outside ``[0, 1)``, and shares leaving ``train`` nothing.
     """
     import math
 
@@ -227,8 +238,9 @@ def check_shares(sides: Mapping[str, float]) -> dict[str, float]:
 
 
 def stated_shares(split: DrawnSplit) -> dict[str, float]:
-    """The shares the drawn ``split`` states, each side's ``<side>_ratio``
-    (:func:`check_shares`, ``train`` the remainder and a side at zero not drawn).
+    """Return the shares the drawn ``split`` states, each side's ``<side>_ratio``.
+
+    They are :func:`check_shares`' answer, ``train`` the remainder and a side at zero not drawn.
     """
     from tcip_mcp.pipelines.data.selection import SIDES
 
@@ -245,11 +257,11 @@ def draw_sides(
     seed: int,
     stratify: bool,
 ) -> tuple[dict[str, Sample], dict[str, int]]:
-    """The one draw: ``samples``, keyed by member identity, onto every side ``ratios`` names
-    (:func:`check_shares`'s answer, ``train`` the remainder), each group (a sample's own
-    ``group``) kept whole
-    (:func:`~tcip_mcp.pipelines.data.splits.group_balanced_split`) and, with ``stratify``,
-    balanced by each member's foreground count
+    """Draw ``samples``, keyed by member identity, onto every side ``ratios`` names.
+
+    ``ratios`` is :func:`check_shares`' answer, ``train`` the remainder. Each group (a sample's
+    own ``group``) is kept whole (:func:`~tcip_mcp.pipelines.data.splits.group_balanced_split`)
+    and, with ``stratify``, balanced by each member's foreground count
     (:func:`~tcip_mcp.pipelines.data.label_queries.foreground_counts` under ``scope``) at both
     stages: the reference share (``calibration`` plus ``holdout``) is drawn as one side, then cut
     between the two at the same seed.
@@ -333,7 +345,7 @@ def draw_sides(
 
 
 def split_seed(split: SplitSpec) -> int:
-    """The seed ``split`` draws at; a bound split stating none refuses (``ValueError``)."""
+    """Return the seed ``split`` draws at; a bound split stating none refuses (``ValueError``)."""
     if split.seed is None:
         raise ValueError(
             "this bound data.split states no seed to redraw its selection at: the "
@@ -345,11 +357,12 @@ def split_seed(split: SplitSpec) -> int:
 def dataset_identity(
     data: DataSpec, samples: Iterable[Sample] = ()
 ) -> tuple[str | None, str | None]:
-    """``(dataset_id, dataset_fingerprint)`` for the run's dataset: the fingerprint recomputed
-    over ``samples``, the run's admitted partition (:func:`dataset_fingerprint`), the id from the
-    dataset's identity record, ``None`` for a dataset never registered. ``(None, None)`` for a run
-    whose images sit under no dataset root. A fingerprint that cannot be read and an identity
-    record that does not decode raise.
+    """Return ``(dataset_id, dataset_fingerprint)`` for the run's dataset.
+
+    The fingerprint is recomputed over ``samples``, the run's admitted partition
+    (:func:`dataset_fingerprint`), and the id read from the dataset's identity record, ``None``
+    for a dataset never registered. ``(None, None)`` for a run whose images sit under no dataset
+    root. A fingerprint that cannot be read and an identity record that does not decode raise.
     """
     images_dir = data.images_dir
     if not images_dir:
@@ -368,9 +381,10 @@ def dataset_identity(
 
 
 def raster_identity(image: Path | BandGroupRef) -> dict:
-    """The logical ``image``'s :func:`~tcip_mcp.pipelines.raster_source.raster_content_identity`
-    over its own probed band count, the one a split records its mosaic by. A source that will not
-    probe raises.
+    """Return the logical ``image``'s content identity over its own probed band count.
+
+    The identity is :func:`~tcip_mcp.pipelines.raster_source.raster_content_identity`'s. A
+    source that will not probe raises.
     """
     import dataclasses
 
@@ -387,12 +401,14 @@ def spatial_single_source_split(
     data: DataSpec,
     shares: Mapping[str, float],
 ) -> SpatialManifest:
-    """Derive the run's requested ``shares`` (:func:`stated_shares`: ``train``, ``val`` and each
-    reserved side stated above zero) over one source's own tile lattice,
-    by disjoint pixel strips (:func:`~tcip_mcp.pipelines.data.splits.spatial_strip_split`), and
-    return it as the :class:`~tcip_mcp.pipelines.schemas.SpatialManifest` a run's partition
-    records; the reserved regions record only their geometry and kept-tile count. It is drawn at
-    the lattice and buffer of the resolved block ``data``'s tiling (:func:`_with_lattice`).
+    """Derive the run's requested ``shares`` over one source's own tile lattice, as a manifest.
+
+    The shares are :func:`stated_shares`' (``train``, ``val`` and each reserved side stated
+    above zero), drawn by disjoint pixel strips
+    (:func:`~tcip_mcp.pipelines.data.splits.spatial_strip_split`) and returned as the
+    :class:`~tcip_mcp.pipelines.schemas.SpatialManifest` a run's partition records; the reserved
+    regions record only their geometry and kept-tile count. It is drawn at the lattice and
+    buffer of the resolved block ``data``'s tiling (:func:`_with_lattice`).
 
     ``sample`` is the ``task`` run's own single admitted sample, which every side's view here is
     built over (:func:`_block_loader`) at ``data``'s class space and sizes (:func:`run_sizes`).
@@ -511,9 +527,10 @@ def _block_loader(
     transforms: Any,
     region: list | None = None,
 ) -> Any:
-    """The platform's ``task`` loader over ``samples`` at ``transforms`` under the resolved block
-    ``data``'s class space, sizes and tiling, its tiles kept to ``region``'s rects when one is
-    given.
+    """Build the platform's ``task`` loader over ``samples`` at ``transforms``.
+
+    The loader is built under the resolved block ``data``'s class space, sizes and tiling, its
+    tiles kept to ``region``'s rects when one is given.
     """
     from tcip_mcp.pipelines.data.datasets import build_dataset, stated_sizes
 
@@ -541,10 +558,11 @@ def resolved_tiling(
     scope: ClassScope,
     sizes: Mapping[str, int],
 ) -> TilingSpec | None:
-    """The tiling block a ``task`` loader over ``samples`` (at ``scope`` and ``sizes``) is built
-    at: ``None`` when it does not tile, else ``tiling`` with its edge and overlap, the stated
-    ones or the ones ``samples``' objects derive (``derivations.derive_tile_geometry``, whose
-    refusals propagate).
+    """Return the tiling block a ``task`` loader over ``samples`` is built at.
+
+    The loader is at ``scope`` and ``sizes``. The block is ``None`` when it does not tile, else
+    ``tiling`` with its edge and overlap, the stated ones or the ones ``samples``' objects
+    derive (``derivations.derive_tile_geometry``, whose refusals propagate).
     """
     from tcip_mcp.pipelines.data.datasets import build_dataset
     from tcip_mcp.pipelines.derivations import derive_tile_geometry
@@ -575,10 +593,11 @@ def predictor_dataset(
     predictor: Any,
     tiling: TilingSpec | None,
 ) -> Any:
-    """The ``task`` loader over ``samples`` under ``scope`` a predictor scores: at the band count
-    ``predictor`` reads its sources at (``predictor.in_chans``) and the tiling block
-    :func:`resolved_tiling` resolves ``tiling`` to over them, an absent block untiled. The sizing
-    and the resolution refuse as they do.
+    """Build the ``task`` loader over ``samples`` under ``scope`` that ``predictor`` scores.
+
+    The loader is at the band count ``predictor`` reads its sources at (``predictor.in_chans``)
+    and the tiling block :func:`resolved_tiling` resolves ``tiling`` to over them, an absent
+    block untiled. The sizing and the resolution refuse as they do.
     """
     from tcip_mcp.pipelines.data.datasets import build_dataset, resolve_sizes
 
@@ -595,9 +614,10 @@ def predictor_dataset(
 def _with_lattice(
     task: str, data: DataSpec, samples: Sequence[Sample]
 ) -> DataSpec:
-    """``data`` with its tiling block resolved over ``samples`` (:func:`resolved_tiling`);
-    ``data`` unchanged, its tiling ``None``, for a run whose loaders a bespoke builder makes,
-    the platform stating nothing of a dataset it does not build.
+    """Return ``data`` with its tiling block resolved over ``samples`` (:func:`resolved_tiling`).
+
+    ``data`` comes back unchanged, its tiling ``None``, for a run whose loaders a bespoke builder
+    makes, the platform stating nothing of a dataset it does not build.
     """
     from tcip_mcp.pipelines.data.datasets import stated_sizes
 
@@ -619,11 +639,12 @@ def _with_lattice(
 def redrawn_selection(
     selection: Selection, selection_dir: str, seed: int
 ) -> Selection:
-    """``selection`` with train and val redrawn fresh over its own train-plus-val samples at
-    ``seed`` (:func:`draw_sides`, over each sample's recorded group key, at the val share the
-    selection already delivered, stratified as the selection records its own draw was), the
-    reference sides untouched. The draw's refusals
-    raise, naming ``selection_dir``. Each redrawn sample keeps the read it carries
+    """Return ``selection`` with train and val redrawn over its own train-plus-val samples.
+
+    The draw is at ``seed`` (:func:`draw_sides`, over each sample's recorded group key, at the
+    val share the selection already delivered, stratified as the selection records its own draw
+    was), the reference sides untouched. The draw's refusals raise, naming ``selection_dir``.
+    Each redrawn sample keeps the read it carries
     (:func:`~tcip_mcp.pipelines.data.label_queries.acquired`).
     """
     from tcip_mcp.pipelines.data.label_queries import acquired
@@ -659,9 +680,10 @@ def _partition_record(
     selection: dict | None,
     spatial: SpatialManifest | None,
 ) -> dict:
-    """The partition a run's resolved record holds: the draw's ``seed`` (``None`` for a route
-    that drew nothing) and resolved ``group_by``, every sample the run bound on the side it
-    landed on in its one recorded shape
+    """Return the partition a run's resolved record holds.
+
+    It holds the draw's ``seed`` (``None`` for a route that drew nothing) and resolved
+    ``group_by``, every sample the run bound on the side it landed on in its one recorded shape
     (:func:`~tcip_mcp.pipelines.data.selection.sample_document`), with the ground-truth digest it
     carries, ``selection``, the selection a bound run bound (its directory, its digest and
     whether the run redrew inside it), ``None`` for a run that drew its own, and ``spatial``, a
@@ -681,8 +703,9 @@ def _partition_record(
 
 
 def partition_samples(partition: Mapping[str, Any]) -> list[Sample]:
-    """A resolved partition's samples read back
-    (:func:`~tcip_mcp.pipelines.data.selection.read_sample`).
+    """Read a resolved partition's samples back.
+
+    Each is read by :func:`~tcip_mcp.pipelines.data.selection.read_sample`.
     """
     from tcip_mcp.pipelines.data.selection import read_sample
 
@@ -695,8 +718,9 @@ def partition_samples(partition: Mapping[str, Any]) -> list[Sample]:
 def partition_spatial(
     partition: Mapping[str, Any],
 ) -> SpatialManifest | None:
-    """A resolved partition's within-image split read back, validated; ``None`` for a partition
-    that drew none.
+    """Read a resolved partition's within-image split back, validated.
+
+    The answer is ``None`` for a partition that drew none.
     """
     from tcip_mcp.pipelines.schemas import SpatialManifest
 
@@ -710,8 +734,9 @@ def run_sizes(
     scope: ClassScope,
     samples: Sequence[Sample],
 ) -> DataSpec:
-    """``data`` with what a run resolved over ``samples`` recorded on it: the class space
-    ``scope`` it was admitted under, and its sizes
+    """Return ``data`` with what a run resolved over ``samples`` recorded on it.
+
+    That is the class space ``scope`` it was admitted under, and its sizes
     (:func:`~tcip_mcp.pipelines.data.datasets.resolve_sizes` over the ones ``data`` states), each
     by its own name.
     """
@@ -744,12 +769,14 @@ def _sample_loaders(
     selection: dict | None = None,
     spatial: SpatialManifest | None = None,
 ):
-    """``(train_ds, val_ds, partition, data)``: the partition (:func:`_partition_record` over
-    ``recorded`` at ``seed``, ``group_by``, the ``selection`` a bound run bound and a
-    within-image run's ``spatial`` split) and :func:`recorded_datasets` over it, the resolved
-    block ``data`` (its tiling already resolved, :func:`_with_lattice`) and the run's ``layout``.
-    ``recorded`` is the membership the partition holds: the two sides for a drawn run, and the
-    selection's held-out samples besides for a bound one.
+    """Return ``(train_ds, val_ds, partition, data)`` over the ``recorded`` membership.
+
+    The partition is :func:`_partition_record` over ``recorded`` at ``seed``, ``group_by``, the
+    ``selection`` a bound run bound and a within-image run's ``spatial`` split; the datasets are
+    :func:`recorded_datasets` over it, the resolved block ``data`` (its tiling already resolved,
+    :func:`_with_lattice`) and the run's ``layout``. ``recorded`` is the membership the
+    partition holds: the two sides for a drawn run, and the selection's held-out samples besides
+    for a bound one.
     """
     partition = _partition_record(
         recorded,
@@ -774,16 +801,17 @@ def _drawn_split(
     transforms,
     tallies_out: dict[str, int] | None,
 ):
-    """``(train_ds, val_ds, partition, resolved)`` for a run that draws its own ``split`` over
-    ``data``'s ground truth: its one place's membership (:func:`admitted_membership`, its tallies
-    copied into ``tallies_out``), then train and val drawn at the split's shares
-    (:func:`stated_shares`) through :func:`draw_sides`, or every stated side over a single tiled
-    source's own tile lattice (:func:`spatial_single_source_split`). A split stating every share
-    zero trains on every member with no validation. ``resolved`` is ``data`` with its class space
+    """Return ``(train_ds, val_ds, partition, resolved)`` for a run drawing its own ``split``.
+
+    The draw is over ``data``'s ground truth: its one place's membership
+    (:func:`admitted_membership`, its tallies copied into ``tallies_out``), then train and val
+    drawn at the split's shares (:func:`stated_shares`) through :func:`draw_sides`, or every
+    stated side over a single tiled source's own tile lattice
+    (:func:`spatial_single_source_split`). A split stating every share zero trains on every
+    member with no validation. ``resolved`` is ``data`` with its class space
     and sizes recorded, and a within-image split is the partition's. Raises when a single source
     cannot hold the sides requested out, when a run over several sources states a reserved
-    share (a reference is the reserved strips of one tiled source, or a selection
-    ``draw_splits`` draws), and with the membership's and the draw's own refusals.
+    share, and with the membership's and the draw's own refusals.
     """
     membership = run_membership(data, split)
     if tallies_out is not None:
@@ -872,9 +900,11 @@ def auto_train_val(
     *,
     tallies_out: dict[str, int] | None = None,
 ):
-    """Build ``(train_ds, val_ds, partition, resolved)`` for a run of ``project`` over its data
-    block ``data``, deriving a leakage-free val split, a bespoke dataset builder imported from
-    the run's ``layout``; ``resolved`` is ``data`` with its ``scope`` and sizes recorded on it.
+    """Build ``(train_ds, val_ds, partition, resolved)`` for a run of ``project`` over ``data``.
+
+    ``data`` is the run's data block; the val split is derived leakage-free, a bespoke dataset
+    builder imported from the run's ``layout``; ``resolved`` is ``data`` with its ``scope`` and
+    sizes recorded on it.
 
     ``partition`` is :func:`_partition_record`'s; a within-image spatial split's holds its one
     sample and its ``spatial`` regions. ``tallies_out`` receives a drawn run's admission's
@@ -1000,9 +1030,10 @@ def auto_train_val(
 
 
 class ResolvedRun(NamedTuple):
-    """A run resolved once, at launch: the datasets built at it, ``spec``, the validated launch
-    config it was resolved from, and ``data``, ``geometry``, ``partition`` and
-    ``trait_revision``, what it resolved.
+    """A run resolved once, at launch.
+
+    It carries the datasets built at it, ``spec``, the validated launch config it was resolved
+    from, and ``data``, ``geometry``, ``partition`` and ``trait_revision``, what it resolved.
     """
 
     train_ds: Any
@@ -1020,8 +1051,10 @@ class ResolvedRun(NamedTuple):
 
     @property
     def record(self) -> dict:
-        """What the run's ``run.json`` holds of this resolution: ``data`` as it records itself,
-        ``geometry``, ``partition`` and ``trait_revision``.
+        """This resolution's record.
+
+        That is ``data`` as it records itself, ``geometry``, ``partition`` and
+        ``trait_revision``.
         """
         from tcip_mcp.pipelines.schemas import revision_record
 
@@ -1041,13 +1074,14 @@ def resolve_run(
     trait_revision: TraitRevisionRef | None = None,
     tallies_out: dict[str, int] | None = None,
 ) -> ResolvedRun:
-    """Resolve the validated config ``spec`` (``schemas.train_config``) once for a run of
-    ``project`` whose declared files ``layout`` lays out (``model_build.SourceLayout``): its data
-    block through :func:`auto_train_val`, the geometry its train dataset serves
+    """Resolve the validated config ``spec`` (``schemas.train_config``) once for a ``project`` run.
+
+    ``layout`` lays out the run's declared files (``model_build.SourceLayout``). The resolution
+    covers its data block through :func:`auto_train_val`, the geometry its train dataset serves
     (:func:`~tcip_mcp.pipelines.training.generic_trainer.effective_data_geometry`), and its
     trait revision (:func:`~tcip_mcp.pipelines.training.generic_trainer.resolve_trait_revision`
-    for a run with or without a val side), or ``trait_revision`` as given, a sweep's own for its
-    trials. ``tallies_out`` is :func:`auto_train_val`'s. Every refusal of the resolution raises.
+    for a run with or without a val side), or ``trait_revision`` as given. ``tallies_out`` is
+    :func:`auto_train_val`'s. Every refusal of the resolution raises.
     """
     from tcip_mcp.pipelines.training.generic_trainer import (
         effective_data_geometry,
@@ -1082,10 +1116,11 @@ def run_loader(
     layout: SourceLayout,
     spatial: SpatialManifest | None = None,
 ) -> Any:
-    """A callable taking ``samples`` and ``transforms`` that builds a dataset of ``task`` over
-    that sample list under the resolved block ``data``'s class space, by the builder its dataset
-    source names (imported from the run's ``layout``) or else by the platform's factory at the
-    block's sizes and tiling.
+    """Return a callable taking ``samples`` and ``transforms`` that builds a ``task`` dataset.
+
+    The dataset is over that sample list under the resolved block ``data``'s class space, built
+    by the builder its dataset source names (imported from the run's ``layout``) or else by the
+    platform's factory at the block's sizes and tiling.
 
     Over a within-image split ``spatial`` (:func:`partition_spatial`) the callable also takes
     ``side`` (``"train"`` unless named) and builds the run's one sample's tiles kept to that
@@ -1151,9 +1186,11 @@ def recorded_datasets(
     transforms,
     layout: SourceLayout,
 ) -> tuple[Any, Any]:
-    """``(train_ds, val_ds)`` built from what a run resolved, resolving nothing again, by
-    :func:`run_loader`: the train and val ``samples`` of its partition, or for a within-image
-    split ``spatial`` (:func:`partition_spatial`) its one sample's train and val sides.
+    """Build ``(train_ds, val_ds)`` from what a run resolved, resolving nothing again.
+
+    The builder is :func:`run_loader`, over the train and val ``samples`` of its partition, or
+    for a within-image split ``spatial`` (:func:`partition_spatial`) its one sample's train and
+    val sides.
     ``val_ds`` is ``None`` for a run whose partition holds no val side. The samples' ground truth
     is read once for both loaders (:func:`~tcip_mcp.pipelines.data.label_queries.acquired`).
     """

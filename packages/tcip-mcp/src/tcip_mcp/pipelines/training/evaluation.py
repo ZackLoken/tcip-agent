@@ -1,6 +1,7 @@
-"""Task-aware evaluation metrics + composite selection objective:
-* detection / instance_seg counts and average precision from the platform's one matcher
-(:mod:`tcip_annotation.matching`), by box or, for instance segmentation, by mask;
+"""Task-aware evaluation metrics and the composite selection objective.
+
+* detection / instance_seg counts and average precision from :mod:`tcip_annotation.matching`'s
+matcher, by box or, for instance segmentation, by mask;
 * in-house scalar metrics for classification / ordinal / regression;
 * the composite selection objective (lower = better);
 * a task-agnostic two-pass ``evaluate()``.
@@ -35,14 +36,14 @@ VAL_LOSS_KEY = VAL_METRIC_PREFIX + "loss"
 
 
 def _rounded(value):
-    """One metric at the reported precision, a non-finite or non-numeric value unchanged."""
+    """Round a finite numeric metric, leaving other values unchanged."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return value
     return round(value, 6) if math.isfinite(value) else value
 
 
 def _reported_metrics(values: dict) -> dict:
-    """One task's metrics as the result record carries them.
+    """Return the task's metrics in their stored form.
 
     Scalars are rounded and a non-finite one becomes null beside a field naming its state;
     the per-class mappings some tasks return, which already carry None for an absent class,
@@ -59,9 +60,9 @@ def _reported_metrics(values: dict) -> dict:
 def compute_composite_objective(
     val_loss: float, f1: float, map50: float, w: ScoreWeights
 ) -> float | None:
-    """Lower-is-better selection/tuning score blending loss, F1 and mAP50, or ``None`` when
-    the epoch has no useful score.
+    """Return the lower-is-better score blending loss, F1 and mAP50, or ``None``.
 
+    ``None`` means the epoch has no useful score. The score is
     ``w.loss*loss + w.f1*(1-f1)*10 + w.map50*(1-map50)*10``, ``w`` the run's stated
     ``evaluation.score_weights``. A non-positive or non-finite loss, or both quality terms below
     0.01, answers ``None``.
@@ -81,7 +82,7 @@ def compute_composite_objective(
 
 
 def precision_recall_f1(tp: int, fp: int, fn: int) -> dict[str, float]:
-    """Precision, recall and F1 from counts: each ``0.0`` when its denominator is empty."""
+    """Return precision, recall and F1, using zero for empty denominators."""
     precision = tp / (tp + fp) if tp + fp else 0.0
     recall = tp / (tp + fn) if tp + fn else 0.0
     f1 = (
@@ -97,8 +98,9 @@ _AP_RECALL_POINTS = 101
 
 
 def iou_criterion(iou_threshold: float, *, by_mask: bool) -> dict:
-    """The matcher's IoU criterion at ``iou_threshold``: over each record's ``rings`` for a mask
-    match (``by_mask``), else over its box.
+    """Return the matcher's IoU criterion at ``iou_threshold``.
+
+    The IoU is over each record's ``rings`` for a mask match (``by_mask``), else over its box.
     """
     return {
         "kind": "mask_iou_match" if by_mask else "iou_match",
@@ -114,9 +116,10 @@ def matched(
     policy: str = "score_first",
     held: dict | None = None,
 ) -> list[dict[int, Any]]:
-    """Each per-image record's class-by-class matching under ``criterion`` at ``conf``
-    (:func:`~tcip_annotation.matching.class_matchings`, indices into the record's ``gt`` and
-    ``dt``), each taken from ``held`` where the same inputs were already matched.
+    """Return each per-image record's class-by-class matching under ``criterion`` at ``conf``.
+
+    Each matching is :func:`~tcip_annotation.matching.class_matchings`' (indices into the
+    record's ``gt`` and ``dt``), taken from ``held`` where the same inputs were already matched.
     """
     from tcip_annotation.matching import class_matchings
 
@@ -136,8 +139,10 @@ def matched(
 def average_precision(
     per_image: list[dict], criterion: dict, *, held: dict | None = None
 ) -> float:
-    """The area under the precision-recall curve of every detection in ``per_image`` matched
-    under ``criterion`` (:func:`matched`, every detection), averaged over the classes the ground
+    """Return the average precision of every detection in ``per_image`` under ``criterion``.
+
+    It is the area under the precision-recall curve of the detections matched under
+    ``criterion`` (:func:`matched`, every detection), averaged over the classes the ground
     truth's objects carry: per class, detections ranked by score across images, one a crowd
     region ignores counting neither way, precision made monotone from the right and read at
     :data:`_AP_RECALL_POINTS` recall points. ``0.0`` for a reference holding no object.
@@ -185,9 +190,10 @@ def average_precision(
 def gt_objects(
     rec: dict, *, crowd: bool = False, class_id: int | None = None
 ) -> list[dict]:
-    """A per-image record's ground-truth objects of ``class_id`` (every class for ``None``): every
-    ``gt`` entry but a crowd region (:func:`~tcip_annotation.matching.objects_of`), which is never
-    one object in a count, a size or a spacing; with ``crowd``, the crowd regions instead.
+    """Return a per-image record's ground-truth objects of ``class_id``, every class for ``None``.
+
+    They are every ``gt`` entry but a crowd region (:func:`~tcip_annotation.matching.objects_of`);
+    with ``crowd``, the crowd regions instead.
     """
     from tcip_annotation.matching import objects_of
 
@@ -200,15 +206,17 @@ def gt_objects(
 
 
 def _in_class(record: dict, class_id: int | None) -> bool:
-    """Whether an evaluation record is of ``class_id``; every record is, for ``None``."""
+    """Return whether the record matches ``class_id``, accepting every class for ``None``."""
     return class_id is None or record["category_id"] == class_id
 
 
 def gt_class_avg_size(
     per_image: list[dict], class_id: int | None = None
 ) -> float:
-    """Average characteristic size (:func:`~tcip_annotation.matching.box_sizes`) of the ground
-    truth's objects of ``class_id``, every class for ``None``; ``0.0`` for none.
+    """Return the average characteristic size of the ground truth's objects of ``class_id``.
+
+    The size is :func:`~tcip_annotation.matching.box_sizes`'; every class counts for ``None``,
+    and the answer is ``0.0`` for no object.
     """
     from tcip_annotation.matching import box_sizes, xywh_corners
 
@@ -221,7 +229,7 @@ def gt_class_avg_size(
 
 
 def mean_of_present_counts(counts: Iterable[int]) -> float:
-    """Mean of the positive entries in ``counts``; ``0.0`` when none is positive."""
+    """Return the mean positive count, or zero when none is positive."""
     present = [c for c in counts if c > 0]
     return float(np.mean(present)) if present else 0.0
 
@@ -229,8 +237,10 @@ def mean_of_present_counts(counts: Iterable[int]) -> float:
 def gt_class_typical_count(
     per_image: list[dict], class_id: int | None = None
 ) -> float:
-    """Mean ground-truth count of ``class_id`` (all classes pooled when ``None``) over the images
-    holding any, independent of detections and confidence; ``0.0`` when no image holds one.
+    """Return the mean ground-truth count of ``class_id`` over the images holding any.
+
+    All classes pool when ``class_id`` is ``None``; the count is independent of detections and
+    confidence, and ``0.0`` when no image holds one.
     """
     counts = [len(gt_objects(rec, class_id=class_id)) for rec in per_image]
     return mean_of_present_counts(counts)
@@ -239,10 +249,11 @@ def gt_class_typical_count(
 def localization_frac(
     trait: TraitEntry, boxes_per_image: list[list[list[float]]]
 ) -> tuple[float, str]:
-    """The center-match tolerance, as a fraction of the average object size, and its source: the
-    ground truth's own nearest-neighbor spacing (``boxes_per_image`` one list of xywh boxes per
-    image), else, when no two same-class objects sit close enough to derive it, the trait
-    revision's stated ``localization_tolerance_frac``.
+    """Return the center-match tolerance, as a fraction of average object size, and its source.
+
+    The tolerance is the ground truth's own nearest-neighbor spacing (``boxes_per_image`` one
+    list of xywh boxes per image), else, when no two same-class objects sit close enough to
+    derive it, the trait revision's stated ``localization_tolerance_frac``.
     """
     from tcip_mcp.pipelines import derivations
 
@@ -256,9 +267,10 @@ def localization_frac(
 
 
 def comparability_criterion(iou_threshold: float, *, by_mask: bool) -> dict:
-    """The criterion that governs where no trait does, in :func:`resolve_match_criterion`'s
-    shape: IoU matching at ``iou_threshold`` (:func:`iou_criterion`), the comparability
-    convention.
+    """Return the criterion that governs where no trait does.
+
+    It is in :func:`resolve_match_criterion`'s shape: IoU matching at ``iou_threshold``
+    (:func:`iou_criterion`), the comparability convention.
     """
     return {
         **iou_criterion(iou_threshold, by_mask=by_mask),
@@ -274,14 +286,15 @@ def resolve_match_criterion(
     class_id: int | None = None,
     by_mask: bool = False,
 ) -> dict:
-    """The localization criterion that governs a trait's phenotype count and model selection, as
-    ``{kind, tolerance_frac and tolerance | iou_threshold, derived_from, trait}``, resolved once
-    over the reference ``per_image`` and carried whole to every count and match over it.
+    """Resolve the localization criterion governing a trait's phenotype count and selection.
+
+    The criterion is ``{kind, tolerance_frac and tolerance | iou_threshold, derived_from,
+    trait}``, resolved once over the reference ``per_image``.
 
     The trait's stated ``localization`` governs, an unauthored one refusing
     (:class:`~tcip_mcp.traits.UnauthoredFieldError`): a center match's tolerance is a
-    fraction of the average object size (:func:`localization_frac`), scaled to ``per_image`` here
-    and to another reference by :func:`scaled_to`; an IoU match's threshold is the one the ground
+    fraction of the average object size (:func:`localization_frac`), scaled to ``per_image``
+    (:func:`scaled_to`); an IoU match's threshold is the one the ground
     truth's own box sizes derive under the trait's authored ``iou_jitter_px`` and ``iou_margin``
     (unauthored ones refusing the same way), and a reference with no box to derive it from, or
     whose boxes the jitter displaces past overlap, refuses. An IoU match is over masks when
@@ -331,8 +344,10 @@ def resolve_match_criterion(
 def scaled_to(
     criterion: dict, per_image: list[dict], class_id: int | None = None
 ) -> dict:
-    """``criterion`` as it applies to ``per_image``: a center match's tolerance scaled to that
-    reference's own average object size; an IoU match unchanged.
+    """Return ``criterion`` as it applies to ``per_image``.
+
+    A center match's tolerance is scaled to that reference's own average object size; an IoU
+    match is unchanged.
     """
     if criterion["kind"] != "center_match":
         return criterion
@@ -346,8 +361,9 @@ def scaled_to(
 
 
 def _dt_score(d: dict) -> float:
-    """A detection record's confidence: a record with no ``score``, or a ``score`` of ``None``,
-    refuses by name.
+    """Return a detection record's confidence.
+
+    A record with no ``score``, or a ``score`` of ``None``, refuses by name.
     """
     if "score" not in d:
         raise ValueError(
@@ -367,8 +383,10 @@ def governing_counts(
     conf_threshold: float,
     class_id: int | None = None,
 ) -> dict:
-    """tp/fp/fn/precision/recall/f1 of ``per_image`` matched under ``criterion`` at
-    ``conf_threshold`` (:func:`counted`), for ``class_id`` or every class.
+    """Return tp/fp/fn/precision/recall/f1 of ``per_image`` matched under ``criterion``.
+
+    The match runs at ``conf_threshold`` and the counts (:func:`counted`) are for ``class_id``
+    or every class.
     """
     return counted(
         matched(per_image, criterion, conf=conf_threshold), criterion, class_id
@@ -380,8 +398,9 @@ def counted(
     criterion: dict,
     class_id: int | None = None,
 ) -> dict:
-    """tp/fp/fn/precision/recall/f1 from the per-image matchings ``by_image`` under
-    ``criterion``, for ``class_id`` or every class.
+    """Return tp/fp/fn/precision/recall/f1 from the per-image matchings ``by_image``.
+
+    The counts are for ``class_id`` or every class, and carry ``criterion`` beside them.
     """
     tp, fp, fn, _biases, _present = _tally(by_image, class_id)
     return {
@@ -396,10 +415,11 @@ def counted(
 def attribute_pairs(
     per_image: list[dict], criterion: dict, *, conf: float, column: int
 ) -> list[tuple[Any, int, int]]:
-    """``(image_id, reference id, predicted id)`` under attribute ``column`` for each reference
-    object matched to one detection of its class scoring at least ``conf``, distance first, under
-    ``criterion`` scaled to ``per_image`` (:func:`matched`). A reference object unassessed for
-    that attribute contributes no pair.
+    """Return ``(image_id, reference id, predicted id)`` under attribute ``column`` per match.
+
+    One triple comes from each reference object matched to one detection of its class scoring
+    at least ``conf``, distance first, under ``criterion`` scaled to ``per_image``
+    (:func:`matched`). A reference object unassessed for that attribute contributes no pair.
     """
     from tcip_annotation.json_io import UNASSESSED
 
@@ -434,7 +454,7 @@ def _count_stats_at_conf(
     class_id: int | None,
     dispersion_quantile: float,
 ) -> dict:
-    """:func:`_count_stats` of ``per_image`` matched once at ``conf`` (:func:`matched`)."""
+    """Return counting statistics after matching ``per_image`` at ``conf``."""
     return _count_stats(
         matched(per_image, criterion, conf=conf), class_id, dispersion_quantile
     )
@@ -443,10 +463,12 @@ def _count_stats_at_conf(
 def _tally(
     matched: list[dict[int, Any]], class_id: int | None
 ) -> tuple[int, int, int, list[int], list[int]]:
-    """``(tp, fp, fn, biases, present_biases)`` over each image's per-class matchings
-    ``matched``, for one class or, for ``None``, each image's counts summed over its classes: each
-    image's count bias (fp minus fn), and the same over the images holding a counted object or
-    detection (one ignored in a crowd region is neither).
+    """Return ``(tp, fp, fn, biases, present_biases)`` over each image's per-class matchings.
+
+    The matchings are ``matched``, counted for one class or, for ``None``, each image's counts
+    summed over its classes. The biases are each image's count bias (fp minus fn), and the same
+    over the images holding a counted object or detection (one ignored in a crowd region is
+    neither).
     """
     tp = fp = fn = 0
     biases: list[int] = []
@@ -472,19 +494,18 @@ def _count_stats(
     class_id: int | None,
     dispersion_quantile: float,
 ) -> dict:
-    """Counting statistics over each image's per-class matchings ``matched`` (:func:`_tally`), for
-    one class or, for ``None``, each image's counts summed over its classes: a curve entry.
-    ``count_error_at_quantile`` is the ``dispersion_quantile`` quantile of the per-image absolute
-    count error (``numpy.quantile``, which refuses a quantile outside [0, 1]).
+    """Return counting statistics over each image's per-class matchings ``matched``.
+
+    The tally (:func:`_tally`) is for one class or, for ``None``, each image's counts summed over
+    its classes: a curve entry. ``count_error_at_quantile`` is the ``dispersion_quantile``
+    quantile of the per-image absolute count error (``numpy.quantile``, which refuses a quantile
+    outside [0, 1]).
 
     Two scopes of the same per-image bias travel side by side. The whole-reference statistics
-    (``count_bias_mean``/``count_bias_std`` over ``n_images``) are what a conf picker compares
-    across the grid: ``n_images`` is the same at every conf, so minimizing ``count_bias_mean``
-    minimizes the reference's total signed miscount. The present-scoped statistics
-    (``count_bias_mean_present``/``count_bias_std_present`` over ``n_present``) are what an
-    equivalence gate compares against a relative tolerance scaled by a density measured over
-    present images only (:func:`mean_of_present_counts`): an image with no GT and no surviving
-    detection is excluded from them.
+    (``count_bias_mean``/``count_bias_std``) are over ``n_images``, the same at every conf, so
+    minimizing ``count_bias_mean`` minimizes the reference's total signed miscount. The
+    present-scoped statistics (``count_bias_mean_present``/``count_bias_std_present``) are over
+    ``n_present``: an image with no GT and no surviving detection is excluded from them.
     """
     tp, fp, fn, biases, present_biases = _tally(matched, class_id)
     abs_biases = [abs(b) for b in biases]
@@ -530,12 +551,13 @@ def derive_operating_point_curve(
     conf_grid: list[float] | None = None,
     held: dict | None = None,
 ) -> dict:
-    """Sweep the confidence threshold over ``per_image`` records, matched under ``criterion``
-    (:func:`matched`, each matching kept in ``held`` where one is given).
+    """Sweep the confidence threshold over ``per_image`` records, matched under ``criterion``.
 
-    One model pass produces ``per_image`` (unfiltered dt with scores); this sweeps conf in Python,
-    no re-forwarding. For each conf: aggregate TP/FP/FN and per-image count bias (FP-FN). The
-    grid is ``0.0`` and every distinct detection score the records hold; an explicit
+    Each matching is :func:`matched`'s, kept in ``held`` where one is given.
+
+    ``per_image`` holds unfiltered detections with their scores; the sweep re-matches them at
+    each conf and runs no model. For each conf: aggregate TP/FP/FN and per-image count bias
+    (FP-FN). The grid is ``0.0`` and every distinct detection score the records hold; an explicit
     ``conf_grid`` (e.g. a single-element ``[conf]``) evaluates exactly those points.
     Returns ``{criterion, dispersion_quantile, class_id, curve:[{conf, tp, fp, fn, precision,
     recall, f1, count_bias_mean, abs_count_error_mean, count_error_at_quantile, count_bias_std,
@@ -579,8 +601,10 @@ def derive_operating_point_curve(
 
 
 def worst_class_count_bias(entry: dict) -> float:
-    """The largest |mean per-image count bias| over the classes in one curve entry, the class this
-    conf serves worst; the pooled bias for an entry over no class.
+    """Return the largest |mean per-image count bias| over the classes in one curve entry.
+
+    That class is the one this conf serves worst; an entry over no class answers its pooled
+    bias.
     """
     return max(
         (abs(s["count_bias_mean"]) for s in entry["per_class"].values()),
@@ -589,9 +613,9 @@ def worst_class_count_bias(entry: dict) -> float:
 
 
 def pick_count_unbiased(sweep: dict) -> float:
-    """The conf that minimizes the worst per-class |mean per-image count bias| (tie-break: lower
-    pooled |bias|, higher F1, lower |error|, higher conf): the count-trait operating point, where
-    the model's totals match GT totals.
+    """Return the conf that minimizes the worst per-class |mean per-image count bias|.
+
+    Ties break on lower pooled |bias|, higher F1, lower |error|, then higher conf.
     """
     best = min(
         sweep["curve"],
@@ -607,9 +631,11 @@ def pick_count_unbiased(sweep: dict) -> float:
 
 
 def classes_with_evidence(entry: dict) -> set[str]:
-    """The classes one curve entry actually says something about: those with a GT object or a
-    surviving detection at that conf (``tp + fp + fn > 0``). A class whose entry is all zeros
-    carries no evidence of an unbiased count.
+    """Return the classes one curve entry actually says something about.
+
+    They are those with a GT object or a surviving detection at that conf
+    (``tp + fp + fn > 0``). A class whose entry is all zeros carries no evidence of an unbiased
+    count.
     """
     return {
         cid
@@ -619,14 +645,16 @@ def classes_with_evidence(entry: dict) -> set[str]:
 
 
 def pick_f1_max(sweep: dict) -> float:
-    """The F1-max conf, reported alongside the count-unbiased point to show the trade-off."""
+    """Return the conf of the sweep's curve entry with the highest F1."""
     return max(sweep["curve"], key=lambda c: c["f1"])["conf"]
 
 
 def _mask_rings(mask: Any, cut: MaskCut, *, soft: bool) -> list:
-    """A binary or, with ``soft``, a soft mask cut at ``cut.mask_binarize``, its regions as rings
+    """Return a mask's regions as rings, for a mask match.
+
+    The mask is binary or, with ``soft``, a soft mask cut at ``cut.mask_binarize``; its rings are
     simplified at ``cut.vertex_spacing``
-    (:func:`~tcip_annotation.mask_contours.mask_to_polygon_rings`), for a mask match.
+    (:func:`~tcip_annotation.mask_contours.mask_to_polygon_rings`).
     """
     from tcip_annotation.mask_contours import mask_to_polygon_rings
 
@@ -643,8 +671,9 @@ def _mask_rings(mask: Any, cut: MaskCut, *, soft: bool) -> list:
 
 
 def gt_record(bbox: list[float], category_id: int, crowd: Any) -> dict:
-    """One ground-truth evaluation record: its class, its ``[x, y, w, h]`` box and its crowd flag.
-    The one shape every ground-truth record is built in.
+    """Return one ground-truth evaluation record of a class, a box and a crowd flag.
+
+    The box is ``[x, y, w, h]``.
     """
     return {
         "category_id": int(category_id),
@@ -654,8 +683,9 @@ def gt_record(bbox: list[float], category_id: int, crowd: Any) -> dict:
 
 
 def dt_record(bbox: list[float], category_id: Any, score: Any) -> dict:
-    """One detection's evaluation record: its ``[x, y, w, h]`` box as given, its class and its
-    score. The one shape every detection record is built in, whatever coordinates it is on.
+    """Return one detection's evaluation record of a box, a class and a score.
+
+    The ``[x, y, w, h]`` box is kept as given, whatever coordinates it is on.
     """
     return {
         "category_id": int(category_id),
@@ -665,20 +695,23 @@ def dt_record(bbox: list[float], category_id: Any, score: Any) -> dict:
 
 
 def detection_record(box: Sequence[float], label: Any, score: Any) -> dict:
-    """One detection's evaluation record from a predictor's corner ``box``, on the stored grid
-    (:func:`~tcip_annotation.json_io.xywh`).
+    """Return one detection's evaluation record from a predictor's corner ``box``.
+
+    The box goes onto the stored grid (:func:`~tcip_annotation.json_io.xywh`).
     """
     return dt_record(xywh(*box), label, score)
 
 
 def _rows(values: Any) -> list:
-    """A tensor's, array's or list's rows as a list."""
+    """Return a tensor's, array's or list's rows as a list."""
     return values.tolist() if hasattr(values, "tolist") else list(values)
 
 
 def _with_attributes(records: list[dict], values: Any) -> list[dict]:
-    """``records``, each carrying its row of ``values`` (one id per attribute) under
-    ``attributes``; unchanged when ``values`` is ``None``.
+    """Return ``records``, each carrying its row of ``values`` under ``attributes``.
+
+    A row holds one id per attribute; ``records`` come back unchanged when ``values`` is
+    ``None``.
     """
     if values is not None:
         for record, row in zip(records, _rows(values), strict=True):
@@ -693,12 +726,13 @@ def result_record(
     image_id: Any = None,
     region: tuple[int, int, int, int] | None = None,
 ) -> dict:
-    """A detection result (its frame's ``width`` and ``height``, the ``cap`` and ``count`` of its
+    """Return a detection result and its ground-truth records ``gt`` as one per-image record.
+
+    The result carries its frame's ``width`` and ``height``, the ``cap`` and ``count`` of its
     forward, corner ``boxes``, ``scores``, ``labels``, and ``attributes``, ``masks`` and
-    ``soft_masks`` where it carries them) and its ground-truth records ``gt`` as the
-    :func:`prediction_record` they make, each mask's polygons as its detection's ``rings`` and
-    each uncut mask as its ``soft_mask``. Boxes, scores, labels and masks differing in length
-    refuse (``ValueError``).
+    ``soft_masks`` where it carries them. The record is the :func:`prediction_record` they make,
+    each mask's polygons as its detection's ``rings`` and each uncut mask as its ``soft_mask``.
+    Boxes, scores, labels and masks differing in length refuse (``ValueError``).
     """
     dt = _with_attributes(
         [
@@ -745,11 +779,13 @@ def prediction_record(
     image_id: Any = None,
     region: tuple[int, int, int, int] | None = None,
 ) -> dict:
-    """The one per-image evaluation record, ``{"width", "height", "gt", "dt", "cap", "count"}``,
-    ``image_id`` and ``region`` when given: the detection records ``dt`` and ground-truth records
+    """Return a per-image evaluation record.
+
+    The record is ``{"width", "height", "gt", "dt", "cap", "count"}``, with ``image_id`` and
+    ``region`` when given: the detection records ``dt`` and ground-truth records
     ``gt`` of a ``width`` x ``height`` frame whose forward kept ``count`` detections under ``cap``
     (``None`` where no forward capped it); ``region`` is the part of that frame,
-    ``(x0, y0, x1, y1)``, its detections and ground truth were kept to and are scored over.
+    ``(x0, y0, x1, y1)``, its detections and ground truth were kept to.
     """
     return {
         "width": int(width),
@@ -764,11 +800,13 @@ def prediction_record(
 
 
 def gt_records(target: Mapping[str, Any]) -> list[dict]:
-    """A target's rows, corner ``boxes`` beside ``labels``, the crowd flag, the ``attributes`` row
-    and each row's ``geometry`` as its ``rings`` (:func:`~tcip_annotation.matching.geometry_rings`)
-    where the target carries them, as evaluation ground-truth records on the stored grid
-    (:func:`~tcip_annotation.json_io.xywh`), from a tensor, array or list target alike, its crowd
-    flags read through :func:`~tcip_mcp.pipelines.data.datasets.crowd_of`.
+    """Return a target's rows as evaluation ground-truth records on the stored grid.
+
+    The rows are corner ``boxes`` beside ``labels``, the crowd flag, the ``attributes`` row and
+    each row's ``geometry`` as its ``rings`` (:func:`~tcip_annotation.matching.geometry_rings`)
+    where the target carries them, put on the grid by :func:`~tcip_annotation.json_io.xywh`,
+    from a tensor, array or list target alike, its crowd flags read through
+    :func:`~tcip_mcp.pipelines.data.datasets.crowd_of`.
     """
     from tcip_annotation.matching import geometry_rings
     from tcip_mcp.pipelines.data.datasets import crowd_of
@@ -802,8 +840,10 @@ def records_from_detector(
     cap: int,
     mask_cut: MaskCut | None,
 ) -> dict:
-    """A torchvision target and a detector's output, run on a ``width`` x ``height`` frame under
-    ``cap``, as the per-image record :func:`prediction_record` makes of them. With a ``mask_cut``
+    """Return a torchvision target and a detector's output as one per-image record.
+
+    The output was run on a ``width`` x ``height`` frame under ``cap``; the record is the one
+    :func:`prediction_record` makes of them. With a ``mask_cut``
     (instance segmentation; ``None`` for a pass cutting no mask) every ground-truth and detection
     record also carries its mask's ``rings`` as the cut draws them (:func:`_mask_rings`), for a
     mask match.
@@ -837,9 +877,10 @@ def records_from_detector(
 
 
 def subject_category_ids(annotations) -> dict[str, int]:
-    """Each box-derivable annotation's subject mapped to a 1-indexed COCO category id (background
-    0, like detector labels), in first-seen order; a geometry-less label and a ``Point`` mint
-    none.
+    """Map each box-derivable annotation's subject to a 1-indexed COCO category id.
+
+    Background is 0, like detector labels, and ids follow first-seen order; a geometry-less label
+    and a ``Point`` mint none.
     """
     from tcip_annotation.state import box_derivable
 
@@ -859,16 +900,17 @@ def records_from_annotation(
     cap: int | None,
     name_id: dict[str, int] | None = None,
 ) -> dict:
-    """Ground-truth and predicted :class:`Annotation` lists (a prediction carrying a ``score``)
-    of a ``width`` x ``height`` frame whose predictions were kept to ``cap`` (``None`` where no
-    forward capped them), as the per-image record :func:`prediction_record` makes of them, its
-    ``count`` the detections predicted, every record carrying its ``rings``
-    (:func:`~tcip_annotation.matching.match_record`) beside its box and the ``index`` of the
-    annotation it was built from in its list. ``name_id`` maps each subject
-    to the one category id it has in every image scored together
-    (:func:`subject_category_ids`), this image's own map when ``None``. A geometry-less annotation
-    and a :class:`~tcip_annotation.state.Point` contribute no record: neither has a region to
-    score.
+    """Return ground-truth and predicted :class:`Annotation` lists as one per-image record.
+
+    A prediction carries a ``score``; the lists are of a ``width`` x ``height`` frame whose
+    predictions were kept to ``cap`` (``None`` where no forward capped them). The record is the
+    one :func:`prediction_record` makes of them, its ``count`` the detections predicted, every
+    record carrying its ``rings`` (:func:`~tcip_annotation.matching.match_record`) beside its box
+    and the ``index`` of the annotation it was built from in its list. ``name_id`` maps each
+    subject to the one category id it has in every image scored together
+    (:func:`subject_category_ids`), this image's own map when ``None``. A geometry-less
+    annotation and a :class:`~tcip_annotation.state.Point` contribute no record: neither has a
+    region to score.
     """
     from tcip_annotation.matching import match_record
     from tcip_annotation.state import (
@@ -913,10 +955,11 @@ def records_from_annotation(
 def bucket_reads(
     images: Sequence[Any], bucket: Any
 ) -> list[tuple[Any, list, Any]]:
-    """The one read a scoring of ``bucket``'s documents for the logical ``images`` makes
-    (:func:`~tcip_mcp.pipelines.image_utils.resolve_image_paths`' answers): each image's
-    ``(source, ground truth, predictions)``, its label document's annotations and, where the
-    bucket's record names a document for it, that prediction document
+    """Read once what a scoring of ``bucket``'s documents for the logical ``images`` needs.
+
+    The images are :func:`~tcip_mcp.pipelines.image_utils.resolve_image_paths`' answers; the
+    read returns each image's ``(source, ground truth, predictions)``, its label document's
+    annotations and, where the bucket's record names a document for it, that prediction document
     (:func:`~tcip_annotation.json_io.read_predictions`, ``None`` where it names none), each read
     once. An image with no label document refuses
     (:class:`~tcip_annotation.json_io.UnreadableLabelDocumentError`).
@@ -942,12 +985,13 @@ def bucket_reads(
 
 
 class ScoredImage(NamedTuple):
-    """One image of a bucket's scoring: the image's :class:`~tcip_mcp.pipelines.raster_source.
-    SourceHeader` (the logical image as its ``source``, its frame read off it, and a render
-    opening the image through it), its ground truth, the bucket's predictions for it (``None``
-    where the bucket names no document for it, which leaves it out of every aggregate), and its
-    governing matching, indices into ``gt`` and ``preds`` (every object missed where
-    unpredicted).
+    """One image of a bucket's scoring.
+
+    It carries the image's :class:`~tcip_mcp.pipelines.raster_source.SourceHeader` (the logical
+    image as its ``source``, its frame read off it, and a render opening the image through it),
+    its ground truth, the bucket's predictions for it (``None`` where the bucket names no
+    document for it), and its governing matching,
+    indices into ``gt`` and ``preds`` (every object missed where unpredicted).
     """
 
     header: Any
@@ -964,12 +1008,14 @@ def score_bucket(
     conf_threshold: float,
     trait: TraitEntry | None,
 ) -> tuple[list[ScoredImage], dict]:
-    """``bucket``'s documents for the logical ``images`` scored against their ground truth from
-    their one read (:func:`bucket_reads`): :func:`detection_metrics` at ``conf_threshold`` over the
-    predicted images' records, one subject-to-id map across every image, by mask when any
-    annotation is a polygon, under the criterion that governs (``trait``'s own when given, the IoU
-    convention at ``iou_threshold`` otherwise), and each image as a :class:`ScoredImage` carrying
-    the matching that scoring made of it.
+    """Score ``bucket``'s documents for the logical ``images`` against their ground truth.
+
+    The scoring reads each image once (:func:`bucket_reads`) and returns
+    :func:`detection_metrics` at ``conf_threshold`` over the predicted images' records, one
+    subject-to-id map across every image, by mask when any annotation is a polygon, under the
+    criterion that governs (``trait``'s own when given, the IoU convention at ``iou_threshold``
+    otherwise), and each image as a :class:`ScoredImage` carrying the matching that scoring made
+    of it.
     """
     from tcip_annotation.matching import Matching, merged
     from tcip_annotation.state import polygonal
@@ -1046,12 +1092,12 @@ def score_bucket(
 def classification_metrics(
     pred_labels: torch.Tensor, targets: torch.Tensor, num_classes: int
 ) -> dict:
-    """Accuracy + macro-F1 + per-class precision/recall/f1/support/count_bias, each per-class
-    mapping keyed by the class index as a string (a JSON object's key).
+    """Return accuracy, macro-F1 and per-class precision/recall/f1/support/count_bias.
 
-    ``count_bias[c] = (predicted count - true count) / true count``: the phenotype is the
-    positive-state fraction, so a class the classifier over-predicts inflates the fraction even at
-    high accuracy.
+    Each per-class mapping is keyed by the class index as a string (a JSON object's key).
+
+    ``count_bias[c] = (predicted count - true count) / true count``, ``0.0`` for a class with no
+    true example.
     """
     pred = pred_labels.detach().cpu().long()
     gt = targets.detach().cpu().long()
@@ -1088,10 +1134,11 @@ def quadratic_weighted_kappa(
     gt_ranks: torch.Tensor,
     num_ranks: int,
 ) -> float | None:
-    """Chance-corrected ordinal agreement over ``num_ranks``, the run's own rank count: squared
-    rank-distance weights, expected agreement from the scored set's own observed rank marginals,
-    the ordinal counterpart to :func:`tcip_mcp.pipelines.operating_point._classification_kappa`.
-    ``None`` when undefined: no items, or expected disagreement is zero (every populated
+    """Return the chance-corrected ordinal agreement over ``num_ranks``, the run's rank count.
+
+    Weights are squared rank distances and expected agreement comes from the scored set's own
+    observed rank marginals. ``None`` when undefined:
+    no items, fewer than two ranks, or expected disagreement is zero (every populated
     true/predicted pair shares one rank).
     """
     pred = pred_ranks.detach().cpu().round().long()
@@ -1120,9 +1167,8 @@ def quadratic_weighted_kappa(
 def r_squared(
     pred_values: torch.Tensor, gt_values: torch.Tensor
 ) -> float | None:
-    """Fraction of variance explained beyond trivially predicting the scored set's own mean, the
-    regression counterpart to :func:`quadratic_weighted_kappa`'s chance-correction (both express
-    "how much better than the trivial baseline achievable from this set's own distribution").
+    """Return the fraction of variance explained beyond predicting the scored set's own mean.
+
     ``None`` when undefined: no items, or the set's own values are constant (no variance to
     explain).
     """
@@ -1140,14 +1186,15 @@ def r_squared(
 def concordance_correlation_coefficient(
     pred_values: torch.Tensor, gt_values: torch.Tensor
 ) -> float | None:
-    """Lin's concordance correlation coefficient: agreement between ``pred_values`` and
-    ``gt_values`` as precision (Pearson correlation) times an accuracy/bias penalty. A prediction
+    """Return Lin's concordance correlation coefficient of ``pred_values`` and ``gt_values``.
+
+    It is their agreement as precision (Pearson correlation) times an accuracy/bias penalty. A
+    prediction
     perfectly correlated with GT but systematically offset (a constant bias, or a scale != 1)
     scores low here. ``None`` when undefined: no items, or either series has zero variance.
 
     ``CCC = 2*r*sigma_pred*sigma_gt / (sigma_pred^2 + sigma_gt^2 + (mean_pred - mean_gt)^2)``, with
-    ``r`` the Pearson correlation and ``sigma`` the population (not sample) standard deviation, the
-    convention :func:`r_squared` uses.
+    ``r`` the Pearson correlation and ``sigma`` the population (not sample) standard deviation.
     """
     pred = pred_values.detach().cpu().float()
     gt = gt_values.detach().cpu().float()
@@ -1168,7 +1215,7 @@ def concordance_correlation_coefficient(
 def ordinal_metrics(
     pred_ranks: torch.Tensor, gt_ranks: torch.Tensor, num_ranks: int
 ) -> dict:
-    """Ordinal metrics over ``num_ranks``, the run's own rank count."""
+    """Return ordinal metrics over ``num_ranks``."""
     pred = pred_ranks.detach().cpu().float()
     gt = gt_ranks.detach().cpu().float()
     if gt.numel() == 0:
@@ -1185,6 +1232,10 @@ def ordinal_metrics(
 def regression_metrics(
     pred_values: torch.Tensor, gt_values: torch.Tensor
 ) -> dict:
+    """Return the MAE, RMSE and R-squared of ``pred_values`` against ``gt_values``.
+
+    An empty set answers zero errors and an R-squared of ``None`` (:func:`r_squared`).
+    """
     pred = pred_values.detach().cpu().float()
     gt = gt_values.detach().cpu().float()
     if gt.numel() == 0:
@@ -1202,7 +1253,7 @@ def semantic_seg_metrics(
     num_classes: int,
     ignore_index: int | None = None,
 ) -> dict:
-    """Standard mean-IoU / Dice for semantic segmentation from per-pixel class maps.
+    """Return mean IoU and Dice for semantic segmentation from per-pixel class maps.
 
     ``preds`` and ``targets`` are integer class-id tensors of matching shape (any shape;
     both are flattened). Per class: IoU = ``|P∩G| / |P∪G|`` and Dice = ``2|P∩G| / (|P|+|G|)``.
@@ -1262,18 +1313,18 @@ def detection_metrics(
     iou_threshold: float,
     by_mask: bool,
 ) -> dict:
-    """A detector's metrics over ``per_image``, every number from the one matcher: ``tp``/``fp``/
-    ``fn``/``precision``/``recall``/``f1`` at ``conf_threshold`` (:func:`governing_counts`) under
-    the criterion that governs (:func:`resolve_match_criterion` of ``trait`` when given, else
-    :func:`comparability_criterion` at ``iou_threshold``, by mask when ``by_mask``), recorded
-    under ``governing_criterion``; ``map50`` and ``map``, the average precision
-    (:func:`average_precision`) at ``schemas.COMPARABILITY_IOU`` and over every one of
-    ``schemas.AP_IOU_THRESHOLDS``.
-    Under a trait's criterion the IoU convention's own counts ride beside them as
-    ``iou_precision``/``iou_recall``/``iou_f1`` and ``map50_role`` labels the convention's
-    numbers comparability only. ``matchings`` holds each image's governing
-    matching (:func:`matched`), the one the counts sum; every matching is made once per distinct
-    criterion and detection set.
+    """Return a detector's metrics over ``per_image``, every number from one matcher's matchings.
+
+    ``tp``/``fp``/``fn``/``precision``/``recall``/``f1`` are taken at ``conf_threshold``
+    (:func:`governing_counts`) under the criterion that governs (:func:`resolve_match_criterion`
+    of ``trait`` when given, else :func:`comparability_criterion` at ``iou_threshold``, by mask
+    when ``by_mask``), recorded under ``governing_criterion``; ``map50`` and ``map`` are the
+    average precision (:func:`average_precision`) at ``schemas.COMPARABILITY_IOU`` and over
+    every one of ``schemas.AP_IOU_THRESHOLDS``. Under a trait's criterion the IoU convention's
+    own counts ride beside them as ``iou_precision``/``iou_recall``/``iou_f1`` and
+    ``map50_role`` labels the convention's numbers comparability only. ``matchings`` holds each
+    image's governing matching (:func:`matched`), the one the counts sum; every matching is made
+    once per distinct criterion and detection set.
     """
     criterion = (
         comparability_criterion(iou_threshold, by_mask=by_mask)
@@ -1335,9 +1386,11 @@ def evaluate(
     density: float | None,
     mask_cut: MaskCut | None,
 ) -> dict:
-    """Compute per-task validation/test metrics. Returns bare metric keys. ``conf_threshold`` is
-    the confidence a detector's boxes are counted at, read from the run's validated
-    ``evaluation.conf_threshold`` or the pass's execution record; ``None`` for any other head.
+    """Compute per-task validation/test metrics, returned under bare metric keys.
+
+    ``conf_threshold`` is the confidence a detector's boxes are counted at, read from the run's
+    validated ``evaluation.conf_threshold`` or the pass's execution record; ``None`` for any
+    other head.
     A detector predicts each image at no score floor, every box the cap ``density`` gives its
     frame admits (``derivations.detection_cap``, through ``operating_point.governed_forward``);
     ``density`` is ``None`` for any other head. ``mask_cut`` is how an instance segmentation

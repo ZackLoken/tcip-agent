@@ -42,16 +42,19 @@ states for it."""
 
 
 class _Transform(BaseModel, ABC):
-    """A transform built from exactly the values an augmentation entry states, each in its
-    type's range and finite.
+    """A transform built from exactly the values an augmentation entry states.
+
+    Each value is in its type's range and finite.
     """
 
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
     @abstractmethod
     def refused_under(self, invariances: CaptureInvariances) -> Refusals:
-        """Each capture invariance under which ``invariances`` says the measurement does not hold
-        for this transform as stated.
+        """Return each capture invariance the measurement does not hold under for this transform.
+
+        ``invariances`` says so for the transform as stated; each maps to the value
+        ``invariances`` states for it.
         """
 
 
@@ -59,26 +62,30 @@ class Compose:
     """Chain multiple (image, target) transforms."""
 
     def __init__(self, transforms: list) -> None:
+        """Hold ``transforms``, applied in their order."""
         self.transforms = transforms
 
     def __call__(
         self, img: Image.Image, target: dict
     ) -> tuple[torch.Tensor | Image.Image, dict]:
+        """Apply each transform to ``(img, target)`` in order and return the resulting pair."""
         for t in self.transforms:
             img, target = t(img, target)
         return img, target
 
     def __repr__(self) -> str:
+        """Return the chain as ``Compose([...])``, one transform per line."""
         lines = [f"  {t!r}" for t in self.transforms]
         return "Compose([\n" + "\n".join(lines) + "\n])"
 
 
 class ToTensor:
-    """Convert PIL Image to tensor (final step)."""
+    """Convert a PIL image to a tensor, ``target`` unchanged."""
 
     def __call__(
         self, img: Image.Image, target: dict
     ) -> tuple[torch.Tensor, dict]:
+        """Return ``img`` as a tensor (:func:`pil_to_tensor`) beside ``target`` unchanged."""
         return pil_to_tensor(img), target
 
 
@@ -95,8 +102,9 @@ def _resize_masks(masks: torch.Tensor, size: tuple[int, int]) -> torch.Tensor:
 
 
 def _keep_rows(target: dict, valid: torch.Tensor) -> None:
-    """Keep the rows ``valid`` marks in every per-box tensor of ``target``
-    (:data:`~tcip_mcp.pipelines.data.datasets.PER_BOX_KEYS`).
+    """Keep the rows ``valid`` marks in every per-box tensor of ``target``.
+
+    The per-box keys are :data:`~tcip_mcp.pipelines.data.datasets.PER_BOX_KEYS`.
     """
     from tcip_mcp.pipelines.data.datasets import PER_BOX_KEYS
 
@@ -112,13 +120,14 @@ class RandomHorizontalFlip(_Transform):
     p: Probability
 
     def refused_under(self, invariances: CaptureInvariances) -> Refusals:
-        """The horizontal flip, unless ``p`` is 0 or ``invariances`` holds under it."""
+        """Return the horizontal flip's refusal unless ``p`` is 0 or ``invariances`` holds it."""
         held = invariances.horizontal_flip
         return {} if held or not self.p else {"horizontal_flip": held}
 
     def __call__(
         self, img: Image.Image, target: dict
     ) -> tuple[Image.Image, dict]:
+        """Flip ``img``, its boxes and its masks horizontally with probability ``p``."""
         if random.random() < self.p:
             img = img.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
             w = img.width
@@ -142,13 +151,14 @@ class RandomVerticalFlip(_Transform):
     p: Probability
 
     def refused_under(self, invariances: CaptureInvariances) -> Refusals:
-        """The vertical flip, unless ``p`` is 0 or ``invariances`` holds under it."""
+        """Return the vertical flip's refusal unless ``p`` is 0 or ``invariances`` holds it."""
         held = invariances.vertical_flip
         return {} if held or not self.p else {"vertical_flip": held}
 
     def __call__(
         self, img: Image.Image, target: dict
     ) -> tuple[Image.Image, dict]:
+        """Flip ``img``, its boxes and its masks vertically with probability ``p``."""
         if random.random() < self.p:
             img = img.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
             h = img.height
@@ -165,9 +175,11 @@ class RandomVerticalFlip(_Transform):
 
 
 class ColorJitter(_Transform):
-    """Random brightness, contrast and saturation perturbations, each a factor drawn uniformly
-    from ``[1 - value, 1 + value]``; a value of 0 leaves that property unchanged, and each value
-    is at most 1, where the factor's lower end reaches 0 and stays non-negative.
+    """Random brightness, contrast and saturation perturbations.
+
+    Each is a factor drawn uniformly from ``[1 - value, 1 + value]``; a value of 0 leaves that
+    property unchanged, and each value is at most 1, where the factor's lower end reaches 0 and
+    stays non-negative.
     """
 
     brightness: Annotated[float, Field(ge=0, le=1)]
@@ -175,8 +187,10 @@ class ColorJitter(_Transform):
     saturation: Annotated[float, Field(ge=0, le=1)]
 
     def refused_under(self, invariances: CaptureInvariances) -> Refusals:
-        """Color when it shifts saturation and intensity when it shifts brightness or contrast,
-        each unless ``invariances`` holds under it.
+        """Return the refusals of color and intensity, each unless ``invariances`` holds it.
+
+        Color is refused when the jitter shifts saturation, intensity when it shifts brightness
+        or contrast.
         """
         refused: Refusals = {}
         if self.saturation and not invariances.color:
@@ -188,6 +202,7 @@ class ColorJitter(_Transform):
     def __call__(
         self, img: Image.Image, target: dict
     ) -> tuple[Image.Image, dict]:
+        """Perturb ``img``'s brightness, contrast and saturation by factors drawn per call."""
         if self.brightness > 0:
             factor = 1.0 + random.uniform(-self.brightness, self.brightness)
             img = ImageEnhance.Brightness(img).enhance(factor)
@@ -201,7 +216,8 @@ class ColorJitter(_Transform):
 
 
 class RandomResizedCrop(_Transform):
-    """Crop a random region and resize to target size. Adjusts boxes and masks accordingly.
+    """Crop a random region and resize to target size, adjusting boxes and masks alike.
+
     ``min_scale`` is at most ``max_scale``.
     """
 
@@ -218,14 +234,20 @@ class RandomResizedCrop(_Transform):
         return self
 
     def refused_under(self, invariances: CaptureInvariances) -> Refusals:
-        """Scale, since every crop it states resizes a region to ``size``, unless
-        ``invariances`` holds under it.
+        """Return the scale refusal unless ``invariances`` holds under scale.
+
+        Every crop the transform states resizes a region to ``size``.
         """
         return {} if invariances.scale else {"scale": invariances.scale}
 
     def __call__(
         self, img: Image.Image, target: dict
     ) -> tuple[Image.Image, dict]:
+        """Crop a random region of ``img`` and resize it to ``size``, with its boxes and masks.
+
+        A box left one pixel wide or tall or less is dropped, its row in every per-box tensor
+        with it.
+        """
         w, h = img.size
         scale = random.uniform(self.min_scale, self.max_scale)
         crop_w = int(w * scale)
@@ -278,12 +300,13 @@ class GaussianBlur(_Transform):
     """The Gaussian's radius in pixels."""
 
     def refused_under(self, invariances: CaptureInvariances) -> Refusals:
-        """No capture invariance: a blur perturbs the sensor."""
+        """Return no capture-invariance refusals."""
         return {}
 
     def __call__(
         self, img: Image.Image, target: dict
     ) -> tuple[Image.Image, dict]:
+        """Blur ``img`` at ``radius`` with probability ``p``, ``target`` unchanged."""
         if random.random() < self.p:
             img = img.filter(ImageFilter.GaussianBlur(radius=self.radius))
         return img, target
@@ -295,12 +318,13 @@ class Resize(_Transform):
     size: Size
 
     def refused_under(self, invariances: CaptureInvariances) -> Refusals:
-        """No capture invariance: a resize fixes the input size."""
+        """Return no capture-invariance refusals."""
         return {}
 
     def __call__(
         self, img: Image.Image, target: dict
     ) -> tuple[Image.Image, dict]:
+        """Resize ``img`` to ``size``, scaling its boxes and resizing its masks with it."""
         w, h = img.size
         img = img.resize(self.size, Image.Resampling.BILINEAR)
         if "boxes" in target and len(target["boxes"]) > 0:
@@ -318,12 +342,11 @@ class Resize(_Transform):
 
 
 class RandomRotation(_Transform):
-    """Rotate image (and detection boxes/masks) by a uniform angle in
-    ``[-degrees, degrees]`` with probability ``p``.
+    """Rotate image (and detection boxes/masks) by a uniform angle with probability ``p``.
 
-    Boxes are rotated as 4 corners about the image center and taken
-    as their axis-aligned envelope, then clamped + degenerate-filtered exactly like
-    ``RandomResizedCrop`` (filtering ``labels``/``masks`` in lockstep). Semantic
+    The angle is drawn from ``[-degrees, degrees]``. Boxes are rotated as 4 corners about the
+    image center and taken as their axis-aligned envelope, then clamped to the frame; a box one
+    pixel wide or tall or less is dropped, its row in every per-box tensor with it. Semantic
     ``[H, W]`` masks are rotated with nearest resampling. Non-detection targets
     (classification/ordinal/regression) pass through untouched.
     """
@@ -332,8 +355,9 @@ class RandomRotation(_Transform):
     p: Probability
 
     def refused_under(self, invariances: CaptureInvariances) -> Refusals:
-        """Rotation, when ``p`` is not 0 and ``degrees`` exceeds the largest rotation
-        ``invariances`` holds under.
+        """Return the rotation refusal when ``p`` is not 0 and ``degrees`` passes what is held.
+
+        What is held is the largest rotation ``invariances`` holds under.
         """
         held = invariances.rotation
         return {"rotation": held} if self.p and self.degrees > held else {}
@@ -341,6 +365,7 @@ class RandomRotation(_Transform):
     def __call__(
         self, img: Image.Image, target: dict
     ) -> tuple[Image.Image, dict]:
+        """Rotate ``img`` and its target by one drawn angle with probability ``p``."""
         if random.random() >= self.p:
             return img, target
         import math
@@ -426,9 +451,10 @@ _AUGMENTATION_REGISTRY: dict[str, type[_Transform]] = {
 def _stated_transforms(
     config: AugmentationSpec,
 ) -> list[tuple[str, _Transform]]:
-    """Each transform ``config`` states, in its order: its name and the transform its stated
-    values validate to. Refuses (``ValueError``) an unknown transform, and, naming the entry, one
-    whose values its transform's type refuses.
+    """Return each transform ``config`` states, in its order, beside its name.
+
+    Each is the transform its stated values validate to. Refuses (``ValueError``) an unknown
+    transform, and, naming the entry, one whose values its transform's type refuses.
     """
     from tcip_mcp.pipelines.model_build import resolve_named
 
@@ -445,10 +471,12 @@ def _stated_transforms(
 def forbidden_transforms(
     config: AugmentationSpec, invariances: CaptureInvariances
 ) -> list[str]:
-    """One issue for each invariance ``invariances``, a project record's, refuses a transform
-    ``config`` states under (its ``refused_under``), naming the transform, the invariance, the
-    value the record states for it and ``initialize_project``, where it is stated. Refuses what
-    :func:`build_augmentation` refuses.
+    """Return one issue per invariance under which a transform ``config`` states is refused.
+
+    ``invariances`` is a project record's, and the refusals are each transform's
+    ``refused_under``. Each issue names the transform, the invariance, the value the record
+    states for it and ``initialize_project``, where it is stated. :func:`_stated_transforms`'
+    refusals propagate.
     """
     return [
         f"augmentation {name!r} relies on the capture invariance {fact!r} beyond what this "
@@ -460,12 +488,11 @@ def forbidden_transforms(
 
 
 def recorded_resize(config: AugmentationSpec | None) -> tuple[int, int] | None:
-    """The fixed ``(width, height)`` an augmentation config resizes every sample to, or ``None``
-    when it pins no size.
+    """Return the fixed ``(width, height)`` an augmentation config resizes every sample to.
 
-    Resolved by building the config's own chain (:func:`build_augmentation`) and reading the last
-    :class:`Resize` in it. An unbuildable config raises. :class:`RandomResizedCrop` is not
-    reported.
+    The answer is ``None`` when it pins no size. It is resolved by building the config's own
+    chain (:func:`build_augmentation`) and reading the last :class:`Resize` in it. An
+    unbuildable config raises. :class:`RandomResizedCrop` is not reported.
     """
     if config is None:
         return None
@@ -481,7 +508,7 @@ def recorded_resize(config: AugmentationSpec | None) -> tuple[int, int] | None:
 
 
 def build_augmentation(config: AugmentationSpec) -> Compose:
-    """The augmentation chain ``config`` states, in its order, ending in :class:`ToTensor`.
+    """Build the augmentation chain ``config`` states, in its order, ending in :class:`ToTensor`.
 
     ``config`` maps each transform's name (:data:`_AUGMENTATION_REGISTRY`) to a dict stating
     every value that transform's constructor takes, e.g. ``{"rationale": "...",

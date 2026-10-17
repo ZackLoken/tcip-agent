@@ -34,7 +34,7 @@ SIDES = ("train", "val", "calibration", "holdout")
 checks it against, held out from both training and selection."""
 
 REFERENCE_SIDES = SIDES[2:]
-"""The two sides an assessment reads."""
+"""The two reference sides, ``calibration`` and ``holdout``."""
 
 DOCUMENT = "document"
 """Ground truth that is one label document per sample, the record its image's key names."""
@@ -57,9 +57,10 @@ SHAPE_DESCRIPTIONS = {
 
 
 def shape_of(ground_truth: Key | str, row_key: str | None) -> str:
-    """Which of :data:`GROUND_TRUTH_SHAPES` a sample's ground truth is, read off the value itself:
-    a key is a label document, a row key or a ``.csv`` path one row of a table, and any other path
-    a mask raster of its own. Reads no disk.
+    """Return which of :data:`GROUND_TRUTH_SHAPES` a sample's ground truth is.
+
+    The shape is read off the value itself: a key is a label document, a row key or a ``.csv``
+    path one row of a table, and any other path a mask raster of its own. Reads no disk.
     """
     if isinstance(ground_truth, Key):
         return DOCUMENT
@@ -70,8 +71,10 @@ def shape_of(ground_truth: Key | str, row_key: str | None) -> str:
 
 @dataclass(frozen=True)
 class Sample:
-    """One sample of a selection: where its pixels are, where its ground truth is, what it is
-    grouped with, and which side it landed on.
+    """One sample of a selection.
+
+    It records where its pixels are, where its ground truth is, what it is grouped with, and
+    which side it landed on.
 
     ``member`` is the name a membership record names this sample by, as its admission resolved it
     (:class:`~tcip_mcp.pipelines.data.label_queries.Admitted`). ``source`` is the image path, or
@@ -84,9 +87,9 @@ class Sample:
     ``rect`` is the half-open pixel rect ``(x0, y0, x1, y1)`` a within-image draw assigned, or
     ``None`` when the sample is the whole source. ``ground_truth_digest`` is the ground truth's
     :func:`ground_truth_digest` when it was read, and ``read`` what that one read answered: the
-    decoded label document, or the table row's value; ``None`` for a mask, whose pixels a loader
-    reads, and for a sample no admission of this act has read; ``stored`` is what the store
-    answered for that read (``tcip_store.Versioned``), the bytes or record a reference retains.
+    decoded label document, or the table row's value; ``None`` for a mask and for a sample no
+    admission of this act has read; ``stored`` is what the store answered for that read
+    (``tcip_store.Versioned``).
     ``image`` is the logical image this act resolved ``source`` to (a
     :class:`~tcip_mcp.pipelines.image_utils.BandGroupRef` for a grouped capture,
     :func:`~tcip_mcp.pipelines.data.label_queries.resolved`). None of the three is ever recorded
@@ -107,10 +110,9 @@ class Sample:
 
     @property
     def location(self) -> str:
-        """Where the sample's pixels are: its source path, and the rect when it is a region. The
-        key a dataset indexes the sample by; two samples at one location are one sample, whatever
-        they are named. Two files at different locations may hold the same pixels, which only
-        :func:`source_digests` tells.
+        """Where the sample's pixels are: its source path, and the rect when it is a region.
+
+        Two samples at one location are one sample, whatever they are named.
         """
         if self.rect is None:
             return self.source
@@ -118,24 +120,23 @@ class Sample:
 
     @property
     def shape(self) -> str:
-        """Which of :data:`GROUND_TRUTH_SHAPES` this sample's ground truth is
-        (:func:`shape_of`).
+        """Which of :data:`GROUND_TRUTH_SHAPES` this sample's ground truth is.
+
+        The shape is :func:`shape_of`'s.
         """
         return shape_of(self.ground_truth, self.row_key)
 
 
 @dataclass(frozen=True)
 class ClassScope:
-    """The class space a run's ground truth was admitted under, recorded whole as one ``scope``
-    mapping (:func:`dataclasses.asdict`) on a run's data config, a selection and a prediction
-    bucket's stamp.
+    """The class space a run's ground truth was admitted under.
 
     ``subject`` is the object class a document admission read completion and targets for, and
     ``attributes`` every attribute the registry declares for it, each an
     :class:`~tcip_mcp.subject_registry.Attribute` whose value ids are positions in its declared
     order: ``None`` until the registry is read, empty for a subject that declares none. A mask
-    raster and a table row carry their own classes: a run over them records a scope whose every
-    field is ``None``. An empty subject is ``None``.
+    raster and a table row carry their own classes: the scope over them has every field
+    ``None``. An empty subject is ``None``.
     """
 
     subject: str | None = None
@@ -143,14 +144,16 @@ class ClassScope:
     __pydantic_config__ = ConfigDict(extra="forbid")
 
     def __post_init__(self) -> None:
+        """Hold an empty subject as ``None``."""
         object.__setattr__(self, "subject", self.subject or None)
 
     @classmethod
     def of(cls, record: Mapping[str, Any]) -> ClassScope:
-        """The class space ``record`` carries under ``scope``, a selection document or a
-        prediction bucket's stamp, validated as a run's data block validates its own
-        (``schemas.DataSpec.scope``) and read through :meth:`recorded`. A scope naming a key
-        outside these fields refuses by name.
+        """Return the class space ``record`` carries under ``scope``.
+
+        ``record`` is a selection document or a prediction bucket's stamp; its scope is validated
+        as a :class:`ClassScope` and read through :meth:`recorded`. A scope naming a key outside
+        these fields refuses by name.
         """
         stated = record.get("scope")
         return cls.recorded(
@@ -161,8 +164,9 @@ class ClassScope:
 
     @staticmethod
     def recorded(scope: ClassScope | None) -> ClassScope:
-        """``scope``, the class space a record carries; a record carrying none refuses
-        (``ValueError``) by name.
+        """Return ``scope``, the class space a record carries.
+
+        A record carrying none refuses (``ValueError``) by name.
         """
         if scope is None:
             raise ValueError(
@@ -173,10 +177,12 @@ class ClassScope:
         return scope
 
     def state_ids(self, state: PositiveState | None) -> tuple[int, int] | None:
-        """``(column, value id)`` of ``state`` under this class space: its attribute's position
-        among the declared attributes and its value's among that attribute's values. ``None`` for
-        no state, a space naming no subject, or one whose attributes do not list ``state``; a
-        subject's space whose attributes were never read refuses (:meth:`admitted_for`).
+        """Return ``(column, value id)`` of ``state`` under this class space.
+
+        That is its attribute's position among the declared attributes and its value's among
+        that attribute's values. ``None`` for no state, a space naming no subject, or one whose
+        attributes do not list ``state``; a subject's space whose attributes were never read
+        refuses (:meth:`admitted_for`).
         """
         if state is None or self.subject is None:
             return None
@@ -190,10 +196,11 @@ class ClassScope:
         return attributes.index(found), found.values.index(state.value)
 
     def admitted_for(self, shape: str, source: str) -> ClassScope:
-        """This class space, refused by ``source`` when ground truth of ``shape`` cannot be read
-        under it: per-image label documents are read for a named subject under the attributes the
-        registry declares for it, and a mask raster or a table row, carrying its own classes, only
-        under the empty class space.
+        """Return this class space, refused by ``source`` when ``shape`` cannot be read under it.
+
+        Per-image label documents are read for a named subject under the attributes the registry
+        declares for it, and a mask raster or a table row, carrying its own classes, only under
+        the empty class space.
         """
         if shape != DOCUMENT and self != ClassScope():
             raise ValueError(
@@ -217,14 +224,14 @@ class ClassScope:
 
 @dataclass(frozen=True)
 class Selection:
-    """A drawn partition: its samples, the scope they were admitted under, and how they were drawn:
-    its ``seed`` and grouping, ``ratios``, the share each side was requested at
-    (``split_construction.check_shares``'s answer), whether it was balanced by foreground count
-    (``stratify_foreground``), and ``rationale``, why it was drawn so.
+    """A drawn partition: its samples, the scope they were admitted under, and how it was drawn.
+
+    How it was drawn is its ``seed`` and grouping, ``ratios``, the share each side was requested
+    at (``split_construction.check_shares``'s answer), whether it was balanced by foreground
+    count (``stratify_foreground``), and ``rationale``, why it was drawn so.
 
     ``scope`` is the class space the draw admitted through, empty for a draw over ground truth no
-    registry scopes, a mask raster or a table row, whose class space a binding run derives from
-    that ground truth once (:func:`~tcip_mcp.pipelines.data.split_construction.run_sizes`).
+    registry scopes, a mask raster or a table row.
     """
 
     samples: tuple[Sample, ...]
@@ -237,15 +244,15 @@ class Selection:
     dataset_fingerprint: str | None = None
 
     def on(self, side: str) -> list[Sample]:
-        """This selection's samples on one side, in recorded order."""
+        """Return this selection's samples on one side, in recorded order."""
         return [s for s in self.samples if s.side == side]
 
     def trainable(self) -> list[Sample]:
-        """This selection's train-plus-val samples, the pool a redraw draws over."""
+        """Return this selection's train samples followed by its val samples."""
         return self.on("train") + self.on("val")
 
     def counts(self) -> dict[str, int]:
-        """How many samples each side holds, every side named even at zero."""
+        """Return each side's sample count, including zero counts."""
         return {
             side: sum(1 for s in self.samples if s.side == side)
             for side in SIDES
@@ -253,9 +260,11 @@ class Selection:
 
 
 def source_digests(samples: Iterable[Sample]) -> dict[str, str]:
-    """Each sample's pixel digest, by its location: sha256 over its source file's bytes (each band
-    file of a grouped capture, in band order), each source read once, and its rect when it is a
-    region. Two samples with one digest are the same image whatever their files are named.
+    """Return each sample's pixel digest, by its location.
+
+    The digest is sha256 over its source file's bytes (each band file of a grouped capture, in
+    band order), each source read once, and its rect when it is a region. Two samples with one
+    digest are the same image whatever their files are named.
     """
     import hashlib
 
@@ -285,8 +294,9 @@ def source_digests(samples: Iterable[Sample]) -> dict[str, str]:
 
 
 def refuse_unreadable_samples(samples: Iterable[Sample]) -> None:
-    """Refuse a sample no loader here can read whatever its ground truth is, naming what is
-    missing: a ``rect`` (a within-image region), which no loader honors.
+    """Refuse a sample no loader here can read whatever its ground truth is.
+
+    The refusal names what no loader honors: a ``rect`` (a within-image region).
     """
     samples = list(samples)
     with_rect = [s.location for s in samples if s.rect is not None]
@@ -304,7 +314,7 @@ def refuse_crossing_sides(samples: Sequence[Sample]) -> None:
 
     Two things are refused: one location on more than one side (the same pixels trained on and
     selected on), and one group key on more than one side (crops of one parent, or captures of one
-    tree, split across sides, which is the leakage the group key exists to prevent).
+    tree, split across sides).
     """
     by_location: dict[str, set[str]] = {}
     by_group: dict[str, set[str]] = {}
@@ -338,9 +348,7 @@ _SELECTION_PARTS = ("selection",)
 
 
 def selection_key(selection_dir: str | Path) -> Key:
-    """The selection recorded under ``selection_dir``, wherever the caller asked the draw to be
-    written, once and whole at the end of the draw that produced it.
-    """
+    """Return the store key of the selection recorded under ``selection_dir``."""
     return Key(SELECTION_STORE, str(Path(selection_dir)), _SELECTION_PARTS)
 
 
@@ -359,8 +367,9 @@ SELECTION_PATHS: PathFields = within(("samples", "[]"), SAMPLE_PATHS)
 
 
 def ground_truth_record(ground_truth: Key | str) -> str | dict[str, str]:
-    """How a record stores one sample's ground truth, the one :func:`ground_truth_of` reads back:
-    a label document's key as its ``root``, ``capture`` and ``stem``, a path as itself.
+    """Return how a record stores one sample's ground truth.
+
+    A label document's key is stored as its ``root``, ``capture`` and ``stem``, a path as itself.
     """
     if isinstance(ground_truth, Key):
         capture, stem = ground_truth.parts
@@ -369,7 +378,7 @@ def ground_truth_record(ground_truth: Key | str) -> str | dict[str, str]:
 
 
 def ground_truth_of(stored: Any) -> Key | str:
-    """A ground truth :func:`ground_truth_record` stored, read back."""
+    """Read back a ground truth :func:`ground_truth_record` stored."""
     from tcip_mcp.dataset_layout import label_key
 
     if isinstance(stored, dict):
@@ -378,7 +387,7 @@ def ground_truth_of(stored: Any) -> Key | str:
 
 
 def sample_document(sample: Sample) -> dict[str, Any]:
-    """The JSON shape one sample is held in, the one :func:`read_sample` reads back."""
+    """Return the JSON shape one sample is held in."""
     doc: dict[str, Any] = {
         "member": sample.member,
         "source": sample.source,
@@ -396,7 +405,7 @@ def sample_document(sample: Sample) -> dict[str, Any]:
 
 
 def selection_document(selection: Selection) -> dict[str, Any]:
-    """The JSON shape a selection is held in, the one :func:`as_selection` reads back."""
+    """Return the JSON shape a selection is held in."""
     return {
         "samples": [sample_document(s) for s in selection.samples],
         "scope": asdict(selection.scope),
@@ -410,10 +419,11 @@ def selection_document(selection: Selection) -> dict[str, Any]:
 
 
 def read_sample(raw: Any, position: int, where: str) -> Sample:
-    """One sample document read back as a :class:`Sample`, refusing by name (naming
-    ``position`` in the record at ``where``) a non-mapping, a sample missing
-    ``member``/``source``/``ground_truth``/``group``/``side``, a side outside :data:`SIDES`, and
-    a malformed ``rect``.
+    """Read one sample document back as a :class:`Sample`.
+
+    Refuses by name (naming ``position`` in the record at ``where``) a non-mapping, a sample
+    missing ``member``/``source``/``ground_truth``/``group``/``side``, a side outside
+    :data:`SIDES`, and a malformed ``rect``.
     """
     if not isinstance(raw, dict):
         raise ValueError(
@@ -459,12 +469,11 @@ def read_sample(raw: Any, position: int, where: str) -> Sample:
 
 
 def as_selection(document: Any, *, where: str) -> Selection:
-    """A held document read back as a :class:`Selection`, refusing by name on anything a draw
-    never writes.
+    """Read a held document back as a :class:`Selection`, refusing anything a draw never writes.
 
     ``where`` names the document in every refusal. Refuses a non-mapping, a missing or empty
-    ``samples`` list, a sample missing ``source``/``ground_truth``/``group``/``side``, a side
-    outside :data:`SIDES`, a malformed ``rect``, a partition whose sides cross
+    ``samples`` list, a sample missing ``member``/``source``/``ground_truth``/``group``/``side``,
+    a side outside :data:`SIDES`, a malformed ``rect``, a partition whose sides cross
     (:func:`refuse_crossing_sides`), and a scope its samples' shape cannot be read under
     (:meth:`ClassScope.admitted_for`).
     """
@@ -502,8 +511,10 @@ def as_selection(document: Any, *, where: str) -> Selection:
 def stored_selection_document(
     selection: Selection, project: str | Path
 ) -> dict[str, Any]:
-    """The document a selection of ``project`` is stored as: :func:`selection_document` with its
-    paths stored against ``project`` (:data:`SELECTION_PATHS`).
+    """Return the document a selection of ``project`` is stored as.
+
+    That is :func:`selection_document` with its paths stored against ``project``
+    (:data:`SELECTION_PATHS`).
     """
     return recorded_paths(
         selection_document(selection), SELECTION_PATHS, project
@@ -513,11 +524,11 @@ def stored_selection_document(
 def write_selection(
     selection_dir: str | Path, selection: Selection, *, project: str | Path
 ) -> Selection:
-    """Write ``selection``, a selection of ``project``, under ``selection_dir``
-    (:func:`stored_selection_document`), and answer it back.
+    """Write ``selection``, a selection of ``project``, under ``selection_dir`` and return it.
 
-    Refuses, before anything is written, whatever :func:`as_selection` refuses, so a selection on
-    disk is always one a reader will accept.
+    The record is :func:`stored_selection_document`'s.
+
+    Refuses, before anything is written, whatever :func:`as_selection` refuses.
     """
     as_selection(selection_document(selection), where=str(selection_dir))
     out_dir = Path(selection_dir)
@@ -531,7 +542,7 @@ def write_selection(
 def read_selection(
     selection_dir: str | Path, *, project: str | Path
 ) -> Selection:
-    """The selection of ``project`` recorded under ``selection_dir``.
+    """Read the selection of ``project`` recorded under ``selection_dir``.
 
     Refuses with ``ValueError`` naming ``selection_dir`` when nothing is recorded there, when the
     record will not decode, or when it fails any of :func:`as_selection`'s shape checks.
@@ -549,8 +560,10 @@ def read_selection_checked(
     *,
     project: str | Path,
 ) -> tuple[Selection | None, str | None]:
-    """:func:`read_selection` answering ``(selection, None)``, ``(None, None)`` for an absence, or
-    ``(None, text)`` for a record that exists and is refused.
+    """Return :func:`read_selection`'s selection for ``selection_dir``, or its refusal as text.
+
+    The answer is ``(selection, None)``, ``(None, None)`` for an absence, or ``(None, text)`` for
+    a record that exists and is refused.
     """
     try:
         document = _read_selection_document(selection_dir, project)
@@ -580,10 +593,11 @@ def _read_selection_document(
 
 
 def ground_truth_digest(ground_truth: Key | str) -> str:
-    """The sha256 of one ground truth's stored bytes, the store's version token: a label document
-    record's (:func:`tcip_store.read_versioned`) or a file's
-    (:func:`tcip_store.read_blob_versioned`). One that is absent raises ``tcip_store.NotFoundError``
-    naming it.
+    """Return the sha256 of one ground truth's stored bytes, the store's version token.
+
+    The token is a label document record's (:func:`tcip_store.read_versioned`) or a file's
+    (:func:`tcip_store.read_blob_versioned`). One that is absent raises
+    ``tcip_store.NotFoundError`` naming it.
     """
     if isinstance(ground_truth, Key):
         return tcip_store.read_versioned(ground_truth).version.token
@@ -591,8 +605,10 @@ def ground_truth_digest(ground_truth: Key | str) -> str:
 
 
 def moved_ground_truth(recorded: Mapping[Key | str, str]) -> list[Key | str]:
-    """The ground truths among ``recorded`` (each to the digest recorded for it) that no longer
-    digest to it, one gone since among them, in ``recorded``'s order.
+    """Return the ground truths among ``recorded`` no longer at the digest recorded for each.
+
+    ``recorded`` maps each ground truth to its digest; one gone since counts among the moved, and
+    the answer keeps ``recorded``'s order.
     """
 
     def moved(ground_truth: Key | str, digest: str) -> bool:
@@ -605,8 +621,9 @@ def moved_ground_truth(recorded: Mapping[Key | str, str]) -> list[Key | str]:
 
 
 def selection_digest(selection: Selection, project: str | Path) -> str:
-    """sha256 over the document a selection of ``project`` is stored as
-    (:func:`stored_selection_document`).
+    """Return the sha256 over the document a selection of ``project`` is stored as.
+
+    The document is :func:`stored_selection_document`'s.
     """
     import hashlib
 

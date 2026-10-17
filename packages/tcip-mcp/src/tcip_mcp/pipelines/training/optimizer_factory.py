@@ -32,7 +32,7 @@ def _build_adamw(params, *, lr: float, weight_decay: float):
 
 
 def _build_lamb(params, *, lr: float, weight_decay: float):
-    """LAMB optimizer, requires the optional ``torch_optimizer`` package."""
+    """Build a LAMB optimizer, refusing when the optional ``torch_optimizer`` is absent."""
     try:
         from torch_optimizer import Lamb
     except ImportError as exc:
@@ -59,10 +59,12 @@ def build_optimizer(
     backbone_lr: float,
     head_lr: float,
 ) -> torch.optim.Optimizer:
-    """The optimizer ``spec`` names over ``model``'s parameter groups at ``backbone_lr`` and
-    ``head_lr`` (the block's own rates, or a stage's scaled ones; :func:`param_groups`), with
-    the block's weight decay and, for ``sgd``, its momentum; each registered builder takes the
-    settings it reads and no other. :func:`param_groups`'s refusal propagates.
+    """Build the optimizer ``spec`` names over ``model``'s parameter groups.
+
+    The groups train at ``backbone_lr`` and ``head_lr`` (:func:`param_groups`), with the block's
+    weight decay and, for ``sgd``, its momentum; each registered builder takes the settings it
+    reads and no other.
+    :func:`param_groups`'s refusal propagates.
     """
     from tcip_mcp.pipelines.model_build import resolve_named
 
@@ -79,11 +81,12 @@ def build_optimizer(
 def param_groups(
     model: nn.Module, backbone_lr: float, head_lr: float
 ) -> list[dict]:
-    """``model``'s parameter groups at ``backbone_lr`` and ``head_lr``: its own
-    ``get_param_groups(backbone_lr, head_lr)`` when it defines one, else the parameters of its
-    ``backbone`` module at ``backbone_lr`` and every other at ``head_lr``. A model exposing
-    neither trains every parameter at the one rate when the two are equal, and refuses
-    (``ValueError``) naming both when they differ.
+    """Return ``model``'s parameter groups at ``backbone_lr`` and ``head_lr``.
+
+    The groups are the model's own ``get_param_groups(backbone_lr, head_lr)`` when it defines
+    one, else the parameters of its ``backbone`` module at ``backbone_lr`` and every other at
+    ``head_lr``. A model exposing neither trains every parameter at the one rate when the two
+    are equal, and refuses (``ValueError``) naming both when they differ.
     """
     if hasattr(model, "get_param_groups"):
         # A bespoke model's own opt-in method, not part of nn.Module's stub.
@@ -111,8 +114,9 @@ def param_groups(
 def compute_lr_scale(
     effective_batch: int, reference_batch: int, power: float
 ) -> float:
-    """The LR multiplier ``(effective_batch / reference_batch) ** power``. Both batches are
-    positive counts the caller states or derives.
+    """Return the LR multiplier ``(effective_batch / reference_batch) ** power``.
+
+    Both batches are positive counts.
     """
     return (effective_batch / reference_batch) ** power
 
@@ -124,8 +128,9 @@ TRAINING_STATE_KEYS = (STATE_DICT_KEY, OPTIMIZER_STATE_KEY, GROUPS_KEY)
 
 
 def _copied(value: Any) -> Any:
-    """An independent copy of one optimizer-state value: a tensor cloned, anything else deep
-    copied.
+    """Return an independent copy of one optimizer-state value.
+
+    A tensor is cloned, anything else deep copied.
     """
     return (
         value.detach().clone() if torch.is_tensor(value) else deepcopy(value)
@@ -135,16 +140,16 @@ def _copied(value: Any) -> Any:
 def capture_training_state(
     model: nn.Module, optimizer: torch.optim.Optimizer
 ) -> dict:
-    """The model's and the optimizer's state at this moment, every value an independent copy:
-    the model's whole ``state_dict`` (weights and buffers) on the CPU under ``STATE_DICT_KEY``;
-    the optimizer's per-parameter state by parameter name under :data:`OPTIMIZER_STATE_KEY`,
-    each tensor a state entry holds directly moved to the CPU and a tensor nested inside a
-    container entry deep copied where it lies; and the optimizer's param groups under
-    :data:`GROUPS_KEY`, each once, as
+    """Return the model's and the optimizer's state at this moment, every value a copy.
+
+    The result holds the model's whole ``state_dict`` (weights and buffers) on the CPU under
+    ``STATE_DICT_KEY``; the optimizer's per-parameter state by parameter name under
+    :data:`OPTIMIZER_STATE_KEY`, each tensor a state entry holds directly moved to the CPU and a
+    tensor nested inside a container entry deep copied where it lies; and the optimizer's param
+    groups under :data:`GROUPS_KEY`, each once, as
     ``{"members": [parameter names], "settings": {every key but params}}``, its settings (its
-    learning rate and whatever else a scheduler or a bespoke ``get_param_groups`` sets) copied
-    as they are. :func:`restore_training_state` puts it back. Refuses (``KeyError``)
-    an optimizer holding a parameter that is not one of ``model``'s named parameters.
+    learning rate among them) copied as they are. Refuses (``KeyError``) an optimizer holding a
+    parameter that is not one of ``model``'s named parameters.
     """
     name_of: dict[torch.Tensor, str] = {
         p: n for n, p in model.named_parameters()
@@ -175,10 +180,11 @@ def capture_training_state(
 def captured_sources(
     model: nn.Module, optimizer: torch.optim.Optimizer, groups: list[dict]
 ) -> list[set[int | None]]:
-    """For each of ``optimizer``'s param groups, the indices into ``groups`` (a capture's
-    :data:`GROUPS_KEY`) of the captured groups its parameters were members of, ``None`` standing
-    for a parameter no captured group held. Membership is read by parameter name; an empty group
-    has no source.
+    """Return, per ``optimizer`` param group, the captured groups its parameters came from.
+
+    Each entry holds the indices into ``groups`` (a capture's :data:`GROUPS_KEY`) of the captured
+    groups the group's parameters were members of, ``None`` standing for a parameter no captured
+    group held. Membership is read by parameter name; an empty group has no source.
     """
     name_of = {p: n for n, p in model.named_parameters()}
     source_of = {
@@ -199,17 +205,17 @@ def restore_training_state(
     *,
     group_settings: bool,
 ) -> None:
-    """Load a :func:`capture_training_state` result of ``model`` into it and into ``optimizer``
-    through the optimizer's own ``load_state_dict``, from fresh copies, so the capture stays as
-    it was taken and every tensor lands on its parameter's device and dtype by the optimizer's own
-    rule: the model's whole ``state_dict``, then each captured parameter's optimizer state,
-    matched by name. A parameter with no captured state (frozen at the capture, unfrozen since)
-    starts with none. ``group_settings`` also puts back, into each param group, the settings of
-    the one captured group its members came from (:func:`captured_sources`), the resume of one
-    stage; without it the groups keep the settings they were built with, a new stage's own.
-    Refuses (``ValueError``) a capture with a member ``optimizer`` does not hold, and with
-    ``group_settings`` a non-empty group whose members did not all come from one captured
-    group.
+    """Load a :func:`capture_training_state` result of ``model`` into it and into ``optimizer``.
+
+    The load goes through the optimizer's own ``load_state_dict``, from fresh copies, so the
+    capture stays as it was taken and every tensor lands on its parameter's device and dtype by
+    the optimizer's own rule: the model's whole ``state_dict``, then each captured parameter's
+    optimizer state, matched by name. A parameter with no captured state (frozen at the capture,
+    unfrozen since) starts with none. ``group_settings`` also puts back, into each param group,
+    the settings of the one captured group its members came from (:func:`captured_sources`);
+    without it the groups keep the settings they were built with. Refuses (``ValueError``) a
+    capture with a member ``optimizer`` does not hold, and with ``group_settings`` a non-empty
+    group whose members did not all come from one captured group.
     """
     model.load_state_dict(state[STATE_DICT_KEY])
     params = dict(model.named_parameters())

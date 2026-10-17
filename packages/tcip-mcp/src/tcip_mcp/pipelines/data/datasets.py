@@ -2,8 +2,8 @@
 
 Every loader here is built from admitted samples, each reading its own source and the ground
 truth that answers for it, and returns (image_tensor, target_dict) where the target format is
-task-specific but always dict-based. `build_dataset` dispatches to the class for a task, or to a
-bespoke ``dataset_source`` builder for a task no loader here covers.
+task-specific but always dict-based. :func:`build_dataset` dispatches to the class for a task;
+:func:`build_from_dataset_source` calls a bespoke ``dataset_source`` builder instead.
 """
 
 from __future__ import annotations
@@ -75,18 +75,20 @@ class BaseDataset(Dataset, ABC):
 
     @property
     @abstractmethod
-    def num_samples(self) -> int: ...
+    def num_samples(self) -> int:
+        """The number of examples the dataset indexes."""
 
     @property
     def class_distribution(self) -> dict[int, int]:
-        """Class ID → count. Subclasses should override for efficiency."""
+        """Examples per class id, empty for a dataset stating no class distribution."""
         return {}
 
     def sample_classes(self) -> list[int | None]:
-        """Each indexed example's class id, in index order and in the space
-        :attr:`class_distribution` keys, ``None`` for one carrying no class, read off its ground
-        truth without decoding its image. A dataset stating a class distribution states this
-        beside it; one that does not refuses (``NotImplementedError``) naming it.
+        """Return each indexed example's class id, in index order.
+
+        The ids are in the space :attr:`class_distribution` keys, ``None`` for one carrying no
+        class, read off its ground truth without decoding its image. This base refuses
+        (``NotImplementedError``) naming the dataset's class.
         """
         raise NotImplementedError(
             f"{type(self).__name__} states no class per example: a sampler weighs each example "
@@ -94,22 +96,23 @@ class BaseDataset(Dataset, ABC):
         )
 
     @abstractmethod
-    def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]: ...
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
+        """Return example ``idx`` as ``(image_tensor, target_dict)``."""
 
     def __len__(self) -> int:
+        """Return :attr:`num_samples`."""
         return self.num_samples
 
 
 class BaseImageDataset(BaseDataset):
     """Base for image datasets, centralizes channel-aware loading + finalization.
 
-    Subclasses set ``self.transforms``, then build only the task-specific target. Each sample is
-    indexed by its location (:meth:`sample_of`), so one dataset spans capture dates and keeps two
-    dates' same-named images apart.
+    Each sample is indexed by its location (:meth:`sample_of`), so one dataset spans capture
+    dates and keeps two dates' same-named images apart.
 
     ``ground_truth_shape`` is the one shape this loader reads
-    (:data:`~tcip_mcp.pipelines.data.selection.GROUND_TRUTH_SHAPES`), declared by each subclass and
-    refused in :meth:`refuse_other_shapes`. ``ground_truth_count`` names the count that ground
+    (:data:`~tcip_mcp.pipelines.data.selection.GROUND_TRUTH_SHAPES`); any other is refused in
+    :meth:`refuse_other_shapes`. ``ground_truth_count`` names the count that ground
     truth derives for a loader whose ground truth carries its own classes (:func:`resolve_sizes`).
     ``reads_geometry`` declares which geometries answer for this loader's measurement, for the
     loaders whose ground truth is a document.
@@ -131,10 +134,11 @@ class BaseImageDataset(BaseDataset):
 
     @property
     def num_samples(self) -> int:
+        """The number of indexed samples."""
         return len(self.stems)
 
     def sample_of(self, key: str) -> Sample:
-        """The recorded sample one index key names."""
+        """Return the recorded sample one index key names."""
         return self._samples[key]
 
     @classmethod
@@ -154,8 +158,9 @@ class BaseImageDataset(BaseDataset):
 
     @staticmethod
     def read_mask(sample: Sample) -> np.ndarray:
-        """One mask sample's raster as the integer class ids it carries, decoded from the bytes its
-        one read answered (``stored``,
+        """Return one mask sample's raster as the integer class ids it carries.
+
+        The raster is decoded from the bytes its one read answered (``stored``,
         :func:`~tcip_mcp.pipelines.data.label_queries.acquired`).
         """
         import io
@@ -182,8 +187,9 @@ class BaseImageDataset(BaseDataset):
         self._keys = [s.location for s in samples]
 
     def _refuse_unreadable_geometry(self, samples: Sequence[Sample]) -> None:
-        """Refuse a sample whose document carries this run's subject only in geometries this loader
-        does not read (:attr:`reads_geometry`), naming it.
+        """Refuse a sample carrying this run's subject only in geometries this loader cannot read.
+
+        The geometries it reads are :attr:`reads_geometry`'s; the refusal names the sample.
 
         A document carrying the subject as a point, or as an image-level record, has real ground
         truth this loader cannot turn into a target. A loader that declares no geometry (a mask
@@ -211,20 +217,23 @@ class BaseImageDataset(BaseDataset):
             )
 
     def image_of(self, stem: str) -> Path | BandGroupRef:
-        """The logical image one sample key names, as its sample carries it."""
+        """Return the logical image one sample key names, as its sample carries it."""
         return self._samples[stem].image
 
     def _open_image(self, stem: str):
-        """Open an image honoring ``expected_channels``: PIL where the pixels have a faithful
-        PIL mode, else an ``[H, W, C]`` ndarray (:func:`image_utils.load_image`).
+        """Open an image honoring ``expected_channels``.
+
+        The image is PIL where the pixels have a faithful PIL mode, else an ``[H, W, C]`` ndarray
+        (:func:`image_utils.load_image`).
         """
         return load_image(self.image_of(stem), self.expected_channels)
 
     def _finalize(
         self, stem: str, img, target: dict
     ) -> tuple[torch.Tensor, dict]:
-        """Sample ``stem``'s decoded ``img`` through the transforms, or as a tensor when there are
-        none. A frame decoded as an array, which no faithful PIL mode takes
+        """Run ``stem``'s decoded ``img`` through the transforms, or make it a tensor when none.
+
+        A frame decoded as an array, which no faithful PIL mode takes
         (:func:`~tcip_mcp.pipelines.raster_source.faithful_pil_mode`), refuses the transforms
         (:func:`unchained`) naming the stem, its dtype and its band count.
         """
@@ -244,7 +253,7 @@ class BaseImageDataset(BaseDataset):
 
 
 def indexed_sample_keys(dataset: Any) -> set[str]:
-    """The sample keys a built dataset actually indexes, however many examples each one yields.
+    """Return the sample keys a built dataset indexes, however many examples each one yields.
 
     A per-image dataset indexes one example per sample, so every sample it was handed is here. A
     tiled dataset indexes one example per kept tile and names no example at all for a source whose
@@ -255,9 +264,10 @@ def indexed_sample_keys(dataset: Any) -> set[str]:
 
 
 def target_tensors(target: Any) -> dict[str, torch.Tensor]:
-    """A ``{"boxes", "labels", "iscrowd"}`` target of parallel per-box values, with its
-    ``attributes`` rows when it carries them, as the tensors every detection loader emits,
-    ``iscrowd`` under torchvision's reference key.
+    """Return a detection target as detection tensors.
+
+    The target is ``{"boxes", "labels", "iscrowd"}`` of parallel per-box values, with its
+    ``attributes`` rows when it carries them; ``iscrowd`` stays under torchvision's reference key.
     """
     return {
         "boxes": torch.tensor(target["boxes"], dtype=torch.float32).reshape(
@@ -278,13 +288,13 @@ def target_tensors(target: Any) -> dict[str, torch.Tensor]:
 
 
 PER_BOX_KEYS = ("boxes", "scores", "labels", "masks", "iscrowd", "attributes")
-"""The keys of a detection target or a detection record holding one row per box, which every
-row filter keeps in step."""
+"""The keys of a detection target or a detection record holding one row per box."""
 
 
 def crowd_of(target: Mapping[str, Any]) -> Any:
-    """A detection target's per-box crowd flags, which every detection producer states; a target
-    stating none refuses (``ValueError``) naming the key.
+    """Return a detection target's per-box crowd flags.
+
+    A target stating none refuses (``ValueError``) naming the key.
     """
     if target.get("iscrowd") is None:
         raise ValueError(
@@ -296,8 +306,9 @@ def crowd_of(target: Mapping[str, Any]) -> Any:
 
 
 def object_region(target: Mapping[str, Any], area: float) -> Region:
-    """The objects of a detection ``target`` (its rows but the crowd regions, :func:`object_rows`),
-    their xyxy boxes and labels, over a region of ``area`` pixels.
+    """Return the objects of a detection ``target`` over a region of ``area`` pixels.
+
+    They are its rows but the crowd regions (:func:`object_rows`), as xyxy boxes and labels.
     """
     keep = object_rows(crowd_of(target))
     return Region(
@@ -310,26 +321,28 @@ def object_region(target: Mapping[str, Any], area: float) -> Region:
 
 
 def class_ids(region: Region) -> list[int]:
-    """The 0-indexed class id of each object of ``region``: its 1-indexed label shifted."""
+    """Return the 0-indexed class id of each object of ``region``, its 1-indexed label shifted."""
     return [int(label) - 1 for label in region.labels.tolist()]
 
 
 def class_counts(regions: Iterable[Region]) -> dict[int, int]:
-    """Objects per 0-indexed class id over ``regions`` (:func:`class_ids`)."""
+    """Count objects per 0-indexed class id over ``regions``."""
     return dict(Counter(c for r in regions for c in class_ids(r)))
 
 
 def region_classes(regions: Iterable[Region]) -> list[int | None]:
-    """Each region's first object's 0-indexed class id (:func:`class_ids`), ``None`` for a
-    region holding no object.
+    """Return each region's first object's 0-indexed class id (:func:`class_ids`).
+
+    A region holding no object answers ``None``.
     """
     return [next(iter(class_ids(r)), None) for r in regions]
 
 
 def instance_targets(targets: list[dict]) -> list[dict]:
-    """``targets`` as the built-in torchvision heads take them: every crowd row
-    (:func:`object_rows`) dropped from each per-box key, every other key as it was; the input
-    targets are unchanged.
+    """Return ``targets`` without their crowd rows.
+
+    Every crowd row (:func:`object_rows`) is dropped from each per-box key, every other key as it
+    was; the input targets are unchanged.
     """
     out = []
     for t in targets:
@@ -341,8 +354,9 @@ def instance_targets(targets: list[dict]) -> list[dict]:
 
 
 class DocumentDataset(BaseImageDataset):
-    """A loader over samples whose ground truth is a per-image label document, read under the
-    run's own admitted class space (``scope``).
+    """A loader over samples whose ground truth is a per-image label document.
+
+    It reads under the run's own admitted class space (``scope``).
     """
 
     ground_truth_shape = DOCUMENT
@@ -354,18 +368,20 @@ class DocumentDataset(BaseImageDataset):
         *,
         scope: ClassScope,
     ) -> None:
+        """Index ``samples`` under ``scope`` at ``transforms`` (:meth:`_init_from_samples`)."""
         self.transforms = transforms
         self.scope = scope
         self._init_from_samples(samples)
 
     def document(self, stem: str) -> LabelDocument:
-        """The label document one sample key names, as its one read answered it."""
+        """Return the label document one sample key names, as its one read answered it."""
         return self._samples[stem].read
 
     def det_targets(self, document: LabelDocument) -> dict[str, Any]:
-        """One sample's label ``document`` (:meth:`document`) as the target
-        :func:`json_det_targets` reads under this run's own class space and this task's own
-        geometry (``reads_geometry``).
+        """Return one sample's label ``document`` (:meth:`document`) as a detection target.
+
+        The target is the one :func:`json_det_targets` reads under this run's own class space and
+        this task's own geometry (``reads_geometry``).
         """
         return json_det_targets(
             document.annotations,
@@ -374,8 +390,9 @@ class DocumentDataset(BaseImageDataset):
         )
 
     def region(self, stem: str) -> Region:
-        """One sample's objects over the frame its label document records
-        (:func:`object_region`).
+        """Return one sample's objects over the frame its label document records.
+
+        The objects are :func:`object_region`'s.
         """
         from tcip_mcp.pipelines.data.splits import label_document_extent
 
@@ -392,19 +409,23 @@ class DocumentDataset(BaseImageDataset):
 
     @property
     def class_distribution(self) -> dict[int, int]:
+        """Objects per 0-indexed class id over every sample's :meth:`region`."""
         return class_counts(self.regions)
 
     def sample_classes(self) -> list[int | None]:
+        """Return each sample's first object's 0-indexed class id (:func:`region_classes`)."""
         return region_classes(self.regions)
 
     @staticmethod
     def tensors(target: Mapping[str, Any]) -> dict[str, torch.Tensor]:
-        """The tensors this task's loader emits for ``target``'s rows, each in the coordinates of
-        the image it is served with: :func:`target_tensors`.
+        """Return the tensors this task's loader emits for ``target``'s rows.
+
+        Each is in the coordinates of the image it is served with: :func:`target_tensors`.
         """
         return target_tensors(target)
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
+        """Return sample ``idx``'s image and detection target, its ``image_id`` the index."""
         stem = self.stems[idx]
         img = self._open_image(stem)
         target = self.tensors(
@@ -414,8 +435,9 @@ class DocumentDataset(BaseImageDataset):
 
 
 class DetectionDataset(DocumentDataset):
-    """Object detection over a recorded sample list: each sample reads its own source and the label
-    document that answers for it.
+    """Object detection over a recorded sample list.
+
+    Each sample reads its own source and the label document that answers for it.
     """
 
     task_type = "detection"
@@ -431,11 +453,13 @@ class DetectionDataset(DocumentDataset):
 def slice_candidates(
     boxes: np.ndarray, slices: list[tuple[int, int, int, int]]
 ) -> list[np.ndarray]:
-    """Each slice's candidate rows of a frame whose full-image xyxy ``boxes`` are given: the
-    ascending indices of every row whose box can meet the slice's half-open ``(x0, y0, x1, y1)``
-    extent, a superset :func:`clip_rows_to_tile` decides on. Found from the slice origins each
-    box's extent spans, so the cost follows the box-slice incidences; slice origins are distinct,
-    as a lattice's are. Each slice gets its own fresh array.
+    """Return each slice's candidate rows of a frame whose full-image xyxy ``boxes`` are given.
+
+    The candidates are the ascending indices of every row whose box can meet the slice's
+    half-open ``(x0, y0, x1, y1)`` extent, a superset of the rows that meet it. They
+    are found from the slice origins each box's extent spans, so the cost follows the box-slice
+    incidences; slice origins are distinct, as a lattice's are. Each slice gets its own fresh
+    array.
     """
     found: list[list[int]] = [[] for _ in slices]
     boxes = np.asarray(boxes, dtype=np.float64).reshape(-1, 4)
@@ -465,9 +489,10 @@ def clip_rows_to_tile(
     tile: tuple[int, int, int, int],
     min_box_size: float,
 ) -> tuple[np.ndarray, np.ndarray, list[Polygon]]:
-    """The ``rows`` of a frame clipped once to the half-open pixel ``tile`` ``(x0, y0, x1, y1)``:
-    each row's region (``shapes``, its Shapely geometry,
-    :func:`~tcip_annotation.matching.shapely_geometry`) intersected with the tile.
+    """Clip the ``rows`` of a frame once to the half-open pixel ``tile`` ``(x0, y0, x1, y1)``.
+
+    Each row's region (``shapes``, its Shapely geometry,
+    :func:`~tcip_annotation.matching.shapely_geometry`) is intersected with the tile.
 
     A row whose clipped region has no area leaves the tile. A row whose full-image xyxy box
     (``boxes``) crosses the tile edge also leaves it when its clipped region is a seam sliver: the
@@ -519,7 +544,7 @@ def clip_rows_to_tile(
 def _validated_keep_regions(
     keep_regions: Sequence[tuple[int, int, int, int]] | None,
 ) -> list[tuple[int, int, int, int]] | None:
-    """``keep_regions`` as int 4-tuples, or ``None`` when no filter was asked for.
+    """Return ``keep_regions`` as integer 4-tuples, or ``None`` when absent.
 
     A malformed rect refuses by name. An empty sequence is a real filter that keeps nothing,
     distinct from ``None``.
@@ -543,24 +568,25 @@ def _validated_keep_regions(
 
 
 class TiledDetectionDataset(BaseImageDataset):
-    """Wrap a :class:`DocumentDataset` (a detection or an instance-segmentation one) and expand
-    each source image into native-resolution slices of SAHI's lattice
-    (:func:`~tcip_mcp.pipelines.slicing.slice_lattice`), each row's region clipped once to the
-    slice (:func:`clip_rows_to_tile`): a row whose clipped region has no area or is a seam sliver
-    leaves the slice, and one that stays carries the bounds of its clipped region as its box and
-    that region, tile-local, as its geometry. Each slice emits the base task's target
-    (``DocumentDataset.tensors``), an instance mask the clipped region rasterized.
+    """A :class:`DocumentDataset` expanded into native-resolution slices of SAHI's lattice.
+
+    The base is a detection or an instance-segmentation dataset; each source image is expanded
+    into slices of :func:`~tcip_mcp.pipelines.slicing.slice_lattice`, each row's region clipped
+    once to the slice (:func:`clip_rows_to_tile`): a row whose clipped region has no area or is a
+    seam sliver leaves the slice, and one that stays carries the bounds of its clipped region as
+    its box and that region, tile-local, as its geometry. Each slice emits the base task's
+    target (``DocumentDataset.tensors``), an instance mask the clipped region rasterized.
 
     Slice membership is computed at ``__init__``. Each source's frame comes from its
     :class:`~tcip_mcp.pipelines.raster_source.SourceHeader` (a TIFF's or a photograph's header,
     a numpy container's array, which for a ``.npz`` is its pixels loaded), and the same header
-    is handed to the process source pool (``raster_source.pooled_source``), which holds open a
-    source whose backend reads windows without a decode (a GDAL-served raster, a memory-mapped
-    ``.npy``); layout refusals surface here, and a refusal of the pixels themselves surfaces at
-    first read. ``__getitem__`` reads a windowed stem one slice window at a time through the
-    pool, and a whole-decode stem by decoding the whole source for each slice and indexing the
-    slice out of it; both emit the base's target dict shape. The dataset itself never holds an
-    open source object, so it pickles into spawned DataLoader workers.
+    opens the source through the process source pool (``raster_source.pooled_source``) where its
+    backend reads windows without a decode; layout refusals surface here, and a refusal of the
+    pixels themselves surfaces at first read. ``__getitem__`` reads a windowed stem one slice
+    window at a time through the pool, and a whole-decode stem by decoding the whole source for
+    each slice and indexing the slice out of it; both emit the base's target dict shape. The
+    dataset itself never holds an open source object, so it pickles into spawned DataLoader
+    workers.
 
     ``keep_regions``, when given, is a sequence of half-open pixel rects ``(x0, y0, x1, y1)``
     in each image's own full-resolution frame: only slices lying fully inside one of them are
@@ -588,6 +614,11 @@ class TiledDetectionDataset(BaseImageDataset):
         transforms: Any = None,
         keep_regions: Sequence[tuple[int, int, int, int]] | None = None,
     ) -> None:
+        """Index ``base``'s sources as the kept slices of the lattice.
+
+        Refuses as the class states; a source whose decoded frame differs from the one its label
+        document records refuses (``ValueError``).
+        """
         from tcip_annotation.matching import geometry_rings, shapely_geometry
         from tcip_mcp.pipelines.derivations import (
             char_sizes,
@@ -699,28 +730,32 @@ class TiledDetectionDataset(BaseImageDataset):
 
     @property
     def stems(self) -> list[str]:
+        """Each indexed tile's source key, in index order."""
         return [e["stem"] for e in self._index]
 
     @property
     def tile_entries(self) -> list[tuple[str, tuple[int, int, int, int]]]:
-        """``(stem, slice)`` per sample, in index order, each slice its half-open ``(x0, y0, x1,
-        y1)`` lattice box.
+        """``(stem, slice)`` per indexed tile, in index order.
+
+        Each slice is its half-open ``(x0, y0, x1, y1)`` lattice box.
         """
         return [(e["stem"], e["slice"]) for e in self._index]
 
     @property
     def source_frames(self) -> dict[str, dict[str, Any]]:
-        """Per-stem frame facts recorded when the index was built: ``width`` and ``height`` (the
-        source header's frame), ``channels`` and ``dtype_itemsize`` (both ``None`` for a source
-        no pooled reader was opened for), and ``windowed`` (whether this source reads through a
-        windowed backend).
+        """Per-stem frame facts recorded when the index was built.
+
+        They are ``width`` and ``height`` (the source header's frame), ``channels`` and
+        ``dtype_itemsize`` (both ``None`` for a source no pooled reader was opened for), and
+        ``windowed`` (whether this source reads through a windowed backend).
         """
         return {stem: dict(info) for stem, info in self._source_frames.items()}
 
     @property
     def regions(self) -> list[Region]:
-        """Each indexed tile's objects over its own pixel area (:func:`object_region`), in index
-        order.
+        """Each indexed tile's objects over its own pixel area, in index order.
+
+        The objects are :func:`object_region`'s.
         """
         return [
             object_region(e, (x1 - x0) * (y1 - y0))
@@ -730,19 +765,21 @@ class TiledDetectionDataset(BaseImageDataset):
 
     @property
     def class_distribution(self) -> dict[int, int]:
+        """Objects per 0-indexed class id over every indexed tile's region."""
         return class_counts(self.regions)
 
     def sample_classes(self) -> list[int | None]:
+        """Return each tile's first object's 0-indexed class id (:func:`region_classes`)."""
         return region_classes(self.regions)
 
     def _read_windowed_tile(
         self, stem: str, info: dict, s: tuple[int, int, int, int]
     ):
-        """One slice through the pooled windowed source: its ``[H, W, C]`` array and the source's
-        band interpretations.
+        """Read one slice through the pooled windowed source.
 
-        Refuses when the recorded frame disagrees with the pooled source's own dims, or the
-        returned window's shape disagrees with the requested rect.
+        Returns its ``[H, W, C]`` array and the source's band interpretations. Refuses when the
+        recorded frame disagrees with the pooled source's own dims, or the returned window's shape
+        disagrees with the requested rect.
         """
         src = raster_source.pooled_source(
             raster_source.SourceHeader(self.image_of(stem)),
@@ -774,9 +811,10 @@ class TiledDetectionDataset(BaseImageDataset):
         return region, getattr(src, "band_interpretations", None)
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
-        """One slice and its clipped targets. The slice is PIL where its dtype has a faithful mode,
-        else ``[H, W, C]``; a 4-channel slice converts only when the source names its 4th band
-        alpha (:func:`to_pil_if_faithful`).
+        """Return one slice and its clipped targets.
+
+        The slice is PIL where its dtype has a faithful mode, else ``[H, W, C]``; a 4-channel
+        slice converts only when the source names its 4th band alpha (:func:`to_pil_if_faithful`).
         """
         e = self._index[idx]
         stem = e["stem"]
@@ -815,8 +853,10 @@ class TiledDetectionDataset(BaseImageDataset):
 
 
 class InstanceSegDataset(DocumentDataset):
-    """Instance masks from per-image polygons: the producer's own samples, each naming its own
-    source and the label document that answers for it.
+    """Instance masks from per-image polygons.
+
+    The samples are the producer's own, each naming its own source and the label document that
+    answers for it.
     """
 
     task_type = "instance_seg"
@@ -825,8 +865,10 @@ class InstanceSegDataset(DocumentDataset):
 
     @staticmethod
     def tensors(target: Mapping[str, Any]) -> dict[str, torch.Tensor]:
-        """:func:`target_tensors` beside ``masks``, each row's polygon rasterized on the
-        ``size`` ``(width, height)`` of the image it is served with (:func:`instance_masks`).
+        """Return :func:`target_tensors` beside ``masks``.
+
+        Each row's polygon is rasterized on the ``size`` ``(width, height)`` of the image it is
+        served with (:func:`instance_masks`).
         """
         return {
             **target_tensors(target),
@@ -837,9 +879,10 @@ class InstanceSegDataset(DocumentDataset):
 def instance_masks(
     polygons: Sequence[Any], size: tuple[int, int]
 ) -> torch.Tensor:
-    """Each polygon of ``polygons`` filled on its own ``size`` ``(width, height)`` canvas, as a
-    ``[N, height, width]`` uint8 tensor. Every ring of a polygon fills its one mask: a multi-ring
-    instance is one occlusion-split object.
+    """Fill each polygon of ``polygons`` on its own ``size`` ``(width, height)`` canvas.
+
+    The masks come back as a ``[N, height, width]`` uint8 tensor. Every ring of a polygon fills
+    its one mask: a multi-ring instance is one occlusion-split object.
     """
     from PIL import ImageDraw
 
@@ -862,8 +905,7 @@ def instance_masks(
 class SemanticSegDataset(BaseImageDataset):
     """PNG mask images where pixel values are class IDs, over a recorded sample list.
 
-    Membership is exactly what the producer recorded and each sample reads the mask it names, so
-    the dataset spans whatever capture dates the draw did.
+    Each sample reads the mask it names.
     """
 
     task_type = "semantic_seg"
@@ -873,10 +915,12 @@ class SemanticSegDataset(BaseImageDataset):
     def __init__(
         self, samples: Sequence[Sample], transforms: Any = None
     ) -> None:
+        """Index ``samples`` at ``transforms`` (:meth:`_init_from_samples`)."""
         self.transforms = transforms
         self._init_from_samples(samples)
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
+        """Return sample ``idx``'s image and its mask's class ids under ``masks``."""
         stem = self.stems[idx]
         img = self._open_image(stem)
         mask = self.read_mask(self._samples[stem])
@@ -890,17 +934,20 @@ class SemanticSegDataset(BaseImageDataset):
 
 
 def table_values(samples: Sequence[Sample]) -> list[str]:
-    """Each sample's own table-row value, as its one read answered it
-    (:func:`~tcip_mcp.pipelines.data.label_queries.acquired`).
+    """Return each sample's own table-row value, as its one read answered it.
+
+    The read is :func:`~tcip_mcp.pipelines.data.label_queries.acquired`'s.
     """
     return [s.read for s in acquired(samples)]
 
 
 class TableDataset(BaseImageDataset):
-    """A loader over a recorded sample list whose ground truth is one row of a table: each sample
-    reads the value its ``row_key`` names in the table it names (:func:`table_values`), read by
-    ``convert`` and handed to the head under ``target_key``, its loss contract's own key. A loader
-    whose ground truth derives a count also counts its values per class.
+    """A loader over a recorded sample list whose ground truth is one row of a table.
+
+    Each sample reads the value its ``row_key`` names in the table it names
+    (:func:`table_values`), read by ``convert`` and handed to the head under ``target_key``, its
+    loss contract's own key. A loader whose ground truth derives a count also counts its values
+    per class.
     """
 
     ground_truth_shape = TABLE
@@ -910,6 +957,7 @@ class TableDataset(BaseImageDataset):
     def __init__(
         self, samples: Sequence[Sample], transforms: Any = None
     ) -> None:
+        """Index ``samples`` at ``transforms`` and read each row value through ``convert``."""
         self.transforms = transforms
         self._init_from_samples(samples)
         self._values = [
@@ -918,17 +966,20 @@ class TableDataset(BaseImageDataset):
 
     @property
     def class_distribution(self) -> dict[int, int]:
+        """Samples per class over :meth:`sample_classes`, a sample with no class uncounted."""
         return dict(Counter(c for c in self.sample_classes() if c is not None))
 
     def sample_classes(self) -> list[int | None]:
-        """Each sample's value where this loader's ground truth derives a class count, else
-        ``None`` for every sample.
+        """Return each sample's value where this loader's ground truth derives a class count.
+
+        Otherwise every sample answers ``None``.
         """
         if self.ground_truth_count:
             return list(self._values)
         return [None] * len(self._values)
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, dict]:
+        """Return sample ``idx``'s image and its value under ``target_key``."""
         stem = self.stems[idx]
         return self._finalize(
             stem, self._open_image(stem), {self.target_key: self._values[idx]}
@@ -971,15 +1022,16 @@ _DATASET_MAP: dict[str, type[BaseImageDataset]] = {
     "ordinal": OrdinalDataset,
     "regression": RegressionDataset,
 }
-"""Which built-in loader reads a run's samples, by task. A task outside this map reaches a dataset
-only through a bespoke ``dataset_source`` builder."""
+"""Which built-in loader reads a run's samples, by task."""
 
 
 def builtin_loader(
     task: str, dataset_source: DatasetSourceSchema | None = None
 ) -> type[BaseImageDataset] | None:
-    """The built-in loader a run of ``task`` is read by: ``None`` for a run naming a bespoke
-    ``dataset_source`` and for a task no built-in loader reads.
+    """Return the built-in loader a run of ``task`` is read by.
+
+    The answer is ``None`` for a run naming a bespoke ``dataset_source`` and for a task no
+    built-in loader reads.
     """
     return None if dataset_source else _DATASET_MAP.get(task)
 
@@ -997,18 +1049,19 @@ def build_from_dataset_source(
     scope: ClassScope,
     transforms: Any,
 ) -> Dataset:
-    """Import the agent's dataset builder a ``dataset_source`` names from its run's layout
-    (``bespoke``, :data:`BespokeSource`; ``model_build.import_source_builder``) and call it.
+    """Import the agent's dataset builder a ``dataset_source`` names and call it.
 
-    The builder is called with a context of ``samples`` (the sample list for the side being built,
-    each carrying its logical image, :func:`~tcip_mcp.pipelines.data.label_queries.resolved`),
-    ``scope`` (the :class:`~tcip_mcp.pipelines.data.selection.ClassScope` those samples were
-    admitted under, every field ``None`` where the ground truth carries its own classes), ``task``
-    and ``transforms``.
+    The builder is imported from its run's layout (``bespoke``, :data:`BespokeSource`;
+    ``model_build.import_source_builder``). It is called with a context of ``samples`` (the
+    sample list for the side being built, each carrying its logical image,
+    :func:`~tcip_mcp.pipelines.data.label_queries.resolved`), ``scope`` (the
+    :class:`~tcip_mcp.pipelines.data.selection.ClassScope` those samples were admitted under,
+    every field ``None`` where the ground truth carries its own classes), ``task`` and
+    ``transforms``.
 
     The context is a ``schemas.DatasetContext``, each value under its field's name;
     ``builder_kwargs`` configure the builder (``schemas.DatasetSourceSchema`` refuses one naming
-    a context field). Declare ``**kwargs`` on the builder to ignore context keys it doesn't use.
+    a context field).
     """
     from tcip_mcp.pipelines.model_build import import_source_builder
 
@@ -1024,7 +1077,7 @@ def build_from_dataset_source(
 
 
 def _band_count(samples: Sequence[Sample]) -> int:
-    """The band count the sources of ``samples`` carry, one count for all of them.
+    """Return the band count the sources of ``samples`` carry, one count for all of them.
 
     Every source is probed, off a header where its container carries one and by decoding where it
     does not; sources that disagree, or a source that will not probe, refuse by name.
@@ -1069,7 +1122,7 @@ SIZE_NAMES = GROUND_TRUTH_COUNTS + ("num_channels",)
 
 
 def stated_sizes(data: DataSpec) -> dict[str, int]:
-    """The sizes a data block states or records, absent where it states none."""
+    """Return the sizes a data block states or records, absent where it states none."""
     sizes = {name: getattr(data, name) for name in SIZE_NAMES}
     return {
         name: int(size) for name, size in sizes.items() if size is not None
@@ -1082,14 +1135,16 @@ def resolve_sizes(
     samples: Sequence[Sample],
     dataset_source: DatasetSourceSchema | None = None,
 ) -> dict[str, int]:
-    """The sizes a run's loaders are built at: what its caller states (``stated``, by
-    :data:`SIZE_NAMES`), and, for each size stated nowhere, what the samples themselves carry.
+    """Return the sizes a run's loaders are built at.
+
+    They are what its caller states (``stated``, by :data:`SIZE_NAMES`), and, for each size
+    stated nowhere, what the samples themselves carry.
 
     Read over every sample the loaders are built from: a class reaching only one side sizes both,
     and two sources disagreeing about their band count refuse. A stated band count is taken as
     given and nothing is probed. A built-in loader's ground truth derives at most one count, its
-    ``ground_truth_count``, and that derived count is the one resolved: any stated count refuses
-    (a scoped run's class count is its map's length).
+    ``ground_truth_count``, and that derived count is the one resolved: any stated count
+    refuses.
 
     For a task no built-in loader reads and for a bespoke ``dataset_source``, the band count the
     sources carry and only the counts the caller states.
@@ -1138,7 +1193,7 @@ def build_dataset(
     tiling: TilingSpec | None = None,
     **unowned: Any,
 ) -> Dataset:
-    """Factory: build the platform's dataset for ``task``.
+    """Build the platform's dataset for ``task``.
 
     ``samples`` is the producer's own sample list: each sample reads its own source and the
     ground truth that answers for it, its own label document, its own mask raster or the row its
@@ -1152,7 +1207,7 @@ def build_dataset(
     The tiling ``task`` builds at (``schemas.run_tiling``, whose refusal propagates) wraps the
     task's dataset in a :class:`TiledDetectionDataset` at the options it states
     (``TilingSpec.tiler_options``), and one missing its ``tile_size`` or ``overlap`` refuses
-    (``ValueError``). An unknown task raises ``Unknown task``.
+    (``ValueError``). An unknown task refuses (``ValueError``) naming the known ones.
     """
     if unowned:
         raise ValueError(
@@ -1197,11 +1252,12 @@ def build_dataset(
 def refuse_unchained(
     samples: Sequence[Sample], num_channels: int, transforms: Any
 ) -> None:
-    """Refuse (``ValueError``) ``transforms`` over ``samples`` when a sample's source is served
-    at ``num_channels`` as an array rather than a PIL image
-    (:meth:`~tcip_mcp.pipelines.raster_source.SourceHeader.pil_mode_at`), naming its location,
-    its dtype, its band count and the transforms (:func:`unchained`); ``None`` transforms refuse
-    nothing and read no source.
+    """Refuse ``transforms`` over ``samples`` when a sample's source is served as an array.
+
+    A source served at ``num_channels`` as an array rather than a PIL image
+    (:meth:`~tcip_mcp.pipelines.raster_source.SourceHeader.pil_mode_at`) refuses
+    (``ValueError``), naming its location, its dtype, its band count and the transforms
+    (:func:`unchained`); ``None`` transforms refuse nothing and read no source.
     """
     if transforms is None:
         return
@@ -1216,8 +1272,9 @@ def refuse_unchained(
 def unchained(
     transforms: Any, frame: str, bands: int, dtype: Any
 ) -> ValueError:
-    """The refusal of ``transforms`` over ``frame``, served as ``bands``-band ``dtype`` pixels
-    no faithful PIL mode takes.
+    """Return the refusal of ``transforms`` over ``frame``.
+
+    ``frame`` is served as ``bands``-band ``dtype`` pixels no faithful PIL mode takes.
     """
     return ValueError(
         f"this run states the augmentation {transforms!r} over {frame}, which is served as "

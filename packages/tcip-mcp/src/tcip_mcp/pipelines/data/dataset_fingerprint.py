@@ -1,5 +1,6 @@
-"""Whole-dataset content identity: :func:`dataset_fingerprint` over the label documents, the
-image files and the subject registry.
+"""Whole-dataset content identity over the label documents, image files and subject registry.
+
+The identity is :func:`dataset_fingerprint`.
 """
 
 from __future__ import annotations
@@ -18,10 +19,11 @@ if TYPE_CHECKING:
 def _labels_term(
     dataset_root: Path, versions: Mapping[Key, str]
 ) -> str | None:
-    """Whole-dataset label identity, composed from each label document's capture, stem and
-    version: the one ``versions`` holds for it, else its
-    :func:`~tcip_mcp.pipelines.data.selection.ground_truth_digest`. ``None`` when the dataset
-    holds no label document.
+    """Return the whole-dataset label identity, or ``None`` when it holds no label document.
+
+    The identity is composed from each label document's capture, stem and version: the one
+    ``versions`` holds for it, else its
+    :func:`~tcip_mcp.pipelines.data.selection.ground_truth_digest`.
     """
     import tcip_store
     from tcip_mcp.dataset_layout import LABEL_DOCUMENTS
@@ -38,9 +40,11 @@ def _labels_term(
 
 
 def _images_term(images_root: Path) -> str | None:
-    """Whole-dataset image identity from each image file's byte digest
+    """Return the whole-dataset image identity, or ``None`` when there are no images.
+
+    The identity is composed from each image file's byte digest
     (:func:`~tcip_store.read_blob_versioned`), read from the bytes on every call; a
-    ``.bandgroup`` manifest digests as its own bytes. ``None`` when there are no images.
+    ``.bandgroup`` manifest digests as its own bytes.
     """
     if not images_root.is_dir():
         return None
@@ -64,8 +68,10 @@ def _images_term(images_root: Path) -> str | None:
 
 
 def _registry_term(dataset_root: Path) -> str | None:
-    """Digest over the canonical registry serialization (``registry_to_dict``) in declared order;
-    ``None`` when the dataset has no registry, and a registry ``read_registry`` refuses raises.
+    """Return the digest of the dataset's canonical registry serialization, or ``None``.
+
+    The serialization is ``registry_to_dict``'s, in declared order; ``None`` when the dataset has
+    no registry, and a registry ``read_registry`` refuses raises.
     """
     from tcip_annotation.json_io import canonical_digest
     from tcip_mcp.subject_registry import read_registry, registry_to_dict
@@ -80,11 +86,12 @@ def _registry_term(dataset_root: Path) -> str | None:
 def dataset_fingerprint(
     dataset_root: str | Path, admitted: Iterable[Sample] = ()
 ) -> str | None:
-    """Whole-dataset content identity over :func:`_labels_term`, :func:`_images_term` and
-    :func:`_registry_term`, so a moved dataset keeps its fingerprint and a change to any of the
-    three changes it; a label document among ``admitted``, the calling act's own admitted
-    samples, enters at the version its admission read rather than being read again. ``None`` for
-    a dataset with no images or no labels.
+    """Return the whole-dataset content identity, or ``None`` with no images or no labels.
+
+    The identity is over :func:`_labels_term`, :func:`_images_term` and :func:`_registry_term`,
+    so a moved dataset keeps its fingerprint and a change to any of the three changes it; a
+    label document among the ``admitted`` samples enters at the version its admission read
+    rather than being read again.
     """
     from tcip_annotation.json_io import canonical_digest
     from tcip_mcp.dataset_layout import image_root

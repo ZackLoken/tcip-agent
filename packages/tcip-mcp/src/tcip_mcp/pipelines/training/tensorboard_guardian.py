@@ -1,5 +1,6 @@
-"""Keep one child tied to the life of the process that launched it, on platforms with no job-object
-equivalent (Linux, macOS).
+"""A guardian tying one child to the life of the process that launched it.
+
+It serves the platforms with no job-object equivalent (Linux, macOS).
 
 Run as ``python -m tcip_mcp.pipelines.training.tensorboard_guardian --parent <pid> --term-grace
 <seconds> -- <argv...>``; both options are required. Starts ``<argv...>`` as its own child and,
@@ -31,8 +32,10 @@ _USAGE = "usage: tensorboard_guardian --parent <pid> --term-grace <seconds> -- <
 
 
 def _terminate_and_wait(child: subprocess.Popen, term_grace: float) -> int:
-    """Ask the child to stop, escalate if it ignores that, and return its raw exit code
-    (negative when a signal ended it, as ``subprocess`` reports it).
+    """Ask the child to stop, escalate if it ignores that, and return its raw exit code.
+
+    The code is negative when a signal ended the child, as ``subprocess`` reports it; the
+    escalation to a kill comes after ``term_grace`` seconds.
     """
     child.terminate()
     try:
@@ -43,8 +46,10 @@ def _terminate_and_wait(child: subprocess.Popen, term_grace: float) -> int:
 
 
 def _exit_code(returncode: int) -> int:
-    """The shell's own reading of a raw Popen return code: 128 plus the signal number when a
-    signal ended it (a negative ``returncode``), the code itself otherwise.
+    """Return the shell's own reading of a raw Popen return code.
+
+    That is 128 plus the signal number when a signal ended the process (a negative
+    ``returncode``), the code itself otherwise.
     """
     return 128 - returncode if returncode < 0 else returncode
 
@@ -71,10 +76,12 @@ def _run(parent_pid: int, term_grace: float, argv: list[str]) -> int:
 
 
 def _parse_args(argv: list[str]) -> tuple[int, float, list[str]]:
-    """``--parent`` and ``--term-grace`` may come in either order, both before ``--``; either
+    """Return the parent pid, the term grace and the child's argv parsed from ``argv``.
+
+    ``--parent`` and ``--term-grace`` may come in either order, both before ``--``; either
     missing, no argv left after it, a non-integer or non-positive parent, or a non-numeric,
-    non-finite (``nan``, ``inf``) or negative term-grace is a usage error rather than a
-    traceback, since none of those names a pid to watch or a duration to wait on.
+    non-finite (``nan``, ``inf``) or negative term-grace exits with the usage message rather than
+    a traceback.
     """
     parent_pid: int | None = None
     term_grace: float | None = None
@@ -108,6 +115,7 @@ def _parse_args(argv: list[str]) -> tuple[int, float, list[str]]:
 
 
 def main() -> int:
+    """Run the guarded child named on the command line and return the guardian's exit code."""
     parent_pid, term_grace, argv = _parse_args(sys.argv[1:])
     return _exit_code(_run(parent_pid, term_grace, argv))
 
