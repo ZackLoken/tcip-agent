@@ -1,6 +1,4 @@
-"""Orchestrates a checkpoint evaluation run (tile-level or delivery-grade full-frame) and returns
-its scored result; ``evaluation.py`` keeps the metrics computation itself.
-"""
+"""Checkpoint evaluation runs, tile-level or delivery-grade full-frame, each returning a result."""
 
 from __future__ import annotations
 
@@ -26,10 +24,11 @@ _COMMON_EVAL_FIELDS = (
 
 
 def evaluation_result(common: dict, extra: dict) -> dict:
-    """One evaluation's result: ``common``, the identity tuple both regimes share
-    (``_COMMON_EVAL_FIELDS``, ``experiment_id`` possibly ``None`` but every key present, or this
-    refuses), followed by ``extra``, this regime's own fields (metrics included), unmodified. A key
-    present in both refuses.
+    """Return one evaluation's result, ``common``'s identity fields followed by ``extra``.
+
+    ``common`` is the identity tuple both regimes share (``_COMMON_EVAL_FIELDS``,
+    ``experiment_id`` possibly ``None`` but every key present, or this refuses); ``extra`` is this
+    regime's own fields (metrics included), unmodified. A key present in both refuses.
     """
     missing = [field for field in _COMMON_EVAL_FIELDS if field not in common]
     if missing:
@@ -53,11 +52,13 @@ def run_test_evaluation(
     tiling: TilingSpec | None = None,
     trait: TraitEntry | None,
 ) -> dict:
-    """Score ``loader`` against the untiled ``pass_``'s model, its boxes counted at the pass's
-    conf, each image capped at the pass's density and the objective weighted by the checkpoint's
-    recorded ``evaluation.score_weights`` (``evaluation.evaluate``), and return the result
-    (:func:`evaluation_result`) with that record under ``execution``; ``trait`` is the confirmed
-    entry whose criterion governs the count, as ``evaluate`` reads it.
+    """Score ``loader`` against the untiled ``pass_``'s model and return the evaluation result.
+
+    Its boxes are counted at the pass's conf, each image capped at the pass's density and the
+    objective weighted by the checkpoint's recorded ``evaluation.score_weights``
+    (``evaluation.evaluate``); the result (:func:`evaluation_result`) carries the pass's record
+    under ``execution``. ``trait`` is the confirmed entry whose criterion governs the count, as
+    ``evaluate`` reads it.
 
     ``tiling`` describes the loader's regime for provenance only: a tile-level run scores
     per-tile predictions against per-tile ground truth, a diagnostic, not the delivery regime.
@@ -106,16 +107,19 @@ def run_full_frame_evaluation(
     device: str | None = None,
     trait: TraitEntry | None,
 ) -> dict:
-    """``checkpoint`` evaluated full frame: its tiled pass over ``stated`` (its conf the stated
-    one), its density, any tile geometry the checkpoint does not record and its merge threshold
-    unless stated derived from the evaluated ground truth
+    """Evaluate ``checkpoint`` full frame over ``admitted`` and return the evaluation result.
+
+    The checkpoint runs its tiled pass over ``stated`` (its conf the stated one), its density,
+    any tile geometry the checkpoint does not record and its merge threshold unless stated
+    derived from the evaluated ground truth
     (:func:`~tcip_mcp.pipelines.execution.execution_record`, whose refusals propagate), matched
     to the full-frame ground truth of the detection loader a run over ``admitted`` builds, under
     ``trait``'s criterion when given. Returns
-    :func:`~tcip_mcp.pipelines.training.evaluation.detection_metrics`, by mask for a pass
-    collecting masks and by box otherwise, beside the reference's object and
-    detection counts and the pass's ``execution`` record. An empty admission, and a document
-    carrying the subject only in geometry a detector cannot read, refuse by name.
+    :func:`~tcip_mcp.pipelines.training.evaluation.detection_metrics` without its matchings, by
+    mask for a pass collecting masks and by box otherwise, beside the reference's object and
+    detection counts, the scored image count, the admission's tallies and the pass's
+    ``execution`` record. An empty admission, and a document carrying the subject only in
+    geometry a detector cannot read, refuse by name.
     """
     from tcip_mcp.pipelines.execution import Reference, prepare
     from tcip_mcp.pipelines.operating_point import cap_saturated_frac

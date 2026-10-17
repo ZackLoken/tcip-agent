@@ -1,6 +1,7 @@
-"""The process entry point of one run's body or one sweep: ``python -m
-tcip_mcp.pipelines.training.subprocess_worker --run-dir <dir>``, everything else it reads being in
-the directory's ``run.json``, or its ``sweep.json`` for a sweep.
+"""The process entry point of one run's body or one sweep.
+
+Invoked as ``python -m tcip_mcp.pipelines.training.subprocess_worker --run-dir <dir>``, everything
+else it reads being in the directory's ``run.json``, or its ``sweep.json`` for a sweep.
 """
 
 from __future__ import annotations
@@ -31,10 +32,11 @@ def prepare_run_context(
     origin: str = "training",
     epoch_hook: Any = None,
 ) -> TrainContext:
-    """Build the ``TrainContext`` of the observed run from what its launch record resolved,
-    resolving nothing again: its config with the resolved data section, its objective, its
-    within-image split if its partition records one, and its datasets and loaders
-    (:func:`~tcip_mcp.pipelines.data.split_construction.recorded_datasets`).
+    """Build the ``TrainContext`` of the observed run from what its launch record resolved.
+
+    Nothing is resolved again. The context carries its config with the resolved data section,
+    its objective, its within-image split if its partition records one, and its datasets and
+    loaders (:func:`~tcip_mcp.pipelines.data.split_construction.recorded_datasets`).
     ``origin`` and ``epoch_hook`` are the context's own.
     """
     from tcip_mcp.pipelines.data.split_construction import (
@@ -93,11 +95,13 @@ def run_directory(
     origin: str = "training",
     epoch_hook: Any = None,
 ) -> TrainRun:
-    """Run the run whose directory is ``run_dir`` to its final status and return it: refuse one
-    that has ended before anything is written (``experiments.require_open``), observe it once,
-    keep its heartbeat, build its context from that observation (:func:`prepare_run_context`,
-    which takes the other arguments), and run its body inside the envelope. A failure before the
-    envelope opens closes the run ``failed`` naming it (``envelope.close_run``) and propagates.
+    """Run the run whose directory is ``run_dir`` to its final status and return it.
+
+    A run that has ended is refused before anything is written (``experiments.require_open``);
+    otherwise it is observed once, its heartbeat kept, its context built from that observation
+    (:func:`prepare_run_context`, which takes the other arguments), and its body run inside the
+    envelope. A failure before the envelope opens closes the run ``failed`` naming it
+    (``envelope.close_run``) and propagates.
     """
     from tcip_mcp.experiments import keep_heartbeat, observe, require_open
     from tcip_mcp.pipelines.training.envelope import (
@@ -135,6 +139,11 @@ def run_directory(
 
 
 def main() -> None:
+    """Run the sweep or the run whose directory ``--run-dir`` names.
+
+    A directory holding a sweep file runs as a sweep, any other as one run
+    (:func:`run_directory`), after the process configures its GDAL cache and binds the store.
+    """
     from tcip_mcp.pipelines.raster_source import configure_gdal_cache
 
     # Its own process entry point: the platform's GDAL cache budget, and its own backend binding.

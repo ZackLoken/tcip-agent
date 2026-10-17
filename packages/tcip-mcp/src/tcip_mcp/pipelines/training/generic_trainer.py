@@ -5,7 +5,7 @@ segmentation) because it delegates everything to the model's forward() which ret
 train mode.
 
 Provides: progressive unfreezing, early stopping, mixed precision, gradient accumulation,
-    checkpoints; metrics leave through the caller's callbacks.
+    checkpoints; metrics leave through the ``epoch_callback`` and ``batch_callback`` it is given.
 """
 
 from __future__ import annotations
@@ -79,21 +79,23 @@ logger = logging.getLogger(__name__)
 
 BATCH_ROWS_PER_EPOCH = 10
 """Per-batch rows an epoch emits when ``log_every_n_batches`` is unstated
-(:func:`batch_row_ends`): owner ruling."""
+(:func:`batch_row_ends`)."""
 
 
 def batch_row_ends(n_batches: int) -> set[int]:
-    """The one-based batch counts within an epoch of ``n_batches`` batches after which a
-    per-batch row is emitted by default: :data:`BATCH_ROWS_PER_EPOCH` evenly spaced ends, the
-    last the epoch's own, or every batch of an epoch shorter than that.
+    """Return the one-based batch counts after which an epoch emits a per-batch row by default.
+
+    For an epoch of ``n_batches`` batches they are :data:`BATCH_ROWS_PER_EPOCH` evenly spaced
+    ends, the last the epoch's own, or every batch of an epoch shorter than that.
     """
     rows = min(BATCH_ROWS_PER_EPOCH, n_batches)
     return {math.ceil(k * n_batches / rows) for k in range(1, rows + 1)}
 
 
 def run_device(spec: TrainConfigSchema) -> torch.device:
-    """The device a validated config (``schemas.train_config``) trains on: its ``device``, or
-    cuda when available and cpu otherwise.
+    """Return the device a validated config (``schemas.train_config``) trains on.
+
+    That is its ``device``, or cuda when available and cpu otherwise.
     """
     return torch.device(
         spec.device or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -103,12 +105,14 @@ def run_device(spec: TrainConfigSchema) -> torch.device:
 def _warmup_starts(
     model, optimizer, captured: list[dict], target_lrs: list[float]
 ) -> list[float]:
-    """The learning rate each of ``optimizer``'s param groups warms up from at a stage boundary,
-    read from ``captured``, the handed-off capture's param groups (its :data:`GROUPS_KEY`),
-    through their membership (``optimizer_factory.captured_sources``): the one rate its members'
-    captured groups ran at, ``0.0`` for a group whose members no captured group held (they were
-    not training), and its own target for an empty group. Refuses (``ValueError``) a group mixing
-    held and unheld members, or members whose captured groups ran at different rates.
+    """Return the learning rate each of ``optimizer``'s param groups warms up from.
+
+    Each rate is read from ``captured``, the handed-off capture's param groups (its
+    :data:`GROUPS_KEY`), through their membership (``optimizer_factory.captured_sources``): the
+    one rate its members' captured groups ran at, ``0.0`` for a group whose members no captured
+    group held (they were not training), and its own target for an empty group. Refuses
+    (``ValueError``) a group mixing held and unheld members, or members whose captured groups
+    ran at different rates.
     """
     starts = []
     for index, (sources, target) in enumerate(
@@ -150,9 +154,10 @@ def set_seed(seed: int, *, deterministic: bool) -> None:
 def capture_rng_state(
     loader_generator: torch.Generator | None,
 ) -> dict[str, Any]:
-    """Snapshot every random stream a run draws from: the four set_seed seeds and
-    ``loader_generator``, the generator a loader shuffles with (``None`` for a loader that has
-    none), restorable with :func:`restore_rng_state`.
+    """Snapshot every random stream a run draws from.
+
+    The streams are the four set_seed seeds and ``loader_generator``, the generator a loader
+    shuffles with (``None`` for a loader that has none).
     """
     return {
         "python_rng_state": random.getstate(),
@@ -170,9 +175,10 @@ def capture_rng_state(
 def restore_rng_state(
     state: dict[str, Any], loader_generator: torch.Generator | None
 ) -> None:
-    """Restore the streams :func:`capture_rng_state` captured, the loader's into
-    ``loader_generator``. Refuses (``ValueError``) a capture and a loader that disagree on whether
-    the loader draws from a generator of its own.
+    """Restore the streams :func:`capture_rng_state` captured.
+
+    The loader's goes into ``loader_generator``. Refuses (``ValueError``) a capture and a loader
+    that disagree on whether the loader draws from a generator of its own.
     """
     if (state["loader_rng_state"] is None) != (loader_generator is None):
         raise ValueError(
@@ -191,10 +197,11 @@ def restore_rng_state(
 def loader_worker_init(
     worker_id: int, *, num_workers: int | None = None
 ) -> None:
-    """DataLoader worker-process initializer: configures the platform GDAL cache budget at
-    ``1 / num_workers`` of it per worker (the whole budget for ``None``), and seeds numpy and
-    random from the seed torch gave the worker (``torch.initial_seed``, the loader generator's
-    base seed plus ``worker_id``).
+    """Initialize one DataLoader worker process.
+
+    It configures the platform GDAL cache budget at ``1 / num_workers`` of it per worker (the
+    whole budget for ``None``), and seeds numpy and random from the seed torch gave the worker
+    (``torch.initial_seed``, the loader generator's base seed plus ``worker_id``).
     """
     from tcip_mcp.pipelines.raster_source import configure_gdal_cache
 
@@ -206,8 +213,10 @@ def loader_worker_init(
 
 
 def seeded_loader_kwargs(seed: int, num_workers: int | None = None) -> dict:
-    """DataLoader kwargs wiring :func:`loader_worker_init` as the ``worker_init_fn`` (scaled by
-    ``num_workers`` when given), plus a ``generator`` seeded with ``seed``.
+    """Return DataLoader kwargs wiring a worker initializer and a ``generator`` seeded by ``seed``.
+
+    The initializer is :func:`loader_worker_init` as the ``worker_init_fn``, scaled by
+    ``num_workers`` when given.
     """
     generator = torch.Generator()
     generator.manual_seed(seed)
@@ -220,8 +229,9 @@ def seeded_loader_kwargs(seed: int, num_workers: int | None = None) -> dict:
 
 
 def run_transforms(spec: TrainConfigSchema) -> Any:
-    """The training transforms a validated config's (``schemas.train_config``) ``augmentation``
-    declares, or ``None`` for none.
+    """Return the training transforms a validated config's ``augmentation`` declares.
+
+    The config is a ``schemas.train_config`` one; the answer is ``None`` when it declares none.
     """
     augmentation = spec.augmentation
     if augmentation is None:
@@ -234,9 +244,11 @@ def run_transforms(spec: TrainConfigSchema) -> Any:
 def run_loaders(
     run: TrainRun, train_ds: Any, val_ds: Any
 ) -> tuple[DataLoader, DataLoader | None]:
-    """``run``'s train loader and, when ``val_ds`` is given, its val loader, collating for the
-    task its config names, at the batch size the run reads (``TrainRun.reads``) and its config's
-    ``num_workers`` and ``sampler``, seeded from its ``seed``.
+    """Return ``run``'s train loader and, when ``val_ds`` is given, its val loader.
+
+    Both collate for the task its config names, at the batch size the run reads
+    (``TrainRun.reads``) and its config's ``num_workers``, seeded from its ``seed``; the train
+    loader draws through its config's ``sampler`` when one is stated.
     """
     from tcip_mcp.pipelines.data.samplers import build_sampler
     from tcip_mcp.pipelines.training.collation import task_collate
@@ -286,8 +298,10 @@ def effective_data_geometry(
     train_ds: Any,
     stated: StatedDetectorGeometry | None,
 ) -> TrainGeometry:
-    """The :class:`~tcip_mcp.pipelines.schemas.TrainGeometry` of a ``task`` run whose resolved
-    data block is ``data``, read off what ``train_ds`` serves.
+    """Return the :class:`~tcip_mcp.pipelines.schemas.TrainGeometry` of a ``task`` run.
+
+    The run's resolved data block is ``data``, and the geometry is read off what ``train_ds``
+    serves.
 
     A detector's ``object_density`` is derived over the ``regions`` its train dataset exposes, a
     frame or a tile each (``derivations.derive_object_density``, whose refusals propagate),
@@ -346,8 +360,10 @@ def effective_data_geometry(
 
 
 def _uniform_native_size(train_ds: Any) -> tuple[int, int] | None:
-    """The one ``(width, height)`` every training source shares, or ``None`` when sizes differ,
-    a source cannot be probed, or the dataset exposes no source list to probe.
+    """Return the one ``(width, height)`` every training source shares, or ``None``.
+
+    The answer is ``None`` when sizes differ, a source cannot be probed, or the dataset exposes
+    no source list to probe.
     """
     stems = sorted(indexed_sample_keys(train_ds))
     resolve = getattr(train_ds, "image_of", None)
@@ -370,9 +386,11 @@ def _uniform_native_size(train_ds: Any) -> tuple[int, int] | None:
 
 
 def checkpoint_path(run_dir: Path | str, name: str) -> Path:
-    """One checkpoint of the run whose directory is ``run_dir``: ``<run_dir>/<name>.pt``, ``name``
-    being ``model_best``, ``model_final``, an epoch checkpoint or a bespoke loop's own tag. A name
-    that is not one file name refuses with ``BadKeyError`` (``experiments.run_name``).
+    """Return the path of one checkpoint of the run whose directory is ``run_dir``.
+
+    The path is ``<run_dir>/<name>.pt``, ``name`` being ``model_best``, ``model_final``, an epoch
+    checkpoint or a bespoke loop's own tag. A name that is not one file name refuses with
+    ``BadKeyError`` (``experiments.run_name``).
     """
     from tcip_mcp.experiments import run_name
 
@@ -380,8 +398,10 @@ def checkpoint_path(run_dir: Path | str, name: str) -> Path:
 
 
 def write_checkpoint(payload: dict, path: Path) -> Path:
-    """Publish one checkpoint at ``path`` once it is whole (``experiments.publish_once``) and
-    return it. A name already written refuses with ``FileExistsError``.
+    """Publish one checkpoint at ``path`` once it is whole and return the path.
+
+    The publication is ``experiments.publish_once``'s. A name already written refuses with
+    ``FileExistsError``.
     """
     from tcip_mcp.experiments import publish_once
 
@@ -390,14 +410,14 @@ def write_checkpoint(payload: dict, path: Path) -> Path:
 
 
 def checkpoint_stamp(run: TrainRun) -> dict:
-    """What every checkpoint of ``run`` carries beside its own state: under ``CONFIG_KEY`` its
-    spec (``TrainRun.spec``, its source files its own snapshot copies) as it records itself
-    (``TrainConfigSchema.record``) without its data locations (``experiments.DATA_PATHS``), which
-    the run's own record keeps, its split whole, and every other path
-    (``experiments.CONFIG_PATHS``, a bound split's selection directory among them) stored against
-    the run's project as its run record stores it and read back against the project
-    (``VerifiedCheckpoint.spec``); under ``SNAPSHOT_KEY`` the digest of the source snapshot its
-    run took (``SourceLayout.snapshot``); under ``GEOMETRY_KEY`` its ``TrainRun.geometry``.
+    """Return the stamp a checkpoint of ``run`` carries beside its own state.
+
+    Under ``CONFIG_KEY`` its spec (``TrainRun.spec``, its source files its own snapshot copies)
+    as it records itself (``TrainConfigSchema.record``) without its data locations
+    (``experiments.DATA_PATHS``), its split whole, and every other path
+    (``experiments.CONFIG_PATHS``, a bound split's selection directory among them) stored
+    against the run's project; under ``SNAPSHOT_KEY`` the digest of the source snapshot its run
+    took (``SourceLayout.snapshot``); under ``GEOMETRY_KEY`` its ``TrainRun.geometry``.
     """
     from tcip_mcp.experiments import CONFIG_PATHS, DATA_PATHS
     from tcip_mcp.registry_paths import recorded_paths
@@ -419,18 +439,20 @@ def checkpoint_stamp(run: TrainRun) -> dict:
 
 
 def _checkpoint_metrics(metrics: dict) -> dict:
-    """One epoch's metrics normalized the way every destination stores them
-    (:func:`stored_numbers`): a diverged run's ``nan`` reads back as ``null`` plus a state
-    companion.
+    """Return one epoch's metrics in their stored form (:func:`stored_numbers`).
+
+    A diverged run's ``nan`` is stored as ``null`` plus a state companion.
     """
     return stored_numbers(metrics)
 
 
 @dataclass(frozen=True)
 class _ResumeState:
-    """The resume contract beside the training state and the epoch row the checkpoint carries
-    at its top level (:func:`capture_training_state`'s keys and ``METRICS_KEY``): each field
-    one key of the checkpoint.
+    """The resume contract a checkpoint carries beside its training state and epoch row.
+
+    The training state and the row sit at the checkpoint's top level
+    (:func:`capture_training_state`'s keys and ``METRICS_KEY``); each field here is one more key
+    of the checkpoint.
 
     ``best`` is the run's best epoch over the stages before the current one and ``stage_best``
     the current stage's, each an :func:`_epoch_state` or ``None``; ``warmup_groups`` are the
@@ -465,9 +487,10 @@ def _epoch_state(
     epoch: int,
     metrics: dict,
 ) -> dict:
-    """One epoch's training state (:func:`capture_training_state`) with the selection value,
-    stage, epoch and metrics it was taken at: what a stage hands the next and what
-    ``model_best.pt`` is written from.
+    """Return one epoch's training state with the selection, stage, epoch and metrics it had.
+
+    The state is :func:`capture_training_state`'s; the metrics are held in their stored form
+    (:func:`_checkpoint_metrics`).
     """
     return {
         **capture_training_state(model, optimizer),
@@ -498,10 +521,11 @@ def _save_checkpoint(
     global_step: int,
     metrics: dict,
 ) -> None:
-    """Write a resumable periodic checkpoint carrying the run's ``stamp``
-    (:func:`checkpoint_stamp`), its current training state (:func:`capture_training_state`, the
-    same representation a stage's best is held in), the epoch's row (``METRICS_KEY``) and the
-    resume state (:class:`_ResumeState`).
+    """Write a resumable periodic checkpoint at ``path``.
+
+    It carries the run's ``stamp`` (:func:`checkpoint_stamp`), its current training state
+    (:func:`capture_training_state`), the epoch's row (``METRICS_KEY``) and the resume state
+    (:class:`_ResumeState`).
     """
     state = _ResumeState(
         scheduler_state_dict=scheduler.state_dict(),
@@ -536,9 +560,11 @@ def _save_checkpoint(
 def _build_scheduler(
     optimizer, spec: SchedulerSpec, *, higher_is_better: bool
 ):
-    """The scheduler ``spec.type`` names (``schemas.SCHEDULER_TYPES``) at every setting ``spec``
-    carries, a horizon-bound one over the block's own ``horizon_epochs``, a plateau one watching
-    the selection value in its direction, ``higher_is_better`` (``schemas.selection_of``).
+    """Build the scheduler ``spec.type`` names (``schemas.SCHEDULER_TYPES``) over ``optimizer``.
+
+    It runs at every setting ``spec`` carries, a horizon-bound one over the block's own
+    ``horizon_epochs``, a plateau one watching the selection value in its direction,
+    ``higher_is_better`` (``schemas.selection_of``).
     """
     if isinstance(spec, CosineSchedule):
         return torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -588,8 +614,10 @@ def _validate(
     task: str,
     **keywords: Any,
 ) -> dict:
-    """``evaluation.evaluate`` of ``model`` over ``val_loader`` at ``keywords``, its own
-    keyword arguments, every key prefixed :data:`VAL_METRIC_PREFIX`.
+    """Return ``evaluation.evaluate`` of ``model`` over ``val_loader`` at ``keywords``.
+
+    ``keywords`` are ``evaluate``'s own keyword arguments; every key of the result is prefixed
+    :data:`VAL_METRIC_PREFIX`.
     """
     metrics = evaluate(model, val_loader, device, task, **keywords)
     return {f"{VAL_METRIC_PREFIX}{k}": v for k, v in metrics.items()}
@@ -602,8 +630,10 @@ def resolve_selection_metric(
     score_weights: ScoreWeights | None,
     has_val_loader: bool,
 ) -> None:
-    """Admit ``requested``, the stated ``evaluation.selection_metric`` (the bare metric key into
-    ``val_metrics`` that drives both ``model_best.pt`` and early stopping), over the run.
+    """Admit ``requested``, the stated ``evaluation.selection_metric``, over the run.
+
+    ``requested`` is the bare metric key into ``val_metrics`` that drives both ``model_best.pt``
+    and early stopping.
 
     Refuses (``ValueError``) ``"objective"`` without the ``score_weights``
     (``evaluation.score_weights``) that weight it, any metric but ``"loss"`` (the training loss)
@@ -640,10 +670,12 @@ def resolve_selection_metric(
 def resolve_trait_revision(
     spec: TrainConfigSchema, *, project: Path, has_val_loader: bool
 ) -> TraitRevisionRef | None:
-    """The latest confirmed revision in ``project`` of the trait the validated config ``spec``'s
-    ``evaluation`` block names (refusing as ``operationalization.latest_confirmed`` does),
-    ``None`` when it names none, once its ``selection_metric`` is admitted over that revision's
-    entry (:func:`resolve_selection_metric`, whose refusals propagate).
+    """Return the latest confirmed revision of the trait ``spec``'s ``evaluation`` block names.
+
+    The revision is read in ``project`` (refusing as ``operationalization.latest_confirmed``
+    does), ``None`` when the block names none, and returned once the validated config's
+    ``selection_metric`` is admitted over that revision's entry
+    (:func:`resolve_selection_metric`, whose refusals propagate).
     """
     from tcip_mcp.operationalization import latest_confirmed
 
@@ -661,14 +693,14 @@ def resolve_trait_revision(
 def _selection_value(
     task: str, val_metrics: dict, avg_loss: float, metric: str
 ) -> float:
-    """Best-model/early-stopping driver: ``val_metrics[f'{VAL_METRIC_PREFIX}{metric}']``.
+    """Return one epoch's selection value, ``val_metrics[f'{VAL_METRIC_PREFIX}{metric}']``.
 
     Raises when the resolved selection metric is not among this epoch's validation metrics. The one
     exception is ``metric == "loss"`` with no validation pass at all (``val_metrics`` empty): the
     training loss ``avg_loss`` answers.
 
     A present value of ``None`` (a diverged metric ``evaluation.stored_number`` normalized to
-    ``null``) comes back as ``nan``, which never improves.
+    ``null``) comes back as ``nan``.
     """
     key = f"{VAL_METRIC_PREFIX}{metric}"
     if key in val_metrics:
@@ -689,8 +721,10 @@ def _improves(
     higher_is_better: bool,
     min_delta: float = 0.0,
 ) -> bool:
-    """Whether ``candidate`` beats ``incumbent`` by more than ``min_delta`` as a selection value,
-    in the direction the run's selection metric improves in.
+    """Return whether ``candidate`` beats ``incumbent`` by more than ``min_delta``.
+
+    Both are selection values, compared in the direction the run's selection metric improves
+    in.
     """
     if higher_is_better:
         return candidate > incumbent + min_delta
@@ -709,8 +743,8 @@ def apply_stage_freeze(
     declares (``num_stages``); ``>0`` freezes up to that stage, each through the model's own
     ``freeze_backbone``. Refuses (``ValueError``) a nonzero ``freeze_to`` over a model exposing
     no ``freeze_backbone``, and a negative one over a backbone declaring no ``num_stages``. With
-    ``prev_trainable`` given, an unfreeze that shrinks the trainable set raises (progressive
-    unfreeze must only ever grow it).
+    ``prev_trainable`` given, an unfreeze that shrinks the trainable set raises
+    (``RuntimeError``).
     """
     if not freeze_to:
         for p in model.parameters():
@@ -744,12 +778,10 @@ def apply_stage_freeze(
 
 
 def _validate_input_channels(expected: int, loader: DataLoader) -> None:
-    """Fail loudly if the first batch's channel count is not ``expected``, the band count the
-    model was built at (``data.num_channels``).
+    """Refuse a first batch whose channel count is not ``expected``.
 
-    A built-in loader reads every source at that count; a bespoke ``dataset_source`` builder
-    composes its own bands and can hand the model another, which this names before an opaque
-    conv-shape error deep in the first forward pass.
+    ``expected`` is the band count the model was built at (``data.num_channels``). An empty
+    loader, or a first image with fewer than three dimensions, is not checked.
     """
     batch = next(iter(loader), None)
     if batch is None:

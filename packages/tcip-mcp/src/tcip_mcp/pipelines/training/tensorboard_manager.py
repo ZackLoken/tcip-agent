@@ -31,8 +31,9 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class _Launched:
-    """A TensorBoard child this process tracks: its port, the URL it serves at, output capture
-    and lifetime tie.
+    """A TensorBoard child this process tracks.
+
+    It carries the child's port, the URL it serves at, its output capture and its lifetime tie.
     """
 
     proc: subprocess.Popen
@@ -95,7 +96,7 @@ if sys.platform == "win32":
         ]
 
     def _get_win_kernel32() -> ctypes.WinDLL:
-        """The kernel32 handle for the job-object calls, with pointer-sized signatures set once."""
+        """Return the kernel32 handle for the job-object calls, its signatures set once."""
         global _win_kernel32
         if _win_kernel32 is None:
             dll = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -153,8 +154,7 @@ if sys.platform == "win32":
     def _assign_to_win_job(proc: subprocess.Popen) -> str | None:
         """Tie ``proc`` to the job object so it dies with this process.
 
-        Returns ``None`` on success, or the failure reason; a failed assignment leaves the
-        child tracked exactly as it would be without a job at all.
+        Returns ``None`` on success, or the failure reason, which is also logged.
         """
         job, reason = _ensure_win_job()
         if job is None:
@@ -173,8 +173,10 @@ if sys.platform == "win32":
 
 
 def _stop_all_tracked() -> None:
-    """Stop every child this process still has tracked, serially, each up to twice
-    ``_STOP_WAIT_SECONDS``; a stop that cannot confirm its kill is logged and the sweep continues.
+    """Stop every child this process still has tracked, serially.
+
+    Each stop waits up to twice ``_STOP_WAIT_SECONDS``; a stop that cannot confirm its kill is
+    logged and the sweep continues.
     """
     for key in list(_TB_PROCESSES):
         result = stop_tensorboard(key)
@@ -196,7 +198,7 @@ def _register_atexit_once() -> None:
 
 
 def _tensorboard_argv(logdir: str, port: int) -> list[str]:
-    """The TensorBoard child's command line over ``logdir`` at ``port``."""
+    """Return the TensorBoard child's command line over ``logdir`` at ``port``."""
     from tcip_mcp.web_client import LOOPBACK_HOST
 
     # tensorboard has no __main__.py; tensorboard.main runs under its own __main__ guard.
@@ -216,7 +218,7 @@ def _tensorboard_argv(logdir: str, port: int) -> list[str]:
 
 
 def _guardian_argv(argv: list[str]) -> list[str]:
-    """``argv`` run under the POSIX lifetime guardian."""
+    """Return ``argv`` wrapped to run under the POSIX lifetime guardian."""
     return [
         sys.executable,
         "-m",
@@ -250,8 +252,10 @@ def _release_output(entry: _Launched) -> None:
 
 
 def launch_tensorboard(logdir: str) -> dict:
-    """Launch a TensorBoard process for the given log directory, tracked by the directory's one
-    spelling (``tcip_store.canonical_path``), which the child is handed and the answer carries.
+    """Launch a TensorBoard process for the given log directory.
+
+    The process is tracked by the directory's one spelling (``tcip_store.canonical_path``), which
+    the child is handed and the answer carries.
 
     Returns dict with 'url', 'port', 'pid', 'logdir', 'lifetime_tie', or ``{'error': ..., 'output':
     ...}`` when the process died during startup. If TensorBoard is already running for this logdir,
@@ -337,7 +341,7 @@ def launch_tensorboard(logdir: str) -> dict:
 
 
 def _running(key: str) -> _Launched | None:
-    """The child tracked under ``key`` while it runs; one that has exited is dropped."""
+    """Return the child tracked under ``key`` while it runs; one that has exited is dropped."""
     entry = _TB_PROCESSES.get(key)
     if entry is not None and entry.proc.poll() is not None:
         _release_output(_TB_PROCESSES.pop(key))
@@ -346,7 +350,7 @@ def _running(key: str) -> _Launched | None:
 
 
 def running_url(logdir: str) -> str | None:
-    """The URL the TensorBoard tracked under ``logdir`` serves at, ``None`` when none runs."""
+    """Return the URL the TensorBoard tracked under ``logdir`` serves at, or ``None``."""
     entry = _running(canonical_path(logdir))
     return entry.url if entry is not None else None
 
@@ -354,10 +358,11 @@ def running_url(logdir: str) -> str | None:
 def stop_tensorboard(logdir: str) -> dict:
     """Stop the running TensorBoard process tracked under ``logdir``.
 
-    Waits up to ``_STOP_WAIT_SECONDS`` for the process to end on its own, then force-kills it and
-    waits the same bound again for the kill to be reaped; the entry is dropped from tracking either
-    way. A kill this cannot confirm reaped within that second wait is logged (the key and pid) and
-    answered ``{"status": "kill_unconfirmed", "pid": ...}``.
+    A process still running is terminated and waited on up to ``_STOP_WAIT_SECONDS``, then
+    force-killed and waited on the same bound again for the kill to be reaped; the entry is
+    dropped from tracking either way, and a key tracking nothing answers
+    ``{"status": "not_running"}``. A kill this cannot confirm reaped within that second wait is
+    logged (the key and pid) and answered ``{"status": "kill_unconfirmed", "pid": ...}``.
 
     On a ``"guardian"`` tie, ``entry.proc`` is the guardian, and a kill that reaches it can orphan
     a TensorBoard the guardian had not yet stopped; the answer is then ``stopped`` or

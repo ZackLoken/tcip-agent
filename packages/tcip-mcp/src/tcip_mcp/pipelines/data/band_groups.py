@@ -1,18 +1,19 @@
-"""Sensor-agnostic band-group correlation: sibling single-band raster files that are really one
-logical multi-band capture (some multispectral drone sensors write one file per band instead of one
-multi-band file per image), and the ``.bandgroup`` manifest that records a found group.
+"""Sensor-agnostic band-group correlation and the ``.bandgroup`` manifest recording a group.
+
+A band group is sibling single-band raster files that are really one logical multi-band capture
+(some multispectral drone sensors write one file per band instead of one multi-band file per
+image).
 
 A group is recorded, never physically stacked to disk: the manifest names which sibling files
-belong together and in what band order. Detection strategies, tried in order:
+belong together and in what band order. Detection strategies, tried in this order:
 
-1. Embedded-metadata grouping, a declarative table of (group-id tag, band-id tag) pairs to look for
-  in each file's XMP; a sensor with an exact-match, shared group-id-per-capture tag is a new table
-  row. Each row also names secondary identity signals (a timestamp, a GPS fix) whose spread across
-  the files claiming one group id must stay below the bucket's own separation between distinct
-  captures; a spread reaching it refuses the group, and so does a candidate where every declared
-  secondary signal is absent.
-2. Explicit manifest, a caller-supplied ``{group_id: {band_name: filename}}`` mapping, for a sensor
-  with no embedded correlation metadata at all.
+1. Explicit manifest, a caller-supplied ``{group_id: {band_name: filename}}`` mapping, for a sensor
+  with no embedded correlation metadata at all, when one is given.
+2. Embedded-metadata grouping over the files the mapping leaves unclaimed, a declarative table of
+  (group-id tag, band-id tag) pairs to look for in each file's XMP. Each row also names secondary
+  identity signals (a timestamp, a GPS fix) whose spread across the files claiming one group id
+  must stay below the bucket's own separation between distinct captures; a spread reaching it
+  refuses the group, and so does a candidate where every declared secondary signal is absent.
 3. Otherwise every file stays independent; there is no filename-pattern fallback.
 """
 
@@ -35,9 +36,7 @@ MANIFEST_EXT = ".bandgroup"
 
 
 def band_group_manifest_path(images_dir: str | Path, stem: str) -> Path:
-    """Where ``stem``'s manifest lives: beside the sibling files it names, itself an enumerated
-    logical image of that directory.
-    """
+    """Return where ``stem``'s manifest lives, beside the sibling files it names."""
     return Path(images_dir, f"{stem}{MANIFEST_EXT}")
 
 
@@ -52,9 +51,10 @@ _ELEM_RE = re.compile(r"<([A-Za-z_][\w.-]*:[A-Za-z_][\w.-]*)>([^<]*)</\1>")
 
 @dataclass(frozen=True)
 class _MetadataStrategy:
-    """One (group-id tag, band-id tag) declarative row, plus the secondary identity signals whose
-    values must agree across the files sharing one group-id value before they are trusted to be
-    one physical capture.
+    """One (group-id tag, band-id tag) declarative row, plus its secondary identity signals.
+
+    The signals' values must agree across the files sharing one group-id value before they are
+    trusted to be one physical capture.
 
     ``identity_signals`` names each signal's kind and its tags, read from each candidate file's
     own XMP independently of the group-id tag: ``"timestamp"``, one ISO-8601 tag compared in
@@ -84,12 +84,12 @@ _EMBEDDED_METADATA_STRATEGIES: list[_MetadataStrategy] = [
 
 
 def _seconds_apart(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    """Seconds between paired rows of epoch times."""
+    """Return absolute seconds between paired rows of epoch times."""
     return np.abs(a[:, 0] - b[:, 0])
 
 
 def _meters_apart(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    """The WGS84 geodesic, in meters, between paired rows of ``(lat, lon)`` degrees."""
+    """Return the WGS84 geodesic, in meters, between paired rows of ``(lat, lon)`` degrees."""
     from tcip_mcp.pipelines.postprocessing.plant_mapping import WGS84
 
     return np.asarray(WGS84.inv(a[:, 1], a[:, 0], b[:, 1], b[:, 0])[2])
@@ -114,9 +114,10 @@ readings, and that distance's unit."""
 def _signal_values(
     kind: str, tags: tuple[str, ...], files: list[dict[str, str]]
 ) -> list[tuple[float, ...] | None]:
-    """Each file's reading of one identity signal (:data:`_SIGNAL_KINDS`): seconds since the epoch
-    for a timestamp, ``(lat, lon)`` degrees for a position; ``None`` for a file whose tags are
-    absent or do not parse.
+    """Return each file's reading of one identity signal (:data:`_SIGNAL_KINDS`).
+
+    A reading is seconds since the epoch for a timestamp, ``(lat, lon)`` degrees for a position;
+    ``None`` for a file whose tags are absent or do not parse.
     """
     read = _SIGNAL_KINDS[kind][0]
     values: list[tuple[float, ...] | None] = []
@@ -132,9 +133,11 @@ def _signal_values(
 def _gap_and_spreads(
     values: np.ndarray, group_ids: np.ndarray, kind: str
 ) -> tuple[float | None, dict[str, float]]:
-    """The between-capture gap of one identity signal over a bucket's files, and each capture
-    group's own spread, both off one pairwise distance matrix in the signal's own distance
-    (:data:`_SIGNAL_KINDS`), the condensed pairs in ``scipy.spatial.distance.pdist``'s order.
+    """Return one identity signal's between-capture gap and each capture group's own spread.
+
+    Both come off one pairwise distance matrix over a bucket's files in the signal's own
+    distance (:data:`_SIGNAL_KINDS`), the condensed pairs in
+    ``scipy.spatial.distance.pdist``'s order.
 
     ``values`` holds one reading per file and ``group_ids`` its group id. The gap is the smallest
     distance between two files of distinct groups (``None`` when one group holds every file); a
@@ -174,7 +177,7 @@ class BandGroupIncompleteError(FileNotFoundError):
 
 
 def _read_xmp_tags(path: Path) -> dict[str, str] | None:
-    """Flat ``{qualified_tag: value}`` from a raster's embedded XMP packet, or ``None``.
+    """Return flat qualified tags from an embedded XMP packet, or ``None``.
 
     Reads both the XMP attribute shape (``drone-dji:CaptureUUID="..."``) and the nested-element
     shape (``<Camera:BandName>Green</Camera:BandName>``).
@@ -211,9 +214,11 @@ def _read_xmp_tags(path: Path) -> dict[str, str] | None:
 
 
 def _canonical_stem(paths: list[Path]) -> str:
-    """The group's own stem, the sibling filenames' common prefix, trimmed of a trailing
-    separator (``DJI_..._0001_MS_G`` / ``..._NIR`` / ``..._R`` / ``..._RE`` -> ``DJI_..._0001_MS``).
-    No physical rename happens; this is only the manifest's own filename stem.
+    """Return the group's own stem, the sibling filenames' common prefix.
+
+    The prefix is trimmed of a trailing separator (``DJI_..._0001_MS_G`` / ``..._NIR`` /
+    ``..._R`` / ``..._RE`` -> ``DJI_..._0001_MS``), the first sibling's stem when they share
+    none. No physical rename happens; this is only the manifest's own filename stem.
     """
     stems = [p.stem for p in paths]
     prefix = os.path.commonprefix(stems)
@@ -221,7 +226,7 @@ def _canonical_stem(paths: list[Path]) -> str:
 
 
 def _candidate_single_band_files(images_dir: Path) -> list[Path]:
-    """Raster files in ``images_dir`` a group could plausibly be built from."""
+    """Return candidate raster files in ``images_dir``."""
     return sorted(
         p
         for p in images_dir.iterdir()
@@ -234,9 +239,10 @@ def _signal_checks(
     group_of: dict[Path, str],
     tags_by_path: dict[Path, dict[str, str]],
 ) -> list[tuple[str, str, float | None, dict[str, float]]]:
-    """``(tags key, kind, gap, spreads)`` of each of ``strategy``'s identity signals over the
-    files ``group_of`` assigns a group id (:func:`_gap_and_spreads`); a group some file of which
-    lacks the signal takes no part in it and has no spread.
+    """Return ``(tags key, kind, gap, spreads)`` of each of ``strategy``'s identity signals.
+
+    Each is taken over the files ``group_of`` assigns a group id (:func:`_gap_and_spreads`); a
+    group some file of which lacks the signal takes no part in it and has no spread.
     """
     paths = list(group_of)
     checks = []
@@ -271,8 +277,8 @@ def detect_embedded_metadata_groups(
     ``refused`` is a list of ``{"group_id", "band", "files", "reason"}`` for a candidate group
     where two files claimed the same band identity, where its files carry none of the strategy's
     identity signals, or where its own spread on a signal reaches that signal's between-capture
-    gap, every case logged, never silently formed (one file overwriting another, or two unrelated
-    captures spliced into one).
+    gap, every case reported in ``refused``, never silently formed (one file overwriting
+    another, or two unrelated captures spliced into one).
 
     The gap and the spreads are derived over ``reference``, every metadata-bearing file of the
     bucket ``candidates`` sit in, grouped ones included (:func:`_signal_checks`). A formed group's
@@ -406,12 +412,12 @@ def groups_from_explicit_mapping(
     images_dir: Path,
     mapping: dict[str, dict[str, str]],
 ) -> tuple[list[dict], set[str]]:
-    """Groups from a caller-supplied ``{group_id: {band_name: filename}}`` sidecar mapping, for a
-    sensor with no embedded correlation metadata at all.
+    """Return groups from a caller-supplied ``{group_id: {band_name: filename}}`` mapping.
 
-    A named file missing on disk is dropped from its group (not refused, nothing was claimed to
-    overwrite); a group left with fewer than 2 resolvable bands is skipped entirely. Returns
-    ``(groups, used_filenames)``.
+    The sidecar mapping serves a sensor with no embedded correlation metadata at all.
+
+    A named file missing on disk is dropped from its group; a group left with fewer than 2
+    resolvable bands is skipped entirely. Returns ``(groups, used_filenames)``.
     """
     groups: list[dict] = []
     used: set[str] = set()
@@ -437,9 +443,10 @@ def groups_from_explicit_mapping(
 
 
 def read_band_group_manifest(manifest_path: Path) -> BandGroupRef:
-    """Parse a ``.bandgroup`` file into a :class:`BandGroupRef`. Raises ``ValueError`` on a
-    malformed manifest (missing/empty ``bands``) and ``KeyError`` on one carrying no
-    ``central_wavelength_nm``.
+    """Parse a ``.bandgroup`` file into a :class:`BandGroupRef`.
+
+    Raises ``ValueError`` on a malformed manifest (missing/empty ``bands``) and ``KeyError`` on
+    one carrying no ``central_wavelength_nm``.
     """
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
     bands_field = data.get("bands")
@@ -476,10 +483,11 @@ def write_band_group_manifest(
     identity_tolerance: dict[str, dict],
     expect: Version | None = None,
 ) -> Path:
-    """Write ``<images_dir>/<stem>.bandgroup`` recording ``bands`` by filename (so a group moved
-    whole with its band files still resolves), each band's ``central_wavelength_nm`` (``None``
+    """Write ``<images_dir>/<stem>.bandgroup`` and return its path.
+
+    The manifest records ``bands`` by filename, each band's ``central_wavelength_nm`` (``None``
     when nothing stated one) and the ``identity_tolerance`` each identity signal was checked
-    against, empty for a group no signal was checked on; return its path.
+    against, empty for a group no signal was checked on.
 
     ``expect`` carries the seam's own meaning: ``Version.ABSENT`` records a newly detected group
     only while none is recorded, and raises ``VersionConflictError`` rather than overwriting one a
@@ -501,13 +509,14 @@ def detect_and_write_band_groups(
     *,
     explicit_groups: dict[str, dict[str, str]] | None = None,
 ) -> dict:
-    """Run the band-group detection strategies over ``images_dir`` and write a ``.bandgroup``
-    manifest for each newly found group.
+    """Run the band-group detection strategies over ``images_dir`` and record what they find.
 
-    Idempotent: a stem with an existing manifest is never regenerated, and only files not already
-        claimed by some manifest are offered as candidates. ``explicit_groups`` (strategy 2) is
-        tried first when given; the embedded-metadata table (strategy 1) runs over whatever
-        candidates it leaves unclaimed. Files no strategy matches are left independent.
+    A ``.bandgroup`` manifest is written for each newly found group.
+
+    Idempotent: a stem with an existing manifest is never regenerated, and only files not
+    already claimed by some manifest are offered as candidates. ``explicit_groups`` (strategy 1)
+    is tried first when given; the embedded-metadata table (strategy 2) runs over whatever
+    candidates it leaves unclaimed. Files no strategy matches are left independent.
 
     A group whose ``image_utils.stem_collision_key`` (of the common-prefix stem, or the caller's
     ``group_id`` for an explicit group) is held by any identity in the bucket

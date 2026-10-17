@@ -1,6 +1,4 @@
-"""Collate functions for a task's ``DataLoader``: batches a list of per-sample
-``(image, target)`` pairs into the shape ``train()`` and ``evaluate()`` both expect.
-"""
+"""Collate functions that batch a task's per-sample ``(image, target)`` pairs."""
 
 from __future__ import annotations
 
@@ -10,13 +8,17 @@ import torch
 
 
 def _detection_collate(batch):
-    """Detection/instance_seg: list of (img, target) → (list[img], list[target])."""
+    """Batch detection pairs as ``(list of images, list of targets)``, unstacked."""
     images, targets = zip(*batch)
     return list(images), list(targets)
 
 
 def _stack_collate(batch):
-    """Classification/ordinal/regression/semantic_seg: stack into tensors."""
+    """Stack a batch's images into one tensor and merge its target dicts key by key.
+
+    A number per sample becomes a tensor, a tensor per sample a stacked tensor, and anything
+    else a list.
+    """
     raw_images, targets = zip(*batch)
     images = torch.stack(raw_images)
     # Merge target dicts, stack numeric values
@@ -33,7 +35,7 @@ def _stack_collate(batch):
 
 
 def task_collate(task: str):
-    """Return the right collate_fn for a task type."""
+    """Return the collate function for ``task``: unstacked for a detector task, else stacked."""
     from tcip_mcp.pipelines.model_contract import DETECTOR_TASKS
 
     if task in DETECTOR_TASKS:

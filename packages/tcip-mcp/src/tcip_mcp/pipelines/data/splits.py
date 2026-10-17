@@ -1,6 +1,7 @@
-"""Group-aware, annotation-stratified train/val/calibration splitting: group-coherent (sibling
-tiles of one source never straddle two splits), annotation-balanced, deterministic in seed.
-Torch-free.
+"""Group-aware, annotation-stratified train/val/calibration splitting, deterministic in seed.
+
+Splits are group-coherent (sibling tiles of one source never straddle two splits) and
+annotation-balanced. Torch-free.
 """
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ _TILE_GROUP_RE = re.compile(r"^(.*)_\d+_\d+$")
 
 
 def default_group_key(stem: str) -> str:
-    """Group key for a stem: strip a trailing ``_<x>_<y>`` tile offset.
+    """Return the stem with a trailing tile offset removed.
 
     Falls back to the full stem when the pattern does not match.
     """
@@ -43,8 +44,9 @@ GROUP_KEY_FNS: dict[str, Callable[[str], str]] = {
 
 
 def count_label_lines(document: LabelDocument, scope: ClassScope) -> int:
-    """How many instances of ``scope``'s subject (of any subject when it names none) one per-image
-    label ``document`` carries.
+    """Return how many instances of ``scope``'s subject one per-image label ``document`` carries.
+
+    Instances of any subject count when the scope names none.
     """
     from tcip_annotation import json_io
     from tcip_annotation.state import instances
@@ -61,9 +63,10 @@ def count_label_lines(document: LabelDocument, scope: ClassScope) -> int:
 def label_document_extent(
     document: LabelDocument, where: str
 ) -> tuple[int, int]:
-    """``(width, height)`` one per-image label ``document`` records, the frame its geometry was
-    authored against. A document that states no positive width and height refuses
-    (``ValueError``) naming ``where``.
+    """Return the ``(width, height)`` one per-image label ``document`` records.
+
+    That is the frame its geometry was authored against. A document that states no positive
+    width and height refuses (``ValueError``) naming ``where``.
     """
     w, h = document.width, document.height
     if not (isinstance(w, int) and isinstance(h, int) and w > 0 and h > 0):
@@ -85,14 +88,14 @@ def group_balanced_split(
     seed: int,
     min_foreground_groups: Mapping[str, int],
 ) -> dict[str, list[str]]:
-    """Partition ``stems`` onto the sides ``splits`` names, each at its positive fraction, keeping
-    each group (``group_key_fn``) whole; deterministic in ``seed`` and the groups, whatever the
-    stems are named.
+    """Partition ``stems`` onto the sides ``splits`` names, keeping each group whole.
+
+    Each side takes its positive fraction and each group is ``group_key_fn``'s; the partition is
+    deterministic in ``seed`` and the groups, whatever the stems are named.
 
     ``counts`` is every stem's measured foreground count, and a stem it does not name refuses
     (``ValueError``). Each side first takes ``min_foreground_groups`` groups carrying foreground,
-    smallest first, without raising on a short tree
-    (:func:`refuse_insufficient_foreground_groups` is the floor). The rest is balanced by a
+    smallest first, without raising on a short tree. The rest is balanced by a
     blended foreground/tile imbalance when ``weighted`` and any group carries foreground, the
     groups carrying none then filling the largest tile deficit; otherwise by tile count alone.
     Returns each side's sorted stems.
@@ -202,8 +205,9 @@ def foreground_group_count(
     counts: Mapping[str, int],
     group_of: Callable[[str], str],
 ) -> int:
-    """How many distinct groups among ``members`` carry foreground. ``counts`` is each member's own
-    foreground count under the caller's own key for it
+    """Return how many distinct groups among ``members`` carry foreground.
+
+    ``counts`` maps each member to its own foreground count
     (:func:`~tcip_mcp.pipelines.data.label_queries.foreground_counts`), naming every member.
     """
     return len({group_of(member) for member in members if counts[member] > 0})
@@ -215,9 +219,10 @@ def refuse_insufficient_foreground_groups(
     *,
     remedy: str,
 ) -> None:
-    """Refuses, before any write, a draw whose tree holds fewer foreground groups than the sum of
-    the per-side minimums a caller states, naming every requested side and its minimum, the
-    foreground groups found, and ``remedy``, the caller's own sentence saying what to add.
+    """Refuse a draw holding fewer foreground groups than its per-side minimums sum to.
+
+    The refusal (``ValueError``) names every requested side and its minimum, the foreground
+    groups found, and ``remedy``, the caller's own sentence saying what to add.
     """
     needed = sum(minimums.values())
     if foreground_groups >= needed:
@@ -230,15 +235,17 @@ def refuse_insufficient_foreground_groups(
 
 
 def member_identity(capture: str, stem: str) -> str:
-    """A draw's member identity for one image, ``<capture>/<stem>``, the key an agent-supplied
-    ``grouping`` map names it by.
+    """Return a draw's member identity for one image, ``<capture>/<stem>``.
+
+    It is the key an agent-supplied ``grouping`` map names the image by.
     """
     return f"{capture}/{stem}"
 
 
 def recorded_group_by(grouping: str | Mapping[str, str]) -> str:
-    """The grouping policy a draw records: its named policy, or ``"explicit_map"`` for a draw
-    grouped by an explicit map.
+    """Return the grouping policy a draw records.
+
+    That is its named policy, or ``"explicit_map"`` for a draw grouped by an explicit map.
     """
     return grouping if isinstance(grouping, str) else "explicit_map"
 
@@ -246,8 +253,10 @@ def recorded_group_by(grouping: str | Mapping[str, str]) -> str:
 def resolve_group_key_fn(
     grouping: str | Mapping[str, str], stems: Sequence[str]
 ) -> Callable[[str], str]:
-    """Resolve ``grouping``, a named policy or an explicit ``{identity: group_key}`` map, to a
-    callable. An unrecognized policy, or a map missing coverage for some of ``stems``, raises.
+    """Resolve ``grouping``, a named policy or an explicit map, to a callable.
+
+    The map is ``{identity: group_key}``. An unrecognized policy, or a map missing coverage for
+    some of ``stems``, raises.
     """
     if isinstance(grouping, str):
         from tcip_mcp.pipelines.model_build import resolve_named
@@ -266,8 +275,9 @@ def resolve_group_key_fn(
 def recorded_group_key_fn(
     grouping: str | Mapping[str, str], *, date: str, stems: Sequence[str] = ()
 ) -> Callable[[str], str]:
-    """The group key a draw records for a bare stem admitted out of capture ``date``'s directory:
-    the stem becomes its member identity (:func:`member_identity`) and ``grouping`` is resolved
+    """Return the group key function a draw records for bare stems out of capture ``date``.
+
+    The stem becomes its member identity (:func:`member_identity`) and ``grouping`` is resolved
     against those identities (:func:`resolve_group_key_fn`), a map checked for coverage of
     ``stems``' identities before any key is handed out.
     """
@@ -277,9 +287,11 @@ def recorded_group_key_fn(
 
 
 def same_directory(a: str | Path | None, b: str | Path | None) -> bool:
-    """Whether ``a`` and ``b`` name one path, compared through ``tcip_store.canonical_path`` so
-    a trailing separator, forward slashes, a relative spelling, a link or a case variant reads as
-    the same path. ``False`` when either side is empty.
+    """Return whether ``a`` and ``b`` name one path.
+
+    They are compared through ``tcip_store.canonical_path`` so a trailing separator, forward
+    slashes, a relative spelling, a link or a case variant reads as the same path. ``False``
+    when either side is empty.
     """
     if not a or not b:
         return False
@@ -292,17 +304,18 @@ _SPATIAL_IDENTITY_SEP = "::"
 
 
 def spatial_strip_identity(stem: str, region_label: str) -> str:
-    """A spatial split's per-region membership identity for one tile's source stem, ``region_label``
-    naming the contiguous pixel-space strip the tile fell into (e.g. ``"strip_x_2"``);
-    :func:`stem_of_spatial_identity` parses it back.
+    """Return a spatial split's per-region membership identity for one tile's source stem.
+
+    ``region_label`` names the contiguous pixel-space strip the tile fell into (e.g.
+    ``"strip_x_2"``).
     """
     return f"{stem}{_SPATIAL_IDENTITY_SEP}{region_label}"
 
 
 def stem_of_spatial_identity(identity: str) -> str:
-    """The bare stem inside a :func:`spatial_strip_identity` string, for a leak check that only
-    cares which source image a split member came from, not which region. An identity with no
-    separator (not one this module produced) is returned unchanged.
+    """Return the bare stem inside a :func:`spatial_strip_identity` string.
+
+    An identity with no separator (not one this module produced) is returned unchanged.
     """
     idx = identity.rfind(_SPATIAL_IDENTITY_SEP)
     return identity[:idx] if idx != -1 else identity
@@ -310,9 +323,11 @@ def stem_of_spatial_identity(identity: str) -> str:
 
 @dataclass(frozen=True)
 class SpatialStripSplit:
-    """A within-image split over named sides: the image partitioned into contiguous pixel-space
-    strips along one axis, each strip assigned whole to one side, with a buffer band excluded at
-    every boundary between differently-assigned strips.
+    """A within-image split over named sides, each a contiguous pixel-space region.
+
+    The image is partitioned into contiguous pixel-space strips along one axis, each strip
+    assigned whole to one side, with a buffer band excluded at every boundary between
+    differently-assigned strips.
 
     Each side is one contiguous region. Regions are ordered largest-share-first from the axis
     center outward (:func:`_center_out_order`), and each boundary is shrunk from one side only
@@ -345,8 +360,9 @@ class SpatialStripSplit:
     def identity_for(
         self, stem: str, box: tuple[int, int, int, int]
     ) -> str | None:
-        """The region identity for the lattice slice ``box`` of ``stem``, or ``None`` when it
-        falls in a dropped gap.
+        """Return the region identity for the lattice slice ``box`` of ``stem``.
+
+        The identity is ``None`` when the slice falls in a dropped gap.
         """
         idx = _region_index(self.region_bounds, self.axis, box)
         if idx is None:
@@ -359,8 +375,10 @@ def _region_index(
     axis: str,
     box: tuple[int, int, int, int],
 ) -> int | None:
-    """Index into ``region_bounds`` of the region the slice ``box`` lies wholly inside along
-    ``axis``, or ``None`` when it falls in a dropped gap (a buffer band or past the extent).
+    """Return the index into ``region_bounds`` of the region holding the slice ``box``.
+
+    The slice lies wholly inside that region along ``axis``; the index is ``None`` when it falls
+    in a dropped gap (a buffer band or past the extent).
     """
     lo, hi = (box[0], box[2]) if axis == "x" else (box[1], box[3])
     idx = bisect.bisect_right([start for _, start, _ in region_bounds], lo) - 1
@@ -373,10 +391,11 @@ def _region_index(
 def _center_out_order(
     slots: list[tuple[str, float]],
 ) -> list[tuple[str, float]]:
-    """Order slots by descending share, largest first, then placed axis-center-out: each next
-    (smaller) slot alternately extends the left or right end of the growing arrangement, so every
-    slot but the largest faces at most one differently-assigned neighbor. A tie among equal shares
-    resolves in the order the slots were given, never by a seed.
+    """Order slots by descending share, largest first, then place them axis-center-out.
+
+    Each next (smaller) slot alternately extends the left or right end of the growing
+    arrangement, so every slot but the largest faces at most one differently-assigned neighbor.
+    A tie among equal shares resolves in the order the slots were given, never by a seed.
     """
     indexed = list(enumerate(slots))
     indexed.sort(key=lambda p: (-p[1][1], p[0]))
@@ -394,10 +413,12 @@ def _strip_regions(
     split_names: tuple[str, ...],
     fractions: tuple[float, ...],
 ) -> list[tuple[str, int, int]]:
-    """Buffer-shrunk ``(name, start, end)`` pixel regions along one axis, one per side, in axis
-    order (:func:`_center_out_order`), cut and shrunk over the lattice's own slice ``spans``
-    (each slice's ``(start, end)`` on the axis, in order) so every region holds whole slices. The
-    fraction each side targets sets its share of the axis.
+    """Return buffer-shrunk ``(name, start, end)`` pixel regions along one axis.
+
+    There is at most one region per side, in axis order (:func:`_center_out_order`), cut and
+    shrunk over the lattice's own slice ``spans`` (each slice's ``(start, end)`` on the axis, in
+    order) so every region holds whole slices; a side left with no slice has none. The fraction
+    each side targets sets its share of the axis.
     """
     n = len(spans)
     raw: list[tuple[str, int, int]] = []
@@ -437,9 +458,7 @@ def spatial_strip_split(
     split_names: tuple[str, ...],
     buffer: int | None = None,
 ) -> SpatialStripSplit:
-    """Split one image's own tile lattice into disjoint pixel-space strips, one side per name, for
-    the case where there are too few source images to hold one out whole: a strip is train, val, or
-    holdout instead of a stem.
+    """Split one image's own tile lattice into disjoint pixel-space strips, one side per name.
 
     The tile lattice is :func:`~tcip_mcp.pipelines.slicing.slice_lattice`'s at this
     ``tile_size``/``overlap``. The split runs along whichever axis (width or height) offers more
