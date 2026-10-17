@@ -40,9 +40,7 @@ def load_subjects(dataset_root: str, date: str) -> dict:
     <token> | None, "unreadable": [stems]}``: ``subjects`` and ``version`` (its compare-and-set
     token) are the stored registry's, both ``None`` when none is stored; ``discovered`` and
     ``unreadable`` are :func:`~tcip_mcp.dataset_layout.capture_subjects` of capture ``date``,
-    read whether or not a registry is stored. A save posting this ``version`` back is
-    refused with 409 if the stored registry has moved on since; a save posting ``None`` asserts no
-    registry is stored and is refused with 409 when one is.
+    read whether or not a registry is stored.
     """
     from tcip_mcp.dataset_layout import capture_subjects
     from tcip_mcp.subject_registry import (
@@ -72,6 +70,8 @@ def load_subjects(dataset_root: str, date: str) -> dict:
 
 
 class SaveSubjectsPayload(BaseModel):
+    """A subject registry save: the registry, its dataset root, its loaded version, the person."""
+
     subjects: (
         dict  # the nested registry mapping (subjects -> attributes -> values)
     )
@@ -84,13 +84,14 @@ class SaveSubjectsPayload(BaseModel):
 
 @router.post("/save")
 def save_subjects(payload: SaveSubjectsPayload) -> dict:
-    """Write the dataset's subject registry through :func:`subject_registry.replace_registry`, by
-    the person ``user`` names.
+    """Write the dataset's subject registry by the person ``user`` names.
+
+    The write goes through :func:`subject_registry.replace_registry`.
 
     Refuses (400) a write dropping a subject, attribute or attribute value the stored registry
     declares, naming what it would have lost. Also refuses (400) a same-values attribute type
     change (categorical to ordinal or back): this route passes neither ``allow_type_changes`` nor
-    ``allow_removals``; ``write_subject_registry`` states either. Refuses (409) a stale
+    ``allow_removals``. Refuses (409) a stale
     ``version``. A write whose audit line could not follow answers 409.
     """
     from tcip_mcp.audit import AuditEntryNotWrittenError

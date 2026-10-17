@@ -1,5 +1,6 @@
-"""Results routes: plant-mapping, per-plant phenology curves, CSV export, and the traits with the
-breeder's confirmation of a trait revision.
+"""Results routes: plant-mapping, per-plant phenology curves, CSV export and the traits.
+
+The traits are served with the breeder's confirmation of a trait revision.
 
 The delivered target is a per-plant CSV of a registered trait's own milestone-date columns
 (``<phenology_prefix>_<NN>per_date`` for each milestone its ``TraitEntry`` declares; every
@@ -42,8 +43,9 @@ router = APIRouter(prefix="/api/results", tags=["results"])
 
 
 def _evidence_roots(root: Path) -> list[Path]:
-    """The open project's own tree plus every dataset root registered to it; a registry that will
-    not decode answers 400.
+    """Return the open project's own tree plus every dataset root registered to it.
+
+    A registry that will not decode answers 400.
     """
     from tcip_mcp.tools.project_tools import dataset_entry_path, read_datasets
     from tcip_store import DecodeError
@@ -56,13 +58,15 @@ def _evidence_roots(root: Path) -> list[Path]:
 
 
 def _is_root(resolved: Path, root: Path) -> bool:
-    """Whether ``resolved`` is the established root ``root`` itself."""
+    """Return whether ``resolved`` is the established root ``root`` itself."""
     return resolved == root
 
 
 def _belonging(root: Path, path: str, admits=within) -> Path:
-    """``path`` resolved, when ``admits`` it against the open project or a dataset registered to
-    it (by default, at or under one); any other path refuses (403), naming the roots checked.
+    """Resolve ``path`` when ``admits`` it against the open project or a dataset registered to it.
+
+    By default ``admits`` means at or under one; any other path refuses (403), naming the roots
+    checked.
     """
     roots = _evidence_roots(root)
     resolved = resolved_path(path)
@@ -79,6 +83,8 @@ def _belonging(root: Path, path: str, admits=within) -> Path:
 
 
 class BuildMappingPayload(BaseModel):
+    """A plant-mapping build: its name, images root, plant registry, dates, radius and person."""
+
     name: str
     images_root: str = Field(min_length=1)
     plant_registry: str
@@ -90,9 +96,10 @@ class BuildMappingPayload(BaseModel):
 
 @router.post("/plant_mapping/build")
 def build_plant_mapping(payload: BuildMappingPayload) -> dict:
-    """Build and persist the open project's plant mapping
-    (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.build_plant_mapping`) from an
-    ``images_root`` confined to the project, by the person ``user`` names, answering the build as
+    """Build and persist the open project's plant mapping, answering it as served.
+
+    The build is :func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.build_plant_mapping`'s,
+    from an ``images_root`` confined to the project, by the person ``user`` names, answered as
     ``MappingBuild.served`` states it.
 
     A refusal answers 400, an unknown registry 404, a rebuild a delivery event still cites 409
@@ -130,14 +137,17 @@ def build_plant_mapping(payload: BuildMappingPayload) -> dict:
 
 
 class LoadMappingPayload(BaseModel):
+    """The name of a persisted plant mapping to load."""
+
     name: str
 
 
 @router.post("/plant_mapping/load")
 def load_plant_mapping(payload: LoadMappingPayload) -> dict:
-    """The persisted mapping under ``payload.name`` as ``MappingBuild.served`` states it. Nothing
-    stored under the name answers 404; a name the key refuses, or a record that will not load,
-    409.
+    """Load the persisted mapping under ``payload.name`` as ``MappingBuild.served`` states it.
+
+    Nothing stored under the name answers 404; a name the key refuses, or a record that will not
+    load, 409.
     """
     from tcip_store import StoreError
 
@@ -155,7 +165,7 @@ def load_plant_mapping(payload: LoadMappingPayload) -> dict:
 
 @router.get("/plant_mapping/list")
 def list_plant_mappings() -> dict:
-    """Every mapping name persisted under the open project."""
+    """List every mapping name persisted under the open project."""
     root = store.held().root
     return {"names": plant_mapping.plant_mapping_names(root)}
 
@@ -164,9 +174,7 @@ def list_plant_mappings() -> dict:
 
 
 class PhenologyInputs(BaseModel):
-    """The inputs a phenology measurement is computed from, never the measurement itself: no
-    Results door accepts rows.
-    """
+    """The inputs a phenology measurement is computed from, never the measurement itself."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -189,8 +197,10 @@ class PhenologyPayload(PhenologyInputs):
 
 
 def _measure(root: Path, payload: PhenologyInputs) -> PhenologyMeasurement:
-    """:func:`~tcip_mcp.pipelines.postprocessing.phenology.measure_phenology` over the buckets this
-    route confines to the project ``root``; each of its refusals answers 400.
+    """Measure phenology over the buckets this route confines to the project ``root``.
+
+    The measurement is :func:`~tcip_mcp.pipelines.postprocessing.phenology.measure_phenology`'s;
+    each of its refusals answers 400.
     """
     from tcip_mcp.operationalization import OperationalizationRefusedError
     from tcip_mcp.subject_registry import RegistryError
@@ -218,12 +228,14 @@ def _measure(root: Path, payload: PhenologyInputs) -> PhenologyMeasurement:
 
 @router.post("/phenology_measurement")
 def phenology_measurement(payload: PhenologyPayload) -> dict:
-    """Both phenology projections (the per-(plant, date) curve and the per-plant milestone dates)
-    from one measurement, with the milestone columns the producer writes, cleared through the one
-    delivery gate: its refusal answers 400 with the refusal's detail unless ``show_unvalidated``,
-    in which case both are returned with the refusal as ``unvalidated_reason`` and, as
-    ``result_sha256``, the digest of each projection's delivered result keyed ``curves`` and
-    ``milestones``, which a breeder's acknowledgment of exporting it binds to.
+    """Return both phenology projections from one measurement, cleared through the delivery gate.
+
+    The projections are the per-(plant, date) curve and the per-plant milestone dates, with the
+    milestone columns the producer writes. The gate is the one delivery gate: its refusal
+    answers 400 with the refusal's detail unless ``show_unvalidated``, in which case both are
+    returned with the refusal as ``unvalidated_reason`` and, as ``result_sha256``, the digest of
+    each projection's delivered result keyed ``curves`` and ``milestones``, which a breeder's
+    acknowledgment of exporting it binds to.
     """
     from tcip_mcp.delivery import DeliveryRefusedError, gate
     from tcip_mcp.operationalization import OperationalizationRefusedError
@@ -281,8 +293,9 @@ def phenology_measurement(payload: PhenologyPayload) -> dict:
 
 
 class AcknowledgmentPayload(BaseModel):
-    """Why the exporting person ships the unvalidated result shown, and that result's digest
-    (``result_sha256``, as the refusal or the screen measurement served it).
+    """Why the exporting person ships the unvalidated result shown, and that result's digest.
+
+    The digest is ``result_sha256``, as the refusal or the screen measurement served it.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -294,12 +307,13 @@ class AcknowledgmentPayload(BaseModel):
 def _recorded_acknowledgment(
     root: Path, payload, person: str, request: Request
 ) -> str | None:
-    """Record the acknowledgment ``payload`` carries (:func:`~tcip_mcp.delivery.
-    record_acknowledgment`) in the project ``root`` by ``person``, and return its id; ``None``
-    when it carries none. A
-    request with no browser ``Origin``, or one declaring an agent identity
-    (:data:`~tcip_mcp.agent_identity.HEADERS`), refuses (403), and a blank reason refuses (400),
-    before anything runs; an act recorded whose audit line could not follow answers 409.
+    """Record the acknowledgment ``payload`` carries and return its id; ``None`` when none.
+
+    The acknowledgment is recorded through :func:`~tcip_mcp.delivery.record_acknowledgment` in
+    the project ``root`` by ``person``. A request with no browser ``Origin``, or one declaring an
+    agent identity (:data:`~tcip_mcp.agent_identity.HEADERS`), refuses (403), and a blank reason
+    refuses (400), before anything runs; an act recorded whose audit line could not follow
+    answers 409.
     """
     if payload.acknowledgment is None:
         return None
@@ -332,8 +346,10 @@ def _recorded_acknowledgment(
 
 
 class ExportCsvPayload(PhenologyInputs):
-    """The export door's payload: the measurement inputs, which computation to export, the person
-    exporting it and the acknowledgment fields.
+    """The export door's payload: the measurement inputs and the export's own fields.
+
+    Those are which computation to export, the person exporting it and the acknowledgment
+    fields.
     """
 
     # Which server computation to export: a choice of producer, never a claim about what the rows
@@ -348,9 +364,10 @@ class ExportCsvPayload(PhenologyInputs):
 
 @router.post("/export_csv")
 def export_csv(payload: ExportCsvPayload, request: Request) -> Response:
-    """Deliver a phenology measurement this route computes itself as a CSV
-    (:func:`~tcip_mcp.pipelines.postprocessing.phenology.deliver_phenology`), written to the
-    project's ``results_export/`` and returned as the response body.
+    """Deliver a phenology measurement this route computes itself as a CSV.
+
+    The delivery is :func:`~tcip_mcp.pipelines.postprocessing.phenology.deliver_phenology`'s,
+    written to the project's ``results_export/`` and returned as the response body.
 
     The acknowledgment is recorded by :func:`_recorded_acknowledgment`; a delivery refusal
     answers 400 with its detail, and a delivery event its receipt could not follow answers 409.
@@ -408,10 +425,10 @@ class PerImageCountDelivery(BaseModel):
 
 
 class OrthomosaicPlantCountsDelivery(BaseModel):
-    """A per-plant count delivery from a published whole-raster prediction bucket plus a registered
-    plant registry, for the plants ``plants`` names. ``nn_tolerance_m`` is not exposed here: this
-    door serves the derived tolerance the core resolves from the plant grid's own spacing, or the
-    ``canopy_subject`` regime.
+    """A per-plant count delivery from a published whole-raster bucket and a plant registry.
+
+    The bucket is a published whole-raster prediction bucket and the registry a registered
+    plant registry, for the plants ``plants`` names. The payload carries no ``nn_tolerance_m``.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -429,8 +446,10 @@ class OrthomosaicPlantCountsDelivery(BaseModel):
 
 
 class ExportCountCsvPayload(BaseModel):
-    """The count-export door's own payload: a discriminated ``delivery`` naming which of the two
-    count kinds this posts, the person exporting it, plus the acknowledgment fields.
+    """The count-export door's own payload: its delivery, its person and the acknowledgment.
+
+    ``delivery`` is discriminated, naming which of the two count kinds this posts; the person is
+    the one exporting it.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -447,9 +466,10 @@ class ExportCountCsvPayload(BaseModel):
 def export_count_csv(
     payload: ExportCountCsvPayload, request: Request
 ) -> Response:
-    """Deliver a per-image or per-plant count CSV over a bucket (and, for the per-plant kind, the
-    registered plant registry) this route confines to the open project, written to the project's
-    ``results_export/`` and returned as the response body.
+    """Deliver a per-image or per-plant count CSV over a bucket this route confines to the project.
+
+    For the per-plant kind the registered plant registry is confined likewise. The CSV is
+    written to the project's ``results_export/`` and returned as the response body.
 
     ``per_image_count`` is
     :func:`~tcip_mcp.pipelines.postprocessing.export.deliver_per_image_counts_csv`;
@@ -544,10 +564,11 @@ def export_count_csv(
 
 @router.get("/delivery-events")
 def list_delivery_events() -> dict:
-    """Every delivery event the open project holds
-    (:func:`~tcip_mcp.delivery.read_delivery_events`):
-    what shipped, under which trait revision and kind, over which buckets and with what each
-    bucket's gate finding was. A record that will not decode refuses the whole listing (400).
+    """List every delivery event the open project holds.
+
+    The events are :func:`~tcip_mcp.delivery.read_delivery_events`'s: what shipped, under which
+    trait revision and kind, over which buckets and with what each bucket's gate finding was. A
+    record that will not decode refuses the whole listing (400).
 
     A record naming a walked-mapping ``plant_mapping`` (a dict carrying ``name`` and
     ``record_sha256``) also carries ``plant_mapping_resolved_key``: the name to load to see exactly
@@ -590,7 +611,7 @@ def list_delivery_events() -> dict:
 
 
 def _served_revision(revision: TraitRevision) -> dict:
-    """One revision as the trait routes serve it, with its ``confirmed`` state."""
+    """Return the revision with its ``confirmed`` state."""
     return {
         **revision.model_dump(mode="json"),
         "confirmed": revision.confirmed,
@@ -598,9 +619,10 @@ def _served_revision(revision: TraitRevision) -> dict:
 
 
 def _served(name: str, record: TraitRecord) -> dict:
-    """One trait's record as the trait routes serve it: each revision as
-    :func:`_served_revision` states it, and ``latest_confirmed``, the number of the revision a
-    delivery reads, or ``None``.
+    """Return one trait's record with its revisions and latest confirmed revision.
+
+    Each revision is as :func:`_served_revision` states it, and ``latest_confirmed`` is the
+    latest confirmed revision's number, or ``None``.
     """
     latest_confirmed = record.latest_confirmed
     return {
@@ -614,8 +636,9 @@ def _served(name: str, record: TraitRecord) -> dict:
 
 @router.get("/traits")
 def list_traits() -> dict:
-    """Every trait the open project holds, each as :func:`_served` states it, revisions oldest
-    first.
+    """List every trait the open project holds, each as :func:`_served` states it.
+
+    Revisions are oldest first.
 
     ``definitions`` quotes crops.yml's own definition of every phenotype a revision delivers.
     ``unreadable`` names each trait whose stored record its schema refuses, and why.
@@ -666,8 +689,9 @@ class ConfirmRevisionPayload(BaseModel):
 
 @router.post("/traits/confirm")
 def confirm_trait_revision(payload: ConfirmRevisionPayload) -> dict:
-    """Record the breeder's confirmation of a trait revision, or withdraw one, through
-    ``traits.confirm_revision``.
+    """Record the breeder's confirmation of a trait revision, or withdraw one.
+
+    Both go through ``traits.confirm_revision``.
 
     Refused with 409 when the hash is not the revision's own, the body carrying the trait's record
     as it stands, and with 400 for every other refusal. A committed confirmation whose audit line
@@ -712,8 +736,9 @@ def confirm_trait_revision(payload: ConfirmRevisionPayload) -> dict:
 
 
 class RegisteredModel(BaseModel):
-    """One registered model as the browser lists it: its name, its checkpoint, its tags and the
-    run that produced it.
+    """One registered model.
+
+    It carries its name, its checkpoint, its tags and the run that produced it.
     """
 
     name: str
@@ -723,15 +748,16 @@ class RegisteredModel(BaseModel):
 
 
 class RegisteredModels(BaseModel):
-    """The open project's registered models as the browser lists them."""
+    """The open project's registered models."""
 
     models: list[RegisteredModel]
 
 
 @router.get("/models/registered")
 def registered_models(tag: str | None = None) -> RegisteredModels:
-    """The open project's registered models under ``tag``
-    (:func:`~tcip_mcp.tools.model_tools.registered_listing`), each as the browser lists it.
+    """List the open project's registered models under ``tag``.
+
+    The listing is :func:`~tcip_mcp.tools.model_tools.registered_listing`'s.
     """
     from tcip_mcp.tools.model_tools import registered_listing
 

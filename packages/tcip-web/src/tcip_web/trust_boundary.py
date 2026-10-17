@@ -1,5 +1,6 @@
-"""The network trust boundary: the backend serves connections that arrived through this machine,
-and answers only to the loopback host it binds.
+"""The network trust boundary: the backend serves only connections arriving through this machine.
+
+It answers only to the loopback host it binds.
 
 Locality is a property of the accepted connection, never of a configured bind host: the ASGI
 ``scope["server"]`` is the local address the connection arrived on, and a connection through
@@ -28,7 +29,7 @@ _DEFAULT_PORTS = {"http": 80, "https": 443}
 
 STATE_CHANGING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 """HTTP methods the trust boundary treats as mutating: a request using one of these must carry
-an allowed Origin, the same requirement every WebSocket scope carries regardless of method."""
+an allowed Origin."""
 
 _ORIGIN_REFUSAL_WS = "origin not allowed"
 _ORIGIN_REFUSAL_HTTP = (
@@ -44,9 +45,11 @@ EXPOSURE_REFUSAL = (
 
 
 def canonical_host(host: str) -> str:
-    """The canonical spelling of a host: lower-cased, no trailing dot, IPv6 unbracketed, an
-    IPv4-mapped IPv6 address unwrapped to its IPv4 form. Raises ``ValueError`` for anything that
-    is not a host: empty, whitespace or control characters, userinfo, a backslash.
+    """Return the canonical spelling of a host.
+
+    Lower-cased, no trailing dot, IPv6 unbracketed, an IPv4-mapped IPv6 address unwrapped to its
+    IPv4 form. Raises ``ValueError`` for anything that is not a host: empty, whitespace or
+    control characters, userinfo, a backslash.
     """
     h = host.strip()
     if (
@@ -68,7 +71,7 @@ def canonical_host(host: str) -> str:
 
 
 def parse_authority(value: str, default_port: int | None) -> Authority:
-    """``host[:port]`` into a canonical authority; a missing port takes ``default_port``.
+    """Parse ``host[:port]`` into a canonical authority; a missing port takes ``default_port``.
 
     Raises ``ValueError`` for a malformed value: a scheme, a path, a query, a fragment, userinfo,
     a non-numeric or out-of-range port, or mismatched IPv6 brackets.
@@ -101,8 +104,9 @@ def parse_authority(value: str, default_port: int | None) -> Authority:
 
 
 def is_loopback_host(host: str) -> bool:
-    """True if ``host``, canonically spelled, is the one loopback host every server here binds
-    (:data:`~tcip_mcp.web_client.LOOPBACK_HOST`); a malformed host is not.
+    """Return whether ``host``, canonically spelled, is the one loopback host the servers bind.
+
+    That host is :data:`~tcip_mcp.web_client.LOOPBACK_HOST`; a malformed host is not it.
     """
     from tcip_mcp.web_client import LOOPBACK_HOST
 
@@ -113,7 +117,7 @@ def is_loopback_host(host: str) -> bool:
 
 
 def arrival(scope: Mapping[str, Any]) -> tuple[str, int | None] | None:
-    """The local address a connection was accepted on, or None when the scope carries none."""
+    """Return the local address a connection was accepted on, or None when the scope has none."""
     server = scope.get("server")
     if not server or not server[0]:
         return None
@@ -121,8 +125,9 @@ def arrival(scope: Mapping[str, Any]) -> tuple[str, int | None] | None:
 
 
 def local_arrival(scope: Mapping[str, Any]) -> bool:
-    """True when the connection arrived through this machine: the loopback host, or a UNIX socket
-    path.
+    """Return whether the connection arrived through this machine.
+
+    That is the loopback host, or a UNIX socket path.
     """
     at = arrival(scope)
     if at is None:
@@ -132,7 +137,7 @@ def local_arrival(scope: Mapping[str, Any]) -> bool:
 
 
 def _http_scheme(scheme: str) -> str:
-    """``scheme`` with a WebSocket scheme named by its HTTP counterpart."""
+    """Return ``scheme`` with WebSocket schemes replaced by their HTTP counterparts."""
     return {"ws": "http", "wss": "https"}.get(scheme, scheme)
 
 
@@ -149,8 +154,9 @@ def _header_values(scope: Mapping[str, Any], name: bytes) -> list[str]:
 
 
 def request_authority(scope: Mapping[str, Any]) -> Authority | None:
-    """The Host header as a canonical authority, or None when it is absent, duplicated or
-    malformed.
+    """Return the Host header as a canonical authority.
+
+    None when it is absent, duplicated or malformed.
     """
     values = _header_values(scope, b"host")
     if len(values) != 1:
@@ -164,7 +170,7 @@ def request_authority(scope: Mapping[str, Any]) -> Authority | None:
 
 
 def host_allowed(scope: Mapping[str, Any]) -> bool:
-    """Whether the request's Host is the loopback host at the port the connection arrived on."""
+    """Return whether Host names the loopback host at the connection's arrival port."""
     at = arrival(scope)
     authority = request_authority(scope)
     if at is None or authority is None:
@@ -193,7 +199,7 @@ def _parse_origin(origin: str) -> tuple[str, Authority] | None:
 
 
 def origin_allowed(origin: str | None, scope: Mapping[str, Any]) -> bool:
-    """Whether an Origin is one this backend serves.
+    """Return whether an Origin is allowed by this backend.
 
     Only an absent Origin (``None``) is a non-browser client and is allowed. A present Origin,
     empty included, is refused unless it parses as a bare authority naming the loopback host, at
@@ -220,12 +226,14 @@ class TrustBoundaryMiddleware:
     def __init__(
         self, app: Callable[[Scope, Receive, Send], Awaitable[None]]
     ) -> None:
+        """Wrap the ASGI ``app`` the admitted connections reach."""
         self.app = app
         self._logged: set[str] = set()
 
     async def __call__(
         self, scope: Scope, receive: Receive, send: Send
     ) -> None:
+        """Pass an admitted scope to the wrapped app, or answer the refusal the class states."""
         if scope["type"] not in ("http", "websocket"):
             await self.app(scope, receive, send)
             return
@@ -251,8 +259,9 @@ class TrustBoundaryMiddleware:
         await self.app(scope, receive, send)
 
     def _origin_ok(self, scope: Mapping[str, Any]) -> bool:
-        """Whether this scope's Origin header, if any, is one :func:`origin_allowed` admits; a
-        duplicated Origin is refused.
+        """Return whether this scope's Origin header, if any, is one :func:`origin_allowed` admits.
+
+        A duplicated Origin is refused.
         """
         values = _header_values(scope, b"origin")
         if len(values) > 1:

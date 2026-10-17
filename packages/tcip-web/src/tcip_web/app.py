@@ -1,5 +1,7 @@
-"""FastAPI application: the GUI state snapshot and its WebSocket, the panel-event hub, the built
-frontend and the health probe; every domain route is mounted from ``tcip_web.routes``.
+"""FastAPI application: the GUI state, the panel-event hub, the built frontend and health probe.
+
+The GUI state is served as a snapshot and over its WebSocket; every domain route is mounted from
+``tcip_web.routes``.
 """
 
 from __future__ import annotations
@@ -31,9 +33,11 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
-    """Open the project the last-opened pointer of the workspace the backend was configured with
-    names, size GDAL's block cache and warm the agent terminal, before the app serves. Refuses a
-    backend configured with no workspace (``StateStore.workspace``).
+    """Open the last-opened project, size GDAL's block cache and warm the agent terminal.
+
+    All three run before the app serves; the project opened is the one the last-opened pointer
+    of the workspace the backend was configured with names. Refuses a backend configured with no
+    workspace (``StateStore.workspace``).
     """
     from tcip_web.routes.projects import open_last_opened
 
@@ -97,8 +101,10 @@ _state_watchers: set[WebSocket] = set()
 async def _bad_request_handler(
     _request: Request, exc: Exception
 ) -> JSONResponse:
-    """An invalid GUI mutation, a directory read as a bucket it is not, or an act naming no
-    person: 400 with the reason.
+    """Answer 400 with the reason.
+
+    For an invalid GUI mutation, a directory read as a bucket it is not, or an act naming no
+    person.
     """
     return JSONResponse(status_code=400, content={"detail": str(exc)})
 
@@ -112,7 +118,7 @@ app.add_exception_handler(NoActorError, _bad_request_handler)
 async def _no_project_open_handler(
     _request: Request, exc: NoProjectOpenError
 ) -> JSONResponse:
-    """Every route that acts on the open project answers 409 while none is open."""
+    """Answer 409 with the no-project exception's detail."""
     return JSONResponse(status_code=409, content={"detail": str(exc)})
 
 
@@ -120,9 +126,7 @@ async def _no_project_open_handler(
 async def _project_not_open_handler(
     _request: Request, exc: ProjectNotOpenError
 ) -> JSONResponse:
-    """A request built for a project the backend does not have open answers 409 naming the one it
-    has open.
-    """
+    """Answer 409 naming the open project to a request built for another one."""
     return JSONResponse(
         status_code=409,
         content={
@@ -142,8 +146,10 @@ SERVER_EPOCH = uuid.uuid4().hex
 def state_snapshot_message(
     state: dict[str, Any], version: int
 ) -> dict[str, Any]:
-    """The state-snapshot envelope: state, version, the open project (``{id, path}``, or null
-    when none is open) and this process's epoch.
+    """Return the state-snapshot envelope.
+
+    It carries the state, the version, the open project (``{id, path}``, or null when none is
+    open) and this process's epoch.
     """
     opened = _gui_store.opened
     return {
@@ -158,7 +164,7 @@ def state_snapshot_message(
 
 
 async def _broadcast_state_snapshot(payload: dict[str, Any]) -> None:
-    """Push the new state, version and open project to every connected browser."""
+    """Push the new state, version and open project to every state socket, dropping dead ones."""
     msg = state_snapshot_message(payload["state"], payload["version"])
     dead: list[WebSocket] = []
     for ws in list(_state_watchers):
@@ -175,18 +181,19 @@ _gui_store.subscribe(_broadcast_state_snapshot)
 
 @app.get("/api/state")
 def get_state() -> dict:
+    """Return the GUI state store's current snapshot."""
     return _gui_store.snapshot()
 
 
 class ActiveTabPayload(BaseModel):
+    """The active tab to record."""
+
     active_tab: str
 
 
 @app.post("/api/state/tab")
 async def set_active_tab(payload: ActiveTabPayload) -> dict:
-    """Record which tab the browser is actually showing, so the GUI snapshot tracks what the
-    human sees.
-    """
+    """Record ``active_tab`` in the GUI state and answer it."""
     await _gui_store.mutate(
         {"active_tab": payload.active_tab}, project=_gui_store.opened
     )
@@ -195,9 +202,9 @@ async def set_active_tab(payload: ActiveTabPayload) -> dict:
 
 @app.websocket("/ws/state")
 async def state_ws(websocket: WebSocket) -> None:
-    """Push live GuiState snapshots to the browser; replays the current snapshot on connect.
-    One-directional: the client never sends a payload over this socket, and an inbound frame,
-    if one ever arrived, is read and discarded, only to detect disconnect.
+    """Push live GuiState snapshots over the socket; replays the current snapshot on connect.
+
+    One-directional: an inbound frame is read and discarded, only to detect disconnect.
     """
     await websocket.accept()
     _state_watchers.add(websocket)
@@ -223,6 +230,8 @@ _panel_subscribers: dict[str, set[WebSocket]] = defaultdict(set)
 
 
 class PanelEvent(BaseModel):
+    """An event pushed to a panel: its type, its data and the project the sender acts on."""
+
     panel: str | None = None
     event_type: str
     data: dict[str, Any] = {}
@@ -243,8 +252,9 @@ async def _broadcast_to_panel(panel: str, event: dict[str, Any]) -> None:
 
 
 def _static_dir_candidates() -> list[Path]:
-    """The built frontend's install-layout candidates, in preference order: the packaged copy
-    inside an installed wheel, then the src-layout checkout.
+    """Return the built frontend's install-layout candidates, in preference order.
+
+    The packaged copy inside an installed wheel, then the src-layout checkout.
     """
     return [
         Path(__file__).parent / "static",
@@ -255,9 +265,9 @@ def _static_dir_candidates() -> list[Path]:
 def _find_static_dir() -> Path:
     """Locate the built frontend across install layouts.
 
-    Prefers a copy packaged inside the installed package (``tcip_web/static/``, how a
-    wheel should ship it) and falls back to the src-layout checkout
-    (``packages/tcip-web/static/``). Returns the src-layout path if neither is built yet.
+    Prefers a copy packaged inside the installed package (``tcip_web/static/``) and falls back
+    to the src-layout checkout (``packages/tcip-web/static/``). Returns the src-layout path if
+    neither is built yet.
     """
     candidates = _static_dir_candidates()
     for c in candidates:
@@ -289,6 +299,7 @@ FRONTEND_SERVING_PATHS = frozenset({"/", "/health"})
 
 @app.get("/health")
 def health() -> dict:
+    """Answer the health probe with ``{"status": "ok"}``."""
     return {"status": "ok"}
 
 
@@ -297,6 +308,7 @@ def health() -> dict:
 
 @app.get("/")
 def index():
+    """Serve the built frontend's ``index.html``, or a 503 naming how to build it when absent."""
     index_path = STATIC_DIR / "index.html"
     if index_path.exists():
         return FileResponse(str(index_path))
@@ -320,7 +332,7 @@ def index():
 
 @app.post("/api/events/{panel}")
 async def post_panel_event(panel: str, event: PanelEvent, request: Request):
-    """Accept an event pushed from an MCP tool and broadcast to subscribers.
+    """Accept a pushed event and broadcast it to subscribers.
 
     Payload shape: ``{panel, event_type, data, project_id}``. An event naming any project but the
     open one answers 409 (``StateStore.admit``), naming the open one's ``open_project_id`` when
@@ -361,7 +373,10 @@ async def post_panel_event(panel: str, event: PanelEvent, request: Request):
 
 @app.websocket("/ws/panel/{panel}")
 async def panel_ws(websocket: WebSocket, panel: str):
-    """Stream panel events to a browser client."""
+    """Stream ``panel``'s events over the socket, the open project's retained events first.
+
+    An unknown panel closes the socket with 1008.
+    """
     if panel not in VALID_PANELS:
         await websocket.close(code=1008, reason=f"unknown panel: {panel}")
         return

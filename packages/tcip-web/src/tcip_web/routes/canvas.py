@@ -1,8 +1,8 @@
-"""Live canvas-state bridge: the GUI pushes what it is rendering; the agent reads it back.
+"""Live canvas-state bridge: a pushed canvas state stored as the open project's records.
 
-A heartbeat (image, viewport, classes, counts; ``shapes`` omitted) arrives on view/meta changes,
-and the full display-resolved geometry only when shapes change. State is split across two records
-of the open project:
+A heartbeat (image, viewport, classes, counts; ``shapes`` omitted) carries no geometry, and a
+full push carries the display-resolved geometry. State is split across two records of the open
+project:
 
   - the meta record (``canvas_meta_key``): replaced by every push.
   - the geometry record (``canvas_geometry_key``): written only by full pushes.
@@ -28,6 +28,8 @@ router = APIRouter(prefix="/api/canvas", tags=["canvas"])
 
 
 class CanvasStatePayload(BaseModel):
+    """A canvas state push: a heartbeat when ``shapes`` is None, else a full push."""
+
     model_config = ConfigDict(extra="forbid")
 
     # The id of the project the GUI built this push for.
@@ -52,8 +54,9 @@ class CanvasStatePayload(BaseModel):
 
 @router.post("/state")
 def push_canvas_state(payload: CanvasStatePayload) -> dict:
-    """Store the pushed canvas for the open project, stamped with the instant it arrived; a push
-    stating a ``user`` that names no one is refused before anything is written.
+    """Store the pushed canvas for the open project, stamped with the instant it arrived.
+
+    A push stating a ``user`` that names no one is refused before anything is written.
     """
     person = actor(payload.user)
     project = store.admit(payload.project_id)

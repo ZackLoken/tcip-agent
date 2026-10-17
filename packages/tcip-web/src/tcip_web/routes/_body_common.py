@@ -1,8 +1,7 @@
 """The body model for a state-changing route that carries no fields of its own.
 
-Giving the handler a JSON body model, even an empty one, makes the server refuse the content types
-a browser simple request can send (no body, form-urlencoded, or plain text) before the handler
-runs; only a call that arrives as application/json reaches it.
+Giving the handler a JSON body model, even an empty one, makes the server refuse a call with no
+body, a form-urlencoded body or a plain-text body before the handler runs.
 """
 
 from __future__ import annotations
@@ -15,8 +14,9 @@ class EmptyBodyPayload(BaseModel):
 
 
 class PersonPayload(BaseModel):
-    """A JSON body naming the person making the act, for a route whose other parameters are its
-    path's.
+    """A JSON body naming the person making the act.
+
+    For a route whose other parameters are its path's.
     """
 
     user: str

@@ -1,6 +1,8 @@
-"""Dataset routes: what a dataset root holds (its dates and subjects, through
-:mod:`tcip_mcp.dataset_layout`, and its published buckets, through :mod:`tcip_mcp.buckets`), the
-``GuiState.dataset`` selection, and the current image position within it.
+"""Dataset routes: what a dataset root holds, the dataset selection and the image position.
+
+A dataset root holds its dates and subjects, through :mod:`tcip_mcp.dataset_layout`, and its
+published buckets, through :mod:`tcip_mcp.buckets`; the selection is ``GuiState.dataset``, and
+the position is the current image's within it.
 """
 
 from __future__ import annotations
@@ -23,6 +25,8 @@ _selected_this_session = False
 
 
 class DatasetTree(BaseModel):
+    """A dataset root's dates, subjects, subjects per date and buckets per date."""
+
     dataset_root: str
     dates_with_images: list[str]
     # Every subject the dataset's registry (``subjects.json``) declares, e.g. ["tree", "fruit"].
@@ -37,7 +41,7 @@ class DatasetTree(BaseModel):
 
 
 def _label_problem(capture: str, unreadable: list[str]) -> str | None:
-    """The line naming ``capture``'s label documents that will not read, if any."""
+    """Return the line naming ``capture``'s label documents that will not read, if any."""
     if not unreadable:
         return None
     return f"capture {capture}: label document(s) {', '.join(unreadable)} will not read"
@@ -46,8 +50,10 @@ def _label_problem(capture: str, unreadable: list[str]) -> str | None:
 def _subjects_by_date(
     root, dates: list[str]
 ) -> tuple[dict[str, list[str]], str | None]:
-    """:func:`~tcip_mcp.dataset_layout.capture_subjects` per date, and the first date's
-    :func:`_label_problem`.
+    """Return each date's labeled subjects and the first label problem encountered.
+
+    The subjects are :func:`~tcip_mcp.dataset_layout.capture_subjects` per date; the problem is
+    the first label problem encountered (:func:`_label_problem`), in date order.
     """
     by_date: dict[str, list[str]] = {}
     problem: str | None = None
@@ -76,6 +82,8 @@ def get_dataset_tree(dataset_root: str) -> DatasetTree:
 
 
 class SelectionRequest(BaseModel):
+    """A dataset selection: its root, subject, capture and bucket."""
+
     dataset_root: str
     subject: str | None = None
     # The capture: a date folder, a literal bucket or ``UNDATED_BUCKET``.
@@ -86,7 +94,8 @@ class SelectionRequest(BaseModel):
 
 @router.post("/select")
 async def select_dataset(req: SelectionRequest) -> dict:
-    """Set the dataset the GUI looks at inside the open project; broadcasts a state delta.
+    """Set the open project's ``GuiState.dataset`` selection; broadcasts a state delta.
+
     Answers 409 while no project is open, and 400 for a bucket name no bucket is published
     under, a ``date`` that is no capture name or a capture holding two images of one stem.
     Whether the (subject, date) has labels and the bucket a document for these images is
@@ -136,15 +145,18 @@ async def select_dataset(req: SelectionRequest) -> dict:
 
 
 class NavRequest(BaseModel):
+    """The current image position within the selection."""
+
     current_image_index: int
 
 
 @router.post("/nav")
 async def set_current_image(req: NavRequest) -> dict:
-    """Persist the browser's current image position into ``GuiState.dataset``: the open project
-    and its selection read as one value (:meth:`~tcip_web.state.StateStore.held_state`), the
-    index replaced, held once :meth:`~tcip_web.state.StateStore.mutate` admits that project
-    under the lock.
+    """Persist the current image position into ``GuiState.dataset``.
+
+    The open project and its selection are read as one value
+    (:meth:`~tcip_web.state.StateStore.held_state`), the index replaced, and held once
+    :meth:`~tcip_web.state.StateStore.mutate` admits that project under the lock.
     """
     project, held = store.held_state()
     dataset = held.dataset

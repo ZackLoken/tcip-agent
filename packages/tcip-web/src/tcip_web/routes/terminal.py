@@ -1,7 +1,9 @@
-"""Agent terminal routes: provider status, session launch, restart and submitted requests over
-HTTP, and per session a WebSocket carrying raw PTY output as text frames out and
-``TerminalInputFrame``/``TerminalResizeFrame`` JSON messages in. A reconnecting socket receives
-the scrollback first, then live output, with nothing lost or repeated between them.
+"""Agent terminal routes: provider status, session launch, restart, requests and a PTY WebSocket.
+
+Status, launch, restart and submitted requests go over HTTP; per session a WebSocket carries
+raw PTY output as text frames out and ``TerminalInputFrame``/``TerminalResizeFrame`` JSON
+messages in. A reconnecting socket receives the scrollback first, then live output, with nothing
+lost or repeated between them.
 """
 
 from __future__ import annotations
@@ -45,8 +47,7 @@ _EXIT_NOTE = (
 def _offer(queue: asyncio.Queue, data: str) -> None:
     """Enqueue output for one subscriber (runs on that subscriber's loop).
 
-    On overflow, drop the backlog and leave a ``None`` sentinel: the pump closes the socket, and
-    the reconnect replay repaints.
+    On overflow, drop the backlog and leave a ``None`` sentinel.
     """
     try:
         queue.put_nowait(data)
@@ -60,13 +61,14 @@ def _offer(queue: asyncio.Queue, data: str) -> None:
 
 
 class LaunchedProgram(BaseModel):
-    """What a launch ran: the provider row's id, the rendered argv, the version its executable
-    (the first element) declares, what the row states its harness's own enforcement restricts
-    and leaves open (``None`` for a ``TCIP_TERMINAL_CMD`` override, which runs no row's
-    arguments), why delivery to it rests on a
-    composer sequence recorded on another version (``None`` when the versions agree, and for an
-    override), and the steps the row's preparation took before the launch, empty when it has
-    none.
+    """What a launch ran: its provider row, argv, version, confinement, delivery and preparation.
+
+    It carries the provider row's id, the rendered argv, the version its executable (the first
+    element) declares, what the row states its harness's own enforcement restricts and leaves
+    open (``None`` for a ``TCIP_TERMINAL_CMD`` override, which runs no row's arguments), why
+    delivery to it rests on a composer sequence recorded on another version (``None`` when the
+    versions agree, and for an override), and the steps the row's preparation took before the
+    launch, empty when it has none.
     """
 
     provider: str
@@ -78,8 +80,10 @@ class LaunchedProgram(BaseModel):
 
 
 class TerminalLaunch(BaseModel):
-    """A started session: its id, whether it was already running when asked for, what it
-    launched, and the session-start ritual that launch was given.
+    """A started session: its id, whether it already ran, what it launched and its ritual.
+
+    Whether it already ran is as of when it was asked for; the ritual is the session-start
+    ritual that launch was given.
     """
 
     session_id: str
@@ -108,9 +112,11 @@ def _record_start(
     project: OpenProject | None,
     actor: str,
 ) -> None:
-    """One audit line by ``actor`` in ``project``'s log per launch for it, naming the session id
-    and the provider and program it launched; a launch for no project has no log to land in and
-    records nothing. A failed append raises ``AuditEntryNotWrittenError``.
+    """Write one audit line by ``actor`` in ``project``'s log for a launch for it.
+
+    The line names the session id and the provider and program it launched; a launch for no
+    project has no log to land in and records nothing. A failed append raises
+    ``AuditEntryNotWrittenError``.
     """
     from tcip_mcp.audit import record_event_or_raise
 
@@ -125,12 +131,13 @@ def _record_start(
 
 @dataclass
 class _Launch:
-    """One launch of a session's agent: its generation (a stale reader's output carries an older
-    one and is dropped), its session-start ritual once known, whether that ritual was delivered,
-    whether the agent has bracketed paste on, the sequence one version of its row's harness was
-    recorded writing when its composer appeared and whether the agent has written it, the
-    requests waiting behind the ritual, and the output tail an escape sequence split across reads
-    continues from.
+    """One launch of a session's agent and its delivery state.
+
+    It carries its generation, its session-start ritual once known, whether that ritual was
+    delivered, whether the agent has bracketed paste on, the sequence one version of its row's
+    harness was recorded writing when its composer appeared and whether the agent has written
+    it, the requests waiting behind the ritual, and the output tail an escape sequence split
+    across reads continues from.
     """
 
     gen: int
@@ -153,6 +160,7 @@ class TerminalSession:
     """What the last start launched; set by :meth:`start`."""
 
     def __init__(self, session_id: str):
+        """Take the session's id; no process runs until :meth:`start`."""
         self.id = session_id
         self._pty = None
         self._lock = threading.Lock()
@@ -170,10 +178,11 @@ class TerminalSession:
     def start(
         self, rows: int, cols: int, provider: pty_host.Provider, actor: str
     ) -> str | None:
-        """Spawn ``provider``'s harness in a PTY for the open project as the current launch by
-        ``actor``, or a new one when the current launch already spawned, its ritual built before
-        the spawn from the project's record as it reads now. Returns an error reason (a record
-        that will not read names why), or None on success.
+        """Spawn ``provider``'s harness in a PTY for the open project, by ``actor``.
+
+        The spawn is the current launch, or a new one when the current launch already spawned,
+        its ritual built before the spawn from the project's record as it reads now. Returns an
+        error reason (a record that will not read names why), or None on success.
         """
         with self._lock:
             if self._pty is not None and self._pty.isalive():
@@ -251,9 +260,10 @@ class TerminalSession:
     def restart(
         self, rows: int, cols: int, provider: pty_host.Provider, actor: str
     ) -> str | None:
-        """Open the next launch, holding the current launch's undelivered requests and every
-        request submitted from here on behind its ritual, end the current process and start
-        ``provider`` as that launch by ``actor``. Returns an error reason, or None on success.
+        """Open the next launch, end the current process and start ``provider`` as it by ``actor``.
+
+        The next launch holds the current launch's undelivered requests and every request
+        submitted from here on behind its ritual. Returns an error reason, or None on success.
         """
         with self._lock:
             self._launch = _Launch(
@@ -278,8 +288,9 @@ class TerminalSession:
             self._deliver()
 
     def terminate(self) -> bool:
-        """Kill the PTY. Returns True when no process remains afterward, False when it survives:
-        ``self._pty`` is then restored so ``alive()``/I/O still see it.
+        """Kill the PTY and return True when no process remains afterward.
+
+        Returns False when it survives: ``self._pty`` is then restored.
         """
         with self._lock:
             pty, self._pty = self._pty, None
@@ -300,12 +311,14 @@ class TerminalSession:
         return True
 
     def alive(self) -> bool:
+        """Return whether the session's PTY process is running."""
         pty = self._pty
         return bool(pty is not None and pty.isalive())
 
     # ── I/O ─────────────────────────────────────────────────────────────
 
     def write(self, data: str) -> bool:
+        """Write ``data`` to the PTY and return whether it was sent."""
         pty = self._pty
         if pty is None or not pty.isalive():
             return False
@@ -318,6 +331,7 @@ class TerminalSession:
             return False
 
     def resize(self, rows: int, cols: int) -> None:
+        """Set the PTY's window size; a failed resize or no PTY is a no-op."""
         pty = self._pty
         if pty is None:
             return
@@ -331,10 +345,11 @@ class TerminalSession:
     # ── output pump (called from the reader thread) ─────────────────────
 
     def _deliver(self) -> None:
-        """Paste the current launch's ritual together with every request queued by then as one
-        message, then each later request on its own, once its agent has bracketed paste on and
-        has written its row's ``composer_ready``; each leaves the launch only once written. Called
-        under the lock.
+        """Paste the current launch's ritual with its queued requests, then each later request.
+
+        The ritual goes together with every request queued by then as one message, then each
+        later request on its own, once its agent has bracketed paste on and has written its row's
+        ``composer_ready``; each leaves the launch only once written. Called under the lock.
         """
         launch = self._launch
         if (
@@ -408,11 +423,12 @@ class TerminalSession:
         return sub_id, queue, replay
 
     def detach(self, sub_id: int) -> None:
+        """Unregister the subscriber ``sub_id``."""
         with self._lock:
             self._subs.pop(sub_id, None)
 
     def scrollback_snapshot(self) -> str:
-        """The current scrollback text."""
+        """Return the current scrollback text."""
         with self._lock:
             return "".join(self._scrollback)
 
@@ -438,7 +454,7 @@ def shutdown_all() -> None:
 
 @router.get("/status")
 def get_status() -> TerminalStatus:
-    """Every provider row with the reason it cannot launch here."""
+    """Return every provider row with the reason it cannot launch here."""
     return TerminalStatus(
         providers=[
             ProviderStatus(
@@ -467,8 +483,9 @@ class TerminalResizeFrame(BaseModel):
 
 
 class CreateSessionRequest(BaseModel):
-    """A launch: the id of the :data:`~tcip_web.terminal.PROVIDERS` row to run, the terminal
-    dimensions and the person launching it.
+    """A launch: the provider row to run, the terminal dimensions and the person launching it.
+
+    The row is named by its id in :data:`~tcip_web.terminal.PROVIDERS`.
     """
 
     provider: str
@@ -482,8 +499,9 @@ def _clamp(v: int) -> int:
 
 
 def _provider(provider_id: str) -> pty_host.Provider:
-    """The table row whose id is exactly ``provider_id``; refuses with 422 naming the ids the
-    table lists.
+    """Return the table row whose id is exactly ``provider_id``.
+
+    Refuses with 422 naming the ids the table lists.
     """
     for row in pty_host.PROVIDERS:
         if row.id == provider_id:
@@ -497,8 +515,9 @@ def _provider(provider_id: str) -> pty_host.Provider:
 
 @router.post("/sessions")
 def create_session(req: CreateSessionRequest) -> TerminalLaunch:
-    """Return the live session (attach semantics, like tmux) or spawn a fresh one running the
-    requested provider by the person ``req.user`` names.
+    """Return the live session (attach semantics, like tmux) or spawn a fresh one.
+
+    A fresh one runs the requested provider by the person ``req.user`` names.
     """
     person = actor(req.user)
     provider = _provider(req.provider)
@@ -532,8 +551,9 @@ def _require(session_id: str) -> TerminalSession:
 def restart_session(
     session_id: str, req: CreateSessionRequest
 ) -> TerminalLaunch:
-    """End the session's process and launch the requested provider in its place, by the person
-    ``req.user`` names.
+    """End the session's process and launch the requested provider in its place.
+
+    The launch is by the person ``req.user`` names.
     """
     person = actor(req.user)
     session = _require(session_id)
@@ -563,7 +583,8 @@ class SubmitRequest(BaseModel):
 
 @router.post("/sessions/{session_id}/submit")
 def submit_to_session(session_id: str, req: SubmitRequest) -> dict:
-    """Queue ``req.text`` for the session's current launch (see :meth:`TerminalSession.submit`);
+    """Queue ``req.text`` for the session's current launch, delivered after its ritual.
+
     404 for an unknown session.
     """
     _require(session_id).submit(req.text)
@@ -571,7 +592,7 @@ def submit_to_session(session_id: str, req: SubmitRequest) -> dict:
 
 
 async def _pump(queue: asyncio.Queue, websocket: WebSocket) -> None:
-    """Single writer per socket: drain the queue in order."""
+    """Drain the queue in order as the socket's single writer."""
     while True:
         text = await queue.get()
         if text is None:
@@ -585,7 +606,7 @@ async def _pump(queue: asyncio.Queue, websocket: WebSocket) -> None:
 
 @router.websocket("/ws/{session_id}")
 async def terminal_ws(websocket: WebSocket, session_id: str) -> None:
-    """Raw terminal bridge: PTY output out as text frames, input and resize frames in."""
+    """Bridge PTY output to text frames and accept input and resize frames."""
     session = _SESSIONS.get(session_id)
     if session is None:
         await websocket.close(code=1008, reason="unknown session")

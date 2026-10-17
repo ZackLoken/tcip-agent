@@ -1,6 +1,8 @@
-"""Annotation session telemetry in a workspace project's annotation-stats record: each
-session's person, start and end, and one entry per contribution to an image naming its activity.
-Every throughput figure is derived from those entries when they are read.
+"""Annotation session telemetry in a workspace project's annotation-stats record.
+
+The record holds each session's person, start and end, and one entry per contribution to an
+image naming its activity. Every throughput figure is derived from those entries when they are
+read.
 """
 
 from __future__ import annotations
@@ -27,9 +29,11 @@ Activity = Literal["new_annotation", "review", "negative_confirmation"]
 
 
 def _session_start(sessions: list[dict[str, Any]]) -> str:
-    """The start stamp of a session opening now among ``sessions``, latest first: this instant,
-    or one microsecond past the latest's stamp when this instant does not exceed it, so no two
-    sessions of a project share a stamp and the stamp identifies the session.
+    """Return the start stamp of a session opening now among ``sessions``, latest first.
+
+    The stamp is this instant, or one microsecond past the latest's stamp when this instant does
+    not exceed it, so no two sessions of a project share a stamp and the stamp identifies the
+    session.
     """
     now = datetime.fromisoformat(now_iso())
     latest = (
@@ -41,9 +45,7 @@ def _session_start(sessions: list[dict[str, Any]]) -> str:
 
 
 class ImageEntry(BaseModel):
-    """One contribution to an image: the identity the page minted for it, the seconds spent, the
-    annotations added and its activity.
-    """
+    """One contribution to an image: its identity, seconds, annotations added and activity."""
 
     contribution_id: str = Field(min_length=1)
     image_name: str
@@ -53,9 +55,10 @@ class ImageEntry(BaseModel):
 
 
 class ImageEventPayload(ImageEntry):
-    """One contribution, by the person ``user`` names, to the project whose id it names, in the
-    session of that project whose start stamp ``started`` is, or ``None`` when the page records
-    no session of that person there.
+    """One contribution, by the person ``user`` names, to the project whose id it names.
+
+    It lands in the session of that project whose start stamp ``started`` is, or ``started`` is
+    ``None`` for a contribution naming no session.
     """
 
     user: str
@@ -64,8 +67,10 @@ class ImageEventPayload(ImageEntry):
 
 
 class SessionRef(BaseModel):
-    """One session, as a page names it to end it: the project it was recorded in and the start
-    stamp the contribution that opened it answered with.
+    """One session: its project and its start stamp.
+
+    The project is the one it was recorded in, and the stamp the one the contribution that
+    opened it answered with.
     """
 
     project_id: str
@@ -73,8 +78,9 @@ class SessionRef(BaseModel):
 
 
 class SessionPlace(BaseModel):
-    """The session a contribution is recorded in: its start stamp, and whether it had ended when
-    the answer was made (another page may end it afterwards).
+    """The session a contribution is recorded in: its start stamp and whether it had ended.
+
+    Whether it had ended is as of the answer; it may be ended afterwards.
     """
 
     started: str
@@ -82,10 +88,12 @@ class SessionPlace(BaseModel):
 
 
 class SessionWrite(BaseModel):
-    """What a session write answers: ``ok`` when it touched a session, ``noop`` when it touched
-    none, and ``session``, the session the contribution is recorded in, whether it landed now or
-    is a repeat of one recorded before; ``None`` for a contribution with nothing to record and
-    for every end answer.
+    """What a session write answers: its status and the session the contribution is in.
+
+    The status is ``ok`` when it touched a session and ``noop`` when it touched none.
+    ``session`` is the session the contribution is recorded in, whether it landed now or is a
+    repeat of one recorded before; ``None`` for a contribution with nothing to record and for
+    every end answer.
     """
 
     status: Literal["ok", "noop"]
@@ -93,9 +101,10 @@ class SessionWrite(BaseModel):
 
 
 class SessionSummary(BaseModel):
-    """One session as recorded, with the throughput its entries amount to: the images given
-    annotations, the annotations added, the seconds spent in all and by activity, and the seconds
-    per added annotation (``None`` when none was added).
+    """One session as recorded, with the throughput its entries amount to.
+
+    The throughput is the images given annotations, the annotations added, the seconds spent in
+    all and by activity, and the seconds per added annotation (``None`` when none was added).
     """
 
     user: str
@@ -111,13 +120,14 @@ class SessionSummary(BaseModel):
 
 @router.post("/image_event")
 async def image_event(payload: ImageEventPayload) -> SessionWrite:
-    """Record one contribution by the person ``user`` names and leave one ``image_event`` line by
-    that person; answers the session the contribution is recorded in (:class:`SessionWrite`).
+    """Record one contribution by the person ``user`` names and leave one ``image_event`` line.
+
+    The line is by that person; answers the session the contribution is recorded in
+    (:class:`SessionWrite`).
 
     A contribution naming a session (``started``) lands in it, in the workspace project its
     ``project_id`` names whatever project is open, while that session is the person's and
-    unended: the one fact a departure (:func:`end_sessions`) changes, checked inside the
-    record's transaction. One naming none lands in the open project
+    unended, checked inside the record's transaction. One naming none lands in the open project
     (:meth:`~tcip_web.state.StateStore.admitted`), in the latest session when it is the
     person's and unended, else in a new one. A contribution whose ``contribution_id`` the record
     already holds is a repeat: it lands nowhere, leaves no line, and answers ``noop`` with the
@@ -162,11 +172,12 @@ async def image_event(payload: ImageEventPayload) -> SessionWrite:
 def _land(
     root: Path, started: str | None, entry: dict[str, Any], person: str
 ) -> SessionWrite:
-    """``entry`` appended, in one transaction on ``root``'s stats record, to the session
-    ``started`` names, refused (409 naming why) unless it is ``person``'s and unended; with
-    ``started`` ``None``, to the latest session when it is ``person``'s and unended, else to a
-    new one. An entry whose ``contribution_id`` a session already holds is not appended: the
-    answer is ``noop`` with that session.
+    """Append ``entry`` to a session in one transaction on ``root``'s stats record.
+
+    The session is the one ``started`` names, refused (409 naming why) unless it is
+    ``person``'s and unended; with ``started`` ``None``, the latest session when it is
+    ``person``'s and unended, else a new one. An entry whose ``contribution_id`` a session
+    already holds is not appended: the answer is ``noop`` with that session.
     """
     key = annotation_stats_key(str(root))
     with tcip_store.transaction(key) as txn:
@@ -231,10 +242,11 @@ def _land(
 
 @router.post("/end")
 def end_session(payload: SessionRef) -> SessionWrite:
-    """Mark the session ``payload`` names as ended (:func:`end_sessions`), answering ``ok``, or
-    ``noop`` for a session already ended, and no session either way. Answers 409 for a
-    ``project_id`` that is not the open project's, for a ``started`` no session of that project
-    carries, and when the line cannot follow the write.
+    """Mark the session ``payload`` names as ended (:func:`end_sessions`).
+
+    Answers ``ok``, or ``noop`` for a session already ended, and no session either way. Answers
+    409 for a ``project_id`` that is not the open project's, for a ``started`` no session of
+    that project carries, and when the line cannot follow the write.
     """
     from tcip_web.state import store
 
@@ -249,10 +261,11 @@ def end_session(payload: SessionRef) -> SessionWrite:
 
 
 def end_sessions(root: Path, started: str | None) -> list[dict[str, Any]]:
-    """Mark ended, in one transaction on ``root``'s stats record, the session ``started`` names,
-    or every unended session (each person's) when ``started`` is ``None``; the sessions it ended,
-    each as recorded. Raises ``LookupError`` for a ``started`` no session of the project
-    carries.
+    """Mark sessions ended in one transaction on ``root``'s stats record and return them.
+
+    The session ended is the one ``started`` names, or every unended session (each person's)
+    when ``started`` is ``None``; each is returned as recorded. Raises ``LookupError`` for a
+    ``started`` no session of the project carries.
     """
     key = annotation_stats_key(str(root))
     with tcip_store.transaction(key) as txn:
@@ -274,9 +287,10 @@ def end_sessions(root: Path, started: str | None) -> list[dict[str, Any]]:
 
 
 def record_ended(root: Path, ended: list[dict[str, Any]]) -> None:
-    """One ``session_ended`` line in ``root``'s log per session of ``ended``
-    (:func:`end_sessions`), by its person; raises ``AuditEntryNotWrittenError`` when one cannot
-    follow.
+    """Write one ``session_ended`` line in ``root``'s log per session of ``ended``, by its person.
+
+    Each session record in ``ended`` carries its ``started`` stamp and its ``user``; raises
+    ``AuditEntryNotWrittenError`` when one cannot follow.
     """
     for session in ended:
         audit.record_event_or_raise(
@@ -288,8 +302,10 @@ def record_ended(root: Path, ended: list[dict[str, Any]]) -> None:
 
 
 def _answering(written: SessionWrite, record: Callable[[], None]) -> None:
-    """Run ``record`` for a session write already made; a line that cannot be appended is raised
-    as the 409 carrying ``written``, the answer the write earned.
+    """Run ``record`` for a session write already made.
+
+    A line that cannot be appended is raised as the 409 carrying ``written``, the answer the
+    write earned.
     """
     from tcip_web.routes.audit_gap import audit_gap_409
 
@@ -301,7 +317,7 @@ def _answering(written: SessionWrite, record: Callable[[], None]) -> None:
 
 @router.get("/load")
 def load_sessions() -> dict[str, list[SessionSummary]]:
-    """Every recorded session, latest first, each with the throughput its entries amount to."""
+    """Return every recorded session, latest first, with its derived throughput."""
     from tcip_web.state import store
 
     data = tcip_store.read(
@@ -311,7 +327,7 @@ def load_sessions() -> dict[str, list[SessionSummary]]:
 
 
 def _summary(session: dict[str, Any]) -> SessionSummary:
-    """``session`` with the figures derived from its entries."""
+    """Return ``session`` with the figures derived from its entries."""
     entries = [ImageEntry.model_validate(e) for e in session["entries"]]
     by_activity: dict[Activity, float] = dict.fromkeys(get_args(Activity), 0.0)
     for e in entries:

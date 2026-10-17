@@ -1,5 +1,6 @@
-"""Path confinement for client-supplied paths: :func:`assert_path_allowed` and the route forms
-built on it.
+"""Path confinement for client-supplied paths.
+
+:func:`assert_path_allowed` and the route forms built on it.
 """
 
 from __future__ import annotations
@@ -24,12 +25,10 @@ __all__ = [
 
 
 def image_roots_from_environment() -> tuple[Path, ...]:
-    """The additive ``TCIP_IMAGE_ROOTS`` entries (os.pathsep list); empty when unset. Read once,
-    at the backend's start. A relative entry refuses (``ValueError``) naming it, since it names
-    no directory until a working directory is chosen.
+    """Return the additive ``TCIP_IMAGE_ROOTS`` entries (os.pathsep list); empty when unset.
 
-    These are added on top of the derived allow-set (:func:`allowed_roots`), the recovery path for
-    a legitimate root the platform does not manage. Setting it never narrows anything.
+    A relative entry refuses (``ValueError``) naming it, since it names no directory until a
+    working directory is chosen.
     """
     raw = os.environ.get("TCIP_IMAGE_ROOTS", "").strip()
     roots = tuple(Path(r) for r in raw.split(os.pathsep) if r.strip())
@@ -43,8 +42,10 @@ def image_roots_from_environment() -> tuple[Path, ...]:
 
 
 def allowed_roots() -> list[Path]:
-    """Every root a client-supplied path may resolve under: the backend's workspace root, each
-    workspace project and its registered dataset roots, then the backend's additive image roots.
+    """Return every root a client-supplied path may resolve under.
+
+    These are the backend's workspace root, each workspace project and its registered dataset
+    roots, then the backend's additive image roots.
 
     A project whose dataset registry will not decode raises.
     """
@@ -69,7 +70,7 @@ def allowed_roots() -> list[Path]:
 
 
 def _existing_anchor(resolved: Path) -> Path | None:
-    """The candidate itself when it exists, else its nearest existing ancestor.
+    """Return the candidate itself when it exists, else its nearest existing ancestor.
 
     Only a missing segment is climbed past; any other error while examining a candidate propagates.
     """
@@ -85,8 +86,9 @@ def _existing_anchor(resolved: Path) -> Path | None:
 
 
 def _contained(anchor: Path, root: Path) -> bool:
-    """Whether ``anchor`` is the same directory as ``root`` or sits below it, by identity; an
-    ancestor that cannot be compared raises.
+    """Return whether ``anchor`` is ``root`` or sits below it, by filesystem identity.
+
+    An ancestor that cannot be compared raises.
     """
     return (
         nearest_containing_ancestor(anchor, root, tolerant=False) is not None
@@ -94,7 +96,7 @@ def _contained(anchor: Path, root: Path) -> bool:
 
 
 def within(resolved: Path, root: Path) -> bool:
-    """Whether an already-resolved path sits at or under ``root``, by filesystem identity.
+    """Return whether an already-resolved path sits at or under ``root``, by filesystem identity.
 
     A path that does not exist yet is judged by its nearest existing ancestor. Any error while
     examining or comparing answers False: a path or root that cannot be examined admits nothing.
@@ -109,13 +111,14 @@ def within(resolved: Path, root: Path) -> bool:
 
 
 def _excluded_by_name(resolved: Path) -> bool:
-    """Whether ``resolved``'s ancestry passes through ``.imports`` or ``.removed``."""
+    """Return whether ``resolved``'s ancestry passes through ``.imports`` or ``.removed``."""
     return ".imports" in resolved.parts or ".removed" in resolved.parts
 
 
 def _in_open_project(path: str | Path) -> Path:
-    """``path`` located against the open project
-    (:func:`~tcip_mcp.registry_paths.located`), against none when no project is open.
+    """Locate ``path`` against the open project, or against none when no project is open.
+
+    The location is :func:`~tcip_mcp.registry_paths.located`'s.
     """
     from tcip_web.state import NoProjectOpenError, store
 
@@ -157,8 +160,9 @@ def assert_path_allowed(path: str | Path) -> Path:
 
 
 def resolved_path(path: str) -> Path:
-    """``path`` located for a route (:func:`_in_open_project`), unconfined; a path that cannot be
-    located answers 400.
+    """Locate ``path`` for a route (:func:`_in_open_project`), unconfined.
+
+    A path that cannot be located answers 400.
     """
     from fastapi import HTTPException
 
@@ -169,7 +173,10 @@ def resolved_path(path: str) -> Path:
 
 
 def allowed_path(path: str | Path) -> Path:
-    """:func:`assert_path_allowed` for a route: its refusal answered as HTTP 403 naming it."""
+    """Resolve an allowed path, translating refusal to HTTP 403.
+
+    The path is admitted by :func:`assert_path_allowed`; its refusal is answered as 403 naming it.
+    """
     from fastapi import HTTPException
 
     try:
@@ -179,7 +186,10 @@ def allowed_path(path: str | Path) -> Path:
 
 
 def allowed_file(path: str) -> Path:
-    """:func:`allowed_path` of a client-supplied file path; no file there answers 404."""
+    """Return an allowed file path; answer 404 when no file exists there.
+
+    The path is client-supplied and admitted by :func:`allowed_path`.
+    """
     from fastapi import HTTPException
 
     p = allowed_path(path)
@@ -189,10 +199,11 @@ def allowed_file(path: str) -> Path:
 
 
 def _resolving(read: Any, path: str) -> tuple[Path, Any]:
-    """The client-supplied image ``path`` (:func:`allowed_file`) and what ``read``, a reader of
-    the logical image a path names, answers for it, the resolver's refusals translated: a path
-    naming no logical image (a band of a grouped capture) answers 404 naming why, a grouped
-    capture missing a band 409, and an ambiguous stem 400.
+    """Return the client-supplied image ``path`` (:func:`allowed_file`) and ``read``'s answer.
+
+    ``read`` is a reader of the logical image a path names; its resolver's refusals are
+    translated: a path naming no logical image (a band of a grouped capture) answers 404 naming
+    why, a grouped capture missing a band 409, and an ambiguous stem 400.
     """
     from fastapi import HTTPException
 
@@ -211,8 +222,10 @@ def _resolving(read: Any, path: str) -> tuple[Path, Any]:
 
 
 def resolved_image(path: str) -> tuple[Path, Any]:
-    """The client-supplied image ``path`` and the logical image it names
-    (:func:`~tcip_mcp.pipelines.image_utils.resolve_image_path`, :func:`_resolving`).
+    """Return the client-supplied image ``path`` and the logical image it names.
+
+    Resolved through :func:`~tcip_mcp.pipelines.image_utils.resolve_image_path` and
+    :func:`_resolving`.
     """
     from tcip_mcp.pipelines.image_utils import resolve_image_path
 
@@ -220,8 +233,10 @@ def resolved_image(path: str) -> tuple[Path, Any]:
 
 
 def allowed_image(path: str) -> tuple[Path, int, int]:
-    """The client-supplied image ``path`` and the dimensions of the logical image it names
-    (:func:`~tcip_mcp.pipelines.image_utils.image_path_dimensions`, :func:`_resolving`).
+    """Return the client-supplied image ``path`` and the dimensions of the logical image it names.
+
+    Read through :func:`~tcip_mcp.pipelines.image_utils.image_path_dimensions` and
+    :func:`_resolving`.
     """
     from tcip_mcp.pipelines.image_utils import image_path_dimensions
 
@@ -230,8 +245,9 @@ def allowed_image(path: str) -> tuple[Path, int, int]:
 
 
 def allowed_optional(path: str | None) -> str | None:
-    """:func:`allowed_path`'s resolved spelling of an optional client-supplied path, or ``None``
-    when none is given.
+    """Return :func:`allowed_path`'s resolved spelling of an optional client-supplied path.
+
+    ``None`` when none is given.
     """
     return str(allowed_path(path)) if path else None
 

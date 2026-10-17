@@ -1,10 +1,11 @@
-"""Image serving: the one path pixels reach the browser through.
+"""Image serving: the one path pixels are served through.
 
-Every response here decodes through ``raster_source.open_raster``, so a photographic frame, a
-grouped multi-band capture and a raster far too large to decode whole are all read the same way: a
-rectangle at a requested resolution. A request with no ``bands`` selection serves the file's own
-pixels as plain RGB; a selection (or a source with more bands than an RGB reading covers)
-composites three of them through the shared display primitives in ``band_stats``.
+Every response that decodes a raster here opens it through ``raster_source.SourceHeader.open``,
+so a photographic frame, a grouped multi-band capture and a raster far too large to decode whole are
+all read the same way: a rectangle at a requested resolution. A request with no ``bands``
+selection serves the file's own pixels as plain RGB; a selection (or a source with more bands
+than an RGB reading covers) composites three of them through the shared display primitives in
+``band_stats``.
 
 A photographic frame is EXIF-oriented on the way out (``PhotographicSource``).
 """
@@ -39,9 +40,11 @@ router = APIRouter(prefix="/api/images", tags=["images"])
 
 
 class ServingCell(BaseModel):
-    """One read of a view: its name, the level it is read off (0 native, ``i`` the ``i``-th
-    overview level), its half-open rect in that level's own pixel grid, and the native-pixel
-    rect it covers (``nx0``..``ny1``), where a viewer places it.
+    """One read of a view: its name, its level, its rect on that level and the native rect.
+
+    The level is the one it is read off (0 native, ``i`` the ``i``-th overview level); its rect
+    is half-open in that level's own pixel grid; the native-pixel rect it covers is
+    ``nx0``..``ny1``.
     """
 
     name: str
@@ -57,24 +60,26 @@ class ServingCell(BaseModel):
 
 
 class ViewReads(BaseModel):
-    """The reads one view of a raster is served by: the native region-serving cells it intersects,
-    the tiles of the overview level its display read is planned off, or one display read of the
-    view where the raster has no level to tile.
+    """The reads one view of a raster is served by.
+
+    These are the native region-serving cells it intersects, the tiles of the overview level its
+    display read is planned off, or one display read of the view where the raster has no level
+    to tile.
     """
 
     reads: list[ServingCell]
 
 
 RENDER_CACHE_VERSION = 6
-"""The render cache's shape version, part of every cache key and every image URL: bumped whenever
-the cache key's inputs or the served headers' shape changes."""
+"""The render cache's shape version, part of every cache key and every image URL."""
 
 
 @dataclass(frozen=True)
 class _Encoding:
-    """How one kind of serve is encoded: a PIL format, its save options, and the longest edge the
-    codec accepts (``None`` where none was found). The cache-file suffix and the media type are
-    the format's own name.
+    """How one kind of serve is encoded: a PIL format, its save options and its longest edge.
+
+    The longest edge is the one the codec accepts (``None`` for no declared edge limit). The
+    cache-file suffix and the media type are the format's own name.
     """
 
     pil_format: str
@@ -94,18 +99,11 @@ _DISPLAY_ENCODING = _Encoding(
     "JPEG", {"quality": 95, "subsampling": 0}, 65_500
 )
 """A display read, the whole frame, a region served scaled or a tile of an overview level: JPEG
-at quality 95 with chroma subsampling off. Measured on one RGB orthomosaic (239921x141130, one
-sensor, one site) read off its overviews at 4:4:4, as bytes and median encode time of three
-runs taken under load: 1,006,644 bytes in 65 ms at quality 95 against 675,889 in 83 ms at 90 for a
-1877x1104 view, 1,737,251 in 207 ms against 1,169,458 in 107 ms at 2503x1472, and 3,543,213 in
-200 ms against 2,423,054 in 453 ms at 3754x2208. The edge limit is the widest single row PIL's JPEG
-encoder accepted here: 65,500 encoded, 65,501 did not."""
+at quality 95 with chroma subsampling off, at most 65,500 pixels on an edge."""
 
 _NATIVE_ENCODING = _Encoding("PNG", {"compress_level": 1}, None)
-"""A region served at native resolution: lossless PNG at its fastest compression level, the
-pixels a judgment is made on. Measured on three 2880x2880 native windows of that same
-orthomosaic: level 1 took 775 to 986 ms and 25.8 to 26.0 MB, level 6 took 1902 to 1978 ms and
-19.7 to 19.8 MB. PNG encoded a 10,000,000 pixel row here; no edge limit was found."""
+"""A region served at native resolution: lossless PNG at compression level 1, with no declared
+edge limit."""
 
 
 def display_cap(
@@ -113,8 +111,9 @@ def display_cap(
         ..., ge=1, description="The requesting display's device-pixel count"
     ),
 ) -> int:
-    """The area cap one display-bound read for the requesting display is held to: that display's
-    own device-pixel count.
+    """Return the area cap one display-bound read for the requesting display is held to.
+
+    That cap is the display's own device-pixel count.
     """
     return display_pixels
 
@@ -134,8 +133,9 @@ _cache_budget_bytes: int | None = None
 
 
 def _cache_byte_budget(cache_dir: Path) -> int:
-    """The cache's byte budget: free space on the cache volume over :data:`_CACHE_BUDGET_DIVISOR`,
-    read once per process.
+    """Return the cache's byte budget, read once per process.
+
+    The budget is the free space on the cache volume over :data:`_CACHE_BUDGET_DIVISOR`.
     """
     global _cache_budget_bytes
     if _cache_budget_bytes is None:
@@ -150,20 +150,16 @@ def _cache_byte_budget(cache_dir: Path) -> int:
 _STATS_SEED = 0
 """The seed every sampled read of a raster's display bounds uses.
 
-Fixed, so two region requests against one raster stretch alike and a reported statistic is
-reproducible across requests and processes.
+Fixed, so a reported statistic is reproducible across requests and processes.
 """
 
 _STATS_WINDOW_SIZE = 256
-"""Pixel window edge the stats sample reads in, passed to ``sample_windows`` as the edge of the
-grid it draws windows from."""
+"""Pixel edge length of the statistics sample's windows and sampling grid."""
 
 _STATS_MAX_WINDOWS = 256
 """Windows the stats sample may read natively, about 16.8 million pixels at
-:data:`_STATS_WINDOW_SIZE`. A GDAL-served raster with more pixels than these windows hold has its
-statistics read off its overview pyramid instead; any other backend samples these windows
-natively. An engineering bound on what one native statistics read may decode, chosen and not
-measured."""
+:data:`_STATS_WINDOW_SIZE`. An engineering bound on what one native statistics read may
+decode, chosen and not measured."""
 
 _STATS_RESERVOIR_SIZE = 1 << 20
 """Pixels the percentile pass keeps, bounding what it holds to that many values per band in the
@@ -177,8 +173,7 @@ only stops a long session over many rasters from growing it without limit."""
 
 @dataclass(frozen=True)
 class _RasterStats:
-    """One raster's display bounds, read once and reused by every region request against it, so two
-    regions of one raster are never stretched differently.
+    """One raster's display bounds.
 
     ``ranges`` and ``clip_bounds`` are per band, in band order. They come from one of two reads,
     and exactly one of these describes which: ``pixel_fraction`` is the share of the raster's
@@ -218,8 +213,9 @@ _stats_lock = threading.Lock()
 
 
 def _render_cache_dir() -> Path:
-    """This machine's render cache, under the system temp directory: a cache of any served image,
-    whichever project or root it lies under.
+    """Return this machine's render cache directory, under the system temp directory.
+
+    It caches any served image, whichever project or root it lies under.
     """
     base = Path(tempfile.gettempdir()) / "tcip-img-cache"
     base.mkdir(parents=True, exist_ok=True)
@@ -238,9 +234,10 @@ def _note_cache_write(cache_dir: Path, nbytes: int) -> None:
 
 
 def _evict_lru(cache_dir: Path) -> None:
-    """Drop least recently used rendered variants until the cache fits its byte budget,
-    each with the headers stored beside it. Walks the directory only when writes since
-    the last accounting could have crossed the budget.
+    """Drop least recently used rendered variants until the cache fits its byte budget.
+
+    Each goes with the headers stored beside it. Walks the directory only when writes since the
+    last accounting could have crossed the budget.
     """
     try:
         budget = _cache_byte_budget(cache_dir)
@@ -291,20 +288,21 @@ def get_view_reads(
     y1: int = Query(..., ge=0, description="View bottom edge, exclusive"),
     area_cap: int = Depends(display_cap),
 ) -> ViewReads:
-    """The reads that serve the view ``[x0, x1) x [y0, y1)`` of the raster at ``path``, clipped
-    to its extent, its frame read off its header (``raster_source.SourceHeader``) and, for a view
-    past the cap, its levels off the windowed reader that header opens.
+    """Return the reads that serve the view ``[x0, x1) x [y0, y1)`` of the raster at ``path``.
+
+    The view is clipped to its extent. The frame is the header's ``display_frame``
+    (``raster_source.SourceHeader``) and, for a view past the cap, the levels are read off the
+    header's windowed reader at ``SourceHeader.route_channels``.
 
     A view of at most the display's area cap is served by the native region-serving cells it
     intersects. A larger view is planned as one display read (``display_bounds.plan_read``); when
     the plan comes off an overview level, the view is served by that level's own region-serving
     cells its window on the level intersects, each a read of one tile of that level at the
-    level's resolution, so a pan fetches only the tiles that entered the view. A raster with no
+    level's resolution. A raster with no
     level to read off is served by one display read of the view itself, named ``view``. Cells
     are sized by :func:`~tcip_mcp.pipelines.reference_grid.derive_serving_tile_size` under the
-    same cap and the edge limit of the encoding each is served in. The frame and the levels are
-    the ones the image route's own plain read opens the raster at
-    (``SourceHeader.route_channels``). Refuses a view with no pixels inside the raster.
+    same cap and the edge limit of the encoding each is served in. Refuses a view with no pixels
+    inside the raster.
     """
     from tcip_mcp.pipelines.raster_source import (
         Rect,
@@ -427,8 +425,10 @@ def _band_index(
 
 
 def _overviews_required(path: str, reason: str) -> HTTPException:
-    """The one refusal for a read that needs a raster's overview pyramid and has none, carrying the
-    condition as a header and, after ``reason``, the request that builds the pyramid.
+    """Build the one refusal for a read that needs a raster's overview pyramid and has none.
+
+    It carries the condition as a header and, after ``reason``, the request that builds the
+    pyramid.
     """
     return HTTPException(
         400,
@@ -439,11 +439,10 @@ def _overviews_required(path: str, reason: str) -> HTTPException:
 
 
 def _overview_stats(raster, dims: list[tuple[int, int]]):
-    """Per-band ranges, clip cut points, and the planned ``(width, height)`` they were read at,
-    from one reduced read of ``raster``'s whole frame, planned within
-    ``overviews.PYRAMID_FLOOR_EDGE`` on each edge over the overview levels ``dims``: the same
-    display primitives the sampled path reads, over pixels an overview level served instead of
-    over native windows.
+    """Return per-band ranges, clip cut points and the ``(width, height)`` they were read at.
+
+    They come from one reduced read of ``raster``'s whole frame, planned within
+    ``overviews.PYRAMID_FLOOR_EDGE`` on each edge over the overview levels ``dims``.
     """
     from tcip_mcp.pipelines.band_stats import band_ranges, clip_bounds
     from tcip_mcp.pipelines.overviews import PYRAMID_FLOOR_EDGE
@@ -464,11 +463,12 @@ def _overview_stats(raster, dims: list[tuple[int, int]]):
 
 
 def _source_identity(header) -> tuple:
-    """``(version, sidecar)``: what identifies the raster ``header`` describes on disk to
-    everything cached about it here, read off the filesystem without opening the raster: its
-    version (:func:`~tcip_mcp.pipelines.raster_source.source_version`) and, for a TIFF, its
-    overview sidecar's (:func:`~tcip_mcp.pipelines.raster_source.file_version`; ``None`` when it
-    has none), since a pyramid appearing changes which pixels a read of it returns.
+    """Return ``(version, sidecar)``, what identifies ``header``'s raster on disk.
+
+    Both are read off the filesystem without opening the raster: its version
+    (:func:`~tcip_mcp.pipelines.raster_source.source_version`) and, for a TIFF, its overview
+    sidecar's (:func:`~tcip_mcp.pipelines.raster_source.file_version`; ``None`` when it has
+    none).
     """
     from tcip_mcp.pipelines import raster_source
     from tcip_mcp.pipelines.overviews import overview_sidecar
@@ -485,9 +485,11 @@ def _source_identity(header) -> tuple:
 def _memo(
     cache: OrderedDict[tuple, _V], key: tuple, compute: Callable[[], _V]
 ) -> _V:
-    """What ``cache`` holds under ``key``; on a miss, ``compute()``'s answer, stored there with
-    the :data:`_STATS_CACHE_MAX` most recently used kept. A concurrent miss on the same key
-    computes twice and stores the same value.
+    """Return what ``cache`` holds under ``key``; on a miss, ``compute()``'s answer.
+
+    A computed answer is stored there with the :data:`_STATS_CACHE_MAX` most recently used kept.
+    ``compute()`` runs outside the lock, so concurrent misses on the same key may each compute,
+    and the later write replaces the cached value.
     """
     with _stats_lock:
         hit = cache.get(key)
@@ -504,7 +506,7 @@ def _memo(
 
 
 def _stats_of(raster) -> _RasterStats:
-    """The per-band display bounds of the open ``raster``, in band order.
+    """Read the per-band display bounds of the open ``raster``, in band order.
 
     A raster the :data:`_STATS_MAX_WINDOWS` windows can hold is read from native pixels by the
     seeded window sample (covering all of them, and so exact, when its grid fits), and past it a
@@ -559,10 +561,10 @@ def _stats_of(raster) -> _RasterStats:
 def _sampled_bounds(
     stats: _RasterStats, idxs: list[int], stretch: str
 ) -> list[tuple[float, float]]:
-    """The ``(low, high)`` pair per selected band a region render stretches between, in the same
-    order as ``idxs``: the clip cut points for ``percent_clip``, the sampled range otherwise
-    (``none`` reads both ends, as the sampled minimum and maximum a float raster's divisor comes
-    from, and an integer raster ignores the pair for its dtype ceiling).
+    """Return the ``(low, high)`` stretch pair of each selected band of ``stats``.
+
+    The pairs are in the same order as ``idxs``: the clip cut points for ``percent_clip``, the
+    sampled range otherwise.
     """
     if stretch == "percent_clip":
         return [stats.clip_bounds[i] for i in idxs]
@@ -570,8 +572,9 @@ def _sampled_bounds(
 
 
 def _plain_rgb(pixels, dtype, bounds: tuple[float, float] | None):
-    """A 1/3/4-band array as the plain ``uint8`` RGB the file's own pixels read as: a single band
-    replicated, a fourth band dropped, and no data-range stretch applied.
+    """Render a 1/3/4-band array as the plain ``uint8`` RGB the file's own pixels read as.
+
+    A single band is replicated, a fourth band dropped, and no data-range stretch applied.
 
     A non-``uint8`` raster is scaled by ``band_stats.full_scale_denominator`` (the ``none``
     stretch), one denominator for the whole array. ``bounds`` carries the sampled ``(minimum,
@@ -659,8 +662,8 @@ def serve_image(
     when a pyramid can be built for it (``overviews.overview_levels``); a raster within the
     pyramid floor, which can have none, is read natively and resampled.
 
-    An ETag keyed on the file's identity and every requested render param lets the browser
-    revalidate with a cheap 304.
+    An ETag is keyed on the file's identity and every requested render param; a request whose
+    ``If-None-Match`` carries it answers 304.
     """
     import numpy as np
     from PIL import Image
@@ -913,8 +916,7 @@ def serve_image(
 
 @router.get("/bands")
 def get_bands(path: str = Query(...)) -> dict:
-    """Band count + per-band stats for ``path``: the picker's symbology data, and the one fact
-    (``band_count > 3``) the frontend uses to decide whether to show the picker at all.
+    """Return the band count and per-band stats for ``path``.
 
     ``path`` may be a plain raster or a ``.bandgroup`` manifest naming a grouped multi-band
     capture. ``band_count`` comes from its header (``SourceHeader.channels``: the header for a
@@ -930,8 +932,7 @@ def get_bands(path: str = Query(...)) -> dict:
     pixel (``pixel_fraction`` 1.0), where the numbers are the raster's own exact bounds. A
     larger GDAL-served one is read once off an overview level instead and carries ``sampled``
     false with ``overview_size``, the ``[width, height]`` it was read at; those bounds describe
-    display scale only. Either way they are the same numbers this raster's region renders
-    stretch through.
+    display scale only.
 
     A band carries ``interpretation`` (``red``, ``alpha``, and the rest) where the backend reads it
     from the file; the key is absent where nothing knows.
@@ -1006,6 +1007,8 @@ _overview_registry = jobstore.JobRegistry()
 
 
 class OverviewBuildPayload(BaseModel):
+    """The raster whose overview pyramid to build."""
+
     path: str
 
 
@@ -1048,11 +1051,10 @@ def _overview_worker(job: OverviewJob) -> None:
 
 @router.post("/overviews")
 def build_image_overviews(payload: OverviewBuildPayload) -> dict:
-    """Start building ``path``'s reduced-resolution overview pyramid, the sidecar a scaled read of
-    a raster larger than the display cap is served from.
+    """Start building ``path``'s reduced-resolution overview pyramid.
 
     One build per raster: a request naming a path a build is already running for joins that job
-    rather than starting a second one over the same sidecar. Poll ``/overviews/status``.
+    rather than starting a second one over the same sidecar.
     """
     src = allowed_file(payload.path)
     job, created = _overview_registry.find_or_register(
@@ -1070,8 +1072,10 @@ def build_image_overviews(payload: OverviewBuildPayload) -> dict:
 
 @router.get("/overviews/status")
 def get_overview_job(job_id: str = Query(...)) -> dict:
-    """An overview build's status and the bytes its sidecar holds as last reported: 0 until the
-    build reports, and a build refused over an existing pyramid reports none.
+    """Return an overview build's status and the bytes its sidecar holds as last reported.
+
+    The bytes are 0 until the build reports, and a build refused over an existing pyramid
+    reports none.
     """
     job = _overview_registry.get(job_id)
     if job is None:

@@ -1,5 +1,6 @@
-"""The shared shape a GUI route answers with when a mutation it already committed could not be
-recorded to the audit log.
+"""The shared shape a GUI route answers with when a committed mutation went unrecorded.
+
+The mutation committed, but its line could not be recorded to the audit log.
 """
 
 from __future__ import annotations
@@ -20,12 +21,11 @@ def audit_gap_409(
     *,
     message: str | None = None,
 ) -> HTTPException:
-    """The 409 a route answers with when a mutation it already committed could not be recorded.
+    """Build the 409 a route answers with when a mutation it already committed went unrecorded.
 
     ``committed`` is the response body a healthy call would have returned: a dict, a pydantic
-    model, or ``None`` when the route cannot say what committed. A client that adopts ``committed``
-    reaches the state a 200 would have left it in. ``message`` overrides ``str(exc)`` when the
-    route must say more than the exception itself does.
+    model, or ``None`` when the route cannot say what committed. ``message`` overrides
+    ``str(exc)`` when the route must say more than the exception itself does.
     """
     return HTTPException(
         409,

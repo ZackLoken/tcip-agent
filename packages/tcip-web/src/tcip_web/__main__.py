@@ -19,9 +19,10 @@ DEFAULT_PORT = 8765
 
 
 def main() -> None:
-    """Resolve the workspace once, publish the port under it, and serve the app configured with
-    it and the image roots. Refuses what :func:`~tcip_mcp.workspace.workspace_from_environment`
-    refuses.
+    """Resolve the workspace once, publish the port under it, and serve the app.
+
+    The app is configured with that workspace and the image roots. Refuses what
+    :func:`~tcip_mcp.workspace.workspace_from_environment` refuses.
     """
     from tcip_mcp.workspace import workspace_from_environment
 

@@ -27,8 +27,9 @@ router = APIRouter(prefix="/api/training", tags=["training"])
 
 
 def _refused(result: dict) -> HTTPException:
-    """A tool's error dict ``result`` as a 422 whose detail carries its fields, the ``error``
-    reason named ``message``.
+    """Return a tool's error dict ``result`` as a 422 whose detail carries its fields.
+
+    The ``error`` reason is named ``message``.
     """
     return HTTPException(
         422, {("message" if k == "error" else k): v for k, v in result.items()}
@@ -37,10 +38,11 @@ def _refused(result: dict) -> HTTPException:
 
 @router.get("/runs/{experiment_id}/splits")
 def list_split_choices_route(experiment_id: str) -> dict:
-    """Every choice the "Data" control offers a relaunch of the run ``experiment_id`` names: the
-    data section its launch stated, and every selection directory this project's own bound runs
-    or the dataset's own splits directory hold, compatibility-checked as the launch itself would
-    check them.
+    """List every data choice a relaunch of the run ``experiment_id`` names can take.
+
+    The choices are the data section its launch stated, and every selection directory this
+    project's own bound runs or the dataset's own splits directory hold, each
+    compatibility-checked.
     """
     from tcip_mcp.tools.training_tools import list_split_choices
 
@@ -51,6 +53,8 @@ def list_split_choices_route(experiment_id: str) -> dict:
 
 
 class RelaunchPayload(BaseModel):
+    """A relaunch: the run or sweep it starts from, an optional selection and the person."""
+
     relaunched_from: str
     selection_dir: str | None = None
     user: str
@@ -58,15 +62,16 @@ class RelaunchPayload(BaseModel):
 
 @router.post("/runs")
 def relaunch_route(payload: RelaunchPayload) -> dict:
-    """Start a new run or sweep from what a run or sweep of this project recorded, the one
-    ``relaunched_from`` names, by the person ``user`` names: no config, param space or path is
-    ever submitted by the browser. A run relaunches through ``launch_training`` with its launch
-    config; a sweep through ``training_tools.launch_sweep``, off the request thread in its own
-    worker process, the way a run's body runs.
+    """Start a new run or sweep from what the run or sweep ``relaunched_from`` names recorded.
 
-    An optional ``selection_dir`` names a partition the browser picked instead of a run's own
-    "As recorded" data section: the launch config then carries ``data.split`` replaced wholesale
-    by ``{"selection_dir": chosen}``. A source naming nothing answers 404, a sweep source with a
+    The source is one of this project's, and the launch is by the person ``user`` names. A run
+    relaunches through ``launch_training`` with its launch config; a sweep through
+    ``training_tools.launch_sweep``, off the request thread in its own worker process, the way a
+    run's body runs.
+
+    An optional ``selection_dir`` names a partition to use instead of a run's own "As recorded"
+    data section: the launch config then carries ``data.split`` replaced wholesale by
+    ``{"selection_dir": chosen}``. A source naming nothing answers 404, a sweep source with a
     ``selection_dir`` 422, a refusal 422, and a launch whose audit line could not be written 409.
     """
     from tcip_mcp.audit import AuditEntryNotWrittenError
@@ -115,14 +120,15 @@ def relaunch_route(payload: RelaunchPayload) -> dict:
 
 @router.get("/runs")
 def list_runs_route() -> TrainingListing:
-    """Every run and sweep of the open project (``experiments.training_listing``)."""
+    """List every run and sweep of the open project (``experiments.training_listing``)."""
     return training_listing(store.held().root)
 
 
 @router.get("/runs/{experiment_id}")
 def get_run(experiment_id: str) -> TrainingDetail:
-    """One run, trial or sweep of the open project (``training_tools.training_detail``), 404 for
-    an id naming none.
+    """Return one run, trial or sweep of the open project (``training_tools.training_detail``).
+
+    404 for an id naming none.
     """
     from tcip_mcp.tools.training_tools import training_detail
 
@@ -136,8 +142,10 @@ def get_run(experiment_id: str) -> TrainingDetail:
 def launch_run_tensorboard(
     experiment_id: str, payload: EmptyBodyPayload
 ) -> dict:
-    """Start (or reuse) a TensorBoard over the board (``experiments.board_of``) of the run, trial
-    or sweep ``experiment_id`` names, keyed by that directory.
+    """Start (or reuse) a TensorBoard over the board of the run, trial or sweep ``experiment_id``.
+
+    The board is ``experiments.board_of``'s for the directory ``experiment_id`` names, and the
+    TensorBoard is keyed by that directory.
 
     A board holding no event file refuses with ``no_logs: True``, carrying the final status's
     error when one is written; a board with events whose run or sweep ended in error refuses
@@ -168,8 +176,10 @@ def launch_run_tensorboard(
 
 @router.post("/runs/{experiment_id}/cancel")
 def cancel_run_route(experiment_id: str, payload: PersonPayload) -> dict:
-    """Request graceful cancellation of the run, trial or sweep ``experiment_id`` names
-    (``cancel_training``), by the person ``user`` names; its refusal answers 404.
+    """Request graceful cancellation of the run, trial or sweep ``experiment_id`` names.
+
+    The request goes through ``cancel_training``, by the person ``user`` names; its refusal
+    answers 404.
     """
     from tcip_mcp.tools.training_tools import cancel_training
 
@@ -182,11 +192,14 @@ def cancel_run_route(experiment_id: str, payload: PersonPayload) -> dict:
 
 
 class ExperimentComparePayload(BaseModel):
+    """The ids of the runs to compare."""
+
     experiment_ids: list[str]
 
 
 @router.post("/compare")
 def compare_runs_route(payload: ExperimentComparePayload) -> dict:
+    """Compare the open project's runs ``experiment_ids`` names (``compare_experiments``)."""
     from tcip_mcp.experiments import compare_experiments
 
     return compare_experiments(
@@ -195,6 +208,8 @@ def compare_runs_route(payload: ExperimentComparePayload) -> dict:
 
 
 class CompareBestPayload(BaseModel):
+    """A ranking request: the runs compared, the metric, its direction and unverified inclusion."""
+
     experiment_ids: list[str]
     metric: str
     higher_is_better: bool | None = None
@@ -203,8 +218,9 @@ class CompareBestPayload(BaseModel):
 
 @router.post("/compare/best")
 def compare_best_route(payload: CompareBestPayload) -> dict:
-    """Rank the marked comparison's own registered checkpoints by one metric
-    (:func:`~tcip_mcp.tools.model_tools.ranked_registered_model`).
+    """Rank the marked comparison's own registered checkpoints by one metric.
+
+    The ranking is :func:`~tcip_mcp.tools.model_tools.ranked_registered_model`'s.
 
     A registry index that will not decode answers 409 naming why; the ranking's own error dicts
     map to 422 (``_refused``). The answer is projected to name, experiment id,
@@ -242,7 +258,7 @@ def compare_best_route(payload: CompareBestPayload) -> dict:
 
 @router.get("/metric-directions")
 def metric_directions_route() -> dict:
-    """Every metric name ``schemas`` declares a ranking direction for, with that direction."""
+    """Return every metric's declared ranking direction, as ``schemas`` declares it."""
     from tcip_mcp.pipelines.schemas import HIGHER_IS_BETTER_BY_METRIC
 
     return {"higher_is_better": dict(HIGHER_IS_BETTER_BY_METRIC)}
@@ -252,9 +268,10 @@ def metric_directions_route() -> dict:
 
 
 class TrainingRowFrame(BaseModel):
-    """One metrics row, by its kind (``experiments.partition_rows``): ``metric`` an epoch's whole
-    row (``experiments.epoch_rows``), pushed each time a row of that epoch is appended, ``batch``
-    the latest per-batch row a read of the run's log found.
+    """One metrics row, by its kind (``experiments.partition_rows``).
+
+    ``metric`` is an epoch's whole row (``experiments.epoch_rows``), pushed each time a row of
+    that epoch is appended; ``batch`` is the latest per-batch row a read of the run's log found.
     """
 
     type: Literal["metric", "batch"]
@@ -263,8 +280,10 @@ class TrainingRowFrame(BaseModel):
 
 
 class TrainingStatusFrame(BaseModel):
-    """The terminal frame: ``status`` carries the run's row for a run this process can still
-    identify, ``error`` is set instead when it cannot.
+    """The terminal frame, carrying the run's row or an error.
+
+    ``status`` carries the run's row for a run this process can still identify, ``error`` is set
+    instead when it cannot.
     """
 
     type: Literal["status"]
@@ -276,9 +295,11 @@ class TrainingStatusFrame(BaseModel):
 async def _stream_metrics(
     ws: WebSocket, project: Path, experiment_id: str, poll_seconds: float = 1.0
 ) -> None:
-    """Push a run's metrics, a sweep's trial included, to the browser as they are appended: each
-    epoch a new epoch row touches is sent again whole (``experiments.epoch_rows`` over every row
-    read), then the latest per-batch row the read found, if any (``experiments.partition_rows``).
+    """Push a run's metrics, a sweep's trial included, over ``ws`` as they are appended.
+
+    Each epoch a new epoch row touches is sent again whole (``experiments.epoch_rows`` over
+    every row read), then the latest per-batch row the read found, if any
+    (``experiments.partition_rows``).
 
     Each tick observes the run once (``experiments.observe``) and reads its log from a byte-offset
     cursor (``experiments.read_rows``), so it reads only what was appended since the last tick and
@@ -286,8 +307,8 @@ async def _stream_metrics(
     observation, so a run the observation found in a terminal state has every row sent before its
     one status frame (``experiments.run_summary`` over the rows sent), which ends the stream.
     An id naming no run directory under ``project`` ends the stream with one status frame
-    naming it, and one that
-    is not a single directory name raises ``BadKeyError``. Every read runs off the event loop.
+    naming it, and one that is not a single directory name raises ``BadKeyError``. Every read
+    runs off the event loop.
     """
     from tcip_mcp.experiments import (
         EPOCH_KEY,
@@ -357,8 +378,9 @@ async def _stream_metrics(
 
 @router.websocket("/runs/{experiment_id}/stream")
 async def training_stream_ws(websocket: WebSocket, experiment_id: str) -> None:
-    """Tail ``experiment_id``'s metrics log, a run of the open project, and push new rows to the
-    browser; closes with 1008 while no project is open.
+    """Tail the metrics log of the open project's run ``experiment_id`` and push new rows.
+
+    The rows go over the socket; closes with 1008 while no project is open.
     """
     try:
         project = store.held().root
