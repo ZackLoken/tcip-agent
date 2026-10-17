@@ -1,7 +1,7 @@
-"""Visualization rendering: annotations and predictions drawn on images, each render written to
-the ``output_path`` its caller names and that path returned.
+"""Visualization rendering: annotations and predictions drawn on images.
 
-The renderers take display pixels, never a path, and pixel coordinates in the raster's own
+Each render is written to the ``output_path`` its caller names and that path returned. The
+renderers take display pixels, never a path, and pixel coordinates in the raster's own
 full-resolution frame, so a renderer handed reduced pixels also takes the ``native_size`` those
 coordinates are in. ``render_grid`` tiles already-rendered artifacts and so takes their paths.
 """
@@ -46,7 +46,7 @@ COLOR_PALETTE: list[tuple[int, int, int]] = [
 
 
 def _rgb_frame(image: Image.Image | np.ndarray) -> Image.Image:
-    """The caller's display pixels as an RGB frame this module can draw on.
+    """Return the caller's display pixels as an RGB frame this module can draw on.
 
     A ``uint8 [H, W, 3]`` array or any PIL image; the returned frame is always a new one. An array
     of another dtype or channel count is refused.
@@ -73,7 +73,7 @@ def _get_scale(
 
 
 def _color_for_class(class_id: int) -> tuple[int, int, int]:
-    """The palette color of ``class_id``, cycling through :data:`COLOR_PALETTE`."""
+    """Return the palette color of ``class_id``, cycling through :data:`COLOR_PALETTE`."""
     return COLOR_PALETTE[class_id % len(COLOR_PALETTE)]
 
 
@@ -356,8 +356,10 @@ def render_candidates(
     output_path: str,
     alpha: float = 0.35,
 ) -> str:
-    """Render numbered proposal candidates on display pixels: every ring of each a
-    semi-transparent polygon in its palette color, one number and score per candidate.
+    """Render numbered proposal candidates on display pixels.
+
+    Every ring of each is a semi-transparent polygon in its palette color, with one number and
+    score per candidate.
 
     Args:
         image: Display pixels (uint8 RGB array or PIL image).
@@ -502,8 +504,9 @@ def render_grid_overlay(
 
 
 def _hex_rgb(color: str) -> tuple[int, int, int]:
-    """``#RRGGBB`` (or ``#RGB``) as an RGB tuple; anything else refuses (``ValueError``) naming
-    it.
+    """Return ``#RRGGBB`` (or ``#RGB``) as an RGB tuple.
+
+    Anything else refuses (``ValueError``) naming it.
     """
     from PIL import ImageColor
 
@@ -538,9 +541,11 @@ def _dashed_segment(
 
 
 def _dash_pixels(dash, stroke: int) -> tuple[float, float] | None:
-    """A shape's ``[on, off]`` dash, given in stroke widths, as pixel lengths at ``stroke`` pixels;
-    None for a solid stroke (no pattern given). A pattern that is not two numbers with a positive
-    ``on`` and a non-negative ``off`` refuses (``ValueError``), an empty one included.
+    """Return a shape's ``[on, off]`` dash, given in stroke widths, as pixel lengths.
+
+    The lengths are at ``stroke`` pixels; None for a solid stroke (no pattern given). A pattern
+    that is not two numbers with a positive ``on`` and a non-negative ``off`` refuses
+    (``ValueError``), an empty one included.
     """
     if dash is None:
         return None
@@ -570,8 +575,10 @@ _MIN_VERTICES = {"polygon": 2, "polyline": 1}
 
 
 class _CanvasShape(NamedTuple):
-    """One pushed canvas shape as decoded: its record, its points in output pixels, its color,
-    whether its outline closes and its dash as pixel lengths (None for a solid stroke).
+    """One pushed canvas shape as decoded.
+
+    It holds its record, its points in output pixels, its color, whether its outline closes and
+    its dash as pixel lengths (None for a solid stroke).
     """
 
     spec: dict

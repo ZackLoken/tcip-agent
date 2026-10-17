@@ -68,8 +68,9 @@ _ANY_EXPR = re.compile(r"\$\{\{.*?\}\}")
 
 
 class UnresolvedExpressionError(Exception):
-    """An ``${{ ... }}`` expression this script has no leg value for and will not pass through
-    to a process as literal text.
+    """An ``${{ ... }}`` expression this script has no leg value for.
+
+    The script will not pass it through to a process as literal text.
     """
 
 
@@ -94,8 +95,10 @@ def _load_workflow() -> dict[str, Any]:
 
 
 def _resolve_text(text: str, leg: dict[str, Any]) -> str:
-    """Substitute ``${{ matrix.<name> }}`` with the leg's own value; refuse by name on any
-    other ``${{ ... }}`` expression rather than pass its literal text to a process.
+    """Substitute ``${{ matrix.<name> }}`` with the leg's own value.
+
+    Any other ``${{ ... }}`` expression, or a matrix name the leg lacks, raises
+    :class:`UnresolvedExpressionError` naming it rather than reaching a process as literal text.
     """
 
     def repl(match: re.Match[str]) -> str:
@@ -150,7 +153,7 @@ def _skip_reason(step: dict[str, Any]) -> str | None:
 
 
 def build_plan() -> list[Stage]:
-    """The full stage list, one entry per step per matrix leg, in workflow order.
+    """Return the full stage list, one entry per step per matrix leg, in workflow order.
 
     Building this never touches a subprocess: it is safe to call from a test that wants to
     check what would run without actually running any of it. Each key is prefixed with its job
@@ -205,7 +208,7 @@ _MYPY_PIN_RE = re.compile(r"mypy==([\w.]+)")
 
 
 def mypy_pin() -> str | None:
-    """The mypy version CI pins, read from the (skipped) install step's own ``run:`` text."""
+    """Return the mypy version CI pins, read from the (skipped) install step's ``run:`` text."""
     for step in _load_workflow()["jobs"]["mypy"]["steps"]:
         match = _MYPY_PIN_RE.search(step.get("run", ""))
         if match:
@@ -219,14 +222,13 @@ def _host_is_windows() -> bool:
 
 
 def _resolve_git_bash() -> str:
-    """The bash that runs each step's ``run:`` text.
+    """Return the bash that runs each step's ``run:`` text.
 
     On a non-Windows host that is the ``bash`` on ``PATH``, the same shell the CI runner gives
     the text. On Windows it is Git Bash's own ``bash.exe``, derived from ``git --exec-path``
-    (whose parent's parent is the Git installation root) rather than a bare ``PATH`` lookup,
-    since a bare ``bash`` can resolve to WSL's launcher or a System32 shim on some machines; the
-    hardcoded default install path is the stated fallback when the derivation finds nothing
-    there. Refuses by name on either host when no bash is found.
+    (whose parent's parent is the Git installation root); the default install paths are the
+    stated fallback when the derivation finds nothing there. Refuses by name on either host when
+    no bash is found.
     """
     if not _host_is_windows():
         found = shutil.which("bash")
@@ -274,6 +276,11 @@ def _safe_filename(key: str) -> str:
 
 
 def main() -> int:
+    """Run the parsed CI stages, write per-stage output and ``summary.json`` under ``--out``.
+
+    Returns 0 when every stage that ran exited 0, else 1. Refuses an ``--out`` that is the
+    recorded baseline, and an ``--only`` key the plan does not hold.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--out",

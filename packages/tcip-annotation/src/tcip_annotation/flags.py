@@ -1,6 +1,8 @@
-"""Review flags: a person's comment asking for a second look at one place on an image, one of a
-bucket's proposals, or the image as a whole, and the reply that resolves it. One record per
-image holds every flag raised on it; a resolved flag is kept, never removed.
+"""Review flags: a person's request for a second look, and the reply that resolves it.
+
+A flag is a person's comment asking for a second look at one place on an image, one of a
+bucket's proposals, or the image as a whole. One record per image holds every flag raised on
+it; a resolved flag is kept, never removed.
 """
 
 from __future__ import annotations
@@ -17,10 +19,12 @@ REVIEW_FLAGS_STORE = "review_flags"
 
 @dataclass(frozen=True)
 class Flag:
-    """One flag: ``id`` names it, ``text`` is the comment, ``by`` who raised it (the label
-    record's own spelling) and ``at`` when. Its target is one of: ``point`` (pixel ``(x, y)``) with
-    the ``subject`` of the annotation flagged there; ``proposal`` (``(bucket, index)``, the
-    index in that bucket's document for the image); or neither, the image as a whole. Once
+    """One flag: its id, comment, raiser and time, its target, and its resolution.
+
+    ``id`` names it, ``text`` is the comment, ``by`` who raised it (the label record's own
+    spelling) and ``at`` when. Its target is one of: ``point`` (pixel ``(x, y)``) with the
+    ``subject`` of the annotation flagged there; ``proposal`` (``(bucket, index)``, the index in
+    that bucket's document for the image); or neither, the image as a whole. Once
     resolved it carries ``resolved_by`` and ``resolved_at``, the ``reply`` given, and ``removed``
     when the save that resolved it did so by removing the annotation it sat on.
     """
@@ -45,8 +49,9 @@ class Flag:
     def resolved(
         self, *, by: str, at: str, reply: str = "", removed: bool = False
     ) -> Flag:
-        """This flag resolved by ``by`` at ``at``; a resolution :func:`decode_flag` would not read
-        back refuses (``ValueError``).
+        """Return this flag resolved by ``by`` at ``at``.
+
+        A resolution :func:`decode_flag` would not read back refuses (``ValueError``).
         """
         return decode_flag(
             encode_flag(
@@ -72,8 +77,10 @@ class FlagRequest:
 
 
 def raised(request: FlagRequest, *, by: str, at: str) -> Flag:
-    """``request`` as a new open flag by ``by`` at ``at`` under a freshly minted id; a blank
-    comment, or a target :func:`decode_flag` would not read back, refuses (``ValueError``).
+    """Return ``request`` as a new open flag by ``by`` at ``at`` under a freshly minted id.
+
+    A blank comment, or a target :func:`decode_flag` would not read back, refuses
+    (``ValueError``).
     """
     import uuid
 
@@ -92,12 +99,12 @@ def raised(request: FlagRequest, *, by: str, at: str) -> Flag:
 
 
 def flag_key(label_key: Key) -> Key:
-    """The flags record of the image whose label document ``label_key`` names."""
+    """Return the flags record key of the image whose label document ``label_key`` names."""
     return Key(REVIEW_FLAGS_STORE, label_key.root, label_key.parts)
 
 
 def encode_flag(flag: Flag) -> dict:
-    """``flag`` as the entry its record stores."""
+    """Return ``flag`` as the entry its record stores."""
     return {
         **asdict(flag),
         "point": list(flag.point) if flag.point else None,
@@ -110,12 +117,13 @@ def _is_text(value) -> bool:
 
 
 def decode_flag(entry: Mapping) -> Flag:
-    """One stored entry as a :class:`Flag`, or ``ValueError`` naming the entry when a key is
-    missing, the id, comment or time is not a non-empty string, the point is not two
-    numbers, the proposal is not a bucket name and an index, a point comes without a subject or
-    beside a proposal, the raiser or the resolver is not a person's recorded identity
-    (:func:`~tcip_annotation.json_io.is_person`), or the resolution states a person without a
-    time.
+    """Return one stored entry as a :class:`Flag`.
+
+    Raises ``ValueError`` naming the entry when a key is missing, the id, comment or time is not a
+    non-empty string, the point is not two numbers, the proposal is not a bucket name and an
+    index, a point comes without a subject or beside a proposal, the raiser or the resolver is
+    not a person's recorded identity (:func:`~tcip_annotation.json_io.is_person`), or the
+    resolution states a person without a time.
     """
     try:
         point, proposal = entry["point"], entry["proposal"]
@@ -168,8 +176,10 @@ def decode_flag(entry: Mapping) -> Flag:
 
 
 def flags_of(record: Mapping | None) -> list[Flag]:
-    """The flags a stored record holds, oldest first; an absent record holds none. A record that
-    is not ``{"flags": [...]}`` or an entry that will not decode refuses (``ValueError``).
+    """Return the flags a stored record holds, oldest first; an absent record holds none.
+
+    A record that is not ``{"flags": [...]}`` or an entry that will not decode refuses
+    (``ValueError``).
     """
     if record is None:
         return []
@@ -180,7 +190,7 @@ def flags_of(record: Mapping | None) -> list[Flag]:
 
 
 def flags_record(flags: list[Flag]) -> dict:
-    """``flags`` as the record :func:`flags_of` reads back."""
+    """Return ``flags`` as the record :func:`flags_of` reads back."""
     return {"flags": [encode_flag(flag) for flag in flags]}
 
 
@@ -194,8 +204,10 @@ def read_flags(key: Key) -> list[Flag]:
 def covers(
     annotation: Annotation, subject: str, point: tuple[float, float]
 ) -> bool:
-    """Whether ``annotation`` is one of ``subject`` whose geometry holds ``point``: inside or on
-    the edge of a box or a polygon's rings, or exactly a placed point's own coordinate.
+    """Return whether ``annotation`` is one of ``subject`` whose geometry holds ``point``.
+
+    Holding is inside or on the edge of a box or a polygon's rings, or exactly a placed point's
+    own coordinate.
     """
     if annotation.subject != subject:
         return False
@@ -226,8 +238,10 @@ def resolved_by_removal(
     by: str,
     at: str,
 ) -> list[Flag]:
-    """``flags`` with each open one resolved as ``removed`` when an annotation of its subject
-    held its point in ``before`` and none does in ``after``; every other flag unchanged.
+    """Return ``flags`` with each open one whose annotation was removed resolved as ``removed``.
+
+    An open flag resolves when an annotation of its subject held its point in ``before`` and none
+    does in ``after``; every other flag is unchanged.
     """
 
     def removed(flag: Flag) -> bool:

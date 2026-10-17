@@ -50,14 +50,15 @@ DEFAULT_LOCK_TIMEOUT_S = 30.0
 
 
 def creation_temp_name(destination: str, token: str) -> str:
-    """The name a file is built under before it is installed at ``destination``: hidden and
-    temp-suffixed.
+    """Return the name a file is built under before it is installed at ``destination``.
+
+    The name is hidden and temp-suffixed.
     """
     return f".{destination}.{token}{_TEMP_SUFFIX}"
 
 
 def require_absolute_root(root: str) -> Path:
-    """The root as a path, or ``BadKeyError`` for a relative one."""
+    """Return the root as a path; ``BadKeyError`` for a relative one."""
     directory = Path(root)
     if not directory.is_absolute():
         raise BadKeyError(
@@ -73,7 +74,7 @@ _file_locks: dict[str, Any] = {}
 
 
 def _filelock_classes() -> tuple[Any, Any]:
-    """The lock class and its timeout error, or a refusal naming what is missing."""
+    """Return the lock class and its timeout error, or refuse naming what is missing."""
     try:
         from filelock import FileLock, Timeout
     except ImportError as exc:
@@ -85,9 +86,10 @@ def _filelock_classes() -> tuple[Any, Any]:
 
 
 def _locks_for(canonical: str, lock_path: str) -> tuple[threading.RLock, Any]:
-    """The one lock pair for a canonical path in this process, one ``FileLock`` instance per path
-    with the library's default thread-local counting: counted same-thread re-entry, and a second
-    thread blocks.
+    """Return the one lock pair for a canonical path in this process.
+
+    One ``FileLock`` instance per path with the library's default thread-local counting: counted
+    same-thread re-entry, and a second thread blocks.
     """
     file_lock_cls, _ = _filelock_classes()
     with _registry_guard:
@@ -103,12 +105,7 @@ def _locks_for(canonical: str, lock_path: str) -> tuple[threading.RLock, Any]:
 
 
 def lock_file_for(path: Path | str) -> Path:
-    """The lock file :func:`path_lock` holds beside the data file at ``path``.
-
-    ``filelock`` deletes it on release under Windows and keeps it under Unix, so whatever removes
-    a data file guarded here removes this file through here as well, or the directory it sits in
-    never empties on Unix.
-    """
+    """Return the lock-file path beside the data file at ``path``."""
     return Path(str(path) + _LOCK_SUFFIX)
 
 
@@ -155,8 +152,9 @@ def database_roots(tree: Path) -> list[Path]:
 def transition_lock(
     root: str, *, timeout_s: float = DEFAULT_LOCK_TIMEOUT_S
 ) -> Generator[None]:
-    """Hold the lock a root's database is created under; creating the root's ``.tcip`` directory
-    is its first act.
+    """Hold the lock a root's database is created under.
+
+    Creating the root's ``.tcip`` directory is its first act.
     """
     db_path = database_file(root)
     ensure_parent(db_path)
@@ -183,10 +181,11 @@ def _version_of(data: bytes) -> Version:
 
 
 def ensure_parent(path: Path) -> list[Path]:
-    """Create ``path``'s parent directory one level at a time, flushing every directory entry it
-    created, and return the levels this call's own ``mkdir`` made, outermost first; a level
-    another writer made meanwhile is not among them, and a level that exists as a file raises
-    ``FileExistsError``.
+    """Create ``path``'s parent directory one level at a time and return the levels made.
+
+    Every directory entry it created is flushed. The return is the levels this call's own
+    ``mkdir`` made, outermost first; a level another writer made meanwhile is not among them, and
+    a level that exists as a file raises ``FileExistsError``.
     """
     parent = path.parent
     missing = list(
@@ -225,8 +224,9 @@ def _stage_bytes(path: Path, data: bytes) -> str:
 
 
 def _apply_staged(temp: str, path: Path) -> None:
-    """Make one staged temp file the file at ``path`` and flush the rename; a rename that fails
-    removes its staging file.
+    """Make one staged temp file the file at ``path`` and flush the rename.
+
+    A rename that fails removes its staging file.
     """
     try:
         retry_while_denied(
@@ -244,7 +244,7 @@ def _remove_entry(path: Path) -> None:
 
 
 def _read_bytes(path: Path) -> bytes | None:
-    """The file's bytes, or None when it is absent."""
+    """Return the file's bytes, or None when it is absent."""
 
     def read() -> bytes | None:
         try:
@@ -257,8 +257,9 @@ def _read_bytes(path: Path) -> bytes | None:
 
 @contextmanager
 def _locked(path: Path) -> Generator[None]:
-    """Hold ``path``'s lock (:func:`path_lock`); ``StoreBusyError`` naming it when the wait runs
-    out.
+    """Hold ``path``'s lock (:func:`path_lock`).
+
+    Raises ``StoreBusyError`` naming the path when the wait runs out.
     """
     _, timeout_error = _filelock_classes()
     ensure_parent(path)
@@ -272,8 +273,10 @@ def _locked(path: Path) -> Generator[None]:
 def require_version(
     entry: Key | str, data: bytes | None, expect: Version
 ) -> None:
-    """Refuse (``VersionConflictError`` naming ``entry``) when the stored bytes ``data``,
-    ``None`` for an absent entry, are not the version ``expect`` names.
+    """Refuse when the stored bytes are not the version ``expect`` names.
+
+    ``data`` is the stored bytes, ``None`` for an absent entry; the refusal is a
+    ``VersionConflictError`` naming ``entry``.
     """
     current = Version.ABSENT if data is None else _version_of(data)
     if current != expect:
@@ -286,9 +289,10 @@ def versioned(
     decode: Callable[[bytes], Any],
     absent: str,
 ) -> Versioned:
-    """Stored bytes ``data`` as their decoded value (``decode``) and their version, or, for an
-    absent entry (``data`` ``None``), ``default`` paired with ``Version.ABSENT``; ``NotFoundError``
-    stating ``absent`` when no default was given.
+    """Return stored bytes ``data`` as their decoded value (``decode``) and their version.
+
+    For an absent entry (``data`` ``None``), ``default`` paired with ``Version.ABSENT``;
+    ``NotFoundError`` stating ``absent`` when no default was given.
     """
     if data is not None:
         return Versioned(decode(data), _version_of(data))
@@ -300,7 +304,7 @@ def versioned(
 
 
 def read_blob_versioned(path: Path, *, default: Any = REQUIRED) -> Versioned:
-    """A file's bytes and their version, read together (:func:`versioned`)."""
+    """Read a file's bytes and their version together (:func:`versioned`)."""
     return versioned(
         _read_bytes(path), default, bytes, f"{path} does not exist"
     )
@@ -325,8 +329,9 @@ def put_blob(
 
 
 def delete_blob(path: Path, *, expect: Version | None = None) -> None:
-    """Remove a file under its lock, comparing ``expect`` and refusing inside an open transaction
-    as :func:`put_blob` does; absence is not an error.
+    """Remove a file under its lock; absence is not an error.
+
+    It compares ``expect`` and refuses inside an open transaction as :func:`put_blob` does.
     """
     refuse_inside_transaction("delete_blob")
     with _locked(path):
@@ -336,8 +341,9 @@ def delete_blob(path: Path, *, expect: Version | None = None) -> None:
 
 
 def is_bookkeeping(name: str) -> bool:
-    """Whether a filename is the store's own artifact rather than data: a lock file, a temp file or
-    one of the database's WAL sidecars.
+    """Return whether a filename is the store's own artifact rather than data.
+
+    The store's own artifacts are a lock file, a temp file or one of the database's WAL sidecars.
     """
     return (
         name in _DATABASE_SIDECARS
@@ -369,11 +375,12 @@ def retry_while_denied(
     *,
     denied: Callable[[PermissionError], bool] = lambda exc: True,
 ) -> Any:
-    """Run a filesystem action a conflicting handle may deny for a while, retrying a
-    ``PermissionError`` that ``denied`` accepts (by default every one) after a jittered wait
-    capped at the time left of ``budget_s`` from the first attempt; the denial is raised instead
-    when the clock, read once the wait ends, has reached that deadline, so no attempt starts
-    after it. Any other error raises at once.
+    """Run a filesystem action a conflicting handle may deny for a while, retrying denials.
+
+    A ``PermissionError`` that ``denied`` accepts (by default every one) is retried after a
+    jittered wait capped at the time left of ``budget_s`` from the first attempt; the denial is
+    raised instead when the clock, read once the wait ends, has reached that deadline, so no
+    attempt starts after it. Any other error raises at once.
     """
     deadline = time.monotonic() + budget_s
     while True:

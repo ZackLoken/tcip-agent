@@ -1,5 +1,4 @@
-"""Run a test against a baseline tree the change under test is absent from, and report whether it
-fails there.
+"""Run a test against a baseline tree without the change under test; report whether it fails.
 
 The baseline is materialized with ``git archive`` (the working tree is never touched), the current
 ``tests/`` directory is overlaid on it, the baseline's own source is proved to be what gets
@@ -210,6 +209,7 @@ def _test_file_relative_to_repo(raw: str) -> tuple[str | None, str]:
 
 
 def git_output(*args: str) -> str:
+    """Return git's stdout for ``args`` run in the repository; ``RuntimeError`` on failure."""
     proc = subprocess.run(
         ["git", *args], cwd=REPO, capture_output=True, text=True
     )
@@ -221,8 +221,9 @@ def git_output(*args: str) -> str:
 
 
 def _is_test_side(path: str) -> bool:
-    """Paths the tool overlays from the current tree, so a diff in them is not the change
-    under test.
+    """Return whether ``path`` is one the tool overlays from the current tree.
+
+    A diff in such a path is not the change under test.
     """
     return path.replace("\\", "/").startswith(f"{TEST_TREE}/")
 
@@ -280,8 +281,10 @@ def _resolve_baseline(
 def _changed_source_files(
     baseline: str, declared: list[str], test_rev: str | None
 ) -> tuple[list[str], str]:
-    """The source-side files that differ between the baseline and the tree the test comes from,
-    and how they were found; a ``declared`` path counts only when it differs too.
+    """Return the source-side files that differ from the baseline, and how they were found.
+
+    The comparison is against the tree the test comes from; a ``declared`` path counts only when
+    it differs too.
     """
     if test_rev:
         tracked = git_output(
@@ -365,7 +368,9 @@ def _snapshot_via_temporary_index(head: str, index_path: Path) -> str | None:
 
 
 def _snapshot_via_stash_create() -> str | None:
-    """The fallback when the temporary-index form fails here: covers tracked changes only, and
+    """Snapshot through ``git stash create``; ``None`` when it produces nothing.
+
+    The fallback when the temporary-index form fails here: covers tracked changes only, and
     touches neither the tree, the index, nor the stash list, same as the form it falls back from.
     """
     out = subprocess.run(
@@ -384,9 +389,11 @@ def _snapshot_via_stash_create() -> str | None:
 
 
 def snapshot_working_tree() -> tuple[str, str]:
-    """A commit object for the working tree exactly as it stands now: tracked modifications and
-    untracked files, ignored files excluded. Returns ``(commit_hash, method)``. Touches neither
-    the working tree, the real index, nor the stash list.
+    """Make a commit object for the working tree exactly as it stands now.
+
+    It holds tracked modifications and untracked files, ignored files excluded. Returns
+    ``(commit_hash, method)``. Touches neither the working tree, the real index, nor the stash
+    list.
     """
     with tempfile.TemporaryDirectory(prefix="failbefore-index-") as scratch:
         head = git_output("rev-parse", "HEAD").strip()
@@ -413,8 +420,9 @@ def materialize(rev: str, dest: Path) -> None:
 
 
 def _overlay_test_tree(dest: Path, test_rev: str | None) -> int:
-    """Copy the whole test tree, from ``test_rev`` or the working tree, into ``dest``; the number
-    of files copied.
+    """Copy the whole test tree, from ``test_rev`` or the working tree, into ``dest``.
+
+    Returns the number of files copied.
     """
     if test_rev:
         archive = subprocess.run(
@@ -442,6 +450,11 @@ def _overlay_test_tree(dest: Path, test_rev: str | None) -> int:
 def child_env(
     tree: Path, outcome_json: Path, current_test_path: Path
 ) -> dict[str, str]:
+    """Return the environment a pytest child runs under in the materialized ``tree``.
+
+    ``PYTHONPATH`` names the tree's package sources and the tree itself, bytecode writing is off,
+    the outcome and current-test paths are set, and ``TCIP_MIN_TESTS`` is removed.
+    """
     srcs = [str(p) for p in sorted(tree.glob("packages/*/src"))]
     sep = ";" if sys.platform == "win32" else ":"
     env = {
@@ -503,9 +516,7 @@ def prove_tree_imports(
 
 
 def install_outcome_plugin(tree: Path) -> None:
-    """Drop the outcome-recording plugin into a materialized tree, on the path pytest will
-    import.
-    """
+    """Drop the outcome-recording plugin into a materialized tree, where pytest will import it."""
     (tree / f"{PLUGIN_MODULE}.py").write_text(PLUGIN_SOURCE, encoding="utf-8")
 
 
@@ -518,8 +529,9 @@ def run_capturing_outcome(
     timeout: int,
     per_test_timeout: float | None = None,
 ):
-    """Run pytest in `tree` and return its process plus what it observed, or None if it
-    reported none.
+    """Run pytest in `tree` and return its process plus what it observed.
+
+    The observation is None if it reported none.
     """
     # The child session keeps its temporary root inside this run's own tree: pytest deletes all
     # but the last few roots under the shared one, including another session's, at every start.
@@ -558,26 +570,28 @@ _TIMEOUT_HEADLINE = re.compile(
 
 
 def _is_timeout(headline: str) -> bool:
-    """Whether this failure is pytest-timeout's own signal-method report (its literal
-    ``PYTEST_FAILURE_MESSAGE``), never behavioral evidence and never confused with a hang the
-    thread method reports through the ``FAIL_BEFORE_CURRENT_TEST`` marker instead.
+    """Return whether this failure is pytest-timeout's own signal-method report.
+
+    That report is its literal ``PYTEST_FAILURE_MESSAGE``, never behavioral evidence and never
+    confused with a hang the thread method reports through the ``FAIL_BEFORE_CURRENT_TEST``
+    marker instead.
 
     The leading exception class is optional because pytest writes the headline both ways: bare
     where the timeout is the whole report, and prefixed ``Failed: `` where pytest-timeout's
-    signal method raises it as an ordinary ``Failed`` inside the test. Only hosts carrying
-    ``SIGALRM`` take that second path, so a pattern anchored on the bare form alone reads a hang
-    as the test's own ``Failed`` assertion and scores it GUARDS on Linux while scoring it
-    INDETERMINATE on Windows.
+    signal method raises it as an ordinary ``Failed`` inside the test, which only hosts carrying
+    ``SIGALRM`` do.
     """
     return bool(_TIMEOUT_HEADLINE.match(headline.strip()))
 
 
 def _is_unreached(headline: str, crash_path: str | None, tree: Path) -> bool:
-    """A failure that never reached the code under test carries the same weight as a collection
-    error: a missing module or import always counts. A missing file counts only when its crash
-    frame sits outside ``tests/`` (:func:`_crash_outside_test_tree`); a test's own assertion
-    reading back a file the fixed code under test was supposed to write raises ``FileNotFoundError``
-    at the test's own line, and that is behavioral evidence, never a fixture-shaped discount.
+    """Return whether a failure never reached the code under test.
+
+    Such a failure carries the same weight as a collection error: a missing module or import
+    always counts. A missing file counts only when its crash frame sits outside ``tests/``
+    (:func:`_crash_outside_test_tree`); a test's own assertion reading back a file the fixed code
+    under test was supposed to write raises ``FileNotFoundError`` at the test's own line, and that
+    is behavioral evidence, never a fixture-shaped discount.
     """
     if headline.startswith(("ModuleNotFoundError", "ImportError")):
         return True
@@ -610,18 +624,20 @@ _CALL_SIGNATURE_MISMATCH_PATTERNS = (
 
 
 def _is_call_signature_mismatch(headline: str) -> bool:
-    """Whether ``headline`` is CPython's own wording for a call supplying the wrong arguments to
-    a callable's signature: an unexpected keyword, a missing required argument (positional or
-    keyword-only), or too many positional arguments. This is the shape a fixture or test calling
-    a constructor with an argument the baseline lacks takes, never wording the code under test
-    composes on its own.
+    """Return whether ``headline`` is CPython's wording for a call-signature mismatch.
+
+    The mismatch is a call supplying the wrong arguments to a callable's signature: an unexpected
+    keyword, a missing required argument (positional or keyword-only), or too many positional
+    arguments. This is the shape a fixture or test calling a constructor with an argument the
+    baseline lacks takes, never wording the code under test composes on its own.
     """
     return any(p.search(headline) for p in _CALL_SIGNATURE_MISMATCH_PATTERNS)
 
 
 def _failure_kind(entry: dict, tree: Path) -> str:
-    """One of ``unreached``, ``timeout``, ``behavioral``, ``fixture``, for one failed or
-    errored test.
+    """Classify one failed test: ``unreached``, ``timeout``, ``behavioral`` or ``fixture``.
+
+    An errored test is classified the same way.
 
     ``unreached``: the import never resolved, always; or a needed file was missing and the crash
     frame sits outside ``tests/`` (:func:`_is_unreached`). A missing file whose crash frame sits
@@ -637,10 +653,8 @@ def _failure_kind(entry: dict, tree: Path) -> str:
     to a call-phase failure:
 
     ``behavioral``: the test's own ``assert`` or ``pytest.fail``/``pytest.raises`` failed (the
-    raised exception's own class is ``AssertionError`` or ``Failed``, read from ``exc_typename``
-    rather than the headline text: pytest's assertion rewriting omits the class name from the
-    headline for a bare comparison, so text alone cannot tell an assertion apart from another
-    exception formatted the same way), or the crash frame sits outside ``tests/``, meaning the
+    raised exception's own class is ``AssertionError`` or ``Failed``, read from
+    ``exc_typename``), or the crash frame sits outside ``tests/``, meaning the
     code under test raised. ``fixture``: a ``TypeError`` raised from inside ``tests/`` whose
     message is a call-signature mismatch (:func:`_is_call_signature_mismatch`), the shape a
     fixture constructor called with an argument the baseline lacks takes; the code under test was
@@ -768,6 +782,7 @@ def _classify(
 
 
 def main() -> int:
+    """Run the command line's test at its baseline, print the verdict, return its exit code."""
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument(
         "test_file", help="path, repo-relative, e.g. tests/test_foo.py"

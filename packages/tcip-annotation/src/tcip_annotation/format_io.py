@@ -1,5 +1,6 @@
-"""The reader of an external dataset-level COCO document (an ``"images"`` / ``"annotations"`` /
-``"categories"`` key), on its way into per-image documents.
+"""The reader of an external dataset-level COCO document, on its way into per-image documents.
+
+Such a document carries an ``"images"`` / ``"annotations"`` / ``"categories"`` key.
 
 Its records carry the per-image document's own field spellings (``bbox`` as ``[x, y, w, h]``,
 ``segmentation`` rings, ``iscrowd``, ``attributes``, ``score``, provenance); this reader names each
@@ -60,8 +61,10 @@ def _named_annotation(
     decode_rle: Callable[[dict], Any],
     vertex_spacing: float,
 ) -> Annotation:
-    """One COCO record as the :class:`Annotation` its ``category_id`` names, a run-length mask's
-    rings simplified at ``vertex_spacing``, or ``ValueError``.
+    """Return one COCO record as the :class:`Annotation` its ``category_id`` names.
+
+    A run-length mask's rings are simplified at ``vertex_spacing``; anything the decoding refuses
+    raises ``ValueError``.
     """
     cid: Any = ann.get("category_id")
     if not is_coco_id(cid) or cid not in categories:
@@ -88,20 +91,21 @@ def parse_coco_annotations(
     decode_rle: Callable[[dict], Any],
     vertex_spacing: float,
 ) -> tuple[dict[int, str], dict[int, list[Annotation]], list[str]]:
-    """The document's valid category declarations, every record it holds as a name-based
-    :class:`Annotation` keyed by the integer ``image_id`` its record names, and every fault found.
+    """Return the document's valid categories, its records by image, and every fault found.
 
-    A document without a dataset-level COCO's keys raises ``ValueError``. Every other fault is
-    returned rather than raised, each naming its declaration or record index: a malformed or
-    repeated category declaration (:func:`coco_categories`), a record whose ``image_id`` is not an
-    integer, and a record the decoding refuses (a ``category_id`` no valid declaration names, then
-    anything :func:`~tcip_annotation.json_io.annotation_of_record` refuses). A record's identity
-    and its decoding are checked independently, so one record can report both, and only a record
-    whose ``image_id`` is valid is associated with an image. A run-length ``segmentation`` (a dict
-    with ``counts`` and ``size``) is decoded to a mask by ``decode_rle`` and converted to rings by
+    The records are each a name-based :class:`Annotation`, keyed by the integer ``image_id`` its
+    record names. A document without a dataset-level COCO's keys raises ``ValueError``. Every
+    other fault is returned rather than raised, each naming its declaration or record index: a
+    malformed or repeated category declaration (:func:`coco_categories`), a record whose
+    ``image_id`` is not an integer, and a record the decoding refuses (a ``category_id`` no valid
+    declaration names, then anything :func:`~tcip_annotation.json_io.annotation_of_record`
+    refuses). A record's identity and its decoding are checked independently, so one record can
+    report both, and only a record whose ``image_id`` is valid is associated with an image. A
+    run-length ``segmentation`` (a dict with ``counts`` and ``size``) is decoded to a mask by
+    ``decode_rle`` and converted to rings by
     :func:`~tcip_annotation.mask_contours.mask_to_polygon_rings` at ``vertex_spacing`` pixels of
-    perimeter per vertex; a mask that yields no ring is
-    refused by the decoder like any other segmentation with no ring.
+    perimeter per vertex; a mask that yields no ring is refused by the decoder like any other
+    segmentation with no ring.
     """
     if "images" not in coco and "categories" not in coco:
         raise ValueError(

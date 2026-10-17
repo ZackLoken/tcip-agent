@@ -86,8 +86,9 @@ _SET_TIMES = ("proposed_at", "confirmed_at", "withdrawn_at")
 
 
 def normalized(served: dict[str, dict]) -> dict[str, dict]:
-    """``served`` with each set revision timestamp replaced by ``_FIXED_TIME``, the facts that
-    differ between two otherwise identical runs.
+    """Return ``served`` with each set revision timestamp replaced by ``_FIXED_TIME``.
+
+    Those timestamps are the facts that differ between two otherwise identical runs.
     """
     return replaced(
         served,
@@ -98,8 +99,10 @@ def normalized(served: dict[str, dict]) -> dict[str, dict]:
 
 
 def produce() -> dict[str, dict]:
-    """Propose and confirm the fixture traits in projects created and opened in a scratch
-    session, serving the listing at each stage, :func:`normalized`.
+    """Propose and confirm the fixture traits in a scratch session; return the served listings.
+
+    The projects are created and opened in the session, the listing served at each stage, and
+    the result :func:`normalized`.
     """
     from tcip_mcp import traits
     from tests._web_fixtures import named_project

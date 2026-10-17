@@ -1,6 +1,8 @@
-"""The scratch workspace the frontend fixture generators make their scenes in, the opening of a
-project through the picker's route, the one walk that replaces what a run fills differently in
-what a scene serves, and the write of a fixture file.
+"""The shared session pieces the frontend fixture generators build their scenes with.
+
+They are the scratch workspace the scenes are made in, the opening of a project through the
+picker's route, the one walk that replaces what a run fills differently in what a scene serves,
+and the write of a fixture file.
 
 A generator creates its projects through ``tests._web_fixtures.named_project`` inside
 :func:`scratch_session`, sends its own requests through the session's client, states its own
@@ -26,9 +28,10 @@ if TYPE_CHECKING:
 
 @contextmanager
 def scratch_session() -> Iterator[tuple[Path, TestClient]]:
-    """A fresh workspace inside a scratch directory and a client of the web backend serving it
-    (``tests._web_fixtures.backend_session``); the directory is removed on exit, after the
-    backend's session has closed.
+    """Yield a fresh scratch workspace and a client of the web backend serving it.
+
+    The client is ``tests._web_fixtures.backend_session``'s; the directory is removed on exit,
+    after the backend's session has closed.
     """
     with tempfile.TemporaryDirectory() as directory:
         workspace = Path(directory).resolve() / "workspace"
@@ -48,9 +51,10 @@ def opened(client: TestClient, project: OpenProject) -> None:
 def replaced(
     value: Any, leaf: Callable[[str | None, Any], Any], key: str | None = None
 ) -> Any:
-    """``value`` with each leaf (anything not a dict or a list) replaced by ``leaf(key, leaf
-    value)``, ``key`` being the dict key the leaf sits under, ``None`` for a list item or the
-    root.
+    """Return ``value`` with each leaf (anything not a dict or a list) replaced through ``leaf``.
+
+    A leaf becomes ``leaf(key, leaf value)``, ``key`` being the dict key the leaf sits under,
+    ``None`` for a list item or the root.
     """
     if isinstance(value, dict):
         return {k: replaced(v, leaf, k) for k, v in value.items()}
@@ -60,8 +64,9 @@ def replaced(
 
 
 def write_fixture(path: Path, content: Any) -> int:
-    """Write ``content`` to ``path`` as indented JSON with LF line endings and say so; returns
-    the exit code 0.
+    """Write ``content`` to ``path`` as indented JSON with LF line endings and say so.
+
+    Returns the exit code 0.
     """
     path.write_text(
         json.dumps(content, indent=2) + "\n", encoding="utf-8", newline="\n"

@@ -1,5 +1,6 @@
-"""The verdict shard: the log of a person's decisions on a prediction bucket's proposals for one
-image, each entry read through :func:`decode_verdict` alone.
+"""The verdict shard: the log of a person's decisions on a prediction bucket's proposals.
+
+One shard covers one image, each entry read through :func:`decode_verdict` alone.
 """
 
 from __future__ import annotations
@@ -19,9 +20,10 @@ VERDICT_ACTIONS: tuple[VerdictAction, ...] = get_args(VerdictAction)
 
 @dataclass(frozen=True)
 class Verdict:
-    """One decision: ``proposal`` is the record's index in the bucket's document for the image,
-    ``action`` what the person decided, ``by`` who (the label record's own spelling) and ``at``
-    when.
+    """One decision on one proposal: which, what, who and when.
+
+    ``proposal`` is the record's index in the bucket's document for the image, ``action`` what
+    the person decided, ``by`` who (the label record's own spelling) and ``at`` when.
     """
 
     proposal: int
@@ -36,10 +38,11 @@ def encode_verdict(verdict: Verdict) -> dict:
 
 
 def decode_verdict(entry: Mapping) -> Verdict:
-    """One stored entry as a :class:`Verdict`, or ``ValueError`` naming the entry when a key is
-    missing, the proposal is not an index, the action is not one of :data:`VERDICT_ACTIONS`, the
-    person is not a person's recorded identity (:func:`~tcip_annotation.json_io.is_person`) or
-    the time is not a string.
+    """Return one stored entry as a :class:`Verdict`.
+
+    Raises ``ValueError`` naming the entry when a key is missing, the proposal is not an index,
+    the action is not one of :data:`VERDICT_ACTIONS`, the person is not a person's recorded
+    identity (:func:`~tcip_annotation.json_io.is_person`) or the time is not a string.
     """
     try:
         proposal, action, by, at = (
@@ -72,8 +75,10 @@ REVIEW_VERDICTS_STORE = "review_verdicts"
 
 
 def verdict_key(dataset_root: str | Path, bucket: str, stem: str) -> Key:
-    """The verdict shard of the image of stem ``stem`` under the prediction bucket named
-    ``bucket``, under the dataset root the bucket and the image's label document belong to.
+    """Return the key of the verdict shard of the image of stem ``stem`` in bucket ``bucket``.
+
+    ``bucket`` names the prediction bucket; the key hangs under the dataset root the bucket and
+    the image's label document belong to.
     """
     return Key(REVIEW_VERDICTS_STORE, str(dataset_root), (bucket, stem))
 
@@ -81,17 +86,20 @@ def verdict_key(dataset_root: str | Path, bucket: str, stem: str) -> Key:
 def record_verdicts(
     txn: tcip_store.Txn, key: Key, verdicts: list[Verdict]
 ) -> None:
-    """Append ``verdicts`` to the shard ``key`` names inside ``txn``, each through
-    :func:`encode_verdict`, so they commit with whatever else the transaction writes.
+    """Append ``verdicts`` to the shard ``key`` names inside ``txn``.
+
+    Each goes through :func:`encode_verdict`, so they commit with whatever else the transaction
+    writes.
     """
     for verdict in verdicts:
         txn.append(key, encode_verdict(verdict))
 
 
 def read_verdicts(key: Key) -> list[Verdict]:
-    """Every verdict the shard ``key`` names holds, oldest first, each through
-    :func:`decode_verdict`; an absent shard holds none. Entries that will not decode refuse
-    (``ValueError``) naming their positions.
+    """Return every verdict the shard ``key`` names holds, oldest first.
+
+    Each goes through :func:`decode_verdict`; an absent shard holds none. Entries that will not
+    decode refuse (``ValueError``) naming their positions.
     """
     page = tcip_store.read_log(key)
     if page.corrupt:

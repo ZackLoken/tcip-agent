@@ -66,7 +66,7 @@ def prose_surfaces() -> list[Path]:
 
 
 def tool_table_first_cells(md_text: str) -> list[str]:
-    """The first cell of every data row in a table whose header's first column is "Tool"."""
+    """Return the first cell of every data row in a table whose header's first column is "Tool"."""
     cells: list[str] = []
     in_tool_table = False
     for line in md_text.splitlines():
@@ -87,15 +87,15 @@ def tool_table_first_cells(md_text: str) -> list[str]:
 
 
 def extract_tool_name(cell: str) -> str | None:
-    """The plain identifier named by a Tools-table cell's first backticked token, or ``None``
-    when that token is not a snake_case identifier (a call signature or a keyword note still
-    yields the name; a path fragment like `tools/` yields nothing to check).
+    """Return the plain identifier a Tools-table cell's first backticked token names, or ``None``.
+
+    ``None`` when that token is not a snake_case identifier (a call signature or a keyword note
+    still yields the name; a path fragment like `tools/` yields nothing to check).
 
     A `` `tcip <command>` `` console invocation is never a claimed MCP tool name, so it is
     validated against ``tcip_web.cli.COMMANDS`` instead of the tool registry: a real command
     yields ``None`` (nothing left to check), and one that command table does not carry is
-    returned in full (``"tcip <command>"``) so the caller's own "not a registered name" check
-    reports it as a fabrication rather than silently passing an invented command.
+    returned in full (``"tcip <command>"``).
     """
     m = _BACKTICK_SPAN.search(cell)
     if not m:
@@ -152,6 +152,7 @@ def orphan_tool_names(surfaces: list[Path] | None = None) -> list[str]:
 
 
 def main() -> int:
+    """Print fabricated and orphaned tool names; return 0 when there are none, else 1."""
     fabricated = fabricated_tool_names()
     orphans = orphan_tool_names()
     ok = True

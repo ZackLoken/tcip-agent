@@ -7,8 +7,9 @@ from typing import Any
 
 
 def column_label(index: int) -> str:
-    """Spreadsheet-style label for 0-based column ``index``: A-Z, then AA, AB, ... Bijective
-    base-26; :func:`column_index` is the inverse.
+    """Return the spreadsheet-style label for 0-based column ``index``: A-Z, then AA, AB, ....
+
+    Bijective base-26; :func:`column_index` is the inverse.
     """
     if index < 0:
         raise ValueError(f"Column index must be non-negative, got {index}")
@@ -33,8 +34,10 @@ def column_index(label: str) -> int:
 
 
 def cell_fields(cell: Any) -> tuple[str, float, float, float, float]:
-    """``(name, x0, y0, x1, y1)`` from one grid cell: a mapping or an object with attributes,
-    carrying ``name`` plus the half-open native-pixel rect ``x0, y0, x1, y1``.
+    """Return ``(name, x0, y0, x1, y1)`` from one grid cell.
+
+    The cell is a mapping or an object with attributes, carrying ``name`` plus the half-open
+    native-pixel rect ``x0, y0, x1, y1``.
     """
     if isinstance(cell, dict):
         return (
@@ -56,13 +59,13 @@ def cell_fields(cell: Any) -> tuple[str, float, float, float, float]:
 def grid_to_rect(
     cell: str, cells: list[Any]
 ) -> tuple[float, float, float, float]:
-    """Resolve a grid cell reference (e.g. 'B3') to the named cell's half-open native-pixel rect
-    ``(x0, y0, x1, y1)``.
+    """Resolve a grid cell reference (e.g. 'B3') to the named cell's half-open native-pixel rect.
 
-    ``cells`` is the caller's own cell list (see :func:`cell_fields` for the accepted shapes), the
-    same list the overlay was rendered with. Matching is case-insensitive and whitespace-stripped.
-    A reference that is not a cell name at all raises ValueError naming the expected format; one
-    that names no cell in this grid raises ValueError naming the grid's valid range.
+    The rect is ``(x0, y0, x1, y1)``. ``cells`` is the caller's own cell list (see
+    :func:`cell_fields` for the accepted shapes), the same list the overlay was rendered with.
+    Matching is case-insensitive and whitespace-stripped. A reference that is not a cell name at
+    all raises ValueError naming the expected format; one that names no cell in this grid raises
+    ValueError naming the grid's valid range.
     """
     wanted = cell.strip().upper()
     if re.fullmatch(r"[A-Z]+[0-9]+", wanted) is None:

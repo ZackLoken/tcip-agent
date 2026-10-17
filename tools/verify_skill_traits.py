@@ -1,6 +1,7 @@
 #!/usr/bin/env python
-"""Guardrail: flag every trait-like token in a crop/domain knowledge document that is not in
-crops.yml.
+"""Guardrail: flag every trait-like token in a knowledge document that crops.yml lacks.
+
+The documents checked are crop and domain knowledge documents.
 
 `unknown_trait_tokens` flags backtick-quoted, multi-segment snake_case tokens that are neither a
 crops.yml trait nor an allow-listed platform token; a single-word fabrication is not detectable
@@ -90,6 +91,7 @@ _BACKTICK_SNAKE = re.compile(r"`([a-z][a-z0-9]*(?:_[A-Za-z0-9]+)+)`")
 
 
 def extract_backtick_snake(md_text: str) -> set[str]:
+    """Return every backticked multi-segment snake_case token in ``md_text``."""
     return set(m.group(1) for m in _BACKTICK_SNAKE.finditer(md_text))
 
 
@@ -99,8 +101,9 @@ def mentioned_trait_names(md_text: str, names: set[str]) -> set[str]:
 
 
 def unknown_trait_tokens(md_text: str, allnames: set[str]) -> list[str]:
-    """Backticked snake_case tokens in ``md_text`` that are neither in ``allnames`` nor an
-    allow-listed platform token.
+    """Return the backticked snake_case tokens in ``md_text`` that are not known names.
+
+    A known name is one in ``allnames`` or an allow-listed platform token.
     """
     toks = extract_backtick_snake(md_text)
     return sorted(
@@ -120,6 +123,7 @@ def off_crop_tokens(
 
 
 def main() -> int:
+    """Check the command line's skill file; return 0 clean, 1 unknown, 2 unusable."""
     if len(sys.argv) < 2:
         print("usage: verify_skill_traits.py <skill.md> [crop_key]")
         return 2

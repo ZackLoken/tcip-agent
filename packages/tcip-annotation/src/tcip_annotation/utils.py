@@ -11,8 +11,10 @@ logger = logging.getLogger(__name__)
 
 
 def _read_orientation_tag(img: Image.Image) -> int | None:
-    """The image's EXIF Orientation tag value, or ``None`` if it carries no EXIF data or no
-    Orientation tag, read through ``_getexif``, a JPEG-family (JPEG, MPO) accessor.
+    """Return the image's EXIF Orientation tag value.
+
+    ``None`` if it carries no EXIF data or no Orientation tag. The tag is read through
+    ``_getexif``, a JPEG-family (JPEG, MPO) accessor.
     """
     try:
         # _getexif is a JpegImageFile/MpoImageFile accessor, absent from the Image.Image stub.
@@ -59,9 +61,10 @@ def auto_orient_image(img: Image.Image) -> Image.Image:
 
 
 def oriented_size(img: Image.Image) -> tuple[int, int]:
-    """``(width, height)`` of the opened image ``img`` once its EXIF orientation is applied, from
-    its header alone, no pixel decode: the tag's operation (:data:`_ORIENTATION_OPS`) applied to a
-    two-pixel probe says whether the axes swap.
+    """Return ``(width, height)`` of the opened image ``img`` once its EXIF orientation is applied.
+
+    The size comes from its header alone, no pixel decode: the tag's operation
+    (:data:`_ORIENTATION_OPS`) applied to a two-pixel probe says whether the axes swap.
     """
     w, h = img.size
     op = _ORIENTATION_OPS.get(_read_orientation_tag(img) or 1)

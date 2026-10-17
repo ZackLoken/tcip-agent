@@ -74,15 +74,17 @@ _PROV_KEYS = ("created_by", "created_at", "accepted_by", "accepted_at")
 
 
 class UnreadableLabelDocumentError(Exception):
-    """A present label document this platform's readers cannot make sense of; not a
-    :class:`ValueError` subclass.
+    """A present label document this platform's readers cannot make sense of.
+
+    It is not a :class:`ValueError` subclass.
     """
 
 
 def safe_score(x) -> float:
-    """A confidence as it is stored: rounded to four places. A non-finite one (NaN or infinity)
-    refuses (``ValueError``) naming it: no stored number stands in for a score the model did not
-    give.
+    """Return a confidence as it is stored: rounded to four places.
+
+    A non-finite one (NaN or infinity) refuses (``ValueError``) naming it: no stored number stands
+    in for a score the model did not give.
     """
     v = float(x)
     if not math.isfinite(v):
@@ -93,8 +95,9 @@ def safe_score(x) -> float:
 
 
 def _numbers(value, key: str, count: int | None = None) -> list[float]:
-    """``value`` as floats: a list of JSON numbers, exactly ``count`` of them when given. Raises
-    ``ValueError`` naming ``key`` for anything else, a numeric string included.
+    """Return ``value`` as floats: a list of JSON numbers, exactly ``count`` of them when given.
+
+    Raises ``ValueError`` naming ``key`` for anything else, a numeric string included.
     """
     if (
         not isinstance(value, list)
@@ -108,8 +111,10 @@ def _numbers(value, key: str, count: int | None = None) -> list[float]:
 
 
 def _polygon_of(segmentation) -> Polygon:
-    """A ``segmentation``'s flat ``x, y`` rings as a :class:`Polygon`, which refuses a ring too
-    short to be a shape, or ``ValueError`` naming what the value is instead.
+    """Return a ``segmentation``'s flat ``x, y`` rings as a :class:`Polygon`.
+
+    The :class:`Polygon` refuses a ring too short to be a shape; any other shape raises
+    ``ValueError`` naming what the value is instead.
     """
     if not isinstance(segmentation, list):
         raise ValueError(
@@ -125,8 +130,9 @@ def _polygon_of(segmentation) -> Polygon:
 
 
 def attributes_of(raw) -> dict[str, str]:
-    """Supplied attribute values, name to value name: anything but a mapping of names to non-empty
-    value names raises ``ValueError``.
+    """Return supplied attribute values, name to value name.
+
+    Anything but a mapping of names to non-empty value names raises ``ValueError``.
     """
     if not isinstance(raw, dict) or not all(
         isinstance(v, str) and v for v in raw.values()
@@ -138,7 +144,7 @@ def attributes_of(raw) -> dict[str, str]:
 
 
 def iscrowd_of(raw) -> bool:
-    """A supplied crowd flag: COCO's ``0``/``1`` or ``true``/``false``, else ``ValueError``."""
+    """Read a supplied crowd flag: COCO's ``0``/``1`` or ``true``/``false``, else ``ValueError``."""
     if not isinstance(raw, int) or raw not in (0, 1):
         raise ValueError(f"iscrowd {raw!r} is not 0, 1, true or false")
     return bool(raw)
@@ -150,17 +156,19 @@ def box_extent_ok(bbox: BBox) -> bool:
 
 
 def stored_box_extent_ok(bbox: BBox) -> bool:
-    """Whether ``bbox`` still has positive extent once rounded to the stored 2-decimal quantum: a
-    box can pass :func:`box_extent_ok` on its raw corners and still round to zero width or height
-    at the grid :func:`xywh` stores.
+    """Return whether ``bbox`` still has positive extent once rounded to the stored grid.
+
+    The grid is the 2-decimal quantum :func:`xywh` stores: a box can pass :func:`box_extent_ok` on
+    its raw corners and still round to zero width or height there.
     """
     _, _, w, h = xywh(bbox.x1, bbox.y1, bbox.x2, bbox.y2)
     return w > 0 and h > 0
 
 
 def check_box_extent(bbox: BBox, *, where: str) -> None:
-    """Refuse a box with no real extent: ``x2 <= x1`` or ``y2 <= y1``. ``where`` names what is
-    being written (a subject, a reviewer action, or a record index).
+    """Refuse a box with no real extent: ``x2 <= x1`` or ``y2 <= y1``.
+
+    ``where`` names what is being written (a subject, a reviewer action, or a record index).
     """
     if not box_extent_ok(bbox):
         raise ValueError(
@@ -170,8 +178,10 @@ def check_box_extent(bbox: BBox, *, where: str) -> None:
 
 
 def ring_vertex(vertex) -> tuple:
-    """A polygon ring vertex's ``(x, y)`` as given, from an ``[x, y]`` pair or an ``{"x":, "y":}``
-    mapping, or ``ValueError`` for any other shape. The values are not interpreted here.
+    """Return a polygon ring vertex's ``(x, y)`` as given.
+
+    The vertex is an ``[x, y]`` pair or an ``{"x":, "y":}`` mapping; any other shape raises
+    ``ValueError``. The values are not interpreted here.
     """
     if isinstance(vertex, Mapping) and "x" in vertex and "y" in vertex:
         return vertex["x"], vertex["y"]
@@ -229,9 +239,11 @@ def stamped(
     author: str,
     now: str,
 ) -> list[Annotation]:
-    """``contents`` with their provenance: each one whose stored content (:func:`stored_content`)
-    equals a not yet claimed record of ``stored`` takes that record's provenance, and every other
-    one is authored by ``author`` at ``now`` with no sign-off.
+    """Return ``contents`` with their provenance.
+
+    Each one whose stored content (:func:`stored_content`) equals a not yet claimed record of
+    ``stored`` takes that record's provenance, and every other one is authored by ``author`` at
+    ``now`` with no sign-off.
     """
     unclaimed: dict[str, list[Annotation]] = {}
     for record in stored:
@@ -375,9 +387,11 @@ FINISHED_STATES = frozenset(
 
 @dataclass(frozen=True)
 class CompletionMark:
-    """A person's attestation that every instance of one subject inside ``rect`` (pixel ``[x, y,
-    w, h]``) is annotated: who (``by``) and when (``at``), the :func:`subject_digest` of that
-    subject's annotations when it was made, and whether proposals were hidden while it was made.
+    """A person's attestation that every instance of one subject inside ``rect`` is annotated.
+
+    ``rect`` is pixel ``[x, y, w, h]``. The mark holds who (``by``) and when (``at``), the
+    :func:`subject_digest` of that subject's annotations when it was made, and whether proposals
+    were hidden while it was made.
     """
 
     rect: tuple[float, float, float, float]
@@ -388,16 +402,19 @@ class CompletionMark:
 
 
 def canonical_digest(value) -> str:
-    """The platform's content digest of a JSON value: sha256 over its compact serialization, in
-    the value's own key order, first sixteen hex digits.
+    """Return the platform's content digest of a JSON value.
+
+    The digest is sha256 over its compact serialization, in the value's own key order, first
+    sixteen hex digits.
     """
     canonical = json.dumps(value, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
 def subject_digest(annotations: Iterable[Annotation], subject: str) -> str:
-    """The :func:`canonical_digest` of ``subject``'s annotations as stored, provenance aside, in
-    an order independent of the order they were drawn in.
+    """Return the :func:`canonical_digest` of ``subject``'s annotations as stored.
+
+    Provenance is left aside, and the order is independent of the order they were drawn in.
     """
     return canonical_digest(
         sorted(_content_key(a) for a in annotations if a.subject == subject)
@@ -420,10 +437,12 @@ def _live(
 def completion_marks(
     data: dict, annotations: list[Annotation]
 ) -> dict[str, list[CompletionMark]]:
-    """The live completion marks a parsed document holds, by subject: the ones whose digest still
-    names that subject's ``annotations``. Raises :class:`UnreadableLabelDocumentError` naming the
-    subject and index of a mark that is not a rect of four numbers, a person (:func:`is_person`), a
-    time, a digest and a ``proposals_hidden`` flag.
+    """Return the live completion marks a parsed document holds, by subject.
+
+    The live ones are those whose digest still names that subject's ``annotations``. Raises
+    :class:`UnreadableLabelDocumentError` naming the subject and index of a mark that is not a rect
+    of four numbers, a person (:func:`is_person`), a time, a digest and a ``proposals_hidden``
+    flag.
     """
     raw = data.get(COMPLETION_KEY) or {}
     if not isinstance(raw, dict):
@@ -477,8 +496,9 @@ def _flag(value) -> bool:
 def covers(
     marks: Iterable[CompletionMark], rect: tuple[float, float, float, float]
 ) -> bool:
-    """Whether the union of ``marks``' rects covers the half-open pixel ``rect`` ``(x0, y0, x1,
-    y1)``, every point of it.
+    """Return whether the union of ``marks``' rects covers every point of the pixel ``rect``.
+
+    ``rect`` is half-open, ``(x0, y0, x1, y1)``.
     """
     boxes = [(x, y, x + w, y + h) for x, y, w, h in (m.rect for m in marks)]
     x0, y0, x1, y1 = rect
@@ -500,10 +520,11 @@ def covers(
 
 @dataclass(frozen=True)
 class LabelDocument:
-    """One image's label document as read: its annotations, its ``width`` and ``height``
-    (``None`` for a document that states none), each subject's live completion marks, and the
-    detection ``cap`` the pass that predicted a prediction document kept its frame to (``None``
-    for a document no pass predicted).
+    """One image's label document as read.
+
+    It holds its annotations, its ``width`` and ``height`` (``None`` for a document that states
+    none), each subject's live completion marks, and the detection ``cap`` the pass that predicted
+    a prediction document kept its frame to (``None`` for a document no pass predicted).
     """
 
     annotations: list[Annotation]
@@ -523,7 +544,9 @@ class LabelDocument:
         )
 
     def state(self, subject: str) -> SubjectState:
-        """What this document says about ``subject``: :meth:`finished` or not, holding it by
+        """Return what this document says about ``subject``.
+
+        The state is :meth:`finished` or not, crossed with holding it by
         :func:`annotations_hold_subject` or not.
         """
         return _STATE_OF[
@@ -535,15 +558,17 @@ class LabelDocument:
 def annotations_hold_subject(
     annotations: Iterable[Annotation], subject: str
 ) -> bool:
-    """Whether any of ``annotations`` names ``subject``, geometry or not: an image-level record
-    counts.
+    """Return whether any of ``annotations`` names ``subject``, geometry or not.
+
+    An image-level record counts.
     """
     return any(a.subject == subject for a in annotations)
 
 
 def label_document(data: dict) -> LabelDocument:
-    """A stored per-image document as a :class:`LabelDocument`; refuses as
-    :func:`_annotations_of` and :func:`completion_marks` do.
+    """Return a stored per-image document as a :class:`LabelDocument`.
+
+    Refuses as :func:`_annotations_of` and :func:`completion_marks` do.
     """
     annotations = _annotations_of(data)
     return LabelDocument(
@@ -565,7 +590,8 @@ NO_DOCUMENT = LabelDocument(
 
 
 def document_at(key: Key, stored: tcip_store.Versioned) -> LabelDocument:
-    """``stored``, what the store answered for ``key``, as a :class:`LabelDocument`:
+    """Return ``stored``, what the store answered for ``key``, as a :class:`LabelDocument`.
+
     :data:`NO_DOCUMENT` at ``Version.ABSENT``, else its value decoded, a value
     :func:`label_document` refuses raising :class:`UnreadableLabelDocumentError` naming ``key``.
     """
@@ -580,10 +606,10 @@ def document_at(key: Key, stored: tcip_store.Versioned) -> LabelDocument:
 
 
 def read_stored(key: Key, **default: Any) -> tcip_store.Versioned:
-    """The store's read of ``key`` (:func:`tcip_store.read_versioned`, ``default`` passed
-    through); a record that does not decode, and an absent one read with no default
-    (``NotFoundError``), raise :class:`UnreadableLabelDocumentError` with the store's own
-    message.
+    """Return the store's read of ``key`` (:func:`tcip_store.read_versioned`, ``default`` passed).
+
+    A record that does not decode, and an absent one read with no default (``NotFoundError``),
+    raise :class:`UnreadableLabelDocumentError` with the store's own message.
     """
     try:
         return tcip_store.read_versioned(key, **default)
@@ -592,18 +618,20 @@ def read_stored(key: Key, **default: Any) -> tcip_store.Versioned:
 
 
 def read_document_versioned(key: Key) -> tuple[LabelDocument, Version]:
-    """The editor's read: the document ``key`` names (:func:`document_at`, :data:`NO_DOCUMENT`
-    where the store holds none) and the version it was read at. A record that does not decode
-    raises :class:`UnreadableLabelDocumentError` naming it.
+    """Return the document ``key`` names and the version it was read at.
+
+    The document is :func:`document_at`'s, :data:`NO_DOCUMENT` where the store holds none. A
+    record that does not decode raises :class:`UnreadableLabelDocumentError` naming it.
     """
     stored = read_stored(key, default=None)
     return document_at(key, stored), stored.version
 
 
 def read_label_document(key: Key, version: str | None = None) -> LabelDocument:
-    """The document ``key`` names, read through the store's required read, at ``version`` (a
-    version token) when one is given. No record, another version, or a record that does not
-    decode raises :class:`UnreadableLabelDocumentError` naming it.
+    """Return the document ``key`` names, read through the store's required read.
+
+    The read is at ``version`` (a version token) when one is given. No record, another version,
+    or a record that does not decode raises :class:`UnreadableLabelDocumentError` naming it.
     """
     stored = read_stored(key)
     if version is not None and stored.version.token != version:
@@ -616,8 +644,10 @@ def read_label_document(key: Key, version: str | None = None) -> LabelDocument:
 
 
 def read_predictions(key: Key) -> LabelDocument:
-    """A prediction document, its records each stating its ``score``, beside the ``cap`` it was
-    kept to: a record stating none raises :class:`UnreadableLabelDocumentError` naming it
+    """Return a prediction document, its records each stating its ``score``, beside its ``cap``.
+
+    The ``cap`` is the one it was kept to. A record stating no score raises
+    :class:`UnreadableLabelDocumentError` naming it
     (:func:`~tcip_annotation.state.prediction_score`).
     """
     document = read_label_document(key)
@@ -632,8 +662,10 @@ def read_predictions(key: Key) -> LabelDocument:
 def detection_annotations(
     annotations: Iterable[Annotation],
 ) -> list[Annotation]:
-    """``annotations`` narrowed to the detections a count counts
-    (:func:`~tcip_annotation.state.is_detection`: a crowd region and a ``Point`` excluded).
+    """Return ``annotations`` narrowed to the detections a count counts.
+
+    The narrowing is :func:`~tcip_annotation.state.is_detection`: a crowd region and a ``Point``
+    excluded.
     """
     return [a for a in annotations if is_detection(a)]
 
@@ -660,17 +692,19 @@ doors refuse on."""
 
 
 def person_name(text: str) -> str | None:
-    """The name ``text`` states under :data:`PERSON_NAME_RULE`, without the prefix; ``None`` when
-    it names no one.
+    """Return the name ``text`` states under :data:`PERSON_NAME_RULE`, without the prefix.
+
+    ``None`` when it names no one.
     """
     match = re.match(PERSON_NAME_RULE, text)
     return None if match is None else match.group(1)
 
 
 def is_person(identity: object) -> bool:
-    """Whether ``identity`` is a person's recorded identity: a string holding
-    :data:`PERSON_IDENTITY_PREFIX` followed by the name :data:`PERSON_NAME_RULE` captures from it,
-    with nothing else around them.
+    """Return whether ``identity`` is a person's recorded identity.
+
+    That is a string holding :data:`PERSON_IDENTITY_PREFIX` followed by the name
+    :data:`PERSON_NAME_RULE` captures from it, with nothing else around them.
     """
     if not isinstance(identity, str):
         return False
@@ -679,30 +713,33 @@ def is_person(identity: object) -> bool:
 
 
 def is_person_signoff(a: Annotation) -> bool:
-    """True when ``a``'s ``accepted_by`` names a person (:func:`is_person`)."""
+    """Return whether ``a``'s ``accepted_by`` names a person (:func:`is_person`)."""
     return is_person(a.accepted_by)
 
 
 def is_unadjudicated_prediction(a: Annotation) -> bool:
-    """True when ``a`` is a model's own output that no human has taken responsibility for: a set
-    ``score`` (see :class:`~tcip_annotation.state.Annotation`). Accepting a prediction into ground
-    truth drops its ``score`` and stamps ``accepted_by``.
+    """Return whether ``a`` is a model's own output that no human has taken responsibility for.
+
+    That is a set ``score`` (see :class:`~tcip_annotation.state.Annotation`).
     """
     return a.score is not None
 
 
 def is_unadjudicated_agent_authorship(a: Annotation) -> bool:
-    """True when ``a`` names a producer that is not a person and no reviewer has signed off on it:
-    its :func:`authorship_of` is ``"tool"``.
+    """Return whether ``a`` names a non-person producer and no reviewer has signed off on it.
+
+    That is its :func:`authorship_of` being ``"tool"``.
     """
     return authorship_of(a) == "tool"
 
 
 def authorship_of(a: Annotation) -> str:
-    """``a``'s authorship, one of ``"person"`` (a person created it, :func:`is_person`),
-    ``"tool_accepted"`` (a person signed it off, :func:`is_person_signoff`), ``"tool"`` (a
-    producer that is no person, such as a bare name or a ``model:<checkpoint>`` stamp, with no
-    person's sign-off) or ``"unattributed"`` (no producer and no person's sign-off).
+    """Return ``a``'s authorship.
+
+    One of ``"person"`` (a person created it, :func:`is_person`), ``"tool_accepted"`` (a person
+    signed it off, :func:`is_person_signoff`), ``"tool"`` (a producer that is no person, such as a
+    bare name or a ``model:<checkpoint>`` stamp, with no person's sign-off) or ``"unattributed"``
+    (no producer and no person's sign-off).
     """
     if is_person(a.created_by):
         return "person"
@@ -713,10 +750,10 @@ def authorship_of(a: Annotation) -> str:
 
 @dataclass
 class ProvenanceFacts:
-    """The provenance classification over one list of annotations: ``scored``
-    (:func:`is_unadjudicated_prediction`) and ``machine_authored``
-    (:func:`is_unadjudicated_agent_authorship`), the latter an index list into the annotations
-    passed in.
+    """The provenance classification over one list of annotations.
+
+    ``scored`` counts :func:`is_unadjudicated_prediction`; ``machine_authored``
+    (:func:`is_unadjudicated_agent_authorship`) is an index list into the annotations passed in.
     """
 
     total: int
@@ -725,7 +762,7 @@ class ProvenanceFacts:
 
 
 def provenance_facts(annotations: list[Annotation]) -> ProvenanceFacts:
-    """The :class:`ProvenanceFacts` classification over ``annotations``."""
+    """Return the :class:`ProvenanceFacts` classification over ``annotations``."""
     scored = 0
     machine_authored: list[int] = []
     for i, a in enumerate(annotations):
@@ -741,12 +778,11 @@ def provenance_facts(annotations: list[Annotation]) -> ProvenanceFacts:
 
 
 def require_reference_ground_truth(annotations: list[Annotation]) -> None:
-    """Refuse the label documents' ``annotations`` as a measurement reference when only the model
-    stands behind them.
+    """Refuse ``annotations`` as a measurement reference when only the model stands behind them.
 
-    Refuses on a record carrying a prediction ``score`` and on a record an agent authored as
-    ground truth with no person's ``accepted_by``. Refuses the whole reference, never by dropping
-    the offending records.
+    The annotations are the label documents'. Refuses on a record carrying a prediction ``score``
+    and on a record an agent authored as ground truth with no person's ``accepted_by``. Refuses
+    the whole reference, never by dropping the offending records.
     """
     facts = provenance_facts(annotations)
     scored, total, agent_authored = (
@@ -783,7 +819,7 @@ def require_reference_ground_truth(annotations: list[Annotation]) -> None:
 def xywh(
     x1: float, y1: float, x2: float, y2: float, *, on_grid: bool = True
 ) -> list[float]:
-    """A box in corner form as this schema's ``bbox``: COCO ``[x, y, w, h]``.
+    """Return a box in corner form as this schema's ``bbox``: COCO ``[x, y, w, h]``.
 
     A pixel box is put on the 2-decimal quantum, the grid the stored document lives on and the grid
     anything comparing a stored box against another box has to be on. ``on_grid=False`` is for a
@@ -797,8 +833,9 @@ def xywh(
 
 
 def _stored_bbox_or_raise(bbox: BBox, *, where: str) -> list[float]:
-    """A box's stored ``xywh``, refusing one whose rounded extent is not positive
-    (:func:`stored_box_extent_ok`).
+    """Return a box's stored ``xywh``, refusing one whose rounded extent is not positive.
+
+    The extent check is :func:`stored_box_extent_ok`.
     """
     if not stored_box_extent_ok(bbox):
         raise ValueError(
@@ -811,7 +848,7 @@ def _stored_bbox_or_raise(bbox: BBox, *, where: str) -> list[float]:
 def _rounded_rings(
     rings: list[list[tuple[float, float]]],
 ) -> list[list[tuple[float, float]]]:
-    """A polygon's rings with each vertex rounded to the document's stored 2-decimal grid."""
+    """Return a polygon's rings with each vertex rounded to the document's stored 2-decimal grid."""
     return [
         [(round(float(x), 2), round(float(y), 2)) for x, y in ring]
         for ring in rings
@@ -819,8 +856,9 @@ def _rounded_rings(
 
 
 def geometry_extent_ok(geometry: BBox | Polygon) -> bool:
-    """Whether ``geometry`` still has positive extent once written to its stored grid. A
-    :class:`Polygon`'s vertices round to two decimals before its box is derived, the same order
+    """Return whether ``geometry`` still has positive extent once written to its stored grid.
+
+    A :class:`Polygon`'s vertices round to two decimals before its box is derived, the same order
     :func:`document_payload` stores them in.
     """
     if polygonal(geometry):
@@ -831,7 +869,8 @@ def geometry_extent_ok(geometry: BBox | Polygon) -> bool:
 
 
 def stored_content(a: Annotation) -> dict:
-    """One annotation as its stored JSON object, provenance aside: its content on the stored grid.
+    """Return one annotation as its stored JSON object, provenance aside, on the stored grid.
+
     Its attributes are read through :func:`attributes_of`, raising ``ValueError`` on a value the
     reader would refuse.
     """
@@ -863,14 +902,15 @@ def stored_content(a: Annotation) -> dict:
 
 
 def _held_provenance(a: Annotation) -> dict:
-    """The provenance fields ``a`` holds, under the schema's own key names; a field it does not
-    hold is absent, never ``None``.
+    """Return the provenance fields ``a`` holds, under the schema's own key names.
+
+    A field it does not hold is absent, never ``None``.
     """
     return {k: getattr(a, k) for k in _PROV_KEYS if getattr(a, k) is not None}
 
 
 def client_annotation(a: Annotation) -> dict:
-    """``a`` as the dict a client reads.
+    """Return ``a`` as the dict a client reads.
 
     ``bbox`` in corner form ``[x1, y1, x2, y2]``; ``rings`` for a polygon, every ring; ``point``
     for a placed prompt or keypoint, the stored key; ``attributes``; ``score`` for a prediction;
@@ -903,11 +943,12 @@ def document_payload(
     marks: Mapping[str, list[CompletionMark]] | None = None,
     cap: int | None = None,
 ) -> dict | None:
-    """The record one image's per-image document holds: its frame, its annotations, of
-    ``marks`` each subject's whose digest still names that subject's annotations here, and a
-    prediction document's detection ``cap`` when given. Refuses (``ValueError``) the first
-    geometry the stored grid collapses. ``None`` when neither a record nor a mark survives and
-    ``keep_empty`` is not set.
+    """Return the record one image's per-image document holds.
+
+    It holds its frame, its annotations, of ``marks`` each subject's whose digest still names that
+    subject's annotations here, and a prediction document's detection ``cap`` when given. Refuses
+    (``ValueError``) the first geometry the stored grid collapses. ``None`` when neither a record
+    nor a mark survives and ``keep_empty`` is not set.
     """
     annotations = list(annotations)
     records = [
@@ -950,12 +991,13 @@ def write_label_document(
     expect: Version | None = None,
     marks: Mapping[str, list[CompletionMark]] | None = None,
 ) -> Version | None:
-    """Write all of an image's annotations, and the completion ``marks`` still live over them
-    (:func:`document_payload`), as the document ``key`` names. An empty list writes an empty
-    document under ``keep_empty``, else removes the document. ``expect`` (a version
-    :func:`read_document_versioned` answered) makes the write a compare-and-set raising
-    ``VersionConflictError`` with nothing written. Returns the new version, or ``None`` when the
-    document was removed.
+    """Write all of an image's annotations as the document ``key`` names.
+
+    The completion ``marks`` still live over them are written with them
+    (:func:`document_payload`). An empty list writes an empty document under ``keep_empty``, else
+    removes the document. ``expect`` (a version :func:`read_document_versioned` answered) makes
+    the write a compare-and-set raising ``VersionConflictError`` with nothing written. Returns the
+    new version, or ``None`` when the document was removed.
     """
     payload = document_payload(
         annotations, width, height, keep_empty=keep_empty, marks=marks
@@ -974,15 +1016,18 @@ UNASSESSED = -1
 
 
 class AttributeRecord(Protocol):
-    """An attribute as a scope declares it: its ``name`` and its ``values`` in declared order, a
-    value's id being its position there.
+    """An attribute as a scope declares it: its ``name`` and its ``values`` in declared order.
+
+    A value's id is its position there.
     """
 
     @property
-    def name(self) -> str: ...
+    def name(self) -> str:
+        """The attribute's name."""
 
     @property
-    def values(self) -> tuple[str, ...]: ...
+    def values(self) -> tuple[str, ...]:
+        """The attribute's value names in declared order."""
 
 
 class UndeclaredValueError(ValueError):
@@ -992,10 +1037,11 @@ class UndeclaredValueError(ValueError):
 def attribute_ids(
     a: Annotation, subject: str, attributes: Iterable[AttributeRecord]
 ) -> list[int] | None:
-    """The id of ``a``'s value under each of ``attributes``, in their order, :data:`UNASSESSED`
-    where ``a`` carries no value for one; ``None`` for a record of a subject other than
-    ``subject``. Refuses (:class:`UndeclaredValueError`) a value its attribute does not declare,
-    naming both.
+    """Return the id of ``a``'s value under each of ``attributes``, in their order.
+
+    :data:`UNASSESSED` where ``a`` carries no value for one; ``None`` for a record of a subject
+    other than ``subject``. Refuses (:class:`UndeclaredValueError`) a value its attribute does not
+    declare, naming both.
     """
     if a.subject != subject:
         return None
@@ -1016,8 +1062,9 @@ def attribute_ids(
 def attribute_values(
     ids: Iterable[int], attributes: Iterable[AttributeRecord]
 ) -> dict[str, str]:
-    """``{name: value}`` for each of ``attributes`` the id row ``ids`` assesses, the inverse of
-    :func:`attribute_ids`.
+    """Return ``{name: value}`` for each of ``attributes`` the id row ``ids`` assesses.
+
+    This is the inverse of :func:`attribute_ids`.
     """
     return {
         attribute.name: attribute.values[int(i)]

@@ -77,7 +77,7 @@ _PRIMITIVE = {
 
 
 def declared_models() -> list[type[BaseModel]]:
-    """The models this script renders, in the order their interfaces are emitted."""
+    """Return the models this script renders, in the order their interfaces are emitted."""
     from tcip_mcp.experiments import (
         RunRow,
         SweepGroup,
@@ -227,6 +227,7 @@ TRANSPORT_MODELS = ("GuiState", "DatasetSelection", "ViewState")
 
 
 def render_cache_version() -> int:
+    """Return the backend's ``RENDER_CACHE_VERSION`` from ``tcip_web.routes.images``."""
     from tcip_web.routes.images import RENDER_CACHE_VERSION
 
     return RENDER_CACHE_VERSION
@@ -273,8 +274,9 @@ def tuple_constants() -> dict[str, tuple[str, ...]]:
 
 
 def platform_panel_event_constants() -> list[tuple[str, str]]:
-    """Each named panel-event constant ``tcip_mcp.web_client`` declares (``PANEL_EVENT_*``), in
-    the module's own declaration order.
+    """Return each named panel-event constant ``tcip_mcp.web_client`` declares.
+
+    The constants are the ``PANEL_EVENT_*`` names, in the module's own declaration order.
     """
     from tcip_mcp import web_client
 
@@ -379,7 +381,7 @@ def _interface(name: str, schema: dict) -> str:
 
 
 def render() -> str:
-    """The full text of the generated module."""
+    """Return the full text of the generated module."""
     from tcip_mcp.web_client import GuiState
 
     models = declared_models()
@@ -428,6 +430,7 @@ def render() -> str:
 
 
 def main() -> int:
+    """Write the generated types module and return 0."""
     GENERATED_PATH.write_text(render(), encoding="utf-8", newline="\n")
     print(f"wrote {GENERATED_PATH}")
     return 0
