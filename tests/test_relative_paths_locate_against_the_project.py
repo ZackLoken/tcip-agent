@@ -861,13 +861,19 @@ def test_a_run_carried_whole_builds_from_its_snapshot_never_a_same_named_file(
     builds from the run's snapshot; that file never answers.
     """
     pytest.importorskip("torchvision")
-    from tcip_mcp.tools.project_tools import import_project, write_archive
+    from tcip_mcp.tools.project_tools import (
+        ZipBundle,
+        import_project,
+        write_archive,
+    )
 
     project, carried = tmp_path / "project", tmp_path / "carried"
     module, checkpoint = _authored_checkpoint(project, monkeypatch)
     bundle = tmp_path / "bundle.zip"
     assert "error" not in write_archive(
-        project.resolve(), output_path=str(bundle), include_models=True
+        project.resolve(),
+        ZipBundle(output_path=str(bundle)),
+        include_models=True,
     )
     assert "error" not in import_project(str(bundle), str(carried))
     (carried / f"{module}.py").write_text(

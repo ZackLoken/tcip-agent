@@ -11,7 +11,11 @@ from pathlib import Path
 import pytest
 
 import tcip_store as ts
-from tcip_mcp.tools.project_tools import archive_project, import_project
+from tcip_mcp.tools.project_tools import (
+    ZipBundle,
+    archive_project,
+    import_project,
+)
 from tcip_mcp.web_client import gui_snapshot_key
 from tcip_store.file_backend import lock_file_for
 from tests._chain_fixtures import BESPOKE_DETECTION, FRAME_STATISTICS
@@ -35,7 +39,9 @@ def test_import_refuses_a_non_empty_destination_and_changes_nothing(
 ):
     root = one_labeled_capture(tmp_path / "source")
     zip_path = tmp_path / "bundle.zip"
-    assert "error" not in archive_project(root, str(zip_path))
+    assert "error" not in archive_project(
+        root, ZipBundle(output_path=str(zip_path))
+    )
 
     dest = tmp_path / "dest"
     dest.mkdir()
@@ -57,7 +63,9 @@ def test_import_refuses_a_non_empty_destination_and_changes_nothing(
 def test_import_admits_a_pre_existing_empty_destination(tmp_path):
     root = one_labeled_capture(tmp_path / "source")
     zip_path = tmp_path / "bundle.zip"
-    assert "error" not in archive_project(root, str(zip_path))
+    assert "error" not in archive_project(
+        root, ZipBundle(output_path=str(zip_path))
+    )
 
     dest = tmp_path / "dest"
     dest.mkdir()
@@ -134,7 +142,9 @@ def test_import_refuses_a_corrupt_zip_without_stranding_a_staging_tree(
 ):
     root = one_labeled_capture(tmp_path / "source")
     zip_path = tmp_path / "bundle.zip"
-    assert "error" not in archive_project(root, str(zip_path))
+    assert "error" not in archive_project(
+        root, ZipBundle(output_path=str(zip_path))
+    )
     data = zip_path.read_bytes()
     zip_path.write_bytes(
         data[: len(data) // 2]
@@ -156,7 +166,9 @@ def test_a_record_travels_inside_the_database_the_archive_copies(tmp_path):
     record = {"active_subject": "x"}
     root = one_labeled_capture(tmp_path / "source")
     ts.replace(gui_snapshot_key(root), record, expect=ts.Version.ABSENT)
-    assert "error" not in archive_project(root, str(tmp_path / "bundle.zip"))
+    assert "error" not in archive_project(
+        root, ZipBundle(output_path=str(tmp_path / "bundle.zip"))
+    )
 
     dest = tmp_path / "dest"
     result = import_project(str(tmp_path / "bundle.zip"), str(dest))
@@ -176,7 +188,9 @@ def test_a_locked_staging_sibling_is_left_alone_while_another_import_completes(
 
     root = one_labeled_capture(tmp_path / "source")
     zip_path = tmp_path / "bundle.zip"
-    assert "error" not in archive_project(root, str(zip_path))
+    assert "error" not in archive_project(
+        root, ZipBundle(output_path=str(zip_path))
+    )
 
     dest = tmp_path / "dest"
     imports_root = dest.parent / ".imports"
@@ -202,7 +216,9 @@ def test_a_free_locked_leftover_staging_sibling_is_swept_with_its_lock_file(
 ):
     root = one_labeled_capture(tmp_path / "source")
     zip_path = tmp_path / "bundle.zip"
-    assert "error" not in archive_project(root, str(zip_path))
+    assert "error" not in archive_project(
+        root, ZipBundle(output_path=str(zip_path))
+    )
 
     dest = tmp_path / "dest"
     imports_root = dest.parent / ".imports"
@@ -233,7 +249,9 @@ def test_dataset_registry_stores_the_relative_dot_after_import(tmp_path):
     assert "error" not in registered
 
     zip_path = tmp_path / "bundle.zip"
-    assert "error" not in archive_project(root, str(zip_path))
+    assert "error" not in archive_project(
+        root, ZipBundle(output_path=str(zip_path))
+    )
     dest = tmp_path / "dest"
     imported = import_project(str(zip_path), str(dest))
 
@@ -258,7 +276,9 @@ def test_dataset_registry_travels_with_nothing_rewritten(tmp_path):
     assert "error" not in registered
 
     zip_path = tmp_path / "bundle.zip"
-    assert "error" not in archive_project(root, str(zip_path))
+    assert "error" not in archive_project(
+        root, ZipBundle(output_path=str(zip_path))
+    )
     dest = tmp_path / "dest"
     imported = import_project(str(zip_path), str(dest))
 
@@ -276,7 +296,9 @@ def test_an_external_dataset_entry_stays_absolute_and_is_disclosed(tmp_path):
     assert "error" not in registered
 
     zip_path = tmp_path / "bundle.zip"
-    assert "error" not in archive_project(root, str(zip_path))
+    assert "error" not in archive_project(
+        root, ZipBundle(output_path=str(zip_path))
+    )
     dest = tmp_path / "dest"
     imported = import_project(str(zip_path), str(dest))
 
@@ -346,7 +368,7 @@ def test_a_splits_root_nested_under_a_nested_dataset_root_archives_and_round_tri
     assert "error" not in splits_result, splits_result
 
     zip_path = tmp_path / "bundle.zip"
-    archived = archive_project(project, str(zip_path))
+    archived = archive_project(project, ZipBundle(output_path=str(zip_path)))
     assert "error" not in archived, archived
 
     dest = tmp_path / "dest"
@@ -451,7 +473,9 @@ def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(
     assert "error" not in splits_result, splits_result
 
     zip_path = tmp_path / "bundle.zip"
-    assert "error" not in archive_project(root, str(zip_path))
+    assert "error" not in archive_project(
+        root, ZipBundle(output_path=str(zip_path))
+    )
 
     dest = tmp_path / "restored"
     imported = import_project(str(zip_path), str(dest))

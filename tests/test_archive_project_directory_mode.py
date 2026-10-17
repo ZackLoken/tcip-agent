@@ -6,14 +6,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tcip_mcp.tools.project_tools import archive_project, import_project
+from tcip_mcp.tools.project_tools import (
+    TreeBundle,
+    ZipBundle,
+    archive_project,
+    import_project,
+)
 from tests._producer_fixtures import one_labeled_capture
 
 
 def test_archive_project_refuses_a_destination_inside_the_project(tmp_path):
     root = one_labeled_capture(tmp_path / "project")
 
-    result = archive_project(root, output_dir=str(root / "bundle"))
+    result = archive_project(root, TreeBundle(output_dir=str(root / "bundle")))
 
     assert "error" in result
     assert "inside the project" in result["error"]
@@ -26,7 +31,7 @@ def test_archive_project_refuses_a_non_empty_destination(tmp_path):
     dest.mkdir()
     (dest / "already_here.txt").write_text("x", encoding="utf-8")
 
-    result = archive_project(root, output_dir=str(dest))
+    result = archive_project(root, TreeBundle(output_dir=str(dest)))
 
     assert "error" in result
     assert "already exists" in result["error"]
@@ -44,13 +49,17 @@ def test_archive_project_refuses_a_zip_destination_inside_the_project_or_already
     root = one_labeled_capture(tmp_path / "project")
     outside = tmp_path / "bundle.zip"
 
-    inside = archive_project(root, output_path=str(root / "archive.zip"))
+    inside = archive_project(
+        root, ZipBundle(output_path=str(root / "archive.zip"))
+    )
     assert "inside the project" in inside["error"]
     assert not (root / "archive.zip").exists()
 
-    assert "error" not in archive_project(root, output_path=str(outside))
+    assert "error" not in archive_project(
+        root, ZipBundle(output_path=str(outside))
+    )
     written = outside.read_bytes()
-    again = archive_project(root, output_path=str(outside))
+    again = archive_project(root, ZipBundle(output_path=str(outside)))
     assert "already exists" in again["error"]
     assert outside.read_bytes() == written
 
@@ -59,40 +68,20 @@ def test_archive_project_refuses_a_zip_destination_inside_the_project_or_already
     monkeypatch.chdir(elsewhere)
     assert (
         "inside the project"
-        in archive_project(root, output_path="archive.zip")["error"]
+        in archive_project(root, ZipBundle(output_path="archive.zip"))["error"]
     )
-    assert "error" not in archive_project(root, output_path="../beside.zip")
+    assert "error" not in archive_project(
+        root, ZipBundle(output_path="../beside.zip")
+    )
     assert (tmp_path / "beside.zip").is_file()
     assert list(elsewhere.iterdir()) == []
-
-
-def test_archive_project_refuses_both_output_path_and_output_dir(tmp_path):
-    root = one_labeled_capture(tmp_path / "project")
-
-    result = archive_project(
-        root,
-        output_path=str(tmp_path / "bundle.zip"),
-        output_dir=str(tmp_path / "bundle"),
-    )
-
-    assert "error" in result
-    assert "not both" in result["error"]
-
-
-def test_archive_project_refuses_neither_output_path_nor_output_dir(tmp_path):
-    root = one_labeled_capture(tmp_path / "project")
-
-    result = archive_project(root)
-
-    assert "error" in result
-    assert "give either output_path" in result["error"]
 
 
 def test_archive_project_directory_mode_admits_valid_work(tmp_path):
     root = one_labeled_capture(tmp_path / "project")
     dest = tmp_path / "bundle"
 
-    result = archive_project(root, output_dir=str(dest))
+    result = archive_project(root, TreeBundle(output_dir=str(dest)))
 
     assert "error" not in result, result
     assert result["output_dir"] == str(dest)
@@ -105,8 +94,8 @@ def test_archive_project_directory_mode_admits_valid_work(tmp_path):
 def test_directory_bundle_round_trip_yields_the_same_records_as_the_zip_round_trip(
     tmp_path,
 ):
-    """archive_project(output_dir=...) -> import_project recovers a project, its band-group
-    manifest and its multi-band-file capture included.
+    """A bundle written as a tree and imported recovers a project, its band-group manifest and
+    its multi-band-file capture included.
     """
     from tcip_mcp.tools.project_tools import (
         initialize_project,
@@ -124,7 +113,7 @@ def test_directory_bundle_round_trip_yields_the_same_records_as_the_zip_round_tr
     assert "error" not in reg, reg
 
     bundle_dir = tmp_path / "bundle"
-    exported = archive_project(src, output_dir=str(bundle_dir))
+    exported = archive_project(src, TreeBundle(output_dir=str(bundle_dir)))
     assert "error" not in exported, exported
     assert bundle_dir.is_dir()
 

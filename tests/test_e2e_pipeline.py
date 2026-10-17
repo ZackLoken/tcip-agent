@@ -27,6 +27,7 @@ from tcip_mcp.tools.data_tools import (
     scan_dataset,
 )
 from tcip_mcp.tools.project_tools import (
+    ZipBundle,
     archive_project,
     initialize_project,
     inspect_project,
@@ -236,7 +237,9 @@ class TestE2EPipeline:
 
         # ── Step 11: Export project as ZIP ───────────────────────────
         zip_path = str(tmp_path / "export.zip")
-        export_result = archive_project(project_dir, zip_path)
+        export_result = archive_project(
+            project_dir, ZipBundle(output_path=zip_path)
+        )
         assert "error" not in export_result
         assert Path(zip_path).is_file()
         assert Path(zip_path).stat().st_size > 0

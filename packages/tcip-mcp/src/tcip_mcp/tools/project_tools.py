@@ -8,11 +8,14 @@ import uuid
 import zipfile
 from pathlib import Path
 
+from pydantic import BaseModel, ConfigDict
+
 import tcip_store
 from tcip_mcp.audit import audited
 from tcip_mcp.project_record import CaptureInvariances
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
+from tcip_mcp.traits import Text
 from tcip_store import Key, VersionConflictError, encode_record
 
 
@@ -70,7 +73,7 @@ def upsert_dataset(project: str | Path, entry: dict) -> None:
 
 @tool()
 @audited(scope_arg="dataset_root")
-def register_dataset(project: Path, dataset_root: str, crop: str) -> dict:
+def register_dataset(project: Path, dataset_root: str, crop: Text) -> dict:
     """Record a dataset's identity, ``{crop, id, fingerprint}``, with the dataset, and its id and
     path (:func:`~tcip_mcp.registry_paths.stored_path`) in the project's dataset registry. ``id``
     is minted once and kept across re-runs and moves, ``fingerprint`` is
@@ -81,8 +84,8 @@ def register_dataset(project: Path, dataset_root: str, crop: str) -> dict:
     Args:
         dataset_root: Root of the dataset (holds ``images/``, ``subjects.json`` and the database
             its label documents are records in).
-        crop: The crop this dataset's imagery is of, as ``crops.yml`` names it. Required; the
-            expert's fact.
+        crop: The crop this dataset's imagery is of, as ``crops.yml`` names it: the expert's
+            fact, required non-empty text and never inferred from a path or slug.
 
     """
     from tcip_mcp.dataset_layout import (
@@ -96,10 +99,6 @@ def register_dataset(project: Path, dataset_root: str, crop: str) -> dict:
     root = Path(dataset_root)
     if not root.is_dir():
         return {"error": f"dataset_root not found: {dataset_root}"}
-    if not crop:
-        return {
-            "error": "crop is required (the expert's fact; never inferred from a path or slug)"
-        }
 
     ident_path = dataset_identity_path(root)
     fingerprint = dataset_fingerprint(root)
@@ -299,128 +298,91 @@ def _recent_activity(project: Path) -> dict:
     return activity
 
 
-def _write_bundle(
-    dest: Path, as_zip: bool, root: Path, members: list[Path]
-) -> None:
-    """Write ``members`` (each an absolute path under ``root``) into ``dest`` under their paths
-    relative to ``root``, as a ZIP when ``as_zip`` and as the identical tree otherwise, each store
-    database as the consistent copy :func:`tcip_store.sqlite_backend.copy_database` takes.
-    Removes ``dest`` on any failure.
-    """
-    import tempfile
-    from contextlib import ExitStack
+class ZipBundle(BaseModel):
+    """A bundle written as one ZIP file at ``output_path``."""
 
-    from tcip_store.file_backend import database_file, database_roots
-    from tcip_store.sqlite_backend import copy_database
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    output_path: str
 
-    databases = {database_file(str(r)) for r in database_roots(root)}
-    try:
-        with ExitStack() as stack:
-            scratch = Path(stack.enter_context(tempfile.TemporaryDirectory()))
-            zf = (
-                stack.enter_context(
-                    zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED)
-                )
-                if as_zip
-                else None
-            )
-            for n, member in enumerate(sorted(members)):
-                source = member
-                if member in databases:
-                    source = scratch / f"{n}.db"
-                    copy_database(member, source)
-                if zf is not None:
-                    zf.write(source, member.relative_to(root))
-                else:
-                    target = dest / member.relative_to(root)
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(source, target)
-    except BaseException:
-        if as_zip:
-            dest.unlink(missing_ok=True)
-        else:
-            shutil.rmtree(dest, ignore_errors=True)
-        raise
+
+class TreeBundle(BaseModel):
+    """A bundle written as a directory tree at ``output_dir``."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    output_dir: str
 
 
 @audited
 def archive_project(
     project: Path,
-    output_path: str = "",
-    output_dir: str = "",
+    destination: ZipBundle | TreeBundle,
     include_models: bool = False,
 ) -> dict:
     """Export ``project`` as a portable bundle (:func:`write_archive`, on its terms) and record
     the export in the project's log.
     """
-    return write_archive(
-        project,
-        output_path=output_path,
-        output_dir=output_dir,
-        include_models=include_models,
-    )
+    return write_archive(project, destination, include_models=include_models)
 
 
 def write_archive(
     project: Path,
+    destination: ZipBundle | TreeBundle,
     *,
-    output_path: str = "",
-    output_dir: str = "",
     include_models: bool = False,
 ) -> dict:
     """Export ``project``, an established project root
-    (:func:`~tcip_mcp.project_record.existing_project`), as a portable bundle: a ZIP file, or,
-    given ``output_dir`` instead of ``output_path``, the identical bundle written as a tree.
+    (:func:`~tcip_mcp.project_record.existing_project`), as a portable bundle written where
+    ``destination`` names (:func:`~tcip_mcp.registry_paths.located` against ``project``): a ZIP
+    file for a :class:`ZipBundle`, the identical bundle as a tree for a :class:`TreeBundle`.
 
     The bundle is every file under the project but the store's own bookkeeping
-    (:func:`tcip_store.file_backend.is_bookkeeping`), each store database as a consistent copy
-    taken through SQLite's own backup, and without the checkpoints
+    (:func:`tcip_store.file_backend.is_bookkeeping`), each under its path relative to the
+    project, each store database as the consistent copy
+    :func:`tcip_store.sqlite_backend.copy_database` takes, and without the checkpoints
     :func:`~tcip_mcp.model_registry.checkpoint_files` names unless ``include_models``;
-    ``checkpoints_excluded`` counts those left out.
+    ``checkpoints_excluded`` counts those left out. A write that fails removes the destination.
 
-    Exactly one of ``output_path``/``output_dir`` must be given
-    (:func:`~tcip_mcp.registry_paths.located` against ``project``). Either refuses a destination
-    inside the project (a bundle cannot contain the tree it was drawn from) and a destination that
-    already exists, except an empty directory given as ``output_dir``.
+    Refuses a destination inside the project (a bundle cannot contain the tree it was drawn from)
+    and a destination that already exists, except an empty directory named by a
+    :class:`TreeBundle`.
 
-    ``size_bytes`` in the response means one thing under ``output_path`` (the written ZIP's own
-    compressed byte count, ``stat().st_size`` on the archive) and a different thing under
-    ``output_dir`` (the sum of the copied members' own uncompressed byte counts); which one the
-    caller is reading is decided by which of ``output_dir``/``output_path`` the response carries.
+    The response carries the destination under the block's own field name, and ``size_bytes``
+    means one thing under ``output_path`` (the written ZIP's own compressed byte count,
+    ``stat().st_size`` on the archive) and a different thing under ``output_dir`` (the sum of the
+    copied members' own uncompressed byte counts).
 
     Args:
-        output_path: Destination path for the ZIP file.
-        output_dir: Destination directory to write the bundle into as a tree, instead of a ZIP.
+        destination: Where the bundle is written, and as which container.
         include_models: Whether to include model checkpoints (can be large).
 
     """
-    if output_path and output_dir:
-        return {
-            "error": "give either output_path (a ZIP file) or output_dir (a directory "
-            "tree), not both"
-        }
-    if not output_path and not output_dir:
-        return {
-            "error": "give either output_path (a ZIP file) or output_dir (a directory "
-            "tree) to archive into"
-        }
-
-    dest = located(output_path or output_dir, project)
+    ((key, given),) = destination.model_dump().items()
+    as_tree = isinstance(destination, TreeBundle)
+    dest = located(given, project)
     if dest.is_relative_to(project):
         return {
             "error": f"the destination {dest} is inside the project being archived "
             f"({project}); choose a destination outside the project"
         }
     if dest.exists() and not (
-        output_dir and dest.is_dir() and not any(dest.iterdir())
+        as_tree and dest.is_dir() and not any(dest.iterdir())
     ):
         return {
             "error": f"the destination {dest} already exists; an archive never writes over "
             "or into anything"
         }
 
+    import tempfile
+    from collections.abc import Callable
+    from contextlib import ExitStack
+
     from tcip_mcp.model_registry import checkpoint_files
-    from tcip_store.file_backend import is_bookkeeping
+    from tcip_store.file_backend import (
+        database_file,
+        database_roots,
+        is_bookkeeping,
+    )
+    from tcip_store.sqlite_backend import copy_database
 
     checkpoints = frozenset() if include_models else checkpoint_files(project)
     files = [
@@ -429,20 +391,47 @@ def write_archive(
         if p.is_file() and not is_bookkeeping(p.name)
     ]
     members = [p for p in files if p not in checkpoints]
+    databases = {database_file(str(r)) for r in database_roots(project)}
 
-    (dest.parent if output_path else dest).mkdir(parents=True, exist_ok=True)
-    _write_bundle(dest, bool(output_path), project, members)
+    def copied(source: Path, name: Path) -> None:
+        target = dest / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+
+    (dest if as_tree else dest.parent).mkdir(parents=True, exist_ok=True)
+    try:
+        with ExitStack() as stack:
+            scratch = Path(stack.enter_context(tempfile.TemporaryDirectory()))
+            put: Callable[[Path, Path], object] = (
+                copied
+                if as_tree
+                else stack.enter_context(
+                    zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED)
+                ).write
+            )
+            for n, member in enumerate(sorted(members)):
+                source = member
+                if member in databases:
+                    source = scratch / f"{n}.db"
+                    copy_database(member, source)
+                put(source, member.relative_to(project))
+    except BaseException:
+        if as_tree:
+            shutil.rmtree(dest, ignore_errors=True)
+        else:
+            dest.unlink(missing_ok=True)
+        raise
     size_bytes = (
-        dest.stat().st_size
-        if output_path
-        else sum(p.stat().st_size for p in dest.rglob("*") if p.is_file())
+        sum(p.stat().st_size for p in dest.rglob("*") if p.is_file())
+        if as_tree
+        else dest.stat().st_size
     )
     return {
         "files_added": len(members),
         "size_bytes": size_bytes,
         "include_models": include_models,
         "checkpoints_excluded": len(files) - len(members),
-        ("output_path" if output_path else "output_dir"): str(dest),
+        key: str(dest),
     }
 
 

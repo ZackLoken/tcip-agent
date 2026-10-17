@@ -31,6 +31,7 @@ from tcip_mcp.pipelines.schemas import (
     checked_train_config,
     revision_record,
 )
+from tcip_mcp.pipelines.training.hpo import Count
 from tcip_mcp.registry_paths import located
 from tcip_mcp.server import tool
 from tcip_store import StoreError, canonical_path, check_json_value
@@ -1034,14 +1035,14 @@ def run_hyperparameter_search(
     max_concurrent: int = 1,
     resources_per_trial: dict | None = None,
     auto_tensorboard: bool = True,
-    split_draws: int = 1,
+    split_draws: Count = 1,
     split_draw_seeds: list[int] | None = None,
     *,
-    n_trials: int,
+    n_trials: Count,
     search_alg: str,
     scheduler: dict,
     search_seed: int,
-    trial_budget: int | None = None,
+    trial_budget: Count | None = None,
     relaunched_from: str | None = None,
 ) -> dict:
     """Run hyperparameter optimization on Ray Tune, training each trial for real.
@@ -1077,10 +1078,11 @@ def run_hyperparameter_search(
         ``param_space`` axis naming ``data.split.seed`` while ``split_draws`` draws at
         most one partition (:func:`caller_split_seed_refusal`); ``split_draws`` above 1 on an
         unbound, built-in config with tiling on that admits exactly one trainable source
-        (:func:`_split_draws_refusal`); a ``split_draws`` that is not an integer, or below 1
-        (:func:`_split_draws_argument_refusal`, checked first); an ``n_trials`` that is not a
-        count, and, on a launch above one draw or any call naming a ``trial_budget``, the bound
-        refusals (:func:`_trial_budget_refusal`). A
+        (:func:`_spatial_draws_issue`); and, on a launch above one draw or any call naming a
+        ``trial_budget``, the bound refusals (:func:`_trial_budget_refusal`). ``split_draws``,
+        ``n_trials`` and a stated ``trial_budget`` are each a
+        :data:`~tcip_mcp.pipelines.training.hpo.Count`, refused by the type at the MCP boundary
+        otherwise. A
         cancel (``cancel_training``) requested before or during the run ends the sweep
         ``{"state": "canceled", ...}``, its final status recording the same.
 
@@ -1091,7 +1093,7 @@ def run_hyperparameter_search(
             dotted path into one (``optimizer.head_lr``). A ``data.split.seed`` axis is refused
             whenever ``split_draws`` draws at most one partition; above 1 it belongs to
             ``split_draws``/``split_draw_seeds``.
-        n_trials: Number of trials; a whole number of at least one.
+        n_trials: Number of sampled points.
         search_alg: Search algorithm, one ``available_search_algs`` lists.
         scheduler: Trial scheduler, a block naming one ``available_schedulers`` lists as its
             ``name`` beside every setting that scheduler's Ray class takes
@@ -1129,8 +1131,7 @@ def run_hyperparameter_search(
             ``param_space`` already sweeps ``data.split.seed`` itself, or ``param_space`` sweeps
             any other ``data.*`` axis. The outcome groups trials by point (params minus the seed)
             and chooses the best by mean over each point's draws; see ``best_value_spread``, and
-            every point's own block at ``split_sensitivity``. 1 is the default; zero or below is
-            refused naming the value.
+            every point's own block at ``split_sensitivity``. 1 is the default.
         split_draw_seeds: The seeds ``split_draws`` pairs with every sampled point, one per draw;
             omit for the derived default (see ``split_draws``).
 
@@ -1172,16 +1173,16 @@ def open_sweep(
     base_config: dict,
     param_space: dict,
     *,
-    n_trials: int,
+    n_trials: Count,
     search_alg: str,
     scheduler: dict,
     baseline_params: dict | None,
     max_concurrent: int,
     resources_per_trial: dict | None,
-    split_draws: int,
+    split_draws: Count,
     split_draw_seeds: list[int] | None,
     search_seed: int,
-    trial_budget: int | None,
+    trial_budget: Count | None,
     relaunched_from: str | None,
     actor: str | None,
 ) -> Path | dict:
@@ -1223,19 +1224,10 @@ def open_sweep(
             "issues": [],
         }
 
-    argument_refusal = _split_draws_argument_refusal(split_draws)
-    if argument_refusal is not None:
-        return {"error": argument_refusal, "issues": []}
     try:
         scheduler_settings(scheduler)
     except ValueError as exc:
         return {"error": str(exc), "issues": []}
-
-    # Below the leg that makes split_draws an integer, so this comparison never meets another
-    # type, and computed once so every leg that reads it agrees on whether a bound is read.
-    reads_bound = trial_budget is not None or (
-        split_draws > 1 and relaunched_from is None
-    )
 
     try:
         (first_label, first_point), *rest = _preflight_points(
@@ -1322,7 +1314,6 @@ def open_sweep(
     search_param_space = split_draw_search_space(param_space, draw_seeds)
 
     budget_refusal = _trial_budget_refusal(
-        reads_bound=reads_bound,
         split_draws=split_draws,
         n_trials=n_trials,
         search_alg=search_alg,
@@ -1485,105 +1476,62 @@ def _apply_hpo_params(base_config: dict, params: dict) -> dict:
     return cfg
 
 
-def _split_draws_argument_refusal(split_draws: object) -> str | None:
-    """Whether ``split_draws`` itself is a draw count at all, checked before every other leg:
-    a value that is not an ``int`` (a ``bool`` is
-    an ``int`` and reads as the integer it names) refuses by name, and a value below one refuses by
-    name.
-    """
-    if not isinstance(split_draws, int):
-        return (
-            f"split_draws={split_draws!r} is not a draw count; pass a whole number of "
-            "partitions to pair."
-        )
-    if split_draws < 1:
-        return (
-            f"split_draws={split_draws} pairs no partition; a sweep pairs at least one, so "
-            "pass 1 (the default, one draw and no spread) or the number of partitions to "
-            "pair."
-        )
-    return None
-
-
-def _trial_count(value: object) -> int | None:
-    """``value`` as a count of trials, a positive ``int`` (a ``bool`` excluded); ``None`` for
-    anything else.
-    """
-    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-        return value
-    return None
-
-
 def _trial_budget_refusal(
     *,
-    reads_bound: bool,
-    split_draws: int,
-    n_trials: object,
+    split_draws: Count,
+    n_trials: Count,
     search_alg: str,
-    trial_budget: object,
+    trial_budget: Count | None,
     relaunched_from: str | None,
     search_param_space: dict,
     baseline_params: dict | None,
 ) -> str | None:
-    """Whether this call's ``n_trials`` is a count of trials (:func:`_trial_count`), and
-    whether its trial count fits the bound it must state or check.
+    """Whether this call's trial count fits the bound it must state or check.
 
-    The bound is read only when ``reads_bound`` says one is (a launch, never a relaunch, above one
-    draw; or any call naming ``trial_budget``): a ``trial_budget`` that is not a count of trials
-    refuses, then Ray's own variant count over ``search_param_space``
-    (:func:`~tcip_mcp.pipelines.training.hpo.planned_trial_count`) meets its two bound clauses: a
-    launch above one draw naming no ``trial_budget`` refuses naming the budget Ray's own count
-    would admit; a stated ``trial_budget`` the count exceeds refuses naming the count, the budget,
-    and whether even one draw exceeds it (``count // split_draws`` is one draw's own count).
+    A bound is read when ``trial_budget`` is stated, or on a launch (``relaunched_from`` unset)
+    above one draw: Ray's own variant count over ``search_param_space``
+    (:func:`~tcip_mcp.pipelines.training.hpo.planned_trial_count`) meets its two bound clauses:
+    such a launch naming no ``trial_budget`` refuses naming the budget Ray's own count would
+    admit; a stated ``trial_budget`` the count exceeds refuses naming the count, the budget, and
+    whether even one draw exceeds it (``count // split_draws`` is one draw's own count).
     Everything else answers ``None``.
     """
-    trials = _trial_count(n_trials)
-    if trials is None:
-        return (
-            f"n_trials={n_trials!r} is not a count of trials; Ray runs a negative count as "
-            "an unbounded sweep and a zero count as none, so pass the number of sampled "
-            "points, a whole number of at least one."
-        )
-    if not reads_bound:
+    if trial_budget is None and (
+        split_draws == 1 or relaunched_from is not None
+    ):
         return None
-    budget = None if trial_budget is None else _trial_count(trial_budget)
-    if trial_budget is not None and budget is None:
-        return (
-            f"trial_budget={trial_budget!r} is not a count of trials; pass the most trials "
-            "this sweep may launch, a whole number of at least one, or omit it at one draw."
-        )
 
     from tcip_mcp.pipelines.training.hpo import planned_trial_count
 
     count = planned_trial_count(
-        search_param_space, trials, search_alg, split_draws, baseline_params
+        search_param_space, n_trials, search_alg, split_draws, baseline_params
     )
     per_draw = count // split_draws
     baseline = "given" if baseline_params else "none"
     built = (
-        f"Ray's own variant count over the space this call builds: n_trials={trials} "
+        f"Ray's own variant count over the space this call builds: n_trials={n_trials} "
         f"sample(s), search_alg={search_alg!r}, baseline {baseline}, {per_draw} per draw"
     )
 
-    if split_draws > 1 and budget is None and relaunched_from is None:
+    if trial_budget is None:
         return (
             f"split_draws={split_draws} pairs every sampled point with {split_draws} "
             f"partitions, so this sweep would launch {count} trials ({built}), a total the "
             f"call never stated; pass trial_budget={count} ({count} admits it as "
             "configured), or run at split_draws=1."
         )
-    if budget is not None and count > budget:
-        if per_draw > budget:
+    if count > trial_budget:
+        if per_draw > trial_budget:
             return (
                 f"this sweep would launch {count} trials ({built}) against "
-                f"trial_budget={budget}, which this sweep exceeds at one draw "
+                f"trial_budget={trial_budget}, which this sweep exceeds at one draw "
                 f"({per_draw} trials per draw); lower n_trials, narrow the gridded axes, or "
                 "state a larger trial_budget."
             )
-        admitted_draws = budget // per_draw
+        admitted_draws = trial_budget // per_draw
         return (
             f"this sweep would launch {count} trials ({built}) against "
-            f"trial_budget={budget}, which admits at most {admitted_draws} draw(s) at "
+            f"trial_budget={trial_budget}, which admits at most {admitted_draws} draw(s) at "
             f"these settings; lower split_draws to {admitted_draws}, lower n_trials, narrow "
             "the gridded axes, or state a larger trial_budget."
         )

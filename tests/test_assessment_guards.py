@@ -798,30 +798,22 @@ def test_the_assess_tools_take_a_dispersion_quantile_within_zero_and_one(
     """The MCP call refuses a dispersion quantile outside [0, 1] by the parameter's own type,
     and admits either end.
     """
-    import asyncio
-
-    from mcp.server.mcpserver.exceptions import ToolError
-
-    from tcip_mcp.server import build_server
-
-    server = build_server(None)
+    from tests._server_calls import called_through_the_server
 
     def called(quantile: float) -> str:
-        arguments = {
-            "checkpoint_path": "absent.pt",
-            "trait": fx.COUNT_TRAIT,
-            "delivery_kind": "per_image_count",
-            **bands,
-            "equivalence_z": EQUIVALENCE_Z,
-            "dispersion_quantile": quantile,
-            "rationale": RATIONALE,
-            "stated": {},
-        }
-        try:
-            asyncio.run(server.call_tool(tool, arguments))
-        except ToolError as exc:
-            return str(exc)
-        return ""
+        return called_through_the_server(
+            tool,
+            {
+                "checkpoint_path": "absent.pt",
+                "trait": fx.COUNT_TRAIT,
+                "delivery_kind": "per_image_count",
+                **bands,
+                "equivalence_z": EQUIVALENCE_Z,
+                "dispersion_quantile": quantile,
+                "rationale": RATIONALE,
+                "stated": {},
+            },
+        )
 
     for outside in (-0.1, 1.5):
         assert "dispersion_quantile" in called(outside), outside

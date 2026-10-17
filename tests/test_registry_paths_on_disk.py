@@ -16,6 +16,7 @@ def test_archive_then_import_lands_a_registry_naming_the_restored_files(
     from tcip_mcp.model_registry import ModelRegistry, read_registry_index
     from tcip_mcp.tools.model_tools import register_model
     from tcip_mcp.tools.project_tools import (
+        ZipBundle,
         archive_project,
         import_project,
     )
@@ -36,7 +37,7 @@ def test_archive_then_import_lands_a_registry_naming_the_restored_files(
 
     zip_path = tmp_path / "export.zip"
     assert "error" not in archive_project(
-        src, str(zip_path), include_models=True
+        src, ZipBundle(output_path=str(zip_path)), include_models=True
     )
     dest = tmp_path / "restored"
     imported = import_project(str(zip_path), str(dest))
