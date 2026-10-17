@@ -1,8 +1,10 @@
-"""The Annotate tab's routes: an image's label document read and saved, the proposals a
-prediction bucket offers for it, and the review queue.
+"""Annotation routes: an image's label document, its bucket proposals and the review queue.
+
+The label document is read and saved; the proposals are those a prediction bucket offers for
+the image.
 
 Reads the canonical per-image label document (every subject's annotations by name and their
-completion marks) by the key of the image the caller names; its one save is
+completion marks) by the key of the image the request names; its one save is
 :func:`~tcip_mcp.dataset_layout.save_label_document`.
 """
 
@@ -36,13 +38,13 @@ logger = logging.getLogger(__name__)
 
 
 class AnnotationPayload(BaseModel):
-    """One annotation's content: its ``subject`` (the object it is about), a geometry (``bbox``
-    corners, ``points`` for the one ring the canvas draws by hand, ``rings`` for a loaded
-    multi-ring shape round-tripping, ``point`` for a placed prompt or keypoint, or none of them for
-    an image-level label), its attribute values by name and its crowd flag.
+    """One annotation's content: its subject, a geometry, its attribute values and its crowd flag.
 
-    Every field but the subject is carried uninterpreted: its one reading is
-    :func:`~tcip_annotation.json_io.annotation_from_payload`.
+    The ``subject`` is the object it is about; the geometry is ``bbox`` corners, ``points`` for
+    one ring, ``rings`` for a multi-ring shape, ``point`` for a placed prompt or keypoint, or
+    none of them for an image-level label; the attribute values are by name.
+
+    Every field but the subject is carried uninterpreted.
     """
 
     subject: str
@@ -55,9 +57,10 @@ class AnnotationPayload(BaseModel):
 
 
 class FlagPayload(BaseModel):
-    """One flag a save raises: its comment and its target, a ``point`` with the ``subject``
-    flagged there, a ``proposal`` (bucket and index), or neither for the image as a whole
-    (:class:`~tcip_annotation.flags.FlagRequest`).
+    """One flag a save raises: its comment and its target.
+
+    The target is a ``point`` with the ``subject`` flagged there, a ``proposal`` (bucket and
+    index), or neither for the image as a whole (:class:`~tcip_annotation.flags.FlagRequest`).
     """
 
     text: str
@@ -67,8 +70,10 @@ class FlagPayload(BaseModel):
 
 
 class SavePayload(BaseModel):
-    """One save: the image's annotations and the gestures it adjudicates beside them
-    (:class:`~tcip_mcp.dataset_layout.Gestures`), by the person ``user`` names.
+    """One save: the image's annotations and the gestures it adjudicates beside them.
+
+    The gestures are :class:`~tcip_mcp.dataset_layout.Gestures`; the save is by the person
+    ``user`` names.
     """
 
     image_path: str
@@ -91,8 +96,10 @@ class SavePayload(BaseModel):
 
 
 def _flags(key: Key) -> list[dict]:
-    """The image's flags as the editor reads them, oldest first
-    (:func:`~tcip_annotation.flags.read_flags`); a record that will not read answers 400.
+    """Return the image's flags, oldest first.
+
+    Read through :func:`~tcip_annotation.flags.read_flags`; a record that will not read answers
+    400.
     """
     from tcip_annotation.flags import encode_flag, flag_key, read_flags
 
@@ -103,16 +110,18 @@ def _flags(key: Key) -> list[dict]:
 
 
 def annotation_dict(a: Annotation) -> dict:
-    """An :class:`Annotation` for the canvas: the library's client projection
-    (:func:`~tcip_annotation.json_io.client_annotation`) plus its ``authorship``
-    (:func:`authorship_of`).
+    """Return an annotation's client projection with authorship.
+
+    The projection is the library's (:func:`~tcip_annotation.json_io.client_annotation`)
+    plus its ``authorship`` (:func:`authorship_of`).
     """
     return {**client_annotation(a), "authorship": authorship_of(a)}
 
 
 def _completion(doc: LabelDocument) -> dict:
-    """Each subject ``doc`` holds or marks, with its state
-    (:meth:`~tcip_annotation.json_io.LabelDocument.state`).
+    """Map each subject ``doc`` holds or marks to its state.
+
+    The state is :meth:`~tcip_annotation.json_io.LabelDocument.state`'s.
     """
     return {
         subject: doc.state(subject)
@@ -123,9 +132,11 @@ def _completion(doc: LabelDocument) -> dict:
 
 
 def _admitted(image_path: str) -> tuple[Key, int, int]:
-    """The image at ``image_path`` admitted once (:func:`~tcip_web.paths.allowed_image`): the key
-    of its label document (:func:`~tcip_mcp.dataset_layout.label_key_of`) and its dimensions. An
-    image under no dataset image tree answers 400.
+    """Admit the image at ``image_path`` once and return its label key and dimensions.
+
+    The admission is :func:`~tcip_web.paths.allowed_image`'s and the key is its label
+    document's (:func:`~tcip_mcp.dataset_layout.label_key_of`). An image under no dataset image
+    tree answers 400.
     """
     from tcip_mcp.dataset_layout import label_key_of
 
@@ -137,7 +148,7 @@ def _admitted(image_path: str) -> tuple[Key, int, int]:
 
 
 def _read(key: Key) -> tuple[LabelDocument, Version]:
-    """The label document ``key`` names and its version; one that will not read answers 400."""
+    """Read the label document ``key`` names and its version; one that will not read answers 400."""
     try:
         return read_document_versioned(key)
     except UnreadableLabelDocumentError as exc:
@@ -146,10 +157,12 @@ def _read(key: Key) -> tuple[LabelDocument, Version]:
 
 @router.get("/labels")
 def load_labels(image_path: str) -> dict:
-    """An image's label document in pixel coords: its annotations, each with its ``index`` in the
-    document (the index a proposal's ``paired`` names), each subject's completion
-    (:func:`_completion`), the image's flags (:func:`_flags`) and the version token a save
-    echoes back, the empty token for an image with no document yet.
+    """Load an image's label document in pixel coords.
+
+    It answers the annotations, each with its ``index`` in the document (the index a proposal's
+    ``paired`` names), each subject's completion (:func:`_completion`), the image's flags
+    (:func:`_flags`) and the version token a save echoes back, the empty token for an image with
+    no document yet.
     """
     key, w, h = _admitted(image_path)
     doc, version = _read(key)
@@ -164,9 +177,9 @@ def _labels_body(
     doc: LabelDocument,
     version: Version,
 ) -> dict:
-    """The label document as the editor adopts it, with the version token that goes with it: what
-    a load answers and what a save answers, so the editor takes a save's token only together
-    with the document it names.
+    """Return the label document with its version token.
+
+    The token is answered only together with the document it names.
     """
     return {
         "image_path": image_path,
@@ -184,13 +197,13 @@ def _labels_body(
 
 @router.post("/labels")
 def save_labels(payload: SavePayload) -> dict:
-    """Save an image's label document through
-    :func:`~tcip_mcp.dataset_layout.save_label_document`, by the person
-    :func:`~tcip_mcp.identity.actor` makes of ``user``, and answer the saved document with its
-    version, as a load answers it (:func:`_labels_body`), and ``accepted``, each accepted
-    proposal's index mapped to the index of the annotation it resolved to, its audit line in the
-    open project's scope. A stale ``base_mtime``, or no project open, answers 409 and a refusal
-    400, nothing written.
+    """Save an image's label document and answer the saved document with its version.
+
+    The save goes through :func:`~tcip_mcp.dataset_layout.save_label_document`, by the person
+    :func:`~tcip_mcp.identity.actor` makes of ``user``. The answer is the document as a load
+    answers it (:func:`_labels_body`) and ``accepted``, each accepted proposal's index mapped to
+    the index of the annotation it resolved to, its audit line in the open project's scope. A
+    stale ``base_mtime``, or no project open, answers 409 and a refusal 400, nothing written.
     """
     from tcip_annotation.flags import FlagRequest
     from tcip_mcp.dataset_layout import Gestures, save_label_document
@@ -248,9 +261,10 @@ def save_labels(payload: SavePayload) -> dict:
 
 @router.get("/proposals")
 def load_proposals(image_path: str, bucket: str) -> dict:
-    """The proposals the bucket named ``bucket`` under the image's dataset root offers for
-    ``image_path``, in document order: each with its ``index``, the index of the annotation of
-    the image's label document it pairs with (``paired``,
+    """Load the proposals the bucket ``bucket`` offers for ``image_path``, in document order.
+
+    The bucket is the one so named under the image's dataset root. Each proposal carries its
+    ``index``, the index of the annotation of the image's label document it pairs with (``paired``,
     :func:`~tcip_mcp.dataset_layout.proposal_pairs`) and the last ``decision`` its verdict shard
     records; beside them the bucket's ``operating_point``, the ``conf`` a review may accept at on
     its assessment's authority or ``None`` with the ``reason``
@@ -295,9 +309,10 @@ def load_proposals(image_path: str, bucket: str) -> dict:
 
 
 class PriorityQueueJob(BaseModel):
-    """A review-queue job's record, as its launch and its poll both answer it: what it was
-    launched under, its state, and once completed its ``queue`` (``{image, score,
-    reference_member?}``, highest first) with the candidate and skipped counts.
+    """A review-queue job's record.
+
+    It carries what the job was launched under, its state, and once completed its ``queue``
+    (``{image, score, reference_member?}``, highest first) with the candidate and skipped counts.
     """
 
     job_id: str
@@ -327,8 +342,9 @@ class PriorityQueueJob(BaseModel):
         budget: int,
         rationale: str,
     ) -> PriorityQueueJob:
-        """The record of a job just launched under these values: pending, with no error, no
-        queue and zero counts, the state its worker takes over from.
+        """Return the record of a job just launched under these values.
+
+        It is pending, with no error, no queue and zero counts.
         """
         return cls(
             job_id=job_id,
@@ -378,6 +394,8 @@ def _pq_worker(job: PriorityQueueJob) -> None:
 
 
 class LaunchPriorityQueuePayload(BaseModel):
+    """A review-queue launch: the checkpoint, images directory, subject, scorer, budget, reason."""
+
     checkpoint_path: str
     images_dir: str
     subject: str | None = None
@@ -390,10 +408,11 @@ class LaunchPriorityQueuePayload(BaseModel):
 def launch_priority_queue(
     payload: LaunchPriorityQueuePayload,
 ) -> PriorityQueueJob:
-    """Launch :func:`~tcip_mcp.tools.feedback_tools.ranked_review_queue` for the open project
-    on a background thread, answering the job's record as it stands before the thread starts; a
-    checkpoint or images directory outside the allowed roots is refused and a missing one
-    answers 404.
+    """Launch the open project's review queue on a background thread and answer its record.
+
+    The queue is :func:`~tcip_mcp.tools.feedback_tools.ranked_review_queue`'s; the record is the
+    job's as it stands before the thread starts. A checkpoint or images directory outside the
+    allowed roots is refused and a missing one answers 404.
     """
     checkpoint_path = allowed_path(payload.checkpoint_path)
     images_dir = allowed_path(payload.images_dir)
@@ -421,9 +440,10 @@ def launch_priority_queue(
 
 @router.get("/queue/{job_id}")
 def get_priority_queue_job(job_id: str) -> PriorityQueueJob:
-    """The queue job ``job_id``'s record: what it was launched under (the scorer block, budget
-    and reason among it), its state and, once completed, its ranked images; an unknown job
-    answers 404.
+    """Return the queue job ``job_id``'s record; an unknown job answers 404.
+
+    The record carries what it was launched under (the scorer block, budget and reason among
+    it), its state and, once completed, its ranked images.
     """
     job = _pq_registry.get(job_id)
     if job is None:

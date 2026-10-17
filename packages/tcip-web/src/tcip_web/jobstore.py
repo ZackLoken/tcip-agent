@@ -21,14 +21,18 @@ JobStatus = Literal["pending", "running", FinalState]
 
 
 def live(job: Any) -> bool:
-    """Whether ``job`` has not yet ended: its status is ``pending`` or ``running``."""
+    """Return whether the job has not yet ended.
+
+    A job that has not ended has status ``pending`` or ``running``.
+    """
     return job.status not in FINAL_STATES
 
 
 def evict_terminal(jobs: dict, max_jobs: int = MAX_JOBS) -> None:
-    """Drop the oldest jobs of any project that have ended (:func:`live`), in place, until
-    ``jobs`` holds at most ``max_jobs`` or every job left is live. Relies on dict insertion order
-    (oldest first).
+    """Drop the oldest ended jobs of any project from ``jobs``, in place.
+
+    Ended means not :func:`live`. Drops until ``jobs`` holds at most ``max_jobs`` or every job
+    left is live. Relies on dict insertion order (oldest first).
     """
     overflow = len(jobs) - max_jobs
     if overflow > 0:
@@ -41,14 +45,15 @@ class JobRegistry:
     """The dict-plus-lock live-job registry: register, find-or-register, get and list."""
 
     def __init__(self, *, id_field: str = "job_id") -> None:
-        """``id_field`` names the attribute :meth:`find_or_register` keys a new job by."""
+        """Initialize an empty registry keyed by ``id_field``."""
         self.jobs: dict[str, Any] = {}
         self.lock = threading.Lock()
         self._id_field = id_field
 
     def _insert(self, job_id: str, job: Any) -> None:
-        """Add ``job`` under ``job_id`` and evict overflow (:func:`evict_terminal`); called under
-        the lock.
+        """Add ``job`` under ``job_id`` and evict overflow (:func:`evict_terminal`).
+
+        Called under the lock.
         """
         self.jobs[job_id] = job
         evict_terminal(self.jobs)
@@ -63,9 +68,10 @@ class JobRegistry:
         match: Callable[[Any], bool],
         make: Callable[[], Any],
     ) -> tuple[Any, bool]:
-        """Under one lock acquisition: the first live job ``match`` accepts, or ``make()``'s new
-        job once inserted (:meth:`_insert`). Returns ``(job, created)``, ``created`` true only
-        when ``make()`` ran, so the caller knows whether to start work for it.
+        """Return the first job ``match`` accepts, or insert and return ``make()``'s new job.
+
+        Both happen under one lock acquisition; the new job is inserted through
+        :meth:`_insert`. Returns ``(job, created)``, ``created`` true only when ``make()`` ran.
         """
         with self.lock:
             for job in self.jobs.values():
@@ -76,11 +82,11 @@ class JobRegistry:
         return job, True
 
     def get(self, job_id: str) -> Any:
-        """A job by id, from any project this process holds."""
+        """Return a job by id, from any project this process holds."""
         with self.lock:
             return self.jobs.get(job_id)
 
     def list(self, project: str) -> list[Any]:
-        """Every job this process holds that runs for ``project``."""
+        """Return every held job that runs for ``project``."""
         with self.lock:
             return [j for j in self.jobs.values() if j.project == project]

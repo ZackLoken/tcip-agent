@@ -1,5 +1,6 @@
-"""Local-filesystem directory browsing for the frontend's folder picker: any directory the
-server's user can read, directories only, never files.
+"""Local-filesystem directory browsing.
+
+Any directory the server's user can read, directories only, never files.
 """
 
 from __future__ import annotations
@@ -24,9 +25,11 @@ _FOUND_RE = re.compile(r"^found\.\d{3}$", re.IGNORECASE)
 
 
 def _is_noise_dir(name: str, st: os.stat_result) -> bool:
-    """A folder the picker should hide: dotfiles and Windows system/hidden folders
-    (``$RECYCLE.BIN``, ``System Volume Information``, ``FOUND.000``, or anything carrying
-    the hidden/system attribute: the latter is a no-op on POSIX).
+    """Return whether the folder's name or ``st``'s attributes mark it hidden or system.
+
+    Such folders are dotfiles and Windows system/hidden folders (``$RECYCLE.BIN``, ``System Volume
+    Information``, ``FOUND.000``, or anything carrying the hidden/system attribute: the latter
+    is a no-op on POSIX).
     """
     if name.startswith((".", "$")):
         return True
@@ -57,7 +60,7 @@ def _windows_drives() -> list[dict]:
 
 
 def _roots_listing() -> dict:
-    """Top-level view (no path given): the drives on Windows, '/' elsewhere."""
+    """Return the top-level view: drives on Windows, ``/`` elsewhere."""
     if os.name == "nt":
         return {
             "path": "",

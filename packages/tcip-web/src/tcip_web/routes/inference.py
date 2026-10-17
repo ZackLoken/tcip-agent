@@ -35,6 +35,8 @@ router = APIRouter(prefix="/api/inference", tags=["inference"])
 
 @dataclass
 class InferenceJob:
+    """One inference pass this process launched: what it runs over, its progress and its outcome."""
+
     job_id: str
     # The project open when the job launched, which it runs for.
     project: str
@@ -62,7 +64,7 @@ class InferenceJob:
 
 
 def _summary(job: InferenceJob) -> dict:
-    """The job as every listing and stream frame serves it."""
+    """Return the job's id, status, progress, images, dataset root, bucket, error and drops."""
     return {
         "job_id": job.job_id,
         "status": job.status,
@@ -85,9 +87,7 @@ def _register(job: InferenceJob) -> None:
 
 
 def _get(job_id: str) -> InferenceJob | None:
-    """A job by id, whichever project it runs for: opening another project must not make an
-    in-flight job unreachable for canceling or streaming it.
-    """
+    """Return a job by id, whichever project it runs for."""
     return _registry.get(job_id)
 
 
@@ -146,6 +146,8 @@ def _worker(job: InferenceJob) -> None:
 
 
 class LaunchInferencePayload(BaseModel):
+    """An inference launch: its checkpoint, capture, bucket, statement and person."""
+
     checkpoint_path: str
     # The run's images are named, not spelled: resolved server-side through dataset_layout.
     dataset_root: str
@@ -162,8 +164,9 @@ class LaunchInferencePayload(BaseModel):
 
 @router.post("/launch")
 def launch_inference(payload: LaunchInferencePayload) -> dict:
-    """Launch a pass over the dataset's images on a background thread, by the person ``user``
-    names, who publishes its bucket.
+    """Launch a pass over the dataset's images on a background thread.
+
+    The person ``user`` names launches it and publishes its bucket.
     """
     person = actor(payload.user)
     project = store.held().root
@@ -234,6 +237,7 @@ def launch_inference(payload: LaunchInferencePayload) -> dict:
 
 @router.get("/jobs")
 def list_jobs() -> dict:
+    """List the summaries of this process's jobs for the open project."""
     return {
         "jobs": [_summary(j) for j in _registry.list(str(store.held().root))]
     }
@@ -241,9 +245,11 @@ def list_jobs() -> dict:
 
 @router.post("/jobs/{job_id}/cancel")
 def cancel_job(job_id: str, payload: PersonPayload) -> dict:
-    """Request graceful cancellation by the person ``user`` names; the worker stops at the next
-    image boundary and the request leaves one ``inference_canceled`` line in the job's project.
-    Refuses (404) an unknown job, and answers 409 when the line cannot follow the request.
+    """Request graceful cancellation by the person ``user`` names.
+
+    The job stops at the next image boundary and the request leaves one
+    ``inference_canceled`` line in the job's project. Refuses (404) an unknown job, and answers
+    409 when the line cannot follow the request.
     """
     from tcip_mcp.audit import AuditEntryNotWrittenError, record_event_or_raise
     from tcip_web.routes.audit_gap import audit_gap_409
@@ -272,6 +278,11 @@ def cancel_job(job_id: str, payload: PersonPayload) -> dict:
 
 @router.websocket("/jobs/{job_id}/stream")
 async def stream_job(websocket: WebSocket, job_id: str) -> None:
+    """Stream a job's progress frames until a final frame once it ends.
+
+    A progress frame is sent whenever the done count changes. An unknown job gets one final
+    frame carrying ``job not found`` and the socket closes.
+    """
     await websocket.accept()
     job = _get(job_id)
     if job is None:

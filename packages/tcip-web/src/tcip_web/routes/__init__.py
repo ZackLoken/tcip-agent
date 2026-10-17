@@ -26,6 +26,7 @@ from tcip_web.routes import (
 
 
 def register_all(app: FastAPI) -> None:
+    """Mount every route module's router on ``app``."""
     app.include_router(dataset.router)
     app.include_router(projects.router)
     app.include_router(terminal.router)

@@ -1,6 +1,8 @@
-"""The web backend's own state: the workspace it serves, the project it has open, that project's
-live :class:`~tcip_mcp.web_client.GuiState` (persisted to the project's GUI snapshot record on
-every change made for it) and the panel events it retains for a browser that connects late.
+"""The web backend's own state: its workspace, open project, GUI state and retained events.
+
+The workspace is the one it serves; the open project's live
+:class:`~tcip_mcp.web_client.GuiState` is persisted to the project's GUI snapshot record on
+every change made for it; the panel events are retained.
 """
 
 from __future__ import annotations
@@ -26,8 +28,8 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 RETAINED_EVENTS_PER_PANEL = 64
-"""How many of the open project's latest panel events each panel replays to a browser that
-connects late; chosen here, so a reconnecting tab catches up on a session's recent steering."""
+"""How many of the open project's latest panel events each panel retains and replays on connect;
+chosen here."""
 
 
 class GuiMutationInvalidError(ValueError):
@@ -42,6 +44,7 @@ class ProjectNotOpenError(NoProjectOpenError):
     """A request built for one project arrived while the backend has another open."""
 
     def __init__(self, open_project_id: str) -> None:
+        """Take the id of the project the backend has open."""
         super().__init__("the backend does not have this project open")
         self.open_project_id = open_project_id
 
@@ -61,13 +64,15 @@ class Held(NamedTuple):
 
 
 class StateStore:
-    """Holds the workspace the backend serves, its open project and that project's live
-    :class:`GuiState` as one value (:class:`Held`), which every change made for the project
-    persists before it is broadcast; a change made while no project is open is held and
-    persisted nowhere.
+    """The workspace the backend serves, its open project and that project's live GUI state.
+
+    The project and its :class:`GuiState` are held as one value (:class:`Held`), which every
+    change made for the project persists before it is broadcast; a change made while no project
+    is open is held and persisted nowhere.
     """
 
     def __init__(self) -> None:
+        """Start with no workspace, no open project and a fresh state at version 0."""
         self._now = Held(None, GuiState())
         self._version = 0
         self._lock = asyncio.Lock()
@@ -81,15 +86,14 @@ class StateStore:
     def configure(
         self, workspace: Path, image_roots: tuple[Path, ...]
     ) -> None:
-        """Set the workspace this backend serves and the additive image roots it admits, both
-        read once where the backend starts.
-        """
+        """Set the workspace this backend serves and the additive image roots it admits."""
         self._workspace, self._image_roots = workspace, image_roots
 
     @property
     def workspace(self) -> Path:
-        """The workspace this backend serves; raises ``RuntimeError`` when it started without
-        one.
+        """The workspace this backend serves.
+
+        Raises ``RuntimeError`` when it started without one.
         """
         if self._workspace is None:
             raise RuntimeError(
@@ -105,19 +109,17 @@ class StateStore:
 
     @property
     def opened(self) -> OpenProject | None:
-        """The open project, its directory and id together, or ``None`` when none is open: one
-        value, so a reader that wants both reads them in one step.
-        """
+        """The open project, its directory and id together, or ``None`` when none is open."""
         return self._now.project
 
     def held(self) -> OpenProject:
-        """The open project; raises :class:`NoProjectOpenError` when none is open."""
+        """Return the open project; raises :class:`NoProjectOpenError` when none is open."""
         return self.held_state()[0]
 
     def held_state(self) -> tuple[OpenProject, GuiState]:
-        """The open project and its GUI state, read as one value, so a reader that wants both
-        never pairs one project's identity with another's state; raises
-        :class:`NoProjectOpenError` when none is open.
+        """Return the open project and its GUI state, read as one value.
+
+        Raises :class:`NoProjectOpenError` when none is open.
         """
         now = self._now
         if now.project is None:
@@ -127,9 +129,10 @@ class StateStore:
         return now.project, now.state
 
     def admit(self, project_id: str) -> OpenProject:
-        """The open project (:meth:`held`), when ``project_id`` names it; raises
-        :class:`ProjectNotOpenError` naming the open project's id when another is open, and
-        what :meth:`held` raises when none is.
+        """Return the open project (:meth:`held`) when ``project_id`` names it.
+
+        Raises :class:`ProjectNotOpenError` naming the open project's id when another is open,
+        and what :meth:`held` raises when none is.
         """
         opened = self.held()
         if project_id != opened.id:
@@ -137,9 +140,10 @@ class StateStore:
         return opened
 
     async def open_project(self, project: OpenProject) -> None:
-        """Make ``project`` the open project (:meth:`_switch`), holding its persisted state (a
-        fresh state when it has none). Raises what :func:`tcip_mcp.web_client.read_gui_snapshot`
-        raises, leaving the open project unchanged.
+        """Make ``project`` the open project (:meth:`_switch`), holding its persisted state.
+
+        A fresh state is held when it has none. Raises what
+        :func:`tcip_mcp.web_client.read_gui_snapshot` raises, leaving the open project unchanged.
         """
         state = (
             await asyncio.to_thread(read_gui_snapshot, project.root)
@@ -148,9 +152,10 @@ class StateStore:
         await self._switch(project, state)
 
     async def close_project(self, project_id: str) -> None:
-        """Depart from the open project (:meth:`_switch`) when ``project_id`` names it
-        (:meth:`admit`), the comparison and the close one step under the lock; a no-op when it
-        does not, or none is open.
+        """Depart from the open project (:meth:`_switch`) when ``project_id`` names it.
+
+        The name is compared through :meth:`admit`, the comparison and the close one step under
+        the lock; a no-op when it does not name it, or none is open.
         """
         await self._switch(None, GuiState(), closing=project_id)
 
@@ -160,11 +165,13 @@ class StateStore:
         state: GuiState,
         closing: str | None = None,
     ) -> None:
-        """Under the lock: when ``closing`` is given and does not name the open project, nothing.
-        Otherwise, when ``following`` replaces another project, end every unended session of the
-        departed one (:func:`tcip_web.routes.sessions.end_sessions`), then, once that commit has
-        returned, publish ``following`` with ``state`` as one value, its retained events cleared,
-        and notify subscribers; a departure that raises publishes nothing. The departure's
+        """Publish ``following`` with ``state`` under the lock, ending the departed sessions first.
+
+        When ``closing`` is given and does not name the open project, nothing. Otherwise, when
+        ``following`` replaces another project, end every unended session of the departed one
+        (:func:`tcip_web.routes.sessions.end_sessions`), then, once that commit has returned,
+        publish ``following`` with ``state`` as one value, its retained events cleared, and
+        notify subscribers; a departure that raises publishes nothing. The departure's
         ``session_ended`` lines (:func:`tcip_web.routes.sessions.record_ended`) follow the
         publication, and a line that cannot be written raises then.
         """
@@ -189,30 +196,29 @@ class StateStore:
             await asyncio.to_thread(record_ended, departed.root, ended)
 
     async def admitted(self, project_id: str, act: Callable[[Path], T]) -> T:
-        """``act`` run on a worker thread with the open project's directory, ``project_id``
-        admitted against it (:meth:`admit`, raising what it raises) and the act done under the
-        lock, so no switch publishes between the admission and the act.
+        """Run ``act`` on a worker thread with the open project's directory and return its result.
+
+        ``project_id`` is admitted against it (:meth:`admit`, raising what it raises) and the act
+        done under the lock, so no switch publishes between the admission and the act.
         """
         async with self._lock:
             root = self.admit(project_id).root
             return await asyncio.to_thread(act, root)
 
     def retain_event(self, panel: str, event: dict[str, Any]) -> None:
-        """Keep ``event``, admitted for the open project by its caller in the same synchronous
-        step, for :meth:`retained_events`; a switch publishes its project and clears the
-        retained events in one synchronous step too, so the event is never kept for another.
-        """
+        """Append ``event`` to ``panel``'s retained events."""
         self._retained[panel].append(event)
 
     def retained_events(self, panel: str) -> list[dict[str, Any]]:
-        """The open project's latest events on ``panel``, oldest first."""
+        """Return the open project's latest events on ``panel``, oldest first."""
         return list(self._retained.get(panel, ()))
 
     async def _hold(
         self, project: OpenProject | None, state: GuiState
     ) -> None:
-        """Hold ``project`` with ``state`` as the next version, the retained events cleared when
-        the project changes, and notify every subscriber of it; called under the lock.
+        """Hold ``project`` with ``state`` as the next version and notify every subscriber of it.
+
+        The retained events are cleared when the project changes. Called under the lock.
         """
         if project != self._now.project:
             self._retained.clear()
@@ -230,6 +236,7 @@ class StateStore:
         self._subscribers.append(callback)
 
     def unsubscribe(self, callback) -> None:
+        """Remove a registered ``callback``; a no-op when it is not registered."""
         try:
             self._subscribers.remove(callback)
         except ValueError:
@@ -237,17 +244,12 @@ class StateStore:
 
     @property
     def state(self) -> GuiState:
-        """The held GUI state (:meth:`held_state` for it with its project)."""
+        """The held GUI state."""
         return self._now.state
 
     @property
     def version(self) -> int:
-        """Monotonic version, bumped on every state change.
-
-        Broadcast alongside each snapshot so a browser can drop a stale replay
-        (e.g. a reconnecting socket resending an older snapshot after newer local
-        state has been applied).
-        """
+        """Monotonic version, bumped on every state change."""
         return self._version
 
     def snapshot(self) -> dict[str, Any]:

@@ -1,5 +1,6 @@
-"""Distill worksheet: one project's friction reports and retrospectives, or every workspace
-project's, printed as Markdown with their recurring themes; writes nothing.
+"""Distill worksheet: friction reports and retrospectives printed as Markdown; writes nothing.
+
+One project's, or every workspace project's, printed with their recurring themes.
 
     tcip distill-learnings --project <project>
     tcip distill-learnings --workspace
@@ -31,7 +32,7 @@ _WORD = re.compile(r"[a-z][a-z0-9']{2,}")
 
 
 def _terms(text: str) -> list[str]:
-    """The non-stopword words of ``text`` and its adjacent non-stopword word pairs, repeats kept."""
+    """Return ``text``'s non-stopword words and adjacent non-stopword word pairs, repeats kept."""
     raw = _WORD.findall(text.lower())
     return [w for w in raw if w not in _STOPWORDS] + [
         f"{a} {b}"
@@ -43,16 +44,14 @@ def _terms(text: str) -> list[str]:
 def _ranked(
     counts: Counter[str], top: int, floor: int
 ) -> list[tuple[str, int]]:
-    """The ``top`` most counted entries of ``counts``, each counted at least ``floor`` times."""
+    """Return the ``top`` most counted entries of ``counts``, each counted at least ``floor``."""
     return [(term, n) for term, n in counts.most_common() if n >= floor][:top]
 
 
 def _themes(
     text: str, top: int = 12, min_count: int = 2
 ) -> list[tuple[str, int]]:
-    """The ``top`` most frequent of ``text``'s terms, each mentioned at least ``min_count``
-    times.
-    """
+    """Return the ``top`` most frequent of ``text``'s terms, each seen ``min_count`` or more."""
     return _ranked(Counter(_terms(text)), top, min_count)
 
 
@@ -61,8 +60,9 @@ def _cross_project_themes(
     top: int = 12,
     min_projects: int = 2,
 ) -> list[tuple[str, int]]:
-    """The ``top`` terms present in at least ``min_projects`` of the projects' term sets, counted
-    once per project.
+    """Return the ``top`` terms present in at least ``min_projects`` of the projects' term sets.
+
+    Each term is counted once per project.
     """
     counts: Counter[str] = Counter()
     for tokens in per_project_tokens.values():
@@ -71,8 +71,9 @@ def _cross_project_themes(
 
 
 def build_workspace_worksheet(workspace: Path) -> str:
-    """The cross-project Markdown worksheet for every project under ``workspace``; writes
-    nothing.
+    """Return the cross-project Markdown worksheet for every project under ``workspace``.
+
+    Writes nothing.
     """
     from tcip_mcp.workspace import project_dirs
 
@@ -128,9 +129,11 @@ def build_workspace_worksheet(workspace: Path) -> str:
 
 
 def _gather(project: Path) -> tuple[list[dict], list, str]:
-    """``project``'s friction reports as :func:`~tcip_mcp.tools.meta_tools.report_row` lists
-    them, its retrospectives (latest stated section first), and the free text of the decoded
-    reports and the retrospectives joined.
+    """Gather ``project``'s friction reports, its retrospectives and their joined free text.
+
+    The reports are listed as :func:`~tcip_mcp.tools.meta_tools.report_row` lists them, the
+    retrospectives latest stated section first, and the text joins the decoded reports' and the
+    retrospectives'.
     """
     from tcip_mcp.tools.meta_tools import (
         report_documents,
@@ -152,8 +155,10 @@ def _gather(project: Path) -> tuple[list[dict], list, str]:
 
 
 def _report_line(report: dict, width: int) -> str:
-    """One report as a bullet: its category and its detail, or ``malformed`` and the reason it
-    will not decode, on one line cut to ``width``.
+    """Render one report as a bullet on one line cut to ``width``.
+
+    The bullet carries its category and its detail, or ``malformed`` and the reason it will not
+    decode.
     """
     if "malformed" in report:
         return f"- [malformed] {report['malformed'].replace(chr(10), ' ')[:width]}"
@@ -204,6 +209,10 @@ def build_worksheet(project: Path) -> str:
 
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    """Print the worksheet for ``--project`` or, with ``--workspace``, across every project.
+
+    ``--workspace`` reads the workspace ``TCIP_WORKSPACE`` names. Returns 0.
+    """
     ap = argparse.ArgumentParser(
         description="Gather learning-review material into one worksheet.",
         prog=prog,

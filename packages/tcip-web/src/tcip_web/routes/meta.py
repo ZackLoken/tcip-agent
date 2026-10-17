@@ -1,5 +1,6 @@
-"""Meta-loop routes: read-only, on-demand views over the friction reports and retrospectives,
-enumerated, ordered and decoded by the module that owns their stores.
+"""Meta-loop routes: read-only, on-demand views over the friction reports and retrospectives.
+
+The records are enumerated, ordered and decoded by the module that owns their stores.
 """
 
 from __future__ import annotations

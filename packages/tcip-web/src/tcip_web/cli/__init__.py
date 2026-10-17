@@ -41,6 +41,12 @@ def _usage() -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Route ``argv`` to its command's ``main`` and return that exit code.
+
+    ``argv`` defaults to ``sys.argv[1:]``. No command prints the usage and returns 2, ``-h`` or
+    ``--help`` prints it and returns 0, and an unknown command prints its name and the usage to
+    stderr and returns 2.
+    """
     args = sys.argv[1:] if argv is None else list(argv)
     if not args or args[0] in ("-h", "--help"):
         print(_usage())
