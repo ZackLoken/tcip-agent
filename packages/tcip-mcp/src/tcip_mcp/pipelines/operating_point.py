@@ -1,5 +1,6 @@
-"""The measurement criteria an assessment computes, each reading its tolerances, floors and
-objective from the trait entry it is handed, and the detector knobs an execution record sets.
+"""The measurement criteria and the detector operating-point knobs.
+
+Each criterion reads its tolerances, floors and objective from the trait entry it is handed.
 """
 
 from __future__ import annotations
@@ -51,9 +52,11 @@ REGRESSION_CRITERIA: dict[
 def _effective_count_bias_tolerance(
     tolerance_frac: float, typical_count: float, n: int
 ) -> float:
-    """The absolute per-image count-bias tolerance one scope (pooled, or one class) is held to:
-    ``tolerance_frac`` of the scope's typical per-image count, floored at ``1 / n``, one whole
-    miscount spread across the ``n`` samples the scope's evidence rests on; ``0.0`` at ``n == 0``.
+    """Return the absolute per-image count-bias tolerance one scope is held to.
+
+    A scope is pooled, or one class. The tolerance is ``tolerance_frac`` of the scope's typical
+    per-image count, floored at ``1 / n``, one whole miscount spread across the ``n`` samples the
+    scope's evidence rests on; ``0.0`` at ``n == 0``.
     """
     return max(tolerance_frac * typical_count, 1.0 / n) if n > 0 else 0.0
 
@@ -67,9 +70,10 @@ def _bias_equivalence(
     typical_count: float,
     equivalence_z: float,
 ) -> tuple[bool, float]:
-    """Whether a bias measured over ``n`` present samples is equivalent to zero at the scope's
-    tolerance (mean plus ``equivalence_z`` one-sided standard errors within it), and that
-    tolerance. ``n == 0`` never passes.
+    """Return whether a bias over ``n`` present samples is equivalent to zero, and the tolerance.
+
+    Equivalent means the mean plus ``equivalence_z`` one-sided standard errors lies within the
+    scope's tolerance. ``n == 0`` never passes.
     """
     tolerance = _effective_count_bias_tolerance(
         tolerance_frac, typical_count, n
@@ -90,7 +94,7 @@ OPERATING_POINT_ATTRS = (SCORE_THRESH, DETECTIONS_PER_IMG)
 
 
 def detector_operating_point_holder(model: Any) -> tuple[Any, str | None]:
-    """Where a model's operating-point knobs live, and the attribute path to name it by.
+    """Return the holder of a model's operating-point knobs and its attribute path.
 
     Checked in this order, the first that exposes any of :data:`OPERATING_POINT_ATTRS`: the module
     itself, its ``.detector``'s ``roi_heads`` (two-stage detectors), its ``.detector`` (one-stage).
@@ -122,8 +126,9 @@ def detector_operating_point_holder(model: Any) -> tuple[Any, str | None]:
 def set_detector_operating_point(
     model: Any, *, score_thresh: float, detections_per_img: int
 ) -> None:
-    """Set both knobs on the holder :func:`detector_operating_point_holder` resolves, so the
-    operating point governs which boxes exist. A knob the model does not expose refuses
+    """Set both knobs on the holder :func:`detector_operating_point_holder` resolves.
+
+    A knob the model does not expose refuses
     (``ValueError``) naming it and the holder.
     """
     target, path = detector_operating_point_holder(model)
@@ -132,8 +137,9 @@ def set_detector_operating_point(
 
 
 def _set_knob(target: Any, path: str | None, attr: str, value: float) -> None:
-    """Set the operating-point knob ``attr`` to ``value`` on ``target``, the holder at ``path``,
-    refusing (``ValueError``) naming the knob and the holder when ``target`` does not expose it.
+    """Set the operating-point knob ``attr`` to ``value`` on ``target``, the holder at ``path``.
+
+    Refuses (``ValueError``) naming the knob and the holder when ``target`` does not expose it.
     """
     if not hasattr(target, attr):
         raise ValueError(
@@ -148,10 +154,11 @@ def _set_knob(target: Any, path: str | None, attr: str, value: float) -> None:
 def governed_forward(
     model: Any, inputs: list, caps: list[int], *, conf: float
 ) -> list:
-    """``model``'s output for each of ``inputs``, in input order, each produced under the
-    in-model score threshold ``conf`` and its own detection cap of ``caps``, both set in the
-    model (:func:`set_detector_operating_point`): one forward per distinct cap, over the inputs it
-    governs.
+    """Return ``model``'s output for each of ``inputs``, in input order, under its own cap.
+
+    Each output is produced under the in-model score threshold ``conf`` and its own detection cap
+    of ``caps``, both set in the model: one forward per
+    distinct cap, over the inputs it governs.
     """
     outputs: list = [None] * len(inputs)
     for cap in sorted(set(caps)):
@@ -165,14 +172,15 @@ def governed_forward(
 
 
 def _min_dt_score(records: list[dict]) -> float | None:
-    """Lowest detection score across a reference, or None if it holds no detections."""
+    """Return the lowest detection score across a reference, or None if it holds none."""
     scores = [d["score"] for rec in records for d in rec["dt"]]
     return min(scores) if scores else None
 
 
 def cap_saturated_frac(records: list[dict]) -> float:
-    """Fraction of ``records`` whose frame kept as many detections as the cap the collection pass
-    gave it; every record states its frame's ``count`` and ``cap``.
+    """Return the fraction of ``records`` whose frame kept as many detections as its cap.
+
+    Every record states its frame's ``count`` and ``cap``.
     """
     return (
         sum(r["count"] == r["cap"] for r in records) / len(records)
@@ -192,12 +200,11 @@ def count_criterion(
     dispersion_quantile: float,
     held: dict | None = None,
 ) -> tuple[float, dict, list[str]]:
-    """The conf the trait's count objective picks on the calibration side, and the held-out count
-    check at that conf: ``(conf, evidence, failures)``.
+    """Pick the count objective's conf on the calibration side and check the holdout at it.
 
-    The records are per-image COCO records (``gt`` objects and every ``dt`` detection with its
-    score) collected at ``staged_conf_floor``, matched under the trait's localization resolved
-    once over the calibration records
+    Returns ``(conf, evidence, failures)``. The records are per-image COCO records (``gt`` objects
+    and every ``dt`` detection with its score) collected at ``staged_conf_floor``, matched under
+    the trait's localization resolved once over the calibration records
     (:func:`~tcip_mcp.pipelines.training.evaluation.resolve_match_criterion`, the evidence's
     ``localization``) and applied to each side
     (:func:`~tcip_mcp.pipelines.training.evaluation.scaled_to`). The holdout passes when its
@@ -324,9 +331,10 @@ def count_criterion(
 
 
 def _classification_kappa(items: list[dict]) -> float | None:
-    """Cohen's kappa between the reference's and the model's positive/negative call over matched
-    instances, chance-corrected from the reference's own base rates; ``None`` for no items or a
-    single class on either side.
+    """Return Cohen's kappa between the reference's and the model's positive/negative call.
+
+    The calls are over matched instances, chance-corrected from the reference's own base rates;
+    ``None`` for no items or a single class on either side.
     """
     n = len(items)
     if n == 0:
@@ -353,15 +361,15 @@ def classifier_criterion(
     *,
     equivalence_z: float,
 ) -> tuple[dict, list[str]]:
-    """The held-out agreement of a positive-state call over matched instances:
-    ``(evidence, failures)``.
+    """Assess the held-out agreement of a positive-state call over matched instances.
 
-    Each item is one reference instance matched to one prediction, ``{"image_id",
-    "is_true_positive", "is_pred_positive"}``. The holdout passes when Cohen's kappa over its items
-    is above zero and above ``classifier_agreement_floor``, and when its present-scoped per-image
-    positive-count bias is equivalent to zero at ``count_bias_tolerance_frac`` of the typical
-    positive count, at ``equivalence_z`` one-sided standard errors. Both sides must carry positive
-    evidence and the holdout at least two items over at least two images.
+    Returns ``(evidence, failures)``. Each item is one reference instance matched to one
+    prediction, ``{"image_id", "is_true_positive", "is_pred_positive"}``. The holdout passes when
+    Cohen's kappa over its items is above zero and above ``classifier_agreement_floor``, and when
+    its present-scoped per-image positive-count bias is equivalent to zero at
+    ``count_bias_tolerance_frac`` of the typical positive count, at ``equivalence_z`` one-sided
+    standard errors. Both sides must carry positive evidence and the holdout at least two items
+    over at least two images.
     """
     by_image: dict[str, list[dict]] = {}
     for it in hold_items:
@@ -422,9 +430,10 @@ def scalar_criterion(
     floor: float,
     criterion: str,
 ) -> tuple[dict, list[str]]:
-    """A per-image scalar prediction's held-out skill: ``criterion``'s ``score`` over the holdout
-    items' ``(predicted, true)`` values must be finite, above zero and above ``floor``.
-    ``(evidence, failures)``.
+    """Assess a per-image scalar prediction's held-out skill.
+
+    ``criterion``'s ``score`` over the holdout items' ``(predicted, true)`` values must be finite,
+    above zero and above ``floor``. Returns ``(evidence, failures)``.
     """
     import torch
 
@@ -453,10 +462,11 @@ def scalar_criterion(
 def spatial_disjointness(
     spatial: SpatialManifest, rects: Sequence[tuple[int, int, int, int]]
 ) -> list[str]:
-    """The reference rects (full-mosaic pixel coordinates) not held out from training under a
-    within-image split's recorded regions ``spatial``: each rect must lie inside one of its
-    ``val_region``/``holdout_region``/``calibration_region`` rects and overlap none of its
-    ``train_region`` rects.
+    """Return the reference rects not held out from training under ``spatial``'s regions.
+
+    Rects are in full-mosaic pixel coordinates; ``spatial`` is a within-image split's recorded
+    regions. Each rect must lie inside one of its ``val_region``/``holdout_region``/
+    ``calibration_region`` rects and overlap none of its ``train_region`` rects.
     """
     from tcip_mcp.pipelines.raster_source import (
         rect_contains_rect,

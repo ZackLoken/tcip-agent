@@ -21,8 +21,9 @@ from tcip_mcp.traits import Text
 
 
 class MatchTolerance(BaseModel):
-    """A nearest-neighbor attribution's resolved tolerance (meters) and the branch of
-    ``plant_mapping.resolve_nn_tolerance_m`` that produced it.
+    """A nearest-neighbor attribution's resolved tolerance (meters) and the branch behind it.
+
+    The branch is the one of ``plant_mapping.resolve_nn_tolerance_m`` that produced it.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -41,11 +42,11 @@ class PlantRegistryReference(BaseModel):
 
 
 class PlantMappingDisclosure(BaseModel):
-    """The ``plant_mapping`` a phenology delivery attributed detections through, as
-    :meth:`tcip_mcp.pipelines.postprocessing.plant_mapping.MappingBuild.delivery_disclosure`
-    composes it: the mapping's own identity, ``verify_mapping_inputs``'s two unverified
-    disclosures, and this delivery's own unattributed-capture count scoped to its delivered dates.
-    Every key is required.
+    """The ``plant_mapping`` a phenology delivery attributed detections through.
+
+    It holds the mapping's own identity, ``verify_mapping_inputs``'s two unverified disclosures,
+    and this delivery's own unattributed-capture count scoped to its delivered dates. Every key is
+    required.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -66,8 +67,9 @@ class PlantMappingDisclosure(BaseModel):
 
 
 class PlantRegistryDisclosure(BaseModel):
-    """The ``plant_mapping`` an orthomosaic delivery's nearest-neighbor regime attributed
-    detections through: the plant registry it read, the raster identity every count in the delivery
+    """The ``plant_mapping`` of an orthomosaic delivery's nearest-neighbor regime.
+
+    It names the plant registry the regime read, the raster identity every count in the delivery
     is attributed through, the tolerance it matched detections under, this delivery's own
     unattributed-detection count, and the registry plants the raster's own frame does not picture
     at all, by name. Every key is required.
@@ -85,8 +87,10 @@ class PlantRegistryDisclosure(BaseModel):
 
 
 class CanopySegmentsDocument(BaseModel):
-    """The label document a canopy-segment delivery read its boundaries from, named by its capture
-    and stem under the delivered bucket's dataset root and by the version it was read at.
+    """The label document a canopy-segment delivery read its boundaries from.
+
+    It is named by its capture and stem under the delivered bucket's dataset root and by the
+    version it was read at.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -99,9 +103,11 @@ class CanopySegmentsDocument(BaseModel):
 
 
 class SegmentTieDisclosure(BaseModel):
-    """One resolved segment-to-plant tie: the attribution claim itself, and the derived margin
-    (:class:`~tcip_mcp.pipelines.postprocessing.segment_attribution.TiedSegment.clearance_m``) a
-    displaced registry position would have to exceed to leave this segment.
+    """One resolved segment-to-plant tie: the attribution claim itself, and its derived margin.
+
+    The margin
+    (:class:`~tcip_mcp.pipelines.postprocessing.segment_attribution.TiedSegment.clearance_m``) is
+    what a displaced registry position would have to exceed to leave this segment.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -112,15 +118,14 @@ class SegmentTieDisclosure(BaseModel):
 
 
 class CanopySegmentDisclosure(BaseModel):
-    """The ``plant_mapping`` an orthomosaic delivery's canopy-segment regime attributed detections
-    through.
+    """The ``plant_mapping`` of an orthomosaic delivery's canopy-segment regime.
 
-    Names the registry and raster identity the same way :class:`PlantRegistryDisclosure` does, plus
-    the canopy document this delivery read its boundaries from, the resolved segment-to-plant ties,
-    the position error in meters the ties were held to, and the registry plants attribution
-    excluded, by name and by reason: outside the raster's frame, inside no segment, within the
-    position error of its segment's boundary, or inside a segment whose own detection was
-    ambiguous (:data:`~tcip_mcp.pipelines.postprocessing.segment_attribution.SegmentAssignment`'s
+    Names the plant registry and the raster identity, plus the canopy document this delivery read
+    its boundaries from, the resolved segment-to-plant ties, the position error in meters the ties
+    were held to, and the registry plants attribution excluded, by name and by reason: outside the
+    raster's frame, inside no segment, within the position error of its segment's boundary, or
+    inside a segment whose own detection was ambiguous
+    (:data:`~tcip_mcp.pipelines.postprocessing.segment_attribution.SegmentAssignment`'s
     ``"overlapping_segments"`` source). Every key is required.
     """
 
@@ -147,8 +152,9 @@ class CanopySegmentDisclosure(BaseModel):
 
 
 class Producer(BaseModel):
-    """The one checkpoint and run behind every delivered bucket
-    (:attr:`~tcip_mcp.model_registry.VerifiedCheckpoint.producer`).
+    """The one checkpoint and run behind every delivered bucket.
+
+    Read off :attr:`~tcip_mcp.model_registry.VerifiedCheckpoint.producer`.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -158,8 +164,9 @@ class Producer(BaseModel):
 
 
 class BucketFinding(BaseModel):
-    """What the gate found for one delivered bucket, named by its dataset root and its name:
-    validated when no reason refuses it.
+    """What the gate found for one delivered bucket, named by its dataset root and its name.
+
+    The bucket is validated when no reason refuses it.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -173,9 +180,10 @@ class BucketFinding(BaseModel):
 
 
 class Acknowledgment(BaseModel):
-    """The breeder's recorded act of shipping one unvalidated result: its id, who did it and why
-    (both required non-empty; a blank one refuses, ``ValueError``), the digest of the result it was
-    given for, and when it was recorded.
+    """The breeder's recorded act of shipping one unvalidated result.
+
+    It holds its id, who did it and why (both required non-empty; a blank one refuses,
+    ``ValueError``), the digest of the result it was given for, and when it was recorded.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -194,7 +202,9 @@ PlantMapping = (
 
 
 class DeliveryEventRecord(TraitRevisionRef):
-    """The stored per-delivery record: the trait revision it shipped under (its
+    """The stored per-delivery record.
+
+    It holds the trait revision it shipped under (its
     :class:`~tcip_mcp.pipelines.schemas.TraitRevisionRef` fields), what shipped and of which kind,
     from which producer, what the gate found per bucket, and the acknowledgment it shipped under.
     """

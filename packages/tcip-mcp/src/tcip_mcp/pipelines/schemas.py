@@ -1,7 +1,9 @@
-"""Pydantic v2 config schemas. A training config's platform-owned keys are typed here, its
-``model_source`` and ``data`` blocks included (:func:`train_config`), each at the top level of
-the config; a bespoke ``training_source`` may read its own additional top-level keys. A config
-carrying a ``training`` key is refused by name.
+"""Pydantic v2 config schemas.
+
+A training config's platform-owned keys are typed here, its ``model_source`` and ``data`` blocks
+included, each at the top level of the config; a bespoke ``training_source`` may read its own
+additional top-level keys. A config carrying a ``training``
+key is refused by name.
 """
 
 from __future__ import annotations
@@ -52,8 +54,10 @@ holds), and that location is read and recorded."""
 
 
 class _Stated(BaseModel):
-    """A block a config states: a key outside its fields refuses by name, and ``rationale``
-    carries why the block states what it does.
+    """A block a config states.
+
+    A key outside its fields refuses by name, and ``rationale`` carries why the block states what
+    it does.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -61,8 +65,9 @@ class _Stated(BaseModel):
 
 
 class SamplerSpec(_Stated):
-    """``sampler``: the train loader's sampler ``name`` names (``samplers.build_sampler``), its
-    own values kept as stated beside the block's ``rationale``.
+    """``sampler``: the train loader's sampler ``name`` names (``samplers.build_sampler``).
+
+    The sampler's own values are kept as stated beside the block's ``rationale``.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -70,33 +75,36 @@ class SamplerSpec(_Stated):
 
 
 class AugmentationSpec(_Stated):
-    """``augmentation``: each transform's name (``augmentations.build_augmentation``) to the
-    values its constructor takes, kept as stated in order beside the block's ``rationale``.
+    """``augmentation``: each transform's name to the values its constructor takes.
+
+    Names are those ``augmentations.build_augmentation`` builds, kept as stated in order beside
+    the block's ``rationale``.
     """
 
     model_config = ConfigDict(extra="allow")
 
 
 class StageSpec(_Stated):
-    """One progressive-unfreeze step: the trainer reads ``freeze_to`` and the stage's own
-    ``gradient_accumulation_steps``, while the learning rate comes from the top-level
-    ``optimizer`` block, never per stage. Any other key, a per-stage ``lr`` or ``epochs``
-    included, is refused by name.
+    """One progressive-unfreeze step.
+
+    It holds ``freeze_to`` and ``gradient_accumulation_steps``. Any other key, a per-stage ``lr``
+    or ``epochs`` included, is refused by name.
     """
 
     freeze_to: int
     """``0`` trains every parameter, ``-1`` freezes every backbone stage, a positive count
-    freezes that many (``generic_trainer.apply_stage_freeze``)."""
+    freezes that many."""
     gradient_accumulation_steps: int | None = Field(None, ge=1)
     """``None``, stated or not, is the run's own top-level ``gradient_accumulation_steps``."""
 
 
 class EarlyStoppingSpec(_Stated):
-    """The stop rule that ends a stage and the run: a stage ends once its selection value has not
-    improved by ``min_delta`` for ``patience`` epochs, the run ends with the stage whose best
-    does not improve by ``min_delta`` on the best of the stage before it, and the run stops as
-    diverged after ``nonfinite_passes`` consecutive full training passes with no finite batch
-    loss.
+    """The stop rule that ends a stage and the run.
+
+    A stage ends once its selection value has not improved by ``min_delta`` for ``patience``
+    epochs, the run ends with the stage whose best does not improve by ``min_delta`` on the best of
+    the stage before it, and the run stops as diverged after ``nonfinite_passes`` consecutive full
+    training passes with no finite batch loss.
     """
 
     patience: int = Field(ge=1)
@@ -105,8 +113,9 @@ class EarlyStoppingSpec(_Stated):
 
 
 class TraitRevisionRef(BaseModel):
-    """One trait revision as every record names it: the trait, the revision's number and its
-    entry's content hash (``traits.entry_sha256``).
+    """One trait revision: the trait, the revision's number and its entry's content hash.
+
+    The hash is ``traits.entry_sha256``.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -116,14 +125,15 @@ class TraitRevisionRef(BaseModel):
 
 
 def revision_record(ref: TraitRevisionRef | None) -> dict | None:
-    """``ref`` as every record stores it, ``None`` for a run whose evaluation names no trait."""
+    """Return ``ref`` as a record stores it, ``None`` for a run whose evaluation names no trait."""
     return None if ref is None else ref.model_dump()
 
 
 class OptimizerSpec(_Stated):
-    """The optimizer every stage builds (``optimizer_factory.build_optimizer``): its family and
-    its tuned settings required (both rates, the weight decay, and ``momentum`` for ``sgd`` and
-    for no other optimizer).
+    """Optimizer settings.
+
+    Its family and its tuned settings are required (both rates, the weight decay, and ``momentum``
+    for ``sgd`` and for no other optimizer).
     """
 
     name: str
@@ -143,8 +153,9 @@ class OptimizerSpec(_Stated):
 
 
 class HorizonSchedule(_Stated):
-    """A schedule built over its own ``horizon_epochs`` scheduled epochs, the most a stage under
-    it runs past its warmup.
+    """A schedule built over its own ``horizon_epochs`` scheduled epochs.
+
+    The horizon is the most a stage under it runs past its warmup.
     """
 
     horizon_epochs: int = Field(ge=1)
@@ -158,11 +169,12 @@ class CosineSchedule(HorizonSchedule):
 
 
 class PlateauSchedule(_Stated):
-    """The rate times ``factor`` once the run's selection value has not improved in its
-    metric's direction (:func:`selection_of`), by ``threshold`` in ``threshold_mode``, for
-    ``patience`` epochs, then ``cooldown`` epochs before the count resumes, never below
-    ``min_lr``, a change smaller than ``eps`` not applied
-    (``torch.optim.lr_scheduler.ReduceLROnPlateau``).
+    """The rate times ``factor`` once the run's selection value stops improving.
+
+    It stops improving when it has not improved in its metric's direction (:func:`selection_of`),
+    by ``threshold`` in ``threshold_mode``, for ``patience`` epochs; ``cooldown`` epochs then pass
+    before the count resumes. The rate never falls below ``min_lr``, and a change smaller than
+    ``eps`` is not applied (``torch.optim.lr_scheduler.ReduceLROnPlateau``).
     """
 
     type: Literal["plateau"]
@@ -176,8 +188,9 @@ class PlateauSchedule(_Stated):
 
 
 class OneCycleSchedule(HorizonSchedule):
-    """One cycle over the block's horizon peaking at ``max_lr``, each of
-    ``torch.optim.lr_scheduler.OneCycleLR``'s own settings stated.
+    """One cycle over the block's horizon peaking at ``max_lr``.
+
+    Each of ``torch.optim.lr_scheduler.OneCycleLR``'s own settings is stated.
     """
 
     type: Literal["onecycle"]
@@ -204,19 +217,20 @@ SchedulerSpec = Annotated[
     CosineSchedule | PlateauSchedule | OneCycleSchedule | StepSchedule,
     Field(discriminator="type"),
 ]
-"""The learning-rate schedule each stage builds (``generic_trainer._build_scheduler``): its
-``type`` and that type's own settings, each stated, any other type's refused by name."""
+"""A learning-rate schedule, discriminated by ``type``: its ``type`` and that type's own settings,
+each stated, any other type's refused by name."""
 SCHEDULER_TYPES: tuple[str, ...] = tuple(
     get_args(schedule.model_fields["type"].annotation)[0]
     for schedule in get_args(get_args(SchedulerSpec)[0])
 )
-"""The ``scheduler.type`` names ``generic_trainer._build_scheduler`` builds."""
+"""The ``type`` names :data:`SchedulerSpec` admits."""
 
 
 class ScoreWeights(BaseModel):
-    """The composite objective's weight on each of its terms
-    (``evaluation.compute_composite_objective``), each non-negative so a better term never
-    raises the lower-is-better objective.
+    """The composite objective's weight on each of its terms.
+
+    The objective is ``evaluation.compute_composite_objective``'s; each weight is non-negative so
+    a better term never raises the lower-is-better objective.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -281,18 +295,20 @@ criterion: the IoU-convention average precision and counts."""
 
 
 def selection_of(metric: str) -> tuple[str, bool]:
-    """``metric``, a validated config's ``evaluation.selection_metric``, and whether a higher
-    value of it ranks better (:data:`HIGHER_IS_BETTER_BY_METRIC`): the one read of a run's or a
-    sweep's selection and its direction.
+    """Return ``metric`` and whether a higher value of it ranks better.
+
+    ``metric`` is a validated config's ``evaluation.selection_metric``; the direction is read off
+    :data:`HIGHER_IS_BETTER_BY_METRIC`.
     """
     return metric, HIGHER_IS_BETTER_BY_METRIC[metric]
 
 
 class EvaluationSpec(_Stated):
-    """What a run's validation pass scores against: the confirmed trait it selects for, the
-    selection metric, one with a declared ranking direction (:data:`SelectionMetric`, checked
-    over the run by ``generic_trainer.resolve_selection_metric``), and the thresholds and score
-    weights the validation pass applies.
+    """What a run's validation pass scores against.
+
+    It holds the confirmed trait it selects for, the selection metric, one with a declared ranking
+    direction (:data:`SelectionMetric`), and the thresholds and score weights the validation pass
+    applies.
     """
 
     trait: str | None = None
@@ -309,8 +325,10 @@ class EvaluationSpec(_Stated):
 
 
 class LrScalingSpec(_Stated):
-    """Effective-batch LR scaling: each stage's learning rates times ``(its effective batch / the
-    first stage's) ** scale_power``, capped at ``max_lr`` when one is stated.
+    """Effective-batch LR scaling.
+
+    Each stage's learning rates are multiplied by ``(its effective batch / the first stage's) **
+    scale_power``, capped at ``max_lr`` when one is stated.
     """
 
     scale_power: float
@@ -328,11 +346,12 @@ class ImageStatsWindow(BaseModel):
 
 
 class ImageStatsSampling(BaseModel):
-    """What band statistics read: the sampling of whichever of
-    ``derivations.band_normalization_stats`` (the exact derivation) or
-    ``band_normalization_stats_sampled`` (the windowed one) produced them. ``windows`` pairs each
-    source's label with the rectangle read from it, or ``None`` for the exact derivation's own
-    whole-image read (``pixel_fraction`` is then ``1.0`` and
+    """What band statistics read.
+
+    It is the sampling of whichever of ``derivations.band_normalization_stats`` (the exact
+    derivation) or ``band_normalization_stats_sampled`` (the windowed one) produced them.
+    ``windows`` pairs each source's label with the rectangle read from it, or ``None`` for the
+    exact derivation's own whole-image read (``pixel_fraction`` is then ``1.0`` and
     ``window_size``/``max_windows_per_image`` are ``None``); ``max_images`` is the cap on rasters
     drawn and ``seed`` the seed that drew them.
     """
@@ -349,9 +368,11 @@ class ImageStatsSampling(BaseModel):
 
 
 class PretrainedWeights(BaseModel):
-    """Pretrained weights a model's builder loads: the ``library`` publishing them and their
-    ``name`` there, a timm pretrained tag (``resnet18.a1_in1k``) or a torchvision weights enum
-    member (``ResNet18_Weights.IMAGENET1K_V1``).
+    """Pretrained weights a model's builder loads.
+
+    They are named by the ``library`` publishing them and their ``name`` there, a timm pretrained
+    tag (``resnet18.a1_in1k``) or a torchvision weights enum member
+    (``ResNet18_Weights.IMAGENET1K_V1``).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -360,15 +381,16 @@ class PretrainedWeights(BaseModel):
 
 
 class StatedBeyondWeights(_Stated):
-    """Per-band statistics stated with ``rationale`` for a model reading more bands than the
-    ``pretrained_weights`` it loads carry statistics for.
+    """Per-band statistics stated with ``rationale`` beyond the bands the weights cover.
+
+    The model reads more bands than the ``pretrained_weights`` it loads carry statistics for.
     """
 
     pretrained_weights: PretrainedWeights
 
 
 def _present(record: Any, names: Sequence[str]) -> dict[str, Any]:
-    """Each of ``names`` whose value on ``record`` is not ``None``, under its own name."""
+    """Return each of ``names`` whose value on ``record`` is not ``None``, under its own name."""
     return {
         name: value
         for name in names
@@ -383,8 +405,9 @@ class _Sourced(BaseModel):
 
     @classmethod
     def handed_names(cls) -> tuple[str, ...]:
-        """The names of the values a builder is handed: every field but ``source``, and every
-        property the class reads off its fields.
+        """Return the names of the values a builder is handed.
+
+        They are every field but ``source``, and every property the class reads off its fields.
         """
         return (
             *(name for name in cls.model_fields if name != "source"),
@@ -396,16 +419,17 @@ class _Sourced(BaseModel):
         )
 
     def handed(self) -> dict[str, Any]:
-        """Each value a builder is handed (:meth:`handed_names`) that is present."""
+        """Return each present value a builder is handed (:meth:`handed_names`)."""
         return _present(self, self.handed_names())
 
 
 class Normalization(_Sourced):
-    """The per-band ``image_mean`` and ``image_std``, in [0, 1] tensor units, a model normalizes
-    its input by, and their ``source``: the data's band statistics' own sampling record when no
-    weights load (``derivations.band_normalization_stats``), the pretrained weights whose own
-    statistics they are (``derivations.pretrained_normalization``), or the statement of every
-    band for a model reading more bands than its weights carry statistics for.
+    """The per-band ``image_mean`` and ``image_std`` a model normalizes its input by.
+
+    Both are in [0, 1] tensor units. Their ``source`` is the data's band statistics' own sampling
+    record when no weights load (``derivations.band_normalization_stats``), the pretrained weights
+    whose own statistics they are (``derivations.pretrained_normalization``), or the statement of
+    every band for a model reading more bands than its weights carry statistics for.
     """
 
     image_mean: list[float]
@@ -424,12 +448,12 @@ class Normalization(_Sourced):
 
 
 class DetectorGeometry(_Sourced):
-    """A detector's input scale and anchors, the four keyword values the platform hands a
-    detection builder: ``min_size`` and ``max_size``, the resize bounds, ``anchor_base_size``,
-    the anchor size of the finest pyramid level, each coarser level doubling it, and
-    ``aspect_ratios`` (h/w), the ratios every level's anchors take; ``source``, the label of the
-    derivation that gave them (``derivations.derive_detector_geometry``) or the statement of
-    them.
+    """A detector's input scale and anchors, the four keyword values the platform hands a builder.
+
+    They are ``min_size`` and ``max_size``, the resize bounds, ``anchor_base_size``, the anchor
+    size of the finest pyramid level, each coarser level doubling it, and ``aspect_ratios`` (h/w),
+    the ratios every level's anchors take; ``source`` is the label of the derivation that gave
+    them (``derivations.derive_detector_geometry``) or the statement of them.
     """
 
     min_size: PositiveInt
@@ -446,10 +470,11 @@ class StatedDetectorGeometry(DetectorGeometry):
 
 
 class ModelDims(NamedTuple):
-    """The dimensions a run's model is built at (``model_build.model_dims``): ``in_chans``, the
-    band count its sources are read at; ``num_classes`` or ``num_ranks``, the count its ground
-    truth derives; ``attributes``, the attribute records a document scope declares. ``None``
-    for each the run has none of.
+    """The dimensions a run's model is built at.
+
+    ``in_chans`` is the band count its sources are read at; ``num_classes`` or ``num_ranks``, the
+    count its ground truth derives; ``attributes``, the attribute records a document scope
+    declares. ``None`` for each the run has none of.
     """
 
     in_chans: int
@@ -458,15 +483,17 @@ class ModelDims(NamedTuple):
     attributes: tuple[Attribute, ...] | None = None
 
     def handed(self) -> dict[str, Any]:
-        """Each dimension the run has, under its own name."""
+        """Return each dimension the run has, under its own name."""
         return _present(self, self._fields)
 
 
 def _handed_once(
     door: str, handed: Sequence[str], kwargs: dict | None, why: str
 ) -> None:
-    """Refuse (``ValueError``) a ``door.builder_kwargs`` naming any of ``handed``, the values
-    the platform hands that door's builder, saying ``why`` they are the platform's.
+    """Refuse (``ValueError``) a ``door.builder_kwargs`` naming any of ``handed``.
+
+    ``handed`` are the values the platform hands that door's builder; the refusal says ``why``
+    they are the platform's.
     """
     restated = sorted(set(handed) & set(kwargs or {}))
     if restated:
@@ -477,11 +504,12 @@ def _handed_once(
 
 
 class ModelSourceSchema(BaseModel):
-    """The importable-builder reference, the task its model is for, the statistics it
-    normalizes by (whose source names any pretrained weights its builder loads), and a
-    detector's geometry stated for a run that resolves no frame to derive it from. A key
-    outside these fields refuses by name, and so does a ``builder_kwargs`` naming a value the
-    platform hands (:data:`HANDED_TO_BUILDER`).
+    """The importable-builder reference and what its model is built with.
+
+    It holds the task its model is for, the statistics it normalizes by (whose source names any
+    pretrained weights its builder loads), and a detector's geometry stated for a run that
+    resolves no frame to derive it from. A key outside these fields refuses by name, and so does
+    a ``builder_kwargs`` naming a value the platform hands (:data:`HANDED_TO_BUILDER`).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -517,9 +545,10 @@ and a detector's geometry (:meth:`_Sourced.handed_names`)."""
 
 
 class DatasetContext(NamedTuple):
-    """What the platform hands a dataset builder, each under its field's name, never its
-    ``builder_kwargs``: the ``task``, the ``samples`` of the side being built, the ``scope``
-    they were admitted under, and the ``transforms``.
+    """What the platform hands a dataset builder, each under its field's name.
+
+    These are never its ``builder_kwargs``: the ``task``, the ``samples`` of the side being built,
+    the ``scope`` they were admitted under, and the ``transforms``.
     """
 
     task: str
@@ -529,8 +558,10 @@ class DatasetContext(NamedTuple):
 
 
 class DatasetSourceSchema(BaseModel):
-    """A bespoke dataset builder; a key outside these fields refuses by name, and so does a
-    ``builder_kwargs`` naming a value the platform hands (:class:`DatasetContext`).
+    """A bespoke dataset builder.
+
+    A key outside these fields refuses by name, and so does a ``builder_kwargs`` naming a value
+    the platform hands (:class:`DatasetContext`).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -553,9 +584,10 @@ class DatasetSourceSchema(BaseModel):
 
 
 class BoundSplit(BaseModel):
-    """``data.split`` bound to the selection recorded at ``selection_dir``: its train and val
-    sides as recorded, or, with a ``seed`` stated, redrawn inside them at it. The draw's reason
-    is the selection's own record.
+    """``data.split`` bound to the selection recorded at ``selection_dir``.
+
+    Its train and val sides are as recorded, or, with a ``seed`` stated, redrawn inside them at
+    it. The draw's reason is the selection's own record.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -564,10 +596,12 @@ class BoundSplit(BaseModel):
 
 
 class DrawnSplit(_Stated):
-    """``data.split`` a run draws itself at ``seed``: each side but ``train`` at its stated
-    ``<side>_ratio`` (zero draws no such side, ``train`` the remainder), balanced by foreground
-    count when ``stratify_foreground``, grouped by ``grouping``: a named policy, or an explicit
-    ``{<capture>/<stem>: group_key}`` map covering every member.
+    """``data.split`` a run draws itself at ``seed``.
+
+    Each side but ``train`` is drawn at its stated ``<side>_ratio`` (zero draws no such side,
+    ``train`` the remainder), balanced by foreground count when ``stratify_foreground``, grouped
+    by ``grouping``: a named policy, or an explicit ``{<capture>/<stem>: group_key}`` map covering
+    every member.
     """
 
     seed: int
@@ -579,7 +613,7 @@ class DrawnSplit(_Stated):
 
 
 def _split_kind(value: Any) -> str:
-    """``"bound"`` for a ``data.split`` naming a ``selection_dir``, else ``"drawn"``."""
+    """Return ``"bound"`` for a ``data.split`` naming a ``selection_dir``, else ``"drawn"``."""
     held = (
         value.get("selection_dir")
         if isinstance(value, dict)
@@ -600,11 +634,13 @@ Rect = tuple[int, int, int, int]
 
 
 class SpatialManifest(BaseModel):
-    """The within-image split a run's resolution drew over its one source's tile lattice
-    (``split_construction.spatial_single_source_split``), recorded in its resolved partition:
-    each side's half-open pixel regions, the region identities its train and val tiles carry,
-    the buffer it was drawn at (the lattice is the run's ``data.tiling``), what it requested and
-    realized, and the raster it was drawn over (``split_construction.raster_identity``).
+    """The within-image split a run's resolution drew over its one source's tile lattice.
+
+    The split is ``split_construction.spatial_single_source_split``'s, recorded in its resolved
+    partition: each side's half-open pixel regions, the region identities its train and val tiles
+    carry, the buffer it was drawn at (the lattice is the run's ``data.tiling``), what it
+    requested and realized, and the raster it was drawn over
+    (``split_construction.raster_identity``).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -632,10 +668,11 @@ class SpatialManifest(BaseModel):
 
 
 class TilingSpec(_Stated):
-    """``data.tiling``, stated for a run that tiles its loader (:func:`run_tiling`): the
-    ``datasets.TiledDetectionDataset`` options it states (an unstated edge and overlap derived,
-    an unstated sliver fraction derived by the tiler), whether a tile holding no object trains
-    (``skip_empty``), and a within-image spatial split's ``buffer``.
+    """``data.tiling``, stated for a run that tiles its loader (:func:`run_tiling`).
+
+    It holds the ``datasets.TiledDetectionDataset`` options it states (an unstated edge and
+    overlap derived, an unstated sliver fraction derived by the tiler), whether a tile holding no
+    object trains (``skip_empty``), and a within-image spatial split's ``buffer``.
     """
 
     tile_size: int | None = None
@@ -646,8 +683,9 @@ class TilingSpec(_Stated):
     buffer: int | None = None
 
     def tiler_options(self, exclude: frozenset[str] = frozenset()) -> dict:
-        """The ``TiledDetectionDataset`` keyword arguments this block states, but ``exclude``;
-        an option it leaves ``None`` is omitted.
+        """Return the ``TiledDetectionDataset`` keyword arguments this block states.
+
+        Those ``exclude`` names are left out, and so is an option the block leaves ``None``.
         """
         return self.model_dump(
             exclude_none=True, exclude={"rationale", "buffer", *exclude}
@@ -655,9 +693,11 @@ class TilingSpec(_Stated):
 
 
 def run_tiling(task: str, tiling: TilingSpec | None) -> TilingSpec | None:
-    """The tiling a run of ``task`` builds its loaders at: ``tiling``, ``None`` for a run stating
-    none. A task outside ``model_contract.TILING_TASKS`` trains whole frames, so a ``tiling``
-    stated for one refuses (``ValueError``) naming the task and ``data.tiling``.
+    """Return the tiling a run of ``task`` builds its loaders at.
+
+    That is ``tiling``, ``None`` for a run stating none. A task outside
+    ``model_contract.TILING_TASKS`` trains whole frames, so a ``tiling`` stated for one refuses
+    (``ValueError``) naming the task and ``data.tiling``.
     """
     from tcip_mcp.pipelines.model_contract import TILING_TASKS
 
@@ -677,8 +717,10 @@ def run_frame(
     tiling: TilingSpec | None,
     native_size: tuple[int, int] | None,
 ) -> tuple[int, int] | None:
-    """The ``(width, height)`` a run of ``task`` trains each input at: the square tile its
-    tiling resolved (:func:`run_tiling`), else ``native_size``, ``None`` for neither.
+    """Return the ``(width, height)`` a run of ``task`` trains each input at.
+
+    That is the square tile its tiling resolved (:func:`run_tiling`), else ``native_size``,
+    ``None`` for neither.
     """
     tiler = run_tiling(task, tiling)
     if tiler is None or tiler.tile_size is None:
@@ -690,8 +732,10 @@ class _Recorded(BaseModel):
     """A validated block a run's records hold as :meth:`record` dumps it."""
 
     def record(self, exclude: dict | None = None) -> dict:
-        """This block as a run's record holds it: every key stated or resolved, in JSON form,
-        but the fields ``exclude`` names (``BaseModel.model_dump``'s nested form).
+        """Return this block as a run's record holds it.
+
+        Every key stated or resolved is dumped in JSON form, but the fields ``exclude`` names
+        (``BaseModel.model_dump``'s nested form).
         """
         return self.model_dump(
             mode="json", exclude_unset=True, exclude=exclude
@@ -699,9 +743,10 @@ class _Recorded(BaseModel):
 
 
 class DataSpec(_Recorded):
-    """``data``: where a run's samples are and how they split, and what its resolution records
-    beside them (``scope`` and the sizes). A key outside these fields refuses by name, and so
-    does a ``tiling`` beside a ``dataset_source``.
+    """``data``: where a run's samples are and how they split.
+
+    It also holds what the run's resolution records beside them (``scope`` and the sizes). A key
+    outside these fields refuses by name, and so does a ``tiling`` beside a ``dataset_source``.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -728,18 +773,20 @@ class DataSpec(_Recorded):
 
     @property
     def recorded_scope(self) -> ClassScope:
-        """The class space this block records (``ClassScope.recorded``, which refuses a block
-        recording none).
+        """The class space this block records.
+
+        Read through ``ClassScope.recorded``, which refuses a block recording none.
         """
         return ClassScope.recorded(self.scope)
 
 
 class TrainGeometry(BaseModel):
-    """What a run's resolution read off the frames its train dataset serves: ``native_size``,
-    the one ``(width, height)`` every training frame of a run the platform resolved untiled
-    shares (``None`` when sizes differ or the run tiles), ``object_density``, a detector's
-    objects per pixel over the regions it trains on, and ``detector``, the geometry its builder
-    is handed (each ``None`` for any other head).
+    """What a run's resolution read off the frames its train dataset serves.
+
+    ``native_size`` is the one ``(width, height)`` every training frame of a run the platform
+    resolved untiled shares (``None`` when sizes differ or the run tiles); ``object_density``, a
+    detector's objects per pixel over the regions it trains on; and ``detector``, the geometry its
+    builder is handed (each ``None`` for any other head).
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -766,10 +813,11 @@ class DefaultTrainerRegime(NamedTuple):
 
 
 class TrainerReads(NamedTuple):
-    """What training under a config reads (:meth:`TrainConfigSchema.trainer_reads`): the loaders'
-    batch size, the config's ``evaluation.conf_threshold`` (stated for a detector),
-    ``evaluation.mask_cut`` (stated for instance segmentation), and the default trainer's regime
-    (``None`` for a config naming its own ``training_source``).
+    """What training under a config reads (:meth:`TrainConfigSchema.trainer_reads`).
+
+    It holds the loaders' batch size, the config's ``evaluation.conf_threshold`` (stated for a
+    detector), ``evaluation.mask_cut`` (stated for instance segmentation), and the default
+    trainer's regime (``None`` for a config naming its own ``training_source``).
     """
 
     batch_size: int
@@ -779,11 +827,12 @@ class TrainerReads(NamedTuple):
 
 
 class TrainConfigSchema(_Recorded):
-    """The one training config shape: trainer keys at the top level, no nested section; a key
-    outside these fields is a bespoke loop's own and is kept as stated. It requires
-    ``model_source``, ``data``, ``evaluation``, the seeding and precision every trainer reads,
-    and ``rationale``, the reason for the top-level values it states; what training reads
-    besides is :meth:`trainer_reads`.
+    """The training config shape: trainer keys at the top level, no nested section.
+
+    A key outside these fields is a bespoke loop's own and is kept as stated. It requires
+    ``model_source``, ``data``, ``evaluation``, the seeding and precision every trainer reads, and
+    ``rationale``, the reason for the top-level values it states; what training reads besides is
+    :meth:`trainer_reads`.
     """
 
     model_config = ConfigDict(extra="allow", protected_namespaces=())
@@ -802,7 +851,7 @@ class TrainConfigSchema(_Recorded):
     """``None``: cuda when available, else cpu."""
     seed: int
     deterministic: bool
-    """Whether cuDNN runs its deterministic algorithms (``generic_trainer.set_seed``)."""
+    """Whether cuDNN runs its deterministic algorithms."""
     mixed_precision: bool
     """Whether a cuda run trains under automatic mixed precision."""
     stages: list[StageSpec] | None = Field(None, min_length=1)
@@ -814,8 +863,7 @@ class TrainConfigSchema(_Recorded):
     early_stopping: EarlyStoppingSpec | None = None
     lr_scaling: LrScalingSpec | None = None
     log_every_n_batches: int | None = Field(None, ge=1)
-    """``None``: ``generic_trainer.BATCH_ROWS_PER_EPOCH`` rows an epoch
-    (``generic_trainer.batch_row_ends``)."""
+    """``None``: up to ``generic_trainer.BATCH_ROWS_PER_EPOCH`` rows an epoch."""
     evaluation: EvaluationSpec
 
     @model_validator(mode="before")
@@ -831,8 +879,9 @@ class TrainConfigSchema(_Recorded):
         return self
 
     def default_trainer_regime(self) -> DefaultTrainerRegime:
-        """The regime the default trainer runs at. Refuses (``ValueError``) naming every block of
-        it this config leaves unstated.
+        """Return the regime the default trainer runs at.
+
+        Refuses (``ValueError``) naming every block of it this config leaves unstated.
         """
         missing = [
             name
@@ -848,12 +897,13 @@ class TrainConfigSchema(_Recorded):
         )
 
     def trainer_reads(self) -> TrainerReads:
-        """What training under this config reads, each stated: the loaders' ``batch_size``, a
-        detector's ``evaluation.conf_threshold``, an instance segmentation run's
-        ``evaluation.mask_cut``, and, when the config names no ``training_source``, the default
-        trainer's regime (:meth:`default_trainer_regime`). Refuses (``ValueError``) naming every
-        one of them the config leaves unstated, a ``mask_cut`` stated for a run cutting no mask,
-        and a ``sampler`` block its sampler refuses
+        """Return what training under this config reads, each stated.
+
+        That is the loaders' ``batch_size``, a detector's ``evaluation.conf_threshold``, an
+        instance segmentation run's ``evaluation.mask_cut``, and, when the config names no
+        ``training_source``, the default trainer's regime (:meth:`default_trainer_regime`).
+        Refuses (``ValueError``) naming every one of them the config leaves unstated, a
+        ``mask_cut`` stated for a run cutting no mask, and a ``sampler`` block its sampler refuses
         (``samplers.sampler_settings``).
         """
         from tcip_mcp.pipelines.data.samplers import sampler_settings
@@ -904,11 +954,12 @@ class TrainConfigSchema(_Recorded):
 def checked_train_config(
     config: dict, project: Path | None = None
 ) -> tuple[TrainConfigSchema | None, list[str]]:
-    """``config`` validated once against the schema, its paths located against ``project``
-    (:data:`ResolvedPath`; ``None`` admits absolute paths only): the validated config and no
-    issues, or ``None`` and one issue string per type or structure error (e.g.
-    ``batch_size="big"``, a stage stating ``epochs``, a nested ``training`` section, a missing
-    ``model_source.task``, a relative path with no project).
+    """Validate ``config`` once against the schema, its paths located against ``project``.
+
+    Paths are :data:`ResolvedPath`; a ``project`` of ``None`` admits absolute paths only. Returns
+    the validated config and no issues, or ``None`` and one issue string per type or structure
+    error (e.g. ``batch_size="big"``, a stage stating ``epochs``, a nested ``training`` section, a
+    missing ``model_source.task``, a relative path with no project).
     """
     try:
         return TrainConfigSchema.model_validate(
@@ -921,8 +972,9 @@ def checked_train_config(
 def train_config(
     config: dict, project: Path | None = None
 ) -> TrainConfigSchema:
-    """``config`` validated against the schema (:func:`checked_train_config`). Refuses
-    (``ValueError``) naming every issue it reports.
+    """Validate ``config`` against the schema (:func:`checked_train_config`).
+
+    Refuses (``ValueError``) naming every issue it reports.
     """
     spec, issues = checked_train_config(config, project)
     if spec is None:
@@ -931,7 +983,7 @@ def train_config(
 
 
 def _issues(error: ValidationError) -> list[str]:
-    """One issue string per error ``error`` carries, located by its config path."""
+    """Return one issue string per error ``error`` carries, located by its config path."""
     issues: list[str] = []
     for err in error.errors():
         loc = ".".join(str(x) for x in err.get("loc", ()))

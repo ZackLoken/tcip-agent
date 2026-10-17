@@ -1,7 +1,8 @@
-"""The reserved-region reference of a within-image split: the band geometry, completeness and
-feasibility an assessment reads a mosaic's own reserved calibration and holdout regions through
-(see ``split_construction.spatial_single_source_split``'s four-way split, ``calibration_ratio``),
-for a raster training source too large or too singular to hold whole images out from.
+"""The reserved-region reference of a within-image split.
+
+It holds the band geometry, completeness and feasibility for a mosaic's own reserved calibration
+and holdout regions, for a raster training source too large or too singular to hold whole images
+out from.
 """
 
 from __future__ import annotations
@@ -21,9 +22,11 @@ logger = logging.getLogger(__name__)
 def reserved_spatial_regions(
     spatial: SpatialManifest | None,
 ) -> SpatialManifest | None:
-    """A run's within-image split ``spatial`` (``experiments.RunResolution.spatial``) when it
-    reserved a calibration and a holdout region, else ``None``: a run that drew no within-image
-    split, or one that reserved no calibration or no holdout region.
+    """Return a run's within-image split ``spatial`` when it reserved both reference regions.
+
+    ``spatial`` is ``experiments.RunResolution.spatial``; the regions are a calibration and a
+    holdout region. ``None`` for a run that drew no within-image split, or one that reserved no
+    calibration or no holdout region.
     """
     if (
         spatial is None
@@ -42,11 +45,11 @@ def band_rects(
     buffer_px: int,
     name_prefix: str,
 ) -> dict[str, tuple[int, int, int, int]]:
-    """``k`` non-overlapping, buffered bands over ``region_rect``, in full-mosaic coordinates.
+    """Return ``k`` non-overlapping, buffered bands over ``region_rect``, in mosaic coordinates.
 
     Recurses :func:`spatial_strip_split` over the region's own local extent (its lattice starts at
     local ``(0, 0)``), then translates every returned rect back by the region's own origin
-    (``+ x0, + y0``), the clean, lattice-phase-safe translation.
+    (``+ x0, + y0``).
     """
     from tcip_mcp.pipelines.data.splits import spatial_strip_split
 
@@ -73,7 +76,7 @@ def band_rects(
 def centered_in(
     boxes: np.ndarray, rect: tuple[int, int, int, int]
 ) -> np.ndarray:
-    """Which of the xyxy ``boxes`` have their center inside the half-open ``rect``."""
+    """Return which of the xyxy ``boxes`` have their center inside the half-open ``rect``."""
     from tcip_annotation.matching import box_centers
 
     x0, y0, x1, y1 = rect
@@ -85,9 +88,11 @@ def select_gt_for_band(
     gt: dict[str, np.ndarray],
     band_rect: tuple[int, int, int, int],
 ) -> dict[str, np.ndarray]:
-    """This band's own GT, the rows of ``gt`` (xyxy ``boxes`` with their ``labels`` and
-    ``iscrowd``) :func:`centered_in` ``band_rect``, each box kept at its full extent (never
-    clipped) and translated to the band's own local (inner-rect-relative) pixel space.
+    """Return this band's own GT, the rows of ``gt`` :func:`centered_in` ``band_rect``.
+
+    ``gt`` holds xyxy ``boxes`` with their ``labels`` and ``iscrowd``; each kept box stays at its
+    full extent (never clipped), translated to the band's own local (inner-rect-relative) pixel
+    space.
     """
     from tcip_mcp.pipelines.data.datasets import PER_BOX_KEYS
 
@@ -105,9 +110,11 @@ def check_completeness(
     subject: str,
     rects: dict[str, tuple[int, int, int, int]],
 ) -> None:
-    """Refuse by name (:class:`~tcip_mcp.assessment.AssessmentRefusedError`, naming the regions, the
-    subject and ``where``) unless the live completion marks the label ``document`` holds for
-    ``subject`` cover every half-open rect in ``rects``.
+    """Refuse unless ``document``'s completion marks for ``subject`` cover every rect in ``rects``.
+
+    The marks are the live ones the label document holds; each rect is half-open. The
+    :class:`~tcip_mcp.assessment.AssessmentRefusedError` names the regions, the subject and
+    ``where``.
     """
     from tcip_annotation.json_io import covers
     from tcip_mcp.assessment import AssessmentRefusedError
@@ -127,8 +134,9 @@ def check_completeness(
 def check_feasibility(
     gt_counts: dict[str, int], *, side: str, min_present: int = 2
 ) -> None:
-    """Refuse by name (:class:`~tcip_mcp.assessment.AssessmentRefusedError`) when fewer than
-    ``min_present`` bands on this side carry any GT at all.
+    """Refuse when fewer than ``min_present`` bands on this side carry any GT at all.
+
+    The refusal is an :class:`~tcip_mcp.assessment.AssessmentRefusedError` naming the side.
     """
     from tcip_mcp.assessment import AssessmentRefusedError
 
@@ -145,10 +153,11 @@ def check_feasibility(
 def density_uniformity_flags(
     gt_counts: dict[str, int], *, factor: float = 3.0
 ) -> list[str]:
-    """Band names whose GT count is a stark outlier (more than ``factor``x the median, or less
-    than ``1/factor``x it) relative to its siblings: a cheap smoke check for a plausible
-    attestation error (a region marked complete after only part of it was actually annotated),
-    flagged in provenance, never gating on its own.
+    """Return the band names whose GT count is a stark outlier relative to its siblings.
+
+    An outlier holds more than ``factor``x the median, or less than ``1/factor``x it: a cheap
+    smoke check for a plausible attestation error (a region marked complete after only part of it
+    was actually annotated).
     """
     import statistics
 

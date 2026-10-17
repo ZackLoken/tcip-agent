@@ -1,4 +1,4 @@
-"""``BackboneWrapper``: the interface a backbone must expose to the necks and detectors here.
+"""``BackboneWrapper``: a uniform interface around a feature extractor.
 
 Wrap a module that already emits a list, tuple, or dict of feature maps: timm's
 ``features_only=True``, torchvision's ``create_feature_extractor`` / ``IntermediateLayerGetter``,
@@ -6,17 +6,14 @@ or a staged module you wrote. The wrapper renames those to ``{"s0": ..., "sN": .
 declared ``out_channels``, and adds per-stage ``freeze_to`` for progressive unfreezing.
 
 Emit finest first: stages are renamed in the order the module returns them (a dict's insertion
-order), and the necks rebuild pyramid order from those names, so ``s0`` must be the
-highest-resolution stage. Pass ``feature_keys=[...]`` to name the stages yourself instead.
+order), and ``s0`` must be the highest-resolution stage. Pass ``feature_keys=[...]`` to name the
+stages yourself instead.
 
 It does not turn a classifier into a feature extractor: wrapping a plain
 ``torchvision.models.resnet50`` yields ``{"s0": (1, 1000)}`` (the logit vector, one entry) because
 that is what the module returns. Extract features first, then wrap.
 
-Constructing the backbone, ``out_indices`` included, is the caller's choice (a plain ViT returns
-four maps at one reduction; ``convnext_*`` and ``swin_*`` expose only indices 0-3 and raise on a
-request for 4); the weights it loads are the ``pretrained_weights`` its model source's
-normalization names and the platform hands its builder::
+Constructing the backbone, ``out_indices`` included, is the caller's choice::
 
     import timm
     from tcip_mcp.pipelines.components.backbones import BackboneWrapper
@@ -59,6 +56,7 @@ class BackboneWrapper(nn.Module):
         *,
         feature_keys: list[str] | None = None,
     ) -> None:
+        """Wrap ``model``, whose levels carry ``out_channels``, named ``feature_keys`` if given."""
         super().__init__()
         self.model = model
         self.out_channels = out_channels

@@ -1,9 +1,8 @@
-"""Pixel bounds for what the platform serves to a screen or writes as an agent-facing artifact, and
-the one integer geometry every display-bound read is sized and planned with.
+"""Pixel bounds for what the platform serves to a screen or writes as an agent-facing artifact.
 
-``VIZ_ARTIFACT_MAX_EDGE`` bounds agent-facing visualization artifacts, which are read back through
-the model's own image reading. Source: agent image-reading practicality; deliberately smaller than
-the display bound, which serves a human screen.
+``VIZ_ARTIFACT_MAX_EDGE`` bounds agent-facing visualization artifacts. Source: agent
+image-reading practicality; deliberately smaller than the display bound, which serves a human
+screen.
 """
 
 from __future__ import annotations
@@ -20,9 +19,7 @@ VIZ_ARTIFACT_MAX_EDGE = 1024
 
 
 def within_cap(width: int, height: int, max_pixels: int) -> bool:
-    """Whether a ``width`` x ``height`` read is at most ``max_pixels`` pixels: the one test of a
-    read or a cell against a display's area cap.
-    """
+    """Return whether a ``width`` x ``height`` read is at most ``max_pixels`` pixels."""
     return width * height <= max_pixels
 
 
@@ -33,11 +30,11 @@ def fit_within(
     max_edge: int | None = None,
     max_scale: Fraction = Fraction(1),
 ) -> tuple[int, int]:
-    """A ``raster_source.scaled_size`` of a ``width`` x ``height`` rect under one scale of at most
-    ``max_scale`` (never above 1, so never upscaled) that is at most ``max_pixels`` pixels and,
-    when ``max_edge`` is given, has no edge longer than it.
+    """Return a ``raster_source.scaled_size`` of a ``width`` x ``height`` rect within the caps.
 
-    The scale is the continuous area bound rounded down, so the size is bounded but not always
+    The size is under one scale of at most ``max_scale`` (never above 1, so never upscaled), at
+    most ``max_pixels`` pixels and, when ``max_edge`` is given, with no edge longer than it. The
+    scale is the continuous area bound rounded down, so the size is bounded but not always
     the largest admissible one. Either axis may limit; a one-pixel axis holds the other to
     ``max_pixels`` on its own.
     """
@@ -60,8 +57,10 @@ def fit_within(
 
 @dataclass(frozen=True)
 class ReadPlan:
-    """One display read: the level it reads (0 native, ``i`` the ``i``-th overview level), the
-    output size, and whether any level's window fit the area it was planned under.
+    """One display read: the level it reads, the output size, and whether any level's window fit.
+
+    Level 0 is native, ``i`` the ``i``-th overview level; a window fits the area the read was
+    planned under.
     """
 
     level: int
@@ -78,14 +77,14 @@ def plan_read(
     max_pixels: int,
     max_edge: int | None = None,
 ) -> ReadPlan:
-    """The read of ``rect`` of a ``raster_w`` x ``raster_h`` raster within ``max_pixels`` output
-    pixels, over the overview levels of ``level_dims`` (each level's own ``(width, height)``,
-    finest first).
+    """Plan the read of ``rect`` of a ``raster_w`` x ``raster_h`` raster within ``max_pixels``.
 
-    Every level is judged by the window the reader opens on it (``raster_source.level_window``).
-    The output is :func:`fit_within` at a scale no finer than the finest level whose window fits
-    ``max_pixels`` (the coarsest level when none does). The level read is the coarsest one whose
-    window still holds the output on both axes, so the plan names the level its pixels come off.
+    ``max_pixels`` bounds the output pixels; the read is planned over the overview levels of
+    ``level_dims`` (each level's own ``(width, height)``, finest first). Every level is judged by
+    the window the reader opens on it (``raster_source.level_window``). The output is
+    :func:`fit_within` at a scale no finer than the finest level whose window fits ``max_pixels``
+    (the coarsest level when none does). The level read is the coarsest one whose window still
+    holds the output on both axes, so the plan names the level its pixels come off.
     """
     from tcip_mcp.pipelines.raster_source import level_window
 
@@ -118,8 +117,9 @@ def plan_read(
 
 
 def planned_read(raster, rect: Rect, plan: ReadPlan):
-    """``raster.read_region`` of ``rect`` at the output size and off the level ``plan`` names,
-    natively when that is the rect's own size.
+    """Read ``rect`` of ``raster`` at the output size and off the level ``plan`` names.
+
+    The read is ``raster.read_region``, native when the output is the rect's own size.
     """
     if (plan.width, plan.height) == (rect.width, rect.height):
         return raster.read_region(rect)

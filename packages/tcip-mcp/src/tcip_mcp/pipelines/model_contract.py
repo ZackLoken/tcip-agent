@@ -1,10 +1,7 @@
-"""The one model-side contract: the measurement boundary, as a behavioral check, not a mold.
-
-A model must train, and its inference output must be something the library scorers can measure:
+"""The model-side contract: the measurement boundary, as a behavioral check.
 
 * ``TCIPModel``: a ``runtime_checkable`` Protocol naming the minimal surface (any ``nn.Module``
-satisfies it). It is a duck-type marker, not an architecture requirement; no ``freeze_backbone`` /
-``head0_*`` here (those are optional conveniences the default trainer uses if present).
+satisfies it). It is a duck-type marker.
 * ``check_model_contract(model, task)``: a behavioral smoke: a train-mode forward yields a finite
 loss with a gradient, and an eval-mode forward yields the documented shape for the task
 (``list[dict]`` per image for detection/instance_seg, a ``dict`` of tensors otherwise).
@@ -45,23 +42,35 @@ class TCIPModel(Protocol):
     """Minimal surface a trainable, measurable model exposes (an ``nn.Module`` already does).
 
     Train-mode ``forward(images, targets)`` returns a loss dict (or scalar loss); eval-mode
-    ``forward(images)`` returns predictions the library scorers consume. This is a marker, not
-    an architecture contract.
+    ``forward(images)`` returns predictions. This is a marker, not an architecture contract.
     """
 
-    def forward(self, *args: Any, **kwargs: Any) -> Any: ...
-    def parameters(self, recurse: bool = True) -> Any: ...
-    def named_parameters(self, recurse: bool = True) -> Any: ...
-    def train(self, mode: bool = True) -> Any: ...
-    def eval(self) -> Any: ...
-    def to(self, *args: Any, **kwargs: Any) -> Any: ...
-    def __call__(self, *args: Any, **kwargs: Any) -> Any: ...
+    def forward(self, *args: Any, **kwargs: Any) -> Any:
+        """Return a loss in train mode, predictions in eval mode."""
+
+    def parameters(self, recurse: bool = True) -> Any:
+        """Return the model's parameters."""
+
+    def named_parameters(self, recurse: bool = True) -> Any:
+        """Return ``(name, parameter)`` pairs."""
+
+    def train(self, mode: bool = True) -> Any:
+        """Set train mode (eval mode for ``mode`` false)."""
+
+    def eval(self) -> Any:
+        """Set eval mode."""
+
+    def to(self, *args: Any, **kwargs: Any) -> Any:
+        """Move the model to a device or dtype."""
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        """Run :meth:`forward`."""
 
 
 def no_batch_reason(
     task: str, dims: Mapping[str, Any] | None, sample_batch: Any
 ) -> str | None:
-    """Why this call can smoke nothing, or ``None`` when it can."""
+    """Return why this call can smoke nothing, or ``None`` when it can."""
     if sample_batch is not None:
         return None
     if task not in _SYNTHESIZABLE_TASKS:
@@ -95,13 +104,13 @@ def _synth_batch(
     num_classes: int | None = None,
     attributes: Any = (),
 ):
-    """A minimal batch in the exact shape ``generic_trainer`` feeds ``model.forward`` for ``task``:
-    per-sample ``(image, target)`` items shaped like a dataset's ``__getitem__``, collated with the
-    trainer's own ``task_collate``, each image ``img_size``, ``(width, height)``.
+    """Synthesize a minimal batch for ``task``.
 
-    ``num_classes`` is the run's own count, which only a ``_COUNTED_TASKS`` target reads; a
-    detection target carries an ``attributes`` row, each attribute's first value, when the run's
-    ``attributes`` name any, so every head is driven.
+    The batch is per-sample ``(image, target)`` items shaped like a dataset's ``__getitem__``,
+    collated with ``task_collate``, each image ``img_size``,
+    ``(width, height)``. ``num_classes`` is the run's own count, which only a ``_COUNTED_TASKS``
+    target reads; a detection target carries an ``attributes`` row, each attribute's first value,
+    when the run's ``attributes`` name any, so every head is driven.
     """
     import torch
 
@@ -181,8 +190,10 @@ def _synth_batch(
 def _driving_batch(
     task: str, dims: Mapping[str, Any] | None, sample_batch: Any, device: Any
 ) -> tuple[Any, Any]:
-    """The ``(images, targets)`` a model is driven with, as the trainer hands it: ``sample_batch``
-    when given, else synthesized; a detection task's targets through ``instance_targets``.
+    """Return the ``(images, targets)`` a model is driven with.
+
+    That is ``sample_batch`` when given, else synthesized; a detection task's targets through
+    ``instance_targets``.
     """
     from tcip_mcp.pipelines.data.datasets import instance_targets
 
@@ -197,11 +208,9 @@ def _driving_batch(
 
 
 def _contains_tensor(value: Any, _depth: int = 0, _max_depth: int = 4) -> bool:
-    """Whether ``value`` is a tensor, or a list/tuple/dict that carries one, any depth up to
-    ``_max_depth``. A bespoke non-detection output's per-key shape is the agent's to choose (e.g. a
-    ragged per-image list of tensors, or a nested dict of them), so a scorer-consumable prediction
-    is not only a top-level tensor value; the depth bound just keeps this from walking an unbounded
-    or self-referential structure someone's eval output happens to contain.
+    """Return whether ``value`` is a tensor, or a list/tuple/dict that carries one.
+
+    Any depth up to ``_max_depth`` is searched.
     """
     import torch
 
@@ -219,7 +228,7 @@ def _contains_tensor(value: Any, _depth: int = 0, _max_depth: int = 4) -> bool:
 
 
 def _forward_loss(model: Any, images: Any, targets: Any):
-    """Train-mode forward → a single scalar loss tensor (sums a returned loss dict)."""
+    """Return a single scalar loss tensor from a train-mode forward (a loss dict summed)."""
     out = model(images, targets)
     if isinstance(out, dict):
         terms = [v for v in out.values() if hasattr(v, "requires_grad")]
@@ -242,7 +251,9 @@ def check_model_contract(
     device: str = "cpu",
     sample_batch: Any = None,
 ) -> dict:
-    """Behavioral smoke test of the measurement boundary. Returns a report; never raises.
+    """Check the model's behavior at the measurement boundary.
+
+    Returns a report; a failed train or eval pass is recorded in it, not raised.
 
     ``dims`` is :func:`~tcip_mcp.pipelines.model_build.resolve_contract_dims`' output, stated only
     when a batch is synthesized here; a caller handing over ``sample_batch`` states none. A
@@ -374,10 +385,11 @@ def overfit_check(
     """Drive ``steps`` optimizer updates on one fixed tiny batch; the loss must fall.
 
     ``dims`` is as for :func:`check_model_contract`. Seeded at the run's own ``seed`` and
-    ``deterministic`` (``generic_trainer.set_seed``), on CPU by default. Returns
-    ``{"passed": bool, "losses": [...], "initial": float, "final": float, "issue": str|None}``.
-    ``passed`` iff every loss is finite and the final loss is strictly below the initial one,
-    the minimal evidence a bespoke model with a real learnable path actually optimizes.
+    ``deterministic``, on CPU by default. Returns
+    ``{"passed": bool, "losses": [...], "initial": float|None, "final": float|None,
+    "issue": str|None}``.
+    ``passed`` iff every step completes with no recorded ``issue``, every loss is finite and the
+    final loss is strictly below the initial one.
 
     ``sample_batch`` is an ``(images, targets)`` pair from your own dataset, required for a task
     outside ``_SYNTHESIZABLE_TASKS``. Without it such a task returns ``passed: False`` with the
@@ -450,7 +462,7 @@ def overfit_check(
 
 
 def render_overfit_report(report: dict) -> dict:
-    """An :func:`overfit_check` report in the form a record can carry.
+    """Render an :func:`overfit_check` report in the form a record can carry.
 
     A diverging model's raw report may hold ``nan`` or ``inf``, values the canonical JSON codec
     refuses outright. ``initial`` and ``final`` are named scalars, so each goes through
