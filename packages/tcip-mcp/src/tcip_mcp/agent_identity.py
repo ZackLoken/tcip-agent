@@ -3,10 +3,9 @@
 A stdio MCP server runs one process per connected client, and the client declares what it is in the
 initialize handshake (``client_info``: a name and a version, such as ``claude-code 2.1.238`` or
 ``codex-mcp-client 0.147.0``). This module keeps that declaration for the life of one server run,
-beside a session id the server mints itself, and projects the pair onto every record the process
-writes: the audit line and the headers of the one HTTP push the tools make.
-The in-app terminal's own session id, when the web backend passed it down through
-``TCIP_TERMINAL_SESSION``, rides along as a correlation.
+beside a session id the server mints itself, and projects the pair onto its audit-line fields and
+its HTTP push headers. The in-app terminal's own session id, when the web backend passed it down
+through ``TCIP_TERMINAL_SESSION``, rides along as a correlation.
 
 Every value here is a declaration by software, recorded as declared; nothing verifies it or refuses
 on it. A process that never completed a handshake has no identity, and its records carry none.
@@ -40,9 +39,11 @@ set it, so a record carrying it says only what the launcher declared."""
 
 @dataclasses.dataclass(frozen=True)
 class AgentIdentity:
-    """What the connecting harness declared, the session this server minted, and the terminal
-    session the launcher declared, absent when not declared. Its attributes are the fields a
-    record gains, in order.
+    """One server run's declared agent identity and the session it minted.
+
+    It holds what the connecting harness declared, the session this server minted, and the
+    terminal session the launcher declared, absent when not declared. Its attributes are the
+    fields a record gains, in order.
     """
 
     agent_client_name: str
@@ -51,6 +52,7 @@ class AgentIdentity:
     terminal_session: str | None
 
     def fields(self) -> dict[str, Any]:
+        """Return the identity's fields by name, in declaration order."""
         return dataclasses.asdict(self)
 
 
@@ -99,13 +101,15 @@ def end() -> None:
 
 
 def current() -> AgentIdentity | None:
-    """The identity this run established, or ``None`` outside a completed handshake."""
+    """Return the identity this run established, or ``None`` outside a completed handshake."""
     return _current
 
 
 def audit_fields() -> dict[str, Any]:
-    """What an audit line carries: nothing outside a session, so the entry keeps its shape, else
-    the identity with ``terminal_session`` present only when one was declared.
+    """Return the identity fields an audit line carries.
+
+    Nothing outside a session, so the entry keeps its shape; else the identity with
+    ``terminal_session`` present only when one was declared.
     """
     if _current is None:
         return {}
@@ -117,11 +121,10 @@ def audit_fields() -> dict[str, Any]:
 
 
 def http_headers() -> dict[str, str]:
-    """The identity as request headers for the tools' HTTP push; empty outside a session.
+    """Return the identity as request headers for an HTTP push; empty outside a session.
 
     A declared name or version is any string, and a header value must be ASCII without control
-    characters, so each value travels percent-encoded (letters, digits and ``-._~`` bare) and the
-    backend decodes it; a push never fails on what a harness chose to call itself.
+    characters, so each value travels percent-encoded (letters, digits and ``-._~`` bare).
     """
     return {
         HEADERS[key]: quote(str(value), safe="")
@@ -130,8 +133,10 @@ def http_headers() -> dict[str, str]:
 
 
 def fields_from_headers(headers: Mapping[str, str]) -> dict[str, Any]:
-    """The identity a request declared through :data:`HEADERS`, ``None`` per field not sent,
-    decoded from the percent-encoding :func:`http_headers` applies.
+    """Return the identity a request declared through :data:`HEADERS`.
+
+    Each field is decoded from the percent-encoding :func:`http_headers` applies, and is ``None``
+    when not sent or empty.
     """
     return {
         field: unquote(headers.get(header) or "") or None
@@ -142,9 +147,10 @@ def fields_from_headers(headers: Mapping[str, str]) -> dict[str, Any]:
 async def record_connecting_client(
     ctx: ServerRequestContext[Any, Any], call_next: CallNext
 ) -> HandlerResult:
-    """Server middleware: take the client's declaration on the first message that carries it,
-    whatever the method, before any record is written. A client that initialized without declaring
-    itself leaves no identity.
+    """Take the client's declaration on the first message that carries it, then pass the call on.
+
+    Server middleware: the declaration is taken whatever the method, before the handler runs. A
+    client that initialized without declaring itself leaves no identity.
     """
     if _current is None and ctx.session.client_params is not None:
         info = ctx.session.client_params.client_info

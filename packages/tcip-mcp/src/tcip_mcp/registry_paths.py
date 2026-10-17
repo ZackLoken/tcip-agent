@@ -1,5 +1,4 @@
-"""How a record stores a path and where a stored path resolves, the one rule every record under a
-project writes and reads paths through.
+"""How a record stores a path and where a stored path resolves.
 
 A stored path is relative POSIX exactly when the target lives under the project whose record holds
 it, absolute exactly when external.
@@ -14,8 +13,9 @@ from typing import Any
 
 
 def is_external_form(stored: str) -> bool:
-    """Whether ``stored`` is an absolute path by either platform's own path grammar; either grammar
-    recognizing it as absolute makes it external.
+    """Return whether ``stored`` is an absolute path by either platform's own path grammar.
+
+    Either grammar recognizing it as absolute makes it external.
     """
     return (
         PurePosixPath(stored).is_absolute()
@@ -26,8 +26,9 @@ def is_external_form(stored: str) -> bool:
 def nearest_containing_ancestor(
     start: Path, root: Path, *, tolerant: bool
 ) -> Path | None:
-    """The nearest of ``start`` and its parents that is the same file as ``root``, or ``None`` when
-    none is.
+    """Return the nearest of ``start`` and its parents that is the same file as ``root``.
+
+    Returns ``None`` when none is.
 
     ``tolerant=True`` treats an ancestor ``os.path.samefile`` cannot compare (an inaccessible
     share) as simply not a match and tries the next one. ``tolerant=False`` re-raises instead.
@@ -48,8 +49,10 @@ class RelativePathWithoutProjectError(ValueError):
 
 
 def located(path: str | Path, project: str | Path | None) -> Path:
-    """The absolute location a caller's ``path`` names: a relative one is relative to the
-    project root ``project``, never to the working directory, and an absolute one is itself.
+    """Return the absolute location a caller's ``path`` names, resolved.
+
+    A relative one is relative to the project root ``project``, never to the working directory,
+    and an absolute one is itself.
 
     With no ``project``, a relative ``path`` refuses (:class:`RelativePathWithoutProjectError`)
     naming the two ways to state it: an absolute path, or a project tool holding its project.
@@ -65,9 +68,10 @@ def located(path: str | Path, project: str | Path | None) -> Path:
 def stored_path(
     path: str | Path, root: str | Path, *, tolerant: bool = True
 ) -> str:
-    """What a record stores for ``path`` (:func:`located` against ``root``): relative POSIX when
-    it lies at or under ``root`` (``root`` itself stored ``"."``), absolute otherwise, so a stored
-    path stores as itself.
+    """Return what a record stores for ``path``, :func:`located` against ``root``.
+
+    The stored form is relative POSIX when it lies at or under ``root`` (``root`` itself stored
+    ``"."``), absolute otherwise, so a stored path stores as itself.
 
     Containment is decided by filesystem identity over the resolved path's own ancestors
     (:func:`nearest_containing_ancestor`, with ``tolerant`` passed through), so an alias or a case
@@ -84,16 +88,16 @@ def stored_path(
 
 
 class CheckpointRegistryRootUnusableError(ValueError):
-    """The registry's own scope root does not exist, is not a directory, or an ancestor comparison
-    against it could not be made at all.
-    """
+    """The registry's own scope root is missing, not a directory, or cannot be compared against."""
 
 
 def checkpoint_registry_path_for(
     checkpoint_path: str | Path, root: str | Path
 ) -> str:
-    """What a checkpoint registry entry stores for its path: relative POSIX when
-    ``checkpoint_path`` resolves under ``root``, absolute otherwise.
+    """Return what a checkpoint registry entry stores for its path.
+
+    The stored form is relative POSIX when ``checkpoint_path`` resolves under ``root``, absolute
+    otherwise.
 
     ``checkpoint_path`` must already name an existing file; ``root`` must exist as a directory, or
     this raises :class:`CheckpointRegistryRootUnusableError` naming it, as it does when the
@@ -119,13 +123,15 @@ class RegistryPathEmptyError(ValueError):
 
 
 class RegistryPathTraversalError(ValueError):
-    """A registry entry's relative path carries a ``..`` segment: the entries-mapping convention
-    is that relative means internal, so this was never a legitimate spelling to resolve.
+    """A registry entry's relative path carries a ``..`` segment.
+
+    Under the entries-mapping convention relative means internal, so this is never a legitimate
+    spelling to resolve.
     """
 
 
 def resolved_registry_path(root: str | Path, stored: str) -> Path:
-    """The absolute path an entries-mapping registry entry's stored path value resolves to.
+    """Return the absolute path an entries-mapping registry entry's stored path resolves to.
 
     ``root`` is absolutized here, so a relative process root still answers an absolute path. A
     relative ``stored`` value is joined onto the absolutized root by its POSIX parts; an absolute
@@ -158,7 +164,7 @@ and is left as it is."""
 
 
 def within(prefix: tuple[str, ...], fields: PathFields) -> PathFields:
-    """``fields`` of a shape held at ``prefix`` inside another record."""
+    """Return ``fields`` prefixed by ``prefix``, for a shape held there inside another record."""
     return tuple(prefix + field for field in fields)
 
 
@@ -186,8 +192,10 @@ def _each_path(
 
 
 def recorded_paths(record: Any, fields: PathFields, root: str | Path) -> Any:
-    """A copy of ``record`` with each path ``fields`` names as :func:`stored_path` stores it
-    against ``root``. An absent or ``None`` field stays as it is.
+    """Return a copy of ``record`` with each path ``fields`` names in its stored form.
+
+    The stored form is :func:`stored_path`'s against ``root``. An absent or ``None`` field stays
+    as it is.
     """
     for field in fields:
         record = _each_path(
@@ -197,8 +205,10 @@ def recorded_paths(record: Any, fields: PathFields, root: str | Path) -> Any:
 
 
 def runtime_paths(record: Any, fields: PathFields, root: str | Path) -> Any:
-    """A copy of ``record``, written by :func:`recorded_paths`, with each path ``fields`` names
-    resolved against ``root`` (:func:`resolved_registry_path`).
+    """Return a copy of ``record`` with each path ``fields`` names resolved against ``root``.
+
+    ``record`` is as :func:`recorded_paths` writes it; each path resolves through
+    :func:`resolved_registry_path`.
     """
     for field in fields:
         record = _each_path(

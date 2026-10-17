@@ -1,5 +1,7 @@
-"""The project record (:class:`ProjectRecord`): the one record every project carries, holding its
-identity, its site and the capture invariances its trait's measurement holds under.
+"""The project record (:class:`ProjectRecord`): the record a project carries.
+
+It holds the project's identity, its site and the capture invariances its trait's measurement
+holds under.
 """
 
 from __future__ import annotations
@@ -40,19 +42,21 @@ class SiteConflictError(ValueError):
 
 
 def mint_id() -> str:
-    """A fresh identity for a record minted once and kept: twelve hex characters of a uuid4."""
+    """Return a fresh record identity: twelve hex characters of a uuid4."""
     return uuid.uuid4().hex[:12]
 
 
 def project_record_key(project_path: str | Path) -> Key:
-    """The project's own record, written compare-and-swap."""
+    """Return the store key of the project's own record."""
     return Key(PROJECT_RECORD_STORE, str(project_path), _PROJECT_RECORD_PARTS)
 
 
 def _printable(text: str) -> str:
-    """``text`` when every character is printable (``str.isprintable``, which also refuses the
-    non-breaking and zero-width characters a paste from a document can carry); otherwise the
-    refusal naming the first other character's code point and its offset.
+    """Return ``text`` when every character is printable, else raise ``ValueError``.
+
+    Printable is ``str.isprintable``, which also refuses the non-breaking and zero-width
+    characters a paste from a document can carry; the refusal names the first other character's
+    code point and its offset.
     """
     for offset, ch in enumerate(text):
         if not ch.isprintable():
@@ -76,8 +80,9 @@ either direction already reaches every orientation."""
 
 
 class CaptureInvariances(BaseModel):
-    """How far each capture transform leaves the project's trait measurement what it was, as the
-    breeder states it when the project is created: whether it does, or for a rotation the
+    """How far each capture transform leaves the project's trait measurement what it was.
+
+    The breeder states it when the project is created: whether it does, or for a rotation the
     largest angle at which it does.
     """
 
@@ -100,11 +105,12 @@ class CaptureInvariances(BaseModel):
 
 
 class ProjectRecord(BaseModel):
-    """The project's record as stored: ``id``, minted once at creation and kept by every
-    correction; ``display_name``, the name the picker shows; ``site``, the breeder's own name for
-    the orchard or station the project's plants stand in; ``invariances``, how far each capture
-    transform leaves the trait's measurement what it was. The display name and the site are each
-    :data:`RecordText`.
+    """The project's record as stored.
+
+    ``id`` is minted once at creation and kept by every correction; ``display_name``, the
+    project's display name; ``site``, the breeder's own name for the orchard or station the
+    project's plants stand in; ``invariances``, how far each capture transform leaves the trait's
+    measurement what it was. The display name and the site are each :data:`RecordText`.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -115,7 +121,7 @@ class ProjectRecord(BaseModel):
 
 
 def read_record(project_path: str | Path) -> ProjectRecord:
-    """The project's record.
+    """Return the project's record.
 
     Raises :class:`ProjectRecordMissingError` for a project with no record yet, and
     :class:`ProjectRecordInvalidError` for a document that decodes but is not one. A document
@@ -129,9 +135,10 @@ def read_record(project_path: str | Path) -> ProjectRecord:
 
 
 def existing_project(value: str | Path) -> tuple[Path, dict]:
-    """``value`` resolved and its record's fields (:func:`record_fields`), when it is a project
-    whose record reads; otherwise ``ValueError`` naming the path and what :func:`read_record`
-    refused.
+    """Return ``value`` resolved and its record's fields (:func:`record_fields`).
+
+    ``value`` must be a project whose record reads; otherwise ``ValueError`` naming the path and
+    what :func:`read_record` refused.
     """
     project = Path(value).resolve()
     fields = record_fields(project)
@@ -143,9 +150,10 @@ def existing_project(value: str | Path) -> tuple[Path, dict]:
 
 
 def _checked(project_path: str | Path, raw: object) -> ProjectRecord:
-    """``raw``, a record read from ``project_path``, when it is a :class:`ProjectRecord`. Raises
-    ``ProjectRecordMissingError`` for an absent record and ``ProjectRecordInvalidError`` naming
-    what the record lacks otherwise.
+    """Return ``raw``, a record read from ``project_path``, validated as a :class:`ProjectRecord`.
+
+    Raises ``ProjectRecordMissingError`` for an absent record and ``ProjectRecordInvalidError``
+    naming what the record lacks otherwise.
     """
     if raw is None:
         raise ProjectRecordMissingError(
@@ -165,7 +173,7 @@ def create_record(
     site: str,
     invariances: CaptureInvariances,
 ) -> ProjectRecord:
-    """Write a new project's record with a freshly minted id, its one creator, and return it.
+    """Write a new project's record with a freshly minted id, and return it.
 
     A project already recording the same display name, site and invariances is returned as it
     stands, its id kept. A present record with a different site raises
@@ -211,11 +219,12 @@ def create_record(
 def _update(
     project_path: str | Path, field: str, value: object, *, actor: str
 ) -> tuple[ProjectRecord, ProjectRecord]:
-    """Replace ``field`` of a readable record with ``value`` under compare-and-swap, the whole
-    replacement validated as a :class:`ProjectRecord`, then record one
-    ``project_record_corrected`` line by ``actor`` in the project's log carrying the record's
-    ``id``, the ``field``, the ``value`` written and the ``previous_value`` it replaced, each as
-    the record dumps it. Returns the record written and the one it replaced.
+    """Replace ``field`` of a readable record with ``value`` under compare-and-swap.
+
+    The whole replacement is validated as a :class:`ProjectRecord`, then one
+    ``project_record_corrected`` line is recorded by ``actor`` in the project's log carrying the
+    record's ``id``, the ``field``, the ``value`` written and the ``previous_value`` it replaced,
+    each as the record dumps it. Returns the record written and the one it replaced.
 
     Refuses what :func:`read_record` and the model refuse, with nothing written and no line; a
     line that cannot be appended after the write raises ``AuditEntryNotWrittenError``.
@@ -250,8 +259,9 @@ def _update(
 
 
 def replace_site(project_path: str | Path, site: str, *, actor: str) -> dict:
-    """Correct the site a readable record holds, by ``actor``, through :func:`_update`; every
-    other field is kept. Returns ``{"site", "previous_site"}``. Refuses what :func:`_update`
+    """Correct the site a readable record holds, by ``actor``, through :func:`_update`.
+
+    Every other field is kept. Returns ``{"site", "previous_site"}``. Refuses what :func:`_update`
     refuses, a site that is not :data:`RecordText` among it.
     """
     record, previous = _update(project_path, "site", site, actor=actor)
@@ -259,8 +269,9 @@ def replace_site(project_path: str | Path, site: str, *, actor: str) -> dict:
 
 
 def rename_project(project: Path, display_name: str, *, actor: str) -> dict:
-    """Change the project's display name, by ``actor``, through :func:`_update`; its directory
-    and every other record are left as they are. Returns ``{"id", "display_name",
+    """Change the project's display name, by ``actor``, through :func:`_update`.
+
+    Its directory and every other record are left as they are. Returns ``{"id", "display_name",
     "previous_display_name"}``. Refuses what :func:`_update` refuses, a display name that is not
     :data:`RecordText` among it.
     """
@@ -275,8 +286,10 @@ def rename_project(project: Path, display_name: str, *, actor: str) -> dict:
 
 
 class InvariancesCorrection(BaseModel):
-    """What :func:`replace_invariances` wrote: the record's ``id``, the ``invariances`` it now
-    holds and the ``previous_invariances`` they replaced.
+    """What :func:`replace_invariances` wrote.
+
+    It holds the record's ``id``, the ``invariances`` it now holds and the
+    ``previous_invariances`` they replaced.
     """
 
     id: str
@@ -287,8 +300,10 @@ class InvariancesCorrection(BaseModel):
 def replace_invariances(
     project_path: str | Path, invariances: CaptureInvariances, *, actor: str
 ) -> InvariancesCorrection:
-    """Correct the capture invariances a readable record holds, by ``actor``, through
-    :func:`_update`; every other field is kept. Refuses what :func:`_update` refuses.
+    """Correct the capture invariances a readable record holds, by ``actor``.
+
+    The correction goes through :func:`_update`; every other field is kept. Refuses what
+    :func:`_update` refuses.
     """
     record, previous = _update(
         project_path, "invariances", invariances, actor=actor
@@ -301,9 +316,11 @@ def replace_invariances(
 
 
 def record_fields(project_path: str | Path) -> dict:
-    """The record's fields (:class:`ProjectRecord`) and ``record_problem``: the fields and
-    ``None``, or each field ``None`` beside the text of why the record would not read. Never
-    raises.
+    """Return the record's fields (:class:`ProjectRecord`) and ``record_problem``.
+
+    A readable record gives the fields and ``None``; a record that is missing, invalid, refused by
+    the store or unreadable from disk gives each field ``None`` beside the text of why, and raises
+    nothing.
     """
     try:
         record = read_record(project_path)

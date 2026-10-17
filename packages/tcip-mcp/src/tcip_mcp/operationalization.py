@@ -1,6 +1,4 @@
-"""A trait's latest confirmed revision, the one every measurement and delivery reads, and the check
-of whether its operationalization binds what a delivery door is about to write.
-"""
+"""A trait's latest confirmed revision, and whether it binds what a delivery is about to write."""
 
 from __future__ import annotations
 
@@ -22,19 +20,22 @@ from tcip_mcp.traits import (
 
 
 class OperationalizationRefusedError(ValueError):
-    """The trait has no confirmed revision, or its confirmed revision does not state or bind what
-    a delivery is about to write.
+    """A trait's confirmed revision is missing or does not cover a delivery.
+
+    The trait has no confirmed revision, or its confirmed revision does not state or bind what a
+    delivery is about to write.
     """
 
     def as_detail(self) -> dict[str, Any]:
-        """The structured refusal body a web door raises."""
+        """Return the structured refusal body: its kind and its message."""
         return {"kind": "operationalization", "message": str(self)}
 
 
 def latest_confirmed(trait: str, project: str | Path) -> TraitRevision:
-    """``trait``'s latest confirmed revision. Refuses
-    (:class:`OperationalizationRefusedError`) naming the trait when none of its revisions is
-    confirmed; an unknown trait raises ``TraitUnknownError``.
+    """Return ``trait``'s latest confirmed revision.
+
+    Refuses (:class:`OperationalizationRefusedError`) naming the trait when none of its revisions
+    is confirmed; an unknown trait raises ``TraitUnknownError``.
     """
     record = read_trait(trait, project)
     if record.latest_confirmed is None:
@@ -56,11 +57,11 @@ def confirmed_revision(
     value_key: str | None = None,
     registry: SubjectRegistry | None = None,
 ) -> TraitRevision:
-    """The latest confirmed revision a ``delivery_kind`` delivery ships under, bound (:func:`bind`)
-    to what the door knows about the file it is about to write.
+    """Return the latest confirmed revision a ``delivery_kind`` delivery ships under.
 
-    ``trait`` names the trait (:func:`latest_confirmed`); ``None`` takes the one trait whose latest
-    confirmed revision delivers ``delivered_phenotype``. Refuses
+    The revision is bound (:func:`bind`) to the given ``delivered_phenotype``, ``value_key`` and
+    ``registry``. ``trait`` names the trait (:func:`latest_confirmed`); ``None`` takes the one trait
+    whose latest confirmed revision delivers ``delivered_phenotype``. Refuses
     (:class:`OperationalizationRefusedError`) when no trait or several qualify, when the revision
     states no operationalization for ``delivery_kind``, and when :func:`bind` refuses.
     """
@@ -92,10 +93,11 @@ def bind(
     buckets: Mapping[str, str | None] | None = None,
     registry: SubjectRegistry | None = None,
 ) -> None:
-    """Refuse (:class:`OperationalizationRefusedError`) a delivery ``revision``'s ``delivery_kind``
-    operationalization does not bind: a delivered phenotype it does not cover, a value key
-    outside its set, a bucket (``buckets``: name to the subject its detections are of) not
-    counting its measured subject, or, with ``registry`` given, a positive state the delivered
+    """Refuse a delivery ``revision``'s ``delivery_kind`` operationalization does not bind.
+
+    Raises :class:`OperationalizationRefusedError` for a delivered phenotype it does not cover, a
+    value key outside its set, a bucket (``buckets``: name to the subject its detections are of)
+    not counting its measured subject, or, with ``registry`` given, a positive state the delivered
     dataset's registry no longer declares.
     """
     entry = revision.entry
@@ -147,9 +149,11 @@ def bind(
 def _revision_delivering(
     delivered_phenotype: str, project: str | Path
 ) -> TraitRevision:
-    """The latest confirmed revision of the one trait whose latest confirmed revision delivers
-    ``delivered_phenotype``; refuses (:class:`OperationalizationRefusedError`) naming the phenotype,
-    the confirmed traits delivering it and the traits proposing it when not exactly one does.
+    """Return the one latest confirmed revision delivering ``delivered_phenotype``.
+
+    That is the latest confirmed revision of the one trait whose latest confirmed revision
+    delivers it; refuses (:class:`OperationalizationRefusedError`) naming the phenotype, the
+    confirmed traits delivering it and the traits proposing it when not exactly one does.
     """
     confirmed: list[TraitRevision] = []
     proposed: list[str] = []

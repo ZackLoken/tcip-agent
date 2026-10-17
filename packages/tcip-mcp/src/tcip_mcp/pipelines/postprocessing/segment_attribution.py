@@ -1,9 +1,10 @@
-"""Per-plant attribution by canopy segment: a detection attributed to a plant by containment in a
-canopy boundary a person accepted, the segment itself tied to a registry plant by containment of
-the plant's own projected position, with a clearance inside that boundary of at least the
-position error the project states for its registry (``position_error_m``), so a displaced
-position cannot have tied the plant to a neighbor's canopy. A canopy boundary is one a person
-accepted (:func:`load_canopy_segments`).
+"""Per-plant attribution by canopy segment.
+
+A detection is attributed to a plant by containment in a canopy boundary a person accepted, the
+segment itself tied to a registry plant by containment of the plant's own projected position, with
+a clearance inside that boundary of at least the position error the project states for its
+registry (``position_error_m``), so a displaced position cannot have tied the plant to a
+neighbor's canopy. A canopy boundary is one a person accepted (:func:`load_canopy_segments`).
 """
 
 from __future__ import annotations
@@ -45,9 +46,10 @@ from tcip_mcp.pipelines.postprocessing.plant_mapping import (
 
 
 class CanopySegmentError(ValueError):
-    """A canopy-segment document, or one of its own annotations, cannot stand behind a segment
-    tie: a document/raster identity mismatch, an absent subject, a ``Point`` naming no region, or
-    a record not positively a person's.
+    """A canopy-segment document, or one of its own annotations, cannot stand behind a segment tie.
+
+    The causes are a document/raster identity mismatch, an absent subject, a ``Point`` naming no
+    region, or a record not positively a person's.
     """
 
 
@@ -65,7 +67,9 @@ class CanopySegment:
 
 
 def _polygon_of(geometry: BBox | Polygon) -> Polygon:
-    """``geometry`` as a :class:`Polygon`: itself, or a box's own rectangle built through
+    """Return ``geometry`` as a :class:`Polygon`.
+
+    That is itself, or a box's own rectangle built through
     :func:`tcip_annotation.matching.box_ring`.
     """
     if polygonal(geometry):
@@ -80,8 +84,9 @@ def load_canopy_segments(
     raster_stem: str,
     raster_identity: dict,
 ) -> list[CanopySegment]:
-    """The canopy segments of ``subject`` in the raster's own label ``document`` (the caller read
-    it by the raster's key), checked against the raster's frame and against the canopy rule's own
+    """Return the canopy segments of ``subject`` in the raster's own label ``document``.
+
+    The segments are checked against the raster's frame and against the canopy rule's own
     provenance admissibility.
 
     Keeps the annotations whose ``subject`` is the stated one. Refuses by name: when the
@@ -175,9 +180,10 @@ class TiedSegment:
 
 @dataclass
 class UntiedSegment:
-    """A canopy segment tied to no registry plant: it contains none, or it contains
-    ``plant_within_position_error``, the one plant whose position lies closer to its boundary
-    than the stated position error.
+    """A canopy segment tied to no registry plant.
+
+    It contains none, or it contains ``plant_within_position_error``, the one plant whose position
+    lies closer to its boundary than the stated position error.
     """
 
     segment_index: int
@@ -187,24 +193,26 @@ class UntiedSegment:
 
 @dataclass
 class SegmentTie:
-    """The result of tying every canopy segment in one raster to the registry plants it can be
-    tied to: the segments actually tied, the segments left untied with why, and the plants a tie
+    """The result of tying every canopy segment in one raster to the registry plants.
+
+    It holds the segments actually tied, the segments left untied with why, and the plants a tie
     does not cover because no segment holds them or they lie outside the raster.
     """
 
     tied: list[TiedSegment]
     untied: list[UntiedSegment]
     plants_without_segment: list[str]
-    """Plot names of every in-frame plant that lies inside no canopy segment, by name."""
+    """Plant ids of every in-frame plant that lies inside no canopy segment, sorted."""
     plants_outside_raster: list[str]
-    """Plot names of every registry plant whose own projected position lies outside the raster's
-    frame (:func:`~tcip_mcp.pipelines.postprocessing.orthomosaic_mapping.plants_in_frame`), never
-    tested for containment at all."""
+    """Plant ids, sorted, of every registry plant whose own projected position lies outside the
+    raster's frame (:func:`~tcip_mcp.pipelines.postprocessing.orthomosaic_mapping.plants_in_frame`),
+    never tested for containment at all."""
 
     @property
     def plants_within_position_error(self) -> list[str]:
-        """Plot names of every plant inside a segment but within the position error of its
-        boundary, read off the untied segments.
+        """Plant ids of every plant inside a segment but within the position error of its boundary.
+
+        They are read off the untied segments, sorted.
         """
         return sorted(
             s.plant_within_position_error
@@ -223,9 +231,11 @@ def _clearance_m(
     polygon: Polygon,
     georef: OrthomosaicGeoreference,
 ) -> float:
-    """The distance in meters from ``plant``, a position in the raster's native CRS, to
-    ``polygon``'s boundary, the boundary put into that CRS through the raster's own affine and the
-    distance taken there, then scaled by the meters one native unit spans.
+    """Return the distance in meters from ``plant`` to ``polygon``'s boundary.
+
+    ``plant`` is a position in the raster's native CRS; the boundary is put into that CRS through
+    the raster's own affine and the distance taken there, then scaled by the meters one native
+    unit spans.
     """
     rings = [
         [georef.pixel_to_native(x, y) for x, y in ring]
@@ -244,10 +254,11 @@ def tie_segments_to_plants(
     height: int,
     position_error_m: float,
 ) -> SegmentTie:
-    """Tie every one of ``segments`` to the one registry plant, if any, whose own projected
-    position it contains with a clearance in meters of at least ``position_error_m``, the error
-    bound in meters the project states for its registry positions; a segment holding a plant
-    whose clearance is smaller is left untied naming that plant.
+    """Tie every one of ``segments`` to the one registry plant, if any, whose position it contains.
+
+    The plant's own projected position must lie inside with a clearance in meters of at least
+    ``position_error_m``, the error bound in meters the project states for its registry positions;
+    a segment holding a plant whose clearance is smaller is left untied naming that plant.
 
     Refuses by name: a ``position_error_m`` that is not a finite, nonnegative distance; a raster
     whose CRS states no meters per unit; a registry with a blank or duplicate
@@ -385,8 +396,10 @@ class SegmentAssignment:
 def assign_detections_to_segments(
     boxes: Sequence[Sequence[float]], tie: SegmentTie
 ) -> list[SegmentAssignment]:
-    """One :class:`SegmentAssignment` per xyxy box of ``boxes`` (full-mosaic pixel space), its
-    centroid tested against every candidate segment ``tie`` holds, tied and untied both.
+    """Return one :class:`SegmentAssignment` per xyxy box of ``boxes``, in full-mosaic pixels.
+
+    Each box's centroid is tested against every candidate segment ``tie`` holds, tied and untied
+    both.
     """
     candidates: list[TiedSegment | UntiedSegment] = [*tie.tied, *tie.untied]
 

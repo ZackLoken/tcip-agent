@@ -1,6 +1,8 @@
-"""Canonical dataset layout: an image's path, ``<dataset_root>/images/<capture>/<stem>.<imgext>``,
-and the keys of its label document (capture and stem), a prediction bucket (its name) and the
-bucket's documents (name and stem); and the one label save.
+"""Canonical dataset layout: an image's path, its documents' keys, and its label save.
+
+An image's path is ``<dataset_root>/images/<capture>/<stem>.<imgext>``; the keys are its label
+document's (capture and stem), a prediction bucket's (its name) and the bucket's documents' (name
+and stem).
 """
 
 from __future__ import annotations
@@ -32,27 +34,29 @@ PREDICTION_BUCKETS = "prediction_buckets"
 
 
 def label_key(dataset_root: str | Path, capture: str, stem: str) -> Key:
-    """The label document of the image ``stem`` of ``capture`` under ``dataset_root``, the triple
-    :func:`parse_image_path` answers for an image path.
+    """Return the key of the label document of image ``stem`` of ``capture`` under ``dataset_root``.
+
+    The triple is the one :func:`parse_image_path` answers for an image path.
     """
     return Key(LABEL_DOCUMENTS, str(Path(dataset_root)), (capture, stem))
 
 
 def prediction_key(dataset_root: str | Path, bucket: str, stem: str) -> Key:
-    """The prediction document of the image ``stem`` in the bucket named ``bucket``."""
+    """Return the key of the prediction document of image ``stem`` in the bucket ``bucket``."""
     return Key(PREDICTION_DOCUMENTS, str(Path(dataset_root)), (bucket, stem))
 
 
 def bucket_key(dataset_root: str | Path, bucket: str) -> Key:
-    """The record of the prediction bucket named ``bucket`` under ``dataset_root``."""
+    """Return the key of the record of the prediction bucket ``bucket`` under ``dataset_root``."""
     return Key(PREDICTION_BUCKETS, str(Path(dataset_root)), (bucket,))
 
 
 def is_bucket_name(name: str) -> bool:
-    """Whether ``name`` is legal as a capture bucket directory name under ``images/``: a single
-    safe path segment (see
-    ``workspace.is_valid_name``) that does not start with a dot, so a hidden directory (an
-    editor's swap file, platform cruft) is never mistaken for one.
+    """Return whether ``name`` is legal as a capture bucket directory name under ``images/``.
+
+    It is legal as a single safe path segment (see ``workspace.is_valid_name``) that does not
+    start with a dot, so a hidden directory (an editor's swap file, platform cruft) is never
+    mistaken for one.
     """
     from tcip_mcp.workspace import is_valid_name
 
@@ -60,8 +64,10 @@ def is_bucket_name(name: str) -> bool:
 
 
 def parse_capture_dir(images_dir: str | Path) -> tuple[Path, str]:
-    """``(dataset_root, capture)`` of a capture directory ``<root>/images/<capture>``; any other
-    directory, the image tree ``<root>/images`` itself included, raises ``ValueError`` naming it.
+    """Return ``(dataset_root, capture)`` of a capture directory ``<root>/images/<capture>``.
+
+    Any other directory, the image tree ``<root>/images`` itself included, raises ``ValueError``
+    naming it.
     """
     directory = Path(images_dir)
     if directory.parent.name != "images":
@@ -73,17 +79,19 @@ def parse_capture_dir(images_dir: str | Path) -> tuple[Path, str]:
 
 
 def parse_image_path(image_path: str | Path) -> tuple[Path, str, str]:
-    """``(dataset_root, capture, stem)`` of an image at ``<root>/images/<capture>/<stem>``
-    (:func:`parse_capture_dir` of its directory).
+    """Return ``(dataset_root, capture, stem)`` of an image at ``<root>/images/<capture>/<stem>``.
+
+    The first two are :func:`parse_capture_dir` of its directory.
     """
     img = Path(image_path)
     return (*parse_capture_dir(img.parent), img.stem)
 
 
 def capture_of(source: str | Path) -> tuple[str | None, str | None]:
-    """``(dataset_id, capture)`` of an image source: the identity record's id of the dataset root
-    whose image tree holds it (``None`` when the root records none) and its capture; both
-    ``None`` for a source that is no image of a capture.
+    """Return ``(dataset_id, capture)`` of an image source.
+
+    The id is the identity record's id of the dataset root whose image tree holds it (``None``
+    when the root records none); both are ``None`` for a source that is no image of a capture.
     """
     try:
         root, capture, _stem = parse_image_path(source)
@@ -94,13 +102,14 @@ def capture_of(source: str | Path) -> tuple[str | None, str | None]:
 
 
 def image_root(dataset_root: str | Path) -> Path:
-    """``<dataset_root>/images/``: the whole image tree, every capture under it."""
+    """Return the whole image-tree path ``<dataset_root>/images/``, every capture under it."""
     return Path(dataset_root, "images")
 
 
 def image_dir(dataset_root: str | Path, capture: str) -> Path:
-    """``<dataset_root>/images/<capture>/``: where a capture's image bytes live; ``ValueError``
-    for a capture that is not a single safe path segment.
+    """Return ``<dataset_root>/images/<capture>/``, where a capture's image bytes live.
+
+    Raises ``ValueError`` for a capture that is not a single safe path segment.
     """
     from tcip_mcp.workspace import is_valid_name
 
@@ -112,20 +121,21 @@ def image_dir(dataset_root: str | Path, capture: str) -> Path:
 
 
 def image_filename(stem: str, ext: str) -> str:
-    """The file name one capture's bytes are stored under (``ext`` includes the leading dot)."""
+    """Return the file name one capture's bytes are stored under; ``ext`` has the leading dot."""
     return f"{stem}{ext}"
 
 
 def image_path(
     dataset_root: str | Path, capture: str, stem: str, ext: str
 ) -> Path:
-    """Canonical write path for an image (``ext`` includes the leading dot)."""
+    """Return the canonical write path for an image (``ext`` includes the leading dot)."""
     return image_dir(dataset_root, capture) / image_filename(stem, ext)
 
 
 def list_dates(dataset_root: str | Path) -> list[str]:
-    """Sorted capture names under ``images/``, each a directory whose name
-    :func:`is_bucket_name` admits.
+    """Return the sorted capture names under ``images/``.
+
+    Each is a directory whose name :func:`is_bucket_name` admits.
     """
     imgs = image_root(dataset_root)
     if not imgs.is_dir():
@@ -136,8 +146,9 @@ def list_dates(dataset_root: str | Path) -> list[str]:
 
 
 def dataset_root_of(path: str | Path) -> Path | None:
-    """The ``<dataset_root>`` a path under ``<dataset_root>/images/`` lives under, or ``None`` if
-    it lives under none.
+    """Return the ``<dataset_root>`` a path under ``<dataset_root>/images/`` lives under.
+
+    Returns ``None`` when it lives under none.
 
     Anchors on the *last* ``images`` segment in the path, so a dataset physically nested under an
     ancestor named ``images`` still resolves to the real root rather than the ancestor. A bare
@@ -152,15 +163,12 @@ def dataset_root_of(path: str | Path) -> Path | None:
 
 
 def subjects_path(dataset_root: str | Path) -> Path:
-    """``<dataset_root>/subjects.json``: the one nested registry that decodes the dataset's
-    labels, written through ``tcip_store.encode_record`` in declared order.
-    """
+    """Return ``<dataset_root>/subjects.json``, the registry that decodes the dataset's labels."""
     return Path(dataset_root, SUBJECTS_FILENAME)
 
 
 def dataset_identity_path(dataset_root: str | Path) -> Path:
-    """``<dataset_root>/dataset.json``: the dataset's identity ({crop, id, fingerprint}), written
-    compare-and-set through ``tcip_store.encode_record``.
+    """Return ``<dataset_root>/dataset.json``, the dataset's identity ({crop, id, fingerprint}).
 
     The stored fingerprint is a cache; recompute-on-read
     (``dataset_fingerprint.dataset_fingerprint``) is authority.
@@ -171,7 +179,7 @@ def dataset_identity_path(dataset_root: str | Path) -> Path:
 def decode_dataset_identity_document(
     data: bytes, *, dataset_root: str | Path
 ) -> dict:
-    """A dataset identity document's bytes, decoded and shape-checked.
+    """Decode and shape-check a dataset identity document's bytes.
 
     Raises ``ValueError`` for bytes that do not decode, or that decode to something other than a
     dict; a dict lacking ``id``, ``crop`` or ``fingerprint`` raises ``KeyError``.
@@ -197,9 +205,10 @@ def decode_dataset_identity_document(
 
 
 def read_dataset_identity(dataset_root: str | Path) -> dict | None:
-    """The dataset's identity record (``{crop, id, fingerprint}``) decoded through
-    :func:`decode_dataset_identity_document`, or ``None`` for a dataset never registered. A record
-    that does not decode raises ``ValueError``.
+    """Return the dataset's identity record (``{crop, id, fingerprint}``), or ``None``.
+
+    The record is decoded through :func:`decode_dataset_identity_document`; ``None`` is a dataset
+    never registered. A record that does not decode raises ``ValueError``.
     """
     stored = tcip_store.read_blob_versioned(
         dataset_identity_path(dataset_root), default=None
@@ -212,8 +221,9 @@ def read_dataset_identity(dataset_root: str | Path) -> dict | None:
 
 
 def require_dataset_identity(dataset_root: str | Path) -> dict:
-    """:func:`read_dataset_identity`, refusing with ``ValueError`` naming ``register_dataset`` a
-    dataset never registered.
+    """Return :func:`read_dataset_identity`'s record, refusing a dataset never registered.
+
+    The refusal is ``ValueError`` naming ``register_dataset``.
     """
     identity = read_dataset_identity(dataset_root)
     if identity is None:
@@ -227,13 +237,14 @@ def require_dataset_identity(dataset_root: str | Path) -> dict:
 
 @dataclass(frozen=True)
 class Gestures:
-    """What one save decides beyond the annotations it writes: the proposals of the bucket named
-    ``bucket``, under the image's own dataset root, it accepts and rejects, each by its index in
-    that bucket's document for the image; the annotations it confirms as the person's own call,
-    each by its position among the annotations the save writes (``confirm``);
-    each subject of ``complete`` marked complete over ``rect`` (pixel ``[x, y, w, h]``, the whole
-    image when ``None``) or, mapped to ``False``, its marks withdrawn; whether proposals were
-    hidden while the person annotated; each flag it raises
+    """What one save decides beyond the annotations it writes.
+
+    It names the proposals of the bucket named ``bucket``, under the image's own dataset root, it
+    accepts and rejects, each by its index in that bucket's document for the image; the
+    annotations it confirms as the person's own call, each by its position among the annotations
+    the save writes (``confirm``); each subject of ``complete`` marked complete over ``rect``
+    (pixel ``[x, y, w, h]``, the whole image when ``None``) or, mapped to ``False``, its marks
+    withdrawn; whether proposals were hidden while the person annotated; each flag it raises
     (:class:`~tcip_annotation.flags.FlagRequest`); and each open flag it resolves, by id, with
     the reply given.
     """
@@ -250,16 +261,19 @@ class Gestures:
 
 
 def label_key_of(image_path: str | Path) -> Key:
-    """The label document of the image at ``image_path`` (:func:`parse_image_path`, then
-    :func:`label_key`); an image under no dataset image tree refuses (``ValueError``).
+    """Return the key of the label document of the image at ``image_path``.
+
+    The key is :func:`parse_image_path`, then :func:`label_key`; an image under no dataset image
+    tree refuses (``ValueError``).
     """
     return label_key(*parse_image_path(image_path))
 
 
 def image_proposals(bucket: str, key: Key) -> tuple[Bucket, list]:
-    """The published bucket named ``bucket`` under the root of the label document ``key`` and its
-    proposals for that image, in document order; a bucket that names no document for the image
-    refuses (``ValueError``).
+    """Return the published bucket ``bucket`` and its proposals for the image ``key`` names.
+
+    The bucket is the one under the root of the label document ``key``; the proposals are in
+    document order. A bucket that names no document for the image refuses (``ValueError``).
     """
     from tcip_annotation.json_io import read_predictions
     from tcip_mcp.buckets import read_bucket
@@ -274,8 +288,9 @@ def image_proposals(bucket: str, key: Key) -> tuple[Bucket, list]:
 
 
 def verdict_key_of(key: Key, bucket: str) -> Key:
-    """The verdict shard of the proposals the bucket named ``bucket`` holds for the image whose
-    label document ``key`` names.
+    """Return the key of the verdict shard of ``bucket``'s proposals for the image ``key`` names.
+
+    ``key`` is the image's label document key.
     """
     from tcip_annotation.verdicts import verdict_key
 
@@ -288,12 +303,14 @@ def proposal_pairs(
     annotations: list,
     proposals: list,
 ) -> dict[int, int]:
-    """Which annotation each of ``bucket``'s proposals pairs with, proposal index to annotation
-    index, by the one matcher (:func:`~tcip_annotation.matching.pair_proposals`) under the
-    localization criterion the assessment ``bucket`` was published under measured its count by;
-    a bucket published under none, or under one that measured no count, pairs under the
-    platform's comparability convention (``schemas.COMPARABILITY_IOU``). Refuses
-    (``ValueError``) a bucket's assessment with no ``project`` to read it from.
+    """Return which annotation each of ``bucket``'s proposals pairs with, by index.
+
+    The mapping is proposal index to annotation index, by
+    :func:`~tcip_annotation.matching.pair_proposals` under the localization criterion the
+    assessment ``bucket`` was published under measured its count by; a bucket published under
+    none, or under one that measured no count, pairs under the platform's comparability
+    convention (``schemas.COMPARABILITY_IOU``). Refuses (``ValueError``) a bucket's assessment
+    with no ``project`` to read it from.
     """
     from tcip_annotation.matching import pair_proposals
     from tcip_mcp.assessment import read_assessment
@@ -320,8 +337,9 @@ def proposal_pairs(
 
 
 def signed_off(annotation: Annotation, by: str, at: str) -> Annotation:
-    """``annotation`` taken responsibility for by the person ``by`` at ``at``: its
-    ``accepted_by`` and ``accepted_at``, everything else as it was.
+    """Return ``annotation`` taken responsibility for by the person ``by`` at ``at``.
+
+    Its ``accepted_by`` and ``accepted_at`` are set, everything else as it was.
     """
     return replace(annotation, accepted_by=by, accepted_at=at)
 
@@ -338,35 +356,37 @@ def save_label_document(
     expect: tcip_store.Version | None = None,
     gestures: Gestures = Gestures(),
 ) -> tuple[tcip_store.Version, LabelDocument, dict[int, int]]:
-    """Write the label document ``key`` names (:func:`label_key_of` an image), the verdicts its
-    ``gestures`` decide and the save's one audit line by ``actor``, in one commit under the
-    document's dataset root. Returns the document's new version, the document decoded from the
-    very record the commit wrote (rounded geometry, only the completion marks still live) and,
-    for each accepted proposal, the index in that document of the annotation it resolved to.
+    """Write a label document, the verdicts its gestures decide and one audit line, in one commit.
+
+    The document is the one ``key`` names (:func:`label_key_of` an image); the verdicts are the
+    ones ``gestures`` decide and the audit line is by ``actor``, all under the document's dataset
+    root. Returns the document's new version, the document decoded from the very record the
+    commit wrote (rounded geometry, only the completion marks still live) and, for each accepted
+    proposal, the index in that document of the annotation it resolved to.
 
     The document holds every annotation parsed from ``payloads``, provenance stamped
     (:func:`~tcip_annotation.json_io.stamped`): a record unchanged since it was stored keeps its
     own, any other is ``author``'s at the save's time. Each annotation ``gestures`` confirms
     (:attr:`Gestures.confirm`) is signed off by ``author`` at the save's time
-    (:func:`signed_off`). Each accepted proposal of ``gestures``
-    pairing no annotation (:func:`proposal_pairs`) joins it as ground truth, its geometry and
-    subject only, every attribute unassessed, authored by its producer and accepted by
-    ``author``; one that pairs signs that annotation off the same way and adds nothing.
-    The document's completion marks still live over the new annotations stay, beside the marks
-    ``gestures`` makes; a subject mapped to ``False`` loses its marks. Each accepted and rejected
-    proposal appends one entry to the image's verdict shard under that bucket. The image's flags
-    record gains each flag ``gestures`` raises, by ``author``, and marks each it resolves; an
-    open flag on an annotation the save removes is resolved as removed by ``author``
+    (:func:`signed_off`). Each accepted proposal of ``gestures`` pairing no annotation
+    (:func:`proposal_pairs`) joins it as ground truth, its geometry and subject only, every
+    attribute unassessed, authored by its producer and accepted by ``author``; one that pairs
+    signs that annotation off the same way and adds nothing. The document's completion marks
+    still live over the new annotations stay, beside the marks ``gestures`` makes; a subject
+    mapped to ``False`` loses its marks. Each accepted and rejected proposal appends one entry to
+    the image's verdict shard under that bucket. The image's flags record gains each flag
+    ``gestures`` raises, by ``author``, and marks each it resolves; an open flag on an annotation
+    the save removes is resolved as removed by ``author``
     (:func:`~tcip_annotation.flags.resolved_by_removal`), so a save whose ``author`` names no
     person (a tool's) cannot remove a flagged annotation.
 
     Raises with nothing written: ``ValueError`` for a payload that does not parse, a confirmed
     position the save writes no annotation at, a removed annotation an open flag sits on when
-    ``author`` names no person, a proposal
-    index the bucket's document does not hold or that is both accepted and rejected, a flag with
-    no comment or on a proposal its bucket does not hold, or a resolved flag that is not open;
-    ``UnreadableLabelDocumentError`` for a stored document that does not decode;
-    ``VersionConflictError`` when ``expect`` is not the version the commit reads.
+    ``author`` names no person, a proposal index the bucket's document does not hold or that is
+    both accepted and rejected, a flag with no comment or on a proposal its bucket does not hold,
+    or a resolved flag that is not open; ``UnreadableLabelDocumentError`` for a stored document
+    that does not decode; ``VersionConflictError`` when ``expect`` is not the version the commit
+    reads.
     """
     from tcip_annotation.flags import (
         flag_key,
@@ -543,9 +563,10 @@ def save_label_document(
 
 
 def list_subjects(dataset_root: str | Path) -> list[str]:
-    """The dataset's subjects, in the registry's declared order. ``[]`` when there is no registry.
+    """Return the dataset's subjects, in the registry's declared order.
 
-    A registry that is present but unreadable raises rather than reading as no subjects.
+    ``[]`` when there is no registry. A registry that is present but unreadable raises rather than
+    reading as no subjects.
     """
     from tcip_mcp import subject_registry
 
@@ -557,15 +578,16 @@ def list_subjects(dataset_root: str | Path) -> list[str]:
 
 
 def capture_label_keys(dataset_root: str | Path, capture: str) -> list[Key]:
-    """Every label document of ``capture`` under ``dataset_root``, in stem order."""
+    """Return the label-document keys of ``capture`` under ``dataset_root``, in stem order."""
     return tcip_store.keys(LABEL_DOCUMENTS, str(dataset_root), (capture,))
 
 
 def capture_subjects(
     dataset_root: str | Path, capture: str
 ) -> tuple[list[str], list[str]]:
-    """The distinct subjects the label documents of ``capture`` hold, sorted, and the stem of
-    every one of them that will not read.
+    """Return the distinct subjects the label documents of ``capture`` hold, sorted.
+
+    Beside them, the stem of every one of those documents that will not read.
     """
     from tcip_annotation.json_io import (
         UnreadableLabelDocumentError,

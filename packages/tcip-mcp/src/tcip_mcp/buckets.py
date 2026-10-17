@@ -1,5 +1,6 @@
-"""A prediction bucket: a record naming who produced its per-image prediction documents and how,
-and those documents, each a record under the dataset root its source images belong to.
+"""A prediction bucket: its per-image prediction documents and the record of who made them and how.
+
+Each document and the record lie under the dataset root the source images belong to.
 
 The record states who produced the documents (a checkpoint's sha256 and the run that produced
 it, or the engine or agent that proposed them), the class scope their labels decode under, the
@@ -29,8 +30,10 @@ _PATHS = (("raster_path",),)
 
 
 class Document(NamedTuple):
-    """One document a publication writes: its source image, its record, and the number of
-    detections its encoding dropped for a box with no extent.
+    """One document a publication writes.
+
+    It holds its source image, its record, and the number of detections its encoding dropped for
+    a box with no extent.
     """
 
     source: str
@@ -43,9 +46,7 @@ class BucketExistsError(ValueError):
 
 
 class NotABucketError(ValueError):
-    """A bucket name names no published bucket under a dataset root, or one whose record does not
-    decode.
-    """
+    """A bucket name names no published bucket under a dataset root, or one that does not decode."""
 
 
 @dataclass(frozen=True)
@@ -75,8 +76,9 @@ class Bucket:
     assessment_id: str | None
 
     def document_key(self, stem: str) -> tcip_store.Key | None:
-        """The document this bucket holds for the source image of stem ``stem``, as its record
-        names it, or ``None`` when the record names none for that image.
+        """Return the key of the document this bucket holds for the source image of stem ``stem``.
+
+        The key is as the record names it, or ``None`` when the record names none for that image.
         """
         from tcip_mcp.dataset_layout import prediction_key
 
@@ -97,8 +99,9 @@ class Bucket:
         ]
 
     def raster(self, project: Path) -> str | None:
-        """The raster this bucket was predicted on, resolved against ``project``, or ``None`` for
-        a bucket of per-image predictions.
+        """Return the raster this bucket was predicted on, resolved against ``project``.
+
+        Returns ``None`` for a bucket of per-image predictions.
         """
         from tcip_mcp.registry_paths import runtime_paths
 
@@ -108,9 +111,10 @@ class Bucket:
 
 
 def read_bucket(dataset_root: str | Path, name: str) -> Bucket:
-    """The bucket named ``name`` under ``dataset_root``, a root its caller already located,
-    carried as the bucket's root, as its record states it. No record, or one that does not decode,
-    refuses (:class:`NotABucketError`) naming it.
+    """Read the bucket named ``name`` under ``dataset_root``, as its record states it.
+
+    ``dataset_root`` is taken as given, not located, and carried as the bucket's root. No record,
+    or one that does not decode, refuses (:class:`NotABucketError`) naming it.
     """
     from tcip_mcp.dataset_layout import bucket_key
 
@@ -138,7 +142,7 @@ def read_bucket(dataset_root: str | Path, name: str) -> Bucket:
 
 
 def buckets_under(dataset_root: str | Path) -> list[Bucket]:
-    """Every bucket published under ``dataset_root``, in name order."""
+    """Return every bucket published under ``dataset_root``, in name order."""
     from tcip_mcp.dataset_layout import PREDICTION_BUCKETS
 
     return [
@@ -148,8 +152,9 @@ def buckets_under(dataset_root: str | Path) -> list[Bucket]:
 
 
 def by_recorded_date(buckets: Iterable[Bucket]) -> dict[str, Bucket]:
-    """``buckets`` keyed by the capture date each record states. A bucket recording no date, and
-    two recording one date, refuse (``ValueError``) naming them.
+    """Return ``buckets`` keyed by the capture date each record states.
+
+    A bucket recording no date, and two recording one date, refuse (``ValueError``) naming them.
     """
     dated: dict[str, Bucket] = {}
     for bucket in buckets:
@@ -168,9 +173,9 @@ def by_recorded_date(buckets: Iterable[Bucket]) -> dict[str, Bucket]:
 
 
 def shared_root(buckets: Iterable[Bucket]) -> Path:
-    """The one dataset root every bucket of ``buckets`` is published under. Buckets under more than
-    one root, or no bucket, refuse (``ValueError``) naming them: a delivery spans one dataset and
-    its one registry.
+    """Return the one dataset root every bucket of ``buckets`` is published under.
+
+    Buckets under more than one root, or no bucket, refuse (``ValueError``) naming them.
     """
     return _one_root((b.root for b in buckets), "a delivery's buckets")
 
@@ -178,8 +183,9 @@ def shared_root(buckets: Iterable[Bucket]) -> Path:
 def buckets_by_date(
     dataset_root: str | Path, dates: list[str]
 ) -> dict[str, list[str]]:
-    """For each of ``dates``, the names of the buckets under ``dataset_root`` whose record states
-    that capture date.
+    """Return, for each of ``dates``, the names of the buckets under ``dataset_root`` of that date.
+
+    A bucket is of a date when its record states that capture date.
     """
     grouped: dict[str, list[str]] = {d: [] for d in dates}
     for bucket in buckets_under(dataset_root):
@@ -189,11 +195,12 @@ def buckets_by_date(
 
 
 def pass_documents(p: Pass, results: Iterable[dict]) -> Iterator[Document]:
-    """Each of a pass's ``results`` encoded as the document it publishes: a detector's (a pass
-    whose execution record states a conf) as its prediction document under the pass's scope,
-    carrying the cap its frame was predicted under and stamped with the checkpoint that predicted
-    it
-    (:func:`~tcip_mcp.pipelines.postprocessing.export.encode_predictions`), any other head's as
+    """Yield each of a pass's ``results`` encoded as the document it publishes.
+
+    A detector's (a pass whose execution record states a conf) is its prediction document under
+    the pass's scope, carrying the cap its frame was predicted under and stamped with the
+    checkpoint that predicted it
+    (:func:`~tcip_mcp.pipelines.postprocessing.export.encode_predictions`); any other head's is
     its own output (:func:`~tcip_mcp.pipelines.postprocessing.export.encode_head_output`).
     """
     from tcip_mcp.pipelines.postprocessing.export import (
@@ -215,8 +222,9 @@ def pass_documents(p: Pass, results: Iterable[dict]) -> Iterator[Document]:
 
 
 def _one_root(roots: Iterable[Path], what: str) -> Path:
-    """The one dataset root among ``roots``; none, or more than one, refuses (``ValueError``)
-    naming ``what`` and the roots.
+    """Return the one dataset root among ``roots``.
+
+    None, or more than one, refuses (``ValueError``) naming ``what`` and the roots.
     """
     found = {tcip_store.canonical_path(root): root for root in roots}
     if len(found) != 1:
@@ -228,9 +236,11 @@ def _one_root(roots: Iterable[Path], what: str) -> Path:
 
 
 def source_root(sources: Iterable[str | Path]) -> Path:
-    """The one dataset root every source image of a bucket lies under
-    (:func:`~tcip_mcp.dataset_layout.dataset_root_of`). A source under no dataset image tree, and
-    sources under more than one root, refuse (``ValueError``) naming them.
+    """Return the one dataset root every source image of a bucket lies under.
+
+    Each source's root is :func:`~tcip_mcp.dataset_layout.dataset_root_of`'s. A source under no
+    dataset image tree, and sources under more than one root, refuse (``ValueError``) naming
+    them.
     """
     from tcip_mcp.dataset_layout import dataset_root_of
 
@@ -260,10 +270,12 @@ def publish(
     assessment_id: str | None,
     actor: str | None,
 ) -> Bucket:
-    """Publish ``documents`` as the bucket ``name`` under the dataset root ``root`` (the one
-    :func:`source_root` answered for their sources) by ``actor``, in one commit over the bucket's
-    record, every document and the publication's audit line, ``prediction_bucket_published``,
-    naming the bucket and its ``dropped_boxes``.
+    """Publish ``documents`` as the bucket ``name`` under the dataset root ``root``, by ``actor``.
+
+    ``root`` is the one :func:`source_root` answers for their sources. One commit covers the
+    bucket's record, every document and the publication's audit line,
+    ``prediction_bucket_published``, naming the bucket and its ``dropped_boxes``. Returns the
+    bucket as read back.
 
     The record states ``producer``, ``scope``, ``execution``, the raster and the assessment as
     given, and the capture of the raster, else of the first document's source image
@@ -334,14 +346,15 @@ def publish(
 
 
 def prediction_producer(checkpoint: VerifiedCheckpoint) -> str:
-    """The ``created_by`` spelling for a prediction ``checkpoint`` wrote."""
+    """Return the ``created_by`` spelling for a prediction ``checkpoint`` wrote."""
     return f"model:{Path(checkpoint.path).stem}@{checkpoint.sha256[:12]}"
 
 
 def detection_rows(bucket: Bucket) -> list[dict[str, Any]]:
-    """Every document of ``bucket``, in stem order, as ``{"image", "count", "scores"}``: the
-    source filename its record names, and the real detections it holds (a ``Point`` and a crowd
-    region excluded) with their scores.
+    """Return every document of ``bucket``, in stem order, as ``{"image", "count", "scores"}``.
+
+    Each row holds the source filename its record names, and the count of real detections it
+    holds (a ``Point`` and a crowd region excluded) with their scores.
     """
     from tcip_annotation.json_io import (
         detection_annotations,

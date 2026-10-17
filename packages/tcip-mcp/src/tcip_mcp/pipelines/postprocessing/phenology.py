@@ -1,9 +1,9 @@
-"""Canonical phenology measurement: a trait's positive-fraction milestones, for whichever
-registered trait it's computed for.
+"""Canonical phenology measurement: a trait's positive-fraction milestones.
 
-The positive-state fraction is the fraction of a plant's detected objects a classifier calls the
-trait's ``positive_state``. Milestone columns come entirely from the trait's own ``TraitEntry``
-(``phenology_prefix`` plus each ``milestone_fractions`` entry):
+The measurement serves whichever registered trait it is computed for. The positive-state fraction
+is the fraction of a plant's detected objects a classifier calls the trait's ``positive_state``.
+Milestone columns come entirely from the trait's own ``TraitEntry`` (``phenology_prefix`` plus
+each ``milestone_fractions`` entry):
 
     ``<prefix>_<NN>per_date``            = the date the positive fraction first crosses NN%,
                                             for each fraction the spec declares
@@ -34,8 +34,9 @@ if TYPE_CHECKING:
 
 
 def _milestone_targets(spec) -> dict[str, float]:
-    """Milestone crossing fractions from the trait's confirmed semantics, resolved per call. Keyed
-    "NNper" to match the CSV column names.
+    """Return milestone crossing fractions from the trait's confirmed semantics, per call.
+
+    Keyed "NNper" to match the CSV column names.
     """
     return {
         f"{int(round(f * 100)):02d}per": f for f in spec.milestone_fractions
@@ -43,8 +44,9 @@ def _milestone_targets(spec) -> dict[str, float]:
 
 
 def _milestone_columns(spec) -> list[tuple[str, str]]:
-    """``(column_suffix, crossing_key)`` for every milestone this trait actually delivers; the
-    majority alias enters only when the spec names a crossing for it.
+    """Return ``(column_suffix, crossing_key)`` for every milestone this trait delivers.
+
+    The majority alias enters, first, only when the spec names a crossing for it.
     """
     cols = [(key, key) for key in _milestone_targets(spec)]
     if spec.majority_milestone:
@@ -53,8 +55,10 @@ def _milestone_columns(spec) -> list[tuple[str, str]]:
 
 
 def milestone_date_columns(spec) -> list[dict[str, str]]:
-    """The milestone columns a trait's phenology delivery carries, each as ``{"date", "bound"}``:
-    the milestone's date column and the column holding that date's evidentiary bound.
+    """Return the milestone columns a trait's phenology delivery carries.
+
+    Each is ``{"date", "bound"}``: the milestone's date column and the column holding that date's
+    evidentiary bound.
     """
     return [
         {
@@ -66,9 +70,10 @@ def milestone_date_columns(spec) -> list[dict[str, str]]:
 
 
 def phenology_csv_columns(spec) -> list[str]:
-    """The delivered per-plant phenology CSV schema for one trait, derived from its ``TraitEntry``:
-    the plant, its coverage, each milestone date and its evidentiary bound, then the delivery
-    columns every delivered CSV carries.
+    """Return the delivered per-plant phenology CSV schema for one trait's ``TraitEntry``.
+
+    The columns are the plant, its coverage, each milestone date and its evidentiary bound, then
+    :data:`~tcip_mcp.delivery.DELIVERY_COLUMNS`.
     """
     from tcip_mcp.delivery import DELIVERY_COLUMNS
 
@@ -98,12 +103,14 @@ CURVE_MEASUREMENT_COLUMNS = [
     "n_missing",
     "ratio",
 ]
-"""The per-(plant, date) columns ``per_plant_series`` produces."""
+"""The per-(plant, date) columns of a curve row (:meth:`PhenologyMeasurement.curve_rows`)."""
 
 
 def curve_csv_columns() -> list[str]:
-    """The delivered per-(plant, date) curve CSV schema: the counts the fraction is built from,
-    then the delivery columns every delivered CSV carries.
+    """Return the delivered per-(plant, date) curve CSV schema.
+
+    The columns are the counts the fraction is built from, then
+    :data:`~tcip_mcp.delivery.DELIVERY_COLUMNS`.
     """
     from tcip_mcp.delivery import DELIVERY_COLUMNS
 
@@ -114,11 +121,10 @@ def curve_csv_columns() -> list[str]:
 
 
 def date_key(date_str: str) -> tuple[int, int, int]:
-    """ISO ``YYYY-MM-DD`` -> ``(year, month, day)`` for chronological sort.
+    """Return ISO ``YYYY-MM-DD`` as ``(year, month, day)`` for chronological sort.
 
     A value that is not a calendar-legal ISO date (the ``undated/`` bucket, a non-numeric folder,
-    or an out-of-range one like ``2026-13-01``) sorts first as ``(0, 0, 0)`` and is excluded from
-    milestone math.
+    or an out-of-range one like ``2026-13-01``) sorts first as ``(0, 0, 0)``.
     """
     parts = date_str.split("-")
     if len(parts) != 3:
@@ -132,12 +138,13 @@ def date_key(date_str: str) -> tuple[int, int, int]:
 
 
 def iso(date_str: str) -> str:
+    """Return ``date_str`` as zero-padded ``YYYY-MM-DD``; a non-ISO one gives ``0000-00-00``."""
     y, m, d = date_key(date_str)
     return f"{y:04d}-{m:02d}-{d:02d}"
 
 
 def _real_points(series: list[tuple[str, float]]) -> list[tuple[str, float]]:
-    """Series sorted chronologically, with non-ISO/undated points dropped."""
+    """Sort the series chronologically and drop non-ISO/undated points."""
     pts = [(d, r) for d, r in series if date_key(d) != (0, 0, 0)]
     pts.sort(key=lambda p: date_key(p[0]))
     return pts
@@ -156,10 +163,9 @@ class Crossing:
         may have happened any time before it; this date is an upper bound, not a measured crossing.
       - ``"interpolated"``: read between the two bracketing observed dates by the crossing rule.
       - ``"right_censored"``: the last observed point still hasn't met the target, the true
-        crossing,
-        if it happens at all, is after this date; this date is a lower bound, the mirror of
-        ``left_censored`` at the other end of the observed window, distinguishing "not yet reached,
-        but we watched through this date" from "no information at all".
+        crossing, if it happens at all, is after this date; this date is a lower bound, the mirror
+        of ``left_censored`` at the other end of the observed window, distinguishing "not yet
+        reached, but we watched through this date" from "no information at all".
     ``gap_days``: for ``interpolated``, the number of days between the two bracketing observations
     (a wide gap is weaker evidence for the same interpolated date), ``0`` for ``exact``/unknown for
     ``left_censored``/``right_censored`` (no bracket on the censored side exists).
@@ -173,8 +179,9 @@ class Crossing:
 def _linear_whole_day(
     d1: str, r1: float, d2: str, r2: float, target: float
 ) -> Crossing:
-    """The day ``target`` is reached on the straight line from ``(d1, r1)`` to ``(d2, r2)``,
-    rounded to the nearest whole day.
+    """Return the day ``target`` is reached on the straight line from ``(d1, r1)`` to ``(d2, r2)``.
+
+    The day is rounded to the nearest whole day.
     """
     y1, m1, day1 = date_key(d1)
     y2, m2, day2 = date_key(d2)
@@ -194,7 +201,7 @@ CROSSING_RULES: dict[
 def crossing_date(
     series: list[tuple[str, float]], target: float, rule: CrossingRule
 ) -> Crossing | None:
-    """Earliest date the fraction curve reaches ``>= target``, with its evidentiary bound.
+    """Return the earliest date the fraction curve reaches ``>= target``, with its bound.
 
     A crossing between two observed points is read by the :data:`CROSSING_RULES` entry ``rule``
     names; a left-censored crossing (the first observed point already meets the target) or a
@@ -216,8 +223,9 @@ def crossing_date(
 
 
 def positive_onset_date(series: list[tuple[str, float]]) -> str | None:
-    """First date any positive-state observation appears (fraction > 0), chronologically.
-    ``None`` if never.
+    """Return the first date, chronologically, any positive-state observation appears.
+
+    An observation is positive when its fraction is above 0; ``None`` if never.
     """
     for d, r in _real_points(series):
         if r > 0:
@@ -226,12 +234,11 @@ def positive_onset_date(series: list[tuple[str, float]]) -> str | None:
 
 
 def plant_milestones(series: list[tuple[str, float]], spec) -> dict:
-    """The phenology dates for one plant's positive-fraction series, keyed by the trait's own
-    columns.
+    """Return the phenology dates for one plant's positive-fraction series, keyed by column.
 
-    The column names (``phenology_prefix`` + each milestone key, plus the majority alias), the
-    crossing fractions, the crossing rule and the majority mapping come from ``spec``, which is
-    required.
+    The keys are the trait's own date and bound columns. The column names (``phenology_prefix`` +
+    each milestone key, plus the majority alias), the crossing fractions, the crossing rule and
+    the majority mapping come from ``spec``, which is required.
     """
     crossings = {
         key: crossing_date(series, frac, spec.crossing_rule)
@@ -258,7 +265,7 @@ def count_by_class(
     *,
     scope: ClassScope,
 ) -> tuple[int, int, int]:
-    """``(n_total, n_positive, n_unclassified)`` for one image's prediction ``document``.
+    """Return ``(n_total, n_positive, n_unclassified)`` for one image's prediction ``document``.
 
     ``scope`` is the bucket's own recorded scope. When it declares no attribute of ``state``
     listing its value (:meth:`~tcip_mcp.pipelines.data.selection.ClassScope.state_ids`), every
@@ -295,13 +302,14 @@ def count_by_class(
 
 
 class EmptyPopulationError(ValueError):
-    """A phenology measurement was asked for with no plants named; the population is the caller's
-    explicit plant list.
+    """A phenology measurement was asked for with no plants named.
+
+    The population is the caller's explicit plant list.
     """
 
 
 def measurement_refusals() -> tuple[type[Exception], ...]:
-    """The exceptions :func:`per_plant_phenology` refuses a measurement with, each naming why."""
+    """Return the exceptions a phenology measurement is refused with, each naming why."""
     from tcip_annotation.json_io import (
         UndeclaredValueError,
         UnreadableLabelDocumentError,
@@ -317,7 +325,10 @@ def measurement_refusals() -> tuple[type[Exception], ...]:
 
 
 def population(plants: Sequence[str]) -> list[str]:
-    """The delivery population as one ordered list of distinct plant ids, refusing an empty one."""
+    """Return the delivery population as one ordered list of distinct plant ids.
+
+    An empty one refuses (:class:`EmptyPopulationError`).
+    """
     ordered = list(dict.fromkeys(str(p) for p in plants))
     if not ordered:
         raise EmptyPopulationError(
@@ -333,9 +344,10 @@ def per_plant_series(
     state: PositiveState | None,
     plants: list[str],
 ) -> dict[str, dict]:
-    """Aggregate the predictions of buckets whose scope declares ``state``'s attribute into a
-    per-plant positive-fraction series, for exactly the plants in ``plants`` (:func:`population`'s
-    list).
+    """Aggregate the buckets' predictions into a per-plant positive-fraction series.
+
+    Only buckets whose scope declares ``state``'s attribute classify; the series covers exactly
+    the plants in ``plants`` (:func:`population`'s list).
 
     ``mapping`` is ``{date: [assignment, ...]}`` where each assignment has ``.stem`` /
     ``.plant_id`` / ``.accession_name`` (attributes or dict keys); ``buckets`` is each delivered
@@ -402,9 +414,10 @@ def per_plant_phenology(
     spec,
     plants: list[str],
 ) -> dict:
-    """Full canonical pipeline: predictions + plant mapping -> per-plant milestones
-    against ``spec``'s ``positive_state`` and milestones, one row per plant in ``plants`` and no
-    other, in its order (see :func:`per_plant_series`).
+    """Measure per-plant milestones from predictions and a plant mapping against ``spec``.
+
+    The milestones are measured against ``spec``'s ``positive_state`` and milestones, one row per
+    plant in ``plants`` and no other, in its order (see :func:`per_plant_series`).
 
     Returns ``{rows: [...], positive_class_assessed: bool}``. Each row carries the
     positive-fraction series, the milestone dates, coverage-disclosure fields
@@ -481,9 +494,10 @@ def per_plant_phenology(
 
 @dataclass(frozen=True)
 class PhenologyMeasurement:
-    """One trait's per-plant phenology over a plant mapping and its delivered buckets: the
-    confirmed revision it is measured under, the buckets by date, the rows, and the mapping's
-    delivery disclosure.
+    """One trait's per-plant phenology over a plant mapping and its delivered buckets.
+
+    It holds the confirmed revision it is measured under, the buckets by date, the rows, and the
+    mapping's delivery disclosure.
     """
 
     revision: TraitRevision
@@ -494,7 +508,7 @@ class PhenologyMeasurement:
     plants: list[str]
 
     def curve_rows(self) -> list[dict]:
-        """Per-(plant, date) rows: the milestone rows' own series, not a second aggregation."""
+        """Return per-(plant, date) rows from the existing series."""
         return [
             {
                 "plant_id": row["plant_id"],
@@ -506,14 +520,16 @@ class PhenologyMeasurement:
         ]
 
     def milestone_rows(self) -> list[dict]:
+        """Return the per-plant rows without their ``series``."""
         return [
             {k: v for k, v in row.items() if k != "series"}
             for row in self.rows
         ]
 
     def result(self, *, curves: bool) -> Result:
-        """The delivered result: the milestone rows, or the curve rows with ``curves``, under
-        their columns, with the population and mapping disclosure.
+        """Return the delivered result: the milestone rows, or the curve rows with ``curves``.
+
+        The rows are under their columns, with the population and mapping disclosure.
         """
         from tcip_mcp.delivery import Result
 
@@ -536,10 +552,11 @@ def measure_phenology(
     buckets: Sequence[str],
     plants: Sequence[str],
 ) -> PhenologyMeasurement:
-    """Measure ``trait``'s phenology over the buckets named ``buckets`` published under
-    the established location ``dataset_root``, each at the
-    capture date its record states (:func:`~tcip_mcp.buckets.by_recorded_date`), through the plant
-    mapping ``mapping_name``, for exactly ``plants``.
+    """Measure ``trait``'s phenology over the named ``buckets`` for exactly ``plants``.
+
+    The buckets are published under the established location ``dataset_root``, each at the
+    capture date its record states (:func:`~tcip_mcp.buckets.by_recorded_date`); the plants are
+    read through the plant mapping ``mapping_name``.
 
     Reads the trait's latest confirmed revision stating a ``state_crossing_dates``
     operationalization, bound against the dataset's registry (refusing, ``ValueError``, a dataset
@@ -596,11 +613,14 @@ def deliver_phenology(
     door: str,
     actor: str | None,
 ) -> dict[str, Any]:
-    """Deliver ``measurement``'s milestone rows, or its per-(plant, date) curve rows with
-    ``curves``, as the CSV at ``output_path``, by ``actor``.
+    """Deliver ``measurement``'s milestone or curve rows as the CSV at ``output_path``.
 
-    The buckets clear the one gate for a ``state_crossing_dates`` delivery, the recorded
-    acknowledgment ``acknowledgment_id`` shipping them unvalidated when it does not validate them.
+    The rows are its milestone rows, or its per-(plant, date) curve rows with ``curves``; the
+    delivery is by ``actor``.
+
+    The buckets clear :func:`~tcip_mcp.delivery.gate` for a ``state_crossing_dates`` delivery,
+    the recorded acknowledgment ``acknowledgment_id`` shipping them unvalidated when it does not
+    validate them.
     Writes exactly :func:`phenology_csv_columns` (or :func:`curve_csv_columns`) with the
     delivery's one event under ``door``, its population and plant-mapping disclosure
     (:func:`~tcip_mcp.delivery.deliver_csv`); returns what was delivered.

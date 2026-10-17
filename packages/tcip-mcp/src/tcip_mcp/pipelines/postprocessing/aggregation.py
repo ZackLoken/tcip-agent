@@ -1,8 +1,7 @@
-"""The per-plant delivery, which aggregates per-image records under the statistic its trait's
-confirmed revision names among :data:`PLANT_AGGREGATIONS`.
+"""The per-plant delivery of per-image records aggregated per plant.
 
-A trait's phenology milestones (percentile-crossing dates of its positive-state fraction) are
-``postprocessing/phenology.py``'s.
+Records are aggregated under the statistic the trait's confirmed revision names among
+:data:`PLANT_AGGREGATIONS`.
 
 ``delivered_phenotype`` is a crop-vocabulary delivered-phenotype name (``stem_count`` is one, as an
 example rather than as the shape), which is what the CSV column and the unit cross-check are about.
@@ -27,15 +26,17 @@ logger = logging.getLogger(__name__)
 def _per_plant(
     records: list[dict], *, plant_aggregation: PlantAggregation, value_key: str
 ) -> list[dict]:
-    """Per-plant summaries of per-image ``records``, one per ``plant_id``: the plant, its record
-    count as ``n_images``, and as ``value`` the :data:`PLANT_AGGREGATIONS` statistic
-    ``plant_aggregation`` names over the records' ``value_key`` (a record without it is a missing
-    observation; ``None`` when every record of the plant misses it).
+    """Return per-plant summaries of per-image ``records``, one per ``plant_id``, sorted by it.
 
-    A record carrying no ``plant_id`` refuses, naming ``build_plant_mapping``. Where records carry
-    an assignment's ``source``/``distance_m`` (as ``build_plant_mapping``'s ``Assignment`` rows
-    do), they are summarized per plant as ``plant_id_source`` (``"mixed"`` where the plant's
-    images disagree) and ``plant_id_distance_m_max``.
+    Each summary holds the plant, its record count as ``n_images``, and as ``value`` the
+    :data:`PLANT_AGGREGATIONS` statistic ``plant_aggregation`` names over the records'
+    ``value_key`` (a record without it is a missing observation; ``None`` when every record of the
+    plant misses it).
+
+    A record carrying no ``plant_id`` refuses (``ValueError``), naming ``build_plant_mapping``.
+    Where records carry an assignment's ``source``/``distance_m``, they are summarized per plant as
+    ``plant_id_source`` (``"mixed"`` where the plant's images disagree) and
+    ``plant_id_distance_m_max``.
     """
     groups: dict[str, list[dict]] = defaultdict(list)
     for r in records:
@@ -85,14 +86,14 @@ def _resolve_units(
     value_key: str,
     scalar: bool,
 ) -> tuple[str, str | None, str | None]:
-    """``(display_unit, linear_basis, declared_unit)``: the units implied by the delivered
-    values' ``value_key``, and crops.yml's declared unit for ``delivered_phenotype`` or ``None``.
+    """Return ``(display_unit, linear_basis, declared_unit)`` for a delivery's values.
 
-    Under a ``scalar`` head's delivery, a value_key with no unit suffix at all takes the declared
-    unit; one that explicitly ends in ``_px`` (or is bare ``"px"``) never does. A value_key that
-    implies a physical unit is cross-checked against the declared one either way.
-    ``display_unit`` is squared for an area; ``linear_basis`` is always linear, and is what the
-    cross-check and the scale's own unit compare against.
+    The first two are the units implied by the delivered values' ``value_key``, the third
+    crops.yml's declared unit for ``delivered_phenotype`` or ``None``. Under a ``scalar`` head's
+    delivery, a value_key with no unit suffix at all takes the declared unit; one that explicitly
+    ends in ``_px`` (or is bare ``"px"``) never does. A value_key that implies a physical unit is
+    cross-checked against the declared one either way, and a mismatch raises ``ValueError``.
+    ``display_unit`` is squared for an area; ``linear_basis`` is always linear.
     """
     from tcip_mcp.pipelines.measurement.mask_geometry import (
         is_pixel_space_key,
@@ -138,9 +139,10 @@ def deliver_per_plant_aggregate(
     acknowledgment_id: str | None = None,
     actor: str | None,
 ) -> dict:
-    """Deliver the per-plant aggregate of per-image ``records`` (each carrying its ``plant_id``
-    and its value under ``value_key``) as a ``delivery_kind`` CSV at ``output_path``, by
-    ``actor``, for exactly the population ``plants``
+    """Deliver the per-plant aggregate of per-image ``records`` as a CSV at ``output_path``.
+
+    Each record carries its ``plant_id`` and its value under ``value_key``; the CSV is a
+    ``delivery_kind`` delivery by ``actor``, for exactly the population ``plants``
     (:func:`~tcip_mcp.pipelines.postprocessing.phenology.population`'s list), over the published
     ``buckets`` the values came from.
 
@@ -150,8 +152,8 @@ def deliver_per_plant_aggregate(
     (:func:`_per_plant`); the plants must be exactly the population, every one carrying a value,
     and the records agree on ``plant_attribution``. The units come from ``value_key``,
     cross-checked against crops.yml. The buckets, the physical-scale assessment
-    ``scale_assessment_id`` and the unit clear the one gate, the recorded acknowledgment
-    ``acknowledgment_id`` shipping them unvalidated when it does not validate them.
+    ``scale_assessment_id`` and the unit clear :func:`~tcip_mcp.delivery.gate`, the recorded
+    acknowledgment ``acknowledgment_id`` shipping them unvalidated when it does not validate them.
 
     Each row carries the plant, its value and unit, its provenance of attribution, and the
     delivery's own cells, written with the delivery's one event under ``door`` with its

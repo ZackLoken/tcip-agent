@@ -38,8 +38,9 @@ def _to_numpy(mask: Any):
 
 
 def _perimeter_px(binary) -> float:
-    """4-connected boundary length: sum over foreground pixels of edges facing
-    background/outside.
+    """Return the 4-connected boundary length of a binary mask.
+
+    The length is the sum over foreground pixels of edges facing background or outside.
     """
     import numpy as np
 
@@ -50,8 +51,10 @@ def _perimeter_px(binary) -> float:
 
 
 def _axes_from_points(pts):
-    """PCA over a raw ``(x, y)`` point cloud -> ``(centroid_xy, principal, secondary,
-    major_unit_vector)``, continuous chord spans with no pixel-inclusive correction.
+    """Return the PCA centroid, axis extents and major axis of a raw ``(x, y)`` point cloud.
+
+    The result is ``(centroid_xy, principal, secondary, major_unit_vector)``, the two extents
+    continuous chord spans with no pixel-inclusive correction.
     """
     import numpy as np
 
@@ -77,10 +80,11 @@ def _axes_from_points(pts):
 
 
 def _axes(binary):
-    """PCA on the foreground pixel coords -> (centroid_xy, principal, secondary, major_unit_vector).
+    """Compute PCA geometry from foreground pixel coordinates.
 
-    ``principal`` / ``secondary`` are pixel-inclusive extents (extent + 1) along the major / minor
-    axis: chords of the mask's footprint, not anatomical spans (see the module docstring).
+    Returns ``(centroid_xy, principal, secondary, major_unit_vector)``; ``principal`` /
+    ``secondary`` are pixel-inclusive extents (extent + 1) along the major / minor axis: chords of
+    the mask's footprint, not anatomical spans.
     """
     import numpy as np
 
@@ -95,16 +99,16 @@ def _axes(binary):
 
 
 def principal_axis_extent_of_points(points: Any) -> float:
-    """The principal-axis extent of a set of ``(x, y)`` points, the same orientation-independent
-    PCA primitive :func:`_axes` computes for ``principal_axis_extent_px``, applied directly to a
-    geometry's own vertices (e.g. a reference object's annotated polygon) rather than a rasterized
-    mask, so a reference object's pixel extent needs no raster to rasterize into and carries no
-    discretization error. A continuous chord span, not pixel-inclusive: the rasterized-mask
-    convention ``_axes`` applies does not apply to raw coordinates.
+    """Return the principal-axis extent of a set of ``(x, y)`` points.
 
-    ``points`` is a flat sequence of ``(x, y)`` pairs; a multi-ring polygon's rings are flattened
-    together before this is called, since one reference annotation is one object regardless of how
-    many rings its geometry carries.
+    The extent is the same orientation-independent PCA primitive :func:`_axes` computes for
+    ``principal_axis_extent_px``, applied directly to a geometry's own vertices rather than a
+    rasterized mask, so it carries no discretization error. A continuous chord span, not
+    pixel-inclusive: the rasterized-mask convention ``_axes`` applies does not apply to raw
+    coordinates.
+
+    ``points`` is a flat sequence of ``(x, y)`` pairs, all treated as one object. Raises
+    ``ValueError`` on no points.
     """
     import numpy as np
 
@@ -118,10 +122,11 @@ def principal_axis_extent_of_points(points: Any) -> float:
 
 
 def _attach_physical(result: dict, scale: float, unit: str) -> None:
-    """Add ``{unit}``-suffixed physical fields from a linear per-pixel scale in that unit (area
-    scales by the square). The unit is real data the caller states, never assumed: a scale in cm/px
-    passed with ``unit="cm"`` produces ``area_cm2``/``principal_axis_extent_cm``/etc, not a
-    silently-wrong ``_mm`` label.
+    """Add ``{unit}``-suffixed physical fields to ``result`` from a linear per-pixel scale.
+
+    The scale is in ``unit`` and area scales by its square. The unit is the one the caller
+    states, never assumed: a scale in cm/px passed with ``unit="cm"`` produces
+    ``area_cm2``/``principal_axis_extent_cm``/etc.
     """
     s = float(scale)
     result[f"{unit}_per_px"] = s
@@ -155,22 +160,23 @@ def _known_units() -> set[str]:
 
 
 def is_pixel_space_key(key: str) -> bool:
-    """Whether ``key`` explicitly names pixel space: a trailing ``_px``, or the bare key
-    ``"px"``.
+    """Return whether ``key`` explicitly names pixel space.
+
+    It does when its last ``_``-separated token is ``px``, the bare key ``"px"`` included.
     """
     return key.rpartition("_")[2] == "px"
 
 
 def unit_from_value_key(key: str) -> tuple[str, str] | None:
-    """``(display_unit, linear_basis)`` if ``key``'s trailing ``_<token>`` names a real physical
-    unit (``"area_mm2"`` -> ``("mm2", "mm")``, ``"principal_axis_extent_cm"`` -> ``("cm", "cm")``),
-    else ``None``.
+    """Return the physical unit ``key``'s trailing ``_<token>`` names, or ``None``.
 
-    ``display_unit`` is what the units column should say; ``linear_basis`` is what crops.yml's
-    declared (always-linear) unit is cross-checked against: the two differ only for a squared
-    (area-like) key. A pixel-suffixed key (``"principal_axis_extent_px"``) never implies a unit,
-    and neither does any trailing token outside crops.yml's real declared units
-    (``"elongated_fraction"`` does not imply a unit called "fraction").
+    The unit is returned as ``(display_unit, linear_basis)``: ``"area_mm2"`` gives
+    ``("mm2", "mm")``, ``"principal_axis_extent_cm"`` gives ``("cm", "cm")``. ``display_unit`` is
+    the unit the value is in; ``linear_basis`` is its linear unit, comparable with crops.yml's
+    declared (always-linear) unit: the two differ only for a squared (area-like) key. A
+    pixel-suffixed key (``"principal_axis_extent_px"``) never implies a unit, and neither does any
+    trailing token outside crops.yml's real declared units (``"elongated_fraction"`` does not
+    imply a unit called "fraction").
 
     Raises when the key's own name says "area" but its unit isn't squared (``"area_mm"``, missing
     the ``2``).
@@ -202,10 +208,10 @@ def mask_geometry(
     unit: str,
     threshold: float,
 ) -> dict:
-    """Dimensional geometry of a single validated 2D mask (``[H, W]`` or ``[1, H, W]``), its
-    foreground the pixels at or above ``threshold``.
+    """Return the dimensional geometry of a single validated 2D mask.
 
-    ``scale`` is a plain float (per-pixel, in ``unit``).
+    The mask is ``[H, W]`` or ``[1, H, W]``, its foreground the pixels at or above ``threshold``;
+    any other shape raises ``ValueError``. ``scale`` is a plain float (per-pixel, in ``unit``).
 
     Returns pixel measurements always, and ``{unit}``-suffixed physical measurements when a scale
     is given::
@@ -228,7 +234,7 @@ def mask_geometry(
         }
 
     The two axis extents are chords of the mask's footprint along its own PCA axes, not anatomical
-    spans: see the module docstring before treating one as a trait's length or width.
+    spans.
 
     An empty mask returns zeros with ``empty=True`` and ``centroid_px=None``.
     """
@@ -278,8 +284,9 @@ def instance_geometries(
     unit: str,
     threshold: float,
 ) -> list[dict]:
-    """Per-instance :func:`mask_geometry` over an ``[N, H, W]`` mask stack (or a single
-    ``[H, W]``).
+    """Return :func:`mask_geometry` per instance of an ``[N, H, W]`` mask stack.
+
+    A single ``[H, W]`` mask is one instance; any other shape raises ``ValueError``.
     """
     arr = _to_numpy(masks)
     if arr.ndim == 2:

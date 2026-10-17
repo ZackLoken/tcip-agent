@@ -1,6 +1,4 @@
-"""Encoding a pass's predictions as per-image documents, and delivering a bucket's per-image
-counts.
-"""
+"""A pass's predictions encoded as per-image documents, and a bucket's per-image count delivery."""
 
 from __future__ import annotations
 
@@ -16,19 +14,18 @@ logger = logging.getLogger(__name__)
 
 
 def _clip(value: float, upper: float | None) -> float:
-    """Clamp ``value`` into ``[0, upper]``; ``upper=None`` (no known image extent) leaves it
-    as-is.
-    """
+    """Clamp ``value`` into ``[0, upper]``; ``upper=None`` leaves it as-is."""
     if upper is None:
         return value
     return max(0.0, min(float(value), float(upper)))
 
 
 def stored_geometries(image_result: dict) -> dict[int, BBox | Polygon]:
-    """Each detection of one raw predictor result that a write stores, by index, as the geometry
-    stored: its mask's rings when it carries one (:func:`_mask_geometry_for_export`), else its box,
-    kept only when that geometry has extent on the stored grid
-    (:func:`~tcip_annotation.json_io.geometry_extent_ok`).
+    """Return the geometry stored for each kept detection of one raw predictor result, by index.
+
+    A detection's geometry is its mask's rings when it carries one
+    (:func:`_mask_geometry_for_export`), else its box, kept only when that geometry has extent on
+    the stored grid (:func:`~tcip_annotation.json_io.geometry_extent_ok`).
     """
     from tcip_annotation.json_io import geometry_extent_ok
     from tcip_annotation.state import BBox
@@ -53,15 +50,17 @@ def encode_predictions(
     *,
     scope: ClassScope,
 ) -> tuple[dict, int]:
-    """A detection result encoded as its name-based per-image prediction document
-    (:func:`~tcip_annotation.json_io.document_payload`), and the number of detections dropped.
+    """Encode a detection result as its name-based per-image prediction document.
+
+    Returns the document (:func:`~tcip_annotation.json_io.document_payload`) and the number of
+    detections dropped.
 
     ``result`` carries its source ``image``, pixel-xyxy ``boxes``, 1-indexed ``labels``
     (background=0), ``scores``, image ``width``/``height``, the frame's detection ``cap``, written
     on the document, and, when ``scope`` declares attributes, ``attributes``, one id row per
-    detection; a result missing one of the first seven,
-    or whose boxes, scores and labels differ in length, refuses (``ValueError``) naming it, and so
-    does a ``scope`` naming no subject or attributes
+    detection; a result missing one of the first seven, or whose boxes, scores and labels differ
+    in length, refuses (``ValueError``) naming it, and so does a ``scope`` naming no subject or
+    attributes
     (:meth:`~tcip_mcp.pipelines.data.selection.ClassScope.admitted_for`). Every prediction's
     ``subject`` is ``scope``'s, and its ``attributes`` each attribute's value its row names
     (:func:`~tcip_annotation.json_io.attribute_values`), none for a scope declaring none. An
@@ -149,10 +148,11 @@ def encode_predictions(
 
 
 def encode_head_output(result: dict, *, task: str) -> tuple[dict, int]:
-    """A classification, ordinal, regression or semantic segmentation result encoded as its
-    document: the source image's ``width`` and ``height``, the head's ``task`` and every output the
-    head returned under ``outputs``, as returned; no detection is ever dropped. A result carrying
-    no output refuses (``ValueError``).
+    """Encode a classification, ordinal, regression or semantic segmentation result.
+
+    Returns the document and a dropped count of zero: the document holds the source image's
+    ``width`` and ``height``, the head's ``task`` and every output the head returned under
+    ``outputs``, as returned. A result carrying no output refuses (``ValueError``).
     """
     outputs = {
         k: v
@@ -179,7 +179,7 @@ def _mask_geometry_for_export(
     *,
     image_size: tuple[int, int] | None = None,
 ) -> BBox | Polygon:
-    """One detection's mask -> a real (possibly multi-ring) Polygon, or BBox if empty.
+    """Return the detection's (possibly multi-ring) polygon, or its box when the mask is empty.
 
     ``mask`` is a ``{"segmentation"}`` dict of flat ``[x0, y0, x1, y1, ...]`` polygons in
     full-image pixels (the record
@@ -218,17 +218,16 @@ def deliver_per_image_counts_csv(
     door: str,
     actor: str | None,
 ) -> dict:
-    """Deliver the per-image counts of the bucket ``name`` published under ``dataset_root`` as the
-    CSV at ``output_path``, by ``actor``, under ``trait``'s latest confirmed revision stating a
-    ``per_image_count`` operationalization.
+    """Deliver the per-image counts of a published bucket as the CSV at ``output_path``.
 
-    The population is the bucket's own documents, as its record names them, and a raster bucket
-    refuses. It clears the one gate (:func:`~tcip_mcp.delivery.gate`), the recorded
-    acknowledgment ``acknowledgment_id`` shipping it unvalidated when the gate does not validate
-    it. Each row is one document in stem
-    order: ``image`` (its source file name), ``detection_count``, ``avg_confidence`` and the
-    delivery's own cells, written with the delivery's one event under ``door``
-    (:func:`~tcip_mcp.delivery.deliver_csv`); returns what was delivered.
+    The bucket is ``name`` published under ``dataset_root``; the delivery is by ``actor``, under
+    ``trait``'s latest confirmed revision stating a ``per_image_count`` operationalization. The
+    population is the bucket's own documents, as its record names them, and a raster bucket
+    refuses. It clears :func:`~tcip_mcp.delivery.gate`, the recorded acknowledgment
+    ``acknowledgment_id`` shipping it unvalidated when the gate does not validate it. Each row is
+    one document in stem order: ``image`` (its source file name), ``detection_count``,
+    ``avg_confidence`` and the delivery's own cells, written with the delivery's one event under
+    ``door`` (:func:`~tcip_mcp.delivery.deliver_csv`); returns what was delivered.
     """
     from tcip_mcp.buckets import detection_rows, read_bucket
     from tcip_mcp.delivery import DELIVERY_COLUMNS, Result, deliver_csv, gate

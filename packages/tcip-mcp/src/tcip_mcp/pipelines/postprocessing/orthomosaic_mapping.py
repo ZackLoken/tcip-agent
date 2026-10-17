@@ -1,12 +1,11 @@
-"""Georeferencing for a whole-mosaic GeoTIFF: a drone orthomosaic covers many plants in one raster,
-so mapping a detection to a real-world plant reads the GeoTIFF's own georeferencing tags to turn a
-pixel location into a real-world coordinate.
+"""Georeferencing for a whole-mosaic GeoTIFF, from pixel location to real-world coordinate.
+
+A drone orthomosaic covers many plants in one raster, so mapping a detection to a real-world plant
+reads the GeoTIFF's own georeferencing tags to turn a pixel location into a real-world coordinate.
 
 :class:`OrthomosaicGeoreference` resolves that pixel <-> real-world mapping from the raster's own
 tags: a rotated/sheared raster, or one whose CRS this module can't determine, is refused (see
-:class:`RotatedRasterError` / :class:`GeoreferencingError`). Reading the pixels themselves is
-``pipelines.raster_source``'s job (:class:`~tcip_mcp.pipelines.raster_source.GdalSource` for a
-raster too large to decode whole).
+:class:`RotatedRasterError` / :class:`GeoreferencingError`).
 """
 
 from __future__ import annotations
@@ -37,15 +36,17 @@ WGS84_EPSG = 4326
 
 
 class GeoreferencingError(ValueError):
-    """A GeoTIFF is missing (or carries an unusable form of) a tag this module needs to resolve
-    a pixel's real-world coordinate: pixel scale, tiepoint, a geokey directory, or a projected
-    CRS identified by that directory.
+    """A GeoTIFF lacks a usable form of a tag needed to resolve a pixel's real-world coordinate.
+
+    The tags are pixel scale, tiepoint, a geokey directory, or a projected CRS identified by that
+    directory.
     """
 
 
 class RotatedRasterError(GeoreferencingError):
-    """A GeoTIFF carries a ``ModelTransformationTag``: a rotated or sheared raster, for which
-    the tiepoint + pixel-scale affine this module implements is the wrong math.
+    """A GeoTIFF carries a ``ModelTransformationTag``: a rotated or sheared raster.
+
+    The tiepoint + pixel-scale affine this module implements is the wrong math for it.
     """
 
 
@@ -68,7 +69,7 @@ class GeoTransform:
 
 
 def geotransform_of(tags: tifffile.TiffTags, path: Path) -> GeoTransform:
-    """The georeferencing one TIFF page's ``tags`` state, ``path`` naming the file in a refusal.
+    """Return the georeferencing one TIFF page's ``tags`` state; ``path`` names it in a refusal.
 
     Raises :class:`RotatedRasterError` if a ``ModelTransformationTag`` is present, and
     :class:`GeoreferencingError` if the pixel scale, tiepoint, or a projected CRS can't be
@@ -159,9 +160,10 @@ def _read_projected_epsg(geokeys: tuple[int, ...], path: Path) -> int:
 def pixel_to_native(
     transform: GeoTransform, pixel_x: float, pixel_y: float
 ) -> tuple[float, float]:
-    """The (easting, northing) in ``transform``'s native projected CRS for pixel (column, row)
-    ``(pixel_x, pixel_y)``, via the tiepoint + pixel-scale GeoTIFF affine, rows increasing
-    southward.
+    """Return the (easting, northing) in ``transform``'s native projected CRS for a pixel.
+
+    The pixel is (column, row) ``(pixel_x, pixel_y)``, mapped via the tiepoint + pixel-scale
+    GeoTIFF affine, rows increasing southward.
     """
     native_x = (
         transform.tiepoint_native_x
@@ -177,9 +179,10 @@ def pixel_to_native(
 def native_to_pixel(
     transform: GeoTransform, native_x: float, native_y: float
 ) -> tuple[float, float]:
-    """The pixel (column, row) for a native-CRS coordinate ``(native_x, native_y)``, the inverse
-    of :func:`pixel_to_native`; a zero ``pixel_scale_x`` or ``pixel_scale_y`` refuses
-    (``ValueError``) naming it.
+    """Return the pixel (column, row) for a native-CRS coordinate ``(native_x, native_y)``.
+
+    This is the inverse of :func:`pixel_to_native`; a zero ``pixel_scale_x`` or ``pixel_scale_y``
+    refuses (``ValueError``) naming it.
     """
     if transform.pixel_scale_x == 0:
         raise ValueError(
@@ -203,11 +206,13 @@ def native_to_pixel(
 
 
 class OrthomosaicGeoreference:
-    """A whole-mosaic GeoTIFF's pixels in its native CRS and in WGS84, one transformer per
-    instance.
+    """A whole-mosaic GeoTIFF's pixels in its native CRS and in WGS84.
+
+    Each instance builds one transformer.
     """
 
     def __init__(self, transform: GeoTransform):
+        """Take the raster's affine; the WGS84 transformer is built on first use."""
         self.transform = transform
         self._to_wgs84: pyproj.Transformer | None = None
 
@@ -216,9 +221,10 @@ class OrthomosaicGeoreference:
         cls,
         georeference: GeoTransform | GeoreferencingError | None,
     ) -> OrthomosaicGeoreference:
-        """The georeference a raster's one georeference read answered (an open reader's or a TIFF
-        header's ``georeference``). Raises the reason that read refused, or
-        :class:`GeoreferencingError` for a raster whose reader reads no GeoTIFF tags.
+        """Return the georeference a raster's one georeference read answered.
+
+        ``georeference`` is an open reader's or a TIFF header's. Raises the reason that read
+        refused, or :class:`GeoreferencingError` for a raster whose reader reads no GeoTIFF tags.
         """
         if isinstance(georeference, GeoTransform):
             return cls(georeference)
@@ -229,11 +235,11 @@ class OrthomosaicGeoreference:
     def pixel_to_native(
         self, pixel_x: float, pixel_y: float
     ) -> tuple[float, float]:
-        """(easting, northing) in this raster's own native projected CRS."""
+        """Return (easting, northing) in this raster's native projected CRS for a pixel."""
         return pixel_to_native(self.transform, pixel_x, pixel_y)
 
     def _transformer(self) -> pyproj.Transformer:
-        """This raster's native CRS to WGS84, built on first use."""
+        """Return this raster's native-CRS-to-WGS84 transformer, built on first use."""
         import pyproj
 
         if self._to_wgs84 is None:
@@ -247,30 +253,30 @@ class OrthomosaicGeoreference:
     def pixel_to_wgs84(
         self, pixel_x: float, pixel_y: float
     ) -> tuple[float, float]:
-        """(lat, lon) in WGS84 for raster pixel ``(pixel_x, pixel_y)``."""
+        """Return (lat, lon) in WGS84 for raster pixel ``(pixel_x, pixel_y)``."""
         native_x, native_y = self.pixel_to_native(pixel_x, pixel_y)
         lon, lat = self._transformer().transform(native_x, native_y)
         return lat, lon
 
     def wgs84_to_native(self, lat: float, lon: float) -> tuple[float, float]:
-        """(easting, northing) in this raster's own native projected CRS for a WGS84
-        ``(lat, lon)``.
-        """
+        """Return (easting, northing) in this raster's native projected CRS for a WGS84 point."""
         native_x, native_y = self._transformer().transform(
             lon, lat, direction="INVERSE"
         )
         return native_x, native_y
 
     def wgs84_to_pixel(self, lat: float, lon: float) -> tuple[float, float]:
-        """The pixel (column, row) in this raster for a WGS84 ``(lat, lon)``, the inverse of
-        :meth:`pixel_to_wgs84`.
+        """Return the pixel (column, row) in this raster for a WGS84 ``(lat, lon)``.
+
+        This is the inverse of :meth:`pixel_to_wgs84`.
         """
         return native_to_pixel(self.transform, *self.wgs84_to_native(lat, lon))
 
     def meters_per_native_unit(self) -> float:
-        """The meters one unit of this raster's native CRS spans
-        (:func:`~tcip_mcp.pipelines.pixel_size.meters_per_crs_unit`); refuses (``ValueError``)
-        naming why when its CRS states no such span.
+        """Return the meters one unit of this raster's native CRS spans.
+
+        The span is :func:`~tcip_mcp.pipelines.pixel_size.meters_per_crs_unit`'s; refuses
+        (``ValueError``) naming why when its CRS states no such span.
         """
         from tcip_mcp.pipelines.pixel_size import meters_per_crs_unit
 
@@ -315,8 +321,10 @@ class DetectionAssignment:
 
 
 def detection_location(box: Sequence[float]) -> tuple[float, float]:
-    """A detection's own location: the center of its corner box
-    (:func:`~tcip_annotation.matching.box_centers`), in the pixel space the box is stated in.
+    """Return a detection's own location: the center of its corner box.
+
+    The center is :func:`~tcip_annotation.matching.box_centers`'s, in the pixel space the box is
+    stated in.
     """
     from tcip_annotation.matching import box_centers
 
@@ -331,10 +339,11 @@ def plants_in_frame(
     width: int,
     height: int,
 ) -> tuple[list[PlantRecord], list[PlantRecord]]:
-    """``(in_frame, outside)``: ``plants`` partitioned by whether their projected pixel position
-    falls inside this raster's own frame, the half-open test ``0 <= px < width`` and ``0 <= py <
-    height`` on the position :meth:`OrthomosaicGeoreference.wgs84_to_pixel` projects.
-    ``width``/``height`` come from the raster's own verified recorded identity.
+    """Return ``(in_frame, outside)``: ``plants`` split by whether they fall in the raster's frame.
+
+    The test is half-open, ``0 <= px < width`` and ``0 <= py < height``, on the position
+    :meth:`OrthomosaicGeoreference.wgs84_to_pixel` projects; ``width``/``height`` are the
+    raster's own frame.
     """
     in_frame: list[PlantRecord] = []
     outside: list[PlantRecord] = []
@@ -354,9 +363,11 @@ def assign_detections_to_plants(
     *,
     nn_tolerance_m: float,
 ) -> list[DetectionAssignment]:
-    """One :class:`DetectionAssignment` per xyxy box of ``boxes`` (full-mosaic pixel space): its
-    :func:`detection_location` resolved to (lat, lon) via ``georeference.pixel_to_wgs84``, then
-    matched to the nearest plant in ``plants`` within ``nn_tolerance_m``, the resolved tolerance
+    """Return one :class:`DetectionAssignment` per xyxy box of ``boxes``, in full-mosaic pixels.
+
+    Each box's :func:`detection_location` is resolved to (lat, lon) via
+    ``georeference.pixel_to_wgs84``, then matched to the nearest plant in ``plants`` within
+    ``nn_tolerance_m``, the resolved tolerance
     (:func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.resolve_nn_tolerance_m`); a
     detection farther than it from every plant is unmapped.
     """

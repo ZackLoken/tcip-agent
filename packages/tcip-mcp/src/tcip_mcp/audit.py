@@ -1,7 +1,8 @@
-"""The audit log: one append-only store under a dataset root or a project root
-(:func:`audit_log_key`). :func:`audited` records a decorated door's calls (timestamp, tool name,
-arguments, status and duration); :func:`record_event_or_raise` records for code that is not a
-door.
+"""The audit log: one append-only store under a dataset root or a project root.
+
+The log's key is :func:`audit_log_key`. :func:`audited` records a decorated door's calls
+(timestamp, tool name, arguments, status and duration); :func:`record_event_or_raise` records for
+code that is not a door.
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ class MutationCommittedWithoutAuditLineError(RuntimeError):
     """A tool body ran to completion and the audit entry that follows it did not land."""
 
     def __init__(self, tool: str, cause: BaseException) -> None:
+        """Take the tool whose entry did not land and the append's exception."""
         super().__init__(
             f"{tool} completed and its audit entry could not be written: {cause}. Whatever the "
             "call changed is committed and unrecorded, so do not retry it blind: repair the "
@@ -43,11 +45,9 @@ class MutationCommittedWithoutAuditLineError(RuntimeError):
 
 
 class AuditEntryNotWrittenError(RuntimeError):
-    """A call outside ``@audited`` recorded a mutation that already committed, and the append for
-    it failed.
+    """A mutation recorded outside ``@audited`` committed, and the append for it failed.
 
-    ``arguments`` are the facts the unwritten line would have carried, so a caller can name what
-    committed without reading it back.
+    ``arguments`` are the facts the unwritten line would have carried.
     """
 
     def __init__(
@@ -57,6 +57,7 @@ class AuditEntryNotWrittenError(RuntimeError):
         *,
         arguments: dict[str, Any] | None = None,
     ) -> None:
+        """Take the tool, the append's exception and the unwritten line's ``arguments``."""
         super().__init__(
             f"{tool} completed and its audit entry could not be written: {cause}. Whatever the "
             "call changed is committed and unrecorded, so do not retry it blind: repair the "
@@ -67,9 +68,10 @@ class AuditEntryNotWrittenError(RuntimeError):
 
 
 def audit_log_key(scope: str | Path) -> Key:
-    """The audit log one event belongs in: the one under ``scope``, the root the event's subject
-    hangs off (a dataset root when the event changed a record that travels with the data, the
-    project root otherwise).
+    """Return the key of the audit log under ``scope``.
+
+    ``scope`` is the root the event's subject hangs off: a dataset root when the event changed a
+    record that travels with the data, the project root otherwise.
     """
     return Key(AUDIT_LOG_STORE, str(scope), _AUDIT_PARTS)
 
@@ -77,9 +79,10 @@ def audit_log_key(scope: str | Path) -> Key:
 def audit_entries(
     scope: str | Path, *, after: str | None = None
 ) -> tuple[list[Mapping[str, Any]], str]:
-    """Every entry of ``scope``'s log (:func:`audit_entry`'s shape), in the order they landed
-    past the cursor ``after``, and the log's cursor. A log carrying undecodable entries raises
-    ``ValueError`` naming how many.
+    """Return every entry of ``scope``'s log past the cursor ``after``, and the log's cursor.
+
+    Entries are in :func:`audit_entry`'s shape, in the order they landed. A log carrying
+    undecodable entries raises ``ValueError`` naming how many.
     """
     from tcip_store import read_log
 
@@ -96,7 +99,7 @@ def audit_entries(
 def acts_of(
     scope: str | Path, tools: tuple[str, ...], *, after: str | None = None
 ) -> tuple[list[Mapping[str, Any]], str]:
-    """The ``ok`` entries of ``tools`` among :func:`audit_entries`, and the log's cursor."""
+    """Return the ``ok`` entries of ``tools`` among :func:`audit_entries`, and the log's cursor."""
     entries, cursor = audit_entries(scope, after=after)
     return [
         e for e in entries if e["status"] == "ok" and e["tool"] in tools
@@ -104,7 +107,7 @@ def acts_of(
 
 
 def now_iso() -> str:
-    """The current instant as an ISO-8601 UTC string."""
+    """Return the current instant as an ISO-8601 UTC string."""
     return datetime.now(timezone.utc).isoformat()
 
 
@@ -127,9 +130,11 @@ def audit_entry(
     status: str | None = None,
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """The shape every audit entry starts from: the clock, the tool, its redacted arguments, the
-    person who performed the act when one did (``actor``, :func:`~tcip_mcp.identity.actor`'s
-    spelling), a caller's extra facts, and the agent identity this process established at its MCP
+    """Return the shape every audit entry starts from.
+
+    The entry holds the clock, the tool, its redacted arguments, the person who performed the act
+    when one did (``actor``, :func:`~tcip_mcp.identity.actor`'s spelling), ``status`` when given,
+    a caller's extra facts, and the agent identity this process established at its MCP
     handshake, if it has one.
 
     The actor and identity keys are reserved: a caller's ``extra`` cannot set one.
@@ -158,9 +163,10 @@ def record_event_or_raise(
     scope: str | Path,
     **extra: Any,
 ) -> None:
-    """Emit one audit line, performed by ``actor``, for a mutation already made by a caller that
-    is not an ``@audited`` door, in the log of the root ``scope`` names (:func:`audit_log_key`). A
-    failed append is raised as :class:`AuditEntryNotWrittenError`, naming the mutation that
+    """Emit one audit line, performed by ``actor``, for a mutation already made.
+
+    The line lands in the log of the root ``scope`` names (:func:`audit_log_key`). A failed
+    append is raised as :class:`AuditEntryNotWrittenError`, naming the mutation that
     committed unrecorded.
     """
     entry = audit_entry(tool, arguments, actor, status, extra)
@@ -173,13 +179,13 @@ def record_event_or_raise(
 
 
 def dataset_scope_of(value: Any) -> Path | None:
-    """The dataset root ``value`` names, or ``None`` when it does not name one.
+    """Return the dataset root ``value`` names, or ``None`` when it does not name one.
 
-    ``value`` is whatever a tool's declared scope argument holds: a path inside the dataset's
-    ``images/`` tree (an image, a capture directory), or the dataset root itself. A path under
-    ``images/`` resolves through :func:`dataset_layout.dataset_root_of`. A path that is not under
-    one counts as a root only when it is a directory that actually carries dataset or project
-    state (its own ``.tcip/`` or a subject registry); anything else yields ``None``.
+    ``value`` is any value; one naming a root is a path inside the dataset's ``images/`` tree (an
+    image, a capture directory), or the dataset root itself. A path under ``images/`` resolves
+    through :func:`dataset_layout.dataset_root_of`. A path that is not under one counts as a root
+    only when it is a directory that actually carries dataset or project state (its own
+    ``.tcip/`` or a subject registry); anything else yields ``None``.
     """
     from tcip_mcp.dataset_layout import SUBJECTS_FILENAME, dataset_root_of
 
@@ -209,12 +215,13 @@ def audited(
     *,
     scope_arg: str | None = None,
 ) -> Callable:
-    """Decorate a door taking a ``project`` parameter (refused without one) so a call that returns
-    a result leaves one ``ok`` line, a call that raises leaves one ``exception`` line, and a call
-    returning its error dict leaves none, in one log: the project's, or with ``scope_arg`` the
-    dataset root that argument resolves to at call time (:func:`dataset_scope_of`; no root means
-    the project's). A set ``scope_arg``
-    reaches the door as the location it names against ``project``
+    """Decorate a door so each call that acts leaves one audit line.
+
+    The door takes a ``project`` parameter (refused without one). A call that returns a result
+    leaves one ``ok`` line, a call that raises leaves one ``exception`` line, and a call returning
+    its error dict leaves none, in one log: the project's, or with ``scope_arg`` the dataset root
+    that argument resolves to at call time (:func:`dataset_scope_of`; no root means the
+    project's). A set ``scope_arg`` reaches the door as the location it names against ``project``
     (:func:`~tcip_mcp.registry_paths.located`), and the entry keeps the caller's spelling.
     ``project`` and ``workspace`` are not recorded as arguments, a model argument is recorded as
     its JSON dump, and an ``actor`` parameter is recorded as the entry's actor. A failed append
