@@ -39,7 +39,7 @@ def test_absent_registry_answers_empty_for_a_fresh_project(tmp_path: Path):
 def test_archive_project_carries_a_registered_checkpoint_outside_models(
     tmp_path: Path,
 ):
-    from tcip_mcp.tools.project_tools import archive_project
+    from tcip_mcp.tools.project_tools import ZipBundle, archive_project
     from tests._web_fixtures import new_project
 
     project = tmp_path / "proj"
@@ -51,13 +51,17 @@ def test_archive_project_carries_a_registered_checkpoint_outside_models(
     ModelRegistry(str(project)).register_model("m", str(ckpt))
     out = tmp_path / "out.zip"
 
-    result = archive_project(project, str(out), include_models=True)
+    result = archive_project(
+        project, ZipBundle(output_path=str(out)), include_models=True
+    )
 
     assert "error" not in result, result
     with zipfile.ZipFile(out) as zf:
         assert "weights/m.pt" in zf.namelist()
 
-    without = archive_project(project, str(tmp_path / "without.zip"))
+    without = archive_project(
+        project, ZipBundle(output_path=str(tmp_path / "without.zip"))
+    )
     assert "error" not in without and without["checkpoints_excluded"] == 1
     with zipfile.ZipFile(tmp_path / "without.zip") as zf:
         assert "weights/m.pt" not in zf.namelist()

@@ -326,7 +326,8 @@ run_hyperparameter_search(
   checks refuse (an unstated value the trainer reads, a source that will not import, a data
   location that does not exist) ends failed naming why.
 - `n_trials` (required) is the number of sampled points, the trials launched being Ray's count
-  over them (`hpo.planned_trial_count`).
+  over them (`hpo.planned_trial_count`). It, `split_draws` and a stated `trial_budget` are each a
+  whole number of at least one; a bool, a fraction or a numeral written as text is refused.
 - `search_seed` (required) seeds the search algorithm itself, native or backend, and is recorded
   in the sweep's input so a relaunch replays it; it is distinct from `data.split.seed`. The
   `17` above is an arbitrary example value.

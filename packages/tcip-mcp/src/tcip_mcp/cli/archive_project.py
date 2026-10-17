@@ -22,21 +22,31 @@ from tcip_mcp.cli import bound_project
 
 
 def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
+    from tcip_mcp.tools.project_tools import (
+        TreeBundle,
+        ZipBundle,
+        archive_project,
+    )
+
     parser = argparse.ArgumentParser(description=__doc__, prog=prog)
     parser.add_argument(
         "project_path",
         help="Root directory of the project. Also where this "
         "run's audit line is recorded.",
     )
-    parser.add_argument(
+    destination = parser.add_mutually_exclusive_group(required=True)
+    destination.add_argument(
         "--output-path",
-        default="",
-        help="Destination path for the ZIP file. Exactly one of "
-        "--output-path/--output-dir is required.",
+        dest="destination",
+        metavar="PATH",
+        type=lambda path: ZipBundle(output_path=path),
+        help="Destination path for the ZIP file.",
     )
-    parser.add_argument(
+    destination.add_argument(
         "--output-dir",
-        default="",
+        dest="destination",
+        metavar="DIR",
+        type=lambda path: TreeBundle(output_dir=path),
         help="Destination directory to write the bundle into as a tree, "
         "instead of a ZIP. Refuses a destination inside project_path or a "
         "destination that already holds anything.",
@@ -50,13 +60,8 @@ def main(argv: list[str] | None = None, *, prog: str | None = None) -> int:
 
     project = bound_project(args.project_path)
 
-    from tcip_mcp.tools.project_tools import archive_project
-
     result = archive_project(
-        project,
-        output_path=args.output_path,
-        output_dir=args.output_dir,
-        include_models=args.include_models,
+        project, args.destination, include_models=args.include_models
     )
     if "error" in result:
         print(f"error: {result['error']}", file=sys.stderr)

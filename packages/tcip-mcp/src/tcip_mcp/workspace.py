@@ -163,7 +163,7 @@ def remove_project(
     """
     from tcip_mcp.audit import record_event_or_raise
     from tcip_mcp.experiments import live_run_conflict
-    from tcip_mcp.tools.project_tools import write_archive
+    from tcip_mcp.tools.project_tools import ZipBundle, write_archive
     from tcip_store.file_backend import retry_while_denied
 
     conflict = live_run_conflict(project)
@@ -175,7 +175,7 @@ def remove_project(
     archive_path = removed / f"{project.name}-{stamp}.zip"
     moved_to = removed / f"{project.name}-{stamp}"
     result = write_archive(
-        project, output_path=str(archive_path), include_models=True
+        project, ZipBundle(output_path=str(archive_path)), include_models=True
     )
     if "error" in result:
         raise ValueError(result["error"])

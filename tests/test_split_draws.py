@@ -12,6 +12,7 @@ from tests._chain_fixtures import (
     training_config,
     weights_statistics,
 )
+from tests._server_calls import called_through_the_server
 from tests._training_values import (
     asha_scheduler,
     drawn_split,
@@ -73,163 +74,43 @@ def test_real_hpo_base_config_is_admitted_by_preflight(
 # -- the door's own split_draws argument and trial_budget guards --------------------
 
 
-@pytest.mark.parametrize(
-    "value", [0, -3, False], ids=["zero", "negative", "the-bool-False"]
-)
-def test_run_hyperparameter_search_refuses_split_draws_below_one(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-    value,
+@pytest.mark.parametrize("name", ["split_draws", "n_trials", "trial_budget"])
+def test_run_hyperparameter_search_takes_each_count_as_a_whole_number_of_at_least_one(
+    name, bound, real_hpo_base_config, monkeypatch
 ):
-    """Guard. split_draws at or below one (zero, a negative int, or the bool False, which reads
-    as the integer it names) refuses by name at the door's own argument leg, before the search is
-    ever reached, with no seed axis in play to confuse the reason.
+    """The MCP call refuses a count that is not a whole number of at least one by the
+    parameter's own type, naming it; stated as 1 on a server bound to a project, the sweep
+    opens and reaches its search once, one sample at one draw.
     """
-    import tcip_mcp.tools.training_tools as tt
-
-    ran = []
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran)
-    )
-
-    result = tt.run_hyperparameter_search(
-        tmp_path,
-        base_config=real_hpo_base_config,
-        param_space=sweep_space(),
-        n_trials=1,
+    arguments = {
+        "base_config": real_hpo_base_config,
+        "param_space": sweep_space(),
+        "n_trials": 1,
         **fifo_search(),
-        split_draws=value,
-        search_seed=0,
-    )
+        "search_seed": 0,
+        "auto_tensorboard": False,
+    }
+    refused = [0, -3, False, True, 2.5, "2"]
+    if name != "trial_budget":
+        refused.append(None)
+    for value in refused:
+        error = called_through_the_server(
+            "run_hyperparameter_search", {**arguments, name: value}
+        )
+        assert name in error, value
 
-    assert "error" in result and "pairs no partition" in result["error"]
-    assert not ran
-
-
-def test_run_hyperparameter_search_refuses_a_non_integer_split_draws_by_direct_call(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-):
-    """Coverage. A fractional split_draws (reachable by a direct Python call alone, since the MCP
-    boundary rejects it) refuses as not a draw count rather than raising out of range(2.5).
-    """
-    import tcip_mcp.tools.training_tools as tt
-
-    ran = []
+    searched: list[dict] = []
     monkeypatch.setattr(
-        "tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran)
+        "tcip_mcp.pipelines.training.hpo.tune_search",
+        lambda **kw: searched.append(kw),
+    )
+    answer = called_through_the_server(
+        "run_hyperparameter_search", {**arguments, name: 1}, bound=bound
     )
 
-    result = tt.run_hyperparameter_search(
-        tmp_path,
-        base_config=real_hpo_base_config,
-        param_space=sweep_space(),
-        n_trials=1,
-        **fifo_search(),
-        split_draws=2.5,
-        search_seed=0,
-    )
-
-    assert "error" in result and "is not a draw count" in result["error"]
-    assert not ran
-
-
-@pytest.mark.parametrize("value", ["2", None, [2]])
-def test_run_hyperparameter_search_refuses_a_split_draws_of_another_type_by_direct_call(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-    value,
-):
-    """Guard. A split_draws of a type that does not order against an integer (reachable by a
-    direct Python call alone) refuses as not a draw count, rather than raising TypeError out of
-    the audited door where the comparison deciding whether a bound is read would meet it.
-    """
-    import tcip_mcp.tools.training_tools as tt
-
-    ran = []
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran)
-    )
-
-    result = tt.run_hyperparameter_search(
-        tmp_path,
-        base_config=real_hpo_base_config,
-        param_space=sweep_space(),
-        n_trials=1,
-        **fifo_search(),
-        split_draws=value,
-        search_seed=0,
-    )
-
-    assert "error" in result and "is not a draw count" in result["error"]
-    assert not ran
-
-
-@pytest.mark.parametrize("value", [0, -1])
-def test_run_hyperparameter_search_refuses_n_trials_not_a_count_above_one_draw(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-    value,
-):
-    """Guard. n_trials that is not a positive count refuses on a paired launch with no stated
-    trial_budget, the search never reached: a negative n_trials counts zero through Ray's own
-    generator while Tuner.fit runs it unbounded, and a zero n_trials launches nothing.
-    """
-    import tcip_mcp.tools.training_tools as tt
-
-    ran = []
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran)
-    )
-
-    result = tt.run_hyperparameter_search(
-        tmp_path,
-        base_config=real_hpo_base_config,
-        param_space=sweep_space(),
-        n_trials=value,
-        **fifo_search(),
-        split_draws=2,
-        search_seed=0,
-    )
-
-    assert "error" in result and "is not a count of trials" in result["error"]
-    assert not ran
-
-
-@pytest.mark.parametrize("value", [0, -1])
-def test_run_hyperparameter_search_refuses_n_trials_not_a_count_at_one_draw_with_no_budget(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-    value,
-):
-    """Guard. n_trials=0 or -1 at one draw with no trial_budget reads no bound, and still
-    refuses naming the count, the search never reached; the same call at n_trials=1 is admitted
-    (test_run_hyperparameter_search_admits_a_one_draw_launch_with_no_stated_budget).
-    """
-    import tcip_mcp.tools.training_tools as tt
-
-    ran = []
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran)
-    )
-
-    result = tt.run_hyperparameter_search(
-        tmp_path,
-        base_config=real_hpo_base_config,
-        param_space=sweep_space(),
-        n_trials=value,
-        **fifo_search(),
-        search_seed=0,
-    )
-
-    assert "error" in result and f"n_trials={value}" in result["error"]
-    assert "is not a count of trials" in result["error"]
-    assert not ran
+    assert "error" not in answer, answer
+    (search,) = searched
+    assert (search["num_samples"], search["split_draws"]) == (1, 1)
 
 
 def test_run_hyperparameter_search_refuses_split_draws_above_one_with_no_trial_budget(
@@ -260,37 +141,6 @@ def test_run_hyperparameter_search_refuses_split_draws_above_one_with_no_trial_b
 
     assert "error" in result and "trial_budget=2" in result["error"]
     assert "would launch 2 trials" in result["error"]
-    assert not ran
-
-
-@pytest.mark.parametrize("value", [0, -1, True, "5"])
-def test_run_hyperparameter_search_refuses_a_trial_budget_not_a_count(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-    value,
-):
-    """Coverage. trial_budget that is not a positive int (a bool included, by name) refuses as
-    not a count of trials, at one draw where the keyword is new.
-    """
-    import tcip_mcp.tools.training_tools as tt
-
-    ran = []
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran)
-    )
-
-    result = tt.run_hyperparameter_search(
-        tmp_path,
-        base_config=real_hpo_base_config,
-        param_space=sweep_space(),
-        n_trials=1,
-        **fifo_search(),
-        trial_budget=value,
-        search_seed=0,
-    )
-
-    assert "error" in result and "is not a count of trials" in result["error"]
     assert not ran
 
 
@@ -638,39 +488,6 @@ def test_run_hyperparameter_search_refuses_a_caller_split_seed_axis_at_one_draw(
         and "cannot be replayed as recorded" in result["error"]
     )
     assert "drop data.split.seed from param_space" in result["error"]
-    assert not ran
-
-
-def test_run_hyperparameter_search_refuses_split_draws_zero_before_the_seed_axis_leg(
-    tmp_path,
-    real_hpo_base_config,
-    monkeypatch,
-):
-    """Guard. The door's own argument leg refuses split_draws=0 by name before the seed-axis leg
-    ever runs: a caller-supplied data.split.seed axis at split_draws=0 hears the below-one
-    reason, never the seed-axis one, since the argument leg runs first for every call.
-    """
-    import tcip_mcp.tools.training_tools as tt
-
-    ran = []
-    monkeypatch.setattr(
-        "tcip_mcp.pipelines.training.hpo.tune_search", _never_search(ran)
-    )
-
-    result = tt.run_hyperparameter_search(
-        tmp_path,
-        base_config=real_hpo_base_config,
-        n_trials=1,
-        **fifo_search(),
-        split_draws=0,
-        param_space={
-            "data.split.seed": {"type": "categorical", "choices": [1, 2]}
-        },
-        search_seed=0,
-    )
-
-    assert "error" in result and "pairs no partition" in result["error"]
-    assert "cannot be replayed as recorded" not in result["error"]
     assert not ran
 
 

@@ -131,16 +131,6 @@ def test_planned_trial_count_over_a_backend_search_alg_name():
     assert planned_trial_count(space, 4, "bayesopt", 1, None) == 4
 
 
-def test_planned_trial_count_num_samples_negative_one_counts_zero():
-    """Ray's own generator counts a negative num_samples as zero rather than negative or
-    unbounded, the fact the door's n_trials argument clause rests on: Tuner.fit() itself would
-    convert -1 to an unbounded sweep, so the bound must refuse it by name rather than trust this
-    count to catch it.
-    """
-    assert planned_trial_count(SPACE, -1, "random", 1, None) == 0
-    assert planned_trial_count(SPACE, -1, "grid", 1, None) == 0
-
-
 # -- uncountable shapes --------------------------------------------------------------
 
 

@@ -10,6 +10,7 @@ import pytest
 import tcip_store
 from tcip_mcp.registry_paths import stored_path
 from tcip_mcp.tools.project_tools import (
+    ZipBundle,
     _external_dataset_paths,
     archive_project,
     import_project,
@@ -20,6 +21,7 @@ from tcip_mcp.tools.project_tools import (
     upsert_dataset,
 )
 from tests._record_damage_fixtures import damage_record
+from tests._server_calls import called_through_the_server
 from tests._web_fixtures import INVARIANCES
 
 
@@ -72,13 +74,32 @@ def test_register_dataset_writes_identity_and_registers(tmp_path: Path):
     ]
 
 
-def test_register_dataset_requires_crop_and_keeps_id_stable(tmp_path: Path):
-    src = tmp_path / "proj"
+def test_register_dataset_refuses_an_empty_crop_by_type_and_admits_a_named_one(
+    bound,
+):
+    src = bound.root / "proj"
     _make_dataset(src)
 
-    assert "error" in register_dataset(
-        tmp_path, str(src), crop=""
-    )  # the expert's fact, required
+    for crop in ("", "   "):
+        refused = called_through_the_server(
+            "register_dataset", {"dataset_root": str(src), "crop": crop}
+        )
+        assert "crop" in refused, crop
+
+    registered = called_through_the_server(
+        "register_dataset",
+        {"dataset_root": str(src), "crop": "currant"},
+        bound=bound,
+    )
+    assert registered["crop"] == "currant" and registered["id"], registered
+    assert read_datasets(bound.root) == [
+        {"id": registered["id"], "path": stored_path(src, bound.root)}
+    ]
+
+
+def test_register_dataset_keeps_id_stable(tmp_path: Path):
+    src = tmp_path / "proj"
+    _make_dataset(src)
 
     first = register_dataset(tmp_path, str(src), crop="currant")
     again = register_dataset(tmp_path, str(src), crop="currant")
@@ -269,7 +290,7 @@ def test_export_import_roundtrip(tmp_path: Path):
     )  # identity travels with the data
 
     zip_path = tmp_path / "export.zip"
-    exported = archive_project(src, str(zip_path))
+    exported = archive_project(src, ZipBundle(output_path=str(zip_path)))
     assert "error" not in exported
     assert zip_path.is_file()
 
@@ -356,7 +377,9 @@ def test_archive_project_includes_bespoke_model_source(tmp_path: Path):
     (manifest_dir / "manifest.json").write_text("{}", encoding="utf-8")
 
     zip_path = tmp_path / "export.zip"
-    exported = archive_project(src, str(zip_path), include_models=True)
+    exported = archive_project(
+        src, ZipBundle(output_path=str(zip_path)), include_models=True
+    )
     assert "error" not in exported
 
     import zipfile
@@ -378,13 +401,17 @@ def test_archive_project_reports_checkpoints_excluded_by_default(
     _initialized(src)
     (src / ".tcip" / "models" / "m.pt").write_bytes(b"weights")
 
-    result = archive_project(src, str(tmp_path / "export.zip"))
+    result = archive_project(
+        src, ZipBundle(output_path=str(tmp_path / "export.zip"))
+    )
 
     assert "error" not in result
     assert result["checkpoints_excluded"] == 1
 
     result_included = archive_project(
-        src, str(tmp_path / "export2.zip"), include_models=True
+        src,
+        ZipBundle(output_path=str(tmp_path / "export2.zip")),
+        include_models=True,
     )
     assert result_included["checkpoints_excluded"] == 0
 
@@ -404,7 +431,9 @@ def test_archive_project_includes_a_registered_run_checkpoint_outside_tcip_model
     finished_run(src, experiment_id="exp_ckpt_bundle")
 
     result = archive_project(
-        src, str(tmp_path / "export.zip"), include_models=True
+        src,
+        ZipBundle(output_path=str(tmp_path / "export.zip")),
+        include_models=True,
     )
     assert "error" not in result
 
@@ -434,7 +463,9 @@ def test_import_project_admits_a_bundle_holding_a_registered_run_checkpoint(
     finished_run(src, experiment_id=exp_id)
 
     zip_path = tmp_path / "export.zip"
-    exported = archive_project(src, str(zip_path), include_models=True)
+    exported = archive_project(
+        src, ZipBundle(output_path=str(zip_path)), include_models=True
+    )
     assert "error" not in exported, exported
 
     dest = tmp_path / "restored"
@@ -480,7 +511,9 @@ def test_import_project_admits_a_registered_checkpoint_with_no_disclosure(
     _internal_foreign_checkpoint(src)
 
     zip_path = tmp_path / "export.zip"
-    exported = archive_project(src, str(zip_path), include_models=True)
+    exported = archive_project(
+        src, ZipBundle(output_path=str(zip_path)), include_models=True
+    )
     assert "error" not in exported, exported
 
     dest = tmp_path / "restored"
@@ -527,7 +560,9 @@ def test_import_project_keeps_a_relative_entry_relative_when_the_archive_carries
     assert not Path(stored_before).is_absolute(), stored_before
 
     zip_path = tmp_path / "export.zip"
-    exported = archive_project(src, str(zip_path), include_models=False)
+    exported = archive_project(
+        src, ZipBundle(output_path=str(zip_path)), include_models=False
+    )
     assert "error" not in exported, exported
 
     dest = tmp_path / "restored"
@@ -571,7 +606,9 @@ def test_import_project_discloses_a_designed_external_checkpoint_separately_from
     reg.register_model("m_external", str(external_ckpt))
 
     zip_path = tmp_path / "export.zip"
-    exported = archive_project(src, str(zip_path), include_models=True)
+    exported = archive_project(
+        src, ZipBundle(output_path=str(zip_path)), include_models=True
+    )
     assert "error" not in exported, exported
 
     dest = tmp_path / "restored"
@@ -601,7 +638,9 @@ def test_archive_project_bundles_a_registered_tcip_models_checkpoint_once(
     assert Path(ckpt).resolve() in checkpoint_files(src)
 
     result = archive_project(
-        src, str(tmp_path / "export.zip"), include_models=True
+        src,
+        ZipBundle(output_path=str(tmp_path / "export.zip")),
+        include_models=True,
     )
     assert "error" not in result, result
 
@@ -634,10 +673,14 @@ def test_a_checkpoint_registered_from_anywhere_in_the_project_travels_only_with_
     ModelRegistry(str(src)).register_model("foreign", str(ckpt))
 
     without = archive_project(
-        src, str(tmp_path / "without.zip"), include_models=False
+        src,
+        ZipBundle(output_path=str(tmp_path / "without.zip")),
+        include_models=False,
     )
     with_models = archive_project(
-        src, str(tmp_path / "with.zip"), include_models=True
+        src,
+        ZipBundle(output_path=str(tmp_path / "with.zip")),
+        include_models=True,
     )
 
     assert without["checkpoints_excluded"] == 1
@@ -666,7 +709,8 @@ def test_archive_project_admits_a_symlink_spelled_project(tmp_path: Path):
         pytest.skip(f"symlinks not available on this machine: {exc}")
 
     result = archive_project(
-        existing_project(link)[0], str(tmp_path / "export.zip")
+        existing_project(link)[0],
+        ZipBundle(output_path=str(tmp_path / "export.zip")),
     )
 
     assert "error" not in result
@@ -845,25 +889,6 @@ def test_initialize_project_records_the_id_display_name_site_and_invariances(
     }
 
 
-def _called_through_the_server(arguments: dict) -> str:
-    """``initialize_project`` called as an MCP client calls it; the tool error's text, or ``""``
-    when the call was admitted.
-    """
-    import asyncio
-
-    from mcp.server.mcpserver.exceptions import ToolError
-
-    from tcip_mcp.server import build_server
-
-    try:
-        asyncio.run(
-            build_server(None).call_tool("initialize_project", arguments)
-        )
-    except ToolError as exc:
-        return str(exc)
-    return ""
-
-
 def test_initialize_project_refuses_unstated_invariances_and_one_unstated_invariance_by_type(
     tmp_path: Path,
 ):
@@ -885,15 +910,18 @@ def test_initialize_project_refuses_unstated_invariances_and_one_unstated_invari
     }
     one_unstated = {k: v for k, v in answers.items() if k != "scale"}
 
-    unstated = _called_through_the_server(stated)
+    unstated = called_through_the_server("initialize_project", stated)
     assert "validation error" in unstated and "invariances" in unstated
-    missing = _called_through_the_server(
-        {**stated, "invariances": one_unstated}
+    missing = called_through_the_server(
+        "initialize_project", {**stated, "invariances": one_unstated}
     )
     assert "validation error" in missing and "scale" in missing
     assert not (tmp_path / "stated").exists()
 
-    assert _called_through_the_server({**stated, "invariances": answers}) == ""
+    admitted = called_through_the_server(
+        "initialize_project", {**stated, "invariances": answers}
+    )
+    assert admitted["display_name"] == "Test project", admitted
     for read in (inspect_project, record_fields):
         invariances = read(tmp_path / "stated")["invariances"]
         assert invariances == answers, read
@@ -935,7 +963,7 @@ def test_initialize_project_refuses_a_rotation_angle_outside_its_range_by_type(
         "invariances": INVARIANCES.model_dump() | {"rotation": angle},
     }
 
-    error = _called_through_the_server(arguments)
+    error = called_through_the_server("initialize_project", arguments)
 
     assert "rotation" in error and refusal in error, error
     assert not project.exists()
@@ -1137,7 +1165,7 @@ def test_archive_and_import_carry_the_project_record(tmp_path: Path):
     record = _initialized(src)
 
     zip_path = tmp_path / "export.zip"
-    exported = archive_project(src, str(zip_path))
+    exported = archive_project(src, ZipBundle(output_path=str(zip_path)))
     assert "error" not in exported
 
     import zipfile
@@ -1179,7 +1207,9 @@ def test_an_archive_of_an_open_database_carries_every_record_and_entry_it_holds(
     before = dump_store(src, before_dir)
     assert (src / ".tcip" / "store.db-wal").stat().st_size > 0
 
-    assert "error" not in archive_project(src, str(tmp_path / "export.zip"))
+    assert "error" not in archive_project(
+        src, ZipBundle(output_path=str(tmp_path / "export.zip"))
+    )
     dest = tmp_path / "restored"
     assert "error" not in import_project(
         str(tmp_path / "export.zip"), str(dest)

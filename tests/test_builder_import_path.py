@@ -511,6 +511,7 @@ def test_a_checkpoint_registered_by_name_builds_beside_its_run_and_where_the_run
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
     from tcip_mcp.tools.project_tools import (
+        ZipBundle,
         archive_project,
         import_project,
         initialize_project,
@@ -529,7 +530,7 @@ def test_a_checkpoint_registered_by_name_builds_beside_its_run_and_where_the_run
 
     archive = tmp_path / "source.zip"
     assert "error" not in archive_project(
-        source, str(archive), include_models=True
+        source, ZipBundle(output_path=str(archive)), include_models=True
     )
     assert "error" not in import_project(str(archive), str(carried))
     GenericPredictor(

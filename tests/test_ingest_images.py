@@ -848,21 +848,13 @@ def test_a_stated_date_is_refused_by_its_type_unless_it_is_a_date():
     """The MCP call refuses a ``date`` that is no calendar date by the parameter's own type, and
     admits an ISO date.
     """
-    import asyncio
-
-    from mcp.server.mcpserver.exceptions import ToolError
-
-    from tcip_mcp.server import build_server
-
-    server = build_server(None)
+    from tests._server_calls import called_through_the_server
 
     def called(stated: str) -> str:
-        arguments = {"images": ["a.png"], "date": stated, "rationale": "known"}
-        try:
-            asyncio.run(server.call_tool("state_capture_date", arguments))
-        except ToolError as exc:
-            return str(exc)
-        return ""
+        return called_through_the_server(
+            "state_capture_date",
+            {"images": ["a.png"], "date": stated, "rationale": "known"},
+        )
 
     refused = called("../escape")
     assert "validation error" in refused
@@ -922,7 +914,11 @@ def test_ingest_after_import_admits_a_second_date(tmp_path):
     case.
     """
     from tcip_mcp.project_record import read_record
-    from tcip_mcp.tools.project_tools import archive_project, import_project
+    from tcip_mcp.tools.project_tools import (
+        ZipBundle,
+        archive_project,
+        import_project,
+    )
     from tests._web_fixtures import new_project
 
     dest = tmp_path.parent / "reopened"
@@ -934,7 +930,7 @@ def test_ingest_after_import_admits_a_second_date(tmp_path):
     assert "error" not in first
 
     zip_path = tmp_path.parent / "export.zip"
-    exported = archive_project(project, str(zip_path))
+    exported = archive_project(project, ZipBundle(output_path=str(zip_path)))
     assert "error" not in exported
 
     imported = import_project(str(zip_path), str(dest))

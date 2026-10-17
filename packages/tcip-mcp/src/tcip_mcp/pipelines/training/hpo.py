@@ -21,12 +21,17 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from importlib.util import find_spec
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
+
+from pydantic import PositiveInt, Strict
 
 if TYPE_CHECKING:
     from tcip_mcp.pipelines.schemas import SplitSpec
 
 logger = logging.getLogger(__name__)
+
+Count = Annotated[PositiveInt, Strict()]
+"""A whole number of at least one; a bool, a fraction or a numeral written as text is not one."""
 
 # Ray is one cluster per process, shared by every concurrent sweep, so its lifetime is
 # refcounted rather than owned by whichever sweep happened to start first.
@@ -571,17 +576,16 @@ def _search_space_and_points(
 
 def planned_trial_count(
     param_space: dict,
-    num_samples: int,
+    num_samples: Count,
     search_alg: str,
-    split_draws: int,
+    split_draws: Count,
     baseline_params: dict | None,
 ) -> int:
     """How many trials ``tune_search`` would launch for this sweep, read off the specification
     :func:`_search_space_and_points` prepares for the launch itself: under a native search, Ray's
     own variant count over that space and its warm-start points (``num_samples`` times every grid
     axis's size, a preset counting its own grid); under a backend searcher, ``num_samples``, the
-    trials ``ray.tune.TuneConfig`` asks it for. A negative ``num_samples`` counts zero. Builds no
-    searcher and draws no trial.
+    trials ``ray.tune.TuneConfig`` asks it for. Builds no searcher and draws no trial.
 
     Propagates whatever ``_to_tune_space`` raises on a space it cannot build.
     """
@@ -591,7 +595,7 @@ def planned_trial_count(
         param_space, search_alg, split_draws, baseline_params
     )
     if normalized_search_alg not in _NATIVE_SEARCH:
-        return max(num_samples, 0)
+        return num_samples
     return _count_variants(
         {"config": space, "num_samples": num_samples}, points or []
     )
