@@ -1,13 +1,9 @@
-"""launch_tensorboard reports a URL only once the child has proved it survived startup.
+"""launch_tensorboard answers an error for a child dying in startup and a URL for a living one.
 
-The command itself is substituted (a dying one, then a living one) so the process
-lifecycle is exercised for real without depending on a TensorBoard install. Three tests use a
-``Popen`` stand-in whose own ``wait`` never confirms a kill: one drives ``launch_tensorboard``'s
-own failure path, proving the post-kill wait there is caught the same way ``stop_tensorboard``'s
-is; one drives ``stop_tensorboard`` itself, proving a kill it cannot confirm is logged there; one
-drives ``_stop_all_tracked`` (the exit sweep), proving its own separate log line fires too. The
-last test proves the module-level grace-under-wait check by importing a copy of the module with
-the constant pushed past its margin.
+The command is substituted by real child processes, a dying one and a living one. A ``Popen``
+stand-in whose ``wait`` always raises ``TimeoutExpired`` drives ``launch_tensorboard``'s failure
+path, ``stop_tensorboard`` and the exit sweep (``_stop_all_tracked``), and each reports or logs
+the unconfirmed kill.
 """
 
 from __future__ import annotations
@@ -18,8 +14,9 @@ import sys
 
 
 class DyingChild(subprocess.Popen):
-    """A real child that writes a missing-install message and exits at once, in place of the
-    command it was handed; construction returns once it has exited.
+    """A real child that writes a missing-install message and exits with status 3.
+
+    It runs in place of the command it was handed, and construction waits for its exit.
     """
 
     def __init__(self, cmd, **kwargs) -> None:
@@ -59,9 +56,10 @@ def test_launch_reports_the_failure_when_the_process_exits_immediately(
 
 
 def _never_confirms_kill_popen_class(spawned: list):
-    """A ``Popen`` stand-in class whose own ``wait`` always raises ``TimeoutExpired``: it starts
-    a real sleeping process so ``kill()`` has something to act on, appends that real process to
-    ``spawned`` for the caller to clean up, but never itself reports the kill confirmed.
+    """Return a ``Popen`` stand-in class whose own ``wait`` always raises ``TimeoutExpired``.
+
+    It starts a real sleeping process, appended to ``spawned``, which ``kill()`` kills;
+    ``terminate`` does nothing.
     """
     real_popen = subprocess.Popen
 
@@ -93,9 +91,9 @@ def _never_confirms_kill_popen_class(spawned: list):
 def test_launch_folds_an_unconfirmed_kill_into_the_error_after_a_raising_tie_assignment(
     monkeypatch, tmp_path
 ):
-    """The launch-failure path's own post-kill wait is caught the same way the stop path's is:
-    a tie-assignment failure whose child will not confirm its kill still returns the existing
-    error shape, naming the pid, instead of letting TimeoutExpired escape.
+    """A failed tie assignment whose child's kill goes unconfirmed returns an error naming both.
+
+    The error names the assignment failure, the unconfirmed kill and the pid.
     """
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
 
@@ -129,8 +127,9 @@ def test_launch_folds_an_unconfirmed_kill_into_the_error_after_a_raising_tie_ass
 
 
 def test_stop_logs_a_kill_that_never_confirms(monkeypatch, tmp_path, caplog):
-    """``kill_unconfirmed`` is logged (the run id and pid), not only returned, since the exit
-    sweep discards the return value and a still-running TensorBoard needs to be visible.
+    """A stop whose kill goes unconfirmed returns ``kill_unconfirmed``.
+
+    A warning names the run and the pid.
     """
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
 
@@ -164,8 +163,9 @@ def test_stop_logs_a_kill_that_never_confirms(monkeypatch, tmp_path, caplog):
 def test_exit_sweep_logs_a_kill_that_never_confirms(
     monkeypatch, tmp_path, caplog
 ):
-    """``_stop_all_tracked``'s own log line fires on the run its sweep leaves running, not
-    only ``stop_tensorboard``'s own line for a caller that reads its return value.
+    """The exit sweep logs a run whose kill goes unconfirmed.
+
+    Its ``Exit sweep`` warning names the run and its pid.
     """
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
 
@@ -213,8 +213,9 @@ def test_launch_returns_a_url_for_a_process_that_stays_up(
 
 
 def test_launch_reports_the_platform_lifetime_tie(monkeypatch, tmp_path):
-    """lifetime_tie names the mechanism a normal launch actually got, through the argv seam
-    with a sleeping stand-in rather than a real TensorBoard install.
+    """A launch's lifetime_tie is ``job`` on Windows and ``guardian`` elsewhere.
+
+    The board's argv is replaced by a sleeping Python process.
     """
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
 
@@ -240,10 +241,11 @@ def test_launch_reports_the_platform_lifetime_tie(monkeypatch, tmp_path):
 def test_a_board_is_tracked_under_the_one_spelling_the_store_keys_its_directory_by(
     monkeypatch, tmp_path
 ):
-    """A board launched under one spelling of a log directory that does not exist yet is found
-    and stopped under any spelling ``canonical_path`` equates with it, and only those: a case
-    variant of the missing tail on a platform whose case rule folds case, a second directory on
-    one that does not.
+    """A board is tracked under the one spelling the store keys its directory by.
+
+    A board launched at the not-yet-existing ``Board`` is found and stopped under ``BOARD``
+    exactly when ``canonical_path`` equates the two spellings; when it does not, the board is
+    neither found nor stopped there.
     """
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
     from tcip_store import canonical_path
@@ -273,7 +275,7 @@ def test_a_board_is_tracked_under_the_one_spelling_the_store_keys_its_directory_
 
 
 def test_the_guardians_grace_leaves_a_second_under_the_stop_wait():
-    """The guardian's kill lands before ``stop_tensorboard`` gives up waiting on it."""
+    """The guardian's term grace sits more than a second under the stop wait."""
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
 
     assert tb._GUARDIAN_TERM_GRACE_SECONDS + 1.0 < tb._STOP_WAIT_SECONDS

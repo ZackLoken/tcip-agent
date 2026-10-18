@@ -17,11 +17,7 @@ from tests._training_values import IOU_THRESHOLD, TRIAGE_WEIGHTS
 
 
 def _display(image_path: str) -> tuple[np.ndarray, tuple[int, int]]:
-    """A file's pixels and native size, the pair the pixel-in renderers take.
-
-    Stands in for whatever the calling tool would have read (``vision_tools._read_for_display``),
-    so a renderer test exercises the renderer and nothing else.
-    """
+    """Return a file's RGB pixels and native size."""
     with Image.open(image_path) as im:
         rgb = im.convert("RGB")
         return np.asarray(rgb), rgb.size
@@ -29,7 +25,11 @@ def _display(image_path: str) -> tuple[np.ndarray, tuple[int, int]]:
 
 @pytest.fixture
 def viz_dataset(tmp_path: Path) -> Path:
-    """Create a dataset with images and their label documents (name-based layout)."""
+    """Create a dataset of four labeled 640x480 JPEGs under ``images/<undated bucket>``.
+
+    Each of ``img_001`` to ``img_004`` holds one ``bud`` box and one ``nut`` box; the return is
+    the dataset root.
+    """
     from tcip_annotation.state import Annotation, BBox
     from tests._producer_fixtures import label_image
 
@@ -59,8 +59,9 @@ PUBLISHED = "published"
 
 @pytest.fixture
 def viz_bucket(viz_dataset: Path) -> Path:
-    """``viz_dataset`` with each image's two predictions published as the bucket
-    :data:`PUBLISHED` (``_chain_fixtures.published``).
+    """Return ``viz_dataset`` with each image's two predictions published as :data:`PUBLISHED`.
+
+    The bucket is published through ``_chain_fixtures.published``.
     """
     pytest.importorskip("torch")
     from tests._chain_fixtures import published
@@ -88,7 +89,7 @@ def viz_bucket(viz_dataset: Path) -> Path:
 
 
 def _damage(key, stored: bytes = b"{not json") -> None:
-    """The record ``key`` names replaced in the store by ``stored``."""
+    """Replace the record ``key`` names in the store by ``stored``."""
     from tests._record_damage_fixtures import damage_record
 
     damage_record(key, stored)
@@ -177,8 +178,10 @@ class TestRenderDetections:
     def test_a_shape_without_its_class_and_a_candidate_without_its_score_refuse_by_name(
         self, tmp_path: Path
     ):
-        """A renderer's inputs are required: a box stating no ``class_id`` and a candidate
-        stating no ``score`` refuse naming the key rather than drawing as class 0 or score 0.
+        """A shape without its class and a candidate without its score refuse by name.
+
+        A box stating no ``class_id`` and a candidate stating no ``score`` raise a KeyError
+        naming the key, and the candidate with its score renders.
         """
         from tcip_annotation.viz import render_candidates, render_detections
 
@@ -215,7 +218,7 @@ class TestRenderDetections:
     def test_a_pil_frame_renders_the_same_as_its_own_pixels(
         self, viz_dataset: Path
     ):
-        """Both input forms are drawn on, and the caller's own frame is never mutated."""
+        """A PIL frame renders byte-identically to its own pixels and is left untouched."""
         from tcip_annotation.viz import render_detections
 
         pixels, native = _display(
@@ -253,8 +256,10 @@ class TestRenderDetections:
     def test_a_native_coordinate_lands_at_its_scaled_position(
         self, tmp_path: Path
     ):
-        """Annotations are authored in the raster's own frame, so a renderer handed reduced
-        pixels scales each coordinate by the served size over ``native_size``.
+        """A native coordinate lands at its scaled position on reduced pixels.
+
+        A box edge at native x 100 of a 400x200 frame draws at x 50 on 200x100 pixels, and
+        nothing draws at x 100.
         """
         from tcip_annotation.viz import render_detections
 
@@ -301,7 +306,7 @@ class TestRenderSegmentations:
     def test_renders_every_ring_of_an_occlusion_split_instance(
         self, viz_dataset: Path
     ):
-        """An instance's rings all get drawn, and it is labeled once, not once per contour."""
+        """An instance's second ring is drawn: its render differs from its first ring's alone."""
         from tcip_annotation.viz import render_segmentations
 
         pixels, native = _display(
@@ -381,7 +386,9 @@ class TestRenderComparison:
     def test_a_tp_entry_draws_a_line_between_the_boxes_it_indexes(
         self, viz_dataset: Path
     ):
-        """``matches`` carries the one matcher's ``(gt index, prediction index)`` pairs; the line
+        """A true-positive entry draws a line between the boxes it indexes.
+
+        ``matches`` carries the one matcher's ``(gt index, prediction index)`` pairs; the line
         is resolved from ``gt_boxes``/``pred_boxes`` by those indices, not from a box pair embedded
         in the match itself.
         """
@@ -505,10 +512,7 @@ class TestVisualizeAnnotations:
     def test_an_unreadable_label_returns_an_error_naming_the_document(
         self, viz_dataset: Path
     ):
-        """An undecodable record is refused by the shared reader itself
-        (UnreadableLabelDocumentError), naming the document, never answered as an image with no
-        labels.
-        """
+        """An annotations render over an unreadable label returns an error naming the document."""
         from tcip_mcp.tools.vision_tools import visualize
 
         img = viz_dataset / "images" / UNDATED_BUCKET / "img_001.jpg"
@@ -584,9 +588,11 @@ class TestVisualizePredictions:
 def test_scoring_and_the_comparison_render_state_one_count_for_one_image(
     tmp_path: Path,
 ):
-    """With no trait, the single-image scoring's TP/FP/FN, its per-detection tags and the
-    comparison render's counts are one matching's: a detection centered in a thin crowd strip,
-    which it overlaps by little of its own area, is ignored by all three.
+    """The scoring and the comparison render state one count for one image.
+
+    With no trait, the single-image scoring's TP/FP/FN, its per-detection tags and the
+    comparison render's counts agree at one TP, no FP and no FN: a detection centered in a thin
+    crowd strip, which it overlaps by little of its own area, is ignored by all three.
     """
     pytest.importorskip("torch")
     from tcip_annotation.state import Annotation, BBox
@@ -675,8 +681,10 @@ class TestVisualizeComparison:
     def test_the_scoring_doors_refuse_an_unstated_iou_threshold_by_name(
         self, viz_bucket: Path
     ):
-        """A comparison render and ``score_predictions`` score at the IoU their caller states,
-        and refuse naming ``iou_threshold`` when it states none.
+        """The scoring doors refuse an unstated IoU threshold by name.
+
+        A comparison render and ``score_predictions`` refuse naming ``iou_threshold`` when none
+        is stated, and ``score_predictions`` scores when one is.
         """
         from tcip_mcp.tools.annotation_tools import score_predictions
         from tcip_mcp.tools.vision_tools import visualize
@@ -726,9 +734,7 @@ class TestVisualizeComparison:
     def test_an_unreadable_gt_returns_an_error_naming_the_document(
         self, viz_bucket: Path
     ):
-        """Same as the annotations source: the shared reader's own message, naming the
-        document.
-        """
+        """A comparison render over an unreadable GT label returns an error naming the document."""
         from tcip_mcp.tools.vision_tools import visualize
 
         img = viz_bucket / "images" / UNDATED_BUCKET / "img_001.jpg"
@@ -776,13 +782,15 @@ class TestVisualizeComparison:
 
 
 class TestDisplayRead:
-    """The one decode the visualization tools render through."""
+    """Tests of the display read the visualization tools render through."""
 
     def test_a_large_source_is_read_down_to_the_artifact_bound(
         self, tmp_path: Path
     ):
-        """The artifact bound is the read's target, not a resize after a whole decode; the native
-        frame the annotations live in is reported unchanged.
+        """A large source is read down to the artifact bound.
+
+        A source twice the bound wide is served with its long edge at the bound, and the native
+        size and the read's rect are reported as the source's own.
         """
         from tcip_mcp.pipelines.display_bounds import VIZ_ARTIFACT_MAX_EDGE
         from tcip_mcp.tools.vision_tools import _display_of
@@ -829,8 +837,10 @@ class TestDisplayRead:
     def test_a_skinny_raster_places_annotations_by_each_axis_own_scale(
         self, tmp_path: Path, shape, native_point, served_point
     ):
-        """A one-pixel-wide raster read down to the artifact edge is reduced along its long axis
-        only, so a point the renderer places by one scale for both axes lands off the image.
+        """A skinny raster places annotations by each axis's own scale.
+
+        A one-pixel-wide raster read down to the artifact edge is reduced along its long axis
+        only, and a point at its native middle is drawn at its served middle.
         """
         import numpy as np
         import tifffile
@@ -865,8 +875,9 @@ class TestDisplayRead:
     def test_a_three_band_raster_that_is_not_8_bit_is_stretched_to_be_visible(
         self, tmp_path: Path
     ):
-        """Band count alone doesn't make a raster displayable: a 16-bit capture's values occupy a
-        sliver of their dtype's range, and passing them through unstretched renders it black.
+        """A three-band raster that is not 8-bit is stretched to be visible.
+
+        A 16-bit capture with values from 100 to 490 is served as uint8 pixels reaching 255.
         """
         import tifffile
 
@@ -904,7 +915,10 @@ class TestDisplayRead:
     def test_a_region_hanging_off_the_edge_is_clamped_into_the_raster(
         self, viz_dataset: Path
     ):
-        """A human can pan past the image, so a viewport is clamped rather than refused."""
+        """A viewport hanging off the raster's edge is clamped to the raster.
+
+        A 400x400 region at (500, 400) on the 640x480 frame reads the 140x80 part inside it.
+        """
         from tcip_mcp.tools.vision_tools import _display_of
 
         read = _display_of(
@@ -951,9 +965,7 @@ class TestVisualizeDatasetSample:
     def test_a_corrupt_label_returns_an_error_not_an_unlabeled_render(
         self, viz_dataset: Path
     ):
-        """A present, unreadable label document must surface as an error, not be silently
-        rendered as though the image carried no labels.
-        """
+        """A dataset render over a corrupt label returns an error naming the image."""
         from tcip_annotation.state import Annotation, BBox
         from tcip_mcp.tools.vision_tools import visualize
         from tests._producer_fixtures import label_image
@@ -977,8 +989,10 @@ class TestVisualizeDatasetSample:
     def test_an_unlabeled_multiband_sample_is_a_rendered_cell(
         self, tmp_path: Path, monkeypatch
     ):
-        """Every grid cell is a rendered artifact, labels or not: the grid tiles renders, and a
-        raw source path in that list is one the tiler has to decode itself.
+        """An unlabeled multiband sample is a rendered grid cell.
+
+        Each cell the grid tiles is a rendered file in the project's viz directory, labels or
+        not.
         """
         import tifffile
 
@@ -1092,7 +1106,7 @@ class TestRenderCandidates:
 
 
 def _uniform_cells(width: int, height: int, tile: int) -> list:
-    """The clamped reference cells for a frame, the list every cells-in consumer takes."""
+    """Return the clamped reference cells for a ``width`` by ``height`` frame at ``tile``."""
     from tcip_mcp.pipelines.reference_grid import reference_cells
 
     return reference_cells(width, height, tile, 0.0, clamp=True)
@@ -1114,7 +1128,7 @@ class TestRenderGridOverlay:
         assert Path(out).is_file()
 
     def test_cell_dicts_accepted(self, viz_dataset: Path):
-        """The renderer takes the plain dicts a JSON route serves as well as cell objects."""
+        """The grid renderer takes cells as the plain dicts a JSON route serves."""
         from tcip_annotation.viz import render_grid_overlay
 
         pixels, native = _display(
@@ -1161,9 +1175,11 @@ class TestRenderGridOverlay:
             )
 
     def test_lines_land_on_supplied_cell_boundaries(self, tmp_path: Path):
-        """The renderer draws the caller's own cell rects: on a clamped 100x80 grid at
-        tile 64 the interior boundaries sit at 64, not at the uniform division (50/40) a
-        renderer that split the frame evenly by cell count would draw.
+        """The grid overlay draws its lines on the supplied cell boundaries.
+
+        The renderer draws the supplied cell rects: on a clamped 100x80 grid at tile 64 the
+        interior boundaries sit at 64, no line sits at x=50 or y=40, and the outer boundaries
+        render on the frame's edge pixels.
         """
         from tcip_annotation.viz import render_grid_overlay
 
@@ -1234,7 +1250,7 @@ class TestGridToRect:
         )
 
     def test_cell_dicts_accepted(self):
-        """The lookup takes the plain dicts a JSON route serves as well as cell objects."""
+        """The cell lookup takes cells as plain dicts and answers the named cell's rect."""
         from tcip_annotation.grid import grid_to_rect
 
         cells = [
@@ -1310,8 +1326,9 @@ class TestColumnLabels:
 
 class TestVisualizeGridOverlayTool:
     def test_derived_default_echoes_geometry(self, viz_dataset: Path):
-        """With no tile_size the tool derives the pointing grain and still echoes the full
-        geometry, so the caller can hand it straight to propose_annotations.
+        """With no tile_size the grid overlay derives the pointing grain and echoes the geometry.
+
+        The answer carries the width, height, derived tile size, overlap, columns and rows.
         """
         from tcip_mcp.pipelines.reference_grid import derive_pointing_tile_size
         from tcip_mcp.tools.vision_tools import overlay_reference_grid
@@ -1386,7 +1403,7 @@ class TestVisualizeGridOverlayTool:
 
 
 class TestProposeAnnotationsTool:
-    """Test propose_annotations tool (mocked engine)."""
+    """Tests of the propose_annotations tool over a mocked engine."""
 
     def test_missing_image(self, tmp_path: Path):
         from tcip_mcp.tools.proposal_tools import propose_annotations
@@ -1566,8 +1583,10 @@ MOCK_CANDIDATES: list[dict[str, Any]] = [
 def _staged(
     project: Path, image: Path, staged: dict
 ) -> tuple[list, list[dict]]:
-    """The document ``staged``'s bucket holds for ``image``: its annotations as the reader
-    decodes them and its records as the store holds them.
+    """Return the document ``staged``'s bucket holds for ``image``, decoded and as stored.
+
+    The pair is its annotations as the reader decodes them and its records as the store holds
+    them.
     """
     import tcip_store
     from tcip_annotation.json_io import read_label_document
@@ -1581,7 +1600,7 @@ def _staged(
 
 
 class TestCandidateCacheRoundTrip:
-    """Verify candidates survive JSON serialize → deserialize."""
+    """Tests that candidates survive a JSON serialize and deserialize round trip."""
 
     def test_polygon_geometry_preserved(self, tmp_path: Path):
         state_file = tmp_path / "candidates_test.json"
@@ -1626,11 +1645,11 @@ class TestCandidateCacheRoundTrip:
 
 
 class TestFullPipelineIntegration:
-    """End-to-end flow: mock candidates → accept → verify output files."""
+    """Tests of staging mocked engine candidates as predictions and checking what was staged."""
 
     @pytest.fixture
     def pipeline_dataset(self, tmp_path: Path) -> Path:
-        """Fresh dataset without pre-existing labels."""
+        """Create a fresh dataset of one image with no labels; return its root."""
         images_dir = tmp_path / "images" / UNDATED_BUCKET
         images_dir.mkdir(parents=True)
         img = Image.new("RGB", (640, 480), color=(80, 120, 60))
@@ -1644,8 +1663,9 @@ class TestFullPipelineIntegration:
         image_path: str,
         candidates: list[dict],
     ) -> None:
-        """Stage ``candidates`` for ``project`` through the real writer: a stub engine that hands
-        them back verbatim, driven by an actual ``propose_annotations`` call.
+        """Stage ``candidates`` for ``project`` through the real writer.
+
+        A stub engine hands them back verbatim, driven by an actual ``propose_annotations`` call.
         """
         from tcip_mcp.pipelines import proposal
         from tcip_mcp.tools.proposal_tools import propose_annotations
@@ -1667,8 +1687,10 @@ class TestFullPipelineIntegration:
         pipeline_dataset: Path,
         monkeypatch: pytest.MonkeyPatch,
     ):
-        """Engine proposals are staged as predictions: pixel geometry, subject names, and score
-        preserved.
+        """Engine proposals are staged as predictions.
+
+        The two staged objects carry the assigned subjects, boxes inside the 640x480 frame,
+        ``created_by`` ``stub`` and a float score.
         """
         from tcip_annotation import bbox_of
         from tcip_mcp.tools.proposal_tools import stage_proposals
@@ -1772,7 +1794,7 @@ class TestFullPipelineIntegration:
         pipeline_dataset: Path,
         monkeypatch: pytest.MonkeyPatch,
     ):
-        """Only accepted candidates appear in output; rejected are omitted."""
+        """Staging one assignment out of three candidates stages one proposal."""
         from tcip_mcp.tools.proposal_tools import stage_proposals
 
         img_path = str(
@@ -1816,7 +1838,7 @@ class TestFullPipelineIntegration:
         pipeline_dataset: Path,
         monkeypatch: pytest.MonkeyPatch,
     ):
-        """Full render → accept → verify pipeline."""
+        """Candidate and grid renders are written, and three assignments stage with a QA render."""
         from tcip_annotation.viz import render_candidates, render_grid_overlay
         from tcip_mcp.tools.proposal_tools import stage_proposals
 
@@ -1864,9 +1886,7 @@ class TestFullPipelineIntegration:
 
 
 class TestEnginePredictionStaging:
-    """stage_proposals stages engine masks as predictions in a bucket of the engine's, not ground
-    truth.
-    """
+    """stage_proposals stages engine masks as predictions in a bucket of the engine's."""
 
     @pytest.fixture
     def format_dataset(self, tmp_path: Path) -> Path:
@@ -1879,8 +1899,9 @@ class TestEnginePredictionStaging:
     def _propose(
         self, monkeypatch: pytest.MonkeyPatch, project: Path, image_path: str
     ) -> None:
-        """Stage MOCK_CANDIDATES for ``project`` through the real writer: a stub engine that
-        hands them back verbatim, driven by an actual ``propose_annotations`` call.
+        """Stage MOCK_CANDIDATES for ``project`` through the real writer.
+
+        A stub engine hands them back verbatim, driven by an actual ``propose_annotations`` call.
         """
         from tcip_mcp.pipelines import proposal
         from tcip_mcp.tools.proposal_tools import propose_annotations
@@ -1929,9 +1950,7 @@ class TestEnginePredictionStaging:
         format_dataset: Path,
         monkeypatch: pytest.MonkeyPatch,
     ):
-        """Staged engine output is a prediction: each object has created_by="stub" and a
-        ``score``.
-        """
+        """Staged engine output carries ``created_by="stub"`` and a float ``score``."""
         from tcip_mcp.tools.proposal_tools import stage_proposals
 
         img_path = str(

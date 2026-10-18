@@ -1,5 +1,7 @@
-"""Tests for tcip_web.state.StateStore: versioning, persistence to the open project, reopening,
-the retained panel events and the one project admission.
+"""Tests for tcip_web.state.StateStore.
+
+The tests cover versioning, persistence to the open project, reopening, the retained panel
+events and the one project admission.
 """
 
 from __future__ import annotations
@@ -53,8 +55,10 @@ def test_a_change_persists_to_the_project_open_when_it_is_made(
 def test_a_mutation_made_for_a_project_no_longer_open_is_refused_and_not_held(
     tmp_path: Path,
 ) -> None:
-    """A route captures the project it acts on once; the write admits that project under the
-    lock, so a mutation computed for one project is never held or persisted as another's.
+    """A mutation made for a project no longer open is refused and not held.
+
+    A mutation captured for one project and applied after a switch is refused naming the open
+    project; the state is unchanged and no snapshot is persisted for either project.
     """
     store = StateStore()
     proj_a = named_project(tmp_path / "A", "A")
@@ -74,9 +78,10 @@ def test_a_mutation_made_for_a_project_no_longer_open_is_refused_and_not_held(
 def test_a_mutation_made_for_no_project_persists_nowhere(
     tmp_path: Path,
 ) -> None:
-    """A mutation made while no project was open is held and persisted nowhere, whatever is
-    open by the time it is applied: not under a project opened meanwhile, and not after a
-    close.
+    """A mutation made while no project was open is persisted nowhere.
+
+    It is persisted neither with nothing open, nor under a project opened meanwhile, nor after
+    a close.
     """
     store = StateStore()
     project = named_project(tmp_path / "A", "A")
@@ -150,8 +155,10 @@ def test_opening_a_project_with_no_snapshot_holds_a_fresh_state(
 def test_opening_a_project_whose_snapshot_does_not_decode_refuses_and_leaves_the_open_one(
     tmp_path: Path,
 ) -> None:
-    """A present snapshot that is not its producer's whole shape is reported, never read as a
-    fresh state, and the project open before stays open.
+    """Opening a project whose snapshot does not decode refuses and leaves the open one.
+
+    A present snapshot naming a tab outside the vocabulary raises a validation error, and the
+    project already open stays open.
     """
     store = StateStore()
     proj_a = named_project(tmp_path / "A", "A")
@@ -171,9 +178,10 @@ def test_opening_a_project_whose_snapshot_does_not_decode_refuses_and_leaves_the
 def test_a_persisted_snapshot_stating_a_nested_field_partly_is_reported_not_defaulted(
     tmp_path: Path,
 ) -> None:
-    """A snapshot whose ``view`` states none of its fields is not its producer's whole shape; the
-    open refuses rather than filling the view with defaults. The whole snapshot the producer
-    writes opens.
+    """A snapshot whose ``view`` states none of its fields is refused, not defaulted.
+
+    Opening such a snapshot raises naming ``view``; the whole snapshot the producer writes
+    opens.
     """
     store = StateStore()
     project = named_project(tmp_path / "A", "A")
@@ -209,8 +217,9 @@ def test_mutate_refuses_an_unknown_tab_and_holds_nothing() -> None:
 def test_mutate_refuses_a_built_model_with_a_wrongly_typed_field_and_holds_nothing() -> (
     None
 ):
-    """A pre-built model instance passes model_copy untouched (revalidate_instances="never"), so
-    mutate must dump it and validate the merged result rather than trust it as already valid.
+    """A mutation carrying a built model with a wrongly typed field is refused and holds nothing.
+
+    The store's version and state are unchanged.
     """
     store = StateStore()
     bad_dataset = DatasetSelection.model_construct(
@@ -223,8 +232,9 @@ def test_mutate_refuses_a_built_model_with_a_wrongly_typed_field_and_holds_nothi
 
 
 def test_mutate_refuses_an_unknown_top_level_key_and_holds_nothing() -> None:
-    """A misspelled top-level key (``activ_tab`` for ``active_tab``) must not be silently
-    dropped.
+    """A misspelled top-level key is refused.
+
+    The key is ``activ_tab`` for ``active_tab``, and the store holds nothing.
     """
     store = StateStore()
     with pytest.raises(GuiMutationInvalidError):
@@ -267,9 +277,7 @@ def test_admission_answers_the_open_project_and_refuses_any_other(
 
 
 class _SwitchingStore(StateStore):
-    """A store whose open project is another one at every read after the first, standing in for
-    a switch that lands between two reads of it.
-    """
+    """A store whose open project is ``first`` at its first read and ``second`` after."""
 
     def __init__(self, first: OpenProject, second: OpenProject) -> None:
         super().__init__()
@@ -281,13 +289,14 @@ class _SwitchingStore(StateStore):
 
     @_now.setter
     def _now(self, value) -> None:
-        """``StateStore.__init__`` assigns the field; the switching reads stand regardless."""
+        """Ignore the assignment, so the switching reads stand."""
 
 
 def test_admission_reads_the_open_project_once(tmp_path: Path) -> None:
-    """An admission that read the id and the root in two steps would admit one project's id and
-    answer the other's root when a switch lands between them; reading the one value once, it
-    answers the project it compared against.
+    """The admission reads the open project once and answers the project it compared against.
+
+    A switch that lands after the admission's one read is refused at the next admission, naming
+    the project now open.
     """
     proj_a = named_project(tmp_path / "A", "A")
     proj_b = named_project(tmp_path / "B", "B")
@@ -302,7 +311,9 @@ def test_admission_reads_the_open_project_once(tmp_path: Path) -> None:
 def test_a_switch_publishes_nothing_until_its_departure_commits(
     tmp_path: Path, monkeypatch
 ):
-    """Opening B departs from A in A's stats transaction; while that transaction is open, and when
+    """A switch publishes nothing until its departure commits.
+
+    Opening B departs from A in A's stats transaction; while that transaction is open, and when
     its commit fails, the store still holds A with A's state, and B is published, identity and
     state together, only once the commit has returned.
     """
@@ -339,9 +350,10 @@ def test_a_switch_publishes_nothing_until_its_departure_commits(
 
 
 def test_a_close_naming_another_project_closes_nothing(tmp_path: Path) -> None:
-    """The close compares and closes in one step under the lock: a close naming a project that
-    is not the open one leaves the open one open, and a switch that lands while the close waits
-    for the lock is seen by the comparison, so the project opened meanwhile stays open.
+    """A close naming a project that is not the open one closes nothing.
+
+    A close naming no open project leaves A open, and a close of A waiting on the lock while B
+    is switched in leaves B open.
     """
     store = StateStore()
     proj_a = named_project(tmp_path / "A", "A")

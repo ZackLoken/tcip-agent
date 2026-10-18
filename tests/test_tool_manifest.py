@@ -1,6 +1,4 @@
-"""The MCP server registers every tool with torch unimportable: a tool module that needs torch
-imports it inside its own functions.
-"""
+"""The MCP server imports and registers its tools with torch unimportable."""
 
 from __future__ import annotations
 
@@ -42,12 +40,10 @@ else:
 
 
 def test_server_imports_with_torch_absent():
-    """Every tool module registers even when torch cannot be imported at all.
+    """The MCP server imports and registers tools while torch imports are blocked.
 
-    The server's own tool imports must never require torch at module load time; a tool
-    module that needs torch imports it inside its own functions. Runs the check in a
-    subprocess that blocks torch (and torchvision) from importing through a meta-path finder,
-    since this process already has torch loaded once any other test has imported it.
+    The check runs in a subprocess whose meta-path finder blocks torch and torchvision from
+    importing.
     """
     assert importlib.util.find_spec("torch") is not None, (
         "torch must be installed in this test environment for this check to mean anything"
@@ -63,10 +59,7 @@ def test_server_imports_with_torch_absent():
 
 
 def test_block_torch_finder_actually_blocks_torch_import():
-    """The meta-path finder the subprocess checks above install really prevents importing
-    torch, rather than implementing the pre-3.4 find_module/load_module protocol Python 3.12
-    never calls, which would leave torch importable while looking like it was blocked.
-    """
+    """The meta-path finder the subprocess checks install really prevents importing torch."""
     result = subprocess.run(
         [sys.executable, "-c", _BLOCK_TORCH_AND_TRY_IMPORT],
         capture_output=True,

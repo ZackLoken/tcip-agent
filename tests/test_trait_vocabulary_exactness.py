@@ -2,8 +2,6 @@
 
 A trait name resolves against the project's records by exact match, and a proposed entry's
 ``delivers`` entries are members of the crops.yml controlled vocabulary, not near-misses of one.
-Both are anti-fabrication boundaries: a loosened lookup hands back another trait's measurement
-semantics, or records a phenotype crops.yml never defines, with nothing in the result saying so.
 """
 
 from __future__ import annotations
@@ -18,8 +16,10 @@ from tests._trait_fixtures import entry, latest, propose, with_fields
 
 
 def _two_traits_with_different_semantics(root: Path) -> None:
-    """Two traits whose measurement semantics differ in every field a caller reads, so serving one
-    where the other was asked for is observable rather than harmless.
+    """Propose ``bud`` and ``leaf``, two traits whose measurement fields differ.
+
+    They differ in positive state, count bias tolerance, milestone fractions and phenology
+    prefix.
     """
     propose(
         root,
@@ -49,10 +49,7 @@ def _two_traits_with_different_semantics(root: Path) -> None:
 def test_a_trait_name_differing_only_by_case_is_unknown(
     tmp_path: Path, near_miss: str
 ):
-    """A name that is not exactly a recorded one is unknown, however close it looks. Resolving
-    it to a same-spelled-different-cased entry would silently swap in another trait's measurement
-    semantics, which is worse than the honest refusal.
-    """
+    """A trait name differing from a recorded one only by case is unknown."""
     _two_traits_with_different_semantics(tmp_path)
     assert trait_names(tmp_path) == ["bud", "leaf"]
 
@@ -63,9 +60,7 @@ def test_a_trait_name_differing_only_by_case_is_unknown(
 
 
 def test_the_exact_name_resolves_its_own_entry(tmp_path: Path):
-    """The refusal above must not cost the legitimate call: each exact name still returns its own
-    entry, and the two stay distinct.
-    """
+    """Each exact trait name returns its own entry, and the two stay distinct."""
     _two_traits_with_different_semantics(tmp_path)
 
     assert latest("bud", tmp_path).count_bias_tolerance_frac == 0.02
@@ -79,9 +74,7 @@ def test_the_exact_name_resolves_its_own_entry(tmp_path: Path):
 
 
 def test_unknown_trait_refusal_lists_what_the_project_holds(tmp_path: Path):
-    """The refusal names the traits it searched, so a caller can tell a misspelling from an
-    unproposed trait without guessing.
-    """
+    """The unknown-trait refusal lists the traits the project holds."""
     _two_traits_with_different_semantics(tmp_path)
 
     with pytest.raises(
@@ -96,9 +89,9 @@ def test_unknown_trait_refusal_lists_what_the_project_holds(tmp_path: Path):
 def test_delivers_must_be_a_vocabulary_member_not_a_prefix_of_one(
     tmp_path: Path, truncated: str
 ):
-    """A ``delivers`` entry that is only a prefix of a real crops.yml name is off-vocabulary. It
-    reads as controlled vocabulary to a human skimming the entry while naming a phenotype crops.yml
-    never defines, so the proposal is refused naming it.
+    """A ``delivers`` entry that is only a prefix of a real crops.yml name is refused.
+
+    Such an entry names no crops.yml phenotype, and the proposal is refused naming it.
     """
     vocab = {t["name"] for t in traits._crops_traits()}
     assert truncated not in vocab
@@ -111,8 +104,9 @@ def test_delivers_must_be_a_vocabulary_member_not_a_prefix_of_one(
 def test_a_truncated_delivers_entry_does_not_smuggle_a_whole_entry_in(
     tmp_path: Path,
 ):
-    """One prefix entry alongside real vocabulary still fails the whole proposal: the anchor is
-    every delivered phenotype, not merely one of them; the honest pair is admitted.
+    """One prefix entry alongside real vocabulary still fails the whole proposal.
+
+    Each delivered phenotype is checked, not merely one of them; the honest pair is admitted.
     """
     with pytest.raises(ValueError, match="leaf_wid"):
         propose(tmp_path, entry("mixed", ("leaf_length", "leaf_wid")))
@@ -125,9 +119,10 @@ def test_a_truncated_delivers_entry_does_not_smuggle_a_whole_entry_in(
 def test_a_revision_cannot_walk_delivers_off_the_vocabulary_and_a_real_addition_is_admitted(
     tmp_path: Path,
 ):
-    """A revision is admitted like the first proposal, so a later proposal cannot walk an entry
-    off the controlled vocabulary a prefix at a time, while adding a genuine phenotype proposes
-    cleanly.
+    """A revision cannot walk ``delivers`` off the vocabulary, and a real addition is admitted.
+
+    A later proposal delivering the truncated ``leaf_len`` is refused naming it, while one
+    adding ``leaf_width`` beside ``leaf_length`` lands as the latest revision.
     """
     base = entry("leaf", ("leaf_length",))
     propose(tmp_path, base)

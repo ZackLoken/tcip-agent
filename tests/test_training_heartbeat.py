@@ -1,7 +1,6 @@
-"""A run directory with no final status reads as 'running' while its heartbeat is fresh (still
-training in another process, e.g. the MCP agent) and only 'interrupted' once the heartbeat goes
-stale. Prevents the GUI mislabeling an agent-launched run as dead and inviting a duplicate
-launch.
+"""A run with no final status reads 'running' while its heartbeat is fresh.
+
+It reads 'interrupted' when the heartbeat is past the stale window.
 """
 
 import os
@@ -12,8 +11,9 @@ from tests._verified_checkpoint_fixtures import detection_config, opened_run
 
 
 def _beat(run_dir, seconds_ago: float) -> float:
-    """Touch ``run_dir``'s heartbeat through its own writer, then age it ``seconds_ago``; the
-    instant it now reads.
+    """Touch ``run_dir``'s heartbeat through its own writer, then age it ``seconds_ago``.
+
+    Returns the instant the heartbeat now reads.
     """
     from tcip_mcp.experiments import HEARTBEAT_FILE, touch_heartbeat
 
@@ -24,7 +24,7 @@ def _beat(run_dir, seconds_ago: float) -> float:
 
 
 def _listed(project) -> dict:
-    """The project's listed runs (``list_experiments``), by id."""
+    """Return the project's runs as ``list_experiments`` lists them, by id."""
     from tcip_mcp.tools.experiment_tools import list_experiments
 
     return {r["experiment_id"]: r for r in list_experiments(project)["runs"]}
@@ -68,9 +68,9 @@ def test_listed_runs_read_running_against_interrupted(tmp_path):
 
 
 def test_a_listed_row_carries_the_heartbeat_instant(tmp_path):
-    """No process id is recorded anywhere a listed row could check, so a client showing a
-    'running' row as live needs the heartbeat instant itself, not just the derived state, to
-    say how stale that liveness claim already is.
+    """A listed row carries the heartbeat instant itself.
+
+    A 'running' row carries the heartbeat's instant itself beside the derived state.
     """
     instant = _beat(
         opened_run(
@@ -92,10 +92,10 @@ def test_a_listed_row_carries_the_heartbeat_instant(tmp_path):
 def test_configured_stale_window_agrees_across_run_list_compare_and_status(
     tmp_path, monkeypatch
 ):
-    """list_experiments, compare_experiments and monitor_training derive "interrupted" the same
-    way under a configured heartbeat window, one constant (``experiments.HEARTBEAT_STALE_SECONDS``)
-    read by every consumer: a 300s-old heartbeat reads stale under a 30s window even though it
-    would read fresh under the 600s default.
+    """A configured stale window reads alike in the run list, the compare and the status.
+
+    list_experiments, compare_experiments and monitor_training each read a 300s-old heartbeat
+    as interrupted under a 30s ``experiments.HEARTBEAT_STALE_SECONDS``.
     """
     from tcip_mcp import experiments
     from tcip_mcp.experiments import compare_experiments as compare_tool

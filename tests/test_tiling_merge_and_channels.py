@@ -1,4 +1,4 @@
-"""Channel-generic tiled training reads: multi-band slices keep their boxes on their pixels."""
+"""Channel-generic tiled reads: multi-band tiles carry their boxes over bright pixels."""
 
 from __future__ import annotations
 
@@ -10,8 +10,10 @@ from tests._training_values import tiling_block
 
 
 def _patched(width=40, height=24, bands=5, patch=(28, 12)) -> np.ndarray:
-    """A black ``height`` by ``width`` array of ``bands`` bands, bright in every band over the
-    6 px square at ``patch``.
+    """Return ``bands`` copies, stacked last, of one ``painted_array`` band.
+
+    The band is ``width`` by ``height``, painted 255 over the 6 by 6 rectangle whose corner is
+    ``patch``.
     """
     px, py = patch
     band = painted_array(width, height, [((px, py, px + 6, py + 6), 255)])
@@ -21,8 +23,10 @@ def _patched(width=40, height=24, bands=5, patch=(28, 12)) -> np.ndarray:
 def _multiband_detection_fixture(
     tmp_path, width=40, height=24, bands=5, patch=(28, 12)
 ):
-    """A non-square multi-band GeoTIFF with a bright patch, and a GT box on that patch; its
-    images directory.
+    """Write :func:`_patched`'s array as ``a.tif`` with one ``bud`` box over the patch rectangle.
+
+    The TIFF sits under ``images/<undated bucket>``, written by ``tifffile`` with no
+    georeferencing tags. Returns its images directory.
     """
     import tifffile
 
@@ -47,10 +51,9 @@ def _multiband_detection_fixture(
 def test_tiled_detection_reads_multiband_and_keeps_boxes_on_their_pixels(
     tmp_path,
 ):
-    """Channel count is not enough: a frame mismatch passes a shape check but displaces every box.
+    """Tiles of a five-band raster keep five bands and each box over its bright patch.
 
-    The bright patch and the GT box are placed together, so this fails if the tile is cut from a
-    differently-oriented frame than the labels were clipped against.
+    Each tile is 5 by 16 by 16, and each kept box's region of its tile holds a pixel above 0.5.
     """
     import torch
 
@@ -88,9 +91,10 @@ def test_tiled_detection_reads_multiband_and_keeps_boxes_on_their_pixels(
 
 
 def test_tiled_dataset_refuses_labels_authored_in_a_different_frame(tmp_path):
-    """A label document authored in a frame other than the one the raster decodes in (here
-    the 5x40 PIL reports for a 40x24x5 TIFF) is refused by the tiled dataset, naming both
-    frames.
+    """The tiled dataset refuses labels authored in a different frame, naming both frames.
+
+    The label document is authored in a frame other than the one the raster decodes in (here
+    the 5x40 PIL reports for a 40x24x5 TIFF).
     """
     import pytest
     import tifffile
@@ -137,8 +141,9 @@ def test_tiled_dataset_refuses_labels_authored_in_a_different_frame(tmp_path):
 def test_the_authored_frame_raises_on_a_corrupt_label_rather_than_reading_as_no_frame(
     tmp_path,
 ):
-    """The tiled dataset reads each label's authored frame off its stored document, so a present,
-    unreadable label raises rather than silently disabling the frame check for that sample.
+    """A present, unreadable label raises when the tiled dataset is built.
+
+    The error is ``UnreadableLabelDocumentError``.
     """
     import pytest
 
@@ -165,7 +170,7 @@ def test_the_authored_frame_raises_on_a_corrupt_label_rather_than_reading_as_no_
 
 
 def test_ctx_tiled_dataset_inherits_the_band_count(tmp_path):
-    """ctx.tiled_dataset constructs the tiler directly: it must not fall back to 3 channels."""
+    """A ``TiledDetectionDataset`` built over a five-band base expects five channels."""
     from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
 
     images_dir = _multiband_detection_fixture(tmp_path)
@@ -181,7 +186,7 @@ def test_ctx_tiled_dataset_inherits_the_band_count(tmp_path):
 
 
 def test_tiled_detection_handles_channel_first_rasters(tmp_path):
-    """The other common GeoTIFF layout, where the axis-order heuristic is observable."""
+    """Tiles of a channel-first five-band raster are 5 by 16 by 16, each box over a bright pixel."""
     import tifffile
 
     from tcip_annotation.state import Annotation, BBox

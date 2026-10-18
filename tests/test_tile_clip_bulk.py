@@ -1,8 +1,8 @@
 """slice_candidates and clip_rows_to_tile over box rows.
 
-The per-box reference below restates the clip and sliver rules one box at a time, independent of
-the shipped code, so the equivalence tests catch a clip that drifts from the semantics and the
-property test states those semantics on their own terms.
+``_clip_reference`` restates the clip and sliver rules one box at a time, independent of the
+shipped code; the equivalence tests compare the bulk clip against it, and a property test
+states those semantics on their own terms.
 """
 
 from __future__ import annotations
@@ -21,8 +21,10 @@ from tcip_mcp.pipelines.slicing import slice_lattice
 
 
 def _clip_reference(boxes, tile_x, tile_y, tile_w, tile_h, min_box_size):
-    """One box at a time: intersect, drop empty, drop clipped slivers; the rows kept and their
-    tile-local xyxy.
+    """Clip ``boxes`` to the tile one box at a time; return the kept tile-local xyxy and rows.
+
+    Each box is intersected with the tile, an empty intersection is dropped, and a box crossing
+    the tile edge is dropped when the square root of its clipped area is under ``min_box_size``.
     """
     tx2, ty2 = tile_x + tile_w, tile_y + tile_h
     rows, out = [], []
@@ -45,7 +47,10 @@ def _clip_reference(boxes, tile_x, tile_y, tile_w, tile_h, min_box_size):
 
 
 def _clip(boxes, tile, min_box_size, rows=None):
-    """``boxes`` as box rows clipped to ``tile`` (:func:`clip_rows_to_tile`): kept boxes, rows."""
+    """Clip ``boxes`` as box rows to ``tile``; return the kept boxes and rows.
+
+    The clip runs through :func:`clip_rows_to_tile`.
+    """
     boxes = np.asarray(boxes, dtype=np.float64).reshape(-1, 4)
     shapes = [shapely_geometry([box_ring(BBox(*b))]) for b in boxes.tolist()]
     rows = np.arange(len(boxes)) if rows is None else rows
@@ -122,7 +127,9 @@ def test_clip_matches_the_per_box_reference_on_random_geometries():
 
 
 def test_a_rectangular_tile_clips_against_its_own_extent():
-    """A box's visible part is a 54x40 sliver against a 64-wide square tile (dropped at
+    """A rectangular tile clips a box against its own extent.
+
+    A box's visible part is a 54x40 sliver against a 64-wide square tile (dropped at
     min_box_size=100), but the same box sits entirely inside a 300-wide tile at the same origin,
     unclipped and kept regardless of size.
     """
@@ -153,8 +160,9 @@ def test_the_candidates_clipped_equal_every_row_clipped_over_a_lattice():
 
 
 def test_each_slice_gets_its_own_candidate_array():
-    """Empty slices must not share one mutable array: a caller mutating one slice's candidates
-    must never see the change in another's.
+    """Each empty slice gets its own candidate array.
+
+    Resizing one empty slice's candidates leaves another's shape unchanged.
     """
     slices = [(0, 0, 64, 64), (100, 0, 164, 64), (0, 100, 64, 164)]
     candidates = slice_candidates(np.array([[10.0, 10.0, 20.0, 20.0]]), slices)
@@ -166,8 +174,10 @@ def test_each_slice_gets_its_own_candidate_array():
 
 
 def test_candidate_cost_scales_with_incidences_not_positions_times_boxes():
-    """A generous wall-clock rail on a large geometry: the cost must follow the box-slice
-    incidences, so a dense lattice over many small boxes finishes in seconds.
+    """Candidates for 50,000 small boxes over a dense 56,000-pixel lattice finish within 60 s.
+
+    Each lattice position gets a candidate list, and the candidate rows number at least the
+    boxes.
     """
     rng = np.random.default_rng(5)
     width = height = 56_000

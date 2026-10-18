@@ -1,13 +1,8 @@
-"""Tiny deterministic models, their ``model_source`` builders, the frames they train on, and the
-runs those frames are trained in.
+"""Tiny deterministic models, the frames written for them, and run configs over those frames.
 
-Every model here holds parameters initialized from constants (one, except
-:class:`TwoRateRegressor`), so a run's trajectory is decided by the data it is fed and never by
-random init. Each builder accepts the width
-(``in_chans``) and, for the classifier, the class count a builder is handed; a model reads a
-frame's mean intensity whatever its width. A frame holds its intensity to within half a level
-(:func:`write_regression_dataset`), so the loss landscape a run presents is fixed by its frames'
-(intensity, value) pairs alone.
+The module holds the models, their ``model_source`` builders, the frame writer, and the run
+configs and contexts over the frames. Each model here initializes its parameters from
+constants, and each builder accepts ``in_chans`` and, for the classifier, ``num_classes``.
 """
 
 from __future__ import annotations
@@ -29,22 +24,18 @@ from tests._training_values import (
 
 
 def _phantom_nan() -> torch.Tensor:
-    """A non-finite loss on a leaf disconnected from any weight's graph, so a bad call's optimizer
-    step never poisons the weight a later good call relies on.
-    """
+    """Return a non-finite loss on a leaf disconnected from any weight's graph."""
     return torch.zeros((), requires_grad=True) + float("nan")
 
 
 class MeanIntensityRegressor(nn.Module):
-    """Predicts ``weight * mean(image)``, with a squared-error loss in train mode.
+    """A regressor predicting ``weight * mean(image)``, with a squared-error loss in train mode.
 
-    One parameter, so which data a pass is run over is the only thing that can move its loss. A
-    subclass changes only which training calls it answers with that loss.
+    It holds one parameter.
 
     With ``cancel_at_call`` and ``cancel_output_dir`` given, the training forward with that
     one-based call count requests the run's own cancellation (``experiments.request_cancel``)
-    at that output directory, so a test can place a cancel at an exact point in the batch
-    stream; both are record values, so the builder's kwargs stay a config.
+    at that output directory.
     """
 
     def __init__(
@@ -99,8 +90,9 @@ def build_mean_intensity_regressor(
     cancel_output_dir: str | None = None,
     **_statistics,
 ) -> MeanIntensityRegressor:
-    """``model_source`` builder for :class:`MeanIntensityRegressor`, which reads raw
-    intensities, not the statistics it is handed.
+    """Build a :class:`MeanIntensityRegressor` as a ``model_source`` builder.
+
+    The weight and cancellation arguments pass through; the statistics it is handed are unused.
     """
     return MeanIntensityRegressor(
         init_weight=init_weight,
@@ -110,10 +102,11 @@ def build_mean_intensity_regressor(
 
 
 class CountingRegressor(MeanIntensityRegressor):
-    """A :class:`MeanIntensityRegressor` whose state also holds a registered buffer, the count of
-    its training forwards, and whose one param group (``get_param_groups``, at the head rate)
-    carries a tensor-valued setting, ``rates``, the two rates it was built at: a capture of its
-    training state has a buffer and a tensor setting to hold.
+    """A :class:`MeanIntensityRegressor` with a forward-count buffer and a tensor group setting.
+
+    Its state also holds a registered buffer, ``forwards``, counting its loss calls, and its
+    one param group (``get_param_groups``, at the head rate) carries a tensor-valued setting,
+    ``rates``, holding the backbone and head rates it was handed.
     """
 
     def __init__(self, init_weight: float = 0.0) -> None:
@@ -137,14 +130,15 @@ class CountingRegressor(MeanIntensityRegressor):
 def build_counting_regressor(
     *, in_chans: int = 1, init_weight: float = 0.0, **_statistics
 ) -> CountingRegressor:
-    """``model_source`` builder for :class:`CountingRegressor`."""
+    """Build a :class:`CountingRegressor` as a ``model_source`` builder."""
     return CountingRegressor(init_weight=init_weight)
 
 
 class TwoRateRegressor(MeanIntensityRegressor):
-    """Predicts ``weight * mean(image) + bias``, its weight in a param group at the backbone rate
-    and its bias in one at the head rate (``get_param_groups``), the two groups in reverse order
-    when ``reverse_groups``.
+    """A regressor predicting ``weight * mean(image) + bias`` with one param group per rate.
+
+    Its weight sits in a param group at the backbone rate and its bias in one at the head rate
+    (``get_param_groups``), the two groups in reverse order when ``reverse_groups``.
     """
 
     def __init__(self, reverse_groups: bool = False) -> None:
@@ -166,17 +160,12 @@ class TwoRateRegressor(MeanIntensityRegressor):
 def build_two_rate_regressor(
     *, in_chans: int = 1, reverse_groups: bool = False, **_statistics
 ) -> TwoRateRegressor:
-    """``model_source`` builder for :class:`TwoRateRegressor`."""
+    """Build a :class:`TwoRateRegressor` as a ``model_source`` builder."""
     return TwoRateRegressor(reverse_groups=reverse_groups)
 
 
 class NanEvalRegressor(MeanIntensityRegressor):
-    """Finite squared-error loss in train mode, all-nan predictions in eval mode.
-
-    The training loss stays finite while every prediction-derived validation metric goes
-    non-finite: a run selecting on the loss completes with those metrics normalized, and one
-    selecting on a prediction-derived metric has no selectable epoch.
-    """
+    """A regressor answering its parent's loss in train mode and ``predict + nan`` in eval."""
 
     def forward(self, images, targets=None):
         if self.training and targets is not None:
@@ -187,15 +176,15 @@ class NanEvalRegressor(MeanIntensityRegressor):
 def build_nan_eval_regressor(
     *, in_chans: int = 1, init_weight: float = 0.0, **_statistics
 ) -> NanEvalRegressor:
-    """``model_source`` builder for :class:`NanEvalRegressor`."""
+    """Build a :class:`NanEvalRegressor` as a ``model_source`` builder."""
     return NanEvalRegressor(init_weight=init_weight)
 
 
 class MeanIntensityClassifier(nn.Module):
-    """Two-class logit ``[0, weight * (mean(image) - 0.5)]``, cross-entropy loss in train mode:
-    frames darker and brighter than mid-gray fall either side of its boundary.
+    """A two-class classifier with logit ``[0, weight * (mean(image) - 0.5)]``.
 
-    One parameter, so a run's trajectory is decided by the data it is fed alone.
+    Its loss is cross-entropy in train mode, and in eval it answers the argmax label. It holds
+    one parameter.
     """
 
     num_classes = 2
@@ -220,19 +209,15 @@ def build_mean_intensity_classifier(
     init_weight: float = 0.0,
     **_statistics,
 ) -> MeanIntensityClassifier:
-    """``model_source`` builder for :class:`MeanIntensityClassifier`, which reads raw
-    intensities, not the statistics it is handed.
+    """Build a :class:`MeanIntensityClassifier` as a ``model_source`` builder.
+
+    ``init_weight`` passes through; the statistics it is handed are unused.
     """
     return MeanIntensityClassifier(init_weight=init_weight)
 
 
 class DataScaledGradientModel(MeanIntensityRegressor):
-    """Loss linear in the parameter: ``weight * sum(batch values)``.
-
-    A batch's gradient is that batch's summed target value and nothing else, independent of the
-    weights the backward pass runs at, which makes each batch's contribution to an optimizer
-    step separable and checkable on its own.
-    """
+    """A model whose loss is ``weight * sum(batch values)``."""
 
     def fit_loss(self, images, targets) -> dict:
         return {
@@ -243,12 +228,12 @@ class DataScaledGradientModel(MeanIntensityRegressor):
 def build_data_scaled_gradient_model(
     *, in_chans: int = 1, **_statistics
 ) -> DataScaledGradientModel:
-    """``model_source`` builder for :class:`DataScaledGradientModel`."""
+    """Build a :class:`DataScaledGradientModel` as a ``model_source`` builder."""
     return DataScaledGradientModel()
 
 
 class AlwaysDivergedModel(MeanIntensityRegressor):
-    """Reports a non-finite loss unconditionally, for exercising a diverged run end to end."""
+    """A :class:`MeanIntensityRegressor` whose ``fit_loss`` answers ``weight * nan``."""
 
     def fit_loss(self, images, targets) -> dict:
         return {"nan_loss": self.weight * float("nan")}
@@ -261,7 +246,7 @@ def build_always_diverged_model(
     cancel_output_dir: str | None = None,
     **_statistics,
 ) -> AlwaysDivergedModel:
-    """``model_source`` builder for :class:`AlwaysDivergedModel`."""
+    """Build an :class:`AlwaysDivergedModel` as a ``model_source`` builder."""
     return AlwaysDivergedModel(
         cancel_at_call=cancel_at_call, cancel_output_dir=cancel_output_dir
     )
@@ -270,10 +255,12 @@ def build_always_diverged_model(
 def run_context(
     root, config: dict, *, epoch_hook=None, experiment_id: str | None = None
 ):
-    """The context the child's own entry builds (``subprocess_worker.prepare_run_context``) for
-    the run :func:`~tests._verified_checkpoint_fixtures.opened_run` opens under the project
-    ``root`` over ``config``: ``run_registry.observed_run``'s run over that directory and the
-    loaders its recorded partition builds, ``epoch_hook`` the context's own.
+    """Return the context the child's own entry builds for a run opened over ``config``.
+
+    The context is built by ``subprocess_worker.prepare_run_context`` for the run
+    :func:`~tests._verified_checkpoint_fixtures.opened_run` opens under the project ``root``:
+    ``run_registry.observed_run``'s run over that directory and the loaders its recorded
+    partition builds, ``epoch_hook`` the context's own.
     """
     from tcip_mcp.experiments import observe
     from tcip_mcp.pipelines.training.subprocess_worker import (
@@ -288,9 +275,10 @@ def run_context(
 
 
 def frames_data(root, intensities, values) -> dict:
-    """The data block of a run training on every frame :func:`write_regression_dataset` writes
-    under ``root``, at ``intensities`` and valued ``values``, with no validation side (every
-    share zero).
+    """Return a run's data block over every frame written under ``root``.
+
+    :func:`write_regression_dataset` writes the frames at ``intensities`` and valued
+    ``values``; the block's split is ``drawn_split(val_ratio=0.0)``.
     """
     images_dir, csv_path = write_regression_dataset(root, intensities, values)
     return {
@@ -301,12 +289,13 @@ def frames_data(root, intensities, values) -> dict:
 
 
 def drawn_data(root, train: tuple[list, list], val: tuple[list, list]) -> dict:
-    """The data block of a run drawing its own split over the frames
-    :func:`write_regression_dataset` writes under ``root``: ``train``'s and then ``val``'s, each
-    ``(intensities, values)``. The frames are grouped so the draw keeps ``val``'s whole on the
-    validation side and ``train``'s on the training side: ``train``'s first frame one group, its
-    others a second, ``val``'s a third, ``val``'s share its own; the draw meets each side's one
-    group smallest first, so ``val`` holds more than one frame and fewer than ``train`` less one.
+    """Return the data block of a run drawing its own split over frames written under ``root``.
+
+    :func:`write_regression_dataset` writes ``train``'s and then ``val``'s frames, each
+    ``(intensities, values)``. The split's grouping map names each frame's member identity and
+    gives it a group: ``train-first`` for ``train``'s first frame, ``train`` for its others and
+    ``val`` for ``val``'s, at a val_ratio of ``val``'s share of the frames. Raises ValueError
+    unless ``val`` holds more than one frame and fewer than ``train``'s count less one.
     """
     from tcip_mcp.dataset_layout import UNDATED_BUCKET
 
@@ -340,9 +329,11 @@ at ``FIT`` times their intensity, validation frames at ``HOLDOUT_FIT``."""
 
 
 def opposed_regression_data(root, train_intensities, val_intensities) -> dict:
-    """:func:`drawn_data` of training frames at ``train_intensities`` valued by :data:`FIT` and
-    validation frames at ``val_intensities`` valued by :data:`HOLDOUT_FIT`: the two sides are fit
-    by opposite-signed weights, so training progress on one is a regression on the other.
+    """Return :func:`drawn_data` over training and validation frames written under ``root``.
+
+    The training frames sit at ``train_intensities``, each valued :data:`FIT` times its
+    intensity, and the validation frames at ``val_intensities``, each valued
+    :data:`HOLDOUT_FIT` times its intensity.
     """
     return drawn_data(
         root,
@@ -352,7 +343,7 @@ def opposed_regression_data(root, train_intensities, val_intensities) -> dict:
 
 
 def distinct_intensities(n: int) -> list[float]:
-    """``n`` frame intensities spread evenly inside ``(0, 1)``, no two alike."""
+    """Return ``(i + 1) / (n + 1)`` for each ``i`` in ``range(n)``."""
     return [(i + 1) / (n + 1) for i in range(n)]
 
 
@@ -368,14 +359,16 @@ six training and four validation frames, which :class:`MeanIntensityClassifier` 
 
 
 def separable_classifier_data(root) -> dict:
-    """:func:`drawn_data` of :data:`SEPARABLE_TRAIN` and :data:`SEPARABLE_VAL`."""
+    """Return :func:`drawn_data` of :data:`SEPARABLE_TRAIN` and :data:`SEPARABLE_VAL`."""
     return drawn_data(root, SEPARABLE_TRAIN, SEPARABLE_VAL)
 
 
 def count_validations(monkeypatch) -> list[str]:
-    """A list each explicit ``model_validate`` of a whole training config
+    """Return a list each explicit config or model-source validation appends its class name to.
+
+    From here on, each ``model_validate`` of a whole training config
     (``schemas.TrainConfigSchema``) or of a model source alone (``schemas.ModelSourceSchema``)
-    appends its class name to from here on.
+    appends to it.
     """
     from tcip_mcp.pipelines.schemas import ModelSourceSchema, TrainConfigSchema
 
@@ -420,12 +413,14 @@ def regressor_config(
     normalization: dict | None = None,
     **overrides,
 ) -> dict:
-    """A :func:`~tests._chain_fixtures.training_config` of ``project`` of the regression
+    """Return a training config of ``project`` for the regression ``builder`` over ``data``.
+
+    The config is a :func:`~tests._chain_fixtures.training_config` of the regression
     ``builder`` (by default the mean-intensity regressor) at ``builder_kwargs`` over the data
     block ``data``: one unfrozen stage at :data:`REGRESSOR_ADAMW` under a cosine schedule of
     ``horizon`` epochs, selecting on the loss, no epoch checkpoints, with ``overrides`` in place
-    of their keys. It normalizes by ``normalization``, or with none stated by the statistics of
-    ``data``'s own frames.
+    of their keys. Its normalization is ``normalization``, or ``FRAME_STATISTICS`` when none is
+    given.
     """
     from tests._chain_fixtures import FRAME_STATISTICS, training_config
 
@@ -461,11 +456,13 @@ def classifier_config(
     normalization: dict | None = None,
     **overrides,
 ) -> dict:
-    """A :func:`~tests._chain_fixtures.training_config` of ``project`` of the mean-intensity
+    """Return a training config of ``project`` for the mean-intensity classifier over ``data``.
+
+    The config is a :func:`~tests._chain_fixtures.training_config` of the mean-intensity
     classifier (weight -1) as a ``task`` model over the data block ``data``: one unfrozen stage
     in batches of three under a cosine schedule of ``horizon`` epochs, AdamW at 0.2, selecting
-    on the loss, no epoch checkpoints, with ``overrides`` in place of their keys. It normalizes
-    by ``normalization``, or with none stated by the statistics of ``data``'s own frames.
+    on the loss, no epoch checkpoints, with ``overrides`` in place of their keys. Its
+    normalization is ``normalization``, or ``FRAME_STATISTICS`` when none is given.
     """
     from tests._chain_fixtures import FRAME_STATISTICS, training_config
 
@@ -492,8 +489,9 @@ def classifier_config(
 
 
 def capture_model(monkeypatch, sink: list) -> None:
-    """Every model ``generic_trainer.build_from_model_source`` builds appended to ``sink`` as it
-    is built.
+    """Append every model ``generic_trainer.build_from_model_source`` builds to ``sink``.
+
+    Each model is appended as it is built.
     """
     from tcip_mcp.pipelines.training import generic_trainer as gt
 
@@ -508,8 +506,10 @@ def capture_model(monkeypatch, sink: list) -> None:
 
 
 class _CallScheduledModel(MeanIntensityRegressor):
-    """A :class:`MeanIntensityRegressor` answering its weight-fit loss on the one-based
-    training-forward calls ``finite(call)`` admits and a non-finite loss on every other.
+    """A :class:`MeanIntensityRegressor` whose ``fit_loss`` is gated by ``finite``.
+
+    ``fit_loss`` answers the parent's weight-fit loss when ``finite`` admits the count of
+    training forwards so far, and :func:`_phantom_nan` when it does not.
     """
 
     def finite(self, call: int) -> bool:
@@ -522,10 +522,7 @@ class _CallScheduledModel(MeanIntensityRegressor):
 
 
 class TransientlyDivergedModel(_CallScheduledModel):
-    """Reports a non-finite loss for its first ``bad_batches`` forward calls, then a normal
-    weight-fit loss for every call after, for proving one diverged epoch short of the trainer's
-    own two-pass divergence rule does not kill a run.
-    """
+    """A :class:`_CallScheduledModel` whose ``finite(call)`` is ``call > bad_batches``."""
 
     def __init__(self, bad_batches: int = 2, init_weight: float = 0.0) -> None:
         super().__init__(init_weight)
@@ -542,17 +539,14 @@ def build_transiently_diverged_model(
     init_weight: float = 0.0,
     **_statistics,
 ) -> TransientlyDivergedModel:
-    """``model_source`` builder for :class:`TransientlyDivergedModel`."""
+    """Build a :class:`TransientlyDivergedModel` as a ``model_source`` builder."""
     return TransientlyDivergedModel(
         bad_batches=bad_batches, init_weight=init_weight
     )
 
 
 class StepCountedDivergenceModel(_CallScheduledModel):
-    """Reports a normal weight-fit loss on the one-based training-forward calls named in
-    ``finite_at``, and a non-finite loss on every other call: an exact call-by-call divergence
-    pattern.
-    """
+    """A :class:`_CallScheduledModel` whose ``finite(call)`` is ``call in set(finite_at)``."""
 
     def __init__(self, finite_at=(), init_weight: float = 0.0) -> None:
         super().__init__(init_weight)
@@ -569,18 +563,14 @@ def build_step_counted_divergence_model(
     init_weight: float = 0.0,
     **_statistics,
 ) -> StepCountedDivergenceModel:
-    """``model_source`` builder for :class:`StepCountedDivergenceModel`."""
+    """Build a :class:`StepCountedDivergenceModel` as a ``model_source`` builder."""
     return StepCountedDivergenceModel(
         finite_at=finite_at, init_weight=init_weight
     )
 
 
 class DivergesAfterModel(_CallScheduledModel):
-    """Reports a normal weight-fit loss for its first ``good_calls`` forward calls, then a
-    non-finite loss for every call after: the reverse of :class:`TransientlyDivergedModel`, for
-    proving a run that trains one real epoch and then dies must not let that epoch's real score
-    win a comparison against a config that only ever scored worse.
-    """
+    """A :class:`_CallScheduledModel` whose ``finite(call)`` is ``call <= good_calls``."""
 
     def __init__(self, good_calls: int, init_weight: float = 0.0) -> None:
         super().__init__(init_weight)
@@ -597,15 +587,14 @@ def build_diverges_after_model(
     init_weight: float = 0.0,
     **_statistics,
 ) -> DivergesAfterModel:
-    """``model_source`` builder for :class:`DivergesAfterModel`."""
+    """Build a :class:`DivergesAfterModel` as a ``model_source`` builder."""
     return DivergesAfterModel(good_calls=good_calls, init_weight=init_weight)
 
 
 class PixelSpreadDivideModel(MeanIntensityRegressor):
-    """Divides its prediction by each sample's spread across its bands (their standard deviation
-    at each pixel, averaged): a real fp32 division-by-zero divergence on a batch of gray frames
-    normalized by statistics alike in every band, while a random synthetic smoke batch (never
-    alike across bands) passes the measurement-boundary contract cleanly.
+    """A regressor dividing its prediction by each sample's spread across its bands.
+
+    The spread is the bands' standard deviation at each pixel, averaged over the pixels.
     """
 
     def predict(self, images):
@@ -617,20 +606,23 @@ class PixelSpreadDivideModel(MeanIntensityRegressor):
 def build_pixel_spread_divide_model(
     *, in_chans: int = 1, **_statistics
 ) -> PixelSpreadDivideModel:
-    """``model_source`` builder for :class:`PixelSpreadDivideModel`."""
+    """Build a :class:`PixelSpreadDivideModel` as a ``model_source`` builder."""
     return PixelSpreadDivideModel()
 
 
 def write_regression_dataset(
     root, intensities, values, *, height: int = 6, width: int = 10
 ):
-    """Write a small on-disk table-labeled dataset (uint8 RGB PNGs ``img<i>.png`` + a CSV of
-    ``stem,value`` rows), a regression's values or a classification's labels.
+    """Write a small on-disk table-labeled dataset of PNG frames and a CSV of values.
 
-    Every frame is a checkerboard one uint8 level either side of its intensity
-    (``round(255 * fraction)``), toward the inside of the range at either end, so each band
-    varies within the frame while the frame's mean stays within half a level of its intensity
-    and frames keep their intensities' order. Returns ``(images_dir, csv_path)``.
+    The frames are uint8 RGB PNGs ``img<i>.png`` under ``root/images/<undated bucket>``, and
+    ``root/values.csv`` holds ``stem,value`` rows, a regression's values or a classification's
+    labels.
+
+    Each frame is a ``height`` by ``width`` checkerboard, 6 by 10 by default, of ``low`` and
+    ``high`` cast to uint8 and stacked into three bands, where ``px = round(255 * fraction)``
+    and ``(low, high)`` is (0, 1) at 0, (254, 255) at 255 and (px - 1, px + 1) at other values.
+    Returns ``(images_dir, csv_path)``.
     """
     import numpy as np
     from PIL import Image

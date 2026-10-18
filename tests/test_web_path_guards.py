@@ -1,8 +1,4 @@
-"""Confinement primitives of the web layer: origin trust, allowed roots, safe joins.
-
-Every refusal asserted here is paired with the legitimate call the same guard must still
-admit, since a rail that only refuses is as broken as one that only admits.
-"""
+"""Confinement primitives of the web layer: origin trust, allowed roots, safe joins."""
 
 from __future__ import annotations
 
@@ -33,8 +29,7 @@ def test_origin_without_a_parseable_host_is_not_local() -> None:
     """An Origin carrying no host is not same-machine and must not pass as loopback.
 
     A sandboxed cross-site iframe and a ``file://`` page both send an opaque origin whose
-    hostname does not parse; treating that absence as loopback would open the state socket,
-    which reports filesystem paths, to a page running anywhere.
+    hostname does not parse; such origins, an empty one and a foreign host are refused.
     """
     assert not origin_allowed("null", LOCAL_ARRIVAL)
     assert not origin_allowed("file://", LOCAL_ARRIVAL)
@@ -45,9 +40,7 @@ def test_origin_without_a_parseable_host_is_not_local() -> None:
 
 
 def test_local_browser_and_non_browser_clients_are_still_admitted() -> None:
-    """Loopback pages, and only a client that sends no Origin at all (never an empty one),
-    keep working.
-    """
+    """Loopback pages and a client sending no Origin at all are admitted."""
     assert origin_allowed("http://127.0.0.1:8765", LOCAL_ARRIVAL)
     assert origin_allowed("http://127.0.0.1:5173", LOCAL_ARRIVAL)
     assert origin_allowed(None, LOCAL_ARRIVAL)
@@ -59,10 +52,10 @@ def test_local_browser_and_non_browser_clients_are_still_admitted() -> None:
 def test_sibling_sharing_a_root_name_prefix_is_outside_the_root(
     tmp_path, monkeypatch
 ) -> None:
-    """Containment is by path component, never by string prefix.
+    """A sibling whose name extends the allowed root's name is outside the root.
 
-    ``<root>-secret`` sits beside the allowed root, not inside it, while ``<root>/sub``
-    legitimately shares the same leading characters and must still be served.
+    A file under ``<root>-secret`` is refused as outside the allowed roots, while one under
+    ``<root>/sub`` is admitted.
     """
     allowed = tmp_path / "data"
     (allowed / "sub").mkdir(parents=True)
@@ -84,8 +77,8 @@ def test_every_configured_root_is_honored_not_only_the_first(
 ) -> None:
     """A multi-entry ``TCIP_IMAGE_ROOTS`` admits work under each entry it names.
 
-    The two roots differ in depth and in the file they hold, so honoring only the first
-    entry, or failing to split the list, changes the outcome for the second.
+    The two roots differ in depth and in the file they hold; each one's file is admitted, and
+    a path under neither is refused.
     """
     first = tmp_path / "imagery_a" / "2026-02-11"
     first.mkdir(parents=True)
@@ -115,8 +108,10 @@ def test_every_configured_root_is_honored_not_only_the_first(
 def test_a_relative_image_root_refuses_at_start_and_an_absolute_one_is_read(
     tmp_path, monkeypatch
 ) -> None:
-    """A relative ``TCIP_IMAGE_ROOTS`` entry names no directory until a working directory is
-    chosen, so reading the list refuses naming it; the same list stated absolutely is read.
+    """A relative ``TCIP_IMAGE_ROOTS`` entry is refused at start, and an absolute one is read.
+
+    Reading a list holding the relative entry ``archive`` raises naming it; the same list with
+    that entry stated absolutely reads as its two directories.
     """
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv(
@@ -137,10 +132,8 @@ def test_derived_default_canonicalises_the_path_it_admits(
 ) -> None:
     """A path under the derived allow-set (here, the workspace) resolves to an absolute path.
 
-    Callers treat the return value as the path to open, so a dot segment must be collapsed, and
-    a relative path with no project open has no root to collapse against and refuses. The
-    additive ``TCIP_IMAGE_ROOTS`` list stays empty throughout:
-    what admits this path is the workspace, not that list.
+    A dot segment is collapsed in the returned path, and a relative path is refused asking for
+    an absolute one. The additive ``TCIP_IMAGE_ROOTS`` list stays empty throughout.
     """
     monkeypatch.delenv("TCIP_IMAGE_ROOTS", raising=False)
     assert image_roots_from_environment() == ()
@@ -169,8 +162,8 @@ def test_derived_default_canonicalises_the_path_it_admits(
 def test_symlink_inside_the_root_pointing_out_is_refused(tmp_path) -> None:
     """A join that resolves out of the root through a symlink escapes and must be refused.
 
-    The per-segment screen never sees a dot-dot or an absolute part here; only the check on
-    the resolved path notices that the destination left the root.
+    The join holds no dot-dot or absolute part; it is refused for its resolved destination,
+    and a join that stays inside the root resolves.
     """
     base = tmp_path / "project"
     (base / "images").mkdir(parents=True)
@@ -197,8 +190,10 @@ def test_symlink_inside_the_root_pointing_out_is_refused(tmp_path) -> None:
 def test_a_removed_holding_directory_is_excluded_like_imports(
     tmp_path,
 ) -> None:
-    """``.removed`` sits directly under the workspace, itself an allowed root, so the exclusion
-    has to be by name: nothing else keeps a moved-project archive out of a guarded route.
+    """A path under the workspace's ``.removed`` holding directory is refused by name.
+
+    ``.removed`` sits directly under the workspace, itself an allowed root; a path under it is
+    refused as outside the allowed roots.
     """
     ws = (tmp_path / "ws").resolve()
     ws.mkdir()
@@ -219,8 +214,8 @@ def test_a_removed_holding_directory_is_excluded_like_imports(
 def test_drive_relative_part_cannot_replace_the_root_anchor(tmp_path) -> None:
     """A part naming another drive relocates the join off the root and must be refused.
 
-    The part is neither absolute by POSIX rules nor a dot-dot segment, so the earlier
-    screens pass it through and only the resolved-path check catches the relocation.
+    The part is neither absolute by POSIX rules nor a dot-dot segment; the join is refused for
+    its resolved destination, and a join that stays inside the root resolves.
     """
     base = tmp_path / "project"
     (base / "images").mkdir(parents=True)

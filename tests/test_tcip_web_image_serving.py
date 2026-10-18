@@ -1,6 +1,7 @@
-"""Image serving through one raster read: regions, the display caps, the plain-serve rule, the
-stretch bounds a render uses, and the overview build a scaled read of an oversized raster
-needs first (routes/images.py).
+"""Image serving through one raster read (routes/images.py).
+
+The tests cover regions, the display caps, the plain-serve rule, the stretch bounds a render
+uses, and the overview build a scaled read of an oversized raster needs first.
 """
 
 from __future__ import annotations
@@ -20,8 +21,9 @@ from tcip_web.routes import images as images_route
 
 @pytest.fixture(autouse=True)
 def _clear_stats_cache():
-    """The per-raster stats and band-count caches are process-global; a fresh test starts from
-    empty ones.
+    """Clear the per-raster stats and band-count caches around each test.
+
+    The caches are process-global; a fresh test starts from empty ones.
     """
     images_route._stats_cache.clear()
     images_route._count_cache.clear()
@@ -33,8 +35,10 @@ def _clear_stats_cache():
 def _quadrant_rgb(
     path: Path, width: int = 400, height: int = 300
 ) -> np.ndarray:
-    """A uint8 RGB raster whose four quadrants are flat, distinct colors, so a served region can
-    be told from any other region and a transposed one from an upright one.
+    """Write a uint8 RGB ``painted_array`` raster as a TIFF at ``path``; return the array.
+
+    Split at ``width // 2`` and ``height // 2``, it is painted (200, 20, 20) top left,
+    (20, 200, 20) top right, (20, 20, 200) bottom left and (200, 200, 20) bottom right.
     """
     from tests._producer_fixtures import painted_array
 
@@ -63,8 +67,11 @@ def _multiband(
     width: int = 40,
     dtype="uint16",
 ) -> np.ndarray:
-    """A small multi-band raster whose left and right halves hold different value ranges, so a
-    region rendered against its own bounds looks different from one rendered against the raster's.
+    """Write a seeded multi-band raster as a TIFF at ``path``; return its array.
+
+    The array is an integer draw in [0, 1000) at seed 3, ``height`` by ``width`` by
+    ``channels``, cast to ``dtype``; 3000 is added to its right half, and the result is cast to
+    ``dtype`` again.
     """
     rng = np.random.default_rng(3)
     arr = rng.integers(0, 1000, size=(height, width, channels)).astype(dtype)
@@ -76,8 +83,9 @@ def _multiband(
 def _wide_raster(
     path: Path, *, width: int = 5000, height: int = 64
 ) -> np.ndarray:
-    """A raster whose longest edge is past the pyramid floor, small enough to build in tests: an
-    overview level exists for it.
+    """Write ``arange(height * width) % 251`` as a uint8 TIFF at ``path``; return the array.
+
+    The array is ``height`` by ``width``, 64 by 5000 by default, written in strips of 8 rows.
     """
     arr = (
         (np.arange(height * width) % 251)
@@ -91,8 +99,10 @@ def _wide_raster(
 def _wide_multiband(
     path: Path, *, width: int = 5000, height: int = 64, channels: int = 4
 ) -> np.ndarray:
-    """A multi-band raster past the pyramid floor, so a pyramid can be built for it, with a band
-    count that reaches the per-band stats rather than the plain-RGB early return.
+    """Write a uint8 draw at seed 11 as a TIFF at ``path``; return the array.
+
+    The array is ``height`` by ``width`` by ``channels``, 64 by 5000 by 4 by default, written
+    in strips of 8 rows.
     """
     rng = np.random.default_rng(11)
     arr = rng.integers(0, 256, size=(height, width, channels)).astype(np.uint8)
@@ -123,8 +133,9 @@ route, so a change to the route's policy fails these renders instead of moving b
 
 
 def _renders_as(resp, owed: np.ndarray) -> None:
-    """The served image is ``owed``'s pixels, encoded byte for byte under the policy
-    :data:`ENCODINGS` states for the response's media type.
+    """Assert the served image is ``owed``'s pixels, encoded byte for byte.
+
+    The encoding is the policy :data:`ENCODINGS` states for the response's media type.
     """
     assert resp.status_code == 200, resp.text
     pil_format, options = ENCODINGS[resp.headers["content-type"]]
@@ -134,8 +145,9 @@ def _renders_as(resp, owed: np.ndarray) -> None:
 
 
 def _composite(arr: np.ndarray, stretch: str, bounds=None) -> np.ndarray:
-    """``arr``'s first three bands through the shared display stretch, between ``bounds`` (per
-    band ``(low, high)``) or, for ``None``, the array's own.
+    """Return ``composite_display_rgb(arr, [0, 1, 2], stretch, bounds)``.
+
+    ``bounds`` is per band ``(low, high)``, or ``None``.
     """
     from tcip_mcp.pipelines.band_stats import composite_display_rgb
 
@@ -213,8 +225,9 @@ def test_a_region_outside_the_raster_is_refused(
 def test_an_empty_region_is_refused_rather_than_raising(
     client: TestClient, tmp_path: Path, corners
 ):
-    """An empty or inverted rectangle is a bad request, never a 500 through the raster layer's
-    own out-of-bounds error.
+    """An empty or inverted rectangle is refused as a bad request.
+
+    The refusal names ``x0 < x1``.
     """
     path = tmp_path / "quads.tif"
     _quadrant_rgb(path)
@@ -247,7 +260,9 @@ def test_a_view_of_an_ingested_raster_reads_its_cells_or_one_display_read(
     client: TestClient,
     tmp_path: Path,
 ):
-    """A view within the display's cap is served by the native cells it intersects, a larger one
+    """A view of an ingested raster is served by its native cells or by one display read.
+
+    A view within the display's cap is served by the native cells it intersects, a larger one
     by one display read of itself; a path naming no image refuses by name.
     """
     from tcip_mcp.pipelines.reference_grid import (
@@ -322,8 +337,10 @@ def test_a_whole_view_over_the_area_cap_scales_to_fit_whichever_axis_limits(
     tmp_path: Path,
     size,
 ):
-    """Whatever an image's shape, asking for the whole of it renders it within the display's
-    area cap, a one-pixel-wide frame included, and the served size header says what was served.
+    """A whole view renders within the display's area cap, whichever axis limits it.
+
+    The shapes include a one-pixel-wide frame on either axis, and the served size header says
+    what was served.
     """
     path = tmp_path / "frame.png"
     Image.new("RGB", size, (30, 60, 90)).save(path)
@@ -396,8 +413,9 @@ def test_a_native_region_decodes_to_exactly_the_source_pixels(
     tmp_path: Path,
     shape,
 ):
-    """A region is the pixels a judgment is made on, so it is served losslessly: noise, which any
-    lossy encoding visibly alters, comes back value for value, at edges past the limits WebP
+    """A native region decodes to exactly the source pixels.
+
+    Seeded uint8 noise comes back value for value, including at edges past the limits WebP
     (16,383) and JPEG (65,500) accept.
     """
     height, width = shape
@@ -439,7 +457,9 @@ def test_the_view_routes_cells_and_the_image_routes_cap_are_one_derivation(
     display,
     rows,
 ):
-    """For one display, a view the view route serves by native cells is one the image route
+    """The view route's native cells and the image route's area cap agree for one display.
+
+    For one display, a view the view route serves by native cells is one the image route
     serves natively, and a view one column past the cap is a display read on both routes; each
     cell the view route names serves natively at its own size. The caps are a square, a
     non-square area, and one a single-row raster reaches.
@@ -497,11 +517,11 @@ def test_the_view_and_labels_routes_measure_the_frame_the_image_routes_reader_op
     client: TestClient,
     tmp_path: Path,
 ):
-    """A one-row RGB TIFF, whose single row the axes would once have been read as a channel
-    plane of, is measured by the view route and the annotation route at the count the image
-    route's plain read opens it at: the canvas frame the labels route answers is the view route's
-    advertised extent, and every read the view route advertises lies inside the reader's frame
-    and serves.
+    """The view and labels routes measure a one-row RGB TIFF at the image route's frame.
+
+    The view route and the annotation route measure it at the count the image route's plain
+    read opens it at: the canvas frame the labels route answers is the view route's advertised
+    extent, and every read the view route advertises lies inside the reader's frame and serves.
     """
     from tcip_mcp.pipelines.raster_source import SourceHeader
 
@@ -555,9 +575,11 @@ def test_a_display_read_comes_off_the_overview_level_it_planned(
     client: TestClient,
     tmp_path: Path,
 ):
-    """A whole view too large for the cap is read from the finest overview level whose window
-    fits, never resampled from native pixels: with the native pixels zeroed after the build, the
-    served view still carries the original content the pyramid holds.
+    """A whole view too large for the cap is read off the overview level it planned.
+
+    The read comes off the pyramid: with the native pixels zeroed after the build, the served
+    view still carries the original content the pyramid holds, and a 10,000-pixel display is
+    served at 100x100, still from the pyramid.
     """
     from tcip_mcp.pipelines.overviews import build_overviews
 
@@ -598,8 +620,9 @@ def test_a_planned_display_read_is_one_the_raster_reader_admits(
     display,
     served_size,
 ):
-    """The plan's whole-pixel output size is one the raster reader's own geometry admits, for
-    rasters whose aspect ratio a quarter or a fitted scale does not divide evenly.
+    """The plan's whole-pixel output size is one the raster reader's own geometry admits.
+
+    The rasters have aspect ratios a quarter or a fitted scale does not divide evenly.
     """
     from tcip_mcp.pipelines.overviews import build_overviews
 
@@ -620,8 +643,10 @@ def test_a_planned_display_read_is_one_the_raster_reader_admits(
 def test_a_one_pixel_wide_raster_reads_off_its_pyramid(
     client: TestClient, tmp_path: Path
 ):
-    """Each level's own dimensions plan the read, so a raster one pixel wide, whose levels all
-    report a horizontal factor of one, still comes off the level that fits the cap.
+    """A raster one pixel wide is read off the pyramid level that fits the cap.
+
+    With its native pixels zeroed after the build, a 1 by 100,000 raster at a 20,000-pixel
+    display is served at 1x12500 carrying the pyramid's 200.
     """
     from tcip_mcp.pipelines.overviews import build_overviews
 
@@ -639,9 +664,10 @@ def test_a_one_pixel_wide_raster_reads_off_its_pyramid(
 def test_a_palette_raster_reads_its_colors_off_its_pyramid(
     client: TestClient, tmp_path: Path
 ):
-    """A palette raster's pyramid samples indices rather than averaging them, and a display read
-    expands the planned level's own indices: with the native indices zeroed after the build, the
-    served view keeps the color the pyramid holds.
+    """A palette raster's display read expands the planned pyramid level's own indices.
+
+    The pyramid holds sampled indices: with the native indices zeroed after the build, the
+    served view's color is one of the two colors the raster's indices name.
     """
     from tcip_mcp.pipelines.overviews import build_overviews
 
@@ -685,8 +711,10 @@ def test_region_statistics_do_not_depend_on_the_display_that_asked(
     tmp_path: Path,
     monkeypatch,
 ):
-    """Two displays asking for one region of one raster get the same stretch, the one the bands
-    route reports, even where the native sample covers only part of the raster.
+    """Two displays asking for one region of one raster get the same stretch.
+
+    The stretch is the one the bands route reports, even where the native sample covers only
+    part of the raster.
     """
     monkeypatch.setattr(images_route, "_STATS_WINDOW_SIZE", 64)
     monkeypatch.setattr(images_route, "_STATS_MAX_WINDOWS", 4)
@@ -721,8 +749,10 @@ def test_region_statistics_do_not_depend_on_the_display_that_asked(
 
 
 def _poisoned_pyramid(path: Path) -> None:
-    """A 4096-pixel square raster of 200 with its 2048 and 1024 levels built, then its native
-    pixels zeroed, so a served 200 proves a read came off the pyramid and a 0 proves it did not.
+    """Write a 4096-pixel square raster of 200, build its pyramid, then zero its native pixels.
+
+    The raster is uint8 in strips of 64 rows; ``build_overviews`` builds the pyramid, and the
+    raster is then rewritten as zeros.
     """
     from tcip_mcp.pipelines.overviews import build_overviews
 
@@ -736,8 +766,9 @@ def _poisoned_pyramid(path: Path) -> None:
 
 
 def _paint_levels(path: Path, values: tuple[int, ...]) -> None:
-    """Overwrite each level of ``path``'s uncompressed sidecar, finest first, with one value
-    apiece in place, so a served value names the physical level the pixels came off.
+    """Overwrite each level of ``path``'s uncompressed sidecar in place with one value apiece.
+
+    The levels take ``values`` finest first.
     """
     from tcip_mcp.pipelines.overviews import overview_sidecar
 
@@ -776,9 +807,11 @@ def test_a_crop_is_planned_on_the_window_the_reader_opens(
     display,
     served_size,
 ):
-    """A one-pixel-wide crop comes off the pyramid rather than being refused or read natively,
-    and an offset crop whose window on a finer level would pass the cap is read off the level
-    whose window, origin rounded down and end up, fits it.
+    """A crop is planned on the window the raster reader opens.
+
+    A one-pixel-wide crop is served at 1x100 or 1x600, and the offset crop (1, 1, 1025, 1025)
+    at 257x257, its level window with the origin rounded down and the end rounded up; each
+    carries the pyramid's 200.
     """
     path = tmp_path / "pyramid.tif"
     _poisoned_pyramid(path)
@@ -802,10 +835,11 @@ def test_a_scaled_view_is_served_by_tiles_of_its_planned_level(
     client: TestClient,
     tmp_path: Path,
 ):
-    """A view past the cap is answered with tiles of the overview level its read is planned off,
-    each served at that level's resolution off that physical level (native 0, level 1 50,
-    level 2 200), and a pan answers the tiles it still covers with the same records and the same
-    responses, so only the tiles that entered the view are new.
+    """A view past the cap is answered with tiles of the overview level its read is planned off.
+
+    Each tile is served at that level's resolution off that physical level (native 0, level 1
+    50, level 2 200), and a pan answers the tiles it still covers with the same records and
+    etags, beside new tiles.
     """
     path = tmp_path / "pyramid.tif"
     _poisoned_pyramid(path)
@@ -868,9 +902,11 @@ def test_every_advertised_tile_of_a_skinny_raster_is_one_its_encoding_admits(
     tmp_path: Path,
     shape,
 ):
-    """A one-pixel level longer than the JPEG edge limit is tiled within that limit, at the
-    level's own resolution, and every tile the view route names serves; a hand-built tile of the
-    whole level, within the area cap but past the edge limit, is refused naming the limit.
+    """A one-pixel level longer than the JPEG edge limit is tiled within that limit.
+
+    The tiles are at the level's own resolution, and every tile the view route names serves; a
+    hand-built tile of the whole level, within the area cap but past the edge limit, is refused
+    naming the limit.
     """
     from tcip_mcp.pipelines.overviews import build_overviews
 
@@ -926,9 +962,10 @@ def test_a_stacked_tiff_the_reader_decodes_whole_is_offered_no_overview_tiles(
     client: TestClient,
     tmp_path: Path,
 ):
-    """A three-page stack whose first page carries GDAL overviews is decoded whole by the image
-    route's reader, which serves no level, so the view route answers with one display read of
-    the view, and that read serves.
+    """A stacked TIFF whose first page carries overviews is offered no overview tiles.
+
+    For a three-page stack, the view route answers with one display read of the view, and that
+    read serves.
     """
     from tcip_mcp.pipelines.overviews import build_overviews, overview_dims
 
@@ -1035,9 +1072,7 @@ def test_the_etag_varies_with_the_region(client: TestClient, tmp_path: Path):
 def test_the_etag_changes_when_an_overview_sidecar_appears(
     client: TestClient, tmp_path: Path
 ):
-    """Overview-served pixels are not the pixels a native read resamples to the same size, so a
-    build that lands between two requests has to invalidate what the first one cached.
-    """
+    """The etag changes when an overview build lands between two requests."""
     from tcip_mcp.pipelines.overviews import build_overviews
 
     path = tmp_path / "wide.tif"
@@ -1060,8 +1095,9 @@ def test_the_etag_changes_when_an_overview_sidecar_appears(
 def test_a_uint8_raster_serves_its_own_pixels_with_no_stretch(
     client: TestClient, tmp_path: Path
 ):
-    """No band selection, no stretch: a flat frame would come back black through a min-max span
-    and comes back at its own levels instead.
+    """A uint8 raster with no band selection is served at its own levels with no stretch.
+
+    The response carries no stats-source and no display-bounds header.
     """
     path = tmp_path / "flat.tif"
     tifffile.imwrite(
@@ -1079,9 +1115,9 @@ def test_a_uint8_raster_serves_its_own_pixels_with_no_stretch(
 def test_a_uint16_raster_serves_on_its_dtypes_full_scale(
     client: TestClient, tmp_path: Path
 ):
-    """A plain serve of a non-uint8 raster divides by the dtype's own ceiling, so a half-scale
-    frame reads as mid-gray. A PIL decode of a single-band uint16 frame clips every value at 255
-    instead, which renders the same raster white.
+    """A plain serve of a uint16 raster divides by the dtype's own ceiling.
+
+    A half-scale single-band frame reads as mid-gray.
     """
     path = tmp_path / "half.tif"
     tifffile.imwrite(str(path), np.full((32, 40), 32768, dtype=np.uint16))
@@ -1109,9 +1145,10 @@ def test_a_multi_band_uint16_raster_serves_on_that_same_scale(
 def test_a_float_regions_full_scale_is_the_rasters_own_maximum(
     client: TestClient, tmp_path: Path
 ):
-    """A float raster has no dtype ceiling to divide by, so a region divides by the maximum the
-    raster's own sample found, not by the brightest value in the region in hand: a dim corner
-    stays dim instead of being lifted to full brightness.
+    """A float region divides by the maximum the raster's own sample found.
+
+    The left half, at 100, of a raster reaching 1000 serves at 100/1000 of full scale: a dim
+    corner stays dim.
     """
     path = tmp_path / "float.tif"
     from tests._producer_fixtures import painted_array
@@ -1144,9 +1181,7 @@ def test_a_float_regions_full_scale_is_the_rasters_own_maximum(
 def test_a_non_positive_float_band_renders_black(
     client: TestClient, tmp_path: Path
 ):
-    """A float band with no positive data renders black, never stretched to its own negative
-    sampled range.
-    """
+    """A float band with no positive data renders black."""
     path = tmp_path / "negative.tif"
     arr = (
         -np.abs(np.random.default_rng(0).standard_normal((32, 40))) - 1.0
@@ -1178,8 +1213,9 @@ def test_a_four_band_raster_serves_as_plain_rgb_with_the_fourth_band_dropped(
     client: TestClient,
     tmp_path: Path,
 ):
-    """The alpha band of an RGBA raster is dropped, not composited and not stretched: the file's
-    own colors reach the viewer unshifted.
+    """The alpha band of an RGBA raster is dropped, not composited and not stretched.
+
+    The file's own colors reach the viewer unshifted.
     """
     path = tmp_path / "rgba.tif"
     arr = np.zeros((32, 40, 4), dtype=np.uint8)
@@ -1197,8 +1233,10 @@ def test_a_four_band_raster_serves_as_plain_rgb_with_the_fourth_band_dropped(
 def test_a_five_band_raster_composites_its_first_three_bands(
     client: TestClient, tmp_path: Path
 ):
-    """Past the band counts an RGB reading covers, a default request is a composite: a stretched
-    render of the first three bands between the served array's own bounds.
+    """A default request for a five-band raster is a composite of its first three bands.
+
+    Past the band counts an RGB reading covers, the composite is a stretched render of the first
+    three bands between the served array's own bounds.
     """
     path = tmp_path / "five.tif"
     arr = _multiband(path, channels=5)
@@ -1209,13 +1247,12 @@ def test_a_five_band_raster_composites_its_first_three_bands(
 
 
 def _pinned_stretch_raster(path: Path) -> tuple[np.ndarray, np.ndarray]:
-    """A non-square 4-band raster whose bands span different ranges, with the display pixels a
-    ``minmax`` stretch owes it worked out by hand.
+    """Write a non-square 4-band raster and return it with its hand-worked ``minmax`` pixels.
 
-    Every value sits on a quarter of its own band's span, so the display byte each one is owed is
-    an exact number (0, 63, 127, 191, 255 after the truncating uint8 cast) rather than something
-    re-derived from the stretch's own arithmetic. Returns the raster and the ``3,0,1`` composite it
-    is owed.
+    The three selected bands span different ranges, and each value in them sits on a quarter
+    of its band's span, so the display byte each one is owed is an exact number (0, 63, 127,
+    191, 255 after the truncating uint8 cast). Returns the raster and the ``3,0,1`` composite
+    it is owed.
     """
     bands = [
         [[0, 100, 200], [300, 400, 400]],  # spans 0..400
@@ -1241,12 +1278,9 @@ def test_the_served_composite_is_the_shared_display_primitives_own_pixels(
     client: TestClient,
     tmp_path: Path,
 ):
-    """What the route encodes is ``composite_display_rgb``'s output byte for byte: the viewer and
-    any other consumer of that primitive see one set of pixels, not two matching expressions.
+    """The route encodes ``composite_display_rgb``'s output byte for byte.
 
-    The pixels that primitive owes a known raster are pinned here independently of how it computes
-    them, so the two sides agreeing is evidence about the display pixels and not just about both
-    calling one function.
+    ``composite_display_rgb`` itself equals the hand-worked ``minmax`` pixels of a known raster.
     """
     from tcip_mcp.pipelines.band_stats import composite_display_rgb
 
@@ -1274,9 +1308,9 @@ def test_two_regions_of_one_raster_stretch_against_the_same_bounds(
     client: TestClient,
     tmp_path: Path,
 ):
-    """Region renders read their bounds from the raster's own sample, never from the region in
-    hand, so a viewer panning across a raster is not looking at a stretch that moves under them:
-    each half renders between the whole raster's bounds, not its own.
+    """Two regions of one raster render between the whole raster's bounds.
+
+    Each half renders between the whole raster's bounds, not its own.
     """
     path = tmp_path / "capture.tif"
     arr = _multiband(path)
@@ -1332,8 +1366,10 @@ def test_a_composited_non_positive_float_band_renders_black_beside_its_lit_bands
     client: TestClient,
     tmp_path: Path,
 ):
-    """The composite route under ``stretch=none`` renders a selected band with no positive data
-    black, the same rule the plain serve renders it under, while the others keep their level.
+    """A composited band with no positive data renders black under ``stretch=none``.
+
+    The two bands with positive data average above 50 in the composite, and the route serves
+    that composite byte for byte.
     """
     path = tmp_path / "capture.tif"
     rng = np.random.default_rng(5)
@@ -1383,8 +1419,9 @@ def test_a_percent_clip_region_stretches_between_the_cached_cut_points(
 
 
 def _cached_stats(path: Path):
-    """The stats the route cached for ``path`` read at its own band count, under the route's
-    own key, so a miss fails rather than computes.
+    """Return the stats the route cached for ``path`` read at its own band count.
+
+    Fails an assertion when the route cached no stats under that key.
     """
     from tcip_mcp.pipelines.raster_source import SourceHeader
 
@@ -1399,9 +1436,10 @@ def _cached_stats(path: Path):
 def _five_band_float_with_one_nan(
     path: Path, *, height: int = 24, width: int = 40
 ) -> np.ndarray:
-    """A 5-band float32 raster whose band 0 holds one NaN pixel among otherwise ordinary values:
-    ``.min()``/``.max()`` propagate that single NaN across the whole band, so band 0's bounds have
-    no finite value to report while bands 1 and 2 (not touched) still do.
+    """Write and return a 5-band float32 raster whose band 0 holds one NaN pixel.
+
+    The NaN sits at band 0's top-left pixel, and the rest of the raster is a seeded uniform
+    draw in [0, 1000).
     """
     rng = np.random.default_rng(7)
     arr = rng.uniform(0, 1000, size=(height, width, 5)).astype(np.float32)
@@ -1413,7 +1451,7 @@ def _five_band_float_with_one_nan(
 def test_a_nan_pixel_still_serves_the_raster(
     client: TestClient, tmp_path: Path
 ):
-    """A NaN pixel poisons its band's bounds, and the route still serves the raster it rendered."""
+    """A five-band float raster holding one NaN pixel still serves at its own size."""
     path = tmp_path / "nan.tif"
     _five_band_float_with_one_nan(path)
     resp = client.get(
@@ -1434,8 +1472,10 @@ def test_get_bands_reports_exact_bounds_when_the_sample_covered_every_pixel(
     client: TestClient,
     tmp_path: Path,
 ):
-    """Exactness is a reported fact, not a size branch: a raster the window budget covers whole
-    gets its own min/max and says the sample was not partial.
+    """The bands route reports exact bounds for a raster its window budget covers whole.
+
+    The response says the sample was not partial, covering every pixel at seed 0, and gives
+    each band's own min and max.
     """
     path = tmp_path / "capture.tif"
     arr = _multiband(path)
@@ -1460,9 +1500,10 @@ def test_get_bands_says_so_when_it_read_only_part_of_the_raster(
     tmp_path: Path,
     monkeypatch,
 ):
-    """With a window budget below the raster's own grid, the reported bounds describe a sample and
-    the response says which one. The raster is a numpy stack, so past that budget it is sampled
-    natively rather than read off overviews.
+    """The bands route reports a sample when its window budget is below the raster's grid.
+
+    The response marks the bounds sampled, with a pixel fraction under one and its seed. The
+    raster is a numpy stack.
     """
     monkeypatch.setattr(images_route, "_STATS_WINDOW_SIZE", 4)
     monkeypatch.setattr(images_route, "_STATS_MAX_WINDOWS", 2)
@@ -1479,8 +1520,9 @@ def test_get_bands_says_so_when_it_read_only_part_of_the_raster(
 def test_get_bands_never_loads_a_tiff_through_load_image(
     client: TestClient, tmp_path: Path, monkeypatch
 ):
-    """The per-band stats of a windowed TIFF come from sampled windows through its reader:
-    describing it never goes through ``image_utils.load_image``, the whole-image load.
+    """Describing a windowed TIFF's bands never calls ``image_utils.load_image``.
+
+    ``load_image`` is the whole-image load.
     """
     from tcip_mcp.pipelines import image_utils
 
@@ -1502,9 +1544,9 @@ def test_get_bands_never_loads_a_tiff_through_load_image(
 def test_cold_band_stats_open_the_raster_once(
     client: TestClient, tmp_path: Path, monkeypatch
 ):
-    """The statistics are sampled through the reader the route already holds for the raster's
-    metadata, never through a second open: a stacked numpy raster, which decodes whole at
-    open, is opened once for its cold stats.
+    """A stacked numpy raster is opened once for its cold band stats.
+
+    The bands route answers four bands, every pixel sampled, with one open of the raster.
     """
     from tcip_mcp.pipelines import raster_source
 
@@ -1531,9 +1573,7 @@ def test_a_described_raster_is_described_again_without_an_open(
     tmp_path: Path,
     monkeypatch,
 ):
-    """The cache is what makes a second description free: asking for one raster's bands twice
-    opens it once in total.
-    """
+    """Asking for one raster's bands twice opens it once in total."""
     from tcip_mcp.pipelines import raster_source
 
     opened: list = []
@@ -1561,9 +1601,10 @@ def test_a_warm_description_reads_nothing_off_the_file(
     monkeypatch,
     bands: int,
 ):
-    """A repeated description of an unchanged container answers from the caches: the band count
-    from its own, the statistics (where the count calls for them) from theirs, so not even the
-    array that states the count is loaded.
+    """A repeated description of an unchanged container answers from the caches.
+
+    The band count comes from its own cache, the statistics (where the count calls for them)
+    from theirs, so not even the array that states the count is loaded.
     """
     path = tmp_path / "stack.npz"
     np.savez(str(path), image=np.zeros((24, 40, bands), dtype=np.uint8))
@@ -1591,8 +1632,9 @@ def test_one_reading_of_a_raster_is_sampled_once_whichever_route_asks_first(
     tmp_path: Path,
     monkeypatch,
 ):
-    """A description and a plain region of one float four-band raster both read it at its own
-    four bands, so its statistics are computed and cached once for both.
+    """A description and a plain region of one raster share one statistics computation.
+
+    The float four-band raster's statistics are computed and cached once for both requests.
     """
     path = tmp_path / "float4.tif"
     rng = np.random.default_rng(5)
@@ -1629,8 +1671,10 @@ def test_a_band_group_rewritten_to_name_another_member_is_described_afresh(
     client: TestClient,
     tmp_path: Path,
 ):
-    """A manifest rewritten to name a different file of the same size and timestamp is a
-    different group: its warm description is read again, not answered from the old entry.
+    """A band group rewritten to name another member is described afresh.
+
+    With band A rewritten from a file of 10 to one of 90 with the same size and timestamp, the
+    described maximum of band A goes from 10 to 90.
     """
     import os
 
@@ -1674,8 +1718,9 @@ def test_a_cold_region_stretch_samples_through_the_reader_that_served_the_region
     tmp_path: Path,
     monkeypatch,
 ):
-    """A region stretched by the raster's own sampled bounds on a cold cache reads those bounds
-    through the reader that served the region: one open for the whole request.
+    """A cold region stretch opens the raster once for the whole request.
+
+    The region is served, and its raster's statistics are cached once.
     """
     from tcip_mcp.pipelines import raster_source
 
@@ -1711,9 +1756,10 @@ def test_the_view_route_reads_one_header_and_opens_the_raster_once(
     tmp_path: Path,
     monkeypatch,
 ):
-    """Planning a view off a pyramid reads the raster's frame and its levels from one header read
-    and one GDAL open of the raster itself; each level is its own handle. A view within the cap
-    needs no level, and reads the header alone.
+    """The view route reads one header and opens the raster once to plan a view.
+
+    Planning a view off a pyramid takes one header read and one GDAL open of the raster
+    itself; a view within the cap takes one header read and no open.
     """
     from tcip_mcp.pipelines import raster_source
     from tcip_mcp.pipelines.overviews import build_overviews
@@ -1777,9 +1823,11 @@ def test_get_bands_reads_an_oversized_rasters_stats_off_its_overviews(
     tmp_path: Path,
     monkeypatch,
 ):
-    """Past the native-sampling budget the stats come from one reduced read of the whole frame,
-    and the response says at what size rather than presenting them as the raster's own bounds:
-    the 5000x64 frame fitted within the 1024 pyramid floor edge is 1024 wide and 13 tall.
+    """The bands route reads an oversized raster's stats off its overviews.
+
+    Past the native-sampling budget the stats come off the overviews: each band's maximum is
+    positive though the native pixels are zeroed, and the response states the overview size,
+    1024 by 13 for the 5000x64 frame, in place of a pixel fraction and seed.
     """
     from tcip_mcp.pipelines.overviews import build_overviews
 
@@ -1805,8 +1853,10 @@ def test_an_oversized_raster_without_overviews_names_the_build_endpoint_for_its_
     tmp_path: Path,
     monkeypatch,
 ):
-    """Describing it from native windows would decode most of the file to read a fraction of it,
-    so the same refusal a whole view gets applies, in the same words.
+    """The bands route refuses an oversized raster without overviews, naming the build endpoint.
+
+    The refusal carries the overviews-required error header and names
+    ``POST /api/images/overviews``.
     """
     monkeypatch.setattr(images_route, "_STATS_MAX_WINDOWS", 1)
     path = tmp_path / "wide_ms.tif"
@@ -1826,8 +1876,10 @@ def test_a_raster_within_the_sampling_budget_keeps_reading_native_pixels(
     tmp_path: Path,
     monkeypatch,
 ):
-    """The threshold admits everything under it unchanged: same exact bounds, same reported
-    sampling facts, no overview needed.
+    """A raster within the sampling budget keeps its native-pixel stats.
+
+    Under the threshold the response keeps each band's exact maximum and the sampling facts and
+    reports no overview size.
     """
     monkeypatch.setattr(images_route, "_STATS_MAX_WINDOWS", 1)
     path = tmp_path / "capture.tif"
@@ -1875,7 +1927,9 @@ def test_get_bands_carries_the_band_interpretations_a_backend_reads(
     client: TestClient,
     tmp_path: Path,
 ):
-    """What each band holds is the fact that tells an ordinary color frame from a four-band
+    """The bands route carries the band interpretations a backend reads.
+
+    What each band holds is the fact that tells an ordinary color frame from a four-band
     capture; it is reported where a backend reads it and absent where nothing does.
     """
     rgba = tmp_path / "rgba.tif"
@@ -1901,8 +1955,10 @@ def test_get_bands_carries_the_band_interpretations_a_backend_reads(
 def test_get_bands_keeps_the_three_band_early_return(
     client: TestClient, tmp_path: Path
 ):
-    """An ordinary RGB frame has no per-band symbology to show, so it costs no pixel read and the
-    response carries no sampling facts to report.
+    """The bands route answers an ordinary RGB frame with its band count alone.
+
+    An ordinary RGB frame has no per-band symbology to show, so the response carries no band
+    entries and no sampling facts.
     """
     path = tmp_path / "plain.jpg"
     Image.new("RGB", (40, 32), (5, 5, 5)).save(path)
@@ -1933,8 +1989,10 @@ def test_a_scaled_read_of_an_oversized_raster_without_overviews_names_the_build_
     client: TestClient,
     tmp_path: Path,
 ):
-    """Reading the whole of an oversized raster natively is what the display bound exists to
-    prevent, so the request is refused, naming the endpoint that makes it servable.
+    """A scaled read of an oversized raster without overviews is refused, naming the endpoint.
+
+    The refusal carries the overviews-required error header and names
+    ``POST /api/images/overviews``.
     """
     path = tmp_path / "wide.tif"
     _wide_raster(path)
@@ -1954,8 +2012,10 @@ def test_the_overview_job_makes_that_same_request_servable(
     client: TestClient,
     tmp_path: Path,
 ):
-    """The refusal admits the work it asked for: build the pyramid it named and the same view
-    serves.
+    """The overview job makes a refused oversized view servable.
+
+    The view is refused 400; the overview job completes, writing a valid sidecar of the bytes
+    it reports, and the same view then serves within the display's pixel count.
     """
     path = tmp_path / "wide.tif"
     _wide_raster(path)
@@ -1979,7 +2039,7 @@ def test_a_build_request_joins_the_one_already_running_for_that_raster(
     client: TestClient,
     tmp_path: Path,
 ):
-    """One build per raster: two builds over the same sidecar would race each other's writes."""
+    """A build request for a raster whose build is running joins that build."""
     path = tmp_path / "wide.tif"
     _wide_raster(path)
     running = images_route.OverviewJob(
@@ -2000,8 +2060,9 @@ def test_a_build_on_an_unreadable_raster_reaches_a_terminal_failure(
     client: TestClient,
     tmp_path: Path,
 ):
-    """A build that cannot even open its raster has to end as a recorded failure: a caller polls
-    this job until it reaches a terminal status, so a worker that dies mid-flight strands it.
+    """A build that cannot open its raster ends as a recorded failure.
+
+    The job's status reads failed, and it carries an error.
     """
     path = tmp_path / "broken.tif"
     path.write_bytes(b"this is not a raster")
@@ -2025,7 +2086,7 @@ def test_a_deep_zoom_region_within_the_cap_is_served_without_overviews(
     client: TestClient,
     tmp_path: Path,
 ):
-    """A region small enough to read natively needs no pyramid, however large the raster is."""
+    """A region of a raster past the pyramid floor that fits the cap serves without overviews."""
     path = tmp_path / "wide.tif"
     _wide_raster(path)
     served = _served(
@@ -2052,9 +2113,9 @@ def test_a_render_cached_under_an_older_version_key_is_not_reused(
     tmp_path: Path,
     monkeypatch,
 ):
-    """The render cache key carries ``RENDER_CACHE_VERSION``, so bumping the constant makes
-    every entry cached under the old value unreachable: a bumped version renders and caches
-    fresh, under its own key, rather than replaying what an older version wrote.
+    """A render cached under an older ``RENDER_CACHE_VERSION`` is not reused.
+
+    After a version bump the render is served under a new etag and cached as a second entry.
     """
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
@@ -2091,8 +2152,10 @@ _SUFFIXES = (
 
 
 def _cache_entry(cache_dir: Path, name: str, size: int, mtime: float) -> Path:
-    """One rendered variant on disk, a display read or a native region by turns, plus its header
-    sidecar, backdated.
+    """Write a ``size``-byte cache entry ``name`` and an empty header sidecar to ``cache_dir``.
+
+    The entry takes the display suffix when ``name`` ends in an even digit and the native
+    suffix when odd, and its modification time is set to ``mtime``.
     """
     image = cache_dir / f"{name}{_SUFFIXES[int(name[-1]) % 2]}"
     image.write_bytes(b"\xff" * size)
@@ -2110,8 +2173,9 @@ def _cached_images(cache_dir: Path) -> list[str]:
 def test_eviction_respects_the_byte_budget_and_keeps_the_newest(
     tmp_path: Path, monkeypatch
 ):
-    """Least recently used entries go first, whichever encoding they hold, each with its sidecar,
-    until the cache's total bytes fit the budget.
+    """Eviction removes the least recently used entries until the cache fits its byte budget.
+
+    Entries go whichever encoding they hold, each with its sidecar.
     """
     sidecar = len("{}")
     monkeypatch.setattr(
@@ -2163,9 +2227,9 @@ def test_the_budget_derives_once_per_process_from_free_space(
 def test_a_file_that_fails_its_header_probe_answers_400_and_a_readable_one_still_serves(
     client: TestClient, tmp_path: Path
 ):
-    """A truncated capture is the request's own fault, so the route names it at 400 instead of
-    letting the probe raise past the handler as a 500. The readable half is the same route over a
-    real frame, so the refusal cannot be a route that refuses everything.
+    """A file that fails its header probe answers 400, and a readable one still serves.
+
+    A truncated capture answers 400 saying the image could not be opened.
     """
     truncated = tmp_path / "truncated.jpg"
     truncated.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01")

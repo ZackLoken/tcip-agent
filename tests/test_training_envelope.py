@@ -1,8 +1,8 @@
 """The audited training envelope: audit-around-body, custom train(ctx) dispatch, and ctx sinks.
 
-Proves the envelope guarantees hold around any training body (default trainer or a custom
-``train(ctx)``): the run is bracketed by audit events, checkpoints saved through ``ctx`` are
-stamped, and completion writes the final status whose checkpoint the registry reads.
+The envelope's guarantees are checked around the default trainer and custom ``train(ctx)``
+bodies: the run is bracketed by audit events, checkpoints saved through ``ctx`` are stamped,
+and completion writes the final status whose checkpoint the registry reads.
 """
 
 from __future__ import annotations
@@ -47,8 +47,10 @@ def _audit_events(root, tool="training_run"):
 
 
 def _context(tmp_path, config: dict, **kwargs) -> tuple[TrainContext, Path]:
-    """A context over a run directory the launcher's own writer opened over ``config``, its run
-    training under the data section the launch resolved, as the child's own entry trains it.
+    """Return a context over a run directory the launcher's own writer opened over ``config``.
+
+    Its run is the record ``observed_run`` reads back from that directory, and its train_loader
+    is None unless ``kwargs`` give one.
     """
     from tcip_mcp.experiments import observe
     from tcip_mcp.pipelines.training.run_registry import observed_run
@@ -63,9 +65,7 @@ def _context(tmp_path, config: dict, **kwargs) -> tuple[TrainContext, Path]:
 
 
 def _bespoke(tmp_path, body: str) -> dict:
-    """A detector run over two frames of its own whose training body is ``body`` of this
-    module.
-    """
+    """Return a detector run config over two frames whose training body is ``body`` here."""
     return detection_config(
         tmp_path / "data",
         project=tmp_path,
@@ -75,7 +75,7 @@ def _bespoke(tmp_path, body: str) -> dict:
 
 
 def _agent_train(ctx):
-    """A minimal custom loop: uses ctx sinks, leaves status for the envelope to mark completed."""
+    """Assert no cancel, log one metrics row and save ``model_best`` through ctx, no status."""
     assert ctx.should_cancel() is False
     ctx.log_metrics(1, {"train_loss": 0.5, "val_loss": 0.4})
     ctx.save_checkpoint(
@@ -132,7 +132,7 @@ def test_envelope_dispatches_to_custom_train_and_guarantees_provenance(
 
 
 def _refuse_the_closing_audit_line(monkeypatch) -> None:
-    """Every ``audit.append`` but a ``running`` line raises a full-disk ``OSError``."""
+    """Make every ``audit.append`` but a ``running`` line raise a full-disk ``OSError``."""
     import tcip_mcp.audit as audit
 
     real_append = audit.append
@@ -148,7 +148,9 @@ def _refuse_the_closing_audit_line(monkeypatch) -> None:
 def test_a_run_whose_closing_audit_line_is_refused_ends_failed_naming_it(
     tmp_path, monkeypatch
 ):
-    """The body completes and saves its deliverable; the closing ``training_run`` append is
+    """A run whose closing audit line is refused ends failed, naming the line.
+
+    The body completes and saves its deliverable; the closing ``training_run`` append is
     refused, so the final status reads ``failed`` naming the unwritten line, names no checkpoint,
     and the log holds the opening line alone.
     """
@@ -164,7 +166,7 @@ def test_a_run_whose_closing_audit_line_is_refused_ends_failed_naming_it(
 
 
 def _agent_train_raises(ctx):
-    """A body that fails on its own."""
+    """Raise an error of the body's own."""
     raise RuntimeError("the body exploded")
 
 
@@ -172,8 +174,9 @@ def test_a_failed_run_whose_closing_audit_line_is_refused_names_both_causes(
     tmp_path,
     monkeypatch,
 ):
-    """The body fails and the closing append is refused: the final status names the body's
-    error and the unwritten line, neither hiding the other.
+    """A failed run whose closing audit line is refused names both causes.
+
+    The final status names the body's error and the unwritten line, neither hiding the other.
     """
     _refuse_the_closing_audit_line(monkeypatch)
     ctx, run_dir = _context(
@@ -188,18 +191,14 @@ def test_a_failed_run_whose_closing_audit_line_is_refused_names_both_causes(
 
 
 def _agent_train_default_tag_no_override(ctx):
-    """Saves under the default tag ("checkpoint"), not model_best/model_final, and never
-    calls set_final_weights. A loop like this produces no discoverable deliverable.
-    """
+    """Save one checkpoint under the default tag, ``checkpoint``, declaring no final weights."""
     ctx.save_checkpoint({STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.4}})
 
 
 def test_envelope_default_tag_with_no_override_fails_run_and_completes_nothing(
     tmp_path,
 ):
-    """A phantom deliverable (no discoverable weights) fails the run rather than completing with
-    a nonexistent path.
-    """
+    """A run saving under the default tag alone fails naming final weights and completes nothing."""
     ctx, run_dir = _context(
         tmp_path, _bespoke(tmp_path, "_agent_train_default_tag_no_override")
     )
@@ -213,9 +212,7 @@ def test_envelope_default_tag_with_no_override_fails_run_and_completes_nothing(
 
 
 def _agent_train_declares_a_path_it_never_wrote(ctx):
-    """Declares its deliverable through set_final_weights under a tag this loop never saved, the
-    file under that name written behind the context's back.
-    """
+    """Write ``never_written.pt`` directly and declare it through set_final_weights."""
     (ctx.run_dir / "never_written.pt").write_bytes(b"")
     ctx.set_final_weights("never_written")
 
@@ -223,9 +220,7 @@ def _agent_train_declares_a_path_it_never_wrote(ctx):
 def test_envelope_declared_deliverable_never_written_fails_run_and_completes_nothing(
     tmp_path,
 ):
-    """A declared tag this run's own saves never wrote ends the run failed rather than completing
-    with a file the run did not save, naming the tag.
-    """
+    """A deliverable declared but not saved through the context fails the run, naming its tag."""
     ctx, run_dir = _context(
         tmp_path,
         _bespoke(tmp_path, "_agent_train_declares_a_path_it_never_wrote"),
@@ -240,7 +235,7 @@ def test_envelope_declared_deliverable_never_written_fails_run_and_completes_not
 
 
 def _agent_train_explicit_override(ctx):
-    """Saves under a non-conventional tag, but explicitly declares it the deliverable."""
+    """Save under the tag ``custom_tag`` and declare it the final weights."""
     ctx.save_checkpoint(
         {STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.4}}, "custom_tag"
     )
@@ -276,7 +271,7 @@ def test_a_resumed_run_records_its_resume_checkpoint_and_completes(tmp_path):
     )
 
     def build_loader(run):
-        """``run``'s training loader over the six frames (``generic_trainer.run_loaders``)."""
+        """Return ``run``'s training loader, built by ``run_loaders`` over the six-frame dataset."""
         ds = dataset_over("classification", str(images_dir), str(csv_path))
         return run_loaders(run, ds, None)[0]
 
@@ -319,9 +314,10 @@ def test_a_resumed_run_records_its_resume_checkpoint_and_completes(tmp_path):
 def test_report_objective_records_a_selection_row_that_reaches_the_epoch_hook(
     tmp_path,
 ):
-    """A bespoke body's reported value is one metrics row stamping it the ``selection`` under
-    the config's selection metric, at the last epoch logged, and fires the epoch hook like any
-    row.
+    """A reported objective records a selection row that reaches the epoch hook.
+
+    A bespoke body's reported value is one metrics row stamping it the ``selection`` under
+    the config's selection metric, at the last epoch logged, and fires the epoch hook.
     """
     from tcip_mcp.experiments import METRICS_FILE, read_rows
 
@@ -347,8 +343,10 @@ def test_report_objective_records_a_selection_row_that_reaches_the_epoch_hook(
 def test_ctx_evaluate_counts_at_the_runs_validated_conf_and_takes_none_of_its_own(
     tmp_path, monkeypatch
 ):
-    """A bespoke body's evaluation counts a detector's boxes at the conf its run's validated
-    evaluation block states; a caller naming another conf is refused by the call itself.
+    """A bespoke body's evaluation is handed the run's validated conf and takes none of its own.
+
+    The stubbed ``evaluate`` receives the conf the run's validated evaluation block states, and
+    a call naming another conf raises TypeError naming ``conf_threshold``.
     """
     import tcip_mcp.pipelines.training.evaluation as evaluation
     from tests._training_values import VALIDATION_CONF

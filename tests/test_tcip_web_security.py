@@ -1,5 +1,7 @@
-"""The route-level face of the trust boundary: Host check, WS Origin check, path confinement
-on the launch and stream routes.
+"""The route-level face of the trust boundary.
+
+The tests cover the Host check, the WS Origin check, and path confinement on the launch and
+stream routes.
 """
 
 from __future__ import annotations
@@ -12,12 +14,10 @@ from starlette.websockets import WebSocketDisconnect
 
 
 class _RawHeaderList(list):
-    """A duplicate-preserving stand-in for the mapping ``websocket_connect`` expects.
+    """A list of (name, value) header pairs that keeps two pairs of one name distinct.
 
-    Passing a plain list of (name, value) pairs keeps two same-named header lines distinct
-    through the request encoding, where an ``httpx.Headers`` instance built the same way is
-    merged into one comma-joined value before it reaches the ASGI scope. ``setdefault`` is the
-    one mapping method the test transport calls, to fill in the WebSocket upgrade headers.
+    ``setdefault`` answers the value of the first pair whose name matches ignoring case, and
+    appends the pair when none does.
     """
 
     def setdefault(self, key: str, value: str) -> str:
@@ -177,7 +177,10 @@ def test_ws_inference_stream_rejects_cross_site_origin(
 def test_ws_training_stream_rejects_cross_site_origin(
     client: TestClient, opened_project
 ) -> None:
-    """A project is open, so the origin, not the absence of one, is what refuses this connect."""
+    """A training-stream connect from a cross-site origin closes as origin not allowed.
+
+    A project is open, so the origin, not the absence of a project, is what refuses it.
+    """
     with pytest.raises(WebSocketDisconnect) as closed:
         with client.websocket_connect(
             "ws://127.0.0.1/api/training/runs/does-not-exist/stream",

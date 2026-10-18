@@ -1,10 +1,7 @@
 """A trait-scoped validation through the real training subprocess.
 
-``evaluation.resolve_match_criterion`` resolves the trait's authored localization against the
-run's own validation GT and never writes the entry: a trait changes only through a proposed
-revision. This drives that through the process a training run actually executes in,
-``subprocess_worker.run``, so the boundary is covered by the entry point itself and not only by
-in-process calls.
+A training run launched under an evaluation naming a confirmed trait completes in its own
+process, and the trait's record keeps its one revision.
 """
 
 from __future__ import annotations
@@ -19,8 +16,10 @@ def test_the_subprocess_resolves_the_authored_criterion_and_leaves_the_trait_ent
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """The child resolves the trait's authored localization over the validation GT and
-    completes, and the trait's record still holds the one revision the test confirmed.
+    """The training child resolves the trait's authored criterion and leaves the entry alone.
+
+    The child runs in its own process under an evaluation naming the trait and completes, and
+    the trait's record still holds the one revision confirmed at setup.
     """
     pytest.importorskip("torchvision")
     monkeypatch.chdir(tmp_path)

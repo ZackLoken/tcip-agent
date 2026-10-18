@@ -1,9 +1,8 @@
-"""The per-epoch validation pass scores the held-out loader, never the training loader.
+"""The per-epoch validation pass scores the held-out loader, not the training loader.
 
-Every ``val_`` metric, the selection value, the best-checkpoint choice and early stopping are
-only defensible if they were measured on data the epoch did not just train on. These runs give
-the train and val sides loss landscapes that pull in opposite directions, so a validation pass
-that scored the training data would report visibly different numbers and pick a different epoch.
+These runs give the train and val sides loss landscapes that pull in opposite directions, so
+the recorded ``val_`` metrics, the selection value, the best checkpoint and early stopping each
+show which side was scored.
 """
 
 from __future__ import annotations
@@ -26,8 +25,9 @@ from tests.tiny_trainer_fixtures import (
 
 
 def _context(tmp_path, horizon: int, **overrides):
-    """The context of a regression run over opposed frames under ``tmp_path``, opened by the
-    launcher's own producer.
+    """Return the context of a regression run over opposed frames under ``tmp_path``.
+
+    The run is opened by the launcher's own producer.
     """
     data = opposed_regression_data(
         tmp_path / "ds", TRAIN_INTENSITIES, VAL_INTENSITIES
@@ -45,9 +45,11 @@ def _context(tmp_path, horizon: int, **overrides):
 
 
 def test_the_run_a_test_trains_is_the_one_its_directory_records(tmp_path):
-    """The context a training test trains holds the run ``observed_run`` reads back from the
-    directory the launcher's own producer opened, and loaders over that run's recorded partition,
-    whose validation side holds the validation frames its fixture wrote and no other.
+    """The context ``_context`` builds holds the run its directory records.
+
+    Its run is the one ``observed_run`` reads back from the directory the launcher's own producer
+    opened, its loaders hold the recorded partition's sides, and the validation side holds the
+    validation frames the fixture wrote and no other.
     """
     from tcip_mcp.experiments import observe
     from tcip_mcp.pipelines.training.run_registry import observed_run
@@ -76,8 +78,10 @@ def test_the_run_a_test_trains_is_the_one_its_directory_records(tmp_path):
 def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(
     tmp_path, monkeypatch
 ):
-    """The ``val_`` metrics an epoch records equal a real evaluation of that epoch's model on the
-    holdout loader, and differ from the same evaluation run over the training loader.
+    """An epoch's recorded ``val_`` metrics match an evaluation of the holdout loader.
+
+    They agree, within 1e-6, with a real evaluation of that epoch's model on the holdout
+    loader, and differ from the evaluation run over the training loader.
     """
     models: list = []
     capture_model(monkeypatch, models)
@@ -141,8 +145,10 @@ def test_recorded_val_metrics_match_an_evaluation_of_the_holdout_loader(
 def test_best_checkpoint_and_early_stopping_follow_the_holdout_loader(
     tmp_path, monkeypatch
 ):
-    """With holdout loss worsening while training loss improves, the run stops early and keeps the
-    first epoch's checkpoint: both decisions read the holdout loader, not the training one.
+    """The best checkpoint and early stopping follow the holdout loader.
+
+    With holdout loss worsening while training loss improves, the run stops after two of its
+    four epochs, and its best metric and ``model_best`` checkpoint are epoch 1's holdout loss.
     """
     models: list = []
     capture_model(monkeypatch, models)
