@@ -15,8 +15,11 @@ docstring-code-format = true
 preview = true
 
 # E, W: pycodestyle. N: pep8-naming. F: pyflakes. B033: a duplicate set value. I: import order.
-# UP: the modern syntax for the Python this runs on. D and ANN are the owner's next gates.
-select = ["E", "W", "N", "F", "B033", "I", "UP"]
+# UP: the modern syntax for the Python this runs on. D: pydocstyle. ANN is the owner's next gate.
+select = ["E", "W", "N", "F", "B033", "I", "UP", "D"]
+
+[lint.pydocstyle]
+convention = "pep257"
 
 [lint.pycodestyle]
 # Prose the formatter does not wrap (docstrings, comments) holds the 100 columns the tree's
@@ -28,6 +31,6 @@ known-first-party = ["tcip_store", "tcip_annotation", "tcip_mcp", "tcip_web", "t
 combine-as-imports = true
 
 [lint.per-file-ignores]
-# `name = pytest.importorskip("dep")` legitimately precedes imports in dependency-gated test
-# files, which would otherwise trip E402 (module import not at top of file).
-"tests/**" = ["E402"]
+# E402: `pytest.importorskip` precedes imports in dependency-gated test files. D100 to D107: a
+# test module, class or function needs no docstring; one it carries takes the D rules' shape.
+"tests/**" = ["E402", "D100", "D101", "D102", "D103", "D104", "D105", "D107"]
