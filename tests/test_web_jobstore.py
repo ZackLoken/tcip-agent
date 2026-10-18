@@ -14,7 +14,7 @@ STATED = Stated(
 
 
 class J:
-    """A job as the registry reads one: its status, the project it runs for, and its id."""
+    """A job holding a status, a project root and a job id."""
 
     def __init__(
         self, status: str, root: str = "root-a", job_id: str = ""
@@ -37,8 +37,10 @@ def test_evict_terminal_caps_and_keeps_running():
 
 
 def test_evict_terminal_drops_the_oldest_terminal_jobs_whichever_root_they_belong_to():
-    """The whole dict is trimmed to max_jobs, oldest terminal job of any root first, so a lone
-    recent job from a different root survives while older ones are still there to go.
+    """Trimming to max_jobs keeps a lone recent job of another root beside the first root's.
+
+    Six terminal jobs across two roots trimmed to three keep the second root's one job and two
+    of the first root's.
     """
     from tcip_web.jobstore import evict_terminal
 
@@ -51,9 +53,10 @@ def test_evict_terminal_drops_the_oldest_terminal_jobs_whichever_root_they_belon
 
 
 def test_evict_terminal_bounds_the_whole_dict_across_roots():
-    """The whole dict stays bounded at max_jobs even as more roots register their own jobs,
-    not just each root's own share: a root that has stopped receiving launches is trimmed too,
-    the leak this helper exists to close.
+    """Eviction bounds the whole job dict across roots.
+
+    The whole dict stays at max_jobs or fewer as a second root registers its jobs, and the
+    first root, which receives no more launches, is trimmed away.
     """
     from tcip_web.jobstore import evict_terminal
 
@@ -70,8 +73,11 @@ def test_evict_terminal_bounds_the_whole_dict_across_roots():
 
 
 def test_job_registry_registers_gets_lists_by_root_and_finds_or_registers():
-    """The one dict-plus-lock registry every route adopts: a job registered under a root is got
-    by id from any root, listed only under its own, and found again rather than made twice.
+    """The job registry registers, gets, lists by root, and finds or registers.
+
+    A job registered under a root is got by id and listed under its own root and not another;
+    a find matching it answers it with nothing created, and a find matching none registers
+    the job it makes.
     """
     from tcip_web.jobstore import JobRegistry
 
@@ -155,8 +161,10 @@ def test_inference_cancel_reaches_a_job_launched_for_a_previously_open_project(
     tmp_path,
     opened_project,
 ):
-    """Canceling a run one launched is legitimate work: opening another project must not make
-    the job invisible to cancel or stream, only to the list route.
+    """An inference cancel reaches a job launched for a previously open project.
+
+    After another project is opened the job is found by id and canceled, the list route lists
+    no job, and an unknown id answers 404.
     """
     from fastapi import HTTPException
 
@@ -204,8 +212,9 @@ def test_priority_queue_by_id_reaches_a_job_launched_for_a_previously_open_proje
     tmp_path,
     opened_project,
 ):
-    """Answering a ranked queue one launched is legitimate work, the same contract inference
-    already holds: opening another project must not make the job invisible by id.
+    """A priority queue reached by id answers a job launched for a previously open project.
+
+    After another project is opened the job is found by id, and an unknown id answers 404.
     """
     from fastapi import HTTPException
 

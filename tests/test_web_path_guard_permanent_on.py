@@ -1,10 +1,10 @@
-"""The web layer's path guard with no env var set: derived allow-set, identity containment, and the
-project-scoped Results doors.
+"""The web layer's path guard with no env var set.
 
-Every refusal here is paired with the legitimate call the same guard must still admit. The
-``tmp_path`` fixture is a project inside its own workspace (``<workspace>/project``), so a project
-built there is admitted by the derived rule; ``outside`` is a directory pytest creates beside that
-workspace, which no rule admits.
+The tests cover the derived allow-set, identity containment, and the project-scoped Results
+doors.
+
+The ``tmp_path`` fixture is a project inside its own workspace (``<workspace>/project``);
+``outside`` is a directory ``tmp_path_factory.mktemp`` creates.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 
 @pytest.fixture
 def outside(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """A directory beside the test's workspace that no allow-set rule admits."""
+    """Return a fresh temporary directory ``tmp_path_factory.mktemp("outside")`` creates."""
     return tmp_path_factory.mktemp("outside")
 
 
@@ -61,8 +61,10 @@ def test_a_workspace_project_reached_through_a_link_is_admitted_as_itself(
     tmp_path: Path,
     outside: Path,
 ) -> None:
-    """A project the workspace lists through a junction or symlink resolves elsewhere and must
-    still be admitted, or the front door would list a project no route can open.
+    """A workspace project reached through a link is admitted as itself.
+
+    A project the workspace lists through a junction or symlink resolves elsewhere and is
+    admitted as its resolved path.
     """
     real = new_project(outside / "linked-project").root
     link = tmp_path.parent / "linked"
@@ -103,10 +105,10 @@ def test_a_dataset_registered_to_a_workspace_project_is_admitted_wherever_it_liv
 def test_a_dataset_registered_as_the_projects_own_tree_contributes_no_relative_root(
     tmp_path: Path,
 ) -> None:
-    """register_dataset stores "." for a project's own dataset; allowed_roots must resolve that
-    entry against the project root rather than pass the bare "." into the allow-set, where a
-    same-file comparison against an unresolved "." would silently admit whatever directory the
-    server process happens to be running from.
+    """A dataset registered as the project's own tree contributes no relative root.
+
+    With the project's own tree registered as a dataset, every allowed root is absolute and the
+    project is among them.
     """
     from tcip_mcp.tools.project_tools import register_dataset
     from tcip_web.paths import allowed_roots
@@ -124,7 +126,9 @@ def test_a_dataset_registered_as_the_projects_own_tree_contributes_no_relative_r
 def test_an_imports_staging_tree_is_never_admitted_even_under_the_workspace(
     tmp_path: Path,
 ) -> None:
-    """The import door stages a half-extracted project under ``<workspace>/.imports/<uuid>/``,
+    """A path inside an import's staging tree is refused, even under the workspace.
+
+    The import door stages a half-extracted project under ``<workspace>/.imports/<uuid>/``,
     which sits under the workspace, an allowed root; a route resolving into it while the import
     is in flight still refuses.
     """
@@ -300,8 +304,10 @@ def test_the_proposals_route_confines_the_image_whose_bucket_it_reads(
 
 
 def _series(project: Path) -> Series:
-    """An assessed attributed series under ``project`` (``_chain_fixtures.attributed_series``),
-    left open in the web backend.
+    """Return an assessed attributed series under ``project``, left open in the web backend.
+
+    The series comes from ``_chain_fixtures.attributed_series`` over two dates, at open
+    fractions 0.0 and 1.0.
     """
     pytest.importorskip("torch")
     from tests._chain_fixtures import attributed_series
@@ -333,7 +339,9 @@ def test_a_delivery_from_another_projects_evidence_is_refused_by_name(
     client: TestClient,
     tmp_path: Path,
 ) -> None:
-    """Project B, open and fully set up, is handed project A's mapping and predictions: both inside
+    """A delivery from another project's evidence is refused by name.
+
+    Project B, open and fully set up, is handed project A's mapping and predictions: both inside
     the managed allow-set, neither belonging to B. No export and no audit line lands in B.
     """
     body = _series(tmp_path).body()
@@ -367,9 +375,11 @@ def test_a_delivery_from_a_dataset_registered_to_the_open_project_is_admitted(
     tmp_path: Path,
     outside: Path,
 ) -> None:
-    """Evidence living outside the workspace entirely, registered to the project, passes the
-    belonging rail. The measurement then judges the relocated buckets on its own terms, so the
-    proof here is that neither the belonging refusal nor the allow-set refusal answers.
+    """A delivery from a dataset registered to the open project is admitted.
+
+    Evidence living outside the workspace entirely, registered to the project, passes the
+    belonging rail: unregistered it is refused as not belonging, and registered it is answered
+    with neither 403 nor 409.
     """
     import shutil
 

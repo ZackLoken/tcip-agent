@@ -1,10 +1,8 @@
 """A region-scoped proposal's geometry, from the engine's crop back to the full frame.
 
-`propose_annotations(grid_cells=...)` hands the engine a crop and translates what comes back
-into the source image's own coordinates. Every consumer downstream reads that geometry as
-full-frame: the overlay the agent looks at, and the mask `stage_proposals` stages for a
-breeder to confirm. A bbox that is translated while its mask rings are not writes a polygon
-that sits where no object is, under a bbox that looks right.
+``propose_annotations(grid_cells=...)`` hands the engine a crop and translates what comes back
+into the source image's own coordinates: the reported bbox, the cached rings and the mask
+``stage_proposals`` stages all sit in the full frame.
 """
 
 from __future__ import annotations
@@ -28,10 +26,10 @@ REGION_CELLS = ["C2", "D2"]
 
 
 class PatchProposer:
-    """A proposal engine that reads its one candidate out of whatever pixels it is handed.
+    """A proposal engine answering one candidate over the pixels with R > 200, G < 60, B < 60.
 
-    Its coordinates are therefore the crop's own, produced by the region read rather than
-    written into the test, which is what makes the offset step observable.
+    The candidate's bbox and ring are those pixels' extrema in the image it opens; it answers
+    no candidate when no pixel passes.
     """
 
     def propose(self, image_path: str, **params: object) -> list[dict]:
@@ -58,7 +56,7 @@ class PatchProposer:
 
 @pytest.fixture
 def patched_frame(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A dataset image with one red patch at ``PATCH``, and the patch engine wired in."""
+    """Write a dataset image with one red patch at ``PATCH`` and wire in the patch engine."""
     from tcip_mcp.pipelines import proposal
     from tests._producer_fixtures import painted_frame
 
@@ -100,7 +98,7 @@ def test_accept_refuses_an_image_no_run_staged_proposals_for(
     patched_frame: Path,
     tmp_path: Path,
 ) -> None:
-    """Nothing staged is a refusal naming the tool to run, never an empty acceptance."""
+    """Staging for an image with no proposals is refused, naming the tool to run first."""
     from tcip_mcp.tools.proposal_tools import stage_proposals
 
     accepted = stage_proposals(
@@ -118,9 +116,11 @@ def test_region_scoped_mask_rings_are_staged_at_their_full_frame_location(
     patched_frame: Path,
     tmp_path: Path,
 ) -> None:
-    """The mask a breeder confirms covers the object, not the crop-local coordinates the engine
-    saw. The region rect starts well inside the frame on both axes, so an untranslated ring
-    lands somewhere else entirely.
+    """Region-scoped mask rings are staged at their full-frame location.
+
+    The mask a breeder confirms covers the object, not the crop-local coordinates the engine
+    saw. The region rect starts well inside the frame on both axes, and the staged ring's
+    bounds equal the patch's full-frame extent.
     """
     from tcip_annotation import json_io
     from tcip_mcp.buckets import read_bucket
@@ -154,8 +154,10 @@ def test_region_scoped_bbox_and_mask_rings_describe_the_same_place(
     patched_frame: Path,
     tmp_path: Path,
 ) -> None:
-    """The bbox the tool reports and the rings it caches are two views of one candidate: both
-    are read as full-frame, so they must not be translated by different origins.
+    """A region-scoped candidate's bbox and mask rings describe the same place.
+
+    The bbox the tool reports and the rings it caches are two views of one candidate: over a
+    region offset from the origin, the rings' bounds equal the reported bbox.
     """
     import tcip_store as ts
     from tcip_mcp.tools.proposal_tools import _staging_key_for

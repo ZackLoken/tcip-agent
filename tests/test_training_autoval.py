@@ -1,8 +1,7 @@
 """Auto train/val wiring: auto_train_val plus the detection val-loss pass.
 
 These exercise the helper that derives a group-aware val split and the generic_trainer
-``_validate`` detection path, which must be correct so a real val loader can be wired without
-crashing the run.
+``_validate`` detection path.
 """
 
 from __future__ import annotations
@@ -40,13 +39,14 @@ _TILED = tiling_block(tile_size=128, overlap=0.2)
 
 
 def _drawn(**stated) -> dict:
-    """A drawn split at seed 1 grouping each source's tiles together, with ``stated`` over it."""
+    """Return a drawn split at seed 1 grouping each source's tiles, with ``stated`` over it."""
     return drawn_split(**{"seed": 1, "grouping": "tile_prefix", **stated})
 
 
 def _manifest(partition: dict) -> dict:
-    """The within-image split the resolved ``partition`` records, read back
-    (``split_construction.partition_spatial``), its fields by name.
+    """Return the within-image split the resolved ``partition`` records, its fields by name.
+
+    The split is read back through ``split_construction.partition_spatial``.
     """
     from tcip_mcp.pipelines.data.split_construction import partition_spatial
 
@@ -58,8 +58,9 @@ def _manifest(partition: dict) -> dict:
 def _detection_dataset(
     root: Path, prefixes=("srcA", "srcB", "srcC", "srcD"), tiles=2
 ):
-    """``tiles`` labeled images per prefix in ``root``'s undated capture; the capture's
-    directory and the stems.
+    """Write ``tiles`` labeled images per prefix in ``root``'s undated capture.
+
+    Returns the capture's directory and the stems.
     """
     images_dir = root / "images" / UNDATED_BUCKET
     all_stems = []
@@ -75,9 +76,10 @@ def _detection_dataset(
 def test_a_run_naming_a_ground_truth_place_that_does_not_exist_refuses_naming_it(
     tmp_path: Path,
 ):
-    """A run states a ground-truth place only for ground truth its images' own label documents
-    do not hold, so a stated place that does not exist, or holds no masks, refuses naming
-    ``data.labels_dir`` rather than reading as no ground truth.
+    """A run naming a ground-truth place that does not exist is refused, naming it.
+
+    A stated place that does not exist, or is empty, raises naming ``data.labels_dir``; the
+    same config naming no place reads the images' own label documents.
     """
     images_dir, _stems = _detection_dataset(tmp_path / "ds")
     (tmp_path / "empty").mkdir()
@@ -136,9 +138,7 @@ def test_auto_train_val_malformed_grouping_raises(tmp_path: Path):
 
 
 def test_auto_train_val_malformed_val_ratio_refuses(tmp_path: Path):
-    """A malformed val_ratio is a caller-config error the run refuses, never a draw it skips by
-    training without validation.
-    """
+    """The run refuses a malformed val_ratio, naming the value."""
     images_dir, _all_stems = _detection_dataset(tmp_path / "ds")
     data_cfg = {
         "images_dir": str(images_dir),
@@ -150,9 +150,11 @@ def test_auto_train_val_malformed_val_ratio_refuses(tmp_path: Path):
 
 
 def test_auto_train_val_ordinal_draws_over_the_tables_own_rows(tmp_path: Path):
-    """An ordinal run's ground truth is a table, so the platform's own producer names one sample
+    """An ordinal run's draw partitions the samples of its table's own rows.
+
+    An ordinal run's ground truth is a table, so the platform's own producer names one sample
     per admitted row and the draw partitions those samples: the run gets a real validation loader
-    and a recorded partition, and each loader reads the row its own sample names.
+    and a recorded partition, and the training loader reads the row each of its samples names.
     """
     from tests.tiny_trainer_fixtures import write_regression_dataset
 
@@ -191,9 +193,10 @@ def test_auto_train_val_ordinal_draws_over_the_tables_own_rows(tmp_path: Path):
 def test_auto_train_val_single_untiled_source_refuses_validation_and_trains_without_it(
     tmp_path: Path,
 ):
-    """A single untiled source has no second group and no tiling geometry to validate on: a
-    requested validation refuses naming the zero shares that train without it, and that stated
-    choice trains.
+    """A single untiled source refuses a requested validation and builds without one if stated.
+
+    A requested val share raises naming every share zero; with a val_ratio of zero, the training
+    dataset holds the one sample and no validation dataset is built.
     """
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     _save_png(images_dir / "src_0_0.png")
@@ -212,8 +215,10 @@ def test_auto_train_val_single_untiled_source_refuses_validation_and_trains_with
 
 
 def test_auto_train_val_single_source_tiled_spatial_split(tmp_path: Path):
-    """A single tiled detection source derives a real, disjoint spatial val split instead of
-    degrading to no validation, train and val tiles sharing no tile and no strip identity.
+    """A single tiled detection source derives a real, disjoint spatial val split.
+
+    It does not degrade to no validation; train and val tiles share no tile and no strip
+    identity.
     """
     images_dir, stem = big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
@@ -245,8 +250,9 @@ def test_auto_train_val_single_source_tiled_spatial_split(tmp_path: Path):
 def test_a_single_tiled_source_with_no_val_share_refuses_by_name(
     tmp_path: Path,
 ):
-    """The spatial geometry lays its validation strip first: a reserved share beside a zero val
-    share refuses naming it, before any strip is laid.
+    """A single tiled source with a reserved share and no val share is refused by name.
+
+    The refusal asks for a val_ratio above zero.
     """
     images_dir, _stem = big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
@@ -262,12 +268,13 @@ def test_a_single_tiled_source_with_no_val_share_refuses_by_name(
 def test_spatial_manifest_tied_val_holdout_fractions_place_by_declared_order(
     tmp_path: Path,
 ):
-    """``val_ratio == holdout_ratio`` ties their shares in the center-out tie-break, so which
+    """Tied val and holdout shares are placed by declared order.
+
+    ``val_ratio == holdout_ratio`` ties their shares in the center-out tie-break, so which
     strip val lands on comes from declared (``split_names``) order alone: ``spatial_single_
     source_split`` fixes that order itself (``("train", "val", "holdout")``), so this pins the
-    resulting regions against the fixed order's own layout, the way the distinct-fractions
-    test above pins its own regions; the placement half is coverage. The manifest carries no
-    ``seed`` key; the assertion guards that absence alone.
+    resulting regions against the fixed order's own layout. The manifest carries no ``seed``
+    key.
     """
     images_dir, stem = big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
@@ -290,10 +297,11 @@ def test_spatial_manifest_tied_val_holdout_fractions_place_by_declared_order(
 def test_spatial_manifest_tied_holdout_calibration_fractions_place_by_declared_order(
     tmp_path: Path,
 ):
-    """``calibration_ratio == holdout_ratio`` ties their shares the same way; the fixed declared
-    order (``("train", "val", "holdout", "calibration")``) pins the calibration/holdout regions
-    the same way the val/holdout tie above pins its own, coverage of the placement, and the
-    manifest carries no ``seed`` key; the assertion guards that absence alone.
+    """Tied holdout and calibration shares are placed by declared order.
+
+    ``calibration_ratio == holdout_ratio`` ties their shares in the center-out tie-break; the
+    fixed declared order (``("train", "val", "holdout", "calibration")``) pins the
+    calibration/holdout regions, and the manifest carries no ``seed`` key.
     """
     images_dir, stem = big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
@@ -317,9 +325,10 @@ def test_spatial_manifest_tied_holdout_calibration_fractions_place_by_declared_o
 def test_spatial_manifest_pins_train_val_and_holdout_regions_for_distinct_fractions(
     tmp_path: Path,
 ):
-    """Coverage, not a guard: with no tied shares (0.65/0.25/0.1) the declared-order tie-break
-    does not run, so the layout comes from the fractions and tile geometry alone. The three
-    regions are pinned against this exact width, height, tile_size, overlap and fractions.
+    """The spatial manifest places the train, val and holdout regions for distinct shares.
+
+    With shares 0.65/0.25/0.1 over a 4000x3000 source, train is pinned at (1236, 0, 3630,
+    3000), val at (0, 0, 1055, 3000) and holdout at (3811, 0, 4000, 3000).
     """
     images_dir, stem = big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
@@ -339,9 +348,10 @@ def test_spatial_manifest_pins_train_val_and_holdout_regions_for_distinct_fracti
 
 
 def test_spatial_manifest_persists_train_and_val_regions_too(tmp_path: Path):
-    """train_region/val_region are persisted the same way holdout_region is: real rects, not
-    just per-region tile identities, so a later geometric disjointness check has real geometry
-    for every side, not only the reserved holdout area.
+    """The spatial manifest persists train and val regions as real rects.
+
+    train_region, val_region and holdout_region each hold real four-number rects, not just
+    per-region tile identities.
     """
     images_dir, stem = big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
@@ -368,9 +378,9 @@ def test_spatial_manifest_persists_train_and_val_regions_too(tmp_path: Path):
 def test_auto_train_val_single_source_spatial_split_ignores_a_stray_keep_regions_in_tiling(
     tmp_path: Path,
 ):
-    """A caller's tiling dict carrying its own keep_regions (meaningless in the automatic
-    single-source route, which derives its own) must never collide with the derived
-    keep_regions kwarg the spatial split passes explicitly.
+    """A single-source spatial split builds a validation loader beside a stray keep_regions.
+
+    The tiling block names its own keep_regions, and the run still has a validation side.
     """
     images_dir, stem = big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
@@ -384,9 +394,7 @@ def test_auto_train_val_single_source_spatial_split_ignores_a_stray_keep_regions
 
 
 def _two_mosaic_tiles(tmp_path: Path) -> tuple[Path, list[str]]:
-    """Two labeled stems whose default tile_prefix grouping collapses to one group; the image
-    tree and the stems.
-    """
+    """Write the labeled images ``mosaicA_0_0`` and ``mosaicA_1_1``; return their tree and stems."""
     images_dir = tmp_path / "images" / UNDATED_BUCKET
     stems = ["mosaicA_0_0", "mosaicA_1_1"]
     for stem in stems:
@@ -398,9 +406,11 @@ def _two_mosaic_tiles(tmp_path: Path) -> tuple[Path, list[str]]:
 def test_auto_train_val_degenerate_grouping_refuses_and_a_stem_grouping_draws(
     tmp_path: Path,
 ):
-    """Two stems whose default tile_prefix grouping collapses to one group hold one foreground
-    group, short of a train and a val side: the run refuses through the draw's own floor rather
-    than regrouping on its own, and the same tree grouped by stem draws both sides.
+    """A degenerate grouping is refused, and the same tree grouped by stem draws.
+
+    Two stems whose default tile_prefix grouping collapses to one group hold one foreground
+    group, short of a train and a val side: the run refuses through the draw's own floor, and
+    the same tree grouped by stem draws two disjoint sides.
     """
     images_dir, stems = _two_mosaic_tiles(tmp_path)
     data_cfg = {
@@ -427,9 +437,7 @@ def test_auto_train_val_degenerate_grouping_refuses_and_a_stem_grouping_draws(
 def test_auto_train_val_explicit_grouping_map_starving_val_refuses(
     tmp_path: Path,
 ):
-    """A caller-supplied grouping map that starves val is a deliberate leakage policy, not a
-    data limitation: the run refuses it rather than discard it for another grouping.
-    """
+    """A caller-supplied grouping map that starves val is refused through the draw's floor."""
     images_dir, stems = _two_mosaic_tiles(tmp_path)
     group_key_map = {
         f"{UNDATED_BUCKET}/{s}": "one_group_for_everything" for s in stems
@@ -448,8 +456,10 @@ def test_auto_train_val_explicit_grouping_map_starving_val_refuses(
 def test_a_calibration_ratio_of_zero_reserves_no_calibration_region(
     tmp_path: Path,
 ):
-    """With calibration_ratio stated at zero, the spatial_manifest carries no calibration_region
-    and still holds its train, val and holdout regions.
+    """A calibration_ratio stated at zero reserves no calibration region.
+
+    The spatial_manifest carries no calibration_region and still holds its train, val and
+    holdout regions.
     """
     images_dir, stem = big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
@@ -475,9 +485,10 @@ def test_a_calibration_ratio_of_zero_reserves_no_calibration_region(
 def test_a_single_source_spatial_run_builds_its_loaders_at_the_stated_band_count(
     tmp_path: Path,
 ):
-    """The sizes a run's config states reach the one-source spatial route too: a run configured
-    for one channel indexes its tile lattice and reads its tiles at one channel, rather than
-    probing its own source back to three.
+    """A single-source spatial run builds its loaders at the stated band count.
+
+    A run configured for one channel builds both loaders at one channel and reads its tiles at
+    one channel.
     """
     images_dir, stem = big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
@@ -499,8 +510,9 @@ def test_a_single_source_spatial_run_builds_its_loaders_at_the_stated_band_count
 
 
 def _within_image_context(tmp_path: Path):
-    """The context a within-image split run's body is handed, built from the run's own launch
-    record (``subprocess_worker.prepare_run_context``), with its partition and its one stem.
+    """Return a within-image split run's ``prepare_run_context`` context, partition and stem.
+
+    The run is opened by ``opened_run`` over a 4000x3000 single source.
     """
     from tcip_mcp.experiments import observe
     from tcip_mcp.pipelines.training.subprocess_worker import (
@@ -531,9 +543,10 @@ def _within_image_context(tmp_path: Path):
 def test_a_bodys_loader_on_a_within_image_split_run_holds_only_train_region_tiles(
     tmp_path: Path,
 ):
-    """A training body's loader over a within-image split run's one sample is that sample's train
-    view: every tile it serves lies inside the train region the run recorded, so no held-out pixel
-    trains.
+    """A body's loader on a within-image split run holds only train-region tiles.
+
+    A training body's loader over the run's one sample is that sample's train view: every tile
+    it serves lies inside the train region the run recorded.
     """
     from tcip_mcp.pipelines.data.split_construction import (
         partition_samples,
@@ -556,8 +569,9 @@ def test_a_bodys_loader_on_a_within_image_split_run_holds_only_train_region_tile
 def test_a_bodys_loader_on_a_within_image_split_run_refuses_another_sample_naming_its_own(
     tmp_path: Path,
 ):
-    """On a within-image split run a body's loader over a sample list that is not the run's one
-    sample refuses naming that sample.
+    """A body's loader on a within-image split run refuses another sample, naming its own.
+
+    A loader over a sample list that is not the run's one sample refuses naming that sample.
     """
     from tests._producer_fixtures import samples_over, seed_bud_images
 
@@ -570,7 +584,11 @@ def test_a_bodys_loader_on_a_within_image_split_run_refuses_another_sample_namin
 
 
 def _multiband_source(images_dir: Path, stem: str, bands: int) -> None:
-    """One annotated raster of ``bands`` bands, written the way the multi-band readers expect."""
+    """Write a ``bands``-band 40x24 TIFF ``stem`` in ``images_dir``, with a ``bud`` box label.
+
+    Each band is one ``painted_array`` band painted 255 over (28, 12, 34, 18), and the box is
+    that rectangle.
+    """
     import numpy as np
     import tifffile
 
@@ -592,9 +610,10 @@ def _multiband_source(images_dir: Path, stem: str, bands: int) -> None:
 def test_a_runs_band_count_is_read_over_every_source_and_a_disagreement_refuses(
     tmp_path: Path,
 ):
-    """The band count is one fact per run, read over every source it holds: sources that agree
-    size both loaders at the count they carry, whichever side each landed on, and one source of
-    another count refuses by name rather than leaving a side to be read at the other's count.
+    """Sources agreeing on a band count size both loaders at it, and a disagreement is refused.
+
+    Two five-band sources drawn to the two sides size both loaders at 5; adding a three-band
+    source is refused, naming the different band counts.
     """
     images_dir = tmp_path / "ds" / "images" / UNDATED_BUCKET
     for stem in ("a", "b"):
@@ -614,8 +633,9 @@ def test_a_runs_band_count_is_read_over_every_source_and_a_disagreement_refuses(
 
 
 def _probe_spy(monkeypatch) -> list[str]:
-    """Every source whose header's own band count is read, once per header read, in call
-    order.
+    """Record every source whose header's own band count is read; return the record.
+
+    A header's first band-count read appends its source, in call order.
     """
     from functools import cached_property
 
@@ -637,9 +657,10 @@ def _probe_spy(monkeypatch) -> list[str]:
 def test_a_stated_band_count_reads_every_source_at_it_and_probes_none(
     tmp_path: Path, monkeypatch
 ):
-    """A config that states how to read its sources is taken at its word: a run over an L source
-    and an RGB one, stated at one channel, builds both loaders at one channel rather than
-    deriving a disagreement it was told how to resolve, and probes no source to do it.
+    """A stated band count sizes both loaders at it and probes no source.
+
+    A run over an L source and an RGB one, stated at one channel, builds both loaders at one
+    channel and reads a train tile at one channel.
     """
     from PIL import Image
 
@@ -672,8 +693,9 @@ def test_a_stated_band_count_reads_every_source_at_it_and_probes_none(
 def test_a_runs_sources_are_probed_once_each_for_the_whole_run(
     tmp_path: Path, monkeypatch
 ):
-    """The band count is read where the run resolves its sizes and nowhere else: each source is
-    probed once for the run, not again inside every loader the run builds.
+    """Each of a run's sources is probed once for the whole run.
+
+    Four five-band sources are each probed exactly once while the run builds both loaders.
     """
     images_dir = tmp_path / "ds" / "images" / UNDATED_BUCKET
     for stem in ("a", "b", "c", "d"):
@@ -695,9 +717,9 @@ def test_a_runs_sources_are_probed_once_each_for_the_whole_run(
 def test_one_preflight_reads_a_sources_header_once_for_its_sizes(
     tmp_path: Path, monkeypatch
 ):
-    """Preflight resolves this run's sizes once and every leg that needs them takes that answer:
-    the reserved-calibration feasibility probe builds the run's own dataset at the sizes already
-    resolved rather than resolving a second time over the same source.
+    """A valid smoke preflight with a reserved calibration share reads a band count twice.
+
+    The run is a single tiled source with val, holdout and calibration shares.
     """
     from tcip_mcp.tools.training_tools import preflight_config
     from tests._verified_checkpoint_fixtures import BUILT_DETECTOR
@@ -728,8 +750,10 @@ def test_one_preflight_reads_a_sources_header_once_for_its_sizes(
 
 
 def test_a_bound_run_records_the_width_it_read_its_sources_at(tmp_path: Path):
-    """The width a run resolved is a fact about the checkpoint it produces, so the run records it
-    on its own data config: a later reader takes the recorded width rather than assuming RGB.
+    """A bound run records the band width it read its sources at on its data config.
+
+    The resolved data block records five channels, and ``recorded_model_dims`` reads them back
+    as ``in_chans``.
     """
     images_dir = tmp_path / "ds" / "images" / UNDATED_BUCKET
     for stem in ("a", "b"):
@@ -760,9 +784,7 @@ def test_a_bound_run_records_the_width_it_read_its_sources_at(tmp_path: Path):
 def test_a_calibration_ratio_adds_a_disjoint_calibration_region(
     tmp_path: Path,
 ):
-    """Admits valid work: a reserved calibration region is real, non-empty geometry, disjoint
-    from train/val/holdout.
-    """
+    """A reserved calibration region is real, non-empty geometry disjoint from the other sides."""
     images_dir, stem = big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
         "images_dir": str(images_dir),
@@ -793,11 +815,11 @@ def test_a_calibration_ratio_adds_a_disjoint_calibration_region(
 
 
 def test_a_spatial_split_raises_on_unresolvable_extent(tmp_path: Path):
-    """No width/height in the label document: the split refuses naming the document and the frame
-    it lacks, before it reads the lattice. The one source is admitted through the producer the run
-    itself admits through and its block resolved the way the run resolves it, so the split is
-    derived over the dataset the run would build; the same block over a document stating its
-    frame draws the split.
+    """A spatial split over a label document with no width/height is refused.
+
+    The refusal says the document states no positive width and height. The one source is
+    admitted through ``admit_over`` and its block resolved through ``run_sizes`` and
+    ``_with_lattice``; the same block over a document stating its frame draws a train region.
     """
     from tcip_mcp.pipelines.data.split_construction import (
         _with_lattice,
@@ -845,9 +867,10 @@ def test_a_spatial_split_raises_on_unresolvable_extent(tmp_path: Path):
 def test_single_tiled_source_raises_on_an_unreadable_label(
     tmp_path: Path, caplog
 ):
-    """A present, unreadable label document is a categorically different fact than one recording
-    no width/height: the run aborts rather than degrading to no validation over a document nobody
-    can read.
+    """A single tiled source with an unreadable label document raises.
+
+    The document is stored as a list, not an object; the run raises
+    UnreadableLabelDocumentError and logs no training without validation.
     """
     import tcip_store
     from tcip_annotation.json_io import UnreadableLabelDocumentError
@@ -870,8 +893,10 @@ def test_single_tiled_source_raises_on_an_unreadable_label(
 
 
 def test_a_spatial_split_raises_on_infeasible_layout(tmp_path: Path):
-    """Reason 2: spatial_strip_split itself cannot lay out 4 non-empty regions at this mosaic
-    size/tile size, and the refusal names the shares.
+    """A spatial split whose layout is infeasible at the mosaic size is refused.
+
+    With val, holdout and calibration shares of 0.33 each over a 4000x3000 source, the refusal
+    says the layout is infeasible at this mosaic size.
     """
     images_dir, stem = big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {
@@ -887,12 +912,10 @@ def test_a_spatial_split_raises_on_infeasible_layout(tmp_path: Path):
 
 
 def test_a_spatial_split_raises_on_empty_gt_bearing_side(tmp_path: Path):
-    """Reason 3: the strip layout itself is feasible (every side gets kept tiles), but with
-    tiling.skip_empty set, a side's tiles carrying no GT filter down to zero real samples. At
-    this exact width/tile_size/fractions, spatial_strip_split places train at x in [1275,
-    3175] (verified directly against spatial_strip_split for this test's own params); GT is
-    placed only inside that range plus calibration's own [3264, 3991], leaving val ([510,
-    1186]) and holdout ([0, 421]) both real, tiled, and entirely GT-free.
+    """A spatial split with a side holding no ground truth under skip_empty is refused.
+
+    With tiling.skip_empty set, ground truth placed between x 1300 and 3960 of a 4000-wide
+    mosaic leaves a side whose tiles carry none, and the run refuses naming zero kept tiles.
     """
     images_dir = tmp_path / "ds" / "images" / UNDATED_BUCKET
     images_dir.mkdir(parents=True, exist_ok=True)
@@ -922,8 +945,10 @@ def test_a_spatial_split_raises_on_empty_gt_bearing_side(tmp_path: Path):
 
 
 def test_a_spatial_split_records_raster_content_identity(tmp_path: Path):
-    """Mechanism 2's training-time recording: a real, decodable single-source raster gets a
-    raster_content_identity in the same spatial_manifest a claim-scope check later reads back.
+    """A spatial split records the single source raster's content identity.
+
+    A real, decodable single-source raster gets a raster_content_identity in its
+    spatial_manifest, stating its width, height and pixel checksum.
     """
     images_dir, stem = big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = {

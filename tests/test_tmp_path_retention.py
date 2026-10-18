@@ -1,7 +1,8 @@
-"""A test's workspace is emptied when the test passes and kept when it fails, under the
-``failed`` retention policy, through the suite's own ``tmp_path`` fixture loaded into a child
-session the way ``tests/conftest.py`` loads it; the emptied root stays so its numbered name is
-not handed out again.
+"""A test's workspace is emptied when the test passes and kept when it fails.
+
+This holds under the ``failed`` retention policy, through the suite's own ``tmp_path`` fixture
+loaded into a child session the way ``tests/conftest.py`` loads it; the emptied root stays as
+an empty directory.
 """
 
 from __future__ import annotations

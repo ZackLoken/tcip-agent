@@ -22,10 +22,12 @@ from tests._training_values import drawn_split, tune_arguments
 
 
 def _config(project: Path, data: dict | None = None, **keys) -> dict:
-    """A :func:`~tests._chain_fixtures.training_config` of ``project`` of a detection model no
-    body builds, declaring this module for a loop of its own, with ``keys`` in place of theirs:
-    over the data section ``data`` at the statistics of its own frames, or over no data and so
-    normalizing by pretrained weights.
+    """Return a training config of ``project`` for a detection model.
+
+    The config is a :func:`~tests._chain_fixtures.training_config` of ``unbuilt_source``'s
+    detector with this module added to its source files, with ``keys`` in place of theirs:
+    over the data section ``data``, or with no data over its weights' statistics
+    (``_chain_fixtures.weights_statistics``).
     """
     from tests._verified_checkpoint_fixtures import unbuilt_source
 
@@ -61,8 +63,9 @@ def _write_classes_json(
 
 
 def _document_dataset(root, subject="bud", attribute=None, values=None):
-    """Two images and their own label documents, under a registry naming ``subject``; the images
-    directory.
+    """Write two images and their own label documents under a registry naming ``subject``.
+
+    Returns the images directory.
     """
     from pathlib import Path
 
@@ -99,8 +102,9 @@ def _document_dataset(root, subject="bud", attribute=None, values=None):
 
 
 def _resolved_data(project, task: str, data_cfg: dict):
-    """The data block a ``task`` run of ``project`` over ``data_cfg`` resolves
-    (``split_construction.auto_train_val``).
+    """Return the data block a ``task`` run of ``project`` over ``data_cfg`` resolves.
+
+    The block is resolved through ``split_construction.auto_train_val``.
     """
     from tests._producer_fixtures import train_val
 
@@ -108,10 +112,10 @@ def _resolved_data(project, task: str, data_cfg: dict):
 
 
 def test_the_class_space_recorded_is_the_one_the_run_admitted(tmp_path):
-    """The checkpoint records the vocabulary the run trained in: the producer writes the scope it
-    admitted under onto the run's own data config, and that is what is read back, so a
-    ``subjects.json`` whose declared order changed after the admission cannot restamp the run
-    with a vocabulary it never trained in.
+    """The resolved data block's recorded scope is the one the run admitted.
+
+    The scope reads ``bud`` with no attributes, and still does after ``subjects.json`` is
+    rewritten to declare an attribute.
     """
     root = tmp_path / "plain"
     images_dir = _document_dataset(root, subject="bud")
@@ -136,8 +140,10 @@ def test_the_class_space_recorded_is_the_one_the_run_admitted(tmp_path):
 def test_a_run_over_an_attributed_subject_records_its_attributes_in_declared_order(
     tmp_path,
 ):
-    """A run's class space is its subject and every attribute the registry declares for it, its
-    values in declared order, admitted once.
+    """A run over an attributed subject records its attributes in declared order.
+
+    A run's class space is its subject and the attribute the registry declares for it, its
+    values in declared order.
     """
     from tcip_mcp.subject_registry import Attribute
 
@@ -165,9 +171,10 @@ def test_a_run_over_an_attributed_subject_records_its_attributes_in_declared_ord
 def test_a_run_whose_ground_truth_carries_its_own_classes_records_the_empty_scope(
     tmp_path,
 ):
-    """A mask raster scopes no class space and no registry answers for one, so the empty scope is
-    stamped and decode falls through to its own derivation rather than to fabricated
-    attributes.
+    """A run whose ground truth carries its own classes records the empty scope.
+
+    A mask raster scopes no class space and no registry answers for one, so the empty scope is
+    stamped.
     """
     from PIL import Image
 
@@ -196,9 +203,11 @@ def test_a_run_whose_ground_truth_carries_its_own_classes_records_the_empty_scop
 def test_the_launch_record_carries_the_resolution_and_the_child_resolves_nothing(
     tmp_path, monkeypatch
 ):
-    """The launcher resolves a run once and writes what it resolved (data section, geometry,
-    partition, trait revision) into its launch record; the child builds its context from that record
-    alone, resolving nothing again and writing nothing beside it.
+    """The launch record carries the resolution, and the child resolves nothing.
+
+    The launcher writes what it resolved (data section, geometry, partition, trait revision)
+    into its launch record; the child's context carries those values with both resolvers
+    patched to raise, and the run directory is unchanged.
     """
     from tcip_mcp.experiments import RUN_FILE, observe
     from tcip_mcp.pipelines.data import split_construction as sc
@@ -239,10 +248,10 @@ def test_the_launch_record_carries_the_resolution_and_the_child_resolves_nothing
 def test_launch_training_child_receives_its_own_run_directory(
     tmp_path, monkeypatch
 ):
-    """The child is told only its run directory, whose ``run.json`` the parent wrote before
-    spawning it, under the id the launch answers. Mocks subprocess.Popen to capture argv without
-    spawning a real child; preflight_config's smoke check still runs for real in this process, so
-    a real (tiny) bespoke model/dataset is needed.
+    """A launched training child receives its own run directory alone.
+
+    One captured child argv ends with ``--run-dir`` and the run directory of the id the launch
+    answers, and that run's record holds the launched images directory.
     """
     pytest.importorskip("torchvision")
     monkeypatch.chdir(tmp_path)
@@ -284,9 +293,11 @@ def test_launch_training_child_receives_its_own_run_directory(
 def test_ctx_should_cancel_and_dispatch_classification_honor_the_cancellation(
     tmp_path,
 ):
-    """A bespoke train(ctx) that calls ctx.should_cancel() (the taught pattern) sees a
-    cancellation requested through the run directory's own record, and dispatch_train_body
-    classifies the resulting run as 'canceled', not 'completed'.
+    """A bespoke body sees a requested cancellation and the run is classified canceled.
+
+    A bespoke train(ctx) that calls ctx.should_cancel() sees a cancellation requested through
+    the run directory's own record, and dispatch_train_body classifies the resulting run as
+    'canceled', not 'completed'.
     """
     from tcip_mcp.experiments import request_cancel
     from tcip_mcp.pipelines.training.envelope import dispatch_train_body
@@ -312,9 +323,7 @@ def test_ctx_should_cancel_and_dispatch_classification_honor_the_cancellation(
 
 
 def _bespoke_loop(ctx) -> None:
-    """Referenced by dotted path in the test above: a minimal train(ctx) that only checks
-    ctx.should_cancel(), the exact taught pattern this test is pinning.
-    """
+    """Return when ctx.should_cancel() answers true, and raise AssertionError when it is false."""
     if ctx.should_cancel():
         return
     raise AssertionError(
@@ -330,8 +339,10 @@ BESPOKE_LOOP = f"{Path(__file__).stem}:_bespoke_loop"
 
 
 def test_run_summary_reads_the_run_directory(tmp_path):
-    """A live run's summary names its config's selection metric and carries no best while no
-    row stamps a ``selection``.
+    """A live run's summary is read from its run directory.
+
+    It names its config's selection metric and carries no best while no row stamps a
+    ``selection``.
     """
     from tcip_mcp.experiments import observe, read_rows, run_summary
     from tests._verified_checkpoint_fixtures import (
@@ -367,7 +378,9 @@ def test_run_summary_reads_the_run_directory(tmp_path):
 def test_the_live_summary_folds_its_rows_in_its_configs_metric_direction(
     tmp_path, metric, best
 ):
-    """The live summary's best is folded in the declared direction of the metric the run's
+    """The live summary folds its rows in its config's metric direction.
+
+    The live summary's best is folded in the declared direction of the metric the run's
     config selects on: the same rows give the highest under a higher-is-better metric and the
     lowest under a lower-is-better one.
     """
@@ -404,8 +417,9 @@ def test_the_live_summary_folds_its_rows_in_its_configs_metric_direction(
 
 
 def test_run_summary_surfaces_the_wall_clock_failure_the_child_wrote(tmp_path):
-    """A run past its deadline stops at its next cancel poll and its own final status names the
-    wall clock; no second writer is involved.
+    """The run summary surfaces the wall-clock failure the child wrote.
+
+    A run past its deadline ends failed, and its own final status names the wall clock.
     """
     from tcip_mcp.experiments import observe, run_summary
     from tests._verified_checkpoint_fixtures import (
@@ -428,9 +442,7 @@ def test_run_summary_surfaces_the_wall_clock_failure_the_child_wrote(tmp_path):
 def test_a_canceled_run_reads_canceled_whatever_its_heartbeat(
     tmp_path, monkeypatch
 ):
-    """A final status is the answer once written: a canceled run never reads running or
-    interrupted, however stale its heartbeat.
-    """
+    """A canceled run reads canceled with its heartbeat fresh and with it stale."""
     from tcip_mcp import experiments
     from tests._verified_checkpoint_fixtures import (
         detector_declaring,
@@ -473,8 +485,9 @@ def test_monitor_training_reads_the_run_directory(tmp_path, monkeypatch):
 
 
 def test_launched_runs_view_lists_a_run_read_from_its_directory(tmp_path):
-    """A run any process launched lists, read straight from its own directory, carrying the
-    directory's last epoch and last sign of life.
+    """An opened run lists, read straight from its own run directory.
+
+    The row carries the directory's last epoch and last sign of life.
     """
     from tcip_mcp.tools.experiment_tools import list_experiments
     from tests._verified_checkpoint_fixtures import (
@@ -534,10 +547,7 @@ def test_gpu_device_pinning_round_robins(monkeypatch):
 
 
 def test_gpu_pinning_skipped_when_device_explicit(monkeypatch):
-    """CUDA_VISIBLE_DEVICES remaps indices inside the child: pinning it when the config already
-    names an explicit device would ask for an ordinal invalid in the child's own remapped view.
-    Must be a no-op whenever the config already knows which device it wants.
-    """
+    """A config naming an explicit device sets no CUDA_VISIBLE_DEVICES for the child."""
     from tcip_mcp.tools import training_tools
 
     class _FakeCuda:
@@ -582,8 +592,10 @@ def test_gpu_pinning_noop_with_single_gpu(monkeypatch):
 def test_max_wall_clock_seconds_terminates_a_hung_child_one_heartbeat_window_late(
     monkeypatch,
 ):
-    """A child that has not stopped itself one heartbeat window past its wall clock is hung: the
-    watcher terminates it and writes nothing, so its directory reads interrupted.
+    """The wall-clock watcher terminates a child that outlives its wall clock.
+
+    With a 0.2 s wall clock and a 0.2 s heartbeat window, a process sleeping 60 s is terminated
+    within 10 s.
     """
     import subprocess
     import sys
@@ -666,8 +678,9 @@ def test_inspect_compute_resources_reports_gpu_free_memory(
 
 
 def test_inspect_compute_resources_counts_a_running_run_directory(tmp_path):
-    """A run whose directory is fresh counts as active, whichever process launched it: the
-    directory alone is enough.
+    """A run whose directory is fresh counts as one more active training run.
+
+    The directory alone is enough.
     """
     from tcip_mcp.tools.training_tools import inspect_compute_resources
     from tests._verified_checkpoint_fixtures import opened_run
@@ -736,8 +749,10 @@ def test_default_trial_resources_no_gpu(monkeypatch):
 
 @pytest.mark.ray_cluster
 def test_tune_search_accepts_explicit_resources_per_trial(tmp_path):
-    """A real, lightweight Ray sweep (a pure-math objective, no training) runs to its end with an
-    explicit resources_per_trial, its experiment store at the caller's sweep_dir.
+    """A Ray sweep runs to its end with an explicit resources_per_trial.
+
+    The sweep runs a pure-math objective over four samples, and its named sweep_dir exists
+    afterward.
     """
     pytest.importorskip("ray")
     from tcip_mcp.pipelines.training.hpo import tune_search
@@ -760,10 +775,10 @@ def test_tune_search_accepts_explicit_resources_per_trial(tmp_path):
 def test_tune_search_runs_despite_deprecated_ray_result_dir_variables(
     tmp_path, monkeypatch
 ):
-    """Ray Tune refuses to run while TUNE_RESULT_DIR or RAY_AIR_LOCAL_CACHE_DIR is set anywhere
-    in the environment, even though sweep_dir alone decides where trial results land. A
-    machine that still carries such a redirect must get a working sweep, stored at the
-    caller's sweep_dir, with the variables left in the environment exactly as they were.
+    """A sweep runs despite deprecated Ray result-directory variables in the environment.
+
+    With TUNE_RESULT_DIR and RAY_AIR_LOCAL_CACHE_DIR set, the named sweep_dir exists afterward
+    and both variables keep their values.
     """
     import os
 

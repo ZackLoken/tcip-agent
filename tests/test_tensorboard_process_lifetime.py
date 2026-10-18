@@ -1,20 +1,15 @@
 """A TensorBoard child's life is tied to the process that launched it.
 
-Each test here spawns a real parent process (``_tensorboard_parent.py``) that launches a real
-child through the manager, with the child's own command swapped for a sleep loop so no
-TensorBoard install is required, then watches what becomes of the child once the parent is gone.
-The parent prints the pid ``launch_tensorboard`` returned and the TensorBoard stand-in's own pid
-on one line; on POSIX these differ only when the tie is in place, since a guardian process then
-sits in front of the stand-in, and both deaths are asserted. On Windows, and under ``--no-tie``
-where no guardian exists, the two pids are the same, so the ``--no-tie`` test asserts one process.
-The normal-exit test disables the platform tie (``--no-tie``) so it proves the ``atexit`` hook
-alone, since the job object and the guardian each end the child on a normal exit too; the
-hard-kill tests keep the tie and prove it directly, one launching from the main thread and one
-from a background thread that has already exited by the time the parent is killed. The
-stop-path test launches in-process instead, to prove ``stop_tensorboard`` itself ends a child
-that ignores SIGTERM before the call returns. The guardian usage-error tests run the guardian's
-own ``python -m`` entry point directly, with no parent process spawned at all, since they are
-proving the argument parser's refusals rather than any process lifetime.
+A real parent process (``_tensorboard_parent.py``) launches a real child through the manager,
+with the child's own command swapped for a sleep loop, and whether the child lives is checked
+after the parent is gone. The parent prints the pid
+``launch_tensorboard`` returned and the TensorBoard stand-in's own pid on one line; on POSIX
+these differ when the tie is in place, since a guardian process sits in front of the
+stand-in, and on Windows or under ``--no-tie`` they name one process. Under ``--no-tie`` the
+``atexit`` hook alone ends the child on a normal exit; with the tie kept, a hard kill of the
+parent ends it, whether the launch ran on the main thread or on a background thread that has
+exited. ``stop_tensorboard`` is driven in-process, and the guardian's argument refusals run
+through its own ``python -m`` entry point with no parent process.
 """
 
 from __future__ import annotations
@@ -35,7 +30,7 @@ _DEATH_TIMEOUT = 10.0
 
 
 def _same_process(pid: int, create_time: float) -> psutil.Process | None:
-    """The live process at ``pid``, or ``None`` if it is gone or the pid has been reused."""
+    """Return the live process at ``pid``, or ``None`` if it is gone or the pid was reused."""
     try:
         proc = psutil.Process(pid)
         return proc if proc.create_time() == create_time else None
@@ -102,12 +97,11 @@ def _spawn_parent(tmp_path: Path, mode: str, *flags: str) -> subprocess.Popen:
 def _read_pids(
     parent: subprocess.Popen,
 ) -> tuple[tuple[int, float], tuple[int, float]]:
-    """The pid ``launch_tensorboard`` returned and the TensorBoard stand-in's own pid, each read
-    and paired with its creation time immediately as it arrives, since a pid's identity is bound
-    to the process alive at the moment its creation time was captured, not to the number itself.
+    """Return the pid ``launch_tensorboard`` returned and the stand-in's own, each timed.
 
-    Raises naming the parent's stderr if the pid line never arrives, so a parent that died before
-    printing is diagnosed rather than failing on an empty line's unpacking.
+    Each pid is paired with its creation time as soon as it is read.
+
+    Raises RuntimeError naming the parent's stderr when the parent prints no pid line.
     """
     line = parent.stdout.readline()
     if not line:
@@ -188,9 +182,7 @@ def test_child_is_gone_within_ten_seconds_of_a_normal_exit(tmp_path):
 def test_stop_ends_a_child_that_ignores_sigterm_before_the_call_returns(
     monkeypatch, tmp_path
 ):
-    """A stand-in that ignores SIGTERM is ended by the guardian before ``stop_tensorboard``
-    returns.
-    """
+    """A stand-in that ignores SIGTERM is ended before ``stop_tensorboard`` returns."""
     from tcip_mcp.pipelines.training import tensorboard_manager as tb
 
     monkeypatch.setattr(
@@ -256,9 +248,7 @@ def test_stop_ends_a_child_that_ignores_sigterm_before_the_call_returns(
 
 
 def _run_guardian(*args: str) -> subprocess.CompletedProcess:
-    """Run the guardian's real ``python -m`` entry point with ``args``, so a usage-error
-    assertion exercises the actual subprocess boundary rather than ``_parse_args`` alone.
-    """
+    """Run the guardian's real ``python -m`` entry point with ``args``; return the result."""
     return subprocess.run(
         [
             sys.executable,
@@ -273,8 +263,9 @@ def _run_guardian(*args: str) -> subprocess.CompletedProcess:
 
 
 def test_guardian_usage_error_for_a_missing_term_grace():
-    """The guardian's own argument parsing refuses a missing --term-grace with the usage
-    message rather than a traceback, run as the real subprocess entry point.
+    """The guardian refuses a missing --term-grace with its usage message.
+
+    Run through its real subprocess entry point, it exits 1 with the usage message on stderr.
     """
     from tcip_mcp.pipelines.training import tensorboard_guardian as guardian
 
@@ -286,7 +277,7 @@ def test_guardian_usage_error_for_a_missing_term_grace():
 
 
 def test_guardian_usage_error_for_a_non_integer_parent():
-    """A --parent that does not parse as an integer is a usage error, not a traceback."""
+    """A --parent that does not parse as an integer exits 1 with the usage message."""
     from tcip_mcp.pipelines.training import tensorboard_guardian as guardian
 
     result = _run_guardian(
@@ -304,7 +295,7 @@ def test_guardian_usage_error_for_a_non_integer_parent():
 
 
 def test_guardian_usage_error_for_a_non_numeric_term_grace():
-    """A --term-grace that does not parse as a float is a usage error, not a traceback."""
+    """A --term-grace that does not parse as a float exits 1 with the usage message."""
     from tcip_mcp.pipelines.training import tensorboard_guardian as guardian
 
     result = _run_guardian(
@@ -341,8 +332,9 @@ def test_guardian_usage_error_for_a_negative_term_grace():
 
 @pytest.mark.parametrize("term_grace", ["nan", "inf"])
 def test_guardian_usage_error_for_a_non_finite_term_grace(term_grace):
-    """Nan and inf both parse as floats but name no usable escalation wait, so both are usage
-    errors rather than a grace the guardian would wait on forever or not at all.
+    """The guardian refuses a non-finite --term-grace with its usage message.
+
+    Nan and inf both parse as floats; each exits 1 with the usage message.
     """
     from tcip_mcp.pipelines.training import tensorboard_guardian as guardian
 
@@ -362,8 +354,9 @@ def test_guardian_usage_error_for_a_non_finite_term_grace(term_grace):
 
 @pytest.mark.parametrize("parent_pid", ["0", "-1"])
 def test_guardian_usage_error_for_a_non_positive_parent(parent_pid):
-    """A --parent of zero or less parses as an integer but names no real process, so it is a
-    usage error rather than a pid the guardian would poll forever.
+    """The guardian refuses a --parent of zero or less with its usage message.
+
+    Such a value parses as an integer; it exits 1 with the usage message.
     """
     from tcip_mcp.pipelines.training import tensorboard_guardian as guardian
 

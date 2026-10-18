@@ -25,9 +25,10 @@ def _event(
     started: str | None = None,
     contribution_id: str | None = None,
 ):
-    """Post one contribution to the project ``project_id`` names, in the session ``started``
-    names or, with ``None``, in the person's latest session of the open project; a fresh
-    contribution unless ``contribution_id`` names one.
+    """Post one contribution to the project ``project_id`` names.
+
+    The post carries ``started`` as given, and a fresh contribution id unless ``contribution_id``
+    names one.
     """
     return client.post(
         "/api/sessions/image_event",
@@ -53,12 +54,12 @@ def _end(client: TestClient, project_id: str, started: str):
 
 
 def _stamp(resp) -> str:
-    """The start stamp of the session a contribution's answer says it is recorded in."""
+    """Return the start stamp of the session a contribution's answer says it is recorded in."""
     return resp.json()["session"]["started"]
 
 
 def _open_session(client: TestClient, project_id: str) -> str:
-    """One contribution to ``project_id`` by alice; the start stamp of the session it opened."""
+    """Post one contribution to ``project_id`` by alice; return its session's start stamp."""
     resp = _event(client, project_id, "IMG_A", 5.0, 2, "new_annotation")
     assert resp.status_code == 200, resp.text
     return _stamp(resp)
@@ -71,7 +72,9 @@ def _load(client: TestClient) -> dict:
 def test_throughput_is_derived_from_the_stored_entries(
     client: TestClient, opened
 ) -> None:
-    """The derived figures are the images with additions, the additions, every second, the
+    """A session's throughput figures are derived from its stored entries.
+
+    The derived figures are the images with additions, the additions, the total seconds, the
     seconds by activity, and the seconds of the images with additions per addition; the record
     stores the entries alone, each naming its activity.
     """
@@ -133,7 +136,9 @@ def test_end_marks_the_session_the_contribution_opened_ended_at_a_utc_instant(
     client: TestClient,
     opened,
 ) -> None:
-    """A contribution answers with the start stamp of the session it landed in, and that stamp
+    """An end marks the session a contribution opened ended at a timezone-aware instant.
+
+    A contribution answers with the start stamp of the session it landed in, and that stamp
     with the project's id is what ends the session; a second end of the same session is a
     no-op, and the next contribution opens a new one.
     """
@@ -161,9 +166,10 @@ def test_end_marks_the_session_the_contribution_opened_ended_at_a_utc_instant(
 def test_an_end_naming_another_projects_session_is_refused_and_ends_nothing(
     tmp_path: Path, client: TestClient
 ) -> None:
-    """A page that recorded a session in one project ends that session and no other: once the
-    backend has another project open, its end is refused and the session open there stays
-    open. The departed project's session was ended by the departure itself.
+    """An end naming another project's session is refused and ends nothing.
+
+    With Hill open, an end naming Valley's session answers 409 naming Hill, and Hill's session
+    stays open. Valley's session was ended by the departure, under one audit line.
     """
     from tests._web_fixtures import named_project
 
@@ -201,9 +207,7 @@ def test_an_end_naming_another_projects_session_is_refused_and_ends_nothing(
 
 
 def _two_open_sessions(client: TestClient, project_id: str) -> list[str]:
-    """Alice's then Bob's contribution to ``project_id``, leaving both their sessions unended;
-    their start stamps.
-    """
+    """Post Alice's then Bob's contribution to ``project_id``; return their start stamps."""
     alice = _open_session(client, project_id)
     bob = _event(
         client, project_id, "IMG_B", 2.0, 1, "new_annotation", user="bob"
@@ -213,8 +217,10 @@ def _two_open_sessions(client: TestClient, project_id: str) -> list[str]:
 
 
 def _assert_departed(project, started: list[str]) -> None:
-    """Every session ``started`` names is ended in ``project``, each with one line by its
-    person.
+    """Assert the sessions ended in ``project`` are exactly the ones ``started`` names.
+
+    The ``session_ended`` lines name exactly those starts, one by ``user:alice`` and one by
+    ``user:bob``.
     """
     sessions = tcip_store.read(annotation_stats_key(str(project.root)))[
         "sessions"
@@ -278,10 +284,11 @@ def test_requests_during_a_departure_never_act_on_the_next_project_with_the_depa
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    """While opening Hill holds Valley's departure transaction open, a navigation request that
-    has read Valley and its selection, and a contribution naming no session, both wait for the
-    switch: neither pairs Hill with Valley's state nor opens a session in Valley after its
-    sessions were ended.
+    """Requests made while a departure is held open answer 409.
+
+    While opening Hill holds Valley's departure transaction open, a navigation request that
+    has read Valley and its selection, and a contribution naming no session, both answer 409:
+    Hill holds no state snapshot and Valley holds no session record.
     """
     import contextlib
     import threading
@@ -382,8 +389,10 @@ def test_a_contribution_naming_an_unended_session_lands_whatever_project_is_open
     client: TestClient,
     monkeypatch,
 ) -> None:
-    """A contribution names its session, so one for Valley lands in Valley's unended session
-    while a backend started afresh has Hill open.
+    """A contribution naming an unended session lands there while another project is open.
+
+    A contribution for Valley lands in Valley's unended session while a backend started afresh
+    has Hill open.
     """
     import asyncio
 
@@ -460,7 +469,9 @@ def test_a_contribution_committed_without_its_line_answers_the_session_it_opened
     opened,
     monkeypatch,
 ) -> None:
-    """When the contribution's line cannot be appended, the 409 carries the answer the write
+    """A contribution committed without its audit line answers the session it opened.
+
+    When the contribution's line cannot be appended, the 409 carries the answer the write
     earned, the session's start stamp included, and that stamp ends the session.
     """
     from tcip_mcp import audit
@@ -493,8 +504,9 @@ def test_two_sessions_of_one_project_never_share_a_start_stamp(
     opened,
     monkeypatch,
 ) -> None:
-    """Two sessions opening in one clock instant get distinct stamps, the second one microsecond
-    past the first, and each stamp ends its own session.
+    """Two sessions opening in one clock instant get distinct start stamps.
+
+    The second stamp is one microsecond past the first, and each stamp ends its own session.
     """
     from tcip_web.routes import sessions
 
@@ -615,10 +627,10 @@ def test_a_repeat_of_an_unnamed_contribution_answers_the_session_it_landed_in_an
     client: TestClient,
     opened,
 ) -> None:
-    """Two contributions naming no session land in one session; the first's answer is lost and
-    the session ended before it is sent again. The repeat answers that session and that it
-    ended, which a page that learned the session from the second can act on, and is recorded
-    once.
+    """A repeated unnamed contribution answers the session it landed in and that it ended.
+
+    Two contributions naming no session land in one session, which then ends, and the first is
+    sent again. The repeat answers that session and that it ended, and adds no entry.
     """
     _event(
         client,
@@ -685,7 +697,9 @@ def test_each_session_write_leaves_one_line_by_the_sessions_person(
 def test_an_end_names_its_own_session_and_not_the_latest(
     client: TestClient, opened
 ) -> None:
-    """A page ends the session its stamp names wherever it sits in the project's list; a newer
+    """An end closes the session its stamp names, not the latest.
+
+    A page ends the session its stamp names wherever it sits in the project's list; a newer
     session another person opened since stays open.
     """
     alice_started = _stamp(
@@ -736,8 +750,10 @@ def test_load_missing_returns_empty_shape(opened_client: TestClient) -> None:
 def test_the_session_routes_refuse_while_no_project_is_open(
     client: TestClient, made
 ) -> None:
-    """A contribution naming a project while none is open, and a load, each answer the
-    backend's none-open refusal.
+    """The session routes answer the none-open refusal while no project is open.
+
+    A contribution naming a project while none is open, and a load, each answer the backend's
+    none-open refusal.
     """
     for resp in (
         _event(client, made.id, "IMG_A", 1.0, 0, "review"),

@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 @pytest.fixture
 def workspace_dir(tmp_path: Path) -> Path:
-    """A fresh workspace the backend is started with."""
+    """Configure and return a fresh workspace the backend is started with."""
     from tcip_web.state import store
 
     ws = (tmp_path / "ws").resolve()
@@ -31,8 +31,9 @@ def workspace_dir(tmp_path: Path) -> Path:
 def _make_project(
     ws: Path, name: str, *, dates=(), subjects=()
 ) -> OpenProject:
-    """A workspace project made by ``tests._web_fixtures.named_project``, its display name
-    ``name``, holding one image per date and the named subjects.
+    """Make a workspace project through ``tests._web_fixtures.named_project``.
+
+    Its display name is ``name``, and it holds one image per date and the named subjects.
     """
     from PIL import Image
 
@@ -147,9 +148,9 @@ def test_projects_report_per_date_subject_model_availability(
 
 
 def test_projects_report_a_label_problem_and_still_list(client, workspace_dir):
-    """A corrupt label under one project must not 500 the whole listing (mirrors
-    record_problem): the project still lists, its other dates are unaffected, and the document
-    is named.
+    """A corrupt label under one project is reported without failing the whole listing.
+
+    The project still lists, its other dates are unaffected, and the document is named.
     """
     from tcip_annotation.state import Annotation, BBox
     from tests._producer_fixtures import image_label_key, label_image
@@ -251,10 +252,12 @@ def test_opening_a_project_naming_no_one_is_refused_and_opens_nothing(
 def test_list_reports_record_fields_across_four_project_states(
     client, workspace_dir
 ):
-    """A project with a record, one with ``.tcip`` and nothing else, one whose record is
+    """The listing reports each project's record fields or why they are absent.
+
+    A project with a record, one with ``.tcip`` and nothing else, one whose record is
     undecodable, and one whose record decodes to something else: all four list, each with its
     record's fields or the ``record_problem`` naming why they are absent. The recordless one gets
-    no database published under it by the listing, the store's own guarantee at this surface.
+    no database published under it by the listing.
     """
     import tcip_store
     from tcip_mcp.project_record import project_record_key
@@ -350,8 +353,9 @@ def test_a_last_opened_pointer_naming_a_missing_project_is_named_and_opens_nothi
 
 
 def _correction(project_id: str, user: str = "tester") -> dict:
-    """An invariances correction request built by the route's own model: no vertical flip, and
-    rotation up to 5 degrees.
+    """Return an invariances correction request built by the route's own model.
+
+    The correction states no vertical flip, and rotation up to 5 degrees.
     """
     from tcip_mcp.project_record import CaptureInvariances
     from tcip_web.routes.projects import InvariancesRequest

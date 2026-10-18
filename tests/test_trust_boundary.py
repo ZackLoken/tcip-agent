@@ -1,6 +1,7 @@
-"""The network trust boundary's own policy functions: the authority parser, the arrival, the Host
-and the Origin rule against a constructed ASGI scope. The boundary as the app applies it is
-covered in test_trust_boundary_routes.py.
+"""The network trust boundary's own policy functions.
+
+The tests cover the authority parser, the arrival, the Host and the Origin rule against a
+constructed ASGI scope.
 """
 
 from __future__ import annotations

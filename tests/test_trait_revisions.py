@@ -1,9 +1,11 @@
-"""One trait record with revisions: proposed through one tool, confirmed through one door, and
-named by every delivery that ships under it.
+"""One trait record with revisions.
+
+Each revision is proposed through one tool, confirmed through one door, and named by the
+deliveries that ship under it.
 
 A proposal appends an unconfirmed revision and nothing ships under it; the breeder's confirmation
-of one revision, by number and the hash of the entry shown, covers its spec fields and every
-operationalization it states together; a later proposal leaves deliveries under the earlier
+of one revision, by number and the hash of the entry shown, covers its spec fields and the
+operationalizations it states together; a later proposal leaves deliveries under the earlier
 confirmed revision until it is confirmed itself; the delivery event names the revision.
 """
 
@@ -36,8 +38,10 @@ def _count_entry(**fields) -> traits.TraitEntry:
 
 
 def _bucket(root: Path):
-    """``root``'s one unassessed bucket ``counts/2026-02-11`` of three detections on one frame of
-    the dataset ``ds``, published on first use (``_chain_fixtures.published``); the bucket.
+    """Return ``root``'s one unassessed bucket ``counts/2026-02-11``, publishing it on first use.
+
+    The bucket holds three detections on one frame of the dataset ``ds``, published through
+    ``_chain_fixtures.published``.
     """
     pytest.importorskip("torch")
     import tcip_store
@@ -62,7 +66,7 @@ def _bucket(root: Path):
 
 
 def _deliver_counts(root: Path, name: str) -> dict:
-    """One per-image count delivery of the count trait at ``root``, returning its event."""
+    """Deliver per-image counts of the count trait at ``root``; return the delivery's event."""
     from tcip_mcp.pipelines.postprocessing.export import (
         deliver_per_image_counts_csv,
     )
@@ -168,8 +172,10 @@ def test_a_later_proposal_leaves_deliveries_under_the_confirmed_one_until_it_is_
 def test_one_confirmation_covers_every_delivery_kind_the_revision_states(
     tmp_path: Path,
 ) -> None:
-    """Spec fields and the operationalization text of every kind are one entry and one
-    confirmation: confirming revision 1 makes each kind it states deliverable.
+    """One confirmation covers every delivery kind the revision states.
+
+    Confirming revision 1, stating a per-image count and a per-plant aggregate, makes both
+    deliverable under revision 1.
     """
     from tests._chain_fixtures import deliver_acknowledged
 
@@ -352,9 +358,10 @@ def test_a_proposal_is_admitted_once_and_a_stored_record_decodes_without_the_voc
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The vocabulary is read once per proposal, by its admission; reading a stored record never
-    reads it, so a crops.yml that no longer names a phenotype leaves a confirmed revision
-    readable and deliverable.
+    """A proposal reads the vocabulary once, and a stored record decodes without it.
+
+    The vocabulary is read once per proposal; with the vocabulary reading empty, a confirmed
+    revision still reads back and delivers.
     """
     confirmed = fx.propose_and_confirm(tmp_path, _count_entry())
     real = traits._crops_traits
@@ -380,9 +387,7 @@ def test_a_proposal_is_admitted_once_and_a_stored_record_decodes_without_the_voc
 
 
 def test_the_entry_hash_covers_every_field_and_ignores_sequence_type() -> None:
-    """A field the confirmation authorizes and the hash misses would let an entry change under a
-    click the breeder gave to other text.
-    """
+    """The entry hash moves with each spec field and the operationalization, not sequence type."""
     entry = _count_entry()
     baseline = traits.entry_sha256(entry)
     dumped = entry.model_dump()
@@ -566,8 +571,10 @@ def test_the_confirmation_writes_its_own_audit_line_after_its_record(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The library confirmation records itself, whoever calls it, and the record is already
-    written when its audit line is appended.
+    """The confirmation writes its own audit line after its record.
+
+    The library confirmation records itself, and the revision reads confirmed when its audit
+    line is appended.
     """
     import tcip_mcp.audit as audit_module
 

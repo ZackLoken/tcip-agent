@@ -1,4 +1,4 @@
-"""The web inference job runs through the pipeline's GenericPredictor."""
+"""The web inference worker, with the pipeline's ``GenericPredictor`` building a stub."""
 
 from pathlib import Path
 
@@ -13,15 +13,16 @@ BUCKET = "out/2026-01-01"
 
 
 def _checkpoint(project: Path, **kwargs) -> Path:
-    """A checkpoint registered in ``project``, completed by a real run (``kwargs`` are its own)."""
+    """Return the checkpoint ``project_checkpoint`` registers in ``project``, passing ``kwargs``."""
     from tests._verified_checkpoint_fixtures import project_checkpoint
 
     return Path(project_checkpoint(project, **kwargs))
 
 
 def _one_image(project: Path, *stems: str) -> Path:
-    """A 100px image per stem (``img`` by default) in ``project``'s undated capture; the capture's
-    directory.
+    """Write a black 100x100 ``<stem>.jpg`` per stem (``img`` by default) in the undated capture.
+
+    Returns the capture's directory.
     """
     from tcip_mcp.dataset_layout import UNDATED_BUCKET, image_dir
     from tests._producer_fixtures import write_image
@@ -57,7 +58,7 @@ def _job(
 def _annotations(
     project: Path, stem: str = "img", bucket: str = BUCKET
 ) -> list[dict]:
-    """The records of ``stem``'s published prediction document under ``bucket``."""
+    """Return the records of ``stem``'s published prediction document under ``bucket``."""
     import tcip_store
     from tcip_mcp.dataset_layout import prediction_key
 
@@ -171,8 +172,10 @@ def test_web_worker_uses_generic_predictor_and_publishes_its_documents(
 def test_web_worker_prefers_the_checkpoints_own_recorded_scope(
     tmp_path, monkeypatch
 ):
-    """The GUI inference worker decodes through the checkpoint's own recorded scope, never an
-    order re-read from a live registry: no subjects.json exists over the images at all.
+    """The GUI inference worker decodes through the checkpoint's own recorded scope.
+
+    No subjects.json exists over the images; the object's attribute decodes to ``open``, and
+    the bucket's scope carries the recorded attribute.
     """
     pytest.importorskip("fastapi")
     from tcip_mcp import subject_registry as cr
@@ -218,8 +221,10 @@ def test_web_worker_prefers_the_checkpoints_own_recorded_scope(
 def test_web_worker_runs_tiled_instance_seg_without_forcing_untiled(
     tmp_path, monkeypatch
 ):
-    """An instance_seg checkpoint launched with the GUI's tile checkbox checked runs tiled as
-    requested, its stated merge threshold recorded as stated.
+    """An instance_seg checkpoint launched tiled from the GUI hands its predictor a tiled pass.
+
+    The job completes stating tile, the bucket's execution records a tiled pass, and the
+    recorded merge threshold's source is ``explicit``.
     """
     pytest.importorskip("fastapi")
     from tcip_mcp.buckets import read_bucket
@@ -263,10 +268,10 @@ def test_web_worker_runs_tiled_instance_seg_without_forcing_untiled(
 def test_web_worker_runs_a_native_frame_tile_scale_and_forwards_its_recorded_resize(
     tmp_path, monkeypatch
 ):
-    """A checkpoint whose only geometry is its own uniform untiled training frame does justify a
-    tile edge, so this door runs rather than refusing: the record names that basis and the
-    prediction call runs at the resolved tile edge plus the checkpoint's recorded train-time
-    resize.
+    """The GUI worker hands its predictor a native-frame tile scale and the recorded resize.
+
+    For a checkpoint whose geometry is its untiled 64x64 training frame, the predictor's one
+    execution carries tile edge 64, sourced ``native_ratio``, and the recorded 128x128 resize.
     """
     pytest.importorskip("fastapi")
     from tcip_web.routes.inference import _worker
@@ -318,8 +323,10 @@ def _sources(project: Path) -> dict:
 def test_web_worker_stamps_the_stated_conf_explicit_and_the_checkpoints_density(
     tmp_path, monkeypatch
 ):
-    """A caller-stated conf is recorded 'explicit', the same distinction tile/tile_size already
-    carry, and the density no caller states is the checkpoint's own recorded one.
+    """The GUI worker records a stated conf's source as explicit and the density's as derived.
+
+    The job completes with one published annotation, and the recorded sources read
+    ``explicit`` for conf and ``derived`` for density.
     """
     from tcip_web.routes.inference import _worker
     from tests._verified_checkpoint_fixtures import SAMPLE_CONF
@@ -352,8 +359,9 @@ def test_web_worker_stamps_the_stated_conf_explicit_and_the_checkpoints_density(
 def test_web_worker_fails_a_job_stating_no_conf_naming_it(
     tmp_path, monkeypatch
 ):
-    """A job stating no conf has no basis for one: the worker's pass refuses naming it, and the
-    job fails with that refusal rather than running at a value nobody stated.
+    """A GUI inference job stating no conf fails, naming it.
+
+    The job's status reads failed, and its error names conf.
     """
     from tcip_web.routes.inference import _worker
 
@@ -378,9 +386,10 @@ def test_web_worker_dropped_boxes_agree_with_the_published_document_on_a_degener
     tmp_path,
     monkeypatch,
 ):
-    """A box that collapses to zero width is dropped when the prediction document is encoded, so
-    the job's own dropped-box counter and the published document must agree: one of the model's
-    two raw detections dropped, exactly one kept, never the model's raw output count.
+    """The job's dropped-box count agrees with the published document on a degenerate box.
+
+    Of the model's two raw detections, one has zero width: the job counts one dropped box, and
+    the published document holds one object.
     """
     pytest.importorskip("fastapi")
     from tcip_web.routes.inference import _worker
@@ -419,10 +428,11 @@ def test_web_worker_dropped_boxes_agree_with_the_published_document_on_a_degener
 
 
 def test_web_worker_fails_the_job_on_a_stem_collision(tmp_path):
-    """The worker's pass enumerates through ``image_utils.list_logical_images``, the same
-    enumeration every reader shares: a capture already holding two logical identities under one
-    case-folded stem fails the job with the refusal's own message, through the worker's own
-    ``except Exception`` handler, rather than crashing the worker thread.
+    """The GUI worker fails the job on a stem collision.
+
+    The worker's pass enumerates through ``image_utils.list_logical_images``: a capture holding
+    two logical identities under one case-folded stem fails the job with an error naming the
+    logical image.
     """
     from tcip_web.routes.inference import _worker
 

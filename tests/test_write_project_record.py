@@ -1,8 +1,8 @@
 """Tests for tcip write-project-record, run by subprocess against a project on disk.
 
-The command corrects a site or the capture invariances typed wrong once, keeping every other field
-of the record, and names the person making the correction; every project here is created through
-``initialize_project`` first.
+The command corrects a mistyped site or capture invariances, keeping every other field of the
+record, and names the person making the correction; the project is the suite's ``project``
+fixture, made through the platform's own creation door.
 """
 
 from __future__ import annotations

@@ -22,8 +22,10 @@ def _opened(
     tmp_path: Path,
     builder: str = "my_models:chestnut_burr_det",
 ):
-    """A detector run built by ``builder``, its module an empty file of its own, over two frames
-    of its own under ``tmp_path``, opened by the launcher's own producer and writer.
+    """Open a detector run built by ``builder`` over two frames of its own under ``tmp_path``.
+
+    The builder's module is an empty file of its own, and the run is opened by the launcher's
+    own producer and writer.
     """
     from tests._chain_fixtures import FRAME_STATISTICS
     from tests._verified_checkpoint_fixtures import (
@@ -120,8 +122,9 @@ def test_metrics_stream_reports_no_frames_for_a_run_no_record_claims(
 
 
 def _completed_run_with_rows(project: Path, run_id: str) -> Path:
-    """A completed run under ``project`` (a terminal run ends the stream after one tick) whose
-    body logged two metrics rows through the envelope's own sink.
+    """Return a completed run under ``project`` whose body logged two metrics rows.
+
+    The child's own entry runs it, its body logging epoch 1 at loss 0.9 and epoch 2 at loss 0.4.
     """
     from tests._verified_checkpoint_fixtures import finished_run
 
@@ -190,8 +193,9 @@ def test_metrics_stream_sends_a_loss_and_the_selection_logged_after_it_as_one_ep
 def test_a_finite_value_logged_after_a_non_finite_one_at_one_epoch_streams_alone(
     tmp_path: Path,
 ) -> None:
-    """A loss logged non-finite and then finite at one epoch streams as the finite value, its
-    earlier non-finite state gone with the value it described.
+    """A loss logged non-finite and then finite at one epoch streams as the finite value.
+
+    The one streamed row reads loss 0.1 and carries no not-finite marker for the loss.
     """
     import asyncio
 
@@ -267,11 +271,10 @@ def test_the_stream_sends_epoch_rows_as_epochs_and_the_latest_batch_row_as_its_o
 def test_metrics_stream_pushes_complete_entries_and_defers_a_partial_one(
     tmp_path: Path,
 ) -> None:
-    """An entry still being appended is held back, never pushed half-formed.
+    """The metrics stream pushes whole rows and holds back an entry still being appended.
 
-    A row's bytes land on disk before its terminator does, so a stream that consumed the
-    fragment would skip the completed row permanently. The stream reads through the log's own
-    byte cursor, which holds that fragment back until it is whole.
+    With two whole rows and a third lacking its terminator, the stream pushes the two rows and
+    then the status frame.
     """
     import asyncio
 
@@ -298,10 +301,7 @@ def test_metrics_stream_pushes_complete_entries_and_defers_a_partial_one(
 def test_metrics_stream_reads_the_log_off_the_event_loop(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The stream's log reads must never run on the event loop's own thread: a slow disk read
-    running on the loop would stall every request and socket the app serves, not only this
-    one.
-    """
+    """The metrics stream reads the log off the event loop's own thread."""
     import asyncio
     import threading
 
@@ -438,10 +438,7 @@ def test_tensorboard_route_404s_with_no_logs_for_a_run_with_no_event_file(
     opened_client: TestClient,
     tmp_path: Path,
 ) -> None:
-    """A run whose body never reached ``SummaryWriter`` has a real directory but no event file
-    for TensorBoard to serve; that reads as ``no_logs``, not as a launchable board over an empty
-    directory, so the GUI never offers a retry against it.
-    """
+    """The TensorBoard route answers 404 with ``no_logs`` for a run with no event file."""
     _opened("run-nologs", tmp_path)
 
     resp = opened_client.post(
@@ -455,10 +452,11 @@ def test_tensorboard_route_404s_with_no_logs_carrying_the_recorded_error(
     tmp_path,
     opened_client: TestClient,
 ) -> None:
-    """A run whose status the platform itself recorded carries a real error (a crash during
-    data load, say) and whose output directory holds no event file: the refusal must say both
-    that it produced no logs (so the tab offers no Try again) and what the recorded error was,
-    not the plain error text a run with real logs would still get.
+    """The TensorBoard route's ``no_logs`` refusal carries the run's recorded error.
+
+    A run whose status the platform itself recorded carries a real error (a crash during
+    data load, say) and whose output directory holds no event file: the refusal says both that
+    it produced no logs and what the recorded error was.
     """
     from tests._verified_checkpoint_fixtures import (
         detector_declaring,
@@ -483,15 +481,16 @@ def test_tensorboard_route_404s_with_no_logs_carrying_the_recorded_error(
 
 
 def _fails_at_data_load(ctx) -> None:
-    """A training body that dies before its first epoch, the way a data-load failure does."""
+    """Raise a RuntimeError naming the dataset's unopenable images_dir."""
     raise RuntimeError("could not open the dataset's images_dir")
 
 
 def test_list_runs_reads_every_training_run_directory(
     opened_project, monkeypatch
 ) -> None:
-    """The route's rows come from the project's run directories: a run whose process stopped
-    touching its heartbeat reads interrupted.
+    """The run listing's rows come from the project's run directories.
+
+    A run whose process stopped touching its heartbeat reads interrupted.
     """
     from tcip_mcp import experiments
     from tcip_web.routes import training
@@ -506,9 +505,7 @@ def test_list_runs_reads_every_training_run_directory(
 def test_list_runs_route_is_a_pure_pass_through_to_the_tool(
     opened_project,
 ) -> None:
-    """The route adds nothing of its own: its listing equals the agent's tool's, exactly, so the
-    route holds no reconstruction of its own.
-    """
+    """The run listing route's answer equals the agent's tool's, exactly."""
     from tcip_mcp.tools.experiment_tools import list_experiments
     from tcip_web.routes.training import list_runs_route
 
@@ -520,8 +517,9 @@ def test_list_runs_route_is_a_pure_pass_through_to_the_tool(
 def test_a_route_launch_shows_its_declaration_from_its_launch_event(
     tmp_path, monkeypatch, opened_client: TestClient
 ) -> None:
-    """A run started through the browser-facing door shows the declaration its launch event
-    carries: none, since no agent declared itself to the serving process.
+    """A run launched through the browser-facing door shows its launch event's declaration.
+
+    The declaration is none, since no agent declared itself to the serving process.
     """
     from tests._producer_fixtures import fake_popen
 
@@ -586,8 +584,10 @@ def _regression_config(tmp_path: Path) -> dict:
 def test_relaunch_route_forks_a_run_s_config_and_names_the_parent(
     tmp_path, monkeypatch, opened_client: TestClient
 ) -> None:
-    """Relaunching a run's config starts a new run directory through the real launcher and a
-    real child, its launch record replaying the picked run's config and naming it as parent.
+    """The relaunch route forks a run's config and names the parent.
+
+    Relaunching starts a new run directory through the real launcher and a real child, its
+    launch record replaying the picked run's config and naming it as parent.
     """
     monkeypatch.setattr(
         "tcip_mcp.pipelines.training.tensorboard_manager.launch_tensorboard",
@@ -625,10 +625,10 @@ def test_relaunch_route_forks_a_run_s_config_and_names_the_parent(
 def test_list_runs_route_names_the_run_s_selection_metric(
     tmp_path, monkeypatch, opened_client: TestClient
 ) -> None:
-    """A launched (subprocess-delegated) run's row carries the metric the trainer itself
-    stamped on its metrics-log rows, and the best value read back beside it, so the Training
-    tab can label its best value instead of showing nothing (the parent's placeholder
-    ``inf``) or a name with no value (a ``None`` best value).
+    """The run listing names a launched run's selection metric and its best value.
+
+    A launched (subprocess-delegated) run's row carries the metric the trainer itself
+    stamped on its metrics-log rows, and a finite best value read back beside it.
     """
     import math
 
@@ -665,8 +665,10 @@ def test_a_sweep_trial_is_listed_read_canceled_and_streamed_by_its_id(
     opened_project: Path,
     real_hpo_base_config: dict,
 ) -> None:
-    """A trial is a run directory under its sweep: the run routes reach it by its own id, and the
-    listing groups it under its sweep rather than beside the runs launched on their own.
+    """A sweep trial is listed, read, canceled and streamed by its own id.
+
+    A trial is a run directory under its sweep: the run routes reach it by its own id, and the
+    listing groups it under its sweep.
     """
     from tcip_mcp.tools.training_tools import open_trial
     from tests._verified_checkpoint_fixtures import opened_sweep
@@ -717,8 +719,10 @@ def test_a_sweep_and_its_trial_each_have_one_board_whichever_door_launches_it(
     monkeypatch,
     tb_launches: list[str],
 ) -> None:
-    """A sweep's TensorBoard is the sweep's own directory whether its body or the run route
-    starts it, and a trial's is its own run board: one key per directory.
+    """TensorBoard launches for a sweep and its trial name the sweep's and the trial's directories.
+
+    The launches name the sweep's own directory twice, from its body and from the run route,
+    and the trial's own run board once.
     """
     import tcip_mcp.tools.training_tools as tt
     from tcip_mcp.experiments import board_of, find_sweep
@@ -766,9 +770,12 @@ def test_a_recorded_sweep_relaunches_through_the_run_launch_door(
     real_hpo_base_config: dict,
     monkeypatch,
 ) -> None:
-    """A sweep relaunches from its own recorded input through the one launch door: a new sweep
-    is opened naming its source, its audit line names the person, and its body starts in a worker
-    process of its own over the new sweep's directory; a sweep relaunch never takes a partition.
+    """A recorded sweep relaunches through the run launch door.
+
+    A sweep relaunches from its own recorded input through the one launch door: a new sweep
+    is opened naming its source, its audit line names the person, and the one captured spawn
+    request ends in ``--run-dir`` and the new sweep's directory. A relaunch also naming a
+    selection directory is refused 422.
     """
     import tcip_store as ts
     from tcip_mcp.audit import audit_log_key

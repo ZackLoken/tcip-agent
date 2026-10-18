@@ -1,7 +1,7 @@
-"""A crash in the training worker's own pre-envelope setup (run record read, dataset build from
-what the launch resolved) never leaves the run reading ``running`` and never ends the process
-without a ``training_run`` audit event: the run is closed ``failed`` before the crash
-propagates.
+"""A crash in the training worker's pre-envelope setup closes the run ``failed``.
+
+A crash in the dataset build closes the run ``failed`` with a final status naming the crash,
+and the crash propagates.
 """
 
 from __future__ import annotations
@@ -57,8 +57,9 @@ def test_a_pre_envelope_crash_marks_the_run_failed_and_opens_a_training_run_even
 def test_a_pre_envelope_crash_whose_audit_line_is_refused_names_both_causes(
     tmp_path, monkeypatch
 ):
-    """Setup fails and the run's audit line is refused: the setup error propagates, and the
-    final status names it and the unwritten line.
+    """A pre-envelope crash whose audit line is refused names both causes.
+
+    The setup error propagates, and the final status names it and the unwritten line.
     """
     import tcip_mcp.audit as audit
 

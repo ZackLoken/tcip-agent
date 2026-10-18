@@ -1,7 +1,9 @@
-"""Tests for training_tools: validator/StageSpec alignment, HPO param plumbing, HPO trial
-reporting (each epoch as it completes; only a completed trial can be the sweep's best),
-HPO/train regime parity, experiment immutability on relaunch, and canonical-format confidence
-parsing in get_worst_predictions.
+"""Tests for training_tools.
+
+The tests cover validator/StageSpec alignment, HPO param plumbing, HPO trial reporting (each
+epoch as it completes; no result for a trial that fails or is canceled), a trial's forwarding
+of the base config's augmentation and model source, experiment immutability on relaunch, and
+canonical-format confidence parsing in get_worst_predictions.
 """
 
 from __future__ import annotations
@@ -39,8 +41,9 @@ pytestmark = pytest.mark.usefixtures("seed_bud_trait_spec")
 
 
 def _labeled(tmp_path: Path) -> dict:
-    """A data section over two labeled frames of ``bud`` under ``tmp_path``
-    (``_verified_checkpoint_fixtures.detection_images``), drawn at seed 0.
+    """Return a data section over two labeled frames of ``bud`` under ``tmp_path``.
+
+    The frames come from ``_verified_checkpoint_fixtures.detection_images``, drawn at seed 0.
     """
     from tests._verified_checkpoint_fixtures import detection_images
 
@@ -53,8 +56,9 @@ def _labeled(tmp_path: Path) -> dict:
 
 
 def _bud_image(image: Path, *, labeled: bool = True) -> None:
-    """A 20x20 frame at ``image``, its bud's box bright on a dim ground, and, unless ``labeled``
-    is false, its label document holding that ``bud`` box.
+    """Write a 20x20 black ``painted_frame`` at ``image``, painted ``BRIGHT`` over (2, 2, 10, 10).
+
+    Unless ``labeled`` is false, it also writes the label document holding that ``bud`` box.
     """
     from tcip_annotation.state import Annotation, BBox
     from tests._producer_fixtures import BRIGHT, label_image, painted_frame
@@ -71,7 +75,7 @@ def _bud_image(image: Path, *, labeled: bool = True) -> None:
 
 
 def _damaged(image: Path, stored: bytes) -> None:
-    """``image``'s label document replaced in the store by ``stored``."""
+    """Replace ``image``'s label document in the store by ``stored``."""
     from tests._producer_fixtures import image_label_key
     from tests._record_damage_fixtures import damage_record
 
@@ -114,7 +118,7 @@ def test_preflight_config_accepts_trainer_canonical_stages(tmp_path):
 
 
 def test_preflight_config_refuses_a_nested_training_section_by_name(tmp_path):
-    """The config has one placement: a ``training`` section is refused naming the move."""
+    """A preflight refuses a nested ``training`` section by name and admits its keys flat."""
     from tcip_mcp.tools.training_tools import preflight_config
 
     flat = training_config(tmp_path, DETECTION_SOURCE, _labeled(tmp_path))
@@ -133,8 +137,9 @@ def test_preflight_config_refuses_a_nested_training_section_by_name(tmp_path):
 
 
 def test_a_smoke_preflight_validates_its_config_once(tmp_path, monkeypatch):
-    """A preflight that admits a config, from its structural check through its resolution and
-    its smoke build, reads it off one validation and never validates its model source again.
+    """A smoke preflight validates its config once.
+
+    A smoke preflight that admits a config records one validation, of ``TrainConfigSchema``.
     """
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
@@ -185,8 +190,9 @@ def test_preflight_config_types_a_non_dict_data_section_instead_of_raising(
 
 
 def _frozen_detection_builder(**kwargs):
-    """An importable builder whose model has nothing to optimize (a legitimate stage-0 shape).
-    Forwards its kwargs so a caller's ``detector`` choice (``fcos``, say) actually lands.
+    """Build a detector through ``build_bespoke_detection`` with its parameters frozen.
+
+    The kwargs pass through to ``build_bespoke_detection``.
     """
     from tests import bespoke_models
 
@@ -197,11 +203,10 @@ def _frozen_detection_builder(**kwargs):
 
 
 def _detection_smoke_cfg(builder: str, tmp_path: Path) -> dict:
-    """A smoke config over the bespoke detector at the statistics and geometry its own small
-    frames derive, which keeps two smoke builds plus twenty overfit steps to seconds. ``fcos``
-    builds in a fraction of ``faster_rcnn``'s time over the same resnet18 backbone (single-stage,
-    no region-proposal network), and nothing either smoke test asserts is
-    faster-rcnn-specific.
+    """Return a smoke config over the bespoke detector built by ``builder``.
+
+    The config states an ``fcos`` detector normalized by ``FRAME_STATISTICS``, over
+    :func:`_labeled`'s frames at three channels.
     """
     return training_config(
         tmp_path,
@@ -217,9 +222,10 @@ def _detection_smoke_cfg(builder: str, tmp_path: Path) -> dict:
 
 
 def test_preflight_config_overfit_restores_rng_state(tmp_path, monkeypatch):
-    """The overfit branch's own reseed-run-restore leaves no net trace on the streams: a plain
-    smoke build (overfit=False) and the same build with overfit=True, run from the same seed,
-    must consume the streams identically once the overfit call returns.
+    """A preflight's overfit check restores the random streams it reseeded.
+
+    A smoke build with overfit=False and the same build with overfit=True, each run from seed
+    11, leave the next draw of the Python, numpy and torch streams equal.
     """
     pytest.importorskip("torch")
     import functools
@@ -262,11 +268,12 @@ def test_preflight_config_overfit_restores_rng_state(tmp_path, monkeypatch):
 def test_preflight_config_overfit_on_all_frozen_model_reports_without_raising(
     tmp_path,
 ):
-    """check_model_contract's own gradient-presence check independently requires a real
-    learnable path, so a literally all-frozen model already fails smoke on its own terms
-    (valid stays False for that reason); what this proves is narrower and still real: the
-    overfit branch's own empty-parameter case never raises out of preflight_config, and its
-    report still names the empty parameter list rather than being swallowed.
+    """An overfit preflight on an all-frozen model reports its empty parameters without raising.
+
+    check_model_contract's own gradient-presence check requires a real learnable path, so the
+    report carries that issue for a literally all-frozen model; the overfit branch's
+    empty-parameter case does not raise out of preflight_config, and its report names the empty
+    parameter list.
     """
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
@@ -302,9 +309,10 @@ def test_preflight_config_refuses_a_per_stage_lr_by_name(tmp_path):
 
 
 def test_preflight_config_warns_when_most_candidates_wont_train(tmp_path):
-    """The admission's own partition is otherwise thrown away: a run whose label store admits
-    only a fraction of its candidate images must not report "valid, no warnings" with no
-    visibility into what would silently train on far fewer images than the operator expects.
+    """A preflight warns when most candidate images will not train.
+
+    A run whose label store admits one of its four candidate images stays valid and warns that
+    3/4 will not train, counting them by reason.
     """
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
@@ -361,10 +369,9 @@ def test_preflight_config_no_coverage_warning_when_everything_trains(tmp_path):
 def test_preflight_config_blocks_rather_than_swallows_an_unreadable_label(
     tmp_path,
 ):
-    """The coverage check's own admission must not fold an unreadable label into a generic build
-    failure it silently drops: a run over these images would fail on the same document, so
-    preflight reports it as a blocking issue, naming the document, not a warning; the launch's
-    own admission refuses it in the same words.
+    """A preflight over an unreadable label is invalid.
+
+    Its issues carry the refusal the admission raises naming the document.
     """
     pytest.importorskip("torch")
     from tcip_annotation import json_io
@@ -402,9 +409,9 @@ def test_preflight_config_blocks_rather_than_swallows_an_unreadable_label(
 
 
 def test_preflight_admits_the_run_once(tmp_path):
-    """Every preflight leg reads one population, so the producer is asked once however many legs
-    need a source, a member name or a count: a second admission is a second answer to the one
-    question of what this run trains on.
+    """A preflight admits the run once.
+
+    A valid preflight of a single tiled source with reserved shares calls the admission once.
     """
     pytest.importorskip("torch")
     import tcip_mcp.pipelines.data.label_queries as label_queries
@@ -458,10 +465,10 @@ def test_preflight_admits_the_run_once(tmp_path):
 def test_preflight_config_blocks_a_document_only_the_admission_reader_refuses(
     tmp_path, bad_document, refusal
 ):
-    """A document that decodes to a dict but whose annotations field is not a list, or whose
-    record cannot be coerced, is exactly what the run's own admission refuses at launch:
-    preflight reads through the same call so it blocks here too, rather than passing a document
-    the launch then aborts on.
+    """A preflight is invalid over a document whose annotations the admission refuses.
+
+    A document whose annotations field is not a list, or holds a non-object, makes preflight
+    invalid, and its issues carry the admission's refusal.
     """
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
@@ -554,9 +561,7 @@ def test_preflight_config_rejects_incoherent_selection_metric(tmp_path):
 def test_preflight_config_names_a_non_mapping_evaluation_block_as_an_issue(
     tmp_path,
 ):
-    """A non-mapping ``evaluation`` block is a named issue, never an exception that crashes the
-    preflight call.
-    """
+    """A non-mapping ``evaluation`` block is a named preflight issue."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -581,8 +586,9 @@ def test_preflight_config_names_a_non_mapping_evaluation_block_as_an_issue(
 
 
 def test_preflight_calibration_ratio_wrong_task_flags_issue(tmp_path):
-    """A classification run never resolves to the within-image split a calibration region
-    reserves from, so its draw refuses the fraction by name.
+    """A preflight flags a calibration_ratio on a classification run by name.
+
+    The issue names calibration_ratio and the reserved strips it needs.
     """
     from tcip_mcp.tools.training_tools import preflight_config
     from tests.tiny_trainer_fixtures import write_regression_dataset
@@ -609,8 +615,9 @@ def test_preflight_calibration_ratio_wrong_task_flags_issue(tmp_path):
 
 
 def test_preflight_calibration_ratio_multi_member_flags_issue(tmp_path):
-    """Two admitted members resolve to the group-balanced split, which reserves no calibration
-    region, so its draw refuses the fraction by name.
+    """A preflight flags a calibration_ratio over two admitted members by name.
+
+    The issue names calibration_ratio and the reserved strips it needs.
     """
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -672,8 +679,9 @@ def test_preflight_reserved_regions_infeasible_layout_refuses_under_smoke(
 def test_preflight_reserved_regions_report_an_unreadable_label_by_name(
     tmp_path,
 ):
-    """This probe's own generic except Exception must not swallow an unreadable label into a
-    silently-logged build failure: the breeder needs to see which document is broken.
+    """The reserved-region preflight probe reports an unreadable label by name.
+
+    An issue names the document and its decode failure.
     """
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
@@ -702,8 +710,9 @@ def test_preflight_reserved_regions_report_an_unreadable_label_by_name(
 
 
 def test_preflight_reserved_regions_admit_a_feasible_layout(tmp_path):
-    """A real, feasible reserved-region config produces no spatial-split issue under
-    smoke=True.
+    """A real, feasible reserved-region config produces no spatial-split issue.
+
+    The preflight runs under smoke=True.
     """
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
@@ -741,9 +750,11 @@ def test_preflight_reserved_regions_admit_a_feasible_layout(tmp_path):
 
 
 def _built_groups(config: dict) -> list[tuple[float, float]]:
-    """``(lr, weight_decay)`` of each param group the trainer's optimizer read of ``config``
-    (``schemas.train_config``'s ``optimizer`` into ``optimizer_factory.build_optimizer``)
-    builds over a backbone-and-head model, the backbone group first.
+    """Return ``(lr, weight_decay)`` of each param group the optimizer of ``config`` builds.
+
+    ``optimizer_factory.build_optimizer`` builds over ``build_two_rate_regressor()`` from the
+    optimizer spec ``schemas.train_config`` reads off ``config``, at the spec's backbone and
+    head rates.
     """
     pytest.importorskip("torch")
     from tcip_mcp.pipelines.schemas import train_config
@@ -774,12 +785,14 @@ def _built_groups(config: dict) -> list[tuple[float, float]]:
 def test_the_launch_door_refuses_what_a_trainer_reads_unstated_and_the_schema_admits_it(
     tmp_path, training_source, unstated, named
 ):
-    """What a trainer reads is asked at the launch door, never by the schema: a detector config
+    """The launch door refuses a key a trainer reads unstated, and the schema admits it.
+
+    What a trainer reads is asked at the launch door, not by the schema: a detector config
     stating no ``evaluation.conf_threshold`` or no ``batch_size``, under the default trainer or a
     loop of its own, and a default-trainer config stating no ``stages``, are each refused by
     ``preflight_config`` naming the key, while ``train_config`` admits each as a checkpoint's
-    config; a config naming its own loop and no ``stages`` is admitted by the door. A head that
-    counts no boxes needs no confidence.
+    config; a config naming its own loop and no ``stages`` is admitted by the door. A
+    classifier's trainer reads no confidence threshold.
     """
     from tcip_mcp.pipelines.schemas import train_config
     from tcip_mcp.tools.training_tools import preflight_config
@@ -815,16 +828,17 @@ def test_the_launch_door_refuses_what_a_trainer_reads_unstated_and_the_schema_ad
 
 
 def _applied(base: dict, params: dict) -> dict:
-    """``params`` applied to ``base`` (``training_tools._apply_hpo_params``)."""
+    """Apply ``params`` to ``base`` through ``training_tools._apply_hpo_params``."""
     from tcip_mcp.tools.training_tools import _apply_hpo_params
 
     return _apply_hpo_params(base, params)
 
 
 def _base(builder: str = BESPOKE_DETECTION, **overrides) -> dict:
-    """A detection base config of this repository of ``builder`` over no data, normalizing by
-    its named weights' statistics (``_chain_fixtures.weights_statistics``), ``overrides`` in
-    place of theirs.
+    """Return a detection base config of this repository of ``builder`` over no data.
+
+    It normalizes by its named weights' statistics (``_chain_fixtures.weights_statistics``),
+    ``overrides`` in place of theirs.
     """
     from tests import REPO_ROOT
 
@@ -843,8 +857,10 @@ def _base(builder: str = BESPOKE_DETECTION, **overrides) -> dict:
 
 
 def test_apply_hpo_params_optimizer_axes_reach_optimizer_param_groups():
-    """Swept optimizer values survive the trainer's own optimizer read into each group's rate
-    and every group's weight decay.
+    """Swept optimizer values reach the optimizer's param groups.
+
+    They reach each group's rate and both groups' weight decay through the trainer's own
+    optimizer read.
     """
     swept = {
         "optimizer.backbone_lr": 3e-4,
@@ -860,9 +876,7 @@ def test_apply_hpo_params_optimizer_axes_reach_optimizer_param_groups():
 
 
 def test_apply_hpo_params_preserves_base_config_stages():
-    """Sweeping a rate must not overwrite the agent's own progressive-unfreeze schedule with a
-    hardcoded recipe: base_config's stages survive unchanged.
-    """
+    """Sweeping a rate leaves base_config's stages unchanged."""
     custom_stages = [stage(-1), stage(2), stage(0)]
     out = _applied(
         _base("x:y", stages=custom_stages), {"optimizer.head_lr": 3e-3}
@@ -871,8 +885,9 @@ def test_apply_hpo_params_preserves_base_config_stages():
 
 
 def test_apply_hpo_params_undotted_key_reaches_top_level():
-    """An undotted swept key must land at the top level of the resolved config, the one
-    placement train() reads, never nested under "training", which the config schema refuses.
+    """An undotted swept key lands at the top level of the resolved config.
+
+    The resolved config holds no ``training`` section.
     """
     out = _applied(_base("x:y"), {"batch_size": 4})
     assert out["batch_size"] == 4
@@ -891,25 +906,26 @@ def test_apply_hpo_params_dotted_key_reaches_nested_field():
 
 
 def test_apply_hpo_params_dotted_seed_key_reaches_the_split_config():
-    """split_draws's own paired grid axis (data.split.seed) reaches the nested field
-    run_hyperparameter_search's drawn path reads, the same dotted-key mechanism a swept
-    builder uses above.
+    """A swept ``data.split.seed`` reaches the nested split field.
+
+    split_draws's own paired grid axis reaches the nested field run_hyperparameter_search's
+    drawn path reads, through the dotted-key mechanism a swept builder uses.
     """
     out = _applied(_base("x:y"), {"data.split.seed": 7})
     assert out["data"]["split"]["seed"] == 7
 
 
 def test_apply_hpo_params_refuses_a_dotted_key_through_a_non_mapping_intermediate():
-    """A dotted key whose path walks through a value that is not a mapping is refused by name,
-    naming the key and what was found there, rather than raising an opaque AttributeError.
-    """
+    """A dotted key whose path walks through a non-mapping value is refused by name."""
     with pytest.raises(ValueError, match="model_source.builder.x"):
         _applied(_base("x:y"), {"model_source.builder.x": "y"})
 
 
 def test_preflight_points_covers_every_categorical_choice_and_both_numeric_bounds():
-    """The preflight checks more than the first corner: every categorical choice and both numeric
-    bounds (low and high) are held by some point, and no point is listed twice.
+    """The preflight points cover every categorical choice and both numeric bounds.
+
+    Every categorical choice and both numeric bounds (low and high) are held by some point, no
+    point is listed twice, and a choice repeated in the space yields one point.
     """
     from tcip_mcp.tools.training_tools import _preflight_points
 
@@ -943,9 +959,10 @@ def test_preflight_points_covers_every_categorical_choice_and_both_numeric_bound
 def test_a_trials_combined_point_is_admitted_as_the_launch_door_admits_it(
     tmp_path,
 ):
-    """Each point a sweep checks before it opens can pass while a combination of two axes away
-    from the corner does not: a default-trainer config with no ``stages``. Its trial ends failed
-    naming why, resolving nothing; a combination the door admits opens its trial resolved.
+    """A trial's combined point is admitted as the launch door admits it.
+
+    A trial whose combined point is a default-trainer config with no ``stages`` ends failed
+    naming why, with nothing resolved; a combination the door admits opens its trial resolved.
     """
     from tcip_mcp.experiments import RUN_FILE, observe, read_record
     from tcip_mcp.tools.training_tools import open_trial
@@ -996,10 +1013,11 @@ class _FakeDataset:
 
 
 def _detection_base(project: Path) -> dict:
-    """A detection base config of a model no trial here builds
-    (:func:`~tests._verified_checkpoint_fixtures.unbuilt_source`) over :func:`_labeled`'s frames
-    under ``project``, selecting on the loss, its trials' partitions stubbed empty
-    (:func:`_patch_hpo_trial_machinery`; ``_chain_fixtures.weights_statistics``).
+    """Return a detection base config over :func:`_labeled`'s frames, selecting on the loss.
+
+    Its model is :func:`~tests._verified_checkpoint_fixtures.unbuilt_source`'s detector,
+    normalized by its weights' statistics (``_chain_fixtures.weights_statistics``), and its
+    frames lie under ``project``.
     """
     from tests._verified_checkpoint_fixtures import unbuilt_source
 
@@ -1012,9 +1030,10 @@ def _detection_base(project: Path) -> dict:
 
 
 def _classifier_base(project: Path, **overrides) -> dict:
-    """A classification base config over :func:`_labeled`'s frames under ``project``, selecting
-    on accuracy, ``overrides`` in place of their keys, its trials' partitions stubbed empty
-    (:func:`_patch_hpo_trial_machinery`; ``_chain_fixtures.weights_statistics``).
+    """Return a classification base config over :func:`_labeled`'s frames, selecting on accuracy.
+
+    The model normalizes by its weights' statistics (``_chain_fixtures.weights_statistics``),
+    the frames lie under ``project``, and ``overrides`` stand in place of their keys.
     """
     return training_config(
         project,
@@ -1030,7 +1049,7 @@ def _classifier_base(project: Path, **overrides) -> dict:
 
 
 def _the_sweep(project: Path) -> Path:
-    """The one sweep directory of ``project``."""
+    """Return the one sweep directory of ``project``."""
     from tcip_mcp import experiments
 
     (sweep,) = experiments.sweep_dirs(project)
@@ -1040,9 +1059,10 @@ def _the_sweep(project: Path) -> Path:
 def _trial(
     point: dict, report, base: dict, project: Path, name: str = "t0"
 ) -> Path:
-    """One HPO trial ``name`` run as its sweep runs it (``_run_hpo_trial``), under the one sweep
-    of ``project`` over ``base`` the sweep door opens (``opened_sweep``) on its first trial.
-    Returns the trial's run directory.
+    """Run one HPO trial ``name`` through ``_run_hpo_trial``.
+
+    The trial runs under the one sweep of ``project`` over ``base`` the sweep door opens
+    (``opened_sweep``) on its first trial. Returns the trial's run directory.
     """
     from tcip_mcp import experiments
     from tcip_mcp.tools.training_tools import _run_hpo_trial
@@ -1058,14 +1078,14 @@ def _trial(
 
 
 def _row(value: float, metric: str = "loss") -> dict:
-    """An epoch row stamping ``metric`` as the run's selection, the way the trainer stamps it."""
+    """Return an epoch row naming ``metric`` as its selection metric, at ``value``."""
     return {"selection_metric": metric, "selection": value}
 
 
 def _complete(run):
-    """End a stand-in training body the way a real one does: final weights, here a stand-in
-    tensor since no model was built, saved under ``model_final`` through the run's own writer
-    (``TrainContext.save_checkpoint``).
+    """Save a one-zero weight under ``model_final`` and mark ``run`` completed.
+
+    The save goes through the run's own writer, ``TrainContext.save_checkpoint``.
     """
     import torch
 
@@ -1080,7 +1100,7 @@ def _complete(run):
 
 
 def _sweep_outcome(project: Path) -> dict:
-    """What the trials of :func:`_trial`'s sweep amount to, as the project's listing reads it."""
+    """Return the outcome of :func:`_trial`'s sweep as the project's listing reads it."""
     from tcip_mcp.experiments import training_listing
 
     (sweep,) = training_listing(project).sweeps
@@ -1088,9 +1108,12 @@ def _sweep_outcome(project: Path) -> dict:
 
 
 def _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=None):
-    """Stub dataset building + training so a trial runs instantly, no Ray: the resolution builds
-    stand-in datasets, records no samples and stamps nothing they serve, and the child builds the
-    same stand-ins from that record.
+    """Stub a trial's dataset building, and its training with ``fake_train``.
+
+    ``auto_train_val`` answers one stand-in dataset on both sides with an empty partition
+    record, recording its ``transforms`` and ``data`` into ``captured`` when one is given;
+    ``recorded_datasets`` answers the same stand-in, the data geometry is empty, and no sampler
+    is built.
     """
     from tcip_mcp.pipelines.data import samplers, split_construction as sc
     from tcip_mcp.pipelines.schemas import TrainGeometry
@@ -1125,8 +1148,9 @@ def _patch_hpo_trial_machinery(monkeypatch, fake_train, captured=None):
 
 
 def _spaces_searched(monkeypatch) -> list:
-    """Replace ``tune_search`` with a search that answers its study directory, and the list it
-    records each param space it ran over into.
+    """Replace ``tune_search`` with a stub that records the param space of each call.
+
+    The stub returns nothing; the return is the list it records into.
     """
     from tcip_mcp.pipelines.training import hpo
 
@@ -1149,7 +1173,7 @@ def _completed_train(
     batch_callback=None,
     resume_from="",
 ):
-    """A training call that completes the run at once, reporting no epoch."""
+    """Mark the run completed, reporting no epoch."""
     run.status = "completed"
     return run
 
@@ -1157,7 +1181,9 @@ def _completed_train(
 def test_run_hpo_trial_reports_each_epoch_and_its_result_is_the_best_of_them(
     monkeypatch, tmp_path
 ):
-    """Every epoch's selection value is reported as the trial logs it, and the trial's result is
+    """An HPO trial reports each epoch, and its result is the best of them.
+
+    Every epoch's selection value is reported as the trial logs it, and the trial's result is
     the best of those same rows (lower=better).
     """
     pytest.importorskip("torch")
@@ -1194,8 +1220,10 @@ def test_run_hpo_trial_reports_each_epoch_and_its_result_is_the_best_of_them(
 def test_a_sweeps_best_at_an_end_of_its_stated_range_is_reported(
     monkeypatch, tmp_path, head_lr, at_end
 ):
-    """A best whose value sits at the stated ``low`` or ``high`` of its axis is named with that
-    end, a range the search could not look past; a best inside the range names none.
+    """A sweep's best at an end of its stated range is reported with that end.
+
+    A best whose value sits at the stated ``low`` or ``high`` of its axis is named with that
+    end; a best inside the range names none.
     """
     pytest.importorskip("torch")
 
@@ -1223,8 +1251,9 @@ def test_a_sweeps_best_at_an_end_of_its_stated_range_is_reported(
 
 
 def test_run_hpo_trial_that_fails_has_no_result(monkeypatch, tmp_path):
-    """A crashed trial ends failed and carries no result, so it can never become the sweep's
-    best.
+    """A crashed HPO trial ends failed and carries no result.
+
+    It reports nothing, and the sweep has no best value.
     """
     pytest.importorskip("torch")
     from tcip_mcp.experiments import observe
@@ -1255,8 +1284,9 @@ def test_run_hpo_trial_that_fails_has_no_result(monkeypatch, tmp_path):
 def test_run_hpo_trial_result_is_the_highest_value_for_a_higher_is_better_metric(
     monkeypatch, tmp_path
 ):
-    """A higher-is-better selection metric (accuracy) makes the trial's result its highest
-    reported value, not a minimize convention that would instead prefer the lowest.
+    """An HPO trial's result is its highest value under a higher-is-better metric.
+
+    Under accuracy, a trial reporting 0.5, 0.9 and 0.6 has 0.9 as its result.
     """
     pytest.importorskip("torch")
 
@@ -1289,9 +1319,7 @@ def test_a_failed_trial_never_outranks_a_real_one_under_a_maximize_direction(
     monkeypatch,
     tmp_path,
 ):
-    """A trial that fails carries no result, so the sweep's outcome under a maximize direction
-    is the one completed trial's, never the failed one's.
-    """
+    """Beside a failed trial, a maximize sweep's best is the completed trial's params and value."""
     pytest.importorskip("torch")
 
     base = _classifier_base(tmp_path)
@@ -1336,8 +1364,9 @@ def test_a_failed_trial_never_outranks_a_real_one_under_a_maximize_direction(
 
 
 def test_run_hpo_trial_uses_base_augmentation_and_model(monkeypatch, tmp_path):
-    """Trials train under the final run's regime: base_config augmentation reaches the train
-    dataset, and the bespoke model_source is carried through. (Loss is owned by the builder.)
+    """An HPO trial hands base_config's augmentation and bespoke model_source to its training.
+
+    The dataset build receives built transforms, and the body receives the bespoke builder.
     """
     pytest.importorskip("torch")
 
@@ -1373,9 +1402,9 @@ def test_run_hpo_trial_dotted_seed_axis_reaches_the_data_cfg_handed_to_auto_trai
     monkeypatch,
     tmp_path,
 ):
-    """The split_draws grid axis (data.split.seed) resolves onto the config before the trial's
-    data section is built, so auto_train_val (and the drawn split behind it) actually reads the
-    draw's own seed rather than the base config's unswept one.
+    """A trial's swept ``data.split.seed`` reaches the data section auto_train_val is handed.
+
+    The data section auto_train_val is handed carries the swept seed 7.
     """
     pytest.importorskip("torch")
 
@@ -1392,9 +1421,10 @@ def test_run_hpo_trial_dotted_seed_axis_reaches_the_data_cfg_handed_to_auto_trai
 def test_run_hpo_trial_dotted_seed_axis_reaches_the_trials_own_records(
     monkeypatch, tmp_path
 ):
-    """data.split.seed, the split_draws grid axis, lands in the trial's launch record and in the
-    data section it resolved, at the nested field auto_train_val reads it from, beside the
-    sampled point itself.
+    """A trial's swept ``data.split.seed`` reaches the trial's own records.
+
+    The split_draws grid axis lands in the trial's launch record and in the data section it
+    resolved, at the nested field auto_train_val reads it from, beside the sampled point itself.
     """
     pytest.importorskip("torch")
     from tcip_mcp.experiments import RUN_FILE, read_record
@@ -1415,10 +1445,11 @@ def test_run_hpo_trial_producer_fed_data_split_seed_over_the_single_source_spati
     monkeypatch,
     tmp_path,
 ):
-    """The producer path: a real one-source tiled dataset through the real, unstubbed
-    auto_train_val. Its single-source spatial-strip branch places every strip by declared order
-    alone, and the trial's launch record carries the real spatial split and tiling
-    auto_train_val wrote, with no seed inside the split it never read one for.
+    """A trial over a single-source spatial split records the split and tiling it resolved.
+
+    The producer path: a real one-source tiled dataset through the real, unstubbed
+    auto_train_val. The trial's launch record carries the spatial split and tiling
+    auto_train_val wrote, with no seed in the partition or its spatial split.
     """
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
@@ -1456,9 +1487,7 @@ def test_run_hpo_trial_producer_fed_data_split_seed_over_the_single_source_spati
 def test_a_trials_launch_record_carries_the_seed_it_trained_under(
     monkeypatch, tmp_path
 ):
-    """A trial's launch record carries the seed its sweep's base config states, the one every
-    trial of the sweep trains under, and the body trains under that recorded seed.
-    """
+    """A trial's launch record and its body's received spec both carry the base config's seed."""
     pytest.importorskip("torch")
     from tcip_mcp.experiments import RUN_FILE, read_record
 
@@ -1487,13 +1516,10 @@ def test_a_trials_launch_record_carries_the_seed_it_trained_under(
 def test_run_hpo_trial_diverged_run_never_outranks_a_worse_but_alive_config(
     tmp_path,
 ):
-    """A trial that trains one real epoch and then diverges ends failed and carries no result,
-    not that epoch's real score, so it can never outrank a config that only scored worse. Drives
-    the real training body (nothing mocked).
+    """A trial over a model diverging after one good call reports a finite first score.
 
-    Every share zero, so the score ranked is the training loss over every admitted row: what is
-    under test is how a diverged run ranks, and a drawn validation side would spend this model's
-    one good forward on measuring rather than training.
+    The sweep is left no best value. The model is ``build_diverges_after_model`` with one good
+    call, and the real training body runs, nothing mocked, with a val_ratio of zero.
     """
     pytest.importorskip("torch")
     from tests.tiny_trainer_fixtures import (
@@ -1534,9 +1560,10 @@ def test_run_hpo_trial_diverged_run_never_outranks_a_worse_but_alive_config(
 
 
 def test_get_worst_predictions_reads_canonical_confidence(tmp_path):
-    """Prediction documents carry a native ``score``; confidence reads from that field, not from
-    box geometry. Reading a normalized box height as confidence instead would make the
-    (1 - avg_conf) ranking term ~1.0 for every image with small boxes (e.g. buds).
+    """The worst-predictions ranking reads confidence from a document's native ``score``.
+
+    Prediction documents carry a native ``score``; confidence reads from that field, not from
+    box geometry.
     """
     pytest.importorskip("torch")
     from PIL import Image
@@ -1589,8 +1616,9 @@ def test_get_worst_predictions_reads_canonical_confidence(tmp_path):
 def test_a_launch_config_that_json_cannot_hold_is_refused_before_the_run_starts(
     tmp_path, monkeypatch
 ):
-    """The caller's config reaches the run's record, so the field that will not encode is named
-    before any write and before a subprocess is spawned.
+    """A launch config JSON cannot hold raises a TypeError naming the field.
+
+    The field is ``config.model_source.builder``, holding a path object.
     """
     from tcip_mcp.tools import training_tools
 
@@ -1614,9 +1642,7 @@ def test_a_launch_config_that_json_cannot_hold_is_refused_before_the_run_starts(
 def test_an_ordinary_launch_config_passes_the_boundary_to_preflight(
     tmp_path, monkeypatch
 ):
-    """The refusal above must not stop a legitimate config: it reaches preflight admitted, with
-    no issue.
-    """
+    """An ordinary launch config passes the JSON boundary to preflight with no issue."""
     from tcip_mcp.tools import training_tools
 
     monkeypatch.chdir(tmp_path)
@@ -1639,8 +1665,10 @@ def test_an_ordinary_launch_config_passes_the_boundary_to_preflight(
 def test_a_sweep_payload_that_json_cannot_hold_is_refused_before_any_trial_runs(
     tmp_path, monkeypatch
 ):
-    """The space reaches the sweep manifest and the base config reaches every trial's resolved
-    config, so both are checked before a single trial is trained against them.
+    """A sweep space or base config JSON cannot hold raises a TypeError naming its field.
+
+    The space's field is ``param_space.lr`` and the base config's is
+    ``base_config.model_source.builder``.
     """
     from tcip_mcp.pipelines.training import hpo
     from tcip_mcp.tools import training_tools
@@ -1688,8 +1716,10 @@ _CHOICE_SPACE = {
 def test_a_space_not_in_the_search_space_shape_is_refused_before_any_trial(
     tmp_path, monkeypatch
 ):
-    """The sweep door reads the space through the one reader of its shape: a list where an axis
-    spec belongs is refused by name, never taken as a value.
+    """A space not in the search-space shape is refused, and no search runs.
+
+    A list where an axis spec belongs is refused with an error saying param_space is not a
+    search space.
     """
     from tcip_mcp.tools import training_tools
 
@@ -1712,8 +1742,10 @@ def test_a_space_not_in_the_search_space_shape_is_refused_before_any_trial(
 def test_an_ordinary_sweep_payload_still_runs_its_search(
     tmp_path, monkeypatch
 ):
-    """The refusal above must not cost a legitimate sweep its search: admits valid work through
-    the sweep door's structural preflight (an importable builder, a real data section).
+    """An ordinary sweep payload reaches its search and completes.
+
+    The sweep passes the sweep door's structural preflight (an importable builder, a real data
+    section).
     """
     from tcip_mcp.tools import training_tools
 
@@ -1750,7 +1782,9 @@ def test_a_sweep_opens_over_a_base_omitting_what_its_space_sweeps_and_refuses_an
     choices,
     label,
 ):
-    """A base config may leave unstated what its search space names: the sweep validates each
+    """A sweep opens over a base omitting what its space sweeps and refuses an invalid point.
+
+    A base config may leave unstated what its search space names: the sweep validates each
     point applied to it, so a base omitting ``optimizer.head_lr`` opens over a space naming it,
     and a corner whose applied config the schema refuses is named by its path and its point's
     label with nothing opened, whether it is the first corner or a later one.
@@ -1802,9 +1836,10 @@ def test_a_sweep_opens_over_a_base_omitting_what_its_space_sweeps_and_refuses_an
 
 
 def _project_answering(project: Path, **answers: bool | float) -> None:
-    """``project`` made a project through ``initialize_project``, its capture invariances the
-    sample answer (``_web_fixtures.INVARIANCES``) with ``answers`` over it, validated by the
-    record's model.
+    """Make ``project`` a project through ``initialize_project`` with ``answers`` as invariances.
+
+    Its capture invariances are the sample answer (``_web_fixtures.INVARIANCES``) with
+    ``answers`` over it, validated by the record's model.
     """
     from tcip_mcp.project_record import CaptureInvariances
     from tcip_mcp.tools.project_tools import initialize_project
@@ -1820,8 +1855,10 @@ def _project_answering(project: Path, **answers: bool | float) -> None:
 
 
 def _door_issues(door: str, project: Path, config: dict, monkeypatch) -> list:
-    """The issues ``door`` answers ``config`` with over ``project``: ``preflight_config``'s
-    report, or the issues ``launch_training`` hands its preflight (stubbed so nothing runs).
+    """Return the issues ``door`` answers ``config`` with over ``project``.
+
+    The issues are ``preflight_config``'s report, or the issues ``launch_training`` hands its
+    preflight, which is stubbed to answer invalid.
     """
     from tcip_mcp.tools import training_tools
 
@@ -1851,7 +1888,7 @@ _EVERY_INVARIANCE_FALSE = {
 
 
 def _rotation(degrees: float, p: float) -> dict:
-    """A rotation entry stating ``degrees`` and ``p``."""
+    """Return a rotation entry stating ``degrees`` and ``p``."""
     return {"rotation": {"degrees": degrees, "p": p}}
 
 
@@ -1919,11 +1956,13 @@ _BRIGHTNESS_ALONE = {
 def test_the_launch_doors_judge_each_augmentation_by_the_invariance_the_project_records(
     tmp_path, monkeypatch, door, answers, transforms, refused
 ):
-    """A transform relying on an invariance the record states false, or a rotation past the
+    """The launch doors judge each augmentation by the invariance the project records.
+
+    A transform relying on an invariance the record states false, or a rotation past the
     record's angle, is refused naming the transform, the invariance, the record's stated value
     and the door that states it; the same transform under a record stating it true is admitted,
     a rotation at or under the record's angle is admitted, a flip or a rotation stated at
-    probability zero relies on nothing, a crop relies on scale whatever its bounds, a blur and a
+    probability zero relies on nothing, a crop fixed at half scale relies on scale, a blur and a
     resize rely on none, and a color jitter whose saturation is zero relies on intensity alone.
     """
     pytest.importorskip("torch")
@@ -1998,8 +2037,10 @@ def test_the_launch_doors_judge_each_augmentation_by_the_invariance_the_project_
 def test_preflight_refuses_an_augmentation_value_outside_its_range_naming_the_field(
     tmp_path, transforms, field, refusal
 ):
-    """A stated value outside its transform's range is refused by the transform's type, naming
-    the entry and the field, under a record admitting every transform.
+    """An augmentation value outside its range is refused by preflight, naming the field.
+
+    The transform's type refuses the stated value, naming the entry and the field, under the
+    sample invariances record.
     """
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
@@ -2025,7 +2066,9 @@ def test_preflight_refuses_an_augmentation_value_outside_its_range_naming_the_fi
 def test_a_sweep_refuses_the_point_its_augmentation_axis_samples_against_the_record(
     tmp_path, monkeypatch
 ):
-    """An axis over an augmentation value is judged at each point it samples: a saturation of
+    """A sweep refuses the point its augmentation axis samples against the project record.
+
+    An axis over an augmentation value is judged at each point it samples: a saturation of
     zero relies on no invariance and a nonzero one on color, so a record stating color false
     refuses the nonzero corner by its label with nothing opened, and one stating it true opens.
     """
@@ -2082,8 +2125,9 @@ def test_a_sweep_refuses_the_point_its_augmentation_axis_samples_against_the_rec
 def test_preflight_names_a_missing_task_where_the_config_is_validated(
     tmp_path,
 ):
-    """A config stating no ``model_source.task`` is refused by name where preflight validates it,
-    before any resolver reads the task; the same config stating its task is admitted.
+    """Preflight names a missing ``model_source.task`` where it validates the config.
+
+    The config stating its task is admitted.
     """
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -2114,8 +2158,9 @@ def test_run_hyperparameter_search_admits_an_lr_sweep_beside_a_base_config_selec
     real_hpo_base_config,
     monkeypatch,
 ):
-    """The selection-metric refusal targets param_space, never base_config: a config that
-    states its own selection metric still runs an ordinary lr sweep.
+    """A base config stating its own selection metric still completes an lr sweep.
+
+    The sweep's search is called with the stated space.
     """
     from tcip_mcp.tools import training_tools
 
@@ -2144,9 +2189,9 @@ def test_hpo_admits_a_categorical_evaluation_axis_naming_the_same_metric_at_ever
     real_hpo_base_config,
     monkeypatch,
 ):
-    """A categorical evaluation axis naming the base config's metric at every choice is
-    admitted, every trial selecting on the sweep's one metric; a choice naming another is
-    refused naming the base config's.
+    """A categorical evaluation axis naming the base config's metric at every choice is admitted.
+
+    The sweep's search is called with that space.
     """
     from tcip_mcp.tools import training_tools
 
@@ -2200,9 +2245,10 @@ def test_hpo_admits_a_categorical_evaluation_axis_naming_the_same_metric_at_ever
 def test_a_sweep_whose_space_samples_another_selection_metric_is_refused_naming_the_base_configs(
     tmp_path, real_hpo_base_config, param_space
 ):
-    """Guard. A sweep ranks every trial by its base config's one selection metric: a space axis
-    sampling another, whether the whole evaluation block or the metric itself, refuses before
-    anything opens, naming the base config's metric.
+    """A sweep whose space samples another selection metric is refused, naming the base's.
+
+    A space axis sampling another metric, whether the whole evaluation block or the metric
+    itself, refuses naming the base config's metric, and no sweep directory is opened.
     """
     from tcip_mcp.experiments import sweep_dirs
     from tcip_mcp.tools import training_tools
@@ -2228,7 +2274,7 @@ def test_a_sweep_whose_space_samples_another_selection_metric_is_refused_naming_
 
 
 def test_dataset_identity_tolerates_a_genuinely_unregistered_dataset(tmp_path):
-    """The admitting half: no identity document at all still reads as (None, fp), not a refusal."""
+    """A dataset with no identity document reads as no dataset id, not a refusal."""
     from tcip_mcp.pipelines.data.split_construction import dataset_identity
     from tcip_mcp.pipelines.schemas import DataSpec
 
@@ -2246,10 +2292,10 @@ def test_dataset_identity_tolerates_a_genuinely_unregistered_dataset(tmp_path):
 def test_cancel_end_to_end_through_the_real_trainer_ends_canceled_with_records_and_no_result(
     tmp_path,
 ) -> None:
-    """A trial that trains one real epoch and is then canceled mid-training (the sweep's
-    cancellation requested only once a genuine score is already on record) ends canceled with
-    its launch record and carries no result, not that epoch's real score, so a canceled trial can
-    never outrank one that merely scored worse.
+    """A trial canceled through the real trainer ends canceled with records and no result.
+
+    A trial that reports one finite epoch and is then canceled mid-training ends canceled, keeps
+    its launch record, and leaves the sweep no best value.
     """
     pytest.importorskip("torch")
     import math

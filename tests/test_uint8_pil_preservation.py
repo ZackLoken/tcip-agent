@@ -1,12 +1,10 @@
-"""uint8 pixels reach the PIL augmentation chain whatever container they decoded from.
+"""uint8 pixels from a TIFF, whole or windowed, reach the PIL augmentation chain.
 
-to_pil_if_faithful is the single conversion; load_image applies it on the array-backend return
-and the tiled dataset applies it on windowed tiles, so an augmentation configured for a run
-covers a uint8 GeoTIFF the same as a JPEG, while dtypes PIL has no faithful mode for stay
-ndarray, and a run stating an augmentation over them refuses when its loader is built. A
-4-channel array only converts to RGBA when the source's own band_interpretations names the 4th
-band alpha; with no such signal, or a signal naming something else (a genuine spectral band), it
-stays an ndarray rather than guess.
+``to_pil_if_faithful`` converts a uint8 array to PIL; ``load_image`` applies it on the
+array-backend return and the tiled dataset on windowed tiles. Dtypes PIL has no faithful mode
+for stay ndarray, and a run stating an augmentation over them refuses when its loader is built.
+A 4-channel array converts to RGBA when the source's own band_interpretations names the 4th
+band alpha; with no such signal, or a signal naming something else, it stays an ndarray.
 """
 
 from __future__ import annotations
@@ -70,12 +68,11 @@ def test_unfaithful_inputs_return_unchanged():
 
 
 def test_four_channel_converts_to_rgba_only_when_the_source_declares_alpha():
-    """RGBA is a faithful *pixel* round-trip for any 4-channel uint8 array, but PIL's
-    augmentation chain treats an alpha channel differently than a color one: correct only when
-    the 4th channel really is transparency. band_interpretations (the same GDAL-color-
-    interpretation fact raster_source's other consumers already read) is the only signal that
-    settles it; with no signal, or a signal naming something other than alpha, the array must
-    stay ndarray rather than guess.
+    """A 4-channel array converts to RGBA only when its source declares alpha.
+
+    With band_interpretations naming the 4th band alpha, the array converts to an RGBA image
+    with its pixels unchanged; with no signal, or a signal naming something other than alpha,
+    the array comes back as the same ndarray object.
     """
     from tcip_mcp.pipelines.image_utils import to_pil_if_faithful
 
@@ -137,9 +134,10 @@ def test_load_image_returns_pil_for_uint8_tiffs(tmp_path: Path):
 def test_load_image_converts_a_real_alpha_tagged_geotiff_to_rgba(
     tmp_path: Path,
 ):
-    """A GDAL-served 4-band GeoTIFF whose 4th band the file itself declares alpha (TIFF
-    ExtraSamples=2, unassociated alpha) is the real signal load_image now reads through
-    raster_source.GdalSource.band_interpretations, not a guess from the channel count.
+    """``load_image`` converts a TIFF whose file declares its 4th band alpha to RGBA.
+
+    The file tags its 4th band ExtraSamples=2, unassociated alpha, and ``load_image`` returns an
+    RGBA image of its pixels.
     """
     import tifffile
 
@@ -159,9 +157,10 @@ def test_load_image_converts_a_real_alpha_tagged_geotiff_to_rgba(
 def test_load_image_keeps_a_declared_spectral_fourth_band_as_ndarray(
     tmp_path: Path,
 ):
-    """A 4-band GeoTIFF whose file tags the 4th band ExtraSamples=0 (unspecified, GDAL's
-    'undefined' color interpretation) is a genuine 4th channel, never alpha; load_image must not
-    guess it into RGBA, where PIL's augmentation chain would silently leave it untouched.
+    """``load_image`` keeps a declared spectral fourth band as an ndarray.
+
+    A 4-band TIFF whose file tags the 4th band ExtraSamples=0 (unspecified, GDAL's
+    'undefined' color interpretation) loads as an ndarray of its pixels, not RGBA.
     """
     import tifffile
 
@@ -181,8 +180,10 @@ def test_load_image_keeps_a_declared_spectral_fourth_band_as_ndarray(
 def test_load_image_keeps_an_undeclared_fourth_band_npy_as_ndarray(
     tmp_path: Path,
 ):
-    """A .npy stack carries no color-interpretation metadata at all: no signal ever exists to
-    call its 4th channel alpha, so load_image must never guess it into RGBA.
+    """``load_image`` keeps a four-band .npy stack as an ndarray.
+
+    A .npy stack carries no color-interpretation metadata; load_image returns its pixels as an
+    ndarray.
     """
     stack = _grid(20, 16, 4)
     np.save(str(tmp_path / "stack.npy"), stack)
@@ -235,7 +236,9 @@ def test_load_image_keeps_ndarray_where_pil_has_no_faithful_mode(
 def test_the_header_and_the_decode_agree_on_whether_a_source_is_served_as_pil(
     tmp_path: Path, name, channels, dtype, tags
 ):
-    """The mode a source's header says it is served in (what a loader built under the chain
+    """The header and the decode agree on whether a source is served as PIL.
+
+    The mode a source's header says it is served in (what a loader built under the chain
     admits by) is the mode ``load_image`` decodes it to, ``None`` for an array.
     """
     import tifffile
@@ -272,7 +275,10 @@ def _flip_transform():
 def _detection_project(
     tmp_path: Path, arr: np.ndarray, *, extrasamples: list[str] | None = None
 ):
-    """One TIFF holding ``arr`` and its label document; its images directory."""
+    """Write ``img0.tif`` holding ``arr`` and its one-box label document; return their directory.
+
+    The TIFF sits under ``images/<undated bucket>`` and its ``bud`` box is (2, 2, 10, 10).
+    """
     import tifffile
 
     from tcip_annotation.state import Annotation, BBox
@@ -343,9 +349,10 @@ def test_a_uint8_windowed_tile_trains_augmented_through_tiling(tmp_path: Path):
 
 
 def test_a_declared_alpha_windowed_tile_trains_augmented(tmp_path: Path):
-    """The windowed tile path reads the same real band_interpretations signal load_image does:
-    a 4-band GeoTIFF whose file declares its 4th band alpha still gets the PIL augmentation
-    chain, byte-identical to the whole-decode case above.
+    """A windowed tile of a TIFF declaring alpha is read through the flip augmentation.
+
+    For a 96x96 4-band TIFF whose file declares its 4th band alpha, the dataset's first tile
+    equals the horizontally flipped top-left 64x64 pixels exactly.
     """
     pytest.importorskip("torch")
     import torch
@@ -379,9 +386,10 @@ def test_a_declared_alpha_windowed_tile_trains_augmented(tmp_path: Path):
 def test_a_declared_spectral_fourth_band_windowed_tile_refuses_the_chain(
     tmp_path: Path,
 ):
-    """A 4-band GeoTIFF whose file declares its 4th band something other than alpha (a genuine
-    spectral band) is never guessed into RGBA, so a tiled loader built under the chain refuses
-    by name rather than serve the tile unaugmented.
+    """A tiled loader under the chain refuses a TIFF declaring a spectral fourth band.
+
+    A 4-band TIFF tagging its 4th band unspecified, read under a flip, is refused naming its
+    4-band uint8 pixels.
     """
     pytest.importorskip("torch")
     from tcip_mcp.pipelines import raster_source
@@ -407,10 +415,11 @@ def test_a_declared_spectral_fourth_band_windowed_tile_refuses_the_chain(
 def _augmented_run(
     tmp_path: Path, arr: np.ndarray, *, bespoke: bool = False
 ) -> dict:
-    """A one-epoch run over one frame holding ``arr`` (:func:`_detection_project`), no validation
-    side, stating an augmentation that flips every frame: a detection run whose loaders the
-    platform builds, or with ``bespoke`` a run of a task no built-in loader reads whose loaders a
-    ``dataset_source`` builder builds.
+    """Return a one-epoch run config over one frame holding ``arr``, flipped with probability 1.
+
+    The frame comes from :func:`_detection_project`, under a val_ratio of zero. The run is a
+    detection run of ``BUILT_DETECTOR``, or with ``bespoke`` one of task ``grape_bunch_count``
+    naming a ``dataset_source`` builder.
     """
     from tests._chain_fixtures import training_config
     from tests._training_values import evaluation_block
@@ -439,7 +448,9 @@ def _augmented_run(
 def test_a_run_stating_augmentation_over_uint16_frames_refuses_at_its_resolution(
     tmp_path: Path, bespoke: bool
 ):
-    """Whoever builds the run's loaders, the platform's factory or its ``dataset_source``
+    """A run stating augmentation over uint16 frames refuses at its resolution.
+
+    Whoever builds the run's loaders, the platform's factory or its ``dataset_source``
     builder, the run refuses at the one door where its samples meet its augmentation.
     """
     pytest.importorskip("torch")
@@ -455,8 +466,10 @@ def test_a_run_stating_augmentation_over_uint16_frames_refuses_at_its_resolution
 
 
 def test_a_bodys_tiler_refuses_the_chain_over_uint16_frames(tmp_path: Path):
-    """``ctx.tiled_dataset`` wraps a dataset a body already holds, so it admits the transforms
-    it is handed over that dataset's samples the way a run's loaders do, and tiles a uint8 one.
+    """A body's tiler refuses the augmentation chain over uint16 frames.
+
+    ``ctx.tiled_dataset`` under a flip refuses a uint16 dataset, naming its 3-band uint16
+    pixels, and tiles the run's uint8 training dataset.
     """
     pytest.importorskip("torch")
     from tcip_mcp.pipelines import raster_source
@@ -493,8 +506,10 @@ def test_a_bodys_tiler_refuses_the_chain_over_uint16_frames(tmp_path: Path):
 def test_a_dataset_built_around_the_door_refuses_the_chain_at_its_first_read(
     tmp_path: Path,
 ):
-    """A loader constructed directly with transforms over a uint16 frame reaches no door, so its
-    first read refuses naming the frame rather than serve it unaugmented.
+    """A dataset built around the door refuses the chain at its first read.
+
+    A loader constructed directly with transforms over a uint16 frame refuses at its first
+    read, naming the frame and its 3-band uint16 pixels.
     """
     pytest.importorskip("torch")
     from tcip_mcp.pipelines.data.datasets import DetectionDataset

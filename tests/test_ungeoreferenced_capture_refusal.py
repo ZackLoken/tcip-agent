@@ -1,8 +1,10 @@
-"""No positioned capture refuses a plant-mapping build or delivery by name; a partly positioned
-mapping keeps delivering with its unattributed count disclosed. Reuses the platform's own
-producers (``initialize_project``, ``register_dataset``, ``build_plant_mapping``, publication and
-the phenology delivery) and the binding family's own geolocated-scene writer, a second registered
-trait rather than the pilot's, so nothing here generalizes from one trait's own vocabulary.
+"""Captures with no position and the plant-mapping build and delivery.
+
+No positioned capture refuses a plant-mapping build or delivery by name; a partly positioned
+mapping keeps delivering with its unattributed count disclosed. The tests use the platform's
+own producers (``initialize_project``, ``register_dataset``, ``build_plant_mapping``,
+publication and the phenology delivery), ``test_plant_mapping_binding``'s geolocated-scene
+writer, and a registered trait of their own.
 """
 
 from __future__ import annotations
@@ -51,12 +53,12 @@ PLANT_IDS = [p["plot"] for p in PLANTS]
 
 
 def _write_ungeoreferenced_image(path: Path) -> None:
-    """A JPEG carrying no EXIF at all: readable, but with no timestamp and no GPS block."""
+    """Write an 8x8 black image at ``path`` through PIL, with no EXIF block."""
     write_image(path, (8, 8))
 
 
 def _write_corrupt_image(path: Path) -> None:
-    """A few bytes no decoder can open: unreadable, never a stamp with a position to miss."""
+    """Write a few bytes no decoder can open."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"not a jpeg")
 
@@ -68,8 +70,9 @@ def test_build_plant_mapping_refuses_when_every_capture_carries_no_position(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A build over captures none of which carry a position this door reads refuses rather than
-    persisting a mapping with ``n_mapped == 0``.
+    """A plant-mapping build over captures that carry no position is refused.
+
+    The build answers an error naming the plant-tag mechanism and persists no mapping.
     """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
@@ -94,9 +97,7 @@ def test_build_plant_mapping_names_the_unreadable_capture_before_the_position_cl
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A capture PIL cannot open at all is named as unreadable, not folded into the no-position
-    sentence as if it had been opened and found blank.
-    """
+    """A plant-mapping build names a capture PIL cannot open as unreadable."""
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
     images_root = dataset_root / "images"
@@ -154,9 +155,9 @@ def test_build_route_refuses_a_selected_date_with_no_captures_never_persisting_a
     client,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A selected date with no captures at all refuses in the shared builder, so both the build
-    door and this route refuse it the same way rather than the route persisting an empty
-    mapping.
+    """The build route refuses a selected date with no captures.
+
+    The route answers 400 saying there is no capture under the selected root.
     """
     from tcip_web.state import store
 
@@ -195,10 +196,10 @@ def _persist_synthetic_mapping(
     plant_csvs: list[dict],
     assignments: dict[str, list[Assignment]],
 ) -> MappingBuild:
-    """A hand-composed ``MappingBuild``, persisted through the platform's own ``persist_mapping``,
-    for a delivery scenario ``build_mapping`` itself would refuse to construct (no positioned
-    capture, or every capture beyond the match distance): the delivery-time refusal is what these
-    tests pin, not the build-time one, so the record is built directly.
+    """Persist and return a hand-composed ``MappingBuild`` through ``persist_mapping``.
+
+    The mapping holds the supplied plant CSVs and per-date assignments, under a registry
+    written beside it.
     """
     from tcip_mcp.dataset_layout import require_dataset_identity
     from tcip_mcp.registry_paths import stored_path
@@ -258,9 +259,10 @@ def _delivery_scene(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> tuple[OpenProject, Path, dict[str, str]]:
-    """``tmp_path`` made a project holding a registered dataset with one real prediction bucket,
-    and the trait this module's deliveries run under; returns ``(project, dataset_root, {date:
-    bucket})``.
+    """Make ``tmp_path`` a project holding a registered dataset and one real prediction bucket.
+
+    The project also holds a registered trait; returns
+    ``(project, dataset_root, {date: bucket})``.
     """
     project = _init(tmp_path)
     dataset_root = _dataset(tmp_path)
@@ -495,9 +497,7 @@ def test_a_blank_plant_name_is_unattributed_by_the_one_predicate(
 
 
 def _republished(dataset_root: Path, date: str) -> dict[str, str]:
-    """Every image now under ``date`` published as a fresh bucket of that date, for a scene whose
-    capture set grew after :func:`_write_scene` published it.
-    """
+    """Publish the JPEGs now under ``date`` as the bucket ``all/<date>``; map date to its name."""
     images = sorted((dataset_root / "images" / date).glob("*.jpg"))
     return {date: _publish(dataset_root.parent, f"all/{date}", images)}
 
@@ -505,8 +505,9 @@ def _republished(dataset_root: Path, date: str) -> dict[str, str]:
 def _delivered_disclosure(
     project: Path, dataset_root: Path, preds_by_date: dict[str, str]
 ) -> dict:
-    """Deliver ``preds_by_date`` through ``valley`` for both plants; the event's plant-mapping
-    disclosure.
+    """Deliver ``preds_by_date`` through ``valley`` for both plants; return the disclosure.
+
+    The disclosure is the delivery event's plant-mapping block.
     """
     res = _deliver(
         project,
@@ -529,9 +530,11 @@ def test_a_partly_positioned_scene_builds_and_delivers_with_the_count_disclosed(
     client,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Two images positioned, one not: both doors build, ``summary()`` reports one unattributed
-    per date and in total, the load route returns the same summary, and the delivery event
-    discloses one unattributed image over the delivered date.
+    """A partly positioned scene builds and delivers with its unattributed count disclosed.
+
+    Two images positioned, one not: the build's ``summary()`` reports one unattributed per date
+    and in total, the load route answers that total, and the delivery event discloses one
+    unattributed image scoped to the delivered date.
     """
     from tcip_web.state import store
 
@@ -571,8 +574,10 @@ def test_a_delivery_naming_one_of_two_mapping_dates_carries_the_delivered_scope(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A mapping covering two dates, one delivered: the disclosed count is scoped to the
-    delivered date alone, never the mapping's full span.
+    """A delivery naming one of two mapping dates discloses the delivered date's count alone.
+
+    The mapping holds one unattributed capture, on the second date; a delivery of the first
+    date discloses none.
     """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
@@ -604,10 +609,10 @@ def test_a_date_recorded_with_no_capture_still_delivers_beside_an_attributed_one
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The no-capture-at-all refusal fires only when nothing across the delivered dates
-    attributes: a mapping recording one date with no capture at all beside a fully attributed
-    one still delivers the attributed date's bucket. A bucket of no documents states no capture
-    date, so no delivery names the empty date itself.
+    """A date recorded with no capture still delivers beside an attributed one.
+
+    A mapping recording one date with no capture at all beside a fully attributed one still
+    delivers the attributed date's bucket, and the delivery names the attributed date alone.
     """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)
@@ -690,8 +695,10 @@ def test_a_capture_at_the_origin_is_admitted_as_positioned(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``(0.0, 0.0)`` is a real GPS position (off the coast of west Africa), never treated as
-    the absence of one: the build's own position check is ``is not None``, not truthiness.
+    """A capture at ``(0.0, 0.0)`` is admitted as positioned.
+
+    ``(0.0, 0.0)`` is a real GPS position, off the coast of west Africa: the build maps the
+    plant there.
     """
     _init(tmp_path)
     dataset_root = _dataset(tmp_path)

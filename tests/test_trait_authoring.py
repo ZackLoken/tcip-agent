@@ -1,4 +1,6 @@
-"""Trait entries: what the schema and a proposal admit, how the calibration path reads an entry,
+"""Trait entries and their admission.
+
+The tests cover what the schema and a proposal admit, how the calibration path reads an entry,
 and the positive state a bucket's scope classifies.
 """
 
@@ -73,8 +75,9 @@ def test_a_proposal_off_the_vocabulary_refuses_and_appends_nothing(
     delivers: tuple,
     refusal: str,
 ):
-    """The anti-fabrication anchor: a proposal whose ``delivers`` is empty or leaves crops.yml
-    refuses by name, and no revision is appended.
+    """A proposal whose ``delivers`` is empty or leaves crops.yml refuses by name.
+
+    No revision is appended.
     """
     with pytest.raises(ValueError, match=refusal):
         propose(tmp_path, entry("leaf", delivers))
@@ -82,8 +85,9 @@ def test_a_proposal_off_the_vocabulary_refuses_and_appends_nothing(
 
 
 def test_every_picker_names_an_admitted_count_objective_and_unset_stays_empty():
-    """Admission accepts each objective a picker implements, and an unset one stays honestly
-    empty rather than defaulted.
+    """Admission accepts each count objective a picker implements.
+
+    An unset count objective stays empty.
     """
     from tcip_mcp.pipelines.operating_point import COUNT_OBJECTIVE_PICKERS
 
@@ -103,8 +107,9 @@ def test_every_picker_names_an_admitted_count_objective_and_unset_stays_empty():
 def test_an_unset_count_objective_refuses_the_proposal_asking_the_breeder(
     tmp_path: Path,
 ):
-    """No platform default stands in for the objective a count is fitted under: a count
-    operationalization proposed without one refuses asking the breeder, and a stated one is
+    """A count operationalization proposed with no count objective refuses, asking the breeder.
+
+    No platform default stands in for the objective a count is fitted under; a stated one is
     admitted.
     """
     from tests._trait_fixtures import with_operationalization
@@ -147,8 +152,9 @@ def test_an_unset_count_objective_refuses_the_proposal_asking_the_breeder(
 def test_an_entry_naming_what_no_table_implements_refuses_naming_the_field(
     field: str,
 ):
-    """A name outside the field's vocabulary refuses where the entry a proposal takes is built,
-    naming the field.
+    """An entry naming a value outside a field's vocabulary refuses, naming the field.
+
+    The refusal comes where the entry a proposal takes is built.
     """
     with pytest.raises(ValidationError, match=field):
         entry("custom", ("leaf_length",), **{field: "a_name_no_table_has"})
@@ -179,8 +185,9 @@ def test_an_entry_naming_what_no_table_implements_refuses_naming_the_field(
 def test_every_authorable_name_has_an_implementation_and_no_other(
     vocabulary: str, table: str
 ):
-    """A field's vocabulary and the table its reader subscripts name the same set, the empty
-    unauthored member aside.
+    """A field's vocabulary and the table its reader subscripts name the same set.
+
+    The empty unauthored member is set aside.
     """
     import importlib
     from typing import get_args
@@ -218,8 +225,10 @@ def test_an_unknown_trait_hard_fails(tmp_path: Path):
 def test_a_measurement_reader_refuses_a_trait_with_no_confirmed_revision_by_name(
     tmp_path: Path,
 ):
-    """A measurement reads the latest confirmed revision: an entry proposed and never confirmed
-    refuses by name, and a later unconfirmed proposal never changes what the confirmed one says.
+    """A measurement reader refuses a trait with no confirmed revision by name.
+
+    A measurement reads the latest confirmed revision: an entry proposed but not confirmed
+    refuses by name, and a later unconfirmed proposal leaves what the confirmed one says.
     """
     from tcip_mcp.operationalization import OperationalizationRefusedError
 
@@ -248,8 +257,9 @@ def test_a_proposal_made_while_another_holds_the_record_lands_as_the_next_revisi
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """Two proposals at once both land: one started while the other has read the record waits
-    for it and appends after it rather than overwriting it.
+    """Two concurrent proposals both land as successive revisions.
+
+    One started while the other holds the record lands after it, as revision 2.
     """
     import threading
 
@@ -316,8 +326,10 @@ GRADE = cr.Attribute("grade", "ordinal", ("low", "high"))
 
 
 def _crossing(**state: str) -> TraitEntry:
-    """:data:`BUD_OPENING` stating ``state`` as its positive state and a crossing
-    operationalization over ``bud``, every field that kind rests on authored.
+    """Return :data:`BUD_OPENING` stating ``state`` as its positive state.
+
+    The entry carries a crossing operationalization over ``bud``, with its count bias and error
+    tolerances and classifier agreement floor authored.
     """
     from tests._trait_fixtures import with_fields, with_operationalization
 
@@ -338,7 +350,9 @@ def _crossing(**state: str) -> TraitEntry:
 def test_a_positive_state_its_registry_does_not_declare_refuses_at_proposal(
     tmp_path: Path,
 ):
-    """The positive state names its attribute and its value as one fact, each held to the
+    """A positive state its registry does not declare refuses at proposal.
+
+    The positive state names its attribute and its value as one fact, each held to the
     registry: a value the attribute does not list refuses, an attribute the subject does not
     declare refuses, and a value of the subject's second attribute is admitted.
     """
@@ -379,7 +393,9 @@ def test_a_positive_state_its_registry_does_not_declare_refuses_at_proposal(
 def test_an_operationalization_leaving_its_breeder_definition_unauthored_refuses_asking_for_it(
     tmp_path: Path, kind: str, field: str
 ):
-    """The rule a milestone's day is read under and the statistic a plant's images combine into
+    """An operationalization leaving its breeder definition unauthored refuses, asking for it.
+
+    The rule a milestone's day is read under and the statistic a plant's images combine into
     are the trait's definition: an operationalization resting on one refuses unauthored at the
     proposal, asking the breeder its question, and appends nothing; authored, it is admitted.
     """
@@ -420,10 +436,11 @@ def _bucket(
     attributes: tuple,
     images: list[Path] | None = None,
 ):
-    """Each of ``images`` (by default one frame ``P1.png`` of capture ``date`` of the dataset
-    ``ds``) holding one ``bud`` detection carrying the last value of each of ``attributes``,
-    published as the bucket ``run/<date>`` from a checkpoint whose scope declares them
-    (``_chain_fixtures.published``); the bucket.
+    """Publish and return the bucket ``run/<date>`` of one ``bud`` detection per image.
+
+    Each of ``images`` (by default one frame ``P1.png`` of capture ``date`` of the dataset
+    ``ds``) holds one ``bud`` detection carrying the last value of each of ``attributes``,
+    published from a checkpoint whose scope declares them (``_chain_fixtures.published``).
     """
     pytest.importorskip("torch")
     from tests._chain_fixtures import published
@@ -480,9 +497,11 @@ def test_the_positive_state_resolves_by_name_from_the_buckets_own_scope(
 
 
 def _deliver_series(tmp_path: Path, *, attributed: bool) -> dict:
-    """Two dated buckets over two mapped plots, whose scope declares the positive state's
-    attribute (``attributed``) or no attribute, delivered through the mapping over them under a
-    breeder's acknowledgment; a refusal answers ``{"error": ...}``.
+    """Deliver two dated buckets over two mapped plots under a breeder's acknowledgment.
+
+    The buckets' scope declares the positive state's attribute (``attributed``) or no
+    attribute, and they are delivered through the mapping over them; a refusal answers
+    ``{"error": ...}``.
     """
     from tests._chain_fixtures import acknowledged
     from tests._mapping_fixtures import PLOTS, map_captures
@@ -529,8 +548,10 @@ def _deliver_series(tmp_path: Path, *, attributed: bool) -> dict:
 
 @pytest.mark.usefixtures("seed_bud_operationalization")
 def test_a_series_classifying_the_states_attribute_delivers(tmp_path: Path):
-    """The delivered milestones are read under the crossing rule the shipped revision states, and
-    the rows pin that revision by number and digest rather than restating its rule in a column.
+    """A series classifying the positive state's attribute delivers.
+
+    The delivered milestones are read under the crossing rule the shipped revision states, and
+    the rows pin that revision by number and digest and carry no crossing_rule column.
     """
     from tcip_mcp.delivery import read_delivery_events
     from tests import csv_rows

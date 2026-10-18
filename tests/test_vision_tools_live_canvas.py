@@ -1,9 +1,8 @@
 """The live-canvas capture: where the human's shapes land, and whether the state is fresh.
 
-`capture_live_canvas` is the agent's only view of work that exists nowhere on disk yet, so two
-things have to hold. The shapes have to be drawn at the resolution the pixels underneath them
-were served at, and a capture that no GUI answered has to say so rather than present a stale
-push as the canvas the human is looking at now.
+``capture_live_canvas`` draws the human's shapes at the resolution the pixels underneath them
+were served at, and a capture no GUI answered reports itself unrefreshed, its state last
+known.
 """
 
 from __future__ import annotations
@@ -57,7 +56,7 @@ def _canvas_image(tmp_path: Path) -> str:
 
 
 def _ago(seconds: float) -> str:
-    """The instant ``seconds`` before now, in the spelling the push route stamps."""
+    """Return the instant ``seconds`` ago, in the spelling the push route stamps."""
     return (
         datetime.now(timezone.utc) - timedelta(seconds=seconds)
     ).isoformat()
@@ -70,8 +69,10 @@ def _push_state(
     received_at: str,
     shapes: list[dict] | None = None,
 ) -> None:
-    """Write the two documents the GUI pushes for the project ``tmp_path``: the meta heartbeat
-    and the geometry blob, the image named relative to the project as the push route stores it.
+    """Write the two documents the GUI pushes for the project ``tmp_path``.
+
+    They are the meta heartbeat and the geometry blob, the image named relative to the project
+    as the push route stores it.
     """
     import tcip_store
     from tcip_mcp.registry_paths import stored_path
@@ -104,7 +105,7 @@ def _push_state(
 
 
 def _dominance(px: Image.Image, xy: tuple[int, int], channel: int) -> int:
-    """How far ``channel`` rises above the other two at one pixel of the rendered artifact."""
+    """Return how far ``channel`` rises above the other two at one pixel of the artifact."""
     values = px.getpixel(xy)
     others = [v for i, v in enumerate(values) if i != channel]
     return values[channel] - max(others)
@@ -116,9 +117,8 @@ def test_canvas_shapes_are_drawn_at_the_resolution_the_pixels_were_served_at(
 ) -> None:
     """A frame read down to ``max_edge`` carries its shapes down with it.
 
-    Shape coordinates arrive in the raster's native grid, so drawing them on reduced pixels
-    without that same reduction shows the agent every polygon, box and point enlarged and
-    displaced while the tool reports it as the human's live canvas.
+    Shape coordinates arrive in the raster's native grid; on the half-size render the point and
+    the box are drawn at their served-scale positions, not at their native ones.
     """
     from tcip_mcp.tools.vision_tools import capture_live_canvas
 
@@ -147,9 +147,8 @@ def test_a_capture_no_gui_answered_reports_the_state_as_last_known(
 ) -> None:
     """A ping that reaches the hub but produces no new push leaves the capture unrefreshed.
 
-    The one thing this tool knows that no file on disk does is whether the canvas it drew is
-    what the human is looking at right now. Reading an unchanged heartbeat as a fresh answer
-    presents a stale canvas, and its stale shape counts, as the live one.
+    The ping is delivered, the capture reports itself unrefreshed with its state's age, and its
+    summary calls the canvas last known.
     """
     from tcip_mcp import web_client
     from tcip_mcp.tools.vision_tools import capture_live_canvas
@@ -185,8 +184,10 @@ def test_a_capture_the_gui_answered_reports_the_state_as_live(
     bound,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A GUI that pushes fresh state in response to the ping is reported as live: the refresh
-    round trip has to admit the answered case, not only flag the unanswered one.
+    """A capture the GUI answered with fresh state reports the state as live.
+
+    The capture reads refreshed, its summary does not call the canvas last known, and it counts
+    the pushed shapes.
     """
     from tcip_mcp import web_client
     from tcip_mcp.tools.vision_tools import capture_live_canvas
@@ -217,8 +218,9 @@ def test_a_canvas_record_without_its_arrival_instant_is_refused_by_name(
     tmp_path: Path,
     bound,
 ) -> None:
-    """No producer writes a canvas record without ``received_at``, so its age is unknown, never
-    zero: the capture refuses rather than describing it as live.
+    """A canvas record without its arrival instant is refused by name.
+
+    The capture raises naming the missing ``received_at``.
     """
     import tcip_store
     from tcip_mcp.tools.vision_tools import capture_live_canvas

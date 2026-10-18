@@ -1,7 +1,7 @@
-"""tcip triage-predictions: the demoted door's own command-line entry point.
+"""tcip triage-predictions: its own command-line entry point.
 
---project is required unconditionally, unlike tcip score-predictions: the checkpoint verification
-this door always runs reads the registry of that project, never only for one optional feature.
+A run naming no --project exits nonzero naming it and plants no store; a run naming one
+triages with a checkpoint registered in that project.
 """
 
 from __future__ import annotations
@@ -76,8 +76,10 @@ def test_triages_with_the_checkpoint_registered_in_the_named_project(
 def test_the_band_and_the_ranking_settings_are_required_on_every_command(
     tmp_path,
 ):
-    """Each console door refuses a call leaving its stated settings out, naming them: triage's
-    band and its reason, the failure-case ranking's top-k and weights, the reference grid's overlap.
+    """Three console commands each refuse a call leaving their stated settings out, naming them.
+
+    The settings are triage's band and its reason, the failure-case ranking's top-k and
+    weights, and the reference grid's overlap.
     """
     cwd = tmp_path / "operator_cwd"
     cwd.mkdir()

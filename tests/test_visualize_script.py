@@ -1,7 +1,7 @@
-"""tcip visualize: the demoted door's own command-line entry point.
+"""tcip visualize: its own command-line entry point.
 
-Like tcip overlay-reference-grid, --project is required unconditionally and must name a project:
-the door writes an artifact and carries an audit line, both under that project.
+--project is required unconditionally and must name a project: the command writes an artifact
+and carries an audit line, both under that project.
 """
 
 from __future__ import annotations

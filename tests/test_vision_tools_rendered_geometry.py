@@ -1,5 +1,6 @@
-"""What the vision tools draw, read off the rendered pixels: per-ring mask coverage and the
-failure-case layers.
+"""What the vision tools draw, read off the rendered pixels.
+
+The tests cover per-ring mask coverage and the failure-case layers.
 """
 
 from __future__ import annotations
@@ -38,15 +39,16 @@ OUTSIDE_EVERY_RING = (150, 90)
 
 
 def _red_over_gray(px: Image.Image, xy: tuple[int, int]) -> int:
-    """How strongly the first palette color (red) covers the gray background at one pixel."""
+    """Return how strongly the first palette color (red) covers the gray ground at one pixel."""
     r, g, _b = px.getpixel(xy)
     return r - g
 
 
 @pytest.fixture
 def split_instance_dataset(tmp_path: Path) -> Path:
-    """A dataset whose one image carries a two-region ground-truth mask, each region far from
-    the other.
+    """Return a dataset of one 320x180 image labeled with one two-ring ``leaf`` polygon.
+
+    The rings are ``GT_RING_LEFT`` and ``GT_RING_RIGHT``.
     """
     from tcip_annotation.state import Annotation, Polygon
     from tests._producer_fixtures import label_image
@@ -75,10 +77,10 @@ def _flat(ring: list[tuple[float, float]]) -> list[float]:
 def test_every_region_of_a_split_annotation_is_drawn_on_the_mask_render(
     split_instance_dataset: Path,
 ) -> None:
-    """A mask render covers every ring the stored annotation holds.
+    """A mask render covers both rings the stored annotation holds.
 
-    An occlusion-split object is one instance in several regions; showing only its dominant
-    fragment understates the extent a reviewer confirms and a model trains on.
+    An occlusion-split object is one instance in two regions: the render counts one instance
+    and paints inside each region, not outside them.
     """
     from tcip_mcp.tools.vision_tools import visualize
 
@@ -101,7 +103,10 @@ def test_every_region_of_a_split_annotation_is_drawn_on_the_mask_render(
 def test_every_region_of_a_split_prediction_is_drawn_on_the_mask_render(
     split_instance_dataset: Path,
 ) -> None:
-    """The prediction render covers every ring too: a split predicted mask must look split."""
+    """A prediction render covers both rings of a split predicted mask.
+
+    The render counts one instance and paints inside each region, not outside them.
+    """
     from tcip_mcp.tools.vision_tools import visualize
     from tests._chain_fixtures import published
 
@@ -151,7 +156,7 @@ PRED_BOX = (200.0, 140.0, 280.0, 190.0)
 
 
 def _mask_center(arr: np.ndarray, channel: int) -> tuple[float, float]:
-    """The center of the pixels where ``channel`` dominates both other channels."""
+    """Return the center of the pixels where ``channel`` dominates both other channels."""
     others = [c for c in (0, 1, 2) if c != channel]
     ch = arr[:, :, channel].astype(int)
     mask = np.ones(ch.shape, dtype=bool)
@@ -164,7 +169,10 @@ def _mask_center(arr: np.ndarray, channel: int) -> tuple[float, float]:
 
 @pytest.fixture
 def mislocalized_prediction_dataset(tmp_path: Path) -> Path:
-    """One image whose single prediction sits nowhere near its single ground-truth box."""
+    """Create a 300x200 image labeled at ``GT_BOX``, with one prediction published at ``PRED_BOX``.
+
+    The prediction is the bucket ``live``'s, scored 0.4; the return is the dataset root.
+    """
     from tcip_annotation.state import Annotation, BBox
     from tests._producer_fixtures import label_image
 
@@ -205,9 +213,8 @@ def test_a_failure_case_draws_ground_truth_from_the_label_document(
 ) -> None:
     """The green layer of a failure case is the image's ground truth, not its predictions again.
 
-    Both layers coming from one document renders a perfect overlap on exactly the images the
-    ranking flagged as worst, so the agent reads the artifact as a model that matched ground
-    truth.
+    The green layer centers on the ground-truth box and the prediction layer on the prediction,
+    more than 100 px apart.
     """
     from tcip_mcp.tools.vision_tools import render_failure_cases
 

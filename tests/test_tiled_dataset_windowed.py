@@ -1,4 +1,6 @@
-"""TiledDetectionDataset: keep-region filtering, the sampler-facing properties, eager
+"""TiledDetectionDataset's keep regions, sampler properties, reads and pickling.
+
+The tests cover keep-region filtering, the sampler-facing properties, eager
 backend-conditioned opens, windowed tile reads, and worker pickling.
 
 Fixtures use a 200x200 frame with tile 64 / overlap 0.2: SAHI's lattice steps 52 and pulls the
@@ -25,7 +27,7 @@ from tests._producer_fixtures import dataset_over  # noqa: E402
 
 @pytest.fixture(autouse=True)
 def _empty_source_pool():
-    """Each test starts and ends with an empty pool: it is process-global state."""
+    """Clear the process-global source pool around each test."""
     raster_source.close_source_pool()
     yield
     raster_source.close_source_pool()
@@ -92,7 +94,7 @@ def _tiled(images_dir, **kwargs) -> TiledDetectionDataset:
 
 
 def _only_source(ds) -> str:
-    """The one sample key this dataset indexes by, its sample's own source identity."""
+    """Return the dataset's one stem key, asserting it holds exactly one."""
     keys = sorted(set(ds.stems))
     assert len(keys) == 1, keys
     return keys[0]
@@ -216,9 +218,7 @@ def test_source_frames_for_a_windowed_raster(tmp_path):
 def test_photographic_construction_opens_no_raster_backend(
     tmp_path, monkeypatch
 ):
-    """A directory of JPEGs must index from header probes alone: opening each one through the
-    raster layer would decode every frame at construction.
-    """
+    """A directory of JPEGs indexes its 16 tiles without opening a raster backend."""
     images_dir = _jpeg_project(tmp_path)
     base = dataset_over("detection", str(images_dir), subject="bud")
 
@@ -248,8 +248,9 @@ def test_the_index_opens_a_windowed_source_once_and_reads_through_that_reader(
     tmp_path,
     monkeypatch,
 ):
-    """Building the index opens the raster once, and that pooled reader is the one a tile is
-    read through: no probe reader is opened beside it, and a read opens nothing new.
+    """Building the index opens the raster once, and tiles are read through that reader.
+
+    No probe reader is opened beside the pooled reader, and a read opens nothing new.
     """
     images_dir, _arr = _tiff_project(tmp_path)
     opened: list = []
@@ -278,9 +279,7 @@ def test_the_index_opens_a_windowed_source_once_and_reads_through_that_reader(
 
 
 def test_an_unopenable_windowed_layout_refuses_at_construction(tmp_path):
-    """A raster that cannot be opened surfaces its refusal when the index is built, not at
-    step N of an epoch.
-    """
+    """A raster that cannot be opened is refused when the index is built."""
     images_dir, _arr = _tiff_project(tmp_path)
     # Corrupt the file after writing the labels: header parse now fails.
     (images_dir / "img0.tif").write_bytes(b"II*\x00garbage")
@@ -292,8 +291,9 @@ def test_an_unopenable_windowed_layout_refuses_at_construction(tmp_path):
 
 
 def test_windowed_tiles_match_the_whole_decode_crop(tmp_path):
-    """Every slice served through the windowed path is identical to the same rect of the
-    whole-decoded source: interior slices and the pulled-back right/bottom edge ones.
+    """Every windowed slice is identical to the same rect of the whole-decoded source.
+
+    This holds for interior slices and the pulled-back right/bottom edge ones.
     """
     images_dir, _arr = _tiff_project(tmp_path)
     ds = _tiled(images_dir)
@@ -309,9 +309,7 @@ def test_windowed_tiles_match_the_whole_decode_crop(tmp_path):
 
 
 def test_windowed_getitem_never_whole_decodes(tmp_path, monkeypatch):
-    """A windowed stem's tiles come from pooled window reads; the whole-decode loader must not
-    run at all, or a huge raster would be decoded whole per tile.
-    """
+    """A windowed stem's tile is served without calling the whole-decode loader."""
     images_dir, _arr = _tiff_project(tmp_path)
     ds = _tiled(images_dir)
 
@@ -326,8 +324,10 @@ def test_windowed_getitem_never_whole_decodes(tmp_path, monkeypatch):
 
 
 def test_a_replaced_windowed_source_refuses_at_read(tmp_path):
-    """The pool keys on mtime and size, so a file replaced after the index was built opens fresh
-    with its own dims, and the dims disagreement refuses instead of serving displaced tiles.
+    """A windowed source replaced after the index was built is refused at read.
+
+    A file replaced with other dims after the index was built refuses its read, naming the
+    frame change.
     """
     import tifffile
 
@@ -374,8 +374,10 @@ def test_a_uint16_windowed_tile_stays_ndarray_and_scales_by_its_dtype(
 
 
 def test_dataset_pickles_after_construction_and_after_a_read(tmp_path):
-    """Spawned DataLoader workers receive the dataset by pickle, so it must never hold an open
-    RasterSource, before or after serving a tile.
+    """The dataset pickles after construction and after a read.
+
+    A clone pickled after construction, and one pickled after a read, each serve the
+    original's first tile.
     """
     images_dir, _arr = _tiff_project(tmp_path)
     ds = _tiled(images_dir)
