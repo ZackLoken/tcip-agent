@@ -1,8 +1,8 @@
 """A model registry entry's path is stored relative to the project root and resolved on read.
 
-Covers the grammar-aware external test, the shared containment core between the checkpoint and
-dataset registries, and every response surface answering a resolved absolute path for a relative
-stored entry.
+These tests cover the external-form check, the checkpoint and dataset registries' agreement on
+relative and absolute spellings, and the response surfaces answering a resolved absolute path
+for a relative stored entry.
 """
 
 from __future__ import annotations
@@ -22,10 +22,7 @@ from tcip_mcp.registry_paths import is_external_form
 
 
 def _checkpoint(path: Path, content: str) -> None:
-    """A checkpoint at ``path`` a run completed under a root of its own
-    (``_verified_checkpoint_fixtures.produced_checkpoint``), its bytes distinct per
-    ``content``.
-    """
+    """Write a checkpoint at ``path`` through ``produced_checkpoint(path, content)``."""
     pytest.importorskip("torch")
     from tests._verified_checkpoint_fixtures import produced_checkpoint
 
@@ -95,9 +92,10 @@ def test_is_external_form_rejects_every_relative_spelling(spelling: str):
 def test_dataset_and_checkpoint_spellers_agree_on_the_same_geometry(
     tmp_path: Path,
 ):
-    """One containment core: a checkpoint and a dataset both sitting under the same project
-    root are recorded relative by their own registries, and both sitting on a genuinely
-    separate tree are recorded absolute, the two registries' records agreeing with each other.
+    """The dataset and checkpoint registries spell the same geometry the same way.
+
+    A checkpoint and a dataset both under the project root are recorded relative by their own
+    registries, and both on a separate tree are recorded absolute.
     """
     from tcip_mcp.tools.project_tools import read_datasets, register_dataset
 
@@ -198,7 +196,9 @@ def test_explicit_register_model_return_is_resolved_absolute(tmp_path: Path):
 def test_a_completed_runs_registry_entry_answers_its_checkpoint_resolved_absolute(
     tmp_path: Path,
 ):
-    """A run's final status stores its checkpoint relative to the project; the registry's
+    """A completed run's registry entry answers its checkpoint resolved absolute.
+
+    A run's final status stores its checkpoint relative to the project; the registry's
     listing of that run answers the path resolved absolute.
     """
     from tcip_mcp.experiments import experiment_dir
@@ -365,9 +365,10 @@ def test_list_models_carries_a_malformed_entrys_error_rather_than_dropping_it(
 def test_a_symlink_to_a_checkpoint_outside_root_stores_the_resolved_external_location(
     tmp_path: Path,
 ):
-    """Spelling is decided on the resolved target, never the name given: a symlink under the
-    project root pointing at a file genuinely outside it stores that external, resolved
-    location, not a relative spelling of the link's own in-tree name.
+    """A symlink to a checkpoint outside the root stores the resolved external location.
+
+    A symlink under the project root pointing at a file outside it stores that file's resolved
+    external location, not a relative spelling of the link's own in-tree name.
     """
     project = tmp_path / "proj"
     real_dir = tmp_path / "real_weights"
@@ -393,8 +394,10 @@ def test_a_symlink_to_a_checkpoint_outside_root_stores_the_resolved_external_loc
 def test_a_symlink_to_a_checkpoint_under_root_stores_the_resolved_internal_location(
     tmp_path: Path,
 ):
-    """The same rule the other direction: a symlink whose resolved target sits under the
-    project root stores that target's own project-relative spelling, not the link's.
+    """A symlink to a checkpoint under the root stores the target's relative spelling.
+
+    A symlink whose resolved target sits under the project root stores that target's own
+    project-relative spelling, not the link's.
     """
     project = tmp_path / "proj"
     real_dir = project / "weights_home"
@@ -420,11 +423,7 @@ def test_a_symlink_to_a_checkpoint_under_root_stores_the_resolved_internal_locat
 def test_a_relative_root_still_answers_an_absolute_response(
     tmp_path: Path, monkeypatch
 ):
-    """A relative root: the resolver's own root argument, not just the entry's stored path,
-    must still answer absolute. The registry key itself refuses a relative project root
-    (``require_absolute_root``), so this is the resolver's own contract, exercised directly
-    rather than through the full ``ModelRegistry`` stack.
-    """
+    """``resolved_registry_path`` over a relative root answers the absolute path under the cwd."""
     from tcip_mcp.registry_paths import resolved_registry_path
 
     monkeypatch.chdir(tmp_path)

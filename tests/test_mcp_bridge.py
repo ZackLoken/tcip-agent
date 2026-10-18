@@ -1,6 +1,6 @@
-"""Integration test: spawn the real Python MCP server and talk JSON-RPC over stdio.
+"""The real Python MCP server, spawned as a subprocess and spoken to in JSON-RPC over stdio.
 
-Validates the full path: subprocess → stdin JSON-RPC → MCPServer → tool call → response.
+The path runs subprocess → stdin JSON-RPC → MCPServer → tool call → response.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ def _send_jsonrpc(proc, obj: dict) -> None:
 
 
 def _reader_thread(stdout, queue: Queue) -> None:
-    """Background thread that reads newline-delimited JSON-RPC messages."""
+    """Read newline-delimited JSON-RPC messages into ``queue``, then ``None`` at EOF."""
     while True:
         line = stdout.readline()
         if not line:
@@ -60,7 +60,7 @@ def _recv(queue: Queue, timeout: float = 30.0) -> dict:
 
 
 class TestMcpBridge:
-    """Spawn the real MCP server and exercise the JSON-RPC protocol."""
+    """Tests of the JSON-RPC protocol against a spawned real MCP server."""
 
     @pytest.fixture(autouse=True)
     def mcp_server(self):
@@ -102,7 +102,7 @@ class TestMcpBridge:
         return _recv(self.queue)
 
     def test_initialize_and_list_tools(self):
-        """Server responds to initialize and tools/list."""
+        """The server answers initialize and lists its tools, ``inspect_project`` among them."""
         # Initialize
         resp = self._call(
             "initialize",

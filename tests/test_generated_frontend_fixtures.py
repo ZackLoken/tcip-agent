@@ -3,10 +3,10 @@
 ``tools/generate_delivery_fixture.py`` makes real deliveries in scratch projects and writes the
 records ``GET /api/results/delivery-events`` serves for them to
 ``frontend/src/test/deliveryEvents.json``; this test regenerates them and holds the checked-in
-file to what a regeneration serves, every value compared but those a run mints. The trait
+file to what a regeneration serves, each value compared but the ones a run mints. The trait
 listings ``tools/generate_trait_fixture.py`` writes and the project fixtures
-``tools/generate_project_fixture.py`` writes are held the same way, and the scratch session
-every generator makes its scenes in (``tools/fixture_session.py``) is held to leaving nothing
+``tools/generate_project_fixture.py`` writes are held the same way, and the scratch session the
+generators make their scenes in (``tools/fixture_session.py``) is held to leaving nothing
 behind.
 """
 
@@ -27,9 +27,7 @@ GENERATED = FRONTEND_SRC / "test" / "deliveryEvents.json"
 
 
 def _generator(name: str):
-    """The fixture generator module ``tools.<name>``, so the test regenerates the way
-    ``python -m tools.<name>`` does.
-    """
+    """Import and return the fixture generator module ``tools.<name>``."""
     return importlib.import_module(f"tools.{name}")
 
 
@@ -61,12 +59,13 @@ between the platforms the scenes run on, and a delivered meter value carries no 
 
 
 def _normalized(fixture: dict[str, dict]) -> dict[str, dict]:
-    """``fixture`` with each :data:`PER_RUN` string replaced by a string placeholder numbered by
-    first appearance, so equal values stay equal and distinct ones distinct and a value of any
-    other type is kept as served, each float rounded to :data:`FLOAT_PLACES`, and an archived
-    mapping key that is exactly the name
+    """Return ``fixture`` with each minted value replaced by a numbered placeholder.
+
+    Each :data:`PER_RUN` string is replaced by a placeholder numbered by its first appearance
+    across the fixture; each float is rounded to
+    :data:`FLOAT_PLACES`; and an archived mapping key equal to the name
     :func:`~tcip_mcp.pipelines.postprocessing.plant_mapping.archived_mapping_name` gives the
-    cited record replaced by that record's placeholder. Every other value is kept as served.
+    cited record is replaced by that record's placeholder. Other values are kept as served.
     """
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         archived_mapping_name,
@@ -103,8 +102,9 @@ def _normalized(fixture: dict[str, dict]) -> dict[str, dict]:
 
 
 def _changed(fixture: dict, name: str, *path_and_value: Any) -> dict:
-    """A copy of ``fixture`` with the value at ``path`` under record ``name`` set to the last
-    argument.
+    """Return a copy of ``fixture`` with one value under record ``name`` replaced.
+
+    The value at ``path`` under record ``name`` is set to the last argument.
     """
     *path, value = path_and_value
     out = copy.deepcopy(fixture)
@@ -116,7 +116,9 @@ def _changed(fixture: dict, name: str, *path_and_value: Any) -> dict:
 
 
 def test_the_comparison_keeps_every_value_a_run_does_not_mint() -> None:
-    """A served fact the frontend asserts (a disclosure count, an output path) changing, a
+    """The fixture comparison breaks on a changed served value and holds across a reminted id.
+
+    A served value (a disclosure count, an output path) changing, a
     minted value changing its type or going absent, two records sharing a minted value no longer
     sharing it, and an archived mapping key that is not the archive's own name each break the
     comparison; a minted id changing its value does not.
@@ -165,9 +167,9 @@ def test_the_comparison_keeps_every_value_a_run_does_not_mint() -> None:
 def test_the_fixture_is_what_a_regeneration_serves_value_for_value(
     name: str,
 ) -> None:
-    """The checked-in trait listings and project fixtures are what their generators serve,
-    after each generator's own normalization: a field added to a served record and not to the
-    fixture, or a stale hash, fails this.
+    """A trait or project fixture is what a regeneration serves, value for value.
+
+    Each generator's checked-in file equals what its ``produce`` serves.
     """
     module = _generator(name)
 
@@ -179,9 +181,10 @@ def test_the_fixture_is_what_a_regeneration_serves_value_for_value(
 
 
 def test_the_delivery_fixture_is_what_a_regeneration_serves() -> None:
-    """The checked-in fixture is each record the scenes' deliveries serve, value for value but
-    for the minted strings :func:`_normalized` replaces: a record field added, renamed or given
-    another type, or a scene that no longer delivers what it did, fails this.
+    """The delivery fixture is what a regeneration of its scenes serves.
+
+    With both passed through :func:`_normalized`, the checked-in fixture equals what a
+    regeneration of the scenes produces.
     """
     pytest.importorskip("torch")
     produced = _generator("generate_delivery_fixture").produce()
@@ -193,8 +196,10 @@ def test_the_delivery_fixture_is_what_a_regeneration_serves() -> None:
 
 
 def test_a_scratch_session_whose_body_raises_releases_store_and_directory():
-    """A scratch session whose body raises closes every store connection it opened and removes
-    its directory, and the body's own exception is the one that reaches the caller.
+    """A scratch session whose body raises releases its store connections and directory.
+
+    The bound store is left holding no connection, the session's directory is removed, and the
+    body's own exception propagates out of the session.
     """
     from tcip_store import store as seam
 
@@ -213,7 +218,9 @@ def test_a_scratch_session_whose_body_raises_releases_store_and_directory():
 
 
 def test_a_scratch_session_holds_no_project_an_earlier_session_opened():
-    """A second scratch session in the same interpreter lists no open project, though the first
+    """A scratch session holds no project an earlier session opened.
+
+    A second scratch session in the same interpreter lists no open project, though the first
     left the project it opened open when its body ended.
     """
     with scratch_session() as (workspace, client):

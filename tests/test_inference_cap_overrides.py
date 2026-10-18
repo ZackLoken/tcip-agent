@@ -1,8 +1,9 @@
-"""The merge-threshold, density and conf values of a pass: the conf and merge threshold are each
-the stated one, else the one a reference the caller holds derives, else a refusal naming it; the
-density is the one the reference's counted regions derive, else the checkpoint's own; a stated
-value is honored at every value it can take, and the record's conf and density reach the
-predictor, not only the record.
+"""The merge-threshold, density and conf values of a pass, stated or derived.
+
+The conf and merge threshold are each the stated one, else the one a handed reference derives,
+else a refusal naming it; the density is the one the reference's counted regions
+derive, else the checkpoint's own. A stated value is recorded as stated, and the record's conf
+and density reach the predictor.
 """
 
 from __future__ import annotations
@@ -34,8 +35,10 @@ def _checkpoint(tmp_path: Path):
 
 
 def _pass(tmp_path: Path, reference=None, **stated):
-    """The pass a registered checkpoint of ``tmp_path`` runs under ``stated`` and the sample
-    reason, made runnable from ``reference`` when one is given.
+    """Prepare a registered checkpoint of ``tmp_path`` under ``stated`` and return the pass.
+
+    The statement is the sample rationale with ``stated`` merged over it, and the prepared pass
+    is made runnable with ``reference``.
     """
     from tcip_mcp.pipelines.execution import Stated, prepare
     from tests._training_values import RATIONALE
@@ -48,7 +51,7 @@ def _pass(tmp_path: Path, reference=None, **stated):
 
 
 def test_stated_values_are_recorded_as_explicit(tmp_path):
-    """The value a caller states is the value that runs, recorded as stated."""
+    """The execution record keeps each stated value and marks its source explicit."""
     from tests._verified_checkpoint_fixtures import (
         SAMPLE_DETECTOR_PASS,
         SAMPLE_OVERLAP,
@@ -72,9 +75,11 @@ def test_stated_values_are_recorded_as_explicit(tmp_path):
 def test_a_reference_derives_the_unstated_merge_threshold_and_the_density_and_keeps_stated_ones(
     tmp_path,
 ):
-    """A reference's boxes derive an unstated merge threshold and its counted regions the density
-    the pass runs at, over the checkpoint's own; a stated merge threshold survives the same
-    reference untouched.
+    """A reference derives an unstated merge threshold and the density and keeps stated ones.
+
+    The execution record carries the merge threshold the reference's boxes derive and the
+    density its counted regions derive in place of the checkpoint's; a stated merge threshold
+    stays as stated beside that reference.
     """
     from tcip_mcp.pipelines.derivations import (
         CROSS_TILE_NMS_DERIVATION,
@@ -126,7 +131,9 @@ def test_a_reference_derives_the_unstated_merge_threshold_and_the_density_and_ke
 
 
 def test_a_detector_pass_refuses_an_unstated_conf_by_name(tmp_path):
-    """No default stands behind a detector's conf: a pass with no reference states it, and one
+    """A detector pass refuses an unstated conf by name.
+
+    No default stands behind a detector's conf: a pass with no reference states it, and one
     left unstated refuses naming it.
     """
     from tcip_mcp.pipelines.execution import ExecutionRefusedError
@@ -136,7 +143,7 @@ def test_a_detector_pass_refuses_an_unstated_conf_by_name(tmp_path):
 
 
 def _in_model_point(p, tmp_path: Path) -> dict:
-    """The operating point the pass's model holds after predicting one 64 px square frame."""
+    """Return the operating point the pass's model holds after predicting one 64 px frame."""
     from PIL import Image
 
     from tcip_mcp.pipelines.operating_point import (
@@ -151,9 +158,10 @@ def _in_model_point(p, tmp_path: Path) -> dict:
 
 
 def test_the_record_a_prediction_is_handed_governs_the_model_it_runs(tmp_path):
-    """The execution record is the one authority over a prediction: the pass's own record sets
-    the model's conf and the cap its density gives the frame, and a record handed to one
-    prediction sets them for it.
+    """The execution record a prediction is handed governs the model it runs.
+
+    The pass's own record sets the model's conf and the cap its density gives a 64 px frame,
+    and a record handed to one prediction sets them for that prediction.
     """
     from tcip_mcp.pipelines.operating_point import (
         DETECTIONS_PER_IMG,
@@ -180,8 +188,10 @@ def test_the_record_a_prediction_is_handed_governs_the_model_it_runs(tmp_path):
 
 
 def test_every_execution_door_takes_its_statement_with_no_default():
-    """Every door that runs a pass takes the statement as a required ``Stated``, so a caller
-    stating nothing says so with the empty statement, which leaves every value unstated.
+    """The four execution doors each take their statement as a required ``Stated``.
+
+    ``run_inference``, ``assess_checkpoint``, ``assess_reserved_regions`` and
+    ``evaluate_model`` give ``stated`` no default, and the empty statement holds no value.
     """
     from tcip_mcp.pipelines.execution import Stated
     from tcip_mcp.tools.calibration_tools import (
@@ -205,8 +215,10 @@ def test_every_execution_door_takes_its_statement_with_no_default():
 
 
 def test_a_statement_carries_its_reason_and_nothing_stated_carries_none():
-    """A statement of any execution value carries why it states it, refused by name otherwise;
-    a reason with nothing stated refuses too, and one stating values with a reason is admitted.
+    """A statement carries its reason, and an empty statement carries none.
+
+    A statement of conf or tile without a reason refuses naming the field, a reason with
+    nothing stated refuses, and a statement with a reason is admitted.
     """
     from pydantic import ValidationError
 
@@ -229,9 +241,10 @@ def test_a_statement_carries_its_reason_and_nothing_stated_carries_none():
 def test_a_stated_threshold_outside_the_unit_interval_is_refused_by_the_type(
     name, value
 ):
-    """Guard. A stated confidence or cross-tile merge threshold below 0 or above 1 is refused at
-    the statement, naming the field; the stated sample pass runs through ``prepare`` as
-    :func:`test_stated_values_are_recorded_as_explicit` shows.
+    """A stated threshold outside the unit interval is refused at the statement by name.
+
+    A stated confidence or cross-tile merge threshold below 0 or above 1 is refused at the
+    statement, naming the field.
     """
     from pydantic import ValidationError
 
@@ -245,9 +258,10 @@ def test_a_stated_threshold_outside_the_unit_interval_is_refused_by_the_type(
 def test_the_dry_run_reports_the_stated_values_and_refuses_an_unstated_conf(
     tmp_path,
 ):
-    """The dry-run report shows the values the pass will run at, the density the checkpoint's
-    own, over images and over a raster alike; a dry run stating no conf refuses as the pass
-    would.
+    """The dry run reports the stated values and refuses an unstated conf.
+
+    Over images and over a raster alike, the dry-run report carries the stated conf and the
+    checkpoint's density; a dry run stating no conf refuses, and no bucket is published.
     """
     from PIL import Image
 

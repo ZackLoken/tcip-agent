@@ -1,11 +1,9 @@
 """Dispatch, terminal state, and deliverable selection around a bespoke ``train(ctx)`` body.
 
-The envelope decides the run's final status and its deliverable from what the body actually did,
-never from the fact that a ``.pt`` exists: a canceled body, a body that recorded its own failure,
-a body that raised and a body past its wall clock all leave a checkpoint on disk and none of them
-may complete with one. When the run is genuinely complete, an explicit ``set_final_weights``
-outranks the convention, and the convention itself prefers the best checkpoint the body saved
-over the last one.
+A canceled body, a body that recorded its own failure, a body that raised and a body past its
+wall clock each leave a checkpoint on disk, and none of their runs completes with one. In a
+completed run an explicit ``set_final_weights`` outranks the filename convention, and the
+convention picks the best checkpoint the body saved over the last one.
 """
 
 from __future__ import annotations
@@ -39,8 +37,10 @@ def _audit_statuses(root, tool="training_run"):
 def _start(
     tmp_path, body_name, *, deadline: float | None = None
 ) -> tuple[TrainContext, Path]:
-    """Run the body ``body_name`` of this module through the envelope, over a run directory the
-    launcher's own writer opened.
+    """Run this module's body ``body_name`` through the envelope and return its context.
+
+    The run directory is one the launcher's own writer opened, its run's deadline set to
+    ``deadline``; it is returned beside the context.
     """
     from tcip_mcp.experiments import observe
     from tcip_mcp.pipelines.training.run_registry import observed_run
@@ -67,7 +67,7 @@ def _start(
 
 
 def _train_saves_best_then_final(ctx):
-    """A loop keeping a best-so-far checkpoint plus a last-epoch one, as the stock trainer does."""
+    """Save ``model_best`` at epoch 4, val_loss 0.2, then ``model_final`` at epoch 9, 0.8."""
     ctx.save_checkpoint(
         {STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.2, "epoch": 4}},
         "model_best",
@@ -91,7 +91,7 @@ def test_best_checkpoint_outranks_the_last_one_as_the_deliverable(tmp_path):
 
 
 def _train_declares_its_own_deliverable(ctx):
-    """A loop whose shippable weights live under a tag outside the model_best/model_final pair."""
+    """Declare shippable weights saved under a tag outside the model_best/model_final pair."""
     ctx.save_checkpoint(
         {STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.8, "epoch": 9}},
         "model_best",
@@ -117,9 +117,10 @@ def test_an_explicit_deliverable_outranks_the_filename_convention(tmp_path):
 def test_completed_metrics_source_is_training_source_for_a_bespoke_loop(
     tmp_path,
 ):
-    """``save_checkpoint``'s own contract: a ``metrics`` key in the saved state becomes the
-    completed checkpoint's metrics with ``metrics_source='training_source'``, since the platform
-    wrote what the loop chose into the artifact and never measured it itself.
+    """A bespoke loop's completed metrics carry ``metrics_source='training_source'``.
+
+    A ``metrics`` key in the state ``save_checkpoint`` saved becomes the completed checkpoint's
+    metrics, the best checkpoint's ``val_loss`` among them.
     """
     _, run_dir = _start(tmp_path, "_train_saves_best_then_final")
 
@@ -134,7 +135,7 @@ class _OutsideTheContract:
 
 
 def _train_leaves_an_undecodable_deliverable(ctx):
-    """A loop whose declared deliverable holds state the verified reader refuses to unpickle."""
+    """Save ``model_best`` with an ``_OutsideTheContract`` under ``extra``; declare it final."""
     ctx.save_checkpoint(
         {STATE_DICT_KEY: {}, "extra": _OutsideTheContract()}, "model_best"
     )
@@ -144,9 +145,7 @@ def _train_leaves_an_undecodable_deliverable(ctx):
 def test_a_deliverable_the_verified_reader_refuses_ends_the_run_failed(
     tmp_path,
 ):
-    """Completion names only a checkpoint the verified reader admits: a declared deliverable
-    whose payload it refuses ends the run failed, and its final status names no checkpoint.
-    """
+    """A deliverable the verified reader refuses ends the run failed with no checkpoint."""
     ctx, run_dir = _start(tmp_path, "_train_leaves_an_undecodable_deliverable")
 
     final = observe(run_dir).final
@@ -158,7 +157,7 @@ def test_a_deliverable_the_verified_reader_refuses_ends_the_run_failed(
 
 
 def _train_stops_on_cancel(ctx):
-    """A loop that checkpoints, then honors a cancellation request and returns."""
+    """Save a checkpoint, then request the run's cancellation and return."""
     from tcip_mcp.experiments import request_cancel
 
     ctx.save_checkpoint(
@@ -178,7 +177,7 @@ def test_a_canceled_run_completes_no_checkpoint_despite_its_weights(tmp_path):
 
 
 def _train_records_its_own_failure(ctx):
-    """A loop that detects a bad run itself and marks it failed rather than raising."""
+    """Save a checkpoint, then set the run's status to failed with a reason and return."""
     ctx.save_checkpoint(
         {STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.4}}, "model_best"
     )
@@ -203,7 +202,7 @@ def test_a_body_that_marks_itself_failed_is_not_promoted_to_completed(
 
 
 def _train_raises_after_checkpointing(ctx):
-    """A loop that declares its best checkpoint as it improves, then dies partway through."""
+    """Declare a best checkpoint, then raise partway through."""
     ctx.save_checkpoint(
         {STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.4}}, "model_best"
     )
@@ -224,7 +223,7 @@ def test_a_raised_failure_closes_the_run_failed_and_completes_nothing(
 
 
 def _train_finishes_past_the_wall_clock(ctx):
-    """A loop that finishes normally and declares its weights after its deadline passed."""
+    """Save and declare weights, then return normally."""
     ctx.save_checkpoint(
         {STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.3}}, "model_best"
     )
@@ -234,9 +233,7 @@ def _train_finishes_past_the_wall_clock(ctx):
 def test_a_run_past_its_wall_clock_ends_failed_naming_it_with_no_checkpoint(
     tmp_path,
 ):
-    """The wall clock is the run's own fact: a body that returned normally past its deadline
-    ends failed naming the limit, and its weights are never the completed checkpoint.
-    """
+    """A run returning past its wall clock ends failed naming the limit, with no checkpoint."""
     ctx, run_dir = _start(
         tmp_path,
         "_train_finishes_past_the_wall_clock",

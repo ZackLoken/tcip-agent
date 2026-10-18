@@ -1,6 +1,6 @@
-"""The import door's own rails: staging, the refusal of the store's own bookkeeping and of an
-escaping member, and the move. Each refusal here is paired with the legitimate call the same rail
-must still admit.
+"""The import door's own rails: staging, its refusals and the move into place.
+
+Staging, the refusal of the store's own bookkeeping and of an escaping member, and the move.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from tests._training_values import drawn_split
 
 
 def _hand_zip(path: Path, members: dict[str, bytes]) -> Path:
-    """A zip carrying exactly ``members``, hand-built: no producer writes these shapes."""
+    """Write a hand-built zip carrying exactly ``members`` and return its path."""
     with zipfile.ZipFile(str(path), "w") as zf:
         for name, data in members.items():
             zf.writestr(name, data)
@@ -121,9 +121,10 @@ def test_import_refuses_a_zip_slip_path(tmp_path):
 def test_extract_zip_refuses_a_sibling_directory_that_shares_stagings_name_as_a_prefix(
     tmp_path,
 ):
-    """A string-prefix escape check reads a member resolving to ``<staging.name>extra/`` as
-    contained, since that sibling's path literally starts with staging's own path; containment
-    by ``relative_to`` does not.
+    """Zip extraction refuses a sibling directory sharing staging's name as a prefix.
+
+    A member resolving to ``<staging.name>extra/`` lies outside staging and refuses as an unsafe
+    path.
     """
     from tcip_mcp.tools.project_tools import _extract_zip
 
@@ -238,9 +239,10 @@ def test_a_free_locked_leftover_staging_sibling_is_swept_with_its_lock_file(
 
 
 def test_dataset_registry_stores_the_relative_dot_after_import(tmp_path):
-    """The project's own dataset registers to itself, and that entry's ``path`` survives the
-    archive/import round trip as the project-relative ``"."`` rather than an absolute path baked
-    in before the move.
+    """The project's own dataset entry stores the relative ``"."`` after import.
+
+    The project registered as its own dataset reads back after the archive/import round trip
+    with ``path`` ``"."`` and no unresolved dataset path.
     """
     from tcip_mcp.tools.project_tools import read_datasets, register_dataset
 
@@ -262,9 +264,7 @@ def test_dataset_registry_stores_the_relative_dot_after_import(tmp_path):
 
 
 def test_dataset_registry_travels_with_nothing_rewritten(tmp_path):
-    """The accessor resolves the stored "." against wherever the project was actually
-    imported, so nothing about the registry needed rewriting for the move to survive.
-    """
+    """The project's own dataset entry resolves to the import destination after an import."""
     from tcip_mcp.tools.project_tools import (
         dataset_entry_path,
         read_datasets,
@@ -310,8 +310,9 @@ def test_an_external_dataset_entry_stays_absolute_and_is_disclosed(tmp_path):
 
 
 def _annotated_dataset(root: Path, n: int) -> None:
-    """``n`` distinct single-tile foreground groups of one subject, each object painted bright,
-    enough to clear draw_splits' floor (one group each for train/val, two for calibration).
+    """Write ``n`` 640 x 480 images, each under its own stem, on one date, and a ``bud`` registry.
+
+    Each image holds one bright ``bud`` box that its label document names.
     """
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
@@ -341,9 +342,10 @@ def _annotated_dataset(root: Path, n: int) -> None:
 def test_a_splits_root_nested_under_a_nested_dataset_root_archives_and_round_trips(
     tmp_path,
 ):
-    """A dataset sits under a project, and draw_splits partitions it in place, landing
-    selection.json under the dataset root rather than beside it. The cross-anchor constraint must
-    admit that nesting rather than refusing the whole project.
+    """A splits root nested under a nested dataset root archives and round-trips.
+
+    A dataset under a project, partitioned in place by draw_splits with selection.json under the
+    dataset root, archives, imports, and reads its selection back.
     """
     from tcip_mcp.pipelines.data.selection import selection_key
     from tcip_mcp.tools.data_tools import draw_splits
@@ -383,12 +385,13 @@ def test_a_splits_root_nested_under_a_nested_dataset_root_archives_and_round_tri
 def test_the_full_round_trip_reads_back_at_once_with_no_hand_adoption(
     tmp_path, monkeypatch
 ):
-    """initialize_project, register_dataset, a confirmed trait revision, a completed run's
-    directory, an HPO sweep's directory and a project-relative splits manifest, all through their
-    own real producers; archived, imported into a fresh destination, and read back at once. The
-    sweep's trial body is stood in for by
-    one that only resolves and opens the trial's run directory through the launcher's own
-    producer and writer.
+    """A full round trip through real producers reads back with no hand adoption.
+
+    A project record, a registered dataset, a confirmed trait revision, a completed run's
+    directory, an HPO sweep's directory and a project-relative splits manifest, each written by
+    its own producer, are archived, imported into a fresh destination and read back with no
+    step between. The sweep's trial body is a stand-in that resolves and opens the trial's run
+    directory through the launcher's own producer and writer, and trains nothing.
     """
     import tcip_mcp.tools.training_tools as tt
     from tcip_mcp import experiments

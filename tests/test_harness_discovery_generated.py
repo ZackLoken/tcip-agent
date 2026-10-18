@@ -1,5 +1,6 @@
-"""The checked-in files `tools/generate_harness_discovery.py` writes are what the current
-knowledge documents produce.
+"""The harness discovery files are what the current knowledge documents produce.
+
+The checked-in files are those `tools/generate_harness_discovery.py` writes.
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ def _documents():
 
 
 def _trees(generator):
-    """Each generated skill tree with the renderer that produces it."""
+    """Return each generated skill tree with the renderer that produces it."""
     return [
         (generator.CLAUDE_SKILLS_DIR, generator.render_skill),
         (generator.AGENTS_SKILLS_DIR, generator.render_agents_skill),
@@ -132,7 +133,7 @@ def test_agents_md_generated_block_stays_under_the_byte_budget():
 
 
 def _agents_md_between_text(generator, tmp_path: Path) -> Path:
-    """An `AGENTS.md` holding the generated block between hand-written text."""
+    """Write an `AGENTS.md` holding the generated block between hand-written text."""
     fixture = tmp_path / "AGENTS.md"
     fixture.write_text(
         "# Before\n\nHand-written text above the block.\n\n"

@@ -1,9 +1,8 @@
-"""Every box scored against ground truth sits on the grid the stored labels are written on.
+"""A box scored against ground truth sits on the grid the stored labels are written on.
 
-Ground truth reaches evaluation from a stored label document, which carries a 2-decimal coordinate
-quantum. A raw prediction does not, so the two sides of a match would otherwise sit on grids that
-differ by a fraction of the quantum, enough to decide a hit sitting exactly on the operating IoU.
-One derivation, owned by the writer that defines the grid, puts both sides on it.
+A stored label document carries a 2-decimal coordinate quantum and a raw prediction does not.
+``records_from_detector`` puts a prediction on that grid and leaves ground truth already on it
+unchanged.
 """
 
 from __future__ import annotations
@@ -19,7 +18,7 @@ ON_GRID_BOX = (12.25, 30.5, 60.75, 80.0)
 
 
 def _detector_pass(gt_boxes, pred_boxes):
-    """A torchvision-shaped GT target and detector output over one image."""
+    """Return a target of ``gt_boxes`` and an output of ``pred_boxes`` scored 0.9, all class 1."""
     target = {
         "boxes": torch.tensor(gt_boxes, dtype=torch.float32),
         "labels": torch.ones(len(gt_boxes), dtype=torch.int64),
@@ -37,9 +36,7 @@ def _detector_pass(gt_boxes, pred_boxes):
 
 
 def test_a_prediction_off_the_stored_grid_is_put_on_it_before_scoring():
-    """A raw detector coordinate carries more precision than any stored box it will be matched
-    against, so it is quantized to the stored grid rather than compared across two grids.
-    """
+    """``records_from_detector`` quantizes a raw prediction to the stored label grid."""
     from tcip_mcp.pipelines.training.evaluation import records_from_detector
 
     target, output = _detector_pass([ON_GRID_BOX], [SUB_QUANTUM_BOX])
@@ -56,9 +53,7 @@ def test_a_prediction_off_the_stored_grid_is_put_on_it_before_scoring():
 
 
 def test_ground_truth_already_on_the_stored_grid_is_unchanged():
-    """The shared derivation must be an identity for the side that defines the grid, or it would be
-    moving ground truth to meet the predictions instead of the other way round.
-    """
+    """Ground truth already on the stored grid leaves ``records_from_detector`` unchanged."""
     from tcip_mcp.pipelines.training.evaluation import records_from_detector
 
     target, output = _detector_pass([ON_GRID_BOX], [])
@@ -76,7 +71,7 @@ def test_ground_truth_already_on_the_stored_grid_is_unchanged():
 
 
 def test_an_annotation_prediction_off_the_stored_grid_is_put_on_it_before_scoring():
-    """The annotation-shaped door onto the same records shares the grid, not just the tensor one."""
+    """``records_from_annotation`` puts both sides of a match on the stored label grid."""
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.training.evaluation import records_from_annotation
 
@@ -108,9 +103,7 @@ def test_the_grid_is_the_one_the_label_writer_owns():
 def test_scoring_labels_read_back_from_disk_is_unaffected_by_the_shared_grid(
     tmp_path,
 ):
-    """Ordinary work must still pass: stored labels scored against predictions that reproduce them
-    match exactly, with no metric moved by putting both sides through the same derivation.
-    """
+    """Stored labels scored against predictions reproducing them match exactly."""
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key

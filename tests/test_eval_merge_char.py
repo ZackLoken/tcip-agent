@@ -1,7 +1,7 @@
 """Characterization goldens for the on-disk evaluators.
 
-Freezes the exact return dicts ``score_predictions`` produces on a single image and on a
-directory, so a change to either shape fails here instead of reaching a delivered metric.
+The exact return dicts ``score_predictions`` produces on a single image and on a directory are
+held to frozen values.
 """
 
 from __future__ import annotations

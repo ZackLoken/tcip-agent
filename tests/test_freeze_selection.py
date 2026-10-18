@@ -1,5 +1,6 @@
-"""freeze_selection: a finished run's own drawn train/val partition, frozen into a selection a
-later run can bind to.
+"""freeze_selection, which freezes a finished run's drawn partition into a selection.
+
+A later run can bind to the selection, which holds the run's own drawn train/val partition.
 """
 
 from __future__ import annotations
@@ -53,10 +54,11 @@ def _real_drawn_experiment(
     subject: str = SUBJECT,
     val_ratio: float = 0.15,
 ) -> dict:
-    """Draws a real train/val split over ``root``'s own fixture dataset through the launcher's
-    own resolution, at ``val_ratio``, recorded in ``experiment_id``'s launch record under
-    ``project``; a run drawing no validation side selects on its training loss. Returns the
-    resolved ``data`` block.
+    """Draw a real train/val split over ``root``'s fixture dataset and return its data block.
+
+    The draw goes through the launcher's own resolution, at ``val_ratio``, recorded in
+    ``experiment_id``'s launch record under ``project``; a run drawing no validation side
+    selects on its training loss. Return the resolved ``data`` block.
     """
     images_dir = root / "images" / date
     opened_run(
@@ -83,8 +85,10 @@ def _real_drawn_experiment(
 
 
 def _damage_resolved(project: Path, experiment_id: str, change) -> None:
-    """Rewrite what a run's launch record under ``project`` says it resolved, on disk past its
-    one writer, ``change`` applied to it.
+    """Rewrite what a run's launch record says it resolved, on disk, bypassing its writer.
+
+    The record is the run's under ``project``, rewritten on disk with ``change`` applied to its
+    resolved block.
     """
     from tcip_store import encode_record
 
@@ -143,10 +147,10 @@ def test_freeze_selection_round_trips_through_a_real_bind(tmp_path: Path):
 def test_freeze_selection_names_the_sources_the_run_read_not_the_launch_input(
     tmp_path: Path,
 ):
-    """The frozen selection is composed from what the run resolved alone. A launch record whose
-    stated config is edited to name another images directory holding identically named files
-    changes nothing: freezing a partition against pixels the run never saw would bind a later run
-    to a different dataset.
+    """A frozen selection names the sources the run read, not its launch input.
+
+    With the launch record's stated config edited to name another images directory holding
+    identically named files, each frozen sample's source stays in the directory the run read.
     """
     from PIL import Image
 
@@ -180,11 +184,10 @@ def test_freeze_selection_names_the_sources_the_run_read_not_the_launch_input(
 def test_freeze_selection_keeps_two_scopes_same_named_members_apart(
     tmp_path: Path,
 ):
-    """A record holding two ground-truth scopes holds one member name twice, and the frozen
-    selection carries both: composing the scopes into one map keyed by bare name would drop one
-    date's member and bind a later run to half the partition its record describes. The partition
-    is composed through the resolution's own partition producer over the run's samples and set
-    into a real run's launch record past its writer.
+    """A frozen selection keeps two scopes' same-named members apart.
+
+    A launch record whose partition holds one member name under two dates freezes into a
+    selection carrying both dates' samples, each side's count and each sample's ground truth.
     """
     from tcip_mcp.pipelines.data.selection import Sample, ground_truth_digest
     from tcip_mcp.pipelines.data.split_construction import _partition_record
@@ -241,11 +244,11 @@ def test_freeze_selection_keeps_two_scopes_same_named_members_apart(
 def test_freeze_selection_carries_an_explicit_grouping_map_onto_its_samples(
     tmp_path: Path,
 ):
-    """The run drew under an agent-supplied map; the frozen selection records each sample's own
-    key from it, so a later bind groups by what was drawn rather than re-resolving a policy.
+    """A frozen selection records an explicit grouping map's group values on its samples.
 
-    The map is keyed by member identity, the key every producer of one uses (``draw_splits`` and
-    ``tcip plant-aware-group-splits``), since a stem names one image only within one capture date.
+    The run drew under a map from member identity to group ``g1`` or ``g2``; the frozen
+    selection records ``explicit_map`` grouping, and its samples' groups are drawn from ``g1``
+    and ``g2``.
     """
     from tcip_mcp.pipelines.data.splits import member_identity
     from tcip_mcp.tools.data_tools import freeze_selection
@@ -355,9 +358,7 @@ def test_a_bound_run_freezes_and_a_later_run_rebinds_to_its_membership(
 
 
 def test_freeze_selection_refuses_a_spatial_split(tmp_path: Path):
-    """A within-image spatial split resolves region identities, which its partition records as
-    its ``spatial`` split, and freeze_selection binds only a stem-keyed partition.
-    """
+    """freeze_selection refuses a run drawn under a within-image spatial split, naming it."""
     from tcip_mcp.tools.data_tools import freeze_selection
     from tests._producer_fixtures import big_single_source
 
@@ -382,9 +383,9 @@ def test_freeze_selection_refuses_a_spatial_split(tmp_path: Path):
 def test_freeze_selection_refuses_a_member_whose_ground_truth_moved(
     tmp_path: Path,
 ):
-    """The staleness check is per member, against the digest the run's own producer recorded for
-    it: a label edited after the run names that member and refuses, since a selection composed
-    from it would bind a later run to ground truth this run never saw.
+    """freeze_selection refuses naming a member whose ground truth moved since the run.
+
+    A label edited after the run refuses the freeze, naming that member.
     """
     from tcip_annotation import json_io
     from tcip_annotation.state import Annotation, BBox
@@ -412,10 +413,7 @@ def test_freeze_selection_refuses_a_member_whose_ground_truth_moved(
 def test_freeze_selection_reads_a_members_removed_document_as_moved(
     tmp_path: Path,
 ):
-    """The record names the document each member's ground truth was, so a member whose document
-    was removed since reads as moved rather than as unchanged: a later bind would otherwise be
-    composed from a document nothing holds.
-    """
+    """freeze_selection reads a member's removed document as moved and refuses, naming it."""
     from tcip_mcp.tools.data_tools import freeze_selection
 
     root = _two_subject_two_date_dataset(tmp_path / "ds")
@@ -441,7 +439,9 @@ def test_freeze_selection_refuses_an_empty_val_side(tmp_path: Path):
 def test_freeze_selection_refuses_a_resolved_scope_missing_its_attributes(
     tmp_path: Path,
 ):
-    """A resolved record edited past its writer to drop its scope's attributes composes a
+    """freeze_selection answers the selection writer's refusal of a scope without attributes.
+
+    A resolved record edited past its writer to drop its scope's attributes composes a
     selection the selection writer refuses, and the door answers with that refusal.
     """
     from tcip_mcp.tools.data_tools import freeze_selection

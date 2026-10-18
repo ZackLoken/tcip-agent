@@ -1,5 +1,7 @@
-"""Training to registry lifecycle wiring: a run's completion is its registration, carrying the
-metrics its own checkpoint recorded and never fabricating any.
+"""Training to registry lifecycle wiring: a run's completion is its registration.
+
+The registration carries the metrics the run's best checkpoint recorded, and a failed run
+registers nothing.
 """
 
 from pathlib import Path
@@ -14,11 +16,12 @@ def _stock_run(
     experiment_id: str,
     builder_kwargs: dict | None = None,
 ) -> Path:
-    """A run of the regression ``builder`` at ``builder_kwargs``, its stage ending at its
-    schedule's ``horizon``, under ``root`` over a regression dataset of its own on disk (four
-    training and two validation frames, each valued twice its intensity), opened by the
-    launcher's own writer and run in-process through the envelope's stock trainer over its own
-    loaders. Returns the run directory.
+    """Run the regression ``builder`` at ``builder_kwargs`` and return the run directory.
+
+    The run's stage ends at its schedule's ``horizon``, under ``root`` over a regression dataset
+    of its own on disk (four training and two validation frames, each valued twice its
+    intensity), opened by the launcher's own writer and run in-process through the envelope's
+    stock trainer over its own loaders.
     """
     from tcip_mcp.pipelines.training.envelope import run_training_envelope
     from tests.tiny_trainer_fixtures import (
@@ -45,7 +48,7 @@ def _stock_run(
 
 
 def _entry(root: Path, name: str) -> dict | None:
-    """The registry entry ``root``'s listing names ``name``, or ``None``."""
+    """Return the registry entry ``root``'s listing names ``name``, or ``None``."""
     from tcip_mcp.model_registry import ModelRegistry
 
     return next(
@@ -61,9 +64,11 @@ def _entry(root: Path, name: str) -> dict | None:
 def test_a_stock_trainer_run_registers_with_trainer_source_and_the_best_epochs_metrics(
     tmp_path,
 ):
-    """A completed stock-trainer run (no training_source in config) registers
-    metrics_source='trainer', the platform's own measurement, carrying model_best.pt's own
-    best-epoch metrics; model_final.pt's metrics is a dict too, the last completed epoch's.
+    """A stock-trainer run registers with the trainer source and its best epoch's metrics.
+
+    A completed stock-trainer run (no training_source in config) registers
+    metrics_source='trainer', carrying model_best.pt's own best-epoch metrics; model_final.pt's
+    metrics is one dict.
     """
     import torch
 
@@ -94,7 +99,9 @@ def test_a_stock_trainer_run_registers_with_trainer_source_and_the_best_epochs_m
 
 
 def test_a_diverged_stock_run_ends_failed_and_registers_nothing(tmp_path):
-    """Two full passes with no finite training loss end the run failed with the reason on its
+    """A diverged stock run ends failed and registers nothing.
+
+    Two full passes with no finite training loss end the run failed with the reason on its
     final status; the verdict leaves no checkpoint on disk and nothing reaches the registry.
     """
     from tcip_mcp.experiments import observe
@@ -114,10 +121,11 @@ def test_a_diverged_stock_run_ends_failed_and_registers_nothing(tmp_path):
 def test_a_completed_run_with_a_diverged_val_metric_registers_it_as_null(
     tmp_path,
 ):
-    """A healthy training loss completes the run even when a validation metric goes
-    non-finite; the final checkpoint and the registry entry carry that metric normalized to
-    null plus a state companion, exactly as the run's own metrics log does, with
-    metrics_source='trainer'.
+    """A completed run registers a diverged validation metric as null.
+
+    A healthy training loss completes the run even when a validation metric goes
+    non-finite; the final checkpoint carries that metric as null beside a ``_state`` key naming
+    the value, and the registry entry carries it as null with metrics_source='trainer'.
     """
     import torch
 

@@ -1,5 +1,6 @@
-"""Functional instance_seg via Mask R-CNN: masks reach the loss, predictions
-carry masks, and metrics match by mask.
+"""Functional instance segmentation via Mask R-CNN.
+
+Masks reach the loss, predictions carry masks, and metrics match by mask.
 """
 
 import pytest

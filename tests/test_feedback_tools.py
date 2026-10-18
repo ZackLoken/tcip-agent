@@ -1,5 +1,6 @@
-"""Review-queue MCP tools: the ranked queue and triage, each skipping what the label documents
-mark finished.
+"""The review-queue MCP tools: the ranked queue and confidence triage.
+
+Each skips what the label documents mark finished.
 """
 
 from __future__ import annotations
@@ -19,8 +20,10 @@ BAND = {"low": 0.3, "high": 0.8, "rationale": RATIONALE}
 
 
 def _dataset(tmp_path: Path, *, marked: tuple[str, ...]) -> Path:
-    """A dataset of two images on one date, those named in ``marked`` marked complete for ``bud``
-    through the editor's own save door; its images directory.
+    """Return the images directory of a dataset of two images on one date.
+
+    Each image holds an empty label document, and the images named in ``marked`` are marked
+    complete for ``bud`` through ``save_label_document``.
     """
     from PIL import Image
 
@@ -48,9 +51,7 @@ def test_prioritize_review_queue_checkpoint_missing(tmp_path):
 
 
 def test_prioritize_review_queue_skips_the_images_marked_finished(tmp_path):
-    """Both marked images drop out before any scorer runs, the plumbing triage_predictions
-    shares.
-    """
+    """``prioritize_review_queue`` skips both marked images and queues no candidate."""
     from tests._verified_checkpoint_fixtures import registered_checkpoint
 
     images = _dataset(tmp_path, marked=("imgA", "imgB"))
@@ -71,8 +72,10 @@ def test_prioritize_review_queue_skips_the_images_marked_finished(tmp_path):
 def test_triage_predictions_skips_only_the_images_marked_finished(
     tmp_path, monkeypatch
 ):
-    """A marked image drops out of the queue; an unmarked one, and every image of a subject nobody
-    marked, is still triaged.
+    """Triage skips the image marked finished for its subject and triages the rest.
+
+    The marked image drops out of the queue and the unmarked one is triaged; for a subject
+    nobody marked, both images are triaged.
     """
     from types import SimpleNamespace
 
@@ -114,10 +117,10 @@ def test_triage_predictions_skips_only_the_images_marked_finished(
 
 
 def test_triage_predictions_surfaces_unscoreable(tmp_path, monkeypatch):
-    """A regression checkpoint's predictions carry no confidence signal at all (RegressionHead's
-    point estimate, deliberately no distributional output). triage_predictions must route them
-    into review rather than silently drop them from every output, and tag them distinctly via
-    unscoreable_images so a caller can tell this apart from a genuinely medium-confidence item.
+    """Triage routes predictions carrying no confidence to review, tagged unscoreable.
+
+    A prediction carrying ``head0_values`` and no scores is routed to review and listed in
+    ``unscoreable_images``.
     """
     from types import SimpleNamespace
 
@@ -152,9 +155,10 @@ def test_triage_predictions_surfaces_unscoreable(tmp_path, monkeypatch):
 def _stubbed_triage_predictions(
     tmp_path, monkeypatch, predictions: list[dict], **kwargs
 ):
-    """triage_predictions against a real registered checkpoint with predict_batch stubbed to a
-    fixed set of confidence-bearing and unscoreable predictions, one call site both door-level
-    triage tests share.
+    """Run triage_predictions over a real registered checkpoint with predict_batch stubbed.
+
+    The stubbed ``predict_batch`` answers ``predictions`` as given, and ``kwargs`` override the
+    sample band.
     """
     from types import SimpleNamespace
 
@@ -184,8 +188,9 @@ def _stubbed_triage_predictions(
 
 
 def _triage_over_one_image(tmp_path, monkeypatch) -> tuple[str, str, list]:
-    """A registered detector, a capture holding one image, and the execution records its stubbed
-    predictor is run under, appended as it runs.
+    """Return a registered detector, a one-image capture, and its predictor's executions.
+
+    The execution records are those the stubbed predictor is run under, appended as it runs.
     """
     from types import SimpleNamespace
 
@@ -211,9 +216,10 @@ def _triage_over_one_image(tmp_path, monkeypatch) -> tuple[str, str, list]:
 
 
 def test_triage_predicts_a_detector_at_its_low_bound(tmp_path, monkeypatch):
-    """Every box the band can hold exists: a detector predicts at ``low`` itself, never at a
-    default above it, each frame capped at the density its checkpoint recorded; the answer
-    carries the band and its reason.
+    """Triage predicts a detector at the band's low bound.
+
+    The detector predicts at ``low`` itself, each frame capped at the density its checkpoint
+    recorded, and the answer carries the band.
     """
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.tools.feedback_tools import triage_predictions
@@ -235,8 +241,10 @@ def test_triage_predicts_a_detector_at_its_low_bound(tmp_path, monkeypatch):
 def test_triage_predictions_routes_the_band_and_the_unscoreable_and_accepts_nothing(
     tmp_path, monkeypatch
 ):
-    """A confident prediction leaves the queue without being accepted: the door writes nothing,
-    while the mid-confidence and unscoreable predictions are routed to review.
+    """Triage routes the band and the unscoreable to review and answers no acceptance.
+
+    A confident prediction leaves the queue without being accepted: the answer names no accepted
+    image, while the mid-confidence and unscoreable predictions are routed to review.
     """
     predictions = [
         {"image": "high.jpg", "scores": [0.9]},
@@ -255,9 +263,7 @@ def test_triage_predictions_routes_the_band_and_the_unscoreable_and_accepts_noth
 
 
 def test_unresolvable_scorer_raises_valueerror_not_an_import_error():
-    """A scorer name that does not resolve refuses with ``ValueError`` whatever it looks like, a
-    dotted name that fails to import included.
-    """
+    """An unknown scorer name and a dotted one that fails to import each raise ``ValueError``."""
     import pytest
 
     from tcip_mcp.pipelines.active_learning import ScorerSpec
@@ -272,7 +278,9 @@ def test_unresolvable_scorer_raises_valueerror_not_an_import_error():
 
 
 def test_a_scorer_block_states_every_value_its_factory_requires_and_nothing_else():
-    """A ``combined`` block without its weights refuses naming each missing one, a value the
+    """A scorer block refuses a missing or untaken factory value and builds at its stated ones.
+
+    A ``combined`` block without its weights refuses naming each missing one, a value the
     factory does not take refuses naming it, and a stated block builds its scorer with the values
     it states.
     """
@@ -322,10 +330,10 @@ def test_unresolvable_proposal_engine_raises_valueerror():
 def _bound_checkpoint(
     project: Path, manifest_dir: Path, experiment_id: str
 ) -> tuple[Path, str]:
-    """A run of ``project`` bound to the selection at ``manifest_dir``, run through the child's
-    own entry (its data resolved and recorded, its body saving the model its config builds), so
-    its completed checkpoint's producer is that bound run. Returns ``(run directory, checkpoint
-    path)``.
+    """Run a detector bound to the selection at ``manifest_dir`` through the child's own entry.
+
+    The run belongs to ``project`` and its body is ``SAVE_BUILT_WEIGHTS``. Return
+    ``(run directory, checkpoint path)``.
     """
     from tcip_mcp.experiments import observe
     from tests._chain_fixtures import SAVE_BUILT_WEIGHTS, run_config
@@ -347,10 +355,7 @@ def _bound_checkpoint(
 
 
 def _stub_scorer(monkeypatch) -> None:
-    """Scores every candidate 1.0 in order: the real scorer reads model logits, which this rail
-    has no need to exercise, since the calibration mark is computed from the candidate's own
-    path and the selection, never from a score.
-    """
+    """Stub the scorer to score each candidate 1.0, in the order handed."""
     import tcip_mcp.pipelines.active_learning.scorer as al_scorer
 
     class _Scorer:
@@ -363,14 +368,16 @@ def _stub_scorer(monkeypatch) -> None:
 
 
 def _reference_samples(drawn) -> list:
-    """The samples a drawn selection holds on its reference sides, calibration and holdout."""
+    """Return the samples a drawn selection holds on its calibration and holdout sides."""
     return [s for side in REFERENCE_SIDES for s in drawn.on(side)]
 
 
 def test_prioritize_review_queue_marks_a_bound_runs_reference_sides(
     tmp_path, monkeypatch
 ):
-    """A checkpoint whose run was bound to a selection marks each ranked candidate against that
+    """A bound run's review queue marks candidates on its selection's reference sides.
+
+    A checkpoint whose run was bound to a selection marks each ranked candidate against that
     selection's own calibration and holdout samples under the queue's images directory.
     """
     from tests.test_selection_ground_truth_digests import (
@@ -414,8 +421,10 @@ def test_the_review_queue_marks_the_runs_frozen_calibration_side_after_the_selec
     tmp_path,
     monkeypatch,
 ):
-    """The marks are the calibration samples the producing run's own partition froze: a selection
-    rewritten after the run, its calibration side moved to train, changes none of them.
+    """The review queue marks the run's frozen reference sides after the selection changed.
+
+    With the selection rewritten after the run, its calibration and holdout samples moved to
+    train, the queue still marks the reference samples the drawn selection held under its date.
     """
     import tcip_store as ts
     from tcip_mcp.pipelines.data.selection import (
@@ -466,10 +475,7 @@ def test_the_review_queue_marks_the_runs_frozen_calibration_side_after_the_selec
 def test_the_review_queue_scores_candidates_at_the_checkpoints_own_read_width(
     tmp_path,
 ):
-    """Both scorers read a candidate at the width the checkpoint reads at: a one-channel model
-    over three-band candidates scores them as one band, rather than handing its first convolution
-    an image three times as wide as the one it was trained on.
-    """
+    """The review queue scores each three-band candidate under a one-channel checkpoint."""
     from PIL import Image
 
     from tests._verified_checkpoint_fixtures import (
@@ -502,7 +508,9 @@ def test_the_review_queue_scores_candidates_at_the_checkpoints_own_read_width(
 def test_prioritize_review_queue_unbound_run_carries_no_marks(
     tmp_path, monkeypatch
 ):
-    """A checkpoint whose registry entry names no producing run has nothing bound to check
+    """An unbound run's review queue carries no reference marks.
+
+    A checkpoint whose registry entry names no producing run has nothing bound to check
     against: no ``reference_member`` on any entry.
     """
     from tests._verified_checkpoint_fixtures import foreign_checkpoint
@@ -524,7 +532,9 @@ def test_prioritize_review_queue_unbound_run_carries_no_marks(
 def test_the_queue_operation_reads_the_locations_its_arrival_established(
     tmp_path, monkeypatch
 ):
-    """The queue the web route launches over the checkpoint and images directory its own arrival
+    """``ranked_review_queue`` does not locate its checkpoint or images directory again.
+
+    The queue the web route launches over the checkpoint and images directory its own arrival
     located ranks them as given: nothing beneath the arrival locates either again.
     """
     import tcip_mcp.model_registry as model_registry
@@ -573,7 +583,7 @@ _FLAT_STEMS = ("a", "b", "c", "d", "e", "f")
 
 
 def _labeled_flat_image(path: Path) -> None:
-    """A gray image at ``path`` holding one bright ``leaf`` box its label document names."""
+    """Write a gray image at ``path`` holding one bright ``leaf`` box its label document names."""
     from tcip_annotation.state import Annotation, BBox
     from tests._producer_fixtures import BRIGHT, label_image, painted_frame
 
@@ -590,9 +600,7 @@ def _labeled_flat_image(path: Path) -> None:
 
 
 def _flat_images_dataset(root: Path, stems=_FLAT_STEMS) -> Path:
-    """Labeled images in the undated capture alone, so the selection records each sample's
-    source under it.
-    """
+    """Write labeled images in the undated capture alone and return the dataset root."""
     for stem in stems:
         _labeled_flat_image(root / "images" / UNDATED_BUCKET / f"{stem}.jpg")
     return root
@@ -601,8 +609,9 @@ def _flat_images_dataset(root: Path, stems=_FLAT_STEMS) -> Path:
 def _mixed_dated_and_flat_dataset(
     root: Path, date: str, stems=_FLAT_STEMS
 ) -> Path:
-    """One capture's labeled images under ``images/<date>/`` and the same stems' labeled images
-    in the undated capture beside it.
+    """Write labeled images under ``images/<date>/`` and the same stems in the undated capture.
+
+    Return the dataset root.
     """
     for stem in stems:
         _labeled_flat_image(root / "images" / date / f"{stem}.jpg")
@@ -634,8 +643,10 @@ def _draw_flat(project: Path, root: Path, out: Path, *, seed: int = 2):
 def test_prioritize_review_queue_marks_an_undated_capture_correctly(
     tmp_path, monkeypatch
 ):
-    """A dataset whose images are its undated capture alone marks its calibration side
-    correctly: each sample's own recorded source names that capture.
+    """A run bound over an undated capture alone marks its reference sides correctly.
+
+    Over a dataset whose images are its undated capture alone, the queue marks exactly the stems
+    of the drawn selection's calibration and holdout samples.
     """
     root = _flat_images_dataset(tmp_path / "data")
     manifest_dir = tmp_path / "manifest"
@@ -666,10 +677,11 @@ def test_prioritize_review_queue_a_bound_run_never_marks_another_dates_calibrati
     tmp_path,
     monkeypatch,
 ):
-    """A selection spanning a dated and the undated capture marks only the calibration
-    samples whose own source sits in the queue's images directory: a sample the selection holds
-    under the dated capture's tree must never read as a member here, even though the same stem
-    name recurs under both.
+    """A bound run does not mark a reference sample from another capture's directory.
+
+    A selection spanning a dated and the undated capture marks exactly the calibration samples
+    whose source sits in the queue's images directory, and no stem that is a calibration sample
+    under the dated capture alone.
     """
     root = _mixed_dated_and_flat_dataset(tmp_path / "data", "2026-03-01")
     manifest_dir = tmp_path / "manifest"
@@ -711,9 +723,7 @@ def test_prioritize_review_queue_a_bound_run_never_marks_another_dates_calibrati
 
 
 def test_prioritize_review_queue_signature_drops_the_triage_only_parameters():
-    """prioritize_review_queue carries no strategy flag and none of triage_predictions's own
-    knobs.
-    """
+    """``prioritize_review_queue`` carries no strategy flag and none of triage's own knobs."""
     import inspect
 
     params = inspect.signature(prioritize_review_queue).parameters
@@ -724,8 +734,10 @@ def test_prioritize_review_queue_signature_drops_the_triage_only_parameters():
 
 
 def test_the_review_queue_takes_its_scorer_budget_and_reason_with_no_default():
-    """The queue's scorer block, budget and reason are each stated: neither the door, the
-    operation nor the web payload holds a value for any.
+    """The review queue takes its scorer, budget and reason with no default.
+
+    ``prioritize_review_queue`` and ``ranked_review_queue`` give ``scorer``, ``budget`` and
+    ``rationale`` no default, and the web payload requires all three.
     """
     import inspect
 
@@ -747,8 +759,10 @@ def test_the_review_queue_takes_its_scorer_budget_and_reason_with_no_default():
 
 
 def test_triage_predictions_signature_carries_the_triage_only_parameters():
-    """triage_predictions carries the confidence-triage band, low and high, and its reason, each
-    stated with no default, and accepts nothing.
+    """``triage_predictions`` takes its band and reason with no default.
+
+    ``triage_predictions`` and ``review_queue`` give ``low`` and ``high`` no default, and
+    ``triage_predictions`` gives ``rationale`` none and takes no ``auto_threshold``.
     """
     import inspect
 

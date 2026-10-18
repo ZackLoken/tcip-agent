@@ -1,8 +1,7 @@
-"""Whether a source can be read at the checkpoint's band count is the predictor's own read.
+"""A pass reads each source at its checkpoint's band count or refuses it by name.
 
-``load_image`` converts any photographic frame to the model's width itself, so a one-channel
-checkpoint over ordinary RGB captures is a legitimate pass that must run; a container with no such
-coercion is refused by name before any pixels reach the model.
+A one-channel checkpoint over an ordinary RGB capture predicts it, and a five-band raster under
+a three-channel checkpoint is refused by name.
 """
 
 from __future__ import annotations
@@ -34,8 +33,9 @@ def _five_band_raster(images_dir: Path) -> str:
 def _predicted(
     tmp_path, images_dir: Path, *, in_chans, normalization=None, **stated
 ):
-    """The pass of a real checkpoint built at ``in_chans`` over ``images_dir``, normalizing by
-    ``normalization`` when given, and its results.
+    """Return the pass of a real checkpoint built at ``in_chans`` and its results.
+
+    The pass runs over ``images_dir``, normalizing by ``normalization`` when given.
     """
     from tests._verified_checkpoint_fixtures import (
         built_detector,
@@ -59,8 +59,10 @@ def _predicted(
 def test_a_source_with_no_coercion_is_refused_at_the_models_own_band_count(
     tmp_path,
 ):
-    """A five-band raster under a three-channel checkpoint has no safe coercion, so the read
-    refuses by name instead of truncating the bands the model trained on.
+    """A source with no coercion to the model's band count is refused by name.
+
+    A five-band raster under a three-channel checkpoint refuses, naming the truncation it
+    declines.
     """
     from tests._verified_checkpoint_fixtures import SAMPLE_OVERLAP
 
@@ -79,9 +81,7 @@ def test_a_source_with_no_coercion_is_refused_at_the_models_own_band_count(
 
 
 def test_a_photographic_source_the_model_reads_is_predicted(tmp_path):
-    """The legitimate case: an RGB capture under a one-channel checkpoint is converted by the
-    loader itself, so the pass predicts it.
-    """
+    """An RGB capture under a one-channel checkpoint is predicted."""
     from tcip_mcp.pipelines.derivations import band_normalization_stats
 
     images_dir = tmp_path / "images"

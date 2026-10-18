@@ -1,7 +1,8 @@
-"""The GUI inference worker publishes through the MCP door's own pass and publication: the same
-refusals before anything is written, one commit holding every document, the bucket's record and
-the publication's line, and nothing at all for a pass that fails, the library's on both doors
-alike.
+"""The GUI inference worker publishes a pass as the MCP door does.
+
+A pass the MCP door refuses fails a GUI run with the same reason and nothing written, a GUI pass
+publishes its documents, the bucket's record and the publication's audit line, and a GUI pass
+canceled while its first image is predicted publishes that image's document alone.
 """
 
 from pathlib import Path
@@ -44,8 +45,9 @@ def _job(job_id, images_dir, bucket, ckpt, project):
 
 
 def _launch_through_the_route(client, dataset, bucket, ckpt, *, tile: bool):
-    """A GUI run publishing ``bucket`` launched through the route by ``client``, joined until
-    its worker ends.
+    """Launch a GUI run publishing ``bucket`` through the route and join its worker.
+
+    The run is launched by ``client``, and its worker thread is joined for up to 60 s.
     """
     from tcip_web.routes.inference import _get
 
@@ -67,7 +69,7 @@ def _launch_through_the_route(client, dataset, bucket, ckpt, *, tile: bool):
 
 
 def _documents(root: Path, bucket: str) -> list[str]:
-    """The stems of the prediction documents stored under ``bucket``."""
+    """Return the stems of the prediction documents stored under ``bucket``."""
     import tcip_store
     from tcip_mcp.dataset_layout import PREDICTION_DOCUMENTS
 
@@ -99,7 +101,9 @@ def _record(root: Path, bucket: str) -> dict:
 def test_the_gui_worker_and_the_mcp_door_publish_the_same_bucket_record(
     tmp_path, monkeypatch
 ):
-    """One checkpoint over one image directory with the same stated values: the two doors' own
+    """The GUI worker and the MCP door publish the same bucket record.
+
+    One checkpoint over one image directory with the same stated values: the two doors' own
     bucket records agree on everything but the name each was published under.
     """
     pytest.importorskip("fastapi")
@@ -131,8 +135,10 @@ def test_a_pass_failing_after_its_first_document_publishes_nothing_on_either_doo
     client,
     monkeypatch,
 ):
-    """A pass that dies between images leaves no document, no record and no line, the GUI's pass
-    and the MCP door's alike: a publication is one commit.
+    """A pass failing after its first document publishes nothing on either door.
+
+    A pass whose second document's encoding raises leaves no document, no record and no audit
+    row, the GUI's pass and the MCP door's alike.
     """
     pytest.importorskip("fastapi")
     import tcip_mcp.pipelines.postprocessing.export as export
@@ -183,8 +189,10 @@ def test_a_pass_the_mcp_door_refuses_the_gui_refuses_alike_with_nothing_publishe
     client,
     monkeypatch,
 ):
-    """A refusal the pass raises before its first write refuses a GUI run as it refuses the MCP
-    door's: the same reason, no document, no record, no line.
+    """A pass the MCP door refuses, the GUI refuses alike, with nothing published.
+
+    A tiled pass stating no tile size fails the GUI job with the MCP door's reason and leaves no
+    document, no record and no audit row.
     """
     pytest.importorskip("fastapi")
     from tcip_mcp.dataset_layout import image_dir
@@ -219,8 +227,10 @@ def test_a_pass_the_mcp_door_refuses_the_gui_refuses_alike_with_nothing_publishe
 def test_a_canceled_gui_pass_publishes_what_it_predicted(
     tmp_path, monkeypatch
 ):
-    """A cancel stops the stream at the next image boundary: the documents already predicted are
-    published, the record names exactly those, and the job ends canceled.
+    """A canceled GUI pass publishes the image it predicted.
+
+    A cancel set while the first of two images is predicted leaves one image done: its document
+    is published, the record names that image alone, and the job ends canceled.
     """
     pytest.importorskip("fastapi")
     from tcip_mcp.dataset_layout import image_dir
@@ -257,8 +267,10 @@ def test_a_canceled_gui_pass_publishes_what_it_predicted(
 def test_a_full_gui_pass_publishes_every_document_and_the_record(
     tmp_path, monkeypatch
 ):
-    """Every prediction document and the record that states who produced them are published, the
-    images predicted in the order the pass walked them, and the job reports its summary.
+    """A full GUI pass over two images publishes both documents and the bucket's record.
+
+    Both prediction documents, encoded in image order, and the record naming their producer
+    and execution are published, and the job reports its summary.
     """
     pytest.importorskip("fastapi")
     import tcip_mcp.pipelines.postprocessing.export as export
@@ -318,7 +330,9 @@ def test_a_full_gui_pass_publishes_every_document_and_the_record(
 def test_a_gui_run_and_an_mcp_run_leave_the_same_publication_lines(
     tmp_path, monkeypatch
 ):
-    """Each run leaves the publication's one line and nothing else in its dataset's log, and each
+    """A GUI run and an MCP run leave the same publication lines.
+
+    Each run leaves the publication's one line and nothing else in its dataset's log, and each
     bucket's record names the run that produced its checkpoint.
     """
     pytest.importorskip("fastapi")

@@ -1,6 +1,8 @@
-"""``model_build``: the smoke contract's class count is the loader's, the provenance snapshot copies
-the module a dotted reference names (not its top-level package), a saved checkpoint rebuilds from
-its own config's model source, and the dimensions a builder is handed are the run's own.
+"""``model_build``'s smoke contract, provenance snapshot, rebuild and handed dimensions.
+
+The smoke contract's class count is the loader's, the provenance snapshot copies the module a
+dotted reference names (not its top-level package), a saved checkpoint rebuilds from its own
+config's model source, and the dimensions a builder is handed are the run's own.
 """
 
 from __future__ import annotations
@@ -69,10 +71,10 @@ def build_probe_net(
     in_chans: int = 3,
     attributes: tuple = (),
 ):
-    """A tiny module whose parameter shapes follow its builder kwargs, one head per attribute
-    sized by its values, taking the statistics it is handed and the weights a run normalizing
-    by weights hands it, loading none. Its forward is never run here; these tests read
-    parameter shapes only.
+    """Build a tiny module whose parameter shapes follow its builder kwargs.
+
+    It has one head per attribute sized by its values, takes the statistics and weights it is
+    handed, and loads none.
     """
     import torch.nn as nn
 
@@ -96,9 +98,10 @@ def _param_shapes(model) -> dict:
 
 
 def _write_registry(dataset_root: Path) -> None:
-    """A registry with three subjects of different shape, so no scope's class count is guessable
-    from the file's overall size: 'leaf' carries a three-value ordinal axis, 'bush' a two-value
-    categorical one, and 'bud' none at all.
+    """Write a registry with three subjects of different shape.
+
+    'leaf' carries a three-value ordinal axis, 'bush' a two-value categorical one, and 'bud'
+    none at all.
     """
     registry = subject_registry.SubjectRegistry(
         subjects=(
@@ -130,7 +133,7 @@ def _write_registry(dataset_root: Path) -> None:
 
 
 def _agent_package(root: Path, name: str, modules: dict) -> Path:
-    """Write an importable package of agent-written modules and return its directory."""
+    """Write an empty ``__init__.py`` and each of ``modules`` under ``root / name``; return it."""
     pkg = root / name
     pkg.mkdir(parents=True, exist_ok=True)
     (pkg / "__init__.py").write_text("", encoding="utf-8")
@@ -143,15 +146,11 @@ def _agent_package(root: Path, name: str, modules: dict) -> Path:
 def test_contract_dims_take_the_admitted_attributes_without_the_loader_background_offset(
     tmp_path,
 ):
-    """A scoped detection config smokes at the subject count and the attributes the run was
-    admitted under, with no background class added: the +1 is the loader's own offset on the
-    labels it builds, so applying it here too would prove the model against a head one class
-    wider than the one that trains.
+    """Contract dims take the admitted attributes without the loader's background offset.
 
-    The attributes are the scope the run was admitted under, not a reading of the registry as it
-    stands now: this run was admitted when its subject declared two condition values, the registry
-    has since gained a third, and a re-resolution would smoke a head one value wider than the head
-    that trains.
+    A scoped detection config smokes at the one subject and the two-value attribute the run was
+    admitted under, with no background class added, after its registry has gained a third
+    condition value.
     """
     from PIL import Image
 
@@ -232,9 +231,10 @@ def test_contract_dims_take_the_admitted_attributes_without_the_loader_backgroun
 def test_contract_dims_count_only_the_subject_for_a_scope_declaring_no_attributes(
     tmp_path,
 ):
-    """An instance_seg scope whose subject declares no attribute trains one class, the subject
-    itself, and hands no attributes. The resolved count stays at that one class rather than
-    gaining a background slot; a run resolving no frame carries no smoke frame.
+    """Contract dims count the subject as their one class for a scope declaring no attributes.
+
+    An instance_seg scope whose subject declares no attribute resolves one class and no
+    attributes, and a run resolving no frame carries no frame size.
     """
     dataset_root = tmp_path / "subject_2026"
     images_dir = dataset_root / "images" / UNDATED_BUCKET
@@ -265,9 +265,10 @@ def test_contract_dims_count_only_the_subject_for_a_scope_declaring_no_attribute
 
 
 def test_snapshot_copies_each_dotted_module_at_its_module_path(tmp_path):
-    """Each of the three bespoke seams' modules, declared under its source's ``source_files`` and
-    lying outside the project, is copied at its path under its import root, the module its own
-    reference names, so the copy binds as that module and never as its top-level package.
+    """The snapshot copies each dotted module at its module path.
+
+    Each of the three bespoke seams' modules, declared under its source's ``source_files`` and
+    lying outside the project, is copied byte for byte at its path under its import root.
     """
     pkg = _agent_package(
         tmp_path,
@@ -318,8 +319,10 @@ def test_snapshot_copies_each_dotted_module_at_its_module_path(tmp_path):
 def test_snapshot_captures_the_module_of_a_builder_spelled_without_a_colon(
     tmp_path,
 ):
-    """``module.path.function`` is the other accepted builder spelling; the function name is the
-    last segment, so the module is everything before it, not the first segment.
+    """The snapshot captures the module of a builder spelled without a colon.
+
+    For ``agent_code_dotted.detectors.build_net`` the snapshot copies
+    ``agent_code_dotted/detectors.py``, the segments ahead of the function name.
     """
     pkg = _agent_package(
         tmp_path,
@@ -354,8 +357,10 @@ def test_snapshot_captures_the_module_of_a_builder_spelled_without_a_colon(
 
 
 def test_a_missing_or_empty_builder_refuses_at_the_configs_validation():
-    """``builder`` of ``None`` and of ``""`` both refuse where the config is validated, naming
-    ``model_source.builder``, before anything reads the model source; a named builder admits.
+    """A missing or empty builder refuses at the config's validation.
+
+    ``builder`` of ``None`` and of ``""`` both refuse where the config is validated, naming
+    ``model_source.builder``; a named builder admits.
     """
     for builder in (None, ""):
         _spec, issues = checked_train_config(
@@ -390,8 +395,9 @@ def test_a_missing_or_empty_builder_refuses_at_the_configs_validation():
 
 
 def _probe_config() -> dict:
-    """A classification run's recorded config of this repository: table ground truth records
-    the empty scope.
+    """Return a classification run's config under the repository root.
+
+    Its data section states five channels, seven classes and the empty scope.
     """
     return training_config(
         REPO_ROOT,
@@ -407,11 +413,10 @@ def _probe_config() -> dict:
 
 @pytest.mark.parametrize("restated", HANDED_TO_BUILDER)
 def test_builder_kwargs_restating_a_handed_value_refuses_by_name(restated):
-    """The dimensions reach the builder from the run's data section, the weights and statistics
-    from the model source's normalization record and a detector's geometry from the run's
-    resolution; a builder_kwargs carrying
-    any of them refuses naming it where the config is validated, the rank count included though
-    this run resolves none.
+    """Builder kwargs restating a handed value refuse by name.
+
+    A builder_kwargs carrying any name the build hands its builder refuses naming it where the
+    config is validated, the rank count included though this run resolves none.
     """
     config = _probe_config()
     config["model_source"]["builder_kwargs"] = {restated: 4}
@@ -421,14 +426,15 @@ def test_builder_kwargs_restating_a_handed_value_refuses_by_name(restated):
 
 
 def handed_kwargs(**kwargs) -> dict:
-    """A builder answering the keyword values it was handed."""
+    """Return the keyword values the builder was handed."""
     return kwargs
 
 
 def test_the_names_a_build_hands_are_the_names_a_restatement_refuses():
-    """A build stating weights, their statistics and a detector geometry hands its builder only
-    names :data:`HANDED_TO_BUILDER` holds, and every one of them but the count and attributes
-    this run has none of.
+    """The names a build hands its builder are the names a restatement refuses.
+
+    A build stating weights, their statistics and a detector geometry hands its builder a
+    subset of :data:`HANDED_TO_BUILDER`, lacking ``num_ranks`` and ``attributes`` alone.
     """
     from tcip_mcp.pipelines.derivations import pretrained_normalization
     from tcip_mcp.pipelines.schemas import PretrainedWeights
@@ -455,9 +461,7 @@ def test_the_names_a_build_hands_are_the_names_a_restatement_refuses():
 
 
 def test_a_model_source_stating_its_own_width_refuses_by_name():
-    """A width stated on the model source itself refuses by name where the config is
-    validated.
-    """
+    """A width stated on the model source itself refuses by name at validation."""
     config = _probe_config()
     config["model_source"]["in_chans"] = 4
 
@@ -466,9 +470,7 @@ def test_a_model_source_stating_its_own_width_refuses_by_name():
 
 
 def test_an_ordinal_run_recording_no_rank_count_refuses_by_name():
-    """A checkpoint's rank count is read at the recorded-dimension boundary, which names what is
-    missing rather than failing on a bare key.
-    """
+    """An ordinal run recording no rank count refuses at ``recorded_model_dims`` by name."""
     config = training_config(
         REPO_ROOT,
         {
@@ -484,8 +486,10 @@ def test_an_ordinal_run_recording_no_rank_count_refuses_by_name():
 
 
 def test_a_run_over_label_documents_recording_a_count_refuses():
-    """A run over label documents is sized by its scope, the subject and its attributes; a count
-    recorded beside it would be a second size, so the dimensions refuse rather than choose.
+    """A run over label documents recording a class count refuses.
+
+    A detection run whose scope names a subject and records ``num_classes`` beside it refuses
+    naming ``num_classes``.
     """
     config = training_config(
         REPO_ROOT,
@@ -508,11 +512,11 @@ def test_a_run_over_label_documents_recording_a_count_refuses():
 def test_a_run_builds_at_the_width_and_heads_its_admitted_data_records(
     tmp_path,
 ):
-    """The admitting case, through the producer: a run whose data section the platform wrote from
-    its own admission builds a model reading that run's band count, its one subject and one head
-    per attribute its registry declares. The single-band sources, the one subject and the
-    three-value attribute all differ from ``build_probe_net``'s defaults, so a build that dropped
-    any of them would come out at the default shape.
+    """A run builds at the width and heads its admitted data records.
+
+    A run whose data section the platform wrote from its own admission builds a model reading
+    one band, one subject class and one three-value attribute head, each differing from
+    ``build_probe_net``'s defaults.
     """
     from PIL import Image
 
@@ -567,10 +571,11 @@ def test_a_run_builds_at_the_width_and_heads_its_admitted_data_records(
 def test_a_saved_checkpoint_rebuilds_the_architecture_its_config_builds(
     tmp_path,
 ):
-    """The checkpoint written by the envelope's save path carries enough of the model source for
-    the inference-side rebuild to reconstruct the same architecture the run trained. Both sides
-    are produced here by the real build path, so a stamp that records less than the builder was
-    called with shows up as a shape difference rather than passing on a restated literal.
+    """A saved checkpoint rebuilds the architecture its config builds.
+
+    The checkpoint the envelope saves carries no model source of its own, and the config it
+    records rebuilds, from the run's snapshot, a model whose parameter shapes match the one the
+    run's context built and saved.
     """
     from tcip_mcp.experiments import CONFIG_PATHS, observe
     from tcip_mcp.pipelines.model_build import (
@@ -636,9 +641,10 @@ def test_a_saved_checkpoint_rebuilds_the_architecture_its_config_builds(
 def test_child_pythonpath_carries_sys_path_and_the_existing_env_value(
     tmp_path, monkeypatch
 ):
-    """The string a spawned process or Ray worker gets must reproduce this interpreter's own
-    import search path, with any existing PYTHONPATH the caller already set preserved at the end
-    rather than displaced by it.
+    """A child's PYTHONPATH carries a prepended ``sys.path`` entry and ends with the old value.
+
+    With a directory prepended to ``sys.path`` and ``PYTHONPATH`` already set, the child's
+    path includes that directory and ends with the existing ``PYTHONPATH`` value.
     """
     import os
 

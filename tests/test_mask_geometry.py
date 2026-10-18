@@ -1,10 +1,8 @@
 """mask-geometry measurement primitive: exact values on synthetic masks.
 
-Locks that geometry on a validated mask is a real, correct measurement: a known rectangle / ellipse
-yields the right area / axis extents / perimeter / centroid in pixels, a physical scale converts
-px -> the caller's own unit correctly (area by the square), and degenerate / empty masks are handled
-without inventing a measurement. The physical scale a delivery rests on is a scale assessment's
-(``tests/test_physical_scale_assessment.py``), never a value this module resolves.
+A known rectangle or ellipse yields the right area, axis extents, perimeter and centroid in
+pixels, a physical scale converts pixels to the stated unit (area by the square), and
+degenerate and empty masks yield no invented measurement.
 """
 
 from __future__ import annotations
@@ -21,7 +19,7 @@ from tests._training_values import MASK_BINARIZE
 
 
 def _rect_mask(h=64, w=64, r0=5, r1=24, c0=10, c1=49):
-    """Solid rectangle: rows r0..r1 (inclusive), cols c0..c1 -> (r1-r0+1) x (c1-c0+1)."""
+    """Return a solid rectangle mask over rows r0..r1 and cols c0..c1, both inclusive."""
     from tests._producer_fixtures import painted_array
 
     return painted_array(w, h, [((c0, r0, c1 + 1, r1 + 1), 1)])
@@ -58,10 +56,9 @@ def test_rectangle_physical_scale_converts_px_to_mm():
 
 
 def test_scale_unit_is_the_callers_fact_never_assumed_to_be_mm():
-    """The unit is real data the caller states, so a cm/px scale reports cm, never a mislabeled mm.
+    """A cm/px scale reports area in cm² and axis extents, perimeter and centroid in cm.
 
-    Replaces the former ``gsd`` alias, which silently treated a field-standard GSD (cm/px) as an
-    mm/px synonym: every dimensional number came out 10x wrong under an ``_mm`` label.
+    The result carries no mm-labeled field.
     """
     m = _rect_mask()
     g = mask_geometry(m, scale=0.5, unit="cm", threshold=MASK_BINARIZE)
@@ -76,9 +73,7 @@ def test_scale_unit_is_the_callers_fact_never_assumed_to_be_mm():
 
 
 def test_no_gsd_parameter_survives_anywhere_in_the_module():
-    """The naming trap is gone: no callable in the module still accepts a ``gsd``/``mm_per_px``
-    knob.
-    """
+    """No callable in the mask geometry module takes a ``gsd`` or ``mm_per_px`` parameter."""
     import importlib
     import inspect
 
@@ -96,13 +91,11 @@ def test_no_gsd_parameter_survives_anywhere_in_the_module():
 
 
 def test_no_length_or_width_key_survives_under_any_alias():
-    """A PCA-chord extent is not an anatomical length/width, and no alias keeps that claim alive.
+    """The geometry carries no length or width key, and unit lookup reads such keys by vocabulary.
 
-    An alias would defeat the rename: code reading ``length_px`` would keep treating the
-    principal-axis chord as the organ's real length, which is exactly the reading the axis-named
-    keys refuse to offer. ``unit_from_value_key`` is vocabulary-driven, so a bespoke ``length_mm``
-    from measurement code outside this module is recognized the same way this module's own
-    fields are.
+    Over two geometries no key starts with ``length`` or ``width``; ``unit_from_value_key`` reads
+    mm or cm off ``length_mm``, ``width_cm`` and the two axis-extent keys, and no unit off a px
+    key.
     """
     from tcip_mcp.pipelines.measurement.mask_geometry import (
         unit_from_value_key,

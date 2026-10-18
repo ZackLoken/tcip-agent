@@ -1,10 +1,9 @@
 """The tcip_mcp.knowledge reader and the serve_domain_knowledge tool built on it.
 
-One canonical directory (`packages/tcip-mcp/src/tcip_mcp/knowledge/`) backs both the generated
-Claude Code skills and this tool; these tests hold the reader's contract (every document
-accounted for, malformed or duplicate frontmatter refused rather than skipped) and the tool's
-surface (the index, a named document, the unknown-name error, and a description composed from
-the same corpus at import time).
+These tests hold the reader's contract over `packages/tcip-mcp/src/tcip_mcp/knowledge/` (each
+document accounted for, malformed or duplicate frontmatter refused) and the tool's surface (the
+index, a named document, the unknown-name error, and a description composed from that corpus at
+import time).
 """
 
 from __future__ import annotations
@@ -23,7 +22,7 @@ from tcip_mcp.knowledge import (
 
 
 def test_list_documents_returns_one_entry_per_markdown_file():
-    """Never a hardcoded count: as many entries as there are .md files under KNOWLEDGE_DIR."""
+    """``list_documents`` lists one entry per .md file under KNOWLEDGE_DIR, each named and read."""
     documents = list_documents()
     on_disk = list(KNOWLEDGE_DIR.rglob("*.md"))
     assert documents, (

@@ -1,9 +1,7 @@
 """Evaluating by run id reads ground truth through the scope the run's checkpoint records.
 
-Labels are stored by subject name in one document per image, so which subject the evaluation
-reads is what decides the counts it scores. The checkpoint's own recorded class space, its map
-included, is the one that supplies it; a wrong scope produces a confident metric for the wrong
-object.
+The fixture images each hold two buds and five leaves under one label document per image, and
+the run is recorded over the leaf scope.
 """
 
 from __future__ import annotations
@@ -19,8 +17,9 @@ pytest.importorskip("torchvision")
 
 
 def _two_subject_dataset(root: Path) -> Path:
-    """Images carrying two subjects with deliberately different counts: 2 buds, 5 leaves, each
-    object painted bright on its frame.
+    """Write three images carrying two subjects at different counts and return their directory.
+
+    Each image holds 2 buds and 5 leaves, each object painted bright on its frame.
     """
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
@@ -63,8 +62,10 @@ def _two_subject_dataset(root: Path) -> Path:
 def test_run_id_evaluation_scopes_ground_truth_to_the_runs_own_subject(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """The evaluation dataset reads the subject the run's checkpoint records, so the ground truth
-    it scores against holds that subject's objects and no others.
+    """Evaluating by run id reads ground truth in the scope the run's checkpoint records.
+
+    With the evaluation runner replaced by a fake that captures its dataset, the captured
+    dataset carries the recorded leaf scope, three samples, and five boxes in its first target.
     """
     import tcip_mcp.pipelines.training.eval_runners as runners
     from tcip_mcp.pipelines.execution import Stated

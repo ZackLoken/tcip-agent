@@ -1,5 +1,7 @@
-"""generic_trainer unit tests: minted-id uniqueness, the run's stated seeding, terminal
-status on setup failure, and atomic checkpoint writes.
+"""The generic trainer's ids, seeding, setup-failure status and checkpoint writes.
+
+Minted-id uniqueness, the run's stated seeding, terminal status on setup failure, and atomic
+checkpoint writes.
 """
 
 import threading
@@ -50,8 +52,10 @@ def test_mint_experiment_id_unique_across_threads():
 
 
 def _context(tmp_path, **stated):
-    """The context of a one-epoch regression run over two frames and no validation side, with
-    ``stated``'s config keys, opened by the launcher's own producer.
+    """Return ``run_context`` of a ``regressor_config`` run with ``stated`` passed through.
+
+    The data block is ``frames_data`` of two frames, intensities 0.1 and 0.5 valued 0.2 and 1.0,
+    under ``tmp_path / "ds"``.
     """
     from tests.tiny_trainer_fixtures import (
         frames_data,
@@ -66,7 +70,7 @@ def _context(tmp_path, **stated):
 
 
 def test_train_applies_the_runs_seed(tmp_path, monkeypatch):
-    """The trainer seeds every stream at the seed and determinism the run's config states."""
+    """The trainer calls ``set_seed`` with the seed and determinism the run's config states."""
     captured = {}
 
     def fake_set_seed(seed, *, deterministic):
@@ -104,14 +108,14 @@ def test_train_with_unwritable_output_dir_marks_run_failed(tmp_path):
 
 
 def _run_artifacts(directory):
-    """What a run left behind, without the storage layer's own lock bookkeeping."""
+    """Return what a run left behind, without the storage layer's own lock bookkeeping."""
     return sorted(
         p.name for p in directory.iterdir() if not p.name.endswith(".lock")
     )
 
 
 def test_a_checkpoint_loads_back_exactly_what_was_saved(tmp_path):
-    """A checkpoint is only worth writing if ``torch.load`` returns the payload unchanged."""
+    """``write_checkpoint`` lands ``model_best.pt`` alone, and it loads back the saved payload."""
     path = gt.checkpoint_path(tmp_path, "model_best")
 
     landed = gt.write_checkpoint(

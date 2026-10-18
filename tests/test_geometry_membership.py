@@ -1,18 +1,9 @@
-"""Every standard geometry route's loaders answer for their own membership.
+"""A geometry route's loaders answer for their own membership.
 
-A detection or instance_seg run the known loaders cover names its membership once, through the
-platform's own producer, and builds every loader out of the samples that producer made. Which
-route the caller took decides which side each sample lands on and nothing about how a loader finds
-its members: whether the caller named a validation directory, stated every share zero, or let the
-run draw its own split, each loader reads the source and the label document its own samples
-state.
-
-These drive each route through ``auto_train_val`` and read the membership back off the loaders
-themselves, never off the record the run persists, so a loader that rediscovered its members from
-a directory would fail here even with a faithful record beside it. Every route a run of either
-geometry task can take is driven under both, each with the geometry its own loader reads, so a
-dispatch that sent one task around the producer fails here rather than passing on the other's
-coverage.
+These drive the drawn, zero-share and within-image routes under each geometry task, with the
+geometry that task's loader reads, and read each loader's membership back off the loader
+itself: its keys name samples whose sources are on disk, and the drawn route's training loader
+holds the training side its partition records.
 """
 
 from __future__ import annotations
@@ -52,9 +43,7 @@ SUBJECT = "bud"
 
 
 def _target_geometry(task: str):
-    """The geometry one task's loader actually reads: a box for detection, a closed ring for
-    instance_seg, whose loader reads polygons only and rasterizes their rings.
-    """
+    """Return a four-point square ``Polygon`` for instance_seg and a ``BBox`` for any other task."""
     if task == "instance_seg":
         return Polygon(
             rings=[[(10.0, 10.0), (30.0, 10.0), (30.0, 30.0), (10.0, 30.0)]]
@@ -63,8 +52,10 @@ def _target_geometry(task: str):
 
 
 def _labeled(root: Path, stems, *, task: str = "detection") -> Path:
-    """One labeled directory: an image, bright over its object, and a per-image label document
-    per stem, each carrying the geometry ``task``'s own loader reads; the image directory.
+    """Write one labeled directory and return it.
+
+    Each stem gets a ``labeled_frame`` under ``root``'s undated bucket, labeled with one
+    ``SUBJECT`` annotation of ``_target_geometry(task)``.
     """
     images_dir = root / "images" / UNDATED_BUCKET
     for stem in stems:
@@ -79,11 +70,7 @@ def _labeled(root: Path, stems, *, task: str = "detection") -> Path:
 
 
 def _one_target(ds, task: str) -> None:
-    """Read one example off a loader and assert the task's own target shape came back.
-
-    Membership alone does not prove a loader reads what its task needs: an instance_seg run whose
-    samples carry only boxes indexes every member and yields no mask at all.
-    """
+    """Read one example off a loader and assert the task's own target shape came back."""
     _image_tensor, target = ds[0]
     assert target["boxes"].tolist() == [[10.0, 10.0, 30.0, 30.0]]
     if task == "instance_seg":
@@ -92,11 +79,9 @@ def _one_target(ds, task: str) -> None:
 
 
 def _membership(ds) -> set[str]:
-    """What one loader says its own members are, read off the samples it was built from.
+    """Return what one loader says its own members are, read off the samples it was built from.
 
-    Every key the loader indexes names one of the samples it was built from, whose source is on
-    disk. A tiled loader indexes one example per kept tile, so its keys are a subset of the samples
-    it was handed rather than all of them.
+    Assert each key the loader indexes names a sample whose source is on disk.
     """
     keys = set(ds.stems)
     for key in keys:
@@ -105,9 +90,10 @@ def _membership(ds) -> set[str]:
 
 
 def _recorded(project: Path, task: str, data_cfg: dict, **config) -> dict:
-    """The partition the launcher's own producer resolves for a ``task`` run of ``project`` over
-    ``data_cfg``, with ``config``'s keys laid beside it, read back from the launch record it
-    writes: the record's members come from the producer, never from a loader's own keys.
+    """Return the partition the launcher's own producer resolves for a ``task`` run.
+
+    The run is of ``project`` over ``data_cfg``, with ``config``'s keys laid beside it, and the
+    partition is read back from the launch record it writes.
     """
     import copy
 
@@ -149,10 +135,12 @@ def test_the_drawn_route_loaders_name_their_own_samples(
 def test_a_zero_validation_share_trains_on_every_admitted_sample_and_records_them(
     tmp_path: Path, task: str
 ):
-    """Guard. A drawn split stating every share zero, the one spelling of a run with no
-    validation side, trains on every admitted sample, records them all on the training side, and
-    selects on the training loss; the same run selecting on a validation metric refuses naming
-    the validation loader it has none of.
+    """A zero validation share loads and records the three admitted samples on the training side.
+
+    With all shares at zero and selection on the training loss, the training loader holds the
+    three admitted samples, no validation loader is built, and the partition records them on the
+    training side; that split selecting on a validation metric refuses, naming the validation
+    loader it lacks.
     """
     from tests._chain_fixtures import training_config
     from tests._verified_checkpoint_fixtures import opened_run, unbuilt_source
@@ -195,8 +183,10 @@ def test_a_zero_validation_share_trains_on_every_admitted_sample_and_records_the
 def test_a_starved_draw_refuses_by_the_draws_own_floor(
     tmp_path: Path, task: str
 ):
-    """A group policy that collapses every sample into one group leaves no side to hold out, so
-    the run refuses naming the floor rather than training without validation.
+    """A draw starved to one group refuses naming its own floor.
+
+    A grouping map putting both samples in one group refuses, naming the two groups the
+    requested sides need.
     """
     stems = ["a_0_0", "b_0_0"]
     images_dir = _labeled(tmp_path / "ds", stems, task=task)
@@ -220,9 +210,11 @@ def test_a_starved_draw_refuses_by_the_draws_own_floor(
 def test_one_tiled_source_still_splits_spatially_over_its_own_samples(
     tmp_path: Path, task: str
 ):
-    """The within-image route wraps the producer's own sample, records that one sample as its
-    partition, and its region identities still name the bare stem every consumer of the manifest
-    joins on, for every task that tiles.
+    """One tiled source splits spatially over its own sample.
+
+    For each task in ``TILING_TASKS``, the within-image route records the one sample as its
+    partition, both loaders hold it on disjoint tiles, and its training region identities name
+    the bare stem.
     """
     images_dir, stem = big_single_source(
         tmp_path / "ds", 4000, 3000, polygons=task == "instance_seg"
@@ -256,11 +248,11 @@ def test_one_tiled_source_still_splits_spatially_over_its_own_samples(
 def test_the_train_only_and_drawn_routes_record_one_directory_the_same_way(
     tmp_path: Path,
 ):
-    """The same training directory is admitted twice, once by a run training on every admitted
-    sample and once by a run that drew its own split over it. The two runs partition it
-    differently, which is what each route is for; what they may not do is disagree about which
-    members that directory holds, where it is, or what each member's ground truth digests to
-    now.
+    """A run holding nothing out and a drawn run record one directory's members alike.
+
+    One training directory of four samples is admitted by a run holding nothing out and by a
+    run drawing its own split. The two record the same four members, sources, ground truths and
+    digests, and the drawn run alone records a validation side.
     """
     stems = ["a_0_0", "b_0_0", "c_0_0", "d_0_0"]
     images_dir = _labeled(tmp_path / "train_ds", stems)

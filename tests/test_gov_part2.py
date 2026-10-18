@@ -1,5 +1,7 @@
-"""Governance: the distill worksheet gathers a project's friction reports and retrospectives into
-one worksheet and applies nothing (governance stays human).
+"""The distill worksheet gathers friction reports and retrospectives and applies nothing.
+
+It gathers a project's friction reports and retrospectives into one worksheet; governance
+stays human.
 """
 
 from __future__ import annotations
@@ -14,7 +16,7 @@ def _load_distill():
 
 
 def _term_set(text: str) -> set[str]:
-    """The distinct terms the worksheet reads from ``text``."""
+    """Return the distinct terms the worksheet reads from ``text``."""
     return set(_load_distill()._terms(text))
 
 
@@ -79,7 +81,9 @@ def test_distill_worksheet_surfaces_disagreements(tmp_path):
 def test_the_worksheet_lists_a_report_that_will_not_decode_as_malformed(
     tmp_path,
 ):
-    """A stored report that is not a JSON object is listed as malformed beside the decoded one,
+    """A stored report that will not decode is listed as malformed beside the decoded one.
+
+    A stored report that is not a JSON object is listed as malformed beside the decoded one,
     and the worksheet still builds.
     """
     import tcip_store as ts
@@ -180,9 +184,7 @@ def test_build_workspace_worksheet_ignores_non_project_dirs(tmp_path):
 
 
 def test_workspace_mode_never_writes_anything(tmp_path):
-    """A workspace worksheet leaves every file under a project's ``.tcip`` but the store's own
-    bookkeeping unchanged.
-    """
+    """A workspace worksheet leaves a project's ``.tcip`` files unchanged, bookkeeping aside."""
     from tcip_store.file_backend import is_bookkeeping
 
     distill = _load_distill()
