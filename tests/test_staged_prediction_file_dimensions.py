@@ -1,9 +1,7 @@
 """The image dimensions a staged prediction document records.
 
-Geometry is staged in pixels, so the document's own width and height are what every later consumer
-normalizes against: review keying, a re-render. On a non-square image a transposed pair reads back
-as geometry that has drifted by the aspect ratio, or left the frame entirely, while the pixel
-coordinates still look correct.
+Geometry is staged in pixels, and the document records the width and height of the image it was
+staged for, landscape or portrait.
 """
 
 from __future__ import annotations
@@ -25,8 +23,10 @@ def _staged(
     size: tuple[int, int],
     box: tuple[float, float, float, float],
 ) -> json_io.LabelDocument:
-    """``box`` staged through ``stage_proposals`` for an image of ``size`` under ``project``'s
-    dataset ``ds``; the staged document as its bucket records it.
+    """Stage ``box`` for an image of ``size`` and return the staged document.
+
+    The box is staged through ``stage_proposals`` under ``project``'s dataset ``ds``; the
+    document is returned as its bucket records it.
     """
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.tools.proposal_tools import stage_proposals
@@ -60,8 +60,10 @@ def _staged(
 def test_staged_file_records_the_width_and_height_it_was_staged_for(
     tmp_path: Path, size: tuple[int, int]
 ) -> None:
-    """The header of the staged file carries the image's own width and height, each in its own
-    field, for both a landscape and a portrait frame.
+    """A staged file records the width and height of the image it was staged for.
+
+    The header carries the image's own width and height, each in its own field, for both a
+    landscape and a portrait frame.
     """
     header = _staged(tmp_path, size, (10.0, 20.0, 60.0, 90.0))
 
@@ -71,8 +73,10 @@ def test_staged_file_records_the_width_and_height_it_was_staged_for(
 def test_staged_geometry_stays_inside_the_frame_the_file_declares(
     tmp_path: Path,
 ) -> None:
-    """A staged box sits inside the image it was measured on, and stays inside it after a consumer
-    normalizes the pixel geometry against the dimensions the same file declares.
+    """Staged geometry stays inside the frame its own file declares.
+
+    A staged box keeps its pixel coordinates, and normalized against the dimensions the same
+    file declares it stays within the unit frame.
     """
     width, height = LANDSCAPE
     header = _staged(tmp_path, LANDSCAPE, (500.0, 60.0, 620.0, 300.0))

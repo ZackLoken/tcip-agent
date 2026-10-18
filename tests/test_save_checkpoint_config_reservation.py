@@ -1,7 +1,7 @@
-"""``TrainContext.save_checkpoint`` reserves the ``config`` key: the checkpoint's ``config`` is
-always this run's own launch config, the record every publishing door reads a run's ``scope``
-from, so a bespoke ``train(ctx)`` loop's own ``state`` carrying that key would silently displace
-it.
+"""``TrainContext.save_checkpoint`` reserves the ``config`` key.
+
+The checkpoint's ``config`` is this run's own launch config, the record a run's ``scope`` is read
+from, and a bespoke ``train(ctx)`` loop's own ``state`` carrying that key is refused.
 """
 
 from __future__ import annotations
@@ -21,8 +21,9 @@ from tcip_mcp.pipelines.training.envelope import TrainContext  # noqa: E402
 
 
 def _ctx(tmp_path) -> tuple[TrainContext, dict]:
-    """The context of a run the launcher's own writer opened under ``tmp_path``, and the config
-    its run trains under as its spec records it.
+    """Return a run's context and the config its spec records.
+
+    The run is one the launcher's own writer opened under ``tmp_path``.
     """
     from tests._verified_checkpoint_fixtures import detection_config
     from tests.tiny_trainer_fixtures import run_context
@@ -46,9 +47,10 @@ def test_save_checkpoint_refuses_a_state_carrying_its_own_config_key(
 def test_a_checkpoint_written_past_the_stamp_refuses_naming_the_key_it_lacks(
     tmp_path, key
 ) -> None:
-    """A produced checkpoint's payload saved back without one key the stamp writes refuses where
-    the checkpoint is read, naming that key and the stamp, never on whatever the absent value
-    leaves its reader to guess at.
+    """A checkpoint lacking a key the stamp writes refuses where it is read, naming the key.
+
+    A produced checkpoint's payload saved back without one key the stamp writes refuses where
+    the checkpoint is read, naming that key and the stamp.
     """
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tests._verified_checkpoint_fixtures import (
@@ -74,9 +76,11 @@ def test_a_checkpoint_written_past_the_stamp_refuses_naming_the_key_it_lacks(
 def test_save_checkpoint_writes_the_launch_config_never_the_loops_own(
     tmp_path,
 ) -> None:
-    """The checkpoint carries the config the run trains under, its launch config with the
-    resolved data section and its source files bound to the run's snapshot, every field but the
-    data locations only the run's record keeps, its paths read back against the project.
+    """``save_checkpoint`` writes the run's launch config.
+
+    A checkpoint saved through an untrained run's context carries the config its spec records,
+    paths read back against the project: each field of that config, and its data section but
+    ``images_dir`` and ``labels_dir``.
     """
     from tcip_mcp.experiments import CONFIG_PATHS
     from tcip_mcp.registry_paths import runtime_paths
@@ -105,7 +109,9 @@ def test_save_checkpoint_writes_the_launch_config_never_the_loops_own(
 def test_the_default_trainer_and_a_bespoke_loop_stamp_one_checkpoint_config(
     tmp_path,
 ) -> None:
-    """The default trainer and a bespoke loop's ``ctx.save_checkpoint``, over one run the
+    """The default trainer and a bespoke loop stamp one checkpoint config.
+
+    The default trainer and a bespoke loop's ``ctx.save_checkpoint``, over one run the
     launcher's own writer opened, write one stamp: one ``config``, the model's and the dataset
     builder's declared files each this run's own snapshot copy of it, as the run's record names
     it, and no field of the run's data locations (``experiments.DATA_PATHS``), one
@@ -188,9 +194,11 @@ def test_the_default_trainer_and_a_bespoke_loop_stamp_one_checkpoint_config(
 def test_a_bound_runs_checkpoint_carries_its_split_whole_and_reads_it_back_bound(
     tmp_path,
 ) -> None:
-    """A run bound to a selection stamps its split whole, the selection's directory stored
-    against the project as its run record stores it, and the checkpoint's spec reads that
-    directory back against the project as the same bound split.
+    """A bound run's checkpoint stamps its selection directory and reads it back bound.
+
+    The stamped split's ``selection_dir`` is the selection's directory stored against the
+    project, and the checkpoint's spec reads it back as a ``BoundSplit`` naming that directory
+    absolutely.
     """
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.schemas import BoundSplit

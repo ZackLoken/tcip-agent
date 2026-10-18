@@ -1,6 +1,8 @@
-"""build_sampler call shape, the imbalance samplers over a run's own loaders, and the
-tile-locality sampler: banded read order, runtime band derivation, per-worker lanes under
-multi-worker loading, and the refusals that keep it honest.
+"""build_sampler's call shape, the imbalance samplers, and the tile-locality sampler.
+
+The imbalance samplers run over a run's own loaders; the tile-locality sampler is covered for
+banded read order, runtime band derivation, per-worker lanes under multi-worker loading, and its
+refusals.
 """
 
 from __future__ import annotations
@@ -16,9 +18,10 @@ torch = pytest.importorskip("torch")
 
 
 class _StubTiledDataset:
-    """Duck-typed stand-in exposing the tiled-dataset ordering contract (``tile_entries`` and
-    ``source_frames``), loadable through a real DataLoader: samples carry the serving process
-    pid so a multi-worker run reveals which worker fetched which index.
+    """Duck-typed stand-in exposing the tiled-dataset ordering contract.
+
+    It carries ``tile_entries`` and ``source_frames``, its length is its tile count, and item
+    ``i`` is ``(i, pid)`` with the pid of the process serving it.
     """
 
     def __init__(self, tile_entries, source_frames):
@@ -67,7 +70,7 @@ def _two_source_dataset():
 
 
 def _band_key(dataset, sampler, idx):
-    """(stem, band ordinal) for a tile index, from the lattice and the derived band height."""
+    """Return (stem, band ordinal) for a tile index, from the lattice and the band height."""
     stem, box = dataset.tile_entries[idx]
     ys = sorted({b[1] for s, b in dataset.tile_entries if s == stem})
     return stem, ys.index(box[1]) // sampler.band_tile_rows
@@ -87,11 +90,10 @@ def _assert_banded(dataset, sampler, order):
 
 
 def _assert_bands_owned_by_one_worker(dataset, sampler, per_worker_streams):
-    """Every (source, band) group is read by exactly one worker, not merely contiguous within
-    whichever worker happens to receive a fragment of it: a band split across workers (each
-    decoding its own share from scratch) would still pass a purely-per-worker contiguity check,
-    since each worker's own fragment stays internally ordered even though the band itself was
-    split, which is exactly the amplification the lanes exist to prevent.
+    """Assert every (source, band) group is read by exactly one worker.
+
+    Each worker's stream keeps its bands contiguous, and no (source, band) group appears in two
+    workers' streams.
     """
     owner: dict[tuple, int] = {}
     for worker, stream in per_worker_streams.items():
@@ -107,8 +109,10 @@ def _assert_bands_owned_by_one_worker(dataset, sampler, per_worker_streams):
 
 
 def test_tile_locality_orders_are_banded_and_differ_across_epochs(monkeypatch):
-    """Within an epoch every (source, band) group stays contiguous; across consecutive
-    epochs the order changes (a sampler seeded once at construction would freeze it).
+    """Tile-locality orders keep each band contiguous and change across epochs.
+
+    Within an epoch every (source, band) group stays contiguous; across consecutive epochs the
+    order changes.
     """
     from tcip_mcp.pipelines.data.samplers import TileLocalitySampler
 
@@ -143,9 +147,10 @@ def test_tile_locality_order_reproducible_under_global_seed(monkeypatch):
 def test_tile_locality_band_height_derived_from_cache_and_row_cost(
     monkeypatch,
 ):
-    """The band height is a runtime derivation, half the per-reader cache share over the
-    costliest windowed source's row bytes over the lattice row pitch, never a pinned
-    constant.
+    """The tile-locality band height is derived from the cache share and the row cost.
+
+    A cache too small for one tile row bands one row, a larger cache bands two, and a source of
+    double width at that cache halves the band to one row.
     """
     from tcip_mcp.pipelines.data.samplers import TileLocalitySampler
 
@@ -168,8 +173,9 @@ def test_tile_locality_band_height_derived_from_cache_and_row_cost(
 
 
 def test_tile_locality_band_height_uses_per_worker_cache_share(monkeypatch):
-    """Each DataLoader worker process holds its own GDAL cache, so the band a worker can
-    keep resident shrinks with the worker count.
+    """The tile-locality band height shrinks with the worker count.
+
+    At one cache size the band is four tile rows with no workers and two rows with two.
     """
     from tcip_mcp.pipelines.data.samplers import TileLocalitySampler
 
@@ -201,10 +207,11 @@ def test_tile_locality_single_tile_row_sources_band_to_one(monkeypatch):
 def test_tile_locality_multi_worker_order_is_laned_per_dispatched_worker(
     monkeypatch,
 ):
-    """The DataLoader dispatches batch i to worker i mod num_workers, so chunking the
-    emitted order into batches and dealing chunks round-robin must reconstruct, for every
-    worker, a read stream whose (source, band) groups stay contiguous; consecutive epochs
-    still differ.
+    """A multi-worker tile-locality order gives each dispatched worker whole bands.
+
+    Each epoch's order covers every index, and chunking it into batches dealt round-robin to
+    the workers gives every worker a read stream whose (source, band) groups stay contiguous and
+    are its own; consecutive epochs differ.
     """
     from tcip_mcp.pipelines.data.samplers import TileLocalitySampler
 
@@ -242,11 +249,11 @@ def test_tile_locality_multi_worker_order_is_laned_per_dispatched_worker(
 def test_tile_locality_lanes_land_on_their_worker_through_a_real_loader(
     monkeypatch,
 ):
-    """End to end through torch's multiprocessing DataLoader: each real worker's received
-    index stream stays banded, which holds only if the round-robin batch dispatch delivers
-    each lane's batches to one worker. Sample values carry the worker pid, so the mapping is
-    observed, not simulated. The lattice is sized so lanes are equal (4 equal bands over 2
-    workers, band a whole number of batches) and no tail misalignment can excuse a split.
+    """Tile-locality lanes land on their worker through a real multiprocessing DataLoader.
+
+    Over four equal bands and two workers, each batch carries one worker's pid, both workers
+    serve, the number of indices served equals the dataset's length, and each worker's received
+    index stream keeps its (source, band) groups contiguous and its own.
     """
     from torch.utils.data import DataLoader
 
@@ -296,9 +303,7 @@ def test_tile_locality_refuses_when_no_source_is_windowed(monkeypatch):
 
 
 def test_tile_locality_refuses_unknown_worker_regime(monkeypatch):
-    """Built without the loader's num_workers (e.g. a call site that never threads it), the
-    sampler refuses and names what to pass rather than assuming a single-worker loader.
-    """
+    """A tile-locality sampler built without the loader's num_workers refuses naming it."""
     from tcip_mcp.pipelines.data.samplers import build_sampler
 
     _patch_gdal_cache(monkeypatch, 62_000_000)
@@ -331,16 +336,17 @@ def test_tile_locality_refuses_windowed_source_without_dtype_size(monkeypatch):
 
 
 def _admitted(name: str, **values):
-    """The sampler block naming ``name`` at ``values`` as the schema admits it."""
+    """Return the sampler block naming ``name`` at ``values`` as the schema admits it."""
     from tcip_mcp.pipelines.schemas import SamplerSpec
 
     return SamplerSpec.model_validate(sampler(name, **values))
 
 
 def _table_run(tmp_path, values: list[int], block: dict, task: str):
-    """The context of a ``task`` run over one frame per value of ``values`` (each its label),
-    whose train loader draws through the sampler ``block``, built as the child's own entry builds
-    it (:func:`~tests.tiny_trainer_fixtures.run_context`).
+    """Return the context of a ``task`` run whose train loader draws through ``block``.
+
+    The run is over one frame per value of ``values`` (each its label), built as the child's own
+    entry builds it (:func:`~tests.tiny_trainer_fixtures.run_context`).
     """
     from tests.tiny_trainer_fixtures import (
         classifier_config,
@@ -377,8 +383,10 @@ def test_build_sampler_builds_tile_locality_through_the_factory(monkeypatch):
 def test_build_sampler_imbalance_samplers_build_with_or_without_the_loader_context(
     tmp_path,
 ):
-    """The imbalance samplers neither require nor receive the loader context: each block builds
-    with the context absent and with it present but ignored.
+    """Each imbalance sampler builds with the loader context absent and with it present.
+
+    The class-balanced, oversampling and weighted blocks each build a sampler drawing at least
+    one epoch of indices, with the context absent and with it present.
     """
     from tcip_mcp.pipelines.data import samplers
 
@@ -413,11 +421,11 @@ def test_build_sampler_imbalance_samplers_build_with_or_without_the_loader_conte
 def test_a_sampler_block_its_sampler_refuses_is_refused_at_preflight_by_name(
     block, named
 ):
-    """Guard. The oversampler's count has no default: a config naming the oversampler with no
-    ``min_count``, or a sampler stated with a value it does not take, refuses naming it where
-    training's reads are checked; ``random`` is no sampler name, the absent block being the
-    shuffled loader; and the loader's own worker count and batch size are the loader's to
-    supply, refused in a block by name.
+    """A sampler block its sampler refuses is refused at preflight by name.
+
+    Training's read check refuses, each by name, an oversampler with no ``min_count``, a
+    sampler stated with a value it does not take, the sampler name ``random``, and the loader's
+    own worker count stated in a block.
     """
     from tcip_mcp.pipelines.schemas import train_config
     from tests import REPO_ROOT
@@ -438,9 +446,11 @@ def test_a_sampler_block_its_sampler_refuses_is_refused_at_preflight_by_name(
 def test_a_stated_oversampler_count_is_the_count_the_train_loader_draws_at(
     tmp_path,
 ):
-    """Guard. The train loader built for a run (``generic_trainer.run_loaders``) draws through the
-    oversampler at the count its config states: four samples of two classes, two each,
-    duplicated up to five per class, read 4 + 2 * 3 * 2 indices an epoch.
+    """A run's train loader draws through the oversampler at the count its config states.
+
+    The train loader built for a run (``generic_trainer.run_loaders``) over four samples of two
+    classes, two each, through the oversampler at ``min_count`` 5 reads 4 + 2 * 3 * 2 indices
+    an epoch.
     """
     ctx = _table_run(
         tmp_path,
@@ -456,9 +466,11 @@ def test_a_stated_oversampler_count_is_the_count_the_train_loader_draws_at(
 def test_each_imbalance_sampler_weighs_the_classes_its_loaders_distribution_counts(
     tmp_path, task
 ):
-    """Guard. Over a run's own loader of three frames of class 0 and one of class 1, the
-    oversampler duplicates each class up to its count (4 + 3 * 2 + 1 * 5 indices), and the
-    class-balanced and weighted samplers weigh each frame by its own class's balanced weight.
+    """Each imbalance sampler weighs the classes its loader's distribution counts.
+
+    Over a run's own loader of three frames of class 0 and one of class 1, the oversampler at
+    ``min_count`` 5 reads 4 + 3 * 2 + 1 * 5 indices, and the class-balanced and weighted
+    samplers weigh each frame by its own class's unnormalized class weight.
     """
     from tcip_mcp.pipelines.components.losses import compute_class_weights
     from tcip_mcp.pipelines.data.samplers import build_sampler
@@ -480,8 +492,10 @@ def test_each_imbalance_sampler_weighs_the_classes_its_loaders_distribution_coun
 def test_a_detection_loaders_example_classes_are_its_distributions_keys(
     tmp_path,
 ):
-    """A detection loader's 1-indexed labels reach a sampler as the 0-indexed classes its
-    class distribution counts.
+    """A detection loader's example classes are its class distribution's keys.
+
+    A detection loader's 1-indexed labels reach a sampler as the 0-indexed classes its class
+    distribution counts.
     """
     from tests._producer_fixtures import dataset_over
     from tests._verified_checkpoint_fixtures import detection_images
@@ -496,9 +510,10 @@ def test_a_detection_loaders_example_classes_are_its_distributions_keys(
 def test_an_imbalance_sampler_over_a_loader_stating_no_classes_refuses_naming_both(
     tmp_path,
 ):
-    """Guard. A regression loader states no class distribution, so a run stating a class-balanced
-    sampler refuses when its train loader is built, naming the sampler and the task, rather than
-    drawing a plain shuffle the config did not ask for.
+    """An imbalance sampler over a loader stating no classes refuses naming sampler and task.
+
+    A regression loader states no class distribution, so a run stating a class-balanced
+    sampler refuses when its train loader is built, naming the sampler and the task.
     """
     with pytest.raises(
         ValueError, match=r"ClassBalancedSampler.*'regression'"
@@ -511,8 +526,10 @@ def test_an_imbalance_sampler_over_a_loader_stating_no_classes_refuses_naming_bo
 def test_the_oversampler_over_an_instance_segmentation_loader_draws_at_its_distribution(
     tmp_path,
 ):
-    """Guard. An instance-segmentation loader states the class distribution its regions count, so
-    the oversampler duplicates its two frames of class 0 up to five: 2 + 2 * 3 indices.
+    """The oversampler over an instance-segmentation loader draws at its distribution.
+
+    An instance-segmentation loader over two frames states a class distribution of two in class
+    0, and the oversampler at ``min_count`` 5 over it reads 2 + 2 * 3 indices.
     """
     from tcip_mcp.pipelines.data.samplers import build_sampler
     from tests._producer_fixtures import dataset_over

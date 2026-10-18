@@ -1,7 +1,7 @@
-"""The ground-truth digests a drawn selection records: each sample carries its own document's
-version, the draw reads each document once, a bound run's partition alone carries them, and the
-selection's own digest is the one value both the run's binding and an assessment's reference
-record.
+"""The ground-truth digests a drawn selection records.
+
+Each sample carries its own document's version, a bound run's partition alone carries them, and
+the run's binding records the selection's own digest.
 """
 
 from __future__ import annotations
@@ -28,8 +28,10 @@ _STEMS = ("a", "b", "c", "d", "e", "f", "g", "h")
 
 
 def _dataset(root: Path, stems=_STEMS) -> Path:
-    """Two capture dates, eight stems each, enough groups that a three-way draw leaves both
-    train and val non-empty for either date.
+    """Write a dataset of two capture dates holding ``stems`` each, and return its root.
+
+    Each stem's image is a painted frame written with a label document of one ``leaf`` box;
+    ``stems`` defaults to eight.
     """
     for date in DATES:
         images_dir = root / "images" / date
@@ -69,8 +71,10 @@ def _draw(project: Path, root: Path, out: Path, *, seed: int = 2):
 
 
 def _bind_run(project: Path, out: Path, experiment_id: str) -> Path:
-    """A run of ``project`` bound to the selection at ``out``, its data resolved and recorded by
-    the launcher's own producer, so no training body runs. Returns the run directory.
+    """Resolve a run of ``project`` bound to the selection at ``out``; return its directory.
+
+    The run is resolved and recorded by ``_verified_checkpoint_fixtures.resolved_run`` under
+    ``experiment_id``.
     """
     from tests._verified_checkpoint_fixtures import resolved_run
 
@@ -82,7 +86,7 @@ def _bind_run(project: Path, out: Path, experiment_id: str) -> Path:
 
 
 def _manifest_sha256(out: Path) -> str:
-    """The sha256 of the selection record at ``out`` as the store holds it."""
+    """Return the sha256 of the selection record at ``out`` as the store holds it."""
     import tcip_store
     from tcip_mcp.pipelines.data.selection import selection_key
 
@@ -113,8 +117,10 @@ def test_every_drawn_sample_carries_its_own_documents_version_as_its_digest(
 def test_a_withdrawn_ground_truth_refuses_its_digest_by_name(
     tmp_path: Path,
 ) -> None:
-    """A document that is gone has no digest: the read refuses naming it rather than answering
-    a stand-in value a comparison could mistake for a recorded one.
+    """A withdrawn ground truth's digest is refused by name.
+
+    A label document key and a CSV path that name nothing each raise ``NotFoundError`` naming
+    the absent ground truth.
     """
     from tcip_mcp.dataset_layout import UNDATED_BUCKET, label_key
     from tcip_mcp.pipelines.data.selection import ground_truth_digest
@@ -128,9 +134,11 @@ def test_a_withdrawn_ground_truth_refuses_its_digest_by_name(
 def test_the_run_binding_records_the_selection_digest_once_never_on_a_sample(
     tmp_path: Path,
 ) -> None:
-    """``selection_digest`` is the sha256 over ``encode_record`` of the selection's own
-    document as the store holds it, and the run's resolved partition carries that value once in
-    its binding block, never on a sample.
+    """A run's binding records the selection digest in its binding block, never on a sample.
+
+    ``selection_digest`` is the sha256 over ``encode_record`` of the selection's own
+    document as the store holds it, and the run's resolved partition carries that value in its
+    binding block, never on a sample.
     """
     from tcip_mcp.experiments import run_resolution
     from tcip_mcp.pipelines.data.selection import (
@@ -159,8 +167,11 @@ def test_the_run_binding_records_the_selection_digest_once_never_on_a_sample(
 def test_a_document_emptied_after_its_admission_never_trains_as_empty(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """The loaders train the document the admission read, at the version its sample records: one
-    emptied between that read and the loaders is never trained as an image with nothing on it.
+    """A document emptied after its admission is held by its loader with its annotations.
+
+    A document emptied while the admission builds its samples is held by the train or val
+    loader with the annotations the admission read, and its sample's recorded digest differs
+    from the emptied document's.
     """
     from tcip_mcp.pipelines.data import label_queries
     from tcip_mcp.pipelines.data.selection import ground_truth_digest
@@ -202,8 +213,10 @@ def test_a_document_emptied_after_its_admission_never_trains_as_empty(
 def test_the_partition_alone_carries_the_per_sample_digests(
     tmp_path: Path,
 ) -> None:
-    """The per-sample digests and groups ride only in the run's resolved partition: the data
-    section recorded beside it (the one every checkpoint embeds) never gains them.
+    """The run's resolved partition alone carries the per-sample digests.
+
+    The per-sample digests and groups ride only in the run's resolved partition: neither the
+    data section's split nor the partition's selection block gains them.
     """
     from tcip_mcp.experiments import run_resolution
 

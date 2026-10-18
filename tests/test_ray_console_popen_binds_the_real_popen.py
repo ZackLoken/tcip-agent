@@ -1,5 +1,7 @@
-"""Ray's ``ConsolePopen``, the ``subprocess.Popen`` subclass Ray's process launcher defines when
-first imported, keeps the real ``Popen`` as its base through the patched window of each of four
+"""Ray's ``ConsolePopen`` keeps the real ``Popen`` as its base through a patched window.
+
+``ConsolePopen`` is the ``subprocess.Popen`` subclass Ray's process launcher defines when first
+imported. It keeps the real ``Popen`` as its base through the patched window of each of four
 test substitutes (``fake_popen``'s class, ``NoExecutableChild``, ``DyingChild`` and
 ``LivingChild``), and one built after the window closes starts a real child.
 """
@@ -40,7 +42,9 @@ from tests.test_tensorboard_launch import DyingChild, LivingChild
 def test_ray_console_popen_keeps_the_real_popen_through_a_patched_window(
     monkeypatch, apply
 ):
-    """Importing Ray's process launcher inside the window leaves ``ConsolePopen`` based on the
+    """A ``ConsolePopen`` imported inside a patched window keeps the real ``Popen`` base.
+
+    Importing Ray's process launcher inside the window leaves ``ConsolePopen`` based on the
     real ``Popen``, and a ``ConsolePopen`` built after the window runs a real child to exit.
     """
     real_popen = subprocess.Popen

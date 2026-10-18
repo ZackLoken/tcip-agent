@@ -1,5 +1,7 @@
-"""score_predictions: a present, unreadable label or prediction document is an error naming the
-document, never a raise through the MCP tool boundary, on both the single-image and folder paths.
+"""score_predictions answers an unreadable document with an error naming it.
+
+A present, unreadable label or prediction document is an error naming the document, never a raise
+through the MCP tool boundary, on both the single-image and folder paths.
 """
 
 from __future__ import annotations
@@ -23,9 +25,10 @@ SCORED_AT = (0.5, 0.25)
 
 
 def _published(project: Path, name: str, image: Path, registry=None):
-    """One ``bud`` box at 0.9 on ``image``, carrying the last value of each attribute
-    ``registry`` declares on it (none for no registry), published as the bucket ``name``; the
-    bucket.
+    """Publish one ``bud`` box at 0.9 on ``image`` as the bucket ``name`` and return the bucket.
+
+    The box carries the last value of each attribute ``registry`` declares on it (none for no
+    registry).
     """
     from tests._chain_fixtures import published
 
@@ -85,9 +88,10 @@ def test_score_predictions_folder_reports_an_unreadable_prediction(
 def test_score_predictions_over_attributed_documents_scores_the_object_class(
     tmp_path: Path,
 ) -> None:
-    """A prediction carrying attribute values carries the object class in subject, so this
-    scores its localization, a valid number about finding the object, never an attribute head's
-    call.
+    """Scoring attributed predictions scores the object class's localization.
+
+    A prediction carrying attribute values carries the object class in subject, and the score
+    over it is one true positive with no error.
     """
     from tcip_mcp import subject_registry as cr
 
@@ -121,8 +125,10 @@ def test_score_predictions_over_attributed_documents_scores_the_object_class(
 def test_a_predicted_image_with_no_label_document_is_refused_as_a_reference(
     tmp_path: Path,
 ):
-    """An image the bucket predicted and nobody labeled has no reference: scoring and the count
-    triage refuse naming its document, never measuring it against an empty one.
+    """A predicted image with no label document is refused as a reference, naming it.
+
+    An image the bucket predicted and nobody labeled has no reference: scoring and the count
+    triage refuse naming its document as having no record.
     """
     from tcip_annotation.json_io import UnreadableLabelDocumentError
     from tcip_mcp.tools.vision_tools import get_worst_predictions
@@ -143,7 +149,9 @@ def test_a_predicted_image_with_no_label_document_is_refused_as_a_reference(
 def test_an_image_the_bucket_names_no_document_for_is_unknown_never_a_miss(
     tmp_path: Path,
 ):
-    """A labeled image the bucket's record never predicted is no false negative and no triage
+    """A labeled image the bucket did not predict is left out and named, not scored a miss.
+
+    A labeled image the bucket's record did not predict is no false negative and no triage
     score: scoring and triage leave it out and name it, while the image it did predict scores.
     """
     from tcip_mcp.tools.vision_tools import get_worst_predictions

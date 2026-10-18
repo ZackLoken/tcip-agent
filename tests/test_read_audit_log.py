@@ -1,10 +1,7 @@
 """``read_audit_log``: the one tool reading a scope's own audit log back, on the record itself.
 
-Coverage, not a guard: this tool has no prior behavior to prove absent.
-
-Every entry read here comes from a real ``@audited`` call, never a hand-built dict, except the
-corrupt-page case, which damages a committed entry's bytes in the database by hand, never
-something a writer through the seam could produce.
+The entries read come from real ``@audited`` calls, except in the corrupt-page case, which
+damages a committed entry's bytes in the database by hand.
 """
 
 from __future__ import annotations

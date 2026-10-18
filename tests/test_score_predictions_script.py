@@ -1,8 +1,7 @@
-"""tcip score-predictions: the demoted door's own command-line entry point.
+"""tcip score-predictions: the scoring door's command-line entry point.
 
-A plain score (no --trait) needs no project at all, since it only reads the image and its
-label and prediction documents under its dataset root; --trait requires --project, since
-resolving a trait's derived localization criterion reads that project's own confirmed revision.
+A plain score (no --trait) scores a single image with no project named, and --trait refuses
+without --project; neither writes a ``.tcip`` directory under the working directory.
 """
 
 from __future__ import annotations
@@ -22,9 +21,7 @@ SCORED_AT = ["--iou-threshold", "0.5", "--conf-threshold", "0.25"]
 
 
 def _fixture(tmp_path: Path) -> tuple[Path, str]:
-    """An image, its label document, and a published bucket holding its document; the image
-    and the bucket's name.
-    """
+    """Write an image, its label document and a published bucket; return image and bucket name."""
     pytest.importorskip("torch")
     from tests._chain_fixtures import published
     from tests._producer_fixtures import label_image

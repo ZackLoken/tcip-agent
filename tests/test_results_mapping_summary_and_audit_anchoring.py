@@ -3,10 +3,10 @@
 Three separate facts travel back from a build: how many images a date holds, how many of them
 resolved to a plant, and how far the GPS matches sat from the plant they resolved to. None of them
 stands in for another, and a date's numbers are its own. The mapping a build persists is audited
-into the project the GUI has open, the same project the persist path itself must sit under.
+into the project the GUI has open.
 
-The mapping name a phenology door is handed is the door's own input to validate: a name naming no
-mapping is refused by name, never carried forward into a phenology computed over nothing.
+A phenology route handed a mapping that does not cover its buckets refuses naming the date, and
+one handed a name no build made refuses it as absent.
 """
 
 from __future__ import annotations
@@ -41,8 +41,10 @@ def _write_image(
     lon: float | None = None,
     h_pos_err: float | None = None,
 ) -> None:
-    """A JPEG carrying EXIF capture time and, unless the fix is missing, a GPS position with the
-    horizontal positioning error ``h_pos_err`` (meters) it reports.
+    """Write an image at ``path`` carrying EXIF capture time ``when``.
+
+    With ``lat`` and ``lon`` given, its GPS block carries that position; with ``h_pos_err``
+    given, the horizontal positioning error (meters) it reports.
     """
     from PIL import TiffImagePlugin
 
@@ -62,15 +64,16 @@ def _write_image(
 
 
 FIRST_DATE_ERRORS = {"a.jpg": 1.5, "b.jpg": 4.0, "c.jpg": 2.0}
-"""The positioning errors (meters) the first date's photographs report, sample data: ``b`` the
-poorer fix, the one that reaches its plant about 3 m off."""
+"""The positioning errors (meters) the first date's photographs report, sample data."""
 
 
 def _capture_fixture(root: Path) -> dict:
-    """Three plants on one row, then two capture dates of unequal size against them.
+    """Write :data:`PLANTS` and two capture dates of photographs under ``root``; return the payload.
 
-    The first date holds a close match, a looser match, an image taken far from any plant, and an
-    image with no GPS fix at all; the second holds a single exact match.
+    It writes the plant CSV, four photographs on 2026-02-11 (three geotagged with
+    :data:`FIRST_DATE_ERRORS`, one with no GPS) and one on 2026-02-25, opens ``root`` as the
+    project, registers the dataset and plant registry, and returns the build payload named
+    ``valley``.
     """
     csv_path = write_plant_csv(root / "plants.csv", PLANTS)
     images = root / "images"
@@ -129,9 +132,10 @@ def test_build_reports_image_count_mapped_count_and_mean_distance_as_three_answe
     client: TestClient,
     tmp_path: Path,
 ) -> None:
-    """A date's summary keeps the three quantities apart. The fixture's first date makes them three
-    different numbers (four images, two plants resolved, three GPS distances recorded), so a summary
-    that reused one of them for another would read wrong rather than merely coincide.
+    """A date's summary keeps the three quantities apart.
+
+    The fixture's first date makes them three different numbers (four images, two plants
+    resolved, three GPS distances recorded), and the summary reports each as its own.
     """
     from tcip_mcp.pipelines.postprocessing.plant_mapping import (
         load_mapping_rows,
@@ -188,9 +192,10 @@ def test_build_without_a_stated_radius_derives_each_dates_from_its_photographs(
     client: TestClient,
     tmp_path: Path,
 ) -> None:
-    """A payload naming no ``match_radius`` derives each date's from the positioning errors its
-    photographs report, the same as the tool's own; a route that pinned a numeric default
-    instead would always land on ``stated``.
+    """A build naming no ``match_radius`` derives each date's from its photographs.
+
+    A payload naming no ``match_radius`` records each date's radius as derived from the
+    positioning errors its photographs report (``h_pos_err``).
     """
     from tcip_mcp.pipelines.postprocessing import plant_mapping
 
@@ -207,10 +212,7 @@ def test_build_response_carries_the_persisted_record_own_match_radius(
     client: TestClient,
     tmp_path: Path,
 ) -> None:
-    """The response's ``match_radius`` equals the persisted record's own: this cannot prove the
-    route never recomputes it, only that whatever it answers agrees with what
-    ``persist_mapping`` actually wrote.
-    """
+    """The build response's ``match_radius`` equals the persisted record's own."""
     from tcip_mcp.pipelines.postprocessing import plant_mapping
 
     payload = _capture_fixture(tmp_path)
@@ -227,12 +229,13 @@ def test_the_route_and_the_tool_build_one_mapping_with_one_audit_line_each(
     client: TestClient,
     tmp_path: Path,
 ) -> None:
-    """Identical builds through the HTTP route and the MCP tool reach one operation: their
-    answers, their persisted records and their audit lines agree field for field once the name
-    and the build's own clock are set aside, and each build leaves exactly one line in the open
-    project's log, the receipt naming the record it wrote. The person who made the act is the
-    lines' one ``actor`` key, the route's naming them and the tool's naming no one, and nothing
-    else on either line names a person.
+    """Identical builds through the HTTP route and the MCP tool answer, persist and audit alike.
+
+    Their answers, their persisted records and their audit lines' arguments agree with
+    ``name``, ``built_at`` and ``record_sha256`` set aside. The two builds leave two
+    ``plant_mapping_built`` lines in the open project's log, each naming its build and the
+    digest of the record it wrote. The route's line carries ``actor`` ``user:tester``, the
+    tool's carries no ``actor``, and nothing else on the route's line names the tester.
     """
     import json
 
@@ -295,9 +298,11 @@ def test_a_mapping_or_registry_name_outside_the_segment_rule_refuses_at_its_key(
     client: TestClient,
     tmp_path: Path,
 ) -> None:
-    """The key producers refuse a name outside the segment rule, so every door that names a
-    mapping or a registry refuses it the same way and writes nothing; a legal name and an
-    archived one still key.
+    """A mapping or registry name outside the segment rule is refused at its key producer.
+
+    Both key producers refuse the name, and the build route, the build tool and the registry
+    registration each refuse it by name with no mapping written; a legal name and an archived
+    one key.
     """
     from tcip_mcp.pipelines.postprocessing import plant_mapping
     from tcip_mcp.tools.phenology_tools import (
@@ -340,9 +345,11 @@ def test_every_phenology_door_refuses_a_mapping_name_that_names_no_mapping(
     client: TestClient,
     tmp_path: Path,
 ) -> None:
-    """With assessed prediction buckets, a mapping that does not cover them is refused by name at
-    every door: one built over only the first date refuses the date it does not cover, and a
-    name never built refuses as absent.
+    """Two phenology routes refuse by name a mapping that does not cover the buckets.
+
+    With assessed prediction buckets, a mapping that does not cover them is refused by name at
+    the measurement and CSV export routes: one built over the first date alone refuses the date
+    it does not cover, and a name no build made refuses as absent.
     """
     pytest.importorskip("torch")
     from tcip_mcp.tools.phenology_tools import build_plant_mapping

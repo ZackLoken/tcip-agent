@@ -1,7 +1,8 @@
-"""Two ``ray_cluster`` tests on two xdist workers never overlap. A child pytest runs a file
-of two marked tests, each recording its start, its end and its session's root around a short
-sleep, under ``-n 2`` with the lock loaded the way ``tests/conftest.py`` loads it; the intervals
-must be disjoint and the root this test's own. Without the lock, two workers run them at once.
+"""Two ``ray_cluster`` tests on two xdist workers never overlap.
+
+A child pytest runs a file of two marked tests, each recording its start, its end and its
+session's root around a short sleep, under ``-n 2`` with the ``tests.ray_cluster_lock`` plugin
+loaded; the two intervals are disjoint and both roots are this test's directory.
 """
 
 from __future__ import annotations

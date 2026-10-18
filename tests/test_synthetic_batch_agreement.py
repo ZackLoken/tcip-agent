@@ -1,10 +1,9 @@
 """The batch the contract synthesizes stands in for the batch the real loaders build.
 
 ``check_model_contract`` and ``overfit_check`` smoke a model against a synthetic batch whenever
-the caller supplies none. That batch is what the report is earned against, so its targets carry
-the same semantics the run's own loaders emit: 1-indexed foreground detection labels (0 is
-background for a torchvision detector), a real positive-area box, and the rank key an ordinal
-head consumes.
+none is supplied. Its targets carry the semantics the run's own loaders emit: 1-indexed
+foreground detection labels (0 is background for a torchvision detector), a positive-area box
+inside the frame, and the rank key an ordinal head consumes.
 """
 
 from __future__ import annotations
@@ -31,7 +30,11 @@ ORD_DIMS = {"in_chans": 3, "num_classes": 4, "img_size": (64, 64)}
 
 
 class _DetectionTargetRecorder(torch.nn.Module):
-    """Records the training batch handed to it and answers with a well-formed detection output."""
+    """A detection model recording the targets of each training forward.
+
+    In training with targets given it appends them to ``seen`` and answers ``{"loss": self.scale
+    * 1.0}``; otherwise it answers one zero box scored 1 with label 1.
+    """
 
     def __init__(self) -> None:
         super().__init__()
@@ -54,8 +57,9 @@ class _DetectionTargetRecorder(torch.nn.Module):
 class _OrdinalProbe(torch.nn.Module):
     """A minimal ordinal model built on the real ``OrdinalHead``.
 
-    The head's own target contract, not a restatement of it here, decides whether the synthetic
-    ordinal batch is consumable. It also records the batch it was handed.
+    It feeds the head each image's per-channel mean. In training with targets given it appends
+    the targets to ``seen`` and answers the head's own losses, prefixed ``head0_``; otherwise it
+    answers the head's decoding.
     """
 
     def __init__(self, num_ranks: int, in_chans: int = 3) -> None:
@@ -75,8 +79,10 @@ class _OrdinalProbe(torch.nn.Module):
 
 
 def _real_detection_item(tmp_path):
-    """One ``(image, target)`` from a real ``DetectionDataset``: a non-square frame, a non-square
-    box, and a subject that is not the first one in the registry.
+    """Return one ``(image, target)`` from a real ``DetectionDataset``.
+
+    It writes a 96 by 48 image labeled with one ``bud`` box ``(4, 6, 40, 19)`` under a registry
+    listing ``bush`` then ``bud``, and returns the first item of the detection dataset over it.
     """
     from PIL import Image
 
@@ -102,8 +108,9 @@ def _real_detection_target(tmp_path):
 
 
 def _real_ordinal_items(tmp_path):
-    """Two ``(image, target)`` items from a real ``OrdinalDataset`` over a skewed, sparsely
-    populated rank column.
+    """Return two ``(image, target)`` items from a real ``OrdinalDataset``.
+
+    The dataset is over two blank 96 by 48 frames ranked 0 and 3.
     """
     from PIL import Image
 
@@ -133,9 +140,10 @@ def _synthetic_detection_target():
 
 
 def test_synthetic_detection_target_labels_a_foreground_object(tmp_path):
-    """Label 0 is background to a torchvision detector. The real loader emits 1-indexed
-    foreground labels, and the synthetic stand-in emits foreground labels too, so a green report
-    is evidence the model can learn the object rather than learn to predict nothing.
+    """The synthetic detection target labels a foreground object, as the real loader does.
+
+    Label 0 is background to a torchvision detector. The real loader and the synthetic stand-in
+    both emit one label of the same dtype, at least 1.
     """
     synth_labels = _synthetic_detection_target()["labels"]
     real_labels = _real_detection_target(tmp_path)["labels"]
@@ -148,9 +156,7 @@ def test_synthetic_detection_target_labels_a_foreground_object(tmp_path):
 
 
 def test_synthetic_detection_box_covers_a_positive_area_inside_the_frame():
-    """A degenerate or out-of-frame box is not an object a detector can be asked to learn, on a
-    frame of either orientation.
-    """
+    """The synthetic detection box covers a positive area inside a non-square frame."""
     width, height = 96, 48
     recorder = _DetectionTargetRecorder()
     check_model_contract(
@@ -169,8 +175,9 @@ def test_synthetic_detection_box_covers_a_positive_area_inside_the_frame():
 def test_synthetic_detection_target_carries_only_keys_the_real_loader_carries(
     tmp_path,
 ):
-    """Every key the synthetic detection target carries is one the real detection loader emits,
-    so a model written against the loader's targets can be smoked against this batch.
+    """The synthetic detection target carries only keys the real loader emits.
+
+    It carries ``boxes`` and ``labels``, and no key the real loader's target lacks.
     """
     synth = _synthetic_detection_target()
     real = _real_detection_target(tmp_path)
@@ -183,7 +190,7 @@ def test_synthetic_detection_target_carries_only_keys_the_real_loader_carries(
 def test_synthetic_ordinal_target_carries_only_keys_the_real_loader_carries(
     tmp_path,
 ):
-    """Same agreement for ordinal: the synthetic rank target uses the real loader's key."""
+    """The synthetic ordinal rank target carries only keys the real ordinal loader emits."""
     probe = _OrdinalProbe(num_ranks=4)
     check_model_contract(probe, "ordinal", dims=ORD_DIMS)
     assert len(probe.seen) == 1, "the contract never ran a train-mode forward"
@@ -195,8 +202,9 @@ def test_synthetic_ordinal_target_carries_only_keys_the_real_loader_carries(
 
 
 def test_an_ordinal_head_consumes_the_synthetic_ordinal_batch():
-    """The rail admits valid work: a model built on the real ordinal head passes the contract on
-    the synthetic batch, which is only true while that batch carries what the head reads.
+    """A model on the real ordinal head passes the contract on the synthetic batch.
+
+    The report is ok, carries a training loss, and names a dict eval output.
     """
     report = check_model_contract(
         _OrdinalProbe(num_ranks=4), "ordinal", dims=ORD_DIMS
@@ -208,7 +216,11 @@ def test_an_ordinal_head_consumes_the_synthetic_ordinal_batch():
 
 
 class _BatchRecorder(torch.nn.Module):
-    """Records the whole training batch handed to it and answers with a tensor-carrying dict."""
+    """A model recording the images and targets of each training forward.
+
+    In training with targets given it appends ``(images, targets)`` to ``seen`` and answers
+    ``{"loss": self.scale * 1.0}``; otherwise it answers ``{"values": torch.zeros(1)}``.
+    """
 
     def __init__(self) -> None:
         super().__init__()
@@ -225,9 +237,10 @@ class _BatchRecorder(torch.nn.Module):
 def test_synthetic_detection_batch_is_assembled_by_the_loader_collate(
     tmp_path,
 ):
-    """The contract's detection batch is the one the trainer's collate builds over per-sample
-    items, so it carries every per-image target key the real loader emits, at the same python
-    type, rather than a hand-assembled subset of them that can drift.
+    """The contract's detection target carries the loader-collated target's keys and types.
+
+    Its per-image target holds exactly the keys the real loader's collated target holds, each at
+    the same Python type.
     """
     recorder = _DetectionTargetRecorder()
     check_model_contract(recorder, "detection", dims=DET_DIMS)
@@ -251,8 +264,9 @@ def test_synthetic_detection_batch_is_assembled_by_the_loader_collate(
 
 
 def test_synthetic_ordinal_batch_is_assembled_by_the_loader_collate(tmp_path):
-    """Same for a stacking task: the contract's ordinal batch carries the loader's target keys at
-    the loader's dtype and rank, batched along the same axis as the images.
+    """The contract's ordinal batch matches the loader-collated batch's keys, dtypes and ranks.
+
+    Each target is batched along the same axis as the images.
     """
     recorder = _BatchRecorder()
     check_model_contract(recorder, "ordinal", dims=ORD_DIMS)
@@ -278,8 +292,10 @@ def test_synthetic_ordinal_batch_is_assembled_by_the_loader_collate(tmp_path):
 
 
 def test_real_models_still_smoke_green_on_the_collated_batch():
-    """The rail admits valid work: a real torchvision detector passes the contract on the collated
-    batch, per-image key included, and a model on the real ordinal head still learns on it.
+    """A real detector and an ordinal-head model pass on the collated batch.
+
+    A real torchvision detector passes the contract on the collated batch, per-image key
+    included, and a model on the real ordinal head passes the overfit check on it.
     """
     pytest.importorskip("torchvision")
     from tests import bespoke_models

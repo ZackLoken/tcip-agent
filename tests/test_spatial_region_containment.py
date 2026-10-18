@@ -1,10 +1,8 @@
-"""A within-mosaic calibration rect must be positively attested as reserved, not merely un-trained.
+"""A within-mosaic calibration rect reads clean only inside a region recorded as non-train.
 
-A mosaic reference band has no image identity of its own, so the only proof it was held out is its
-geometry: the rect has to sit fully inside a region the run's partition actually recorded as
-non-train (``val_region``/``holdout_region``/``calibration_region``) and clear of every recorded
-train region. Missing the containment obligation admits a rect that lies in no attested region at
-all: a gap between regions, or coordinates the persisted geometry never covered.
+The rect reads clean when it sits fully inside a region the run's partition recorded as
+non-train (``val_region``/``holdout_region``/``calibration_region``), and a rect outside every
+such region reads as a leak even when it touches no recorded train region.
 """
 
 from __future__ import annotations
@@ -25,13 +23,15 @@ GAPPED = SpatialManifest.model_construct(
     holdout_region=[],
     calibration_region=[],
 )
-"""The regions of a manifest reserving x<400 for training and x>=600 for validation, silent on
-the strip between them; the containment check reads nothing else of it."""
+"""A manifest whose train region spans x 0 to 400 and val region x 600 to 1000, both over y 0 to
+1000, with no holdout or calibration region: the strip from x 400 to 600 lies in no region."""
 
 
 def test_a_rect_in_an_unattested_gap_between_regions_is_a_leak():
-    """A rect drawn from the silent strip touches no train pixel, so an overlap test alone reads it
-    clean, yet nothing in the split ever attested it as held out.
+    """A rect in an unattested gap between regions reads as a leak.
+
+    A rect drawn from the silent strip touches no train pixel and lies inside no recorded
+    region, and the check names it.
     """
     from tcip_mcp.pipelines.raster_source import (
         rect_contains_rect,
@@ -50,21 +50,18 @@ def test_a_rect_in_an_unattested_gap_between_regions_is_a_leak():
 
 
 def test_a_rect_inside_an_attested_region_is_admitted():
-    """The companion obligation: a rect fully inside a recorded non-train region reads clean, or
-    a mosaic reference could never be assessed at all.
-    """
+    """A rect fully inside a recorded non-train region reads clean."""
     assert spatial_disjointness(GAPPED, [(650, 100, 750, 300)]) == []
 
 
 def test_persisted_four_way_geometry_admits_its_calibration_region_and_refuses_the_unattested(
     tmp_path,
 ):
-    """Driven through the real writer rather than a hand-written manifest, so the reader's key
-    names are checked against what the run's resolved record actually carries.
+    """A persisted four-way split admits its calibration region and refuses an unattested rect.
 
-    A four-way split reserves its own calibration region; a rect inside it must read clean, and a
-    rect outside every persisted region (here beyond the mosaic's own extent, the shape a caller
-    passing coordinates from a different raster produces) must read as a leak.
+    The manifest is the run's resolved record, written by the real writer. A four-way split
+    reserves its own calibration region; a rect inside it reads clean, and a rect outside every
+    persisted region (here beyond the mosaic's own extent) reads as a leak.
     """
     from tcip_mcp.experiments import run_resolution
     from tests._verified_checkpoint_fixtures import resolved_run
@@ -103,9 +100,10 @@ def test_persisted_four_way_geometry_admits_its_calibration_region_and_refuses_t
 
 
 def test_a_spatial_runs_resolved_record_carries_no_drawn_seed(tmp_path):
-    """The spatial-strip layout is governed by declared order alone, so the run's resolved
-    partition carries no drawn seed and its spatial manifest no ``seed`` key: this route draws
-    nothing, whatever ``data.split.seed`` the config states.
+    """A spatial run's resolved record carries no drawn seed.
+
+    The run's resolved partition carries no drawn seed and its spatial manifest no ``seed`` key,
+    though the config states ``data.split.seed``.
     """
     from tcip_mcp.experiments import run_resolution
     from tests._verified_checkpoint_fixtures import resolved_run

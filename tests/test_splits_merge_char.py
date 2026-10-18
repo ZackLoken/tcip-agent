@@ -1,7 +1,7 @@
 """Characterization goldens for ``draw_splits``.
 
 Freezes the statistics ``draw_splits`` returns and the selection document it writes beside
-them, so a change to either shape fails here.
+them.
 """
 
 from __future__ import annotations
@@ -107,8 +107,10 @@ def test_draw_splits_stats_golden(tmp_path: Path):
 
 
 def test_draw_splits_selection_document_golden(tmp_path: Path):
-    """The selection is the draw's one record, in the database under its directory. Every
-    sample names its own source and label; the draw copies nothing.
+    """The selection is the draw's one record, in the database under its directory.
+
+    Every sample's source lies in the dataset's capture directory and its ground truth is that
+    image's label key, and the selection directory holds ``.tcip/store.db`` alone.
     """
     from tcip_mcp.pipelines.data.selection import read_selection
     from tcip_mcp.tools.data_tools import draw_splits

@@ -1,9 +1,8 @@
 """What the registry holds, and where it holds it.
 
 The registered-model inventory of a project is its registry index record: registration records a
-checkpoint where it already lives instead of copying it under the registry directory, and a
-checkpoint registered again supersedes its earlier entry rather than adding a second one. Both
-facts decide what any reader counting a project's models can honestly report.
+checkpoint where it lives, copying nothing under the registry directory, and a checkpoint
+registered again replaces its earlier entry, leaving one entry per checkpoint.
 """
 
 from __future__ import annotations
@@ -31,9 +30,10 @@ _RUNS = {
 def test_registered_models_are_recorded_in_the_index_not_copied_into_the_registry_dir(
     tmp_path: Path,
 ) -> None:
-    """Registration leaves each checkpoint under its own run directory and records it in the
-    index. The registry directory holds the index alone, so counting checkpoint files there
-    counts nothing and the index is the only source of a project's registered-model inventory.
+    """Registration records each checkpoint in the index and leaves it in its run directory.
+
+    The registry directory holds no checkpoint file, and each entry names its run's own
+    checkpoint by path and digest.
     """
     root = tmp_path / "proj"
     reg = ModelRegistry(str(root))
@@ -60,10 +60,10 @@ def test_registered_models_are_recorded_in_the_index_not_copied_into_the_registr
 def test_registering_a_checkpoint_again_supersedes_its_earlier_entry(
     tmp_path: Path,
 ) -> None:
-    """A checkpoint registered again, under its old name or another, replaces that checkpoint's
-    one entry; two different checkpoints are two entries whatever they are named. The inventory
-    keeps one entry per checkpoint, so a reader counting registered models never counts one
-    checkpoint twice.
+    """A checkpoint registered again replaces its one entry in the inventory.
+
+    A checkpoint registered again, under its old name or another, replaces that checkpoint's
+    one entry, and a different checkpoint keeps its own entry and name.
     """
     root = tmp_path / "proj"
     root.mkdir()

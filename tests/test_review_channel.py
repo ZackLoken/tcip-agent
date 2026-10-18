@@ -1,9 +1,8 @@
 """The agent to GUI proposal channel: focus_human_attention over a bucket + stage_proposals.
 
 focus_human_attention with a bucket resolves a model's proposals on a frame and posts an
-``annotate_focus`` event naming that bucket (a soft miss with no GUI, but the resolution must be
-right). stage_proposals publishes agent-proposed detections as a prediction bucket (never GT) for
-canvas sign-off.
+``annotate_focus`` event naming that bucket. stage_proposals publishes agent-proposed detections as
+a prediction bucket, never ground truth.
 """
 
 from __future__ import annotations
@@ -46,20 +45,20 @@ def _images(root: Path, date: str, names: list[str]) -> None:
 
 
 def _staged_name(producer: str, date: str, stem: str) -> str:
-    """The bucket ``stage_proposals`` publishes for ``stem`` under ``producer``: its own bucket,
-    one per staged image.
-    """
+    """Return the bucket name ``<producer>/<date>/<stem>``."""
     return f"{producer}/{date}/{stem}"
 
 
 def _staged(root: Path, producer: str, date: str, stem: str):
-    """The key of the document ``stage_proposals`` publishes for ``stem`` under ``producer``."""
+    """Return the key of the document staged for ``stem`` under ``producer``."""
     return prediction_key(root, _staged_name(producer, date, stem), stem)
 
 
 def _publish(root: Path, date: str, preds: dict[str, list[float]]) -> str:
-    """The model bucket ``baseline/<date>`` under ``root``: one document per image name of
-    ``preds``, a scored ``bud`` box per score (none for an empty list); its name.
+    """Publish the model bucket ``baseline/<date>`` under ``root`` and return its name.
+
+    The bucket holds one document per image name of ``preds``, a scored ``bud`` box per score
+    (none for an empty list).
     """
     pytest.importorskip("torch")
     from tests._chain_fixtures import published
@@ -92,19 +91,17 @@ def _image(
 
 
 def _img_path(root: Path, date: str, stem: str) -> str:
-    """The path ``_image`` wrote ``stem`` at, for the explicit regime's own ``image_path``
-    argument, which carries the dataset root, date and stem in one value.
-    """
+    """Return the path ``_image`` wrote ``stem`` at, ``<stem>.jpg`` in ``root``'s ``date``."""
     return str(Path(image_dir(root, date)) / f"{stem}.jpg")
 
 
 def _no_ground_truth(root: Path) -> bool:
-    """Whether no label document was written under ``root``."""
+    """Return whether no label document was written under ``root``."""
     return tcip_store.keys(LABEL_DOCUMENTS, str(root)) == []
 
 
 def _damage(root: Path, bucket: str, stem: str) -> None:
-    """``stem``'s published document in ``bucket``, its stored bytes no longer decoding."""
+    """Damage ``stem``'s published document in ``bucket`` so its stored bytes do not decode."""
     from tests._record_damage_fixtures import damage_record
 
     damage_record(prediction_key(root, bucket, stem), b"{not json")
@@ -149,8 +146,10 @@ def test_focus_over_a_bucket_skips_an_empty_prediction_document(
 def test_focus_over_a_bucket_navigates_past_an_unreadable_prediction_on_another_frame(
     tmp_path: Path, bound
 ) -> None:
-    """A corrupt prediction document elsewhere on the date does not close the call: the frame it
-    lands on is readable, and the unreadable one is named instead of raising.
+    """A focus over a bucket navigates past a corrupt prediction document on another frame.
+
+    The corrupt document does not close the call: the frame it lands on is readable, and the
+    answer names the unreadable one.
     """
     root = tmp_path / "proj"
     date = "2026-02-11"
@@ -293,9 +292,10 @@ def test_stage_proposals_rejects_unnormalized_coords(tmp_path: Path) -> None:
 def test_stage_proposals_rejects_a_model_name_that_is_no_single_segment(
     tmp_path: Path,
 ) -> None:
-    """A malformed model_name must never name more than the producer segment of the staged
-    bucket; date and stem are no caller-supplied strings (image_path resolves them structurally
-    through the same parser propose_annotations uses).
+    """``stage_proposals`` refuses a model_name that is not one path segment.
+
+    Each malformed model_name tried (a traversal, a nested or drive path, a backslash path, a
+    blank, an empty string) is refused, and nothing reaches ground truth.
     """
     root = tmp_path / "proj"
     date = "2026-02-11"
@@ -362,8 +362,10 @@ def test_stage_proposals_rejects_box_missing_subject(tmp_path: Path) -> None:
 def test_stage_proposals_refuses_a_shape_naming_no_subject_by_index(
     tmp_path: Path, shape: str, subject
 ) -> None:
-    """A staged shape is an annotation, made where every annotation is: one naming no subject is
-    refused by construction, the refusal naming the shape, and nothing is staged.
+    """A staged shape naming no subject is refused by its index, and nothing is staged.
+
+    A box or polygon naming no subject is refused with an error opening with its kind and index
+    1 and naming ``subject``, and no document is staged.
     """
     root = tmp_path / "proj"
     date = "2026-02-11"
@@ -541,9 +543,7 @@ def test_stage_proposals_rejects_bad_polygon(tmp_path: Path) -> None:
 
 
 def test_stage_proposals_requires_a_shape(tmp_path: Path) -> None:
-    """Neither input regime named: refused before ever touching the image, naming both regimes
-    rather than guessing which one was meant.
-    """
+    """A call naming neither input regime is refused naming both regimes."""
     res = stage_proposals(
         tmp_path,
         str(tmp_path / "proj" / "images" / "2026-02-11" / "IMG_0001.jpg"),
@@ -552,7 +552,7 @@ def test_stage_proposals_requires_a_shape(tmp_path: Path) -> None:
 
 
 class _FakeSingleBoxEngine:
-    """One candidate, whole-image proposal only, for the assignments-regime refusal tests below."""
+    """A proposal engine whose ``propose`` answers one fixed candidate with one ring."""
 
     def propose(self, image_path, **params):
         return [
@@ -571,9 +571,7 @@ class _FakeSingleBoxEngine:
 def _staged_assignments_image(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> str:
-    """A real image with a candidate already staged by ``propose_annotations``, the platform's
-    own producer for the assignments regime's admitting call.
-    """
+    """Return a real image with one candidate already staged by ``propose_annotations``."""
     from tcip_mcp.pipelines import proposal
     from tcip_mcp.tools.proposal_tools import propose_annotations
 
@@ -640,8 +638,9 @@ def test_stage_proposals_treats_an_empty_boxes_list_beside_assignments_as_no_sha
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An empty ``boxes``/``polygons`` list carries no shape at all, so it is not "combined with
-    boxes/polygons" any more than omitting the argument would be: the assignments regime runs.
+    """An empty ``boxes`` list beside assignments counts as no shapes given.
+
+    Beside an empty ``boxes`` list, the assignments regime stages its one proposal.
     """
     image_path = _staged_assignments_image(tmp_path, monkeypatch)
     assignments = [{"candidate_id": 1, "subject": "leaf"}]
@@ -719,8 +718,9 @@ def test_stage_proposals_refuses_boxes_or_polygons_without_model_name(
 
 
 class _FakeMultiRingEngine:
-    """An engine whose one object always splits into the same two disjoint pixel rings, through
-    the whole-image proposal seam (``propose_annotations``/``stage_proposals``).
+    """An engine whose ``propose`` answers one fixed candidate carrying the two rings of ``_RINGS``.
+
+    The candidate's ``bbox`` is computed from those rings' coordinates.
     """
 
     _RINGS = [
@@ -779,8 +779,10 @@ def test_a_two_ring_proposal_round_trips_through_propose_and_accept(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The admit case is the proposer seam's actual return, not a hand-built shape: staged as
-    candidates, accepted with a class, and read back with both rings intact.
+    """A two-ring proposal reads back with both rings after propose and accept.
+
+    The proposer seam's return is staged as one candidate, accepted with a class, and read back
+    with its two rings of three and four vertices.
     """
     from tcip_mcp.pipelines import proposal
     from tcip_mcp.tools.annotation_tools import read_annotations
@@ -917,8 +919,10 @@ def test_stage_proposals_refuses_a_pixel_vertex_outside_the_image_bounds(
 def test_stage_proposals_refuses_an_out_of_range_coordinate_under_rings(
     tmp_path: Path,
 ) -> None:
-    """The pixel-frame counterpart of the normalized-range check: a pixel vertex outside the image
-    keeps its refusal at the module's own default image size, not only a specially tiny one.
+    """A pixel vertex outside the image is refused at the default image size.
+
+    A ring under ``rings`` with vertices at negative pixel coordinates is refused at the
+    module's own default image size, and nothing is staged.
     """
     root = tmp_path / "proj"
     date = "2026-02-11"
@@ -946,8 +950,11 @@ def test_stage_proposals_refuses_an_out_of_range_coordinate_under_rings(
 def test_stage_proposals_refuses_a_normalized_ring_handed_under_rings(
     tmp_path: Path,
 ) -> None:
-    """A ring of normalized [0,1] coordinates handed under the pixel-frame key must refuse at the
-    module's own default image size: it never spans a real pixel, unlike a mask contour.
+    """A ring of normalized coordinates handed under ``rings`` is refused.
+
+    A ring of normalized [0,1] coordinates handed under the pixel-frame key is refused at the
+    module's own default image size, naming a ring that spans under a pixel, and nothing is
+    staged.
     """
     root = tmp_path / "proj"
     date = "2026-02-11"
@@ -982,8 +989,10 @@ _BOX = [
 def test_stage_proposals_refuses_a_second_stage_of_the_same_stem(
     tmp_path: Path,
 ) -> None:
-    """A staged document a reviewer may already have judged is never rewritten: the second stage
-    answers an error naming the bucket, and the first document is unchanged.
+    """A second stage of the same stem is refused and the first document stays unchanged.
+
+    The second stage answers an error naming the bucket as already staged, and the first
+    document keeps its version.
     """
     root = tmp_path / "proj"
     date = "2026-02-11"
@@ -1010,9 +1019,7 @@ def test_stage_proposals_refuses_a_second_stage_of_the_same_stem(
 def test_stage_proposals_admits_two_stems_staged_in_turn(
     tmp_path: Path,
 ) -> None:
-    """Each staged image is its own bucket, so two stems staged in turn under one model name
-    both land.
-    """
+    """Two stems staged in turn under one model name both land, each in its own bucket."""
     root = tmp_path / "proj"
     date = "2026-02-11"
     _image(root, date, "IMG_0001", size=(640, 480))

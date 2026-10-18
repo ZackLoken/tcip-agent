@@ -1,4 +1,4 @@
-"""The registry entry shape as its readers actually consume it.
+"""The registry entry shape as its readers consume it.
 
 Each agreement here runs a reader of the registry index's entries against a registry the real
 ``register_model`` wrote.
@@ -21,8 +21,9 @@ _RUNS = {
 
 
 def _checkpoint(path: Path, content: str) -> Path:
-    """A checkpoint at ``path`` a run completed under a root of its own, its bytes one per
-    ``content`` (``_verified_checkpoint_fixtures.produced_checkpoint``).
+    """Write ``produced_checkpoint(path, content)`` at ``path`` and return the path.
+
+    The writer is ``_verified_checkpoint_fixtures.produced_checkpoint``; torch is required.
     """
     pytest.importorskip("torch")
     from tests._verified_checkpoint_fixtures import produced_checkpoint
@@ -31,7 +32,7 @@ def _checkpoint(path: Path, content: str) -> Path:
 
 
 def _doctor():
-    """The data-state doctor loaded as a module, for its own read of the registry index."""
+    """Return the ``tcip_mcp.cli.doctor`` module."""
     from tcip_mcp.cli import doctor
 
     return doctor
@@ -39,7 +40,10 @@ def _doctor():
 
 @pytest.fixture()
 def polluted_project(tmp_path: Path) -> tuple[Path, ModelRegistry]:
-    """A project whose registry entries point at checkpoints under a test-fixture directory."""
+    """Return a project and its registry, whose entries name checkpoints under a fixture dir.
+
+    Each of ``_RUNS`` is registered from ``<tmp_path>/pytest-of-fixture/run/<name>.pt``.
+    """
     root = tmp_path / "proj"
     root.mkdir()
     leak_dir = tmp_path / "pytest-of-fixture" / "run"
@@ -59,9 +63,10 @@ def polluted_project(tmp_path: Path) -> tuple[Path, ModelRegistry]:
 def test_doctor_flags_every_registry_entry_the_registry_wrote(
     polluted_project,
 ) -> None:
-    """The doctor's registry check reads the index by key; every entry the registry holds must be
-    visible to it, named and with its checkpoint path, or the mandated data-state check degrades
-    into a silent pass on a polluted project.
+    """The doctor's registry check names every entry the registry wrote, with its checkpoint.
+
+    Each registered entry pointing under a fixture directory is one error finding naming the
+    model and its checkpoint path.
     """
     root, reg = polluted_project
     registered = reg.list_models()
@@ -96,9 +101,9 @@ def test_doctor_reports_nothing_for_a_project_with_no_registered_models(
 def test_identity_resolution_matches_a_registered_checkpoint_by_content(
     tmp_path: Path,
 ) -> None:
-    """A checkpoint copied to a path the registry never saw still resolves to the run that
-    produced it, matched on the content hash its final status names: the binding a run's own
-    completion recorded, not a caller-asserted tag.
+    """A checkpoint copied to a path the registry does not hold resolves to the run that made it.
+
+    Its producer is the run's id and the original checkpoint's content hash.
     """
     pytest.importorskip("torch")
     from tests._verified_checkpoint_fixtures import (
@@ -126,12 +131,7 @@ def test_identity_resolution_matches_a_registered_checkpoint_by_content(
 def test_doctor_reports_an_index_that_will_not_decode_rather_than_reading_it_as_no_models(
     tmp_path: Path,
 ) -> None:
-    """A registry the reader cannot decode is a finding, not silence.
-
-    Absence and corruption are different states: a project that registered nothing has no models,
-    while a project whose index will not parse has models nobody can see. Folding the second into
-    the first hands a breeder a clean bill of health for a registry that is unreadable.
-    """
+    """A registry index that will not decode is one error finding naming the decode failure."""
     from tcip_mcp.model_registry import registry_index_key
     from tests._record_damage_fixtures import damage_record
 
@@ -154,8 +154,8 @@ def test_a_readable_index_is_still_read_entry_by_entry(
 ) -> None:
     """The decode refusal is scoped to an index that will not parse.
 
-    A readable index is still walked entry by entry, so raising on corruption cannot collapse
-    every project into the one finding that says nothing about which models it holds.
+    A readable index yields one finding per registered entry, each naming its model, and none
+    mentions decoding.
     """
     root, reg = polluted_project
     assert len(reg.list_models()) == len(_RUNS)

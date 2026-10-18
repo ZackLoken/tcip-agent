@@ -1,9 +1,7 @@
-"""A refusal leaves no audit row, whichever door or library refuses and however deep.
+"""A refusal leaves no audit row, from an undecorated door, a decorated door or a library.
 
-Every mutating door leaves one line per act it made, the decorator's or its library's, and a
-refusal made none: an undecorated door refused before it acts, a decorated door returning its
-error dict, and a library refusing a write (the registry's ownership rail) alike. The admitting
-halves (one row per act when the door does act) live beside each door's own tests.
+An undecorated door's refusal, a decorated door returning its error dict, and a library refusing
+a write (the registry's ownership rail) each leave the audit log as it was.
 """
 
 from __future__ import annotations

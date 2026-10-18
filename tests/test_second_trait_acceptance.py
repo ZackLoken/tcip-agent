@@ -1,14 +1,12 @@
-"""A second registered trait, driven through both phenology doors (the measurement and
-export_csv), asserting its own schema and that an unassessed delivery is refused, so the delivery
-path is exercised against more than one registered trait.
+"""A second registered trait driven through both phenology doors.
+
+The doors are the measurement and export_csv; the tests assert the trait's own schema and that
+an unassessed delivery is refused.
 
 ``currant_bloom`` is authored here, in each test's own project, honestly
-tentative: no domain expert has confirmed it, and it exists to prove the delivery mechanism
-generalizes to a real *second* trait, not to describe a validated measurement. It deliberately
-leaves ``majority_milestone``/``majority_label`` empty rather than copied from bud_opening, since
-crops.yml names no "majority" bloom date for currant, proving ``_milestone_columns`` produces the
-smaller, no-majority column set for a real second trait, not only for local ``TraitEntry`` shapes
-constructed to prove the structural invariant.
+tentative: no domain expert has confirmed it, and it describes no validated measurement. It
+leaves ``majority_milestone``/``majority_label`` empty, and its measurement carries no majority
+date column.
 """
 
 from __future__ import annotations
@@ -55,10 +53,12 @@ def _seed_currant_bloom_trait(tmp_path: Path) -> None:
 
 
 def _currant_bloom_body(tmp_path: Path) -> dict:
-    """A registered dataset of geolocated captures over two dates, one unassessed bucket per date
-    whose scope declares the positive state's attribute, the mapping over them,
+    """Build the phenology request body over two dates of geolocated captures and return it.
+
+    The project holds a registered dataset of geolocated captures over two dates, one unassessed
+    bucket per date whose scope declares the positive state's attribute, the mapping over them,
     and ``currant_bloom`` confirmed, with ``tmp_path`` open in the
-    web backend; the request body a phenology door takes.
+    web backend.
     """
     import asyncio
 

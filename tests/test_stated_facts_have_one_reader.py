@@ -1,6 +1,7 @@
-"""A prediction's score, a ground-truth record's content, the target a loader builds from
-annotations and a completion digest's stored grid: a record that does not state one of these is
-refused by name where it is read.
+"""A record that does not state a fact its reader needs is refused by name where it is read.
+
+The facts are a prediction's score, a ground-truth record's content, the target a loader builds
+from annotations and a completion digest's stored grid.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ BOX = BBox(10.0, 10.0, 30.0, 30.0)
 
 
 def _stored(image: Path, anns: list[Annotation]):
-    """``anns`` written as the document of ``image``; its key."""
+    """Write ``anns`` as the document of ``image`` and return its key."""
     label_image(image, anns, IMG, IMG)
     return image_label_key(image)
 
@@ -83,8 +84,10 @@ def test_no_reader_stands_in_a_score_for_a_prediction_stating_none(
 def test_the_instance_loader_builds_its_target_from_the_polygons_it_reads(
     tmp_path: Path,
 ):
-    """The instance loader's target comes from the one target builder, over the geometry the
-    loader declares it reads: a box beside the polygon is no instance and no mask.
+    """The instance loader builds its target from the polygons it reads.
+
+    Over the geometry the loader declares it reads, a box beside the polygon is no instance and
+    no mask.
     """
     from PIL import Image
 
@@ -114,8 +117,9 @@ def test_the_instance_loader_builds_its_target_from_the_polygons_it_reads(
 def test_the_completion_digest_reads_a_box_on_the_writers_own_grid(
     tmp_path: Path,
 ):
-    """The digest hashes each annotation as the label writer stores it, so a box off the stored
-    grid digests the same before it is written as after it is read back.
+    """The completion digest reads a box on the label writer's own grid.
+
+    A box off the stored grid digests the same before it is written as after it is read back.
     """
     anns = [
         Annotation(subject=SUBJECT, geometry=BBox(0.005, 10.0, 10.004, 20.0))

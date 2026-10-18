@@ -1,5 +1,6 @@
-"""The model registry's paths across an archive and import: an in-project checkpoint's entry is
-stored relative to its project root, so the restored project's registry names the restored file.
+"""The model registry's paths across an archive and import.
+
+After an archive and import, the restored project's registry names the restored checkpoint.
 """
 
 from __future__ import annotations
@@ -10,8 +11,10 @@ from pathlib import Path
 def test_archive_then_import_lands_a_registry_naming_the_restored_files(
     tmp_path: Path,
 ):
-    """The real archive and import round trip: a foreign entry stays relative and the restored
-    run's own entry names the checkpoint under the destination.
+    """An archive and import round trip lands a registry naming the restored checkpoints.
+
+    A foreign entry stays relative and the restored run's own entry names the checkpoint under
+    the destination.
     """
     from tcip_mcp.model_registry import ModelRegistry, read_registry_index
     from tcip_mcp.tools.model_tools import register_model

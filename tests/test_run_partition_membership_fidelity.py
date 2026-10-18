@@ -1,9 +1,9 @@
 """What a run's resolved record claims about a spatial-strip split.
 
-The resolved partition's ``spatial`` split is the immutable record a reviewer
-reconstructs a metric from: which units trained, which validated, and which pixel regions each
-side occupied. These drive the real writer (the launcher's own resolution and launch record) and
-read the result back, including through the geometric disjointness check that consumes it.
+The resolved partition's ``spatial`` split records which units are on the training side, which
+on the validation side, and which pixel regions each side occupied. These drive the launcher's
+own resolution and launch record and read the result back, directly and through the geometric
+disjointness check.
 """
 
 from __future__ import annotations
@@ -31,8 +31,10 @@ def _data_cfg(images_dir: Path, **split) -> dict:
 
 
 def _persisted_split(project: Path, experiment_id: str, data_cfg: dict):
-    """The spatial manifest the run ``experiment_id`` under ``project`` over ``data_cfg``
-    resolved and recorded.
+    """Resolve the run ``experiment_id`` over ``data_cfg`` and return its spatial manifest.
+
+    The manifest is the one the run under ``project`` resolved and recorded; the helper asserts
+    the training side holds the one source ``mosaic``.
     """
     from tcip_mcp.experiments import run_resolution
     from tests._verified_checkpoint_fixtures import (
@@ -50,9 +52,10 @@ def _persisted_split(project: Path, experiment_id: str, data_cfg: dict):
 def test_spatial_split_records_val_membership_from_the_val_side(
     tmp_path: Path,
 ) -> None:
-    """The recorded val membership is the validation side's own strip identities. Train and val
-    held different regions, so the record must show different, non-overlapping members: a metric
-    reconstructed from a manifest claiming both sides held the same units is unreproducible.
+    """The recorded train and val members are disjoint, and the train region is the wider.
+
+    The recorded train and val members are non-empty and disjoint, and the recorded train region
+    is wider along the axis than the val region.
     """
     images_dir, _ = big_single_source(tmp_path / "ds", 4000, 3000)
     data_cfg = _data_cfg(images_dir)
@@ -76,9 +79,11 @@ def test_spatial_split_records_val_membership_from_the_val_side(
 def test_persisted_calibration_region_is_reserved_away_from_train(
     tmp_path: Path,
 ) -> None:
-    """A four-way split's reserved calibration band reaches the resolved record as its own geometry,
-    disjoint from the train region, and the geometric disjointness check reads a rect drawn from
-    what was actually persisted there as clean while still catching one drawn from train.
+    """A four-way split's calibration band is recorded as its own geometry, disjoint from train.
+
+    The reserved calibration band reaches the resolved record as its own geometry, disjoint from
+    the train region, and the geometric disjointness check reads a rect drawn from what was
+    actually persisted there as clean while still catching one drawn from train.
     """
     from tcip_mcp.pipelines.operating_point import spatial_disjointness
     from tcip_mcp.pipelines.raster_source import rects_overlap

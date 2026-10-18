@@ -1,7 +1,8 @@
-"""Backend coverage for side-by-side run comparison: compare_experiments' task, subject,
-status_error, split and registry columns, an honest same_dataset_fingerprint over an error
-column, the experiment_ids filter on best-model ranking, and the /api/training/compare/best
-route.
+"""Side-by-side run comparison in the backend.
+
+Covers compare_experiments' task, subject, status_error, split and registry columns,
+same_dataset_fingerprint beside an error entry, the experiment_ids filter on best-model ranking,
+and the /api/training/compare/best route.
 """
 
 from __future__ import annotations
@@ -14,8 +15,11 @@ from tests._training_values import drawn_split
 def _opened(
     project, experiment_id: str, *, data_dir=None, split: dict | None = None
 ):
-    """A detector run, over two frames of its own (or those under ``data_dir``) and stating
-    ``split``, resolved and opened by the launcher's own producer and writer.
+    """Open an unbuilt detector run, drawing ``split`` when one is given, and return its directory.
+
+    The run is over two detection frames written under ``data_dir`` (by default a fixture
+    directory beside the project named for ``experiment_id``), resolved and opened by the
+    launcher's own producer and writer.
     """
     from tests._verified_checkpoint_fixtures import (
         detection_config,
@@ -34,8 +38,11 @@ def _opened(
 
 
 def _bound(experiment_id: str, tmp_path, **split):
-    """A run bound to a selection ``draw_splits`` drew at seed 7, its ``data.split`` beside the
-    binding being ``split``.
+    """Open a run bound to a selection drawn at seed 7; return its directory and the selection's.
+
+    The selection is drawn once per ``tmp_path``, at ``splits/2024-01-01``, over the
+    two-subject, two-date dataset, and later calls bind to it; the run's ``data.split`` carries
+    ``split``'s keys beside the binding.
     """
     from tests._chain_fixtures import training_config
     from tests._verified_checkpoint_fixtures import opened_run, unbuilt_source
@@ -74,8 +81,10 @@ def _compared(project, *experiment_ids: str) -> list[dict]:
 def test_same_dataset_fingerprint_is_none_not_true_when_one_id_is_an_error(
     tmp_path,
 ):
-    """An error entry is never dropped from the fingerprint judgment: two matching fingerprints
-    beside one missing run do not compare as the same data.
+    """The dataset fingerprint comparison is None, not True, when one id is an error.
+
+    Two runs over one dataset compare as True; the same two beside one missing run compare as
+    None.
     """
     from tcip_mcp.experiments import compare_experiments
     from tests._verified_checkpoint_fixtures import opened_run
@@ -99,8 +108,9 @@ def test_same_dataset_fingerprint_is_none_not_true_when_one_id_is_an_error(
 def test_compare_experiments_reports_task_and_subject_from_the_runs_records(
     tmp_path,
 ):
-    """The task is read off the launch record, the subject off the data section the run
-    resolved.
+    """``compare_experiments`` reports a run's task and subject from its own records.
+
+    The task is read off the launch record, the subject off the data section the run resolved.
     """
     _opened(tmp_path, "exp-task-subject")
 
@@ -109,9 +119,10 @@ def test_compare_experiments_reports_task_and_subject_from_the_runs_records(
 
 
 def test_registry_lists_the_checkpoint_this_run_completed(tmp_path):
-    """Admits valid work, through the platform's own producer: a completed run's own checkpoint
-    shows up in its own registry column, reduced to name/metrics/metrics_source/completion
-    time; a run with no completed checkpoint lists none.
+    """A completed run's own checkpoint shows up in its registry column; an unfinished run's none.
+
+    The run completes through the platform's own producer, and its entry carries its name, its
+    metrics, ``metrics_source`` and ``registered_at``.
     """
     from tests._verified_checkpoint_fixtures import finished_run
 
@@ -143,9 +154,7 @@ def test_split_reports_a_bound_selection_directory(tmp_path):
 
 
 def test_split_reports_a_redrawn_bound_selection_distinctly(tmp_path):
-    """A run bound to a selection and one that redrew inside that same selection must never
-    compare as the same data.
-    """
+    """A bound run and one that redrew inside the same selection report different splits."""
     _bound("exp-bound-plain", tmp_path)
     _bound("exp-bound-redrawn", tmp_path, seed=7)
 
@@ -169,9 +178,11 @@ def test_split_reports_a_drawn_seed_with_no_binding(tmp_path):
 
 
 def test_status_error_names_a_diverged_run_reason(tmp_path):
-    """Admits valid work through the platform's own producer: run_training_envelope over the
-    divergence fixture's always-diverged builder writes the final status's own error, which
-    compare_experiments surfaces as status_error; a run with no final status carries none.
+    """``compare_experiments`` surfaces a diverged run's final-status error as status_error.
+
+    run_training_envelope over the divergence fixture's always-diverged builder writes the final
+    status's own error, which compare_experiments surfaces as status_error; a run with no final
+    status carries none.
     """
     from tcip_mcp.experiments import observe
     from tests.test_lifecycle_wiring import _stock_run
@@ -200,7 +211,7 @@ def _register(
     *,
     metric: str = "val_map50",
 ) -> None:
-    """A run completed through the platform's own producer, its checkpoint carrying ``metric``."""
+    """Complete a run through the platform's own producer, its checkpoint carrying ``metric``."""
     from tests._verified_checkpoint_fixtures import finished_run
 
     finished_run(
@@ -209,7 +220,7 @@ def _register(
 
 
 def test_available_metrics_excludes_an_unmarked_experiments_metric(tmp_path):
-    """experiment_ids narrows every derivation, available_metrics included, to the marked set."""
+    """experiment_ids narrows ``available_metrics`` to the marked experiments' metrics."""
     from tcip_mcp.tools.model_tools import rank_registered_models
 
     _register(tmp_path, "exp-marked", 0.7, metric="val_map50")
@@ -237,8 +248,11 @@ def test_rank_registered_models_ranks_only_within_the_marked_set(tmp_path):
 def test_rank_registered_models_names_the_marked_set_when_the_filter_empties_a_non_empty_listing(
     tmp_path,
 ):
-    """The registry is not empty; the filter just names no marked experiment in it. That is a
-    distinct fact from an empty registry and needs its own text.
+    """A filter naming no registered experiment is refused with text of its own.
+
+    Over a registry holding another experiment's checkpoint, a filter naming only an
+    unregistered experiment refuses with "none of the marked experiments registered a
+    checkpoint".
     """
     from tcip_mcp.tools.model_tools import rank_registered_models
 
@@ -287,7 +301,9 @@ def test_a_ranking_over_a_marked_set_that_registered_nothing_reads_the_registry_
 def test_compare_best_route_422s_with_no_registered_checkpoint(
     opened_client: TestClient, tmp_path
 ):
-    """A project with no completed run and no foreign registration answers the ranking's own
+    """The compare-best route answers 422 for a project with no registered checkpoint.
+
+    A project with no completed run and no foreign registration answers the ranking's own
     refusal as 422, and the asking writes no registry index.
     """
     import tcip_store
@@ -308,8 +324,9 @@ def test_compare_best_route_422s_with_no_registered_checkpoint(
 def test_compare_best_route_409s_when_the_index_will_not_decode(
     opened_client: TestClient, monkeypatch
 ):
-    """A corrupt index is not a project with no models: the route answers 409, not the 404 an
-    absent index answers.
+    """The compare-best route answers 409 when the registry index will not decode.
+
+    The detail names the registry as unreadable.
     """
     import tcip_mcp.model_registry as model_registry
     from tcip_store import DecodeError

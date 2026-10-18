@@ -1,8 +1,7 @@
 """Exact-name scope resolution.
 
-A scope's subject, and an attribute a positive state names, resolve by exact name: a near-miss must
-refuse rather than land on some other declared name, whose value vocabulary belongs to a
-different measurement.
+A scope's subject, and an attribute a positive state names, resolve by exact name, and a
+near-miss refuses.
 """
 
 from __future__ import annotations
@@ -26,8 +25,10 @@ from tests._producer_fixtures import registry_over
 
 
 def _prefixed_attributes() -> SubjectRegistry:
-    """One subject carrying two attributes whose names share a prefix, the longer declared first,
-    with vocabularies of different size so the two cannot be confused for one another.
+    """Return one subject carrying two attributes whose names share a prefix.
+
+    The longer name, ``opening_stage``, is declared first with four values, and ``opening``
+    second with two.
     """
     return SubjectRegistry(
         subjects=(
@@ -51,9 +52,9 @@ def _prefixed_attributes() -> SubjectRegistry:
 
 
 def _case_variant_subjects() -> SubjectRegistry:
-    """Two subject names differing only in case, each with its own attribute vocabulary. The GUI
-    accepts a free-text subject name, so a case variant is an ordinary registry state: the two are
-    distinct subjects and each scope must resolve to its own vocabulary.
+    """Return two subject names differing in case alone, each with its own attribute vocabulary.
+
+    ``bud`` declares a two-value categorical ``opening`` and ``Bud`` a three-value ordinal one.
     """
     return SubjectRegistry(
         subjects=(
@@ -82,8 +83,9 @@ def _case_variant_subjects() -> SubjectRegistry:
 
 
 def _scope(tmp_path: Path, registry: SubjectRegistry, subject: str):
-    """The class space the admission reads for ``subject`` over a dataset declaring
-    ``registry``.
+    """Return the class space the admission reads for ``subject`` over ``registry``.
+
+    The dataset under ``tmp_path`` declares ``registry``.
     """
     from tcip_mcp.pipelines.data.label_queries import registry_scope
 
@@ -92,9 +94,10 @@ def _scope(tmp_path: Path, registry: SubjectRegistry, subject: str):
 
 
 def test_attribute_lookup_resolves_the_exactly_named_attribute(tmp_path: Path):
-    """With two attributes sharing a prefix, the scope carries both under their own names and a
-    positive state resolves to the vocabulary it named, not to whichever declared name happens to
-    start with it.
+    """An attribute lookup resolves the exactly named attribute.
+
+    With two attributes sharing a prefix, the scope carries both under their own names and a
+    positive state resolves to the vocabulary it named.
     """
     reg = _prefixed_attributes()
     scope = _scope(tmp_path, reg, "bud")
@@ -115,8 +118,10 @@ def test_attribute_lookup_resolves_the_exactly_named_attribute(tmp_path: Path):
 
 
 def test_an_attribute_name_that_only_prefixes_a_declared_one_refuses():
-    """A truncated attribute name names no declared attribute and must refuse, rather than read
-    the longer attribute's ranks while reporting the name the caller asked for.
+    """An attribute name that is a strict prefix of a declared one is refused.
+
+    The subject declares no attribute of the truncated name, and the positive state naming it
+    is reported as naming no declared attribute.
     """
     reg = SubjectRegistry(
         subjects=(
@@ -143,7 +148,9 @@ def test_an_attribute_name_that_only_prefixes_a_declared_one_refuses():
 
 
 def test_subject_lookup_resolves_the_exactly_named_subject(tmp_path: Path):
-    """Subject names are matched verbatim: two names differing only in case are two subjects with
+    """A subject lookup resolves the exactly named subject.
+
+    Subject names are matched verbatim: two names differing in case alone are two subjects with
     their own vocabularies, and a name declared by neither refuses.
     """
     reg = _case_variant_subjects()
@@ -163,8 +170,9 @@ def test_subject_lookup_resolves_the_exactly_named_subject(tmp_path: Path):
 def test_case_variant_subjects_survive_a_file_roundtrip_as_distinct_subjects(
     tmp_path: Path,
 ):
-    """Names are stored and read back verbatim: nothing folds two similar names into one subject,
-    which would merge two label populations into a single scope.
+    """Case-variant subjects survive a file round trip as distinct subjects.
+
+    Both names are stored and read back verbatim, each with its own attribute vocabulary.
     """
     reg = _case_variant_subjects()
     path = tmp_path / "subjects.json"
