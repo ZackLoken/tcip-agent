@@ -1,6 +1,8 @@
-"""A torchvision detector's input scale and anchors: every builder takes them stated, the one
-derivation gives them from a run's frame and its objects, the run's resolution records them,
-and the platform hands them to the builder from that record alone.
+"""A torchvision detector's input scale and anchors, stated to its builder and derived from data.
+
+Each builder takes them stated, ``derive_detector_geometry`` gives them from a run's frame and
+its objects, the run's resolution records them, and the platform hands them to the builder from
+that record.
 """
 
 from __future__ import annotations
@@ -35,8 +37,10 @@ GEOMETRY = DetectorGeometry.handed_names()
     ],
 )
 def test_every_detector_builder_takes_its_geometry_stated(builder):
-    """No builder defaults its anchor base, its resize bounds or, but for the anchor-free FCOS,
-    its aspect ratios, and a call leaving one out is refused by the signature.
+    """Each detector builder takes its geometry stated, refusing a call that leaves one out.
+
+    No builder defaults its anchor base, its resize bounds or, but for the anchor-free FCOS, its
+    aspect ratios, and a call leaving one out is refused by the signature.
     """
     from tcip_mcp.pipelines.components import detectors
 
@@ -80,13 +84,15 @@ SIZES_WH = [
     (20, 24),
     (24, 40),
 ]
-"""Object extents, width by height, spread across four doublings of their characteristic size."""
+"""Object extents, width by height, their characteristic sizes from about 7 to 31 px."""
 
 
 def test_the_geometry_agrees_with_numpy_and_the_aspect_ratio_derivation():
-    """Agreement with numpy: the derived resize bounds are the frame's own edges, the four
-    doubling anchor levels bracket the 10th to 90th percentile of the characteristic sizes
-    ``numpy.quantile`` computes from the same boxes, and the ratios are ``gt_aspect_ratios``' own.
+    """The derived detector geometry agrees with numpy and the aspect-ratio derivation.
+
+    The derived resize bounds are the frame's own edges, the four doubling anchor levels bracket
+    the 10th to 90th percentile of the characteristic sizes ``numpy.quantile`` computes from the
+    same boxes, and the ratios are ``gt_aspect_ratios``' own.
     """
     frame = (96, 64)
     regions = [
@@ -108,8 +114,9 @@ def test_the_geometry_agrees_with_numpy_and_the_aspect_ratio_derivation():
 
 
 def test_a_detector_built_at_the_derived_geometry_sees_a_small_tile_at_its_native_scale():
-    """A 64 px tile reaches the detector's transform at 64 px: the derived bounds are the
-    tile's, where a fixed 800 px resize would scale it twelvefold.
+    """A detector built at the derived geometry sees a small tile at its native scale.
+
+    A 64 px tile comes out of the detector's transform at 64 px.
     """
     from tests import bespoke_models
 
@@ -127,7 +134,7 @@ def test_a_detector_built_at_the_derived_geometry_sees_a_small_tile_at_its_nativ
 
 
 def test_regions_holding_no_object_leave_a_geometry_its_type_refuses():
-    """No object derives no anchor: the record's own type refuses the absence."""
+    """Regions holding no object derive no anchor base, which the geometry's type refuses."""
     from pydantic import ValidationError
 
     empty = [Region(np.zeros((0, 4), np.float32), np.zeros(0, np.int64), 64.0)]
@@ -136,8 +143,10 @@ def test_regions_holding_no_object_leave_a_geometry_its_type_refuses():
 
 
 def test_a_geometry_sourced_by_any_label_but_the_derivations_is_refused():
-    """The derivation's own label is the one derived source the record admits: the record
-    re-validates under it, and the same values under another label are refused by the type.
+    """A detector geometry sourced by any label but the derivation's is refused.
+
+    The record re-validates under the derivation's own label, and the same values under another
+    label are refused naming ``source``.
     """
     from pydantic import ValidationError
 
@@ -168,8 +177,9 @@ def _preflight_config(tmp_path, **model_source):
 def test_preflight_refuses_a_builder_kwarg_restating_the_recorded_geometry(
     tmp_path, restated
 ):
-    """The geometry reaches the builder from the run's resolution alone: ``builder_kwargs``
-    naming any of the four refuses at the launch door, naming it.
+    """Preflight refuses a ``builder_kwargs`` entry restating the recorded geometry, naming it.
+
+    ``builder_kwargs`` naming any of the four geometry keys fails preflight naming it.
     """
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -186,10 +196,11 @@ def test_preflight_refuses_a_builder_kwarg_restating_the_recorded_geometry(
 def test_the_launch_builds_the_detector_at_the_geometry_its_resolution_recorded(
     tmp_path, monkeypatch
 ):
-    """Admits valid work: a config the chain fixtures build passes the launch door's smoke, the
-    geometry its resolution derived is the one ``derive_detector_geometry`` gives at the frame its
-    frames share over its train regions, and the model it builds holds that geometry's bounds and
-    anchors.
+    """Preflight's smoke builds the detector at the geometry its resolution recorded.
+
+    A config the chain fixtures build passes preflight's smoke; the geometry handed to the
+    builder carries the 64 by 48 frame and bounds of 48 and 64, and the model built holds those
+    bounds and anchors doubling from the geometry's anchor base.
     """
     from tcip_mcp.pipelines import model_build
     from tcip_mcp.tools.training_tools import preflight_config

@@ -1,9 +1,8 @@
-"""Where a detector's operating-point knobs live: the module itself, its ``.detector.roi_heads``,
-or its ``.detector``, resolved independently of what a given call actually applies.
+"""Where a detector's operating-point knobs live, resolved apart from what a call applies.
 
-A module exposing its knobs on itself, with no ``.detector`` to route through, reaches a validated
-operating point via the ``getattr`` chain falling through to the module itself. The interface is
-stated once (:func:`~tcip_mcp.pipelines.operating_point.detector_operating_point_holder`), and a
+The knobs live on the module itself, its ``.detector.roi_heads``, or its ``.detector``. A module
+exposing its knobs on itself, with no ``.detector`` to route through, reaches a validated operating
+point through :func:`~tcip_mcp.pipelines.operating_point.detector_operating_point_holder`, and a
 knob set on a model exposing none refuses naming it.
 """
 
@@ -32,9 +31,10 @@ _DIMS = {"in_chans": 3, "num_classes": 1}
 
 
 def _built(model_source: dict):
-    """The model ``model_source`` builds at :data:`_DIMS` and a 32 px frame's geometry, imported
-    from the staged sources of a run config over one noise frame of its own with this repository
-    as its project.
+    """Return the model ``model_source`` builds at :data:`_DIMS` and a 32 px frame's geometry.
+
+    The builder is imported from the staged sources of a run config over one noise frame of its
+    own with this repository as its project.
     """
     import tempfile
 
@@ -119,9 +119,11 @@ def test_holder_is_none_when_nothing_exposes_a_knob():
 
 
 def test_holder_refuses_when_the_module_and_its_detectors_roi_heads_both_expose_a_knob():
-    """An ambiguous module, ambiguous in the same shape a real bespoke wrapper could build: a
-    torchvision two-stage detector under ``.detector`` (whose ``roi_heads`` already exposes the
-    knob) plus a knob restated on the wrapper itself. The platform must not silently pick one.
+    """The holder refuses a module whose knob sits both on itself and on its detector's heads.
+
+    The module is a torchvision two-stage detector under ``.detector`` (whose ``roi_heads``
+    exposes the knob) plus a knob restated on the wrapper itself, and the holder refuses naming
+    more than one location.
     """
     from tcip_mcp.pipelines.operating_point import (
         SCORE_THRESH,
@@ -188,10 +190,9 @@ def _checkpoint(tmp_path, builder: str) -> str:
 
 
 def _assessed(tmp_path: Path, builder: str) -> dict:
-    """The assessment of ``builder``'s checkpoint over a drawn selection of images, each its own
-    size, labeled at exactly the box ``BareScoreThreshDetector``/``BareNoKnobDetector`` always
-    predict for that size, so every image matches and no two collide on content; its record, or
-    the door's error.
+    """Assess ``builder``'s checkpoint over a drawn selection and return its record or error.
+
+    The images are each their own size, each labeled at its central box spanning half its edge.
     """
     from PIL import Image
 
@@ -242,8 +243,11 @@ def _assessed(tmp_path: Path, builder: str) -> dict:
 def test_a_bespoke_module_exposing_its_own_knobs_is_assessed_at_its_stated_floor(
     tmp_path,
 ):
-    """A hand-rolled, non-torchvision module exposing both knobs on itself is assessed at the
-    staged floor applied there, and its record names the attribute path it was applied on.
+    """A bespoke module exposing its own knobs is assessed, its floor path recorded as ``self``.
+
+    A hand-rolled, non-torchvision module exposing both knobs on itself is assessed without
+    error; the record names ``"self"`` as the floor's attribute path and reports no
+    ``conf_censored`` failure.
     """
     record = _assessed(tmp_path, BARE_SCORE_THRESH_DETECTOR)
 

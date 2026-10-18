@@ -37,8 +37,10 @@ def test_parse_image_path_refuses_an_image_of_no_capture(path: str) -> None:
 def test_a_flat_image_beside_an_undated_one_of_its_stem_is_no_second_image(
     tmp_path: Path,
 ) -> None:
-    """``images/same.png`` beside ``images/undated/same.png``: the census lists the bucketed one
-    alone, keyed by its own capture, and the flat one has no label key.
+    """A flat image beside an undated one of its stem is no second image.
+
+    With ``images/same.png`` beside ``images/undated/same.png``, the census counts one image, the
+    bucketed one's label key is its capture and stem, and the flat one is refused a label key.
     """
     from tcip_mcp.dataset_layout import label_key_of
     from tcip_mcp.tools.data_tools import scan_dataset
@@ -145,8 +147,9 @@ def test_a_capture_directory_sits_under_the_image_root() -> None:
 def test_buckets_under_lists_every_published_bucket_and_nothing_else(
     tmp_path: Path,
 ) -> None:
-    """A published bucket is a record, its name dated or not: the one listing the doctor command
-    reads through. A prediction document no record names is none.
+    """``buckets_under`` lists every published bucket, its name dated or not, and nothing else.
+
+    A published bucket is a record. A prediction document no record names is none.
     """
     pytest.importorskip("torch")
     from tcip_mcp.buckets import buckets_under

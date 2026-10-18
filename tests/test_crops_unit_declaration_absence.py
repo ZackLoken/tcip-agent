@@ -1,10 +1,7 @@
 """A trait that declares no physical unit stays absent from the unit mapping.
 
-``crops_units()`` is the unit authority two deliveries read: the aggregated CSV's units column
-cross-check, and the vocabulary of trailing tokens a value_key may imply a unit with. A date,
-ordinal, ratio, or count trait has no physical unit, and giving it one there both labels a
-delivered number with a unit nobody declared and widens the token vocabulary every value_key is
-matched against.
+A date, ordinal, ratio, or count trait in crops.yml declares no physical unit, and
+``crops_units()`` maps none for it.
 """
 
 from __future__ import annotations
@@ -25,7 +22,7 @@ from tests import _trait_fixtures as fx, csv_rows
 
 @pytest.fixture(autouse=True)
 def _recorded_meaning(tmp_path: Path):
-    """Every delivery below ships under a trait whose delivered number has a confirmed meaning."""
+    """Confirm ``stem_count`` and ``plant_surface_area`` delivered meanings in the project."""
     fx.seed_delivery_traits(tmp_path)
     fx.seed_confirmed_aggregate(
         tmp_path,
@@ -42,7 +39,7 @@ def _recorded_meaning(tmp_path: Path):
 
 
 def _records(value_key: str, *values: tuple[str, float]) -> list[dict]:
-    """One per-image record under ``value_key`` per ``(plant_id, value)``."""
+    """Return one per-image record under ``value_key`` per ``(plant_id, value)``."""
     return [
         {"plant_id": plant, value_key: value, "plant_attribution": "image"}
         for plant, value in values
@@ -59,7 +56,7 @@ def _deliver(
     delivery_kind: str,
     buckets=None,
 ):
-    """The acknowledged per-plant delivery (``_chain_fixtures.deliver_acknowledged``)."""
+    """Run the acknowledged per-plant delivery (``_chain_fixtures.deliver_acknowledged``)."""
     if buckets is None:
         pytest.importorskip("torch")
     from tests._chain_fixtures import deliver_acknowledged
@@ -97,8 +94,9 @@ UNDECLARED = [
 
 
 def test_declared_units_are_read_verbatim_from_crops_yml():
-    """The mapping carries each declaring trait's own unit, several distinct ones, so a later
-    assertion that some trait is absent cannot pass merely because the mapping is empty.
+    """The declared units are read verbatim from crops.yml.
+
+    The mapping is not empty and carries each declaring trait's own unit, several distinct ones.
     """
     units = crops_units()
     assert units, "crops.yml units should be loadable in the repo checkout"
@@ -110,10 +108,7 @@ def test_declared_units_are_read_verbatim_from_crops_yml():
 def test_a_trait_declaring_no_unit_is_absent_rather_than_given_one(
     trait_name: str,
 ):
-    """Absent from the mapping, not mapped to a plausible-looking stand-in. A guessed unit here is
-    a fabricated measurement claim: it would be cross-checked against, and shipped in a delivered
-    units column, as though a breeder had declared it.
-    """
+    """A crops.yml trait declaring no unit is absent from the unit mapping."""
     from tcip_mcp import traits
 
     assert trait_name in {t["name"] for t in traits._crops_traits()}, (
@@ -126,9 +121,9 @@ def test_a_trait_declaring_no_unit_is_absent_rather_than_given_one(
     "value_key", ["detections_count", "burrs_count", "seeds_count"]
 )
 def test_a_count_suffixed_value_key_implies_no_unit(value_key: str):
-    """A count is not a physical unit, so a value_key ending in it implies none. The recognized
-    tokens are exactly crops.yml's declared units and their squared forms, so a trailing token that
-    entered the vocabulary through an undeclared trait would start labeling counts as measured.
+    """A value_key ending in a count implies no unit, since a count is not a physical unit.
+
+    A key ending in a declared unit, ``detections_mm``, resolves to that unit.
     """
     assert unit_from_value_key(value_key) is None
     # the same key shape with a real declared unit is still recognized, so this is exactness, not
@@ -139,9 +134,9 @@ def test_a_count_suffixed_value_key_implies_no_unit(value_key: str):
 def test_a_count_valued_delivery_ships_with_a_blank_units_column(
     tmp_path: Path,
 ):
-    """End to end: a per-plant count, delivered for a trait crops.yml declares no unit for, carries
-    an empty units column. A unit in that column would read as a physical measurement of a number
-    that is a tally.
+    """A per-plant count delivered for a trait declaring no unit ships with a blank units column.
+
+    The delivery runs end to end and keeps the counted values.
     """
     out_path = tmp_path / "counts.csv"
     _deliver(
@@ -160,13 +155,10 @@ def test_a_count_valued_delivery_ships_with_a_blank_units_column(
 def test_a_dimensional_value_ships_for_a_trait_crops_yml_declares_no_unit_for(
     tmp_path: Path,
 ):
-    """crops.yml declaring no unit for a trait means there is nothing to cross-check against, not
-    that the measurement is refused: an mm-keyed area still resolves to its own squared label. A
-    stand-in unit in the mapping would turn this legitimate delivery into a mismatch refusal.
+    """A dimensional value ships for a trait crops.yml declares no unit for.
 
-    Delivered as a regression aggregate: its prediction is in the trait's declared unit by
-    construction, so a dimensional value ships with no stated physical scale, unlike the same
-    shape in a count delivery, which has nothing answering for its unit without one.
+    With no unit declared for the trait, an mm-keyed area resolves to its own squared label,
+    and the regression aggregate ships with ``mm2`` in its units column.
     """
     assert _resolve_units("plant_surface_area", "area_mm2", True)[:2] == (
         "mm2",
@@ -189,9 +181,7 @@ def test_a_dimensional_value_ships_for_a_trait_crops_yml_declares_no_unit_for(
 def test_a_declared_unit_still_cross_checks_the_value_keys_own_unit(
     tmp_path: Path,
 ):
-    """The absence rule above must not cost the check it exists to serve: a trait crops.yml does
-    declare a unit for still refuses a value whose own key implies a different one.
-    """
+    """A trait declaring ``mm`` refuses a value whose own key implies ``cm``."""
     assert crops_units()["bark_thickness"] == "mm"
     with pytest.raises(ValueError, match="declared units"):
         _deliver(

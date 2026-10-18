@@ -25,8 +25,9 @@ Z = {"equivalence_z": EQUIVALENCE_Z}
 
 
 def _flipped_items(n: int, flips: set[int]) -> list[dict]:
-    """``n`` classifier items one per image, the first half true positives, each index in
-    ``flips`` predicted the other way.
+    """Return ``n`` classifier items, one per image, positive where the index is below ``n // 2``.
+
+    Each item is predicted as its truth, except an index in ``flips``, predicted the other way.
     """
     return [
         {
@@ -39,9 +40,11 @@ def _flipped_items(n: int, flips: set[int]) -> list[dict]:
 
 
 def _classifier_items(prefix, n_images, pos_per_image, *, miscall_images=()):
-    """``pos_per_image`` correctly called positives per image and one token negative (so kappa
-    stays defined), plus one extra positive-called negative on each of ``miscall_images``: the
-    same absolute miscall whatever the density.
+    """Return classifier items over ``n_images`` images named ``prefix`` and an index.
+
+    Each image gets ``pos_per_image`` positive items called positive and one negative item called
+    negative, and each image whose index is in ``miscall_images`` one more negative item called
+    positive.
     """
     items = []
     for i in range(n_images):
@@ -73,8 +76,10 @@ def _classifier_items(prefix, n_images, pos_per_image, *, miscall_images=()):
 
 
 def test_a_single_image_holdout_cannot_pass_on_its_zero_dispersion():
-    """One holdout image has no images to vary its bias across, so the dispersion the equivalence
-    test discounts by vanishes; it refuses as too thin rather than passing at the tolerance.
+    """A single-image holdout is refused as having too few holdout images.
+
+    One holdout image has no images to vary its bias across, and the criterion reports
+    ``insufficient_holdout_images``.
     """
     from tcip_mcp.pipelines.operating_point import classifier_criterion
 
@@ -94,8 +99,10 @@ def test_a_single_image_holdout_cannot_pass_on_its_zero_dispersion():
 
 
 def test_the_positive_count_bias_is_scoped_to_images_carrying_a_positive():
-    """An image with no true and no predicted positive contributes no certain zero to the bias,
-    or forty such images would dilute a real two-per-image over-call toward nothing.
+    """The positive-count bias is taken over the images carrying a positive alone.
+
+    Over ten images carrying positives and forty carrying none, the bias is taken over the ten:
+    two extra calls per image, refused as over tolerance.
     """
     from tcip_mcp.pipelines.operating_point import classifier_criterion
 
@@ -135,7 +142,9 @@ def test_the_positive_count_bias_is_scoped_to_images_carrying_a_positive():
 
 
 def test_the_same_miscall_fails_a_sparse_class_and_passes_a_dense_one():
-    """The tolerance is a fraction of the typical positive count: one extra positive call on one
+    """One extra positive call fails the classifier criterion for a sparse class, not a dense one.
+
+    The tolerance is a fraction of the typical positive count: one extra positive call on one
     holdout image of twenty refuses at one positive per image and passes at a hundred and fifty.
     """
     from tcip_mcp.pipelines.operating_point import classifier_criterion
@@ -169,7 +178,7 @@ def test_the_same_miscall_fails_a_sparse_class_and_passes_a_dense_one():
 
 
 def test_the_trait_authored_agreement_floor_is_the_floor_applied():
-    """A kappa of 0.8 clears a 0.41 floor and fails the 0.9 floor a trait authors."""
+    """A kappa between 0.75 and 0.85 clears the entry's floor and fails a trait-authored 0.9."""
     from tcip_mcp.pipelines.operating_point import classifier_criterion
 
     cal, hold = _flipped_items(20, set()), _flipped_items(100, set(range(10)))

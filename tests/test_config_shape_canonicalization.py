@@ -1,5 +1,7 @@
-"""A training config has one shape: every key the trainer reads sits at the top level beside
-``model_source`` and ``data``, and a nested ``training`` section is refused by name.
+"""A training config has one shape, its training keys at the top level.
+
+The schema validates the flat config with its training keys beside ``model_source`` and
+``data``, and a nested ``training`` section is refused by name.
 """
 
 import copy
@@ -47,13 +49,14 @@ from tests._training_values import (
 
 
 def _issues_of(config):
-    """The issues ``schemas.checked_train_config`` reports for ``config``."""
+    """Return the issues ``schemas.checked_train_config`` reports for ``config``."""
     return checked_train_config(config)[1]
 
 
 def _without(config: dict, path: str) -> dict:
-    """A copy of ``config`` with the key at the dotted ``path`` removed, a list entry named by
-    its index.
+    """Return a copy of ``config`` with the key at the dotted ``path`` removed.
+
+    A list entry in the path is named by its index.
     """
     copied = copy.deepcopy(config)
     *parents, leaf = path.split(".")
@@ -65,7 +68,7 @@ def _without(config: dict, path: str) -> dict:
 
 
 def _names(issues: list[str], path: str) -> bool:
-    """Whether one of ``issues`` names every part of the dotted ``path``."""
+    """Return whether one of ``issues`` names every part of the dotted ``path``."""
     return any(
         all(part in issue for part in path.split(".")) for issue in issues
     )
@@ -97,9 +100,10 @@ FLAT_CONFIG: dict = training_config(
 
 
 def _required_paths() -> list[str]:
-    """Every value the schema requires, by its dotted path, read off the schema itself: its
-    required top-level fields and the required fields of each stated block (a stage, the
-    optimizer, the stated schedule, the stop rule, the evaluation and the tiling).
+    """Return the values the schema requires, by dotted path, read off the schema itself.
+
+    The paths are its required top-level fields and the required fields of each stated block (a
+    stage, the optimizer, the stated schedule, the stop rule, the evaluation and the tiling).
     """
     top = [
         n for n, f in TrainConfigSchema.model_fields.items() if f.is_required()
@@ -183,8 +187,9 @@ door."""
 
 
 def _door_issues(config: dict) -> list[str]:
-    """The issues the launch door's structural check reports for ``config``, which the schema
-    admits, for this repository as its project.
+    """Return the issues the launch door's structural check reports for ``config``.
+
+    The config is one the schema admits, checked with this repository as its project.
     """
     from tcip_mcp.tools.training_tools import _structural_issues
 
@@ -196,8 +201,9 @@ def test_a_flat_config_validates_with_no_issue():
 
 
 def _refused_naming(config: dict, path: str, project: Path) -> None:
-    """Assert ``config`` less the key at ``path`` is refused naming it where a config is
-    validated and at the launch door, and ``config`` itself is admitted.
+    """Assert ``config`` less the key at ``path`` is refused naming it and ``config`` is admitted.
+
+    The refusal is asserted where a config is validated and at the launch door.
     """
     from tcip_mcp.tools.training_tools import launch_training
 
@@ -216,9 +222,10 @@ def _refused_naming(config: dict, path: str, project: Path) -> None:
 def test_a_config_stating_no_required_value_is_refused_naming_it(
     path, tmp_path
 ):
-    """Guard. Every value training reads that a config states, a drawn split's shares,
-    stratification and seed among them, is refused unstated by name where the config is
-    validated and at the launch door, and the config stating it is admitted.
+    """A config stating no required value is refused naming it, and one stating it is admitted.
+
+    Each required or stated value, a drawn split's shares, stratification and seed among them,
+    is refused unstated by name where the config is validated and at the launch door.
     """
     _refused_naming(FLAT_CONFIG, path, tmp_path)
 
@@ -227,7 +234,7 @@ def test_a_config_stating_no_required_value_is_refused_naming_it(
 def test_a_schedule_stating_no_setting_is_refused_naming_it(
     kind, path, tmp_path
 ):
-    """Guard. Every setting a schedule hands its torch scheduler is refused unstated by name."""
+    """Each setting a schedule kind states is refused unstated by name."""
     _refused_naming(
         {**FLAT_CONFIG, "scheduler": schedule(kind)}, path, tmp_path
     )
@@ -235,8 +242,9 @@ def test_a_schedule_stating_no_setting_is_refused_naming_it(
 
 @pytest.mark.parametrize("path", DRAWN_SPLIT_PATHS)
 def test_a_drawn_split_omitting_a_draw_key_is_refused_by_that_field(path):
-    """Guard. Each draw key is the drawn split's own required field: one left out is refused by
-    that field's requiredness, located at it, never by a check over the split as a whole.
+    """A drawn split omitting a draw key is refused by that field's requiredness, located at it.
+
+    One draw key left out is reported as ``data.split.drawn.<key>: Field required``.
     """
     key = path.removeprefix("data.split.")
     issues = _issues_of(_without(FLAT_CONFIG, path))
@@ -254,8 +262,9 @@ def test_a_drawn_split_groups_by_a_named_policy_or_an_explicit_map():
 
 @pytest.mark.parametrize("path", RATIONALE_PATHS)
 def test_a_block_stating_no_reason_is_refused_naming_it(path):
-    """Guard. Every stated block carries its own ``rationale``: one left out is refused naming
-    the block, and the config stating each is admitted.
+    """A stated block left without its ``rationale`` is refused naming the block.
+
+    Each stated block carries its own ``rationale``, and the config stating each is admitted.
     """
     issues = _issues_of(_without(FLAT_CONFIG, path))
     assert _names(issues, path), issues
@@ -263,8 +272,9 @@ def test_a_block_stating_no_reason_is_refused_naming_it(path):
 
 
 def _least_admitted(config: dict, paths: list[str]) -> dict:
-    """``config`` less each of ``paths`` whose removal the schema and the launch door both still
-    admit, one at a time: the least config the platform runs, whatever defaults it carries.
+    """Return ``config`` less each of ``paths`` whose removal the schema and launch door admit.
+
+    The paths are tried one at a time, each staying out when both still admit the config.
     """
     least = copy.deepcopy(config)
     for path in paths:
@@ -275,7 +285,7 @@ def _least_admitted(config: dict, paths: list[str]) -> dict:
 
 
 def _at(record: dict, path: str) -> Any:
-    """The value at the dotted ``path`` of ``record``; ``KeyError`` naming it when absent."""
+    """Return the value at the dotted ``path`` of ``record``; ``KeyError`` naming it when absent."""
     node: Any = record
     for part in path.split("."):
         node = node[int(part)] if isinstance(node, list) else node[part]
@@ -313,10 +323,12 @@ RECORDED_PATHS = [
 
 
 def test_a_runs_record_names_every_value_its_training_reads(tmp_path):
-    """Guard. The least config the platform admits for a tiled, drawn detection run under a
-    one-cycle schedule, opened by the launcher's own producer, records every value training and
-    its loaders read in ``run.json``'s config, and the worker's own read of that record carries
-    each at the same value: no value training reads can stay off the record as a default.
+    """A run's record carries each recorded training value, as a run context reads it.
+
+    The least config the platform admits for a tiled, drawn detection run under a one-cycle
+    schedule, opened by the launcher's own producer, records each of the recorded paths in
+    ``run.json``'s config, non-null, and a run context's spec record over the same config
+    carries each at the recorded value.
     """
     from tcip_mcp.experiments import observe
     from tests._verified_checkpoint_fixtures import (
@@ -363,8 +375,11 @@ def test_a_config_stating_no_tuned_value_is_admitted_and_refused_at_the_door_nam
 
 
 def test_a_config_naming_its_own_loop_states_only_what_its_loop_reads():
-    """The door requires the default trainer's regime of a config the default trainer runs; a
-    config naming its own ``training_source`` leaves unstated what its loop never reads.
+    """A config naming its own training loop is not asked for the default trainer's regime.
+
+    The door refuses a config naming no ``training_source`` that leaves the default regime's
+    fields unstated, naming ``stages``; the same config naming its own ``training_source``
+    reports nothing unstated.
     """
     custom = {
         k: v
@@ -379,8 +394,9 @@ def test_a_config_naming_its_own_loop_states_only_what_its_loop_reads():
 
 
 def test_an_optimizer_naming_no_family_is_refused_naming_it():
-    """Guard. The optimizer's family has no default: a block naming none is refused naming
-    ``optimizer.name``, and the same block naming it is admitted.
+    """An optimizer block naming no family is refused naming ``optimizer.name``.
+
+    The optimizer's family has no default, and the same block naming it is admitted.
     """
     assert _names(
         _issues_of(_without(FLAT_CONFIG, "optimizer.name")), "optimizer.name"
@@ -438,9 +454,10 @@ def test_sgd_states_its_momentum_and_no_other_optimizer_does():
 
 
 def test_a_sweep_base_config_may_omit_only_what_its_search_space_names():
-    """A trial's config is validated once its point is applied, so a base config leaving the
-    swept rate to the sweep validates, and one leaving a rate nothing sweeps is refused naming
-    it.
+    """A sweep's base config may omit the rate its search space names.
+
+    With the sweep's point applied, a base config leaving the swept rate to the sweep validates,
+    and one leaving a rate nothing sweeps is refused naming it.
     """
     from tcip_mcp.tools.training_tools import _apply_hpo_params
 
@@ -470,7 +487,7 @@ def test_a_nested_training_section_is_refused_by_name():
 
 
 def test_an_empty_training_section_is_refused_too():
-    """Even an empty section names a placement nothing reads; the refusal is about the key."""
+    """An empty ``training`` section is refused by its key with the nested-section refusal."""
     assert _issues_of({**FLAT_CONFIG, "training": {}}) == [
         NESTED_TRAINING_SECTION_REFUSAL
     ]
@@ -483,8 +500,9 @@ def test_top_level_stages_are_typed_by_stage_spec():
 
 
 def test_the_trainer_reads_the_flat_config_as_given(tmp_path, monkeypatch):
-    """What train() reads (run.spec.stages) is the configured schedule itself, with no
-    second placement to reconcile against.
+    """An opened run's recorded spec carries the flat config's stages as given.
+
+    The record holds the configured stages and no ``training`` key.
     """
     monkeypatch.chdir(tmp_path)
     from tests._chain_fixtures import DETECTION_SOURCE, own_statistics
@@ -508,22 +526,23 @@ def test_the_trainer_reads_the_flat_config_as_given(tmp_path, monkeypatch):
 
 
 def test_stage_spec_refuses_a_per_stage_lr():
-    """train() reads learning rates from the optimizer block alone, so a stage lr is refused."""
+    """A stage stating its own learning rate is refused naming ``lr``."""
     StageSpec.model_validate(stage(-1))
     with pytest.raises(ValidationError, match="lr"):
         StageSpec.model_validate(stage(-1, lr=1e-3))
 
 
 def test_a_stage_states_its_own_gradient_accumulation():
-    """train() reads a stage's own accumulation, so the schema admits it."""
+    """A stage stating its own gradient accumulation is admitted by the schema."""
     stages = [stage(-1), stage(0, gradient_accumulation_steps=4)]
     assert _issues_of({**FLAT_CONFIG, "stages": stages}) == []
 
 
 def test_the_stop_rule_validates_as_stated_and_refuses_a_zero_patience_and_an_on_switch():
-    """The stop rule's values are the config's own, read as stated, and none has a default; a
-    patience of zero and an ``enabled`` key, since nothing but the rule ends a stage, are
-    refused by name.
+    """The stop rule validates as stated and refuses a zero patience and an ``enabled`` key.
+
+    The stop rule's values are the config's own, read as stated, and none has a default; a
+    patience of zero and an ``enabled`` key are refused by name.
     """
     stated = train_config(
         {
@@ -583,8 +602,10 @@ def test_lr_scaling_requires_its_power_and_names_no_reference_batch():
 
 
 def test_the_loaders_read_the_batch_size_the_schema_validated(tmp_path):
-    """The batch size the schema admits is the one the loaders are built at, coerced the same
-    way, and one it refuses builds no loader.
+    """The loaders are built at the batch size the schema validated, coerced the same way.
+
+    The string ``"3"`` the schema admits builds loaders of batch size 3, and a batch size of 0
+    is refused naming ``batch_size``.
     """
     pytest.importorskip("torch")
     from tests.tiny_trainer_fixtures import (
@@ -621,8 +642,10 @@ def test_model_source_refuses_an_undeclared_key_by_name():
 
 
 def test_model_source_admits_every_declared_key(tmp_path):
-    """Every declared key validates with no issue, the statistics as their derivation's own
-    producer records them and the geometry stated with its reason.
+    """A model source stating builder, kwargs, task, sources, statistics and geometry validates.
+
+    The statistics are stated as their derivation's own producer records them and the geometry
+    is stated with its reason; the config reports no issue.
     """
     pytest.importorskip("torch")
     from tests._chain_fixtures import (
@@ -650,8 +673,10 @@ def test_model_source_admits_every_declared_key(tmp_path):
 
 
 def test_a_width_stated_on_the_model_source_is_refused_by_name():
-    """The width is the run's own ``data.num_channels``, handed to the builder; a model source
-    stating one beside it is refused by name rather than read as a second spelling.
+    """A width stated on the model source is refused by name.
+
+    The width is the run's own ``data.num_channels``; a model source stating ``in_chans`` is
+    refused naming ``model_source.in_chans``.
     """
     issues = _issues_of(
         {
@@ -705,18 +730,21 @@ def test_a_width_stated_on_the_model_source_is_refused_by_name():
 def test_a_fact_a_reader_reads_is_refused_where_the_config_is_validated(
     path, config
 ):
-    """``model_source.task`` and every ``data`` key a resolver or a recorded-dimension reader
-    reads are typed where the config enters: one missing, of the wrong type or misspelled is
-    named there, before any reader below the boundary meets it.
+    """A fact a reader reads that is missing, mistyped or misspelled is refused at validation.
+
+    ``model_source.task`` and the listed ``data`` keys a resolver or a recorded-dimension reader
+    reads are typed where the config enters: each one missing, of the wrong type or misspelled
+    is named in the validation issues.
     """
     issues = _issues_of(config)
     assert any(issue.startswith(path) for issue in issues), issues
 
 
 def test_a_stated_tiling_block_reaches_the_tiler_as_stated():
-    """Admits valid work: every tiler option a ``data.tiling`` block states validates and reaches
-    the tiler's keyword arguments by name, its reason none of them, and one left unstated is
-    left to the tiler.
+    """A stated ``data.tiling`` block reaches the tiler as stated.
+
+    Every tiler option the block states validates and reaches the tiler's keyword arguments by
+    name, its reason none of them, and one left unstated is left to the tiler.
     """
     from tcip_mcp.pipelines.schemas import train_config
 

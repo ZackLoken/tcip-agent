@@ -1,6 +1,8 @@
-"""``ClassScope``: the scope an admission produces carries every attribute the registry declares
-for its subject, read back whole through a selection and a run's own data section, and a document
-scope whose attributes were never read refuses at admission.
+"""``ClassScope``: the scope an admission produces and its round trip through a selection and a run.
+
+A drawn scope carries the attributes the registry declares for its subject, read back whole
+through a selection and a run's own data section, and a scope recording no attributes refuses at
+admission.
 """
 
 from __future__ import annotations
@@ -29,9 +31,11 @@ CONDITION = Attribute(
 def test_a_scope_the_admission_produced_round_trips_through_the_selection_and_the_run(
     tmp_path: Path,
 ) -> None:
-    """The admitting case, through the producers: the draw records the scope its admission read
-    targets under, every declared attribute in it, the selection reads it back whole, and a run
-    bound to it records that same scope on its own data section.
+    """The scope a draw's admission produced round-trips through the selection and a bound run.
+
+    Through the producers, the draw records the scope its admission read targets under, the
+    registry's declared ``condition`` attribute in it, the selection reads it back whole, and a
+    run bound to it records that same scope on its own data section.
     """
     pytest.importorskip("torch")
     from tests._producer_fixtures import train_val
@@ -74,7 +78,7 @@ def _images_dir(root: Path) -> str:
 
 
 def run_membership(block: dict):
-    """The membership a run's data ``block``, drawing its own split, admits."""
+    """Return the membership a run's data ``block``, drawing its own split, admits."""
     from tcip_mcp.pipelines.data.split_construction import (
         run_membership as admitted,
     )

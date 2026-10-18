@@ -1,8 +1,8 @@
-"""The project-scoped ``delivery_events`` record ``deliver_csv`` writes once per delivery.
+"""The project-scoped ``delivery_events`` record ``deliver_csv`` writes for a delivery.
 
-The record carries the gate's own finding for each delivered bucket and the producer once; it is
-validated against :class:`~tcip_mcp.pipelines.delivery_events_schema.DeliveryEventRecord` before
-it is written, and a look on screen records none.
+The record carries the gate's own finding for each delivered bucket and the producer; a record
+:class:`~tcip_mcp.pipelines.delivery_events_schema.DeliveryEventRecord` refuses is not written,
+and a look on screen records none.
 """
 
 from __future__ import annotations
@@ -21,8 +21,9 @@ from tests._trait_fixtures import COUNT_SUBJECT, seed_confirmed_count
 
 
 def _bucket(project: Path):
-    """An unassessed bucket of one document detecting nothing, counting the count trait's
-    measured subject.
+    """Publish an unassessed bucket of one document detecting nothing and return it.
+
+    The bucket counts the count trait's measured subject.
     """
     pytest.importorskip("torch")
     from tests._chain_fixtures import predicted, published
@@ -36,8 +37,9 @@ def _bucket(project: Path):
 
 
 def _cleared(project: Path, revision, bucket, result):
-    """The gate's clearance of ``result``, a per-image count delivery under ``revision`` over the
-    unassessed ``bucket``, shipped under a breeder's acknowledgment of it.
+    """Return the gate's clearance of ``result``, shipped under a breeder's acknowledgment of it.
+
+    ``result`` is a per-image count delivery under ``revision`` over the unassessed ``bucket``.
     """
     from tests._chain_fixtures import acknowledged
 
@@ -56,8 +58,10 @@ def _cleared(project: Path, revision, bucket, result):
 
 
 def _record(project: Path, revision, bucket=None, **disclosed) -> dict:
-    """``deliver_csv`` of an empty per-image count delivery under ``revision`` over ``bucket``
-    (by default a fresh :func:`_bucket`), shipped under a breeder's acknowledgment.
+    """Run ``deliver_csv`` of an empty per-image count delivery under ``revision``.
+
+    The delivery is over ``bucket`` (by default a fresh :func:`_bucket`), shipped under a
+    breeder's acknowledgment.
     """
     result = delivery.Result(
         delivery.DELIVERY_COLUMNS, [], population=[], **disclosed
@@ -145,9 +149,7 @@ def test_two_deliveries_of_the_same_trait_and_kind_both_enumerate_distinctly(
 def test_a_web_route_writes_its_delivery_event_under_the_open_project_only(
     tmp_path, client
 ):
-    """A delivery through the web backend lands its record under the project the backend has
-    open, and nowhere else.
-    """
+    """A web delivery lands its event record under the open project and none under a second one."""
     pytest.importorskip("torch")
     from tests._chain_fixtures import attributed_series
 
@@ -175,7 +177,7 @@ def test_a_web_route_writes_its_delivery_event_under_the_open_project_only(
 def test_a_look_on_screen_records_no_delivery_event_and_no_audit_line(
     tmp_path, client
 ):
-    """Looking at a number is not delivering it: phenology_measurement changes no state."""
+    """``phenology_measurement`` answers a number with no delivery event and no new log line."""
     pytest.importorskip("torch")
     from tcip_mcp.audit import audit_log_key
     from tests._chain_fixtures import attributed_series
@@ -198,8 +200,9 @@ def test_a_record_that_cannot_be_written_raises_before_any_audit_line(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A delivery event that cannot be written raises into the delivering door, and no audit line
-    names an event that was never recorded.
+    """A delivery event that cannot be written raises, and no audit line names one.
+
+    No event is recorded.
     """
     from tcip_mcp.audit import audit_log_key
 
@@ -236,9 +239,7 @@ def test_a_record_that_cannot_be_written_raises_before_any_audit_line(
 def test_a_plant_mapping_missing_a_disclosure_key_raises_and_writes_nothing(
     tmp_path: Path,
 ):
-    """A ``plant_mapping`` missing a required disclosure key refuses before the CSV or its event
-    is written.
-    """
+    """A ``plant_mapping`` missing a required disclosure key raises and writes no CSV or event."""
     from pydantic import ValidationError
 
     bad_mapping = {
@@ -264,8 +265,9 @@ def test_a_plant_mapping_missing_a_disclosure_key_raises_and_writes_nothing(
 
 
 def _delivered_disclosure(project: Path, deliver) -> dict:
-    """The ``plant_mapping`` disclosure the one delivery ``deliver()`` records under
-    ``project``, its delivered ``stem_count`` confirmed there first, as its JSON form.
+    """Return the ``plant_mapping`` disclosure the one delivery ``deliver()`` records, as JSON.
+
+    The delivery records under ``project``, its delivered ``stem_count`` confirmed there first.
     """
     from tcip_mcp.delivery import read_delivery_events
     from tests import _trait_fixtures as fx
@@ -281,9 +283,10 @@ def _delivered_disclosure(project: Path, deliver) -> dict:
 def test_plant_mapping_union_resolves_each_shape_and_refuses_a_hybrid(
     tmp_path: Path,
 ) -> None:
-    """No two of the three ``plant_mapping`` disclosure shapes share a required key set: each
-    disclosure its own producer records validates against exactly its own model, and a hybrid
-    combining keys from two shapes resolves to none.
+    """The ``plant_mapping`` union resolves each disclosure shape and refuses a hybrid.
+
+    Each disclosure its own producer records resolves to its own model, and a hybrid combining
+    keys from two shapes is refused.
     """
     from pydantic import TypeAdapter, ValidationError
 
@@ -409,8 +412,9 @@ def test_delivery_events_route_serves_a_delivered_plant_mapping_disclosure_uncha
     tmp_path: Path,
     client,
 ) -> None:
-    """The disclosure a phenology delivery records over a built mapping is the one the route
-    serves.
+    """The delivery-events route serves a phenology delivery's mapping disclosure unchanged.
+
+    The disclosure is the one the delivery records over a built mapping.
     """
     pytest.importorskip("torch")
     from tests._chain_fixtures import attributed_series

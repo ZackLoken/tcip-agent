@@ -1,6 +1,8 @@
-"""A canceled run or job reads back as ``canceled`` through each reader of its status: the web job
-registry and the run directory's derived state. Each status is written by its own producer, never
-spelled into a fixture.
+"""A canceled run or job reads back as ``canceled`` through each reader of its status.
+
+The readers are the web job registry and the run directory's derived state. Each status is
+written by its own producer: the inference worker, and a training body requesting its own
+cancellation.
 """
 
 from __future__ import annotations
@@ -51,7 +53,7 @@ def test_a_canceled_inference_job_reads_as_canceled(tmp_path, monkeypatch):
 
 
 def _train_stops_on_cancel(ctx):
-    """A body that receives a cancellation request before training anything."""
+    """Request the run's cancellation and train nothing."""
     from tcip_mcp.experiments import request_cancel
 
     request_cancel(ctx.run_dir)

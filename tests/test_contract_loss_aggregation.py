@@ -1,9 +1,7 @@
-"""The objective the contract smokes and optimizes is every term of a returned loss dict.
+"""The objective the contract smokes and optimizes is the sum of a returned loss dict's terms.
 
-A detector's train-mode forward returns several loss terms at once (classifier, box regression,
-objectness, rpn). ``check_model_contract`` and ``overfit_check`` prove the model against their
-sum, the same objective the trainer descends, so a later term that is broken, non-finite or left
-unoptimized cannot pass behind a healthy first term.
+``check_model_contract`` reports the sum of three terms and fails a non-finite second term, and
+``overfit_check`` refuses a run whose summed loss rises while its first term falls.
 """
 
 from __future__ import annotations
@@ -23,7 +21,7 @@ CLS_DIMS = {"in_chans": 3, "num_classes": 2, "img_size": (64, 64)}
 
 
 class _ThreeTermLoss(torch.nn.Module):
-    """Three loss terms of deliberately unequal magnitude, all on one learnable scale."""
+    """Three loss terms, one learnable scale times 1, 10 and 100, the scale starting at 1."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -40,7 +38,7 @@ class _ThreeTermLoss(torch.nn.Module):
 
 
 class _NonFiniteSecondTerm(torch.nn.Module):
-    """A healthy first loss term beside a second one that has gone non-finite."""
+    """A first loss term, a learnable scale starting at 1, beside a second that is NaN."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -56,10 +54,10 @@ class _NonFiniteSecondTerm(torch.nn.Module):
 
 
 class _UnoptimizedCompanionTerm(torch.nn.Module):
-    """A first term the optimizer can drive down beside a companion term outside its reach.
+    """A ``primary`` term carrying a gradient beside a ``companion`` term carrying none.
 
-    The companion grows twice as fast as the first term falls, so the objective as a whole gets
-    worse over the run while the first term alone looks like healthy progress.
+    In training, ``primary`` is the squared weight, starting at 2, and ``companion`` is
+    ``2 * (4 - primary)`` over a detached copy of it.
     """
 
     def __init__(self) -> None:
@@ -77,7 +75,7 @@ class _UnoptimizedCompanionTerm(torch.nn.Module):
 
 
 class _TwoOptimizableTerms(torch.nn.Module):
-    """Two loss terms with different optima, both reachable by the optimizer."""
+    """Two loss terms, ``(a - 1) ** 2`` and ``0.5 * (b + 1) ** 2``, from a at 3 and b at -4."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -94,8 +92,9 @@ class _TwoOptimizableTerms(torch.nn.Module):
 
 
 def test_train_loss_is_the_sum_of_every_returned_loss_term():
-    """The reported train loss accounts for all three terms (1 + 10 + 100 at scale 1), not the
-    first, the largest, or the last of them.
+    """The contract's reported train loss is the sum of every loss term the model returns.
+
+    The three terms, 1, 10 and 100 at scale 1, report a train loss of 111.
     """
     report = check_model_contract(
         _ThreeTermLoss(), "classification", dims=CLS_DIMS
@@ -105,7 +104,7 @@ def test_train_loss_is_the_sum_of_every_returned_loss_term():
 
 
 def test_a_non_finite_later_loss_term_fails_the_smoke():
-    """A finite first term never covers for a non-finite one behind it."""
+    """A non-finite second loss term fails the smoke despite a finite first term."""
     report = check_model_contract(
         _NonFiniteSecondTerm(), "classification", dims=CLS_DIMS
     )
@@ -133,7 +132,7 @@ def test_overfit_check_judges_the_whole_objective_not_the_first_term():
 
 
 def test_a_multi_term_model_that_optimizes_every_term_passes():
-    """The rail admits valid work: several terms are fine as long as their sum falls."""
+    """A two-term model whose summed loss falls over 25 steps passes the overfit check."""
     report = overfit_check(
         _TwoOptimizableTerms(),
         "classification",

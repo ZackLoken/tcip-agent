@@ -1,4 +1,7 @@
-"""DiversityScorer: no silent random-noise, no silent no-op."""
+"""DiversityScorer refuses a model with no backbone and warns when it has no labeled embeddings.
+
+With no labeled embeddings, it scores the one image it is given 1.0.
+"""
 
 from __future__ import annotations
 

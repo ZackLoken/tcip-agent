@@ -1,10 +1,7 @@
-"""The derivation registry checked against what actually runs, not only against itself.
+"""The derivation registry checked against the labels and numbers the calibration path produces.
 
-``DERIVATION_IMPLEMENTATIONS`` is the record that every ``derived_from`` label has a real
-computation behind it. Reading it statically proves only that its own entries import. These tests
-hold it to the two things a reader of an audit trail relies on: that a label the calibration path
-can stamp is registered under the exact text that path produces, and that the callable registered
-for a label is the one that produced the number the label was stamped on.
+A label the calibration path can stamp is registered under the text that path produces, and the
+callable registered for a label reproduces the number the label was stamped on.
 """
 
 from __future__ import annotations
@@ -29,10 +26,9 @@ def _resolve(label: str):
 
 
 def test_every_count_objective_label_the_calibration_path_can_stamp_is_registered():
-    """The conf label is built from whichever picker ran, so the objective registry is the source
-    of that text, and every label it holds must be registered. The label is assembled into a
-    variable before it is stamped, so a registry key that drifts from the text the picker registry
-    names is invisible to a scan of stamp sites.
+    """Every count-objective label the calibration path can stamp is registered.
+
+    Every label the count-objective picker registry holds is a key of the derivation registry.
     """
     from tcip_mcp.pipelines.operating_point import COUNT_OBJECTIVE_PICKERS
 
@@ -48,10 +44,10 @@ def test_every_count_objective_label_the_calibration_path_can_stamp_is_registere
 def test_the_registered_callable_for_an_iou_threshold_stamp_reproduces_the_stamped_number(
     tmp_path,
 ):
-    """The IoU threshold a match criterion reports carries a derivation label; the callable that
-    label resolves to, run on the same GT, has to return that same number. A registry entry that
-    names a different-but-importable derivation passes every static check while pointing an
-    auditor at code that never produced the value.
+    """The callable registered for an IoU threshold's label reproduces the stamped number.
+
+    The IoU threshold a match criterion reports carries a derivation label, and the callable that
+    label resolves to, run on the same GT, returns that number.
     """
     trait = confirm_bare(
         tmp_path,
@@ -74,10 +70,10 @@ def test_the_registered_callable_for_an_iou_threshold_stamp_reproduces_the_stamp
 
 
 def test_registering_a_picker_registers_the_labels_it_can_stamp(monkeypatch):
-    """A picker's label is the picker registry's own text. A second list of them would let a
-    registered picker stamp a label no implementation is recorded for, which is the auditing gap
-    this registry exists to close, so the labels are read from the registry rather than restated
-    beside it.
+    """Registering a picker registers the labels it can stamp.
+
+    A picker added to the picker registry under a new label finds that label in the derivation
+    registry, at the implementation an existing picker's label names.
     """
     from tcip_mcp.pipelines import derivations, operating_point
 
@@ -98,10 +94,10 @@ def test_registering_a_picker_registers_the_labels_it_can_stamp(monkeypatch):
 def test_the_registered_callable_for_a_center_match_stamp_reproduces_the_stamped_tolerance(
     tmp_path,
 ):
-    """Same demand on the center-match branch, where the reported tolerance is the derived
-    fraction scaled by the GT's own average characteristic size: both sides of the comparison run
-    the real implementations, so the label is checked against the computation rather than against
-    a number copied out of one of them.
+    """The callable registered for a center-match label reproduces the stamped tolerance.
+
+    On the center-match branch the reported tolerance is the registered callable's fraction
+    scaled by the GT's own average characteristic size.
     """
     trait = confirm_bare(tmp_path, "leaf", localization="center_match").entry
     from tcip_mcp.pipelines.training.evaluation import (

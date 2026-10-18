@@ -1,9 +1,7 @@
-"""A run records the dataset identity it launched against, once.
+"""A run records the dataset identity it launched against in its launch record.
 
-The content end of the reproduce-a-number chain: id + fingerprint are written into the run's
-launch record when it is opened, which nothing rewrites, and compare_experiments surfaces whether
-two runs share a dataset so a metric comparison across different data is not read as
-apples-to-apples.
+The id and fingerprint are written into the run's launch record when it is opened, and
+compare_experiments reports whether two runs share a dataset fingerprint.
 """
 
 from __future__ import annotations
@@ -21,8 +19,9 @@ SUBJECT = "bud"
 
 
 def _make_dataset(root: Path, *, shade: int = 0) -> Path:
-    """Two labeled images on a ground of ``shade``, each object bright, under one capture date;
-    answers their images directory.
+    """Write two labeled images under one capture date and return their images directory.
+
+    Image ``i`` is a ``labeled_frame`` on the ground ``(shade, 10 * i, 0)``.
     """
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.subject_registry import Subject, SubjectRegistry
@@ -43,7 +42,7 @@ def _make_dataset(root: Path, *, shade: int = 0) -> Path:
 
 
 def _config(project: Path, images_dir: Path) -> dict:
-    """A :data:`BUILT_DETECTOR` run's config of ``project`` over ``images_dir``."""
+    """Return a :data:`BUILT_DETECTOR` run's config of ``project`` over ``images_dir``."""
     return training_config(
         project,
         BUILT_DETECTOR,
@@ -81,9 +80,10 @@ def test_compare_experiments_surfaces_shared_fingerprint(tmp_path):
 def test_compare_experiments_mixed_none_fingerprint_is_unknown_not_same(
     tmp_path,
 ):
-    """One run with a known fingerprint compared against a run over a dataset holding no label
-    document (None) must report unknown identity, not a false apples-to-apples True: the two
-    demonstrably did not train on the same (known) data.
+    """Comparing a run of known fingerprint with one of none reports unknown identity, not same.
+
+    The second run is over a dataset holding no label document, and the comparison's
+    ``same_dataset_fingerprint`` is ``None``.
     """
     from tests._verified_checkpoint_fixtures import table_images
     from tests.tiny_trainer_fixtures import (
@@ -146,8 +146,9 @@ def test_dataset_identity_helper_registered_vs_bespoke(tmp_path):
 def test_dataset_identity_raises_a_fingerprint_read_failure(
     tmp_path, monkeypatch
 ):
-    """A fingerprint read failure (a locked or removed image mid-scan) raises by name rather than
-    reading as a run with no identity: the launch refuses before its directory exists.
+    """A fingerprint read failure raises out of ``dataset_identity`` by name.
+
+    A fingerprint read raising ``OSError`` mid-scan raises that error out of the call.
     """
     import tcip_mcp.pipelines.data.dataset_fingerprint as dataset_fingerprint_mod
     from tcip_mcp.pipelines.data.split_construction import dataset_identity
@@ -177,8 +178,10 @@ def test_dataset_identity_raises_a_fingerprint_read_failure(
 def test_a_trial_over_a_data_axis_records_the_dataset_its_own_input_names(
     tmp_path, monkeypatch
 ):
-    """A sweep trial whose sampled point names another dataset records that dataset's identity,
-    read off the trial's own input, never the identity of the sweep's base dataset.
+    """A sweep trial over a data axis records the identity of the dataset its own input names.
+
+    A sweep trial whose sampled point names another dataset records that dataset's id and
+    fingerprint.
     """
     pytest.importorskip("torch")
     from tcip_mcp.experiments import RUN_FILE, read_record
@@ -206,9 +209,9 @@ def test_a_trial_over_a_data_axis_records_the_dataset_its_own_input_names(
 def test_a_launch_records_the_identity_of_the_dataset_it_trains_on(
     tmp_path, monkeypatch
 ):
-    """The launch reads the registered dataset's identity once and writes it into the run's
-    launch record before the child starts; the child's resolved partition names the samples
-    beside it.
+    """A launch records the identity of the dataset its config names.
+
+    The run's launch record carries the registered dataset's id and fingerprint.
     """
     pytest.importorskip("torch")
     from tcip_mcp.experiments import RUN_FILE, read_record

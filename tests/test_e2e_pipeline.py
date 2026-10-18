@@ -1,11 +1,9 @@
-"""End-to-end integration test: agent pipeline through MCP tools and the demoted library calls.
+"""End-to-end integration test: the agent pipeline through MCP tools and library calls.
 
-Verifies the full workflow:
+The workflow covered:
   initialize_project → scan_dataset → the doctor's check_data_quality →
   read_annotations → save_annotations → score_predictions (image) →
   score_predictions (dataset) → draw_splits → archive_project
-
-Each step asserts filesystem state to prove persistence works.
 """
 
 from __future__ import annotations
@@ -42,7 +40,11 @@ from tests._web_fixtures import INVARIANCES
 
 @pytest.fixture()
 def project_dir(tmp_path: Path) -> Path:
-    """Fully populated TCIP project with images, labels, predictions, and a nested registry."""
+    """Return a project of five 640x480 images, two bud labels each, and a published bucket.
+
+    The registry declares ``bud``; each image's predictions, published as :data:`BUCKET`, are
+    one box on its first label's box at 0.92 and one box away from both labels at 0.60.
+    """
     root = tmp_path / "my_project"
     date = "2-11-26"
     images = root / "images" / date
@@ -104,7 +106,7 @@ BUCKET = "live/2-11-26"
 
 
 class TestE2EPipeline:
-    """Walk the full pipeline using MCP tools, asserting state at each step."""
+    """The full pipeline walked through MCP tools, its state asserted at each step."""
 
     def test_full_pipeline(self, project_dir: Path, tmp_path: Path):
         root = str(project_dir)
@@ -249,12 +251,12 @@ class TestE2EPipelineEdgeCases:
     """Edge-case scenarios for the pipeline."""
 
     def test_empty_project(self, tmp_path: Path):
-        """Pipeline tools handle an uninitialized project gracefully."""
+        """An uninitialized project inspects as no id, its record problem named."""
         status = inspect_project(tmp_path)
         assert status["id"] is None and status["record_problem"]
 
     def test_dataset_with_missing_labels(self, tmp_path: Path):
-        """scan_dataset reports unlabeled images correctly."""
+        """scan_dataset counts three images, one label and two unlabeled images."""
         images = tmp_path / "images" / UNDATED_BUCKET
         images.mkdir(parents=True)
 
@@ -278,7 +280,7 @@ class TestE2EPipelineEdgeCases:
         assert ds["unlabeled_images"] == 2
 
     def test_evaluate_no_predictions(self, tmp_path: Path):
-        """score_predictions handles images with no predictions."""
+        """score_predictions answers a dict for an image under an unpublished bucket name."""
         images = tmp_path / "images" / UNDATED_BUCKET
         images.mkdir(parents=True)
 

@@ -1,10 +1,10 @@
-"""The conf-censoring guard of the count criterion, built around the floor the reference's
-predictions were collected at.
+"""The count criterion's conf-censoring guard, built around the reference's collection floor.
 
-The criterion never infers censorship from the reference's own observed minimum score: every
-surviving score is at or above the collection floor by construction. The floor is stated
-(``staged_conf_floor``), and the conf the objective picks at or below it is censored; a floor far
-below every observed score is reported beside the criterion and never fails it.
+The floor is the one the reference's predictions were collected at.
+
+The floor is stated (``staged_conf_floor``), and a conf the objective picks at or below it is
+censored; a stated 0.01 floor beneath detections no lower than 0.5 is reported beside the
+criterion's observed minimum and does not fail it.
 """
 
 from __future__ import annotations
@@ -53,8 +53,9 @@ def test_a_reference_collected_at_a_real_floor_passes():
 
 
 def test_a_conf_picked_at_or_below_the_collection_floor_is_censored():
-    """The floor sits at the picked conf, so the sweep could not have seen anything below it: the
-    criterion fails even though the holdout bias is zero.
+    """A conf picked at or below the collection floor is censored.
+
+    With the stated floor at the picked conf, the criterion reports ``conf_censored``.
     """
     _conf, _evidence, failures = _criterion(
         *good_cal_holdout(fp_score=0.05), 0.95
@@ -64,9 +65,10 @@ def test_a_conf_picked_at_or_below_the_collection_floor_is_censored():
 
 
 def test_a_floor_far_below_every_observed_score_is_reported_and_never_fails():
-    """The stated 0.01 floor, and detections that never go below 0.5: the observed minimum is
-    reported beside the floor for a person to notice, and a pick genuinely above the floor still
-    passes.
+    """A floor far below the observed scores is reported beside the criterion and does not fail it.
+
+    With the stated 0.01 floor and detections no lower than 0.5, the evidence records both the
+    floor and the observed minimum, and the pick above the floor passes.
     """
     _conf, evidence, failures = _criterion(
         *good_cal_holdout(fp_score=0.5), 0.01

@@ -1,6 +1,6 @@
-"""Detector & architecture diversity: add_p2 necks, FCOS end-to-end.
+"""Detector and architecture diversity: add_p2 necks, FCOS end to end.
 
-Uses ``resnet18`` (FPN normalizes the channel difference); CPU, tiny inputs, 1 epoch.
+The cases run on CPU over tiny inputs.
 """
 
 from __future__ import annotations

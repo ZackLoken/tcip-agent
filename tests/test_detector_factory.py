@@ -1,5 +1,6 @@
-"""Detector builders: plain ``build_detector`` / ``_build_*`` factories, imported
-directly by bespoke model code (no registry).
+"""Detector builders: plain ``build_detector`` / ``_build_*`` factories.
+
+Bespoke model code imports them directly (no registry).
 """
 
 import pytest
@@ -48,9 +49,10 @@ def test_build_detector_unknown_name_raises():
 
 
 class _LinearPatchBackbone(nn.Module):
-    """A patch-embedding stem with no convolution in it: unfold the image into patches and project
-    them linearly, the shape a transformer-style backbone takes. Its band count lives in the fan-in
-    of a linear layer, which is why reading the first registered ``Conv2d`` cannot recover it.
+    """A patch-embedding stem with no convolution in it.
+
+    It unfolds the image into patches and projects them linearly, the shape a transformer-style
+    backbone takes. Its band count lives in the fan-in of a linear layer.
     """
 
     def __init__(
@@ -85,7 +87,7 @@ class _PassThroughNeck(nn.Module):
 
 
 def _unprobable_adapter(in_chans: int, out_channels: int = 32):
-    """The platform's own adapter over a backbone whose band count no probe can read."""
+    """Return a ``BackboneNeckAdapter`` over a linear patch backbone, asserting no probed width."""
     from tcip_mcp.pipelines.components.detectors import (
         BackboneNeckAdapter,
         _probe_in_chans,
@@ -102,9 +104,9 @@ def _unprobable_adapter(in_chans: int, out_channels: int = 32):
 
 
 def test_a_detector_stating_no_statistics_is_refused_by_its_signature():
-    """With no statistics stated, torchvision would normalize with 3-element ImageNet statistics
-    over bands nobody has confirmed are RGB. The builder's signature takes them with no default,
-    so the build refuses naming them.
+    """A detector stating no normalization statistics is refused by the builder's signature.
+
+    A build stating no statistics over a five-band backbone refuses naming ``image_mean``.
     """
     from tcip_mcp.pipelines.components.detectors import build_detector
 
@@ -122,9 +124,11 @@ def test_a_detector_stating_no_statistics_is_refused_by_its_signature():
 def test_a_detector_over_that_backbone_builds_from_its_datasets_own_band_statistics(
     tmp_path,
 ):
-    """The rail admits valid work: per-band statistics derived from the run's own admitted sources
-    build the same detector and reach its transform at the bands they describe, and a caller that
-    states the width builds at the three-band statistics it states.
+    """A detector over an unprobable backbone builds from its dataset's own band statistics.
+
+    Per-band statistics derived from the run's own admitted sources build the detector and
+    reach its transform at the bands they describe, and a caller that states the width builds at
+    the three-band statistics it states.
     """
     import numpy as np
     import tifffile

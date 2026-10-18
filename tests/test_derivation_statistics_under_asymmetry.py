@@ -1,8 +1,6 @@
-"""Tier-A derivations on asymmetric data: sparse class ids, open boxes, skewed spacing.
+"""Derivations on asymmetric data: sparse class ids, open boxes, skewed spacing.
 
-A derivation that reads a symmetric artifact (dense ids, square boxes, evenly spaced objects)
-cannot show which statistic it actually computes, because every candidate statistic agrees there.
-These fixtures are built so a wrong statistic and the right one return different numbers.
+Each fixture is asymmetric: sparse ids, elongated boxes, or a dense row beside a far-apart pair.
 """
 
 from __future__ import annotations
@@ -21,9 +19,10 @@ from tcip_mcp.pipelines.derivations import (
 
 
 def test_num_classes_sizes_the_head_for_the_highest_id_not_the_ids_present():
-    """A label set whose observed ids are sparse (a class absent from this split, or ids the
-    registry assigned 0 and 3) still has to size the model's output head for the highest id it can
-    emit: a head built for the number of ids present indexes past its own last logit.
+    """The class count sizes the head for the highest id, not the count of ids present.
+
+    A label set whose observed ids are sparse, 0 and 3 say, sizes for one more than its highest
+    id.
     """
     assert num_classes_from_distribution({0: 5, 3: 2}) == 4
     assert num_classes_from_distribution({2: 7}) == 3
@@ -40,10 +39,10 @@ def test_num_classes_sizes_the_head_for_the_highest_id_not_the_ids_present():
 def test_anchor_ratios_keep_square_coverage_on_a_uniformly_open_dataset(
     boxes, label_ratio
 ):
-    """The derived anchor set spans the GT's own shape distribution and still covers a square-ish
-    object. A class whose p10 and p90 both sit away from 1.0 would otherwise leave anchors that
-    match nothing near square, so an instance closer to square than the rest of its class loses
-    anchor coverage entirely.
+    """The derived anchor ratios keep square coverage on a uniformly elongated dataset.
+
+    Over uniformly tall or uniformly wide boxes, the derived set holds the boxes' own ratio
+    and 1.0, spanning both.
     """
     ratios = gt_aspect_ratios(boxes)
     assert ratios is not None and len(ratios) >= 2
@@ -53,12 +52,11 @@ def test_anchor_ratios_keep_square_coverage_on_a_uniformly_open_dataset(
 
 
 def test_localization_tolerance_normalizes_by_the_characteristic_size_its_siblings_share():
-    """The center-match tolerance is a fraction of ``sqrt(w*h)``, the same characteristic size
-    ``char_sizes`` (and through it the localization kind and the IoU threshold) measures.
-    Two datasets with the same characteristic size and the same neighbor spacing must therefore
-    derive the same tolerance, however differently their boxes are shaped: a size measure that
-    reads the sides instead splits them apart and the tolerance stops being comparable to the
-    criterion that selected it.
+    """The localization tolerance normalizes by the characteristic size its siblings share.
+
+    The center-match tolerance is a fraction of ``sqrt(w*h)``, the characteristic size
+    ``char_sizes`` measures. Square and open boxes of one characteristic size and one neighbor
+    spacing derive one tolerance, half the 40 px spacing over the size of 30.
     """
     square = [[(0, 0, 30, 30), (40, 0, 30, 30), (80, 0, 30, 30)]]
     open = [[(0, 0, 10, 90), (40, 0, 10, 90), (80, 0, 10, 90)]]
@@ -79,10 +77,10 @@ def test_localization_tolerance_normalizes_by_the_characteristic_size_its_siblin
 
 
 def test_block_scale_takes_the_typical_spacing_not_one_dragged_up_by_isolated_objects():
-    """Calibration blocks are sized by the median nearest-neighbor spacing, so the isolated
-    objects real GT always carries cannot widen them past what the data supports. On a skewed
-    spacing distribution (a dense row plus a far-apart pair) the mean sits well above every
-    spacing the dense majority actually has.
+    """The block scale takes the typical object spacing, not one dragged up by isolated objects.
+
+    Over a row of six objects 100 px apart and a pair 900 px apart, the GT object-spacing scale
+    is 100 px, above the 50 px tile floor.
     """
     from tests._verified_checkpoint_fixtures import objects_over
 

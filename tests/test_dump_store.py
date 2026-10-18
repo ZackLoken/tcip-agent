@@ -1,5 +1,6 @@
-"""``tcip dump-store``: every record and log of a project's store databases written out as files
-a person reads, each decoding to the value the database holds.
+"""``tcip dump-store``: every record and log of a project's store databases written out as files.
+
+Each file decodes to the value the database holds.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from tests._web_fixtures import new_project
 
 
 def _project_with_records(tmp_path: Path) -> Path:
-    """A project holding records and log entries in two databases, written by their producers."""
+    """Return a project holding records and log entries in two databases, written by producers."""
     from tests import _trait_fixtures as fx
 
     project = new_project(tmp_path).root
@@ -32,8 +33,10 @@ def _project_with_records(tmp_path: Path) -> Path:
 
 
 def _held(project: Path) -> dict[tuple, object]:
-    """Every record and every log each database under ``project`` holds, read through the seam,
-    by ``(root relative to the project, store, parts, suffix)``.
+    """Return every record and every log each database under ``project`` holds.
+
+    Each is read through the seam and keyed by ``(root relative to the project, store, parts,
+    suffix)``.
     """
     held: dict[tuple, object] = {}
     for root in {
@@ -50,7 +53,10 @@ def _held(project: Path) -> dict[tuple, object]:
 
 
 def _dumped(out: Path) -> dict[tuple, object]:
-    """Every file under ``out``, its names read back through ``unquote``, by the same tuple."""
+    """Return every decoded file under ``out``, keyed as :func:`_held` keys its values.
+
+    Each file's path parts are read back through ``unquote``.
+    """
     dumped: dict[tuple, object] = {}
     for path in (p for p in out.rglob("*") if p.is_file()):
         relative, store, *parts = (
@@ -69,7 +75,9 @@ def _dumped(out: Path) -> dict[tuple, object]:
 def test_the_records_a_database_holds_and_the_records_its_dump_writes_agree(
     tmp_path: Path,
 ):
-    """Store by store, the dump's files read back to exactly the keys and values each database
+    """The records a database holds and the records its dump writes agree.
+
+    Store by store, the dump's files read back to exactly the keys and values each database
     answers.
     """
     project = _project_with_records(tmp_path)
@@ -86,9 +94,11 @@ def test_the_records_a_database_holds_and_the_records_its_dump_writes_agree(
 def test_every_key_the_store_admits_dumps_to_its_own_file_inside_the_destination(
     tmp_path: Path,
 ):
-    """A key with no parts, parts that would climb out of the destination, two parts that differ
-    only by case and a part holding a lone surrogate each land in a file of their own under
-    ``out_dir``, and a key holding both a record and log entries dumps both.
+    """Keys of edge-case shapes each dump to their own file inside the destination.
+
+    A key with no parts, parts naming a parent directory, two parts that differ only by case
+    and a part holding a lone surrogate each land in a file of their own under ``out_dir``, and
+    a key holding both a record and log entries dumps both.
     """
     project = new_project(tmp_path).root
     root = str(project)

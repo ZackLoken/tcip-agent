@@ -1,8 +1,7 @@
-"""Detection measurement-integrity coverage: val-loss over negatives, standard+operating mAP,
-tiled evaluation, and the tile geometry a pass derives from its checkpoint.
+"""Detection measurement integrity, from val-loss over negatives to a pass's derived tile geometry.
 
-Kept in one file so the audit's measurement-integrity locks live together. Vision/state
-tests here are pure-Python or monkeypatched (no GPU) so they stay xdist-safe.
+The cases cover val-loss over negatives, standard+operating mAP, tiled evaluation, and the tile
+geometry a pass derives from its checkpoint.
 """
 
 from __future__ import annotations
@@ -47,7 +46,7 @@ DETECTOR_PASS = Stated(**SAMPLE_DETECTOR_PASS)
 
 
 class _StubDetector:
-    """Minimal detector: records every loss-pass call so we can assert negatives are forwarded."""
+    """A minimal detector recording each loss pass's image count and box count."""
 
     def __init__(self) -> None:
         self.calls: list[tuple[int, int]] = []
@@ -69,8 +68,9 @@ class _StubDetector:
 
 
 class _StubModel:
-    """Composed-model stand-in exposing ``.detector``, both operating-point knobs, which its
-    empty-prediction forward honors trivially.
+    """Composed-model stand-in exposing ``.detector`` and both operating-point knobs.
+
+    Its forward returns one empty prediction per image.
     """
 
     def __init__(self, detector: _StubDetector) -> None:
@@ -93,7 +93,7 @@ class _StubModel:
 
 
 def _det_batch(box_counts: list[int]):
-    """One detection batch: image tensors + targets, some with empty (negative) boxes."""
+    """Return one detection batch of image tensors and targets, one per count in ``box_counts``."""
     images, targets = [], []
     for n in box_counts:
         images.append(torch.zeros(3, 32, 32))
@@ -161,7 +161,7 @@ def test_all_negative_only_loader_is_not_skipped():
 
 
 def _capture_run_test_evaluation(monkeypatch):
-    """Patch run_test_evaluation to record the built dataset + tiling instead of loading a model."""
+    """Patch run_test_evaluation to record the built dataset and tiling, returning a stub result."""
     import tcip_mcp.pipelines.training.eval_runners as runners
 
     captured: dict = {}
@@ -213,9 +213,10 @@ def test_run_id_reuses_training_tiling(tmp_path, monkeypatch):
 def test_evaluating_a_run_leaves_its_directory_byte_identical(
     tmp_path, monkeypatch
 ):
-    """An evaluation of a completed run by its id writes nothing: the run's files before and after
-    are the same names holding the same bytes, no audit line is left for it, and the result comes
-    back to the caller.
+    """Evaluating a completed run by its id leaves its directory byte-identical.
+
+    The run's files before and after are the same names holding the same bytes, the project's
+    audit log gains no row, and the result carries no error.
     """
     import tcip_store as ts
     from tcip_mcp.audit import audit_log_key
@@ -274,8 +275,10 @@ def test_explicit_checkpoint_stays_untiled(tmp_path, monkeypatch):
 def test_evaluate_model_reads_its_loader_at_the_checkpoints_own_width(
     tmp_path, monkeypatch
 ):
-    """The door measures at the width the checkpoint reads at, and a checkpoint recording none
-    stops it where the predictor refuses rather than sizing the loader off the references.
+    """``evaluate_model`` reads its loader at the checkpoint's own width.
+
+    Over three-band sources, a checkpoint recording one band builds a one-band loader, and a
+    checkpoint recording no band count is refused as having none.
     """
     from tcip_mcp.tools.training_tools import evaluate_model
     from tests._verified_checkpoint_fixtures import (
@@ -328,10 +331,10 @@ def test_evaluate_model_reads_its_loader_at_the_checkpoints_own_width(
 def _detections_as_ground_truth(
     checkpoint, images_dir, *, subject: str, limit: int = 20
 ):
-    """Write each image's own strongest detections back as its ground truth, so a metric over this
-    fixture is sensitive to which detections the model is allowed to emit. The registered
-    ``checkpoint``'s model, built from its own spec, is read with its score floor removed so that
-    it returns detections to write back.
+    """Write up to ``limit`` of each png image's own detections back as its ground truth.
+
+    The registered ``checkpoint``'s model, built from its own spec, is read with its score floor
+    removed, and only boxes wider and taller than 1 px are written.
     """
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.image_utils import load_image, pil_to_tensor
@@ -375,13 +378,11 @@ def _detections_as_ground_truth(
 def test_the_scored_model_is_the_one_the_door_already_built(
     tmp_path, monkeypatch
 ):
-    """One build per evaluation, and the execution it reports is the one its model ran under.
+    """An evaluation builds its model once and reports the execution that model ran under.
 
-    The door builds the checkpoint to read the width it measures at, and the runner scores through
-    that same module governed by the execution record it reports: a separately built copy of the
-    same checkpoint, counted at that record's conf under the cap it gives each frame, answers with
-    the same numbers over the same loader. Counted at a conf above every score instead it answers
-    otherwise, which the last assertion measures rather than assumes.
+    A separately built copy of the checkpoint, counted at the reported record's conf under the
+    cap it gives each frame, answers with the measured numbers over the measured loader; counted
+    at conf 0.6, the copy answers a different recall.
     """
     from typing import cast
 
@@ -452,8 +453,10 @@ def test_the_scored_model_is_the_one_the_door_already_built(
     execution = Execution.of(measured["execution"])
 
     def _independent(conf: float) -> dict:
-        """The evaluation of the independent copy counted at ``conf``, each image capped at the
-        record's density, its objective weighted by the checkpoint's recorded weights.
+        """Return the evaluation of the independent copy counted at ``conf``.
+
+        Each image is capped at the record's density, its objective weighted by the checkpoint's
+        recorded weights.
         """
         return evaluate(
             independent_model,
@@ -488,11 +491,13 @@ def test_the_scored_model_is_the_one_the_door_already_built(
 def test_the_three_evaluation_loaders_over_one_truth_and_one_predictor_agree(
     tmp_path, monkeypatch
 ):
-    """The assessment's reference, the full-frame evaluation and the tile-level diagnostic each
+    """The three evaluation doors build their loaders alike over one truth and one predictor.
+
+    The assessment's reference, the full-frame evaluation and the tile-level diagnostic each
     build their loader over one ground truth for one predictor at the same width and the same
     untiled block: every factory build each door makes is recorded and the three doors' records
-    are compared with each other. The predictor reads one band of three-band sources, so a door
-    sizing its loader off the sources would disagree.
+    are compared with each other. The predictor reads one band of three-band sources, and every
+    door's builds carry one band.
     """
     from PIL import Image
 
@@ -626,8 +631,9 @@ def test_explicit_tiling_override_on_checkpoint(tmp_path, monkeypatch):
 
 
 def _sliced_stub(boxes, **training) -> StubPredictor:
-    """A three-band detector answering ``boxes`` at 0.9 on a 128px frame, trained at
-    ``training``'s geometry.
+    """Return a three-band stub detector answering ``boxes`` at 0.9 on a 128px frame.
+
+    ``training`` sets the stub's recorded training geometry.
     """
     return StubPredictor(
         task="detection",
@@ -643,8 +649,10 @@ def _sliced_stub(boxes, **training) -> StubPredictor:
 def _full_frame(
     tmp_path, monkeypatch, stub, annotations, *, checkpoint=None, **stated
 ) -> dict:
-    """``run_full_frame_evaluation`` of one 128px frame labeled with ``annotations`` through
-    ``stub``, at the sample detector values unless ``stated`` names its own.
+    """Run ``run_full_frame_evaluation`` of one 128px frame through ``stub`` and return it.
+
+    The frame is labeled with ``annotations``, and the pass is stated at the sample detector
+    values, ``stated`` overriding any of them.
     """
     from tcip_mcp.pipelines.training.eval_runners import (
         run_full_frame_evaluation,
@@ -688,8 +696,10 @@ def test_full_frame_counts_straddling_object_once(tmp_path, monkeypatch):
 def test_full_frame_scores_a_detection_in_a_crowd_region_as_neither(
     tmp_path, monkeypatch
 ):
-    """The delivery-grade gate reads each record's crowd flag off the loader's target: a
-    detection inside a crowd region is neither a true nor a false positive.
+    """The full-frame gate scores a detection inside a crowd region as neither TP nor FP.
+
+    With one object and one crowd region labeled and a detection on each, the gate counts one
+    true positive, no false positive and no miss.
     """
     from tcip_annotation.state import Annotation, BBox
 
@@ -713,8 +723,10 @@ def test_full_frame_scores_a_detection_in_a_crowd_region_as_neither(
 def test_full_frame_reads_each_ground_truth_box_on_the_stored_grid(
     tmp_path, monkeypatch
 ):
-    """The delivery-grade gate scores the box its document holds, on the stored two-decimal grid,
-    never the float arithmetic of the loader's corners.
+    """The full-frame gate reads each ground-truth box on the stored grid.
+
+    A box labeled and detected at (10.1, 10.1, 40.3, 30.3) enters the scored record, as ground
+    truth and as detection, as the xywh box [10.1, 10.1, 30.2, 20.2].
     """
     import tcip_mcp.pipelines.training.evaluation as evaluation
     from tcip_annotation.state import Annotation, BBox
@@ -753,7 +765,10 @@ def test_full_frame_reads_each_ground_truth_box_on_the_stored_grid(
 def _geometry_stub(
     *, train_tile_size=None, train_overlap=None
 ) -> StubPredictor:
-    """A predictor carrying the given persisted training geometry, answering empty results."""
+    """Return a predictor carrying the given persisted training geometry.
+
+    It answers empty results.
+    """
     return StubPredictor(
         boxes=(),
         scores=(),
@@ -765,7 +780,7 @@ def _geometry_stub(
 
 
 def _pass_over(tmp_path, monkeypatch, stub, **stated):
-    """The pass a registered checkpoint prepares over one image with ``stub`` as its predictor."""
+    """Return the pass a registered checkpoint prepares over one image with ``stub`` predicting."""
     from PIL import Image
 
     from tests._verified_checkpoint_fixtures import predicted_over
@@ -801,8 +816,10 @@ def test_a_tiled_pass_derives_its_tile_edge_from_the_checkpoint(
 def test_a_tiled_pass_with_no_basis_for_its_edge_refuses_naming_it(
     tmp_path, monkeypatch
 ):
-    """A checkpoint with no persisted training tile geometry has no real basis to tile at: a tiled
-    pass with no stated edge refuses, naming the missing basis, never fabricating a scale.
+    """A tiled pass with no basis for its edge refuses naming it.
+
+    A checkpoint with no persisted training tile geometry has no basis to tile at: a tiled pass
+    with no stated edge refuses, naming ``tile_size``.
     """
     from tcip_mcp.pipelines.execution import ExecutionRefusedError
 
@@ -849,10 +866,11 @@ def test_a_stated_edge_contradicting_the_checkpoint_refuses_naming_both(
 def test_the_evaluation_derives_an_unrecorded_tile_geometry_from_its_ground_truth(
     tmp_path, monkeypatch
 ):
-    """A checkpoint with no persisted tiling and no stated edge is scored at the lattice the
-    evaluated ground truth derives, recorded by the derivation's name, never at an ungrounded
-    scale, each value under the derivation that produced it: a stated edge keeps its own source
-    beside the overlap derived for it.
+    """The evaluation derives an unrecorded tile geometry from its ground truth.
+
+    Over one 20 px object, a checkpoint with no persisted tiling and no stated edge records a
+    100 px edge and its overlap, each under its derivation; a stated 64 px edge is recorded
+    ``explicit`` beside the overlap derived for it.
     """
     from tcip_annotation.state import Annotation, BBox
     from tcip_mcp.pipelines.derivations import (
@@ -895,9 +913,7 @@ def test_the_evaluation_derives_an_unrecorded_tile_geometry_from_its_ground_trut
 def test_the_evaluation_derives_tile_geometry_from_the_checkpoint(
     tmp_path, monkeypatch
 ):
-    """The checkpoint's own persisted training geometry governs the evaluation instead of an
-    arbitrary fixed scale.
-    """
+    """The evaluation's pass takes the checkpoint's persisted 224 px tile and 0.1 overlap."""
     from tcip_annotation.state import Annotation, BBox
 
     stub = _sliced_stub([], train_tile_size=224, train_overlap=0.1)
@@ -921,16 +937,13 @@ def test_the_evaluation_derives_tile_geometry_from_the_checkpoint(
 def test_launch_training_persists_effective_tile_geometry(
     tmp_path, monkeypatch
 ):
-    """launch_training resolves the run before its child starts, so the effective tiling
-    geometry is in the run's launch record when launch_training returns.
+    """``launch_training`` persists the effective tile geometry in the run's launch record.
 
-    Also pins the isolation of the training body: this monkeypatches
-    ``generic_trainer.train`` in this process to raise if ever called. If the run executed in this
-    same interpreter, that monkeypatch would poison it and the "status == completed" assertion
-    below would fail, since the poisoned ``train`` would be the one actually invoked. Because the
-    real subprocess re-imports fresh, the monkeypatch here has no effect and the run completes
-    normally, proving the training body genuinely executes outside this process, not merely that
-    the API still returns the right shape.
+    The effective tiling geometry and object density are in the run's launch record when
+    launch_training returns.
+
+    With ``generic_trainer.train`` patched in this process to raise if called, the run reports a
+    process id other than this one and completes.
     """
     pytest.importorskip("torchvision")
     monkeypatch.chdir(tmp_path)

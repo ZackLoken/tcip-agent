@@ -1,7 +1,7 @@
 """Tests for composable ML primitives.
 
-Covers: datasets, optimizer factory, generic trainer basics,
-predictor, active learning scorers, and tool imports.
+Covers: dataset construction, the optimizer factory, a registered-checkpoint load and the
+active-learning scorers.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from tests._training_values import adamw_optimizer, sgd_optimizer  # noqa: E402
 
 class TestDatasets:
     def test_build_dataset_classification(self, tmp_path):
-        """Classification dataset from its ground-truth table, one row per image."""
+        """A classification dataset over a four-row table holds four samples of two classes."""
         from tests.tiny_trainer_fixtures import write_regression_dataset
 
         images_dir, csv_path = write_regression_dataset(
@@ -36,7 +36,7 @@ class TestDatasets:
         assert ds.task_type == "classification"
 
     def test_build_dataset_detection(self, tmp_path):
-        """Detection dataset from per-image label documents."""
+        """A detection dataset over one labeled image holds one sample."""
         from tcip_annotation.state import Annotation, BBox
         from tests._producer_fixtures import label_image
 
@@ -73,8 +73,9 @@ class TestDatasets:
 
 
 def _built(block: dict, model):
-    """The optimizer ``block`` (validated through ``schemas.OptimizerSpec``) builds over
-    ``model`` at its own rates.
+    """Build the optimizer ``block`` states over ``model`` at its own rates and return it.
+
+    The block is validated through ``schemas.OptimizerSpec``.
     """
     from tcip_mcp.pipelines.schemas import OptimizerSpec
     from tcip_mcp.pipelines.training.optimizer_factory import build_optimizer
@@ -119,7 +120,7 @@ class TestOptimizerFactory:
         assert "sgd" in _OPTIMIZER_BUILDERS
 
     def test_lamb_raises_when_torch_optimizer_missing(self):
-        """Lamb must never silently fall back to AdamW when torch_optimizer isn't installed."""
+        """Building Lamb without torch_optimizer installed raises ImportError naming it."""
         from importlib.util import find_spec
 
         if find_spec("torch_optimizer") is not None:

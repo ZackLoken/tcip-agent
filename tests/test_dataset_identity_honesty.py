@@ -1,9 +1,6 @@
-"""A dataset's recomputed identity says nothing rather than something, when there is nothing left.
+"""A dataset that has lost its imagery or its labels recomputes to no identity.
 
-The fingerprint is authority-on-read: whoever compares a stored value against a recompute is asking
-whether the data still is what it was. A dataset that has lost one of the two halves it is composed
-from has no identity to report, and manufacturing one from the surviving half would let that
-comparison answer with a number.
+The recompute over the surviving half is ``None``.
 """
 
 from __future__ import annotations
@@ -22,9 +19,7 @@ _DATE = "2026-02-11"
 
 
 def _dataset(root: Path) -> None:
-    """Two dated images of different sizes, each with its own label, the nested layout ingest
-    writes.
-    """
+    """Write two images of different sizes and colors under one dated capture, each labeled."""
     (root / "images" / _DATE).mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (48, 32), color=(120, 90, 40)).save(
         root / "images" / _DATE / "IMG_1.png"
@@ -47,10 +42,7 @@ def _dataset(root: Path) -> None:
 
 
 def test_a_dataset_whose_images_were_all_removed_reports_no_identity(tmp_path):
-    """Labels alone are not the dataset's identity: with the imagery gone the recompute must
-    report nothing at all, never a label-only value a stored fingerprint could still be compared
-    against.
-    """
+    """A dataset whose images were all removed reports no identity, its labels left in place."""
     _dataset(tmp_path)
     before = dataset_fingerprint(tmp_path)
     assert before is not None
@@ -62,7 +54,7 @@ def test_a_dataset_whose_images_were_all_removed_reports_no_identity(tmp_path):
 
 
 def test_a_dataset_whose_labels_were_all_removed_reports_no_identity(tmp_path):
-    """The mirror half: imagery alone is not the identity either."""
+    """A dataset whose labels were all removed reports no identity from its imagery alone."""
     _dataset(tmp_path)
     for key in capture_label_keys(tmp_path, _DATE):
         ts.delete(key)
@@ -70,7 +62,10 @@ def test_a_dataset_whose_labels_were_all_removed_reports_no_identity(tmp_path):
 
 
 def test_the_identity_comes_back_when_the_imagery_does(tmp_path):
-    """The same pixels restored under the same names recompute to the same identity."""
+    """Imagery rewritten byte for byte under its names recomputes to the identity it had.
+
+    While the images are gone the identity is ``None``.
+    """
     _dataset(tmp_path)
     before = dataset_fingerprint(tmp_path)
     for img in (tmp_path / "images" / _DATE).glob("*.png"):
