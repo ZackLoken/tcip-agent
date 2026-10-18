@@ -1,5 +1,6 @@
-"""A bucket whose scope declares attributes delivers the object count of its own recorded subject,
-never a count per attribute value.
+"""A bucket whose scope declares attributes delivers the count of its own recorded subject.
+
+An image whose two predictions carry two different attribute values delivers one row counting 2.
 """
 
 from __future__ import annotations

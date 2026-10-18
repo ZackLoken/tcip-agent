@@ -1,6 +1,8 @@
-"""Detection counts have one producer, the platform's matcher: an evaluation's counts are the
-matcher's own at the operating point, inclusive of a detection scoring exactly at it, and the
-prediction scorer's per-image matchings sum to the evaluation's counts over the same records.
+"""Detection counts have one producer, the platform's matcher.
+
+An evaluation's counts are the matcher's own at the operating point, inclusive of a detection
+scoring exactly at it, and the prediction scorer's per-image matchings sum to the evaluation's
+counts over the same records.
 """
 
 from __future__ import annotations
@@ -133,8 +135,10 @@ def test_masks_that_share_a_box_but_not_a_region_do_not_match_on_either_route():
 def test_one_scoring_matches_each_class_once_per_distinct_criterion(
     monkeypatch,
 ):
-    """Counts, average precision and the displayed matching share one matching per image, class
-    and criterion over the same detections: nothing is matched twice.
+    """Scoring matches each image and class once per distinct criterion.
+
+    Counts, average precision and the displayed matching share one matching per image, class and
+    criterion over the same detections: nothing is matched twice.
     """
     from collections import Counter
 

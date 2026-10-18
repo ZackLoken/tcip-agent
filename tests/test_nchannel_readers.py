@@ -1,4 +1,4 @@
-"""Channel-aware image loading, readers, and the BaseImageDataset refactor."""
+"""Tests of channel-aware image loading, readers, and ``BaseImageDataset``."""
 
 import numpy as np
 import pytest

@@ -1,8 +1,8 @@
 """The provenance identity spine.
 
-Locks the provenance across the spine: a checkpoint's producing run read off the run's own
-final status beside a computed-once sha256, the enriched capture_env, a selection's own digests
-and seed, and the producing model named once on the delivery event rather than on every row.
+Covered: a checkpoint's producing run read off the run's own final status beside its sha256, the
+enriched capture_env, a selection's own digests and seed, and the producing model named on the
+delivery event and not on its rows.
 """
 
 from __future__ import annotations
@@ -27,8 +27,10 @@ def test_capture_env_records_code_and_libraries():
 
 
 def test_the_producer_of_a_completed_runs_checkpoint_is_that_run(tmp_path):
-    """A completed run's checkpoint resolves its producer through the binding the run's own
-    final status recorded, not a caller-asserted tag or a stamp in the payload.
+    """The producer of a completed run's checkpoint is that run.
+
+    The checkpoint resolves its producer through the binding the run's own final status recorded,
+    not a caller-asserted tag or a stamp in the payload.
     """
     pytest.importorskip("torch")
     from tcip_mcp.model_registry import load_registered_checkpoint
@@ -45,9 +47,10 @@ def test_the_producer_of_a_completed_runs_checkpoint_is_that_run(tmp_path):
 
 
 def test_the_producer_of_a_foreign_checkpoint_names_no_run(tmp_path):
-    """A checkpoint a run of the project wrote beside its deliverable, whose digest no completion
-    names, registered in explicit mode, names its digest and leaves ``experiment_id`` null rather
-    than failing.
+    """A foreign checkpoint's producer names its digest and no run.
+
+    A checkpoint a run of the project wrote beside its deliverable, whose digest no completion
+    names, registered in explicit mode, loads with ``experiment_id`` null.
     """
     pytest.importorskip("torch")
     from tcip_mcp.model_registry import load_registered_checkpoint
@@ -61,10 +64,11 @@ def test_the_producer_of_a_foreign_checkpoint_names_no_run(tmp_path):
 
 
 def test_a_payloads_own_experiment_id_names_no_producer(tmp_path):
-    """A checkpoint payload that states an ``experiment_id`` of its own is a claim nothing
-    answers for: the producer is only ever the run whose final status names the digest, so a
-    checkpoint a run saved through its own writer with that field beside its weights, whose
-    digest no completion names, resolves none, whatever its payload says.
+    """A payload's own ``experiment_id`` names no producer.
+
+    A checkpoint a run saved through its own writer with an ``experiment_id`` beside its weights,
+    whose digest no completion names, keeps that field in its payload and resolves no producing
+    run, its digest still named.
     """
     pytest.importorskip("torch")
     from tcip_mcp.model_registry import load_registered_checkpoint
@@ -136,8 +140,10 @@ def test_draw_splits_selection_embeds_digests_and_seed(data_dir, tmp_path):
 def test_a_delivery_event_names_its_producer_and_write_time_and_its_rows_repeat_neither(
     tmp_path,
 ):
-    """The checkpoint and run behind a delivered count are on the delivery's one event, beside
-    the time it was written; every row carries only the delivery columns, never the producer.
+    """A delivery event names its producer and write time, and its rows repeat neither.
+
+    The delivery's one event carries the bucket's producer and an ISO write time; its one row
+    carries the delivery columns and no producer column.
     """
     pytest.importorskip("torch")
     from datetime import datetime

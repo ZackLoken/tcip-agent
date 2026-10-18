@@ -1,13 +1,8 @@
 """Each class's count-bias tolerance is scaled by that class's own typical per-image count.
 
-The relative count-bias tolerance is a fraction of a derived density. Which density is the whole
-point of the per-class gate: on a multi-class reference the pooled per-image count is the sum over
-every class, so judging a rare class against it hands that class a tolerance inflated by every other
-class's objects, and a real, systematic miscount of the rare class clears the gate while the stamped
-per-class provenance still describes the tolerance it should have been held to.
-
-The fixtures here pair a dense class with a rare one. A single-class reference cannot distinguish
-the two scales at all, because there the pooled density is that one class's density.
+The relative count-bias tolerance is a fraction of a derived density; on a multi-class reference
+the pooled per-image count is the sum over every class. The fixtures here pair a dense class with a
+rare one.
 """
 
 from __future__ import annotations
@@ -31,13 +26,11 @@ SPURIOUS_PER_IMAGE = 2
 
 
 def _records(prefix: str, offset: float, *, spurious: bool) -> list[dict]:
-    """``N_IMAGES`` records carrying a dense class 1 and a rare class 2, every real object matched
-    exactly by one detection.
+    """Return ``N_IMAGES`` records of ``DENSE_PER_IMAGE`` class-1 and ``RARE_PER_IMAGE`` class-2 GT.
 
-    With ``spurious``, each image also carries ``SPURIOUS_PER_IMAGE`` extra class-2 detections far
-    from any GT, so class 2 is over-counted by exactly that much on every image and class 1 is never
-    wrong. Boxes sit 50 px apart, well outside the tolerance this GT derives, so no detection can
-    match a neighbor.
+    Each GT box gets a detection at the same box, scored 0.9. With ``spurious``, each image also
+    gets ``SPURIOUS_PER_IMAGE`` class-2 detections in a row of their own. The 20 px boxes sit
+    50 px apart from ``offset`` along each row.
     """
     recs = []
     for i in range(N_IMAGES):
@@ -90,10 +83,12 @@ def _criterion(*, spurious: bool):
 
 
 def test_a_rare_class_is_not_granted_the_dense_class_density_as_its_tolerance():
-    """Class 2 carries 10 objects an image and is over-counted by 2 on every one of them, a 20%
-    systematic miscount of that class. Class 1 carries 250 an image and is never wrong, so the
-    pooled per-image density is 260 and the pooled bias of 2 is well inside the pooled tolerance:
-    only the class's own density fails this reference.
+    """A rare class is judged against its own density, not the dense class's, as its tolerance.
+
+    Class 2 carries 10 objects an image and is over-counted by 2 on every one of them, a 20%
+    systematic miscount of that class. Class 1 carries 250 an image with no bias, so the pooled
+    per-image density is 260: the pooled check does not fail, the rare class's tolerance is under a
+    tenth of the pooled one, and the per-class check fails.
     """
     _conf, evidence, failures = _criterion(spurious=True)
     rare = evidence["per_class"]["2"]
@@ -116,10 +111,7 @@ def test_a_rare_class_is_not_granted_the_dense_class_density_as_its_tolerance():
 
 
 def test_the_same_dense_and_rare_class_pairing_passes_when_every_class_is_honest():
-    """The companion obligation: the same two-class density profile, counted correctly, passes. A
-    per-class tolerance that failed a rare class merely for being rare would block every
-    legitimate multi-class reference.
-    """
+    """A dense and rare class pairing counted correctly passes, both classes in the evidence."""
     _conf, evidence, failures = _criterion(spurious=False)
 
     assert set(evidence["per_class"]) == {"1", "2"}

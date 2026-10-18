@@ -1,6 +1,8 @@
-"""``calibrate_physical_scale``: a per-pixel scale derived on a selection's calibration side from
-reference objects of known physical length, checked against its holdout side, and recorded as an
-assessment a dimensional delivery names.
+"""Tests of ``calibrate_physical_scale``.
+
+A per-pixel scale is derived on a selection's calibration side from reference objects of known
+physical length, checked against its holdout side, and recorded as an assessment a dimensional
+delivery names.
 
 A reference's pixel extent is the principal-axis extent of its own polygon, so orientation does
 not move it; a box, two references in one image, a row-less reference, an unauthored tolerance and
@@ -38,7 +40,7 @@ def _rect(
     angle_deg: float = 0.0,
     center: tuple[float, float] = (60.0, 60.0),
 ) -> list[tuple[float, float]]:
-    """Four corners of a length x width rectangle, rotated ``angle_deg`` about its own center."""
+    """Return the corners of a length x width rectangle rotated ``angle_deg`` about its center."""
     hl, hw = length_px / 2.0, width_px / 2.0
     a = math.radians(angle_deg)
     cx, cy = center
@@ -59,9 +61,10 @@ def _reference(
     unit: str = "mm",
     angles: dict[int, float] | None = None,
 ) -> tuple[Path, Path]:
-    """``n`` reference frames of one 100 px bar each in a registered dataset, their breeder CSV
-    (each physical extent ``extents_mm[i]``, else the fixed scale's), and a selection drawn over
-    them; ``(selection_dir, reference_csv)``.
+    """Return ``(selection_dir, reference_csv)`` over ``n`` frames of one 100 px bar each.
+
+    The frames sit in a registered dataset, beside their breeder CSV (each physical extent
+    ``extents_mm[i]``, else the fixed scale's) and a selection drawn over them.
     """
     from PIL import Image
 
@@ -159,8 +162,9 @@ def _calibrate(
 def test_the_whole_chain_delivers_a_dimensional_area_resting_on_the_scale(
     tmp_path,
 ):
-    """A passing scale assessment covering the delivered capture answers for an mm2 area: the
-    delivery names it, and the same delivery with no scale named refuses.
+    """A passing scale assessment covering the delivered capture answers for an mm2 area.
+
+    The delivery names it, and the same delivery with no scale named refuses.
     """
     pytest.importorskip("torch")
     from tcip_mcp.buckets import read_bucket
@@ -245,9 +249,7 @@ def test_a_bar_annotated_at_45_degrees_implies_the_same_scale_as_an_axis_aligned
 def test_a_box_reference_refuses_rather_than_reading_a_projected_extent(
     tmp_path,
 ):
-    """A box's long side is the object's projected extent, orientation-dependent: the
-    assessment refuses it outright.
-    """
+    """The scale assessment refuses a box reference, naming the polygon a reference needs."""
     _author_tolerance(tmp_path)
     selection, csv_path = _reference(tmp_path)
     for image in (tmp_path / "ds" / "images" / DATE).glob("*.png"):
@@ -342,7 +344,7 @@ def test_too_few_references_on_a_side_fail_as_unreplicated(tmp_path):
 def test_a_reference_set_disagreeing_with_itself_beyond_the_tolerance_fails(
     tmp_path,
 ):
-    """Implied scales of 0.05 to 0.5 mm/px disagree across any split by far more than 5%."""
+    """A reference set whose implied scales span 0.05 to 0.5 mm/px fails the assessment."""
     _author_tolerance(tmp_path, tolerance_frac=0.05)
     selection, csv_path = _reference(
         tmp_path, extents_mm=[5.0, 10.0, 15.0, 50.0, 5.0, 10.0, 15.0, 50.0]
@@ -356,8 +358,10 @@ def test_a_reference_set_disagreeing_with_itself_beyond_the_tolerance_fails(
 def test_a_holdout_image_identical_to_a_calibration_image_fails_disjointness(
     tmp_path,
 ):
-    """The scale is checked on images it was not derived from: a holdout frame byte for byte a
-    calibration frame shares its source digest, and the assessment fails naming it.
+    """A holdout image identical to a calibration image fails disjointness, named.
+
+    The scale is checked on images it was not derived from: a holdout frame byte for byte a
+    calibration frame shares its source digest.
     """
     from tcip_mcp.pipelines.data.selection import read_selection
 
@@ -418,9 +422,10 @@ def test_a_malformed_reference_csv_refuses_naming_its_line(
 
 
 def test_the_scale_is_measured_from_the_retained_table(tmp_path, monkeypatch):
-    """The breeder's table is read once, that read is retained, and the scale is measured from
-    the retained copy: a table that changes as the assessment opens is measured as it was read
-    and retained, and a change after the assessment is a moved reference.
+    """The scale is measured from the retained copy of the breeder's table.
+
+    A table that changes as the assessment reads it is measured as it was read and retained, and
+    a change after the assessment is reported as a moved reference.
     """
     from tcip_mcp import assessment as module
     from tcip_mcp.assessment import assessment_dir, read_assessment

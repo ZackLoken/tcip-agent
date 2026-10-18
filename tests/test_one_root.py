@@ -1,11 +1,12 @@
-"""One project per process, named where the process starts: the MCP server acts on the project
-it was started for, the web backend on the project it has open, and neither ever reads the
-other's choice or leaves one behind in the environment.
+"""One project per process, named where the process starts.
+
+The MCP server acts on the project it was started for, the web backend on the project it has
+open, and neither ever reads the other's choice or leaves one behind in the environment.
 
 The MCP cases run the real ``tcip-pipeline`` server in memory through a handshake
 (``tests.test_agent_identity_records.results_through_handshake``); the backend cases go through
-the app's own open route. Every project is made through the platform's own creation door under
-this test's workspace (``tmp_path.parent``).
+the app's own open route. Projects are made through the platform's own creation door under the
+workspace ``tmp_path.parent``.
 """
 
 from __future__ import annotations
@@ -55,9 +56,11 @@ def test_the_server_acts_on_the_project_it_was_started_for_while_the_backend_ope
 
 
 def test_a_tool_input_spelled_like_the_bound_project_stays_the_callers(bound):
-    """The server binds its project context, never a tool's own input that shares a name with
-    it: ``write_retrospective``'s ``project_id`` names the retrospective, is offered to the
-    client, and a call through the server writes under the caller's name.
+    """A tool input spelled like the bound project stays the caller's.
+
+    The server binds its project context, not a tool's own input that shares a name with it:
+    ``write_retrospective``'s ``project_id`` names the retrospective, is offered to the client,
+    and a call through the server writes under the caller's name.
     """
     from tcip_mcp.server import build_server
     from tcip_mcp.tools.meta_tools import read_retrospective

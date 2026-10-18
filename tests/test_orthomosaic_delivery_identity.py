@@ -1,11 +1,8 @@
-"""A per-plant orthomosaic delivery resolves detections only through the raster its bucket was
-produced on.
+"""A per-plant orthomosaic delivery checks its raster against the identity its bucket records.
 
-The counts in the delivered CSV are attributed to plants by the raster's own georeferencing, so
-the raster is part of the measurement: a pixel-identical copy at a moved tiepoint re-attributes
-every count to a neighboring plant, and a far-shifted one reads every plant as an explicit zero.
-The bucket record names the raster and its identity; a raster changed on disk since publication
-refuses.
+The counts in the delivered CSV are attributed to plants by the raster's own georeferencing. The
+bucket record names the raster and its identity: a raster whose tiepoint moved or whose content
+changed since publication refuses, and the unchanged raster passes the check.
 """
 
 from __future__ import annotations
@@ -35,7 +32,7 @@ pytestmark = pytest.mark.usefixtures("confirmed_count_aggregate")
 
 
 def _produced_bucket(tmp_path: Path, raster_path: Path) -> str:
-    """A bucket from the real producer: run_inference's whole-raster regime; its name."""
+    """Produce a bucket through run_inference's whole-raster regime and return its name."""
     from tcip_mcp.tools.inference_tools import run_inference
     from tests.test_orthomosaic_tools import RASTER_PASS
 
@@ -70,8 +67,10 @@ def _delivered(tmp_path: Path, bucket: str, raster_path: Path) -> dict:
 
 
 def test_a_raster_whose_tiepoint_moved_since_publication_refuses(tmp_path):
-    """Identical pixels at a moved tiepoint resolve every detection onto a different plant, so the
-    raster is refused rather than silently believed: the content half alone cannot see this.
+    """A raster whose tiepoint moved since publication refuses.
+
+    Identical pixels at a moved tiepoint refuse as a georeferencing mismatch naming the tiepoint,
+    and no CSV is written.
     """
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path)
@@ -128,8 +127,10 @@ def test_a_bucket_of_per_image_predictions_refuses_naming_what_it_is(tmp_path):
 def test_the_raster_it_was_produced_on_passes_the_identity_check_and_meets_the_gate(
     tmp_path,
 ):
-    """The producer's own recorded identity admits the unchanged raster; this bucket was never
-    assessed and this door takes no acknowledgment, so the refusal named is the gate's.
+    """The raster a bucket was produced on passes the identity check and meets the gate.
+
+    The producer's own recorded identity admits the unchanged raster; with no assessment behind
+    the bucket, the delivery refuses saying no assessment answers, naming no mismatch.
     """
     from tcip_mcp.buckets import read_bucket
 

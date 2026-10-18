@@ -1,7 +1,8 @@
-"""The conditions of the count criterion an assessment judges a detection reference by: the
-localization-quality and dispersion floors, reference sufficiency and the equivalence test,
-pick-then-label from the trait's objective, exact-conf holdout evaluation (not a nearest-neighbor
-snap), cap-saturation evidence (never a failure), and the population the bias is measured over.
+"""Tests of the count criterion an assessment judges a detection reference by.
+
+Covered: the localization-quality and dispersion floors, reference sufficiency and the
+equivalence test, pick-then-label from the trait's objective, exact-conf holdout evaluation,
+cap-saturation evidence that adds no failure, and the population the bias is measured over.
 """
 
 from __future__ import annotations
@@ -43,7 +44,7 @@ def _criterion(
     equivalence_z=EQUIVALENCE_Z,
     dispersion_quantile=DISPERSION_QUANTILE,
 ):
-    """``count_criterion`` staged at ``floor``: ``(conf, evidence, failures)``."""
+    """Run ``count_criterion`` staged at ``floor``; return ``(conf, evidence, failures)``."""
     return count_criterion(
         cal,
         hold,
@@ -59,10 +60,9 @@ def _criterion(
 
 
 def _cal_picks_conf_point_nine():
-    """20-image dense calibration reference whose count-unbiased pick is exactly 0.9 (one low-conf
-    spurious detection per image, filtered out once conf crosses its 0.05 score). The holdouts
-    below carry a sparse score set that excludes 0.9, so the nearest point of the holdout's own
-    grid is a genuinely different threshold.
+    """Return a 20-image dense calibration reference whose count-unbiased pick is exactly 0.9.
+
+    Each image carries one low-conf spurious detection, scoring 0.05.
     """
     n, obj = 20, 80
     return dense_records(
@@ -77,9 +77,7 @@ def _cal_picks_conf_point_nine():
 
 
 def _nearest_neighbor_bias_comparator(holdout_records, tolerance, conf):
-    """The curve entry nearest ``conf`` on the holdout's own auto-built grid, not an exact
-    evaluation at ``conf`` itself.
-    """
+    """Return the curve entry nearest ``conf`` on the holdout's own auto-built grid."""
     from tcip_mcp.pipelines.training.evaluation import (
         derive_operating_point_curve,
     )
@@ -93,7 +91,9 @@ def _nearest_neighbor_bias_comparator(holdout_records, tolerance, conf):
 
 
 def test_exact_conf_eval_catches_a_catastrophic_bias_a_nearest_neighbor_comparator_misses():
-    """Holdout detections all score 0.05 with zero false positives: evaluated exactly at 0.9 every
+    """Exact-conf evaluation catches a catastrophic bias a nearest-neighbor comparator misses.
+
+    Holdout detections all score 0.05 with zero false positives: evaluated exactly at 0.9 every
     detection is filtered out (bias -80/image), while the comparator's nearest grid point, 0.05,
     reads a perfect 0.0.
     """
@@ -126,8 +126,10 @@ def test_exact_conf_eval_catches_a_catastrophic_bias_a_nearest_neighbor_comparat
 
 
 def test_exact_conf_eval_admits_a_reference_a_nearest_neighbor_comparator_would_fail():
-    """True matches score 0.99 and false positives 0.89: at exactly 0.9 the false positives drop
-    and the bias is zero, while the comparator's nearest point, 0.89, reads +2.0/image.
+    """Exact-conf evaluation admits a reference a nearest-neighbor comparator reads as biased.
+
+    True matches score 0.99 and false positives 0.89: at exactly 0.9 the false positives drop and
+    the bias is zero, while the comparator's nearest point, 0.89, reads +2.0/image.
     """
     from tcip_mcp.pipelines.training.evaluation import gt_class_avg_size
 
@@ -161,10 +163,10 @@ def test_exact_conf_eval_admits_a_reference_a_nearest_neighbor_comparator_would_
 def _tp_zero_bias_zero_records(
     id_prefix: str, *, n_images: int = 10, objects_per_image: int = 50
 ):
-    """Every image: N GT on a 40 px grid, N detections each 2000 px right of its GT, past the
-    grid's far edge, so no ground truth lies within the center-match tolerance the grid's own
-    spacing derives (20 px at 20 px objects): count bias is exactly 0 (fp == fn == N) while not
-    one detection matches (tp=0).
+    """Return ``n_images`` records of ``objects_per_image`` GT boxes and as many detections.
+
+    The GT boxes are 20 px, laid on a 40 px grid, and each detection, scored 0.9, sits 2000 px
+    right of its GT box.
     """
     records = []
     cols = int(objects_per_image**0.5) + 2
@@ -203,8 +205,9 @@ def test_tp_zero_bias_zero_holdout_fails_the_localization_floor():
 
 
 def _one_bad_image():
-    """Ten images, one dropping 10 objects and none elsewhere: ``(cal, hold, entry)``, the entry's
-    dispersion tolerance 0.5 and its bias tolerance loose.
+    """Return ``(cal, hold, entry)`` over ten images, one dropping 10 objects and none elsewhere.
+
+    The entry's dispersion tolerance is 0.5 and its bias tolerance loose.
     """
     n_images, objects_per_image = 10, 50
     cal = dense_records(
@@ -231,8 +234,10 @@ def _one_bad_image():
 
 
 def test_an_authored_dispersion_tolerance_fails_one_bad_image_among_many():
-    """The ninetieth-percentile per-image error (1.0) exceeds an authored 0.5 even though the mean
-    bias is small.
+    """An authored dispersion tolerance of 0.5 fails one bad image among many.
+
+    The ninetieth-percentile per-image error (1.0) exceeds the tolerance even though the mean bias
+    is small.
     """
     cal, hold, strict = _one_bad_image()
 
@@ -245,9 +250,10 @@ def test_an_authored_dispersion_tolerance_fails_one_bad_image_among_many():
 
 
 def test_the_dispersion_check_reads_the_quantile_the_assessment_states():
-    """The per-image error is taken at the stated quantile, numpy's own over the per-image errors,
-    and the curve records that quantile: at the median the one bad image no longer reaches the
-    tolerance.
+    """The dispersion check reads the per-image error at the quantile the assessment states.
+
+    The error is numpy's own quantile over the per-image errors, and the curve records that
+    quantile: at the median the one bad image does not reach the tolerance.
     """
     import numpy as np
 
@@ -314,8 +320,10 @@ def test_n_equals_2_holdout_with_real_variance_fails_equivalence_not_just_degene
 
 
 def test_padding_with_empty_records_cannot_dilute_the_equivalence_test():
-    """Eight empty records beside a real n=2 disagreement change no verdict: the test measures over
-    the images that carry something, and the statistics are never recomputed on a shrunk sample.
+    """Eight empty records beside a real n=2 disagreement change no equivalence verdict.
+
+    The evidence records ten images with two present, and the padded run fails exactly as the
+    unpadded one does, on the bias tolerance.
     """
     loosened = fx.with_fields(ENTRY, count_bias_tolerance_frac=1.0)
     hold_real = _records("h", shift=3.0)
@@ -350,7 +358,7 @@ def test_padding_with_empty_records_cannot_dilute_the_equivalence_test():
 
 @pytest.mark.parametrize("objective", ["detection_f1", "presence"])
 def test_an_f1_objective_picks_f1_max_and_labels_it_accordingly(objective):
-    """Presence deliberately shares the F1-max picker and label with detection F1."""
+    """The detection F1 and presence objectives each pick the F1-max conf under its label."""
     conf, evidence, _failures = _criterion(
         _records(),
         _records("h", shift=3.0),
@@ -388,9 +396,9 @@ def test_cap_saturation_is_surfaced_but_never_fails_the_criterion():
 def _rotating_noise_pattern(
     n: int, *, low: int = 1, high: int = 5, offset: int = 13
 ) -> tuple[list[int], list[int]]:
-    """``n`` per-image miss counts cycling through ``[low, high]``, and a false-positive pattern
-    that is a rotation of the same values at the same score, so the mean bias is exactly zero while
-    real per-image dispersion remains.
+    """Return ``n`` per-image miss counts and the same counts rotated by ``offset`` as FP counts.
+
+    Image ``i`` misses ``low + (3 * i + 1) % (high - low + 1)``.
     """
     span = high - low + 1
     miss = [low + (i * 3 + 1) % span for i in range(n)]
@@ -433,8 +441,10 @@ def test_a_realistic_noisy_detector_passes_at_n_equals_40():
 
 
 def test_the_equivalence_test_runs_at_the_multiplier_the_assessment_states():
-    """The same noisy detector at n=40 (bias 0, standard error about 0.32 against a tolerance of
-    1.0) passes at 1.645 standard errors and fails at 4, and the evidence records the multiplier
+    """The equivalence test runs at the standard-error multiplier the assessment states.
+
+    The same noisy detector at n=40 (bias 0, standard error about 0.32 against a tolerance of 1.0)
+    passes at 1.645 standard errors and fails at 4, and the evidence records the multiplier
     applied.
     """
     miss, fp = _rotating_noise_pattern(40)
@@ -467,8 +477,10 @@ def test_the_same_noisy_detector_on_ten_images_fails_equivalence():
 
 
 def test_the_same_noise_crosses_from_fail_to_pass_as_density_rises():
-    """At a fixed n=40 the identical noise fails at 30 objects/image (tolerance 0.30) and passes at
-    100 (tolerance 1.00): the disclosed consequence of a relative tolerance.
+    """The same noise crosses from fail to pass as object density rises.
+
+    At a fixed n=40 the identical noise fails at 30 objects/image (tolerance 0.30) and passes at
+    100 (tolerance 1.00), its bias spread equal at both densities.
     """
     miss, fp = _rotating_noise_pattern(40)
     _c, sparse, sparse_failures = _noisy(40, 30, miss, fp)
@@ -481,8 +493,10 @@ def test_the_same_noise_crosses_from_fail_to_pass_as_density_rises():
 
 
 def test_a_dense_realistic_reference_passes_with_every_condition_applied():
-    """Perfect recall and a varying handful of low-conf spurious detections per image, all filtered
-    at the count-unbiased conf.
+    """A dense realistic reference passes the count criterion.
+
+    The reference has perfect recall and a varying handful of low-conf spurious detections per
+    image, and the criterion reports no failure.
     """
     n = 24
     fp = [
@@ -545,8 +559,10 @@ def _mixed_reference(
     fp_per_loaded: int,
     shift: float = 0.0,
 ) -> list[dict]:
-    """``n_loaded`` dense images carrying the same systematic over-count plus ``n_negative``
-    confirmed negatives (no GT, no detections).
+    """Return ``dense_records`` of ``n_loaded`` images, then of ``n_negative`` images of no objects.
+
+    The loaded images pass ``objects_per_image``, ``shift``, no misses and ``fp_per_loaded`` extra
+    detections per image, all scored 0.9.
     """
     loaded = dense_records(
         n_images=n_loaded,

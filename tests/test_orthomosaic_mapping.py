@@ -1,5 +1,7 @@
-"""Orthomosaic georeferencing, per-detection plant assignment, and the tiled inference pass that
-sources its tiles from a windowed raster read.
+"""Tests of orthomosaic georeferencing, plant assignment and the windowed tiled pass.
+
+Covered: orthomosaic georeferencing, per-detection plant assignment, and the tiled inference pass
+that sources its tiles from a windowed raster read.
 """
 
 from __future__ import annotations
@@ -60,9 +62,10 @@ def test_pixel_to_native_x_increases_with_pixel_column(tmp_path: Path) -> None:
 
 
 def test_pixel_to_native_y_flips_with_pixel_row(tmp_path: Path) -> None:
-    """A pixel further down the raster (larger row) must resolve to a *smaller* northing:
-    GeoTIFF rows increase downward while northing increases upward. Two pixels on the same
-    column but different rows must disagree in the direction a symmetric bug wouldn't catch.
+    """A pixel further down the raster (larger row) resolves to a *smaller* northing.
+
+    GeoTIFF rows increase downward while northing increases upward: a pixel 20 rows down lands 20
+    pixel scales south of the tiepoint.
     """
     path = tmp_path / "mosaic.tif"
     _write_geotiff(path)
@@ -160,9 +163,10 @@ def test_pixel_to_wgs84_matches_independent_pyproj_transform(
 def test_pixel_to_wgs84_central_meridian_known_reference(
     tmp_path: Path,
 ) -> None:
-    """UTM zone 15N's central meridian is exactly -93 degrees longitude; a pixel resolving to
-    native easting 500000 (the zone's false easting) must land on that meridian regardless of
-    northing, a hand-verifiable check independent of trusting pyproj's own round-trip.
+    """A pixel at UTM zone 15N's false easting lands on the -93 degree central meridian.
+
+    UTM zone 15N's central meridian is exactly -93 degrees longitude; the tiepoint pixel, at native
+    easting 500000 (the zone's false easting), lands on it.
     """
     path = tmp_path / "mosaic.tif"
     _write_geotiff(path)
@@ -179,8 +183,9 @@ def test_pixel_to_wgs84_central_meridian_known_reference(
 def test_wgs84_to_pixel_matches_independent_pyproj_inverse_at_asymmetric_pixel(
     tmp_path: Path,
 ) -> None:
-    """An asymmetric pixel (distinct nonzero x and y, off the tiepoint): the round-trip and an
-    independently-built pyproj inverse transform must both land back on it.
+    """The round-trip and an independent pyproj inverse both land back on an asymmetric pixel.
+
+    The pixel has distinct nonzero x and y and sits off the tiepoint.
     """
     import pyproj
 
@@ -286,9 +291,9 @@ def test_plants_in_frame_partitions_by_the_rasters_own_recorded_dimensions(
 def test_plants_in_frame_edge_pixel_at_width_or_height_is_outside(
     tmp_path: Path,
 ) -> None:
-    """The half-open test: a plant projecting to exactly the raster's own width or height row or
-    column is outside, since a valid pixel index runs only 0..width-1 / 0..height-1, on both
-    axes.
+    """A plant projecting to exactly the raster's width or height is outside the frame.
+
+    The frame is half-open: a valid pixel index runs only 0..width-1 / 0..height-1, on both axes.
     """
     from tcip_mcp.pipelines.postprocessing.plant_mapping import PlantRecord
 
@@ -342,9 +347,11 @@ TILE = 32
 
 
 def _pass(tmp_path: Path, ckpt: str, **stated: Any):
-    """The pass the registered ``ckpt`` runs at this module's lattice: ``TILE`` edge, 0.2
-    overlap, NMS at 0.3, every detection kept up to the checkpoint's density, an instance
-    segmentation checkpoint's masks cut at the sample threshold, with ``stated`` over those.
+    """Prepare the pass the registered ``ckpt`` runs at this module's lattice.
+
+    The lattice is a ``TILE`` edge, 0.2 overlap, NMS at 0.3 and ``conf`` 0.0, an instance
+    segmentation checkpoint's masks cut at the sample threshold, with ``stated`` merged over
+    those.
     """
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.execution import Stated, prepare
@@ -371,16 +378,14 @@ def _pass(tmp_path: Path, ckpt: str, **stated: Any):
 
 
 def _bare_execution():
-    """A tiled record at this module's lattice for a bare predictor that refuses or fails before
-    any forward pass, so no checkpoint stands behind it.
-    """
+    """Return a tiled record at this module's lattice with no checkpoint behind it."""
     from tests._verified_checkpoint_fixtures import tiled_record
 
     return tiled_record(tile_size=TILE, overlap=0.2, conf=0.0)
 
 
 def _sliced(predictor, execution, source, **kwargs) -> dict:
-    """``predict_sliced`` under ``execution``, eight tiles a batch."""
+    """Run ``predict_sliced`` under ``execution``, eight tiles a batch."""
     return predictor.predict_sliced(
         source, execution=execution, tile_batch_size=8, **kwargs
     )
@@ -394,10 +399,10 @@ def _windowed_multiband_tiff(
     channels: int = 4,
     rowsperstrip: int = 12,
 ) -> np.ndarray:
-    """A small multi-band raster with real pixel content (not all-zero, so a from-scratch
-    detector's convolutions see something), decodable by both ``load_image`` (the full-array
-    path) and the windowed raster layer (``open_raster``): strip-based, contiguous samples, no
-    compression.
+    """Write a seeded ``(height, width, channels)`` uint8 array to ``path``; return the array.
+
+    The array is drawn from ``default_rng(0)`` and written by ``tifffile.imwrite`` at
+    ``rowsperstrip``.
     """
     rng = np.random.default_rng(0)
     arr = rng.integers(0, 255, size=(height, width, channels), dtype=np.uint8)
@@ -408,9 +413,10 @@ def _windowed_multiband_tiff(
 def _bespoke_detection_checkpoint(
     tmp_path: Path, raster_path: Path, *, in_chans: int
 ) -> str:
-    """A real bespoke detector checkpoint for a raster with ``in_chans`` bands, normalizing by the
-    band statistics derived from ``raster_path`` itself (``derivations.band_normalization_stats``),
-    mirroring how a real multispectral model_source is built, not a pinned placeholder.
+    """Return a real bespoke detector checkpoint for a raster with ``in_chans`` bands.
+
+    It normalizes by the band statistics derived from ``raster_path`` itself
+    (``derivations.band_normalization_stats``).
     """
     from tcip_mcp.pipelines.derivations import band_normalization_stats
 
@@ -434,10 +440,11 @@ def _bespoke_detection_checkpoint(
 def _raster_checkpoint(
     tmp_path: Path, model_source: dict, channels: int, **data
 ) -> str:
-    """The checkpoint a run under ``tmp_path`` of ``model_source`` completed over two labeled
-    ``channels``-band rasters of its own, ``data``'s keys laid over its data section; registered
-    by completing. The frames are not square, so the run records no frame edge a stated tile
-    edge could contradict.
+    """Return the checkpoint a run of ``model_source`` completed over two labeled rasters.
+
+    The run is under ``tmp_path``, over two ``_windowed_multiband_tiff`` rasters written at
+    ``height=48, width=64`` and ``channels``, ``data``'s keys laid over its data section; the
+    checkpoint is registered by completing.
     """
     from tcip_annotation.state import Annotation, BBox, Polygon
     from tests._producer_fixtures import label_image
@@ -479,9 +486,10 @@ def _raster_checkpoint(
 def test_predict_sliced_windowed_source_matches_full_array_predict_sliced(
     tmp_path: Path,
 ) -> None:
-    """The load-bearing correctness check: the windowed-read slicing path and the full-array
-    ``predict_sliced`` path must produce bit-identical full-mosaic-pixel-space
-    detections for the same checkpoint and the same raster, not merely both run without error.
+    """The windowed and full-array ``predict_sliced`` paths agree on one raster's detections.
+
+    For one checkpoint and one raster, both report the same frame size, tile count (more than one)
+    and labels, and their full-mosaic boxes and scores agree within float tolerance.
     """
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
@@ -521,7 +529,7 @@ def test_predict_sliced_windowed_source_matches_full_array_predict_sliced(
 def _bespoke_instance_seg_checkpoint(
     tmp_path: Path, *, in_chans: int = 3
 ) -> str:
-    """A real bespoke Mask R-CNN checkpoint normalizing by its own frames' statistics."""
+    """Return a real bespoke Mask R-CNN checkpoint normalizing by its own frames' statistics."""
     return _raster_checkpoint(
         tmp_path,
         {
@@ -537,9 +545,10 @@ def _bespoke_instance_seg_checkpoint(
 def test_predict_sliced_windowed_and_full_array_sources_produce_matching_masks(
     tmp_path: Path,
 ) -> None:
-    """Both source kinds carry masks for a multi-slice instance_seg case, in the merged-polygon
-    shape documented on ``predict_sliced``, and the windowed path agrees with the full-array path
-    detection-for-detection, masks included.
+    """Windowed and full-array sources produce matching masks for a multi-slice instance_seg case.
+
+    Both source kinds carry masks, each entry holding only a segmentation inside the frame, and
+    the windowed masks equal the full-array ones.
     """
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
@@ -579,9 +588,7 @@ def test_predict_sliced_windowed_and_full_array_sources_produce_matching_masks(
 def test_a_windowed_pass_stating_no_masks_carries_no_masks_key(
     tmp_path: Path,
 ) -> None:
-    """The boxes-only opt-out still works on the windowed path: no ``masks`` key at all, not an
-    empty one, mirroring ``predict_sliced``'s own opt-out contract.
-    """
+    """A windowed pass stating no masks carries no ``masks`` key at all, not an empty one."""
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
 
@@ -599,8 +606,9 @@ def test_a_windowed_pass_stating_no_masks_carries_no_masks_key(
 def test_predict_sliced_windowed_source_mask_polygon_exports_where_it_sits(
     tmp_path: Path,
 ) -> None:
-    """A sliced instance_seg detection's merged polygon round-trips through
-    ``encode_predictions`` to a polygon at the same full-mosaic pixels.
+    """A sliced instance_seg detection's merged polygon exports at the same full-mosaic pixels.
+
+    The polygon round-trips through ``encode_predictions``.
     """
     pytest.importorskip("torch")
     pytest.importorskip("torchvision")
@@ -639,9 +647,9 @@ def test_predict_sliced_windowed_source_mask_polygon_exports_where_it_sits(
 
 
 def test_predict_sliced_windowed_source_channel_mismatch_refuses() -> None:
-    """A model's declared ``in_chans`` disagreeing with the raster's own band count refuses
-    before any tile is read, rather than truncating or padding the bands the model was trained
-    on.
+    """A model's ``in_chans`` disagreeing with the raster's band count refuses before any read.
+
+    The reader fails any read, so the refusal comes before a tile is read.
     """
     pytest.importorskip("torch")
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor
@@ -665,10 +673,10 @@ def test_predict_sliced_windowed_source_channel_mismatch_refuses() -> None:
 def test_windowed_predict_sliced_reaches_real_slicing_for_instance_seg_with_and_without_masks() -> (
     None
 ):
-    """instance_seg masks thread through the windowed-read path the same as the full-array
-    ``predict_sliced`` path: neither a record collecting masks nor one collecting none (the
-    boxes-only opt-out) refuses outright, both reach the real slice loop, which then fails on the
-    fake reader's own ``AssertionError`` rather than anything raised by ``predict_sliced`` itself.
+    """A windowed instance_seg pass raises ``AssertionError`` with masks collected and with none.
+
+    The fake reader raises ``AssertionError`` on any read; neither record refuses with another
+    error first.
     """
     from dataclasses import replace
 
@@ -698,9 +706,9 @@ def test_windowed_predict_sliced_reaches_real_slicing_for_instance_seg_with_and_
 
 
 def test_predict_sliced_windowed_source_refuses_non_detection_task() -> None:
-    """Unlike a decoded source, there is no untiled ``predict()`` fallback for a windowed
-    reader (the whole point is the raster can't be decoded whole), so a non-detection task must
-    refuse outright rather than attempt one.
+    """A windowed source refuses a non-detection task outright.
+
+    The fake reader fails any read, so the refusal comes before a tile is read.
     """
     pytest.importorskip("torch")
     from tcip_mcp.pipelines.inference.generic_predictor import GenericPredictor

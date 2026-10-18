@@ -1,8 +1,8 @@
 """Tests for the canonical phenology measurement module.
 
 The positive-state fraction is the share of a plant's detected objects that are in the trait's
-positive/measured state, where that state is a classifier call (never a geometric proxy). These
-tests pin the authoritative trait definitions:
+positive/measured state, where that state is a classifier call. These tests pin the authoritative
+trait definitions:
 
     bud_05/50/95per_date  = dates the open fraction crosses 5/50/95%
     bud_majority_date     = date most buds are open (the majority-label alias) = the 95% crossing
@@ -38,9 +38,7 @@ def _registry(*attributes: cr.Attribute) -> cr.SubjectRegistry:
 
 
 def _scope(root: Path, *attributes: cr.Attribute) -> ClassScope:
-    """The class space the admission reads for ``bud`` over a dataset at ``root`` declaring
-    ``attributes`` on it.
-    """
+    """Return the registry scope of ``bud`` over a dataset at ``root`` declaring ``attributes``."""
     from tcip_mcp.pipelines.data.label_queries import registry_scope
     from tests._producer_fixtures import registry_over
 
@@ -49,7 +47,7 @@ def _scope(root: Path, *attributes: cr.Attribute) -> ClassScope:
 
 
 def _document(project: Path, annotations: list[Annotation]):
-    """``annotations`` written as one image's prediction document under ``project``; its key."""
+    """Write ``annotations`` as an image's prediction document under ``project``; return its key."""
     from tcip_mcp.dataset_layout import prediction_key
 
     key = prediction_key(project, "m/2024-05-01", "img")
@@ -64,10 +62,11 @@ def _bucket(
     *,
     attributed: bool = True,
 ):
-    """A bucket published for ``date`` holding one document per stem of ``documents``, each
-    detection carrying its value under :data:`OPENING`, from a checkpoint whose scope declares it,
-    or none from one whose scope declares no attribute (``_chain_fixtures.published``). With no
-    stem named it holds one image of no stem a test maps, since a publication holds a document.
+    """Publish a bucket for ``date`` holding one document per stem of ``documents``; return it.
+
+    Each detection carries its value under :data:`OPENING`, from a checkpoint whose scope declares
+    it, or none from one whose scope declares no attribute (``_chain_fixtures.published``). With
+    no stem named it holds one image named ``unmapped``.
     """
     pytest.importorskip("torch")
     from tests._chain_fixtures import predicted, published
@@ -200,8 +199,9 @@ def test_plant_milestones_returns_four_dates_and_bounds():
 
 
 def test_the_milestones_and_their_schema_restate_no_crossing_rule():
-    """The rule a crossing is read under is the trait revision's, which every delivered CSV pins
-    by its revision columns: neither a plant's milestones nor the schema restates it.
+    """Neither a plant's milestones nor the CSV schema restates the crossing rule.
+
+    The rule a crossing is read under is the trait revision's.
     """
     ms = phenology.plant_milestones(
         [("2024-05-01", 0.0), ("2024-05-09", 1.0)], BUD_OPENING
@@ -229,9 +229,10 @@ def test_milestone_date_columns_is_proper_subset_of_full_columns():
 
 
 def test_every_milestone_bound_and_the_observed_date_count_are_delivered_columns():
-    """``plant_milestones`` emits a bound beside each milestone date and each row carries
-    ``n_observed_dates``; the writer's ``extrasaction="ignore"`` would drop any the schema did not
-    name, and a left-censored crossing would then ship indistinguishable from a measured one.
+    """Every milestone bound and the observed-date count are delivered columns.
+
+    ``plant_milestones`` emits a bound beside each milestone date, and the CSV schema names each
+    date, each bound and ``n_observed_dates``.
     """
     cols = phenology.phenology_csv_columns(BUD_OPENING)
     ms = phenology.plant_milestones(
@@ -467,9 +468,10 @@ def test_per_plant_phenology_multi_date_and_excludes_plant_with_one_bad_date(
 def test_a_plant_the_mapping_captured_on_no_image_of_a_date_is_incomplete_on_it(
     tmp_path,
 ):
-    """Every plant has a point on every mapped date: a plant captured on the first date only
-    carries an imageless second date, counted against its completeness, so under the rule its
-    milestones are withheld rather than computed from the date it happened to be seen on.
+    """A plant the mapping captured on no image of a date is incomplete on that date.
+
+    A plant captured on the first date only carries an imageless second date, counted against its
+    completeness, and its milestones are withheld; a plant captured on both dates is complete.
     """
     buckets = {
         "2024-05-01": _bucket(
@@ -583,10 +585,10 @@ _SPEC_SHAPES = [
     ids=lambda s: f"{s.name}-{s.majority_milestone or 'nomajority'}",
 )
 def test_phenology_csv_columns_name_no_column_without_a_producer(spec):
-    """Every trait-prefixed column the schema names must be filled by a producer, or the delivered
-    CSV carries a permanently-blank column. The schema and the producer share
-    ``_milestone_columns``, so this holds by construction for any spec shape, including one whose
-    ``majority_milestone`` is unset (unlike BUD_OPENING's, which is always set).
+    """Every trait-prefixed column the CSV schema names is filled by a producer.
+
+    The parametrized spec shapes include one whose ``majority_milestone`` is unset, and no
+    computed column is missing from the schema.
     """
     series = [("2026-02-01", 0.0), ("2026-02-10", 0.5), ("2026-02-20", 1.0)]
     produced = set(phenology.plant_milestones(series, spec))
@@ -602,8 +604,9 @@ def test_phenology_csv_columns_name_no_column_without_a_producer(spec):
 def test_excluded_plant_carries_the_same_milestone_keys_as_an_included_one(
     tmp_path,
 ):
-    """A plant excluded from milestone computation must carry the same row shape as an included
-    one, including each milestone date's ``*_date_bound`` companion, not just
+    """An excluded plant carries the same milestone keys as an included one.
+
+    The shape includes each milestone date's ``*_date_bound`` key, not just
     ``milestone_date_columns``'s bare dates.
     """
     buckets = {
@@ -640,9 +643,10 @@ def test_excluded_plant_carries_the_same_milestone_keys_as_an_included_one(
 
 
 def test_per_plant_series_counts_the_images_the_mapping_names(tmp_path):
-    """``n_images`` is derived from every image the mapping names for a (plant, date), not asserted
-    by a consumer, so a breeder auditing coverage can tell a well-sampled plant from a single-photo
-    one.
+    """``n_images`` counts every image the mapping names for a (plant, date).
+
+    Four images are named for one plant on one date, one with no prediction document: the count
+    is 4, beside six detections, three positive and one missing image.
     """
     buckets = {
         "2026-02-11": _bucket(
@@ -668,9 +672,9 @@ def test_per_plant_series_counts_the_images_the_mapping_names(tmp_path):
 def test_per_plant_series_excludes_unattributed_assignments_from_coverage(
     tmp_path,
 ):
-    """An assignment with no ``plant_id`` (an image the plant-mapping step could not assign) is
-    dropped from every plant's coverage; how often that happens is disclosed once, at delivery
-    scope, by ``plant_mapping.MappingBuild.unattributed``, never recomputed here.
+    """An assignment with no ``plant_id`` adds no plant to the per-plant series.
+
+    Such an assignment is an image the plant-mapping step could not assign.
     """
     buckets = {
         "2026-02-11": _bucket(tmp_path, "2026-02-11", {"P1_a": ["open"]})
@@ -690,10 +694,7 @@ def test_per_plant_series_excludes_unattributed_assignments_from_coverage(
 def test_per_plant_phenology_excludes_unattributed_assignments_from_rows(
     tmp_path,
 ):
-    """``per_plant_phenology`` never emits a row for an unattributed assignment, and carries no
-    unattributed count of its own: that disclosure is ``plant_mapping.MappingBuild.unattributed``'s,
-    at delivery scope, not a per-call return value.
-    """
+    """``per_plant_phenology`` emits no row and no unmapped count for an unattributed assignment."""
     buckets = {
         "2026-02-11": _bucket(tmp_path, "2026-02-11", {"P1_a": ["open"]})
     }

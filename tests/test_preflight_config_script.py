@@ -1,4 +1,4 @@
-"""tcip preflight-config: the demoted door's own command-line entry point.
+"""tcip preflight-config: the preflight door's own command-line entry point.
 
 Structural validation always runs, for the project --project names.
 """
@@ -12,9 +12,10 @@ from tests._cli_fixtures import run_tcip
 
 
 def _fixture_config(root: Path) -> Path:
-    """A valid config: a builder the operator's own process imports (never called, since no
-    --smoke is passed here) over two labeled frames of the subject its scope names
-    (``_verified_checkpoint_fixtures.detection_images``).
+    """Write ``training_config``'s config to ``root/config.json`` and return the path.
+
+    The config is of ``BUILT_DETECTOR`` over ``detection_images`` under ``root/data`` and
+    ``SCOPED_DATA``.
     """
     from tests._chain_fixtures import training_config
     from tests._verified_checkpoint_fixtures import (

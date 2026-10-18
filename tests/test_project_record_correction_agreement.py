@@ -15,7 +15,7 @@ from tests._web_fixtures import INVARIANCES, named_project
 
 
 def _flags(block: CaptureInvariances) -> list[str]:
-    """``block`` as the console door's flags take it."""
+    """Return ``block`` as the console door's flags take it."""
     flags: list[str] = []
     for name, value in block.model_dump().items():
         flag = name.replace("_", "-")
@@ -27,8 +27,9 @@ def _flags(block: CaptureInvariances) -> list[str]:
 
 
 def _recorded(line: dict, record_id: str) -> dict:
-    """``line`` without what differs between two acts of one correction: its time, and the
-    record id its arguments carry, which must be ``record_id``.
+    """Return ``line`` without what differs between two acts of one correction.
+
+    That is its time, and the record id its arguments carry, which must be ``record_id``.
     """
     assert line["arguments"]["id"] == record_id
     return {
@@ -40,9 +41,11 @@ def _recorded(line: dict, record_id: str) -> dict:
 def test_the_console_and_web_doors_record_one_correction_alike(
     client, tmp_path
 ):
-    """The same block corrected by the same person through the console door on one project and
-    the web door on another persists the same block on both, and leaves on each one
-    ``project_record_corrected`` line that matches the other's once its time is dropped and its
+    """The console and web doors record one correction alike.
+
+    The same block corrected by the same person through the console door on one project and the
+    web door on another persists the same block on both, and leaves on each one
+    ``project_record_corrected`` line that matches the other's after its time is dropped and its
     record id, checked to be its own project's, is set aside.
     """
     from tcip_mcp.project_record import read_record

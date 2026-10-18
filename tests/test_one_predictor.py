@@ -1,5 +1,7 @@
-"""The one predictor: a checkpoint the platform trained, which states no predictor kind, is built
-by ``GenericPredictor`` directly, predicts, and is ranked by an active-learning scorer.
+"""Tests of the one predictor, ``GenericPredictor``.
+
+A checkpoint the platform trained, which states no predictor kind, is built by
+``GenericPredictor`` directly, predicts, and is ranked by an active-learning scorer.
 """
 
 from __future__ import annotations

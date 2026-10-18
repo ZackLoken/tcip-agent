@@ -34,7 +34,7 @@ WIDE = StatedRadius(value=10.0, rationale="reaches every plant a test places")
 
 
 def _assign(stamps, plants):
-    """``assign_plants`` over ``stamps`` within their date's radius stated as :data:`WIDE`."""
+    """Run ``assign_plants`` over ``stamps`` within their date's radius stated as :data:`WIDE`."""
     return assign_plants(
         stamps, plants, radius=date_match_radius(stamps, WIDE)
     )
@@ -42,8 +42,10 @@ def _assign(stamps, plants):
 
 @pytest.fixture
 def stamp(tmp_path: Path):
-    """Stamps read by the platform's own reader off geotagged photographs written under
-    ``tmp_path``, each captured ``seconds`` after one start time.
+    """Return a maker of stamps read off geotagged photographs written under ``tmp_path``.
+
+    The platform's own reader reads each stamp, each photograph captured ``seconds`` after one
+    start time.
     """
 
     def make(stem: str, lat: float, lon: float, seconds: int):
@@ -60,9 +62,10 @@ def stamp(tmp_path: Path):
 
 
 def _one_build(project: Path) -> MappingBuild:
-    """One mapping named "mapping" of a registered dataset's captures on :data:`DATE`, built,
-    registered and persisted through the platform's own producers (``map_captures``), as
-    ``load_mapping`` reads it back.
+    """Return ``load_mapping``'s read of a mapping named "mapping" of the captures on :data:`DATE`.
+
+    ``project`` is made through ``named_project`` and the mapping built by ``map_captures`` over
+    its dataset ``ds``.
     """
     named_project(project, "Orchard")
     map_captures(project, project / "ds", [DATE], name="mapping")
@@ -84,7 +87,9 @@ def _plant(plot: str, accession: str, lat: float, lon: float) -> PlantRecord:
 
 
 def test_a_plants_distance_is_the_wgs84_geodesic() -> None:
-    """One degree of longitude along the equator is the WGS84 semi-major axis times pi over 180
+    """A plant's distance is the WGS84 geodesic.
+
+    One degree of longitude along the equator is the WGS84 semi-major axis times pi over 180
     (6,378,137 m, the datum's own definition), the distance the nearest plant is reported at.
     """
     import math
@@ -258,8 +263,9 @@ def test_persist_and_load_mapping_round_trip(tmp_path: Path) -> None:
 def test_load_mapping_refuses_a_record_missing_capture_digests(
     tmp_path: Path,
 ) -> None:
-    """A record without its capture digests (one the producer wrote, then stripped) fails the
-    required-keys read naming the missing key.
+    """``load_mapping`` refuses a record missing its capture digests, naming the key.
+
+    The record is one the producer wrote, then stripped.
     """
     _one_build(tmp_path)
     key = plant_mapping_key(tmp_path, "mapping")
@@ -274,7 +280,7 @@ def test_load_mapping_refuses_a_record_missing_capture_digests(
 def test_build_mapping_empty_dir_refuses_naming_no_capture(
     tmp_path: Path,
 ) -> None:
-    """No capture at all under the requested dates refuses by name, naming the images root."""
+    """``build_mapping`` over no capture refuses with ``UngeoreferencedCaptureError``, saying so."""
     with pytest.raises(Exception, match="no capture under") as exc:
         build_mapping(
             tmp_path / "nope",
@@ -291,8 +297,9 @@ def test_build_mapping_empty_dir_refuses_naming_no_capture(
 def test_persisting_a_mapping_into_a_directory_that_does_not_exist_yet_still_lands(
     tmp_path: Path,
 ) -> None:
-    """The first mapping of a fresh project, whose state directory holds nothing yet, lands
-    where it is named and reads back.
+    """A fresh project's first mapping lands where it is named and reads back.
+
+    The project's state directory holds nothing yet.
     """
     build = _one_build(tmp_path)
 
@@ -303,9 +310,7 @@ def test_persisting_a_mapping_into_a_directory_that_does_not_exist_yet_still_lan
 def test_persisting_a_mapping_waits_on_the_lock_its_record_is_written_under(
     tmp_path: Path,
 ) -> None:
-    """The write takes the database's write lock, and reports the contention rather than
-    writing past a holder of it.
-    """
+    """Persisting a mapping under another writer's lock raises ``StoreBusyError``, writing none."""
     from tcip_store import StoreBusyError
     from tcip_store.sqlite_backend import SqliteBackend
     from tests._audit_fixtures import held_by_another_writer

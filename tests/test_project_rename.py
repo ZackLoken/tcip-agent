@@ -1,8 +1,10 @@
-"""Renaming a project changes its display name and nothing else, and a project whose directory
-moves still resolves every run, data location and bucket its records name.
+"""Renaming a project changes its display name only, and a moved project still resolves.
 
-``tcip_mcp.project_record.rename_project`` and ``POST /api/projects/rename``; every project is made
-through the platform's own creation door under this test's workspace (``tmp_path.parent``).
+A project whose directory moves still resolves the runs, data locations and buckets its records
+name.
+
+``tcip_mcp.project_record.rename_project`` and ``POST /api/projects/rename``; projects are made
+through the platform's own creation door under the workspace ``tmp_path.parent``.
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ from tests._web_fixtures import named_project
 
 
 def _files(root: Path) -> dict[str, bytes]:
-    """Every file under ``root`` but the databases, by its path relative to ``root``."""
+    """Return every file under ``root`` but the databases, keyed by path relative to ``root``."""
     return {
         p.relative_to(root).as_posix(): p.read_bytes()
         for p in sorted(root.rglob("*"))
@@ -28,8 +30,9 @@ def _files(root: Path) -> dict[str, bytes]:
 
 
 def _held(root: Path, *, but: set[str]) -> dict[tuple, object]:
-    """Every record and log the databases under ``root`` hold, read through the seam, but the
-    stores ``but`` names, by root relative to ``root``, store and parts.
+    """Return every record and log the databases under ``root`` hold, but the stores ``but`` names.
+
+    Each is read through the seam and keyed by root relative to ``root``, store and parts.
     """
     from tcip_store.file_backend import database_roots
 
@@ -158,10 +161,11 @@ def test_a_project_moved_after_training_resolves_every_path_its_records_name(
     tmp_path,
     monkeypatch,
 ):
-    """Every in-project path a record holds is spelled relative to the project, so a project
-    whose directory moves resolves its resumed run's checkpoint, its completed run's checkpoint,
-    its registry entry, a run's data locations and partition, and a published bucket's documents
-    at their new location, and no run record names the directory it left.
+    """A project moved after training resolves the in-project paths its records name.
+
+    A project whose directory moves resolves its resumed run's checkpoint, its completed run's
+    checkpoint, its registry entry, a run's data locations and partition, and a published bucket's
+    documents at their new location, and no run record names the directory it left.
     """
     import json
 

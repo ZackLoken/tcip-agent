@@ -1,4 +1,4 @@
-"""tcip overlay-reference-grid: the demoted door's own command-line entry point.
+"""tcip overlay-reference-grid: the overlay door's own command-line entry point.
 
 --project is required unconditionally and must name a project: the door writes an artifact and
 carries an audit line, both under that project.

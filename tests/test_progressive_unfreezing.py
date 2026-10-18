@@ -3,8 +3,8 @@
 Covers the three optimizer_factory helpers (LR scaling, name-keyed optimizer
 snapshot/restore) and their integration in generic_trainer.train(): the
 non-decreasing-unfreeze guard, inter-stage LR warmup, effective-batch LR
-scaling, and a two-stage handoff smoke test. Tiny synthetic data, CPU,
-``pretrained=False`` so it stays under the CI per-test timeout.
+scaling, and a two-stage handoff smoke test, over tiny synthetic data on CPU with
+``pretrained=False``.
 """
 
 from __future__ import annotations
@@ -112,8 +112,10 @@ def test_capture_restore_roundtrip():
 
 
 def test_warmup_reads_only_the_rates_of_the_groups_it_merges():
-    """Two captured groups at one rate that differ in an unrelated setting merge into one new
-    group, which warms up from that rate.
+    """A merged group warms up from its captured groups' shared rate, not the new optimizer's.
+
+    Two captured groups at one rate that differ in an unrelated setting merge into one new group,
+    which warms up from that rate.
     """
     model = nn.Linear(2, 1)
     opt = torch.optim.AdamW(
@@ -132,9 +134,10 @@ def test_warmup_reads_only_the_rates_of_the_groups_it_merges():
 
 
 def test_a_resume_refuses_a_group_merging_two_captured_groups_even_at_equal_settings():
-    """A resumed group whose members came from two captured groups has no one setting on
-    record, even where the two captured groups' settings are equal; a group per captured group
-    resumes.
+    """A resume refuses a group merging two captured groups, even at equal settings.
+
+    A resumed group whose members came from two captured groups has no one setting on record, even
+    where the two captured groups' settings are equal; a group per captured group resumes.
     """
     model = nn.Linear(2, 1)
     opt = torch.optim.AdamW(
@@ -179,9 +182,11 @@ class _CustomGroupRegressor(nn.Linear):
 
 
 def test_a_tensor_valued_bespoke_group_setting_survives_a_resume():
-    """A setting a bespoke ``get_param_groups`` puts on its group, changed while training, comes
-    back whole on a resume restore into an optimizer ``build_optimizer`` builds afresh, a
-    multi-element tensor included.
+    """A tensor-valued bespoke group setting survives a resume.
+
+    A setting a bespoke ``get_param_groups`` puts on its group, changed while training, comes back
+    whole on a resume restore into an optimizer ``build_optimizer`` builds afresh, a multi-element
+    tensor included.
     """
     from tcip_mcp.pipelines.schemas import OptimizerSpec
     from tcip_mcp.pipelines.training.optimizer_factory import build_optimizer
@@ -216,10 +221,12 @@ def test_a_tensor_valued_bespoke_group_setting_survives_a_resume():
 def test_an_optimizer_trains_a_built_detectors_backbone_at_backbone_lr_and_the_rest_at_head_lr(
     attributes,
 ):
-    """A detector the platform's ``build_detector`` builds, its subject's attribute heads beside
-    it or not, trains the parameters of its ``backbone`` at the stated ``backbone_lr`` and every
-    other at ``head_lr``; a model exposing neither groups nor a backbone refuses differing rates
-    by name and trains at equal ones.
+    """The optimizer gives a built detector's backbone ``backbone_lr`` and the rest ``head_lr``.
+
+    For a detector the platform's ``build_detector`` builds, its subject's attribute heads beside
+    it or not, the optimizer assigns the parameters of its ``backbone`` the stated
+    ``backbone_lr`` and every other ``head_lr``; a model exposing neither groups nor a backbone
+    refuses differing rates by name and builds one group at equal ones.
     """
     from tcip_mcp import subject_registry
     from tcip_mcp.pipelines.schemas import OptimizerSpec
@@ -268,9 +275,11 @@ class _NoStageCount(nn.Module):
 
 
 def test_a_stage_freeze_a_model_cannot_apply_refuses_by_name():
-    """A nonzero ``freeze_to`` over a model with no ``freeze_backbone``, and a negative one over a
-    backbone declaring no ``num_stages``, refuse naming what is missing; a built classifier's
-    backbone freezes whole under a negative one while its head stays trainable.
+    """A stage freeze a model cannot apply refuses, naming what is missing.
+
+    A nonzero ``freeze_to`` over a model with no ``freeze_backbone``, and a negative one over a
+    backbone declaring no ``num_stages``, refuse; a built classifier's backbone freezes whole
+    under a negative one while its head stays trainable.
     """
     from tcip_mcp.pipelines.training.generic_trainer import apply_stage_freeze
     from tests.bespoke_models import build_bespoke_classifier
@@ -290,8 +299,9 @@ def test_a_stage_freeze_a_model_cannot_apply_refuses_by_name():
 
 
 def test_a_restore_puts_every_tensor_on_its_parameter_dtype_and_the_next_step_runs():
-    """A one-element parameter's momentum is a one-element tensor: it lands on the parameter's
-    dtype like every other state tensor, and the restored optimizer steps.
+    """A restore puts a one-element parameter's momentum on its dtype, and the next step runs.
+
+    The momentum restored into a float64 model is float64, and the restored optimizer steps.
     """
     model = nn.Linear(1, 1, bias=False)
     opt = torch.optim.AdamW(model.parameters(), lr=1e-3)
@@ -313,8 +323,10 @@ def test_a_restore_puts_every_tensor_on_its_parameter_dtype_and_the_next_step_ru
 
 
 def test_a_resume_restore_puts_back_every_scheduled_group_setting():
-    """The settings a scheduler writes into a group (OneCycle's betas beside its rate) come back
-    on a resume restore, and a handoff restore leaves the built ones.
+    """A resume restore puts back every scheduled group setting.
+
+    The settings a scheduler writes into a group (OneCycle's betas beside its rate) come back on a
+    resume restore, and a handoff restore leaves the built ones.
     """
     model = nn.Linear(2, 1)
     opt = torch.optim.AdamW(model.parameters(), lr=1e-3)
@@ -365,9 +377,10 @@ def test_a_restore_into_an_optimizer_missing_a_trained_parameter_is_refused():
 
 
 def test_a_restore_dropping_a_parameter_a_stateless_optimizer_held_is_refused():
-    """Membership, not optimizer state, says what the captured optimizer held: a momentum-free
-    SGD keeps no per-parameter state, and a restore that drops one of its parameters still
-    refuses.
+    """A restore dropping a parameter a stateless optimizer held is refused.
+
+    A momentum-free SGD keeps no per-parameter state, and a restore that drops one of its
+    parameters refuses naming it.
     """
     model = nn.Linear(2, 1)
     opt = torch.optim.SGD(model.parameters(), lr=1e-2, momentum=0.0)
@@ -393,15 +406,16 @@ def test_a_restore_dropping_a_parameter_a_stateless_optimizer_held_is_refused():
 
 
 def test_freeze_to_is_per_stage_for_a_wrapped_bespoke_backbone():
-    """A wrapped agent-written backbone, its stages one level down inside a ModuleList, freezes
-    per stage, not all-or-nothing.
+    """``freeze_to`` freezes a wrapped bespoke backbone per stage, not all-or-nothing.
+
+    The agent-written backbone keeps its stages one level down inside a ModuleList.
     """
     import torch.nn as nn
 
     from tcip_mcp.pipelines.components.backbones import BackboneWrapper
 
     class Staged(nn.Module):
-        """Sole named child is a ModuleList, the shape the descent exists for."""
+        """A backbone whose sole named child is a ModuleList of stages."""
 
         def __init__(self) -> None:
             super().__init__()
@@ -439,10 +453,11 @@ def test_freeze_to_is_per_stage_for_a_wrapped_bespoke_backbone():
 
 
 def _trained(tmp_path: Path, stages, n: int = 6, **extra):
-    """A classification run of the resnet18 classifier (the freeze and warmup logic here is
-    backbone-agnostic) over ``stages``, ``extra`` its other config keys, training on ``n``
-    two-label frames under ``tmp_path`` with no validation side, opened by the launcher's own
-    producer and trained over its own loader at its batch size: the run and its directory.
+    """Train a resnet18 classification run over ``stages``; return the run and its directory.
+
+    ``extra`` are the run's other config keys; it trains on ``n`` frames under ``tmp_path``,
+    labeled alternately 0 and 1, with no validation side, opened by the launcher's own producer
+    and trained over its own loader at its batch size.
     """
     from tests._chain_fixtures import training_config
     from tests.tiny_trainer_fixtures import (
@@ -491,8 +506,10 @@ def test_monotonic_unfreeze_guard_fails(tmp_path: Path):
 
 
 def test_warmup_lr_ramps_at_stage_boundary(tmp_path: Path):
-    """The second stage warms up for two epochs with its schedule suppressed, then runs its
-    schedule's one-epoch horizon.
+    """The learning rate ramps up over warmup at a stage boundary.
+
+    The second stage's three epochs start below the base backbone rate, rise, and reach it at the
+    second epoch; every epoch records its target effective batch and trainable parameters.
     """
     run, _ = _trained(tmp_path, [stage(-1), stage(0)], stage_warmup_epochs=2)
     assert run.status == "completed", run.status_error
@@ -508,8 +525,10 @@ def test_warmup_lr_ramps_at_stage_boundary(tmp_path: Path):
 def test_lr_scaling_is_relative_to_the_first_stage_effective_batch(
     tmp_path: Path,
 ):
-    """Batch size 2 targets an effective batch of 2 in the first stage and 8 in the second, so
-    the multiplier is (8/2)^0.5 == 2.0. Six samples make three batches, so the second stage's one
+    """Learning-rate scaling is relative to the first stage's effective batch.
+
+    Batch size 2 targets an effective batch of 2 in the first stage and 8 in the second, so the
+    multiplier is (8/2)^0.5 == 2.0. Six samples make three batches, so the second stage's one
     window holds three of the four batches it targets: one optimizer step against three.
     """
     stages = [stage(-1), stage(0, gradient_accumulation_steps=4)]

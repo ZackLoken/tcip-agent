@@ -1,5 +1,7 @@
-"""Per-batch progress rows: the trainer emits them at a stated cadence, on the run's one metrics
-log, and no reader of that log takes one for an epoch row.
+"""Tests of per-batch progress rows.
+
+The trainer emits them at a stated cadence, on the run's one metrics log, and no reader of that
+log takes one for an epoch row.
 """
 
 from __future__ import annotations
@@ -37,7 +39,7 @@ TRAIT_SCOPED = evaluation_block(
 
 
 def batch_rows(rows):
-    """The per-batch rows among ``rows`` (``experiments.partition_rows``)."""
+    """Return the per-batch rows among ``rows`` (``experiments.partition_rows``)."""
     return partition_rows(rows)[1]
 
 
@@ -49,10 +51,11 @@ def _context(
     validated: bool = True,
     **extra,
 ) -> TrainContext:
-    """The context of a regression run over opposed frames (``validated``, else over its
-    training frames alone with no validation side), its training frames at ``intensities`` (by
-    default three training batches an epoch), opened by the launcher's own producer, recording
-    every epoch hook call into ``hook_calls``; ``extra`` are config keys.
+    """Return the context of a regression run opened by the launcher's own producer.
+
+    The run is over opposed frames when ``validated``, else over its training frames alone with no
+    validation side; its training frames are at ``intensities``, its epoch hook appends each epoch
+    to ``hook_calls``, and ``extra`` are config keys.
     """
     root = tmp_path / "ds"
     data = (
@@ -69,9 +72,7 @@ def _context(
 
 
 def test_a_run_admits_what_its_training_reads_once(tmp_path, monkeypatch):
-    """Building a run's loaders, training it and evaluating it twice read one admission of what
-    its training reads.
-    """
+    """Building, training and twice evaluating a run read one admission of its training reads."""
     from tcip_mcp.pipelines.schemas import TrainConfigSchema
 
     calls: list[int] = []
@@ -92,8 +93,9 @@ def test_a_run_admits_what_its_training_reads_once(tmp_path, monkeypatch):
 
 @pytest.mark.usefixtures("seed_bud_trait_spec")
 def test_a_run_resolves_what_its_evaluation_reads_once(tmp_path, monkeypatch):
-    """Training a run stating a confirmed trait and evaluating it twice read the trait's entry
-    off the registry once, at the trait revision its launch records.
+    """Training and twice evaluating a trait-stating run read the trait's entry once.
+
+    The run states a confirmed trait, and the registry's ``read_trait`` answers one call.
     """
     import tcip_mcp.traits as traits
 
@@ -117,8 +119,10 @@ def test_a_run_resolves_what_its_evaluation_reads_once(tmp_path, monkeypatch):
 def test_a_run_scores_under_the_trait_revision_its_launch_resolved(
     tmp_path, monkeypatch
 ):
-    """A run launched against a trait's confirmed revision, then trained after the breeder
-    confirms a newer one, scores every epoch under the revision its launch resolved.
+    """A run's evaluations score under the trait revision its launch resolved.
+
+    The run is launched against a trait's confirmed revision, then trained after the breeder
+    confirms a newer one.
     """
     import tcip_mcp.pipelines.training.generic_trainer as generic_trainer
     from tests import _trait_fixtures as fx
@@ -148,9 +152,11 @@ def test_a_run_scores_under_the_trait_revision_its_launch_resolved(
 def test_a_run_whose_recorded_revision_holds_another_entry_refuses_by_name(
     tmp_path,
 ):
-    """The body reads the trait entry at the revision its launch recorded, the entry's hash
-    included: a record naming a hash that revision does not hold refuses naming both, rather than
-    scoring under an entry the launch never resolved.
+    """A run whose recorded revision holds another entry refuses by name.
+
+    The body reads the trait entry at the revision its launch recorded, the entry's hash included:
+    a record naming a hash that revision does not hold refuses with ``RevisionMovedError`` naming
+    the revision's own hash.
     """
     from tcip_mcp.traits import RevisionMovedError
 
@@ -171,9 +177,10 @@ def test_a_run_whose_recorded_revision_holds_another_entry_refuses_by_name(
 def test_the_trainers_validation_and_a_bodys_evaluation_hand_evaluate_one_keyword_set(
     tmp_path, monkeypatch
 ):
-    """Over one run stating its own IoU threshold and a confirmed trait, the trainer's
-    validation and ``ctx.evaluate`` hand ``evaluate`` the same keywords, the trait's entry
-    among them.
+    """The trainer's validation and ``ctx.evaluate`` hand ``evaluate`` the same keywords.
+
+    The run states its own IoU threshold and a confirmed trait, and the trait's entry is among the
+    keywords.
     """
     import tcip_mcp.pipelines.training.evaluation as evaluation
     import tcip_mcp.pipelines.training.generic_trainer as generic_trainer
@@ -228,9 +235,10 @@ def test_the_trainer_logs_a_batch_row_at_the_stated_cadence_and_no_reader_takes_
 def test_a_config_stating_no_cadence_logs_ten_batch_rows_every_epoch(
     tmp_path, n_batches
 ):
-    """No stated cadence: each of two epochs logs ten rows (every batch of a shorter epoch),
-    spaced evenly over the epoch, the gaps between them never differing by more than one batch,
-    the last at the epoch's own final batch.
+    """A config stating no cadence logs up to ten batch rows each epoch.
+
+    Each of two epochs logs ``min(10, n_batches)`` distinct rows inside the epoch, the gaps between
+    them differing by at most one batch, the last at the epoch's own final batch.
     """
     intensities = [0.1 + 0.6 * i / n_batches for i in range(n_batches)]
     ctx = _context(tmp_path, [], intensities, validated=False, batch_size=1)
@@ -253,8 +261,9 @@ def test_a_config_stating_no_cadence_logs_ten_batch_rows_every_epoch(
 def test_the_best_selection_reads_epoch_rows_and_never_a_batch_row_s_selection(
     tmp_path,
 ):
-    """A bespoke loop's batch row carrying a ``selection`` better than every epoch's does not
-    become the run's best selection.
+    """A batch row's ``selection``, better than every epoch's, does not become the best selection.
+
+    The batch row is a bespoke loop's.
     """
     ctx = _context(tmp_path, [])
     ctx.log_metrics(1, {"selection": 0.5})

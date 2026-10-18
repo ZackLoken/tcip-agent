@@ -1,9 +1,7 @@
-"""What the count criterion's evidence says about itself has to match what actually happened.
+"""What the count criterion's evidence says about itself matches what ran.
 
-Every field here is read by someone reconstructing a delivered number: which derivation produced
-the conf, and what the reference's own scores looked like against the floor it was collected at.
-A record that describes a different derivation or a different bar than the one that ran is a
-silent loss of auditability, with no wrong number visible anywhere to signal it.
+Covered: which derivation produced the conf, and what the reference's own scores looked like
+against the floor it was collected at.
 """
 
 from __future__ import annotations
@@ -27,9 +25,10 @@ ENTRY = fx.with_fields(
 def _records(
     prefix: str, offset: float, *, stray: tuple[dict, ...] = ()
 ) -> list[dict]:
-    """One record per image (``evaluation.prediction_record``), every object matched exactly by
-    one detection at score 0.9, the first image also holding the detections ``stray``. Boxes sit
-    100 px apart, well outside the tolerance this GT derives.
+    """Return ``N_IMAGES`` records built by ``evaluation.prediction_record``.
+
+    Each image's 40 px GT boxes, 100 px apart from ``offset``, each get a detection at the same
+    box scored 0.9, and ``stray`` is appended unchanged to the first image's detections.
     """
     from tcip_mcp.pipelines.training.evaluation import (
         dt_record,
@@ -61,9 +60,10 @@ def _records(
 
 
 def test_every_conf_label_the_registered_pickers_can_record_has_a_registered_implementation():
-    """The conf label is built at runtime from whichever picker ran; drive every registered count
-    objective and check the labels those runs produced against the derivation registry, which
-    exists so no data-sounding provenance string names a derivation nothing implements.
+    """Every conf label a registered count picker records names a registered implementation.
+
+    Each registered count objective is driven, and the two labels those runs produced are each
+    found in the derivation registry.
     """
     from tcip_mcp.pipelines.derivations import DERIVATION_IMPLEMENTATIONS
     from tcip_mcp.pipelines.operating_point import COUNT_OBJECTIVE_PICKERS
@@ -88,8 +88,10 @@ def test_every_conf_label_the_registered_pickers_can_record_has_a_registered_imp
 
 
 def test_the_lowest_score_across_the_reference_is_surfaced_and_never_fails_it():
-    """The reference's lowest observed score sits right at the floor it was collected at only on
-    the holdout; the observed minimum reads over both sides and is evidence, never a failure.
+    """The lowest score across the reference is surfaced as evidence and does not fail it.
+
+    One holdout detection scores 0.05, the floor the reference was collected at, and the observed
+    minimum is 0.05 with no failure; with that detection absent the minimum is 0.9.
     """
     from tcip_mcp.pipelines.training.evaluation import dt_record
 

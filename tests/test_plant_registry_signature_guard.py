@@ -1,9 +1,4 @@
-"""The two delivery doors that take a named plant registry, held to their signatures.
-
-Nothing here imports ``register_plant_registry``: the module reaches only
-``phenology_tools.py`` and ``orthomosaic_tools.py``, so it collects against any tree that
-carries those two.
-"""
+"""The two delivery doors that take a named plant registry refuse a ``plant_csv_paths`` argument."""
 
 from __future__ import annotations
 
@@ -19,7 +14,10 @@ def test_build_plant_mapping_refuses_plant_csv_paths_argument(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A guard: the door's signature takes plant_registry, not plant_csv_paths."""
+    """``build_plant_mapping`` refuses a ``plant_csv_paths`` argument by name.
+
+    The door's signature takes plant_registry, not plant_csv_paths.
+    """
     from tests.test_plant_mapping_binding import _init
 
     _init(tmp_path)
@@ -35,7 +33,10 @@ def test_build_plant_mapping_refuses_plant_csv_paths_argument(
 def test_deliver_orthomosaic_plant_counts_refuses_plant_csv_paths_argument(
     tmp_path: Path,
 ) -> None:
-    """A guard: the door's signature takes plant_registry, not plant_csv_paths."""
+    """``deliver_orthomosaic_plant_counts`` refuses a ``plant_csv_paths`` argument by name.
+
+    The door's signature takes plant_registry, not plant_csv_paths.
+    """
     with pytest.raises(TypeError, match="plant_csv_paths"):
         deliver_orthomosaic_plant_counts(  # type: ignore[call-arg]
             tmp_path,

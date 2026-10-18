@@ -1,16 +1,12 @@
-"""``state.Point`` is a third annotation geometry, and every consumer decides about it.
+"""``state.Point`` is an annotation geometry with a location and no box or area.
 
-A Point is a placed prompt (SAM-style) or a keypoint/landmark: a real annotation with a location,
-but never a detection/segmentation target. It has no box and no area, so ``bbox_of`` refuses one
-rather than fabricate a degenerate zero-area box that would read downstream as a real object. That
-refusal is the backstop, not the guard: these tests pin the two behaviors that widening the union
-demands of every consumer:
+A Point is a placed prompt (SAM-style) or a keypoint/landmark, and ``bbox_of`` refuses one.
+Covered:
 
-  * a training-target / IoU-matching / delivery-grade path skips a Point cleanly (never crashes on
-    ``bbox_of``, never emits a fabricated extent), while still doing its normal job for the boxes
-    and polygons alongside it; and
-  * a serializer / write path represents a Point (the ``"point": [x, y]`` key, symmetric on read and
-    write) instead of silently dropping the only thing that annotation says.
+  * training targets, IoU matching and delivery-grade paths skip a Point and handle the boxes and
+    polygons beside it; and
+  * serializers and write paths represent a Point with the ``"point": [x, y]`` key, on read and
+    write.
 """
 
 from __future__ import annotations
@@ -49,7 +45,7 @@ def test_bbox_of_refuses_a_point_and_says_why() -> None:
 
 
 def test_bbox_of_still_reads_a_box_and_a_polygon() -> None:
-    """The refusal must not have narrowed what bbox_of legitimately answers."""
+    """``bbox_of`` answers a box as itself and a polygon as its bounding box."""
     assert bbox_of(BOX) is BOX
     b = bbox_of(Polygon([RING]))
     assert (b.x1, b.y1, b.x2, b.y2) == (50.0, 50.0, 70.0, 70.0)
@@ -100,8 +96,9 @@ def test_a_point_alongside_a_box_and_a_polygon_all_survive_one_document(
 
 
 def _scope(root: Path, *values: str):
-    """The class space ``bud`` is read under over a dataset at ``root`` declaring ``opening``
-    over ``values`` on it, or no attribute for no values.
+    """Return the registry scope of ``bud`` over a dataset at ``root``.
+
+    The dataset declares ``opening`` over ``values`` on it, or no attribute for no values.
     """
     from tcip_mcp import subject_registry as cr
     from tcip_mcp.pipelines.data.label_queries import registry_scope
@@ -150,10 +147,11 @@ def test_json_det_targets_yields_no_box_for_a_point(tmp_path: Path) -> None:
 def test_a_point_only_document_carries_the_subject_and_the_detection_loader_refuses_it(
     tmp_path: Path,
 ) -> None:
-    """Admission asks whether the document carries the subject at all, so a point-only document
-    does: it is real ground truth, not an empty image. Which geometries answer for a measurement
-    is the selected loader's own fact, so the detection loader refuses that sample by name rather
-    than training it as a zero-object negative no human confirmed.
+    """A point-only document carries the subject, and the detection loader refuses it.
+
+    Both documents read as partial for the subject. The detection loader refuses the point-only
+    one, saying its subject lies only in geometries a detection loader does not read, and the
+    loader admits the box-bearing document alone as its one sample.
     """
     from tests._producer_fixtures import dataset_over
 
@@ -430,8 +428,10 @@ def test_save_annotations_tool_writes_an_incoming_point(
 def test_save_annotations_tool_keeps_points_and_point_distinct(
     tmp_path: Path, bound
 ) -> None:
-    """``points`` is a polygon contour and ``point`` is one location: one spelling must not serve
-    both, or a point and a one-vertex polygon become indistinguishable on disk.
+    """``save_annotations`` keeps ``points`` and ``point`` distinct.
+
+    ``points`` is a polygon contour and ``point`` is one location: the two save as a polygon and a
+    point.
     """
     from tcip_mcp.tools.annotation_tools import save_annotations
 

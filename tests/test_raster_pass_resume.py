@@ -1,11 +1,10 @@
 """run_inference's raster_path regime resumes an interrupted tiled pass.
 
 A pass over a small (64x64, tile 32, no overlap: exactly four tiles) geo-referenced raster
-records its own identity under the project before the first tile and one batch record per
-flushed tile (tile_batch_size=1 here, so each tile is its own batch). Interruption is simulated
-by making the store's own replace raise once the pass has durably recorded one batch, the same
-shape a real crash mid-pass leaves: the identity record and that one batch record survive,
-nothing else does.
+records its own identity under the project and one batch record per flushed tile
+(tile_batch_size=1 here, so each tile is its own batch). Interruption is simulated by making the
+store's own replace raise after the pass has recorded one batch, leaving the identity record and
+that one batch record.
 """
 
 from __future__ import annotations
@@ -30,9 +29,11 @@ from tests.test_orthomosaic_tools import (  # noqa: E402
 
 
 def _instance_seg_checkpoint(tmp_path: Path) -> str:
-    """The checkpoint a fixed-mask instance_seg run under ``tmp_path`` completed over frames of
-    its own, registered by completing: each :data:`TILE` px slice it predicts holds one detection
-    over the slice's central half, its mask filling that half.
+    """Return the checkpoint a fixed-mask instance_seg run under ``tmp_path`` completed.
+
+    The run completed over frames of its own, registering the checkpoint. Its builder,
+    ``build_fixed_mask_instance_seg``, is given one box and one mask region, both at
+    ``[TILE // 4, TILE // 4, 3 * TILE // 4, 3 * TILE // 4]``.
     """
     from tests._chain_fixtures import BESPOKE_MODELS, FRAME_STATISTICS
     from tests._verified_checkpoint_fixtures import registered_checkpoint
@@ -55,8 +56,9 @@ def _instance_seg_checkpoint(tmp_path: Path) -> str:
 
 
 def _setup(tmp_path: Path) -> tuple[str, Path]:
-    """A registered bespoke detection checkpoint and a real, readable 64x64 geo raster (four
-    32px tiles at overlap 0.0) in the undated capture of the dataset ``ds``, in the project
+    """Return a registered bespoke detection checkpoint and a 64x64 geo raster.
+
+    The raster is written in the undated capture of the dataset ``ds``, in the project
     ``tmp_path``.
     """
     raster_path = _raster(tmp_path)
@@ -100,9 +102,7 @@ def _run(
 
 
 def _progress(project: Path, raster_path: Path, bucket: str) -> list[str]:
-    """The segments of every progress record a raster pass toward ``bucket`` left under
-    ``project``.
-    """
+    """Return the segments of every progress record a pass toward ``bucket`` left in ``project``."""
     from tcip_mcp.dataset_layout import dataset_root_of
     from tcip_mcp.tools.inference_tools import _progress_keys
 
@@ -122,10 +122,7 @@ def _published(raster_path: Path, bucket: str) -> bool:
 
 
 def _interrupt_after_one_batch(monkeypatch) -> None:
-    """Make the store's own replace raise the moment a second raster-pass batch record would
-    land, so the durable state left behind is exactly what a real crash after one flushed batch
-    leaves: the identity record, and that one batch record, nothing past it.
-    """
+    """Make the store's replace raise on the second raster-pass batch record it is handed."""
     import tcip_store.store as store_mod
 
     real_replace = store_mod.replace
@@ -158,7 +155,7 @@ def _interrupted(
 
 
 def _document(raster_path: Path, bucket: str) -> dict:
-    """The one document a whole-raster bucket holds, as stored."""
+    """Return the stored document of ``raster_path``'s stem in the bucket ``bucket``."""
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.dataset_layout import dataset_root_of
 
@@ -208,8 +205,9 @@ def test_an_interrupted_instance_segmentation_pass_resumes_to_the_uninterrupted_
     tmp_path,
     monkeypatch,
 ):
-    """The recorded progress carries each slice's shifted predictions whole, polygons included,
-    so the resumed pass merges the seeded masks exactly as the uninterrupted pass does.
+    """An interrupted instance segmentation pass resumes to the uninterrupted pass's masks.
+
+    The resumed pass's annotations, segmentations included, equal the uninterrupted pass's.
     """
     raster_path = _raster(tmp_path)
     _write_geo_raster(raster_path, height=64, width=64)
@@ -263,8 +261,10 @@ def test_an_interrupted_pass_leaves_one_identity_and_one_batch_record_and_no_buc
     tmp_path,
     monkeypatch,
 ):
-    """The progress sits under the project, apart from the bucket the pass will publish, and the
-    bucket is published only once the pass is whole.
+    """An interrupted pass leaves one identity and one batch record, and no bucket.
+
+    The progress sits under the project, apart from the bucket the pass will publish, and no
+    bucket is published for the partial pass.
     """
     ckpt, raster_path = _setup(tmp_path)
     bucket = "preds/2026-01-01"
@@ -322,9 +322,11 @@ def test_a_published_bucket_whose_progress_clear_failed_refuses_every_later_pass
     tmp_path,
     monkeypatch,
 ):
-    """A crash between publication and the progress clear leaves a whole bucket and a progress
-    record beside it: a fresh pass refuses on the recorded progress, and a resume refuses on the
-    bucket rather than publishing over it; the bucket stays as published.
+    """A published bucket whose progress clear failed refuses a fresh pass and a resume.
+
+    With the progress clear raising after publication, a fresh pass refuses as already recorded,
+    a resume refuses with an error saying ``already``, and the bucket's document stays as
+    published.
     """
     import tcip_mcp.tools.inference_tools as itools
 
@@ -374,8 +376,9 @@ def test_resume_refuses_when_the_recorded_identity_carries_an_extra_top_level_ke
     tmp_path,
     monkeypatch,
 ):
-    """The top-level comparison is a key union, not a fixed field list: a field a future writer
-    adds to the identity body is compared, and named, without a second list to keep in sync.
+    """A resume refuses when the recorded identity carries an extra top-level key.
+
+    The refusal names the extra key, ``future_field``.
     """
     from tcip_mcp.tools.inference_tools import _progress_key
     from tcip_store import store
@@ -397,8 +400,10 @@ def test_resume_refuses_when_the_recorded_identity_carries_an_extra_top_level_ke
 def test_content_identity_failure_after_open_refuses_naming_the_raster(
     tmp_path, monkeypatch
 ):
-    """A raster that opens cleanly but fails partway through the sampling read refuses through
-    the same ``{"error": ...}`` shape a failed open does, and writes nothing.
+    """A content-identity failure after open refuses, naming the raster, and writes nothing.
+
+    A raster that opens cleanly but fails partway through the sampling read refuses as a returned
+    ``{"error": ...}`` naming the raster, and no bucket is published.
     """
     import tcip_mcp.pipelines.raster_source as raster_source_module
 
@@ -426,9 +431,11 @@ def test_an_interrupted_pass_under_an_assessment_resumes_under_that_assessment(
     tmp_path,
     monkeypatch,
 ):
-    """A pass published under a reserved-regions assessment resumes under the same assessment and
+    """An interrupted pass under an assessment resumes under that assessment.
+
+    A pass published under a reserved-regions assessment resumes under the same assessment and
     execution record, reproducing the detections an uninterrupted pass makes, and a resume naming
-    another assessment refuses by name.
+    another assessment refuses.
     """
     from tcip_mcp.buckets import read_bucket
     from tcip_mcp.pipelines.execution import Stated
