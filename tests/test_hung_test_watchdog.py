@@ -1,7 +1,8 @@
-"""A test that hangs inside a C call holding the GIL is ended at its timeout and named, alone
-and under xdist. Each case runs pytest in a child process on a one-test file written here, with
-the watchdog loaded the way ``tests/conftest.py`` loads it, and bounds the child by the timeout
-several times over: a child that outlives the bound is the defect the watchdog exists for.
+"""A test hanging inside a C call holding the GIL is ended within the outer bound and named.
+
+That holds alone and under xdist. Each case runs pytest in a child process on a one-test file
+written here, with the watchdog loaded the way ``tests/conftest.py`` loads it and a 2 s pytest
+timeout; the child exits nonzero within ten times that timeout and names the hanging test.
 """
 
 from __future__ import annotations

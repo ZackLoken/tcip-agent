@@ -1,6 +1,7 @@
-"""The editor's gestures through the one label save: what each writes into the label document,
-the verdict shard and the completion marks, and what the admission, the queue and the editor's
-own listing read back from it.
+"""The editor's gestures through the label save, and what readers read back.
+
+These tests cover what the gestures write into the label document, the verdict shard and the
+completion marks, and what the admission, the queue and the editor's own listing read back.
 """
 
 from __future__ import annotations
@@ -61,15 +62,16 @@ def _stored(root: Path, image: Path) -> json_io.LabelDocument:
 
 
 def _as_loaded(root: Path, image: Path) -> list[dict]:
-    """The document's annotations as the editor loads them, the payloads it saves back."""
+    """Return ``json_io.client_annotation`` of each annotation stored for ``image``."""
     return [
         json_io.client_annotation(a) for a in _stored(root, image).annotations
     ]
 
 
 def _bucket(root: Path, image: Path) -> str:
-    """A proposal bucket for ``image`` holding one ``bud`` box over :data:`BOX`, staged through
-    the platform's own door; its name.
+    """Stage a proposal bucket for ``image`` holding one ``bud`` box and return its name.
+
+    The box lies over :data:`BOX`, staged through the platform's own door.
     """
     from tcip_mcp.tools.proposal_tools import stage_proposals
 
@@ -206,8 +208,10 @@ def test_accepting_an_unpaired_proposal_adds_it_authored_by_its_producer(
 def test_accepting_a_model_proposal_carries_no_attribute_value_into_the_document(
     tmp_path: Path,
 ) -> None:
-    """An accepted proposal pairing no annotation joins ground truth with its geometry and subject
-    alone: every attribute the model called is left unassessed for the person to fill in.
+    """Accepting a model proposal carries none of its attribute values into the document.
+
+    A proposal whose model called ``color`` blue, accepted with no annotation paired, joins
+    ground truth with its geometry and subject and no attribute value.
     """
     pytest.importorskip("torch")
     from tcip_mcp import subject_registry as cr
@@ -282,7 +286,9 @@ def test_the_shard_records_each_decision_once_and_refuses_an_entry_it_cannot_rea
 def test_a_decision_or_a_completion_mark_by_no_person_does_not_read(
     tmp_path: Path,
 ) -> None:
-    """A verdict's and a completion mark's ``by`` name a person; one naming a producer that is no
+    """A verdict or completion mark by no person does not read.
+
+    A verdict's and a completion mark's ``by`` name a person; one naming a producer that is no
     person refuses as the record it is read from.
     """
     from dataclasses import replace
@@ -496,9 +502,11 @@ def test_the_save_route_confirms_an_annotation_once_and_refuses_it_named_twice(
 def test_an_accepted_proposal_answers_the_annotation_it_resolved_to(
     tmp_path: Path,
 ) -> None:
-    """An accepted proposal that pairs with a submitted annotation signs that annotation off and
-    appends nothing; one that pairs with none is appended. The answer names each one's annotation,
-    whatever else the save carries.
+    """An accepted proposal answers the annotation it resolved to.
+
+    An accepted proposal that pairs with a submitted annotation signs that annotation off and
+    appends nothing; one that pairs with none is appended. The answer maps each proposal to its
+    annotation's index.
     """
     image = _image(tmp_path)
     bucket = _bucket(tmp_path, image)
@@ -555,8 +563,10 @@ def test_the_save_route_answers_the_annotation_an_accepted_proposal_resolved_to(
 def test_the_save_answers_the_document_it_stored(
     tmp_path: Path, client
 ) -> None:
-    """What the save writes is what it answers: rounded geometry and only the completion marks
-    that still name the subject's annotations, the same answer a load gives.
+    """The save answers the document it stored, the same answer a load gives.
+
+    After an edit to a completed subject, the save answers the point rounded to two decimals
+    and the subject's completion as partial, matching what a load then answers.
     """
     from tests._web_fixtures import open_new_project
 
@@ -748,8 +758,9 @@ def test_the_proposals_payload_carries_what_the_editor_reads_and_no_more(
 def test_a_staged_bucket_serves_no_operating_point_and_says_why(
     tmp_path: Path, client
 ) -> None:
-    """A bucket staged under no assessment has no conf a review may accept at: the route says
-    so beside the proposals rather than deciding admission for each of them.
+    """A staged bucket serves no operating point and says why.
+
+    A bucket staged under no assessment serves a null conf and a reason beside its proposals.
     """
     from tests._web_fixtures import open_new_project
 
@@ -769,9 +780,10 @@ def test_a_staged_bucket_serves_no_operating_point_and_says_why(
 def test_the_loaded_annotations_carry_the_index_a_pairing_names(
     tmp_path: Path, client
 ) -> None:
-    """Each loaded annotation states its document index, the index a proposal's ``paired``
-    refers to, so the editor pairs by the server's enumeration and never by position in a
-    list it re-split by geometry.
+    """The loaded annotations carry the document index a proposal's pairing names.
+
+    Each loaded annotation states its document index, and a proposal's ``paired`` names the
+    index of the loaded annotation it pairs with.
     """
     from tests._web_fixtures import open_new_project
 
@@ -855,8 +867,10 @@ def test_a_mark_made_with_proposals_hidden_says_so(tmp_path: Path) -> None:
 def test_a_negative_is_an_empty_subject_and_a_mark_at_every_reader(
     tmp_path: Path, client
 ) -> None:
-    """The admission that trains, the review queue and the editor's own listing each read an
-    empty document as nothing until a person marks it, and as a negative once they have.
+    """Three readers see an empty document as a negative when marked and not while unmarked.
+
+    Admission, the review queue's source preparation and the editor's listing each read an
+    empty unmarked document as no negative, and the same document marked complete as one.
     """
     from tcip_mcp.pipelines.data.label_queries import admit, registry_scope
     from tcip_mcp.tools.feedback_tools import _prepare_queue_sources
@@ -927,7 +941,7 @@ def test_saved_provenance_is_the_requests_actor_whatever_the_browser_sends(
 
 
 def _counted(annotations: list, proposals: list, criterion: dict) -> dict:
-    """The assessment's governing count over one image's annotations and proposals."""
+    """Return the assessment's governing count over one image's annotations and proposals."""
     from tcip_annotation.json_io import xywh
     from tcip_mcp.pipelines.training.evaluation import (
         dt_record,
@@ -954,7 +968,9 @@ def _counted(annotations: list, proposals: list, criterion: dict) -> dict:
 def test_the_assessment_count_and_the_editor_pairing_agree_under_a_crowd_region(
     tmp_path: Path,
 ) -> None:
-    """The assessment's governing count and the editor's proposal pairing, each over the same
+    """The assessment count and the editor's pairing agree under a crowd region.
+
+    The assessment's governing count and the editor's proposal pairing, each over the same
     annotations and a bucket published under no assessment, a crowd region among them, agree on
     what pairs.
     """
@@ -1021,7 +1037,9 @@ def test_the_assessment_count_and_the_editor_pairing_agree_under_a_crowd_region(
 def test_the_editor_pairs_a_bucket_under_its_assessments_center_match(
     tmp_path: Path,
 ) -> None:
-    """A bucket published under a center-match assessment pairs in the editor as that
+    """The editor pairs a bucket under its assessment's center match.
+
+    A bucket published under a center-match assessment pairs in the editor as that
     assessment counts: an annotation shifted off its proposal by under the assessment's
     tolerance, but by more than the comparability IoU admits, pairs and counts alike.
     """
@@ -1086,7 +1104,7 @@ def test_the_editor_pairs_a_bucket_under_its_assessments_center_match(
 
 
 class DottedProposer:
-    """A proposer the agent brings by dotted path: one candidate over the whole frame."""
+    """A proposer the agent brings by dotted path, returning one fixed candidate for any image."""
 
     def propose(self, image_path: str, **params) -> list[dict]:
         return [

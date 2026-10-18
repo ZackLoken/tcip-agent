@@ -1,7 +1,8 @@
 """The model_source build seam and the thin measurement-boundary contract.
 
-Covers ``build_from_model_source`` dispatch (``model_source`` only, validated with its config)
-and the behavioral ``check_model_contract`` / ``overfit_check`` utilities on real bespoke models.
+These tests cover ``build_from_model_source`` dispatch from a ``model_source`` validated with its
+config, and the behavioral ``check_model_contract`` and ``overfit_check`` utilities on real
+bespoke models.
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ DET_DIMS = {"in_chans": 3, "num_classes": 1, "img_size": (64, 64)}
 
 
 def _classifier():
-    """A real bespoke two-class classifier at :func:`band_statistics`."""
+    """Build a real bespoke two-class classifier at :func:`band_statistics`."""
     from tests._chain_fixtures import band_statistics
 
     return bespoke_models.build_bespoke_classifier(
@@ -42,8 +43,9 @@ def _classifier():
 
 
 def _bespoke_builder(*, image_mean, image_std, **_handed):
-    """An importable 'agent-written' builder: a real bespoke classification module at the
-    statistics it is handed, loading none of the weights it is handed.
+    """Build a real bespoke classifier at the handed statistics, as an agent-written builder.
+
+    The builder is importable and loads none of the weights it is handed.
     """
     return bespoke_models.build_bespoke_classifier(
         num_classes=2, image_mean=image_mean, image_std=image_std
@@ -57,8 +59,10 @@ _UNRESOLVED = TrainGeometry(
 
 
 def _source(builder: str):
-    """``builder``'s classification ``model_source`` declaring this module, validated in a run
-    config over no data, and the layout its admission stages (``model_build.staged_sources``).
+    """Return ``builder``'s classification ``model_source`` and the layout its admission stages.
+
+    The model source declares this module, validated in a run config over no data; the layout
+    is ``model_build.staged_sources``'s.
     """
     from tcip_mcp.pipelines.model_build import staged_sources
     from tcip_mcp.pipelines.schemas import train_config
@@ -124,9 +128,9 @@ def test_check_model_contract_classification_ok():
 
 
 def test_check_model_contract_records_per_parameter_gradient_magnitudes():
-    """A model whose parameters all took zero gradient must read as what it is: the presence
-    conjunct only asks whether a .grad exists, not what it is, so the report also states each
-    named parameter's gradient norm rather than gating the report on presence alone.
+    """The model contract records gradient magnitudes keyed by the model's parameter names.
+
+    Each reported name is a parameter of the model, and each magnitude is a non-negative float.
     """
     model = _classifier()
     report = check_model_contract(model, "classification", dims=CLS_DIMS)
@@ -141,11 +145,10 @@ def test_check_model_contract_records_per_parameter_gradient_magnitudes():
 
 
 def test_check_model_contract_gradient_norm_survives_a_float32_overflow():
-    """Each element of this parameter's gradient is finite (2e38, under float32's ~3.4e38 max), so
-    the elementwise finiteness gate passes, but summing their squares in the gradient's own
-    float32 dtype overflows: ``torch.tensor([2e38, 2e38]).norm()`` is ``inf`` even though every
-    element is finite. The recorded magnitude must be computed at higher precision so the report
-    stays the JSON-encodable value ``check_json_value`` needs downstream, never an ``inf``.
+    """The contract's gradient norm survives a float32 overflow as a finite value.
+
+    Each element of the parameter's gradient is 2e38, finite in float32, and the reported norm
+    is finite and equals 2e38 times the square root of two.
     """
     import torch.nn as nn
 
@@ -173,7 +176,7 @@ def test_check_model_contract_gradient_norm_survives_a_float32_overflow():
 
 
 def test_check_model_contract_rejects_prediction_free_eval_output():
-    """A dict is the shape, not the content: an output with no tensor is not a measurement."""
+    """The model contract rejects an eval output holding no tensor."""
     import torch.nn as nn
 
     class _Empty(nn.Module):
@@ -194,10 +197,10 @@ def test_check_model_contract_rejects_prediction_free_eval_output():
 
 
 def test_check_model_contract_accepts_a_ragged_nested_eval_output():
-    """A bespoke non-detection task may legitimately return a per-image ragged list of tensors (or
-    a nested dict of them) rather than one flat top-level tensor, e.g. a variable number of
-    per-instance predictions per image. The eval-output check must see the tensor wherever it is
-    nested, not only at the top level of the dict.
+    """The model contract accepts a ragged nested eval output.
+
+    An eval output holding, under one key, a list of per-image tensors of different lengths
+    passes the contract.
     """
     import torch.nn as nn
 
@@ -273,8 +276,10 @@ def test_render_overfit_report_passes_through_a_finite_report():
 
 
 def test_render_overfit_report_keeps_a_diverging_models_state():
-    """A diverging model's raw report can carry nan, which check_json_value refuses. The
-    rendered form keeps the state as a named companion field instead of losing it.
+    """The rendered overfit report keeps a diverging model's state as a named field.
+
+    A raw report carrying nan and inf renders to a form check_json_value admits, the
+    non-finite values null and the final value's state named beside it.
     """
     from tcip_mcp.pipelines.model_contract import render_overfit_report
 

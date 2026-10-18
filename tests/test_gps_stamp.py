@@ -1,6 +1,8 @@
-"""A capture's GPS stamp: a coordinate whose hemisphere reference is missing refuses naming the
-image, the platform never deriving a hemisphere, and a stamp with a latitude and no longitude has
-no position, so the capture is unattributed rather than measured at longitude 0.
+"""A capture's GPS stamp and the position it states.
+
+A coordinate whose hemisphere reference is missing refuses naming the image, and a stamp with a
+latitude and no longitude has no position, so its capture stays unmapped beside a plant at
+longitude 0.
 """
 
 from __future__ import annotations

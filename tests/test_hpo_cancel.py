@@ -1,7 +1,8 @@
-"""Cooperative sweep cancel: ``cancel_training`` over a sweep's id, a sweep's canceled final
-status, ``_run_hpo_trial``'s entry check, and the sweep ``Stopper``'s two stop-all conditions. The
-cancel is the sweep directory's one cancellation record (``experiments.request_cancel``), which
-every trial of it polls.
+"""Cooperative sweep cancel through the sweep directory's cancellation record.
+
+These tests cover ``cancel_training`` over a sweep's id, a sweep's canceled final status,
+``_run_hpo_trial``'s entry check, and the sweep ``Stopper``'s two stop-all conditions. The
+cancel is the record ``experiments.request_cancel`` writes in the sweep directory.
 """
 
 from __future__ import annotations
@@ -15,8 +16,10 @@ from tests._verified_checkpoint_fixtures import opened_sweep
 def _stub_search(
     monkeypatch, *, before=None, raises: Exception | None = None
 ) -> list[dict]:
-    """Replace Ray Tune's search with one answering the sweep's log directory, first calling
-    ``before(sweep_root)``, or raising ``raises``; returns the calls it received.
+    """Replace Ray Tune's search with a stub and return the calls it receives.
+
+    The stub records its keywords, calls ``before`` with the sweep directory when it is given,
+    then raises ``raises`` when it is given.
     """
     calls: list[dict] = []
 
@@ -48,9 +51,9 @@ def test_a_cancel_written_before_the_run_ends_the_sweep_canceled_before_its_firs
     real_hpo_base_config,
     monkeypatch,
 ) -> None:
-    """A cancel the opened sweep's directory holds when its run starts (a relaunch canceled
-    before its worker ran) ends the sweep canceled, its final status carrying the reason, and
-    never starts the search.
+    """A sweep holding a cancel when its run starts ends canceled with no search call.
+
+    The final status carries the cancel-at-start reason, and the search stub records no call.
     """
     from tcip_mcp import experiments
     from tcip_mcp.tools.training_tools import (
@@ -88,9 +91,7 @@ def test_a_cancel_landing_mid_search_ends_the_sweep_canceled(
     monkeypatch,
     raises,
 ) -> None:
-    """A cancel that lands while the search runs ends the sweep canceled whether the search
-    returns or raises once it stops.
-    """
+    """A cancel landing mid-search ends the sweep canceled whether the search returns or raises."""
     from tcip_mcp import experiments
     from tcip_mcp.tools.training_tools import (
         _CANCEL_DURING_RUN_REASON,
@@ -125,7 +126,9 @@ def test_a_cancel_after_the_sweep_ended_refuses_and_leaves_its_final_status_as_w
     real_hpo_base_config,
     monkeypatch,
 ) -> None:
-    """A cancel arriving after the sweep ended refuses by name and writes nothing: its final
+    """A cancel after the sweep ended refuses and leaves its final status as written.
+
+    A cancel arriving after the sweep ended refuses by name and writes nothing: its final
     status is the one it ended with.
     """
     from tcip_mcp.experiments import cancel_requested, experiment_dir
@@ -155,9 +158,7 @@ def test_a_cancel_after_the_sweep_ended_refuses_and_leaves_its_final_status_as_w
 def test_a_second_cancel_keeps_the_time_of_the_first(
     project, real_hpo_base_config
 ) -> None:
-    """The cancellation record is written once: a repeated request keeps the first request's
-    time.
-    """
+    """A repeated cancel request answers the first request's time."""
     from tcip_mcp.experiments import request_cancel
 
     opened = opened_sweep(project, real_hpo_base_config)
@@ -172,8 +173,10 @@ def test_a_sweep_cancel_reaches_only_a_sweep_of_the_project_it_is_handed(
     real_hpo_base_config,
     tmp_path_factory,
 ) -> None:
-    """The cancel resolves the sweep under the project it is handed; another project holds no
-    such sweep and refuses.
+    """A sweep cancel reaches a sweep of the project it is handed and refuses elsewhere.
+
+    The cancel lands on the sweep under the project it is handed; handed another project, which
+    holds no such sweep, it refuses.
     """
     from tcip_mcp.experiments import cancel_requested, experiment_dir
     from tcip_mcp.tools.training_tools import cancel_training
@@ -206,7 +209,7 @@ def test_run_hpo_trial_reports_nothing_and_opens_no_run_when_the_sweep_is_cancel
 
 
 class _FakeTrial:
-    """Stands in for a ``ray.tune.experiment.Trial`` in the callback: only ``trial_id`` is read."""
+    """A stand-in for a ``ray.tune.experiment.Trial`` in the callback, carrying ``trial_id``."""
 
     def __init__(self, trial_id: str) -> None:
         self.trial_id = trial_id
@@ -236,9 +239,10 @@ def test_sweep_stopper_stop_all_true_once_ray_no_longer_holds_any_trial_live(
 def test_sweep_stopper_stop_all_true_at_once_for_a_trial_ray_killed_outright(
     tmp_path,
 ) -> None:
-    """A trial Ray kills outright never writes its final status, so a disk-based check alone
-    would read it as running until the heartbeat window passed; the callback's own live set, fed
-    by Ray's own ``on_trial_error`` report, says otherwise at once.
+    """The sweep stopper stops all when Ray reports its one live trial errored.
+
+    With a cancel requested and the stale window not elapsed, ``stop_all`` reads false while
+    the trial is live and true right after Ray's ``on_trial_error`` report.
     """
     from tcip_mcp.experiments import request_cancel
     from tcip_mcp.pipelines.training.hpo import _build_sweep_stopper
@@ -280,9 +284,10 @@ def test_run_hyperparameter_search_refuses_a_relaunched_from_naming_no_sweep_und
     real_hpo_base_config,
     monkeypatch,
 ) -> None:
-    """relaunched_from must name a sweep this root holds: a name that resolves to nothing is
-    refused before any directory is made, rather than recorded as lineage nothing answers for;
-    a launch naming none is untouched by the check.
+    """A ``relaunched_from`` naming no sweep under this root refuses, making no sweep directory.
+
+    A name resolving to no sweep refuses naming it with no sweep directory made, and a launch
+    naming none is admitted.
     """
     from tcip_mcp.experiments import sweep_dirs
     from tcip_mcp.tools.training_tools import run_hyperparameter_search

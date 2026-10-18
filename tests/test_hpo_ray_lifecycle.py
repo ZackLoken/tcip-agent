@@ -1,9 +1,8 @@
-"""Ray is one cluster per process, shared by every sweep running in it.
+"""``tune_search``'s lifecycle of the Ray cluster its process holds.
 
-``tune_search`` may therefore only shut Ray down when the last concurrent sweep leaves, and
-only when the platform is what started it. Ray is faked here (``tune_search`` imports it
-inside the function body) so the lifecycle can be driven deterministically without a real
-cluster: each fake ``Tuner.fit`` blocks until the test releases it.
+``tune_search`` shuts Ray down when the last concurrent sweep leaves, leaves a cluster its
+process did not start running, and sizes and seeds the cluster it starts. Ray is faked here,
+and each fake ``Tuner.fit`` blocks until its release event is set.
 """
 
 from __future__ import annotations
@@ -18,12 +17,10 @@ import pytest
 
 
 class _FakeDaemonProcess:
-    """Stands in for a Ray daemon's ``Popen``, as ``Node.all_processes`` holds it.
+    """A stand-in for a Ray daemon's ``Popen``, as ``Node.all_processes`` holds it.
 
-    ``terminate`` mirrors ``ConsolePopen``'s Windows console-signal path: it raises the
-    ``OSError`` that path raises on a daemon started without a console (``ray.no_console``
-    True on the fake module), and otherwise succeeds like a daemon that has a console to
-    signal.
+    ``terminate`` raises ``OSError`` while ``ray.no_console`` is true on the fake module and
+    marks the daemon dead while it is false.
     """
 
     def __init__(self, ray: ModuleType, pid: int) -> None:
@@ -54,18 +51,13 @@ class _FakeDaemonProcess:
 def _install_fake_ray(monkeypatch, entered: list, release: list) -> ModuleType:
     """Put a counting, blocking stand-in for Ray on ``sys.modules``.
 
-    The nth ``Tuner`` built sets ``entered[n]`` when its ``fit`` starts and returns only
-    once ``release[n]`` is set, so a test can hold a sweep open across another's exit.
-    ``ray.tune.schedulers`` carries the one class the sample sweep's scheduler names.
+    The nth ``Tuner`` built sets ``entered[n]`` when its ``fit`` starts and returns when
+    ``release[n]`` is set. ``ray.tune.schedulers`` carries the one class the sample sweep's
+    scheduler names.
 
-    ``ray._private.worker.global_worker.node.all_processes`` mirrors the real attribute path
-    ``_kill_ray_daemons_before_shutdown`` reads, holding one fake daemon per Ray process type;
-    ``shutdown`` mirrors ``Node.kill_all_processes``, terminating whichever of those daemons
-    are still alive (``ray.no_console`` decides whether that terminate call raises).
-    ``_kill_ray_daemons_before_shutdown`` looks up each fake daemon's descendants through the
-    real ``psutil``, so ``psutil.Process`` is patched here to report the fake pids as never
-    having any: a real pid this test made up matching a process actually running on the host
-    would otherwise be walked and its children killed.
+    ``ray._private.worker.global_worker.node.all_processes`` holds one fake daemon per Ray
+    process type, and ``shutdown`` terminates whichever of those daemons are still alive.
+    ``psutil.Process`` is patched to raise ``NoSuchProcess`` for any pid.
     """
     import psutil
 
@@ -193,7 +185,7 @@ def _run_one_search(project) -> None:
 
 @pytest.fixture(autouse=True)
 def _isolated_lifecycle_state(tmp_path, monkeypatch):
-    """Start every test from an idle, unowned cluster."""
+    """Reset the cluster lifecycle state to idle and unowned."""
     import tcip_mcp.pipelines.training.hpo as hpo
 
     monkeypatch.setattr(hpo, "_active_searches", 0)
@@ -251,10 +243,10 @@ def test_a_cluster_this_process_did_not_start_is_never_shut_down(
 def test_ray_init_propagates_this_process_s_import_search_path_to_trial_workers(
     tmp_path, monkeypatch
 ):
-    """A trial worker Ray spawns starts from its own defaults, not this interpreter's
-    sys.path; every entry of it reaches the worker, the same guarantee the launch subprocess
-    gets, except a layout root an import put there, which no worker inherits: a worker imports
-    from the layout it binds itself.
+    """``ray.init``'s runtime environment carries this process's import path, less layout roots.
+
+    Each ``sys.path`` entry that is not a layout root appears in that environment's
+    ``PYTHONPATH``, and no layout root does.
     """
     from tcip_mcp.pipelines.model_build import _LAYOUT_ROOTS
     from tcip_store import canonical_path
@@ -282,9 +274,10 @@ def test_a_concurrent_sweep_warns_when_the_running_cluster_s_import_path_has_gon
     caplog,
     tmp_path,
 ):
-    """A cluster this module started keeps the ``PYTHONPATH`` it was handed at ``ray.init``;
-    a second sweep entering while that cluster is still up, after ``sys.path`` gained an entry
-    the first sweep never saw, must be told its trial workers will not see that entry either.
+    """A concurrent sweep warns when the running cluster's import path has gone stale.
+
+    With ``sys.path`` gaining an entry while a first sweep's cluster is up, a second sweep
+    entering logs a warning that the cluster keeps the import path captured at its start.
     """
     import logging
 
@@ -321,8 +314,10 @@ def test_a_concurrent_sweep_does_not_warn_when_the_import_path_is_unchanged(
     monkeypatch,
     caplog,
 ):
-    """The companion of the stale-path warning: entering a second sweep against a cluster
-    this module started, with the import path unchanged, raises no warning.
+    """A concurrent sweep raises no warning when the import path is unchanged.
+
+    Entering a second sweep against a cluster this module started, with the import path
+    unchanged, raises no warning.
     """
     import logging
 
@@ -371,11 +366,11 @@ def test_sequential_sweeps_each_start_and_stop_their_own_cluster(
 def test_a_console_free_exit_kills_ray_daemons_before_shutdown_signals_them(
     tmp_path, monkeypatch
 ):
-    """Windows' console-signal shutdown path raises ``OSError: [WinError 6] The handle is
-    invalid`` on a daemon started without a console; a console-free process must kill every
-    daemon itself first so ``ray.shutdown()`` finds each one already dead and never signals
-    it. Asserts the sweep's exit raises nothing, that every daemon was killed rather than
-    signaled, and that ``ray.shutdown()`` still ran.
+    """A console-free exit kills Ray's daemons, leaving ``ray.shutdown()`` none to signal.
+
+    With no console attached and daemons whose terminate raises, the sweep's exit raises
+    nothing, each daemon records one kill and no terminate call, and ``ray.shutdown()`` still
+    runs.
     """
     import tcip_mcp.pipelines.training.hpo as hpo
 
@@ -409,9 +404,10 @@ def test_a_console_free_exit_kills_ray_daemons_before_shutdown_signals_them(
 def test_a_process_with_a_console_lets_ray_shutdown_signal_its_daemons_directly(
     tmp_path, monkeypatch
 ):
-    """Coverage of the attached-console path: asserts nothing is killed ahead of
-    ``ray.shutdown()``, which signals each daemon through the terminate path, and that
-    ``ray.shutdown()`` still ran.
+    """A process with a console lets ``ray.shutdown()`` signal its daemons directly.
+
+    Asserts nothing is killed ahead of ``ray.shutdown()``, which signals each daemon through the
+    terminate path, and that ``ray.shutdown()`` still ran.
     """
     import tcip_mcp.pipelines.training.hpo as hpo
 
@@ -438,9 +434,10 @@ def test_a_process_with_a_console_lets_ray_shutdown_signal_its_daemons_directly(
 def test_a_cluster_this_process_starts_is_sized_to_the_sweep_s_own_request(
     tmp_path, monkeypatch
 ):
-    """The cluster asks Ray for the sweep's CPUs, every concurrent trial's together, never for
-    the host's: three half-CPU trials at once need two whole CPUs, and the default one-CPU,
-    one-at-a-time sweep needs one.
+    """A cluster this process starts is sized to the sweep's own CPU request.
+
+    Three concurrent half-CPU trials ask Ray for two whole CPUs, and the sample one-CPU,
+    one-at-a-time sweep asks for one.
     """
     from tcip_mcp.pipelines.training.hpo import tune_search
     from tests._training_values import sweep_space, tune_arguments

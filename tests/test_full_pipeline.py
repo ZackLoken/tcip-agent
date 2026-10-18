@@ -1,7 +1,6 @@
-"""End-to-end integration test: build → train → infer.
+"""The bespoke ``model_source`` pipeline as one connected system: build → train → infer.
 
-Proves the full bespoke ``model_source`` pipeline works as a connected system.
-Uses synthetic data for classification and real sample data for detection.
+Classification runs over synthetic data and detection over real sample data.
 """
 
 from __future__ import annotations
@@ -37,8 +36,9 @@ from tests._training_values import (  # noqa: E402
 
 @pytest.fixture()
 def tiny_classification_data(tmp_path):
-    """A minimal 2-class image classification dataset: six dark frames of class 0 and six bright
-    ones of class 1, plus their ground-truth table.
+    """Write a two-class classification dataset and return its images and table paths.
+
+    Six dark frames of class 0 and six bright ones of class 1, plus their ground-truth table.
     """
     from tests.tiny_trainer_fixtures import write_regression_dataset
 
@@ -58,7 +58,7 @@ def tiny_classification_data(tmp_path):
 
 
 class TestFullClassificationPipeline:
-    """End-to-end: bespoke builder → train → checkpoint → predict."""
+    """Tests of the bespoke classification pipeline from builder through checkpoint to predict."""
 
     def test_build_train_infer(self, tiny_classification_data, tmp_path):
         # --- Step 1: A bespoke classification model_source ---
@@ -168,7 +168,7 @@ root holding subjects.json, images/<date>/ and their label documents; defaults t
 
 
 def _sample_date() -> str | None:
-    """A capture date under SAMPLE_PROJECT that has both images and bud annotations, or None."""
+    """Return a capture date under SAMPLE_PROJECT holding images and bud annotations, or None."""
     if not (SAMPLE_PROJECT / "subjects.json").is_file():
         return None
     from tcip_annotation import json_io
@@ -189,7 +189,7 @@ def _sample_date() -> str | None:
     reason="No nested-schema sample project (set TCIP_SAMPLE_PROJECT to a converted dataset)",
 )
 class TestDetectionPipelineRealData:
-    """End-to-end: build → train → infer using real bud images (nested schema)."""
+    """Tests of the detection pipeline, build to train to infer, over real bud images."""
 
     def test_build_train_infer(self, tmp_path):
         from tests._chain_fixtures import detector_values

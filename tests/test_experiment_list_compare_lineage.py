@@ -1,5 +1,6 @@
-"""Experiment-tool coverage (list / compare / lineage), each run a directory the launcher's own
-writer opened under the test's project.
+"""The experiment tools' list, compare and lineage reads over launcher-opened runs.
+
+Each run is a directory the launcher's own writer opened under a scratch project.
 """
 
 
@@ -9,9 +10,10 @@ def _opened(
     builder: str = "my_models:tree_detector",
     **facts,
 ):
-    """A run of ``project`` of a detector built by ``builder``, declared in a ``my_models.py`` of
-    its own, over its own two frames, opened by the launcher's own writer; ``facts`` are
-    ``open_run``'s other keywords.
+    """Open a run of a detector built by ``builder`` through the launcher's own writer.
+
+    The run belongs to ``project``, its builder declared in a ``my_models.py`` of its own, over
+    its own two frames; ``facts`` are ``open_run``'s other keywords.
     """
     from tests._chain_fixtures import FRAME_STATISTICS
     from tests._verified_checkpoint_fixtures import (
@@ -87,7 +89,9 @@ def test_a_completed_runs_lineage_names_the_checkpoint_its_final_status_names(
 
 
 def test_get_experiment_tool_pages_epoch_rows_bounded_by_n_epochs(tmp_path):
-    """The MCP tool accepts metrics_limit/metrics_offset under view='full', paging the epoch
+    """``get_experiment`` pages the epoch rows ``n_epochs`` counts under the full view.
+
+    The MCP tool accepts metrics_limit/metrics_offset under view='full', paging the epoch
     rows ``n_epochs`` counts.
     """
     from tcip_mcp.tools.experiment_tools import get_experiment
@@ -110,8 +114,10 @@ def test_get_experiment_tool_pages_epoch_rows_bounded_by_n_epochs(tmp_path):
 def test_get_experiment_tool_lineage_view_admits_defaults_refuses_pagination(
     tmp_path,
 ):
-    """A rail must admit valid work: the ordinary view='lineage' call (no pagination args)
-    still succeeds; a non-default pagination arg under that view is refused as meaningless.
+    """``get_experiment``'s lineage view admits its defaults and refuses pagination.
+
+    The ordinary view='lineage' call (no pagination args) still succeeds; a non-default
+    pagination arg under that view is refused as meaningless.
     """
     from tcip_mcp.tools.experiment_tools import get_experiment
 
@@ -131,8 +137,10 @@ def test_get_experiment_tool_lineage_view_admits_defaults_refuses_pagination(
 def test_compare_experiments_reports_the_last_row_and_rows_logged_after_the_end(
     tmp_path,
 ):
-    """The final status is written once; a row an outside writer appends later with a later
-    instant is counted, never hidden, and a completed run's own rows are not.
+    """``compare_experiments`` reports the last row and counts rows logged after the end.
+
+    Of two rows appended to a completed run, the one stamped now is counted after the end and
+    the one stamped in 2000 is not, and the last row appended is the one reported.
     """
     from tcip_mcp.experiments import (
         METRICS_FILE,
@@ -162,8 +170,9 @@ def test_compare_experiments_reports_the_last_row_and_rows_logged_after_the_end(
 def test_compare_experiments_stale_heartbeat_compares_interrupted(
     tmp_path, monkeypatch
 ):
-    """A run with no final status reads running while its heartbeat is fresh, with no
-    rows-after-end count since it has not ended, and interrupted once it goes stale.
+    """A run with no final status compares running, then interrupted when its heartbeat is stale.
+
+    While its heartbeat is fresh it reads running with no rows-after-end count.
     """
     from tcip_mcp import experiments
     from tcip_mcp.experiments import compare_experiments
@@ -185,10 +194,11 @@ def test_compare_experiments_stale_heartbeat_compares_interrupted(
 def test_compare_experiments_rows_after_end_compares_instants_across_offsets(
     tmp_path,
 ):
-    """rows_after_end parses each row's timestamp (and the final status's ``ended``) as an
-    instant and compares strictly-after, so a row stamped in a different UTC offset, or a bare
-    "Z", still compares on the instant it actually names rather than on its ISO text; a row
-    whose timestamp does not decode refuses the run's comparison, naming the row.
+    """``rows_after_end`` compares row timestamps as instants across UTC offsets.
+
+    Of five rows stamped in three UTC offsets and a bare "Z", the two whose instants fall
+    strictly after the final status's ``ended`` are counted. A row whose timestamp does not
+    decode refuses the run's comparison, naming the row.
     """
     from datetime import datetime, timedelta, timezone
 

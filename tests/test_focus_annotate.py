@@ -2,7 +2,7 @@
 
 The tool resolves the first image holding the subject and the mode its labels imply, then posts an
 ``annotate_focus`` event. With no GUI running, delivery is a soft miss (``delivered=False``),
-but the resolution (index + mode) must still be correct: that's what these pin.
+and the resolution (index + mode) is what these tests check.
 """
 
 from __future__ import annotations
@@ -27,10 +27,10 @@ def _scene(root: Path, date: str, images: list[str]) -> None:
 def _label(
     root: Path, subject: str, date: str, task: str, stem: str, count: int
 ) -> None:
-    """Write the one per-image label document (all subjects, name-based): ``count`` 0 writes a
-    present empty document, else ``count`` shapes of ``subject`` with the geometry ``task`` names
-    (``segment`` a polygon, ``point`` a point, else a box), so focus_human_attention infers the
-    mode from the frame's own geometry.
+    """Write the per-image label document, holding ``count`` shapes of ``subject``.
+
+    ``count`` 0 writes a present empty document, else ``count`` shapes of ``subject`` with the
+    geometry ``task`` names: ``segment`` a polygon, ``point`` a point, any other task a box.
     """
     geoms = {
         "segment": Polygon([[(10.0, 10.0), (20.0, 10.0), (20.0, 20.0)]]),
@@ -46,7 +46,7 @@ def _label(
 
 
 def _unreadable(root: Path, date: str, stem: str) -> None:
-    """A label document for ``stem`` whose stored bytes no longer decode."""
+    """Write an empty ``bush`` label document for ``stem``; overwrite it with ``{not json``."""
     from tests._record_damage_fixtures import damage_record
 
     _label(root, "bush", date, "segment", stem, 0)
@@ -84,8 +84,10 @@ def test_a_named_bucket_sets_the_mode_from_its_own_document_not_the_label(
     tmp_path: Path,
     bound,
 ) -> None:
-    """The frame's ground truth is a box and the bucket's proposal for it a polygon: the canvas
-    shows the proposals, so the mode is the proposal document's own geometry.
+    """A named bucket sets the focus mode from its own document, not the label.
+
+    The frame's ground truth is a box and the bucket's proposal for it a polygon: with no bucket
+    named the focus resolves to box mode, and with the bucket named to polygon mode.
     """
     import pytest
     from PIL import Image
@@ -211,11 +213,7 @@ def test_focus_annotate_infers_box_mode_from_detect_labels(
 def test_focus_annotate_sends_a_point_only_frame_in_point_mode(
     tmp_path: Path, bound
 ) -> None:
-    """A frame whose only geometry for the subject is a point is edited in point mode.
-
-    ``_subject_task`` already answers "point"; delivering that frame in box mode hands the human a
-    tool that cannot touch what is on the canvas (the GUI's Mode union carries "point").
-    """
+    """A frame carrying point annotations of the subject resolves to point mode."""
     root = tmp_path / "proj"
     date = "2026-03-02"
     imgs = [f"IMG_{i:04d}.JPG" for i in range(3)]
@@ -316,8 +314,10 @@ def test_focus_annotate_navigates_past_an_unreadable_label_on_another_frame(
     tmp_path: Path,
     bound,
 ) -> None:
-    """A present, unreadable label on a frame the tool is not landing on does not close the
-    navigation surface for the date; it is named in the result's ``unreadable`` list instead.
+    """The focus tool navigates past an unreadable label on another frame, naming it.
+
+    With an unreadable label on the first frame, the tool lands on the frame holding the
+    subject and names the first frame in the result's ``unreadable`` list.
     """
     root = tmp_path / "proj"
     date = "2026-03-02"
@@ -336,9 +336,7 @@ def test_focus_annotate_refuses_when_the_landed_frame_itself_is_unreadable(
     tmp_path: Path,
     bound,
 ) -> None:
-    """A present, unreadable label naming the requested frame is an error naming the document,
-    never a raise through the tool boundary.
-    """
+    """An unreadable label on the requested frame answers an error naming the document."""
     root = tmp_path / "proj"
     date = "2026-03-02"
     imgs = [f"IMG_{i:04d}.JPG" for i in range(3)]

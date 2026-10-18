@@ -1,12 +1,10 @@
-"""EXIF-orientation regression: the training loader must read the same upright frame the
-labels are authored in (and that ``image_dimensions`` / the GUI / eval already use).
+"""The training loader reads the upright frame an EXIF-oriented image's labels are in.
 
 A JPEG tagged EXIF Orientation 6 stores its sensor frame rotated from the upright one, and a
-label document records its pixel boxes and its width and height in the upright frame. If
-``load_image`` ever returns the raw sensor frame while ``image_dimensions`` returns the
-upright one, the loader reads upright boxes against a raw ``(w, h)`` and scatters every box,
-with in-loop mAP blind to it (raw-vs-raw). These tests assert the frames are one, by
-construction and spatially, through the real dataset classes.
+label document records its pixel boxes and its width and height in the upright frame. These
+tests hold ``load_image``, ``image_dimensions``, ``SourceHeader.display_frame`` and the
+detection datasets to the upright frame, and check that a loaded label box covers the marker
+it was drawn on.
 """
 
 from __future__ import annotations
@@ -44,10 +42,10 @@ MARKER = (
 def _make_orient6_dataset(
     tmp_path: Path,
 ) -> tuple[Path, tuple[int, int, int, int]]:
-    """Write ``images/m.jpg`` (Orientation 6) and its label document (upright-frame pixel box).
+    """Write an Orientation-6 ``m.jpg`` and its upright-frame label document.
 
-    The on-disk pixels are the upright image rotated 90° so that auto-orient's rotate(270)
-    restores the upright frame, mirroring a real orientation-6 capture.
+    The image lands in the undated bucket under ``tmp_path / "images"``, its on-disk pixels the
+    upright image rotated 90°; the return is that directory and the marker's upright box.
     """
     from tcip_annotation.state import Annotation, BBox
     from tests._producer_fixtures import label_image, painted_frame
@@ -76,7 +74,7 @@ def _make_orient6_dataset(
 def _red_fraction(
     rchan: np.ndarray | torch.Tensor, g: np.ndarray | torch.Tensor
 ) -> float:
-    """Fraction of pixels that are strongly red (R high, G low): marker detector, JPEG-robust."""
+    """Return the fraction of pixels with R above 0.55 and G below 0.45, or -1 for no pixels."""
     r = rchan.numpy() if isinstance(rchan, torch.Tensor) else rchan
     gg = g.numpy() if isinstance(g, torch.Tensor) else g
     if r.size == 0:
@@ -107,9 +105,7 @@ def test_orientation6_fixture_is_real(tmp_path: Path) -> None:
 
 
 def test_load_image_frame_matches_image_dimensions(tmp_path: Path) -> None:
-    """Both readers share one orientation-tag read, so this guards the axis-swap rule
-    each applies from it, not whether the tag read itself agrees.
-    """
+    """``load_image`` serves the upright frame ``image_dimensions`` reports."""
     from tcip_mcp.pipelines.image_utils import image_dimensions, load_image
 
     images_dir, _ = _make_orient6_dataset(tmp_path)
@@ -123,9 +119,7 @@ def test_the_header_frame_and_the_decoded_frame_agree_at_every_orientation(
     tmp_path: Path,
     orientation: int,
 ) -> None:
-    """The size read off a photograph's header and the frame its decode serves are one
-    orientation rule, at each of the eight EXIF orientations.
-    """
+    """A photograph's header size and its decoded frame agree at every EXIF orientation."""
     from tcip_annotation.utils import oriented_size
     from tcip_mcp.pipelines.raster_source import PhotographicSource
 

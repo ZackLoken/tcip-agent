@@ -1,6 +1,4 @@
-"""Tests for matching.py: the one matcher's pairs under a stated criterion, and its geometry
-helpers.
-"""
+"""The one matcher's pairs under a stated criterion, and its geometry helpers."""
 
 from __future__ import annotations
 
@@ -69,7 +67,7 @@ LOBE_B = [
 
 
 def test_point_in_polygon_hits_a_ring_that_is_not_the_first():
-    """Every ring is part of the instance, so a hit test consults all of them."""
+    """``point_in_polygon`` hits a point inside either ring and misses the gap between them."""
     poly = Polygon([LOBE_A, LOBE_B])
     assert point_in_polygon(20, 30, poly) is True  # inside the first lobe
     assert point_in_polygon(95, 35, poly) is True  # inside the second lobe
@@ -79,8 +77,10 @@ def test_point_in_polygon_hits_a_ring_that_is_not_the_first():
 
 
 def test_a_multi_ring_instance_pairs_by_the_box_spanning_every_ring():
-    """The matcher compares an instance by the box over all its rings, so a proposal that found
-    one lobe of a two-lobe instance overlaps only part of it.
+    """A two-ring instance pairs by the box spanning both rings.
+
+    A proposal holding the whole instance pairs, and one holding one lobe of the two pairs
+    nothing at 0.5.
     """
     gt = [Annotation(subject="bud", geometry=Polygon([LOBE_A, LOBE_B]))]
     exact = [
@@ -168,7 +168,9 @@ def test_the_criterion_limit_is_inclusive_and_a_lower_overlap_pairs_nothing():
 
 
 def test_an_unpaired_detection_centered_in_a_crowd_region_is_ignored():
-    """COCO's crowd rule as evaluation states it: a detection left unpaired whose center lies in
+    """An unpaired detection centered in a crowd region is ignored.
+
+    COCO's crowd rule as evaluation states it: a detection left unpaired whose center lies in
     a crowd region's box is neither true nor false.
     """
     gt = [

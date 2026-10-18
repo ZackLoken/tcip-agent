@@ -1,9 +1,9 @@
 """The browser and the backend meet on one declaration of the API's paths.
 
 The FastAPI app registers the paths; ``tools/generate_frontend_routes.py`` projects them into
-``frontend/src/api/routes.ts``. These tests hold that projection to the routes the app really has,
-keep the frontend from writing a path of its own beside it, and check that every path the browser
-asks for is one the dev server forwards.
+``frontend/src/api/routes.ts``. These tests hold that projection to the app's registered routes,
+check that the frontend writes no path of its own beside it, and check that each path the
+browser asks for is one the dev server forwards.
 """
 
 from __future__ import annotations
@@ -52,11 +52,7 @@ def _frontend_sources(include_tests: bool) -> list[Path]:
 def test_the_generated_path_module_is_what_the_registered_routes_produce() -> (
     None
 ):
-    """The checked-in module is a projection of the app's routes, not a hand-edited copy.
-
-    Regenerating and comparing is the whole guarantee: an added, renamed or re-methoded route that
-    never reached the module would leave the browser asking for a path the backend no longer serves.
-    """
+    """The checked-in path module equals what the generator renders from the app's routes."""
     generated = _generator().render(app)
     assert GENERATED.read_text(encoding="utf-8") == generated, (
         "packages/tcip-web/frontend/src/api/routes.ts is out of date; "
@@ -67,9 +63,7 @@ def test_the_generated_path_module_is_what_the_registered_routes_produce() -> (
 def test_no_frontend_module_writes_a_backend_path_of_its_own() -> None:
     """Outside the generated module, the frontend holds no path string of its own.
 
-    A call site that spells a path itself is a second declaration of the contract, which is what
-    drifts: the backend renames the route and the browser keeps asking for the old one. Frontend
-    test files are left out: a URL written there is the expectation being asserted, not a caller.
+    Frontend test files are left out of the scan.
     """
     registered_shapes = {
         re.sub(r"\{[^}]*\}", "{}", path)
@@ -98,10 +92,7 @@ def test_no_frontend_module_writes_a_backend_path_of_its_own() -> None:
 def test_the_generated_proxy_module_is_what_the_registered_routes_produce() -> (
     None
 ):
-    """The checked-in dev-proxy module is a projection of the app's routes, not a hand-edited
-    copy: a socket route added under a new prefix that never reached the module would leave the
-    dev server unable to proxy it.
-    """
+    """The checked-in dev-proxy module equals what the generator renders from the app's routes."""
     generated = _generator().render_proxy(app)
     assert PROXY_GENERATED.read_text(encoding="utf-8") == generated, (
         "packages/tcip-web/frontend/src/api/devProxy.generated.ts is out of date; "
@@ -110,7 +101,7 @@ def test_the_generated_proxy_module_is_what_the_registered_routes_produce() -> (
 
 
 def _proxy_entries_from_generated_module() -> tuple[tuple[str, bool], ...]:
-    """The ``DEV_PROXY`` entries as the checked-in generated module actually declares them."""
+    """Return the ``DEV_PROXY`` entries as the checked-in generated module declares them."""
     text = PROXY_GENERATED.read_text(encoding="utf-8")
     return tuple(
         (path, ws == "true") for path, ws in _PROXY_ENTRY_RE.findall(text)
@@ -118,9 +109,10 @@ def _proxy_entries_from_generated_module() -> tuple[tuple[str, bool], ...]:
 
 
 def test_vite_config_builds_its_real_proxy_from_the_generated_module() -> None:
-    """The one assertion that reads the real ``vite.config.ts``: its ``server.proxy`` is built by
-    mapping each ``DEV_PROXY`` entry's own ``path``/``ws`` fields into a proxy rule, structurally,
-    never by a literal of its own a substring match could mistake for the real thing.
+    """The real ``vite.config.ts`` builds its proxy from each generated ``DEV_PROXY`` entry.
+
+    The config imports the generated module, and its ``server.proxy`` maps each ``DEV_PROXY``
+    entry's ``path`` and ``ws`` fields into a proxy rule.
     """
     vite_text = VITE_CONFIG.read_text(encoding="utf-8")
     assert "./src/api/devProxy.generated" in vite_text, (
@@ -139,16 +131,16 @@ def test_vite_config_builds_its_real_proxy_from_the_generated_module() -> None:
 def test_the_real_apis_websocket_routes_make_the_api_prefix_proxy_websockets() -> (
     None
 ):
-    """Three sockets are mounted under ``/api`` rather than under ``/ws``, so the generated
-    ``/api`` entry must itself carry ``ws: true`` or the dev server never proxies them.
-    """
+    """The ``/api`` proxy entry generated from the app's routes carries ``ws: true``."""
     entries = dict(_generator().collect_proxy_entries(app))
     assert entries.get("/api") is True
 
 
 def test_the_frontend_serving_paths_are_never_proxy_entries() -> None:
-    """A route the app itself serves the frontend or its health probe through never becomes a
-    proxy entry, so the dev server keeps serving its own root, modules and HMR there.
+    """The app's frontend-serving paths do not become proxy entries.
+
+    Over an app serving ``/``, ``/health`` and one ``/api`` route, the proxy entries are
+    exactly ``{"/api"}``, and none is a frontend-serving path.
     """
     from tcip_web.app import FRONTEND_SERVING_PATHS
 
@@ -178,10 +170,8 @@ def test_every_path_the_browser_asks_for_is_forwarded_by_the_dev_server() -> (
 ):
     """The paths the frontend references all fall under a prefix the generated dev proxy forwards.
 
-    Sockets are the case worth stating: two of them are mounted under the API prefix rather than
-    under /ws, so a proxy rule for /ws alone would leave them unreachable in development. The
-    prefixes come from the checked-in proxy module, what the config's own ``server.proxy`` is
-    held to build from, rather than only from the generator function that produced it.
+    The prefixes are parsed from the checked-in proxy module, and each referenced route name is
+    one the backend registers.
     """
     prefixes = tuple(
         path for path, _ws in _proxy_entries_from_generated_module()
@@ -219,8 +209,8 @@ def test_a_route_the_generator_has_not_seen_before_still_reaches_the_browser() -
 ):
     """A newly registered route is projected without anything being taught about it.
 
-    The names carry the method and the path parameters, and a parameter is encoded where it is
-    substituted, so a value with a slash in it cannot widen the path it was meant to fill.
+    The names carry the method and the path parameters, and the rendered module passes a
+    parameter through ``encodeURIComponent`` where it is substituted.
     """
     generator = _generator()
     fresh = FastAPI()
@@ -256,7 +246,7 @@ def test_a_route_the_generator_has_not_seen_before_still_reaches_the_browser() -
 def test_two_routes_that_would_share_a_name_are_refused_rather_than_collapsed() -> (
     None
 ):
-    """One name cannot stand for two routes: the browser would reach the wrong one silently."""
+    """Two routes generating one name are refused, naming it."""
     generator = _generator()
     clashing = FastAPI()
 

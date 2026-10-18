@@ -20,8 +20,10 @@ DATE = "2-11-26"
 
 
 def _empty_bucket(project: Path, *images: Path) -> str:
-    """A bucket ``m/2024-01-01`` that predicted nothing on each of ``images`` (8 by 8 px), under
-    their dataset root; its name.
+    """Publish a bucket ``m/2024-01-01`` that predicted nothing and return its name.
+
+    The bucket holds an empty prediction for each of ``images`` (8 by 8 px), under their dataset
+    root.
     """
     pytest.importorskip("torch")
     from tests._chain_fixtures import published
@@ -58,11 +60,7 @@ class TestReadAnnotations:
     def test_polygon_is_reported_as_rings_including_every_contour(
         self, tmp_path
     ):
-        """The tool response represents a polygon as ``rings``, all of them.
-
-        A stored annotation can be occlusion-split (one instance, several contours), so reporting a
-        single flat point list would silently hide part of the object from the agent reading it.
-        """
+        """The tool response represents a two-contour polygon as ``rings``, both of them."""
         from tcip_annotation.state import Annotation, Polygon
         from tcip_mcp.tools.annotation_tools import read_annotations
         from tests._producer_fixtures import label_image
@@ -100,7 +98,7 @@ class TestReadAnnotations:
 
 
 class TestEvaluatePredictions:
-    """Test score_predictions with actual file I/O."""
+    """Tests of score_predictions over files on disk."""
 
     def test_evaluate_single_image(self, data_dir: Path):
         from tcip_mcp.tools.annotation_tools import score_predictions
@@ -134,7 +132,7 @@ class TestEvaluatePredictions:
 
 
 class TestEvaluatePredictionsDetail:
-    """Test score_predictions(detail=True) per-detection breakdown with actual file I/O."""
+    """Tests of score_predictions(detail=True)'s per-detection breakdown over files on disk."""
 
     def test_detail_breakdown(self, data_dir: Path):
         from tcip_mcp.tools.annotation_tools import score_predictions
@@ -241,7 +239,7 @@ class TestEvaluateFolderEnumeration:
 
 
 def _chain(**transforms):
-    """The chain an ``augmentation`` block of ``transforms`` builds once the schema admits it."""
+    """Validate an ``augmentation`` block of ``transforms`` and return the chain it builds."""
     from tcip_mcp.pipelines.data.augmentations import build_augmentation
     from tcip_mcp.pipelines.schemas import AugmentationSpec
 
@@ -251,7 +249,7 @@ def _chain(**transforms):
 
 
 class TestAugmentations:
-    """Test data augmentation pipeline."""
+    """Tests of the data augmentation pipeline."""
 
     def test_build_empty_augmentation(self):
         transforms = _chain()
@@ -309,9 +307,10 @@ class TestAugmentations:
 
 class TestReadAnnotationsUnknownFormat:
     def test_unrecognized_store_returns_error_not_raise(self, tmp_path):
-        """The per-image reader refuses a record of a shape it does not read; read_annotations
-        surfaces that as an error dict, matching its own convention and the docs, not an
-        uncaught error.
+        """``read_annotations`` answers an unreadable record's refusal as an error dict.
+
+        The per-image reader refuses a record of a shape it does not read; read_annotations
+        surfaces that as an error dict naming the problem, not an uncaught error.
         """
         from PIL import Image
 

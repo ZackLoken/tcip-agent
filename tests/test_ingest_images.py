@@ -1,7 +1,6 @@
-"""Tests for ingestion: the workspace resolver + ``ingest_images`` tool.
+"""Ingestion: the workspace resolver and the ``ingest_images`` tool.
 
-All tests use synthetic temp fixtures under the test's own ``TCIP_WORKSPACE``, never the
-operator's real workspace.
+The fixtures are synthetic images written under a scratch ``TCIP_WORKSPACE``.
 """
 
 from __future__ import annotations
@@ -17,8 +16,9 @@ from tcip_mcp.tools.ingest_tools import ingest_images
 
 
 def _make_image(path: Path, exif_date: str | None = None) -> None:
-    """Write a tiny image; when ``exif_date`` ('YYYY:MM:DD HH:MM:SS') is set, embed it
-    as EXIF DateTimeOriginal so the ingest EXIF reader round-trips it.
+    """Write a tiny image, embedding ``exif_date`` as EXIF DateTimeOriginal when it is set.
+
+    The date reads 'YYYY:MM:DD HH:MM:SS'.
     """
     from PIL import Image
 
@@ -33,9 +33,7 @@ def _make_image(path: Path, exif_date: str | None = None) -> None:
 
 
 def _make_raster(path: Path, **metadata: str) -> None:
-    """Write a tiny GeoTIFF carrying ``metadata`` in GDAL's default metadata domain, where a
-    stitching engine writes an orthomosaic's own capture date.
-    """
+    """Write a tiny GeoTIFF carrying ``metadata`` in GDAL's default metadata domain."""
     import rasterio
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -52,9 +50,7 @@ def _make_raster(path: Path, **metadata: str) -> None:
 
 
 def _make_tagged_tiff(path: Path, datetime_tag: str) -> None:
-    """Write a tiny TIFF whose DateTime tag (306) states ``datetime_tag``, the standard tag rather
-    than any one engine's metadata item.
-    """
+    """Write a tiny TIFF whose DateTime tag (306) states ``datetime_tag``."""
     import numpy as np
     import tifffile
 
@@ -102,7 +98,7 @@ def test_list_dates(tmp_path):
 
 
 def _entries(manifest: dict) -> dict[str, tuple[str, str | None]]:
-    """Each ingested file's bucket and date source, keyed by its source file name."""
+    """Return each ingested file's bucket and date source, keyed by its source file name."""
     return {
         Path(f["source"]).name: (f["bucket"], f["date_source"])
         for f in manifest["files"]
@@ -110,14 +106,16 @@ def _entries(manifest: dict) -> dict[str, tuple[str, str | None]]:
 
 
 def _unreadable(manifest: dict) -> list[str]:
-    """Each ingested file's reason its capture date could not be read, where it has one."""
+    """Return each ingested file's reason its capture date could not be read, where it has one."""
     return [
         f["date_unreadable"] for f in manifest["files"] if f["date_unreadable"]
     ]
 
 
 def test_ingest_exif_buckets_and_undated(project, tmp_path):
-    """Each ingested file has one entry naming its bucket and what dated it, a file no source
+    """Ingest buckets each file by its EXIF date, and a file nothing dates as undated.
+
+    Each ingested file has one entry naming its bucket and what dated it, a file no source
     dated in the undated bucket with no source.
     """
     src = tmp_path / "raw"
@@ -145,7 +143,9 @@ def test_ingest_exif_buckets_and_undated(project, tmp_path):
 
 
 def test_ingested_bytes_read_back_through_the_image_path(project, tmp_path):
-    """The writer is the real ingest_images tool. The reader is tcip_store's blob read at
+    """Ingested bytes read back byte-identical through the image path.
+
+    The writer is the real ingest_images tool. The reader is tcip_store's blob read at
     dataset_layout.image_path(root, date, stem, ext): the bytes it hands back are byte-identical
     to the source file ingest copied from, not merely present.
     """
@@ -165,7 +165,9 @@ def test_ingested_bytes_read_back_through_the_image_path(project, tmp_path):
 def test_ingest_buckets_a_raster_by_the_capture_date_its_metadata_states(
     project, tmp_path
 ):
-    """A raster whose writer states its capture date in a metadata item the ingest names lands in
+    """Ingest buckets a raster by the capture date a named metadata item states.
+
+    A raster whose writer states its capture date in a metadata item the ingest names lands in
     that date's bucket, the manifest naming the item that answered; the same raster with no item
     named states no date the ingest reads, so it lands undated, unreported.
     """
@@ -200,7 +202,7 @@ def test_ingest_buckets_a_tiff_by_its_own_datetime_tag(project, tmp_path):
 def test_ingest_leaves_a_raster_that_states_no_date_undated_and_unreported(
     project, tmp_path
 ):
-    """Read, and it says nothing about when it was captured: a fact, not a failure."""
+    """A raster stating no capture date ingests undated, with no unreadable-date report."""
     src = tmp_path / "raw"
     _make_raster(src / "plain.tif")
 
@@ -226,9 +228,10 @@ def test_ingest_leaves_a_photo_without_an_exif_date_undated_and_unreported(
 def test_ingest_still_ingests_a_file_whose_capture_date_cannot_be_read(
     project, tmp_path, name
 ):
-    """The probe never gates ingestion: an unreadable container is copied and counted like any
-    other, buckets undated, and is named in the report so the difference from a file that simply
-    states no date stays visible.
+    """Ingest copies a file whose capture date cannot be read, and names it.
+
+    A file holding no image is copied and counted with no error, buckets undated, and is named
+    in the unreadable-date report.
     """
     src = tmp_path / "raw"
     src.mkdir(parents=True)
@@ -259,8 +262,10 @@ def test_ingest_reports_an_exif_date_it_cannot_read_as_a_date(
 
 @pytest.mark.parametrize("stated", ["date_from", "detect_band_groups"])
 def test_ingest_takes_no_bucket_or_detection_choice(project, tmp_path, stated):
-    """A file's bucket is its own date or undated, and band groups are detected in every touched
-    bucket: neither is a choice the call states.
+    """Ingest takes no bucket choice and no band-group detection choice.
+
+    A call stating ``date_from`` or ``detect_band_groups`` raises ``TypeError`` naming it and
+    writes no ``images`` directory.
     """
     src = tmp_path / "raw"
     _make_image(src / "a.jpg", exif_date="2026:02:11 10:30:00")
@@ -314,7 +319,9 @@ def test_ingest_two_sources_with_one_stem_refuse_the_whole_call(
 def test_ingest_same_stem_in_two_different_buckets_is_admitted(
     project, tmp_path
 ):
-    """foo.jpg into one date and foo.png into another land side by side: the collision key is
+    """One stem ingested into two different buckets is admitted.
+
+    foo.jpg into one date and foo.png into another land side by side: the collision key is
     scoped per bucket.
     """
     src = tmp_path / "raw"
@@ -347,8 +354,10 @@ def test_ingest_same_stem_different_ext_refuses_the_whole_call(
 def test_ingest_stem_collision_across_two_calls_refuses_naming_both_files(
     project, tmp_path
 ):
-    """The classic collision: one call places foo.jpg, a later call offers foo.png into the
-    same bucket. The bucket keeps holding foo.jpg alone; nothing from the second call lands.
+    """A stem collision across two ingest calls refuses naming both files.
+
+    One call places foo.jpg, a later call offers foo.png into the same bucket. The bucket keeps
+    holding foo.jpg alone; nothing from the second call lands.
     """
     src1 = tmp_path / "raw1"
     _make_image(src1 / "foo.jpg", exif_date="2026:02:11 10:00:00")
@@ -372,7 +381,10 @@ def test_ingest_stem_collision_across_two_calls_refuses_naming_both_files(
 def test_ingest_case_variant_stem_collision_across_two_calls_refuses(
     project, tmp_path
 ):
-    """Foo.jpg then foo.png: different exact stems, the same case-folded key."""
+    """A case-variant stem collision across two ingest calls refuses naming both files.
+
+    Foo.jpg then foo.png: different exact stems, one case-folded key.
+    """
     src1 = tmp_path / "raw1"
     _make_image(src1 / "Foo.jpg", exif_date="2026:02:11 10:00:00")
     first = ingest_images(project, source=str(src1))
@@ -395,9 +407,7 @@ def test_ingest_case_variant_stem_collision_across_two_calls_refuses(
 def test_ingest_admits_a_source_after_a_band_group_manifest_with_a_different_stem(
     project, tmp_path
 ):
-    """A manifest at one stem never blocks an ordinary source at another stem in the same
-    bucket.
-    """
+    """A manifest at one stem does not block an ordinary source at another stem in its bucket."""
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
 
     src = tmp_path / "raw"
@@ -428,9 +438,7 @@ def test_ingest_admits_a_source_after_a_band_group_manifest_with_a_different_ste
 def test_ingest_after_a_band_group_manifest_refuses_naming_the_manifest(
     project, tmp_path
 ):
-    """cap.jpg after a cap.bandgroup manifest: the door refuses rather than admitting a source
-    that would mint the manifest-versus-raw ambiguity every reader already refuses.
-    """
+    """Ingest at a band-group manifest's own stem refuses naming the manifest, copying nothing."""
     from tcip_mcp.pipelines.data.band_groups import write_band_group_manifest
 
     src = tmp_path / "raw"
@@ -495,7 +503,7 @@ def test_ingest_reingest_is_idempotent_via_collision_skip(project, tmp_path):
 
 
 def _undated_labeled(project, tmp_path, name: str = "a.png") -> Path:
-    """One image ingested undated, its label document holding one box; the image's path."""
+    """Ingest one image undated, label it with one box, and return the image's path."""
     from tests._producer_fixtures import box_annotation, label_image
 
     src = tmp_path / "raw"
@@ -511,9 +519,7 @@ STATED = date(2026, 5, 15)
 
 
 def _image_records(image: Path) -> list:
-    """The keys of every record keyed by ``image``'s capture and stem: its label document, its
-    flags and its staged proposals.
-    """
+    """Return the keys of ``image``'s label document, flags and staged proposals."""
     from tcip_annotation.flags import flag_key
     from tcip_mcp.tools.proposal_tools import proposal_staging_key
 
@@ -528,7 +534,9 @@ def _image_records(image: Path) -> list:
 def test_a_stated_date_moves_an_undated_image_with_every_record_keyed_by_it(
     project, tmp_path, monkeypatch
 ):
-    """The label document, the flags record and the staged proposals of the moved image all
+    """A stated date moves an undated image with its label, flags and staged proposals.
+
+    The label document, the flags record and the staged proposals of the moved image all
     answer at its new capture, unchanged, and none is left at the old one.
     """
     import tcip_mcp.audit as audit_mod
@@ -605,7 +613,9 @@ def test_a_stated_date_moves_an_undated_image_with_every_record_keyed_by_it(
 def test_a_stated_date_whose_records_fail_to_commit_changes_nothing(
     project, tmp_path, monkeypatch
 ):
-    """A records transaction that raises after the files were copied leaves no copy in the new
+    """A stated date whose records fail to commit changes nothing.
+
+    A records transaction that raises after the files were copied leaves no copy in the new
     bucket, the image and its label document where they were, and no audit line.
     """
     import tcip_mcp.audit as audit_mod
@@ -637,7 +647,9 @@ def test_a_stated_date_whose_records_fail_to_commit_changes_nothing(
 def test_a_failed_stated_date_keeps_another_writers_file_in_the_bucket_it_made(
     project, tmp_path, monkeypatch
 ):
-    """A file another writer lands in the bucket the call made survives the call's cleanup, and
+    """A failed stated date keeps another writer's file in the bucket the call made.
+
+    A file another writer lands in the bucket the call made survives the call's cleanup, and
     so does the bucket; the call's own copy is gone.
     """
     import tcip_store as ts
@@ -666,7 +678,9 @@ def test_a_failed_stated_date_keeps_another_writers_file_in_the_bucket_it_made(
 def test_a_stated_date_makes_its_bucket_through_the_store_route(
     project, tmp_path, monkeypatch
 ):
-    """The bucket directory the move needs is made by the store's parent-making route, whose
+    """A stated date makes its bucket through the store's parent-making route.
+
+    The bucket directory the move needs is made by the store's parent-making route, whose
     answer names it.
     """
     import tcip_store as ts
@@ -691,7 +705,9 @@ def test_a_stated_date_makes_its_bucket_through_the_store_route(
 def test_a_failed_stated_date_leaves_the_empty_bucket_a_racer_made(
     project, tmp_path, monkeypatch
 ):
-    """A bucket directory another writer makes between the store route's walk and its own
+    """A failed stated date leaves the empty bucket a racer made.
+
+    A bucket directory another writer makes between the store route's walk and its own
     ``mkdir`` is not the call's to remove: it survives the call's failure, empty.
     """
     import tcip_store as ts
@@ -728,7 +744,9 @@ def test_a_failed_stated_date_leaves_the_empty_bucket_a_racer_made(
 def test_a_failed_stated_date_raises_its_cause_when_its_bucket_fills_before_removal(
     project, tmp_path, monkeypatch
 ):
-    """Another writer's file landing in the bucket the call made just before the call removes it
+    """A failed stated date raises its own cause when its bucket fills before removal.
+
+    Another writer's file landing in the bucket the call made just before the call removes it
     keeps the bucket and the file, and the transaction's own error propagates with no removal
     error in front of it.
     """
@@ -764,8 +782,10 @@ def test_a_failed_stated_date_raises_its_cause_when_its_bucket_fills_before_remo
 def test_a_failed_stated_date_raises_a_refused_bucket_removal(
     project, tmp_path, monkeypatch
 ):
-    """A removal of the bucket the call made refused for any reason but another writer's file
-    propagates, chained to the transaction's error.
+    """A failed stated date raises a refused removal of its bucket.
+
+    A permission error removing the bucket the call made propagates, chained to the
+    transaction's error.
     """
     import tcip_store as ts
     from tcip_mcp.tools.ingest_tools import state_capture_date
@@ -845,7 +865,9 @@ def test_a_stated_date_refuses_an_image_a_published_bucket_names(
 
 
 def test_a_stated_date_is_refused_by_its_type_unless_it_is_a_date():
-    """The MCP call refuses a ``date`` that is no calendar date by the parameter's own type, and
+    """A stated date is refused by the parameter's type unless it is a calendar date.
+
+    The MCP call refuses a ``date`` that is no calendar date by the parameter's own type, and
     admits an ISO date.
     """
     from tests._server_calls import called_through_the_server
@@ -910,9 +932,7 @@ def test_inspect_project_counts_canonical_images(project, tmp_path):
 
 
 def test_ingest_after_import_admits_a_second_date(tmp_path):
-    """A project the import door lands is usable at once: import, then ingest, is the admit
-    case.
-    """
+    """A project the import door lands takes a second date's ingest, keeping its project id."""
     from tcip_mcp.project_record import read_record
     from tcip_mcp.tools.project_tools import (
         ZipBundle,

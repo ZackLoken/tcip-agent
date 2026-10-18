@@ -1,14 +1,10 @@
 """The holdout's center-match tolerance is scaled by the holdout's own GT object size.
 
 ``count_criterion`` derives one localization policy (a fraction of a characteristic object size)
-from the calibration GT's nearest-neighbor spacing and applies that same fraction to both sides.
-The absolute pixel tolerance it produces still has to be multiplied by the object scale of the side
-it is applied to. Borrowing calibration's average object size for the holdout redefines what
-counts as a hit on data whose objects are a different size, which moves tp/fp/fn and therefore the
-count bias the whole held-out check rests on.
+from the calibration GT's nearest-neighbor spacing and applies that fraction to both sides, each
+side's absolute pixel tolerance being the fraction of its own object size.
 
-The fixtures here deliberately give the two sides different object scales, which is the only shape
-in which the two derivations produce different numbers at all.
+The fixtures give the two sides different object scales.
 """
 
 from __future__ import annotations
@@ -38,12 +34,10 @@ DET_OFFSET = 30.0
 def _records(
     prefix: str, *, size: float, x0: float, det_offset: float
 ) -> list[dict]:
-    """``N_IMAGES`` records whose GT boxes are ``size`` px square, one row per image at ``SPACING``
-    px centers, each carrying a detection whose center sits ``det_offset`` px to the right of its
-    own GT center.
+    """Return ``N_IMAGES`` records of square GT boxes, each beside one offset detection.
 
-    ``SPACING`` exceeds the larger tolerance by its own width again, so a detection offset by
-    :data:`DET_OFFSET` can only ever match its own GT box, never a neighbor.
+    The GT boxes are ``size`` px square, one row per image at ``SPACING`` px centers, each
+    carrying a detection whose center sits ``det_offset`` px to the right of its own GT center.
     """
     recs = []
     for i in range(N_IMAGES):
@@ -87,13 +81,14 @@ def _criterion(cal, hold, entry=ENTRY):
 
 
 def test_a_holdout_of_smaller_objects_is_judged_at_its_own_object_scale():
-    """Calibration carries 80 px objects, the holdout 20 px ones, and every holdout detection sits
-    30 px from its GT center: comfortably inside the 60 px tolerance calibration's own scale earns,
-    and far outside the 15 px the holdout's own scale earns.
+    """A holdout of smaller objects is judged at its own object scale.
+
+    Calibration carries 80 px objects, the holdout 20 px ones, and each holdout detection sits
+    30 px from its GT center, inside the 60 px tolerance calibration's own scale earns.
 
     Judged at the holdout's scale, nothing on that side matches, and the reference fails the
-    localization floor. Nothing about the count bias reveals this: every image loses exactly as many
-    detections as it gains false ones, so the pooled and per-class bias terms both read zero.
+    localization floor while the count bias reads zero and raises no bias failure: the holdout
+    loses exactly as many detections as it gains false ones.
     """
     cal = _records("c", size=80.0, x0=0.0, det_offset=0.0)
     hold = _records("h", size=20.0, x0=100000.0, det_offset=DET_OFFSET)
@@ -118,8 +113,10 @@ def test_a_holdout_of_smaller_objects_is_judged_at_its_own_object_scale():
 
 
 def test_the_same_displacement_passes_when_both_sides_carry_the_same_object_scale():
-    """The companion obligation: a 30 px displacement against 80 px objects is a genuine hit on both
-    sides, and such a reference must still pass.
+    """A 30 px displacement passes with 80 px objects on both sides.
+
+    The holdout's true positives equal its object count with no false positive or miss, and
+    the criterion reports no failure.
     """
     cal = _records("c", size=80.0, x0=0.0, det_offset=DET_OFFSET)
     hold = _records("h", size=80.0, x0=100000.0, det_offset=DET_OFFSET)

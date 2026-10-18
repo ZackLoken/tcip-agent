@@ -1,10 +1,9 @@
-"""The name-based annotation schema: subjects, never integer class ids, in a record or in memory.
+"""The name-based annotation schema: subjects, not integer class ids, in a record or in memory.
 
-The measurement-critical invariants of name-based labels: the registry decodes its own labels, a
-geometry-less annotation round-trips without collapsing to a negative, every attribute id rests
-on the registry's declared order, negatives key through a threaded subject, the loader filters by
-subject and geometry, decode inverts the recorded scope, and authoring refuses a subjectless
-label. Each test builds its own dataset, sharing no fixture with another.
+These tests cover name-based labels: the registry decodes its own labels, a geometry-less
+annotation round-trips without collapsing to a negative, attribute ids rest on the registry's
+declared order, negatives key through a threaded subject, the loader filters by subject and
+geometry, decode inverts the recorded scope, and authoring refuses a subjectless label.
 """
 
 from __future__ import annotations
@@ -30,7 +29,7 @@ from tests._producer_fixtures import (  # noqa: E402
 
 
 def _write_image(images_dir: Path, stem: str) -> Path:
-    """The 640 by 480 image ``<stem>.jpg`` of ``images_dir``."""
+    """Write the 640 by 480 image ``<stem>.jpg`` of ``images_dir`` and return its path."""
     return write_image(images_dir / f"{stem}.jpg", (640, 480))
 
 
@@ -220,8 +219,10 @@ def test_save_annotations_refuses_missing_subject(tmp_path, bound):
 
 
 def test_save_annotations_prefers_points_over_bbox(tmp_path, bound):
-    """save_annotations prefers points over bbox (aligned with the web converters), so a payload
-    carrying both geometries writes the polygon, never collapsing it to a box-only record.
+    """``save_annotations`` writes the polygon when a payload carries points and a box.
+
+    The stored record carries a ``segmentation``, and the annotation reads back as the polygon
+    the points state.
     """
     from tcip_mcp.tools.annotation_tools import save_annotations
 
@@ -265,9 +266,7 @@ def test_save_annotations_prefers_points_over_bbox(tmp_path, bound):
 def test_save_annotations_refuses_a_polygon_that_is_no_shape(
     tmp_path, bound, geometry
 ):
-    """A supplied polygon that is empty or too short is a malformed value, refused by name before
-    anything is written, never read as no geometry nor saved and then dropped on write.
-    """
+    """``save_annotations`` refuses an empty or one-vertex polygon by name and writes nothing."""
     from tcip_mcp.tools.annotation_tools import save_annotations
 
     image = _write_image(tmp_path / "images" / UNDATED_BUCKET, "img_001")
@@ -281,7 +280,9 @@ def test_save_annotations_refuses_a_polygon_that_is_no_shape(
 
 
 def test_save_annotations_accepts_rings(tmp_path, bound):
-    """An occlusion-split instance in either ring-vertex shape (``{x, y}`` mappings or ``[x, y]``
+    """``save_annotations`` accepts multi-ring geometry in either vertex shape.
+
+    An occlusion-split instance in either ring-vertex shape (``{x, y}`` mappings or ``[x, y]``
     pairs) saves with its geometry through the write door.
     """
     from tcip_mcp.tools.annotation_tools import save_annotations
@@ -361,8 +362,10 @@ def test_save_annotations_accepts_rings(tmp_path, bound):
 def test_geometryless_only_image_is_refused_by_the_loader_that_reads_no_target_from_it(
     tmp_path,
 ):
-    """Never trained as a fabricated zero-object negative: admission asks whether the document
-    carries the subject, and the loader owns which geometries answer for its measurement.
+    """An image whose labels are all geometry-less is refused by the detection loader by name.
+
+    Admission keeps the image, the detection loader refuses it by name, and the boxed image
+    alone still loads.
     """
     from tcip_mcp.pipelines.data.label_queries import admit
 
@@ -422,9 +425,9 @@ def test_records_from_annotation_honors_a_global_name_id():
 
 
 def test_uppercase_extension_image_still_yields_boxes(tmp_path):
-    """The detection loader matches images by their real on-disk name, not a case-normalized one:
-    real drone frames use an uppercase .JPG, and a fabricated ".jpg" match would silently yield
-    zero boxes.
+    """An image with an uppercase extension yields its boxes.
+
+    A labeled ``IMG_1.JPG`` loads as one sample carrying its one box.
     """
     _write_registry(tmp_path, Subject(name="bud"))
     images_dir = tmp_path / "images" / UNDATED_BUCKET

@@ -1,11 +1,7 @@
-"""Every walk over one bucket of ``images/`` routes through ``list_logical_images``' own
-stem-collision refusal, raising ``AmbiguousImageStemError`` the way every other reader of a bucket
-does, never picking one member of a stem-collided pair silently.
+"""Readers of one bucket of ``images/`` refuse a stem-collided pair, naming both files.
 
-``ingest_images`` itself refuses to create a stem-collided pair, so the pair a test needs here
-is built the only way one can actually reach disk: one real file ingested through that door,
-then a second, case-differing raw file added directly into the same bucket, standing in for a
-dataset an external tool or a manual copy touched after ingestion.
+Each collided pair is one real file ingested through ``ingest_images`` and a second,
+case-differing raw file added directly into that bucket.
 """
 
 from __future__ import annotations
@@ -45,10 +41,7 @@ def _collide(bucket: Path) -> None:
 
 
 def _ingested_bucket_of(tmp_path: Path, stems: list[str]) -> Path:
-    """An uncollided bucket holding one real ingested file per ``stem``, no case-differing
-    collision added: the rail's admitting counterpart to :func:`_ingested_bucket` plus
-    :func:`_collide`, proving a routed site still enumerates every member of a clean bucket.
-    """
+    """Ingest one 16 px JPEG per ``stem`` through ``ingest_images``; return the undated bucket."""
     from tcip_mcp.tools.ingest_tools import ingest_images
     from tests._producer_fixtures import BRIGHT, painted_frame
 
@@ -68,9 +61,7 @@ SUBJECT = "leaf"
 
 
 def _label(bucket: Path, *stems: str) -> None:
-    """One label document per stem's image in ``bucket``, so the producer admits this bucket: a
-    preflight reads the run's own admitted membership, never a directory listing of its own.
-    """
+    """Write, for each stem's image in ``bucket``, a label document holding one ``leaf`` box."""
     from tcip_annotation.state import Annotation, BBox
     from tests._producer_fixtures import label_image
 
@@ -84,9 +75,7 @@ def _label(bucket: Path, *stems: str) -> None:
 
 
 def test_preflight_refuses_a_stem_collision(tmp_path):
-    """The run's own resolution is the one walk every preflight leg reads, so a collided bucket
-    is refused once, where that resolution runs, as an issue naming both colliding files.
-    """
+    """Preflight refuses a stem-collided bucket with an issue naming both colliding files."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -120,8 +109,9 @@ def test_scan_dataset_image_census_refuses_a_stem_collision(tmp_path):
 def test_doctor_script_reports_a_stem_collision_with_no_label_file_instead_of_crashing(
     tmp_path,
 ):
-    """A collision with no label record for its stem surfaces as a finding of the doctor's one
-    census, not a crashed subprocess.
+    """The doctor reports a stem collision with no label file as a finding, not a crash.
+
+    The command exits 2 with no traceback and names both colliding files.
     """
     bucket = _ingested_bucket(tmp_path)
     _collide(bucket)
@@ -137,7 +127,7 @@ def test_doctor_script_reports_a_stem_collision_with_no_label_file_instead_of_cr
 def test_doctor_script_reports_a_stem_collision_once_not_once_per_check(
     tmp_path,
 ):
-    """The doctor enumerates ``images/`` once, so a breeder reads about a collision once."""
+    """The doctor reports a stem collision once, with no traceback."""
     bucket = _ingested_bucket(tmp_path)
     _collide(bucket)
     project_root = bucket.parent.parent
@@ -154,9 +144,7 @@ def test_doctor_script_reports_a_stem_collision_once_not_once_per_check(
 
 
 def test_preflight_admits_a_clean_multi_image_bucket(tmp_path):
-    """The rail's own admitting counterpart: two uncollided images reach ``list_logical_images``
-    without raising, and preflight reads the run's sizes off them with nothing to object to.
-    """
+    """Preflight admits a clean bucket of two uncollided images with no issue."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -179,9 +167,7 @@ def test_preflight_admits_a_clean_multi_image_bucket(tmp_path):
 def test_preflight_split_policy_stems_admits_a_clean_multi_image_bucket(
     tmp_path,
 ):
-    """Two uncollided images resolve cleanly through ``resolve_group_key_fn``, proving the
-    listing reached both stems rather than raising or silently dropping one.
-    """
+    """A split policy over a clean two-image bucket resolves with no split issue."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 
@@ -206,9 +192,7 @@ def test_preflight_split_policy_stems_admits_a_clean_multi_image_bucket(
 def test_calibration_ratio_feasibility_admits_a_clean_multi_image_bucket(
     tmp_path,
 ):
-    """Both uncollided images are counted: the feasibility issue names the real count (2), the
-    direct evidence the admission reached every member rather than one raw-walked file.
-    """
+    """Calibration feasibility over a clean bucket names a count of two admitted sources."""
     pytest.importorskip("torch")
     from tcip_mcp.tools.training_tools import preflight_config
 

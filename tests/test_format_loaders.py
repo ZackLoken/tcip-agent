@@ -1,7 +1,6 @@
-"""COCO parser correctness, for the import door that reads one.
+"""The COCO parser's reading of a dataset-level COCO document.
 
-Training reads geometry ground truth as per-image label documents, so no loader here opens a
-dataset-level COCO at all; what is covered is the parser the import door calls.
+These tests call the parser directly; no loader here opens a COCO document.
 """
 
 import pytest
@@ -10,9 +9,7 @@ torch = pytest.importorskip("torch")
 
 
 def test_parse_coco_annotations_decodes_names():
-    """A dataset-level COCO parses to name-based Annotations, the subject decoded from
-    categories.
-    """
+    """A dataset-level COCO parses to name-based Annotations, subjects from its categories."""
     from tcip_annotation.format_io import parse_coco_annotations
     from tcip_annotation.state import Polygon
     from tests._training_values import VERTEX_SPACING

@@ -44,9 +44,10 @@ def test_compute_class_weights_balanced():
 def test_class_weights_are_sized_by_the_one_class_count_derivation(
     monkeypatch,
 ):
-    """A weight vector and a run's loaders are sized by one rule: the weigher asks the platform's
-    own derivation for the count a distribution implies, so a distribution whose top id is above
-    its own length weights every class the ground truth reaches rather than only those present.
+    """``compute_class_weights`` is sized by ``num_classes_from_distribution``.
+
+    Weights over ids 0 and 4 ask the derivation once with that distribution and hold five
+    classes, the three unseen ids among them.
     """
     from tcip_mcp.pipelines import derivations
     from tcip_mcp.pipelines.components import losses
@@ -100,13 +101,13 @@ def test_weighted_ce_built():
 
 
 def test_class_distribution_on_an_unweightable_loss_refuses():
-    """Imbalance handling that silently vanishes is worse than a build that refuses."""
+    """A class distribution handed to a loss that cannot weight refuses by name."""
     with pytest.raises(ValueError, match="not weightable"):
         build_loss("dice", class_distribution={0: 90, 1: 10}, num_classes=2)
 
 
 def test_combined_loss_routes_each_kwarg_to_the_terms_that_accept_it():
-    """A per-term hyperparameter reaches its own term, not every term."""
+    """A combined loss hands ``label_smoothing`` to cross entropy and ``smooth`` to dice."""
     loss = build_loss("cross_entropy+dice", label_smoothing=0.1, smooth=2.0)
     ce, dice = loss.losses
     assert ce.ce.label_smoothing == 0.1
@@ -179,11 +180,7 @@ def test_semantic_seg_head_weighted_ce():
 
 
 def test_semantic_seg_head_advertises_no_loss_choice():
-    """The head welds CE + multi-class Dice; it must not accept a loss name it cannot honor.
-
-    There is no registry loss to route a name to: `build_loss("cross_entropy+dice")` raises at
-    forward, since the registry's DiceLoss is binary while this head emits multi-class logits.
-    """
+    """``SemanticSegHead`` takes no ``loss`` argument and refuses one by name."""
     import pytest as _pytest
 
     from tcip_mcp.pipelines.components.heads import SemanticSegHead
@@ -210,15 +207,17 @@ value its transform takes."""
 
 
 def _built(config):
-    """The chain ``config``, an ``augmentation`` block, builds once the schema admits it."""
+    """Validate ``config`` as an ``augmentation`` block and return the chain it builds."""
     from tcip_mcp.pipelines.schemas import AugmentationSpec
 
     return build_augmentation(AugmentationSpec.model_validate(config))
 
 
 def test_build_augmentation_builds_each_transform_at_the_values_its_entry_states():
-    """Guard. Every entry of the dict form builds its transform, in the config's order, holding
-    exactly the values the entry states, the chain ending in ToTensor.
+    """``build_augmentation`` builds each transform at the values its entry states.
+
+    Each entry of ``EVERY_TRANSFORM`` builds its transform, in the config's order, holding the
+    values the entry states, and the chain ends in ToTensor.
     """
     chain = _built(augmentation(**EVERY_TRANSFORM)).transforms
 
@@ -229,10 +228,11 @@ def test_build_augmentation_builds_each_transform_at_the_values_its_entry_states
 
 
 def test_every_invariance_a_registered_transform_relies_on_is_a_field_of_the_record():
-    """Under a record stating every capture invariance false and the rotation at 0 degrees,
-    every registered transform at nonzero values is refused once per invariance it relies on,
-    together naming each field of the record's own model once; the blur and the resize rely on
-    none.
+    """A record holding no capture invariance draws as many issues as it has fields, naming each.
+
+    Under a record stating each invariance false and the rotation at 0 degrees,
+    ``EVERY_TRANSFORM`` yields an issue count equal to ``CaptureInvariances``'s field count,
+    the issues name each field, and no issue names the blur or the resize.
     """
     from tcip_mcp.pipelines.data.augmentations import forbidden_transforms
     from tcip_mcp.pipelines.schemas import AugmentationSpec
@@ -286,9 +286,11 @@ def test_every_invariance_a_registered_transform_relies_on_is_a_field_of_the_rec
 def test_build_augmentation_refuses_an_entry_not_stating_its_values_by_name(
     config, named
 ):
-    """Guard. A shorthand (True, a number, a list), a preset name, a value the transform does not
-    take (hue) and a value it takes left unstated each refuse naming the entry, and an unknown
-    transform refuses by its name: nothing in the chain is a value the config did not state.
+    """An augmentation entry not stating its values refuses by name.
+
+    A shorthand (True, a number, a list), a preset name, a value the transform does not take
+    (hue) and a value it takes left unstated each refuse naming the entry, and an unknown
+    transform refuses by its name.
     """
     with pytest.raises(ValueError, match=named):
         _built(config)
@@ -325,7 +327,7 @@ def test_random_rotation_classification_passthrough():
 def _instance_target(
     x1: int, y1: int, x2: int, y2: int, size: int = 64
 ) -> dict:
-    """One box with an exactly-matching [1, H, W] instance mask."""
+    """Return a target of one box and a [1, size, size] mask painted over that box's extent."""
     from tests._producer_fixtures import painted_array
 
     mask = torch.as_tensor(painted_array(size, size, [((x1, y1, x2, y2), 1)]))[
@@ -499,10 +501,10 @@ def test_grid_mode_enumerates_discrete_axes():
 def test_tune_search_normalizes_search_alg_case_before_deciding_grid(
     tmp_path, monkeypatch
 ):
-    """tune_search reads a normalized local, not the caller's own casing, at the point it
-    decides whether _to_tune_space builds a grid space: search_alg="Grid" (the agent's own
-    casing, not this module's lower-cased spelling) still reaches the grid branch. Stopped
-    right after _to_tune_space records its own grid keyword, before Ray is ever touched.
+    """tune_search builds a grid space for ``search_alg='Grid'``.
+
+    With ``_to_tune_space`` stubbed to record its grid keyword and stop the sweep,
+    ``search_alg="Grid"`` reaches it with ``grid=True``.
     """
     pytest.importorskip("ray")
     import tcip_mcp.pipelines.training.hpo as hpo
@@ -561,8 +563,11 @@ HYPERBAND_SCHEDULER = {
 
 
 def test_build_scheduler_builds_each_scheduler_at_the_settings_its_block_states():
-    """Guard. Each scheduler is Ray's own class built at its block's settings, max_t among them
-    (never Ray's default cap), pbt mutating over the space it is handed, fifo pruning nothing.
+    """``build_scheduler`` builds Ray's own scheduler class for each named block.
+
+    ASHA and HyperBand carry their blocks' ``max_t`` of 7 and 9, median builds a
+    ``MedianStoppingRule``, PBT mutates over the space it is handed, and fifo is a plain
+    ``FIFOScheduler``.
     """
     pytest.importorskip("ray")
     from ray import tune
@@ -632,9 +637,10 @@ def test_build_scheduler_builds_each_scheduler_at_the_settings_its_block_states(
 def test_scheduler_settings_refuses_a_setting_unstated_or_not_taken_by_name(
     scheduler, named
 ):
-    """Guard. A setting its scheduler's Ray class takes and the block leaves unstated (so Ray
-    would supply it), and one the class does not take (so Ray would drop it), each refuse by
-    name, as does a name no scheduler carries.
+    """A scheduler setting left unstated or not taken by its Ray class refuses by name.
+
+    A setting its scheduler's Ray class takes and the block leaves unstated, and one the class
+    does not take, each refuse by name, as does a name no scheduler carries.
     """
     pytest.importorskip("ray")
     import re
@@ -646,7 +652,7 @@ def test_scheduler_settings_refuses_a_setting_unstated_or_not_taken_by_name(
 
 
 def _first_sampled_lr(searcher, storage_path) -> float:
-    """The ``lr`` of the first trial ``searcher`` samples from a one-axis continuous space."""
+    """Return the ``lr`` of the first trial ``searcher`` samples from a one-axis space."""
     from ray import tune
     from ray.tune.experiment import Experiment
 
@@ -678,9 +684,10 @@ def test_the_native_sampler_draws_the_sweep_seed_s_points(tmp_path):
 
 
 def test_every_backend_searcher_retains_the_sweep_seed():
-    """Each real backend searcher holds the stated seed where its own sampler reads it: optuna's
-    ``_seed``, hyperopt's ``rstate`` (a ``RandomState`` drawing what one seeded with the same
-    value draws), bayesopt's ``_random_state``.
+    """The optuna, hyperopt and bayesopt searchers each retain the sweep seed.
+
+    Each real backend searcher holds the stated seed: optuna's ``_seed``, hyperopt's ``rstate``
+    (drawing what a ``RandomState`` seeded with that value draws), bayesopt's ``_random_state``.
     """
     pytest.importorskip("ray")
     import numpy as np
@@ -741,7 +748,7 @@ def test_build_search_alg_native_and_backend():
 
 
 def test_available_search_algs_lists_natives_and_installed_backends():
-    """Every native name a sweep may state is listed, beside each installed backend."""
+    """``available_search_algs`` lists the native names and the installed optuna backend."""
     pytest.importorskip("ray")
     from tcip_mcp.pipelines.training.hpo import (
         _NATIVE_SEARCH,
@@ -756,9 +763,9 @@ def test_available_search_algs_lists_natives_and_installed_backends():
 
 @pytest.mark.ray_cluster
 def test_tune_search_evaluates_its_baseline_and_optimizes(tmp_path):
-    """End-to-end Ray Tune: a real sweep runs every trial and evaluates the baseline point.
-    Uses a pure-math objective, each trial writing the point it trained, so no training is
-    needed.
+    """A real Ray Tune sweep of six samples runs six trials, the baseline point among them.
+
+    It uses a pure-math objective, each trial writing the point it was handed.
     """
     pytest.importorskip("ray")
     import json
@@ -789,10 +796,12 @@ def test_tune_search_evaluates_its_baseline_and_optimizes(tmp_path):
 
 
 def test_run_hyperparameter_search_exposes_agent_search_choices_not_pinned():
-    """Guard. run_hyperparameter_search takes the trial count, the search algorithm and the
+    """``run_hyperparameter_search`` requires its search settings and pins no space or pruner.
+
+    run_hyperparameter_search takes the trial count, the search algorithm and the
     scheduler block as required arguments with no default; it takes no ``pruner``,
-    ``direction`` or separate halving setting, and the search space is the caller's to state, no
-    default space or default baseline shipping beside it.
+    ``direction`` or separate halving setting; ``param_space`` has no default, and ``hpo``
+    carries no default space or default baseline.
     """
     import inspect
 

@@ -1,5 +1,7 @@
-"""The external COCO document's reader: category naming, image grouping, the one decoder, and
-every fault returned together rather than the first one raised.
+"""The external COCO document's reader.
+
+These tests cover its category naming, its image grouping, its per-record faults, and the
+independent faults of one document returned together.
 """
 
 import json
@@ -86,9 +88,7 @@ def test_a_crowd_record_reads_with_its_flag():
 
 
 def test_parse_coco_refuses_a_document_without_the_coco_shape():
-    """A per-image document handed to the COCO reader is refused by name rather than read as a
-    document holding no annotations.
-    """
+    """A per-image document handed to the COCO reader is refused by name."""
     with pytest.raises(ValueError, match="not a dataset-level COCO document"):
         _parse({"image": "a", "annotations": []})
 
@@ -112,8 +112,9 @@ def test_a_record_naming_no_valid_category_is_a_fault_by_index(category_id):
     "image_id", [None, "1", 1.0], ids=["missing", "string", "float"]
 )
 def test_a_record_with_no_integer_image_id_is_a_fault_by_index(image_id):
-    """A missing identity never associates under ``None``, and a coercible one never under the
-    integer it would coerce to.
+    """A COCO record with no integer image id is a fault named by its index.
+
+    The record joins no image: image 1 holds its other record alone.
     """
     coco = _sample_coco_detect()
     coco["annotations"][0]["image_id"] = image_id
@@ -148,7 +149,7 @@ def test_a_malformed_category_declaration_is_a_fault_by_index_never_a_coercion(
 
 
 def test_parse_coco_refuses_two_categories_declared_under_one_id():
-    """A second declaration under an id would otherwise rename every record of the first."""
+    """Two categories declared under one id are a fault naming the id and both names."""
     coco = _sample_coco_detect()
     coco["categories"].append({"id": 0, "name": "leaf"})
     _, _, problems = _parse(coco)
@@ -203,9 +204,7 @@ def test_parse_coco_names_a_malformed_annotations_container(
 def test_parse_coco_decodes_every_record_through_the_per_image_decoder(
     key, value, fault
 ):
-    """The per-image decoder's own terms decide a record, a supplied malformed value refused by
-    record index exactly as a per-image document's record would be.
-    """
+    """The COCO reader refuses a record's malformed value as a fault naming the record's index."""
     coco = _sample_coco_detect()
     coco["annotations"][1][key] = value
     _, by_image, problems = _parse(coco)
@@ -218,9 +217,7 @@ def test_parse_coco_decodes_every_record_through_the_per_image_decoder(
 
 
 def test_parse_coco_annotations_keeps_an_empty_string_accepted_by():
-    """An empty-string provenance value is kept, not dropped: the per-image reader keeps it (is
-    not None, never a truthiness test), and the COCO records go through that reader.
-    """
+    """The COCO reader keeps an empty-string ``accepted_by``."""
     coco = _sample_coco_detect()
     coco["annotations"][0]["accepted_by"] = ""
     parsed = _parse(coco)[1][1]
@@ -285,7 +282,7 @@ def test_parse_coco_multi_ring_segmentation_keeps_every_ring():
 
 
 def test_the_coco_reader_admits_a_byte_order_marked_document(tmp_path):
-    """A UTF-8 byte-order mark encodes the same document as one without it."""
+    """The COCO reader reads both records of a document opening with a UTF-8 byte-order mark."""
     from tcip_mcp.pipelines.data.coco_import import _read_coco
 
     coco = _sample_coco_detect()

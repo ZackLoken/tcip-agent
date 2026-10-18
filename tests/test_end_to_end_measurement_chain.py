@@ -1,13 +1,8 @@
 """The measurement chain end to end: ingest, train, assess, publish, confirm, deliver.
 
-Three detectors over one flow. The first delivers a CSV whose validated column reads true, and
-is the admitting half for the two refusals beside it: the same flow with the reference labels
-edited after the assessment refuses, and the same flow with the bucket published twice refuses
-the second publish.
-
-The subject is the chain, not the fit: the model is tiny and its predictions are stable, so a
-run that stops delivering a validated number says the chain broke rather than that a fit
-wandered.
+Three detectors over one flow. Untouched, the flow delivers a CSV whose validated column reads
+true; with the reference labels edited after the assessment the delivery refuses, and with the
+bucket published twice the second publish refuses.
 """
 
 from __future__ import annotations
@@ -38,10 +33,7 @@ from tests._verified_checkpoint_fixtures import SAMPLE_DETECTOR_PASS  # noqa: E4
 def test_a_drawn_reference_selection_records_each_samples_ground_truth_digest(
     tmp_path: Path,
 ):
-    """The fact the edited-reference refusal rests on: a selection records, per sample, the
-    digest of the ground truth the draw held out, so a reader can say that document moved since
-    without re-reading the draw.
-    """
+    """Each calibration sample of a drawn selection records its ground truth's digest."""
     root = tmp_path / "ds"
     synthetic_capture(root)
     selection = draw_reference_selection(
@@ -58,7 +50,9 @@ def test_a_drawn_reference_selection_records_each_samples_ground_truth_digest(
 def test_the_draw_and_the_delivery_check_digest_a_ground_truth_the_same_way(
     tmp_path: Path,
 ):
-    """The digest the draw records for each sample's ground truth is the one the delivery-time
+    """The draw and the delivery-time check digest a ground truth the same way.
+
+    The digest the draw records for each sample's ground truth is the one the delivery-time
     check recomputes for an untouched reference.
     """
     from tcip_mcp.pipelines.data.selection import ground_truth_digest
@@ -79,8 +73,9 @@ def test_the_draw_and_the_delivery_check_digest_a_ground_truth_the_same_way(
 def test_the_tiny_detector_trains_and_finds_one_object_per_frame(
     tmp_path: Path,
 ):
-    """The model the chain rests on: a real training pass, and predictions stable enough that a
-    count measured over them is a fact about the chain rather than about a fit.
+    """The tiny detector trains and finds the one object in each of three frames.
+
+    Each frame's predicted box lies within one pixel of its object's.
     """
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.execution import prepare
@@ -115,9 +110,10 @@ def test_the_tiny_detector_trains_and_finds_one_object_per_frame(
 def test_a_reference_document_edited_after_its_read_is_never_measured(
     tmp_path: Path, monkeypatch
 ):
-    """The loaders measure each reference document as the assessment's one read answered it, the
-    version it retained: an edit landing after that read is never measured, and the record names
-    the version read, not the edit.
+    """The assessment records the reference version its read retained, not a later edit.
+
+    A document edited after the assessment's read leaves the assessment standing, and the
+    record's retained digest for it differs from the edited document's.
     """
     from tcip_mcp import assessment as assessment_mod
     from tcip_mcp.pipelines.data.selection import ground_truth_digest
@@ -156,10 +152,10 @@ def test_a_reference_document_edited_after_its_read_is_never_measured(
 def test_a_frame_assessments_reference_derives_the_density_that_governs_its_pass(
     tmp_path: Path,
 ):
-    """An assessment over frames states no cap: its calibration frames' own objects derive the
-    density its record carries, over the one the checkpoint recorded of its training frames,
-    which here is half of it: every calibration frame holds a second object no training frame
-    holds.
+    """A frame assessment's calibration objects derive the density its record carries.
+
+    With a second object added to each calibration frame, the assessment's record carries a
+    derived density of two objects per frame, where the checkpoint recorded one.
     """
     from tcip_mcp.model_registry import load_registered_checkpoint
     from tcip_mcp.pipelines.data.selection import read_selection
@@ -200,9 +196,11 @@ def test_a_frame_assessments_reference_derives_the_density_that_governs_its_pass
 def test_the_assessment_passes_and_the_bucket_published_under_it_names_it(
     tmp_path: Path,
 ):
-    """Assess and publish: the assessment fits the operating point on the selection's calibration
-    side, measures the count over its holdout side and passes; the bucket published under it runs
-    its execution record and names it, and no training run is opened for it.
+    """The assessment passes and the bucket published under it names it.
+
+    The assessment passes with its holdout sharing no group or source with calibration,
+    training or selection; the bucket published under it carries its producer and execution
+    record and names it, and the run listing holds ``exp-chain-publish`` alone.
     """
     from tcip_mcp.assessment import read_assessment
     from tcip_mcp.buckets import read_bucket
@@ -236,11 +234,11 @@ def test_the_assessment_passes_and_the_bucket_published_under_it_names_it(
 def test_the_chain_delivers_a_csv_whose_validated_column_reads_true(
     tmp_path: Path,
 ):
-    """The admitting flow, and the half that makes the two refusals below mean something.
+    """The chain delivers a CSV whose validated column reads true, and refuses an unassessed one.
 
     Ingest synthetic images, train a tiny model, publish a bucket, assess it against a reference
     selection, confirm a trait revision, deliver a CSV whose validated column reads true. Nothing
-    is edited and nothing is republished, so the delivery stands; the same predictions published
+    is edited and nothing is republished, so the delivery stands; the predictions published again
     under no assessment refuse.
     """
     from tcip_mcp.delivery import read_delivery_events
@@ -298,9 +296,10 @@ def test_editing_the_reference_labels_after_the_assessment_refuses_the_delivery(
     tmp_path: Path,
     edit: str,
 ):
-    """The same flow with a reference label edited after the assessment, on either side of the
-    reference or in the copy the assessment retained of it: the delivery refuses naming the
-    document and writes no CSV.
+    """A reference label edited after the assessment refuses the delivery by name.
+
+    The edit lands on either side of the reference or in the copy the assessment retained of
+    it: the delivery refuses naming the document and writes no CSV.
     """
     import tcip_store
     from tcip_mcp.assessment import assessment_dir, read_assessment
@@ -353,9 +352,10 @@ def test_editing_the_reference_labels_after_the_assessment_refuses_the_delivery(
 def test_publishing_the_same_bucket_twice_refuses_the_second_publish(
     tmp_path: Path,
 ):
-    """The same flow with the bucket published twice, through the inference door and through
-    ``publish`` itself: each refuses, and the bucket's record and every one of its documents is
-    exactly what the first publication left.
+    """Publishing the same bucket a second time refuses.
+
+    A second publish through the inference door and through ``publish`` itself each refuses,
+    and the bucket's record and its documents keep the versions the first publication left.
     """
     import tcip_store
     from tcip_mcp.buckets import (

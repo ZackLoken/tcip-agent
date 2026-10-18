@@ -1,10 +1,10 @@
 """The envelope-owned ``ctx`` sinks a hand-rolled ``train(ctx)`` routes through.
 
-These are the promises ``TrainContext`` makes to a training body independent of dispatch: the
-per-epoch signal reaches an HPO trial's pruner, the run's ``metrics.jsonl`` accumulates rather
-than truncates, only real scalars reach TensorBoard, a checkpoint lands once under the tag it was
-asked for without stamping the caller's own live state, an artifact is a file in the run's
-directory, and cancellation is visible through the run's cancellation record.
+These tests cover ``TrainContext``'s sinks: the per-epoch signal reaches an HPO trial's pruning
+hook, the run's ``metrics.jsonl`` keeps each logged epoch, numeric scalars alone reach
+TensorBoard, a checkpoint lands under its tag and a second save under that tag refuses, saving
+leaves the loop's own state dict unstamped, an artifact is a file in the run's directory, and a
+cancel requested on the run directory turns ``should_cancel`` true.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from tcip_mcp.pipelines.training.envelope import TrainContext  # noqa: E402
 
 
 def _context(tmp_path, **kwargs) -> tuple[TrainContext, Path]:
-    """A context over a run directory the launcher's own writer opened under ``tmp_path``."""
+    """Return a context built with ``kwargs`` and the run directory the launcher's writer opened."""
     from tcip_mcp.experiments import observe
     from tcip_mcp.pipelines.training.run_registry import observed_run
     from tests._verified_checkpoint_fixtures import (
@@ -41,7 +41,7 @@ def _context(tmp_path, **kwargs) -> tuple[TrainContext, Path]:
 
 
 def _rows(run_dir: Path) -> list[dict]:
-    """The run's metrics rows without the instant each was written."""
+    """Return the run's metrics rows without the instant each was written."""
     from tcip_mcp.experiments import METRICS_FILE, read_rows
 
     return [
@@ -65,7 +65,7 @@ class _RecordingWriter:
 
 
 def test_epoch_signal_reaches_the_trial_hook(tmp_path):
-    """An HPO trial's pruning signal fires with each epoch the body logs."""
+    """An HPO trial's hook receives the epoch and metrics the body logs."""
     seen: list[tuple] = []
     ctx, _ = _context(
         tmp_path,
@@ -78,7 +78,9 @@ def test_epoch_signal_reaches_the_trial_hook(tmp_path):
 
 
 def test_the_sink_is_the_one_stamp_of_a_rows_epoch_and_instant(tmp_path):
-    """Metrics carrying the epoch or the instant refuse naming the key and write nothing; the
+    """The metrics sink refuses an epoch or instant key and stamps the epoch itself.
+
+    Metrics carrying the epoch or the instant refuse naming the key and write nothing; the
     same metrics without it record the epoch the sink was handed.
     """
     from tcip_mcp.experiments import EPOCH_KEY, TIMESTAMP_KEY
@@ -95,7 +97,7 @@ def test_the_sink_is_the_one_stamp_of_a_rows_epoch_and_instant(tmp_path):
 
 
 def test_metrics_file_accumulates_one_row_per_epoch(tmp_path):
-    """Every logged epoch survives; the file is a history, not a slot holding the last row."""
+    """Two logged epochs both remain in the metrics file, in the order they were logged."""
     ctx, run_dir = _context(tmp_path)
 
     ctx.log_metrics(3, {"val_loss": 0.75, "map50": 0.10})
@@ -110,7 +112,9 @@ def test_metrics_file_accumulates_one_row_per_epoch(tmp_path):
 def test_a_diverged_metric_is_logged_as_null_beside_the_state_that_names_it(
     tmp_path,
 ):
-    """A diverged loss is real information the run has to record, and NaN is not JSON: the
+    """A diverged metric is logged as null beside a state naming why.
+
+    A diverged loss is real information the run has to record, and NaN is not JSON: the
     row keeps the epoch, states the value is absent, and says why.
     """
     ctx, run_dir = _context(tmp_path)
@@ -125,8 +129,9 @@ def test_a_diverged_metric_is_logged_as_null_beside_the_state_that_names_it(
 def test_a_diverged_metric_still_reaches_the_pruning_hook_as_the_number_it_was(
     tmp_path,
 ):
-    """The stored row cannot carry a non-finite value, but a pruner compares numbers, so the
-    hook sees what the training body produced rather than the record's representation.
+    """A diverged metric reaches the pruning hook as the number it was.
+
+    The hook receives the infinite loss the body logged.
     """
     seen: list[dict] = []
     ctx, _ = _context(
@@ -139,7 +144,7 @@ def test_a_diverged_metric_still_reaches_the_pruning_hook_as_the_number_it_was(
 
 
 def test_only_real_scalars_reach_the_summary_writer(tmp_path):
-    """A boolean flag or a text label is not a curve; plotting one misreads it as a number."""
+    """The summary writer receives the numeric scalars alone, flushed once."""
     writer = _RecordingWriter()
     ctx, _ = _context(tmp_path, _tb=writer)
 
@@ -158,7 +163,7 @@ def test_only_real_scalars_reach_the_summary_writer(tmp_path):
 
 
 def test_checkpoint_lands_under_the_tag_it_was_asked_for(tmp_path):
-    """Distinct tags are distinct files; a periodic save never overwrites the best one."""
+    """Distinct tags are distinct files; a periodic save leaves the best one's metrics intact."""
     ctx, run_dir = _context(tmp_path)
 
     best = ctx.save_checkpoint(
@@ -181,9 +186,7 @@ def test_checkpoint_lands_under_the_tag_it_was_asked_for(tmp_path):
 
 
 def test_a_checkpoint_name_written_twice_refuses_and_keeps_the_first(tmp_path):
-    """A checkpoint is written once: a second save under one tag refuses and the file under that
-    name stays the bytes the first save published.
-    """
+    """A second checkpoint save under one tag refuses and keeps the first save's bytes."""
     ctx, run_dir = _context(tmp_path)
     ctx.save_checkpoint(
         {STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.2}}, "model_best"
@@ -202,11 +205,7 @@ def test_a_checkpoint_name_written_twice_refuses_and_keeps_the_first(tmp_path):
 
 
 def test_a_checkpoint_tag_cannot_walk_out_of_the_run_directory(tmp_path):
-    """A tag is a name inside the run, so one spelled as a path leaves nothing outside it.
-
-    A bespoke loop names its own tags, and a checkpoint landing beside the run rather than in
-    it is a weight file no provenance points at.
-    """
+    """A checkpoint tag spelled as a path refuses and writes nothing outside the run."""
     from tcip_store import BadKeyError
 
     ctx, run_dir = _context(tmp_path)
@@ -218,7 +217,7 @@ def test_a_checkpoint_tag_cannot_walk_out_of_the_run_directory(tmp_path):
 
 
 def test_checkpoint_stamping_leaves_the_callers_state_untouched(tmp_path):
-    """The stamp goes onto the saved payload, never back into the loop's own live state dict."""
+    """The stamp goes onto the saved payload, not back into the loop's own live state dict."""
     ctx, run_dir = _context(tmp_path)
     state = {STATE_DICT_KEY: {}, METRICS_KEY: {"val_loss": 0.2}}
 
@@ -231,8 +230,10 @@ def test_checkpoint_stamping_leaves_the_callers_state_untouched(tmp_path):
 
 
 def test_record_artifact_copies_the_file_into_the_run(tmp_path):
-    """An artifact is a file in the run's own directory and never the run's deliverable, and a
-    second recording under one name refuses.
+    """``record_artifact`` copies a file into the run and refuses a second under its name.
+
+    The artifact lands under the run's ``artifacts`` directory, the run names no deliverable,
+    and a second recording under one name refuses.
     """
     ctx, run_dir = _context(tmp_path)
     source = tmp_path / "stderr.txt"
@@ -261,7 +262,7 @@ def test_an_artifact_name_cannot_walk_out_of_the_run_directory(tmp_path):
 
 
 def test_cancellation_is_seen_through_the_runs_cancellation_record(tmp_path):
-    """A stop requested by another process must reach a loop polling ``ctx.should_cancel()``."""
+    """A cancel requested on the run directory turns ``ctx.should_cancel()`` true."""
     from tcip_mcp.experiments import request_cancel
 
     ctx, run_dir = _context(tmp_path)

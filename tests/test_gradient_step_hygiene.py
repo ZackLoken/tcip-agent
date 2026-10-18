@@ -1,9 +1,8 @@
-"""An optimizer step descends on its own window's gradient, never on a running sum.
+"""An optimizer step carries the mean gradient of the batches in its own window.
 
-The trained model is the phenotype's measuring instrument, so the loop must feed each step the
-gradient of the batches that step covers and nothing else. These runs use a model whose per-batch
-gradient is fixed by the batch's data, so the gradient an optimizer step receives can be compared
-against that batch's own gradient computed independently.
+These runs use a model whose per-batch gradient is fixed by the batch's data, and compare the
+gradient each optimizer step receives against the mean of the independently computed gradients
+of the batches it covers.
 """
 
 from __future__ import annotations
@@ -39,10 +38,10 @@ def _trained(
     *,
     accumulation: int = 1,
 ):
-    """A run over training frames at ``intensities`` valued ``values`` and no validation side,
-    one frame a batch at ``accumulation`` batches a step, opened by the launcher's own producer
-    and trained over its own loader, which serves its first epoch in an order seeded from the
-    run's config.
+    """Train a run over frames at ``intensities`` valued ``values`` and return it.
+
+    The run has no validation side, one frame a batch at ``accumulation`` batches a step,
+    opened by the launcher's own producer and trained over its own loader.
     """
     config = regressor_config(
         1,
@@ -59,7 +58,7 @@ def _trained(
 
 
 def _batch_gradient(images, targets) -> torch.Tensor:
-    """One batch's own gradient, from a fresh instance of the model the run builds."""
+    """Return one batch's own gradient from a fresh instance of the model the run builds."""
     model = build_data_scaled_gradient_model()
     model.train()
     sum(model(images, targets).values()).backward()
@@ -70,8 +69,10 @@ def _batch_gradient(images, targets) -> torch.Tensor:
 
 
 def _record_steps(monkeypatch, steps: list) -> None:
-    """Append to ``steps``, at every optimizer step, the gradient the parameters carry and the
-    training batches the run's model was fed since the previous step.
+    """Record each optimizer step's gradient and the batches fed since the previous step.
+
+    A step pre-hook appends to ``steps`` the gradient the parameters carry and the training
+    batches a forward pre-hook saw the run's model fed since the previous step.
     """
     fed: list = []
     real_build_model, real_build_optimizer = (
@@ -122,9 +123,10 @@ def _record_steps(monkeypatch, steps: list) -> None:
 
 
 def _window_sizes(steps: list) -> list[int]:
-    """How many batches each of ``steps`` covers, after asserting that each step's gradient is
-    the mean of the independent gradients of exactly the batches fed since the step before, and
-    that no two batches share a gradient, so a step carrying another window's cannot pass.
+    """Assert each step's gradient is its batches' mean, and return each step's batch count.
+
+    The assertions hold each step's gradient to the mean of the independent gradients of the
+    batches fed since the previous step, and require no two batches to share a gradient.
     """
     batch_grads = [
         _batch_gradient(*batch) for _, batches in steps for batch in batches
@@ -142,7 +144,7 @@ def _window_sizes(steps: list) -> list[int]:
 def test_each_optimizer_step_sees_only_its_own_batch_gradient(
     tmp_path, monkeypatch
 ):
-    """One step per batch at accumulation 1, each carrying that batch's gradient alone."""
+    """At accumulation 1, each batch makes one step carrying that batch's gradient alone."""
     steps: list = []
     _record_steps(monkeypatch, steps)
     run = _trained(tmp_path)
@@ -152,8 +154,9 @@ def test_each_optimizer_step_sees_only_its_own_batch_gradient(
 
 
 def test_no_accumulated_gradient_survives_the_run(tmp_path, monkeypatch):
-    """The parameters carry no leftover gradient once the run ends, so nothing from the epoch's
-    batches is still sitting there to be descended on again.
+    """No accumulated gradient survives the end of the run.
+
+    After the run ends, each trainable parameter's gradient is absent or zero.
     """
     models: list = []
     capture_model(monkeypatch, models)
@@ -171,8 +174,10 @@ def test_no_accumulated_gradient_survives_the_run(tmp_path, monkeypatch):
 def test_gradient_accumulation_combines_only_its_own_window(
     tmp_path, monkeypatch
 ):
-    """Accumulation still holds: with two batches per step, a step carries the mean of exactly
-    those two batches' gradients, and the window does not carry over into the next step.
+    """Gradient accumulation combines its own window's batches and no others.
+
+    With two batches per step, each of the two steps carries the mean of its own two batches'
+    gradients.
     """
     steps: list = []
     _record_steps(monkeypatch, steps)
@@ -190,7 +195,9 @@ def test_gradient_accumulation_combines_only_its_own_window(
 def test_an_epoch_last_shorter_window_averages_over_the_batches_it_holds(
     tmp_path, monkeypatch
 ):
-    """Three batches at accumulation two: the second window holds one batch, and its step carries
+    """An epoch's shorter last window averages over the batches it holds.
+
+    Three batches at accumulation two: the second window holds one batch, and its step carries
     that batch's own gradient, not half of it.
     """
     steps: list = []

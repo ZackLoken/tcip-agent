@@ -258,9 +258,7 @@ def test_load_reports_roundtrips_a_written_report(tmp_path: Path):
 def test_a_report_missing_a_field_its_writer_records_refuses_rather_than_reading_as_blank(
     tmp_path: Path,
 ):
-    """A stored report holding its time alone is not answered with an empty category, detail
-    and context and a false disagreement; the listing refuses naming the missing field.
-    """
+    """A stored report holding its time alone refuses the listing, naming ``category``."""
     import pytest
 
     from tcip_mcp.tools.meta_tools import friction_report_key
@@ -312,7 +310,7 @@ def test_load_reports_recent_first_and_respects_limit(tmp_path: Path):
 def test_a_retrospective_stating_no_section_sorts_after_every_dated_one_by_name(
     tmp_path: Path,
 ):
-    """A document that states no time is never given one, and lands in one fixed place by name."""
+    """Retrospectives stating no time list after the dated one, ordered by name."""
     write_retrospective(
         tmp_path, project_id="dated", task="t", worked="w", did_not_work="d"
     )

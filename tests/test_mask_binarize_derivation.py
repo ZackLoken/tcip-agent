@@ -1,6 +1,7 @@
-"""The mask threshold and vertex spacing an instance segmentation assessment derives over its
-calibration side's matched detections, checked against shapely's own region IoU, a threshold known
-in advance and objects of several sizes drawn at one known spacing.
+"""The mask threshold and vertex spacing an instance segmentation assessment derives.
+
+Both are derived over its calibration side's matched detections, checked against shapely's own
+region IoU, a threshold known in advance and objects of several sizes drawn at one known spacing.
 """
 
 from __future__ import annotations
@@ -19,8 +20,9 @@ FAR_CUT = 0.2
 
 
 def _soft_disk(radius: int) -> np.ndarray:
-    """A soft mask falling from 1 at its center to 0 at ``radius``, in steps of 0.1 a few pixels
-    wide, so neighboring cuts differ by a band of pixels.
+    """Return a ``2 * radius + 1`` square array of ``1 - distance / radius`` from its center.
+
+    Each value is rounded to one decimal and clipped to [0, 1].
     """
     size = 2 * radius + 1
     yy, xx = np.mgrid[:size, :size]
@@ -29,8 +31,10 @@ def _soft_disk(radius: int) -> np.ndarray:
 
 
 def _pairs() -> list:
-    """Three detections at their frame origins, each matched to the object its own soft mask cut
-    at :data:`KNOWN_CUT` is, that object's rings drawn by the platform's contour extractor.
+    """Return three detections at their frame origins, each matched to its own object.
+
+    Each object is the detection's own soft mask cut at :data:`KNOWN_CUT`, that object's rings
+    drawn by the platform's contour extractor.
     """
     from tcip_annotation.mask_contours import mask_to_polygon_rings
     from tests._training_values import VERTEX_SPACING
@@ -51,7 +55,7 @@ def _pairs() -> list:
 
 
 def _shapely_mean_iou(pairs: list, cut: float) -> float:
-    """Each pair's object against its soft mask cut at ``cut``, by shapely's own polygon areas."""
+    """Return the mean IoU of each pair's object and its mask cut at ``cut``, by shapely's areas."""
     from shapely.geometry import Polygon
 
     from tcip_annotation.mask_contours import mask_to_polygon_rings
@@ -70,7 +74,9 @@ def _shapely_mean_iou(pairs: list, cut: float) -> float:
 
 
 def test_the_derived_mask_threshold_is_the_cut_the_objects_were_drawn_at():
-    """Agreement. Objects that are their soft masks cut at a known probability derive that
+    """The derived mask threshold is the cut the objects were drawn at.
+
+    Objects that are their soft masks cut at a known probability derive that
     probability, its mean rings IoU is shapely's own over the same rings, and a far cut scores
     lower, as shapely scores it.
     """
@@ -92,17 +98,21 @@ def test_the_derived_mask_threshold_is_the_cut_the_objects_were_drawn_at():
 
 
 def _empty_pair() -> tuple:
-    """A detection whose soft mask holds no positive pixel, as the collection crops one (an empty
-    part at origin zero), matched to an object of its own.
+    """Return a detection whose soft mask holds no positive pixel, matched to its own object.
+
+    The mask is a 0 x 0 array at origin zero, matched to the first pair's object shifted 300 px
+    right.
     """
     _soft, _origin, rings = _pairs()[0]
     return np.zeros((0, 0)), (0, 0), [[(px + 300, py) for px, py in rings[0]]]
 
 
 def test_a_matched_mask_holding_no_positive_value_offers_no_cut_and_still_counts():
-    """Guard. A matched detection whose soft mask is empty contributes no candidate, so the known
-    cut still derives, and its zero overlap counts in every candidate's mean; a reference whose
-    every matched mask is empty, or that matches none, refuses naming ``mask_binarize``.
+    """A matched mask holding no positive value offers no cut and still counts.
+
+    With a matched pair of empty soft mask added, the known cut still derives and the mean
+    rings IoU at it counts that pair's zero overlap; a reference of one empty-mask pair, or of
+    no pair, refuses naming ``mask_binarize``.
     """
     from tcip_mcp.pipelines.derivations import (
         derive_mask_binarize,
@@ -131,10 +141,11 @@ def _drawn_pair(
     turn: float,
     spacing: int,
 ):
-    """A detection at ``origin`` whose soft mask is a smooth filled ellipse of half-axes
-    ``axes``, matched to the polygon inscribed in the same ellipse at evenly spaced angles turned
-    by ``turn`` radians, drawn as a person draws an outline at ``spacing`` pixels per vertex: its
-    count the nearest integer to the ellipse's circumference over ``spacing``.
+    """Return ``(soft, origin, [ring])`` for an ellipse of half-axes ``axes``.
+
+    ``soft`` is a float32 array with ``cv2.ellipse`` filled at 1.0 over those half-axes, and
+    ``ring`` holds ``round(circumference / spacing)`` points of that ellipse, offset by
+    ``origin``, at evenly spaced angles starting from ``turn`` radians.
     """
     import cv2
 
@@ -156,7 +167,7 @@ def _drawn_pair(
 
 
 def _closed_length(points: np.ndarray) -> float:
-    """The length of the closed polyline through ``points``, by numpy alone."""
+    """Return the length of the closed polyline through ``points``, by numpy alone."""
     return float(
         np.hypot(*(np.roll(points, -1, axis=0) - points).T.astype(float)).sum()
     )
@@ -166,12 +177,13 @@ def _closed_length(points: np.ndarray) -> float:
 def test_the_derived_vertex_spacing_leaves_each_prediction_its_objects_vertex_count(
     spacing,
 ):
-    """Agreement. Objects of four sizes drawn at one spacing, each predicted as a smooth contour
-    of the same object, derive a spacing at which ``mask_to_polygon_rings`` leaves every
-    prediction its own object's count within one, whatever its size; the spacing is the median of
-    each contour's perimeter over its object's count, numpy's own over the same contours, and the
-    raster contour runs longer than the polygon it traces, so it lies at or above the drawn one
-    and within 15 percent of it.
+    """The derived vertex spacing leaves each prediction its object's vertex count within one.
+
+    Objects of four sizes drawn at one spacing, each predicted as a filled ellipse of that
+    object, derive a spacing at which ``mask_to_polygon_rings`` leaves each prediction its own
+    object's vertex count within one; the spacing is the median of
+    each contour's perimeter over its object's count, numpy's own over those contours, and it
+    lies at or above the drawn spacing and within 15 percent of it.
     """
     from tcip_annotation.mask_contours import (
         mask_contours,
@@ -210,7 +222,7 @@ def test_the_derived_vertex_spacing_leaves_each_prediction_its_objects_vertex_co
 
 
 def test_a_ring_at_vertex_spacing_zero_keeps_every_contour_vertex():
-    """Guard. At spacing zero ``mask_to_polygon_rings`` returns each contour's own vertices."""
+    """At spacing zero ``mask_to_polygon_rings`` returns each contour's own vertices."""
     from tcip_annotation.mask_contours import (
         mask_contours,
         mask_to_polygon_rings,
@@ -227,8 +239,10 @@ def test_a_ring_at_vertex_spacing_zero_keeps_every_contour_vertex():
 
 
 def test_a_ring_already_under_its_count_at_any_admitted_spacing_is_kept():
-    """Guard. A spacing the block admits, however small, leaves a contour already holding no more
-    vertices than its perimeter implies as the contour gives it.
+    """A small square's rings at a mask-cut spacing of 1e-310 equal its rings at spacing zero.
+
+    ``MaskCut`` admits the spacing 1e-310, and ``mask_to_polygon_rings`` returns the 3x3
+    square's contour at it unchanged from the contour at spacing zero.
     """
     from tcip_annotation.mask_contours import mask_to_polygon_rings
     from tcip_mcp.pipelines.execution import MaskCut
@@ -243,7 +257,9 @@ def test_a_ring_already_under_its_count_at_any_admitted_spacing_is_kept():
 
 
 def test_a_pair_with_no_contour_or_no_ring_contributes_nothing_to_the_spacing():
-    """Guard. A matched object holding no ring and a detection whose mask cuts to nothing leave
+    """A pair with no contour or no ring contributes nothing to the derived spacing.
+
+    A matched object holding no ring and a detection whose mask cuts to nothing leave
     the derived spacing as it was, and a reference where no pair contributes refuses naming
     ``vertex_spacing``.
     """
@@ -268,7 +284,9 @@ def test_a_pair_with_no_contour_or_no_ring_contributes_nothing_to_the_spacing():
 def test_an_untiled_instance_segmentation_assessment_records_the_mask_threshold_it_derives(
     tmp_path,
 ):
-    """An instance segmentation assessment stating no mask threshold or vertex spacing derives
+    """An untiled instance segmentation assessment records the mask cut it derives.
+
+    An instance segmentation assessment stating no mask threshold or vertex spacing derives
     both over its calibration side and records each, by its derivation's label, on the
     execution record a published pass restores.
     """
@@ -319,9 +337,11 @@ def test_an_untiled_instance_segmentation_assessment_records_the_mask_threshold_
 def test_a_mask_collecting_pass_stating_no_block_and_no_reference_names_the_blocks_fields(
     tmp_path,
 ):
-    """Guard. An instance segmentation pass collecting masks that states no ``mask_cut`` and has
-    no reference to derive one over is refused naming each of the block's fields; the same pass
-    stating the block runs, each field recorded as stated.
+    """A mask-collecting pass with no block and no reference refuses naming the block's fields.
+
+    An instance segmentation pass collecting masks that states no ``mask_cut`` and has
+    no reference to derive one over is refused naming each of the block's fields; that pass
+    stating the block prepares a runnable pass recording each field as explicit.
     """
     from tcip_mcp.pipelines.execution import ExecutionRefusedError, prepare
     from tests._training_values import MASK_CUT, collection_pass
@@ -348,9 +368,10 @@ def test_a_mask_collecting_pass_stating_no_block_and_no_reference_names_the_bloc
 
 @pytest.mark.parametrize("missing", ["mask_binarize", "vertex_spacing"])
 def test_a_stated_mask_cut_missing_either_value_is_refused_naming_it(missing):
-    """Guard. A statement's ``mask_cut`` carries both of its values or none is stated: one
-    missing either is refused by the type, naming the missing value, and one holding both is
-    admitted.
+    """A stated ``mask_cut`` missing either value is refused by the type, naming it.
+
+    A statement's ``mask_cut`` carries both of its values or none is stated: one missing either
+    is refused by the type, naming the missing value, and one holding both is admitted.
     """
     from pydantic import ValidationError
 

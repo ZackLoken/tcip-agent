@@ -1,10 +1,8 @@
-"""What a loader hands the trainer for one sample: box extents, the tile index's own boxes, and
-the fields that identify the sample.
+"""What a loader hands the trainer for one sample.
 
-Fixtures here are deliberately asymmetric (boxes wider than they are tall and taller than they are
-wide, a non-square frame, sparse ordinal ranks) so a transposed extent, an unfiltered tile index or
-a collapsed identity produces different numbers than the correct behavior rather than the same
-ones.
+These tests cover its box extents, the tile index's boxes and the fields that identify the
+sample, over asymmetric fixtures: boxes wider than tall and taller than wide, a non-square frame,
+and sparse ordinal ranks.
 """
 
 import pytest
@@ -38,10 +36,10 @@ def _write(images_dir, stem, boxes, size):
 
 
 def test_a_boxs_width_and_height_reach_the_loader_unswapped(tmp_path):
-    """The loader reads each sample's own document into pixel xyxy. A box wider than it is tall
-    must stay wider than it is tall: swapping the two keeps the origin and moves the far corner,
-    so every object trains against the wrong extent while the box count and its position both look
-    right.
+    """A box's width and height reach the loader unswapped.
+
+    One box wider than tall and one taller than wide reach the target as the pixel xyxy the
+    document states.
     """
     size = (120, 80)
     images = tmp_path / "images" / UNDATED_BUCKET
@@ -82,11 +80,11 @@ SEAM_BOXES = [
 def test_a_seam_fragment_is_not_indexed_as_a_whole_object(
     tmp_path, sliver_frac
 ):
-    """A box a tile boundary cuts down to a two-pixel stub is a fragment, not an object. The
-    cutoff the dataset resolves, derived from this dataset's own size spread or supplied by the
-    caller, has to reach the index: otherwise the model is trained to call the stub a whole object,
-    and the recorded fraction describes a filter the data never went through. The tiles holding the
-    rest of each box keep it.
+    """A seam fragment is not indexed as a whole object.
+
+    A box a tile boundary cuts down to a two-pixel stub is indexed in no tile, whether the
+    sliver cutoff is derived from the dataset or supplied, and the tile holding the rest of
+    each box keeps it.
     """
     from tcip_mcp.pipelines.data.datasets import TiledDetectionDataset
 
@@ -120,9 +118,7 @@ def test_a_seam_fragment_is_not_indexed_as_a_whole_object(
 
 
 def test_each_detection_sample_carries_its_own_index_as_image_id(tmp_path):
-    """The target dict says which sample it came from, and a consumer joins per-sample results back
-    through that field. A shared value silently attributes every sample's boxes to one image.
-    """
+    """Each detection sample carries its own index as its image id, beside its own boxes."""
     size = (120, 80)
     images = tmp_path / "images" / UNDATED_BUCKET
     stems = ["a", "b", "c"]
@@ -145,9 +141,10 @@ def test_each_detection_sample_carries_its_own_index_as_image_id(tmp_path):
 def test_an_ordinal_sample_carries_the_rank_count_its_head_decodes_with(
     tmp_path,
 ):
-    """The CORN loss and decode both loop over the rank count the target carries, so it is how many
-    ranks the scale reaches, never how many samples were loaded. The ranks here are sparse, so the
-    two are different numbers.
+    """An ordinal run's rank count is the scale's reach, not the number of samples.
+
+    Over three samples ranked 0, 2 and 5, the run's rank count is six and each sample carries
+    its own rank.
     """
     images = tmp_path / "images" / UNDATED_BUCKET
     _make_images(images, ["s0", "s1", "s2"], (48, 32))

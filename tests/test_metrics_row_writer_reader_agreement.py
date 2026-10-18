@@ -1,9 +1,7 @@
 """The metrics rows a run writes are the rows the Training stream serves.
 
-Both sides here are the real implementations: the run's body appends to its own metrics log
-through the envelope, and the WebSocket route reads that same log in the run's own directory and
-replays it, so a change to the row shape or to where the log lives shows up as a disagreement
-instead of passing against a hand-built file.
+Both sides are the real implementations: the run's body appends to its own metrics log through
+the envelope, and the WebSocket route replays that log from the run's own directory.
 """
 
 from __future__ import annotations
@@ -17,7 +15,7 @@ from tests._verified_checkpoint_fixtures import (
 
 
 def _drain(ws) -> list[dict]:
-    """Every frame the stream sends, up to and including the terminal status frame."""
+    """Return the frames the stream sends, through the terminal status frame."""
     frames = []
     while True:
         msg = ws.receive_json()
@@ -61,9 +59,7 @@ def test_training_stream_serves_a_relaunched_run_by_its_own_minted_id(
     opened_project,
     client,
 ):
-    """A relaunch's id is minted fresh and is the one id its directory is addressed by
-    everywhere, the stream included: no separate run id to resolve it through.
-    """
+    """The training stream serves a relaunched run by its own minted id."""
     from tcip_mcp.experiments import mint_experiment_id
 
     parent = finished_run(tmp_path)
@@ -88,7 +84,9 @@ def test_stream_drains_a_row_that_lands_between_the_read_and_the_terminal_check(
     client,
     monkeypatch,
 ):
-    """A row the run appends as it ends, after the stream's last log read, still reaches the
+    """The stream drains a row landing between its read and its terminal check.
+
+    A row the run appends as it ends, after the stream's last log read, still reaches the
     browser ahead of the status frame that ends the stream: the run ends between the stream's
     read and its next observation.
     """
@@ -144,8 +142,9 @@ def test_training_stream_serves_no_metric_frames_for_a_run_no_directory_holds(
     opened_project,
     client,
 ):
-    """An id no run directory answers for replays nothing and sends only the terminal status
-    frame naming the unresolved run.
+    """A stream for an id no run directory holds serves no metric frame.
+
+    Its last frame is a status frame carrying no status and an error.
     """
     with client.websocket_connect(
         "ws://127.0.0.1/api/training/runs/never-launched/stream",
